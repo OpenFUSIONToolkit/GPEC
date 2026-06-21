@@ -57,7 +57,7 @@ kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\t
 
 ### Toroidal Coordinate ``\zeta`` and ``\phi``
 
-- The ignorable toroidal coordinate is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
+- The magnetic cooridante toroidal angle is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
   a single-valued straight-field-line offset that depends on the working coordinate. PEST
   coordinates have ``\nu = 0``.
 - The physical toroidal angle is reconstructed as
@@ -69,18 +69,23 @@ kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\t
 ### Working Coordinate Options
 
 Controlled by `jac_type` in the `[Equilibrium]` section of `gpec.toml`. The Jacobian is
-``J \propto B_p^{p_{bp}}\, B^{p_b}\, R^{-p_r}``:
+``J \propto B_p^{p_{bp}}\, B^{p_b}\, R^{-p_r}\, r_c^{-p_{rc}}``, where ``B_p`` is the poloidal
+field magnitude, ``B`` is the total field magnitude, ``R`` is the major radius, and
+``r_c = \sqrt{(R-R_0)^2 + (Z-Z_0)^2}`` is the minor radius (distance from the magnetic axis
+``(R_0, Z_0)``):
 
-| Name | `power_bp` | `power_b` | `power_r` |
-|------|-----------|-----------|-----------|
-| Hamada (default) | 0 | 0 | 0 |
-| PEST | 0 | 0 | 2 |
-| Boozer | 0 | 2 | 0 |
-| Equal-arc | 1 | 0 | 0 |
+| Name | `power_bp` | `power_b` | `power_r` | `power_rc` |
+|------|-----------|-----------|-----------|------------|
+| Hamada (default) | 0 | 0 | 0 | 0 |
+| PEST | 0 | 0 | 2 | 0 |
+| Boozer | 0 | 2 | 0 | 0 |
+| Equal-arc | 1 | 0 | 0 | 0 |
+| Park | 0 | 1 | 0 | 0 |
 
 The powers are set automatically from `jac_type` (`EquilibriumConfig` in
 `src/Equilibrium/EquilibriumTypes.jl`) and applied in the field-line Jacobian
-(`direct_fieldline_der!` in `src/Equilibrium/DirectEquilibrium.jl`).
+(`direct_fieldline_der!` in `src/Equilibrium/DirectEquilibrium.jl`). Setting `jac_type = "other"`
+lets you specify the four exponents manually.
 
 ## Helicity and Handedness
 
@@ -111,7 +116,7 @@ The code always works with ``|F|``; the sign of ``B_t`` is carried separately (`
 
 ## Safety Factor ``q``
 
-The direct solver **computes** ``q`` by field-line integration for direct (EFIT) equilibria and 
+The direct solver **computes** ``q`` by field-line integration for direct (EFIT) equilibria and
 overwrites the file profile (`direct_run` in `src/Equilibrium/DirectEquilibrium.jl`):
 
 ```math
@@ -122,8 +127,8 @@ q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p .
   positive, **``q`` is positive** in standard operation. The solver emits a warning if the on-axis
   extrapolation yields ``q_0 \le 0``, treating it as a spline artifact rather than a physical
   result.
-- **Inverse** equilibria instead use the ``q`` profile supplied with the input
-  (`src/Equilibrium/InverseEquilibrium.jl`).
+- **Inverse** equilibria, for which only CHEASE and analytic options are currently supported, instead use the ``q`` profile supplied with the input
+  (`src/Equilibrium/InverseEquilibrium.jl`). This follows the fortran GPEC CHEASE reading convention.
 
 ## Mode Numbers ``m`` and ``n``
 
@@ -138,11 +143,14 @@ q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p .
 The poloidal spectrum spans `mlow` to `mhigh` (`src/GeneralizedPerturbedEquilibrium.jl`):
 
 ```math
-m_\mathrm{low} = \min(n\,q_\mathrm{min},\,0) - 4 - \Delta m_\mathrm{low}, \qquad
-m_\mathrm{high} = n\,q_\mathrm{max} + \Delta m_\mathrm{high}.
+m_\mathrm{low} = \min(\lfloor n\,q_\mathrm{min}\rfloor,\,0) - 4 - \Delta m_\mathrm{low}, \qquad
+m_\mathrm{high} = \lfloor n\,q_\mathrm{max}\rfloor + 2\,\Delta m_\mathrm{high}.
 ```
 
-`delta_mlow` and `delta_mhigh` widen the range beyond the resonant modes.
+`delta_mlow` and `delta_mhigh` widen the range beyond the resonant modes. Note the asymmetric
+factor of 2 on ``\Delta m_\mathrm{high}``: `delta_mhigh` is doubled before being applied (for
+consistency with the Fortran DCON convention), so the user-supplied value adds twice as many
+modes on the high side as `delta_mlow` does on the low side.
 
 ### Why Positive ``m`` Is Always Resonant
 
@@ -155,7 +163,7 @@ m_\mathrm{res} = n\,q > 0 .
 ```
 
 Negative-``m`` modes are always non-resonant. This is by design: the ``m = 2`` displacement shows
-resonant behavior at ``q = 2``, while ``m = -2`` never does.
+resonant behavior at ``q = 2``, etc.
 
 ## Spectrum Output Sign Conventions
 
@@ -185,16 +193,20 @@ b_surfmn = real(b_m) - 1j * helicity * imag(b_m)
 For LH configurations only the sign of ``m`` is flipped; for RH, ``m`` is unchanged but the complex
 conjugate is taken.
 
-### Interfacing with VACUUM
+### Interfacing with Vacuum
 
-The VACUUM code uses CCW ``\phi`` and downward-outboard ``\theta``. GPEC uses the complex conjugate
-of RH configurations when interfacing with VACUUM.
+The Vacuum code uses CCW ``\phi`` and downward-outboard ``\theta``. GPEC uses the complex conjugate
+of RH configurations when interfacing with Vacuum.
 
 ## Field Amplitudes and Units
 
 GPEC reports perturbed magnetic fields as Fourier spectra on flux surfaces. The spectrum of a field
-on a surface depends on in general on the coordinate system used. However, certain resonant components on rational surfaces or the 2-norm of the Fourier coefficient vector on any surface can be made coordinate-independent if the proper area weighting is used within the Fourier decomposition. The
-coordinate-invariance of the weightings used in GPEC is established in Pharr (2026) (see [Citations](citations.md)). In each case, we normalize the harmonics by scalar area factors in such a way that the units are always Tesla. 
+on a surface depends in general on the coordinate system used. However, certain resonant components
+on rational surfaces or the 2-norm of the Fourier coefficient vector on any surface can be made
+coordinate-independent if the proper area weighting is used within the Fourier decomposition. The
+coordinate-invariance of the weightings used in GPEC is established in Pharr (2026) (see
+[Citations](citations.md)). In each case, we normalize the harmonics by scalar area factors in such
+a way that the units are always Tesla.
 
 ### Resonant Field
 
@@ -205,13 +217,19 @@ rational surface, divided by the **scalar area** ``A^r`` of that surface:
 b^r = \frac{\Phi^r}{A^r} \qquad [\mathrm{T}].
 ```
 
-Dividing the resonant flux ``\Phi^r`` by the surface area turns it into a genuine field amplitude
+Dividing the resonant flux ``\Phi^r`` by the surface area turns it into a field amplitude in Tesla
 that is invariant under changes of the poloidal-angle (working) coordinate. This is the quantity
 reported as `resonant_flux`.
 
-### Power-Normalized Field
+Note that there is strictly NO resonant field in ideal MHD perturbed equilibrium calculations, and
+only the effective resonant field is non-zero in these cases. Effective resonant fields are computed
+as above but for the resonant component of flux that is being shielded by the shielding current layer
+on the rational surface. Resistive and kinetic MHD perturbed equilibria have, in general, finite
+resonant fields as well as effective resonant fields.
 
-The power-normalized field is the Fourier spectrum of the square-root-area-weighted normal field
+### Root-Area Normalized Field
+
+The root-area normalized field is the Fourier spectrum of the square-root-area-weighted normal field
 ``\sqrt{\mathcal{J}\,|\nabla\psi|}\,(\mathbf{b}\cdot\hat{\mathbf{n}})``, divided by the scalar
 ``\sqrt{A}`` of the surface:
 
@@ -220,7 +238,7 @@ The power-normalized field is the Fourier spectrum of the square-root-area-weigh
 (\mathbf{b}\cdot\hat{\mathbf{n}})\, e^{-i m\theta}\, d\theta \qquad [\mathrm{T}].
 ```
 
-The name comes from Parseval's theorem: the sum of its squared mode amplitudes equals the
+According to Parseval's theorem, the sum of its squared mode amplitudes equals the
 area-averaged squared normal field — the surface-averaged field "power",
 
 ```math
@@ -297,8 +315,7 @@ The sign of ``\omega_E`` shifts the resonance location in velocity space.
 ## COCOS Compatibility
 
 The conventions above are GPEC-native and predate the COCOS standard, as defined in
-[Sauter, Comp. Phys. Comm. 2013](https://doi.org/10.1016/j.cpc.2012.09.010). What is **certain**
-about the internal convention:
+[Sauter, Comp. Phys. Comm. 2013](https://doi.org/10.1016/j.cpc.2012.09.010). The internal convention:
 
 - Right-handed magnetic coordinates ``(\psi, \theta, \zeta)``.
 - ``\psi`` excludes the ``2\pi`` factor (poloidal flux per radian) and increases from axis to edge.
@@ -312,16 +329,10 @@ imas_cocos = 11   # default: IMAS standard, ψ divided by 2π on read
 imas_cocos = 2    # data already in the internal convention, no conversion
 ```
 
-!!! warning "The COCOS index is not yet certified"
-    The internal "COCOS 2" label is a working assumption, not a verified index. The IMAS reader
-    converts COCOS 11 → "COCOS 2" by dividing ``\psi`` by ``2\pi`` **only**, whereas in the COCOS
-    standard the pure ``2\pi`` partner of COCOS 11 is COCOS **1** (COCOS 2 differs additionally in
-    the cylindrical/poloidal handedness ``\sigma_{R\phi Z}`` and in ``\mathrm{sign}(q)``). A
-    rigorous classification would require auditing the ``\sigma_{B_p}``, ``\sigma_{R\phi Z}``, and
-    ``\sigma_{\rho\theta\phi}`` signs against the GPEC field representation. Until that audit is
-    done, treat the **practical input requirement** as the reliable statement: provide IMAS
-    equilibria in COCOS 11 (default) or COCOS 2, selected via `imas_cocos`. Full COCOS conformance
-    is tracked as a separate effort.
+!!! warning "The COCOS indexing is still a beta feature"
+    Note that the IMAS reader converts COCOS 11 → "COCOS 2" by simply dividing ``\psi`` by ``2\pi``
+    (i.e. conversion from COCOS 11 to 1) and relying on the standardly enforced sign conventions
+    above to eventually conform to the COCOS 2 conventions.
 
 ## See also
 
