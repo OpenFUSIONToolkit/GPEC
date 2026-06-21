@@ -171,4 +171,4 @@ Provides the complete theory and implementation details, including NTV in the pr
 > *Physics of Plasmas* **24**, 032505 (2017).
 > DOI: [10.1063/1.4977898](https://doi.org/10.1063/1.4977898)
 
-Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the the KineticForces functionality.
+Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the KineticForces functionality.

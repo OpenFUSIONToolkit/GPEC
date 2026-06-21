@@ -57,7 +57,7 @@ kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\t
 
 ### Toroidal Coordinate ``\zeta`` and ``\phi``
 
-- The magnetic cooridante toroidal angle is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
+- The magnetic coordinate toroidal angle is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
   a single-valued straight-field-line offset that depends on the working coordinate. PEST
   coordinates have ``\nu = 0``.
 - The physical toroidal angle is reconstructed as
