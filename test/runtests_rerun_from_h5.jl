@@ -1,9 +1,9 @@
 using HDF5
 using TOML
 
-# Tests for the gpec.h5 snapshot + replay feature, kept deliberately light: exactly one
-# full-pipeline source run + one replay (the analytic Solovev path), plus pipeline-free checks
-# for direct-equilibrium recovery and the override flags.
+# Tests for the gpec.h5 snapshot + replay feature, kept deliberately light: one full-pipeline
+# source run + replay (the analytic Solovev path), plus pipeline-free ingest round-trip checks
+# for the direct (EFIT) and inverse (CHEASE) equilibrium kinds and the override flags.
 
 # Collect every leaf dataset path under an open HDF5 file, skipping the groups/paths that
 # legitimately differ between a source run and its replay (`input/` is re-emitted with the
@@ -189,10 +189,26 @@ end
     end
 end
 
-# Direct (DIII-D EFIT) equilibrium recovery through the h5 path, without a pipeline run:
-# `read_efit` captures the raw arrays, which we round-trip through a temp h5 via the real
-# replay reader `read_equilibrium_raw_inputs` and rebuild with `build_direct_from_raw`. The
-# rebuilt splines must evaluate bit-for-bit identical to the originals.
+# Round-trip the typed equilibrium ingest through a temp h5 exactly as the snapshot writer and
+# replay reader do (field-by-field write + `read_equilibrium_ingest`), then rebuild the solver
+# input. The rebuilt splines must evaluate bit-for-bit identical to the originals. This is the
+# pipeline-free guard on the capture → store → restore path, run once per equilibrium kind.
+function _roundtrip_ingest(ingest, kind)
+    mktempdir() do d
+        h5path = joinpath(d, "raw.h5")
+        h5open(h5path, "w") do f
+            f["input/raw_inputs/equilibrium/ingest_kind"] = kind
+            for nm in fieldnames(typeof(ingest))
+                f["input/raw_inputs/equilibrium/$nm"] = getfield(ingest, nm)
+            end
+        end
+        restored = h5open(GeneralizedPerturbedEquilibrium.read_equilibrium_ingest, h5path, "r")
+        @test restored isa typeof(ingest)
+        return restored
+    end
+end
+
+# Direct (DIII-D EFIT) equilibrium recovery through the h5 path, without a pipeline run.
 @testset "Rerun direct-equilibrium recovery through h5" begin
     Equil = GeneralizedPerturbedEquilibrium.Equilibrium
     config = Equil.EquilibriumConfig(;
@@ -201,38 +217,61 @@ end
     )
     src = Equil.read_efit(config)
     @test src isa Equil.DirectRunInput
-    @test !isempty(src.raw_data)
+    @test src.ingest isa Equil.DirectIngest
 
-    mktempdir() do d
-        h5path = joinpath(d, "raw.h5")
-        h5open(h5path, "w") do f
-            for (k, v) in src.raw_data
-                f["input/raw_inputs/equilibrium/$k"] = v
-            end
-        end
-        raw = h5open(GeneralizedPerturbedEquilibrium.read_equilibrium_raw_inputs, h5path, "r")
-        rebuilt = Equil.build_direct_from_raw(config, raw)
+    restored = _roundtrip_ingest(src.ingest, "direct")
+    rebuilt = Equil.build_direct_from_ingest(config, restored)
 
-        @test rebuilt.rmin == src.rmin
-        @test rebuilt.rmax == src.rmax
-        @test rebuilt.zmin == src.zmin
-        @test rebuilt.zmax == src.zmax
-        @test rebuilt.psio == src.psio
-        @test rebuilt.bt_sign == src.bt_sign
-        @test rebuilt.psi_in_xs == src.psi_in_xs
-        @test rebuilt.psi_in_ys == src.psi_in_ys
+    @test rebuilt.rmin == src.rmin
+    @test rebuilt.rmax == src.rmax
+    @test rebuilt.zmin == src.zmin
+    @test rebuilt.zmax == src.zmax
+    @test rebuilt.psio == src.psio
+    @test rebuilt.bt_sign == src.bt_sign
+    @test rebuilt.psi_in_xs == src.psi_in_xs
+    @test rebuilt.psi_in_ys == src.psi_in_ys
 
-        # 2D flux interpolant must evaluate bit-for-bit at interior sample points.
-        for fr in (0.25, 0.5, 0.75), fz in (0.4, 0.6)
-            R = src.rmin + fr * (src.rmax - src.rmin)
-            Z = src.zmin + fz * (src.zmax - src.zmin)
-            @test rebuilt.psi_in((R, Z)) == src.psi_in((R, Z))
-        end
-        # 1D profile spline likewise.
-        for frac in (0.1, 0.5, 0.9)
-            x = src.psi_in_xs[1] + frac * (src.psi_in_xs[end] - src.psi_in_xs[1])
-            @test rebuilt.sq_in(x) == src.sq_in(x)
-        end
+    # 2D flux interpolant must evaluate bit-for-bit at interior sample points.
+    for fr in (0.25, 0.5, 0.75), fz in (0.4, 0.6)
+        R = src.rmin + fr * (src.rmax - src.rmin)
+        Z = src.zmin + fz * (src.zmax - src.zmin)
+        @test rebuilt.psi_in((R, Z)) == src.psi_in((R, Z))
+    end
+    # 1D profile spline likewise.
+    for frac in (0.1, 0.5, 0.9)
+        x = src.psi_in_xs[1] + frac * (src.psi_in_xs[end] - src.psi_in_xs[1])
+        @test rebuilt.sq_in(x) == src.sq_in(x)
+    end
+end
+
+# Inverse (CHEASE) equilibrium recovery through the same h5 path — exercises the InverseIngest
+# branch and `build_inverse_from_ingest`, the kind that was not rerunnable before this change.
+@testset "Rerun inverse-equilibrium recovery through h5" begin
+    Equil = GeneralizedPerturbedEquilibrium.Equilibrium
+    config = Equil.EquilibriumConfig(;
+        eq_filename=joinpath(@__DIR__, "test_data", "CHEASE_test_data", "INP1_ascii"),
+        eq_type="chease_ascii", jac_type="boozer", grid_type="ldp",
+        psilow=0.01, psihigh=0.994, r0exp=6.8, b0exp=7.4
+    )
+    src = Equil.read_chease_ascii(config)
+    @test src isa Equil.InverseRunInput
+    @test src.ingest isa Equil.InverseIngest
+
+    restored = _roundtrip_ingest(src.ingest, "inverse")
+    rebuilt = Equil.build_inverse_from_ingest(config, restored)
+
+    @test rebuilt.ro == src.ro
+    @test rebuilt.zo == src.zo
+    @test rebuilt.psio == src.psio
+    @test rebuilt.rz_in_xs == src.rz_in_xs
+    @test rebuilt.rz_in_ys == src.rz_in_ys
+
+    # R, Z interpolants must evaluate bit-for-bit at interior (ψ, θ) sample points.
+    for fpsi in (0.25, 0.5, 0.75), fth in (0.2, 0.6)
+        ψ = src.rz_in_xs[1] + fpsi * (src.rz_in_xs[end] - src.rz_in_xs[1])
+        θ = src.rz_in_ys[1] + fth * (src.rz_in_ys[end] - src.rz_in_ys[1])
+        @test rebuilt.rz_in_R((ψ, θ)) == src.rz_in_R((ψ, θ))
+        @test rebuilt.rz_in_Z((ψ, θ)) == src.rz_in_Z((ψ, θ))
     end
 end
 

@@ -143,7 +143,7 @@ end
 
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir)
-    equil = Equilibrium.setup_equilibrium(eq_config)
+    equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     mtheta = 48
     nzeta = 16
@@ -385,7 +385,8 @@ end
 @testset "Analytic coils: window_pane standoff" begin
     equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
-    equil = Equilibrium.setup_equilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir))
+    equil = Equilibrium.setup_equilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir),
+        Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     # surface_point_and_normal: outboard midplane (poloidal_angle = 0)
     R0, Z0, nR0, nZ0 = ForcingTerms.surface_point_and_normal(equil, 0.0)

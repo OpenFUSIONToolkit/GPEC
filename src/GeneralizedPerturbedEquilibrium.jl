@@ -1,6 +1,17 @@
 # GeneralizedPerturbedEquilibrium.jl
 module GeneralizedPerturbedEquilibrium
 
+# External dependencies used by main and the rerun helpers
+using TOML
+using Printf
+using HDF5
+using FastInterpolations
+import IMASdd
+import AdaptiveArrayPools: @with_pool
+
+const _BANNER = "="^60
+const _SECTION = "-"^40
+
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
 export Utilities
@@ -37,15 +48,8 @@ include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
 
-# Additional imports for main function
-using TOML
-using Printf
-using HDF5
-
-using FastInterpolations
-import IMASdd
-
-import AdaptiveArrayPools: @with_pool
+# Rerun snapshot/replay helpers, included directly into this module
+include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
@@ -55,19 +59,10 @@ using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
-const _BANNER = "="^60
-const _SECTION = "-"^40
-
-# Rerun snapshot/replay helpers. Depends on the module-level imports above
-# (HDF5, TOML, Equilibrium, ForcingTerms) and the `_BANNER` constant, so this
-# include has to come after them but before `main`, which dispatches into
-# `build_inputs_from_h5` on .h5 inputs.
-include("Rerun.jl")
-
 const _DEPRECATED_FFS_KEYS = ("delta_mband", "mband")
 
-# Drop deprecated [ForceFreeStates] keys (e.g. banded-matrix removal from PR #286) so legacy
-# gpec.toml files keep parsing instead of throwing an unknown-keyword error.
+# Drop deprecated [ForceFreeStates] keys (e.g. banded-matrix removal) so legacy gpec.toml files
+# keep parsing instead of throwing an unknown-keyword error.
 function _drop_deprecated_ffs_keys!(table)
     for k in _DEPRECATED_FFS_KEYS
         if haskey(table, k)
@@ -108,8 +103,9 @@ end
 Build the pipeline inputs from a working directory containing `gpec.toml`. Returns the
 parsed `inputs` dict (made self-contained for the rerun snapshot), the `EquilibriumConfig`,
 and the `additional_input` consumed by `setup_equilibrium` — an analytic `*Config` for
-TJ/SOL/LAR equilibria, the `dd` data dictionary for IMAS, or `nothing` for file-based
-equilibria (efit, chease) that `setup_equilibrium` reads from disk.
+sol/lar/tj equilibria (parameters from the embedded TOML section), the `dd` data dictionary
+for IMAS, or `nothing` for file-based equilibria (efit, chease) that `setup_equilibrium`
+reads from disk.
 """
 function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
@@ -117,23 +113,18 @@ function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothi
     haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
 
-    # LAR/Solovev carry their parameters in a separate auxiliary TOML referenced
-    # by eq_filename. Merge those parameters into the in-memory `inputs` dict so
-    # the snapshot writer emits a self-contained TOML blob.
+    # Fold a deprecated analytic side-car TOML into `inputs` if its section isn't already
+    # embedded, so the snapshot writer emits a self-contained TOML blob.
     merge_auxiliary_eq_toml!(inputs, eq_config)
 
-    # Build `additional_input` from embedded TOML sections (analytic equilibria) or from
-    # the dd keyword argument (IMAS). These are mutually exclusive — an equilibrium is
-    # either analytic (TJ/SOL/LAR), IMAS-fed, or read from a file (additional_input=nothing).
-    additional_input = nothing
-    if eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
-        additional_input = Equilibrium.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
-    elseif eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
-        additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
-    elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
-        additional_input = Equilibrium.LargeAspectRatioConfig(inputs["LAR_INPUT"])
+    # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
+    # IMAS-fed (via the dd kwarg), or read from a file (additional_input = nothing).
+    additional_input = if haskey(ANALYTIC_EQ_SECTIONS, eq_config.eq_type)
+        build_analytic_config(eq_config.eq_type, inputs)
     elseif eq_config.eq_type == "imas"
-        additional_input = dd
+        dd
+    else
+        nothing
     end
 
     return inputs, eq_config, additional_input
@@ -185,12 +176,8 @@ function main_from_inputs(
     _drop_deprecated_ffs_keys!(ffs_table)
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
-    # The builder already resolved `additional_input` (analytic `*Config`, IMAS `dd`,
-    # prebuilt DirectRunInput/InverseRunInput from a rerun, or `nothing` for file-based
-    # equilibria). `setup_equilibrium` consumes it directly — no source dispatch here.
-    #
-    # The TJ-analytic equilibrium follows the profile family of R. Fitzpatrick's TJ code
-    # (https://github.com/rfitzp/TJ); see `Equilibrium.TJAnalyticConfig`.
+    # inputs/eq_config/additional_input are fully resolved by the caller; this body does no
+    # source dispatch — setup_equilibrium consumes additional_input directly.
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
@@ -604,14 +591,19 @@ function write_outputs_to_HDF5(
         # Store git version for reproducibility
         out_h5["info/git_version"] = git_version
 
-        # Self-contained run snapshot: the full merged TOML (so a rerun can
-        # reconstruct every ForceFreeStates/Equilibrium/Wall/PE control struct),
-        # plus raw equilibrium arrays so the rerun never needs the original
-        # g-file / CHEASE / auxiliary TOML files.
+        # Self-contained run snapshot: the full merged TOML (so a rerun can reconstruct every
+        # ForceFreeStates/Equilibrium/Wall/PE control struct), plus the equilibrium ingest
+        # arrays so a file-based rerun never needs the original g-file / CHEASE / IMAS source.
         if inputs !== nothing
             out_h5["input/gpec_toml_raw"] = sprint(TOML.print, inputs)
         end
-        write_equilibrium_raw_inputs!(out_h5, equil)
+        if equil.ingest !== nothing  # analytic equilibria are regenerated from their TOML section
+            eq_group = "input/raw_inputs/equilibrium"
+            out_h5["$eq_group/ingest_kind"] = equil.ingest isa Equilibrium.DirectIngest ? "direct" : "inverse"
+            for f in fieldnames(typeof(equil.ingest))
+                out_h5["$eq_group/$f"] = getfield(equil.ingest, f)
+            end
+        end
         if forcing_modes !== nothing
             forcing_group = create_group(out_h5, "input/raw_inputs/forcing_terms")
             ForcingTerms.save_forcing_to_h5(forcing_modes, forcing_group)

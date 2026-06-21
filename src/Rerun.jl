@@ -5,84 +5,75 @@
 # Included directly into the GeneralizedPerturbedEquilibrium module, so these functions share
 # its imports (TOML, HDF5, Equilibrium, ForcingTerms, etc.).
 
+# Analytic equilibria carry their parameters in a TOML section rather than an ingest array;
+# replay regenerates them from that section. Maps eq_type to its gpec.toml section key.
+const ANALYTIC_EQ_SECTIONS = Dict(
+    "sol" => "SOL_INPUT",
+    "lar" => "LAR_INPUT",
+    "tj_analytic" => "TJ_ANALYTIC_INPUT",
+    "tj_analytic_direct" => "TJ_ANALYTIC_INPUT",
+)
+
 """
     merge_auxiliary_eq_toml!(inputs::Dict{String,Any}, eq_config)
 
-For analytic equilibria (`lar`, `sol`), the equilibrium parameters live in a
-separate auxiliary TOML referenced by `eq_config.eq_filename` (e.g. `sol.toml`
-with a `[SOL_INPUT]` section). To make the `gpec.h5` snapshot self-contained,
-we merge the relevant auxiliary section into the in-memory `inputs` dict under
-the same key (`LAR_INPUT` / `SOL_INPUT`). On replay, `build_inputs_from_h5` reads these
-sections back into a `LargeAspectRatioConfig` / `SolovevConfig` and passes
-them to `setup_equilibrium` as `additional_input`, bypassing the auxiliary
-file read entirely.
-
-No-op for EFIT/CHEASE equilibria — those are snapshotted via `raw_inputs`.
+Ensure the analytic-equilibrium parameter section (`[SOL_INPUT]` / `[LAR_INPUT]` /
+`[TJ_ANALYTIC_INPUT]`) is present in the in-memory `inputs` dict so the `gpec.h5` snapshot
+is self-contained. If the section is already embedded in `gpec.toml`, this is a no-op.
+Otherwise it falls back to the deprecated side-car TOML referenced by `eq_config.eq_filename`
+and folds that section in (with a deprecation warning). No-op for non-analytic equilibria.
 """
 function merge_auxiliary_eq_toml!(inputs::Dict{String,Any}, eq_config::Equilibrium.EquilibriumConfig)
-    eq_type = eq_config.eq_type
-    if eq_type != "lar" && eq_type != "sol"
-        return inputs
-    end
+    section = get(ANALYTIC_EQ_SECTIONS, eq_config.eq_type, nothing)
+    section === nothing && return inputs        # file-based: snapshotted via the equilibrium ingest
+    haskey(inputs, section) && return inputs     # already embedded in gpec.toml
 
     filepath = eq_config.eq_filename
-    if !isfile(filepath)
-        @warn "Auxiliary equilibrium TOML not found at $filepath; snapshot will not contain analytic parameters"
-        return inputs
-    end
-
+    isfile(filepath) || return inputs            # nothing to fold; build_analytic_config will report a clear error
+    @warn "Reading analytic parameters from side-car $filepath is deprecated; move [$section] into gpec.toml"
     aux = TOML.parsefile(filepath)
-    section = eq_type == "lar" ? "LAR_INPUT" : "SOL_INPUT"
-    if haskey(aux, section)
-        inputs[section] = aux[section]
-    else
-        @warn "Auxiliary TOML $filepath has no [$section] section; snapshot will not contain analytic parameters"
-    end
+    haskey(aux, section) && (inputs[section] = aux[section])
     return inputs
 end
 
 """
-    write_equilibrium_raw_inputs!(out_h5, equil)
+    build_analytic_config(eq_type, inputs)
 
-Write the raw-data dict captured on `PlasmaEquilibrium.raw_inputs` into
-`input/raw_inputs/equilibrium/` inside an open HDF5 file. The layout follows
-the `kind` field: `direct`, `inverse`, or `analytic`. On replay, the reader
-looks at `kind` to decide whether to rebuild a `DirectRunInput` /
-`InverseRunInput` or to reconstruct an analytic config from the TOML snapshot.
+Construct the analytic-equilibrium `*Config` (`SolovevConfig` / `LargeAspectRatioConfig` /
+`TJAnalyticConfig`) from the TOML section named by [`ANALYTIC_EQ_SECTIONS`]. Shared by the
+TOML and rerun input builders so both resolve analytic parameters the same way.
 """
-function write_equilibrium_raw_inputs!(out_h5, equil::Equilibrium.PlasmaEquilibrium)
-    raw = equil.raw_inputs
-    if isempty(raw)
-        @warn "Equilibrium has no raw_inputs captured; gpec.h5 will not be rerunnable"
-        return nothing
+function build_analytic_config(eq_type::AbstractString, inputs::Dict)
+    section = get(ANALYTIC_EQ_SECTIONS, eq_type, nothing)
+    section === nothing && error("build_analytic_config: $eq_type is not an analytic equilibrium type")
+    haskey(inputs, section) || error("Analytic equilibrium $eq_type requires a [$section] section in gpec.toml")
+    data = inputs[section]
+    if eq_type == "sol"
+        return Equilibrium.SolovevConfig(data)
+    elseif eq_type == "lar"
+        return Equilibrium.LargeAspectRatioConfig(data)
+    else
+        return Equilibrium.TJAnalyticConfig(data)
     end
-
-    group_path = "input/raw_inputs/equilibrium"
-    for (key, val) in raw
-        out_h5["$group_path/$key"] = val
-    end
-    return nothing
 end
 
 """
-    read_equilibrium_raw_inputs(in_h5) -> Dict{String,Any}
+    read_equilibrium_ingest(in_h5) -> EquilibriumIngest
 
-Inverse of `write_equilibrium_raw_inputs!`: read every dataset under
-`input/raw_inputs/equilibrium/` into a plain dict. Used by `build_inputs_from_h5`
-to hydrate a `DirectRunInput` / `InverseRunInput` without any filesystem
-access.
+Reconstruct the [`DirectIngest`](@ref)/[`InverseIngest`](@ref) stored under
+`input/raw_inputs/equilibrium/` (the inverse of the field-by-field write in
+`write_outputs_to_HDF5`). Returns `nothing` when the group is absent, which marks an
+analytic equilibrium — replayed from its TOML section rather than stored arrays.
 """
-function read_equilibrium_raw_inputs(in_h5)
+function read_equilibrium_ingest(in_h5)
     group_path = "input/raw_inputs/equilibrium"
-    if !haskey(in_h5, group_path)
-        error("gpec.h5 has no $group_path group — the file was produced before rerun snapshot support was added")
-    end
+    haskey(in_h5, group_path) || return nothing
     group = in_h5[group_path]
-    raw = Dict{String,Any}()
-    for name in keys(group)
-        raw[name] = read(group, name)
-    end
-    return raw
+    kind = read(group, "ingest_kind")
+    T = kind == "direct" ? Equilibrium.DirectIngest :
+        kind == "inverse" ? Equilibrium.InverseIngest :
+        error("Unknown equilibrium ingest_kind in gpec.h5: $kind")
+    return T((read(group, String(f)) for f in fieldnames(T))...)
 end
 
 """
@@ -123,9 +114,9 @@ function parse_override_flag(expr::AbstractString)
     length(parts) < 2 && error("--override key must be dotted (section.key[.subkey]): $expr")
 
     # Parse RHS as a TOML value by wrapping it in a throwaway key=value line.
+    sentinel = "_rerun_override_"
     parsed_val = try
-        parsed = TOML.parse("_rerun_override_ = $rhs")
-        parsed["_rerun_override_"]
+        TOML.parse("$sentinel = $rhs")[sentinel]
     catch e
         # Warn instead of silently stringifying a bare word, which would otherwise only fail
         # much later where the field expects a number/bool.
@@ -219,32 +210,11 @@ function resolve_rerun_output_path(source_h5::String, output_dir::String, output
         stem = endswith(lowercase(base), ".h5") ? base[1:end-3] : base
         output_name = string(stem, "_rerun.h5")
     end
-    out_abs = abspath(joinpath(output_dir, output_name))
-    if out_abs == source_abs
+    if abspath(joinpath(output_dir, output_name)) == source_abs
         error("Refusing to overwrite source HDF5 at $source_abs. " *
               "Pass `--output-dir <newdir>` or `--output-name <other.h5>`.")
     end
     return (output_dir, output_name)
-end
-
-"""
-    rebuild_equilibrium_input(eq_config, raw) -> Union{DirectRunInput,InverseRunInput,Nothing}
-
-Dispatch on `raw["kind"]` to rebuild the solver input. Returns `nothing` for
-the `analytic` case — the caller should fall back to constructing a
-`LargeAspectRatioConfig` / `SolovevConfig` from the restored TOML sections.
-"""
-function rebuild_equilibrium_input(eq_config::Equilibrium.EquilibriumConfig, raw::Dict{String,Any})
-    kind = get(raw, "kind", "")
-    if kind == "direct"
-        return Equilibrium.build_direct_from_raw(eq_config, raw)
-    elseif kind == "inverse"
-        return Equilibrium.build_inverse_from_raw(eq_config, raw)
-    elseif kind == "analytic"
-        return nothing
-    else
-        error("Unknown raw equilibrium kind in gpec.h5: $kind")
-    end
 end
 
 """
@@ -253,24 +223,23 @@ end
 
 Rerun input builder. Parses the rerun-specific CLI flags, reads the snapshot out of the
 source HDF5, applies any overrides, and reconstructs the pipeline inputs — a prebuilt
-`DirectRunInput`/`InverseRunInput` for file-based equilibria, or an analytic `*Config` for
-LAR/SOL. Never touches the source file's original ingest paths. The returned tuple is fed
-straight into `main_from_inputs`.
+`DirectRunInput`/`InverseRunInput` rebuilt from the stored ingest for file-based equilibria,
+or an analytic `*Config` for sol/lar/tj. Never touches the source file's original ingest
+paths. The returned tuple is fed straight into `main_from_inputs`.
 """
 function build_inputs_from_h5(args::Vector{String})
     cli = parse_rerun_cli(args)
     source_h5 = cli.source_h5
     isfile(source_h5) || error("Source HDF5 not found: $source_h5")
 
-    # Pull the stored TOML, raw equilibrium arrays, and (if present) forcing
-    # data out of the source file. Forcing modes are only written when the
-    # original run had a [PerturbedEquilibrium] section, so the group may be
-    # missing — we signal that with `nothing` and let main_from_inputs fall
-    # back to loading from `ft_ctrl.forcing_data_file`.
-    # `--coil-source coils` recomputes the coil field from stored geometry, so it
-    # deliberately ignores the frozen forcing-mode snapshot.
+    # Pull the stored TOML, equilibrium ingest, and (if present) forcing data out of the source
+    # file. Forcing modes are only written when the original run had a [PerturbedEquilibrium]
+    # section, so the group may be missing — we signal that with `nothing` and let
+    # main_from_inputs fall back to loading from `ft_ctrl.forcing_data_file`.
+    # `--coil-source coils` recomputes the coil field from stored geometry, so it deliberately
+    # ignores the frozen forcing-mode snapshot.
     use_coils = cli.coil_source == "coils"
-    toml_raw, raw_eq, source_git, preloaded_forcing, preloaded_coils = h5open(source_h5, "r") do in_h5
+    toml_raw, ingest, source_git, preloaded_forcing, preloaded_coils = h5open(source_h5, "r") do in_h5
         haskey(in_h5, "input/gpec_toml_raw") ||
             error("Source HDF5 $source_h5 has no input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
         forcing_modes = if use_coils || !haskey(in_h5, "input/raw_inputs/forcing_terms")
@@ -292,7 +261,7 @@ function build_inputs_from_h5(args::Vector{String})
         end
         (
             read(in_h5, "input/gpec_toml_raw"),
-            read_equilibrium_raw_inputs(in_h5),
+            read_equilibrium_ingest(in_h5),
             haskey(in_h5, "info/git_version") ? read(in_h5, "info/git_version") : "unknown",
             forcing_modes,
             coil_sets
@@ -328,24 +297,20 @@ function build_inputs_from_h5(args::Vector{String})
           "  source: $(abspath(source_h5))\n" *
           "  output: $(abspath(joinpath(output_dir, output_name)))\n$_BANNER"
 
-    # Rebuild the equilibrium solver input from the HDF5-stored arrays (or from
-    # the merged LAR/SOL sections for analytic kinds), and run the standard
-    # pipeline. Everything downstream is unchanged.
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], output_dir)
-    # eq_filename won't be used on replay — clear it so any leftover absolute
-    # path from the source machine can't trip up later code paths.
+    # Clear eq_filename: unused on replay, and a stale absolute path could mislead downstream code.
     eq_config.eq_filename = ""
 
-    additional_input = if raw_eq["kind"] == "analytic"
-        if eq_config.eq_type == "lar"
-            lar_data = get(inputs, "LAR_INPUT", Dict{String,Any}())
-            Equilibrium.LargeAspectRatioConfig(; (Symbol(k) => v for (k, v) in lar_data)...)
-        else
-            sol_data = get(inputs, "SOL_INPUT", Dict{String,Any}())
-            Equilibrium.SolovevConfig(; (Symbol(k) => v for (k, v) in sol_data)...)
-        end
+    # Analytic kinds regenerate from their TOML section; file-based kinds rebuild splines from
+    # the stored ingest. A file-based run with no ingest can only come from a pre-ingest gpec.h5.
+    additional_input = if haskey(ANALYTIC_EQ_SECTIONS, eq_config.eq_type)
+        build_analytic_config(eq_config.eq_type, inputs)
+    elseif ingest isa Equilibrium.DirectIngest
+        Equilibrium.build_direct_from_ingest(eq_config, ingest)
+    elseif ingest isa Equilibrium.InverseIngest
+        Equilibrium.build_inverse_from_ingest(eq_config, ingest)
     else
-        rebuild_equilibrium_input(eq_config, raw_eq)
+        error("gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay")
     end
 
     return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils

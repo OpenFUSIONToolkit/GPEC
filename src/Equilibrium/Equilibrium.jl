@@ -118,8 +118,8 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         plasma_equilibrium = equilibrium_solver(eq_input)
     end
 
-    # Forward raw ingest arrays so the gpec.h5 writer can snapshot them.
-    plasma_equilibrium.raw_inputs = eq_input.raw_data
+    # Forward the captured ingest so the gpec.h5 writer can snapshot it (nothing for analytic).
+    plasma_equilibrium.ingest = eq_input.ingest
 
     equilibrium_global_parameters!(plasma_equilibrium)
     equilibrium_qfind!(plasma_equilibrium)

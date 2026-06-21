@@ -258,7 +258,7 @@ function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
     n_array = read(group, "n")
     m_array = read(group, "m")
     amp_real = read(group, "amplitude_real")
-    amp_imag = haskey(group, "amplitude_imag") ? read(group, "amplitude_imag") : zeros(length(n_array))
+    amp_imag = haskey(group, "amplitude_imag") ? read(group, "amplitude_imag") : zeros(length(n_array))  # optional for hand-authored groups
 
     if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
         error("Inconsistent array lengths in HDF5 forcing group")

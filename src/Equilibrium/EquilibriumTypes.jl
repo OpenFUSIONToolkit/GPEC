@@ -345,6 +345,79 @@ function SolovevConfig(input_dict::Dict{String,Any})
 end
 
 """
+    DirectIngest
+
+The serializable raw arrays and scalars captured by a direct-equilibrium reader
+(`read_efit`, `read_imas`, `sol_run` is analytic and does not use this) — everything
+needed to rebuild a `DirectRunInput`'s splines without re-reading the original g-file.
+Stored on `DirectRunInput.ingest` / `PlasmaEquilibrium.ingest` and dumped to
+`gpec.h5` so a run can be replayed from any directory. The interpolants themselves are
+not serializable; they are reconstructed from these nodes by `build_direct_from_ingest`.
+
+## Fields
+
+  - `sq_xs::Vector{Float64}` — normalized-ψ knots for the 1D profile spline
+  - `sq_fs::Matrix{Float64}` — 1D profile node values (F, μ₀P, q, √ψ_norm)
+  - `psi_xs::Vector{Float64}` — R grid for the 2D flux map [m]
+  - `psi_ys::Vector{Float64}` — Z grid for the 2D flux map [m]
+  - `psi_rz::Matrix{Float64}` — processed poloidal flux on the (R, Z) grid [Wb/rad]
+  - `rmin/rmax/zmin/zmax::Float64` — computational-grid bounds [m]
+  - `psio::Float64` — total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+  - `bt_sign::Int` — sign of the toroidal field (+1 or -1)
+"""
+struct DirectIngest
+    sq_xs::Vector{Float64}
+    sq_fs::Matrix{Float64}
+    psi_xs::Vector{Float64}
+    psi_ys::Vector{Float64}
+    psi_rz::Matrix{Float64}
+    rmin::Float64
+    rmax::Float64
+    zmin::Float64
+    zmax::Float64
+    psio::Float64
+    bt_sign::Int
+end
+
+"""
+    InverseIngest
+
+The serializable raw arrays and scalars captured by an inverse-equilibrium reader
+(`read_chease_ascii`, `read_chease_binary`) — everything needed to rebuild an
+`InverseRunInput`'s splines without re-reading the original CHEASE file. Stored on
+`InverseRunInput.ingest` / `PlasmaEquilibrium.ingest` and reconstructed by
+`build_inverse_from_ingest`. See [`DirectIngest`](@ref) for the role this plays in
+the `gpec.h5` rerun snapshot.
+
+## Fields
+
+  - `sq_xs::Vector{Float64}` — normalized-ψ knots for the 1D profile spline
+  - `sq_fs::Matrix{Float64}` — 1D profile node values
+  - `rz_xs::Vector{Float64}` — ψ grid for the R, Z maps
+  - `rz_ys::Vector{Float64}` — θ grid for the R, Z maps
+  - `R_nodes::Matrix{Float64}` — R node values on the (ψ, θ) grid [m]
+  - `Z_nodes::Matrix{Float64}` — Z node values on the (ψ, θ) grid [m]
+  - `ro::Float64` — R of magnetic axis [m]
+  - `zo::Float64` — Z of magnetic axis [m]
+  - `psio::Float64` — total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+"""
+struct InverseIngest
+    sq_xs::Vector{Float64}
+    sq_fs::Matrix{Float64}
+    rz_xs::Vector{Float64}
+    rz_ys::Vector{Float64}
+    R_nodes::Matrix{Float64}
+    Z_nodes::Matrix{Float64}
+    ro::Float64
+    zo::Float64
+    psio::Float64
+end
+
+# Equilibria captured for replay carry one of these; analytic equilibria carry `nothing`
+# and are regenerated from their TOML section instead.
+const EquilibriumIngest = Union{Nothing,DirectIngest,InverseIngest}
+
+"""
     DirectRunInput(...)
 
 A container struct that bundles all necessary inputs for the `direct_run` function.
@@ -383,6 +456,8 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
   - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
+  - `ingest::EquilibriumIngest` — captured raw arrays for the `gpec.h5` rerun snapshot
+    (a [`DirectIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -396,13 +471,8 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
     bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
-    raw_data::Dict{String,Any}  # Raw arrays used to build the splines (for gpec.h5 snapshot/replay)
+    ingest::EquilibriumIngest
 end
-
-# Outer constructor: call sites that don't capture raw arrays pass 11 positional args
-# (through bt_sign); raw_data defaults to empty (this equilibrium is then not rerun-snapshottable).
-DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign) =
-    DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign, Dict{String,Any}())
 
 """
     InverseRunInput(...)
@@ -420,6 +490,8 @@ A container struct for inputs to the `inverse_run` function.
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+  - `ingest::EquilibriumIngest` - captured raw arrays for the `gpec.h5` rerun snapshot
+    (an [`InverseIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
 """
 mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -431,12 +503,8 @@ mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<
     ro::Float64                 # R axis location
     zo::Float64                 # Z axis location
     psio::Float64               # Total flux difference |psi_axis - psi_boundary|
-    raw_data::Dict{String,Any}  # Raw arrays used to build the splines (for gpec.h5 snapshot/replay)
+    ingest::EquilibriumIngest
 end
-
-# Outer constructor: pre-rerun call sites pass 9 positional args; raw_data defaults to empty.
-InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio) =
-    InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, Dict{String,Any}())
 
 """
     EquilibriumParameters
@@ -800,6 +868,9 @@ This object provides a complete representation of the processed plasma equilibri
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
+  - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
+    `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
+    equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -826,16 +897,14 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     zo::Float64
     psio::Float64
 
-    # Raw ingest data forwarded from DirectRunInput/InverseRunInput for gpec.h5 snapshot/replay.
-    # Keys depend on equilibrium kind: "direct", "inverse", or "analytic".
-    raw_inputs::Dict{String,Any}
+    ingest::EquilibriumIngest
 end
 
-# Outer constructor: call sites pass 16 positional args (through psio); raw_inputs defaults to empty
-# (it is populated post-construction from eq_input.raw_data in setup_equilibrium).
+# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest, so allow
+# construction without it; ingest defaults to nothing and is assigned post-construction.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
     eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
     PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, Dict{String,Any}())
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing)
