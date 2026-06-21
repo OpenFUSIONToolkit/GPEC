@@ -120,6 +120,7 @@ function compute_calculated_kinetic_matrices(
                     block_w, block_t, psi, n, ell,
                     kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.wdfac, kf_ctrl.divxfac,
                     kf_ctrl.electron, equil, intr_t, kinetic_profiles;
+                    nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
                     atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
                 )
                 full_w .+= block_w

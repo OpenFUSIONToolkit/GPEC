@@ -439,18 +439,22 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         @info "\n  KineticForces\n$_SECTION"
         kf_start = time()
 
-        # kf_ctrl and kinetic_profiles were loaded once above the stability block.
-        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
-        if @isdefined(pe_state)
+        # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
+        # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
+        if !@isdefined(pe_state)
+            @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
+        else
+            # kf_ctrl and kinetic_profiles were loaded once above the stability block.
+            kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
             KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
-        end
 
-        kf_state = KineticForces.KineticForcesState()
-        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
+            kf_state = KineticForces.KineticForcesState()
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
 
-        if kf_ctrl.write_outputs_to_HDF5
-            h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                KineticForces.write_to_hdf5!(h5file, kf_state)
+            if kf_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                    KineticForces.write_to_hdf5!(h5file, kf_state)
+                end
             end
         end
 

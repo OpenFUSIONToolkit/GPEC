@@ -1,11 +1,11 @@
-# Regression case: Solovev n=1 with the "calculated" kinetic path at full strength.
-# Guards the real KineticForces (PENTRC-style) physics path against drift. Each
-# [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
-# noise floor below which a difference is treated as zero.
 [case]
-name = "solovev_kinetic_calculated"
-description = "Solovev, n=1, kinetic_source=calculated, kinetic_factor=1.0, mode-converged band (delta_m=8, mpert=32). et[1]≈1.894-1.525i with the pressure-consistent kinetic.dat (n·T tied to the Solovev P₀≈4.27e4 Pa)."
+name = "solovev_kinetic_nuzero"
+description = "Solovev, n=1, kinetic_source=calculated, nutype=zero (collisionless energy integral, issue #281), mode-converged band (delta_m=8, mpert=32). Reuses the calculated example deck via override; et[1]≈2.333-2.174i with the pressure-consistent kinetic.dat."
 example_dir = "examples/Solovev_kinetic_calculated_example"
+
+# Run the shared calculated deck collisionless (no separate nuzero example directory).
+[overrides]
+"KineticForces.nutype" = "zero"
 
 # Energies — leading eigenvalues
 [quantities.et_real]
