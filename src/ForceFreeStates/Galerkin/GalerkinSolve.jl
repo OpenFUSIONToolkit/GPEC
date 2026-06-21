@@ -39,6 +39,13 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
     return ws
 end
 
+"""Empty `GalerkinResult` for a domain with no resonant surfaces."""
+function empty_galerkin_result()
+    empty2 = Matrix{ComplexF64}(undef, 0, 0)
+    return GalerkinResult(empty2, empty2, empty2, empty2, empty2, 0,
+        Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2, nothing, nothing)
+end
+
 """
     galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
                    intr::ForceFreeStatesInternal; vac_data=nothing) -> GalerkinResult
@@ -59,18 +66,11 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     mpert = intr.numpert_total
     np = GAL_NP
 
-    # Resonant surfaces inside the integration domain, in increasing ψ (Fortran `sing(1:msing)`).
-    # psilow is raised above the axis by sing_min! when qlow > qmin (excludes the q<qlow core);
-    # fall back to the equilibrium axis bound if sing_min! was not run (psilow still 0).
-    psilow = intr.psilow > 0 ? intr.psilow : equil.profiles.xs[1]
-    psihigh = intr.psilim
-    sings = [s for s in intr.sing if psilow < s.psifac < psihigh && intr.mlow <= s.m[1] <= intr.mhigh]
+    sings, psilow, psihigh = gal_resonant_surfaces(intr, equil)
     msing = length(sings)
     if msing == 0
         ctrl.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
-        empty2 = Matrix{ComplexF64}(undef, 0, 0)
-        return GalerkinResult(Matrix{ComplexF64}(undef, 0, 0), empty2, empty2, empty2, empty2, 0,
-            Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2, nothing, nothing)
+        return empty_galerkin_result()
     end
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"

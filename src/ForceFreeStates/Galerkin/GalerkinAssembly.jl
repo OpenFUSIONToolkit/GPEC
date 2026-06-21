@@ -50,20 +50,22 @@ Evaluate the `mpert×mpert` matrices `F = Q F̄ Qᴴ`, `K = Q K̄`, `G = Ḡ` at
 Uses the un-factored reduced `ffit.fmats_gal` (F̄), `ffit.kmats` (K̄), `ffit.gmats` (Ḡ). F/K/G are the
 ideal-MHD Euler–Lagrange coefficient matrices of the outer-region weak form (Glasser 2016, PoP 23, 112506).
 """
-function gal_get_fkg(ffit::FourFitVars, intr::ForceFreeStatesInternal, x::Float64, q::Float64)
+function gal_get_fkg(ffit::FourFitVars, intr::ForceFreeStatesInternal, x::Float64, q::Float64;
+    Fbuf::Union{Nothing,Matrix{ComplexF64}}=nothing, Kbuf::Union{Nothing,Matrix{ComplexF64}}=nothing,
+    Gbuf::Union{Nothing,Matrix{ComplexF64}}=nothing)
     N = intr.numpert_total
     sf = vec((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
 
-    Fbar = Matrix{ComplexF64}(undef, N, N)
-    K = Matrix{ComplexF64}(undef, N, N)
-    G = Matrix{ComplexF64}(undef, N, N)
-    ffit.fmats_gal(vec(Fbar), x; hint=ffit._hint)
+    F = Fbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Fbuf
+    K = Kbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Kbuf
+    G = Gbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Gbuf
+    ffit.fmats_gal(vec(F), x; hint=ffit._hint)
     ffit.kmats(vec(K), x; hint=ffit._hint)
     ffit.gmats(vec(G), x; hint=ffit._hint)
 
-    F = Matrix{ComplexF64}(undef, N, N)
+    # scale F̄→F=Q F̄ Qᴴ and K̄→K=Q K̄ in place (Q = diag(sf))
     @inbounds for j in 1:N, i in 1:N
-        F[i, j] = Fbar[i, j] * sf[i] * sf[j]
+        F[i, j] = F[i, j] * sf[i] * sf[j]
         K[i, j] = K[i, j] * sf[i]
     end
     return F, K, G
@@ -87,19 +89,19 @@ function gal_gauss_quad!(cell::GalCell, ffit::FourFitVars, profiles, intr::Force
     x0c = (x2 + x1) / 2
     dxc = (x2 - x1) / 2
     qhint = Ref(1)
+    Fbuf = Matrix{ComplexF64}(undef, N, N)
+    Kbuf = Matrix{ComplexF64}(undef, N, N)
+    Gbuf = Matrix{ComplexF64}(undef, N, N)
 
     @inbounds for iq in eachindex(nodes)
         x = x0c + dxc * nodes[iq]
         w = dxc * weights[iq]
         q = profiles.q_spline(x; hint=qhint)
-        F, K, G = gal_get_fkg(ffit, intr, x, q)
+        F, K, G = gal_get_fkg(ffit, intr, x, q; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
         pbt, qbt = gal_hermite(x, x1, x2)
-        pb = collect(pbt)
-        qb = collect(qbt)
-        if swap_edge
-            pb[3], pb[4] = pb[4], pb[3]
-            qb[3], qb[4] = qb[4], qb[3]
-        end
+        # swap the right-node value/slope DOFs (Fortran pb(2)↔pb(3)) for the free-boundary edge
+        pb = swap_edge ? (pbt[1], pbt[2], pbt[4], pbt[3]) : pbt
+        qb = swap_edge ? (qbt[1], qbt[2], qbt[4], qbt[3]) : qbt
         for ip in 0:np, ipert in 1:N, jp in 0:np, jpert in 1:N
             cell.mat[ipert, jpert, ip+1, jp+1] += w * (
                 F[ipert, jpert] * qb[ip+1] * qb[jp+1] +
@@ -285,11 +287,11 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         ua = sing_get_ua_gal(asymp, z)
         dua = sing_get_dua_gal(asymp, z)
         q = profiles.q_spline(x; hint=qhint)
-        ua2 = ua[:, cols, :]
-        dua2 = dua[:, cols, :]
-        mv = sing_matvec(ffit, intr, x, q, ua2, dua2)   # N×2 (col1=big, col2=small)
+        ua_cols = ua[:, cols, :]
+        dua_cols = dua[:, cols, :]
+        mv = sing_matvec(ffit, intr, x, q, ua_cols, dua_cols)   # N×2 (col1=big, col2=small)
         pbt, _ = gal_hermite(x, x1, x2)
-        w = conj.(@view ua2[:, 2, 1])                   # conj small solution, qty1
+        w = conj.(@view ua_cols[:, 2, 1])               # conj small solution, qty1
         out = Vector{ComplexF64}(undef, L)
         out[1] = sum(w .* @view mv[:, 1])               # res1
         out[2] = sum(w .* @view mv[:, 2])               # res2
@@ -305,10 +307,8 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         return out
     end
 
-    # Numerical-method deviation from gal_lsode_int: adaptive QuadGK (Gauss-Kronrod) replaces Fortran's
-    # LSODE accumulation over the same integrand/limits, so this path is NOT bit-exact with gal.f. Match
-    # Fortran's LSODE tolerance (gal_tol) and cap the evaluations at gal_gnstep (Fortran's gnstep limit)
-    # so a near-singular integrand cannot hang.
+    # QuadGK (adaptive Gauss-Kronrod) replaces Fortran gal_lsode_int over the same integrand/limits — not
+    # bit-exact; gal_tol/gal_gnstep cap the evals so a near-singular integrand cannot hang.
     raw, qerr = quadgk(integrand, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=gal_gnstep)
     if verbose
         @info "  resonant jsing=$jsing side=$(cell.extra) qerr=$(qerr) res1=$(raw[1]) res2=$(raw[2])"

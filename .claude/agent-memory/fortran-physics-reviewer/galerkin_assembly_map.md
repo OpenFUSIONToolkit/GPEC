@@ -34,4 +34,22 @@ of sing.f's internal singular-surface handling, not a line port. The ×(-1) chai
 but worth a dedicated check against sing.f sing_get_ua/dua if Δ′ ever disagrees with Fortran. Lives outside
 GalerkinAssembly.jl.
 
-## Verdict: PASS WITH REQUIRED ANNOTATIONS (citation comments only; no physics defects found).
+## RPEC matching (GalerkinMatch.jl <-> rmatch/match.f match_rpec) — reviewed 2026-06-20
+- match block (mat idx1..idx4, -delta1/delta2 signs) + rmat=-TRANSPOSE(delta coil block) + cout/cin split: EXACT port. PASS.
+- matched outer soln Σcout(isol)·sols + sols(:,:,csol): EXACT (match_output_solution L32-41).
+- resist.f E/F/H/M/G/K/taua/taur/v1: EXACT (Resist.jl). eta/rho caller-supplied = deliberate documented deviation.
+- gal quadrature: jacobi_alloc "gll" = Gauss-Lobatto = Julia gausslobatto. nq1 lower=|nn·q1|, upper=|q1|: match.
+
+## SUSPECT (should-fix) — RPEC forced eigenvalue γ
+GalerkinMatch.jl:66 uses γ = 2π·im·n·gal_rotation. Fortran match_rpec passes `initguess` (namelist,
+default 0.0) DIRECTLY to deltac_run — NOT i·n·rotation. The `guess+ifac*ntor*rotation` Doppler form
+lives only in match_delta (Newton eigenvalue search), NOT the RPEC path. Two issues:
+  (1) extra 2π: Fortran eig=ifac*ntor*rotation has NO 2π (rotation is ω[rad/s], eig is 1/time, q0=x0/taua).
+  (2) RPEC path in Fortran uses initguess (the user forced eigenvalue), not a per-surface i·n·rotation shift.
+Confirm intended convention vs Fortran before trusting resistive Δ(Q); ideal_flag path (γ unused) is unaffected.
+RESOLUTION 2026-06-20: author confirms the Hz convention is DELIBERATE (gal_rotation is f[Hz], so γ=2πi·n·f);
+the overstated comments were corrected. Δ(Q) now guarded by test/runtests_innerlayer.jl (Julia self-pin on
+glasser_wang_2020_eq55). Remaining follow-up (mpharr): upgrade that guard to a Fortran deltac_run / paper
+cross-check to fully close the convention question.
+
+## Verdict: PASS WITH REQUIRED ANNOTATIONS for outer solve; RPEC γ convention is SHOULD-FIX (verify vs match.f).

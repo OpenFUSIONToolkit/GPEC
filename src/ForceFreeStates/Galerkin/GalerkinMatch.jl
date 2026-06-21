@@ -3,8 +3,9 @@
 # DRIVEN (RPEC) outer↔inner asymptotic matching. Port of rmatch `match_rpec` (match.f) and the
 # outer total-solution construction of `match_output_solution` (match.f).
 #
-# Per rational surface: the forced eigenvalue γ_s = 2πi·n·f_s (rpec, match.f), the inner-layer
-# matching data Δ(Q) via the Galerkin GGJ solver (InnerLayer.solve_inner), then the 4·msing matching
+# Per rational surface: the forced eigenvalue γ_s = 2πi·n·f_s (gal_rotation is the rotation f in Hz, so γ
+# is the layer Doppler frequency), the inner-layer matching data Δ(Q) via the Galerkin GGJ solver
+# (InnerLayer.solve_inner), then the 4·msing matching
 # system mat·[cout;cin] = rmat is assembled (rmat = −transpose of the gal Δ′ coil block) and solved for
 # the per-coil outer/inner coefficients. The matched outer solution for coil drive j is
 #   ξ_j = Σ_{isol=1}^{2 msing} cout[isol,j]·sols[:,:,isol] + sols[:,:,2 msing+j]
@@ -48,13 +49,11 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             length(v) == msing || error("gal_match_rpec: $name has length $(length(v)), expected msing=$msing (one value per surface, core→edge)")
         end
 
-        # Re-derive the gal singular-surface set (must match galerkin_solve's filter) to get the SingType
-        # objects resist_eval needs; verify alignment with the stored gal Δ′ surfaces.
-        psilow = intr.psilow > 0 ? intr.psilow : equil.profiles.xs[1]
-        psihigh = intr.psilim
-        sings = [s for s in intr.sing if psilow < s.psifac < psihigh && intr.mlow <= s.m[1] <= intr.mhigh]
-        length(sings) == msing && isapprox([s.psifac for s in sings], gal_result.sing_psi; rtol=1e-8) ||
-            error("gal_match_rpec: re-derived surface set does not match gal Δ′ surfaces (filter drift?)")
+        # Re-derive the gal singular-surface set (same helper as galerkin_solve) for the SingType objects
+        # resist_eval needs.
+        sings, _, _ = gal_resonant_surfaces(intr, equil)
+        length(sings) == msing ||
+            error("gal_match_rpec: re-derived $(length(sings)) surfaces, expected msing=$msing")
 
         # --- inner-layer matching data Δ(Q) per surface (deltac_run; match.f) ---
         inner = InnerLayer.GGJModel(solver=:galerkin)
@@ -63,7 +62,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         for i in 1:msing
             params = resist_eval(sings[i], equil, intr; eta=ctrl.gal_eta[i], rho=ctrl.gal_rho[i],
                 gamma=ctrl.gal_gamma, ising=i)
-            γ = 2π * im * nn * ctrl.gal_rotation[i]    # rpec forced eigenvalue 2πi·n·f
+            γ = 2π * im * nn * ctrl.gal_rotation[i]    # forced eigenvalue; gal_rotation is f [Hz], γ = 2πi·n·f
             rpec_eig[i] = γ
             Δ = InnerLayer.solve_inner(inner, params, γ)   # (Δ₁, Δ₂) in deltac.f convention
             deltar[i, 1] = Δ[1]
@@ -89,7 +88,8 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             mat[idx1, idx4] = 1
             mat[idx2, idx3] = -1
             mat[idx2, idx4] = -1
-            mat[idx3, idx3] = -delta1   # Δ_in
+            # inner-layer Δ block signs per match.f match_rpec
+            mat[idx3, idx3] = -delta1
             mat[idx3, idx4] = delta2
             mat[idx4, idx3] = -delta1
             mat[idx4, idx4] = -delta2

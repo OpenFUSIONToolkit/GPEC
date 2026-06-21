@@ -19,13 +19,15 @@ The implementation lives in `src/ForceFreeStates/Galerkin/`:
 | `GalerkinStructs.jl` | Cell, interval, and workspace types mirroring the Fortran derived types |
 | `GalerkinGrid.jl` | Packed grid construction and local→global DOF mapping |
 | `GalerkinAssembly.jl` | Element-level assembly: Hermite basis, Gauss-Lobatto stiffness, resonant and extension cells, boundary conditions |
+| `GalerkinSolution.jl` | Reconstruct ξ(ψ) and analytic ξ′(ψ) on the gal-native grid |
+| `GalerkinMatch.jl` | DRIVEN/RPEC outer↔inner asymptotic matching and the matched `OdeState` for PerturbedEquilibrium |
 | `GalerkinSolve.jl` | Top-level driver `galerkin_solve`, banded solve, Δ′ extraction, PEST-3 blocks, HDF5 output |
 
 ## API Reference
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["Galerkin/GalerkinStructs.jl", "Galerkin/GalerkinGrid.jl", "Galerkin/GalerkinAssembly.jl", "Galerkin/GalerkinSolve.jl"]
+Pages = ["Galerkin/GalerkinStructs.jl", "Galerkin/GalerkinGrid.jl", "Galerkin/GalerkinAssembly.jl", "Galerkin/GalerkinSolution.jl", "Galerkin/GalerkinMatch.jl", "Galerkin/GalerkinSolve.jl"]
 ```
 
 ## See also

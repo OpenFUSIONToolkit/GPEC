@@ -28,6 +28,7 @@ else
     include("./runtests_riccati.jl")
     include("./runtests_parallel_integration.jl")
     include("./runtests_sing.jl")
+    include("./runtests_innerlayer.jl")
     include("./runtests_tj_analytic.jl")
     include("./runtests_kinetic.jl")
     include("./runtests_fullruns.jl")

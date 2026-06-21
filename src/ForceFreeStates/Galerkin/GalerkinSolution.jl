@@ -5,22 +5,21 @@
 #   gal_get_solution    (gal.f)  ξ (and optional ξ′) at one ψ for one solution column
 #   gal_output_solution (gal.f)  evaluate (ξ, ξ′) on a gal-native packed grid, all columns
 #
-# The whole point of carrying ξ′ here is to evaluate it analytically from the Hermite derivative basis
-# (gal_hermite qb) and the asymptotic-series derivative (sing_get_dua_gal) rather than ever
-# spline-differentiating ξ at the packed edge — the spline-endpoint derivative was the root cause of
-# GPEC's fake ~100% shielding (fixed in Fortran by RDCON_singcoup commit c3e8c5bc).
+# ξ′ is evaluated analytically from the Hermite derivative basis (gal_hermite qb) and the asymptotic-series
+# derivative (sing_get_dua_gal), never by spline-differentiating ξ at the packed edge.
 #
 # Fortran module flags restore_uh/us/ul default .TRUE. (gal.f); the full reconstruction is always
 # performed. The cut path (gal.f, used only for the matching diagnostic) is NOT ported here.
 
-# Dense / coarse sampling per cell, matching Fortran interp_np_res / interp_np (gal.f).
+# Sampling points per cell, matching Fortran interp_np_res / interp_np (gal.f): coarse in regular cells,
+# dense in resonant/extension cells to resolve the near-singular asymptotic series.
 const GAL_INTERP_NP = 3
 const GAL_INTERP_NP_RES = 60
 
 # Advance the monotone (iintvl, icell) cursor to the cell containing x. Port of gal.f.
 @inline function gal_locate_cell(ws::GalWorkspace, x::Float64, iintvl::Int, icell::Int)
     msing = length(ws.intvl) - 1
-    for _ in 1:((msing+1)*ws.nx+1)
+    for _ in 1:((msing+1)*ws.nx+1)   # bounded scan: at most one full wrap over all cells
         cell = ws.intvl[iintvl+1].cells[icell]
         if cell.x[1] <= x <= cell.x[2]
             return iintvl, icell, cell
@@ -59,12 +58,9 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
 
     # --- non-resonant (Hermite) part: same coefficients, value basis pb → ξ, derivative basis qb → ξ′ ---
     pbt, qbt = gal_hermite(x, cell.x[1], cell.x[2])
-    pb = collect(pbt)
-    qb = collect(qbt)
-    if iintvl == msing && icell == ws.nx          # last edge cell: swap node-2/3 DOFs (gal.f)
-        pb[3], pb[4] = pb[4], pb[3]
-        qb[3], qb[4] = qb[4], qb[3]
-    end
+    swap = iintvl == msing && icell == ws.nx       # last edge cell: swap node-2/3 DOFs (gal.f)
+    pb = swap ? (pbt[1], pbt[2], pbt[4], pbt[3]) : pbt
+    qb = swap ? (qbt[1], qbt[2], qbt[4], qbt[3]) : qbt
     for ip in 0:np
         u = @view ws.sol[cell.map[:, ip+1], isol]
         @views sol .+= u .* pb[ip+1]
