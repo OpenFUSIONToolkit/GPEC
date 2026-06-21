@@ -299,7 +299,7 @@ breaks axisymmetry to produce n≠0 forcing. Currents are zeroed; `load_coil_set
 """
 function make_pf_hoop(; radius::Real, height::Real, nsec::Int=361, name::String="pf_hoop")
     radius > 0 || error("make_pf_hoop: radius must be > 0 (got $radius)")
-    nsec >= 4 || error("make_pf_hoop: nsec must be >= 4 (got $nsec)")
+    nsec >= 361 || error("make_pf_hoop: nsec must be >= 361 (got $nsec); a full poloidal hoop needs at least ~1° resolution to be smooth")
     phis = range(0; length=nsec, stop=2π)  # closed: phis[end] == phis[1] + 2π
     x = reshape([radius * cos(p) for p in phis], 1, 1, nsec)
     y = reshape([radius * sin(p) for p in phis], 1, 1, nsec)
@@ -395,6 +395,18 @@ function make_window_pane_standoff(equil; standoff::Real, poloidal_angle::Real,
     uZ = s * tR + c * tZ
 
     half = poloidal_length / 2
+
+    # Guard against a coil that pokes through the plasma boundary (the standoff is too small for
+    # the tilt/length, e.g. a 90° tilt with standoff < half the leg length). The surface point's
+    # tangent plane supports the (convex) boundary, so the nearest leg corner's clearance from the
+    # boundary along the normal is standoff - half*|sin(tilt)| — the tilt tips the legs toward the
+    # surface, while tangential displacement leaves the normal clearance unchanged.
+    clearance = standoff - half * abs(sin(deg2rad(poloidal_tilt)))
+    clearance > 0 || error("make_window_pane_standoff: coil intersects the plasma boundary " *
+                           "(standoff=$standoff, poloidal_length=$poloidal_length, poloidal_tilt=$poloidal_tilt); " *
+                           "an external coil must lie outside the control surface — increase standoff or reduce " *
+                           "poloidal_length/poloidal_tilt")
+
     c1 = [Rc - half * uR, Zc - half * uZ]
     c2 = [Rc + half * uR, Zc + half * uZ]
 

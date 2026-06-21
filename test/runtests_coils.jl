@@ -325,6 +325,8 @@ end
     @test abs(By[1]) < 1e-14
 
     @test_throws ErrorException ForcingTerms.make_pf_hoop(; radius=-1.0, height=0.0)
+    # nsec below the 361 floor (too coarse for a smooth poloidal loop) must error
+    @test_throws ErrorException ForcingTerms.make_pf_hoop(; radius=a, height=0.0, nsec=100)
 end
 
 @testset "Analytic coils: make_window_pane" begin
@@ -421,6 +423,13 @@ end
     # near the coil (same sense as the corner-built window pane).
     np_pol = 20  # make_window_pane default
     @test cs1.z[1, 1, np_pol] > cs1.z[1, 1, 1]
+
+    # Separatrix-touch guard: a 90° tilt with standoff shorter than half the leg length pushes
+    # one corner back through the boundary, which must error. A normal placement still succeeds.
+    @test_throws ErrorException ForcingTerms.make_window_pane_standoff(equil; standoff=0.1,
+        poloidal_angle=0.0, poloidal_length=1.0, poloidal_tilt=90.0, ncoil=1)
+    @test ForcingTerms.make_window_pane_standoff(equil; standoff=0.3, poloidal_angle=0.0,
+        poloidal_length=0.4, poloidal_tilt=0.0, ncoil=1) isa ForcingTerms.CoilSet
 end
 
 # ---------------------------------------------------------------------------
