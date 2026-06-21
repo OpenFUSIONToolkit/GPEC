@@ -5,8 +5,9 @@ Energy-space integration for the kinetic resonance operator.
 Implements the energy integrand from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
 
 The integral over normalized energy x = E/T is evaluated in real x-space over
-`[0, X_ENERGY_MAX]` (Fortran PENTRC convention; `exp(-72) ≈ 5e-32` is negligible
-to any tolerance). Resonance poles (where the denominator i·Ω(x) - ν vanishes,
+`[0, X_ENERGY_MAX]`. The integrand and every resonance pole decay as `x^p·exp(-x)`,
+so the upper limit is set where that tail falls far below any quadrature tolerance
+(see `X_ENERGY_MAX`). Resonance poles (where the denominator i·Ω(x) - ν vanishes,
 shifted off the real axis to x_pole = x_res - i·ν/Ω′ by collisions) are removed
 analytically by a Sokhotski-Plemelj decomposition, so the remaining integrand
 is smooth and integrated by QuadGK adaptive Gauss-Kronrod quadrature. One path
@@ -171,10 +172,17 @@ function find_resonance_energies(leff::Float64, wb::Float64, n::Int, we::Float64
     return roots
 end
 
-# Upper energy limit for the collisionless real-x-space integral, matching the
-# Fortran PENTRC convention (energy.f90, `xmax`). exp(-72) ≈ 5e-32, so the energy
-# tail beyond this is negligible to any quadrature tolerance.
-const X_ENERGY_MAX = 72.0
+# Upper energy limit for the real-x-space integral. The integrand AND every
+# resonance pole decay as x^p·exp(-x) (p ≤ 3.5 with the qt heat-flux factor): a
+# dropped pole at xr ≥ X_ENERGY_MAX contributes R·(PV+iπ) with residue
+# R = N(xr)·exp(-xr)/(i·Ω′), and at a simple pole Ω′ is O(the drift frequencies),
+# so |R| ~ xr^2.5·exp(-xr) — the same law as the smooth tail. At x=100,
+# 100^3.5·exp(-100) ≈ 4e-37 is ~30 orders below any quadrature tolerance, so 100
+# bounds both with enormous margin. This is a tolerance edge, not a precision edge:
+# exp(-x) underflows to 0 only near x≈746. Near-degenerate poles (Ω′→0) are handled
+# by the SINGULAR_EPS guard below, not by this limit. QuadGK is adaptive, so the
+# near-zero tail beyond the resonance is accepted in a single panel at no extra cost.
+const X_ENERGY_MAX = 100.0
 
 """
     _real_pole_regular_part(xr, p, leff, wb, n, wd) → ComplexF64
@@ -292,8 +300,9 @@ end
 Integrate the kinetic resonance operator over normalized energy x = E/T.
 
 The integral ∫₀^∞ N(x)·exp(-x)/denom(x) dx is evaluated in real x-space over
-`[0, X_ENERGY_MAX]` (Fortran PENTRC convention; `exp(-72) ≈ 5e-32` is below any
-tolerance) via `_integrate_energy_resonant`. Each resonance pole (root of
+`[0, X_ENERGY_MAX]` (the integrand and its poles decay as `x^p·exp(-x)`, so the
+tail there is far below any tolerance) via `_integrate_energy_resonant`. Each
+resonance pole (root of
 Ω(x) = leff·wb·√x + n·(we + wd·x), shifted off the real axis by collisions to
 x_pole = x_res - i·ν/Ω′) is removed by subtracting its singular part R/(x - x_pole)
 and adding back the analytic principal-value + residue. A single formula handles

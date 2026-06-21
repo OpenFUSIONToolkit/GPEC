@@ -252,8 +252,8 @@
         end
 
         @testset "tail pole beyond X_ENERGY_MAX dropped" begin
-            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900 > 72.
-            # The pole sits past X_ENERGY_MAX where exp(-x_res) underflows; the
+            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900,
+            # well past X_ENERGY_MAX. The pole sits where exp(-x_res) underflows; the
             # `xr >= X_ENERGY_MAX` check in _integrate_energy_resonant drops it cleanly.
             @test KF.find_resonance_energies(1.0, 1.0, 1, -30.0, 0.0)[1] ≈ 900.0
             result = KF.integrate_energy(
@@ -262,6 +262,31 @@
             )
             @test isfinite(real(result))
             @test isfinite(imag(result))
+        end
+
+        @testset "pole at and within 1e-13 of X_ENERGY_MAX (boundary robustness)" begin
+            # Direct analog of the original u→1 bug, relocated to x→X_ENERGY_MAX: a
+            # resonance pole sitting exactly at, just below, and just above the upper
+            # integration limit. Linear case (wd=0) with leff=wb=n=1 gives
+            # x_res = (n·we/(leff·wb))² = we², so we = -√x_target places the pole.
+            xmax = KF.X_ENERGY_MAX
+            run_xres(x_target) = KF.integrate_energy(
+                0.5, 0.3, -sqrt(x_target), 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            below = run_xres(xmax - 1e-13)   # pole kept, subtracted analytically
+            at = run_xres(xmax)              # find_resonance rounds to ≤ xmax; >= guard drops at endpoint
+            above = run_xres(xmax + 1e-13)   # pole dropped (outside domain)
+            @test isfinite(below) && isfinite(at) && isfinite(above)
+            # Continuous across the boundary: the only term that changes is the pole's
+            # contribution ∝ exp(-xmax) ~ exp(-100) ~ 4e-44, negligible on the O(1) bulk
+            # integral. No NaN from log(xmax - x_pole) at the exact endpoint.
+            @test below ≈ at rtol=1e-9
+            @test at ≈ above rtol=1e-9
+            # Collisionless result equals the ν→0⁺ (small-ν krook) limit.
+            small_nu = KF.integrate_energy(
+                0.5, 0.3, -sqrt(xmax - 1e-13), 0.0, 1.0, 1e-6, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test below ≈ small_nu rtol=1e-3
         end
 
         @testset "pole_offset overflow guard" begin
