@@ -219,7 +219,11 @@ b^r = \frac{\Phi^r}{A^r} \qquad [\mathrm{T}].
 
 Dividing the resonant flux ``\Phi^r`` by the surface area turns it into a field amplitude in Tesla
 that is invariant under changes of the poloidal-angle (working) coordinate. This is the quantity
-reported as `resonant_flux`.
+reported as `resonant_flux`. The need for this normalization is the central point of Park, Boozer,
+and Menard (2008) (see [Citations](citations.md)): the raw Fourier spectrum of the perturbed field is
+*spectrally asymmetric* and changes with the magnetic working coordinate, so only the resonant
+harmonic scaled by the scalar surface area ``A^r`` is a coordinate-independent physical measure of
+the resonant field.
 
 Note that there is strictly NO resonant field in ideal MHD perturbed equilibrium calculations, and
 only the effective resonant field is non-zero in these cases. Effective resonant fields are computed
@@ -273,11 +277,10 @@ b_m = \oint (\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta, \qquad
 
 Only the **square-root-area weighting** ``\tilde b`` transforms unitarily between working coordinates, so
 its 2-norm (and quantities derived from it, such as the singular values of the resonant coupling matrix)
-are coordinate-invariant. The **full-area weighting** ``\bar b`` is coordinate-invariant for the
+are coordinate-invariant. Note that the "root-area-weighted field" sometimes appears as "power-normalized
+field" in early GPEC literature, as the latter names a Parseval *property* of ``\tilde b``. The **full-area weighting** ``\bar b`` is coordinate-invariant for the
 pitch-resonant ``m = nq`` harmonic on a rational surface — the **resonant area-weighted field**
-``\bar b^{\,r} = \Phi^r/A^r``. The term "root-area-weighted field" is preferred over "power-normalized
-field": the latter names a Parseval *property* of ``\tilde b`` rather than the weighting itself, and is
-not the term used by Pharr (2026).
+``\bar b^{\,r} = \Phi^r/A^r`` as described above.
 
 GPEC operates and outputs **only in these field representations — poloidal flux ``\Phi`` (weber) is never
 stored.** Flux appears, briefly, only internally when a user supplies flux-valued forcing, and is
