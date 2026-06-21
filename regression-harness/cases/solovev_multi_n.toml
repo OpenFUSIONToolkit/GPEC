@@ -1,3 +1,7 @@
+# Regression case: Solovev multi-n (n = 1 and 2) ideal stability.
+# Tracks the leading free-boundary energies and stability quantities for the analytic
+# Solovev fixture swept over a toroidal mode-number range. Each [quantities.*] block names
+# an HDF5 path, how to extract it, and the noise floor below which a diff is treated as zero.
 [case]
 name = "solovev_multi_n"
 description = "Solovev analytical equilibrium, multi-n, ideal stability"

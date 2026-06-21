@@ -205,24 +205,23 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         println("  method = ", method)
     end
 
-    # Method selection
-    if method == "fcgl"
+    # Method selection — route on the registry dispatch tag (errors on unknown method)
+    kind = method_kind(method)
+    if kind == :fcgl
         tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac,
                                     n_s, T_s, equil, intr)
 
-    elseif method == "rlar"
+    elseif kind == :rlar
         tpsi_var[] = calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
                                     wdhat, wbhat, nueff, dVdpsi, n_s, T_s,
                                     dbob_m_f, intr.bo, bmin)
 
-    elseif method == "clar"
+    elseif kind == :clar
         tpsi_var[] = calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec,
                                     nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
                                     tspl, dbob_m_f, divx_m_f, divxfac, wdfac)
 
-    elseif method in ["fgar", "tgar", "pgar", "fwmm", "twmm", "pwmm",
-                      "ftmm", "ttmm", "ptmm", "fkmm", "tkmm", "pkmm",
-                      "frmm", "trmm", "prmm"]
+    else  # :gar — fgar/tgar/pgar + all *mm matrix methods
         # Evaluate geometric matrices at current ψ if matrix path
         smat_f = nothing
         tmat_f = nothing
@@ -247,8 +246,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
                                    pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
                                    rex_override=rex_override, imx_override=imx_override)
-    else
-        error("ERROR: torque - unknown method")
     end
 
     if intr.verbose
@@ -920,6 +917,7 @@ function compute_kinetic_matrices_at_psi!(
     zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
     electron::Bool, equil, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
+    nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
     # Bypass ψ > 1 (no kinetic contribution outside plasma)
@@ -934,6 +932,7 @@ function compute_kinetic_matrices_at_psi!(
 
     kinetic_energy_matrices_for_euler_lagrange!(
         kwmat, ktmat, state, psi, n, l, wdfac, intr;
+        nutype, f0type, nufac,
         energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
         pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
 

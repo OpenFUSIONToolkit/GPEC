@@ -217,10 +217,44 @@
             @test collisionless ≈ small_nu rtol=1e-3
         end
 
-        @testset "xr > 700 Maxwellian-underflow guard" begin
-            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900 > 700.
-            # The pole sits where exp(-x_res) underflows; subtraction trips 0·log(-1) = NaN
-            # unless the guard at EnergyIntegration.jl:207 fires first.
+        @testset "collisionless tail-pole resonance (regression: was NaN)" begin
+            # Resonance deep in the Maxwellian tail (x_res ≈ 56): n·wd·s² + leff·wb·s + n·we = 0
+            # with wb=1e3, wd=5e2, we=-3.5483e4 ⟹ s=√56, x_res≈56. Under the old u-space pole
+            # handling u_res = 1-exp(-56) rounds to 1.0, tripping 0·(-Inf)=NaN. The real-x-space
+            # branch keeps x_res a well-conditioned O(1) number, and the resonance contribution
+            # (∝ exp(-56)) is negligible so the result equals the ν→0⁺ limit (issue #281).
+            args = (0.0, 2.0e3, -3.5483e4, 5.0e2, 1.0e3)
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            @test KF.find_resonance_energies(1.0, 1.0e3, 1, -3.5483e4, 5.0e2)[1] ≈ 56.0 rtol = 1e-2
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(real(collisionless))
+            @test isfinite(imag(collisionless))
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "Ω′ < 0 collisionless causal branch" begin
+            # The unified add-back R·[log(xmax-x_pole) - log(-x_pole)] gets the causal
+            # ∓iπ·sign(Ω′) branch from the SIGNED ZERO of pole_offset = ν/Ω′ at ν=0.
+            # Pick n·wd < 0 so Ω′ = leff·wb/(2√x) + n·wd flips sign in the tail; the
+            # collisionless result must still equal the ν→0⁺ (small-ν krook) limit, which
+            # carries the sign naturally through its off-axis pole.
+            args = (0.0, 2.0e3, 3.5e4, -5.0e2, 1.0e3)   # we>0, wd<0 ⟹ tail root with Ω′<0
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(collisionless)
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "tail pole beyond X_ENERGY_MAX dropped" begin
+            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900,
+            # well past X_ENERGY_MAX. The pole sits where exp(-x_res) underflows; the
+            # `xr >= X_ENERGY_MAX` check in _integrate_energy_resonant drops it cleanly.
             @test KF.find_resonance_energies(1.0, 1.0, 1, -30.0, 0.0)[1] ≈ 900.0
             result = KF.integrate_energy(
                 0.5, 0.0, -30.0, 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
@@ -230,11 +264,36 @@
             @test isfinite(imag(result))
         end
 
+        @testset "pole at and within 1e-13 of X_ENERGY_MAX (boundary robustness)" begin
+            # Direct analog of the original u→1 bug, relocated to x→X_ENERGY_MAX: a
+            # resonance pole sitting exactly at, just below, and just above the upper
+            # integration limit. Linear case (wd=0) with leff=wb=n=1 gives
+            # x_res = (n·we/(leff·wb))² = we², so we = -√x_target places the pole.
+            xmax = KF.X_ENERGY_MAX
+            run_xres(x_target) = KF.integrate_energy(
+                0.5, 0.3, -sqrt(x_target), 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            below = run_xres(xmax - 1e-13)   # pole kept, subtracted analytically
+            at = run_xres(xmax)              # find_resonance rounds to ≤ xmax; >= guard drops at endpoint
+            above = run_xres(xmax + 1e-13)   # pole dropped (outside domain)
+            @test isfinite(below) && isfinite(at) && isfinite(above)
+            # Continuous across the boundary: the only term that changes is the pole's
+            # contribution ∝ exp(-xmax) ~ exp(-100) ~ 4e-44, negligible on the O(1) bulk
+            # integral. No NaN from log(xmax - x_pole) at the exact endpoint.
+            @test below ≈ at rtol=1e-9
+            @test at ≈ above rtol=1e-9
+            # Collisionless result equals the ν→0⁺ (small-ν krook) limit.
+            small_nu = KF.integrate_energy(
+                0.5, 0.3, -sqrt(xmax - 1e-13), 0.0, 1.0, 1e-6, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test below ≈ small_nu rtol=1e-3
+        end
+
         @testset "pole_offset overflow guard" begin
             # Tiny wb gives small omega_prime = leff·wb/(2√x_res) = 5e-16 at x_res=1, while
-            # nuk = 1e300 forces nu_res / omega_prime = 2e315 → Inf. The guard at
-            # EnergyIntegration.jl:220 must skip this pole rather than build a non-finite
-            # u_pole. Parameters keep abs(wb) > 1e-30 so find_resonance_energies still returns x_res.
+            # nuk = 1e300 forces pole_offset = ν/omega_prime = 2e315 → Inf. The
+            # `isfinite(pole_offset) || continue` guard in _integrate_energy_resonant must skip
+            # this pole. Parameters keep abs(wb) > 1e-30 so find_resonance_energies still returns x_res.
             @test KF.find_resonance_energies(1.0, 1e-15, 1, -1e-15, 0.0)[1] ≈ 1.0
             result = KF.integrate_energy(
                 0.5, 0.0, -1e-15, 0.0, 1e-15, 1e300, 0, 1.0, 1, 0.5, 0.5, "fgar";
@@ -283,9 +342,20 @@
         @test intr.ro == 0.0
         @test intr.bo == 0.0
         @test intr.mpert == 0
-        @test length(intr.methods) == 18
-        @test length(intr.docs) == 18
         @test intr.chi1 == 0.0
+    end
+
+    @testset "METHOD_REGISTRY" begin
+        # The registry is the single source of truth for NTV methods. Every entry's
+        # flag must be a real KineticForcesControl field (the TOML kwargs splat relies
+        # on it) and carry a recognized dispatch kind. No fixed count is asserted —
+        # adding a method should not require editing a magic number here.
+        for entry in KF.METHOD_REGISTRY
+            @test entry.flag in fieldnames(KF.KineticForcesControl)
+            @test endswith(string(entry.flag), "_flag")
+            @test entry.kind in (:gar, :fcgl, :rlar, :clar)
+            @test KF.method_kind(entry.name) == entry.kind
+        end
     end
 
     @testset "KineticForcesState" begin

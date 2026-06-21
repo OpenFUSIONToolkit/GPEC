@@ -413,14 +413,16 @@ function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     psi_samp = range(psi_split_core, psi_split_edge; length=n_samp)
     h_samp = step(psi_samp)
     h_min = Inf
-    buf = zeros(4)
+    # Size the buffer to the actual profile count, not a hardcoded 4 (cf. InverseEquilibrium.jl).
+    nq = size(sq_in.y, 2)
+    buf = zeros(nq)
     all_vals = [
         begin
             sq_in(buf, ψ)
             copy(buf)
         end for ψ in psi_samp
     ]
-    for k in 1:4
+    for k in 1:nq
         vals = [all_vals[i][k] for i in 1:n_samp]
         f_scale = max(maximum(abs.(vals)), 1e-12)
         d2_max = 0.0
@@ -511,6 +513,9 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
     elseif equil_params.grid_type == "pow1"
         # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
         [psilow + (psihigh - psilow) * (3(ipsi / mpsi) - (ipsi / mpsi)^3) / 2 for ipsi in 0:mpsi]
+    elseif equil_params.grid_type == "uniform"
+        # Evenly spaced surfaces, e.g. for profile diagnostics at constant resolution
+        collect(range(psilow, psihigh; length=mpsi + 1))
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end

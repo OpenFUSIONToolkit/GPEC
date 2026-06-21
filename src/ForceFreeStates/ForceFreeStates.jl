@@ -21,8 +21,7 @@ import StaticArrays: @MMatrix
 
 # Include all necessary files
 include("ForceFreeStatesStructs.jl")
-include("Mercier.jl")
-include("Bal.jl")
+include("Ballooning.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")
 include("Fourfit.jl")

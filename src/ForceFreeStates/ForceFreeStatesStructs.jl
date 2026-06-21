@@ -102,8 +102,8 @@ identity-block initial conditions:
 
 Applying the propagator to the current state `u_prev`:
 
-  u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
-  u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
+u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
+u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
 
 Since each chunk starts from a bounded identity IC (rather than the accumulated state),
 exponential growth within a chunk does not affect the conditioning of the overall
@@ -139,7 +139,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `mlow::Int` - Lowest poloidal mode number
   - `mhigh::Int` - Highest poloidal mode number
   - `mpert::Int` - Number of poloidal modes (mhigh - mlow + 1)
-  - `mband::Int` - Bandwidth for matrix operations (mpert - 1 - delta_mband)
   - `nlow::Int` - Lowest toroidal mode number
   - `nhigh::Int` - Highest toroidal mode number
   - `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
@@ -166,7 +165,6 @@ A mutable struct holding internal state variables for stability calculations.
     mlow::Int = 0
     mhigh::Int = 0
     mpert::Int = 0
-    mband::Int = 0
     nlow::Int = 0
     nhigh::Int = 0
     npert::Int = 0
@@ -205,11 +203,10 @@ A mutable struct containing control parameters for stability analysis, set by th
 ## Fields
 
   - `verbose::Bool` - Enable verbose output
-  - `bal_flag::Bool` - Enable ballooning mode analysis
+  - `local_stability_flag::Bool` - Enable local stability analysis (`D_I` and ballooning)
   - `mat_flag::Bool` - Enable matrix output
   - `ode_flag::Bool` - Enable ODE integration diagnostics
   - `vac_flag::Bool` - Enable vacuum region calculation
-  - `mer_flag::Bool` - Enable Mercier stability criterion
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
@@ -217,7 +214,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `delta_mband::Int` - Integration keeps only this wide a band of solutions along the diagonal in m,m'
   - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
@@ -252,11 +248,10 @@ A mutable struct containing control parameters for stability analysis, set by th
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
-    bal_flag::Bool = false
+    local_stability_flag::Bool = false
     mat_flag::Bool = false
     ode_flag::Bool = false
     vac_flag::Bool = false
-    mer_flag::Bool = false
     mthvac::Int = 480
     nzvac::Int = 1
     sing_start::Int = 0
@@ -264,7 +259,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    delta_mband::Int = 0
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
@@ -301,7 +295,6 @@ end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
     mpert::Int
-    mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
 
     # Complex-valued CubicSeriesInterpolant for stability matrices
@@ -354,7 +347,7 @@ end
     _hint::Base.RefValue{Int} = Ref(1)
 
     # Used in Free.jl
-    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
+    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mpert - 1)
 end
 
 # Helper to create empty complex series interpolant for default initialization
@@ -371,7 +364,7 @@ function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
 end
 
 # Convenience constructor
-FourFitVars(mpert::Int, mband::Int, numpert_total::Int) = FourFitVars(; mpert, mband, numpert_total)
+FourFitVars(mpert::Int, numpert_total::Int) = FourFitVars(; mpert, numpert_total)
 
 """
     VacuumData
