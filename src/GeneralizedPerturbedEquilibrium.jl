@@ -50,7 +50,7 @@ import AdaptiveArrayPools: @with_pool
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_find!
-using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
+using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
@@ -64,13 +64,27 @@ const _SECTION = "-"^40
 # `build_inputs_from_h5` on .h5 inputs.
 include("Rerun.jl")
 
+const _DEPRECATED_FFS_KEYS = ("delta_mband", "mband")
+
+# Drop deprecated [ForceFreeStates] keys (e.g. banded-matrix removal from PR #286) so legacy
+# gpec.toml files keep parsing instead of throwing an unknown-keyword error.
+function _drop_deprecated_ffs_keys!(table)
+    for k in _DEPRECATED_FFS_KEYS
+        if haskey(table, k)
+            @warn "`$k` in [ForceFreeStates] is deprecated and ignored please remove it from gpec.toml."
+            delete!(table, k)
+        end
+    end
+    return table
+end
+
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Every input source builds a ready `(inputs, eq_config, additional_input)` and hands it to
     # `main_from_inputs`: a gpec.toml working directory, an IMAS `dd`, or a gpec.h5 snapshot.
     if !isempty(args) && endswith(lowercase(args[1]), ".h5")
-        inputs, eq_config, additional_input, path, git_version, preloaded_forcing = build_inputs_from_h5(args)
+        inputs, eq_config, additional_input, path, git_version, preloaded_forcing, preloaded_coils = build_inputs_from_h5(args)
         return main_from_inputs(inputs, eq_config, additional_input, path, git_version;
-            preloaded_forcing_modes=preloaded_forcing)
+            preloaded_forcing_modes=preloaded_forcing, preloaded_coil_sets=preloaded_coils)
     end
 
     path = length(args) >= 1 ? args[1] : "./"
@@ -141,6 +155,11 @@ already read from the source HDF5 snapshot, so `compute_perturbed_equilibrium`
 does not have to touch the original `forcing.dat` path. When `nothing`, the
 ForcingTerms data is loaded from disk at snapshot time (if PerturbedEquilibrium
 is enabled) so it still ends up in `input/raw_inputs/forcing_terms/`.
+
+`preloaded_coil_sets` similarly lets the rerun path inject coil geometry read from
+`input/raw_inputs/coils/` so a coil run can be replayed (recomputing the field
+against the current equilibrium) without the original `.dat`/`.h5` files. The coil
+geometry actually used by the run is always written back into `input/raw_inputs/coils/`.
 """
 function main_from_inputs(
     inputs::Dict{String,Any},
@@ -149,6 +168,7 @@ function main_from_inputs(
     path::String,
     git_version::String;
     preloaded_forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing
 )
     total_start = time()
 
@@ -159,10 +179,11 @@ function main_from_inputs(
     equil_start = time()
 
     intr = ForceFreeStatesInternal(; dir_path=path)
-    # `inputs` and `eq_config` are supplied by the caller (already parsed from gpec.toml
-    # on the normal path, or reconstructed from the gpec.h5 TOML blob on the rerun path),
-    # so this body must not re-read them from disk — the rerun has no gpec.toml file.
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    # `inputs` is supplied by the caller (parsed from gpec.toml on the normal path, or
+    # reconstructed from the gpec.h5 TOML blob on the rerun path), so do not re-read it here.
+    ffs_table = inputs["ForceFreeStates"]
+    _drop_deprecated_ffs_keys!(ffs_table)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
     # The builder already resolved `additional_input` (analytic `*Config`, IMAS `dd`,
     # prebuilt DirectRunInput/InverseRunInput from a rerun, or `nothing` for file-based
@@ -212,7 +233,7 @@ function main_from_inputs(
                 path,
                 ft_ctrl_snapshot.forcing_data_file,
                 ft_ctrl_snapshot.forcing_data_format,
-                ctrl.verbose,
+                ctrl.verbose
             )
         end
     end
@@ -239,18 +260,15 @@ function main_from_inputs(
         # equil = set_up_equilibrium(equil.config)
     end
 
-    # Compute Mercier and Ballooning stability (if desired)
-    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
+    # Compute local stability (if desired). This holds `D_I` from the
+    # ballooning coefficient system and the local ballooning result.
     profiles_xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
-    if ctrl.mer_flag
-        if ctrl.verbose
-            @info "Evaluating Mercier criterion"
-        end
-        mercier_scan!(locstab_fs, equil)
-    end
-    if ctrl.bal_flag
+    ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
+    if ctrl.local_stability_flag
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
+        # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
+        ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
     end
     # Fit data to splines
     intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
@@ -320,12 +338,6 @@ function main_from_inputs(
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
-    if ctrl.delta_mband >= intr.mpert
-        @warn "Banded matrices not implemented yet, setting delta_mband to 0"
-        ctrl.delta_mband = 0
-    end
-    intr.mband = intr.mpert - 1 - ctrl.delta_mband
-    intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
 
     # Build KineticForces control and load kinetic profiles once — reused by
@@ -334,14 +346,15 @@ function main_from_inputs(
     # stability does not need kinetic_profiles, but the post-PE block always
     # does, so we load whenever a [KineticForces] section is present or the
     # stability path requests the calculated source.
-    kf_ctrl = haskey(inputs, "KineticForces") ?
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(;
             (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
@@ -360,12 +373,12 @@ function main_from_inputs(
                   "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
                   "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
                   "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
+                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
                   "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband)
+        metric = make_metric(equil, intr.mpert)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"
@@ -445,7 +458,7 @@ function main_from_inputs(
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, inputs, forcing_modes_snapshot)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, inputs, forcing_modes_snapshot; ballooning_boundary=ballooning_boundary)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -493,6 +506,12 @@ function main_from_inputs(
             pe_intr.forcing_modes = copy(forcing_modes_snapshot)
         end
 
+        # Inject preloaded coil geometry (gpec.h5 replay with `--coil-source coils`)
+        # so the coil field is recomputed from stored geometry without the .dat/.h5 file.
+        if preloaded_coil_sets !== nothing
+            pe_intr.coil_sets = copy(preloaded_coil_sets)
+        end
+
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
@@ -507,6 +526,12 @@ function main_from_inputs(
                 pe_state, pe_intr, joinpath(intr.dir_path, output_file)
             )
             @info "Results written to $output_file"
+        end
+
+        # Snapshot the coil geometry actually used into the gpec.h5 output so the run
+        # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
+        if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
+            _write_coil_snapshot!(joinpath(intr.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
         end
     end
 
@@ -570,7 +595,8 @@ function write_outputs_to_HDF5(
     ffit::Union{FourFitVars,Nothing}=nothing,
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
-    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing;
+    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
@@ -593,7 +619,6 @@ function write_outputs_to_HDF5(
 
         # Write derived run parameters
         out_h5["info/mpert"] = intr.mpert
-        out_h5["info/mband"] = intr.mband
         out_h5["info/mlow"] = intr.mlow
         out_h5["info/mhigh"] = intr.mhigh
         out_h5["info/npert"] = intr.npert
@@ -631,8 +656,11 @@ function write_outputs_to_HDF5(
         out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
-        # Write local stability data; always write all entries, using empty arrays when not computed
-        if ctrl.mer_flag
+        # Write local stability data; always write all entries, using empty arrays when not computed.
+        # locstab/di = Mercier D_I (det(d0bar)); locstab/dr = resistive interchange D_R;
+        # locstab/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
+        # tearing Δ' under perturbed_equilibrium/singular_coupling/delta_prime).
+        if ctrl.local_stability_flag
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
             out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
@@ -640,9 +668,14 @@ function write_outputs_to_HDF5(
             out_h5["locstab/di"] = Float64[]
             out_h5["locstab/dr"] = Float64[]
         end
-        out_h5["singular/di0"] = (ctrl.mer_flag && !isempty(intr.sing)) ?
+        out_h5["singular/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
                                  [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["locstab/ca1"] = ctrl.bal_flag ? intr.locstab.y[:, 4] : Float64[]
+        out_h5["locstab/ballooning_Delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
+
+        # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
+        out_h5["locstab/psi"] = ballooning_boundary.psi
+        out_h5["locstab/alpha"] = ballooning_boundary.alpha
+        out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
@@ -714,7 +747,7 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
-        
+
         # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
@@ -804,6 +837,22 @@ function write_outputs_to_HDF5(
             end
         end
     end
+end
+
+"""
+    _write_coil_snapshot!(h5_path::String, coil_sets::Vector{CoilSet})
+
+Append the coil geometry used by a run into `input/raw_inputs/coils/` of an existing
+gpec.h5 file (opened in append mode), so the run can be replayed from the output alone.
+One subgroup per coil set; see `ForcingTerms.save_coils_to_h5`.
+"""
+function _write_coil_snapshot!(h5_path::String, coil_sets::Vector{ForcingTerms.CoilSet})
+    isfile(h5_path) || return nothing
+    h5open(h5_path, "r+") do out_h5
+        haskey(out_h5, "input/raw_inputs/coils") && return nothing
+        ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, "input/raw_inputs/coils"))
+    end
+    return nothing
 end
 
 """

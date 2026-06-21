@@ -432,6 +432,46 @@
                 @test size(grri) == (32, 4)  # 2*16, 2*2
                 @test size(plasma_pts) == (16, 3)
             end
+
+            @testset "in-place compute_vacuum_response! matches wrapper" begin
+                # The allocating wrapper is a thin caller of the in-place routine; verify the
+                # in-place entry populates caller-owned duck-typed (NamedTuple) storage identically.
+                for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.5))
+                    inputs = _make_inputs()
+                    wv, grri, grre, pp, wp = compute_vacuum_response(inputs, wall_settings)
+
+                    numpoints = inputs.mtheta * inputs.nzeta
+                    num_modes = inputs.mpert * inputs.npert
+                    vac = (wv=zeros(ComplexF64, num_modes, num_modes), grri=zeros(2 * numpoints, 2 * num_modes), grre=zeros(2 * numpoints, 2 * num_modes),
+                        plasma_pts=zeros(numpoints, 3), wall_pts=zeros(numpoints, 3))
+                    compute_vacuum_response!(vac, inputs, wall_settings)
+
+                    @test vac.wv ≈ wv
+                    @test vac.grri ≈ grri
+                    @test vac.grre ≈ grre
+                    @test vac.plasma_pts ≈ pp
+                    @test vac.wall_pts ≈ wp
+                end
+            end
+        end
+
+        @testset "extract_plasma_surface_at_psi" begin
+            # Self-contained analytic Solovev equilibrium (same recipe as runtests_equil.jl).
+            eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", eq_filename="unused", jac_type="pest", grid_type="ldp", psilow=1e-4, psihigh=0.99999, mpsi=64, mtheta=128)
+            sol_config = Equilibrium.SolovevConfig(64, 64, 64, 1.6, 0.33, 1.0, 1.9, 1.0, 1.0, 1.0)
+            pe = Equilibrium.equilibrium_solver(Equilibrium.sol_run(eq_config, sol_config))
+
+            mtheta = length(pe.rzphi_ys)
+            r, z, ν = extract_plasma_surface_at_psi(pe, 0.5)
+            @test length(r) == length(z) == length(ν) == mtheta
+            @test all(isfinite, r) && all(isfinite, z) && all(isfinite, ν)
+            @test all(r .> 0)
+            @test minimum(r) < pe.ro < maximum(r)        # surface brackets the magnetic axis in R
+
+            extent(rr, zz) = maximum(hypot.(rr .- pe.ro, zz .- pe.zo))
+            r_in, z_in, _ = extract_plasma_surface_at_psi(pe, 0.2)
+            r_out, z_out, _ = extract_plasma_surface_at_psi(pe, 0.8)
+            @test extent(r_out, z_out) > extent(r_in, z_in)   # minor radius grows outward in ψ
         end
     end
 

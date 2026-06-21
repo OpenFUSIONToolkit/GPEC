@@ -373,7 +373,7 @@ GPEC consists of **seven main modules** organized in `src/`:
      - `Fourfit.jl` - Fourier fitting routines
      - `FixedBoundaryStability.jl` - Fixed boundary analysis
      - `Free.jl` - Free boundary stability
-     - `Mercier.jl` - Mercier stability criterion
+     - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Status: Stable, core DCON functionality implemented
 
 #### Perturbed Equilibrium Modules
@@ -619,6 +619,11 @@ Every consultation is bounded — see **Subagent Consultations** under Important
 - **Keep code comments concise** - A comment should be one line where possible. Do not write multi-line block comments explaining the current session's investigation, what was tried, what was wrong before, or why a specific file/path behaves differently. State what the code does and why at a general level. Example of too much detail: a 6-line block explaining that efit_by_inversion uses psilow>0 while CHEASE starts at 0, that the old code was removed, and that spline spikes result. Preferred: `# Replicate Fortran inverse.f: overwrite deta at axis (r²=0) by extrapolating from innermost surfaces.`
 - **No PR/issue references in source** - Do not cite specific GitHub PR or issue numbers (e.g. `#171`, `#202`) in source or test comments/docstrings. During dynamic development these references quickly go stale and pollute the code. Just concisely state the objective or what the code does; the git history and PR threads track the provenance.
 
+### Minimal-change discipline
+- **Reuse native ops and existing utilities before writing new ones.** FastInterpolations splines integrate and differentiate natively (`integrate`, `cumulative_integrate`, `deriv1`); the Equilibrium module already has flux-surface integration/average patterns. Do not reimplement spline integration, quadrature, or differentiation — grep for the existing idiom first.
+- **Size the change to the problem.** A small numerical correction (e.g. a ~1% fix) should be a handful of lines, not new general-purpose machinery. Resist faithfully porting Fortran scaffolding (custom integrators, power-law spline bases) when a native call plus a one-line correction gives the same numbers — verify equivalence instead of assuming the elaborate version is needed.
+- **Don't commit throwaway artifacts for minor fixes.** No in-repo benchmark scripts/outputs or agent-memory churn for a small change — these accumulate and outsize `src`. Verify with a scratch script (e.g. under `/tmp`) and the regression harness; the regression harness is the durable record of numerical behavior.
+
 ### Output Files
 - **Default output**: `gpec.h5` (previously `euler.h5` in older versions)
 - **Legacy diagnostic files**: When modifying equilibrium code, remember that older versions output `gsec.h5`, `gse.h5`, `gsei.h5` - these are now consolidated into `gpec.h5`
@@ -671,6 +676,43 @@ Additional file hygiene (enforced by pre-commit hooks):
 - No trailing whitespace on any line
 - Files must end with exactly one newline
 - LF line endings only (no CRLF)
+
+### TOML Annotation Conventions
+
+Config-style TOML files (`examples/*/gpec.toml`, `examples/*/sol.toml`, the
+`test/test_data/*` fixtures, and `regression-harness/cases/*.toml`) follow one shared
+annotation style so they stay consistent and self-documenting for users who copy and
+modify them. **Do not invent a new convention** — match what the existing example files do.
+
+1. **File header (2–10 lines).** Begin each config-style TOML with a plain `#` comment block
+   stating the example's purpose/context and calling out key settings (wall choice, forcing,
+   n-range, ideal vs kinetic). No ASCII-art separators or decorative dividers.
+2. **Inline annotation on every variable line.** Every `key = value` gets a trailing
+   `# description`. Source the wording from the matching config struct's docstring
+   (`EquilibriumConfig`, `WallShapeSettings`, `ForceFreeStatesControl`, `ForcingTermsControl`,
+   `PerturbedEquilibriumControl`, `SolovevConfig`, `TJAnalyticConfig`, `KineticForcesControl`)
+   and keep it to one terse line. **Use the same description for the same variable across all
+   files** — `examples/DIIID-like_ideal_example/gpec.toml` is the canonical reference for the
+   common sections.
+3. **Section comments only when informative.** No comment is required above a section. Keep a
+   block comment only when it carries real information (e.g. the Solovev `[Wall]` note on why a
+   conformal wall is needed). Never add decorative section dividers.
+4. **No Fortran references — annotations must be self-contained and Julia-centric.** The Julia
+   code is the production workhorse; a new user must not need to know the legacy Fortran GPEC
+   code to read an example. Headers explain the *scenario and its unique aspect*; inline comments
+   explain the *variable*. Do **not** cite Fortran namelist files (`dcon.in`/`equil.in`/`pentrc.in`),
+   Fortran flag names (`kin_flag`, `sas_flag`, `electron_flag`, …), or legacy code names
+   (`DCON`/`STRIDE`/`PENTRC`) as things the reader must know. Non-Fortran external-model citations
+   (e.g. the analytic TJ model behind `tj_analytic`) are acceptable provenance. (This applies to
+   the user-facing `examples/*` and `test/test_data/*` TOMLs; `regression-harness/cases/*` may
+   retain algorithm names as developer metadata.)
+5. **Only active, meaningful variables in examples.** Do not set deprecated or "not yet
+   implemented" variables just to mirror defaults — they add clutter and imply false relevance
+   (e.g. the `truncate_at_dW_peak` edge-peak truncation, `thmax0`). Omit them so examples show
+   only knobs that do something on that run.
+6. **`Project.toml`-family files are exempt.** `Project.toml`, `docs/Project.toml`,
+   `regression-harness/Project.toml`, and `.JuliaFormatter.toml` are machine-managed; do not
+   inline-annotate dependency UUIDs or `[compat]` entries.
 
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran

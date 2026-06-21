@@ -148,8 +148,7 @@ end
 """
     parse_rerun_cli(args) -> NamedTuple
 
-Parse the rerun CLI. Returns `(source_h5, output_dir, output_name,
-override_file, overrides)`. Unknown flags error out early.
+Parse the rerun CLI. Returns `(source_h5, output_dir, output_name, override_file, overrides, coil_source)`. Unknown flags error out early.
 
 Supported flags:
 
@@ -157,6 +156,9 @@ Supported flags:
   - `--output-name <filename>`  — output HDF5 filename (default: `<basename>_rerun.h5`)
   - `--override-file <path>`    — TOML file merged onto the stored TOML
   - `--override key=value`      — single-field override (repeatable)
+  - `--coil-source <which>`     — for coil runs, which snapshot drives the replay:
+    `forcing-modes` (default) reuses the frozen forcing modes exactly; `coils`
+    recomputes the field from the stored coil geometry (lets the equilibrium change).
 """
 function parse_rerun_cli(args::Vector{String})
     isempty(args) && error("build_inputs_from_h5 requires a positional source .h5 path")
@@ -166,6 +168,7 @@ function parse_rerun_cli(args::Vector{String})
     output_name = nothing
     override_file = nothing
     overrides = Dict{String,Any}()
+    coil_source = "forcing-modes"
 
     i = 2
     while i <= length(args)
@@ -187,13 +190,19 @@ function parse_rerun_cli(args::Vector{String})
             merged = parse_override_flag(args[i+1])
             apply_toml_overrides!(overrides, merged)
             i += 2
+        elseif flag == "--coil-source"
+            i + 1 > length(args) && error("--coil-source requires a value (forcing-modes|coils)")
+            coil_source = args[i+1]
+            coil_source in ("forcing-modes", "coils") ||
+                error("--coil-source must be 'forcing-modes' or 'coils', got: $coil_source")
+            i += 2
         else
             error("Unknown rerun flag: $flag")
         end
     end
 
     return (source_h5=source_h5, output_dir=output_dir, output_name=output_name,
-        override_file=override_file, overrides=overrides)
+        override_file=override_file, overrides=overrides, coil_source=coil_source)
 end
 
 """
@@ -240,7 +249,7 @@ end
 
 """
     build_inputs_from_h5(args::Vector{String})
-        -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing)
+        -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils)
 
 Rerun input builder. Parses the rerun-specific CLI flags, reads the snapshot out of the
 source HDF5, applies any overrides, and reconstructs the pipeline inputs — a prebuilt
@@ -258,13 +267,26 @@ function build_inputs_from_h5(args::Vector{String})
     # original run had a [PerturbedEquilibrium] section, so the group may be
     # missing — we signal that with `nothing` and let main_from_inputs fall
     # back to loading from `ft_ctrl.forcing_data_file`.
-    toml_raw, raw_eq, source_git, preloaded_forcing = h5open(source_h5, "r") do in_h5
+    # `--coil-source coils` recomputes the coil field from stored geometry, so it
+    # deliberately ignores the frozen forcing-mode snapshot.
+    use_coils = cli.coil_source == "coils"
+    toml_raw, raw_eq, source_git, preloaded_forcing, preloaded_coils = h5open(source_h5, "r") do in_h5
         haskey(in_h5, "input/gpec_toml_raw") ||
             error("Source HDF5 $source_h5 has no input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
-        forcing_modes = if haskey(in_h5, "input/raw_inputs/forcing_terms")
+        forcing_modes = if use_coils || !haskey(in_h5, "input/raw_inputs/forcing_terms")
+            nothing
+        else
             modes = ForcingTerms.ForcingMode[]
             ForcingTerms.load_forcing_from_h5_group!(modes, in_h5["input/raw_inputs/forcing_terms"])
             modes
+        end
+        coil_sets = if use_coils
+            haskey(in_h5, "input/raw_inputs/coils") ||
+                error("--coil-source coils requested but $source_h5 has no input/raw_inputs/coils " *
+                    "(the source run did not use coils, or predates coil-snapshot support)")
+            sets = ForcingTerms.CoilSet[]
+            ForcingTerms.load_coils_from_h5_group!(sets, in_h5["input/raw_inputs/coils"])
+            sets
         else
             nothing
         end
@@ -273,6 +295,7 @@ function build_inputs_from_h5(args::Vector{String})
             read_equilibrium_raw_inputs(in_h5),
             haskey(in_h5, "info/git_version") ? read(in_h5, "info/git_version") : "unknown",
             forcing_modes,
+            coil_sets
         )
     end
 
@@ -325,5 +348,5 @@ function build_inputs_from_h5(args::Vector{String})
         rebuild_equilibrium_input(eq_config, raw_eq)
     end
 
-    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing
+    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils
 end

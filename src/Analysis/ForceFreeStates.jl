@@ -10,6 +10,7 @@ using HDF5
 using LaTeXStrings
 using Plots
 using Printf
+using Statistics: quantile
 
 """
     plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
@@ -368,6 +369,58 @@ function plot_delta_prime(h5path; save_path=nothing)
 end
 
 """
+    plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
+
+Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
+pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
+normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
+are ballooning-unstable. Reads `locstab/psi`, `locstab/alpha`, and
+`locstab/alpha_critical` (populated when ForceFreeStates runs with
+`local_stability_flag = true`).
+
+### Arguments
+
+  - `h5path`: Path to a GPEC HDF5 output file (e.g. `"gpec.h5"`)
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `psi_min`: Lower ψ_N axis limit; set near the edge (e.g. `0.9`) to focus on the
+    pedestal (default: `0.0`)
+
+### Returns
+
+A `Plots.jl` plot object.
+"""
+function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
+    psi, alpha, alpha_crit = h5open(h5path, "r") do fid
+        haskey(fid, "locstab/alpha") || return (Float64[], Float64[], Float64[])
+        read(fid["locstab/psi"]), read(fid["locstab/alpha"]), read(fid["locstab/alpha_critical"])
+    end
+
+    isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
+
+    p = plot(;
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
+    )
+
+    # NaN entries leave natural gaps over always-stable surfaces; isfinite masking would
+    # wrongly connect across such gaps with a straight line.
+    plot!(p, psi, alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, psi, alpha_crit; lw=2, linestyle=:dash, color=:red, label="1st stability boundary")
+
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
     plot_cond_fbar(h5path; save_path=nothing, zoom=false)
 
 Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan stored in
@@ -516,6 +569,113 @@ function plot_ffs_summary(h5path; save_path=nothing)
         p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500), right_margin=10Plots.mm)
     end
 
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
+    plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
+
+Plot the BALOO-style infinite-n ballooning stability diagram with first and second stability
+boundaries: experimental α (solid black), 1st stability boundary α_crit1 (dashed red), and
+2nd stability boundary α_crit2 (dashed blue) versus ψ_N. `NaN` entries in the boundary
+arrays leave natural gaps over always-stable surfaces without requiring explicit masking.
+
+### Arguments
+
+  - `bnd`: NamedTuple with fields `psi`, `alpha`, `alpha_critical1`, `alpha_critical2`
+    (as returned by `ForceFreeStates.ballooning_alpha_boundaries`)
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `psi_min`: Lower ψ_N axis limit (default: `0.0`)
+
+### Returns
+
+A `Plots.jl` plot object.
+"""
+function plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
+    p = plot(;
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
+    )
+    plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, marker=:circle, label="1st stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, marker=:circle, label="2nd stability boundary")
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
+    plot_ballooning_alpha_boundaries(bnd, dpmap; save_path=nothing, psi_min=0.0)
+
+Same diagram drawn over a heatmap of the signed Δ' from
+`ForceFreeStates.ballooning_delta_prime_map`: each surface's Δ'(α) is oriented by the
+sign of its α=0 (stable) value so that positive is stable everywhere, regridded from
+its native physical α = α_ref*scale onto a shared uniform α axis, and shown with the
+Δ'=0 contour, the extracted boundaries, and the scan cap `max_alpha_scale*α_exp`.
+Color limits are set to the 90th percentile of |Δ'| so the pole regions inside the
+unstable band do not wash out the marginal structure.
+"""
+function plot_ballooning_alpha_boundaries(bnd, dpmap; save_path=nothing, psi_min=0.0)
+    psi = dpmap.psi
+    scales = dpmap.alpha_scales
+    alpha_ref = dpmap.alpha_ref
+    signed = dpmap.delta_prime .* sign.(dpmap.delta_prime[:, 1])
+
+    finite_aref = filter(isfinite, alpha_ref)
+    isempty(finite_aref) && error("delta-prime map contains no valid surfaces")
+    alpha_axis = collect(range(0.0, maximum(finite_aref) * scales[end]; length=200))
+    z = fill(NaN, length(alpha_axis), length(psi))
+    for i in eachindex(psi)
+        (isfinite(alpha_ref[i]) && alpha_ref[i] > 0.0) || continue
+        a_surf = alpha_ref[i] .* scales
+        for (j, a) in enumerate(alpha_axis)
+            a > a_surf[end] && break
+            k = min(searchsortedlast(a_surf, a), length(a_surf) - 1)
+            k < 1 && continue
+            t = (a - a_surf[k]) / (a_surf[k+1] - a_surf[k])
+            z[j, i] = (1 - t) * signed[i, k] + t * signed[i, k+1]
+        end
+    end
+
+    # Color limits track the unstable-side magnitudes; deep stable values and pole
+    # regions clamp at the ends instead of washing out the marginal band.
+    finite_z = abs.(filter(isfinite, vec(z)))
+    finite_neg = abs.(filter(x -> isfinite(x) && x < 0.0, vec(z)))
+    lim = isempty(finite_neg) ? (isempty(finite_z) ? 1.0 : quantile(finite_z, 0.9)) : quantile(finite_neg, 0.95)
+    lim = max(lim, eps(Float64))
+
+    p = heatmap(
+        psi,
+        alpha_axis,
+        z;
+        c=cgrad(:RdBu),
+        clims=(-lim, lim),
+        # Leading newline offsets the rotated title clear of the colorbar tick labels (GR quirk)
+        colorbar_title="\n" * L"\Delta' \times \mathrm{sign}(\Delta'_{\alpha=0})",
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm,
+        right_margin=15Plots.mm
+    )
+    contour!(p, psi, alpha_axis, z; levels=[0.0], color=:black, linewidth=1, colorbar_entry=false)
+    plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, linestyle=:dash, label="1st stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, linestyle=:dash, label="2nd stability boundary")
+    plot!(p, psi, scales[end] .* alpha_ref; lw=2, color=:gray, linestyle=:dot, label="scan cap")
     isnothing(save_path) || savefig(p, save_path)
     return p
 end
