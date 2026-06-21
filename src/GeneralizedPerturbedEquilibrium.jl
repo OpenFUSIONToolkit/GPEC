@@ -61,7 +61,7 @@ const _SECTION = "-"^40
 # Rerun snapshot/replay helpers. Depends on the module-level imports above
 # (HDF5, TOML, Equilibrium, ForcingTerms) and the `_BANNER` constant, so this
 # include has to come after them but before `main`, which dispatches into
-# `main_from_h5` on .h5 inputs.
+# `build_inputs_from_h5` on .h5 inputs.
 include("Rerun.jl")
 
 const _DEPRECATED_FFS_KEYS = ("delta_mband", "mband")
@@ -79,14 +79,15 @@ function _drop_deprecated_ffs_keys!(table)
 end
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
-    # Parse command line arguments
-    path = length(args) >= 1 ? args[1] : "./"
-
-    # Rerun dispatch: when the first positional argument is an HDF5 file, treat it as
-    # a stored snapshot and hand off to the replay entry point.
+    # Every input source builds a ready `(inputs, eq_config, additional_input)` and hands it to
+    # `main_from_inputs`: a gpec.toml working directory, an IMAS `dd`, or a gpec.h5 snapshot.
     if !isempty(args) && endswith(lowercase(args[1]), ".h5")
-        return main_from_h5(args)
+        inputs, eq_config, additional_input, path, git_version, preloaded_forcing, preloaded_coils = build_inputs_from_h5(args)
+        return main_from_inputs(inputs, eq_config, additional_input, path, git_version;
+            preloaded_forcing_modes=preloaded_forcing, preloaded_coil_sets=preloaded_coils)
     end
+
+    path = length(args) >= 1 ? args[1] : "./"
 
     # Capture git version for reproducibility
     git_version = try
@@ -97,37 +98,57 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
 
     @info "\n$_BANNER\n  GPEC - Generalized Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
 
-    # Read input TOML from the working directory and set up the equilibrium. The
-    # rest of the pipeline is shared with `main_with_inputs` (used by the rerun
-    # path), which accepts a prebuilt `inputs` dict and equilibrium config.
+    inputs, eq_config, additional_input = build_inputs_from_toml(path; dd=dd)
+    return main_from_inputs(inputs, eq_config, additional_input, path, git_version)
+end
+
+"""
+    build_inputs_from_toml(path; dd=nothing) -> (inputs, eq_config, additional_input)
+
+Build the pipeline inputs from a working directory containing `gpec.toml`. Returns the
+parsed `inputs` dict (made self-contained for the rerun snapshot), the `EquilibriumConfig`,
+and the `additional_input` consumed by `setup_equilibrium` — an analytic `*Config` for
+TJ/SOL/LAR equilibria, the `dd` data dictionary for IMAS, or `nothing` for file-based
+equilibria (efit, chease) that `setup_equilibrium` reads from disk.
+"""
+function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
 
-    if "Equilibrium" in keys(inputs)
-        eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
-    elseif isfile(joinpath(path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
-        eq_config = Equilibrium.EquilibriumConfig(joinpath(path, "equil.toml"))
-    else
-        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
-    end
+    haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
+    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
 
     # LAR/Solovev carry their parameters in a separate auxiliary TOML referenced
     # by eq_filename. Merge those parameters into the in-memory `inputs` dict so
     # the snapshot writer emits a self-contained TOML blob.
     merge_auxiliary_eq_toml!(inputs, eq_config)
 
-    return main_with_inputs(inputs, eq_config, nothing, path, git_version)
+    # Build `additional_input` from embedded TOML sections (analytic equilibria) or from
+    # the dd keyword argument (IMAS). These are mutually exclusive — an equilibrium is
+    # either analytic (TJ/SOL/LAR), IMAS-fed, or read from a file (additional_input=nothing).
+    additional_input = nothing
+    if eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
+        additional_input = Equilibrium.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
+    elseif eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
+        additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
+    elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
+        additional_input = Equilibrium.LargeAspectRatioConfig(inputs["LAR_INPUT"])
+    elseif eq_config.eq_type == "imas"
+        additional_input = dd
+    end
+
+    return inputs, eq_config, additional_input
 end
 
 """
-    main_with_inputs(inputs, eq_config, additional_input, path, git_version;
+    main_from_inputs(inputs, eq_config, additional_input, path, git_version;
                      preloaded_forcing_modes=nothing)
 
-Shared pipeline body used by both the TOML entry point (`main`) and the rerun
-entry point (`main_from_h5`). The caller is responsible for producing a fully
-merged `inputs::Dict` and an `EquilibriumConfig`; `additional_input` is forwarded
-to `setup_equilibrium` (it may be a prebuilt `DirectRunInput`/`InverseRunInput`
-or a `LargeAspectRatioConfig`/`SolovevConfig`, or nothing for the normal path).
+Shared pipeline body that every input source funnels into. The caller (one of the
+`build_inputs_from_*` builders) is responsible for producing a fully merged
+`inputs::Dict`, an `EquilibriumConfig`, and a ready `additional_input` — this body
+does no source dispatch of its own. `additional_input` is forwarded directly to
+`setup_equilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
+analytic `*Config` or IMAS `dd` (TOML path), or `nothing` for file-based equilibria.
 
 `preloaded_forcing_modes` lets the rerun path inject a `Vector{ForcingMode}`
 already read from the source HDF5 snapshot, so `compute_perturbed_equilibrium`
@@ -140,7 +161,7 @@ is enabled) so it still ends up in `input/raw_inputs/forcing_terms/`.
 against the current equilibrium) without the original `.dat`/`.h5` files. The coil
 geometry actually used by the run is always written back into `input/raw_inputs/coils/`.
 """
-function main_with_inputs(
+function main_from_inputs(
     inputs::Dict{String,Any},
     eq_config::Equilibrium.EquilibriumConfig,
     additional_input,
@@ -164,42 +185,13 @@ function main_with_inputs(
     _drop_deprecated_ffs_keys!(ffs_table)
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
-    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
-    # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
-    # EITHER point `eq_filename` at a side-car TOML (legacy) OR embed their
-    # parameters directly in gpec.toml under a top-level section:
-    # [TJ_ANALYTIC_INPUT], [SOL_INPUT], [LAR_INPUT].  When the embedded section
-    # is present it takes precedence and the side-car file is not consulted,
-    # so a run is fully described by a single gpec.toml.
+    # The builder already resolved `additional_input` (analytic `*Config`, IMAS `dd`,
+    # prebuilt DirectRunInput/InverseRunInput from a rerun, or `nothing` for file-based
+    # equilibria). `setup_equilibrium` consumes it directly — no source dispatch here.
     #
-    # The TJ-analytic equilibrium follows the profile family of
-    # R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); see
-    # `Equilibrium.TJAnalyticConfig`.
-    if "Equilibrium" in keys(inputs)
-        # Build additional_input from embedded TOML sections (analytic equilibria) or from
-        # the dd keyword argument (IMAS). These are mutually exclusive at runtime — an
-        # equilibrium is either analytic (TJ/SOL/LAR) or IMAS-fed or read from a file.
-        # Skip rebuilding when the caller already supplied a prebuilt solver input: the
-        # gpec.h5 rerun path passes a DirectRunInput/InverseRunInput that
-        # setup_equilibrium consumes directly to bypass the file reader.
-        if additional_input === nothing
-            if eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
-                additional_input = Equilibrium.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
-            elseif eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
-                additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
-            elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
-                additional_input = Equilibrium.LargeAspectRatioConfig(inputs["LAR_INPUT"])
-            elseif eq_config.eq_type == "imas"
-                additional_input = dd
-            end
-        end
-        equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
-    elseif isfile(joinpath(intr.dir_path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
-        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
-    else
-        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
-    end
+    # The TJ-analytic equilibrium follows the profile family of R. Fitzpatrick's TJ code
+    # (https://github.com/rfitzp/TJ); see `Equilibrium.TJAnalyticConfig`.
+    equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -507,7 +499,7 @@ function main_with_inputs(
         pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=intr.dir_path)
 
         # Reuse the forcing modes loaded at snapshot time (or injected by
-        # `main_from_h5`) so the PE compute step never re-reads the original
+        # `build_inputs_from_h5`) so the PE compute step never re-reads the original
         # forcing file. `compute_perturbed_equilibrium` short-circuits
         # `load_forcing_data!` when `pe_intr.forcing_modes` is non-empty.
         if forcing_modes_snapshot !== nothing

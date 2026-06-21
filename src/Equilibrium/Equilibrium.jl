@@ -43,7 +43,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 
     eq_type = eq_config.eq_type
 
-    # Rerun path: caller (e.g. main_from_h5) already rebuilt the solver input from
+    # Rerun path: caller (e.g. build_inputs_from_h5) already rebuilt the solver input from
     # the stored raw arrays. Bind it onto the current config and skip the reader.
     if additional_input isa DirectRunInput
         eq_input = additional_input

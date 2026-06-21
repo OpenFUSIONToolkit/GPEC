@@ -1,15 +1,9 @@
-"""
-    Rerun support: helpers for saving run inputs into gpec.h5 and replaying them.
-
-This file provides the machinery that backs issue #171: turning a gpec.h5 output
-into a self-contained run snapshot that can be rerun from any directory, with
-optional overrides, without needing the original g-file / CHEASE / wall / TOML
-auxiliary inputs.
-
-Functions here are included directly into the GeneralizedPerturbedEquilibrium
-module (via `include("Rerun.jl")`), so they share its imports (TOML, HDF5,
-Equilibrium, ForcingTerms, etc.).
-"""
+# Rerun support: save a run's inputs into gpec.h5 and replay them. Turns a gpec.h5 output into
+# a self-contained snapshot rerunnable from any directory, with optional overrides, without the
+# original g-file / CHEASE / wall / auxiliary TOML inputs.
+#
+# Included directly into the GeneralizedPerturbedEquilibrium module, so these functions share
+# its imports (TOML, HDF5, Equilibrium, ForcingTerms, etc.).
 
 """
     merge_auxiliary_eq_toml!(inputs::Dict{String,Any}, eq_config)
@@ -18,7 +12,7 @@ For analytic equilibria (`lar`, `sol`), the equilibrium parameters live in a
 separate auxiliary TOML referenced by `eq_config.eq_filename` (e.g. `sol.toml`
 with a `[SOL_INPUT]` section). To make the `gpec.h5` snapshot self-contained,
 we merge the relevant auxiliary section into the in-memory `inputs` dict under
-the same key (`LAR_INPUT` / `SOL_INPUT`). On replay, `main_from_h5` reads these
+the same key (`LAR_INPUT` / `SOL_INPUT`). On replay, `build_inputs_from_h5` reads these
 sections back into a `LargeAspectRatioConfig` / `SolovevConfig` and passes
 them to `setup_equilibrium` as `additional_input`, bypassing the auxiliary
 file read entirely.
@@ -74,7 +68,7 @@ end
     read_equilibrium_raw_inputs(in_h5) -> Dict{String,Any}
 
 Inverse of `write_equilibrium_raw_inputs!`: read every dataset under
-`input/raw_inputs/equilibrium/` into a plain dict. Used by `main_from_h5`
+`input/raw_inputs/equilibrium/` into a plain dict. Used by `build_inputs_from_h5`
 to hydrate a `DirectRunInput` / `InverseRunInput` without any filesystem
 access.
 """
@@ -132,8 +126,11 @@ function parse_override_flag(expr::AbstractString)
     parsed_val = try
         parsed = TOML.parse("_rerun_override_ = $rhs")
         parsed["_rerun_override_"]
-    catch
-        # Fall back to string if TOML parse fails (e.g., unquoted bare words).
+    catch e
+        # Warn instead of silently stringifying a bare word, which would otherwise only fail
+        # much later where the field expects a number/bool.
+        @warn "Could not parse --override value as a TOML literal; storing it as a string. " *
+              "Quote it explicitly if a string was intended." key=lhs value=rhs error=e
         rhs
     end
 
@@ -164,7 +161,7 @@ Supported flags:
     recomputes the field from the stored coil geometry (lets the equilibrium change).
 """
 function parse_rerun_cli(args::Vector{String})
-    isempty(args) && error("main_from_h5 requires a positional source .h5 path")
+    isempty(args) && error("build_inputs_from_h5 requires a positional source .h5 path")
     source_h5 = args[1]
 
     output_dir = pwd()
@@ -251,14 +248,16 @@ function rebuild_equilibrium_input(eq_config::Equilibrium.EquilibriumConfig, raw
 end
 
 """
-    main_from_h5(args::Vector{String})
+    build_inputs_from_h5(args::Vector{String})
+        -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils)
 
-Rerun entry point. Parses the rerun-specific CLI flags, reads the snapshot
-out of the source HDF5, applies any overrides, and dispatches back into
-`main` with the reconstructed inputs. Never touches the source file's
-original ingest paths.
+Rerun input builder. Parses the rerun-specific CLI flags, reads the snapshot out of the
+source HDF5, applies any overrides, and reconstructs the pipeline inputs — a prebuilt
+`DirectRunInput`/`InverseRunInput` for file-based equilibria, or an analytic `*Config` for
+LAR/SOL. Never touches the source file's original ingest paths. The returned tuple is fed
+straight into `main_from_inputs`.
 """
-function main_from_h5(args::Vector{String})
+function build_inputs_from_h5(args::Vector{String})
     cli = parse_rerun_cli(args)
     source_h5 = cli.source_h5
     isfile(source_h5) || error("Source HDF5 not found: $source_h5")
@@ -266,7 +265,7 @@ function main_from_h5(args::Vector{String})
     # Pull the stored TOML, raw equilibrium arrays, and (if present) forcing
     # data out of the source file. Forcing modes are only written when the
     # original run had a [PerturbedEquilibrium] section, so the group may be
-    # missing — we signal that with `nothing` and let main_with_inputs fall
+    # missing — we signal that with `nothing` and let main_from_inputs fall
     # back to loading from `ft_ctrl.forcing_data_file`.
     # `--coil-source coils` recomputes the coil field from stored geometry, so it
     # deliberately ignores the frozen forcing-mode snapshot.
@@ -349,6 +348,5 @@ function main_from_h5(args::Vector{String})
         rebuild_equilibrium_input(eq_config, raw_eq)
     end
 
-    return main_with_inputs(inputs, eq_config, additional_input, output_dir, current_git;
-        preloaded_forcing_modes=preloaded_forcing, preloaded_coil_sets=preloaded_coils)
+    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils
 end
