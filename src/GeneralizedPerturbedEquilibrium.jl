@@ -439,12 +439,8 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         @info "\n  KineticForces\n$_SECTION"
         kf_start = time()
 
-        # The standalone NTV torque diagnostics contract the kinetic operators
-        # against perturbed-equilibrium displacements (ξ), so they require a PE
-        # state. The self-consistent kinetic_source="calculated" path folds the
-        # kinetic physics into the stability solve and produces no PE state, so
-        # there is nothing for this block to act on — skip it rather than feed
-        # `compute_torque_all_methods!` empty perturbation interpolants.
+        # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
+        # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
         if !@isdefined(pe_state)
             @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
         else

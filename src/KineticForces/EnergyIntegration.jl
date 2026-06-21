@@ -172,16 +172,8 @@ function find_resonance_energies(leff::Float64, wb::Float64, n::Int, we::Float64
     return roots
 end
 
-# Upper energy limit for the real-x-space integral. The integrand AND every
-# resonance pole decay as x^p·exp(-x) (p ≤ 3.5 with the qt heat-flux factor): a
-# dropped pole at xr ≥ X_ENERGY_MAX contributes R·(PV+iπ) with residue
-# R = N(xr)·exp(-xr)/(i·Ω′), and at a simple pole Ω′ is O(the drift frequencies),
-# so |R| ~ xr^2.5·exp(-xr) — the same law as the smooth tail. At x=100,
-# 100^3.5·exp(-100) ≈ 4e-37 is ~30 orders below any quadrature tolerance, so 100
-# bounds both with enormous margin. This is a tolerance edge, not a precision edge:
-# exp(-x) underflows to 0 only near x≈746. Near-degenerate poles (Ω′→0) are handled
-# by the SINGULAR_EPS guard below, not by this limit. QuadGK is adaptive, so the
-# near-zero tail beyond the resonance is accepted in a single panel at no extra cost.
+# Upper limit of the real-x energy integral. Integrand and poles decay as x^p·exp(-x)
+# (p ≤ 3.5); at x=100 the tail is ~1e-37, far below any quadrature tolerance.
 const X_ENERGY_MAX = 100.0
 
 """
@@ -210,28 +202,20 @@ end
 
 Energy integral in **real x-space** over `[0, X_ENERGY_MAX]`, matching Fortran
 PENTRC's real-space integration (energy.f90). One path for any collisionality:
-each resonance contributes a pole `x_pole = x_res − i·ν/Ω′` (real on the axis when
-ν ≡ 0, shifted off it when ν > 0), removed analytically by principal-value +
-residue (Sokhotski-Plemelj), leaving a smooth integrand for QuadGK. The
-collisionless case is the exact ν→0 limit of this single formula.
-
-The add-back `R·[log(xmax − x_pole) − log(−x_pole)]` carries the causal branch
-automatically: with `pole_offset = ν/Ω′`, the signed zero of `−pole_offset` for
-ν ≡ 0 makes `log(−x_pole) = log(x_res) + iπ·sign(Ω′)`, the retarded ν→0⁺ limit of
-Fortran's ximag>0 contour.
-
-For ν > 0 the off-axis pole keeps the integrand bounded (`|denom| ≥ ν > 0`). For
-ν ≡ 0 the pole is on the real axis, where `Ω(x) = leff·wb·√x + n·(we+wd·x)` — a
-difference of `O(10⁴)` terms — rounds to exactly `0` over a ~ULP-wide window, where
-the physical term is `0/0`; there QuadGK is handed the analytic regular-part limit
-(`_real_pole_regular_part`) instead. That guard only ever fires for ν ≡ 0.
+each resonance contributes a pole `x_pole = x_res − i·ν/Ω′`, removed analytically by
+principal-value + residue (Sokhotski-Plemelj), leaving a smooth integrand for QuadGK.
+The collisionless case (ν ≡ 0, real-axis pole) is the exact ν→0⁺ limit of this single
+formula; its causal branch is carried by the signed zero of `−pole_offset` (see the
+add-back below), and its on-axis `0/0` window by the analytic regular-part limit.
 """
 function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
                                         n::Int, we::Float64, wd::Float64,
                                         atol::Float64, rtol::Float64)::ComplexF64
-    x_res_list = find_resonance_energies(leff, wb, n, we, wd)
+    x_res_list = find_resonance_energies(leff, wb, n, we, wd)   # ≤ 2 roots of a quadratic in √x
     x_poles = ComplexF64[]
     residues = ComplexF64[]
+    sizehint!(x_poles, length(x_res_list))
+    sizehint!(residues, length(x_res_list))
     pole_contribution = ComplexF64(0.0)
 
     for xr in x_res_list
@@ -240,9 +224,8 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
         # Ω′(x_res) = d/dx[leff·wb·√x + n·(we + wd·x)]
         omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
         abs(omega_prime) < SINGULAR_EPS && continue
-        # Collisions shift the pole off the real axis: x_pole = x_res - i·ν/Ω′ (real iff ν=0).
-        # If ν overflows (e.g. harmonic ν at tiny x_res) the pole is infinitely broadened —
-        # no localized pole; skip and let QuadGK integrate the smooth bounded integrand.
+        # Collisions shift the pole off-axis: x_pole = x_res - i·ν/Ω′. Skip if ν overflows
+        # (harmonic ν at tiny x_res): pole infinitely broadened, integrand stays smooth.
         pole_offset = _energy_collision_frequency(xr, p) / omega_prime
         isfinite(pole_offset) || continue
         x_pole = complex(xr, -pole_offset)   # signed-zero imag part for ν=0 carries the causal branch
@@ -262,9 +245,8 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
         @inbounds for k in 1:npole
             val -= residues[k] / (x - x_poles[k])
         end
-        # Inside a ν=0 pole's flat-Ω window the physical term is 0/0 → val non-finite. Replace
-        # it with the analytic regular-part limit of the nearest pole (the other poles'
-        # subtractions stay finite and are kept). Never reached for ν>0 (integrand bounded).
+        # At a ν=0 pole Ω rounds to 0 and the physical term is 0/0; substitute the nearest
+        # pole's analytic regular-part limit, keeping the other (finite) pole subtractions.
         if !isfinite(val)
             k = 1
             @inbounds for j in 2:npole
@@ -284,11 +266,15 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
         return val
     end
 
-    # Resonance locations as QuadGK breakpoints so the smooth-but-sharp integrand
-    # is resolved near each pole. Sort a copy of the real parts — `x_poles` must stay
-    # aligned with `residues`, which the integrand pairs by index.
+    # Pole real parts as QuadGK breakpoints so the smooth-but-sharp integrand is resolved
+    # near each pole. With ≤ 2 poles, branch on the breakpoint count to pass them as
+    # positional args — a `breaks...` splat of a runtime-length Vector is type-unstable.
     breaks = unique(sort(real.(x_poles)))
-    smooth_val, _ = quadgk(integrand, 0.0, breaks..., X_ENERGY_MAX; atol=atol, rtol=rtol)
+    smooth_val, _ = if length(breaks) == 1
+        quadgk(integrand, 0.0, breaks[1], X_ENERGY_MAX; atol=atol, rtol=rtol)
+    else
+        quadgk(integrand, 0.0, breaks[1], breaks[2], X_ENERGY_MAX; atol=atol, rtol=rtol)
+    end
     return smooth_val + pole_contribution
 end
 

@@ -120,6 +120,7 @@ function build_matched_fortran_deck(workdir::String)
     replace_namelist_value!(pentin, "nl",     string(get(kf, "nl", 1)))
     replace_namelist_value!(pentin, "nutype", "\"" * string(get(kf, "nutype", "harmonic")) * "\"")
     replace_namelist_value!(pentin, "f0type", "\"" * string(get(kf, "f0type", "maxwellian")) * "\"")
+    replace_namelist_value!(pentin, "nufac",  string(get(kf, "nufac", 1)))
     replace_namelist_value!(pentin, "kinetic_file", "\"kinetic.txt\"")
 
     # kinetic.txt — Fortran readtable wants a title line then numeric rows; the
@@ -148,14 +149,14 @@ function run_fortran_reference(workdir::String)
 end
 
 function run_julia_reference()
-    run = mktempdir(; prefix="solovev_kinetic_julia_")
+    rundir = mktempdir(; prefix="solovev_kinetic_julia_")
     for f in ("gpec.toml", "sol.toml", "kinetic.dat")
-        cp(joinpath(JULIA_FIXTURE, f), joinpath(run, f))
+        cp(joinpath(JULIA_FIXTURE, f), joinpath(rundir, f))
     end
     t0 = time()
-    GPE.main([run])
+    GPE.main([rundir])
     wall = time() - t0
-    et = h5open(joinpath(run, "gpec.h5"), "r") do h5
+    et = h5open(joinpath(rundir, "gpec.h5"), "r") do h5
         read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
     end
     return real(et[1]), imag(et[1]), wall
