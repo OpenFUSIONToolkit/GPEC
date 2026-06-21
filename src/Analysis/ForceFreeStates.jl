@@ -9,6 +9,8 @@ module ForceFreeStates
 using HDF5
 using LaTeXStrings
 using Plots
+using Printf
+using Statistics: quantile
 
 """
     plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
@@ -32,7 +34,7 @@ A `Plots.jl` plot object.
 function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     mlow, xi_psi, psi, et = h5open(h5path, "r") do fid
         read(fid["info/mlow"]), read(fid["integration/xi_psi"]),
-        read(fid["integration/psi"]), read(fid["vacuum/et"])
+        read(fid["integration/psi"]), read(fid["FreeBoundaryStability/eigenmode_energies"])
     end
 
     mpert = size(xi_psi, 1)
@@ -104,7 +106,8 @@ end
 Heatmap of energy eigenvector magnitudes vs (m, mode index).
 
 Only `matrix_type=:total` is supported (the total energy eigenvector matrix `Wₜ` is stored in
-`vacuum/wt`). Plasma and vacuum eigenvectors are not stored separately in the HDF5 output.
+`FreeBoundaryStability/W_freeboundary_eigenmodes`). Plasma and vacuum eigenvectors are not
+stored separately in the HDF5 output.
 
 Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC conventions.
 
@@ -126,7 +129,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
 
     wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["vacuum/wt"]), read(fid["equil/psio"]), read(fid["info/mlow"])
+        read(fid["FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["equil/psio"]), read(fid["info/mlow"])
     end
 
     isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
@@ -184,19 +187,19 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 
 ### Returns
 
-A `Plots.jl` plot object, or `nothing` if no `edge_scan/` group is present in the file.
+A `Plots.jl` plot object, or `nothing` if no `EdgeScan/` group is present in the file.
 """
 function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
     has_scan, q, et, ep, ev, evonly, qlim = h5open(h5path, "r") do fid
-        if !haskey(fid, "edge_scan/psi")
+        if !haskey(fid, "EdgeScan/psi")
             return false, Float64[], ComplexF64[], ComplexF64[], ComplexF64[], Float64[], NaN
         end
         true,
-        read(fid["edge_scan/q"]),
-        read(fid["edge_scan/total_energy"]),
-        read(fid["edge_scan/plasma_energy"]),
-        read(fid["edge_scan/vacuum_energy"]),
-        read(fid["edge_scan/vacuum_eigenvalue"]),
+        read(fid["EdgeScan/q"]),
+        read(fid["EdgeScan/total_energy"]),
+        read(fid["EdgeScan/plasma_energy"]),
+        read(fid["EdgeScan/vacuum_energy"]),
+        read(fid["EdgeScan/vacuum_eigenvalue"]),
         read(fid["info/qlim"])
     end
 
@@ -260,7 +263,11 @@ or green (stable, Re < 0), with a dashed reference line at zero.
 A `Plots.jl` plot object.
 """
 function plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
-    dataset = Dict(:total => "vacuum/et", :plasma => "vacuum/ep", :vacuum => "vacuum/ev")
+    dataset = Dict(
+        :total => "FreeBoundaryStability/eigenmode_energies",
+        :plasma => "FreeBoundaryStability/eigenmode_plasma_energies",
+        :vacuum => "FreeBoundaryStability/eigenmode_vacuum_energies"
+    )
     haskey(dataset, matrix_type) || error("matrix_type must be :total, :plasma, or :vacuum")
 
     et = h5open(h5path, "r") do fid
@@ -362,6 +369,164 @@ function plot_delta_prime(h5path; save_path=nothing)
 end
 
 """
+    plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
+
+Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
+pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
+normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
+are ballooning-unstable. Reads `locstab/psi`, `locstab/alpha`, and
+`locstab/alpha_critical` (populated when ForceFreeStates runs with
+`local_stability_flag = true`).
+
+### Arguments
+
+  - `h5path`: Path to a GPEC HDF5 output file (e.g. `"gpec.h5"`)
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `psi_min`: Lower ψ_N axis limit; set near the edge (e.g. `0.9`) to focus on the
+    pedestal (default: `0.0`)
+
+### Returns
+
+A `Plots.jl` plot object.
+"""
+function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
+    psi, alpha, alpha_crit = h5open(h5path, "r") do fid
+        haskey(fid, "locstab/alpha") || return (Float64[], Float64[], Float64[])
+        read(fid["locstab/psi"]), read(fid["locstab/alpha"]), read(fid["locstab/alpha_critical"])
+    end
+
+    isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
+
+    p = plot(;
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
+    )
+
+    # NaN entries leave natural gaps over always-stable surfaces; isfinite masking would
+    # wrongly connect across such gaps with a straight line.
+    plot!(p, psi, alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, psi, alpha_crit; lw=2, linestyle=:dash, color=:red, label="1st stability boundary")
+
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
+    plot_cond_fbar(h5path; save_path=nothing, zoom=false)
+
+Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan stored in
+`singular/kinetic/` (populated when ForceFreeStates runs with
+`kinetic_factor > 0`, `ode_flag = true`, `singfac_min > 0`).
+
+`F̄` is the kinetic Euler-Lagrange matrix formed by Schur-reducing the six
+kinetic matrices against the ideal A/B/C/D/E/H blocks (Logan 2015 Appendix
+C). Peaks in `cond(F̄)` locate "kinetically-displaced" singular surfaces —
+roots of `det(F̄)` that are not at ideal rational surfaces. When a peak
+exceeds the threshold stored in `scan_threshold` the ODE integrator stops
+there and steps across trapezoidally, mirroring Fortran `ode_kin_cross`.
+
+The plot overlays the ideal rational surfaces (dotted grey, labelled with
+their q value) and any accepted kinetic singular surfaces (solid crimson).
+If no peak exceeds the threshold, `kmsing = 0` and the kinetic ODE runs as
+a single chunk. This diagnostic is useful for anyone asking *where* the
+kinetic resonances land relative to the ideal ones.
+
+### Arguments
+
+  - `h5path`: Path to a GPEC HDF5 output file produced with kinetic mode enabled
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `zoom`: If `true`, auto-scale the y-axis to the scan data (threshold shown
+    as annotation only); if `false` (default), always include the threshold
+    line in the y-range
+
+### Returns
+
+A `Plots.jl` plot object, or `nothing` if no kinetic scan is stored in the file.
+"""
+function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
+    scan_psi, scan_cond, thr, k_psi, i_psi, i_q, kmsing = h5open(h5path, "r") do fid
+        if !(haskey(fid, "singular") && haskey(fid["singular"], "kinetic"))
+            return Float64[], Float64[], 0.0, Float64[], Float64[], Float64[], 0
+        end
+        kg = fid["singular/kinetic"]
+        (read(kg["scan_psi"]),
+            read(kg["scan_cond"]),
+            read(kg["scan_threshold"]),
+            read(kg["psi"]),
+            read(fid["singular/psi"]),
+            read(fid["singular/q"]),
+            read(kg["kmsing"]))
+    end
+
+    if isempty(scan_psi)
+        @warn "No kinetic-singular-surface scan in $h5path — rerun with kinetic_factor>0, ode_flag=true, singfac_min>0"
+        return nothing
+    end
+
+    finite_cond = filter(isfinite, scan_cond)
+    data_max = isempty(finite_cond) ? 1.0 : maximum(finite_cond)
+    data_min = isempty(finite_cond) ? 1.0 : max(minimum(finite_cond), 1e-3)
+
+    p = plot(scan_psi, scan_cond;
+        yscale=:log10,
+        lw=2,
+        color=:steelblue,
+        label="cond(F̄)",
+        xlabel="Norm. Poloidal Flux",
+        ylabel="cond(F̄)",
+        title="Kinetic F̄ condition number (kmsing = $kmsing)",
+        legend=:topleft,
+        left_margin=12Plots.mm,
+        bottom_margin=4Plots.mm,
+        size=(900, 500)
+    )
+
+    if zoom
+        # Auto-scale y to data and annotate the threshold at the top edge if off-scale.
+        ylims!(p, (data_min / 2, data_max * 3))
+        if thr > 0 && thr > data_max * 3
+            annotate!(p, [(scan_psi[end], data_max * 2.5,
+                text(@sprintf("threshold = %.0e (off-scale)", thr), :right, 9, :red))])
+        elseif thr > 0
+            hline!(p, [thr]; color=:red, linestyle=:dash, lw=1.5,
+                label=@sprintf("threshold = %.0e", thr))
+        end
+    elseif thr > 0
+        hline!(p, [thr]; color=:red, linestyle=:dash, lw=1.5,
+            label=@sprintf("threshold = %.0e", thr))
+    end
+
+    if !isempty(i_psi)
+        vline!(p, i_psi; color=:gray, linestyle=:dot, lw=1,
+            label="ideal rational (q = m/n)")
+        y_label = zoom ? data_max * 1.2 : max(data_max * 1.2, sqrt(data_max * (thr > 0 ? thr : data_max)))
+        for (idx, ps) in enumerate(i_psi)
+            annotate!(p, [(ps, y_label,
+                text(@sprintf("q=%.0f", i_q[idx]), :right, 8, :gray))])
+        end
+    end
+
+    if !isempty(k_psi)
+        vline!(p, k_psi; color=:crimson, lw=1.5, label="accepted kinsing")
+    end
+
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
     plot_ffs_summary(h5path; save_path=nothing)
 
 Four-panel summary of ForceFreeStates (DCON-style) stability results, combining:
@@ -388,7 +553,8 @@ A `Plots.jl` plot object.
 """
 function plot_ffs_summary(h5path; save_path=nothing)
     has_vac = h5open(h5path, "r") do fid
-        haskey(fid, "vacuum/wt") && !isempty(read(fid["vacuum/wt"]))
+        haskey(fid, "FreeBoundaryStability/W_freeboundary_eigenmodes") &&
+            !isempty(read(fid["FreeBoundaryStability/W_freeboundary_eigenmodes"]))
     end
 
     p_crit = plot_fixed_boundary_stability_criterion(h5path)
@@ -403,6 +569,113 @@ function plot_ffs_summary(h5path; save_path=nothing)
         p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500), right_margin=10Plots.mm)
     end
 
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
+    plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
+
+Plot the BALOO-style infinite-n ballooning stability diagram with first and second stability
+boundaries: experimental α (solid black), 1st stability boundary α_crit1 (dashed red), and
+2nd stability boundary α_crit2 (dashed blue) versus ψ_N. `NaN` entries in the boundary
+arrays leave natural gaps over always-stable surfaces without requiring explicit masking.
+
+### Arguments
+
+  - `bnd`: NamedTuple with fields `psi`, `alpha`, `alpha_critical1`, `alpha_critical2`
+    (as returned by `ForceFreeStates.ballooning_alpha_boundaries`)
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `psi_min`: Lower ψ_N axis limit (default: `0.0`)
+
+### Returns
+
+A `Plots.jl` plot object.
+"""
+function plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
+    p = plot(;
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
+    )
+    plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, marker=:circle, label="1st stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, marker=:circle, label="2nd stability boundary")
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
+    plot_ballooning_alpha_boundaries(bnd, dpmap; save_path=nothing, psi_min=0.0)
+
+Same diagram drawn over a heatmap of the signed Δ' from
+`ForceFreeStates.ballooning_delta_prime_map`: each surface's Δ'(α) is oriented by the
+sign of its α=0 (stable) value so that positive is stable everywhere, regridded from
+its native physical α = α_ref*scale onto a shared uniform α axis, and shown with the
+Δ'=0 contour, the extracted boundaries, and the scan cap `max_alpha_scale*α_exp`.
+Color limits are set to the 90th percentile of |Δ'| so the pole regions inside the
+unstable band do not wash out the marginal structure.
+"""
+function plot_ballooning_alpha_boundaries(bnd, dpmap; save_path=nothing, psi_min=0.0)
+    psi = dpmap.psi
+    scales = dpmap.alpha_scales
+    alpha_ref = dpmap.alpha_ref
+    signed = dpmap.delta_prime .* sign.(dpmap.delta_prime[:, 1])
+
+    finite_aref = filter(isfinite, alpha_ref)
+    isempty(finite_aref) && error("delta-prime map contains no valid surfaces")
+    alpha_axis = collect(range(0.0, maximum(finite_aref) * scales[end]; length=200))
+    z = fill(NaN, length(alpha_axis), length(psi))
+    for i in eachindex(psi)
+        (isfinite(alpha_ref[i]) && alpha_ref[i] > 0.0) || continue
+        a_surf = alpha_ref[i] .* scales
+        for (j, a) in enumerate(alpha_axis)
+            a > a_surf[end] && break
+            k = min(searchsortedlast(a_surf, a), length(a_surf) - 1)
+            k < 1 && continue
+            t = (a - a_surf[k]) / (a_surf[k+1] - a_surf[k])
+            z[j, i] = (1 - t) * signed[i, k] + t * signed[i, k+1]
+        end
+    end
+
+    # Color limits track the unstable-side magnitudes; deep stable values and pole
+    # regions clamp at the ends instead of washing out the marginal band.
+    finite_z = abs.(filter(isfinite, vec(z)))
+    finite_neg = abs.(filter(x -> isfinite(x) && x < 0.0, vec(z)))
+    lim = isempty(finite_neg) ? (isempty(finite_z) ? 1.0 : quantile(finite_z, 0.9)) : quantile(finite_neg, 0.95)
+    lim = max(lim, eps(Float64))
+
+    p = heatmap(
+        psi,
+        alpha_axis,
+        z;
+        c=cgrad(:RdBu),
+        clims=(-lim, lim),
+        # Leading newline offsets the rotated title clear of the colorbar tick labels (GR quirk)
+        colorbar_title="\n" * L"\Delta' \times \mathrm{sign}(\Delta'_{\alpha=0})",
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm,
+        right_margin=15Plots.mm
+    )
+    contour!(p, psi, alpha_axis, z; levels=[0.0], color=:black, linewidth=1, colorbar_entry=false)
+    plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, linestyle=:dash, label="1st stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, linestyle=:dash, label="2nd stability boundary")
+    plot!(p, psi, scales[end] .* alpha_ref; lw=2, color=:gray, linestyle=:dot, label="scan cap")
     isnothing(save_path) || savefig(p, save_path)
     return p
 end

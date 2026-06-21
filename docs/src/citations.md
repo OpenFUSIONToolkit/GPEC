@@ -125,7 +125,7 @@ Combines the toroidal outer-region calculation with the two-fluid slab layer mod
 
 ## Kinetic Forces
 
-The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) formalism.
+The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical TRansport Code) formalism.
 
 > J.-K. Park, A. H. Boozer, and J. E. Menard, "Nonambipolar Transport by Trapped Particles in Tokamaks,"
 > *Physical Review Letters* **102**, 065002 (2009).
@@ -147,7 +147,7 @@ Extends the energy principle to account for kinetic effects and derives the rela
 > *Physics of Plasmas* **20**, 122507 (2013).
 > DOI: [10.1063/1.4849395](https://doi.org/10.1063/1.4849395)
 
-Derives the neoclassical toroidal viscosity (NTV) torque in perturbed equilibria for general tokamak geometry, providing the theoretical basis for PENTRC.
+Derives the neoclassical toroidal viscosity (NTV) torque in perturbed equilibria for general tokamak geometry, providing the theoretical basis for the use of KineticForces in ForceFreeStates.
 
 ---
 
@@ -155,7 +155,7 @@ Derives the neoclassical toroidal viscosity (NTV) torque in perturbed equilibria
 > PhD Thesis, Princeton University (2015).
 > Link: [www.proquest.com/docview/1658203153](https://www.proquest.com/docview/1658203153)
 
-Provides the complete PENTRC theory and implementation details, including NTV in the presence of finite collisionality and general magnetic geometry.
+Provides the complete theory and implementation details, including NTV in the presence of finite collisionality and general magnetic geometry.
 
 ---
 
@@ -163,4 +163,4 @@ Provides the complete PENTRC theory and implementation details, including NTV in
 > *Physics of Plasmas* **24**, 032505 (2017).
 > DOI: [10.1063/1.4977898](https://doi.org/10.1063/1.4977898)
 
-Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the PENTRC functionality.
+Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the the KineticForces functionality.

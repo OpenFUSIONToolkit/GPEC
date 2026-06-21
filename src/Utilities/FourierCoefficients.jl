@@ -30,14 +30,14 @@ Use this when you only need to access coefficients at original grid points.
 # Fields
 
   - `xs::Vector{Float64}`: Radial coordinates
-  - `mband::Int`: Number of Fourier modes (0 to mband inclusive)
+  - `mmax::Int`: Highest retained poloidal Fourier mode (modes 0:mmax inclusive)
   - `nqty::Int`: Number of quantities
   - `cos_coeffs::Array{Float64,3}`: Cosine coefficients (npsi × nmodes × nqty)
   - `sin_coeffs::Array{Float64,3}`: Sine coefficients (npsi × nmodes × nqty)
 """
 struct FourierCoefficients
     xs::Vector{Float64}
-    mband::Int
+    mmax::Int
     nqty::Int
     cos_coeffs::Array{Float64,3}
     sin_coeffs::Array{Float64,3}
@@ -53,7 +53,7 @@ function empty_FourierCoefficients()
 end
 
 """
-    FourierCoefficients(xs, ys, fs, mband)
+    FourierCoefficients(xs, ys, fs, mmax)
 
 Compute Fourier coefficients via FFT without creating splines.
 
@@ -62,29 +62,33 @@ Compute Fourier coefficients via FFT without creating splines.
   - `xs::Vector{Float64}`: Radial coordinates
   - `ys::Vector{Float64}`: Poloidal coordinates (periodic domain)
   - `fs::Array{Float64,3}`: Function values (npsi × ntheta × nqty)
-  - `mband::Int`: Number of Fourier modes to retain
+  - `mmax::Int`: Highest poloidal Fourier mode to retain
 """
 function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
-    fs::Array{Float64,3}, mband::Int)
-    npsi, ntheta, nqty = size(fs)
+    fs::Array{Float64,3}, mmax::Int)
+    npsi, ny_full, nqty = size(fs)
 
     @assert length(xs) == npsi "xs length must match first dimension of fs"
-    @assert length(ys) == ntheta "ys length must match second dimension of fs"
-    @assert mband >= 0 "mband must be non-negative"
+    @assert length(ys) == ny_full "ys length must match second dimension of fs"
+    @assert mmax >= 0 "mmax must be non-negative"
 
-    # Clamp mband to Nyquist limit
-    nyquist_limit = ntheta ÷ 2
-    actual_mband = min(mband, nyquist_limit)
+    # Drop periodic-duplicate endpoint before FFT to match Fortran fspline_fit_2
+    # (equil/fspline.f:293 uses `f = fst%fs(:, 0:my-1, iq)`). The equilibrium θ-grids
+    # in this codebase store θ=0 and θ=2π as both endpoints (length mtheta+1);
+    # including the duplicate biases the DC coefficient by ~(f(0) − mean)/N.
+    has_duplicate = ny_full > 1 && isapprox(ys[end] - ys[1], 2π; rtol=1e-10)
+    ntheta = has_duplicate ? ny_full - 1 : ny_full
+    fs_view = has_duplicate ? view(fs, :, (1:ntheta), :) : fs
 
-    nmodes = actual_mband + 1
+    @assert mmax <= ntheta ÷ 2 "Requested mmax=$mmax exceeds the θ-grid Nyquist limit $(ntheta ÷ 2) (ntheta=$ntheta); increase the poloidal grid resolution or reduce mpert."
 
     # Compute Fourier coefficients using batched FFT
-    fs_reshaped = reshape(permutedims(fs, (2, 1, 3)), ntheta, npsi * nqty)
+    fs_reshaped = reshape(permutedims(fs_view, (2, 1, 3)), ntheta, npsi * nqty)
     fft_results = fft(fs_reshaped, 1)
 
     # Extract and normalize coefficients
-    cos_coeffs = zeros(Float64, npsi, nmodes, nqty)
-    sin_coeffs = zeros(Float64, npsi, nmodes, nqty)
+    cos_coeffs = zeros(Float64, npsi, mmax + 1, nqty)
+    sin_coeffs = zeros(Float64, npsi, mmax + 1, nqty)
 
     for iq in 1:nqty
         for ipsi in 1:npsi
@@ -95,14 +99,14 @@ function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
             @inbounds cos_coeffs[ipsi, 1, iq] = real(fft_col[1]) / ntheta
 
             # Higher modes
-            @inbounds for m in 1:actual_mband
+            @inbounds for m in 1:mmax
                 cos_coeffs[ipsi, m+1, iq] = 2 * real(fft_col[m+1]) / ntheta
                 sin_coeffs[ipsi, m+1, iq] = -2 * imag(fft_col[m+1]) / ntheta
             end
         end
     end
 
-    FourierCoefficients(xs, actual_mband, nqty, cos_coeffs, sin_coeffs)
+    FourierCoefficients(xs, mmax, nqty, cos_coeffs, sin_coeffs)
 end
 
 """
@@ -123,7 +127,7 @@ This function returns the normalized FFT coefficient (FFT/ntheta):
 function get_complex_coeff(fc::FourierCoefficients, ipsi::Int, mode::Int, qty::Int)
     @boundscheck begin
         @assert 1 <= ipsi <= length(fc.xs) "ipsi out of bounds"
-        @assert 0 <= mode <= fc.mband "mode out of bounds"
+        @assert 0 <= mode <= fc.mmax "mode out of bounds"
         @assert 1 <= qty <= fc.nqty "qty out of bounds"
     end
     if mode == 0
@@ -137,15 +141,15 @@ end
 """
     get_complex_coeffs!(out, fc::FourierCoefficients, ipsi, qty)
 
-Fill vector with normalized complex FFT coefficients for modes 0:mband.
+Fill vector with normalized complex FFT coefficients for modes 0:mmax.
 """
 function get_complex_coeffs!(out::AbstractVector{ComplexF64}, fc::FourierCoefficients,
     ipsi::Int, qty::Int)
-    nmodes = fc.mband + 1
+    nmodes = fc.mmax + 1
     @assert length(out) >= nmodes "output vector too short"
 
     @inbounds out[1] = complex(fc.cos_coeffs[ipsi, 1, qty], 0.0)
-    @inbounds for m in 1:fc.mband
+    @inbounds for m in 1:fc.mmax
         out[m+1] = complex(fc.cos_coeffs[ipsi, m+1, qty] / 2,
             -fc.sin_coeffs[ipsi, m+1, qty] / 2)
     end

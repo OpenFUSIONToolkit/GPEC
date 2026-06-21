@@ -1,19 +1,20 @@
+# Solovev analytical equilibrium — n=1 ideal stability + perturbed equilibrium.
+# Near-marginal n=1 external kink stabilized by a close conformal wall (see [Wall] note).
+# Integration-pipeline smoke-test and et[1] regression fixture; the equilibrium is
+# generated analytically from the side-car sol.toml ([SOL_INPUT]).
+
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
 eq_filename = "sol.toml"                # Path to equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                            # Poloidal field power exponent for Jacobian
-power_b = 0                             # Toroidal field power exponent for Jacobian
-power_r = 0                             # Major radius power exponent for Jacobian
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
-psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.9995                        # Upper limit of normalized flux coordinate
-mpsi = 128                              # Number of radial grid points
+psilow = 1e-4                           # Lower limit of normalized poloidal flux
+psihigh = 0.9995                        # Upper limit of normalized poloidal flux
+mpsi = 128                              # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
-
 
 [Wall]
 # Close conformal wall is required to stabilize this Solovev fixture's n=1 external kink:
@@ -33,50 +34,46 @@ equal_arc_wall = true                   # Equal arc length distribution of nodes
 
 [ForcingTerms]
 forcing_data_file = "forcing.dat"       # Manual mode table (n, m, real, imag)
-forcing_data_format = "ascii"           # "ascii" or "hdf5"
+forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 
 [PerturbedEquilibrium]
-fixed_boundary = false                  # Fixed boundary flag
-output_eigenmodes = true                # Output mode fields as b-fields
-compute_response = true                 # Compute plasma response
-compute_singular_coupling = true        # Compute singular coupling metrics
+fixed_boundary = false                  # Use fixed boundary conditions
+output_eigenmodes = true                # Output eigenmode fields as b-fields
+compute_response = true                 # Compute plasma response to forcing
+compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = true                          # Enable verbose logging
-write_outputs_to_HDF5 = true            # Write outputs to HDF5
+write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
 
 [ForceFreeStates]
-bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
+local_stability_flag = true   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 mat_flag = true               # Construct coefficient matrices for diagnostic purposes
-ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
+ode_flag = true               # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
-mer_flag = true               # Evaluate the Mercier criterian
 
-psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
-qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
-qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
+psiedge = 0.99                # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
 nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
-delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 960                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+mthvac = 960                  # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
-kinetic_source = "fixed"      # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
+kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
-save_interval = 3            # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
+ucrit = 1e3                   # Column-norm threshold that triggers solution renormalization
+force_wv_symmetry = true      # Enforce symmetry of the vacuum energy matrix
+save_interval = 3             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
 # Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
-use_parallel          = true   # Parallel FM-propagator BVP — ~5× faster than serial EL on this delta_m-expanded grid even though Δ' is pathological on this near-marginal Solovev (kept on for speed, not for Δ' validation)
+use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
 parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
-populate_dense_xi     = true   # REQUIRED for PerturbedEquilibrium (this TOML has a [PerturbedEquilibrium] section). Default is false; PE-using configs must set true when use_parallel=true.
-truncate_at_dW_peak   = false  # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
-set_psilim_via_dmlim  = false  # FALSE for limited circular / analytical equilibria — rationals sparse, dmlim truncation would chop too much edge
-dmlim                 = 0.2    # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n
-
+populate_dense_xi     = true   # Append serial-EL pass so dense ξ is stored — REQUIRED with a [PerturbedEquilibrium] section
+set_psilim_via_dmlim  = false  # FALSE for limited/analytical equilibria — rationals sparse, dmlim would chop too much edge
+dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)

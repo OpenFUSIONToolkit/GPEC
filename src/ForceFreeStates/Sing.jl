@@ -135,7 +135,15 @@ See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematica
 
   - `SingAsymptotics`: Struct containing all asymptotic expansion data
 """
-function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal; sig::Float64=1.0, alpha_override::Union{Nothing, Vector{ComplexF64}}=nothing)
+function compute_sing_asymptotics(
+    singp::SingType,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal;
+    sig::Float64=1.0,
+    alpha_override::Union{Nothing,Vector{ComplexF64}}=nothing
+)
 
     # Allocations
     vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 1)
@@ -213,22 +221,22 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         ipert0 = r1[1]
         N = intr.numpert_total
         msg = "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)\n"
-        msg *= @sprintf("  m0mat(1,1)= %+.12e %+.12ei\n", real(m0mat[1,1]), imag(m0mat[1,1]))
-        msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1,2]), imag(m0mat[1,2]))
-        msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2,1]), imag(m0mat[2,1]))
-        msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2,2]), imag(m0mat[2,2]))
-        di = m0mat[1,1]*m0mat[2,2] - m0mat[2,1]*m0mat[1,2]
+        msg *= @sprintf("  m0mat(1,1)= %+.12e %+.12ei\n", real(m0mat[1, 1]), imag(m0mat[1, 1]))
+        msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1, 2]), imag(m0mat[1, 2]))
+        msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2, 1]), imag(m0mat[2, 1]))
+        msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2, 2]), imag(m0mat[2, 2]))
+        di = m0mat[1, 1]*m0mat[2, 2] - m0mat[2, 1]*m0mat[1, 2]
         msg *= @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei\n", real(di), real(alpha[1]), imag(alpha[1]))
         msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
-        msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
-        msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
+        msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0, 2, 1]), imag(vmat[ipert0, ipert0, 2, 1]))
+        msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0+N, 2, 1]), imag(vmat[ipert0, ipert0+N, 2, 1]))
         for k in 0:(2*ctrl.sing_order)
             msg *= @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei\n",
-                k, real(vmat[ipert0,ipert0,1,k+1]), imag(vmat[ipert0,ipert0,1,k+1]),
-                real(vmat[ipert0,ipert0,2,k+1]), imag(vmat[ipert0,ipert0,2,k+1]))
+                k, real(vmat[ipert0, ipert0, 1, k+1]), imag(vmat[ipert0, ipert0, 1, k+1]),
+                real(vmat[ipert0, ipert0, 2, k+1]), imag(vmat[ipert0, ipert0, 2, k+1]))
             msg *= @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei\n",
-                k, real(vmat[ipert0,ipert0+N,1,k+1]), imag(vmat[ipert0,ipert0+N,1,k+1]),
-                real(vmat[ipert0,ipert0+N,2,k+1]), imag(vmat[ipert0,ipert0+N,2,k+1]))
+                k, real(vmat[ipert0, ipert0+N, 1, k+1]), imag(vmat[ipert0, ipert0+N, 1, k+1]),
+                real(vmat[ipert0, ipert0+N, 2, k+1]), imag(vmat[ipert0, ipert0+N, 2, k+1]))
         end
         msg
     end
@@ -351,7 +359,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
+            for ipert_m in jpert_m:intr.mpert
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
@@ -402,8 +410,8 @@ Add a spline for F directly instead of the lower triangular factorization to avo
         for j in 0:n
             for ipert_n in 1:intr.npert
                 for jpert_m in 1:intr.mpert
-                    for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
-                        for kpert_m in max(1, ipert_m-intr.mband):jpert_m
+                    for ipert_m in jpert_m:intr.mpert
+                        for kpert_m in 1:jpert_m
                             ipert = ipert_m + (ipert_n - 1) * intr.mpert
                             jpert = jpert_m + (ipert_n - 1) * intr.mpert
                             kpert = kpert_m + (ipert_n - 1) * intr.mpert
@@ -422,7 +430,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in max(1, jpert_m-intr.mband):min(intr.mpert, jpert_m+intr.mband)
+            for ipert_m in 1:intr.mpert
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
@@ -464,7 +472,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # G = [G, G', G''/2, G'''/6]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
+            for ipert_m in jpert_m:intr.mpert
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
@@ -912,4 +920,177 @@ more simplistic code with similar performance.
     odet.ud[:, :, 2] .= .-tmp_mat
     mul!(tmp_mat, cmat, u1)
     @views odet.ud[:, :, 2] .-= tmp_mat
+end
+
+"""
+    evaluate_fbar_condition(psi, ffit, equil, intr; hint=Ref(1))
+
+Evaluate the condition number of the kinetic F̄ matrix at a given ψ. Uses cond(F̄)
+as a scale-invariant measure of near-singularity. Mirrors the intent of Fortran
+`sing_get_f_det` (`sing.f:1298-1481`) which computes det(F̄).
+
+F̄(i,j) = q₁·f0(i,j)·q₂ - q₁·P(i,j) - conj(P†(j,i))·q₂ + R1(i,j)
+
+where q₁ = m₁ - n·q(ψ), q₂ = m₂ - n·q(ψ) are the direct singularity factors.
+"""
+function evaluate_fbar_condition(psi::Float64, ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
+    np = intr.numpert_total
+
+    # Evaluate q(ψ) and compute singfac = m - n*q
+    q = equil.profiles.q_spline(psi; hint=hint)
+    singfac = Float64[(m - q * n) for m in intr.mlow:intr.mhigh for n in intr.nlow:intr.nhigh]
+
+    # Evaluate FKG sub-matrices from splines
+    f0_vec = zeros(ComplexF64, np * np)
+    p_vec = zeros(ComplexF64, np * np)
+    pa_vec = zeros(ComplexF64, np * np)
+    r1_vec = zeros(ComplexF64, np * np)
+    ffit.f0mats(f0_vec, psi; hint=hint)
+    ffit.pmats(p_vec, psi; hint=hint)
+    ffit.paats(pa_vec, psi; hint=hint)
+    ffit.r1mats(r1_vec, psi; hint=hint)
+    f0mat = reshape(f0_vec, np, np)
+    pmat = reshape(p_vec, np, np)
+    paat = reshape(pa_vec, np, np)
+    r1mat = reshape(r1_vec, np, np)
+
+    # Assemble F̄ [Fortran sing.f lines 1412-1423, sing_get_f_det with fkg_kmats_flag=true]
+    fbar = zeros(ComplexF64, np, np)
+    for j in 1:np
+        q2 = singfac[j]
+        for i in 1:np
+            q1 = singfac[i]
+            fbar[i, j] = q1 * f0mat[i, j] * q2 - q1 * pmat[i, j] - conj(paat[j, i]) * q2 + r1mat[i, j]
+        end
+    end
+
+    return cond(fbar)
+end
+
+"""
+    find_kinetic_singular_surfaces!(ffit, equil, intr; ngrid=2000, cond_threshold=1e8)
+
+Find kinetically-displaced singular surfaces — locations where cond(F̄) peaks,
+indicating near-singularity of the kinetic F̄ matrix in the ODE RHS. Populates
+`intr.kinsing` and `intr.kmsing`.
+
+Mirrors the intent of Fortran `ksing_find` (`sing.f:1486-1616`) which finds zeros of
+det(F̄) via adaptive bisection. Here we use condition number peaks instead of
+determinant zeros for better numerical robustness and scale invariance.
+
+Algorithm:
+
+ 1. Evaluate cond(F̄) on a dense ψ grid
+ 2. Find local maxima (peaks where gradient changes from + to -)
+ 3. Refine each peak with golden-section minimization of -cond
+ 4. Filter by threshold and resonance condition
+"""
+function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; ngrid::Int=2000, cond_threshold::Float64=1e8)
+    psilow = equil.profiles.xs[1]
+    psihigh = intr.psilim
+
+    # Evaluate cond(F̄) on a dense grid
+    psi_grid = collect(range(psilow, psihigh; length=ngrid))
+    cond_vals = zeros(ngrid)
+    hint = Ref(1)
+    for i in 1:ngrid
+        try
+            cond_vals[i] = evaluate_fbar_condition(psi_grid[i], ffit, equil, intr; hint=hint)
+        catch
+            cond_vals[i] = Inf  # singular matrix — definitely a kinsing surface
+        end
+    end
+
+    # Persist the scan so callers/HDF5 output can plot cond(F̄) vs ψ and show why peaks
+    # were (or weren't) accepted as kinetic singular surfaces.
+    intr.kinsing_scan_psi = psi_grid
+    intr.kinsing_scan_cond = cond_vals
+    intr.kinsing_scan_threshold = cond_threshold
+
+    # Find local maxima of cond(F̄): points where cond increases then decreases
+    peak_indices = Int[]
+    for i in 2:(ngrid-1)
+        if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1] && cond_vals[i] > cond_threshold
+            push!(peak_indices, i)
+        end
+    end
+
+    # Refine each peak to find the precise ψ location
+    kinsing_surfaces = SingType[]
+    for idx in peak_indices
+        psi_lo = psi_grid[max(idx - 1, 1)]
+        psi_hi = psi_grid[min(idx + 1, ngrid)]
+
+        # Golden-section search to maximize cond (minimize -cond)
+        psi_refined = _golden_section_max(psi_lo, psi_hi, psi -> evaluate_fbar_condition(psi, ffit, equil, intr))
+
+        # Evaluate q and q' at refined location
+        hint_ref = Ref(1)
+        q_val = equil.profiles.q_spline(psi_refined; hint=hint_ref)
+        q1_val = equil.profiles.q_deriv(psi_refined; hint=hint_ref)
+
+        # Check resonance: at least one mode m satisfies mlow ≤ n*q ≤ mhigh
+        has_resonant = false
+        for n in intr.nlow:intr.nhigh
+            nq = n * q_val
+            if intr.mlow <= nq && nq <= intr.mhigh
+                has_resonant = true
+                break
+            end
+        end
+        if !has_resonant
+            continue
+        end
+
+        push!(
+            kinsing_surfaces,
+            SingType(;
+                psifac=psi_refined,
+                rho=sqrt(psi_refined),
+                m=[round(Int, n * q_val) for n in intr.nlow:intr.nhigh],
+                n=collect(intr.nlow:intr.nhigh),
+                q=q_val,
+                q1=q1_val
+            )
+        )
+    end
+
+    # Sort by ψ location
+    sort!(kinsing_surfaces; by=s -> s.psifac)
+
+    intr.kinsing = kinsing_surfaces
+    intr.kmsing = length(kinsing_surfaces)
+
+    if intr.kmsing > 0
+        @info "Found $(intr.kmsing) kinetic singular surface(s):"
+        for (i, ks) in enumerate(intr.kinsing)
+            @info @sprintf("   kinsing[%d]: ψ = %.6f, q = %.4f", i, ks.psifac, ks.q)
+        end
+    else
+        @info "No kinetic singular surfaces found (cond threshold = $(cond_threshold))"
+    end
+
+    return nothing
+end
+
+"""
+Golden-section search to find the ψ that maximizes f(ψ) on [a, b].
+"""
+function _golden_section_max(a::Float64, b::Float64, f::Function; tol::Float64=1e-10)
+    gr = (sqrt(5) + 1) / 2
+    c = b - (b - a) / gr
+    d = a + (b - a) / gr
+    for _ in 1:100
+        if abs(b - a) < tol
+            break
+        end
+        if f(c) > f(d)
+            b = d
+        else
+            a = c
+        end
+        c = b - (b - a) / gr
+        d = a + (b - a) / gr
+    end
+    return (a + b) / 2
 end

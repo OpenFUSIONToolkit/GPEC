@@ -21,14 +21,15 @@ import StaticArrays: @MMatrix
 
 # Include all necessary files
 include("ForceFreeStatesStructs.jl")
-include("Mercier.jl")
-include("Bal.jl")
+include("Ballooning.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")
 include("Fourfit.jl")
+include("FixedKineticMatrices.jl")
 include("Kinetic.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
+include("PowerNorm.jl")
 include("Free.jl")
 include("Riccati.jl")
 

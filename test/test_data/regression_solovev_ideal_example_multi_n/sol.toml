@@ -1,11 +1,15 @@
+# Solovev analytical equilibrium parameters, consumed by gpec.toml (eq_type = "sol").
+# Sets the grid resolution, plasma shape, and field/pressure scaling factors used to
+# generate the analytic Solovev equilibrium. See SolovevConfig in src/Equilibrium.
+
 [SOL_INPUT]
-mr = 128      # number of radial grid zones
-mz = 128      # number of axial grid zones
-ma = 128      # number of flux grid zones
-e = 1.6       # elongation
-a = 0.33      # minor radius
-r0 = 1.0      # major radius
-q0 = 1.9      # safety factor at the o-point
-p0fac=1       # scale on-axis pressure (P-> P+P0*p0fac. beta changes. Phi,q constant)
-b0fac=1       # scale toroidal field at constant beta (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
-f0fac=1       # scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
+mr = 128       # Number of radial grid zones
+mz = 128       # Number of axial grid zones
+ma = 128       # Number of flux grid zones
+e = 1.6        # Elongation
+a = 0.33       # Minor radius
+r0 = 1.0       # Major radius
+q0 = 1.9       # Safety factor at the magnetic axis (O-point)
+p0fac = 1      # Scale on-axis pressure (β changes; Φ, q fixed)
+b0fac = 1      # Scale toroidal field at constant β (Bt changes; shape, β fixed)
+f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p, Bp fixed)
