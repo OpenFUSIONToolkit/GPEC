@@ -50,7 +50,7 @@ import AdaptiveArrayPools: @with_pool
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_find!
-using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
+using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
@@ -63,6 +63,20 @@ const _SECTION = "-"^40
 # include has to come after them but before `main`, which dispatches into
 # `main_from_h5` on .h5 inputs.
 include("Rerun.jl")
+
+const _DEPRECATED_FFS_KEYS = ("delta_mband", "mband")
+
+# Drop deprecated [ForceFreeStates] keys (e.g. banded-matrix removal from PR #286) so legacy
+# gpec.toml files keep parsing instead of throwing an unknown-keyword error.
+function _drop_deprecated_ffs_keys!(table)
+    for k in _DEPRECATED_FFS_KEYS
+        if haskey(table, k)
+            @warn "`$k` in [ForceFreeStates] is deprecated and ignored please remove it from gpec.toml."
+            delete!(table, k)
+        end
+    end
+    return table
+end
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Parse command line arguments
@@ -144,10 +158,11 @@ function main_with_inputs(
     equil_start = time()
 
     intr = ForceFreeStatesInternal(; dir_path=path)
-    # `inputs` and `eq_config` are supplied by the caller (already parsed from gpec.toml
-    # on the normal path, or reconstructed from the gpec.h5 TOML blob on the rerun path),
-    # so this body must not re-read them from disk — the rerun has no gpec.toml file.
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    # `inputs` is supplied by the caller (parsed from gpec.toml on the normal path, or
+    # reconstructed from the gpec.h5 TOML blob on the rerun path), so do not re-read it here.
+    ffs_table = inputs["ForceFreeStates"]
+    _drop_deprecated_ffs_keys!(ffs_table)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
     # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
@@ -253,18 +268,15 @@ function main_with_inputs(
         # equil = set_up_equilibrium(equil.config)
     end
 
-    # Compute Mercier and Ballooning stability (if desired)
-    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
+    # Compute local stability (if desired). This holds `D_I` from the
+    # ballooning coefficient system and the local ballooning result.
     profiles_xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
-    if ctrl.mer_flag
-        if ctrl.verbose
-            @info "Evaluating Mercier criterion"
-        end
-        mercier_scan!(locstab_fs, equil)
-    end
-    if ctrl.bal_flag
+    ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
+    if ctrl.local_stability_flag
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
+        # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
+        ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
     end
     # Fit data to splines
     intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
@@ -334,12 +346,6 @@ function main_with_inputs(
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
-    if ctrl.delta_mband >= intr.mpert
-        @warn "Banded matrices not implemented yet, setting delta_mband to 0"
-        ctrl.delta_mband = 0
-    end
-    intr.mband = intr.mpert - 1 - ctrl.delta_mband
-    intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
 
     # Build KineticForces control and load kinetic profiles once — reused by
@@ -375,12 +381,12 @@ function main_with_inputs(
                   "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
                   "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
                   "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
+                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
                   "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband)
+        metric = make_metric(equil, intr.mpert)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"
@@ -460,7 +466,7 @@ function main_with_inputs(
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, inputs, forcing_modes_snapshot)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, inputs, forcing_modes_snapshot; ballooning_boundary=ballooning_boundary)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -597,7 +603,8 @@ function write_outputs_to_HDF5(
     ffit::Union{FourFitVars,Nothing}=nothing,
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
-    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing;
+    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
@@ -620,7 +627,6 @@ function write_outputs_to_HDF5(
 
         # Write derived run parameters
         out_h5["info/mpert"] = intr.mpert
-        out_h5["info/mband"] = intr.mband
         out_h5["info/mlow"] = intr.mlow
         out_h5["info/mhigh"] = intr.mhigh
         out_h5["info/npert"] = intr.npert
@@ -658,8 +664,11 @@ function write_outputs_to_HDF5(
         out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
-        # Write local stability data; always write all entries, using empty arrays when not computed
-        if ctrl.mer_flag
+        # Write local stability data; always write all entries, using empty arrays when not computed.
+        # locstab/di = Mercier D_I (det(d0bar)); locstab/dr = resistive interchange D_R;
+        # locstab/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
+        # tearing Δ' under perturbed_equilibrium/singular_coupling/delta_prime).
+        if ctrl.local_stability_flag
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
             out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
@@ -667,9 +676,14 @@ function write_outputs_to_HDF5(
             out_h5["locstab/di"] = Float64[]
             out_h5["locstab/dr"] = Float64[]
         end
-        out_h5["singular/di0"] = (ctrl.mer_flag && !isempty(intr.sing)) ?
+        out_h5["singular/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
                                  [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["locstab/ca1"] = ctrl.bal_flag ? intr.locstab.y[:, 4] : Float64[]
+        out_h5["locstab/ballooning_Delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
+
+        # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
+        out_h5["locstab/psi"] = ballooning_boundary.psi
+        out_h5["locstab/alpha"] = ballooning_boundary.alpha
+        out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
