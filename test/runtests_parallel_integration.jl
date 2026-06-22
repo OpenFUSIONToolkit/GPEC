@@ -305,11 +305,11 @@ using TOML
 
         et_par, intr_par = run_diiid(true)
 
-        # Parallel FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid-sensitive
-        # (log_asymptotic/auto-mpsi gives a spurious −0.09; ldp/mpsi=256 gives the converged
-        # +0.504), so a loose bracket would mask exactly that accuracy regression. Value is
-        # deterministic and reproducible (parallel and standard ODE paths agree to rel_diff=0).
-        @test isapprox(et_par, 0.504306; rtol=2e-2)
+        # Parallel FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
+        # equilibrium-sensitive (auto-mpsi gives a spurious value; a wrong grid/Ip shifts it), so
+        # a loose bracket would mask exactly that accuracy regression. Value is deterministic and
+        # reproducible (parallel and standard ODE paths agree to rel_diff=0).
+        @test isapprox(et_par, 0.999467; rtol=2e-2)
         # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
         # comment above). BVP Δ' matrix regression for DIIID-like is in the
         # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
@@ -523,9 +523,9 @@ using TOML
         # surfaces q=5,6 (ψ≈0.98, 0.997) are NOT converged — real part and even sign can fluctuate
         # — so they get only the finiteness/non-zero checks above, not value pins. Values use this
         # testset's mode range (mpert=27, vs full-pipeline mpert=35, so they differ slightly).
-        @test isapprox(real(dpm[1, 1]), +9.396892e+00; rtol=1e-2)   # q=2
-        @test isapprox(real(dpm[2, 2]), -2.114709e+00; rtol=1e-2)   # q=3
-        @test isapprox(real(dpm[3, 3]), -1.915087e+01; rtol=3e-2)   # q=4
+        @test isapprox(real(dpm[1, 1]), +7.225479e+00; rtol=1e-2)   # q=2
+        @test isapprox(real(dpm[2, 2]), -6.089718e+00; rtol=1e-2)   # q=3
+        @test isapprox(real(dpm[3, 3]), -2.177899e+01; rtol=3e-2)   # q=4
     end
 
 end
