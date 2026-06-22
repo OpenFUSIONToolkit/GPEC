@@ -50,9 +50,10 @@ function compute_plasma_response!(
     surface_inductance = compute_surface_inductance_from_greens(grri_2d, grre_2d, ffs_intr, nn, ν_vac)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
-    # Reluctance Rho = L^{-1} * (Lambda - L) * L^{-1}  (gpout_resp convention)
+    # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
+    # Λ (plasma inductance) is not Hermitian — its anti-Hermitian part is the dissipative/torque response — so the adjoint matters.
     L_inv = inv(surface_inductance)
-    reluctance = L_inv * (plasma_inductance - surface_inductance) * L_inv
+    reluctance = L_inv * (plasma_inductance' - surface_inductance) * L_inv
 
     # Store permeability in internal state for singular coupling / field reconstruction.
     # These consumers operate on the physical control-surface flux Φ_x, so the internal
