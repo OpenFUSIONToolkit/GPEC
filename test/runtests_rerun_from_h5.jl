@@ -285,3 +285,26 @@ end
     bad = @test_logs (:warn,) pf("ForceFreeStates.mode=blorp")
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
+
+# Drift guard for the analytic-equilibrium registry: setup_equilibrium and the rerun builder both
+# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
+# empty section) would silently break one path. Asserting each entry is well-formed and that
+# build_analytic_config resolves it keeps adding a new analytic kind a one-row change.
+@testset "ANALYTIC_EQ registry is well-formed and drives build_analytic_config" begin
+    Equil = GeneralizedPerturbedEquilibrium.Equilibrium
+    bac = GeneralizedPerturbedEquilibrium.build_analytic_config
+    for (eq_type, spec) in Equil.ANALYTIC_EQ
+        @test spec.section isa String && !isempty(spec.section)
+        # config_type must build from a parsed TOML table (the rerun/embedded-section path)...
+        @test hasmethod(spec.config_type, Tuple{Dict{String,Any}})
+        # ...and from a side-car path string (the deprecated fallback in setup_equilibrium).
+        @test hasmethod(spec.config_type, Tuple{String})
+        # run_fn must accept (EquilibriumConfig, <its config type>).
+        @test hasmethod(spec.run_fn, Tuple{Equil.EquilibriumConfig,spec.config_type})
+        # build_analytic_config resolves the section to the right config type using defaults.
+        cfg = bac(eq_type, Dict{String,Any}(spec.section => Dict{String,Any}()))
+        @test cfg isa spec.config_type
+    end
+    # Unregistered kinds are rejected, not silently mis-built.
+    @test_throws ErrorException bac("not_a_real_kind", Dict{String,Any}())
+end

@@ -6,13 +6,9 @@
 # its imports (TOML, HDF5, Equilibrium, ForcingTerms, etc.).
 
 # Analytic equilibria carry their parameters in a TOML section rather than an ingest array;
-# replay regenerates them from that section. Maps eq_type to its gpec.toml section key.
-const ANALYTIC_EQ_SECTIONS = Dict(
-    "sol" => "SOL_INPUT",
-    "lar" => "LAR_INPUT",
-    "tj_analytic" => "TJ_ANALYTIC_INPUT",
-    "tj_analytic_direct" => "TJ_ANALYTIC_INPUT",
-)
+# replay regenerates them from that section. The eq_type -> section mapping (and which kinds
+# are analytic at all) lives in the `Equilibrium.ANALYTIC_EQ` registry, the single source of
+# truth shared with `setup_equilibrium`.
 
 """
     merge_auxiliary_eq_toml!(inputs::Dict{String,Any}, eq_config)
@@ -24,8 +20,9 @@ Otherwise it falls back to the deprecated side-car TOML referenced by `eq_config
 and folds that section in (with a deprecation warning). No-op for non-analytic equilibria.
 """
 function merge_auxiliary_eq_toml!(inputs::Dict{String,Any}, eq_config::Equilibrium.EquilibriumConfig)
-    section = get(ANALYTIC_EQ_SECTIONS, eq_config.eq_type, nothing)
-    section === nothing && return inputs        # file-based: snapshotted via the equilibrium ingest
+    spec = get(Equilibrium.ANALYTIC_EQ, eq_config.eq_type, nothing)
+    spec === nothing && return inputs            # file-based: snapshotted via the equilibrium ingest
+    section = spec.section
     haskey(inputs, section) && return inputs     # already embedded in gpec.toml
 
     filepath = eq_config.eq_filename
@@ -40,21 +37,14 @@ end
     build_analytic_config(eq_type, inputs)
 
 Construct the analytic-equilibrium `*Config` (`SolovevConfig` / `LargeAspectRatioConfig` /
-`TJAnalyticConfig`) from the TOML section named by [`ANALYTIC_EQ_SECTIONS`]. Shared by the
-TOML and rerun input builders so both resolve analytic parameters the same way.
+`TJAnalyticConfig`) from the TOML section named in the `Equilibrium.ANALYTIC_EQ` registry.
+Shared by the TOML and rerun input builders so both resolve analytic parameters the same way.
 """
 function build_analytic_config(eq_type::AbstractString, inputs::Dict)
-    section = get(ANALYTIC_EQ_SECTIONS, eq_type, nothing)
-    section === nothing && error("build_analytic_config: $eq_type is not an analytic equilibrium type")
-    haskey(inputs, section) || error("Analytic equilibrium $eq_type requires a [$section] section in gpec.toml")
-    data = inputs[section]
-    if eq_type == "sol"
-        return Equilibrium.SolovevConfig(data)
-    elseif eq_type == "lar"
-        return Equilibrium.LargeAspectRatioConfig(data)
-    else
-        return Equilibrium.TJAnalyticConfig(data)
-    end
+    spec = get(Equilibrium.ANALYTIC_EQ, eq_type, nothing)
+    spec === nothing && error("build_analytic_config: $eq_type is not an analytic equilibrium type")
+    haskey(inputs, spec.section) || error("Analytic equilibrium $eq_type requires a [$(spec.section)] section in gpec.toml")
+    return spec.config_type(inputs[spec.section])
 end
 
 """
@@ -72,7 +62,9 @@ function read_equilibrium_ingest(in_h5)
     kind = read(group, "ingest_kind")
     T = kind == "direct" ? Equilibrium.DirectIngest :
         kind == "inverse" ? Equilibrium.InverseIngest :
-        error("Unknown equilibrium ingest_kind in gpec.h5: $kind")
+        error("Unknown equilibrium ingest_kind in gpec.h5: $kind (expected \"direct\" or \"inverse\")")
+    # Positional reconstruction: relies on the default constructor, so `fieldnames(T)` order
+    # must match the struct definition and the field-by-field write in write_outputs_to_HDF5.
     return T((read(group, String(f)) for f in fieldnames(T))...)
 end
 
@@ -303,14 +295,16 @@ function build_inputs_from_h5(args::Vector{String})
 
     # Analytic kinds regenerate from their TOML section; file-based kinds rebuild splines from
     # the stored ingest. A file-based run with no ingest can only come from a pre-ingest gpec.h5.
-    additional_input = if haskey(ANALYTIC_EQ_SECTIONS, eq_config.eq_type)
+    additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
         build_analytic_config(eq_config.eq_type, inputs)
     elseif ingest isa Equilibrium.DirectIngest
         Equilibrium.build_direct_from_ingest(eq_config, ingest)
     elseif ingest isa Equilibrium.InverseIngest
         Equilibrium.build_inverse_from_ingest(eq_config, ingest)
     else
-        error("gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay")
+        error("gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay. " *
+              "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one); a new analytic kind must be " *
+              "registered in Equilibrium.ANALYTIC_EQ.")
     end
 
     return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils

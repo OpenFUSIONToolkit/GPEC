@@ -119,7 +119,7 @@ function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothi
 
     # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
     # IMAS-fed (via the dd kwarg), or read from a file (additional_input = nothing).
-    additional_input = if haskey(ANALYTIC_EQ_SECTIONS, eq_config.eq_type)
+    additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
         build_analytic_config(eq_config.eq_type, inputs)
     elseif eq_config.eq_type == "imas"
         dd
