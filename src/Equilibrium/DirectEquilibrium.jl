@@ -197,21 +197,32 @@ function direct_position!(raw_profile::DirectRunInput)
     # Because DirectRunInput is a mutable struct, we can update the spline here
     raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; extrap=ExtendExtrap())
 
-    # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
-    # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0), so Brent is
-    # globally convergent within the bracket (start_r, end_r) and needs no restarts.
-    function find_separatrix_crossing(start_r, end_r, label)
-        r_sol = find_zero(
-            r -> (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0); bfield.psi),
-            (start_r, end_r), Roots.Brent()
-        )
-        @info "$label separatrix found at R = $(@sprintf("%.3f", r_sol))"
-        return r_sol
+    # Replicate Fortran direct.f direct_position: unbracketed Newton iteration dr=-ψ/ψ_r toward
+    # ψ=0 (the renormalized separatrix). Newton extrapolates past the grid edge, so it finds the
+    # separatrix even for limited equilibria whose grid box hugs the LCFS (ψ>0 to the edge, no
+    # sign change to bracket). Fortran allows more steps here than for the axis solve (2000 vs 200).
+    max_separatrix_steps = 2000
+    function find_separatrix_crossing(r_edge, label)
+        # On each failed attempt, shift the initial guess (a weighted blend of r_edge and the axis
+        # ro) from near the grid edge toward the axis (Fortran direct.f restart counter ird = 0..5).
+        for restart in 0:5
+            r = ((3 - 0.5 * restart) * r_edge + ro) / (4 - 0.5 * restart)
+            for _ in 1:max_separatrix_steps
+                direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
+                dr = -bfield.psi / bfield.psir
+                r += dr
+                if abs(dr) <= 1e-12 * abs(r)
+                    @info "$label separatrix found at R = $(@sprintf("%.3f", r))"
+                    return r
+                end
+            end
+        end
+        error("Took too many steps to find $label separatrix.")
     end
 
     # Find inboard (rs1) and outboard (rs2) separatrix positions
-    rs1 = find_separatrix_crossing(ro, raw_profile.rmin, "Inboard")
-    rs2 = find_separatrix_crossing(ro, raw_profile.rmax, "Outboard")
+    rs1 = find_separatrix_crossing(raw_profile.rmin, "inboard")
+    rs2 = find_separatrix_crossing(raw_profile.rmax, "outboard")
 
     return ro, zo, rs1, rs2
 end
