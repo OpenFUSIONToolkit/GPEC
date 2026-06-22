@@ -7,7 +7,7 @@ power_b = 0                    # Toroidal field power exponent for Jacobian
 power_r = 0                    # Major radius power exponent for Jacobian
 grid_type = "ldp"              # Radial grid packing (sin²: packs core+edge). Robust δW/Δ' vs log_asymptotic.
 psilow = 1e-4                  # Lower limit of normalized flux coordinate
-psihigh = 0.9995               # Upper limit of normalized flux coordinate
+psihigh = 0.995                # captures q=6 with sas_flag/dmlim at this Ip
 mpsi = 256                     # Fixed radial grid (avoid mpsi=0 auto: it edge-starves → spurious δW/Δ')
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi (unused when mpsi>0)
 mtheta = 256                   # Number of poloidal grid points
