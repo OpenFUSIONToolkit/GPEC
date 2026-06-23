@@ -385,12 +385,13 @@ function compute_3D_kernel_matrices!(
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry3D
 
-    # Initialize quadrature data
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
     if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
-        @warn "PATCH_RAD is greater than half the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $((min(source.mtheta, source.nzeta) - 1) ÷ 2). Be sure to check if outputs are converged."
+        @warn "PATCH_RAD=$(PATCH_RAD) is greater than half the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $((min(source.mtheta, source.nzeta) - 1) ÷ 2), be sure to check if outputs are converged. This can be avoided by setting mtheta and nzeta to be greater than $(2 * PATCH_RAD + 1)."
         PATCH_RAD = (min(source.mtheta, source.nzeta) - 1) ÷ 2
     end
+
+    # Initialize quadrature data
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
 
