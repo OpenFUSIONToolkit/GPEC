@@ -670,11 +670,11 @@ function compute_cova_components(
 
         # Tensor contraction with mode coupling (matches Fortran gpeq_cova)
         for ipert in 1:mpert
-            xvp_acc = zero(ComplexF64);
-            xvt_acc = zero(ComplexF64);
+            xvp_acc = zero(ComplexF64)
+            xvt_acc = zero(ComplexF64)
             xvz_acc = zero(ComplexF64)
-            bvp_acc = zero(ComplexF64);
-            bvt_acc = zero(ComplexF64);
+            bvp_acc = zero(ComplexF64)
+            bvt_acc = zero(ComplexF64)
             bvz_acc = zero(ComplexF64)
 
             for dm in (1-ipert):(mpert-ipert)
@@ -916,9 +916,9 @@ function _build_rzphi_geometry(
                 v21 = dr2_dtheta / (2 * rfac)
                 v22 = (1 + doff_dtheta) * 2π * rfac
             else
-                v11 = 0.0;
-                v12 = 0.0;
-                v21 = 0.0;
+                v11 = 0.0
+                v12 = 0.0
+                v21 = 0.0
                 v22 = 0.0
             end
 
