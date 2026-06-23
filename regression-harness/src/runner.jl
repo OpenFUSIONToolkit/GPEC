@@ -79,6 +79,36 @@ open(ARGS[2], "w") do f
 end
 """
 
+# Self-contained separatrix-finder regression (PR #296). Loads a fixed-boundary EFIT whose
+# computational box hugs the LCFS (eps=0.05 TokaMaker aspect-scan g-file): outside the prescribed
+# LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
+# bracketed-Brent separatrix finder could not bracket psi=sibry and equilibrium setup threw. Calls
+# setup_equilibrium directly and writes the leading equilibrium scalars: errors on the buggy code,
+# passes with the Newton finder. Runtime is written to ARGS[2] for parity with the GPEC runner.
+const COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.Equilibrium
+using HDF5
+root = dirname(Base.active_project())
+gfile = joinpath(root, "examples", "efit_fixedbdy_separatrix_example", "eq_eps0.0500000_k1.000_d0.000.geqdsk")
+cfg = Equilibrium.EquilibriumConfig(; eq_type="efit", eq_filename=gfile)
+t_start = time()
+pe = Equilibrium.setup_equilibrium(cfg)
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["equil/psio"]  = pe.psio
+    fid["equil/q0"]    = pe.params.q0
+    fid["equil/q95"]   = pe.params.q95
+    fid["equil/betat"] = pe.params.betat
+    fid["equil/betan"] = pe.params.betan
+end
+open(ARGS[2], "w") do f
+    println(f, elapsed)
+end
+"""
+
 """
 Run GPEC for a single commit/ref and case. Dispatches to run_local for
 the working tree or run_at_commit for a git ref.
@@ -109,6 +139,8 @@ Pick the subprocess script template for a `kind="computed"` case.
 function _computed_script_template(case_spec::CaseSpec)
     if case_spec.name == "ggj_reference"
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
+    elseif case_spec.name == "efit_fixedbdy_separatrix"
+        return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
     end
     error("No computed-script template registered for case '$(case_spec.name)'")
 end
