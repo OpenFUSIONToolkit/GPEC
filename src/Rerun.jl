@@ -1,37 +1,14 @@
 # Rerun support: save a run's inputs into gpec.h5 and replay them. Turns a gpec.h5 output into
 # a self-contained snapshot rerunnable from any directory, with optional overrides, without the
-# original g-file / CHEASE / wall / auxiliary TOML inputs.
+# original g-file / CHEASE / wall inputs.
 #
 # Included directly into the GeneralizedPerturbedEquilibrium module, so these functions share
 # its imports (TOML, HDF5, Equilibrium, ForcingTerms, etc.).
 
-# Analytic equilibria carry their parameters in a TOML section rather than an ingest array;
-# replay regenerates them from that section. The eq_type -> section mapping (and which kinds
-# are analytic at all) lives in the `Equilibrium.ANALYTIC_EQ` registry, the single source of
-# truth shared with `setup_equilibrium`.
-
-"""
-    merge_auxiliary_eq_toml!(inputs::Dict{String,Any}, eq_config)
-
-Ensure the analytic-equilibrium parameter section (`[SOL_INPUT]` / `[LAR_INPUT]` /
-`[TJ_ANALYTIC_INPUT]`) is present in the in-memory `inputs` dict so the `gpec.h5` snapshot
-is self-contained. If the section is already embedded in `gpec.toml`, this is a no-op.
-Otherwise it falls back to the deprecated side-car TOML referenced by `eq_config.eq_filename`
-and folds that section in (with a deprecation warning). No-op for non-analytic equilibria.
-"""
-function merge_auxiliary_eq_toml!(inputs::Dict{String,Any}, eq_config::Equilibrium.EquilibriumConfig)
-    spec = get(Equilibrium.ANALYTIC_EQ, eq_config.eq_type, nothing)
-    spec === nothing && return inputs            # file-based: snapshotted via the equilibrium ingest
-    section = spec.section
-    haskey(inputs, section) && return inputs     # already embedded in gpec.toml
-
-    filepath = eq_config.eq_filename
-    isfile(filepath) || return inputs            # nothing to fold; build_analytic_config will report a clear error
-    @warn "Reading analytic parameters from side-car $filepath is deprecated; move [$section] into gpec.toml"
-    aux = TOML.parsefile(filepath)
-    haskey(aux, section) && (inputs[section] = aux[section])
-    return inputs
-end
+# Analytic equilibria carry their parameters in an embedded TOML section rather than an ingest
+# array; replay regenerates them from that section. The eq_type -> section mapping (and which
+# kinds are analytic at all) lives in the `Equilibrium.ANALYTIC_EQ` registry, the single source
+# of truth shared with `setup_equilibrium`.
 
 """
     build_analytic_config(eq_type, inputs)

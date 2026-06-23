@@ -107,12 +107,15 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
     elseif haskey(ANALYTIC_EQ, eq_type)
-        # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry:
-        # build the config from the eq_filename TOML if not already supplied, then run its solver.
+        # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
+        # Their parameters live in the embedded `[*_INPUT]` section and are passed in as the
+        # `*Config` additional_input (built by build_analytic_config on the TOML/rerun paths).
         spec = ANALYTIC_EQ[eq_type]
-        if additional_input === nothing
-            additional_input = spec.config_type(eq_config.eq_filename)
-        end
+        additional_input isa spec.config_type ||
+            error(
+                "setup_equilibrium: analytic eq_type=\"$eq_type\" requires its $(spec.config_type) " *
+                "passed as additional_input (built from the embedded [$(spec.section)] section)."
+            )
         eq_input = spec.run_fn(eq_config, additional_input)
     elseif eq_type == "imas"
         if additional_input === nothing

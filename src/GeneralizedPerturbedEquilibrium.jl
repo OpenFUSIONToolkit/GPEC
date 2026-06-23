@@ -100,8 +100,8 @@ end
     build_inputs_from_toml(path; dd=nothing) -> (inputs, eq_config, additional_input)
 
 Build the pipeline inputs from a working directory containing `gpec.toml`. Returns the
-parsed `inputs` dict (made self-contained for the rerun snapshot), the `EquilibriumConfig`,
-and the `additional_input` consumed by `setup_equilibrium` — an analytic `*Config` for
+parsed `inputs` dict, the `EquilibriumConfig`, and the `additional_input` consumed by
+`setup_equilibrium` — an analytic `*Config` for
 sol/lar/tj equilibria (parameters from the embedded TOML section), the `dd` data dictionary
 for IMAS, or `nothing` for file-based equilibria (efit, chease) that `setup_equilibrium`
 reads from disk.
@@ -111,10 +111,6 @@ function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothi
 
     haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
-
-    # Fold a deprecated analytic side-car TOML into `inputs` if its section isn't already
-    # embedded, so the snapshot writer emits a self-contained TOML blob.
-    merge_auxiliary_eq_toml!(inputs, eq_config)
 
     # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
     # IMAS-fed (via the dd kwarg), or read from a file (additional_input = nothing).

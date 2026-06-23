@@ -51,7 +51,7 @@ end
 
 # Analytic (Solovev) equilibrium: the single end-to-end source + replay. The replay runs from a
 # temp directory containing nothing but the captured gpec.h5, proving the snapshot is
-# self-contained (no auxiliary TOML, g-file, or forcing data), and reproduces the source
+# self-contained (no g-file or forcing data needed), and reproduces the source
 # bit-for-bit across every output dataset.
 @testset "Rerun from gpec.h5 (analytic Solovev)" begin
     template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
@@ -295,10 +295,8 @@ end
     bac = GeneralizedPerturbedEquilibrium.build_analytic_config
     for (eq_type, spec) in Equil.ANALYTIC_EQ
         @test spec.section isa String && !isempty(spec.section)
-        # config_type must build from a parsed TOML table (the rerun/embedded-section path)...
+        # config_type must build from a parsed TOML table (the embedded-section path).
         @test hasmethod(spec.config_type, Tuple{Dict{String,Any}})
-        # ...and from a side-car path string (the deprecated fallback in setup_equilibrium).
-        @test hasmethod(spec.config_type, Tuple{String})
         # run_fn must accept (EquilibriumConfig, <its config type>).
         @test hasmethod(spec.run_fn, Tuple{Equil.EquilibriumConfig,spec.config_type})
         # build_analytic_config resolves the section to the right config type using defaults.

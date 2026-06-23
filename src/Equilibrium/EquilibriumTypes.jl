@@ -224,21 +224,7 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     zeroth::Bool = false
 end
 
-"""
-Outer constructor for LargeAspectRatioConfig that enables a toml file
-interface for specifying the configuration settings
-"""
-function LargeAspectRatioConfig(path::String)
-    raw = TOML.parsefile(path)
-    input_data = get(raw, "LAR_INPUT", Dict())
-    return LargeAspectRatioConfig(; symbolize_keys(input_data)...)
-end
-
-"""
-Outer constructor for LargeAspectRatioConfig from a parsed TOML dictionary.
-Supports embedding the LAR analytic-equilibrium parameters directly in
-`gpec.toml` under `[LAR_INPUT]` instead of a separate `lar.toml`.
-"""
+"Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table."
 function LargeAspectRatioConfig(input_dict::Dict{String,Any})
     return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
 end
@@ -278,18 +264,7 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
-function TJAnalyticConfig(path::String)
-    raw = TOML.parsefile(path)
-    input_data = get(raw, "TJ_ANALYTIC_INPUT", Dict())
-    return TJAnalyticConfig(; symbolize_keys(input_data)...)
-end
-
-"""
-Outer constructor for TJAnalyticConfig from a parsed TOML dictionary. Supports
-embedding the TJ-analytic equilibrium parameters (cf. R. Fitzpatrick's
-TJ code, https://github.com/rfitzp/TJ) directly in the main `gpec.toml`
-under `[TJ_ANALYTIC_INPUT]`, removing the need for a separate side-car file.
-"""
+"Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table."
 function TJAnalyticConfig(input_dict::Dict{String,Any})
     return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
@@ -325,21 +300,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
     f0fac::Float64 = 1       # scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 end
 
-"""
-Outer constructor for SolovevConfig that enables a toml file
-interface for specifying the configuration settings
-"""
-function SolovevConfig(path::String) # if we use @kwdef, it generates SolovevConfig() so it conflicts with this line.
-    raw = TOML.parsefile(path)
-    input_data = get(raw, "SOL_INPUT", Dict())
-    return SolovevConfig(; symbolize_keys(input_data)...)
-end
-
-"""
-Outer constructor for SolovevConfig from a parsed TOML dictionary.
-Supports embedding the Solovev analytic-equilibrium parameters directly
-in `gpec.toml` under `[SOL_INPUT]` instead of a separate `sol.toml`.
-"""
+"Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table."
 function SolovevConfig(input_dict::Dict{String,Any})
     return SolovevConfig(; symbolize_keys(input_dict)...)
 end
