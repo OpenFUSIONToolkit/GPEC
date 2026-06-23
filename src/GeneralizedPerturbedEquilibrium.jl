@@ -58,9 +58,9 @@ using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
-const _DEPRECATED_FFS_KEYS = ("delta_mband", "mband")
+const _DEPRECATED_FFS_KEYS = ("mer_flag")
 
-# Drop deprecated [ForceFreeStates] keys (e.g. banded-matrix removal) so legacy gpec.toml files
+# Drop deprecated [ForceFreeStates] keys so legacy gpec.toml files
 # keep parsing instead of throwing an unknown-keyword error.
 function _drop_deprecated_ffs_keys!(table)
     for k in _DEPRECATED_FFS_KEYS
