@@ -239,8 +239,7 @@ end
 3D toroidal surface geometry for vacuum boundary integral calculations.
 
 Built by toroidally extruding a 2D poloidal contour (`PlasmaGeometry`) and computing
-Cartesian coordinates, tangent vectors, normals, and differential area elements. Note
-that the gradient/area elements are scaled by dθ and dζ.
+Cartesian coordinates, tangent vectors, normals, and differential area elements.
 
 # Fields
 
