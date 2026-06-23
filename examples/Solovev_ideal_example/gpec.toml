@@ -32,7 +32,7 @@ tw = 0.05                               # Sharpness of wall corners (try 0.05 as
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
 [ForcingTerms]
-forcing_data_file = "forcing.dat"       # Manual mode table (n, m, real, imag)
+forcing_data_file = "forcing.dat"       # Manual mode table (n, m, amplitude_real, amplitude_imag)
 forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 
 [PerturbedEquilibrium]

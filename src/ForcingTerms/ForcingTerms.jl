@@ -83,14 +83,14 @@ from the file (or `"normal_field_T"` by default if no tag is present).
 1  3  0.3  -0.2
 ```
 
-Columns: n, m, real(amplitude), [optional] imag(amplitude)
+Columns: n, m, amplitude_real, amplitude_imag
 
 **HDF5 format** — optional root attribute `normalization` (string), plus datasets:
 
   - `"n"`: Integer array of toroidal mode numbers
   - `"m"`: Integer array of poloidal mode numbers
   - `"amplitude_real"`: Real parts of amplitudes
-  - `"amplitude_imag"`: Imaginary parts of amplitudes (optional, default 0)
+  - `"amplitude_imag"`: Imaginary parts of amplitudes
 """
 function load_forcing_data!(
     forcing_modes::Vector{ForcingMode},
@@ -125,7 +125,7 @@ end
 Load forcing data from ASCII file. Returns normalization tag (`"normal_field_T"` by default).
 
 Optional first `# normalization: <tag>` header line sets the normalization.
-Remaining `#`-prefixed lines and blank lines are ignored. Data columns: n, m, real, [imag].
+Remaining `#`-prefixed lines and blank lines are ignored. Data columns: n, m, amplitude_real, amplitude_imag.
 """
 function load_forcing_ascii!(
     forcing_modes::Vector{ForcingMode},
@@ -155,8 +155,8 @@ function load_forcing_ascii!(
     nrows = size(data, 1)
     ncols = size(data, 2)
 
-    if ncols < 3
-        error("ASCII forcing file must have at least 3 columns (n, m, real_amplitude)")
+    if ncols < 4
+        error("ASCII forcing file must have 4 columns (n, m, amplitude_real, amplitude_imag)")
     end
 
     empty!(forcing_modes)
@@ -165,7 +165,7 @@ function load_forcing_ascii!(
         n = Int(data[i, 1])
         m = Int(data[i, 2])
         real_part = Float64(data[i, 3])
-        imag_part = ncols >= 4 ? Float64(data[i, 4]) : 0.0
+        imag_part = Float64(data[i, 4])
 
         push!(forcing_modes, ForcingMode(;
             n=n,
@@ -182,7 +182,7 @@ end
 Load forcing data from HDF5 file. Returns normalization tag (`"normal_field_T"` by default).
 
 Optional root attribute `normalization` (string) sets the normalization.
-Required datasets: `n`, `m`, `amplitude_real`. Optional: `amplitude_imag`.
+Required datasets: `n`, `m`, `amplitude_real`, `amplitude_imag`.
 """
 function load_forcing_hdf5!(
     forcing_modes::Vector{ForcingMode},
@@ -200,7 +200,7 @@ function load_forcing_hdf5!(
         n_array = read(file, "n")
         m_array = read(file, "m")
         amp_real = read(file, "amplitude_real")
-        amp_imag = haskey(file, "amplitude_imag") ? read(file, "amplitude_imag") : zeros(length(n_array))
+        amp_imag = read(file, "amplitude_imag")
 
         if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
             error("Inconsistent array lengths in HDF5 forcing file")
@@ -258,7 +258,7 @@ function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
     n_array = read(group, "n")
     m_array = read(group, "m")
     amp_real = read(group, "amplitude_real")
-    amp_imag = haskey(group, "amplitude_imag") ? read(group, "amplitude_imag") : zeros(length(n_array))  # optional for hand-authored groups
+    amp_imag = read(group, "amplitude_imag")
 
     if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
         error("Inconsistent array lengths in HDF5 forcing group")

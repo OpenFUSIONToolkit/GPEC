@@ -61,7 +61,7 @@ equal_arc_wall = false                  # Equal arc length distribution of nodes
 
 # Uncomment to enable perturbed equilibrium calculations:
 # [PerturbedEquilibrium]
-# forcing_data_file = "forcing.dat"      # Manual mode table (n, m, real, imag)
+# forcing_data_file = "forcing.dat"      # Manual mode table (n, m, amplitude_real, amplitude_imag)
 # forcing_data_format = "ascii"          # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 # fixed_boundary = false                 # Use fixed boundary conditions
 # output_eigenmodes = true               # Output eigenmode fields as b-fields
