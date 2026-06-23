@@ -48,7 +48,6 @@ include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
 
-# Rerun snapshot/replay helpers, included directly into this module
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
@@ -169,15 +168,12 @@ function main_from_inputs(
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
+
+    # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
-    # `inputs` is supplied by the caller (parsed from gpec.toml on the normal path, or
-    # reconstructed from the gpec.h5 TOML blob on the rerun path), so do not re-read it here.
     ffs_table = inputs["ForceFreeStates"]
     _drop_deprecated_ffs_keys!(ffs_table)
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
-
-    # inputs/eq_config/additional_input are fully resolved by the caller; this body does no
-    # source dispatch — setup_equilibrium consumes additional_input directly.
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
@@ -445,7 +441,18 @@ function main_from_inputs(
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, inputs, forcing_modes_snapshot; ballooning_boundary=ballooning_boundary)
+        write_outputs_to_HDF5(
+            ctrl,
+            equil,
+            intr,
+            odet,
+            ctrl.vac_flag ? vac_data : nothing,
+            ffit,
+            git_version,
+            inputs,
+            forcing_modes_snapshot;
+            ballooning_boundary=ballooning_boundary
+        )
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
