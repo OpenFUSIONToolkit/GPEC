@@ -33,9 +33,9 @@ end
 function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     h = psi_b - psi_a
     t = (psi - psi_a) / h
-    h00 = 2t^3 - 3t^2 + 1;
+    h00 = 2t^3 - 3t^2 + 1
     h10 = t^3 - 2t^2 + t
-    h01 = -2t^3 + 3t^2;
+    h01 = -2t^3 + 3t^2
     h11 = t^3 - t^2
     return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
 end
@@ -203,18 +203,18 @@ function compute_singular_coupling_metrics!(
 
         u_node = ForceFreeStates_results.u_store
         ud_node = ForceFreeStates_results.ud_store
-        ua_l = u_node[resnum, :, 1, il_l];
+        ua_l = u_node[resnum, :, 1, il_l]
         ub_l = u_node[resnum, :, 1, ir_l]
-        ua_r = u_node[resnum, :, 1, il_r];
+        ua_r = u_node[resnum, :, 1, il_r]
         ub_r = u_node[resnum, :, 1, ir_r]
-        dua_l = ud_node[resnum, :, 1, il_l];
+        dua_l = ud_node[resnum, :, 1, il_l]
         dub_l = ud_node[resnum, :, 1, ir_l]
-        dua_r = ud_node[resnum, :, 1, il_r];
+        dua_r = ud_node[resnum, :, 1, il_r]
         dub_r = ud_node[resnum, :, 1, ir_r]
 
-        psi_il_l = psi_store_all[il_l];
+        psi_il_l = psi_store_all[il_l]
         psi_ir_l = psi_store_all[ir_l]
-        psi_il_r = psi_store_all[il_r];
+        psi_il_r = psi_store_all[il_r]
         psi_ir_r = psi_store_all[ir_r]
 
         u_l = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
@@ -226,9 +226,9 @@ function compute_singular_coupling_metrics!(
         ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
         ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
 
-        q_l = equil.profiles.q_spline(lpsi);
+        q_l = equil.profiles.q_spline(lpsi)
         q1_l = equil.profiles.q_deriv(lpsi)
-        q_r = equil.profiles.q_spline(rpsi);
+        q_r = equil.profiles.q_spline(rpsi)
         q1_r = equil.profiles.q_deriv(rpsi)
         singfac_l = m_res - nn * q_l
         singfac_r = m_res - nn * q_r
@@ -236,9 +236,9 @@ function compute_singular_coupling_metrics!(
         jump_vec = Vector{ComplexF64}(undef, numpert_total)
         for k in 1:numpert_total
             ck = @view C_coeffs[:, k]
-            xsp_l = dot(u_l, ck);
+            xsp_l = dot(u_l, ck)
             xsp1_l = dot(ud_l, ck)
-            xsp_r = dot(u_r, ck);
+            xsp_r = dot(u_r, ck)
             xsp1_r = dot(ud_r, ck)
             bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
             bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
