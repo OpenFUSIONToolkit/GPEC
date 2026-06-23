@@ -8,12 +8,12 @@ name = "diiid_n1"
 description = "DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium"
 example_dir = "examples/DIIID-like_ideal_example"
 
-# Energies — leading eigenvalues at the final truncation (psilim). eigenmode_* are now power-normalized (Φ-space, Jacobian-invariant); ξ-space counterparts live under FreeBoundaryStability/XiNorm/ and are not tracked.
+# Energies — leading eigenvalues at the final truncation (psilim). eigenmode_* are now root-area-weighted (Φ-space, Jacobian-invariant); ξ-space counterparts live under FreeBoundaryStability/XiNorm/ and are not tracked.
 [quantities.et_real]
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "Power Normalized total energy Re(et[1])"
+label = "root-area-weighted total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
 
@@ -21,7 +21,7 @@ order = 10
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "imag_first"
-label = "Power Normalized total energy Im(et[1])"
+label = "root-area-weighted total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
 
@@ -29,7 +29,7 @@ order = 11
 h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "Power Normalized plasma energy Re(ep[1])"
+label = "root-area-weighted plasma energy Re(ep[1])"
 noise_threshold = 1e-10
 order = 12
 
@@ -37,7 +37,7 @@ order = 12
 h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "Power Normalized vacuum energy Re(ev[1])"
+label = "root-area-weighted vacuum energy Re(ev[1])"
 noise_threshold = 1e-10
 order = 13
 
@@ -54,7 +54,7 @@ order = 14
 h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "Power Normalized plasma energy (all)"
+label = "root-area-weighted plasma energy (all)"
 noise_threshold = 1e-10
 order = 20
 
@@ -62,7 +62,7 @@ order = 20
 h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "Power Normalized vacuum energy (all)"
+label = "root-area-weighted vacuum energy (all)"
 noise_threshold = 1e-10
 order = 21
 
@@ -70,7 +70,7 @@ order = 21
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "Power Normalized total energy (all)"
+label = "root-area-weighted total energy (all)"
 noise_threshold = 1e-10
 order = 22
 
@@ -299,19 +299,19 @@ label = "Chirikov parameter"
 noise_threshold = 1e-8
 order = 82
 
-[quantities.resonant_flux]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+[quantities.resonant_area_weighted_field]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "norm"
-label = "||resonant flux||"
+label = "||resonant area-weighted field||"
 noise_threshold = 1e-8
 order = 83
 
-[quantities.resonant_flux_all]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+[quantities.resonant_area_weighted_field_all]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "all_complex"
-label = "resonant flux Phi_res"
+label = "resonant area-weighted field b^r"
 noise_threshold = 1e-8
 
 # Perturbed equilibrium: energies

@@ -25,6 +25,8 @@ using HDF5
             # not numeric regression — the mode-converged physical value is pinned in the
             # regression harness (examples/Solovev_kinetic_calculated_example). Assert only
             # nerfed-grid-robust facts: finite and positive (Solovev is stable).
+            # ξ-space (XiNorm) eigenvalues are read here because root-area weighting collapses
+            # these stable modes to ~0, making them unusable as a regression anchor.
             et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
             @test isfinite(real(et[1]))
             @test real(et[1]) > 0
@@ -43,6 +45,8 @@ using HDF5
             # harness on the mode-converged deck, not here — et[1] is a near-marginal,
             # ill-conditioned, FP-reassociation-sensitive quantity on this grid (sign not even
             # robust across platforms), so no value is pinned.
+            # ξ-space (XiNorm) eigenvalues are read here because root-area weighting collapses
+            # these modes to ~0, making them unusable as a regression anchor.
             et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
             @test isfinite(real(et[1]))
         end

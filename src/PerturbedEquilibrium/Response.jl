@@ -50,39 +50,64 @@ function compute_plasma_response!(
     surface_inductance = compute_surface_inductance_from_greens(grri_2d, grre_2d, ffs_intr, nn, ν_vac)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
-    # Reluctance Rho = L^{-1} * (Lambda - L) * L^{-1}  (gpout_resp convention)
+    # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
+    # Λ (plasma inductance) is not Hermitian — its anti-Hermitian part is the dissipative/torque response — so the adjoint matters.
     L_inv = inv(surface_inductance)
-    reluctance = L_inv * (plasma_inductance - surface_inductance) * L_inv
+    reluctance = L_inv * (plasma_inductance' - surface_inductance) * L_inv
 
-    # Store control surface matrices in state for HDF5 output
-    state.plasma_inductance  = plasma_inductance
-    state.surface_inductance = surface_inductance
-    state.permeability       = permeability
-    state.reluctance         = reluctance
-
-    # Store permeability in internal state for singular coupling use
+    # Store permeability in internal state for singular coupling / field reconstruction.
+    # These consumers operate on the physical control-surface flux Φ_x, so the internal
+    # copy stays in flux space; only the stored/output quantities are conformed to fields below.
     intr.plasma_response = permeability
 
-    forcing_vector  = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
-    response_vector = compute_plasma_response_vector(permeability, forcing_vector)
+    # Conform the control-surface matrices to the coordinate-invariant root-area-weighted
+    # field (b̃) space for output (issue #233 / Pharr 2026). Store the b̃→b̄ operator S = Σ/√A
+    # and the scalar surface area A so users can recover the area-weighted field (b̄ = S·b̃) or
+    # flux (Φ = A·b̄) — see Utils.jl output docs.
+    rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs_intr)
+    field_mats = field_space_response_matrices(plasma_inductance, surface_inductance, permeability, reluctance, rootarea_to_area_weight, surface_area)
+    state.plasma_inductance       = field_mats.plasma_inductance
+    state.surface_inductance      = field_mats.surface_inductance
+    state.permeability            = field_mats.permeability
+    state.reluctance              = field_mats.reluctance
+    state.rootarea_to_area_weight = rootarea_to_area_weight
+    state.surface_area            = surface_area
 
-    state.forcing_vec  = forcing_vector
-    state.response_vec = response_vector
+    # Forcing and response on the control surface. Flux Φ appears only as a brief internal bridge:
+    # forcing arrives as Φ_x, the field reconstruction below consumes Φ_tot, and the b̃ spectra are
+    # formed via the conform operator R = S·A (Φ = R·b̃).
+    forcing_flux  = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
+    response_flux = compute_plasma_response_vector(permeability, forcing_flux)
 
-    # Scalar energies and torque, ported from Fortran gpout. forcing_vector and
-    # response_vector are Phi_x and Phi_tot in the gpeq_weight=1 basis.
+    # Output forcing/response in the three Pharr field representations (all tesla):
+    #   b̃ (root-area-weighted) = R⁻¹·Φ,  b (bare) = Σ⁻¹·b̃,  b̄ (area-weighted) = S·b̃.
+    flux_conform     = rootarea_to_area_weight .* surface_area          # R = Σ·√A  (b̃ → flux)
+    bare_to_rootarea = rootarea_to_area_weight .* sqrt(surface_area)    # Σ        (bare → b̃)
+    forcing_b_rootarea  = flux_conform \ forcing_flux
+    response_b_rootarea = flux_conform \ response_flux
+    state.forcing_b_rootarea  = forcing_b_rootarea
+    state.response_b_rootarea = response_b_rootarea
+    state.forcing_b   = bare_to_rootarea \ forcing_b_rootarea
+    state.response_b  = bare_to_rootarea \ response_b_rootarea
+    state.forcing_b_area  = rootarea_to_area_weight * forcing_b_rootarea
+    state.response_b_area = rootarea_to_area_weight * response_b_rootarea
+
+    # Scalar energies and torque (Joules), ported from Fortran gpout. These are congruence-invariant
+    # (energy = Φ†·G⁻¹·Φ = b̃†·G̃⁻¹·b̃), so they are evaluated from the brief internal flux vectors with
+    # the well-conditioned flux-space inductances — the b̃ form routes through inv(R⁻¹LR⁻†) and is
+    # needlessly ill-conditioned. The result is a physical scalar, not a stored flux quantity.
     L_surf_inv = inv(surface_inductance)
     L_plas_inv = inv(plasma_inductance)
-    vy = dot(forcing_vector,  L_surf_inv * forcing_vector)  / 4
-    sy = dot(response_vector, L_surf_inv * response_vector) / 4
-    py = dot(response_vector, L_plas_inv * response_vector) / 4
+    vy = dot(forcing_flux,  L_surf_inv * forcing_flux)  / 4
+    sy = dot(response_flux, L_surf_inv * response_flux) / 4
+    py = dot(response_flux, L_plas_inv * response_flux) / 4
     state.vacuum_energy   = real(vy)
     state.surface_energy  = real(sy)
     state.plasma_energy   = real(py)              # Fortran's "total energy" is this pengy
     state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(
-        response_vector, flux_matrix, ForceFreeStates_results, equil, ffs_intr, intr,
+        response_flux, flux_matrix, ForceFreeStates_results, equil, ffs_intr, intr,
         metric, ffit, ctrl
     )
 
@@ -98,6 +123,6 @@ function compute_plasma_response!(
     state.xi_n_modes = xi_n_modes
 
     if ctrl.verbose
-        @info "Response complete: $(length(intr.forcing_modes)) forcing modes, max amplitude = $(@sprintf("%.3e", maximum(abs.(response_vector))))"
+        @info "Response complete: $(length(intr.forcing_modes)) forcing modes, max amplitude = $(@sprintf("%.3e", maximum(abs.(response_flux))))"
     end
 end
