@@ -24,8 +24,7 @@ export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings;
-        green_only=false)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
 
@@ -47,7 +46,6 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
   - `inputs`: `VacuumInput` struct with mode numbers, grid resolution, and boundary info.
   - `wall_settings::WallShapeSettings`: Wall geometry configuration.
-  - `green_only`: If true, skip building the response matrix `wv` and return zeros for `wv` and `xzpts`.
 
 # Returns
 
@@ -71,8 +69,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     wall_pts::AbstractMatrix{Float64},
     inputs::VacuumInput,
     wall_settings::WallShapeSettings;
-    n_override::Union{Nothing,Int}=nothing,
-    green_only::Bool=false
+    n_override::Union{Nothing,Int}=nothing
 )
 
     # Initialize surface geometries
@@ -139,48 +136,42 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     F_int = lu!(grad_green_interior)
     ldiv!(F_int, grri)
 
-    # Always initialise wv to zero so that green_only keeps it zeroed
-    if !green_only
-        # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-        arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
-        fourier_inverse_transform!(arr, grre, cos_mn_basis)
-        fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
-        fourier_inverse_transform!(ari, grre, sin_mn_basis)
-        fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
+    # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
+    arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
+    fourier_inverse_transform!(arr, grre, cos_mn_basis)
+    fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
+    fourier_inverse_transform!(ari, grre, sin_mn_basis)
+    fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
 
-        # fourier_inverse_transform! uses 1/N normalization; restore the 4π² physics factor
-        # from the vacuum Green's function integral [Chance 2007 eq. 114-118]
-        arr .*= 4π^2
-        aii .*= 4π^2
-        ari .*= 4π^2
-        air .*= 4π^2
+    # fourier_inverse_transform! uses 1/N normalization; restore the 4π² physics factor
+    # from the vacuum Green's function integral [Chance 2007 eq. 114-118]
+    arr .*= 4π^2
+    aii .*= 4π^2
+    ari .*= 4π^2
+    air .*= 4π^2
 
-        # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
-        wv .= complex.(arr .+ aii, air .- ari)
-        inputs.force_wv_symmetry && hermitianpart!(wv)
+    # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
+    wv .= complex.(arr .+ aii, air .- ari)
+    inputs.force_wv_symmetry && hermitianpart!(wv)
 
-        # Fill coordinate arrays
-        if inputs.nzeta > 1 # 3D
-            plasma_pts .= plasma_surf.r
-            wall_pts .= wall.r
-        else # 2D
-            @views begin
-                plasma_pts[:, 1] .= plasma_surf.x
-                plasma_pts[:, 2] .= 0.0
-                plasma_pts[:, 3] .= plasma_surf.z
-                wall_pts[:, 1] .= wall.x
-                wall_pts[:, 2] .= 0.0
-                wall_pts[:, 3] .= wall.z
-            end
+    # Fill coordinate arrays
+    if inputs.nzeta > 1 # 3D
+        plasma_pts .= plasma_surf.r
+        wall_pts .= wall.r
+    else # 2D
+        @views begin
+            plasma_pts[:, 1] .= plasma_surf.x
+            plasma_pts[:, 2] .= 0.0
+            plasma_pts[:, 3] .= plasma_surf.z
+            wall_pts[:, 1] .= wall.x
+            wall_pts[:, 2] .= 0.0
+            wall_pts[:, 3] .= wall.z
         end
     end
 end
 
 """
-    compute_vacuum_response(
-        inputs::VacuumInput,
-        wall_settings::WallShapeSettings;
-        green_only=false)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 Allocate and return the vacuum response matrix and Green's functions for the given
 vacuum inputs.
@@ -190,12 +181,12 @@ implementation. For performance‑critical paths that already own preallocated s
 (e.g. `ForceFreeStates.VacuumData`), prefer the in‑place method to avoid extra
 heap allocations.
 """
-@with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
+@with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     # Allocate storage for the vacuum response matrix and Green's functions
     numpoints = inputs.mtheta * inputs.nzeta
     num_modes = inputs.mpert * inputs.npert
-    
+
     vac = (
         wv=zeros(ComplexF64, num_modes, num_modes),
         grri=zeros(2 * numpoints, 2 * num_modes),
@@ -203,17 +194,13 @@ heap allocations.
         plasma_pts=zeros(numpoints, 3),
         wall_pts=zeros(numpoints, 3)
     )
-    compute_vacuum_response!(vac, inputs, wall_settings; green_only=green_only)
+    compute_vacuum_response!(vac, inputs, wall_settings)
 
     return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
 end
 
 """
-    compute_vacuum_response!(
-        vac_data,
-        inputs::VacuumInput,
-        wall_settings::WallShapeSettings;
-        green_only=false)
+    compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 In-place variant that computes the vacuum response and directly populates the arrays
 stored in `vac_data`.
@@ -230,7 +217,7 @@ compatible sizes:
 This is designed to work with `ForceFreeStates.VacuumData` but does not depend on
 its concrete type (duck-typed on field names only).
 """
-function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
+function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     mpert = inputs.mpert
     npert = inputs.npert
@@ -245,8 +232,7 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
             vac_data.plasma_pts,
             vac_data.wall_pts,
             inputs,
-            wall_settings;
-            green_only=green_only
+            wall_settings
         )
     else
         # 2D vacuum: fill diagonal blocks of the response matrix
@@ -270,8 +256,7 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
                 vac_data.wall_pts,
                 inputs,
                 wall_settings;
-                n_override=n,
-                green_only=green_only
+                n_override=n
             )
         end
     end
