@@ -7,6 +7,8 @@
 *.i
 *.out
 *.h5
+# kinetic-profile inputs are tracked despite the blanket *.h5 (output) ignore
+!examples/**/*kinetic*.h5
 .vscode
 *.DS_Store
 *.pdf
