@@ -121,9 +121,9 @@ end
     template_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
     src_dat = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries", "d3d_il.dat")
 
-    read_resflux(path) =
+    read_resfield(path) =
         h5open(path, "r") do h5
-            key = "perturbed_equilibrium/singular_coupling/resonant_flux"
+            key = "perturbed_equilibrium/singular_coupling/resonant_area_weighted_field"
             haskey(h5, key) ? read(h5, key) : ComplexF64[]
         end
 
@@ -161,9 +161,9 @@ end
             @test haskey(h5, "input/raw_inputs/coils")
             @test haskey(h5, "input/raw_inputs/coils/my_coils")
         end
-        src_flux = read_resflux(source_h5)
-        @test !isempty(src_flux)
-        @test maximum(abs.(src_flux)) > 0
+        src_field = read_resfield(source_h5)
+        @test !isempty(src_field)
+        @test maximum(abs.(src_field)) > 0
 
         # Delete the .dat: the snapshot must now be the only source of geometry.
         rm(coil_dat)
@@ -183,7 +183,7 @@ end
                 ])
                 replay_h5 = joinpath(replay_dir, "gpec_rerun.h5")
                 @test isfile(replay_h5)
-                @test read_resflux(replay_h5) ≈ src_flux rtol = 1e-6
+                @test read_resfield(replay_h5) ≈ src_field rtol = 1e-6
             end
         end
     end
