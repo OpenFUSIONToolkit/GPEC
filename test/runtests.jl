@@ -24,6 +24,7 @@ else
     include("./runtests_fouriertransforms.jl")
     include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
+    include("./runtests_coordinate_invariant.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_riccati.jl")
     include("./runtests_parallel_integration.jl")

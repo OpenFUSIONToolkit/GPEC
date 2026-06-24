@@ -66,50 +66,50 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         force_termination, use_galgrid, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
-            power_b = 0;
-            power_bp = 0;
-            power_r = 0;
+            power_b = 0
+            power_bp = 0
+            power_r = 0
             power_rc = 0
         elseif jac_type == "pest"
             @info "Forcing pest coordinate jacobian exponents: power_*"
-            power_b = 0;
-            power_bp = 0;
-            power_r = 2;
+            power_b = 0
+            power_bp = 0
+            power_r = 2
             power_rc = 0
         elseif jac_type == "equal_arc"
             @info "Forcing equal_arc coordinate jacobian exponents: power_*"
-            power_b = 0;
-            power_bp = 1;
-            power_r = 0;
+            power_b = 0
+            power_bp = 1
+            power_r = 0
             power_rc = 0
         elseif jac_type == "boozer"
             @info "Forcing boozer coordinate jacobian exponents: power_*"
-            power_b = 2;
-            power_bp = 0;
-            power_r = 0;
+            power_b = 2
+            power_bp = 0
+            power_r = 0
             power_rc = 0
         elseif jac_type == "park"
             @info "Forcing park coordinate jacobian exponents: power_*"
-            power_b = 1;
-            power_bp = 0;
-            power_r = 0;
+            power_b = 1
+            power_bp = 0
+            power_r = 0
             power_rc = 0
         elseif jac_type == "other"
             # Normalize to a named type when the powers match, so fast paths are taken.
             if power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "hamada";
+                jac_type = "hamada"
                 @info "Recognized hamada jacobian from power exponents"
             elseif power_b == 0 && power_bp == 0 && power_r == 2 && power_rc == 0
-                jac_type = "pest";
+                jac_type = "pest"
                 @info "Recognized pest jacobian from power exponents"
             elseif power_b == 0 && power_bp == 1 && power_r == 0 && power_rc == 0
-                jac_type = "equal_arc";
+                jac_type = "equal_arc"
                 @info "Recognized equal_arc jacobian from power exponents"
             elseif power_b == 2 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "boozer";
+                jac_type = "boozer"
                 @info "Recognized boozer jacobian from power exponents"
             elseif power_b == 1 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "park";
+                jac_type = "park"
                 @info "Recognized park jacobian from power exponents"
             else
                 @info "Using manual jacobian exponents: power b, bp, r, rc = $(power_b), $(power_bp), $(power_r), $(power_rc)"

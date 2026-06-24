@@ -30,7 +30,14 @@ function load_case(filepath::String)::CaseSpec
         sort!(quantities; by=q -> q.order)
     end
 
-    return CaseSpec(name, description, example_dir, quantities, kind)
+    overrides = Dict{String,Any}()
+    if haskey(data, "overrides")
+        for (k, v) in data["overrides"]
+            overrides[k] = v
+        end
+    end
+
+    return CaseSpec(name, description, example_dir, quantities, kind, overrides)
 end
 
 function load_all_cases(cases_dir::String)::Dict{String,CaseSpec}

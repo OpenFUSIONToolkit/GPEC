@@ -534,18 +534,22 @@ function main_from_inputs(
         @info "\n  KineticForces\n$_SECTION"
         kf_start = time()
 
-        # kf_ctrl and kinetic_profiles were loaded once above the stability block.
-        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
-        if @isdefined(pe_state)
+        # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
+        # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
+        if !@isdefined(pe_state)
+            @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
+        else
+            # kf_ctrl and kinetic_profiles were loaded once above the stability block.
+            kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
             KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
-        end
 
-        kf_state = KineticForces.KineticForcesState()
-        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
+            kf_state = KineticForces.KineticForcesState()
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
 
-        if kf_ctrl.write_outputs_to_HDF5
-            h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                KineticForces.write_to_hdf5!(h5file, kf_state)
+            if kf_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                    KineticForces.write_to_hdf5!(h5file, kf_state)
+                end
             end
         end
 
@@ -685,17 +689,17 @@ function write_outputs_to_HDF5(
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
-        # Power-normalized flux (Φ-space) energies are the default — they are Jacobian-
+        # Root-area-weighted (Φ-space) energies are the default — they are Jacobian-
         # invariant. The ξ-space values sit under EdgeScan/XiNorm/ and are retained for
         # benchmarking against the Fortran GPEC lineage.
         if !isempty(odet.edge_scan.psi)
             es = odet.edge_scan
             out_h5["EdgeScan/psi"] = es.psi
             out_h5["EdgeScan/q"] = es.q
-            out_h5["EdgeScan/total_energy"] = es.pn_total_eigenvalue
-            out_h5["EdgeScan/plasma_energy"] = es.pn_plasma_energy
-            out_h5["EdgeScan/vacuum_energy"] = es.pn_vacuum_energy
-            out_h5["EdgeScan/vacuum_eigenvalue"] = es.pn_vacuum_eigenvalue
+            out_h5["EdgeScan/total_energy"] = es.rootA_total_eigenvalue
+            out_h5["EdgeScan/plasma_energy"] = es.rootA_plasma_energy
+            out_h5["EdgeScan/vacuum_energy"] = es.rootA_vacuum_energy
+            out_h5["EdgeScan/vacuum_eigenvalue"] = es.rootA_vacuum_eigenvalue
             out_h5["EdgeScan/XiNorm/total_energy"] = es.total_eigenvalue
             out_h5["EdgeScan/XiNorm/plasma_energy"] = es.plasma_energy
             out_h5["EdgeScan/XiNorm/vacuum_energy"] = es.vacuum_energy
@@ -743,19 +747,19 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
 
-        # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
+        # Write free-boundary stability data. Root-area-weighted (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
         # W_freeboundary_eigenmodes holds the eigenvector matrix of W_freeboundary with
         # columns sorted most-unstable first; the same phase normalization is applied in
         # both spaces (largest-magnitude entry made real-positive).
-        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.pn_wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.pn_wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.pn_wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.pn_wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.pn_et : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.pn_ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.pn_ev : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.rootA_wt0 : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.rootA_wp : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.rootA_wv : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.rootA_wt : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.rootA_et : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.rootA_ep : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.rootA_ev : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]

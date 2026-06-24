@@ -20,7 +20,7 @@ mat_flag = true               # Construct coefficient matrices for diagnostic pu
 ode_flag = true               # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+psiedge = 1.0                # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
@@ -29,8 +29,8 @@ nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
-delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 96                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+mthvac = 64                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+nzvac = 96                    # Number of points used in splines over toroidal angle at the plasma-vacuum interface
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model

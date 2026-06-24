@@ -32,10 +32,7 @@ and data dumping.
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
-    @inbounds for ipert in 1:numpert_total
-        @views vac_data.wv[ipert, :] .*= singfac[ipert]
-        @views vac_data.wv[:, ipert] .*= singfac[ipert]
-    end
+    vac_data.wv .*= singfac .* singfac'
 
     # Least stable eigenvalue of the vacuum matrix alone (should be PSD; clamp numerical noise to zero)
     vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv)))))
@@ -83,31 +80,29 @@ and data dumping.
         vac_data.wt[:, isol] .*= phase
     end
 
-    # Compute plasma and vacuum contributions.
-    # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
+    # Project W_p and W_v into the eigenmode basis. Diagonal entries give
+    # the plasma/vacuum energy split for each mode: et[i] = ep[i] + ev[i]
     mul!(tmp_mat, wp, vac_data.wt)
-    mul!(wpt, adjoint(vac_data.wt), tmp_mat)
+    mul!(wpt, vac_data.wt', tmp_mat)
     mul!(tmp_mat, vac_data.wv, vac_data.wt)
-    mul!(wvt, adjoint(vac_data.wt), tmp_mat)
-    for ipert in 1:numpert_total
-        vac_data.ep[ipert] = wpt[ipert, ipert]
-        vac_data.ev[ipert] = wvt[ipert, ipert]
-    end
+    mul!(wvt, vac_data.wt', tmp_mat)
+    vac_data.ep .= diag(wpt)
+    vac_data.ev .= diag(wvt)
 
-    # Eigenspectrum of W_Φ at psilim — Jacobian-invariant energy values; see PowerNorm.jl.
+    # Eigenspectrum of W_Φ at psilim — Jacobian-invariant energy values; see RootAreaWeighted.jl.
     # Computed directly here (no spline); spline is used by the edge scan.
     mtheta_eq = length(equil.rzphi_ys)
-    ft_pn = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, mlow)
-    sqrtamat_pn = compute_sqrtamat(equil, psilim, ft_pn)
-    jarea_pn = Equilibrium.flux_surface_area(equil, psilim, mtheta_eq)
-    pn_result = compute_power_norm_eigenvalues(vac_data.wt0, wp, vac_data.wv, sqrtamat_pn, jarea_pn, equil, psilim, intr; all_eigenvalues=true)
-    vac_data.pn_et .= pn_result.pn_et_all
-    vac_data.pn_ep .= pn_result.pn_ep_all
-    vac_data.pn_ev .= pn_result.pn_ev_all
-    vac_data.pn_wt0 .= pn_result.wt_pn
-    vac_data.pn_wp .= pn_result.wp_pn
-    vac_data.pn_wv .= pn_result.wv_pn
-    vac_data.pn_wt .= pn_result.pn_eigenvectors
+    ft_rootA = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, mlow)
+    sqrtamat_rootA = Equilibrium.compute_sqrtamat(equil, psilim, ft_rootA)
+    jarea_rootA = Equilibrium.flux_surface_area(equil, psilim, mtheta_eq)
+    rootA_result = compute_rootarea_eigenvalues(vac_data.wt0, wp, vac_data.wv, sqrtamat_rootA, jarea_rootA, equil, psilim, intr; all_eigenvalues=true)
+    vac_data.rootA_et .= rootA_result.rootA_et_all
+    vac_data.rootA_ep .= rootA_result.rootA_ep_all
+    vac_data.rootA_ev .= rootA_result.rootA_ev_all
+    vac_data.rootA_wt0 .= rootA_result.wt_rootA
+    vac_data.rootA_wp .= rootA_result.wp_rootA
+    vac_data.rootA_wv .= rootA_result.wv_rootA
+    vac_data.rootA_wt .= rootA_result.rootA_eigenvectors
 
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
@@ -141,7 +136,7 @@ Compute a spline of vacuum response matrices over the range of psi from 'ctrl.ps
 same function as `free_wvmats` in the Fortran code. Currently defaults to 4 spline points per
 q-window minimum.
 """
-function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+@with_pool pool function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
     profiles = equil.profiles
 
@@ -149,8 +144,8 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     # TODO: 4 spline points is arbitrary - is there a better way?
     qedge = profiles.q_spline(ctrl.psiedge)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
-    psi_array = zeros(Float64, npsi + 1)
-    wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
+    psi_array = zeros!(pool, Float64, npsi + 1)
+    wv_array = zeros!(pool, ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:(npsi+1)
         # Space points evenly in q over [qedge, qlim] (i=1 → qedge, i=npsi+1 → qlim)
@@ -212,15 +207,12 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     q_at_psifac = equil.profiles.q_spline(odet.psifac)
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((intr.mlow:intr.mhigh) .- q_at_psifac .* (intr.nlow:intr.nhigh)')
-    @inbounds for ipert in 1:Npert
-        @views wv[ipert, :] .*= singfac[ipert]
-        @views wv[:, ipert] .*= singfac[ipert]
-    end
+    wv .*= singfac .* singfac'
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
 
-    # Save wt before eigen (which overwrites the input) for power-norm computation
+    # Save wt before eigen (which overwrites the input) for root-area-weighted computation
     wt_saved = copy(wt)
 
     Ev = eigen(wt)
@@ -261,7 +253,7 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     # negative. Clamp to zero to enforce the physical constraint.
     vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / norm)
 
-    # Eigenspectrum of W_Φ — Jacobian-invariant energy values; see PowerNorm.jl.
+    # Eigenspectrum of W_Φ — Jacobian-invariant energy values; see RootAreaWeighted.jl.
     # Evaluate sqrtamat + jarea from the pre-computed spline.
     mpert = intr.mpert
     sqrtamat_flat = Vector{ComplexF64}(undef, mpert^2 + 1)
@@ -269,9 +261,9 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     sqrtamat_local = reshape(@view(sqrtamat_flat[1:(mpert^2)]), mpert, mpert)
     jarea_local = real(sqrtamat_flat[end])
 
-    pn_result = compute_power_norm_eigenvalues(wt_saved, wp, wv, sqrtamat_local, jarea_local, equil, odet.psifac, intr)
+    rootA_result = compute_rootarea_eigenvalues(wt_saved, wp, wv, sqrtamat_local, jarea_local, equil, odet.psifac, intr)
 
     return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue,
-        pn_total_eigenvalue=pn_result.pn_total_eigenvalue, pn_plasma_energy=pn_result.pn_plasma_energy, pn_vacuum_energy=pn_result.pn_vacuum_energy,
-        pn_vacuum_eigenvalue=pn_result.pn_vacuum_eigenvalue)
+        rootA_total_eigenvalue=rootA_result.rootA_total_eigenvalue, rootA_plasma_energy=rootA_result.rootA_plasma_energy, rootA_vacuum_energy=rootA_result.rootA_vacuum_energy,
+        rootA_vacuum_eigenvalue=rootA_result.rootA_vacuum_eigenvalue)
 end
