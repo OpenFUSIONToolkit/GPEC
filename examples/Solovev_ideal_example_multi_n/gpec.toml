@@ -1,11 +1,10 @@
 # Solovev analytical equilibrium — multi-n ideal stability (n = 1 and 2 in one run).
 # Same near-marginal Solovev plasma as Solovev_ideal_example, swept over a toroidal
 # mode-number range. The single_n_1/ and single_n_2/ subdirectories run each n alone
-# for cross-checking. Equilibrium is generated from sol.toml.
+# for cross-checking. Equilibrium is generated from the embedded [SOL_INPUT] section.
 
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
-eq_filename = "sol.toml"                # Path to equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -57,3 +56,15 @@ parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2
 populate_dense_xi     = false  # Append serial-EL pass for dense ξ; not needed without [PerturbedEquilibrium] (default false)
 set_psilim_via_dmlim  = false  # FALSE for multi-n — dmlim truncation is ambiguous when n varies (sing_lim! skips anyway)
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
+# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
+[SOL_INPUT]
+mr = 128       # Number of radial grid zones
+mz = 128       # Number of axial grid zones
+ma = 128       # Number of flux grid zones
+e = 1.6        # Elongation
+a = 0.33       # Minor radius
+r0 = 1.0       # Major radius
+q0 = 1.9       # Safety factor at the magnetic axis (O-point)
+p0fac = 1      # Scale on-axis pressure (β changes; Φ, q fixed)
+b0fac = 1      # Scale toroidal field at constant β (Bt changes; shape, β fixed)
+f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p, Bp fixed)

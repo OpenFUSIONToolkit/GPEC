@@ -8,6 +8,7 @@ User-facing control parameters from TOML [PerturbedEquilibrium] section.
 Note: Forcing data file settings are now in [ForcingTerms] section.
 
 High Priority (MWE):
+
   - `fixed_boundary::Bool` - Fixed boundary flag (default: false)
   - `output_eigenmodes::Bool` - Output mode fields as b-fields (default: true)
   - `compute_response::Bool` - Compute plasma response (default: true)
@@ -15,14 +16,17 @@ High Priority (MWE):
   - `verbose::Bool` - Enable verbose logging (default: true)
 
 Output Settings:
+
   - `output_filename::String` - Combined output file with ForceFreeStates results (default: uses ForceFreeStates HDF5_filename)
   - `write_outputs_to_HDF5::Bool` - Write perturbed equilibrium outputs to HDF5 (default: true)
 
 Medium Priority (defer for MWE):
+
   - `filter_modes::Bool` - Enable mode filtering (default: false)
   - `singular_point_method::String` - Method for singular point treatment (default: "standard")
 
 Regularization:
+    # High Priority (MWE)
   - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
 @kwdef mutable struct PerturbedEquilibriumControl
@@ -55,6 +59,8 @@ Internal state variables for perturbed equilibrium calculations.
 
   - `dir_path::String` - Working directory path
   - `forcing_modes::Vector{ForcingMode}` - Loaded forcing mode data
+  - `coil_sets::Vector{CoilSet}` - Coil geometry used (when `forcing_data_format = "coil"`);
+    captured for the gpec.h5 rerun snapshot
   - `plasma_response::Matrix{ComplexF64}` - Plasma response matrix
   - `singular_coupling_metrics::Dict{String,Float64}` - Coupling metrics at singular surfaces
   - `m_modes::Vector{Int}` - Poloidal mode numbers for each index i in 1:numpert_total
@@ -63,6 +69,7 @@ Internal state variables for perturbed equilibrium calculations.
 @kwdef mutable struct PerturbedEquilibriumInternal
     dir_path::String = "./"
     forcing_modes::Vector{ForcingMode} = ForcingMode[]
+    coil_sets::Vector{CoilSet} = CoilSet[]
     plasma_response::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     singular_coupling_metrics::Dict{String,Float64} = Dict{String,Float64}()
     m_modes::Vector{Int} = Int[]
@@ -77,6 +84,7 @@ Results from perturbed equilibrium calculations.
 ## Fields
 
 Response fields (mode space):
+
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
   - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, mpert]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, mpert]
@@ -85,6 +93,7 @@ Response fields (mode space):
 Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
 Each row maps the full applied field to the resonant response at that surface.
 Matches Fortran `C_f_x_out`, `C_i_x_out`, etc. (shape [mode_C, m_out]).
+
   - `C_resonant_area_weighted_field`   - Φ_r/A^r coupling (resonant area-weighted field b^r in tesla; singcoup row 1) [Pharr 2026]
   - `C_resonant_current` - Resonant current coupling (singcoup row 2)
   - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
@@ -93,13 +102,16 @@ Matches Fortran `C_f_x_out`, `C_i_x_out`, etc. (shape [mode_C, m_out]).
 
 Applied resonant vectors [n_rational] = C · forcing_amplitudes.
 Matches Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`.
+
   - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_prime`
 
 Diagnostics [n_rational]:
+
   - `island_half_width::Vector{Float64}` - w/2 = sqrt(|island_width_sq|) from applied forcing
   - `chirikov_parameter::Vector{Float64}` - Island overlap metric
 
 Metadata [n_rational] — identifies each (surface, n) row:
+
   - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 
 Control-surface forcing/response spectra [numpert_total], in the three Pharr (2026) field
@@ -113,6 +125,7 @@ root-area-weighted field (b̃) space (issue #233 / Pharr 2026). Writing `S ≡ r
 (b̃→b̄) and `A ≡ surface_area`, the brief internal flux-conform operator is `R = S·A` (Φ = R·b̃).
 Recover the area-weighted (b̄) forms by conforming with `S` (e.g. `L_b̄ = S·L̃·S†`); recover flux
 with `Φ = A·b̄`.
+
   - `plasma_inductance` - Λ̃ = R⁻¹·Λ·R⁻† (wt0-based plasma inductance, congruence)
   - `surface_inductance` - L̃ = R⁻¹·L·R⁻† (vacuum surface inductance, congruence)
   - `permeability` - P̃ = R⁻¹·P·R (plasma response operator P=Λ·L⁻¹, similarity)
@@ -123,9 +136,10 @@ with `Φ = A·b̄`.
 Energies (Joules; Fortran gpout convention). Congruence-invariant scalars
 (energy = Φ†·G⁻¹·Φ = b̃†·G̃⁻¹·b̃), evaluated from the brief internal flux vectors Φ_x, Φ_tot with the
 well-conditioned flux-space inductances L, Λ:
+
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
-  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")
+  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")    # Response fields in mode space [npsi, mpert]
   - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
 """
 @kwdef mutable struct PerturbedEquilibriumState
@@ -133,37 +147,37 @@ well-conditioned flux-space inductances L, Λ:
     psi_grid::Vector{Float64} = Float64[]
 
     # Response fields in mode space [npsi, mpert]
-    xi_modes::Union{Nothing, NamedTuple} = nothing
-    b_modes::Union{Nothing, NamedTuple} = nothing
-    b_n_modes::Union{Nothing, Matrix{ComplexF64}}  = nothing  # physical normal field b_n [npsi, mpert]
-    xi_n_modes::Union{Nothing, Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, mpert]
+    xi_modes::Union{Nothing,NamedTuple} = nothing
+    b_modes::Union{Nothing,NamedTuple} = nothing
+    b_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal field b_n [npsi, mpert]
+    xi_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, mpert]
 
     # Coupling matrices [n_rational × numpert_total]
-    C_resonant_area_weighted_field::Matrix{ComplexF64}    = zeros(ComplexF64, 0, 0)
-    C_resonant_current::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
-    C_island_width_sq::Matrix{ComplexF64}   = zeros(ComplexF64, 0, 0)
-    C_penetrated_area_weighted_field::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
-    C_delta_prime::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)
+    C_resonant_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_resonant_current::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_island_width_sq::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_penetrated_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_delta_prime::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
 
     # Applied resonant vectors [n_rational] = C · amp_vec
-    resonant_area_weighted_field::Vector{ComplexF64}      = ComplexF64[]
-    resonant_current::Vector{ComplexF64}    = ComplexF64[]
-    island_width_sq::Vector{ComplexF64}     = ComplexF64[]
-    penetrated_area_weighted_field::Vector{ComplexF64}    = ComplexF64[]
-    delta_prime::Vector{ComplexF64}         = ComplexF64[]
+    resonant_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
+    resonant_current::Vector{ComplexF64} = ComplexF64[]
+    island_width_sq::Vector{ComplexF64} = ComplexF64[]
+    penetrated_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
+    delta_prime::Vector{ComplexF64} = ComplexF64[]
 
     # Diagnostics [n_rational]
-    island_half_width::Vector{Float64}      = Float64[]
-    chirikov_parameter::Vector{Float64}     = Float64[]
+    island_half_width::Vector{Float64} = Float64[]
+    chirikov_parameter::Vector{Float64} = Float64[]
 
     # Metadata [n_rational]
-    rational_psi::Vector{Float64}           = Float64[]
-    rational_q::Vector{Float64}             = Float64[]
-    rational_m_res::Vector{Int}             = Int[]
-    rational_n::Vector{Int}                 = Int[]
-    rational_surface_idx::Vector{Int}       = Int[]
+    rational_psi::Vector{Float64} = Float64[]
+    rational_q::Vector{Float64} = Float64[]
+    rational_m_res::Vector{Int} = Int[]
+    rational_n::Vector{Int} = Int[]
+    rational_surface_idx::Vector{Int} = Int[]
 
-    # Control-surface forcing/response spectra in the three Pharr field representations [numpert_total], tesla
+    # Control-surface forcing/response spectra in the three weightings of field representations [numpert_total], tesla
     forcing_b::Vector{ComplexF64}           = ComplexF64[]  # bare normal field b (forcing Φ_x)
     forcing_b_rootarea::Vector{ComplexF64}  = ComplexF64[]  # root-area-weighted field b̃ (coordinate-invariant)
     forcing_b_area::Vector{ComplexF64}      = ComplexF64[]  # area-weighted field b̄
@@ -180,8 +194,8 @@ well-conditioned flux-space inductances L, Λ:
     surface_area::Float64 = 0.0  # scalar control-surface area A = ∫J|∇ψ|dθ (flux: Φ = A·b̄; conform R = S·A)
 
     # Energies — see the struct docstring for formulas
-    vacuum_energy::Float64   = 0.0
-    surface_energy::Float64  = 0.0
-    plasma_energy::Float64   = 0.0
+    vacuum_energy::Float64 = 0.0
+    surface_energy::Float64 = 0.0
+    plasma_energy::Float64 = 0.0
     toroidal_torque::Float64 = 0.0
 end
