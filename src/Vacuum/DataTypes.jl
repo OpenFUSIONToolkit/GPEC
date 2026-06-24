@@ -81,11 +81,13 @@ function VacuumInput(
     # Extract plasma surface geometry at this psi
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
 
+    # Remove the last point to go from the [0, 2π] grid to VACUUM's [0, 2π) grid
+    # and reverse the arrays for VACUUM's CW θ direction
     return VacuumInput(;
-        x=reverse(r),
-        z=reverse(z),
-        ν=reverse(ν),
-        mtheta_in=length(r),
+        x=reverse(r)[1:(end-1)],
+        z=reverse(z)[1:(end-1)],
+        ν=reverse(ν)[1:(end-1)],
+        mtheta_in=length(r)-1,
         mlow=mlow,
         mpert=mpert,
         nlow=nlow,
@@ -222,13 +224,13 @@ function PlasmaGeometry(inputs::VacuumInput)
     @assert length(inputs.x) == length(inputs.z) == length(inputs.ν) "x, z, and ν must have the same length"
 
     # Interpolate arrays from input onto mtheta grid
-    θ_in = range(0.0, 2π; length=inputs.mtheta_in) # VacuumInput uses [0, 2π] grid
-    θ_out = range(; start=0, length=inputs.mtheta, step=2π/inputs.mtheta) # VACUUM uses [0, 2π) grid
+    θ_in = range(; start=0, length=inputs.mtheta_in, step=2π/inputs.mtheta_in)
+    θ_out = range(; start=0, length=inputs.mtheta, step=2π/inputs.mtheta)
 
     # Use one-shot API with PeriodicBC
-    x = cubic_interp(θ_in, inputs.x, θ_out; bc=PeriodicBC()) # no endpoint handling needed!
-    z = cubic_interp(θ_in, inputs.z, θ_out; bc=PeriodicBC())
-    ν = cubic_interp(θ_in, inputs.ν, θ_out; bc=PeriodicBC())
+    x = cubic_interp(θ_in, inputs.x, θ_out; bc=PeriodicBC(; endpoint=:exclusive))
+    z = cubic_interp(θ_in, inputs.z, θ_out; bc=PeriodicBC(; endpoint=:exclusive))
+    ν = cubic_interp(θ_in, inputs.ν, θ_out; bc=PeriodicBC(; endpoint=:exclusive))
 
     return PlasmaGeometry(x, z, ν)
 end
@@ -339,13 +341,13 @@ function PlasmaGeometry3D(inputs::VacuumInput)
         # Interpolate 3D inputs onto vacuum grid
         @assert !isempty(inputs.y) "y must be provided for 3D (nzeta_in > 1) inputs"
         @assert length(inputs.x) == length(inputs.y) == length(inputs.z) == inputs.mtheta_in * inputs.nzeta_in "x, y, z must have length mtheta_in * nzeta_in"
-        θ_in = range(0.0, 2π; length=inputs.mtheta_in)
-        ζ_in = range(0.0, 2π; length=inputs.nzeta_in)
+        θ_in = range(; start=0, length=inputs.mtheta_in, step=2π/inputs.mtheta_in)
+        ζ_in = range(; start=0, length=inputs.nzeta_in, step=2π/inputs.nzeta_in)
         θ_flat = repeat(collect(θ_grid), nzeta)
         ζ_flat = repeat(collect(ζ_grid); inner=mtheta)
         grid_points = (θ_flat, ζ_flat)
         for (k, data) in enumerate((inputs.x, inputs.y, inputs.z))
-            itp = cubic_interp((θ_in, ζ_in), reshape(data, inputs.mtheta_in, inputs.nzeta_in); bc=(PeriodicBC(), PeriodicBC()))
+            itp = cubic_interp((θ_in, ζ_in), reshape(data, inputs.mtheta_in, inputs.nzeta_in); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive)))
             r[:, k] = itp(grid_points)
         end
     end
@@ -427,10 +429,6 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     # Compute plasma surface quantities
     x_plasma = plasma_surf.x
     z_plasma = plasma_surf.z
-
-    # Output wall coordinate arrays
-    x_wall = zeros(Float64, mtheta)
-    z_wall = zeros(Float64, mtheta)
 
     # Common geometric parameters
     xmin = minimum(x_plasma)
