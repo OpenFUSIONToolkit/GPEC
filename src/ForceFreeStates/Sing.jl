@@ -795,6 +795,124 @@ function sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64)
     return dua
 end
 
+# --- Column-restricted asymptotic evaluation for the outer-region Galerkin solver ---------------
+#
+# Every gal caller (gal_resonant!, gal_extension!, gal_get_solution) needs only the two resonant
+# columns of a single-surface asymptotic: the big solution (column r2[1] = ipert_res) and the small
+# solution (column r2[2] = ipert_res + numpert_total). The general sing_get_ua/sing_get_dua compute
+# all 2·numpert_total columns and allocate full (N, 2N, 2) arrays at every evaluation point — ~34×
+# more work than used. These kernels evaluate ONLY those two columns into a caller-provided
+# (N, 2, 2) buffer (col 1 = big, col 2 = small), allocation-free, with scalar exponent bookkeeping
+# instead of the full `power` array. They require a single-resonance asymptotic (length(r1) == 1),
+# which always holds for the per-surface gal series. Numerically identical to slicing the full
+# result to [r2[1], r2[2]].
+
+"""
+    sing_get_ua_res!(out, sing_asymp, dpsi) -> out
+
+Evaluate only the big (col 1) and small (col 2) resonant columns of `sing_get_ua` into the
+caller-provided `out` of shape `(numpert_total, 2, 2)`. Allocation-free. See the section comment.
+"""
+function sing_get_ua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
+    vmat = sing_asymp.vmat
+    order = sing_asymp.sing_order
+    N = size(vmat, 1)
+    sqrtfac = sqrt(dpsi)
+    ρ = sing_asymp.r1[1]
+    cbig = sing_asymp.r2[1]
+    csml = sing_asymp.r2[2]
+    nterm = 2 * order
+
+    @inbounds for k in 1:2, ii in 1:N
+        ab = vmat[ii, cbig, k, nterm+1]
+        as = vmat[ii, csml, k, nterm+1]
+        for t in (nterm-1):-1:0
+            ab = ab * sqrtfac + vmat[ii, cbig, k, t+1]
+            as = as * sqrtfac + vmat[ii, csml, k, t+1]
+        end
+        out[ii, 1, k] = ab
+        out[ii, 2, k] = as
+    end
+
+    # Unshear v→u: big column /dpsi^α, small column *dpsi^α; resonant row /√dpsi (qty1), *√dpsi (qty2).
+    pfac = dpsi^sing_asymp.alpha[1]
+    @inbounds for k in 1:2, ii in 1:N
+        out[ii, 1, k] /= pfac
+        out[ii, 2, k] *= pfac
+    end
+    @inbounds out[ρ, 1, 1] /= sqrtfac
+    @inbounds out[ρ, 2, 1] /= sqrtfac
+    @inbounds out[ρ, 1, 2] *= sqrtfac
+    @inbounds out[ρ, 2, 2] *= sqrtfac
+    return out
+end
+
+"""
+    sing_get_dua_res!(out, sing_asymp, dpsi) -> out
+
+Evaluate only the big (col 1) and small (col 2) resonant columns of `sing_get_dua` into the
+caller-provided `out` of shape `(numpert_total, 2, 2)`. Allocation-free; scalar per-term exponents
+replace the full `power` array. See the section comment.
+"""
+function sing_get_dua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
+    vmat = sing_asymp.vmat
+    order = sing_asymp.sing_order
+    N = size(vmat, 1)
+    sqrtfac = sqrt(dpsi)
+    ρ = sing_asymp.r1[1]
+    cbig = sing_asymp.r2[1]
+    csml = sing_asymp.r2[2]
+    α = sing_asymp.alpha[1]
+    nterm = 2 * order
+
+    # Per-term exponent base (×1, in half-powers of dpsi): 2·order + row offset (∓1 on the resonant row,
+    # by qty) + column offset (−2α big, +2α small). Tracked as scalars per column instead of a full array.
+    @inbounds for k in 1:2, ii in 1:N
+        roff = ii == ρ ? (k == 1 ? ComplexF64(-1) : ComplexF64(1)) : ComplexF64(0)
+        pb = nterm + roff - 2 * α
+        ps = nterm + roff + 2 * α
+        ab = vmat[ii, cbig, k, nterm+1] * pb
+        as = vmat[ii, csml, k, nterm+1] * ps
+        for t in (nterm-1):-1:0
+            pb -= 1
+            ps -= 1
+            ab = ab * sqrtfac + vmat[ii, cbig, k, t+1] * pb
+            as = as * sqrtfac + vmat[ii, csml, k, t+1] * ps
+        end
+        out[ii, 1, k] = ab
+        out[ii, 2, k] = as
+    end
+
+    pfac = dpsi^α
+    twodpsi = 2 * dpsi
+    @inbounds for k in 1:2, ii in 1:N
+        out[ii, 1, k] /= pfac
+        out[ii, 2, k] *= pfac
+    end
+    @inbounds out[ρ, 1, 1] /= sqrtfac
+    @inbounds out[ρ, 2, 1] /= sqrtfac
+    @inbounds out[ρ, 1, 2] *= sqrtfac
+    @inbounds out[ρ, 2, 2] *= sqrtfac
+    # Divide (not multiply by reciprocal) to match sing_get_dua bit-for-bit; the resonant QuadGK and the
+    # ill-conditioned near-singular solve amplify a 1e-16 input change into ~1e-3 in Δ′.
+    @inbounds for idx in eachindex(out)
+        out[idx] /= twodpsi
+    end
+    return out
+end
+
+"""
+Allocating wrapper for [`sing_get_ua_res!`](@ref); returns the big/small columns as `(N, 2, 2)`.
+"""
+sing_get_ua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
+    sing_get_ua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
+
+"""
+Allocating wrapper for [`sing_get_dua_res!`](@ref); returns the big/small columns as `(N, 2, 2)`.
+"""
+sing_get_dua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
+    sing_get_dua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
+
 """
     sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua, dua) -> matvec
 

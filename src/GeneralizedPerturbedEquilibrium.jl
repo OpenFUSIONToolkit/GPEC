@@ -448,8 +448,10 @@ function main_from_inputs(
     # Outer-region resistive Δ′ matrix via the singular Galerkin method (RDCON gal_solve)
     gal_data = nothing
     if ctrl.gal_flag
+        gal_start = time()
         ctrl.mat_flag || error("gal_flag=true requires mat_flag=true (needs the F/G/K matrix splines)")
         gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
+        @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     end
 
     if ctrl.write_outputs_to_HDF5

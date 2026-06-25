@@ -19,11 +19,27 @@ end
 
 # Two-sided asymptotic evaluation (z = ψ - ψ_s). Right (z≥0) uses the sig=+1 series at z; left (z<0)
 # uses the sig=-1 series at the positive distance |z| (real √, no renorm), matching Fortran sing.f.
-# The derivative on the left picks up d|z|/dψ = -1.
+# The derivative on the left picks up d|z|/dψ = -1. Only the big (col 1) and small (col 2) resonant
+# columns are evaluated (sing_get_ua_res/sing_get_dua_res); the in-place `!` forms write into a
+# caller-owned (numpert_total, 2, 2) buffer for the hot quadrature/reconstruction loops.
 @inline sing_get_ua_gal(g::GalSingAsymp, z::Float64) =
-    z >= 0 ? sing_get_ua(g.right, z) : sing_get_ua(g.left, -z)
+    z >= 0 ? sing_get_ua_res(g.right, z) : sing_get_ua_res(g.left, -z)
 @inline sing_get_dua_gal(g::GalSingAsymp, z::Float64) =
-    z >= 0 ? sing_get_dua(g.right, z) : (-1) .* sing_get_dua(g.left, -z)
+    z >= 0 ? sing_get_dua_res(g.right, z) : (-1) .* sing_get_dua_res(g.left, -z)
+
+@inline sing_get_ua_gal!(out, g::GalSingAsymp, z::Float64) =
+    z >= 0 ? sing_get_ua_res!(out, g.right, z) : sing_get_ua_res!(out, g.left, -z)
+@inline function sing_get_dua_gal!(out, g::GalSingAsymp, z::Float64)
+    if z >= 0
+        sing_get_dua_res!(out, g.right, z)
+    else
+        sing_get_dua_res!(out, g.left, -z)
+        @inbounds for i in eachindex(out)
+            out[i] = -out[i]
+        end
+    end
+    return out
+end
 
 """
     gal_hermite(x, x0, x1) -> (pb, qb)
@@ -122,8 +138,8 @@ end
     gal_extension!(cell, ising, ffit, profiles, intr, asymps, sings, nn, nodes, weights)
 
 Build `cell.emat`, `cell.ediag`, `cell.rhs`, `cell.erhs` for an extension cell (`ext`/`ext1`/`ext2`).
-Port of `gal_extension` (gal.f). The big solution (`isol` column) drives the RHS; for `ext`
-cells the small solution (`isol+N` column) also forms the resonant coupling `emat`/`ediag`.
+Port of `gal_extension` (gal.f). The big solution (column 1 of the gal asymptotic) drives the RHS;
+for `ext` cells the small solution (column 2) also forms the resonant coupling `emat`/`ediag`.
 """
 function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     intr::ForceFreeStatesInternal, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
@@ -137,7 +153,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     jsing = _cell_jsing(cell, ising)
     asymp = asymps[jsing]
     psi_s = sings[jsing].psifac
-    isol = _ipert_res(sings[jsing], intr)
+    # sing_get_*_gal returns only the two resonant columns: 1 = big solution, 2 = small solution.
     ua_at(x) = sing_get_ua_gal(asymp, x - psi_s)
     dua_at(x) = sing_get_dua_gal(asymp, x - psi_s)
 
@@ -166,8 +182,8 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     if cell.etype == GCT_EXT
         uab = ua_at(xb)
         duab = dua_at(xb)
-        u = uab[:, isol+N, 1]      # small solution
-        du = duab[:, isol+N, 1]
+        u = uab[:, 2, 1]      # small solution
+        du = duab[:, 2, 1]
         for ipert in 1:N
             @views cell.emat .+= cell.mat[:, ipert, :, jp+1] .* u[ipert] .+
                                  cell.mat[:, ipert, :, jp+2] .* du[ipert]
@@ -188,10 +204,10 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     end
 
     # --- rhs (gal.f) ---
-    ua1 = ua_at(x1)[:, isol, 1]    # big solution at left node
-    du1 = dua_at(x1)[:, isol, 1]
-    ua2 = ua_at(x2)[:, isol, 1]    # big solution at right node
-    du2 = dua_at(x2)[:, isol, 1]
+    ua1 = ua_at(x1)[:, 1, 1]    # big solution at left node
+    du1 = dua_at(x1)[:, 1, 1]
+    ua2 = ua_at(x2)[:, 1, 1]    # big solution at right node
+    du2 = dua_at(x2)[:, 1, 1]
     fill!(cell.rhs, 0)
 
     if cell.etype == GCT_EXT || cell.etype == GCT_EXT1
@@ -205,8 +221,8 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
             F, K, G = gal_get_fkg(ffit, intr, x, q)
             pbt, qbt = gal_hermite(x, x1, x2)
             uax = ua_at(x)
-            ub = uax[:, isol, 1]
-            dub = dua_at(x)[:, isol, 1]
+            ub = uax[:, 1, 1]
+            dub = dua_at(x)[:, 1, 1]
             term1 = F * dub .+ K * ub
             term2 = adjoint(K) * dub .+ G * ub
             for ip in 0:np
@@ -215,8 +231,8 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         end
         if cell.etype == GCT_EXT
             for ipert in 1:N
-                cell.erhs += conj(ua_at(xb)[ipert, isol+N, 1]) * cell.rhs[ipert, jp+1] +
-                             conj(dua_at(xb)[ipert, isol+N, 1]) * cell.rhs[ipert, jp+2]
+                cell.erhs += conj(ua_at(xb)[ipert, 2, 1]) * cell.rhs[ipert, jp+1] +
+                             conj(dua_at(xb)[ipert, 2, 1]) * cell.rhs[ipert, jp+2]
             end
         end
     elseif cell.etype == GCT_EXT2
@@ -237,7 +253,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         @views cell.rhs[:, ip+1] .-= surf_l .* (pbt[ip+1] * w1)
     end
     if cell.etype == GCT_EXT && cell.extra == GAL_SIDE_RIGHT
-        cell.erhs -= sum(conj.(ua_at(x1)[:, isol+N, 1]) .* surf_l)
+        cell.erhs -= sum(conj.(ua_at(x1)[:, 2, 1]) .* surf_l)
     end
 
     q_r = profiles.q_spline(x2; hint=qhint)
@@ -248,7 +264,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         @views cell.rhs[:, ip+1] .+= surf_r .* (pbt[ip+1] * w2)
     end
     if cell.etype == GCT_EXT && cell.extra == GAL_SIDE_LEFT
-        cell.erhs += sum(conj.(ua_at(x2)[:, isol+N, 1]) .* surf_r)
+        cell.erhs += sum(conj.(ua_at(x2)[:, 2, 1]) .* surf_r)
     end
     return cell
 end
@@ -272,26 +288,25 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     jsing = _cell_jsing(cell, ising)
     asymp = asymps[jsing]
     psi_s = sings[jsing].psifac
-    isol_big = _ipert_res(sings[jsing], intr)
-    isol_small = isol_big + N
-    cols = [isol_big, isol_small]
 
     # Integration limits (gal.f): right → [x2, x_lsode]; left → [x1, x_lsode]
     x0 = (cell.extra == GAL_SIDE_LEFT) ? x1 : x2
     x1l = cell.x_lsode
     sgn_u = (cell.extra == GAL_SIDE_RIGHT) ? -1.0 : 1.0
 
+    # Reused per-integrand buffers (col 1 = big, col 2 = small): sing_get_*_gal! fills them in place.
+    ua_buf = Array{ComplexF64,3}(undef, N, 2, 2)
+    dua_buf = Array{ComplexF64,3}(undef, N, 2, 2)
+
     L = 2 + 2 * N * (np + 1)
     function integrand(x)
         z = x - psi_s
-        ua = sing_get_ua_gal(asymp, z)
-        dua = sing_get_dua_gal(asymp, z)
+        sing_get_ua_gal!(ua_buf, asymp, z)
+        sing_get_dua_gal!(dua_buf, asymp, z)
         q = profiles.q_spline(x; hint=qhint)
-        ua_cols = ua[:, cols, :]
-        dua_cols = dua[:, cols, :]
-        mv = sing_matvec(ffit, intr, x, q, ua_cols, dua_cols)   # N×2 (col1=big, col2=small)
+        mv = sing_matvec(ffit, intr, x, q, ua_buf, dua_buf)   # N×2 (col1=big, col2=small)
         pbt, _ = gal_hermite(x, x1, x2)
-        w = conj.(@view ua_cols[:, 2, 1])               # conj small solution, qty1
+        w = conj.(@view ua_buf[:, 2, 1])               # conj small solution, qty1
         out = Vector{ComplexF64}(undef, L)
         out[1] = sum(w .* @view mv[:, 1])               # res1
         out[2] = sum(w .* @view mv[:, 2])               # res2
@@ -410,6 +425,7 @@ end
 Apply the axis (`u(0)=0` identity) and edge boundary conditions to the boundary cells' `mat`, plus the
 rpec coil-source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f),
 including its full three-way edge branch (rpec count `ncoil = ws.nsol - 2*msing`):
+
   - rpec (`ncoil > 0`): identity edge **and** a unit source at the edge value DOF of coil column
     `2*msing+ipert` for each poloidal mode `ipert` (gal.f). `ws.rhs` is already allocated and
     `gal_assemble_rhs!` only fills columns `1:2*msing`, so the injection is not clobbered.

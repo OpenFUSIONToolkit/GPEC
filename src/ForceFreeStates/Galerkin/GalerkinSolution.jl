@@ -73,7 +73,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     jsing = _cell_jsing(cell, iintvl)             # left → iintvl+1, right → iintvl (gal_get_solution)
     asymp = asymps[jsing]
     psi_s = sings[jsing].psifac
-    ipert0 = _ipert_res(sings[jsing], intr)       # resonant (big) row; small row = ipert0+mpert
+    # sing_get_*_gal returns only the two resonant columns: 1 = big solution, 2 = small solution.
 
     # Edge Hermite weights (fresh, unswapped) for ext/ext2 cells (gal.f)
     pbe, qbe = gal_hermite(x, cell.x[1], cell.x[2])
@@ -98,11 +98,11 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     if cell.etype == GCT_RES || cell.etype == GCT_EXT
         delta = ws.sol[cell.emap, isol]
         if cell.etype == GCT_RES
-            @views sol .+= delta .* ua[:, ipert0+mpert, 1]
-            want_d && (@views dsol .+= delta .* dua[:, ipert0+mpert, 1])
+            @views sol .+= delta .* ua[:, 2, 1]
+            want_d && (@views dsol .+= delta .* dua[:, 2, 1])
         else  # GCT_EXT: series held at the fixed edge xext, x-dependence only via Hermite weights
-            @views sol .+= delta .* (epb1 .* uaext[:, ipert0+mpert, 1] .+ epb2 .* duaext[:, ipert0+mpert, 1])
-            want_d && (@views dsol .+= delta .* (eqb1 .* uaext[:, ipert0+mpert, 1] .+ eqb2 .* duaext[:, ipert0+mpert, 1]))
+            @views sol .+= delta .* (epb1 .* uaext[:, 2, 1] .+ epb2 .* duaext[:, 2, 1])
+            want_d && (@views dsol .+= delta .* (eqb1 .* uaext[:, 2, 1] .+ eqb2 .* duaext[:, 2, 1]))
         end
     end
 
@@ -110,11 +110,11 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     if (isol == 2jsing - 1 && cell.extra == GAL_SIDE_LEFT) ||
        (isol == 2jsing && cell.extra == GAL_SIDE_RIGHT)
         if cell.etype == GCT_RES || cell.etype == GCT_EXT || cell.etype == GCT_EXT1
-            @views sol .+= ua[:, ipert0, 1]
-            want_d && (@views dsol .+= dua[:, ipert0, 1])
+            @views sol .+= ua[:, 1, 1]
+            want_d && (@views dsol .+= dua[:, 1, 1])
         elseif cell.etype == GCT_EXT2
-            @views sol .+= epb1 .* uaext[:, ipert0, 1] .+ epb2 .* duaext[:, ipert0, 1]
-            want_d && (@views dsol .+= eqb1 .* uaext[:, ipert0, 1] .+ eqb2 .* duaext[:, ipert0, 1])
+            @views sol .+= epb1 .* uaext[:, 1, 1] .+ epb2 .* duaext[:, 1, 1]
+            want_d && (@views dsol .+= eqb1 .* uaext[:, 1, 1] .+ eqb2 .* duaext[:, 1, 1])
         end
     end
 
