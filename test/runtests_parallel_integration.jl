@@ -307,16 +307,17 @@ using TOML
 
         # Parallel FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
         # equilibrium-sensitive (auto-mpsi gives a spurious value; a wrong grid/Ip shifts it), so
-        # a loose bracket would mask exactly that accuracy regression. Value is deterministic and
-        # reproducible (parallel and standard ODE paths agree to rel_diff=0).
+        # a loose bracket would mask exactly that accuracy regression. The parallel-path value is
+        # deterministic and reproducible.
         @test isapprox(et_par, 0.800637; rtol=2e-2)
         # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
         # comment above). BVP Δ' matrix regression for DIIID-like is in the
         # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
 
-        # No explicit parallel-vs-standard cross-path check: both paths share the equilibrium
-        # grid, so they agree (rel_diff=0) even on a bad grid — a cross-path check is blind to
-        # grid/accuracy regressions. The tight absolute pin above is the guard for those.
+        # No explicit parallel-vs-standard cross-path check here: the two paths share the
+        # equilibrium grid (so a cross-path comparison is blind to grid/accuracy regressions),
+        # and their agreement is already verified on the lighter Solovev case above. The tight
+        # absolute pin above is the guard for grid/equilibrium regressions on this case.
     end
 
     @testset "ode_itime_cost is additive over sub-intervals" begin
