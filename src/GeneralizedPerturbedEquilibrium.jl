@@ -645,6 +645,13 @@ function write_outputs_to_HDF5(
         # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
         if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
+            out_h5["singular/delta_prime_raw"] = intr.delta_raw_matrix #(ViaW edit)
+        end
+        if intr.msing > 0 && !isempty(intr.delta_coil_matrix)
+            out_h5["singular/delta_coil_matrix"] = intr.delta_coil_matrix
+            out_h5["singular/delta_coil_abs"] = abs.(intr.delta_coil_matrix)
+            out_h5["singular/delta_coil_real"] = real.(intr.delta_coil_matrix)
+            out_h5["singular/delta_coil_imag"] = imag.(intr.delta_coil_matrix) #(ViaW edit)
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan

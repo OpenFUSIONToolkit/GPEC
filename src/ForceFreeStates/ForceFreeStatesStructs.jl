@@ -196,6 +196,9 @@ A mutable struct holding internal state variables for stability calculations.
     raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    delta_raw_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    delta_coil_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+      # raw BVP Δ' matrix before PEST3 combination
 end
 
 """

@@ -176,6 +176,10 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
     # Coil-response block (rpec_flag): rows 2*msing+1 : 2*msing+mpert of delta (empty otherwise).
     delta_coil = ncoil > 0 ? delta[(2*msing+1):(2*msing+ncoil), :] : Matrix{ComplexF64}(undef, 0, 0)
+    if ncoil > 0
+        @info "Galerkin Δ′ solve: coil-response block delta_coil = $(size(delta_coil))"
+        @info "Galerkin Δ′ solve: coil-response 1,1 = $(delta_coil[1, 1])"
+    end
 
     # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"

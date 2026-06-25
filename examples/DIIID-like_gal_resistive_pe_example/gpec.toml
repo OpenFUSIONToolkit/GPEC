@@ -86,22 +86,3 @@ gal_eta                = [8e-8, 8e-8, 8e-8, 8e-8]          # Per-surface resisti
 gal_rho                = [3.3e-7, 3.3e-7, 3.3e-7, 3.3e-7]  # Per-surface mass density ρ [kg/m³] (core→edge); Fortran rmatch `massden`
 gal_rotation           = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation frequency f [Hz] (core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
 gal_gamma              = 1.6666666666666667               # Ratio of specific heats Γ for the resistive-layer coefficients (5/3)
-
-[ForcingTerms]
-forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
-machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
-mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
-nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
-
-[[ForcingTerms.coil_set]]
-name = "c"                              # DIII-D C-coil (6 coils); resolves to coil_geometries/d3d_c.dat
-currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
-
-[PerturbedEquilibrium]
-fixed_boundary = false                  # Use fixed boundary conditions
-output_eigenmodes = true                # Output eigenmode fields as b-fields
-compute_response = true                 # Compute plasma response to forcing
-compute_singular_coupling = true        # Compute singular layer coupling metrics
-verbose = true                          # Enable verbose logging
-write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
-reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)

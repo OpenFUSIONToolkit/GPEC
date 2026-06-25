@@ -322,26 +322,35 @@ function compute_delta_prime_matrix!(
         debug && _log_S_axis_shooting_propagators(uShootR, uShootL, uAxis,
                                                   S_at_surface_left, T_left_mats,
                                                   ipert_all, has_ua, msing, N)
-        M, nMat, col_edge = _assemble_bvp_S_axis(
-            uShootR, uShootL, uAxis, ipert_all, msing, N, wv, psio)
+        M, nMat, col_edge, edge_drive_rows = _assemble_bvp_S_axis(
+            uShootR, uShootL, uAxis, ipert_all, msing, N, wv, psio;
+            rpec = (ctrl !== nothing && ctrl.gal_rpec_flag))
     else
         M, nMat, col_edge = _assemble_bvp_FM_axis(
             Phi_L_mats, Phi_R_mats, ipert_all, msing, N,
             T_left_inv, T_right_inv, has_ua, wv, psio)
+        edge_drive_rows = nothing
     end
 
+    do_coil = ctrl !== nothing && ctrl.gal_rpec_flag && use_S_axis
+    intr.delta_prime_matrix, intr.delta_raw_matrix, intr.delta_coil_matrix = 
+        _solve_bvp_and_combine_pest3(M, msing, N, nMat, use_S_axis, ipert_all, 
+                                    col_edge, ctrl, debug;
+                                    compute_coil=do_coil, edge_drive_rows=edge_drive_rows)
     if debug
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
     end
-
-    intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
-        M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
 # N is numpert_total. Layout: c_axis(N), c_left[1](2N), c_right[1](2N), ..., c_edge(N).
+
 _col_left(j::Int, N::Int)  = (N + 4N*(j-1) + 1):(N + 4N*(j-1) + 2N)
 _col_right(j::Int, N::Int) = (N + 4N*(j-1) + 2N + 1):(N + 4N*j)
+
+#N = number of poloidal modes = N_coil in RDCON (ViaW)
+#j = singular surface index (1-based) (ViaW)
+#its figuring out where in M is the reg. Delta matrix (ViaW)
 
 # Multi-resonance surfaces (one q value satisfying multiple (m,n) tuples in a multi-n run)
 # are not yet handled by the inter-surface BVP. Returns true if any surface has >1 modes;
@@ -570,12 +579,13 @@ end
 # Assemble the BVP matrix M with S-based axis BC. The Riccati S matrix at surface 1's left
 # boundary encodes the axis BC (U₁ = S·U₂) in a well-conditioned form (cond ~ 10⁶), avoiding
 # the catastrophically ill-conditioned axis FM. Fortran-matched structure with
-# nMat = (2 + 4·msing)·N. Returns (M, nMat, col_edge).
+# nMat = (2 + 4·msing)·N. Returns (M, nMat, col_edge). (ViaW edit: THIS section is boundary conditions, through 630)
 function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
                               uShootL::Vector{Matrix{ComplexF64}},
                               uAxis::Matrix{ComplexF64}, ipert_all::Vector{Int},
                               msing::Int, N::Int,
-                              wv::Union{Nothing,Matrix{ComplexF64}}, psio::Float64)
+                              wv::Union{Nothing,Matrix{ComplexF64}}, psio::Float64;
+                              rpec::Bool=false)
     # STRIDE global BVP block structure [Glasser-Kolemen 2018 PoP 25, 032501 Eq. 37].
     nMat = (2 + 4 * msing) * N
     col_axis = 1:N
@@ -583,9 +593,13 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     M = zeros(ComplexF64, nMat, nMat)
 
     # Axis matching: uShootL[1] · c_left[1] = uAxis · c_axis  (2N equations)
-    M[1:2N, _col_left(1, N)] .= uShootL[1]
+    M[1:2N, _col_left(1, N)] .= uShootL[1]#(ViaW: axis condition where q(psi_axis)=0)
     M[1:2N, col_axis]        .= -uAxis
     row_offset = 2N
+
+    # ViaW code for testing boundary conditions
+    #M[1:2N, col_edge] .= 0.0
+    #M[N+1:2N, col_axis] .= -I(N) #U_2 = I, U_1 = 0 -> for conditions 0 and 1
 
     for j in 1:msing
         ipert_j = ipert_all[j]
@@ -598,15 +612,18 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
             end
         end
 
-        junc_rows = (row_offset + 1):(row_offset + 2N)
+        junc_rows = (row_offset + 1):(row_offset + 2N) #(Via edit: these are your boundary conditions)
+        @info "junc_rows = $junc_rows, j=$j, msing=$msing, N=$N"
         if j < msing
             # Midpoint matching between consecutive surfaces
             M[junc_rows, _col_right(j, N)]   .= -uShootR[j]
             M[junc_rows, _col_left(j+1, N)]  .=  uShootL[j+1]
         else
-            # Edge junction
+            # Edge junction (ViaW: edge condition where q(psi_edge)=0)
             M[junc_rows, _col_right(msing, N)] .= uShootR[msing]
-            if wv !== nothing
+            if rpec
+                M[junc_rows[1:N],    col_edge] .= -I(N)
+            elseif wv !== nothing
                 M[junc_rows[1:N],     col_edge] .= -I(N)
                 M[junc_rows[N+1:end], col_edge] .= wv .* psio^2
             else
@@ -620,12 +637,13 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     for j in 1:msing
         ipert_j = ipert_all[j]
         row_offset += 1
-        M[row_offset, _col_left(j, N)[ipert_j]]  = 1
+        M[row_offset, _col_left(j, N)[ipert_j]]  = 1 #(ViaW edit these)
         row_offset += 1
-        M[row_offset, _col_right(j, N)[ipert_j]] = 1
+        M[row_offset, _col_right(j, N)[ipert_j]] = 1 #(ViaW edit these)
     end
     @assert row_offset == nMat "Row count mismatch: expected $nMat, got $row_offset"
-    return M, nMat, col_edge
+    edge_drive_rows = collect((row_offset - 2N + 1):(row_offset - 2N + N))
+    return M, nMat, col_edge, edge_drive_rows
 end
 
 # Fallback BVP assembly with FM-based axis BC (used when no Riccati S matrices are available).
@@ -636,6 +654,7 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
                                T_left_inv::Vector{Matrix{ComplexF64}},
                                T_right_inv::Vector{Matrix{ComplexF64}}, has_ua::Bool,
                                wv::Union{Nothing,Matrix{ComplexF64}}, psio::Float64)
+    @warning "compute_delta_prime_matrix!: FM-axis fallback"
     nMat = (2 + 4 * msing) * N
     col_axis = 1:N
     col_edge = (N + 4N*msing + 1):nMat
@@ -650,7 +669,7 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
         cl = _col_left(j, N)
         cr = _col_right(j, N)
         row_cont = 2N + (4N-2)*(j-1)
-        for i in 1:2N
+        for i in 1:2N #(ViaW: non resonant continuity conditions)
             if i != ipert_j && i != ipert_j + N
                 row_cont += 1
                 M[row_cont, cl[i]] =  1
@@ -687,19 +706,20 @@ end
 # precision lets the imaginary part drift 2–5× on DIIID-class equilibria.
 function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
                                       use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
-                                      ctrl, debug::Bool)
-    s2 = 2 * msing
+                                      ctrl, debug::Bool;
+                                      compute_coil::Bool = false,
+                                      edge_drive_rows=nothing)
+    s2 = 2 * msing #does N=1 in the edge case, but not in the 2N=4 case? (ViaW)
     Tc = (ctrl === nothing || ctrl.extended_precision_bvp) ? Complex{Double64} : ComplexF64
     M_solve = Tc.(M)
-
     M_lu = lu(M_solve; check=false)
     use_lu = issuccess(M_lu)
     M_pinv = use_lu ? nothing : pinv(M_solve)
     if !use_lu
         @warn "Δ' BVP: LU factorization singular (rank $(rank(M))/$nMat), using pseudo-inverse fallback"
     end
-
     dp_raw = zeros(Tc, s2, s2)
+    #one of these 2msing will need a +N (ViaW)
     b = zeros(Tc, nMat)
     for jsing in 1:msing, side in 1:2
         dRow = 2jsing - (2 - side)
@@ -718,6 +738,19 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
         end
     end
 
+    delta_coil = zeros(Tc, s2, N)
+    if compute_coil && edge_drive_rows !== nothing
+        for kmode in 1:N
+            fill!(b,0)
+            b[edge_drive_rows[kmode]] = 1
+            x = use_lu ? (M_lu \ b) : (M_pinv * b)
+            for ksing in 1:msing
+                ipert_k = ipert_all[ksing]
+                delta_coil[2ksing-1, kmode] = x[_col_left(ksing, N)[ipert_k+N]]
+                delta_coil[2ksing,   kmode] = x[_col_right(ksing, N)[ipert_k+N]]
+            end
+        end    
+    end
     # PEST3 four-term combination [Chance PPPL-2527; Glasser-Kolemen 2018 PoP 25, 032501 Eq. 31].
     # Δ'[i,j] = (NW − NE − SW + SE) on each 2×2 block of dp_raw, in extended precision.
     deltap_ext = zeros(Tc, msing, msing)
@@ -727,7 +760,7 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     deltap = ComplexF64.(deltap_ext)
 
     debug && _log_bvp_pest3(dp_raw, deltap, s2, msing, Tc)
-    return deltap
+    return deltap, ComplexF64.(dp_raw), ComplexF64.(delta_coil)
 end
 
 # Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
