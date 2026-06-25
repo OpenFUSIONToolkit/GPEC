@@ -210,16 +210,20 @@ function direct_position!(raw_profile::DirectRunInput)
     # same-sign endpoints and throw "non-bracketing interval"; the pre-scan
     # locks onto the physical LCFS crossing closest to the axis.
     function find_separatrix_crossing(start_r, end_r, label;
-                                       n_scan::Int=200)
+        n_scan::Int=200)
         f(r) = (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in,
-                    raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0);
-                bfield.psi)
+            raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0);
+        bfield.psi)
         r_prev = start_r
         f_prev = f(r_prev)
         for i in 1:n_scan
             r_curr = start_r + (end_r - start_r) * (i / n_scan)
             f_curr = f(r_curr)
-            if f_prev * f_curr < 0
+            if f_curr == 0
+                # ψ lands exactly on the separatrix at this sample.
+                @info "$label separatrix found at R = $(@sprintf("%.3f", r_curr))"
+                return r_curr
+            elseif f_prev * f_curr < 0
                 r_sol = find_zero(f, (r_prev, r_curr), Roots.Brent())
                 @info "$label separatrix found at R = $(@sprintf("%.3f", r_sol))"
                 return r_sol
@@ -390,7 +394,7 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
     end
 
     return find_zero((f, fp), rfac, Roots.Newton();
-        atol=1e-12*abs(psi0), rtol=1e-12, maxevals=50)
+        atol=1e-12 * abs(psi0), rtol=1e-12, maxevals=50)
 end
 
 """
@@ -464,7 +468,7 @@ The middle-region spacing is driven by profile curvature (P, F, dV/dψ, q) via s
 """
 function make_optimal_mpsi(psilow, psihigh, A, sq_in;
     tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
-    dlog = (13.0 * tau / A)^(1/4)
+    dlog = (13.0 * tau / A)^(1 / 4)
     N_edge = ceil(Int, log((1.0 - psi_split_edge) / (1.0 - psihigh)) / dlog) + 1
     h_mid = _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     N_mid = ceil(Int, (psi_split_edge - psi_split_core) / h_mid)
@@ -587,7 +591,7 @@ robustness.
         @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
 
         ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
-        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3])^2
         @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
         @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
         @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes

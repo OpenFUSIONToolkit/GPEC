@@ -157,6 +157,31 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
 
     model = _build_inner_model(control.inner_model)
 
+    # Guard: the inner-layer model and the parameter eltype must match, or
+    # `_build_surface_coupling` throws an opaque MethodError downstream.
+    expected_P = _is_ggj(model) ? GGJParameters : SLAYERParameters
+    all(p -> p isa expected_P, params) ||
+        throw(
+            ArgumentError(
+                "run_slayer: inner_model=$(control.inner_model) requires " *
+                "$(expected_P) per-surface parameters, but got eltype " *
+                "$(eltype(params)). Build inputs with the matching builder " *
+                "(build_slayer_inputs for SLAYER, build_ggj_inputs for GGJ).")
+        )
+
+    # The coupled determinant uses the reduced m×m (tearing-only) form, which
+    # drops the interchange channel. For GGJ that channel carries the Glasser
+    # interchange stabilization, so coupled-GGJ results omit real physics.
+    if _is_ggj(model) && control.coupling_mode === :coupled
+        @warn(
+            "SLAYER: coupling_mode=:coupled with a GGJ inner model uses the " *
+            "reduced m×m tearing-only determinant, which DROPS the GGJ " *
+            "interchange (Glasser stabilization) channel — results are " *
+            "physically incomplete. Use the full Pletzer-Dewar matching " *
+            "(multi_surface_coupling_full) for coupled GGJ studies."
+        )
+    end
+
     # GGJ growth-rate extraction by Re/Im contour matching is not yet
     # reliable (the contours do not robustly intersect at a dispersion-relation
     # zero). The scan still runs so the user can inspect/plot the contours and

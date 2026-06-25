@@ -31,7 +31,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                            |
 | `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
 | `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
-| `Q_i`      | Normalized ion diamagnetic:      +tauk · ω_*i                     |
+| `Q_i`      | Normalized ion diamagnetic:      −tauk · ω_*i                     |
 | `iota_e`   | Q_e / (Q_e − Q_i)                                                 |
 | `tauk`     | Q-conversion factor S^(1/3) · τ_H  [s] — multiplies ω to get Q    |
 | `tau_r`    | Resistive diffusion time [s]                                      |
@@ -313,7 +313,20 @@ function slayer_parameters(;
     Q_e = -tauk * omega_e
     Q_i = -tauk * omega_i
     Q_e_minus_Q_i = Q_e - Q_i
-    iota_e = Q_e_minus_Q_i == 0 ? 0.0 : Q_e / Q_e_minus_Q_i
+    # iota_e = Q_e/(Q_e - Q_i) is singular when the electron and ion
+    # diamagnetic frequencies are degenerate (ω_*e == ω_*i). The downstream
+    # Riccati coefficients divide by iota_e, so silently setting it to 0 (or
+    # Inf) produces NaN/Inf; surface the degeneracy as a clear error instead.
+    Q_e_minus_Q_i != 0 ||
+        throw(
+            ArgumentError(
+                "slayer_parameters: Q_e == Q_i (degenerate " *
+                "electron/ion diamagnetic frequencies) makes " *
+                "iota_e = Q_e/(Q_e - Q_i) singular. Check the " *
+                "diamagnetic-frequency inputs ω_*e, ω_*i."
+            )
+        )
+    iota_e = Q_e / Q_e_minus_Q_i
 
     # Plasma beta and compressibility
     lbeta = (5.0 / 3.0) * MU_0 * n_e * E_CHG * (t_e + t_i) / bt^2
