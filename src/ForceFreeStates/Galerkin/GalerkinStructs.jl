@@ -146,6 +146,17 @@ Coil-driven RPEC matched solution from the outer↔inner asymptotic matching (Fo
   - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` — `(mpert, ngrid, mcoil)` matched ξ(ψ) and
     analytic ξ′(ψ) on the gal grid, one column per coil drive (identity-at-edge basis).
   - `deltar::Matrix{ComplexF64}` — `(msing, 2)` inner-layer matching data `(Δ₁, Δ₂)` per surface.
+  - `bpen::Matrix{ComplexF64}` — `(msing, mcoil)` inner-layer penetrated (reconnected) resonant field at
+    each rational surface, one column per coil drive. Read off the GGJ inner solution at the layer center
+    (X=0) exactly as Fortran `match_output_solution` builds `intotsol_b` (match.f) — cusp-free, fit-free.
+    Zero for the ideal branch (`gal_ideal_flag`), where the inner layer is skipped.
+  - `inner_psi::Vector{Vector{Float64}}` — per surface, the inner-layer ψ grid `ψ_s ± X·x0/v1` (left wing
+    reversed then right wing, so ψ ascends through `ψ_s`). Empty in the ideal branch.
+  - `inner_xi::Vector{Matrix{ComplexF64}}` — per surface, the inner-layer displacement `ξ_ψ(ψ)` on
+    `inner_psi`, `(length(inner_psi[s]), mcoil)`, one column per coil drive. This is Fortran `match_solution`'s
+    `intotsol` (deltac component 2): `resc·(±Ξ₁·cin[2s] + Ξ₂·cin[2s-1])`, odd parity `Ξ₁` antisymmetric across
+    `ψ_s`, even parity `Ξ₂` symmetric, `resc=(v1/x0)^(1/2+p1)`. The raw inner-layer contribution only (no
+    regular outer background added), so it shares the singular asymptote with the outer near `ψ_s`.
   - `rpec_eig::Vector{ComplexF64}` — forced eigenvalues `γ_s = 2πi·n·f_s` per surface.
   - `residual::Float64` — relative linear-solve residual `‖mat·cof − rmat‖/‖rmat‖`.
 """
@@ -155,6 +166,9 @@ struct GalMatchResult
     xi::Array{ComplexF64,3}
     xi_deriv::Array{ComplexF64,3}
     deltar::Matrix{ComplexF64}
+    bpen::Matrix{ComplexF64}
+    inner_psi::Vector{Vector{Float64}}
+    inner_xi::Vector{Matrix{ComplexF64}}
     rpec_eig::Vector{ComplexF64}
     residual::Float64
 end

@@ -42,6 +42,9 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         cout = zeros(ComplexF64, 2msing, mcoil)
         cin = zeros(ComplexF64, 2msing, mcoil)
         deltar = zeros(ComplexF64, msing, 2)
+        bpen = zeros(ComplexF64, msing, mcoil)
+        inner_psi = Vector{Float64}[]   # no inner layer in the ideal limit
+        inner_xi = Matrix{ComplexF64}[]
         rpec_eig = zeros(ComplexF64, msing)
         residual = 0.0
     else
@@ -56,25 +59,45 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             error("gal_match_rpec: re-derived $(length(sings)) surfaces, expected msing=$msing")
 
         # --- inner-layer matching data Δ(Q) per surface (deltac_run; match.f) ---
-        inner = InnerLayer.GGJModel(solver=:galerkin)
+        # solve_inner_profile returns the same Δ as solve_inner plus the reconstructed inner-layer field,
+        # so the layer-center value (penetrated field) comes for free from the single matching solve.
         deltar = zeros(ComplexF64, msing, 2)
         rpec_eig = zeros(ComplexF64, msing)
+        # Per-surface layer-center field weights pen[i,k] = scale·Ψ_k(0), parity k=1,2 (match.f intotsol_b).
+        chi1 = 2π * equil.psio
+        pen = zeros(ComplexF64, msing, 2)
+        # Per-surface inner-layer ξ_ψ building blocks for the matched solution (match.f intotsol, deltac comp 2):
+        # the ψ grid ψ_s ± X·x0/v1 (left reversed then right) and the resc-scaled odd/even parity profiles.
+        inner_psi = Vector{Vector{Float64}}(undef, msing)
+        inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₁, antisymmetric across ψ_s
+        inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₂, symmetric across ψ_s
         for i in 1:msing
             params = resist_eval(sings[i], equil, intr; eta=ctrl.gal_eta[i], rho=ctrl.gal_rho[i],
                 gamma=ctrl.gal_gamma, ising=i)
             γ = 2π * im * nn * ctrl.gal_rotation[i]    # forced eigenvalue; gal_rotation is f [Hz], γ = 2πi·n·f
             rpec_eig[i] = γ
-            Δ = InnerLayer.solve_inner(inner, params, γ)   # (Δ₁, Δ₂) in deltac.f convention
+            # Inner-solve knobs matched to the Fortran rmatch deltac/inps reference (DELTAC_LIST): inps basis,
+            # inps_xfac=10 (xmax×10, grid nx = 128·10 = 1280), nq=5, cutoff=5, order_pow=8 (↔ kmax).
+            Δ, _, prof, _ = InnerLayer.GGJ.solve_inner_profile(params, γ; xfac=10.0, nx=1280, nq=5, cutoff=5, kmax=8)   # (Δ₁, Δ₂) in deltac.f convention
             deltar[i, 1] = Δ[1]
             deltar[i, 2] = Δ[2]
+            x0i = InnerLayer.GGJ.x0(params)
+            resc = (params.v1 / x0i)^(0.5 + InnerLayer.GGJ.p1(params))   # deltac.f amplitude rescale
+            scale = chi1 * im * nn * sings[i].q1 * x0i                   # match.f b-field scaling
+            pen[i, 1] = scale * prof.Ψ[1, 1] * resc                     # layer center X=0, parity 1 (Ψ(0)≠0)
+            pen[i, 2] = scale * prof.Ψ[1, 2] * resc                     # parity 2 (Ψ(0)=0 ⇒ ~0)
+            xvar = prof.x .* (x0i / params.v1)                          # inner X → ψ-distance (deltac.f:1822)
+            inner_psi[i] = vcat(reverse(sings[i].psifac .- xvar), sings[i].psifac .+ xvar)
+            inner_odd[i] = resc .* vcat(reverse(.-prof.Ξ[:, 1]), prof.Ξ[:, 1])   # comp 2, parity 1 (odd: −left,+right)
+            inner_even[i] = resc .* vcat(reverse(prof.Ξ[:, 2]), prof.Ξ[:, 2])    # comp 2, parity 2 (even)
         end
 
         # --- assemble the 4·msing matching system (match.f) ---
         delta_out = gal_result.delta[1:2msing, 1:2msing]   # outer Δ′ plasma block
         mat = zeros(ComplexF64, 4msing, 4msing)
         rmat = zeros(ComplexF64, 4msing, mcoil)
-        @views mat[2msing+1:4msing, 1:2msing] .= transpose(delta_out)          # Δ_out
-        @views rmat[2msing+1:4msing, :] .= .-transpose(gal_result.delta_coil)  # −Δ_coil source
+        @views mat[(2msing+1):4msing, 1:2msing] .= transpose(delta_out)          # Δ_out
+        @views rmat[(2msing+1):4msing, :] .= .-transpose(gal_result.delta_coil)  # −Δ_coil source
         for ising in 1:msing
             idx1 = 2ising - 1
             idx2 = 2ising
@@ -99,7 +122,19 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         cof = mat \ rmat
         residual = norm(mat * cof - rmat) / max(norm(rmat), 1e-300)
         cout = cof[1:2msing, :]
-        cin = cof[2msing+1:4msing, :]
+        cin = cof[(2msing+1):4msing, :]
+
+        # Inner-layer penetrated (reconnected) resonant field at each rational surface, read off the GGJ
+        # inner solution at the layer center exactly as Fortran match_output_solution builds intotsol_b
+        # (match.f) — cusp-free, fit-free. bpen[i,j] = pen₁(i)·cin[2i,j] + pen₂(i)·cin[2i-1,j].
+        bpen = zeros(ComplexF64, msing, mcoil)
+        for i in 1:msing, j in 1:mcoil
+            bpen[i, j] = pen[i, 1] * cin[2i, j] + pen[i, 2] * cin[2i-1, j]
+        end
+
+        # Matched inner-layer ξ_ψ(ψ) per surface, per coil drive (match.f intotsol): odd parity weighted by
+        # cin[2i] (cofin(2·ising)), even parity by cin[2i-1] (cofin(2·ising-1)).
+        inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
     end
 
     # --- matched outer ξ/ξ′ per coil drive (match.f); ideal: cout=0 ⇒ bare coil column ---
@@ -118,7 +153,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         end
     end
 
-    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, rpec_eig, residual)
+    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, rpec_eig, residual)
 end
 
 """

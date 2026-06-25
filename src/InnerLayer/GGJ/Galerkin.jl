@@ -877,3 +877,60 @@ function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     return rescale_delta(Δ_swapped, params)
 end
 
+
+# THIS IS AN ATTEMPT AT A CONVERGENCE-GUARDED INNER-LAYER SOLVE. IT PRESENTLY HAS SOME
+# ISSUES AND IS NOT RELIABLE IN BROAD SCANS. IT IS LEFT HERE FOR REFERENCE AND MAY BE REWORKED LATER.
+"""
+    solve_inner_converged(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
+                          rtol=1e-2, kmax0=12, xfac0=1.5, cells_per_unit=3.0,
+                          nx_min=1024, nx_max=8192, kmax_step=2, kmax_max=28,
+                          xfac_growth=1.5, max_levels=6, nq=6, pfac=1.0, cutoff=8, tol_res=1e-4)
+        -> (; delta, converged, err, kmax, xfac, nx, nlevels)
+
+Convergence-guarded GGJ inner-layer solve: only returns a Δ once it is stable under joint refinement of
+the three coupled accuracy knobs — series order `kmax`, asymptotic reach `xfac`, and grid resolution `nx`.
+Successively refines all three (raising `kmax` clears the high-|Q| series floor; raising `xfac` clears the
+reach floor; `nx` is scaled with `xmax` to hold cells-per-unit-x ≈ `cells_per_unit`, which prevents the
+grid-starvation breakup that otherwise corrupts Δ at large `xfac`/high |Q|) until the per-component
+relative change of (Δ₁, Δ₂) drops below `rtol`, or `max_levels` is hit (then `converged=false`).
+
+The metric is per real/imag component with a significance floor (5% of |Δᵢ|), so a converged norm cannot
+mask a wrong reactive part Re(Δ₁) — the failure mode under-reach produces (Im dominates |Δ₁|).
+"""
+function solve_inner_converged(model::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
+    rtol::Float64=1e-2, kmax0::Int=12, xfac0::Float64=1.5,
+    cells_per_unit::Float64=3.0, nx_min::Int=1024, nx_max::Int=8192,
+    kmax_step::Int=2, kmax_max::Int=28, xfac_growth::Float64=1.5,
+    max_levels::Int=6, nq::Int=6, pfac::Float64=1.0, cutoff::Int=8, tol_res::Float64=1e-4)
+    Q = inner_Q(params, γ)
+    # nx sized so cells-per-unit-x ≈ cells_per_unit over [0, xmax]; gal_nx must be even.
+    nx_for(km, xf) = clamp(2 * cld(ceil(Int, cells_per_unit * _xmax_3level(params, Q; kmax=km, xfac=xf).xmax), 2), nx_min, nx_max)
+    function level(km, xf)
+        nx = nx_for(km, xf)
+        return solve_inner(model, params, γ; kmax=km, nx=nx, nq=nq, pfac=pfac, cutoff=cutoff, xfac=xf, tol_res=tol_res), nx
+    end
+    # Per real/imag component relative change with a significance floor (5% of |Δᵢ|).
+    function comperr(a, b)
+        e = 0.0
+        for i in 1:2
+            fl = 0.05 * abs(b[i])
+            e = max(e, abs(real(a[i]) - real(b[i])) / (abs(real(b[i])) + fl))
+            e = max(e, abs(imag(a[i]) - imag(b[i])) / (abs(imag(b[i])) + fl))
+        end
+        return e
+    end
+
+    kmax = kmax0
+    xfac = xfac0
+    Δ, nx = level(kmax, xfac)
+    err = Inf
+    for ℓ in 1:max_levels
+        kmax = min(kmax + kmax_step, kmax_max)
+        xfac *= xfac_growth
+        Δnew, nx = level(kmax, xfac)
+        err = comperr(Δnew, Δ)
+        Δ = Δnew
+        err < rtol && return (; delta=Δ, converged=true, err=err, kmax=kmax, xfac=xfac, nx=nx, nlevels=ℓ)
+    end
+    return (; delta=Δ, converged=false, err=err, kmax=kmax, xfac=xfac, nx=nx, nlevels=max_levels)
+end
