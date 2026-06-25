@@ -34,4 +34,5 @@ else
     include("./runtests_fullruns.jl")
     include("./runtests_coils.jl")
     include("./runtests_imas.jl")
+    include("./runtests_rerun_from_h5.jl")
 end

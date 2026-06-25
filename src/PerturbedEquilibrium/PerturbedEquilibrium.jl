@@ -14,7 +14,7 @@ import ..ForceFreeStates
 import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal, FourFitVars, MetricData
 import ..Vacuum
 import ..ForcingTerms
-import ..ForcingTerms: ForcingMode, load_forcing_data!, convert_forcing_normalization!
+import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization!
 import ..Utilities
 import ..Utilities.FourierTransforms
 import DelimitedFiles: readdlm
@@ -81,28 +81,35 @@ function compute_perturbed_equilibrium(
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs_intr)
 
-    # Step 1: Load forcing data
-    if ft_ctrl.forcing_data_format == "coil"
-        empty!(intr.forcing_modes)
-        cfg = ForcingTerms.CoilConfig(ft_ctrl)
-        coil_sets = ForcingTerms.load_coil_sets(cfg, ffs_intr.nlow)
-        for n in ffs_intr.nlow:ffs_intr.nhigh
-            modes_n = ForcingMode[]
-            ForcingTerms.compute_coil_forcing_modes!(
-                modes_n, coil_sets, equil, cfg, n, ffs_intr.mlow, ffs_intr.mhigh;
-                psi=ffs_intr.psilim, verbose=ctrl.verbose
-            )
-            append!(intr.forcing_modes, modes_n)
-        end
-    else
-        norm_tag = load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
-        for n in ffs_intr.nlow:ffs_intr.nhigh
-            # filter returns a new Vector but still holds references to same ForcingMode objects
-            modes_n = filter(m -> m.n == n, intr.forcing_modes)
-            isempty(modes_n) && continue
-            m_vals = [m.m for m in modes_n]
-            convert_forcing_normalization!(modes_n, norm_tag, equil, n,
-                minimum(m_vals), maximum(m_vals))
+    # Load forcing data. On the gpec.h5 replay path the caller preloads
+    # `intr.forcing_modes` from the snapshot, so skip re-reading the original file.
+    if isempty(intr.forcing_modes)
+        if ft_ctrl.forcing_data_format == "coil"
+            cfg = ForcingTerms.CoilConfig(ft_ctrl)
+            # Reuse preloaded coil geometry (gpec.h5 rerun with `--coil-source coils`)
+            # when present; otherwise build it from the TOML coil-set config. Either
+            # way, retain it on `intr.coil_sets` for the rerun snapshot writer.
+            coil_sets = isempty(intr.coil_sets) ?
+                        ForcingTerms.load_coil_sets(cfg, ffs_intr.nlow; equil=equil) : intr.coil_sets
+            intr.coil_sets = coil_sets
+            for n in ffs_intr.nlow:ffs_intr.nhigh
+                modes_n = ForcingMode[]
+                ForcingTerms.compute_coil_forcing_modes!(
+                    modes_n, coil_sets, equil, cfg, n, ffs_intr.mlow, ffs_intr.mhigh;
+                    psi=ffs_intr.psilim, verbose=ctrl.verbose
+                )
+                append!(intr.forcing_modes, modes_n)
+            end
+        else
+            norm_tag = load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
+            for n in ffs_intr.nlow:ffs_intr.nhigh
+                # filter returns a new Vector but still holds references to same ForcingMode objects
+                modes_n = filter(m -> m.n == n, intr.forcing_modes)
+                isempty(modes_n) && continue
+                m_vals = [m.m for m in modes_n]
+                convert_forcing_normalization!(modes_n, norm_tag, equil, n,
+                    minimum(m_vals), maximum(m_vals))
+            end
         end
     end
 

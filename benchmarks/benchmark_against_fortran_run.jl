@@ -334,13 +334,9 @@ function load_julia_outputs(h5_path::String)
         julia["delta_prime"]        = haskey(f, "$sc/delta_prime")        ? read(f, "$sc/delta_prime")        : ComplexF64[]
 
         pe = "perturbed_equilibrium"
-        # GPEC stores the control-surface spectra as fields (tesla), not flux. Reconstruct the
-        # poloidal flux for the Fortran Phi_x/Phi_tot comparison as Φ = A·b̄ (area-weighted field).
-        A_surf  = haskey(f, "$pe/response_matrices/surface_area") ? read(f, "$pe/response_matrices/surface_area") : 1.0
-        fb_area = haskey(f, "$pe/forcing_b_area")  ? read(f, "$pe/forcing_b_area")  : ComplexF64[]
-        rb_area = haskey(f, "$pe/response_b_area") ? read(f, "$pe/response_b_area") : ComplexF64[]
-        julia["forcing_vec"]  = isempty(fb_area) ? ComplexF64[] : A_surf .* fb_area   # Φ_x   = A·b̄_x
-        julia["response_vec"] = isempty(rb_area) ? ComplexF64[] : A_surf .* rb_area   # Φ_tot = A·b̄_tot
+        # Fortran Phi_x/Phi_tot are the area-weighted field b̄ (tesla), matching forcing/response_b_area directly.
+        julia["forcing_vec"]  = haskey(f, "$pe/forcing_b_area")  ? read(f, "$pe/forcing_b_area")  : ComplexF64[]   # Phi_x   = b̄_x
+        julia["response_vec"] = haskey(f, "$pe/response_b_area") ? read(f, "$pe/response_b_area") : ComplexF64[]   # Phi_tot = b̄_tot
         julia["b_n"]          = haskey(f, "$pe/response/b_n")        ? read(f, "$pe/response/b_n")        : Matrix{ComplexF64}(undef, 0, 0)
         julia["Jbgradpsi"]    = haskey(f, "$pe/response/b_psi_area_weighted") ? read(f, "$pe/response/b_psi_area_weighted") : Matrix{ComplexF64}(undef, 0, 0)
         julia["xi_psi"]       = haskey(f, "$pe/response/xi_psi")     ? read(f, "$pe/response/xi_psi")     : Matrix{ComplexF64}(undef, 0, 0)
@@ -917,7 +913,7 @@ function generate_plots(fort, julia, bench_dir, nn)
     j_fvec   = julia["forcing_vec"]
     j_rvec   = julia["response_vec"]
     j_mmodes = julia["m_modes"]
-    p6 = plot(; xlabel="m", ylabel="|Φ| [Wb]", title="Phi_x & Phi_tot spectrum (n=$nn)",
+    p6 = plot(; xlabel="m", ylabel="|b̄| [T]", title="Phi_x & Phi_tot spectrum (n=$nn)",
               legend=:topright)
     if !isempty(j_fvec) && !isempty(f_phi_x)
         jfx_amps = [abs(get(Dict(zip(j_mmodes, j_fvec)), m, NaN+0im)) for m in m_ctrl]

@@ -102,7 +102,8 @@ end
     ctrl = FFS.ForceFreeStatesControl(;
         (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-        GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
+        GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
+        GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
     metric = FFS.make_metric(equil, intr_tmp.mpert)

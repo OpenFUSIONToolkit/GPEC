@@ -4,7 +4,6 @@
 
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
-eq_filename = "sol.toml"                # Path to equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -58,3 +57,15 @@ dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmli
 
 write_outputs_to_HDF5 = false # Write outputs to the HDF5 file
 verbose = false               # Enable verbose logging
+# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
+[SOL_INPUT]
+mr = 128       # Number of radial grid zones
+mz = 128       # Number of axial grid zones
+ma = 128       # Number of flux grid zones
+e = 1.6        # Elongation
+a = 0.33       # Minor radius
+r0 = 1.0       # Major radius
+q0 = 1.9       # Safety factor at the magnetic axis (O-point)
+p0fac = 1      # Scale on-axis pressure (β changes; Φ, q fixed)
+b0fac = 1      # Scale toroidal field at constant β (Bt changes; shape, β fixed)
+f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p, Bp fixed)
