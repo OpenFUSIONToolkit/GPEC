@@ -183,6 +183,9 @@ heap allocations.
 """
 @with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
+    # Reconstruct the full torus from a single field period (no-op unless nfp > 1)
+    inputs = expand_field_periods(inputs)
+
     # Allocate storage for the vacuum response matrix and Green's functions
     numpoints = inputs.mtheta * inputs.nzeta
     num_modes = inputs.mpert * inputs.npert
