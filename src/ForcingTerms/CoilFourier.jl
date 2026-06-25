@@ -182,11 +182,10 @@ function fourier_decompose_bn(
 )
     mtheta = grid.mtheta
     nzeta = grid.nzeta
-    mpert = m_high - m_low + 1
 
     # Build 2D basis: cos(m*θ - n*ζ) and sin(m*θ - n*ζ)
     # Using 3D call with npert=1, nlow=n gives shape (mtheta*nzeta, mpert)
-    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, m_low:(m_low+mpert-1), nzeta, [n])
+    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
     bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j] ✓
     scale = 2.0 / (mtheta * nzeta)
@@ -330,7 +329,7 @@ function convert_forcing_normalization!(
     grid = sample_boundary_grid(equil, mtheta, nzeta; psi=psi)
 
     # Reconstruct real-space B·n̂(θ, ζ) from input Fourier modes
-    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, m_low:(m_low+mpert-1), nzeta, [n])
+    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
     # Build amplitude vectors (real, imag) ordered m_low:m_high
     amp_real = zeros(mpert)

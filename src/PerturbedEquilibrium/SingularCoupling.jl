@@ -86,9 +86,7 @@ function compute_singular_coupling_metrics!(
 )
     ctrl.verbose && @info "Computing singular coupling metrics (GPEC method)"
 
-    msing = ffs_intr.msing
-    mpert = ffs_intr.mpert
-    numpert_total = ffs_intr.numpert_total
+    (; msing, numpert_total, mlow, mhigh, nlow, nhigh) = ffs_intr
 
     if msing == 0
         ctrl.verbose && @info "No singular surfaces found. Skipping singular coupling calculation."
@@ -103,9 +101,6 @@ function compute_singular_coupling_metrics!(
     chi1 = 2π * equil.psio
     twopi = 2π
     mtheta = vac_data.mthvac
-    mlow = ffs_intr.mlow
-    nlow = ffs_intr.nlow
-    nhigh = ffs_intr.nhigh
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
     # Phase 1: Collect all resonant (surface, n) pairs in psi order
@@ -115,7 +110,7 @@ function compute_singular_coupling_metrics!(
             m_res_float = ffs_intr.sing[s].q * nn
             m_res = round(Int, m_res_float)
             abs(m_res_float - m_res) > 1e-6 && continue
-            (m_res < ffs_intr.mlow || m_res > ffs_intr.mhigh) && continue
+            (m_res < mlow || m_res > mhigh) && continue
             push!(resonant_pairs, (s, nn))
         end
     end
@@ -166,7 +161,7 @@ function compute_singular_coupling_metrics!(
         end
 
         # Compute Green's functions at this surface for this n (once per pair)
-        vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:ffs_intr.mhigh, [nn])
+        vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
         _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
         grri = Matrix{Float64}(grri_raw)
         grre = Matrix{Float64}(grre_raw)
