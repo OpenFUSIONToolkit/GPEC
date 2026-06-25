@@ -30,13 +30,12 @@ Compute the vacuum response matrix and both Green's functions using provided vac
 
 Single entry point for vacuum calculations.
 
-  - For **3D** (`inputs.nzeta > 1`), computes the full coupled response across all (m,n) modes defined
-    by `inputs.(mlow, mpert, nlow, npert)`.
+  - For **3D** (`inputs.nzeta > 1`), computes the full coupled response across all (m,n) modes
 
   - For **2D geometry** (`inputs.nzeta == 1`), supports either:
 
-      + **single-n** (`inputs.npert == 1`): computes (m,n) response for `n = inputs.nlow`
-      + **multi-n** (`inputs.npert > 1`): loops over `n = inputs.nlow:(inputs.nlow+inputs.npert-1)` and returns
+      + **single-n** (`length(inputs.n_modes) == 1`): computes (m,n) response for `n = inputs.n_modes[1]`
+      + **multi-n** (`length(inputs.n_modes) > 1`): loops over `inputs.n_modes` and returns
         **blocks** of the full response matrices with one block per toroidal mode number.
 
 This is the pure Julia implementation that replaces the Fortran `mscvac` function.
@@ -50,15 +49,8 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 # Returns
 
   - `wv`: Complex vacuum response matrix.
-
-      + 2D single-n: `mpert × mpert`
-      + 2D multi-n: `(mpert*npert) × (mpert*npert)` (block diagonal)
-      + 3D: `num_modes × num_modes` (full coupled)
-
   - `grri`: Interior Green's function matrix.
-
   - `grre`: Exterior Green's function matrix.
-
   - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
 """
 @with_pool pool function _compute_vacuum_response_single!(
@@ -78,7 +70,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
     # Compute Fourier basis coefficients
     ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=ν)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, inputs.nzeta, inputs.n_modes; n_2D=n_override, ν=ν)
     num_points_surf, num_modes = size(cos_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
@@ -188,7 +180,7 @@ heap allocations.
 
     # Allocate storage for the vacuum response matrix and Green's functions
     numpoints = inputs.mtheta * inputs.nzeta
-    num_modes = inputs.mpert * inputs.npert
+    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
 
     vac = (
         wv=zeros(ComplexF64, num_modes, num_modes),
@@ -222,9 +214,8 @@ its concrete type (duck-typed on field names only).
 """
 function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-    mpert = inputs.mpert
-    npert = inputs.npert
-    numpert_total = mpert * npert
+    mpert = length(inputs.m_modes)
+    numpert_total = mpert * length(inputs.n_modes)
 
     # 3D vacuum: full coupled response across (m,n) from a single kernel call
     if inputs.nzeta > 1
@@ -242,8 +233,7 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
         vac_data.wv .= 0
 
         # Each n is independent in 2D geometry → fill diagonal blocks inside preallocated arrays
-        ns = inputs.nlow:(inputs.nlow+inputs.npert-1)
-        for (idx_n, n) in enumerate(ns)
+        for (idx_n, n) in enumerate(inputs.n_modes)
             block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
             cols = vcat(block_idx, numpert_total .+ block_idx)
 

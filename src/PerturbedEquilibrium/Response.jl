@@ -40,8 +40,7 @@ function compute_plasma_response!(
     # matching Fortran gpeq_surface which uses grri(2*mthsurf, 2*mpert).
     # vac_data.grri has shape [2*mthvac*nzvac, 2*mpert] and cannot be used directly.
     nn = ffs_intr.nlow
-    vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, vac_data.mthvac, 1,
-        ffs_intr.mpert, ffs_intr.mlow, 1, nn)
+    vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, vac_data.mthvac, 1, ffs_intr.mlow:ffs_intr.mhigh, [nn])
     wall_nowall = Vacuum.WallShapeSettings(; shape="nowall")
     _, grri_2d_raw, grre_2d_raw, _, _ = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall)
     grri_2d = Matrix{Float64}(grri_2d_raw)

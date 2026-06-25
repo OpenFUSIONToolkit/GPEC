@@ -166,7 +166,7 @@ function compute_singular_coupling_metrics!(
         end
 
         # Compute Green's functions at this surface for this n (once per pair)
-        vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
+        vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:ffs_intr.mhigh, [nn])
         _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
         grri = Matrix{Float64}(grri_raw)
         grre = Matrix{Float64}(grre_raw)

@@ -11,22 +11,20 @@
                 @test vac.ν == Float64[]
                 @test vac.mtheta_in == 0
                 @test vac.nzeta_in == 1
-                @test vac.mlow == 1
-                @test vac.mpert == 1
-                @test vac.nlow == 1
-                @test vac.npert == 1
+                @test vac.m_modes == [1]
+                @test vac.n_modes == [1]
                 @test vac.mtheta == 1
                 @test vac.nzeta == 1
                 @test vac.force_wv_symmetry == true
             end
 
             @testset "keyword constructor" begin
-                vac = VacuumInput(mtheta=32, mpert=3, mlow=1, nlow=2, npert=2, nzeta=1)
+                vac = VacuumInput(mtheta=32, m_modes=[1, 2, 3], n_modes=[2, 3], nzeta=1)
                 @test vac.mtheta == 32
-                @test vac.mpert == 3
-                @test vac.mlow == 1
-                @test vac.nlow == 2
-                @test vac.npert == 2
+                @test length(vac.m_modes) == 3
+                @test vac.m_modes[1] == 1
+                @test vac.n_modes[1] == 2
+                @test length(vac.n_modes) == 2
                 @test vac.nzeta == 1
             end
         end
@@ -56,10 +54,8 @@
                     z=[0.0, 0.1, 0.0, -0.1, 0.0],
                     ν=zeros(5),
                     mtheta=5,
-                    mpert=1,
-                    mlow=1,
-                    nlow=1,
-                    npert=1,
+                    m_modes=[1],
+                    n_modes=[1],
                     nzeta=1
                 )
                 surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
@@ -80,10 +76,8 @@
                     nzeta_in=1,
                     ν=zeros(5),
                     mtheta=8,
-                    mpert=1,
-                    mlow=0,
-                    nlow=0,
-                    npert=1,
+                    m_modes=[0],
+                    n_modes=[0],
                     nzeta=1
                 )
                 surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
@@ -360,16 +354,14 @@
         end
 
         @testset "compute_vacuum_response" begin
-            _make_inputs(; mtheta=128, mtheta_eq=17, mpert=2, nlow=1, npert=1) = VacuumInput(
+            _make_inputs(; mtheta=128, mtheta_eq=17, m_modes=1:2, n_modes=[1]) = VacuumInput(
                 mtheta_in=mtheta_eq,
                 nzeta_in=1,
                 x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
                 z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
                 ν=zeros(mtheta_eq),
-                mlow=1,
-                mpert=mpert,
-                nlow=nlow,
-                npert=npert,
+                m_modes=collect(Int, m_modes),
+                n_modes=collect(Int, n_modes),
                 nzeta=1,
                 mtheta=mtheta
             )
@@ -380,7 +372,7 @@
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
                 numpoints = inputs.mtheta * inputs.nzeta
-                num_modes = inputs.mpert * inputs.npert
+                num_modes = length(inputs.m_modes) * length(inputs.n_modes)
 
                 @test size(wv) == (num_modes, num_modes)
                 @test eltype(wv) == ComplexF64
@@ -403,7 +395,7 @@
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
                 numpoints = inputs.mtheta * inputs.nzeta
-                num_modes = inputs.mpert * inputs.npert
+                num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                 @test size(wv) == (num_modes, num_modes)
                 @test size(grri) == (2 * numpoints, 2 * num_modes)
                 @test all(isfinite, plasma_pts)
@@ -415,7 +407,7 @@
             end
 
             @testset "edge: single poloidal mode mpert=1" begin
-                inputs = _make_inputs(mpert=1, npert=1)
+                inputs = _make_inputs(m_modes=[1], n_modes=[1])
                 wall_settings = WallShapeSettings(shape="nowall")
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (1, 1)
@@ -441,7 +433,7 @@
                     wv, grri, grre, pp, wp = compute_vacuum_response(inputs, wall_settings)
 
                     numpoints = inputs.mtheta * inputs.nzeta
-                    num_modes = inputs.mpert * inputs.npert
+                    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                     vac = (wv=zeros(ComplexF64, num_modes, num_modes), grri=zeros(2 * numpoints, 2 * num_modes), grre=zeros(2 * numpoints, 2 * num_modes),
                         plasma_pts=zeros(numpoints, 3), wall_pts=zeros(numpoints, 3))
                     compute_vacuum_response!(vac, inputs, wall_settings)
@@ -478,16 +470,14 @@
     # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
     # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
     @testset "Vacuum.jl (3D)" begin
-        _make_3d_inputs(; mtheta=32, mtheta_eq=17, mpert=2, nlow=0, npert=2, nzeta=32) = VacuumInput(
+        _make_3d_inputs(; mtheta=32, mtheta_eq=17, m_modes=1:2, n_modes=0:1, nzeta=32) = VacuumInput(
             mtheta_in=mtheta_eq,
             nzeta_in=1,
             x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
             z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
             ν=zeros(mtheta_eq),
-            mlow=1,
-            mpert=mpert,
-            nlow=nlow,
-            npert=npert,
+            m_modes=collect(Int, m_modes),
+            n_modes=collect(Int, n_modes),
             nzeta=nzeta,
             mtheta=mtheta
         )
@@ -520,17 +510,15 @@
                 z=vec(Z),
                 mtheta_in=mtheta_in,
                 nzeta_in=nzeta_in,
-                mlow=1,
-                mpert=mpert,
-                nlow=nlow,
-                npert=npert,
+                m_modes=collect(1:mpert),
+                n_modes=collect(nlow:(nlow+npert-1)),
                 mtheta=mtheta,
                 nzeta=nzeta
             )
         end
 
         @testset "VacuumInput nzeta > 1" begin
-            vac = VacuumInput(mtheta=32, nzeta=24, mpert=2, npert=2)
+            vac = VacuumInput(mtheta=32, nzeta=24, m_modes=[1, 2], n_modes=[1, 2])
             @test vac.nzeta == 24
             @test vac.mtheta == 32
         end
@@ -604,7 +592,7 @@
             wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
-            num_modes = inputs.mpert * inputs.npert
+            num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
             @test all(isfinite, wv)
@@ -627,7 +615,7 @@
             wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
-            num_modes = inputs.mpert * inputs.npert
+            num_modes = length(inputs.m_modes) * length(inputs.n_modes)
 
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
@@ -648,7 +636,7 @@
             wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
-            num_modes = inputs.mpert * inputs.npert
+            num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
             @test size(grri) == (2 * numpoints, 2 * num_modes)
             @test all(isfinite, plasma_pts)

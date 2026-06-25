@@ -144,28 +144,29 @@ end
         # Nonzero n and ν exercise the general phase-shifted form and lock both the
         # grid convention (start=0, step=2π/N) and the -n·ν sign.
         N, mlow, mpert = 32, -3, 7
+        m_modes = mlow:(mlow+mpert-1)
         n = 2
         ν = collect(range(; start=0.0, length=N, step=0.05))
-        cosb, sinb = compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=n, ν=ν)
+        cosb, sinb = compute_fourier_coefficients(N, m_modes, 1, Int[]; n_2D=n, ν=ν)
         @test size(cosb) == (N, mpert)
         @test size(sinb) == (N, mpert)
 
         θ = collect(range(; start=0, length=N, step=2π/N))
-        for (l, m) in enumerate(mlow:(mlow+mpert-1))
+        for (l, m) in enumerate(m_modes)
             @test all(isapprox.(cosb[:, l], cos.(m .* θ .- n .* ν); atol))
             @test all(isapprox.(sinb[:, l], sin.(m .* θ .- n .* ν); atol))
         end
 
         # The FourierTransform constructor stores exactly the n=0, ν=0 basis.
         ft = FourierTransform(N, mpert, mlow)
-        @test ft.cslth == compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=0, ν=zeros(N))[1]
-        @test ft.snlth == compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=0, ν=zeros(N))[2]
+        @test ft.cslth == compute_fourier_coefficients(N, m_modes, 1, Int[]; n_2D=0, ν=zeros(N))[1]
+        @test ft.snlth == compute_fourier_coefficients(N, m_modes, 1, Int[]; n_2D=0, ν=zeros(N))[2]
     end
 
     @testset "3D basis shapes" begin
         mtheta, mpert, mlow = 8, 5, -2
         nzeta, npert, nlow = 6, 3, -1
-        cosb, sinb = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow)
+        cosb, sinb = compute_fourier_coefficients(mtheta, mlow:(mlow+mpert-1), nzeta, nlow:(nlow+npert-1))
         @test size(cosb) == (mtheta * nzeta, mpert * npert)
         @test size(sinb) == (mtheta * nzeta, mpert * npert)
     end

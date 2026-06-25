@@ -15,10 +15,8 @@ nzeta > 1 for 3D vacuum calculation. The arrays should be for a single field per
   - `ν::Vector{Float64}`: Free parameter in specifying toroidal angle, ζ = ϕ + ν(θ), on input theta grid (axisymmetric only, length mtheta_in)
   - `mtheta_in::Int`: Number of input poloidal grid points
   - `nzeta_in::Int`: Number of input toroidal grid points (1 for axisymmetric, > 1 for non-axisymmetric)
-  - `mlow::Int`: Lower poloidal mode number
-  - `mpert::Int`: Number of poloidal modes
-  - `nlow::Int`: Lower toroidal mode number
-  - `npert::Int`: Number of toroidal modes
+  - `m_modes::Vector{Int}`: Vector of poloidal mode numbers. E.g. `collect(mlow:mhigh)` for a contiguous range.
+  - `n_modes::Vector{Int}`: Vector of toroidal mode numbers. E.g. `collect(nlow:nhigh)` for a contiguous range or `collect(nlow:n_stride:nhigh)` for a strided list for stellarator mode-family calculations.
   - `mtheta::Int`: Number of vacuum calculation poloidal grid points
   - `nzeta::Int`: Number of vacuum calculation toroidal grid points (1 for 2D vacuum calculation, > 1 for 3D vacuum calculation)
   - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
@@ -31,10 +29,8 @@ nzeta > 1 for 3D vacuum calculation. The arrays should be for a single field per
     ν::Vector{Float64} = Float64[]
     mtheta_in::Int = 0
     nzeta_in::Int = 1
-    mlow::Int = 1
-    mpert::Int = 1
-    nlow::Int = 1
-    npert::Int = 1
+    m_modes::Vector{Int} = [1]
+    n_modes::Vector{Int} = [1]
     mtheta::Int = 1
     nzeta::Int = 1
     force_wv_symmetry::Bool = true
@@ -46,9 +42,9 @@ end
         equil::Equilibrium.PlasmaEquilibrium,
         ψ::Float64,
         mtheta::Int,
-        mpert::Int,
-        mlow::Int,
-        n::Int,
+        nzeta::Int,
+        m_modes::AbstractVector{<:Integer},
+        n_modes::AbstractVector{<:Integer};
         force_wv_symmetry::Bool = true
     ) -> VacuumInput
 
@@ -60,10 +56,10 @@ Extracts plasma geometry from equilibrium at the given flux surface and packages
   - `equil`: Equilibrium solution
   - `ψ`: Normalized flux coordinate
   - `mtheta`: Number of vacuum calculation poloidal points
-  - `mpert`: Number of perturbing poloidal modes
-  - `mlow`: Lowest poloidal mode number
-  - `n`: Toroidal mode number
-  - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (default: true)
+  - `nzeta`: Number of vacuum calculation toroidal points (1 for 2D, >1 for 3D)
+  - `m_modes`: Poloidal mode numbers (e.g. `mlow:mhigh`)
+  - `n_modes`: Toroidal mode numbers (e.g. `[n]` for a single mode, or `nlow:nhigh`)
+  - `force_wv_symmetry::Bool`: Enforce Hermitian symmetry in the vacuum response matrix (default: true)
 
 ## Returns
 
@@ -74,10 +70,8 @@ function VacuumInput(
     ψ::Float64,
     mtheta::Int,
     nzeta::Int,
-    mpert::Int,
-    mlow::Int,
-    npert::Int,
-    nlow::Int;
+    m_modes::AbstractVector{<:Integer},
+    n_modes::AbstractVector{<:Integer};
     force_wv_symmetry::Bool=true
 )
     # Extract plasma surface geometry at this psi
@@ -90,10 +84,8 @@ function VacuumInput(
         z=reverse(z)[1:(end-1)],
         ν=reverse(ν)[1:(end-1)],
         mtheta_in=length(r)-1,
-        mlow=mlow,
-        mpert=mpert,
-        nlow=nlow,
-        npert=npert,
+        m_modes=collect(Int, m_modes),
+        n_modes=collect(Int, n_modes),
         mtheta=mtheta,
         nzeta=nzeta,
         force_wv_symmetry=force_wv_symmetry
@@ -149,10 +141,8 @@ function expand_field_periods(inputs::VacuumInput)
         ν=inputs.ν,
         mtheta_in=mt,
         nzeta_in=nz_full,
-        mlow=inputs.mlow,
-        mpert=inputs.mpert,
-        nlow=inputs.nlow,
-        npert=inputs.npert,
+        m_modes=inputs.m_modes,
+        n_modes=inputs.n_modes,
         mtheta=inputs.mtheta,
         nzeta=inputs.nzeta * nfp,
         force_wv_symmetry=inputs.force_wv_symmetry,
