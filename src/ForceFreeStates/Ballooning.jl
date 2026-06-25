@@ -1102,11 +1102,19 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     initial_condition_left = [0.0, 1.0]
     initial_condition_right = [0.0, -1.0]
 
+    # Reusable RHS parameters: precompute the periodic-wrap constants once (were recomputed every RHS call)
+    # and carry a scratch buffer + search hint so the spline is evaluated in place (no per-step allocation).
+    itp = ode_coefficient_spline.itp
+    theta_min = first(ode_coefficient_spline.xs)
+    theta_period = last(ode_coefficient_spline.xs) - theta_min
+    ode_params = (itp=itp, coeffs=zeros(Float64, length(itp(theta_min))), theta_min=theta_min, theta_period=theta_period, hint=Ref(1))
+
+    # Only the endpoint log-derivative is used, so don't store the full trajectory or build dense output.
     problem_left = ODEProblem(
         compute_ballooning_ode!,
         initial_condition_left,
         (theta_start_left, theta_end_left),
-        (ode_coefficient_spline, theta_k)
+        ode_params
     )
     sol_left = solve(
         problem_left,
@@ -1115,6 +1123,8 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
         abstol=TOLERANCE^2,
         dtmin=MINIMUM_STEP,
         adaptive=true,
+        save_everystep=false,
+        dense=false,
         verbose=false
     )
     if sol_left.retcode != ReturnCode.Success
@@ -1125,7 +1135,7 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
         compute_ballooning_ode!,
         initial_condition_right,
         (theta_start_right, theta_end_right),
-        (ode_coefficient_spline, theta_k)
+        ode_params
     )
     sol_right = solve(
         problem_right,
@@ -1134,6 +1144,8 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
         abstol=TOLERANCE^2,
         dtmin=MINIMUM_STEP,
         adaptive=true,
+        save_everystep=false,
+        dense=false,
         verbose=false
     )
     if sol_right.retcode != ReturnCode.Success
@@ -1173,11 +1185,12 @@ where y₁ is the solution and y₂ = f·dy/dθ.
   - `poloidal_angle::Float64`: Current poloidal angle θ (independent variable).
 """
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
-    ode_coefficient_spline = parameters[1]
-    theta_min = first(ode_coefficient_spline.xs)
-    theta_period = last(ode_coefficient_spline.xs) - theta_min
-    theta_wrapped = mod(Float64(poloidal_angle) - theta_min, theta_period) + theta_min
-    coeffs = ode_coefficient_spline.itp(theta_wrapped)
+    itp = parameters.itp
+    coeffs = parameters.coeffs
+    theta_wrapped = mod(Float64(poloidal_angle) - parameters.theta_min, parameters.theta_period) + parameters.theta_min
+    # In-place spline evaluation into the reusable buffer; the plain `coeffs = itp(θ)` form allocated a
+    # fresh length-9 Vector on every RHS call — the dominant cost of the ballooning scan.
+    itp(coeffs, theta_wrapped; hint=parameters.hint)
 
     periodic = coeffs[1]
     peculiar_1st = coeffs[2]
