@@ -175,6 +175,12 @@ heap allocations.
 """
 @with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
+    # Field-periodic 3D reduction: exploit the block-circulant structure of an nfp-periodic
+    # boundary to solve only reduced per-residue-class systems instead of the full torus.
+    if inputs.nzeta > 1 && inputs.nfp > 1
+        return _compute_vacuum_response_3d_periodic(inputs, wall_settings)
+    end
+
     # Reconstruct the full torus from a single field period (no-op unless nfp > 1)
     inputs = expand_field_periods(inputs)
 
@@ -192,6 +198,105 @@ heap allocations.
     compute_vacuum_response!(vac, inputs, wall_settings)
 
     return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
+end
+
+"""
+    _compute_vacuum_response_3d_periodic(inputs::VacuumInput, wall_settings::WallShapeSettings)
+
+Field-periodic ("layer-2") vacuum response for a 3D boundary with `inputs.nfp > 1`.
+
+The boundary is `nfp`-periodic, so the single-/double-layer boundary-integral operators `S`
+and `D` are block-circulant in the field-period index. Writing the full response as
+`wv = (4π²/N)·Eᴴ·D⁻¹S·E` (`E` the complex Fourier basis, `N = mtheta·nzeta_full`), the
+block-circulant structure block-diagonalizes the problem by toroidal residue class
+`k = mod(n, nfp)`: modes with different `k` do not couple, and within a class
+
+    D̂ₖ = Σ_d D_d ω^{k d},   Ŝₖ = Σ_d S_d ω^{k d},   ω = exp(-2πi/nfp),
+
+where `D_d`, `S_d` are the `M×M` (`M = N/nfp`) blocks coupling observers in field period 0 to
+sources in field period `d`. Each class then needs a single `M×M` solve
+
+    wv[class k] = (4π²/M)·E_localᴴ·(D̂ₖ \\ Ŝₖ)·E_local,
+
+with `E_local` the basis restricted to one field period. Only the first block-row of the
+operators is built (observers in period 0), so the kernel cost drops by `nfp` and the dense
+`O(N³)` factorization is replaced by per-class `O(M³)` solves.
+
+Only the response matrix `wv` is produced (the only quantity the 3D bridge consumes); the
+interior/exterior Green's-function matrices are returned zeroed. Supports `nowall` only.
+"""
+function _compute_vacuum_response_3d_periodic(inputs::VacuumInput, wall_settings::WallShapeSettings)
+
+    wall_settings.shape == "nowall" || error("Field-periodic 3D vacuum reduction supports nowall only (got shape=\"$(wall_settings.shape)\")")
+
+    nfp = inputs.nfp
+
+    # Full-torus geometry (O(N) memory) used as the source surface; observers are restricted
+    # to field period 0 below, so the dense N×N operators are never formed.
+    full = expand_field_periods(inputs)
+    plasma_surf = PlasmaGeometry3D(full)
+
+    mtheta = full.mtheta
+    nzeta_full = full.nzeta
+    nzeta_full % nfp == 0 || error("nzeta_full=$nzeta_full must be divisible by nfp=$nfp for field-periodic reduction")
+    N = mtheta * nzeta_full          # full-torus point count
+    M = N ÷ nfp                      # points per field period (= mtheta * nzeta_per_period)
+
+    m_modes = inputs.m_modes
+    n_modes = inputs.n_modes
+    mpert = length(m_modes)
+    num_modes = mpert * length(n_modes)
+
+    # First block-row of the operators: observers in field period 0 (M rows) × all sources (N cols)
+    kparams = KernelParams3D(11, 20, 5)
+    grad_row = zeros(M, N)   # double-layer D (with +I on the period-0 diagonal block)
+    green_row = zeros(M, N)  # single-layer S
+    compute_3D_kernel_matrices!(grad_row, green_row, plasma_surf, plasma_surf, kparams.PATCH_RAD, kparams.RAD_DIM, kparams.INTERP_ORDER; n_obs=M)
+
+    # Complex Fourier basis on a single field period: E_local[idx, col] = exp(i(mθ - nζ_local)).
+    # Columns are ordered m-fast, n-slow to match the wv layout used by the 3D bridge.
+    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
+    ζ_grid = range(; start=0, length=nzeta_full, step=2π/nzeta_full)
+    E_local = zeros(ComplexF64, M, num_modes)
+    nzeta_p = nzeta_full ÷ nfp
+    for (idx_n, n) in enumerate(n_modes), (idx_m, m) in enumerate(m_modes)
+        col = idx_m + (idx_n - 1) * mpert
+        for jl in 1:nzeta_p, i in 1:mtheta
+            idx = i + (jl - 1) * mtheta
+            E_local[idx, col] = cis(m * θ_grid[i] - n * ζ_grid[jl])
+        end
+    end
+
+    # Solve one reduced M×M system per toroidal residue class k = mod(n, nfp). Reusing the D̂/Ŝ
+    # buffers and solving in place (lu!/ldiv!) keeps the peak footprint at a few M×M matrices.
+    wv = zeros(ComplexF64, num_modes, num_modes)
+    D̂ = Matrix{ComplexF64}(undef, M, M)
+    Ŝ = Matrix{ComplexF64}(undef, M, M)
+    for k in unique(mod.(n_modes, nfp))
+        # Reduced operators D̂ₖ = Σ_d D_d ω^{k d}, Ŝₖ = Σ_d S_d ω^{k d} (fused, allocation-free)
+        fill!(D̂, 0)
+        fill!(Ŝ, 0)
+        for d in 0:(nfp-1)
+            phase = cis(-2π * (k * d) / nfp)
+            cols = (d*M+1):((d+1)*M)
+            @views @. D̂ += phase * grad_row[:, cols]
+            @views @. Ŝ += phase * green_row[:, cols]
+        end
+
+        # Exterior response operator for this sector: solve D̂ₖ G = Ŝₖ in place (Ŝ ← G = D̂ₖ⁻¹Ŝₖ)
+        ldiv!(lu!(D̂), Ŝ)
+        mode_cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
+        Ek = @view E_local[:, mode_cols]
+        wv[mode_cols, mode_cols] .= (4π^2 / M) .* (Ek' * (Ŝ * Ek))
+    end
+
+    inputs.force_wv_symmetry && hermitianpart!(wv)
+
+    # Only wv is consumed by the 3D bridge; return zeroed Green's functions and the plasma points.
+    grri = zeros(2 * N, 2 * num_modes)
+    grre = zeros(2 * N, 2 * num_modes)
+    wall_pts = zeros(N, 3)
+    return wv, grri, grre, copy(plasma_surf.r), wall_pts
 end
 
 """

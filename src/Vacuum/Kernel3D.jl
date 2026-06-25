@@ -354,6 +354,14 @@ where each entry is φ(x_obs, x_src).
 
       + Must be ≤ (2 * PATCH_RAD + 1)
 
+# Keyword Arguments
+
+  - `n_obs::Int=0`: If `> 0`, only the first `n_obs` observer points (rows) are evaluated,
+    producing an `n_obs × num_points` block. The field-periodic reduction uses this to build
+    only the first block-row of a block-circulant operator (observers in a single field
+    period). The default (`0`) evaluates all observer points and is bit-identical to the
+    prior behavior.
+
 # Threading
 
 This function automatically uses all available threads (`Threads.nthreads()`).
@@ -366,9 +374,12 @@ function compute_3D_kernel_matrices!(
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,
     RAD_DIM::Int,
-    INTERP_ORDER::Int
+    INTERP_ORDER::Int;
+    n_obs::Int=0
 )
     num_points = observer.mtheta * observer.nzeta
+    # Observer rows actually evaluated (all points unless restricted to a single-period subset)
+    n_obs_eff = n_obs == 0 ? num_points : n_obs
     dθdζ = 4π^2 / num_points
 
     # Get block of grad green function matrix
@@ -376,7 +387,7 @@ function compute_3D_kernel_matrices!(
     row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
     grad_greenfunction_block = view(
         grad_greenfunction,
-        ((row_index-1)*num_points+1):(row_index*num_points),
+        ((row_index-1)*n_obs_eff+1):(row_index*n_obs_eff),
         ((col_index-1)*num_points+1):(col_index*num_points)
     )
 
@@ -400,7 +411,7 @@ function compute_3D_kernel_matrices!(
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
-    Threads.@threads for idx_obs in 1:num_points
+    Threads.@threads for idx_obs in 1:n_obs_eff
         # Get thread-local workspace
         ws = workspaces[Threads.threadid()]
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
@@ -490,9 +501,11 @@ function compute_3D_kernel_matrices!(
     grad_greenfunction_block ./= 2π
     greenfunction ./= 2π
 
-    # Add the term that comes from the volume integral of Green's identity
+    # Add the term that comes from the volume integral of Green's identity.
+    # Observer i is paired with source i (same point), so the +1 lands on the block diagonal;
+    # for a restricted observer subset only the first n_obs_eff self-pairs are present.
     if typeof(source) == typeof(observer)
-        for i in 1:num_points
+        for i in 1:min(n_obs_eff, num_points)
             grad_greenfunction_block[i, i] += 1.0
         end
     end

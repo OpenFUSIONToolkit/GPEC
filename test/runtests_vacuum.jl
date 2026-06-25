@@ -646,6 +646,85 @@
             @test isapprox(wv, wv', rtol=1e-12)
         end
 
+        # Field-periodic (layer-2) reduction: an nfp-periodic boundary makes the boundary-integral
+        # operators block-circulant, so the reduced per-residue-class solve must reproduce the full
+        # torus result (the n_stride=1 bridge case spans several residue classes mod nfp).
+        @testset "compute_vacuum_response 3D field-periodic reduction" begin
+            # Build one field period of a 3D boundary on the full-torus ζ spacing; expand_field_periods
+            # tiles it by rigid rotation, so reduced and full paths share an identical full-torus surface.
+            _make_periodic_period(; mtheta, nzeta_p, nfp, R0=1.7, a=0.3, b=0.3, ε=0.04) = begin
+                θ = range(; start=0, length=mtheta, step=2π/mtheta)
+                X = zeros(mtheta, nzeta_p)
+                Y = zeros(mtheta, nzeta_p)
+                Z = zeros(mtheta, nzeta_p)
+                for j in 1:nzeta_p
+                    ζ = (j - 1) * 2π / (nzeta_p * nfp)   # period 0 of the full-torus grid
+                    for (i, θi) in enumerate(θ)
+                        R = R0 + a * cos(θi) + ε * cos(θi + nfp * ζ)
+                        X[i, j] = R * cos(ζ)
+                        Y[i, j] = R * sin(ζ)
+                        Z[i, j] = b * sin(θi) + ε * sin(θi + nfp * ζ)
+                    end
+                end
+                return vec(X), vec(Y), vec(Z)
+            end
+
+            mtheta, nzeta_p, nfp = 24, 8, 3        # full torus nzeta = 24 ≥ PATCH_DIM (23)
+            m_modes = collect(-1:1)
+            n_modes = [1, 2, 3, 4]                 # residues {1, 2, 0, 1} mod nfp exercise grouping
+            Xp, Yp, Zp = _make_periodic_period(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp)
+
+            inputs_red = VacuumInput(
+                x=Xp, y=Yp, z=Zp,
+                mtheta_in=mtheta, nzeta_in=nzeta_p,
+                m_modes=m_modes, n_modes=n_modes,
+                mtheta=mtheta, nzeta=nzeta_p,
+                force_wv_symmetry=false, nfp=nfp
+            )
+            wall_settings = WallShapeSettings(shape="nowall")
+
+            # Reduced (block-circulant) path
+            wv_red, _, _, plasma_pts_red, _ = compute_vacuum_response(inputs_red, wall_settings)
+
+            # Full-torus reference: pre-expand so nfp=1 forces the dense path
+            inputs_full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inputs_red)
+            @test inputs_full.nfp == 1
+            @test inputs_full.nzeta == nzeta_p * nfp
+            wv_full, _, _, _, _ = compute_vacuum_response(inputs_full, wall_settings)
+
+            num_modes = length(m_modes) * length(n_modes)
+            @test size(wv_red) == (num_modes, num_modes)
+            @test eltype(wv_red) == ComplexF64
+            @test all(isfinite, wv_red)
+            # plasma points are the full torus
+            @test size(plasma_pts_red, 1) == mtheta * nzeta_p * nfp
+
+            # Reduced == dense full-torus result (block-circulant solve is an exact reorganization)
+            @test isapprox(wv_red, wv_full; rtol=1e-6, atol=1e-7)
+
+            # Modes in different residue classes mod nfp do not couple in the reduced result
+            classes = mod.(n_modes, nfp)
+            mpert = length(m_modes)
+            for in1 in eachindex(n_modes), in2 in eachindex(n_modes)
+                if classes[in1] != classes[in2]
+                    rows = ((in1-1)*mpert+1):(in1*mpert)
+                    cols = ((in2-1)*mpert+1):(in2*mpert)
+                    @test all(iszero, wv_red[rows, cols])
+                end
+            end
+
+            # Hermitian symmetrization still works through the reduced path
+            inputs_sym = VacuumInput(
+                x=Xp, y=Yp, z=Zp,
+                mtheta_in=mtheta, nzeta_in=nzeta_p,
+                m_modes=m_modes, n_modes=n_modes,
+                mtheta=mtheta, nzeta=nzeta_p,
+                force_wv_symmetry=true, nfp=nfp
+            )
+            wv_sym, _, _, _, _ = compute_vacuum_response(inputs_sym, wall_settings)
+            @test isapprox(wv_sym, wv_sym', rtol=1e-12)
+        end
+
         @testset "Kernel3D laplace_kernel" begin
             G, K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_kernel(1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             # Kernel returns 1/|r_obs - r_src| (4π factor applied elsewhere in BIE)
