@@ -33,8 +33,9 @@ constructor.
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
-    diffusivity [m²/s], used only when the kinetic file carries no
-    `chi_e`/`chi_phi` profiles (otherwise those take precedence)
+    diffusivity [m²/s], used only when the kinetic file carries no usable
+    `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
+    file's χ⊥(ψ)/χ_φ(ψ) take precedence
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
@@ -77,8 +78,9 @@ there is one consistent interface for resistive and kinetic profiles.
   - `profile_file`   -- path to a kinetic-profile file (relative to the run
     dir), required when SLAYER is enabled. HDF5 (`.h5`) files use the GPEC
     kinetic schema and may carry `chi_e` (χ⊥) and `chi_phi` (χ_φ); ASCII
-    tables are also accepted but carry no χ (the `chi_perp`/`chi_tor`
-    fallbacks below are used instead).
+    tables are also accepted but carry no χ. When a χ dataset is absent or
+    all-zero, the scalar `chi_perp`/`chi_tor` fallbacks below are used (so a
+    file can keep the χ keys set to 0 to defer to the scalars).
   - `profile_group`  -- group within the HDF5 file (default `"/"`)
 
 # Output control

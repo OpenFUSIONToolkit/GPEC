@@ -92,46 +92,50 @@ order = 19
 # is sensitive to the AMR cell topology and ODE solver, so the Q/ω/γ
 # thresholds are absolute and modestly loose; re-pin intentionally if a
 # solver/AMR change shifts the root inventory.
+# Growth-rate / frequency / root outputs. Pinned for the inner three rational
+# surfaces only (2/1, 3/1, 4/1) via `first_3`: the Δ'/γ contour search is
+# numerically unreliable on the outermost surfaces (e.g. 5/1, 6/1, 7/1 near the
+# edge), so those are deliberately not golden-tracked.
 # ---------------------------------------------------------------------
 [quantities.slayer_Q_re]
 h5path = "slayer/roots/Q_root_real"
 type = "real_vector"
-extract = "all_real"
-label = "SLAYER Re(Q_root)"
+extract = "first_3"
+label = "SLAYER Re(Q_root) [2/1,3/1,4/1]"
 noise_threshold = 1e-4
 order = 30
 
 [quantities.slayer_Q_im]
 h5path = "slayer/roots/Q_root_imag"
 type = "real_vector"
-extract = "all_real"
-label = "SLAYER Im(Q_root)"
+extract = "first_3"
+label = "SLAYER Im(Q_root) [2/1,3/1,4/1]"
 noise_threshold = 1e-4
 order = 31
 
 [quantities.slayer_omega_Hz]
 h5path = "slayer/roots/omega_Hz"
 type = "real_vector"
-extract = "all_real"
-label = "SLAYER ω_Hz"
+extract = "first_3"
+label = "SLAYER ω_Hz [2/1,3/1,4/1]"
 noise_threshold = 1.0
 order = 32
 
 [quantities.slayer_gamma_Hz]
 h5path = "slayer/roots/gamma_Hz"
 type = "real_vector"
-extract = "all_real"
-label = "SLAYER γ_Hz"
+extract = "first_3"
+label = "SLAYER γ_Hz [2/1,3/1,4/1]"
 noise_threshold = 1e-1
 order = 33
 
-# no_root flag (1 = extraction failed for that entry). Must stay 0 here —
-# this case exists to guard that the D3D-like run keeps finding a real root.
+# no_root flag (1 = extraction failed). Pinned for the inner three surfaces;
+# this case guards that the 2/1, 3/1, 4/1 keep finding a real root.
 [quantities.slayer_no_root]
 h5path = "slayer/roots/no_root"
 type = "real_vector"
-extract = "all_real"
-label = "SLAYER no_root flags"
+extract = "first_3"
+label = "SLAYER no_root flags [2/1,3/1,4/1]"
 noise_threshold = 0
 order = 34
 

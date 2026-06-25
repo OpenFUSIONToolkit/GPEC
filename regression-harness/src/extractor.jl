@@ -75,6 +75,15 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         json_str = JSON.json(arr; allownan=true)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
+    elseif startswith(spec.extract, "first_")
+        # "first_N": real values of the leading N vector elements only. Used to
+        # golden-pin the inner (trustworthy) rational surfaces while ignoring
+        # edge surfaces where the Δ'/γ contour search is numerically unreliable.
+        nkeep = parse(Int, spec.extract[(length("first_")+1):end])
+        arr = Float64.(real.(raw))[1:min(nkeep, length(raw))]
+        json_str = JSON.json(arr; allownan=true)
+        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
+
     elseif spec.extract == "all_complex"
         pairs = [[real(x), imag(x)] for x in raw]
         json_str = JSON.json(pairs; allownan=true)

@@ -19,8 +19,8 @@
 # Read kinetic profiles through the shared `Equilibrium.read_kinetic_file`
 # reader and adapt them to the SLAYER inner layer. Returns the spline-based
 # `KineticProfiles` plus χ⊥(ψ)/χ_φ(ψ) callables built from the file's
-# `chi_e`/`chi_phi` (or `nothing` when the file carries no χ, in which case
-# the caller falls back to the scalar `control.chi_perp`/`chi_tor`).
+# `chi_e`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
+# case the caller falls back to the scalar `control.chi_perp`/`chi_tor`).
 function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     isempty(control.profile_file) &&
         error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
@@ -43,8 +43,16 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
         T_i=data.T_i, omega=omega,
         omega_e=zeros(npsi), omega_i=zeros(npsi))
 
-    chi_perp = data.chi_e === nothing ? nothing : cubic_interp(collect(Float64, data.psi), collect(Float64, data.chi_e))
-    chi_tor = data.chi_phi === nothing ? nothing : cubic_interp(collect(Float64, data.psi), collect(Float64, data.chi_phi))
+    # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
+    # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
+    # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
+    # to the scalar control.chi_perp/chi_tor fallback. Build the spline only
+    # from a usable (present, not all-zero) array.
+    psi_xs = collect(Float64, data.psi)
+    _chi_spline(v) = (v === nothing || all(iszero, v)) ? nothing :
+                     cubic_interp(psi_xs, collect(Float64, v))
+    chi_perp = _chi_spline(data.chi_e)
+    chi_tor = _chi_spline(data.chi_phi)
     return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor)
 end
 
@@ -379,8 +387,9 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl;
         chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
         chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
         (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
-            "SLAYER: kinetic file has no chi_e/chi_phi profile(s); using the " *
-            "scalar control.chi_perp/chi_tor fallback for the missing one(s).")
+            "SLAYER: kinetic file has no usable chi_e/chi_phi profile(s) " *
+            "(dataset absent or all-zero); using the scalar " *
+            "control.chi_perp/chi_tor fallback for the missing one(s).")
         params = build_slayer_inputs(equil, ffs_intr.sing, profiles;
             bt=bt,
             mu_i=control.mu_i,
