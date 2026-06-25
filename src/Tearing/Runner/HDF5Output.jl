@@ -84,7 +84,6 @@ function _write_settings!(g, ctrl::SLAYERControl)
     s["gap_kHz_threshold"] = ctrl.gap_kHz_threshold
     s["polish_roots"] = Int(ctrl.polish_roots)
     s["validity_rtol"] = ctrl.validity_rtol
-    s["profile_source"] = String(ctrl.profile_source)
     s["profile_file"] = ctrl.profile_file
     s["profile_group"] = ctrl.profile_group
     s["store_scan"] = Int(ctrl.store_scan)

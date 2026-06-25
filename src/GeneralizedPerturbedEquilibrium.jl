@@ -400,7 +400,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
             slayer_ctrl.enabled || return nothing
             @info "\n  SLAYER\n$_SECTION"
             slayer_start = time()
-            result = Runner.run_slayer(equil, intr, slayer_ctrl, inputs["SLAYER"];
+            result = Runner.run_slayer(equil, intr, slayer_ctrl;
                 dir_path=intr.dir_path)
             @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
             h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file

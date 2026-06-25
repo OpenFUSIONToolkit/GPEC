@@ -14,23 +14,38 @@
 # full equilibrium solve in every test.
 
 # ---------------------------------------------------------------------
-# Profile loading dispatch
+# Profile loading
 # ---------------------------------------------------------------------
-function _load_profiles(control::SLAYERControl, toml_section::AbstractDict,
-    dir_path::AbstractString)
-    if control.profile_source === :inline
-        haskey(toml_section, "profiles") ||
-            error("run_slayer: profile_source=:inline but no " *
-                  "[SLAYER.profiles] subsection found in gpec.toml")
-        return kinetic_profiles_from_toml(toml_section["profiles"])
-    elseif control.profile_source === :h5
-        isempty(control.profile_file) &&
-            error("run_slayer: profile_source=:h5 but profile_file is empty")
-        h5path = isabspath(control.profile_file) ? control.profile_file :
-                 joinpath(dir_path, control.profile_file)
-        return kinetic_profiles_from_h5(h5path; group=control.profile_group)
+# Read kinetic profiles through the shared `Equilibrium.read_kinetic_file`
+# reader and adapt them to the SLAYER inner layer. Returns the spline-based
+# `KineticProfiles` plus χ⊥(ψ)/χ_φ(ψ) callables built from the file's
+# `chi_e`/`chi_phi` (or `nothing` when the file carries no χ, in which case
+# the caller falls back to the scalar `control.chi_perp`/`chi_tor`).
+function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
+    isempty(control.profile_file) &&
+        error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
+              "kinetic-profile file (HDF5 GPEC kinetic schema or ASCII table).")
+    path = isabspath(control.profile_file) ? control.profile_file :
+           joinpath(dir_path, control.profile_file)
+    data = read_kinetic_file(path; group=control.profile_group)
+
+    for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))
+        v === nothing &&
+            error("run_slayer: kinetic file '$path' is missing required " *
+                  "dataset '$name' for the SLAYER inner layer.")
     end
-    error("run_slayer: unknown profile_source=$(control.profile_source)")
+    # ω_*e/ω_*i are recomputed per-surface from equilibrium gradients
+    # (compute_omega_star), so the diamagnetic-frequency inputs here are
+    # placeholders; `omega` carries the ExB rotation when present.
+    npsi = length(data.psi)
+    omega = data.omega_E === nothing ? zeros(npsi) : data.omega_E
+    profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
+        T_i=data.T_i, omega=omega,
+        omega_e=zeros(npsi), omega_i=zeros(npsi))
+
+    chi_perp = data.chi_e === nothing ? nothing : cubic_interp(collect(Float64, data.psi), collect(Float64, data.chi_e))
+    chi_tor = data.chi_phi === nothing ? nothing : cubic_interp(collect(Float64, data.psi), collect(Float64, data.chi_phi))
+    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor)
 end
 
 # ---------------------------------------------------------------------
@@ -326,14 +341,14 @@ end
 # Full pipeline: equilibrium + ForceFreeStates → parameters → analysis
 # ---------------------------------------------------------------------
 """
-    run_slayer(equil, ffs_intr, control, toml_section;
-                dir_path="./") -> SLAYERResult
+    run_slayer(equil, ffs_intr, control; dir_path="./") -> SLAYERResult
 
 Orchestrate the full SLAYER analysis against a solved
 `PlasmaEquilibrium` and `ForceFreeStatesInternal`. Kinetic profiles are
-loaded according to `control.profile_source` (either inline from
-`toml_section["profiles"]` or from the HDF5 file `control.profile_file`
-relative to `dir_path`). Per-surface parameters are built via
+read from `control.profile_file` (relative to `dir_path`) through the shared
+`Equilibrium.read_kinetic_file` reader; when the file carries `chi_e`/`chi_phi`
+profiles they set χ⊥(ψ)/χ_φ(ψ), otherwise the scalar `control.chi_perp`/
+`chi_tor` fallbacks are used. Per-surface parameters are built via
 `build_slayer_inputs`; the outer-region Δ' matrix is pulled from
 `ffs_intr.delta_prime_matrix` (or, if empty, from the diagonal
 `sing.delta_prime` entries).
@@ -341,13 +356,14 @@ relative to `dir_path`). Per-surface parameters are built via
 Returns an `enabled=false` `SLAYERResult` when `control.enabled` is
 false.
 """
-function run_slayer(equil, ffs_intr, control::SLAYERControl,
-    toml_section::AbstractDict; dir_path::AbstractString="./")
+function run_slayer(equil, ffs_intr, control::SLAYERControl;
+    dir_path::AbstractString="./")
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(ffs_intr.sing) && return empty_slayer_result(control)
 
-    profiles = _load_profiles(control, toml_section, dir_path)
+    loaded = _load_profiles(control, dir_path)
+    profiles = loaded.profiles
 
     if control.inner_model in (:ggj_shooting, :ggj_galerkin)
         # GGJ γ-extraction is future work; `run_slayer_from_inputs` emits the
@@ -359,12 +375,18 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl,
             lnLambda_form=control.lnLambda_form)
     else
         bt = control.bt === nothing ? equil.config.b0exp : control.bt
+        # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
+        chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
+        chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
+        (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
+            "SLAYER: kinetic file has no chi_e/chi_phi profile(s); using the " *
+            "scalar control.chi_perp/chi_tor fallback for the missing one(s).")
         params = build_slayer_inputs(equil, ffs_intr.sing, profiles;
             bt=bt,
             mu_i=control.mu_i,
             zeff=control.zeff,
-            chi_perp=control.chi_perp,
-            chi_tor=control.chi_tor,
+            chi_perp=chi_perp,
+            chi_tor=chi_tor,
             dr_val=control.dr_val,
             dgeo_val=control.dgeo_val,
             dc_type=control.dc_type,

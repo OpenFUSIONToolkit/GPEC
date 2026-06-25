@@ -27,9 +27,10 @@ using LinearAlgebra
 using Statistics: mean, median
 using HDF5
 
+using FastInterpolations: cubic_interp
 using ..Utilities
-using ..Utilities: KineticProfiles, kinetic_profiles_from_toml,
-    kinetic_profiles_from_h5
+using ..Utilities: KineticProfiles
+using ...Equilibrium: read_kinetic_file, KineticProfileData
 using ..InnerLayer
 using ..InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,

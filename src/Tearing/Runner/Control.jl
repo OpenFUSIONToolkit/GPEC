@@ -32,7 +32,9 @@ constructor.
   - `bt`       -- toroidal field [T]. `nothing` → use `equil.config.b0exp`
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
-  - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]
+  - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
+    diffusivity [m²/s], used only when the kinetic file carries no
+    `chi_e`/`chi_phi` profiles (otherwise those take precedence)
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
@@ -68,10 +70,15 @@ constructor.
 
 # Kinetic-profile source
 
-  - `profile_source` -- `:inline` (use the `[SLAYER.profiles]` TOML table)
-    or `:h5` (read from a separate HDF5 file)
-  - `profile_file`   -- HDF5 path (relative to the run dir), required if
-    `profile_source === :h5`
+SLAYER reads kinetic profiles through the shared `Equilibrium.read_kinetic_file`
+reader (the same standardized object used by the kinetic/NTV physics), so
+there is one consistent interface for resistive and kinetic profiles.
+
+  - `profile_file`   -- path to a kinetic-profile file (relative to the run
+    dir), required when SLAYER is enabled. HDF5 (`.h5`) files use the GPEC
+    kinetic schema and may carry `chi_e` (χ⊥) and `chi_phi` (χ_φ); ASCII
+    tables are also accepted but carry no χ (the `chi_perp`/`chi_tor`
+    fallbacks below are used instead).
   - `profile_group`  -- group within the HDF5 file (default `"/"`)
 
 # Output control
@@ -135,7 +142,6 @@ constructor.
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
 
-    profile_source::Symbol = :inline
     profile_file::String = ""
     profile_group::String = "/"
 
@@ -146,7 +152,6 @@ const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
-const _VALID_PROFILE_SOURCES = (:inline, :h5)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
@@ -163,9 +168,6 @@ function validate(ctrl::SLAYERControl)
     ctrl.dc_type in _VALID_DC_TYPES ||
         throw(ArgumentError("SLAYERControl: dc_type=$(ctrl.dc_type) " *
                             "not in $(_VALID_DC_TYPES)"))
-    ctrl.profile_source in _VALID_PROFILE_SOURCES ||
-        throw(ArgumentError("SLAYERControl: profile_source=$(ctrl.profile_source) " *
-                            "not in $(_VALID_PROFILE_SOURCES)"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
         throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
                             "not in $(_VALID_RESISTIVITY_MODELS)"))
@@ -213,9 +215,6 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "pole_threshold") && (flat["pole_threshold"] = v["pole_threshold"])
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
             haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
-        elseif k == "profiles"
-            # Profiles are handled separately by the runner; skip here
-            continue
         else
             flat[k] = v
         end
@@ -234,7 +233,7 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :dc_type,
-            :profile_source, :resistivity_model, :lnLambda_form)
+            :resistivity_model, :lnLambda_form)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)

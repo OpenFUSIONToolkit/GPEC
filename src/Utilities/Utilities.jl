@@ -34,7 +34,7 @@ using .PhysicalConstants
 export PhysicalConstants
 export MU_0, M_E, M_P, E_CHG, K_B, EPS_0
 
-export KineticProfiles, kinetic_profiles_from_toml, kinetic_profiles_from_h5
+export KineticProfiles
 
 using .NeoclassicalResistivity
 export NeoclassicalResistivity
