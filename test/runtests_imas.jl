@@ -91,6 +91,22 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test psi_center >= 0.0   # ψ should be non-negative at magnetic axis region
     end
 
+    # An imas run started via `main(; dd)` must thread the dd through to `additional_input`;
+    # guards against the dispatch silently dropping it.
+    @testset "main dd dispatch: dd reaches additional_input" begin
+        dd, _ = make_mock_dd()
+        mktempdir() do dir
+            write(joinpath(dir, "gpec.toml"), "[Equilibrium]\neq_type = \"imas\"\nimas_cocos = 11\n")
+            inputs, eq_config, additional_input =
+                GeneralizedPerturbedEquilibrium.build_inputs_from_toml(dir; dd=dd)
+            @test eq_config.eq_type == "imas"
+            @test additional_input === dd
+            # Without a dd, an imas config leaves additional_input === nothing.
+            _, _, no_dd = GeneralizedPerturbedEquilibrium.build_inputs_from_toml(dir)
+            @test no_dd === nothing
+        end
+    end
+
     # Test 4: write_imas — single n, correct metadata and energy_perturbed
     @testset "write_imas: single n_tor" begin
         dd = IMASdd.dd()

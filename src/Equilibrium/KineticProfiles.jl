@@ -158,9 +158,11 @@ end
 """
 Internal helper: parse the raw 6-column kinetic profile table from disk,
 filtering out non-numeric header rows. Returns six independent column views.
+`#` comment lines (e.g. a provenance header) are stripped so they cannot widen
+the parsed matrix and pad the data rows.
 """
 function _read_kinetic_table(kinetic_file::AbstractString)
-    table = DelimitedFiles.readdlm(kinetic_file)
+    table = DelimitedFiles.readdlm(kinetic_file; comments=true)
 
     # Keep numeric rows only (drops text headers). Build row-major by rebuilding
     # the matrix as a stack of rows — reshape(:, 6) is column-major and scrambles

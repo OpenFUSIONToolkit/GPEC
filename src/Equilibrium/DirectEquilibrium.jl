@@ -197,40 +197,32 @@ function direct_position!(raw_profile::DirectRunInput)
     # Because DirectRunInput is a mutable struct, we can update the spline here
     raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; extrap=ExtendExtrap())
 
-    # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
-    # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0), so Brent is
-    # globally convergent within the bracket (start_r, end_r) and needs no restarts.
-    # For limited equilibria whose grid box hugs the LCFS (e.g. some TokaMaker gEQDSKs),
-    # ψ can stay positive out to the grid edge with no sign change to bracket. The separatrix
-    # (ψ = 0) then sits just beyond the grid; extend the bracket outward via the extrapolating
-    # ψ spline until ψ changes sign (capped), so rs is a faithful ψ=0 crossing rather than the
-    # arbitrary grid edge (which lands in the degenerate ψ→0, Bp→0 region and breaks tracing).
-    psi_at(r) = (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0); bfield.psi)
-    function find_separatrix_crossing(start_r, end_r, label)
-        hi = end_r
-        if psi_at(start_r) * psi_at(hi) > 0
-            span = abs(end_r - start_r)
-            step = 0.02 * span
-            hi_max = end_r + sign(end_r - start_r) * 0.5 * span   # cap extrapolation at 50% of the half-width
-            while psi_at(start_r) * psi_at(hi) > 0 && abs(hi - end_r) < abs(hi_max - end_r)
-                hi += sign(end_r - start_r) * step
+    # Replicate Fortran direct.f direct_position: unbracketed Newton iteration dr=-ψ/ψ_r toward
+    # ψ=0 (the renormalized separatrix). Newton extrapolates past the grid edge, so it finds the
+    # separatrix even for limited equilibria whose grid box hugs the LCFS (ψ>0 to the edge, no
+    # sign change to bracket). Fortran allows more steps here than for the axis solve (2000 vs 200).
+    max_separatrix_steps = 2000
+    function find_separatrix_crossing(r_edge, label)
+        # On each failed attempt, shift the initial guess (a weighted blend of r_edge and the axis
+        # ro) from near the grid edge toward the axis (Fortran direct.f restart counter ird = 0..5).
+        for restart in 0:5
+            r = ((3 - 0.5 * restart) * r_edge + ro) / (4 - 0.5 * restart)
+            for _ in 1:max_separatrix_steps
+                direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
+                dr = -bfield.psi / bfield.psir
+                r += dr
+                if abs(dr) <= 1e-12 * abs(r)
+                    @info "$label separatrix found at R = $(@sprintf("%.3f", r))"
+                    return r
+                end
             end
-            if psi_at(start_r) * psi_at(hi) > 0
-                @warn "$label: ψ does not change sign even extrapolating to R = $(@sprintf("%.3f", hi)); " *
-                      "using R = $(@sprintf("%.3f", hi)) as the boundary."
-                return hi
-            end
-            @warn "$label: ψ positive to grid edge R = $(@sprintf("%.3f", end_r)) (limited equilibrium); " *
-                  "located ψ=0 by extrapolation in R ∈ (R_edge, $(@sprintf("%.3f", hi)))."
         end
-        r_sol = find_zero(psi_at, (start_r, hi), Roots.Brent())
-        @info "$label separatrix found at R = $(@sprintf("%.3f", r_sol))"
-        return r_sol
+        error("Took too many steps to find $label separatrix.")
     end
 
     # Find inboard (rs1) and outboard (rs2) separatrix positions
-    rs1 = find_separatrix_crossing(ro, raw_profile.rmin, "Inboard")
-    rs2 = find_separatrix_crossing(ro, raw_profile.rmax, "Outboard")
+    rs1 = find_separatrix_crossing(raw_profile.rmin, "inboard")
+    rs2 = find_separatrix_crossing(raw_profile.rmax, "outboard")
 
     return ro, zo, rs1, rs2
 end
@@ -432,14 +424,16 @@ function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     psi_samp = range(psi_split_core, psi_split_edge; length=n_samp)
     h_samp = step(psi_samp)
     h_min = Inf
-    buf = zeros(4)
+    # Size the buffer to the actual profile count, not a hardcoded 4 (cf. InverseEquilibrium.jl).
+    nq = size(sq_in.y, 2)
+    buf = zeros(nq)
     all_vals = [
         begin
             sq_in(buf, ψ)
             copy(buf)
         end for ψ in psi_samp
     ]
-    for k in 1:4
+    for k in 1:nq
         vals = [all_vals[i][k] for i in 1:n_samp]
         f_scale = max(maximum(abs.(vals)), 1e-12)
         d2_max = 0.0
@@ -530,6 +524,9 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
     elseif equil_params.grid_type == "pow1"
         # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
         [psilow + (psihigh - psilow) * (3(ipsi / mpsi) - (ipsi / mpsi)^3) / 2 for ipsi in 0:mpsi]
+    elseif equil_params.grid_type == "uniform"
+        # Evenly spaced surfaces, e.g. for profile diagnostics at constant resolution
+        collect(range(psilow, psihigh; length=mpsi + 1))
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end

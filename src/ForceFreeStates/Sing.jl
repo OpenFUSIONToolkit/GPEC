@@ -171,7 +171,15 @@ See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematica
 
   - `SingAsymptotics`: Struct containing all asymptotic expansion data
 """
-function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal; sig::Float64=1.0, alpha_override::Union{Nothing, Vector{ComplexF64}}=nothing)
+function compute_sing_asymptotics(
+    singp::SingType,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal;
+    sig::Float64=1.0,
+    alpha_override::Union{Nothing,Vector{ComplexF64}}=nothing
+)
 
     # Allocations
     vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 1)
@@ -249,22 +257,22 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         ipert0 = r1[1]
         N = intr.numpert_total
         msg = "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)\n"
-        msg *= @sprintf("  m0mat(1,1)= %+.12e %+.12ei\n", real(m0mat[1,1]), imag(m0mat[1,1]))
-        msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1,2]), imag(m0mat[1,2]))
-        msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2,1]), imag(m0mat[2,1]))
-        msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2,2]), imag(m0mat[2,2]))
-        di = m0mat[1,1]*m0mat[2,2] - m0mat[2,1]*m0mat[1,2]
+        msg *= @sprintf("  m0mat(1,1)= %+.12e %+.12ei\n", real(m0mat[1, 1]), imag(m0mat[1, 1]))
+        msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1, 2]), imag(m0mat[1, 2]))
+        msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2, 1]), imag(m0mat[2, 1]))
+        msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2, 2]), imag(m0mat[2, 2]))
+        di = m0mat[1, 1]*m0mat[2, 2] - m0mat[2, 1]*m0mat[1, 2]
         msg *= @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei\n", real(di), real(alpha[1]), imag(alpha[1]))
         msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
-        msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
-        msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
+        msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0, 2, 1]), imag(vmat[ipert0, ipert0, 2, 1]))
+        msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0+N, 2, 1]), imag(vmat[ipert0, ipert0+N, 2, 1]))
         for k in 0:(2*ctrl.sing_order)
             msg *= @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei\n",
-                k, real(vmat[ipert0,ipert0,1,k+1]), imag(vmat[ipert0,ipert0,1,k+1]),
-                real(vmat[ipert0,ipert0,2,k+1]), imag(vmat[ipert0,ipert0,2,k+1]))
+                k, real(vmat[ipert0, ipert0, 1, k+1]), imag(vmat[ipert0, ipert0, 1, k+1]),
+                real(vmat[ipert0, ipert0, 2, k+1]), imag(vmat[ipert0, ipert0, 2, k+1]))
             msg *= @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei\n",
-                k, real(vmat[ipert0,ipert0+N,1,k+1]), imag(vmat[ipert0,ipert0+N,1,k+1]),
-                real(vmat[ipert0,ipert0+N,2,k+1]), imag(vmat[ipert0,ipert0+N,2,k+1]))
+                k, real(vmat[ipert0, ipert0+N, 1, k+1]), imag(vmat[ipert0, ipert0+N, 1, k+1]),
+                real(vmat[ipert0, ipert0+N, 2, k+1]), imag(vmat[ipert0, ipert0+N, 2, k+1]))
         end
         msg
     end
@@ -387,7 +395,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
+            for ipert_m in jpert_m:intr.mpert
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
@@ -438,8 +446,8 @@ Add a spline for F directly instead of the lower triangular factorization to avo
         for j in 0:n
             for ipert_n in 1:intr.npert
                 for jpert_m in 1:intr.mpert
-                    for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
-                        for kpert_m in max(1, ipert_m-intr.mband):jpert_m
+                    for ipert_m in jpert_m:intr.mpert
+                        for kpert_m in 1:jpert_m
                             ipert = ipert_m + (ipert_n - 1) * intr.mpert
                             jpert = jpert_m + (ipert_n - 1) * intr.mpert
                             kpert = kpert_m + (ipert_n - 1) * intr.mpert
@@ -458,7 +466,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in max(1, jpert_m-intr.mband):min(intr.mpert, jpert_m+intr.mband)
+            for ipert_m in 1:intr.mpert
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
@@ -500,7 +508,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # G = [G, G', G''/2, G'''/6]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
+            for ipert_m in jpert_m:intr.mpert
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
@@ -1106,10 +1114,11 @@ det(F̄) via adaptive bisection. Here we use condition number peaks instead of
 determinant zeros for better numerical robustness and scale invariance.
 
 Algorithm:
-1. Evaluate cond(F̄) on a dense ψ grid
-2. Find local maxima (peaks where gradient changes from + to -)
-3. Refine each peak with golden-section minimization of -cond
-4. Filter by threshold and resonance condition
+
+ 1. Evaluate cond(F̄) on a dense ψ grid
+ 2. Find local maxima (peaks where gradient changes from + to -)
+ 3. Refine each peak with golden-section minimization of -cond
+ 4. Filter by threshold and resonance condition
 """
 function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; ngrid::Int=2000, cond_threshold::Float64=1e8)
     psilow = equil.profiles.xs[1]
@@ -1135,7 +1144,7 @@ function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.P
 
     # Find local maxima of cond(F̄): points where cond increases then decreases
     peak_indices = Int[]
-    for i in 2:(ngrid - 1)
+    for i in 2:(ngrid-1)
         if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1] && cond_vals[i] > cond_threshold
             push!(peak_indices, i)
         end
@@ -1168,14 +1177,17 @@ function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.P
             continue
         end
 
-        push!(kinsing_surfaces, SingType(;
-            psifac=psi_refined,
-            rho=sqrt(psi_refined),
-            m=[round(Int, n * q_val) for n in intr.nlow:intr.nhigh],
-            n=collect(intr.nlow:intr.nhigh),
-            q=q_val,
-            q1=q1_val,
-        ))
+        push!(
+            kinsing_surfaces,
+            SingType(;
+                psifac=psi_refined,
+                rho=sqrt(psi_refined),
+                m=[round(Int, n * q_val) for n in intr.nlow:intr.nhigh],
+                n=collect(intr.nlow:intr.nhigh),
+                q=q_val,
+                q1=q1_val
+            )
+        )
     end
 
     # Sort by ψ location

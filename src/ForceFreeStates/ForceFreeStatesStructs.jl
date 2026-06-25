@@ -102,8 +102,8 @@ identity-block initial conditions:
 
 Applying the propagator to the current state `u_prev`:
 
-  u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
-  u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
+u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
+u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
 
 Since each chunk starts from a bounded identity IC (rather than the accumulated state),
 exponential growth within a chunk does not affect the conditioning of the overall
@@ -139,7 +139,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `mlow::Int` - Lowest poloidal mode number
   - `mhigh::Int` - Highest poloidal mode number
   - `mpert::Int` - Number of poloidal modes (mhigh - mlow + 1)
-  - `mband::Int` - Bandwidth for matrix operations (mpert - 1 - delta_mband)
   - `nlow::Int` - Lowest toroidal mode number
   - `nhigh::Int` - Highest toroidal mode number
   - `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
@@ -166,7 +165,6 @@ A mutable struct holding internal state variables for stability calculations.
     mlow::Int = 0
     mhigh::Int = 0
     mpert::Int = 0
-    mband::Int = 0
     nlow::Int = 0
     nhigh::Int = 0
     npert::Int = 0
@@ -206,11 +204,10 @@ A mutable struct containing control parameters for stability analysis, set by th
 ## Fields
 
   - `verbose::Bool` - Enable verbose output
-  - `bal_flag::Bool` - Enable ballooning mode analysis
+  - `local_stability_flag::Bool` - Enable local stability analysis (`D_I` and ballooning)
   - `mat_flag::Bool` - Enable matrix output
   - `ode_flag::Bool` - Enable ODE integration diagnostics
   - `vac_flag::Bool` - Enable vacuum region calculation
-  - `mer_flag::Bool` - Enable Mercier stability criterion
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
@@ -218,7 +215,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `delta_mband::Int` - Integration keeps only this wide a band of solutions along the diagonal in m,m'
   - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
@@ -253,11 +249,10 @@ A mutable struct containing control parameters for stability analysis, set by th
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
-    bal_flag::Bool = false
+    local_stability_flag::Bool = false
     mat_flag::Bool = false
     ode_flag::Bool = false
     vac_flag::Bool = false
-    mer_flag::Bool = false
     mthvac::Int = 480
     nzvac::Int = 1
     sing_start::Int = 0
@@ -265,7 +260,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    delta_mband::Int = 0
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
@@ -327,7 +321,6 @@ end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
     mpert::Int
-    mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
 
     # Complex-valued CubicSeriesInterpolant for stability matrices
@@ -381,7 +374,7 @@ end
     _hint::Base.RefValue{Int} = Ref(1)
 
     # Used in Free.jl
-    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
+    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mpert - 1)
 end
 
 # Helper to create empty complex series interpolant for default initialization
@@ -398,7 +391,7 @@ function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
 end
 
 # Convenience constructor
-FourFitVars(mpert::Int, mband::Int, numpert_total::Int) = FourFitVars(; mpert, mband, numpert_total)
+FourFitVars(mpert::Int, numpert_total::Int) = FourFitVars(; mpert, numpert_total)
 
 """
     VacuumData
@@ -415,8 +408,8 @@ Populated in `Free.jl`.
   - `wt0::Array{ComplexF64, 2}` - Free-boundary total-energy matrix W = wp + wv before diagonalisation (numpert_total × numpert_total). **ξ-space.**
   - `wp::Array{ComplexF64, 2}` - Plasma energy matrix (numpert_total × numpert_total). **ξ-space.**
   - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total). **ξ-space.**
-  - `pn_wt0, pn_wp, pn_wv::Array{ComplexF64,2}` - Power-normalized flux (Φ-space) counterparts of `wt0`, `wp`, `wv` at the plasma edge (see PowerNorm.jl). Jacobian-invariant up to the M†·W·M transform.
-  - `pn_wt::Array{ComplexF64,2}` - Φ-space eigenvector matrix of `pn_wt0` (columns sorted most-unstable first, phase-normalized so each column's largest-magnitude entry is real-positive).
+  - `rootA_wt0, rootA_wp, rootA_wv::Array{ComplexF64,2}` - Root-area-weighted flux (Φ-space) counterparts of `wt0`, `wp`, `wv` at the plasma edge (see RootAreaWeighted.jl). Jacobian-invariant up to the M†·W·M transform.
+  - `rootA_wt::Array{ComplexF64,2}` - Φ-space eigenvector matrix of `rootA_wt0` (columns sorted most-unstable first, phase-normalized so each column's largest-magnitude entry is real-positive).
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
@@ -442,16 +435,16 @@ Populated in `Free.jl`.
     n_tor_idx::Vector{Int} = zeros(Int, numpert_total)
     vacuum_eigenvalue::Float64 = NaN
 
-    # Power-normalized flux eigenvalues (Jacobian-invariant)
-    pn_et::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
-    pn_ep::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
-    pn_ev::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+    # Root-area-weighted flux eigenvalues (Jacobian-invariant)
+    rootA_et::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+    rootA_ep::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+    rootA_ev::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
 
-    # Power-normalized flux matrices at the plasma edge (Jacobian-invariant).
-    pn_wt0::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
-    pn_wp::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
-    pn_wv::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
-    pn_wt::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    # Root-area-weighted flux matrices at the plasma edge (Jacobian-invariant).
+    rootA_wt0::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    rootA_wp::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    rootA_wv::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    rootA_wt::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
 
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
@@ -466,17 +459,17 @@ EdgeScanState
 
 Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
 Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`
-(power-norm values) and `EdgeScan/XiNorm/` (ξ-space values, for benchmarking).
+(root-area-weighted values) and `EdgeScan/XiNorm/` (ξ-space values, for benchmarking).
 
 ## Fields
 
   - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
   - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
-  - `sqrtamat_spline` - Precomputed √A convolution matrix + surface area spline for power-norm eigenvalues.
+  - `sqrtamat_spline` - Precomputed √A convolution matrix + surface area spline for root-area-weighted eigenvalues.
   - `sqrtamat_hint::Base.RefValue{Int}` - Search hint for sqrtamat spline.
   - `psi, q` - ψ and q values at each edge scan step.
   - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - ξ-space energy components at each step (NaN for failed steps). Kept for Fortran benchmarking.
-  - `pn_total_eigenvalue, pn_plasma_energy, pn_vacuum_energy, pn_vacuum_eigenvalue` - Power-normalized flux (Φ-space) energies (Jacobian-invariant; NaN for failed/singular steps). These are the values written to `EdgeScan/` by default.
+  - `rootA_total_eigenvalue, rootA_plasma_energy, rootA_vacuum_energy, rootA_vacuum_eigenvalue` - Root-area-weighted flux (Φ-space) energies (Jacobian-invariant; NaN for failed/singular steps). These are the values written to `EdgeScan/` by default.
 """
 @kwdef mutable struct EdgeScanState
     numpert_total::Int
@@ -486,7 +479,7 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     wv_hint::Base.RefValue{Int} = Ref(1)
 
-    # Power-norm sqrtamat + jarea spline (mpert^2 + 1 series: flattened sqrtamat then jarea)
+    # Root-area-weighted sqrtamat + jarea spline (mpert^2 + 1 series: flattened sqrtamat then jarea)
     sqrtamat_spline::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2 + 1)
     sqrtamat_hint::Base.RefValue{Int} = Ref(1)
 
@@ -498,11 +491,11 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
 
-    # Power-normalized flux eigenvalues (Jacobian-invariant)
-    pn_total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
-    pn_plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
-    pn_vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
-    pn_vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
+    # Root-area-weighted flux eigenvalues (Jacobian-invariant)
+    rootA_total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    rootA_plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    rootA_vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    rootA_vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
 end
 
 EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)

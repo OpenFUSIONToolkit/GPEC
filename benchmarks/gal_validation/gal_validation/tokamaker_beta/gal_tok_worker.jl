@@ -24,10 +24,10 @@ function base_inputs(dir)
             "etol" => 1e-10, "force_termination" => false),
         "Wall" => Dict("shape" => "nowall", "a" => 0.2415),
         "ForceFreeStates" => Dict(
-            "bal_flag" => false, "mat_flag" => true, "ode_flag" => true,
-            "vac_flag" => true, "mer_flag" => true,
+            "local_stability_flag" => true, "mat_flag" => true, "ode_flag" => true,
+            "vac_flag" => true,
             "qlow" => 1.02, "qhigh" => 1e3, "sing_start" => 0,
-            "nn_low" => 1, "nn_high" => 1, "delta_mlow" => 8, "delta_mhigh" => 8, "delta_mband" => 0,
+            "nn_low" => 1, "nn_high" => 1, "delta_mlow" => 8, "delta_mhigh" => 8,
             "mthvac" => 512, "thmax0" => 1, "kinetic_factor" => 0.0,
             "eulerlagrange_tolerance" => 1e-10, "singfac_min" => 1e-4, "ucrit" => 1e4,
             "use_parallel" => true, "parallel_threads" => 1, "populate_dense_xi" => false,
@@ -49,7 +49,7 @@ function run_pipeline(psihigh)
     eq_config = EQ.EquilibriumConfig(inputs["Equilibrium"], dir)
     equil = EQ.setup_equilibrium(eq_config, nothing)
     FFS.sing_lim!(intr, ctrl, equil)
-    xs = equil.profiles.xs; ls = zeros(length(xs), 5); FFS.mercier_scan!(ls, equil)
+    xs = equil.profiles.xs; ls = zeros(length(xs), 5); FFS.compute_ballooning_stability!(ctrl, ls, equil)
     intr.locstab = cubic_interp(xs, Series(ls); extrap=ExtendExtrap())
     intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
     FFS.sing_find!(intr, equil)
@@ -65,9 +65,8 @@ function run_pipeline(psihigh)
     intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
     intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.mband = min(max(intr.mpert - 1 - ctrl.delta_mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
-    metric = FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+    metric = FFS.make_metric(equil, intr.mpert)
     ffit = FFS.make_matrix(equil, intr, metric)
     odet, fm_propagators, fm_chunks, fm_S_left = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
     vac_data = FFS.free_run!(odet, ctrl, equil, ffit, intr)

@@ -66,50 +66,50 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         force_termination, use_galgrid, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
-            power_b = 0;
-            power_bp = 0;
-            power_r = 0;
+            power_b = 0
+            power_bp = 0
+            power_r = 0
             power_rc = 0
         elseif jac_type == "pest"
             @info "Forcing pest coordinate jacobian exponents: power_*"
-            power_b = 0;
-            power_bp = 0;
-            power_r = 2;
+            power_b = 0
+            power_bp = 0
+            power_r = 2
             power_rc = 0
         elseif jac_type == "equal_arc"
             @info "Forcing equal_arc coordinate jacobian exponents: power_*"
-            power_b = 0;
-            power_bp = 1;
-            power_r = 0;
+            power_b = 0
+            power_bp = 1
+            power_r = 0
             power_rc = 0
         elseif jac_type == "boozer"
             @info "Forcing boozer coordinate jacobian exponents: power_*"
-            power_b = 2;
-            power_bp = 0;
-            power_r = 0;
+            power_b = 2
+            power_bp = 0
+            power_r = 0
             power_rc = 0
         elseif jac_type == "park"
             @info "Forcing park coordinate jacobian exponents: power_*"
-            power_b = 1;
-            power_bp = 0;
-            power_r = 0;
+            power_b = 1
+            power_bp = 0
+            power_r = 0
             power_rc = 0
         elseif jac_type == "other"
             # Normalize to a named type when the powers match, so fast paths are taken.
             if power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "hamada";
+                jac_type = "hamada"
                 @info "Recognized hamada jacobian from power exponents"
             elseif power_b == 0 && power_bp == 0 && power_r == 2 && power_rc == 0
-                jac_type = "pest";
+                jac_type = "pest"
                 @info "Recognized pest jacobian from power exponents"
             elseif power_b == 0 && power_bp == 1 && power_r == 0 && power_rc == 0
-                jac_type = "equal_arc";
+                jac_type = "equal_arc"
                 @info "Recognized equal_arc jacobian from power exponents"
             elseif power_b == 2 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "boozer";
+                jac_type = "boozer"
                 @info "Recognized boozer jacobian from power exponents"
             elseif power_b == 1 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "park";
+                jac_type = "park"
                 @info "Recognized park jacobian from power exponents"
             else
                 @info "Using manual jacobian exponents: power b, bp, r, rc = $(power_b), $(power_bp), $(power_r), $(power_rc)"
@@ -224,21 +224,7 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     zeroth::Bool = false
 end
 
-"""
-Outer constructor for LargeAspectRatioConfig that enables a toml file
-interface for specifying the configuration settings
-"""
-function LargeAspectRatioConfig(path::String)
-    raw = TOML.parsefile(path)
-    input_data = get(raw, "LAR_INPUT", Dict())
-    return LargeAspectRatioConfig(; symbolize_keys(input_data)...)
-end
-
-"""
-Outer constructor for LargeAspectRatioConfig from a parsed TOML dictionary.
-Supports embedding the LAR analytic-equilibrium parameters directly in
-`gpec.toml` under `[LAR_INPUT]` instead of a separate `lar.toml`.
-"""
+"Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table."
 function LargeAspectRatioConfig(input_dict::Dict{String,Any})
     return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
 end
@@ -278,18 +264,7 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
-function TJAnalyticConfig(path::String)
-    raw = TOML.parsefile(path)
-    input_data = get(raw, "TJ_ANALYTIC_INPUT", Dict())
-    return TJAnalyticConfig(; symbolize_keys(input_data)...)
-end
-
-"""
-Outer constructor for TJAnalyticConfig from a parsed TOML dictionary. Supports
-embedding the TJ-analytic equilibrium parameters (cf. R. Fitzpatrick's
-TJ code, https://github.com/rfitzp/TJ) directly in the main `gpec.toml`
-under `[TJ_ANALYTIC_INPUT]`, removing the need for a separate side-car file.
-"""
+"Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table."
 function TJAnalyticConfig(input_dict::Dict{String,Any})
     return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
@@ -325,24 +300,83 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
     f0fac::Float64 = 1       # scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 end
 
-"""
-Outer constructor for SolovevConfig that enables a toml file
-interface for specifying the configuration settings
-"""
-function SolovevConfig(path::String) # if we use @kwdef, it generates SolovevConfig() so it conflicts with this line.
-    raw = TOML.parsefile(path)
-    input_data = get(raw, "SOL_INPUT", Dict())
-    return SolovevConfig(; symbolize_keys(input_data)...)
-end
-
-"""
-Outer constructor for SolovevConfig from a parsed TOML dictionary.
-Supports embedding the Solovev analytic-equilibrium parameters directly
-in `gpec.toml` under `[SOL_INPUT]` instead of a separate `sol.toml`.
-"""
+"Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table."
 function SolovevConfig(input_dict::Dict{String,Any})
     return SolovevConfig(; symbolize_keys(input_dict)...)
 end
+
+"""
+    DirectIngest
+
+The serializable raw arrays and scalars captured by a direct-equilibrium reader
+(`read_efit`, `read_imas`, `sol_run` is analytic and does not use this) — everything
+needed to rebuild a `DirectRunInput`'s splines without re-reading the original g-file.
+Stored on `DirectRunInput.ingest` / `PlasmaEquilibrium.ingest` and dumped to
+`gpec.h5` so a run can be replayed from any directory. The interpolants themselves are
+not serializable; they are reconstructed from these nodes by `build_direct_from_ingest`.
+
+## Fields
+
+  - `sq_xs::Vector{Float64}` — normalized-ψ knots for the 1D profile spline
+  - `sq_fs::Matrix{Float64}` — 1D profile node values (F, μ₀P, q, √ψ_norm)
+  - `psi_xs::Vector{Float64}` — R grid for the 2D flux map [m]
+  - `psi_ys::Vector{Float64}` — Z grid for the 2D flux map [m]
+  - `psi_rz::Matrix{Float64}` — processed poloidal flux on the (R, Z) grid [Wb/rad]
+  - `rmin/rmax/zmin/zmax::Float64` — computational-grid bounds [m]
+  - `psio::Float64` — total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+  - `bt_sign::Int` — sign of the toroidal field (+1 or -1)
+"""
+struct DirectIngest
+    sq_xs::Vector{Float64}
+    sq_fs::Matrix{Float64}
+    psi_xs::Vector{Float64}
+    psi_ys::Vector{Float64}
+    psi_rz::Matrix{Float64}
+    rmin::Float64
+    rmax::Float64
+    zmin::Float64
+    zmax::Float64
+    psio::Float64
+    bt_sign::Int
+end
+
+"""
+    InverseIngest
+
+The serializable raw arrays and scalars captured by an inverse-equilibrium reader
+(`read_chease_ascii`, `read_chease_binary`) — everything needed to rebuild an
+`InverseRunInput`'s splines without re-reading the original CHEASE file. Stored on
+`InverseRunInput.ingest` / `PlasmaEquilibrium.ingest` and reconstructed by
+`build_inverse_from_ingest`. See [`DirectIngest`](@ref) for the role this plays in
+the `gpec.h5` rerun snapshot.
+
+## Fields
+
+  - `sq_xs::Vector{Float64}` — normalized-ψ knots for the 1D profile spline
+  - `sq_fs::Matrix{Float64}` — 1D profile node values
+  - `rz_xs::Vector{Float64}` — ψ grid for the R, Z maps
+  - `rz_ys::Vector{Float64}` — θ grid for the R, Z maps
+  - `R_nodes::Matrix{Float64}` — R node values on the (ψ, θ) grid [m]
+  - `Z_nodes::Matrix{Float64}` — Z node values on the (ψ, θ) grid [m]
+  - `ro::Float64` — R of magnetic axis [m]
+  - `zo::Float64` — Z of magnetic axis [m]
+  - `psio::Float64` — total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+"""
+struct InverseIngest
+    sq_xs::Vector{Float64}
+    sq_fs::Matrix{Float64}
+    rz_xs::Vector{Float64}
+    rz_ys::Vector{Float64}
+    R_nodes::Matrix{Float64}
+    Z_nodes::Matrix{Float64}
+    ro::Float64
+    zo::Float64
+    psio::Float64
+end
+
+# Equilibria captured for replay carry one of these; analytic equilibria carry `nothing`
+# and are regenerated from their TOML section instead.
+const EquilibriumIngest = Union{Nothing,DirectIngest,InverseIngest}
 
 """
     DirectRunInput(...)
@@ -383,6 +417,8 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
   - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
+  - `ingest::EquilibriumIngest` — captured raw arrays for the `gpec.h5` rerun snapshot
+    (a [`DirectIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -396,6 +432,7 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
     bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
+    ingest::EquilibriumIngest
 end
 
 """
@@ -414,6 +451,8 @@ A container struct for inputs to the `inverse_run` function.
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+  - `ingest::EquilibriumIngest` - captured raw arrays for the `gpec.h5` rerun snapshot
+    (an [`InverseIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
 """
 mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -425,6 +464,7 @@ mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<
     ro::Float64                 # R axis location
     zo::Float64                 # Z axis location
     psio::Float64               # Total flux difference |psi_axis - psi_boundary|
+    ingest::EquilibriumIngest
 end
 
 """
@@ -789,6 +829,9 @@ This object provides a complete representation of the processed plasma equilibri
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
+  - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
+    `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
+    equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -814,4 +857,15 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     ro::Float64
     zo::Float64
     psio::Float64
+
+    ingest::EquilibriumIngest
 end
+
+# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest, so allow
+# construction without it; ingest defaults to nothing and is assigned post-construction.
+PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
+    rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
+    eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
+    PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing)

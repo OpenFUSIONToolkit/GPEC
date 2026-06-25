@@ -1,6 +1,17 @@
 # GeneralizedPerturbedEquilibrium.jl
 module GeneralizedPerturbedEquilibrium
 
+# External dependencies used by main and the rerun helpers
+using TOML
+using Printf
+using HDF5
+using FastInterpolations
+import IMASdd
+import AdaptiveArrayPools: @with_pool
+
+const _BANNER = "="^60
+const _SECTION = "-"^40
+
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
 export Utilities
@@ -37,30 +48,40 @@ include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
 
-# Additional imports for main function
-using TOML
-using Printf
-using HDF5
-
-using FastInterpolations
-import IMASdd
-
-import AdaptiveArrayPools: @with_pool
+include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!
-using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
+using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _BANNER = "="^60
-const _SECTION = "-"^40
+const _DEPRECATED_FFS_KEYS = ("mer_flag")
+
+# Drop deprecated [ForceFreeStates] keys so legacy gpec.toml files
+# keep parsing instead of throwing an unknown-keyword error.
+function _drop_deprecated_ffs_keys!(table)
+    for k in _DEPRECATED_FFS_KEYS
+        if haskey(table, k)
+            @warn "`$k` in [ForceFreeStates] is deprecated and ignored please remove it from gpec.toml."
+            delete!(table, k)
+        end
+    end
+    return table
+end
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
-    # Parse command line arguments
+    # Every input source builds a ready `(inputs, eq_config, additional_input)` and hands it to
+    # `main_from_inputs`: a gpec.toml working directory, an IMAS `dd`, or a gpec.h5 snapshot.
+    if !isempty(args) && endswith(lowercase(args[1]), ".h5")
+        inputs, eq_config, additional_input, path, git_version, preloaded_forcing, preloaded_coils = build_inputs_from_h5(args)
+        return main_from_inputs(inputs, eq_config, additional_input, path, git_version;
+            preloaded_forcing_modes=preloaded_forcing, preloaded_coil_sets=preloaded_coils)
+    end
+
     path = length(args) >= 1 ? args[1] : "./"
 
     # Capture git version for reproducibility
@@ -71,6 +92,71 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     end
 
     @info "\n$_BANNER\n  GPEC - Generalized Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
+
+    inputs, eq_config, additional_input = build_inputs_from_toml(path; dd=dd)
+    return main_from_inputs(inputs, eq_config, additional_input, path, git_version)
+end
+
+"""
+    build_inputs_from_toml(path; dd=nothing) -> (inputs, eq_config, additional_input)
+
+Build the pipeline inputs from a working directory containing `gpec.toml`. Returns the
+parsed `inputs` dict, the `EquilibriumConfig`, and the `additional_input` consumed by
+`setup_equilibrium` — an analytic `*Config` for
+sol/lar/tj equilibria (parameters from the embedded TOML section), the `dd` data dictionary
+for IMAS, or `nothing` for file-based equilibria (efit, chease) that `setup_equilibrium`
+reads from disk.
+"""
+function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
+    inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
+
+    haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
+    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
+
+    # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
+    # IMAS-fed (via the dd kwarg), or read from a file (additional_input = nothing).
+    additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
+        build_analytic_config(eq_config.eq_type, inputs)
+    elseif eq_config.eq_type == "imas"
+        dd
+    else
+        nothing
+    end
+
+    return inputs, eq_config, additional_input
+end
+
+"""
+    main_from_inputs(inputs, eq_config, additional_input, path, git_version;
+                     preloaded_forcing_modes=nothing)
+
+Shared pipeline body that every input source funnels into. The caller (one of the
+`build_inputs_from_*` builders) is responsible for producing a fully merged
+`inputs::Dict`, an `EquilibriumConfig`, and a ready `additional_input` — this body
+does no source dispatch of its own. `additional_input` is forwarded directly to
+`setup_equilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
+analytic `*Config` or IMAS `dd` (TOML path), or `nothing` for file-based equilibria.
+
+`preloaded_forcing_modes` lets the rerun path inject a `Vector{ForcingMode}`
+already read from the source HDF5 snapshot, so `compute_perturbed_equilibrium`
+does not have to touch the original `forcing.dat` path. When `nothing`, the
+ForcingTerms data is loaded from disk at snapshot time (if PerturbedEquilibrium
+is enabled) so it still ends up in `input/raw_inputs/forcing_terms/`.
+
+`preloaded_coil_sets` similarly lets the rerun path inject coil geometry read from
+`input/raw_inputs/coils/` so a coil run can be replayed (recomputing the field
+against the current equilibrium) without the original `.dat`/`.h5` files. The coil
+geometry actually used by the run is always written back into `input/raw_inputs/coils/`.
+"""
+function main_from_inputs(
+    inputs::Dict{String,Any},
+    eq_config::Equilibrium.EquilibriumConfig,
+    additional_input,
+    path::String,
+    git_version::String;
+    preloaded_forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing
+)
     total_start = time()
 
     # ----------------------------------------------------------------
@@ -79,44 +165,13 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
-    # Read input data and set up data structures
-    intr = ForceFreeStatesInternal(; dir_path=path)
-    inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
-    # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
-    # EITHER point `eq_filename` at a side-car TOML (legacy) OR embed their
-    # parameters directly in gpec.toml under a top-level section:
-    # [TJ_ANALYTIC_INPUT], [SOL_INPUT], [LAR_INPUT].  When the embedded section
-    # is present it takes precedence and the side-car file is not consulted,
-    # so a run is fully described by a single gpec.toml.
-    #
-    # The TJ-analytic equilibrium follows the profile family of
-    # R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); see
-    # `Equilibrium.TJAnalyticConfig`.
-    if "Equilibrium" in keys(inputs)
-        eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
-        # Build additional_input from embedded TOML sections (analytic equilibria) or from
-        # the dd keyword argument (IMAS). These are mutually exclusive at runtime — an
-        # equilibrium is either analytic (TJ/SOL/LAR) or IMAS-fed or read from a file.
-        additional_input = nothing
-        if eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
-            additional_input = Equilibrium.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
-        elseif eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
-            additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
-        elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
-            additional_input = Equilibrium.LargeAspectRatioConfig(inputs["LAR_INPUT"])
-        elseif eq_config.eq_type == "imas"
-            additional_input = dd
-        end
-        equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
-    elseif isfile(joinpath(intr.dir_path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
-        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
-    else
-        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
-    end
+    # Build data structures from inputs
+    intr = ForceFreeStatesInternal(; dir_path=path)
+    ffs_table = inputs["ForceFreeStates"]
+    _drop_deprecated_ffs_keys!(ffs_table)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
+    equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -136,6 +191,31 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     else
         intr.debug_settings = DebugSettings()
+    end
+
+    # Forcing-data snapshot: when PerturbedEquilibrium is enabled, load forcing
+    # modes early so they can be written into `input/raw_inputs/forcing_terms/`
+    # alongside the TOML blob. On the rerun path the caller passes the modes in
+    # directly via `preloaded_forcing_modes`, bypassing the original file. Coil
+    # forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on
+    # replay, so only the file-based formats need their modes captured here.
+    forcing_modes_snapshot = preloaded_forcing_modes
+    if forcing_modes_snapshot === nothing && "PerturbedEquilibrium" in keys(inputs)
+        ft_raw = get(inputs, "ForcingTerms", Dict{String,Any}())
+        scalar_forcing = filter(p -> p.first != "coil_set", ft_raw)
+        ft_ctrl_snapshot = ForcingTerms.ForcingTermsControl(;
+            (Symbol(k) => v for (k, v) in scalar_forcing)...
+        )
+        if ft_ctrl_snapshot.forcing_data_format in ("ascii", "hdf5")
+            forcing_modes_snapshot = ForcingTerms.ForcingMode[]
+            ForcingTerms.load_forcing_data!(
+                forcing_modes_snapshot,
+                path,
+                ft_ctrl_snapshot.forcing_data_file,
+                ft_ctrl_snapshot.forcing_data_format,
+                ctrl.verbose
+            )
+        end
     end
 
     # ----------------------------------------------------------------
@@ -160,18 +240,15 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         # equil = set_up_equilibrium(equil.config)
     end
 
-    # Compute Mercier and Ballooning stability (if desired)
-    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
+    # Compute local stability (if desired). This holds `D_I` from the
+    # ballooning coefficient system and the local ballooning result.
     profiles_xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
-    if ctrl.mer_flag
-        if ctrl.verbose
-            @info "Evaluating Mercier criterion"
-        end
-        mercier_scan!(locstab_fs, equil)
-    end
-    if ctrl.bal_flag
+    ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
+    if ctrl.local_stability_flag
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
+        # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
+        ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
     end
     # Fit data to splines
     intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
@@ -249,12 +326,6 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
-    if ctrl.delta_mband >= intr.mpert
-        @warn "Banded matrices not implemented yet, setting delta_mband to 0"
-        ctrl.delta_mband = 0
-    end
-    intr.mband = intr.mpert - 1 - ctrl.delta_mband
-    intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
 
     # Build KineticForces control and load kinetic profiles once — reused by
@@ -263,14 +334,15 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # stability does not need kinetic_profiles, but the post-PE block always
     # does, so we load whenever a [KineticForces] section is present or the
     # stability path requests the calculated source.
-    kf_ctrl = haskey(inputs, "KineticForces") ?
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(;
             (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
@@ -289,12 +361,12 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
                   "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
                   "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
                   "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
+                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
                   "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband)
+        metric = make_metric(equil, intr.mpert)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"
@@ -381,7 +453,19 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, gal_data)
+        write_outputs_to_HDF5(
+            ctrl,
+            equil,
+            intr,
+            odet,
+            ctrl.vac_flag ? vac_data : nothing,
+            ffit,
+            git_version,
+            inputs,
+            forcing_modes_snapshot,
+            gal_data;
+            ballooning_boundary=ballooning_boundary
+        )
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -431,6 +515,20 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
             pe_odet = gal_matched_odestate(gal_data, ffit, intr)
         end
 
+        # Reuse the forcing modes loaded at snapshot time (or injected by
+        # `build_inputs_from_h5`) so the PE compute step never re-reads the original
+        # forcing file. `compute_perturbed_equilibrium` short-circuits
+        # `load_forcing_data!` when `pe_intr.forcing_modes` is non-empty.
+        if forcing_modes_snapshot !== nothing
+            pe_intr.forcing_modes = copy(forcing_modes_snapshot)
+        end
+
+        # Inject preloaded coil geometry (gpec.h5 replay with `--coil-source coils`)
+        # so the coil field is recomputed from stored geometry without the .dat/.h5 file.
+        if preloaded_coil_sets !== nothing
+            pe_intr.coil_sets = copy(preloaded_coil_sets)
+        end
+
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
@@ -446,6 +544,12 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
             )
             @info "Results written to $output_file"
         end
+
+        # Snapshot the coil geometry actually used into the gpec.h5 output so the run
+        # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
+        if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
+            _write_coil_snapshot!(joinpath(intr.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
+        end
     end
 
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
@@ -457,18 +561,22 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         @info "\n  KineticForces\n$_SECTION"
         kf_start = time()
 
-        # kf_ctrl and kinetic_profiles were loaded once above the stability block.
-        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
-        if @isdefined(pe_state)
+        # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
+        # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
+        if !@isdefined(pe_state)
+            @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
+        else
+            # kf_ctrl and kinetic_profiles were loaded once above the stability block.
+            kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
             KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
-        end
 
-        kf_state = KineticForces.KineticForcesState()
-        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
+            kf_state = KineticForces.KineticForcesState()
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
 
-        if kf_ctrl.write_outputs_to_HDF5
-            h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                KineticForces.write_to_hdf5!(h5file, kf_state)
+            if kf_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                    KineticForces.write_to_hdf5!(h5file, kf_state)
+                end
             end
         end
 
@@ -507,7 +615,10 @@ function write_outputs_to_HDF5(
     vac_data::Union{VacuumData,Nothing},
     ffit::Union{FourFitVars,Nothing}=nothing,
     git_version::String="unknown",
-    gal_data::Union{GalerkinResult,Nothing}=nothing
+    inputs::Union{Nothing,Dict{String,Any}}=nothing,
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    gal_data::Union{GalerkinResult,Nothing}=nothing;
+    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
@@ -520,22 +631,26 @@ function write_outputs_to_HDF5(
             write_galerkin!(out_h5, gal_data)
         end
 
-        # Store input parameters
-        for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
-            out_h5["input/ForceFreeStates/$key"] = val
+        # Self-contained run snapshot: the full merged TOML (so a rerun can reconstruct every
+        # ForceFreeStates/Equilibrium/Wall/PE control struct), plus the equilibrium ingest
+        # arrays so a file-based rerun never needs the original g-file / CHEASE / IMAS source.
+        if inputs !== nothing
+            out_h5["input/gpec_toml_raw"] = sprint(TOML.print, inputs)
         end
-        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumConfig), getfield.(Ref(equil.config), fieldnames(Equilibrium.EquilibriumConfig)))
-            out_h5["input/EQUIL_CONTROL/$key"] = val
+        if equil.ingest !== nothing  # analytic equilibria are regenerated from their TOML section
+            eq_group = "input/raw_inputs/equilibrium"
+            out_h5["$eq_group/ingest_kind"] = equil.ingest isa Equilibrium.DirectIngest ? "direct" : "inverse"
+            for f in fieldnames(typeof(equil.ingest))
+                out_h5["$eq_group/$f"] = getfield(equil.ingest, f)
+            end
         end
-        # TODO: assuming EQUIL_OUTPUT is going to be deprecated
-        # TODO: should we store the equilibrium? difficult since it could be a gfile, sol.in, etc.
-        # TODO: if we do one input file, can just pass that in instead and loop easily since its parsed
-        # as a dict already (for (k, v) in inputs["ForceFreeStates"]...). We have to do this since custom structs
-        # don't inherently have an iterator by default
+        if forcing_modes !== nothing
+            forcing_group = create_group(out_h5, "input/raw_inputs/forcing_terms")
+            ForcingTerms.save_forcing_to_h5(forcing_modes, forcing_group)
+        end
 
         # Write derived run parameters
         out_h5["info/mpert"] = intr.mpert
-        out_h5["info/mband"] = intr.mband
         out_h5["info/mlow"] = intr.mlow
         out_h5["info/mhigh"] = intr.mhigh
         out_h5["info/npert"] = intr.npert
@@ -573,8 +688,11 @@ function write_outputs_to_HDF5(
         out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
-        # Write local stability data; always write all entries, using empty arrays when not computed
-        if ctrl.mer_flag
+        # Write local stability data; always write all entries, using empty arrays when not computed.
+        # locstab/di = Mercier D_I (det(d0bar)); locstab/dr = resistive interchange D_R;
+        # locstab/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
+        # tearing Δ' under perturbed_equilibrium/singular_coupling/delta_prime).
+        if ctrl.local_stability_flag
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
             out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
@@ -582,9 +700,14 @@ function write_outputs_to_HDF5(
             out_h5["locstab/di"] = Float64[]
             out_h5["locstab/dr"] = Float64[]
         end
-        out_h5["singular/di0"] = (ctrl.mer_flag && !isempty(intr.sing)) ?
+        out_h5["singular/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
                                  [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["locstab/ca1"] = ctrl.bal_flag ? intr.locstab.y[:, 4] : Float64[]
+        out_h5["locstab/ballooning_Delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
+
+        # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
+        out_h5["locstab/psi"] = ballooning_boundary.psi
+        out_h5["locstab/alpha"] = ballooning_boundary.alpha
+        out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
@@ -599,17 +722,17 @@ function write_outputs_to_HDF5(
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
-        # Power-normalized flux (Φ-space) energies are the default — they are Jacobian-
+        # Root-area-weighted (Φ-space) energies are the default — they are Jacobian-
         # invariant. The ξ-space values sit under EdgeScan/XiNorm/ and are retained for
         # benchmarking against the Fortran GPEC lineage.
         if !isempty(odet.edge_scan.psi)
             es = odet.edge_scan
             out_h5["EdgeScan/psi"] = es.psi
             out_h5["EdgeScan/q"] = es.q
-            out_h5["EdgeScan/total_energy"] = es.pn_total_eigenvalue
-            out_h5["EdgeScan/plasma_energy"] = es.pn_plasma_energy
-            out_h5["EdgeScan/vacuum_energy"] = es.pn_vacuum_energy
-            out_h5["EdgeScan/vacuum_eigenvalue"] = es.pn_vacuum_eigenvalue
+            out_h5["EdgeScan/total_energy"] = es.rootA_total_eigenvalue
+            out_h5["EdgeScan/plasma_energy"] = es.rootA_plasma_energy
+            out_h5["EdgeScan/vacuum_energy"] = es.rootA_vacuum_energy
+            out_h5["EdgeScan/vacuum_eigenvalue"] = es.rootA_vacuum_eigenvalue
             out_h5["EdgeScan/XiNorm/total_energy"] = es.total_eigenvalue
             out_h5["EdgeScan/XiNorm/plasma_energy"] = es.plasma_energy
             out_h5["EdgeScan/XiNorm/vacuum_energy"] = es.vacuum_energy
@@ -656,20 +779,20 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
-        
-        # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
+
+        # Write free-boundary stability data. Root-area-weighted (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
         # W_freeboundary_eigenmodes holds the eigenvector matrix of W_freeboundary with
         # columns sorted most-unstable first; the same phase normalization is applied in
         # both spaces (largest-magnitude entry made real-positive).
-        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.pn_wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.pn_wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.pn_wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.pn_wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.pn_et : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.pn_ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.pn_ev : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.rootA_wt0 : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.rootA_wp : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.rootA_wv : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.rootA_wt : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.rootA_et : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.rootA_ep : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.rootA_ev : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
@@ -746,6 +869,22 @@ function write_outputs_to_HDF5(
             end
         end
     end
+end
+
+"""
+    _write_coil_snapshot!(h5_path::String, coil_sets::Vector{CoilSet})
+
+Append the coil geometry used by a run into `input/raw_inputs/coils/` of an existing
+gpec.h5 file (opened in append mode), so the run can be replayed from the output alone.
+One subgroup per coil set; see `ForcingTerms.save_coils_to_h5`.
+"""
+function _write_coil_snapshot!(h5_path::String, coil_sets::Vector{ForcingTerms.CoilSet})
+    isfile(h5_path) || return nothing
+    h5open(h5_path, "r+") do out_h5
+        haskey(out_h5, "input/raw_inputs/coils") && return nothing
+        ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, "input/raw_inputs/coils"))
+    end
+    return nothing
 end
 
 """
