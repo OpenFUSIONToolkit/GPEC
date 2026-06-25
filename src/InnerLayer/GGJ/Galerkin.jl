@@ -788,25 +788,36 @@ end
 # -----------------------------------------------------------------------
 function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
     mpert = 3
-    xs = Float64[]
-    Ψ = Matrix{ComplexF64}(undef, 0, 2);
-    Ξ = similar(Ψ);
-    Υ = similar(Ψ)
+    # Preallocate the output arrays (every qualifying cell contributes npc points) instead of growing
+    # them with vcat inside the loop, which reallocates and copies the whole array each iteration (O(n²)).
+    npts = 0
+    for cell in ws.cells
+        (cell.etype == CT_RES || cell.etype == CT_EXT) && continue
+        cell.np >= 0 || continue
+        npts += npc
+    end
+    xs = Vector{Float64}(undef, npts)
+    Ψ = Matrix{ComplexF64}(undef, npts, 2)
+    Ξ = Matrix{ComplexF64}(undef, npts, 2)
+    Υ = Matrix{ComplexF64}(undef, npts, 2)
+    vals = zeros(ComplexF64, mpert, 2)
+    k = 0
     for cell in ws.cells
         (cell.etype == CT_RES || cell.etype == CT_EXT) && continue
         cell.np >= 0 || continue
         for t in range(0, 1; length=npc + 1)[1:(end-1)]
             x = cell.x_left + t * (cell.x_right - cell.x_left)
             pb, _ = _hermite(x, cell.x_left, cell.x_right)
-            vals = zeros(ComplexF64, mpert, 2)
+            fill!(vals, 0)
             for isol in 1:2, ipert in 1:mpert, ip in 0:cell.np
                 g = cell.map[ipert, ip+1]
                 g <= ws.ndim && (vals[ipert, isol] += ws.sol[g, isol] * pb[ip+1])
             end
-            push!(xs, x)
-            Ψ = vcat(Ψ, permutedims(vals[1, :]));
-            Ξ = vcat(Ξ, permutedims(vals[2, :]));
-            Υ = vcat(Υ, permutedims(vals[3, :]))
+            k += 1
+            xs[k] = x
+            Ψ[k, 1] = vals[1, 1]; Ψ[k, 2] = vals[1, 2]
+            Ξ[k, 1] = vals[2, 1]; Ξ[k, 2] = vals[2, 2]
+            Υ[k, 1] = vals[3, 1]; Υ[k, 2] = vals[3, 2]
         end
     end
     p = sortperm(xs)
