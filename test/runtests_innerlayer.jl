@@ -1,29 +1,51 @@
 # runtests_innerlayer.jl
 #
-# Inner-layer GGJ Δ(Q) solver tests on the published Glasser & Wang (2020, Eq. 55) benchmark.
-# Pins the Galerkin inner-layer Δ as a numerical guard against accidental drift in the Δ(Q) path
-# that gal_match_rpec feeds. The forced eigenvalue is built in the RPEC convention γ = 2πi·n·f
-# (gal_rotation is f in Hz), so this also exercises that convention.
+# Inner-layer GGJ solver checks on the Glasser & Wang (2020, Phys. Plasmas 27, 012506) Eq. 55
+# benchmark equilibrium (D-shaped, aspect ratio 2, q = 2 surface).
 #
-# The reference Δ values are current Julia outputs (reproducible to machine precision), pinned pending
-# a Fortran rmatch deltac_run / paper cross-check. The :shooting solver returns NaN on this benchmark,
-# so solver-vs-solver cross-validation is left as a follow-up.
+# SCOPE — what this paper pins: Glasser & Wang (2020) does NOT tabulate an inner-region matching
+# Δ(Q) (its "Δ_±" Eq. 54 is a convergence-error norm; its physical outputs are growth rates from
+# full resistive DCON). So we test (a) the paper-grounded, platform-independent Mercier index D_I
+# and Frobenius matching powers r_± = 3/2 ± √(−D_I) (Eq. 49), pure functions of the coefficients,
+# and (b) the Galerkin Δ(Q) at the paper's operating point Q = 0.1234, pinned to a value
+# cross-checked against the Fortran rmatch deltac solver (inps basis).
+#
+# The Δ(Q) cross-check: at Q = 0.1234 the layer is well-conditioned and Δ is purely real; the
+# Julia GGJ Galerkin solver and Fortran rmatch deltac agree to ~1e-8 there
+# (Δ_odd ≈ 3.698368e4, Δ_even ≈ 14.759721). This is a different, well-behaved operating point than
+# the original ill-conditioned pin (Q ≈ 6e5·i) that was order-1 irreproducible across architecture.
 
 const IL = GeneralizedPerturbedEquilibrium.InnerLayer
+const GGJ = IL.GGJ
 
-@testset "InnerLayer GGJ Δ(Q)" begin
+@testset "InnerLayer GGJ (Glasser & Wang 2020, Eq. 55)" begin
     p = IL.glasser_wang_2020_eq55()
-    gal = IL.GGJModel(; solver=:galerkin)
-    n = 1
 
-    @testset "f=$(f) Hz" for (f, Δ_ref) in (
-        (1.0e3, (-5.9565220175e-06 - 2.9037648679e-08im, -2.7749660199e-05 + 1.0841989446e-05im)),
-        (1.0e4, (3.7251353050e-08 + 4.0060105204e-07im, 1.0531076405e-07 - 9.4368319597e-08im))
-    )
-        γ = 2π * im * n * f
+    @testset "Mercier index and matching powers (Eq. 49)" begin
+        # D_I = E + F + H − 1/4 from the verbatim Eq. 55 coefficients.
+        D_I = GGJ.mercier_di(p)
+        @test D_I ≈ -0.268361 rtol = 1e-4
+        @test D_I < 0                              # Mercier-stable: the inner-layer model's premise
+
+        # p1 = √(−D_I) sets the large-x Frobenius exponents r_± = 3/2 ± √(−D_I) (Eq. 49).
+        @test GGJ.p1(p) ≈ sqrt(-D_I) rtol = 1e-12
+        @test GGJ.p1(p) ≈ 0.518036 rtol = 1e-4
+    end
+
+    @testset "Galerkin Δ(Q) at Q = 0.1234, cross-checked vs Fortran rmatch deltac" begin
+        gal = IL.GGJModel(; solver=:galerkin)
+        # Eq. 55's companion point is the scaled growth rate Q = 0.1234 (real); build the physical
+        # rate γ = Q·Q₀ so inner_Q(p, γ) lands exactly there.
+        Q_paper = 0.1234
+        γ = Q_paper * GGJ.q0(p)
+        @test GGJ.inner_Q(p, γ) ≈ Q_paper rtol = 1e-12
         Δ = IL.solve_inner(gal, p, γ)
         @test all(isfinite, Δ)
-        @test Δ[1] ≈ Δ_ref[1] rtol = 1e-5
-        @test Δ[2] ≈ Δ_ref[2] rtol = 1e-5
+        # Δ is purely real at this real Q; values cross-checked against Fortran rmatch deltac
+        # (inps basis) — the two independent codes agree to ~1e-8. rtol absorbs cross-platform jitter.
+        @test real(Δ[1]) ≈ 3.698368e4 rtol = 1e-3
+        @test real(Δ[2]) ≈ 14.759721 rtol = 1e-3
+        @test abs(imag(Δ[1])) < 1e-3 * abs(Δ[1])
+        @test abs(imag(Δ[2])) < 1e-3 * abs(Δ[2])
     end
 end
