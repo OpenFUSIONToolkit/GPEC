@@ -37,12 +37,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               imx_override::Union{Nothing,Float64}=nothing,
               atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
-    if intr.verbose
-        println("torque - tpsi function, psi = ", psi)
-        println("  electron ", electron)
-        println("  ell ", l)
-    end
-
     # Enforce bounds
     if psi > 1
         tpsi_var[] = 0.0
@@ -196,14 +190,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
     nueff = nu_s / (2 * epsr)
 
-    if intr.verbose
-        @printf("   eq values = %.1e %.1e %.1e %.1e %.1e %.1e %.1f %d\n",
-               wdian, wdiat, welec, wdhat, wbhat, nueff, q, 0)
-    end
-
-    if intr.verbose
-        println("  method = ", method)
-    end
 
     # Method selection — route on the registry dispatch tag (errors on unknown method)
     kind = method_kind(method)
@@ -248,9 +234,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    rex_override=rex_override, imx_override=imx_override)
     end
 
-    if intr.verbose
-        println("torque - end function, psi = ", psi)
-    end
 
     return nothing
 end
