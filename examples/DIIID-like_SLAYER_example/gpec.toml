@@ -33,11 +33,10 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
-bal_flag = false               # Ideal MHD ballooning criterion for short wavelengths
+local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 mat_flag = true                # Construct coefficient matrices for diagnostic purposes
-ode_flag = true                # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
+ode_flag = true                # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
-mer_flag = true                # Evaluate the Mercier criterian
 
 psiedge = 0.99                 # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
@@ -48,11 +47,10 @@ nn_low = 1                     # Smallest toroidal mode number to include
 nn_high = 1                    # Largest toroidal mode number to include
 delta_mlow = 8                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 8                # Expands upper bound of Fourier harmonics
-delta_mband = 0                # Integration keeps only this wide a band...
-mthvac = 512                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 thmax0 = 1                     # Linear multiplier on the automatic choice of theta integration bounds
 
-kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
+kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
