@@ -3,6 +3,7 @@
 #   Computes ballooning stability criterion over all flux surfaces
 # ======================================================================
 using LinearAlgebra
+using StaticArrays: SVector
 
 """
     compute_ballooning_stability!(ctrl, locstab_fs, plasma_eq)
@@ -476,7 +477,10 @@ function prepare_ballooning_coefficients(
     kappaw_periodic .+= -kappas .* i_per_perturbed .+ (theta_k_reference .* q_derivative .+ i_per0_thetak_shift) .* kappas
     kappaw_secular = q_derivative .* kappas
 
-    bf_fs = zeros(mtheta + 1, 9)
+    # Only the 7 coefficients the ballooning ODE RHS reads are interpolated. bsq and sigma are kept as
+    # locals (used below for n0_fs/d0bar) but deliberately NOT added to the spline, since the RHS never
+    # uses them — interpolating 9 columns when 7 suffice wastes ~22% of every per-step spline evaluation.
+    bf_fs = zeros(mtheta + 1, 7)
     bf_fs[:, 1] = nabla_beta_sq_b_sq_periodic
     bf_fs[:, 2] = nabla_beta_sq_b_sq_peculiar_1st
     bf_fs[:, 3] = nabla_beta_sq_b_sq_peculiar_2nd
@@ -484,10 +488,8 @@ function prepare_ballooning_coefficients(
     bf_fs[:, 5] = kappaw_secular
     bf_fs[:, 6] = jac_chiprime
     bf_fs[:, 7] = pprime_chiprime
-    bf_fs[:, 8] = bsq
 
     sigma = .-(two_pi_f .* pressure_gradient .* q_derivative) ./ (chi_prime^2 .* bsq)
-    bf_fs[:, 9] = sigma
 
     m0_12 = jac_chiprime ./ nabla_beta_sq_b_sq_peculiar_2nd
     m0_21 = -2.0 .* jac_chiprime .* pprime_chiprime .* kappaw_periodic
@@ -1099,8 +1101,8 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     theta_start_right = THETA_MAX0
     theta_end_right = MATCHING_POINT
 
-    initial_condition_left = [0.0, 1.0]
-    initial_condition_right = [0.0, -1.0]
+    initial_condition_left = SVector(0.0, 1.0)
+    initial_condition_right = SVector(0.0, -1.0)
 
     # Reusable RHS parameters: precompute the periodic-wrap constants once (were recomputed every RHS call)
     # and carry a scratch buffer + search hint so the spline is evaluated in place (no per-step allocation).
@@ -1111,7 +1113,7 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
 
     # Only the endpoint log-derivative is used, so don't store the full trajectory or build dense output.
     problem_left = ODEProblem(
-        compute_ballooning_ode!,
+        compute_ballooning_ode,
         initial_condition_left,
         (theta_start_left, theta_end_left),
         ode_params
@@ -1132,7 +1134,7 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     end
 
     problem_right = ODEProblem(
-        compute_ballooning_ode!,
+        compute_ballooning_ode,
         initial_condition_right,
         (theta_start_right, theta_end_right),
         ode_params
@@ -1165,7 +1167,7 @@ end
 #   Differential equations for marginal ballooning stability
 # ======================================================================
 """
-    compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
+    compute_ballooning_ode(solution, parameters, poloidal_angle) -> SVector{2,Float64}
 
 Defines the RHS of the first-order ODE system for ideal marginal ballooning modes.
 Used by the DifferentialEquations.jl ODE solver.
@@ -1179,12 +1181,11 @@ where y₁ is the solution and y₂ = f·dy/dθ.
 
 ## Arguments
 
-  - `derivatives::Vector{Float64}`: Output vector [dy₁/dθ, dy₂/dθ].
-  - `solution::Vector{Float64}`: Current state vector [y₁, y₂].
+  - `solution`: Current state vector `[y₁, y₂]` (an `SVector{2}`). Returns the derivative `[dy₁/dθ, dy₂/dθ]` as an `SVector{2}`.
   - `parameters::Tuple`: (ode_coefficient_spline, reference_angle).
   - `poloidal_angle::Float64`: Current poloidal angle θ (independent variable).
 """
-function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
+function compute_ballooning_ode(solution, parameters, poloidal_angle)
     itp = parameters.itp
     coeffs = parameters.coeffs
     theta_wrapped = mod(Float64(poloidal_angle) - parameters.theta_min, parameters.theta_period) + parameters.theta_min
@@ -1204,6 +1205,7 @@ function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_ang
     kappaw = kappaw_periodic - poloidal_angle * kappaw_secular
     g = -2.0 * jac_chiprime * pprime_chiprime * kappaw
 
-    derivatives[1] = solution[2] / f
-    derivatives[2] = g * solution[1]
+    # Out-of-place RHS returning an SVector: DP5 runs the 2-component system on stack-allocated static
+    # vectors (no heap, SIMD), removing the per-step Vector overhead of the integration.
+    return SVector(solution[2] / f, g * solution[1])
 end
