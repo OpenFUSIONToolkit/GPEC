@@ -140,11 +140,11 @@ Inline function for fast cross product of two 3D vectors at a given index.
     idx::Int
 )
     @inbounds begin
-        a1 = a[idx, 1];
-        a2 = a[idx, 2];
+        a1 = a[idx, 1]
+        a2 = a[idx, 2]
         a3 = a[idx, 3]
-        b1 = b[idx, 1];
-        b2 = b[idx, 2];
+        b1 = b[idx, 1]
+        b2 = b[idx, 2]
         b3 = b[idx, 3]
 
         c[idx, 1] = a2*b3 - a3*b2

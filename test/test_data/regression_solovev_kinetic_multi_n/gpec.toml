@@ -1,62 +1,71 @@
+# Regression fixture: Solovev multi-n (n = 1 and 2) with the kinetic path barely enabled
+# (kinetic_factor=1e-9). Verifies the "fixed" kinetic path runs across a mode-number range
+# without perturbing the ideal result, on a coarse (mpsi=16) plasma; consumed by test/runtests_*.jl.
+
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
-eq_filename = "sol.toml"                # Path to equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                            # Poloidal field power exponent for Jacobian
-power_b = 0                             # Toroidal field power exponent for Jacobian
-power_r = 0                             # Major radius power exponent for Jacobian
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
-psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.9995                        # Upper limit of normalized flux coordinate
-mpsi = 16                               # Number of radial grid points
+psilow = 1e-4                           # Lower limit of normalized poloidal flux
+psihigh = 0.9995                        # Upper limit of normalized poloidal flux
+mpsi = 16                               # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
-shape = "conformal"                     # Close conformal wall stabilizes Solovev n=1 external kink; see examples/Solovev_ideal_example/gpec.toml
-a = 0.2415
-aw = 0.05
-bw = 1.5
-cw = 0
-dw = 0.5
-tw = 0.05
-equal_arc_wall = true
+shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath); close conformal wall stabilizes the Solovev n=1 kink (see examples/Solovev_ideal_example/gpec.toml)
+a = 0.2415                              # Distance from plasma (conformal) or shape parameter
+aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                                # Elongation parameter for wall shapes
+cw = 0                                  # Offset of wall center from major radius
+dw = 0.5                                # Triangularity parameter for wall shapes
+tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
-bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
+local_stability_flag = true   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 mat_flag = false              # Construct coefficient matrices for diagnostic purposes
-ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
+ode_flag = true               # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
-mer_flag = true               # Evaluate the Mercier criterian
 
-psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
-qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
-qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
+psiedge = 0.99                # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                    # Lower toroidal mode number
-nn_high = 2                   # Upper toroidal mode number
+nn_low = 1                    # Smallest toroidal mode number to include
+nn_high = 2                   # Largest toroidal mode number to include
 delta_mlow = 0                # Expands lower bound of Fourier harmonics
 delta_mhigh = 0               # Expands upper bound of Fourier harmonics
-delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 64                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+mthvac = 64                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
-kinetic_source = "fixed"      # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
-kinetic_factor = 1e-9         # Small perturbation to verify kinetic path without altering physics (>0 enables kinetic mode)
+kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
+kinetic_factor = 1e-9         # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode; tiny value just exercises the path)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
+ucrit = 1e3                   # Column-norm threshold that triggers solution renormalization
 
 # Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
+use_parallel          = true   # Run parallel FM-propagator BVP path (multi-n Δ' matrix has open issues — sing_lim! warns and skips — but ξ and energies are valid)
 parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
-populate_dense_xi     = true   # Append serial-EL pass after parallel BVP so HDF5 integration/xi_* carry axis-basis dense ξ for PerturbedEquilibrium
-truncate_at_dW_peak   = false  # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
-set_psilim_via_dmlim  = false  # FALSE for multi-n (dmlim truncation is ambiguous when n varies — sing_lim! would skip with warning anyway)
-dmlim                 = 0.2    # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n
+populate_dense_xi     = true   # Append serial-EL pass so dense ξ is stored — REQUIRED with a [PerturbedEquilibrium] section
+set_psilim_via_dmlim  = false  # FALSE for multi-n — dmlim truncation is ambiguous when n varies (sing_lim! skips anyway)
+dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
 
-write_outputs_to_HDF5 = true
-verbose = false
+write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
+verbose = false               # Enable verbose logging
+# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
+[SOL_INPUT]
+mr = 128       # Number of radial grid zones
+mz = 128       # Number of axial grid zones
+ma = 128       # Number of flux grid zones
+e = 1.6        # Elongation
+a = 0.33       # Minor radius
+r0 = 1.0       # Major radius
+q0 = 1.9       # Safety factor at the magnetic axis (O-point)
+p0fac = 1      # Scale on-axis pressure (β changes; Φ, q fixed)
+b0fac = 1      # Scale toroidal field at constant β (Bt changes; shape, β fixed)
+f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p, Bp fixed)

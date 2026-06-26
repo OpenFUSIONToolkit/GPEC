@@ -17,17 +17,21 @@ makedocs(;
     sitename="GPEC.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", nothing) == "true",
-        canonical="https://OpenFUSIONToolkit.github.io/GPEC/"
+        canonical="https://OpenFUSIONToolkit.github.io/GPEC/",
+        size_threshold=409_600,      # 400 KiB — stability.md is a large single-page module reference
+        size_threshold_warn=204_800  # 200 KiB
     ),
     modules=[GeneralizedPerturbedEquilibrium],
     pages=[
         "Home" => "index.md",
         "Setup" => "set_up.md",
         "Workflow" => "workflow.md",
+        "Conventions Reference" => "conventions.md",
         "API Reference" => [
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",
             "Stability Analysis" => "stability.md",
+            "Ballooning Local Stability" => "ballooning.md",
             "KineticForces" => "kinetic_forces.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",

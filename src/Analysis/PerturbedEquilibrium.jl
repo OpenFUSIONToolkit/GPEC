@@ -18,13 +18,14 @@ function _has_pe_data(h5path, key)
 end
 
 """
-    plot_resonant_flux(h5path; save_path=nothing)
+    plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
 
-Scatter plot of `|Φ_res|` per rational surface vs ψ_N. One marker series per toroidal
-mode n. Integer-valued q rational surfaces are annotated.
+Scatter plot of the resonant area-weighted field `|b^r|` per rational surface vs ψ_N. One marker series
+per toroidal mode n. Integer-valued q rational surfaces are annotated. The resonant area-weighted field
+`b^r = Φ^r/A^r` is the resonant flux normalized by the scalar surface area, in tesla [Pharr 2026].
 
 Requires the perturbed equilibrium module to have been run and
-`singular_coupling/resonant_flux` to be present in the HDF5 file.
+`singular_coupling/resonant_area_weighted_field` to be present in the HDF5 file.
 
 ### Arguments
 
@@ -38,29 +39,29 @@ Requires the perturbed equilibrium module to have been run and
 
 A `Plots.jl` plot object.
 """
-function plot_resonant_flux(h5path; save_path=nothing)
+function plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
     base = "perturbed_equilibrium/singular_coupling/"
-    _has_pe_data(h5path, base * "resonant_flux") ||
-        return plot(; title="No resonant flux data — run with perturbed equilibrium enabled", legend=false)
+    _has_pe_data(h5path, base * "resonant_area_weighted_field") ||
+        return plot(; title="No resonant area-weighted field data — run with perturbed equilibrium enabled", legend=false)
 
-    resonant_flux, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base * "resonant_flux"]),
+    resonant_area_weighted_field, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
+        read(fid[base * "resonant_area_weighted_field"]),
         read(fid[base * "rational_psi"]),
         read(fid[base * "rational_q"]),
         read(fid[base * "rational_n"])
     end
 
-    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|Φ_res|",
-        title="Resonant flux |Φ_res| per surface", legend=:outertopright,
+    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|b^r| [T]",
+        title="Resonant area-weighted field |b^r| per surface", legend=:outertopright,
         left_margin=10Plots.mm, bottom_margin=5Plots.mm)
 
     for nn in unique(rational_n)
         mask = rational_n .== nn
-        scatter!(p, rational_psi[mask], abs.(resonant_flux[mask]);
+        scatter!(p, rational_psi[mask], abs.(resonant_area_weighted_field[mask]);
             label="n=$nn", markersize=7, markerstrokewidth=0)
         for k in findall(mask)
             abs(rational_q[k] - round(rational_q[k])) < 0.05 || continue
-            annotate!(p, rational_psi[k], abs(resonant_flux[k]),
+            annotate!(p, rational_psi[k], abs(resonant_area_weighted_field[k]),
                 text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
         end
     end
@@ -240,17 +241,17 @@ function plot_driven_delta_prime(h5path; save_path=nothing)
 end
 
 """
-    plot_resonant_field(h5path; save_path=nothing)
+    plot_resonant_area_weighted_field(h5path; save_path=nothing)
 
 Five-panel summary of resonant coupling quantities at each rational surface vs ψ_N:
 
-  - `|Φ_res|`: resonant flux (`plot_resonant_flux`)
+  - `|b^r|`: resonant area-weighted field (`plot_resonant_area_weighted_field_amplitude`)
   - `Re(Δ')`: tearing stability parameter (`plot_driven_delta_prime`)
   - `|I_res|`: resonant current
   - `w/2`: island half-width (`plot_island_widths`)
   - `K`: Chirikov overlap parameter (`plot_chirikov_parameter`)
 
-Inspired by `plot_resonant_field.py` from OMFIT GPEC.
+Inspired by `plot_resonant_flux.py` from OMFIT GPEC.
 
 ### Arguments
 
@@ -264,8 +265,8 @@ Inspired by `plot_resonant_field.py` from OMFIT GPEC.
 
 A `Plots.jl` plot object.
 """
-function plot_resonant_field(h5path; save_path=nothing)
-    p1 = plot_resonant_flux(h5path)
+function plot_resonant_area_weighted_field(h5path; save_path=nothing)
+    p1 = plot_resonant_area_weighted_field_amplitude(h5path)
     p2 = plot_driven_delta_prime(h5path)
     p3 = _plot_resonant_current(h5path)
     p4 = plot_island_widths(h5path)
@@ -342,7 +343,7 @@ Inspired by `plot_spectrograms.py` from OMFIT GPEC.
 
   - `component`: Response field component to plot; one of `:xi_psi`, `:b_psi`,
     `:b_theta`, `:b_zeta` (default: `:xi_psi`). `:b_psi` reads the area-normalized
-    `psi_area` dataset.
+    `b_psi_area_weighted` dataset.
   - `save_path`: If provided, save the figure to this path (default: `nothing`)
 
 ### Returns
@@ -352,7 +353,7 @@ A `Plots.jl` plot object.
 function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     comp_map = Dict(
         :xi_psi  => "xi_psi",
-        :b_psi   => "psi_area",  # area-normalized b^ψ
+        :b_psi   => "b_psi_area_weighted",  # area-normalized b^ψ
         :b_theta => "b_theta",
         :b_zeta  => "b_zeta",
     )
@@ -421,7 +422,7 @@ end
 
 Three-panel composite summary of perturbed equilibrium results:
 
-  - Top-left: Resonant flux per surface (`plot_resonant_flux`)
+  - Top-left: Resonant area-weighted field per surface (`plot_resonant_area_weighted_field_amplitude`)
   - Top-right: Edge |b_ψ| spectrum
   - Bottom: ξ_ψ mode spectrogram (`plot_mode_spectrogram`)
 
@@ -438,7 +439,7 @@ Three-panel composite summary of perturbed equilibrium results:
 A `Plots.jl` plot object.
 """
 function plot_perturbed_equilibrium_summary(h5path; save_path=nothing)
-    p_islands  = plot_resonant_flux(h5path)
+    p_islands  = plot_resonant_area_weighted_field_amplitude(h5path)
     p_bpsi     = _plot_bpsi_edge_spectrum(h5path)
     p_spectro  = plot_mode_spectrogram(h5path; component=:xi_psi)
 
@@ -452,11 +453,11 @@ end
 # Internal helper — |b_psi(m)| spectrum at the outermost psi surface
 function _plot_bpsi_edge_spectrum(h5path)
     base = "perturbed_equilibrium/response/"
-    _has_pe_data(h5path, base * "psi_area") ||
+    _has_pe_data(h5path, base * "b_psi_area_weighted") ||
         return plot(; title="No b_psi data — run with perturbed equilibrium enabled", legend=false)
 
     data, mlow, mhigh = h5open(h5path, "r") do fid
-        read(fid[base * "psi_area"]),
+        read(fid[base * "b_psi_area_weighted"]),
         read(fid["info/mlow"]), read(fid["info/mhigh"])
     end
 
