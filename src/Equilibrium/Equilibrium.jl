@@ -33,6 +33,39 @@ export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_
 # --- Constants ---
 const mu0 = 4π * 1e-7
 
+# efit-family equilibrium kinds that share the separatrix-clamp / inversion handling.
+const EFIT_KINDS = ("efit", "efit_arclength", "efit_by_inversion")
+
+"""
+    AnalyticEqSpec
+
+Single-source-of-truth entry describing one analytic-equilibrium kind: the `gpec.toml`
+section that carries its parameters, the `*Config` type built from that section, and the
+run function that turns the config into solver input. `tj_analytic` and `tj_analytic_direct`
+share `TJAnalyticConfig` but bind different run functions, so `run_fn` is per-entry rather
+than derived from `config_type`.
+
+## Fields
+
+  - `section::String` — `gpec.toml` section key (e.g. `"SOL_INPUT"`)
+  - `config_type::DataType` — `*Config` type, constructed via its `(::Dict)` / `(::String)` ctor
+  - `run_fn::Function` — `(EquilibriumConfig, config) -> eq_input` solver entry point
+"""
+struct AnalyticEqSpec
+    section::String
+    config_type::DataType
+    run_fn::Function
+end
+
+# Registry of analytic equilibrium kinds. Both `setup_equilibrium` (fresh runs) and the
+# rerun input builder dispatch off this table, so adding a new analytic kind is one new row.
+const ANALYTIC_EQ = Dict(
+    "sol" => AnalyticEqSpec("SOL_INPUT", SolovevConfig, sol_run),
+    "lar" => AnalyticEqSpec("LAR_INPUT", LargeAspectRatioConfig, lar_run),
+    "tj_analytic" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run),
+    "tj_analytic_direct" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run_direct)
+)
+
 """
     setup_equilibrium(eq_config::EquilibriumConfig)
 
@@ -46,7 +79,25 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 
     eq_type = eq_config.eq_type
 
-    if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
+    # Rerun path: caller (e.g. build_inputs_from_h5) already rebuilt the solver input from
+    # the stored raw arrays. Bind it onto the current config and skip the reader.
+    if additional_input isa DirectRunInput
+        eq_input = additional_input
+        eq_input.config = eq_config
+        # Re-run the separatrix clamp for efit-family replays so an overridden
+        # psihigh from the rerun TOML is re-validated against the closed flux region.
+        if eq_type in EFIT_KINDS
+            psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
+            if adjusted
+                @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
+                      "clamped to $(round(psihigh_safe; sigdigits=7))"
+                eq_input.config.psihigh = psihigh_safe
+            end
+        end
+    elseif additional_input isa InverseRunInput
+        eq_input = additional_input
+        eq_input.config = eq_config
+    elseif eq_type in EFIT_KINDS
         eq_input = read_efit(eq_config)
         psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
         if adjusted
@@ -58,41 +109,24 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
-    elseif eq_type == "lar"
-        if additional_input === nothing
-            additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
-        end
-        eq_input = lar_run(eq_config, additional_input)
-    elseif eq_type == "tj_analytic"
-        # TJ-analytic equilibrium (GPEC adaptation of the profile family
-        # used by R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ) fed
-        # through the inverse pipeline.
-        if additional_input === nothing
-            additional_input = TJAnalyticConfig(eq_config.eq_filename)
-        end
-        eq_input = tj_analytic_run(eq_config, additional_input)
-    elseif eq_type == "tj_analytic_direct"
-        # TJ-analytic equilibrium (R. Fitzpatrick's TJ-code profile
-        # family, https://github.com/rfitzp/TJ) fed through the direct-GS
-        # solver: builds ψ(R, Z) on a 2D grid and delegates to the same solver
-        # as `efit`.  Reproduces the full geqdsk-path physics including
-        # higher-order geometric effects that the inverse solver misses.
-        if additional_input === nothing
-            additional_input = TJAnalyticConfig(eq_config.eq_filename)
-        end
-        eq_input = tj_analytic_run_direct(eq_config, additional_input)
-    elseif eq_type == "sol"
-        if additional_input === nothing
-            additional_input = SolovevConfig(eq_config.eq_filename)
-        end
-        eq_input = sol_run(eq_config, additional_input)
+    elseif haskey(ANALYTIC_EQ, eq_type)
+        # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
+        # Their parameters live in the embedded `[*_INPUT]` section and are passed in as the
+        # `*Config` additional_input (built by build_analytic_config on the TOML/rerun paths).
+        spec = ANALYTIC_EQ[eq_type]
+        additional_input isa spec.config_type ||
+            error(
+                "setup_equilibrium: analytic eq_type=\"$eq_type\" requires its $(spec.config_type) " *
+                "passed as additional_input (built from the embedded [$(spec.section)] section)."
+            )
+        eq_input = spec.run_fn(eq_config, additional_input)
     elseif eq_type == "imas"
         if additional_input === nothing
             error("setup_equilibrium: eq_type=\"imas\" requires an IMASdd.dd passed as additional_input")
         end
         eq_input = read_imas(eq_config, additional_input)
     else
-        error("Equilibrium type $(eq_config.eq_type) is not implemented")
+        error("Equilibrium type $(eq_type) is not implemented")
     end
 
     if eq_type == "efit_by_inversion"
@@ -102,6 +136,9 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     else
         plasma_equilibrium = equilibrium_solver(eq_input)
     end
+
+    # Forward the captured ingest so the gpec.h5 writer can snapshot it (nothing for analytic).
+    plasma_equilibrium.ingest = eq_input.ingest
 
     equilibrium_global_parameters!(plasma_equilibrium)
     equilibrium_qfind!(plasma_equilibrium)
