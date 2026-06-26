@@ -12,7 +12,7 @@ using FastInterpolations
 using AdaptiveArrayPools
 using Roots
 using FastGaussQuadrature: gausslobatto
-using QuadGK: quadgk
+using QuadGK: quadgk, quadgk!
 
 import ..Equilibrium
 import ..Utilities

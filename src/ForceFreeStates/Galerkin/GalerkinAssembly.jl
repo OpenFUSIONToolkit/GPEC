@@ -12,11 +12,6 @@
 #
 # Hermite DOF index ip (Fortran 0:3) ↔ Julia array index ip+1 throughout.
 
-"""Resonant flat mode index `1 + (m-mlow) + (n-nlow)*mpert` for a singular surface (single resonance)."""
-@inline function _ipert_res(sing::SingType, intr::ForceFreeStatesInternal)
-    return 1 + (sing.m[1] - intr.mlow) + (sing.n[1] - intr.nlow) * intr.mpert
-end
-
 # Two-sided asymptotic evaluation (z = ψ - ψ_s). Right (z≥0) uses the sig=+1 series at z; left (z<0)
 # uses the sig=-1 series at the positive distance |z| (real √, no renorm), matching Fortran sing.f.
 # The derivative on the left picks up d|z|/dψ = -1. Only the big (col 1) and small (col 2) resonant
@@ -149,6 +144,10 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     np = GAL_NP
     x1, x2 = cell.x
     qhint = Ref(1)
+    # Reused F/K/G buffers for gal_get_fkg (each call's result is consumed before the next).
+    Fbuf = Matrix{ComplexF64}(undef, N, N)
+    Kbuf = Matrix{ComplexF64}(undef, N, N)
+    Gbuf = Matrix{ComplexF64}(undef, N, N)
 
     jsing = _cell_jsing(cell, ising)
     asymp = asymps[jsing]
@@ -194,7 +193,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         end
         # surface term at xb
         qb = profiles.q_spline(xb; hint=qhint)
-        Fb, Kb, _ = gal_get_fkg(ffit, intr, xb, qb)
+        Fb, Kb, _ = gal_get_fkg(ffit, intr, xb, qb; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
         pbt, _ = gal_hermite(xb, x1, x2)
         Fdu_Ku = Fb * du .+ Kb * u
         for ip in 0:np
@@ -218,7 +217,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
             x = x0c + dxc * nodes[iq]
             w = dxc * weights[iq]
             q = profiles.q_spline(x; hint=qhint)
-            F, K, G = gal_get_fkg(ffit, intr, x, q)
+            F, K, G = gal_get_fkg(ffit, intr, x, q; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
             pbt, qbt = gal_hermite(x, x1, x2)
             uax = ua_at(x)
             ub = uax[:, 1, 1]
@@ -246,7 +245,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
 
     # --- surface terms (always; gal.f) ---
     q_l = profiles.q_spline(x1; hint=qhint)
-    Fl, Kl, _ = gal_get_fkg(ffit, intr, x1, q_l)
+    Fl, Kl, _ = gal_get_fkg(ffit, intr, x1, q_l; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
     pbt, _ = gal_hermite(x1, x1, x2)
     surf_l = Fl * du1 .+ Kl * ua1
     for ip in 0:np
@@ -257,7 +256,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     end
 
     q_r = profiles.q_spline(x2; hint=qhint)
-    Fr, Kr, _ = gal_get_fkg(ffit, intr, x2, q_r)
+    Fr, Kr, _ = gal_get_fkg(ffit, intr, x2, q_r; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
     pbt, _ = gal_hermite(x2, x1, x2)
     surf_r = Fr * du2 .+ Kr * ua2
     for ip in 0:np
@@ -295,27 +294,38 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     sgn_u = (cell.extra == GAL_SIDE_RIGHT) ? -1.0 : 1.0
 
     # Reused per-integrand buffers (col 1 = big, col 2 = small): sing_get_*_gal! fills them in place.
+    # sing_matvec! scratch and the quadgk! output buffer are hoisted too, so the integrand allocates nothing.
     ua_buf = Array{ComplexF64,3}(undef, N, 2, 2)
     dua_buf = Array{ComplexF64,3}(undef, N, 2, 2)
+    kmat = Matrix{ComplexF64}(undef, N, N)
+    gmat = Matrix{ComplexF64}(undef, N, N)
+    d1 = Vector{ComplexF64}(undef, N)
+    mvtmp = Vector{ComplexF64}(undef, N)
+    sfvec = Vector{Float64}(undef, N)
+    mv = Matrix{ComplexF64}(undef, N, 2)
+    w = Vector{ComplexF64}(undef, N)
+    pbuf = Vector{ComplexF64}(undef, N)
 
     L = 2 + 2 * N * (np + 1)
-    function integrand(x)
+    function integrand!(out, x)
         z = x - psi_s
         sing_get_ua_gal!(ua_buf, asymp, z)
         sing_get_dua_gal!(dua_buf, asymp, z)
         q = profiles.q_spline(x; hint=qhint)
-        mv = sing_matvec(ffit, intr, x, q, ua_buf, dua_buf)   # N×2 (col1=big, col2=small)
+        sing_matvec!(mv, kmat, gmat, d1, mvtmp, sfvec, ffit, intr, x, q, ua_buf, dua_buf)  # N×2 (col1=big, col2=small)
         pbt, _ = gal_hermite(x, x1, x2)
-        w = conj.(@view ua_buf[:, 2, 1])               # conj small solution, qty1
-        out = Vector{ComplexF64}(undef, L)
-        out[1] = sum(w .* @view mv[:, 1])               # res1
-        out[2] = sum(w .* @view mv[:, 2])               # res2
+        # Pairwise sum over the materialized product (reuses buffers) — matches sum(w .* mv) bit-for-bit.
+        w .= conj.(@view ua_buf[:, 2, 1])               # conj small solution, qty1
+        pbuf .= w .* @view mv[:, 1]
+        out[1] = sum(pbuf)                              # res1
+        pbuf .= w .* @view mv[:, 2]
+        out[2] = sum(pbuf)                              # res2
         idx = 3
-        for ip in 0:np, ipert in 1:N
+        @inbounds for ip in 0:np, ipert in 1:N
             out[idx] = pbt[ip+1] * mv[ipert, 1]         # hbig (ipert fastest, then ip)
             idx += 1
         end
-        for ip in 0:np, ipert in 1:N
+        @inbounds for ip in 0:np, ipert in 1:N
             out[idx] = pbt[ip+1] * mv[ipert, 2]         # hsmall
             idx += 1
         end
@@ -323,8 +333,10 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     end
 
     # QuadGK (adaptive Gauss-Kronrod) replaces Fortran gal_lsode_int over the same integrand/limits — not
-    # bit-exact; gal_tol/gal_gnstep cap the evals so a near-singular integrand cannot hang.
-    raw, qerr = quadgk(integrand, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=gal_gnstep)
+    # bit-exact; gal_tol/gal_gnstep cap the evals so a near-singular integrand cannot hang. The in-place
+    # quadgk!/integrand! pair avoids a per-eval vector allocation in this hot adaptive loop.
+    result = Vector{ComplexF64}(undef, L)
+    raw, qerr = quadgk!(integrand!, result, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=gal_gnstep)
     if verbose
         @info "  resonant jsing=$jsing side=$(cell.extra) qerr=$(qerr) res1=$(raw[1]) res2=$(raw[2])"
     end

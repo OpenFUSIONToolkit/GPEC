@@ -956,6 +956,44 @@ function sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Floa
 end
 
 """
+    sing_matvec!(matvec, kmat, gmat, d1, tmp, sfvec, ffit, intr, psi, q, ua, dua) -> matvec
+
+Allocation-free, in-place form of [`sing_matvec`](@ref) for the hot resonant-quadrature integrand.
+All scratch is caller-owned: `kmat`/`gmat` are `N×N`, `d1`/`tmp`/`sfvec` are length-`N`, `matvec` is
+`N×size(ua,2)`. The reduced K̄/Ḡ splines write directly into `kmat`/`gmat`. The accumulation order
+(separate `gmat*ua` into `tmp`, then add) reproduces `sing_matvec` **bit-for-bit** — a fused 5-arg
+`mul!` would round differently, and the ill-conditioned near-singular resonant solve amplifies a
+1e-16 change into ~1e-3 in Δ′.
+"""
+function sing_matvec!(matvec::AbstractMatrix{ComplexF64}, kmat::Matrix{ComplexF64}, gmat::Matrix{ComplexF64},
+    d1::Vector{ComplexF64}, tmp::Vector{ComplexF64}, sfvec::Vector{Float64}, ffit::FourFitVars,
+    intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua::AbstractArray{ComplexF64,3}, dua::AbstractArray{ComplexF64,3})
+
+    N = intr.numpert_total
+    msol = size(ua, 2)
+
+    # Direct singular factor (m - n q), NOT 1/(m - n q); flat order matches vec((m) .- q.*(n)').
+    idx = 0
+    @inbounds for nn in intr.nlow:intr.nhigh, mm in intr.mlow:intr.mhigh
+        idx += 1
+        sfvec[idx] = mm - q * nn
+    end
+
+    ffit.kmats(vec(kmat), psi; hint=ffit._hint)
+    ffit.gmats(vec(gmat), psi; hint=ffit._hint)
+    kdag = adjoint(kmat)
+
+    for isol in 1:msol
+        @views d1 .= dua[:, isol, 1] .* sfvec             # u' · singfac
+        @views mul!(matvec[:, isol], kdag, d1)            # K̄† (u' · singfac)
+        @views mul!(tmp, gmat, ua[:, isol, 1])            # Ḡ u
+        @views matvec[:, isol] .+= tmp                    # + Ḡ u
+        @views matvec[:, isol] .-= dua[:, isol, 2]        # - (F u' + K u)'
+    end
+    return matvec
+end
+
+"""
     sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::ForceFreeStatesInternal)
 
 Compute the asymptotic expansion coefficients according to equation

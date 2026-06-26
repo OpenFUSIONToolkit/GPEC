@@ -75,8 +75,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
 
-    # Per-surface two-sided asymptotic series (pr178's validated convention, matching Fortran sing.f
-    # vmatr/vmatl): right = sig=+1, left = sig=-1, no √det normalization. The Mercier exponent α is a
+    # Per-surface two-sided asymptotic series matching Fortran sing.f vmatr/vmatl:
+    # right = sig=+1, left = sig=-1, no √det normalization. The Mercier exponent α is a
     # property of the surface, so the left series reuses the right's α (alpha_override). The order is
     # raised to gal_sing_order + ceil(2·Re(α)) for high-Mercier-index surfaces (Fortran sing1_vmat).
     ctrl_gal = deepcopy(ctrl)
