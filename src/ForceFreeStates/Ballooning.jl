@@ -40,8 +40,10 @@ function compute_ballooning_stability!(
 
     num_psi = length(plasma_eq.profiles.xs)
 
-    # Loop over flux surfaces
-    for flux_surface_index in 1:num_psi
+    # Parallelism is governed by the Julia thread count (`julia -t N`); with one thread this runs serially.
+    # All data is thread-local, so no locks are needed. The `:greedy` scheduling strategy
+    # outperforms `:static` and `:dynamic` for this workload in testing.
+    Threads.@threads :greedy for flux_surface_index in 1:num_psi
 
         psi = plasma_eq.profiles.xs[flux_surface_index]
         coeff_data = prepare_ballooning_coefficients(flux_surface_index, plasma_eq; theta_k=theta_k)
