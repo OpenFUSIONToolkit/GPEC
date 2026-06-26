@@ -2,12 +2,11 @@
 # Gal-enabled TJ-analytic beta (pc) scan: at each pc, run the full GPEC pipeline with gal_flag=true
 # and capture three Δ′ measures per resonant surface (m=2 q=2, m=3 q=3):
 #   gal      = galerkin/pest3_Delta diagonal      (RDCON singular-Galerkin, this port)
-#   stride   = singular/delta_prime_matrix diag   (STRIDE BVP, pr178)
-#   cajump   = (ca_r-ca_l)/((2pi)^2 psio)          (ca-jump, pr178 primary)
-# Reuses examples/LAR_beta_scan/gpec.toml. Writes /tmp/gal_epsilon_scan_results.h5 + CSV.
+#   stride   = singular/delta_prime_matrix diag   (STRIDE BVP)
+#   cajump   = (ca_r-ca_l)/((2pi)^2 psio)          (ca-jump primary)
+# Reuses examples/LAR_epsilon_scan/gpec.toml. Writes gal_epsilon_scan_results.h5 + CSV next to this script.
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "..", "Projects", "GPEC_dev", "docs", "GPEC_julia"))
-const REPO = "/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia"
+const REPO = normpath(joinpath(@__DIR__, "..", ".."))
 Pkg.activate(REPO)
 using GeneralizedPerturbedEquilibrium
 using HDF5, TOML, Printf
@@ -86,7 +85,7 @@ for (i, pc) in enumerate(pcs)
 end
 
 # Save
-out_h5 = "/tmp/gal_epsilon_scan_results.h5"
+out_h5 = joinpath(@__DIR__, "gal_epsilon_scan_results.h5")
 isfile(out_h5) && rm(out_h5)
 h5open(out_h5, "w") do f
     f["pc"] = [r[1] for r in results]
@@ -99,7 +98,7 @@ h5open(out_h5, "w") do f
         end
     end
 end
-open("/tmp/gal_epsilon_scan_results.csv", "w") do io
+open(joinpath(@__DIR__, "gal_epsilon_scan_results.csv"), "w") do io
     println(io, "pc,gal_m2,stride_m2,cajump_m2,gal_m3,stride_m3,cajump_m3,dW_total")
     for (pc, r) in results
         @printf(io, "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", pc,
@@ -108,5 +107,5 @@ open("/tmp/gal_epsilon_scan_results.csv", "w") do io
             get(r,"dW_total",NaN))
     end
 end
-@info "Saved /tmp/gal_epsilon_scan_results.h5 and .csv ($(length(results)) points)"
+@info "Saved gal_epsilon_scan_results.h5 and .csv to $(@__DIR__) ($(length(results)) points)"
 println("DONE")

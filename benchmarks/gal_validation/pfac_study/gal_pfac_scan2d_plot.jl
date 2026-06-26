@@ -1,8 +1,8 @@
 # Plot the (pc x pfac) gal-vs-STRIDE q=3 tracking scan: heatmap + per-pfac curves.
-using Pkg; Pkg.activate("/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia")
+using Pkg; Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")))
 using Plots, DelimitedFiles, Printf; gr()
 
-data, hdr = readdlm("/tmp/gal_pfac_scan2d.csv", ','; header=true)
+data, hdr = readdlm(joinpath(@__DIR__, "gal_pfac_scan2d.csv"), ','; header=true)
 col(name) = data[:, findfirst(==(name), strip.(vec(hdr)))]
 pc = col("pc"); pfac = col("pfac"); gq3 = col("gal_q3"); sq3 = col("stride_q3")
 relerr = 100 .* abs.(gq3 .- sq3) ./ abs.(sq3)
@@ -32,8 +32,8 @@ for (i, pf) in enumerate(pfacs)
 end
 
 fig = plot(p1, p2; layout=(2, 1), size=(900, 1000))
-savefig(fig, "/tmp/gal_pfac_scan2d.png")
-println("Saved /tmp/gal_pfac_scan2d.png")
+savefig(fig, joinpath(@__DIR__, "gal_pfac_scan2d.png"))
+println("Saved gal_pfac_scan2d.png to ", @__DIR__)
 
 # Per-pfac median/max summary
 println("\npfac      median%   max%   (q=3 over the pc grid)")

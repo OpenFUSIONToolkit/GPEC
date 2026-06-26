@@ -1,7 +1,7 @@
 # Plot gal vs STRIDE Δ′ across the TJ-analytic beta and epsilon scans.
-# Reads /tmp/gal_beta_scan_results.csv and /tmp/gal_epsilon_scan_results.csv.
+# Reads gal_beta_scan_results.csv and gal_epsilon_scan_results.csv from this directory.
 using Pkg
-Pkg.activate("/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia")
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")))
 using Plots, DelimitedFiles, Printf
 gr()
 
@@ -80,13 +80,13 @@ function relpanel(cols, xname, xlabel)
 end
 
 for (name, path, xn, xl, ttl) in (
-        ("beta", "/tmp/gal_beta_scan_results.csv", "pc", "pₐ (on-axis pressure factor)", "TJ-analytic β scan (ε=0.2, qc=1.5, qa=3.6)"),
-        ("eps", "/tmp/gal_epsilon_scan_results.csv", "pc", "ε = a/R₀", "TJ-analytic ε scan (pc=0.001, qc=1.5, qa=3.6)"))
+        ("beta", joinpath(@__DIR__, "gal_beta_scan_results.csv"), "pc", "pₐ (on-axis pressure factor)", "TJ-analytic β scan (ε=0.2, qc=1.5, qa=3.6)"),
+        ("eps", joinpath(@__DIR__, "gal_epsilon_scan_results.csv"), "pc", "ε = a/R₀", "TJ-analytic ε scan (pc=0.001, qc=1.5, qa=3.6)"))
     cols = loadcsv(path)
     cols === nothing && continue
     xmarg = marginal_point(cols, xn)
     fig = plot(panel(cols, xn, xl, ttl, xmarg), dwpanel(cols, xn, xl), relpanel(cols, xn, xl); layout=(3, 1), size=(820, 1320))
-    out = "/tmp/gal_$(name)_comparison.png"
+    out = joinpath(@__DIR__, "gal_$(name)_comparison.png")
     savefig(fig, out)
     println("Saved figure: ", out)
     println("=== $name: gal-vs-STRIDE relative diff (%) ===")

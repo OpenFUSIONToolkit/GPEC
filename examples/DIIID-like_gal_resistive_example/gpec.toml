@@ -41,9 +41,8 @@ nn_high = 1                    # Largest toroidal mode number to include
 delta_mlow = 8                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 4                # Expands upper bound of Fourier harmonics
 mthvac = 512                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
-thmax0 = 1                     # Linear multiplier on the automatic choice of theta integration bounds
 
-kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
+kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" kinetic response)
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
@@ -54,11 +53,10 @@ ucrit = 1e4                    # Maximum fraction of solutions allowed before re
 use_parallel        = true     # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
 parallel_threads    = 2        # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
 populate_dense_xi   = false    # Dense axis-basis ξ for the FFS HDF5 output. Not needed here: no [PerturbedEquilibrium] section, and the gal-matched path builds its own dense ξ. Set true only for a shooting-fed PE run.
-truncate_at_dW_peak = false    # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
 set_psilim_via_dmlim = false   # Keep psilim at psihigh (do not truncate at last_rational_q + dmlim)
 dmlim               = 0.2      # Truncate integration at (last_rational_q + dmlim) / n (only used when set_psilim_via_dmlim = true)
 
-# RDCON outer-region singular Galerkin Δ′ solver with rpec coil columns (matched to Fortran &GAL_INPUT).
+# Outer-region singular Galerkin Δ′ solver with rpec coil columns.
 # This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
 gal_flag               = true  # Enable the outer-region singular Galerkin Δ′ solve (requires mat_flag = true)
 gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
@@ -76,11 +74,11 @@ gal_sing_order         = 6     # Base power-series order for the Galerkin singul
 gal_sing_order_ceiling = true  # Auto-raise the series order by ceil(2·Re(α)) on high-Mercier-index surfaces
 gal_rpec_flag          = true  # Append mpert coil-response columns (unit edge sources) to the solve → delta_coil block
 
-# DRIVEN (RPEC) outer↔inner matching. Per-surface resistive inputs (core→edge), mirroring the Fortran
-# rmatch DIII-D example: eta=8e-8, massden=3.3e-7 (ni≈1e20 m^-3), rotation=1 Hz, Γ=5/3. 4 surfaces.
+# DRIVEN (RPEC) outer↔inner matching. Per-surface resistive inputs (core→edge) for a DIII-D-like case:
+# η=8e-8, ρ=3.3e-7 kg/m³ (ni≈1e20 m^-3), rotation=1 Hz, Γ=5/3. 4 surfaces.
 gal_match_flag         = true  # Solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag = true.
-gal_ideal_flag         = false # true → build the IDEAL solution (skip the inner layer, bare coil columns; ≡ DCON). false → the resistive matching below.
-gal_eta                = [8e-8, 8e-8, 8e-8, 8e-8]          # Per-surface resistivity η (core→edge); Fortran rmatch `eta`
-gal_rho                = [3.3e-7, 3.3e-7, 3.3e-7, 3.3e-7]  # Per-surface mass density ρ [kg/m³] (core→edge); Fortran rmatch `massden`
-gal_rotation           = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation frequency f [Hz] (core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
+gal_ideal_flag         = false # true → build the IDEAL solution (skip the inner layer, bare coil columns). false → the resistive matching below.
+gal_eta                = [8e-8, 8e-8, 8e-8, 8e-8]          # Per-surface resistivity η (core→edge)
+gal_rho                = [3.3e-7, 3.3e-7, 3.3e-7, 3.3e-7]  # Per-surface mass density ρ [kg/m³] (core→edge)
+gal_rotation           = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation frequency f [Hz] (core→edge); forced eigenvalue γ_s = 2πi·n·f
 gal_gamma              = 1.6666666666666667               # Ratio of specific heats Γ for the resistive-layer coefficients (5/3)

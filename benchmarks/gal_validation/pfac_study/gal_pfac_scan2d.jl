@@ -1,8 +1,8 @@
 # 2D scan: gal-vs-STRIDE q=3 tracking over (pc, pfac). STRIDE is pfac-independent
-# (recorded per run as a consistency check). Output /tmp/gal_pfac_scan2d.csv.
+# (recorded per run as a consistency check). Output gal_pfac_scan2d.csv next to this script.
 using GeneralizedPerturbedEquilibrium
 using HDF5, TOML, Printf
-const REPO = "/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia"
+const REPO = normpath(joinpath(@__DIR__, "..", "..", ".."))
 const BASE = TOML.parsefile(joinpath(REPO, "examples", "LAR_beta_scan", "gpec.toml"))
 const PCS = [0.005, 0.010, 0.020, 0.030, 0.040, 0.050, 0.060, 0.070, 0.085, 0.100]
 const PFACS = [5e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]
@@ -23,7 +23,7 @@ function extract(h5)
     end
 end
 
-io = open("/tmp/gal_pfac_scan2d.csv", "w")
+io = open(joinpath(@__DIR__, "gal_pfac_scan2d.csv"), "w")
 println(io, "pc,pfac,gal_q2,stride_q2,gal_q3,stride_q3"); flush(io)
 t0 = time(); n = 0; ntot = length(PCS) * length(PFACS)
 for pc in PCS, pfac in PFACS
@@ -49,5 +49,5 @@ for pc in PCS, pfac in PFACS
     end
 end
 close(io)
-println("Saved /tmp/gal_pfac_scan2d.csv")
+println("Saved gal_pfac_scan2d.csv to ", @__DIR__)
 println("DONE")

@@ -1,8 +1,8 @@
 # Plot the fine (50 pc x 30 pfac) gal-vs-STRIDE q=3 tracking scan: heatmap + per-pfac curves.
-using Pkg; Pkg.activate("/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia")
+using Pkg; Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")))
 using Plots, DelimitedFiles, Printf; gr()
 
-data, hdr = readdlm("/tmp/gal_pfac_scan2d_big.csv", ','; header=true)
+data, hdr = readdlm(joinpath(@__DIR__, "gal_pfac_scan2d_big.csv"), ','; header=true)
 col(name) = data[:, findfirst(==(name), strip.(vec(hdr)))]
 pc = col("pc"); pfac = col("pfac"); gq3 = col("gal_q3"); sq3 = col("stride_q3")
 relerr = 100 .* abs.(gq3 .- sq3) ./ max.(abs.(sq3), 1e-12)
@@ -30,8 +30,8 @@ for i in unique(sel)
     plot!(p2, pcs, [isfinite(z) ? max(z, 1e-3) : NaN for z in Z[i, :]]; lw=2, label=@sprintf("pfac=%.1e", pfacs[i]))
 end
 fig = plot(p1, p2; layout=(2, 1), size=(1000, 1050))
-savefig(fig, "/tmp/gal_pfac_scan2d_big.png")
-println("Saved /tmp/gal_pfac_scan2d_big.png")
+savefig(fig, joinpath(@__DIR__, "gal_pfac_scan2d_big.png"))
+println("Saved gal_pfac_scan2d_big.png to ", @__DIR__)
 
 med(v) = (w = sort(filter(isfinite, v)); isempty(w) ? NaN : (n = length(w); iseven(n) ? (w[n÷2]+w[n÷2+1])/2 : w[(n+1)÷2]))
 println("\npfac        median%   max%")

@@ -1,10 +1,10 @@
-# Plot the TokaMaker beta-scan pfac convergence study. Data: /tmp/gal_tok_scan.csv
+# Plot the TokaMaker beta-scan pfac convergence study. Data: gal_tok_scan.csv in this directory
 # (beta,pfac,m,q,gal,stride). Produces: per-pfac error summary, a heatmap (beta x pfac)
 # of median-over-surfaces tracking error, and per-q tracking-vs-beta at the chosen pfac.
-using Pkg; Pkg.activate("/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia")
+using Pkg; Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")))
 using Plots, DelimitedFiles, Printf; gr()
 
-d, h = readdlm("/tmp/gal_tok_scan.csv", ','; header=true)
+d, h = readdlm(joinpath(@__DIR__, "gal_tok_scan.csv"), ','; header=true)
 col(n) = d[:, findfirst(==(n), strip.(vec(h)))]
 beta = col("beta"); pfac = col("pfac"); m = Int.(col("m")); q = col("q"); g = col("gal"); s = col("stride")
 # Exclude q=1: the internal-kink surface where the outer-region Δ′ construction does not apply
@@ -47,7 +47,7 @@ for i in unique(sel)
     plot!(p2, betas, yv; lw=2, marker=:circle, ms=2, label=@sprintf("pfac=%.1e", pfacs[i]))
 end
 fig = plot(p1, p2; layout=(2, 1), size=(1000, 1050))
-savefig(fig, "/tmp/gal_tok_scan.png")
-println("Saved /tmp/gal_tok_scan.png")
+savefig(fig, joinpath(@__DIR__, "gal_tok_scan.png"))
+println("Saved gal_tok_scan.png to ", @__DIR__)
 println("surfaces present (q): ", sort(unique(round.(q; digits=1))))
 println("DONE")

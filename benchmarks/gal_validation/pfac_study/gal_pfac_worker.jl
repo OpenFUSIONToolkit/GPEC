@@ -8,7 +8,7 @@ using TOML, Printf, LinearAlgebra
 import FastInterpolations: cubic_interp, Series, ExtendExtrap
 LinearAlgebra.BLAS.set_num_threads(1)   # avoid oversubscription across parallel workers
 
-const REPO = "/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia"
+const REPO = normpath(joinpath(@__DIR__, "..", "..", ".."))
 const PFACS = exp10.(range(-4, 0; length=30))   # 30 packing ratios, 1e-4 .. 1e0
 
 const PCLIST = parse.(Float64, split(ARGS[1], ','))   # comma-separated pc values
