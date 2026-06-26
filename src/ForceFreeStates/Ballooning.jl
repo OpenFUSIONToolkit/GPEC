@@ -40,8 +40,13 @@ function compute_ballooning_stability!(
 
     num_psi = length(plasma_eq.profiles.xs)
 
-    # Loop over flux surfaces
-    for flux_surface_index in 1:num_psi
+    # The flux-surface loop is embarrassingly parallel: each iteration writes only its own
+    # row of locstab_fs and reads the shared equilibrium read-only. All scratch (coefficient
+    # splines, ODE parameters, per-step bracket-search hints) is allocated inside the
+    # per-surface calls, so nothing mutable is shared across threads — results are independent
+    # of execution order and bit-identical to the serial path. Parallelism is governed by the
+    # Julia thread count (`julia -t N`); with one thread this runs serially.
+    Threads.@threads for flux_surface_index in 1:num_psi
 
         psi = plasma_eq.profiles.xs[flux_surface_index]
         coeff_data = prepare_ballooning_coefficients(flux_surface_index, plasma_eq; theta_k=theta_k)
