@@ -814,7 +814,7 @@ function ballooning_alpha_boundary(
     alpha = fill(NaN, npsi)
     alpha_critical = fill(NaN, npsi)
 
-    for i in 1:npsi
+    Threads.@threads :greedy for i in 1:npsi
         xs[i] > 1.0 && continue
         try
             alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
@@ -878,7 +878,7 @@ function ballooning_alpha_boundaries(
     alpha_critical1 = fill(NaN, npsi)
     alpha_critical2 = fill(NaN, npsi)
 
-    for i in 1:npsi
+    Threads.@threads :greedy for i in 1:npsi
         xs[i] > 1.0 && continue
         try
             cr = ballooning_alpha_crossings(i, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan)
@@ -967,7 +967,7 @@ function ballooning_qprime_boundaries(
     qprime_critical1 = fill(NaN, npsi)
     qprime_critical2 = fill(NaN, npsi)
 
-    for i in 1:npsi
+    Threads.@threads :greedy for i in 1:npsi
         xs[i] > 1.0 && continue
         try
             cr = ballooning_qprime_crossings(
