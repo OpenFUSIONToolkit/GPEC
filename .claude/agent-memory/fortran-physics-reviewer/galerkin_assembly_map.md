@@ -53,3 +53,31 @@ glasser_wang_2020_eq55). Remaining follow-up (mpharr): upgrade that guard to a F
 cross-check to fully close the convention question.
 
 ## Verdict: PASS WITH REQUIRED ANNOTATIONS for outer solve; RPEC γ convention is SHOULD-FIX (verify vs match.f).
+
+
+# Second pass
+
+
+## PR #266 "Galerkin Integrator" full review (2026-06-25) — PASS
+Exhaustive line-by-line vs gal.f / match.f / deltac.f / resist.f / sing.f. All physics-bearing code faithful.
+- RESOLVED (was SUSPECT): forced eig γ=2πi·n·rotation IS correct. match.f match_rpec line:
+  `rpec_eigenvalues(ising)=2*pi*rotation(ising)*REAL(ntor,r8)*ifac` — the 2π IS in Fortran. Julia matches exactly.
+  My earlier "no 2π in Fortran" note was wrong (confused match_delta Newton path with match_rpec). Closed.
+- Verified EXACT: gal_get_fkg (F=QF̄Q,K=QK̄,G=Ḡ,singfac=m-nq), gauss_quad weak form (F qq+K qp+K† pq+G pp),
+  gal_extension, gal_resonant (mpert-fastest hermite layout; Fortran's apparent (0:np,mpert,2) reshape is a
+  no-op relabel — der writes mpert-fastest, caller reads mpert-fastest), assemble_mat/rhs, set_boundary,
+  gal_get_solution (restore_uh/us/ul), PEST-3 A/B/Γ/Δ ± combos, Δ′ extraction, match_rpec matrix signs,
+  resist_eval E/F/G/H/K/M/taua/taur, mercier_di=E+F+H-1/4, rescale=sfac^(2p1/3)·v1^(2p1) + delta(1)↔(2) swap
+  (swap applied in BOTH solve_inner and solve_inner_profile), sing_matvec, sing_get_dua, ξ_s=-A⁻¹(Bξ'+Cξ).
+- Documented deviations (all fine): η/ρ caller-supplied (no Spitzer); gal_gamma default 5/3 = resist.f;
+  QuadGK replaces LSODE; sing_get_dua omits Fortran `sig` (moved to sing_get_dua_gal left-side ×(-1)).
+- InnerAsymptotics.jl + Shooting.jl diffs = PURE JuliaFormatter whitespace, zero numeric change.
+- Reference.jl G=8.950e1,H=1.292e-2,K=2.332e2 = corrected GW2020 Eq.55 (prior transcription bug fixed).
+
+## OPEN ITEM (latent, n≥2 only): gal_make_grid resonant-cell width asymmetry
+gal.f gal_make_grid genuinely uses nq1=ABS(nn*sing(ising)%q1) on the LOWER bound but nq1=ABS(sing(ising+1)%q1)
+(NO nn) on the UPPER bound. Julia GalerkinGrid.jl faithfully reproduces. Natural layer scale is 1/(n q1) on BOTH
+sides (singfac'≈-n q1), so the upper/left side of each interior surface gets cells ~n× too wide for n≥2.
+No effect at n=1 (RDCON resistive target). galerkin_solve allows single n≥2 (blocks only multi-n npert>1), so it
+IS reachable. Recommend: keep faithful but warn, or fix both sides to nn*q1 (deviation, more correct) gated by
+validation. Suspected upstream Fortran oversight, not a Julia port error.
