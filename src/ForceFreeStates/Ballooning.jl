@@ -5,6 +5,10 @@
 using LinearAlgebra
 using StaticArrays: SVector
 
+const BALLOONING_THETA_MAX_CAP = 16.5
+const BALLOONING_THETA_SCALE_MULTIPLIER = 10.0
+const MATCHING_POINT = 1e-3
+
 """
     compute_ballooning_stability!(ctrl, locstab_fs, plasma_eq)
 
@@ -374,6 +378,26 @@ function _calculate_i_per_perturbed(
     return i_per_perturbed
 end
 
+function _ballooning_theta_scale(
+    periodic::AbstractVector,
+    peculiar_1st::AbstractVector,
+    peculiar_2nd::AbstractVector;
+    fallback::Float64=BALLOONING_THETA_MAX_CAP
+)
+    theta_scale = 0.0
+    for idx in eachindex(periodic, peculiar_1st, peculiar_2nd)
+        a0 = periodic[idx]
+        a1 = peculiar_1st[idx]
+        a2 = peculiar_2nd[idx]
+        if Base.isfinite(a0) && Base.isfinite(a1) && Base.isfinite(a2) && Base.abs(a2) > Base.eps(Float64)
+            c = a0 - a1^2 / (4.0 * a2)
+            local_scale = Base.sqrt(Base.abs(c / a2))
+            Base.isfinite(local_scale) && (theta_scale = Base.max(theta_scale, local_scale))
+        end
+    end
+    return theta_scale > 0.0 ? theta_scale : fallback
+end
+
 function prepare_ballooning_coefficients(
     flux_surface_index::Int,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
@@ -491,6 +515,13 @@ function prepare_ballooning_coefficients(
     bf_fs[:, 6] = jac_chiprime
     bf_fs[:, 7] = pprime_chiprime
 
+    theta_scale = _ballooning_theta_scale(
+        nabla_beta_sq_b_sq_periodic,
+        nabla_beta_sq_b_sq_peculiar_1st,
+        nabla_beta_sq_b_sq_peculiar_2nd
+    )
+    theta_max = min(BALLOONING_THETA_MAX_CAP, BALLOONING_THETA_SCALE_MULTIPLIER * theta_scale)
+
     sigma = .-(two_pi_f .* pressure_gradient .* q_derivative) ./ (chi_prime^2 .* bsq)
 
     m0_12 = jac_chiprime ./ nabla_beta_sq_b_sq_peculiar_2nd
@@ -512,7 +543,11 @@ function prepare_ballooning_coefficients(
     d0bar[2, 2] = n0_int[4]
 
     @views bf_fs[end, :] .= bf_fs[1, :]
-    ode_coefficient_spline = (xs=theta_grid, itp=cubic_interp(theta_grid, Series(bf_fs); bc=PeriodicBC()))
+    ode_coefficient_spline = (
+        xs=theta_grid,
+        itp=cubic_interp(theta_grid, Series(bf_fs); bc=PeriodicBC()),
+        theta_max=theta_max
+    )
 
     return (
         ode_coefficient_spline=ode_coefficient_spline,
@@ -1095,12 +1130,11 @@ Computes Delta' = (y'/y)_right - (y'/y)_left.
 function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     TOLERANCE = 1e-8
     MINIMUM_STEP = 1e-10
-    MATCHING_POINT = 1e-3
-    THETA_MAX0 = 16.5
+    theta_max = max(ode_coefficient_spline.theta_max, 10.0 * MATCHING_POINT)
 
-    theta_start_left = -THETA_MAX0
+    theta_start_left = -theta_max
     theta_end_left = -MATCHING_POINT
-    theta_start_right = THETA_MAX0
+    theta_start_right = theta_max
     theta_end_right = MATCHING_POINT
 
     initial_condition_left = SVector(0.0, 1.0)
