@@ -844,6 +844,10 @@ a_2\left(\theta+\frac{a_1}{2a_2}\right)^2
 The residual scale is ``c = a_0-a_1^2/(4a_2)``. To make the asymptotic
 approximation valid, the code chooses an integration boundary where the
 ``\theta^2`` term dominates, using the scale ``\sqrt{|c/a_2|}``.
+Because the shooting boundary is a single flux-surface quantity, `Bal.jl`
+evaluates this scale on the ballooning theta grid and uses the largest finite
+value on that surface. The base integration boundary is then capped as
+``\theta_{\max}=\min(16.5,10\max_\theta\sqrt{|c/a_2|})``.
 
 Directly extracting ``c_{a1}`` or ``\Delta'`` from the small asymptotic solution is
 numerically fragile. The comparison below shows that the `Baloo.f` style, which
