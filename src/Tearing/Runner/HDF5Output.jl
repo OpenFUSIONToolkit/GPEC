@@ -61,8 +61,9 @@ function _write_settings!(g, ctrl::SLAYERControl)
     s["zeff"] = ctrl.zeff
     s["chi_perp"] = ctrl.chi_perp
     s["chi_tor"] = ctrl.chi_tor
-    s["dr_val"] = ctrl.dr_val
-    s["dgeo_val"] = ctrl.dgeo_val
+    # NaN sentinel records the auto-derive (nothing) setting in a numeric dataset.
+    s["dr_val"] = ctrl.dr_val === nothing ? NaN : ctrl.dr_val
+    s["dgeo_val"] = ctrl.dgeo_val === nothing ? NaN : ctrl.dgeo_val
     s["theta_sample"] = ctrl.theta_sample
     s["resistivity_model"] = String(ctrl.resistivity_model)
     s["lnLambda_form"] = String(ctrl.lnLambda_form)

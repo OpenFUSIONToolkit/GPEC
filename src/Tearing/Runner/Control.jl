@@ -36,7 +36,12 @@ constructor.
     diffusivity [m²/s], used only when the kinetic file carries no usable
     `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
     file's χ⊥(ψ)/χ_φ(ψ) take precedence
-  - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs
+  - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
+    auto-derives them from the equilibrium: `dr_val` from the resistive
+    interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
+    toroidal geometric factor (required only by `dc_type=:toroidal`). Supply a
+    scalar only to override the auto-derivation; an explicit `0.0` disables the
+    critical-Δ offset (Δ_crit ≡ 0)
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
@@ -102,8 +107,8 @@ there is one consistent interface for resistive and kinetic profiles.
     zeff::Float64 = 1.0
     chi_perp::Float64 = 1.0
     chi_tor::Float64 = 1.0
-    dr_val::Float64 = 0.0
-    dgeo_val::Float64 = 0.0
+    dr_val::Union{Float64,Nothing} = nothing
+    dgeo_val::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0
     resistivity_model::Symbol = :sauter
     lnLambda_form::Symbol = :nrl
@@ -239,8 +244,8 @@ function slayer_control_from_toml(section::AbstractDict)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym === :bt
-            # Allow explicit nothing or a number
+        elseif sym in (:bt, :dr_val, :dgeo_val)
+            # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :boxes
             # `boxes` is a Vector{NTuple{4,Float64}}; from TOML this comes
