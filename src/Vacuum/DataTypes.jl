@@ -665,6 +665,7 @@ function WallGeometry3D(inputs::VacuumInput, wall_settings::WallShapeSettings)
     end
 
     inputs.nzeta_in > 1 && error("3D wall geometry not yet implemented for non-axisymmetric inputs")
+    inputs.nfp > 1 && error("3D wall geometry not yet implemented for nfp > 1")
 
     # Plasma surface coordinates (2D)
     surf_2D = PlasmaGeometry(inputs)

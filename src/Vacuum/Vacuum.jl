@@ -199,35 +199,29 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
 """
 @maybe_with_pool pool function _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-    has_wall = wall_settings.shape != "nowall"
-    nfp = inputs.nfp
-
-    # WallGeometry3D is an axisymmetric toroidal extrusion, so a walled 3D run is nfp=1 only.
-    has_wall && nfp > 1 && error("3D vacuum with a wall supports nfp=1 only (got nfp=$(inputs.nfp)); use nowall for the field-periodic block-circulant path")
-
     # Full-torus geometry for source surface; observers are restricted to one field period
     full = expand_field_periods(inputs)
     plasma_surf = PlasmaGeometry3D(full)
-    wall = has_wall ? WallGeometry3D(full, wall_settings) : nothing
+    wall = WallGeometry3D(full, wall_settings)
 
-    mtheta = full.mtheta
-    nzeta_full = full.nzeta
-    nzeta_full % nfp == 0 || error("nzeta_full=$nzeta_full must be divisible by nfp=$nfp for field-periodic reduction")
-    N = mtheta * nzeta_full          # full-torus point count (per surface)
-    M = N ÷ nfp                      # points per field period (= mtheta * nzeta_per_period)
+    (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
 
-    m_modes = inputs.m_modes
-    n_modes = inputs.n_modes
+    num_points_per_fp = mtheta * nzeta # points per field period
+    num_points = num_points_per_fp * nfp # full-torus point count
     mpert = length(m_modes)
 
-    nb = has_wall ? 2 : 1            # surface blocks: plasma, or [plasma; wall]
+    # Complex Fourier basis on a single field period, exp(i(mθ - nζ_local)).
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta, n_modes; nfp=nfp)
+    exp_mn_basis = complex.(cos_mn_basis, sin_mn_basis)
+
+    nb = wall.nowall ? 1 : 2            # surface blocks: plasma, or [plasma; wall]
 
     # First block-row of the combined operator: observers in field period 0 (nb·M rows) ×
     # all sources (nb·N cols). The kernel places each plasma/wall sub-block by observer/source
     # type; the single-layer S is populated only for plasma sources, so green_row is nb·M × N.
-    grad_row = zeros!(pool, nb * M, nb * N)   # double-layer D (with +I on the period-0 diagonals)
-    green_row = zeros!(pool, nb * M, N)       # single-layer S (plasma sources only)
-    green_scratch = zeros!(pool, M, N)        # throwaway green buffer for wall-source kernel calls
+    grad_row = zeros!(pool, nb * num_points_per_fp, nb * num_points)   # double-layer D (with +I on the period-0 diagonals)
+    green_row = zeros!(pool, nb * num_points_per_fp, num_points)       # single-layer S (plasma sources only)
+    green_scratch = zeros!(pool, num_points_per_fp, num_points)        # throwaway green buffer for wall-source kernel calls
 
     # Kernel parameters, hardcoded for now
     PATCH_RAD = 11
@@ -235,23 +229,19 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
     INTERP_ORDER = 5
 
     # Plasma–plasma (single-layer → plasma-observer rows 1:M)
-    compute_3D_kernel_matrices!(grad_row, view(green_row, 1:M, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-    if has_wall
+    compute_3D_kernel_matrices!(grad_row, view(green_row, 1:num_points_per_fp, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+    if !wall.nowall
         # Plasma–wall (double-layer only); wall–plasma (single-layer → wall-observer rows M+1:2M); wall–wall
         compute_3D_kernel_matrices!(grad_row, green_scratch, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-        compute_3D_kernel_matrices!(grad_row, view(green_row, (M+1):(2M), :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrices!(grad_row, view(green_row, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
         compute_3D_kernel_matrices!(grad_row, green_scratch, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
     end
-
-    # Complex Fourier basis on a single field period, exp(i(mθ - nζ_local)).
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta_full, n_modes; nfp=nfp)
-    exp_mn_basis = complex.(cos_mn_basis, sin_mn_basis)
 
     # Solve one reduced (nb·M)×(nb·M) system per toroidal residue class k = mod(n, nfp). Reusing
     # the D̂/Ŝ buffers and solving in place (lu!/ldiv!) keeps the peak footprint small.
     fill!(vac_data.wv, 0)
-    D̂ = zeros!(pool, ComplexF64, nb * M, nb * M)
-    Ŝ = zeros!(pool, ComplexF64, nb * M, M)
+    D̂ = zeros!(pool, ComplexF64, nb * num_points_per_fp, nb * num_points_per_fp)
+    Ŝ = zeros!(pool, ComplexF64, nb * num_points_per_fp, num_points_per_fp)
     for k in unique(mod.(n_modes, nfp))
         # Reduced operators D̂ₖ = Σ_d D_d ω^{k d}, Ŝₖ = Σ_d S_d ω^{k d} (fused, allocation-free).
         # D̂ keeps the nb-block source structure (plasma cols 1:M, wall cols M+1:2M); Ŝ is plasma-
@@ -261,11 +251,11 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
         for d in 0:(nfp-1)
             phase = cis(-2π * (k * d) / nfp)
             for s in 0:(nb-1)
-                src_cols = (s*N+d*M+1):(s*N+(d+1)*M)
-                dst_cols = (s*M+1):((s+1)*M)
+                src_cols = (s*num_points+d*num_points_per_fp+1):(s*num_points+(d+1)*num_points_per_fp)
+                dst_cols = (s*num_points_per_fp+1):((s+1)*num_points_per_fp)
                 @views @. D̂[:, dst_cols] += phase * grad_row[:, src_cols]
             end
-            scols = (d*M+1):((d+1)*M)
+            scols = (d*num_points_per_fp+1):((d+1)*num_points_per_fp)
             @views @. Ŝ += phase * green_row[:, scols]
         end
 
@@ -273,21 +263,17 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
         ldiv!(lu!(D̂), Ŝ)
         mode_cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
         Ek = @view exp_mn_basis[:, mode_cols]
-        G_plasma = @view Ŝ[1:M, :]   # plasma-observer rows of the combined exterior operator
-        vac_data.wv[mode_cols, mode_cols] .= (4π^2 / M) .* (Ek' * (G_plasma * Ek))
+        G_plasma = @view Ŝ[1:num_points_per_fp, :]   # plasma-observer rows of the combined exterior operator
+        vac_data.wv[mode_cols, mode_cols] .= (4π^2 / num_points_per_fp) .* (Ek' * (G_plasma * Ek))
     end
 
     inputs.force_wv_symmetry && hermitianpart!(vac_data.wv)
 
-    # Only wv is produced on the 3D path; zero the Green's functions and fill coordinate arrays.
+    # Green's functions not yet filled in 3D
     fill!(vac_data.grri, 0)
     fill!(vac_data.grre, 0)
     vac_data.plasma_pts .= plasma_surf.r
-    if has_wall
-        vac_data.wall_pts .= wall.r
-    else
-        fill!(vac_data.wall_pts, 0)
-    end
+    vac_data.wall_pts .= wall.r
 end
 
 """
