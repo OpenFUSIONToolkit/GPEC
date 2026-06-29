@@ -24,62 +24,44 @@ export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+    _assemble_vacuum_response!(wv, grri_in, grre_in, plasma_surf, wall, cos_mn_basis, sin_mn_basis, kparams; force_wv_symmetry=true)
 
-Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
+Shared boundary-integral assembly for a single dense vacuum system.
 
-Single entry point for vacuum calculations.
-
-  - For **3D** (`inputs.nzeta > 1`), computes the full coupled response across all (m,n) modes
-
-  - For **2D geometry** (`inputs.nzeta == 1`), supports either:
-
-      + **single-n** (`length(inputs.n_modes) == 1`): computes (m,n) response for `n = inputs.n_modes[1]`
-      + **multi-n** (`length(inputs.n_modes) > 1`): loops over `inputs.n_modes` and returns
-        **blocks** of the full response matrices with one block per toroidal mode number.
-
-This is the pure Julia implementation that replaces the Fortran `mscvac` function.
-It computes both interior (grri) and exterior (grre) Green's functions for GPEC response calculations.
+Given constructed surface geometries, the Fourier bases, and the kernel dispatch parameters,
+this builds the double-/single-layer operators, solves the exterior and interior systems, and
+inverse-Fourier-transforms the result into the vacuum response matrix `wv` and the Green's
+functions `grri`/`grre`. It is the geometry-agnostic kernel shared by the 2D (per-n) and dense
+3D (wall) paths; all dimensionality/symmetry decisions are made by the callers, which pass in
+the appropriate `plasma_surf`/`wall` types, bases, and `kparams`.
 
 # Arguments
 
-  - `inputs`: `VacuumInput` struct with mode numbers, grid resolution, and boundary info.
-  - `wall_settings::WallShapeSettings`: Wall geometry configuration.
+  - `wv`: vacuum response matrix block to fill (`num_modes × num_modes`).
+  - `grri_in`, `grre_in`: interior/exterior Green's-function matrices; the active
+    `1:num_points_total` rows are written.
+  - `plasma_surf`, `wall`: constructed surface geometries (2D or 3D variants; `wall` must
+    expose a `nowall::Bool` field).
+  - `cos_mn_basis`, `sin_mn_basis`: Fourier basis coefficients (`num_points_surf × num_modes`).
+  - `kparams`: kernel dispatch parameters (`KernelParams2D` or `KernelParams3D`).
+  - `force_wv_symmetry`: enforce Hermitian symmetry on `wv`.
 
-# Returns
+# Reference
 
-  - `wv`: Complex vacuum response matrix.
-  - `grri`: Interior Green's function matrix.
-  - `grre`: Exterior Green's function matrix.
-  - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
+[Chance Phys. Plasmas 2007 052506 eq. 114-118]
 """
-@with_pool pool function _compute_vacuum_response_single!(
+@maybe_with_pool pool function _assemble_vacuum_response!(
     wv::AbstractMatrix{ComplexF64},
     grri_in::AbstractMatrix{Float64},
     grre_in::AbstractMatrix{Float64},
-    plasma_pts::AbstractMatrix{Float64},
-    wall_pts::AbstractMatrix{Float64},
-    inputs::VacuumInput,
-    wall_settings::WallShapeSettings;
-    n_override::Union{Nothing,Int}=nothing
+    plasma_surf,
+    wall,
+    cos_mn_basis::AbstractMatrix{Float64},
+    sin_mn_basis::AbstractMatrix{Float64},
+    kparams;
+    force_wv_symmetry::Bool=true
 )
-
-    # Initialize surface geometries
-    plasma_surf = inputs.nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
-    wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
-
-    # Compute Fourier basis coefficients
-    ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, inputs.nzeta, inputs.n_modes; n_2D=n_override, ν=ν)
     num_points_surf, num_modes = size(cos_mn_basis)
-
-    # Create kernel parameters structs used to dispatch to the correct kernel
-    if inputs.nzeta > 1
-        # Hardcode these values for now - can expose to the user in the future
-        kparams = KernelParams3D(11, 20, 5)
-    else
-        kparams = KernelParams2D(n_override)
-    end
 
     # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
     num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
@@ -135,100 +117,112 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     fourier_inverse_transform!(ari, grre, sin_mn_basis)
     fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
 
-    # fourier_inverse_transform! uses 1/N normalization; restore the 4π² physics factor
-    # from the vacuum Green's function integral [Chance 2007 eq. 114-118]
-    arr .*= 4π^2
-    aii .*= 4π^2
-    ari .*= 4π^2
-    air .*= 4π^2
-
     # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
-    wv .= complex.(arr .+ aii, air .- ari)
-    inputs.force_wv_symmetry && hermitianpart!(wv)
+    wv .= 4π^2 * complex.(arr .+ aii, air .- ari)
+    force_wv_symmetry && hermitianpart!(wv)
+end
 
-    # Fill coordinate arrays
-    if inputs.nzeta > 1 # 3D
-        plasma_pts .= plasma_surf.r
-        wall_pts .= wall.r
-    else # 2D
-        @views begin
-            plasma_pts[:, 1] .= plasma_surf.x
-            plasma_pts[:, 2] .= 0.0
-            plasma_pts[:, 3] .= plasma_surf.z
-            wall_pts[:, 1] .= wall.x
-            wall_pts[:, 2] .= 0.0
-            wall_pts[:, 3] .= wall.z
-        end
+"""
+    _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+
+2D (axisymmetric, `inputs.nzeta == 1`) vacuum response calculation.
+
+Each toroidal mode `n` decouples in 2D geometry, so the routine loops over `inputs.n_modes`,
+filling the corresponding diagonal block of the response matrix and the matching column block
+of the Green's functions via [`_assemble_vacuum_response!`]. Geometry is rebuilt per `n` (it is
+`n`-independent, but the Fourier basis is not), and the coordinate arrays are filled identically
+on each pass.
+"""
+function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+
+    mpert = length(inputs.m_modes)
+    numpert_total = mpert * length(inputs.n_modes)
+
+    vac_data.wv .= 0
+
+    # Geometry and Fourier basis for this toroidal mode (n_2D = n, ν from the plasma surface)
+    plasma_surf = PlasmaGeometry(inputs)
+    wall = WallGeometry(inputs, plasma_surf, wall_settings)
+
+    for (idx_n, n) in enumerate(inputs.n_modes)
+        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, inputs.nzeta, inputs.n_modes; n_2D=n, ν=plasma_surf.ν)
+        kparams = KernelParams2D(n)
+
+        # Diagonal block of wv and matching column block of the Green's functions
+        block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
+        cols = vcat(block_idx, numpert_total .+ block_idx)
+        wv_block = @view vac_data.wv[block_idx, block_idx]
+        grri_block = @view vac_data.grri[:, cols]
+        grre_block = @view vac_data.grre[:, cols]
+
+        _assemble_vacuum_response!(wv_block, grri_block, grre_block, plasma_surf, wall, cos_mn_basis, sin_mn_basis, kparams; force_wv_symmetry=inputs.force_wv_symmetry)
+    end
+
+    # Populate coordinate arrays
+    @views begin
+        vac_data.plasma_pts[:, 1] .= plasma_surf.x
+        vac_data.plasma_pts[:, 2] .= 0.0
+        vac_data.plasma_pts[:, 3] .= plasma_surf.z
+        vac_data.wall_pts[:, 1] .= wall.x
+        vac_data.wall_pts[:, 2] .= 0.0
+        vac_data.wall_pts[:, 3] .= wall.z
     end
 end
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+    _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-Allocate and return the vacuum response matrix and Green's functions for the given
-vacuum inputs.
+3D (`inputs.nzeta > 1`) vacuum response calculation, split into two internally-coherent branches.
 
-This is a thin allocating wrapper around the in‑place [`compute_vacuum_response!`]
-implementation. For performance‑critical paths that already own preallocated storage
-(e.g. `ForceFreeStates.VacuumData`), prefer the in‑place method to avoid extra
-heap allocations.
-"""
-@with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
-
-    # Field-periodic 3D reduction: exploit the block-circulant structure of an nfp-periodic
-    # boundary to solve only reduced per-residue-class systems instead of the full torus.
-    if inputs.nzeta > 1 && inputs.nfp > 1
-        return _compute_vacuum_response_3d_periodic(inputs, wall_settings)
-    end
-
-    # Reconstruct the full torus from a single field period (no-op unless nfp > 1)
-    inputs = expand_field_periods(inputs)
-
-    # Allocate storage for the vacuum response matrix and Green's functions
-    numpoints = inputs.mtheta * inputs.nzeta
-    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
-
-    vac = (
-        wv=zeros(ComplexF64, num_modes, num_modes),
-        grri=zeros(2 * numpoints, 2 * num_modes),
-        grre=zeros(2 * numpoints, 2 * num_modes),
-        plasma_pts=zeros(numpoints, 3),
-        wall_pts=zeros(numpoints, 3)
-    )
-    compute_vacuum_response!(vac, inputs, wall_settings)
-
-    return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
-end
-
-"""
-    _compute_vacuum_response_3d_periodic(inputs::VacuumInput, wall_settings::WallShapeSettings)
-
-Field-periodic ("layer-2") vacuum response for a 3D boundary with `inputs.nfp > 1`.
-
-The boundary is `nfp`-periodic, so the single-/double-layer boundary-integral operators `S`
-and `D` are block-circulant in the field-period index. Writing the full response as
-`wv = (4π²/N)·Eᴴ·D⁻¹S·E` (`E` the complex Fourier basis, `N = mtheta·nzeta_full`), the
-block-circulant structure block-diagonalizes the problem by toroidal residue class
-`k = mod(n, nfp)`: modes with different `k` do not couple, and within a class
+**nowall** (`wall_settings.shape == "nowall"`) — block-circulant field-period reduction.
+The `nfp`-periodic boundary makes the single-/double-layer operators `S`, `D` block-circulant
+in the field-period index. Writing the full response as `wv = (4π²/N)·Eᴴ·D⁻¹S·E` (`E` the
+complex Fourier basis, `N = mtheta·nzeta_full`), the structure block-diagonalizes the problem by
+toroidal residue class `k = mod(n, nfp)`: modes with different `k` do not couple, and within a
+class
 
     D̂ₖ = Σ_d D_d ω^{k d},   Ŝₖ = Σ_d S_d ω^{k d},   ω = exp(-2πi/nfp),
 
-where `D_d`, `S_d` are the `M×M` (`M = N/nfp`) blocks coupling observers in field period 0 to
-sources in field period `d`. Each class then needs a single `M×M` solve
+with `D_d`, `S_d` the `M×M` (`M = N/nfp`) blocks coupling observers in field period 0 to sources
+in period `d`. Each class needs one `M×M` solve `wv[class k] = (4π²/M)·E_localᴴ·(D̂ₖ \\ Ŝₖ)·E_local`.
+Only the first block-row of the operators is built, so the kernel cost drops by `nfp` and the
+dense `O(N³)` factorization is replaced by per-class `O(M³)` solves. For `nfp == 1` this
+degenerates to a **single residue class with `M = N`**, reproducing the dense solve to round-off.
+Only `wv` is produced; `grri`/`grre` are returned zeroed.
 
-    wv[class k] = (4π²/M)·E_localᴴ·(D̂ₖ \\ Ŝₖ)·E_local,
-
-with `E_local` the basis restricted to one field period. Only the first block-row of the
-operators is built (observers in period 0), so the kernel cost drops by `nfp` and the dense
-`O(N³)` factorization is replaced by per-class `O(M³)` solves.
-
-Only the response matrix `wv` is produced (the only quantity the 3D bridge consumes); the
-interior/exterior Green's-function matrices are returned zeroed. Supports `nowall` only.
+**wall** (any other shape) — dense, wall-capable path. Block-circulant does not yet support
+walls, so this builds `PlasmaGeometry3D`/`WallGeometry3D` and calls [`_assemble_vacuum_response!`],
+producing `wv`, `grri`, and `grre`. This branch is `nfp=1`-oriented; `nfp>1 + wall` has no
+consumer and is rejected.
 """
-function _compute_vacuum_response_3d_periodic(inputs::VacuumInput, wall_settings::WallShapeSettings)
+@maybe_with_pool pool function _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-    wall_settings.shape == "nowall" || error("Field-periodic 3D vacuum reduction supports nowall only (got shape=\"$(wall_settings.shape)\")")
+    # TODO(block-circulant + wall): an nfp-periodic wall is block-circulant under the same
+    # field-period rotation as the plasma, so the coupled [plasma; wall] × [plasma; wall]
+    # boundary-integral operator is itself block-circulant in the field-period index. To retire
+    # the dense wall branch below: build the first block-row of the 2×2 (plasma/wall) block
+    # operator (observers in period 0, M_p + M_w rows × full-torus sources), form the per-residue
+    # -class reduced operators D̂ₖ, Ŝₖ over the combined surface exactly as in the nowall case,
+    # solve the per-class systems, and apply the per-period basis to the plasma-observer rows. The
+    # wall enters only as extra rows/cols of the circulant blocks; the residue-class
+    # decomposition is unchanged.
+    if wall_settings.shape != "nowall"
+        # ── Dense, wall-capable 3D path ──────────────────────────────────────────────────────
+        inputs.nfp > 1 && error("3D vacuum with a wall supports nfp=1 only (got nfp=$(inputs.nfp)); use nowall for the field-periodic block-circulant path")
 
+        plasma_surf = PlasmaGeometry3D(inputs)
+        wall = WallGeometry3D(inputs, wall_settings)
+        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, inputs.nzeta, inputs.n_modes)
+        kparams = KernelParams3D(11, 20, 5)
+
+        _assemble_vacuum_response!(vac_data.wv, vac_data.grri, vac_data.grre, plasma_surf, wall, cos_mn_basis, sin_mn_basis, kparams; force_wv_symmetry=inputs.force_wv_symmetry)
+
+        vac_data.plasma_pts .= plasma_surf.r
+        vac_data.wall_pts .= wall.r
+        return nothing
+    end
+
+    # ── nowall: block-circulant field-period reduction (all nfp; nfp=1 ⇒ single class, M=N) ──
     nfp = inputs.nfp
 
     # Full-torus geometry (O(N) memory) used as the source surface; observers are restricted
@@ -249,15 +243,15 @@ function _compute_vacuum_response_3d_periodic(inputs::VacuumInput, wall_settings
 
     # First block-row of the operators: observers in field period 0 (M rows) × all sources (N cols)
     kparams = KernelParams3D(11, 20, 5)
-    grad_row = zeros(M, N)   # double-layer D (with +I on the period-0 diagonal block)
-    green_row = zeros(M, N)  # single-layer S
+    grad_row = zeros!(pool, M, N)   # double-layer D (with +I on the period-0 diagonal block)
+    green_row = zeros!(pool, M, N)  # single-layer S
     compute_3D_kernel_matrices!(grad_row, green_row, plasma_surf, plasma_surf, kparams.PATCH_RAD, kparams.RAD_DIM, kparams.INTERP_ORDER; n_obs=M)
 
     # Complex Fourier basis on a single field period: E_local[idx, col] = exp(i(mθ - nζ_local)).
     # Columns are ordered m-fast, n-slow to match the wv layout used by the 3D bridge.
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
     ζ_grid = range(; start=0, length=nzeta_full, step=2π/nzeta_full)
-    E_local = zeros(ComplexF64, M, num_modes)
+    E_local = zeros!(pool, ComplexF64, M, num_modes)
     nzeta_p = nzeta_full ÷ nfp
     for (idx_n, n) in enumerate(n_modes), (idx_m, m) in enumerate(m_modes)
         col = idx_m + (idx_n - 1) * mpert
@@ -267,11 +261,18 @@ function _compute_vacuum_response_3d_periodic(inputs::VacuumInput, wall_settings
         end
     end
 
+    # TODO(3D grri/grre): per residue class k, after ldiv!(lu!(D̂ₖ), Ŝₖ) (the exterior operator
+    # D̂ₖ⁻¹Ŝₖ), assemble the point→mode Green's-function columns by applying the per-period basis
+    # E_local and the interior variant (-D + 2I ⇒ block-circulant interior operator with the
+    # period-0 diagonal sign/identity handled per class), mirroring the dense
+    # _assemble_vacuum_response! grri/grre construction. Scatter each class's columns back into
+    # the full [2N × 2·num_modes] arrays by residue class. Until then grri/grre are returned zeroed.
+
     # Solve one reduced M×M system per toroidal residue class k = mod(n, nfp). Reusing the D̂/Ŝ
     # buffers and solving in place (lu!/ldiv!) keeps the peak footprint at a few M×M matrices.
-    wv = zeros(ComplexF64, num_modes, num_modes)
-    D̂ = Matrix{ComplexF64}(undef, M, M)
-    Ŝ = Matrix{ComplexF64}(undef, M, M)
+    fill!(vac_data.wv, 0)
+    D̂ = zeros!(pool, ComplexF64, M, M)
+    Ŝ = zeros!(pool, ComplexF64, M, M)
     for k in unique(mod.(n_modes, nfp))
         # Reduced operators D̂ₖ = Σ_d D_d ω^{k d}, Ŝₖ = Σ_d S_d ω^{k d} (fused, allocation-free)
         fill!(D̂, 0)
@@ -287,26 +288,59 @@ function _compute_vacuum_response_3d_periodic(inputs::VacuumInput, wall_settings
         ldiv!(lu!(D̂), Ŝ)
         mode_cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
         Ek = @view E_local[:, mode_cols]
-        wv[mode_cols, mode_cols] .= (4π^2 / M) .* (Ek' * (Ŝ * Ek))
+        vac_data.wv[mode_cols, mode_cols] .= (4π^2 / M) .* (Ek' * (Ŝ * Ek))
     end
 
-    inputs.force_wv_symmetry && hermitianpart!(wv)
+    inputs.force_wv_symmetry && hermitianpart!(vac_data.wv)
 
-    # Only wv is consumed by the 3D bridge; return zeroed Green's functions and the plasma points.
-    grri = zeros(2 * N, 2 * num_modes)
-    grre = zeros(2 * N, 2 * num_modes)
-    wall_pts = zeros(N, 3)
-    return wv, grri, grre, copy(plasma_surf.r), wall_pts
+    # Only wv is produced on the nowall path; zero the Green's functions and fill plasma points.
+    fill!(vac_data.grri, 0)
+    fill!(vac_data.grre, 0)
+    vac_data.plasma_pts .= plasma_surf.r
+    fill!(vac_data.wall_pts, 0)
+end
+
+"""
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+
+Allocate and return the vacuum response matrix and Green's functions for the given vacuum
+inputs. Thin allocating wrapper around the in-place [`compute_vacuum_response!`]: it sizes the
+output arrays for the full torus and forwards to the same 2D/3D workers. For performance-critical
+paths that already own preallocated storage (e.g. `ForceFreeStates.VacuumData`), prefer the
+in-place method to avoid extra heap allocations.
+
+# Returns
+
+  - `wv`: complex vacuum response matrix (`num_modes × num_modes`).
+  - `grri`, `grre`: interior/exterior Green's functions (zeroed on the 3D nowall path).
+  - `plasma_pts`, `wall_pts`: surface coordinate arrays.
+"""
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+
+    num_points = inputs.mtheta * inputs.nzeta * inputs.nfp # mtheta for 2D
+    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
+
+    vac = (
+        wv=zeros(ComplexF64, num_modes, num_modes),
+        grri=zeros(2 * num_points, 2 * num_modes),
+        grre=zeros(2 * num_points, 2 * num_modes),
+        plasma_pts=zeros(num_points, 3),
+        wall_pts=zeros(num_points, 3)
+    )
+    compute_vacuum_response!(vac, inputs, wall_settings)
+
+    return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
 end
 
 """
     compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-In-place variant that computes the vacuum response and directly populates the arrays
-stored in `vac_data`.
+In-place variant that computes the vacuum response and directly populates the arrays stored in
+`vac_data`. Dispatches on dimensionality only: 2D (`inputs.nzeta == 1`) routes to
+[`_compute_vacuum_response_2d!`], 3D to [`_compute_vacuum_response_3d!`].
 
-The `vac_data` argument is expected to provide the following writable fields with
-compatible sizes:
+The `vac_data` argument is expected to provide the following writable fields with compatible
+sizes:
 
   - `wv::AbstractMatrix{ComplexF64}`             – vacuum response matrix
   - `grri::AbstractMatrix{Float64}`              – interior Green's functions
@@ -314,49 +348,14 @@ compatible sizes:
   - `plasma_pts::AbstractMatrix{Float64}`        – plasma surface coordinates
   - `wall_pts::AbstractMatrix{Float64}`          – wall surface coordinates
 
-This is designed to work with `ForceFreeStates.VacuumData` but does not depend on
-its concrete type (duck-typed on field names only).
+This is designed to work with `ForceFreeStates.VacuumData` but does not depend on its concrete
+type (duck-typed on field names only).
 """
 function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
-
-    mpert = length(inputs.m_modes)
-    numpert_total = mpert * length(inputs.n_modes)
-
-    # 3D vacuum: full coupled response across (m,n) from a single kernel call
-    if inputs.nzeta > 1
-        _compute_vacuum_response_single!(
-            vac_data.wv,
-            vac_data.grri,
-            vac_data.grre,
-            vac_data.plasma_pts,
-            vac_data.wall_pts,
-            inputs,
-            wall_settings
-        )
+    if inputs.nzeta == 1
+        _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
     else
-        # 2D vacuum: fill diagonal blocks of the response matrix
-        vac_data.wv .= 0
-
-        # Each n is independent in 2D geometry → fill diagonal blocks inside preallocated arrays
-        for (idx_n, n) in enumerate(inputs.n_modes)
-            block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
-            cols = vcat(block_idx, numpert_total .+ block_idx)
-
-            wv_block = @view vac_data.wv[block_idx, block_idx]
-            grri_block = @view vac_data.grri[:, cols]
-            grre_block = @view vac_data.grre[:, cols]
-
-            _compute_vacuum_response_single!(
-                wv_block,
-                grri_block,
-                grre_block,
-                vac_data.plasma_pts,
-                vac_data.wall_pts,
-                inputs,
-                wall_settings;
-                n_override=n
-            )
-        end
+        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings)
     end
 end
 
