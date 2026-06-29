@@ -49,76 +49,87 @@ export transform!, inverse_transform!
 export fourier_transform!, fourier_inverse_transform!
 
 """
-    compute_fourier_coefficients(mtheta, m_modes, nzeta, n_modes; n_2D=nothing, ν=nothing)
+    compute_fourier_coefficients(mtheta, m_modes, n, ν)
 
-Compute Fourier basis function coefficients for transforms between physical-space and mode-space.
-Supports both 2D and 3D geometries.
-
-- **2D** (`nzeta == 1`): builds basis for the explicit poloidal mode list `m_modes` at a single
-  toroidal mode `n_2D` with optional toroidal angle offset `ν`. `n_modes` is ignored.
-- **3D** (`nzeta > 1`): builds basis for every `(m, n)` pair in the Cartesian product
-  `m_modes × n_modes`. Columns are ordered m-fast, n-slow (matching the `wv` matrix layout).
+Build the 2D Fourier basis for the explicit poloidal mode list `m_modes` at a single toroidal
+mode `n`, with toroidal angle offset `ν` (length `mtheta`).
 
 # Arguments
 
 - `mtheta::Int`: Number of poloidal grid points (theta resolution)
 - `m_modes::AbstractVector{<:Integer}`: Poloidal mode numbers
-- `nzeta::Int`: Number of toroidal grid points (1 for 2D, >1 for 3D)
-- `n_modes::AbstractVector{<:Integer}`: Toroidal mode numbers (ignored in 2D)
-
-# Keyword Arguments
-
-- `n_2D::Union{Nothing, Int}=nothing`: Toroidal mode number for the 2D path (required when `nzeta==1`)
-- `ν::Union{Nothing, Vector{Float64}}=nothing`: Toroidal angle offset array of length `mtheta`
-  (required when `nzeta==1`; default when omitted: all zeros)
+- `n::Integer`: Toroidal mode number
+- `ν::AbstractVector{<:AbstractFloat}`: Toroidal angle offset array of length `mtheta`
 
 # Returns
 
-- 2D: `(cos_mn_basis, sin_mn_basis)` each of size `(mtheta, length(m_modes))`
-  where `cos_mn_basis[i,l] = cos(m_modes[l]*θᵢ - n_2D*νᵢ)`
-- 3D: `(cos_mn_basis, sin_mn_basis)` each of size `(mtheta*nzeta, length(m_modes)*length(n_modes))`
-  where column `l = idx_m + (idx_n-1)*length(m_modes)` holds `cos(m_modes[idx_m]*θ - n_modes[idx_n]*ζ)`
+`cos(m_modes[l]*θᵢ - n*νᵢ), sin(m_modes[l]*θᵢ - n*νᵢ)` each of size `(mtheta, length(m_modes))`.
+"""
+function compute_fourier_coefficients(mtheta::Int, m_modes::AbstractVector{<:Integer}, n::Integer, ν::Vector{Float64})
+
+    @assert length(ν) == mtheta "ν must have length mtheta"
+
+    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
+    cos_mn_basis = cos.(m_modes' .* θ_grid .- n .* ν)
+    sin_mn_basis = sin.(m_modes' .* θ_grid .- n .* ν)
+
+    return cos_mn_basis, sin_mn_basis
+end
+
+"""
+    compute_fourier_coefficients(mtheta, m_modes, nzeta, n_modes; nfp=1)
+
+Build the 3D Fourier basis for every `(m, n)` pair in the Cartesian product `m_modes × n_modes`.
+Columns are ordered m-fast, n-slow (matching the `wv` matrix layout).
+
+The toroidal grid uses the full-torus step `2π/nzeta`. When `nfp > 1`, only the first
+`nzeta ÷ nfp` toroidal points (one field period) are emitted, so the basis directly provides
+the per-period block `E_local` used by the field-periodic block-circulant reduction without any
+post-hoc row slicing. `nfp == 1` (default) emits the full torus, reproducing the legacy output.
+
+# Arguments
+
+- `mtheta::Int`: Number of poloidal grid points (theta resolution)
+- `m_modes::AbstractVector{<:Integer}`: Poloidal mode numbers
+- `nzeta::Int`: Number of full-torus toroidal grid points (must be divisible by `nfp`)
+- `n_modes::AbstractVector{<:Integer}`: Toroidal mode numbers
+
+# Keyword Arguments
+
+- `nfp::Int=1`: Number of field periods. Emits `nzeta ÷ nfp` toroidal points (one period).
+
+# Returns
+
+`(cos_mn_basis, sin_mn_basis)` each of size `(mtheta*(nzeta÷nfp), length(m_modes)*length(n_modes))`
+where column `l = idx_m + (idx_n-1)*length(m_modes)` holds `cos(m_modes[idx_m]*θ - n_modes[idx_n]*ζ)`.
 """
 function compute_fourier_coefficients(
     mtheta::Int,
     m_modes::AbstractVector{<:Integer},
     nzeta::Int,
     n_modes::AbstractVector{<:Integer};
-    n_2D::Union{Nothing, Int}=nothing,
-    ν::Union{Nothing, Vector{Float64}}=nothing
+    nfp::Int=1
 )
+    @assert nzeta % nfp == 0 "nzeta ($nzeta) must be divisible by nfp ($nfp)"
 
-    # Uniform theta grid: [0, 2π)
+    # Uniform theta grid: [0, 2π); toroidal grid on the full-torus step, one field period emitted
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
+    ζ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+    nzeta_out = nzeta ÷ nfp
 
-    if nzeta == 1
-        @assert n_2D !== nothing "n_2D must be set for 2D"
-        @assert ν !== nothing "ν must be set for 2D"
-        @assert length(ν) == mtheta "ν must have length mtheta"
-
-        # In 2D, we only use one toroidal mode at a time
-        # Compute sin(mθ - nν) and cos(mθ - nν)
-        cos_mn_basis = cos.(m_modes' .* θ_grid .- n_2D .* ν)
-        sin_mn_basis = sin.(m_modes' .* θ_grid .- n_2D .* ν)
-    else # 3D
-        @assert (n_2D === nothing && ν === nothing) "n_2D and ν should be nothing for 3D"
-
-        # Build basis for all (m, n) pairs
-        mpert = length(m_modes)
-        ζ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
-        sin_mn_basis = zeros(mtheta * nzeta, mpert * length(n_modes))
-        cos_mn_basis = zeros(mtheta * nzeta, mpert * length(n_modes))
-        for (idx_n, n) in enumerate(n_modes)
-            n_col_offset = (idx_n - 1) * mpert
-            for (idx_m, m) in enumerate(m_modes)
-                col = idx_m + n_col_offset
-                for (j, ζ) in enumerate(ζ_grid), (i, θ) in enumerate(θ_grid)
-                    idx = i + (j - 1) * mtheta
-                    arg = m * θ - n * ζ
-                    s, c = sincos(arg)
-                    cos_mn_basis[idx, col] = c
-                    sin_mn_basis[idx, col] = s
-                end
+    mpert = length(m_modes)
+    sin_mn_basis = zeros(mtheta * nzeta_out, mpert * length(n_modes))
+    cos_mn_basis = zeros(mtheta * nzeta_out, mpert * length(n_modes))
+    for (idx_n, n) in enumerate(n_modes)
+        n_col_offset = (idx_n - 1) * mpert
+        for (idx_m, m) in enumerate(m_modes)
+            col = idx_m + n_col_offset
+            for j in 1:nzeta_out, (i, θ) in enumerate(θ_grid)
+                idx = i + (j - 1) * mtheta
+                arg = m * θ - n * ζ_grid[j]
+                s, c = sincos(arg)
+                cos_mn_basis[idx, col] = c
+                sin_mn_basis[idx, col] = s
             end
         end
     end
@@ -202,7 +213,7 @@ function FourierTransform(
     n::Int=0,
     ν::Vector{Float64}=zeros(Float64, mtheta)
 )
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mlow:(mlow + mpert - 1), 1, Int[]; n_2D=n, ν=ν)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mlow:(mlow + mpert - 1), n, ν)
     return FourierTransform(mtheta, mpert, mlow, cos_mn_basis, sin_mn_basis)
 end
 

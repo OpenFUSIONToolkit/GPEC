@@ -145,7 +145,7 @@ function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settin
     wall = WallGeometry(inputs, plasma_surf, wall_settings)
 
     for (idx_n, n) in enumerate(inputs.n_modes)
-        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, inputs.nzeta, inputs.n_modes; n_2D=n, ν=plasma_surf.ν)
+        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, n, plasma_surf.ν)
         kparams = KernelParams2D(n)
 
         # Diagonal block of wv and matching column block of the Green's functions
@@ -219,7 +219,7 @@ consumer and is rejected.
 
         vac_data.plasma_pts .= plasma_surf.r
         vac_data.wall_pts .= wall.r
-        return nothing
+        return
     end
 
     # ── nowall: block-circulant field-period reduction (all nfp; nfp=1 ⇒ single class, M=N) ──
@@ -239,7 +239,6 @@ consumer and is rejected.
     m_modes = inputs.m_modes
     n_modes = inputs.n_modes
     mpert = length(m_modes)
-    num_modes = mpert * length(n_modes)
 
     # First block-row of the operators: observers in field period 0 (M rows) × all sources (N cols)
     kparams = KernelParams3D(11, 20, 5)
@@ -247,19 +246,9 @@ consumer and is rejected.
     green_row = zeros!(pool, M, N)  # single-layer S
     compute_3D_kernel_matrices!(grad_row, green_row, plasma_surf, plasma_surf, kparams.PATCH_RAD, kparams.RAD_DIM, kparams.INTERP_ORDER; n_obs=M)
 
-    # Complex Fourier basis on a single field period: E_local[idx, col] = exp(i(mθ - nζ_local)).
-    # Columns are ordered m-fast, n-slow to match the wv layout used by the 3D bridge.
-    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    ζ_grid = range(; start=0, length=nzeta_full, step=2π/nzeta_full)
-    E_local = zeros!(pool, ComplexF64, M, num_modes)
-    nzeta_p = nzeta_full ÷ nfp
-    for (idx_n, n) in enumerate(n_modes), (idx_m, m) in enumerate(m_modes)
-        col = idx_m + (idx_n - 1) * mpert
-        for jl in 1:nzeta_p, i in 1:mtheta
-            idx = i + (jl - 1) * mtheta
-            E_local[idx, col] = cis(m * θ_grid[i] - n * ζ_grid[jl])
-        end
-    end
+    # Complex Fourier basis on a single field period, exp(i(mθ - nζ_local)).
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta_full, n_modes; nfp=nfp)
+    exp_mn_basis = complex.(cos_mn_basis, sin_mn_basis)
 
     # TODO(3D grri/grre): per residue class k, after ldiv!(lu!(D̂ₖ), Ŝₖ) (the exterior operator
     # D̂ₖ⁻¹Ŝₖ), assemble the point→mode Green's-function columns by applying the per-period basis
@@ -287,7 +276,7 @@ consumer and is rejected.
         # Exterior response operator for this sector: solve D̂ₖ G = Ŝₖ in place (Ŝ ← G = D̂ₖ⁻¹Ŝₖ)
         ldiv!(lu!(D̂), Ŝ)
         mode_cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
-        Ek = @view E_local[:, mode_cols]
+        Ek = @view exp_mn_basis[:, mode_cols]
         vac_data.wv[mode_cols, mode_cols] .= (4π^2 / M) .* (Ek' * (Ŝ * Ek))
     end
 

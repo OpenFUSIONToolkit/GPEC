@@ -147,7 +147,7 @@ end
         m_modes = mlow:(mlow+mpert-1)
         n = 2
         ν = collect(range(; start=0.0, length=N, step=0.05))
-        cosb, sinb = compute_fourier_coefficients(N, m_modes, 1, Int[]; n_2D=n, ν=ν)
+        cosb, sinb = compute_fourier_coefficients(N, m_modes, n, ν)
         @test size(cosb) == (N, mpert)
         @test size(sinb) == (N, mpert)
 
@@ -159,8 +159,8 @@ end
 
         # The FourierTransform constructor stores exactly the n=0, ν=0 basis.
         ft = FourierTransform(N, mpert, mlow)
-        @test ft.cslth == compute_fourier_coefficients(N, m_modes, 1, Int[]; n_2D=0, ν=zeros(N))[1]
-        @test ft.snlth == compute_fourier_coefficients(N, m_modes, 1, Int[]; n_2D=0, ν=zeros(N))[2]
+        @test ft.cslth == compute_fourier_coefficients(N, m_modes, 0, zeros(N))[1]
+        @test ft.snlth == compute_fourier_coefficients(N, m_modes, 0, zeros(N))[2]
     end
 
     @testset "3D basis shapes" begin
