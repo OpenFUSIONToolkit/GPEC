@@ -334,38 +334,17 @@ grad_greenfunction is the double-layer kernel matrix, where each entry is
 ∇_{x_src} φ(x_obs, x_src) · n_src, and greenfunction is the single-layer kernel matrix,
 where each entry is φ(x_obs, x_src).
 
+Takes advantage of field periodicity to evaluate the kernel only over a single field period.
+
 # Arguments
 
   - `grad_greenfunction`: Double-layer kernel matrix (Nobs × Nsrc) filled in place
-
   - `greenfunction`: Single-layer kernel matrix (Nobs × Nsrc) filled in place
-
   - `observer`: Observer geometry (PlasmaGeometry3D)
-
   - `source`: Source geometry (PlasmaGeometry3D)
-
   - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
-
-      + Total patch size in # of gridpoints = (2 * PATCH_RAD + 1) x (2 * PATCH_RAD + 1)
-
   - `RAD_DIM`: Polar radial quadrature order. Angular order = 2 * RAD_DIM
-
-  - `INTERP_ORDER`: Lagrange interpolation order
-
-      + Must be ≤ (2 * PATCH_RAD + 1)
-
-# Keyword Arguments
-
-  - `n_obs::Int=0`: If `> 0`, only the first `n_obs` observer points (rows) are evaluated,
-    producing an `n_obs × num_points` block. The field-periodic reduction uses this to build
-    only the first block-row of a block-circulant operator (observers in a single field
-    period). The default (`0`) evaluates all observer points and is bit-identical to the
-    prior behavior.
-
-# Threading
-
-This function automatically uses all available threads (`Threads.nthreads()`).
-Start Julia with `julia -t auto` or set `JULIA_NUM_THREADS` to enable multi-threading.
+  - `INTERP_ORDER`: Lagrange interpolation order, must be ≤ (2 * PATCH_RAD + 1)
 """
 function compute_3D_kernel_matrices!(
     grad_greenfunction::AbstractMatrix{Float64},
@@ -374,12 +353,10 @@ function compute_3D_kernel_matrices!(
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,
     RAD_DIM::Int,
-    INTERP_ORDER::Int;
-    n_obs::Int=0
+    INTERP_ORDER::Int
 )
     num_points = observer.mtheta * observer.nzeta
-    # Observer rows actually evaluated (all points unless restricted to a single-period subset)
-    n_obs_eff = n_obs == 0 ? num_points : n_obs
+    n_obs = size(greenfunction, 1) # num_points ÷ nfp
     dθdζ = 4π^2 / num_points
 
     # Get block of grad green function matrix
@@ -387,7 +364,7 @@ function compute_3D_kernel_matrices!(
     row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
     grad_greenfunction_block = view(
         grad_greenfunction,
-        ((row_index-1)*n_obs_eff+1):(row_index*n_obs_eff),
+        ((row_index-1)*n_obs+1):(row_index*n_obs),
         ((col_index-1)*num_points+1):(col_index*num_points)
     )
 
@@ -411,7 +388,7 @@ function compute_3D_kernel_matrices!(
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
-    Threads.@threads for idx_obs in 1:n_obs_eff
+    Threads.@threads for idx_obs in 1:n_obs
         # Get thread-local workspace
         ws = workspaces[Threads.threadid()]
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
@@ -503,33 +480,10 @@ function compute_3D_kernel_matrices!(
 
     # Add the term that comes from the volume integral of Green's identity.
     # Observer i is paired with source i (same point), so the +1 lands on the block diagonal;
-    # for a restricted observer subset only the first n_obs_eff self-pairs are present.
+    # for a restricted observer subset only the first n_obs self-pairs are present.
     if typeof(source) == typeof(observer)
-        for i in 1:min(n_obs_eff, num_points)
+        for i in 1:min(n_obs, num_points)
             grad_greenfunction_block[i, i] += 1.0
         end
     end
-end
-
-"""
-    kernel!(grad_greenfunction, greenfunction, observer, source, params::KernelParams3D)
-
-Dispatch wrapper for 3D kernel that forwards to `compute_3D_kernel_matrices!` with params.
-"""
-function kernel!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
-    observer::Union{PlasmaGeometry3D,WallGeometry3D},
-    source::Union{PlasmaGeometry3D,WallGeometry3D},
-    params::KernelParams3D
-)
-    return compute_3D_kernel_matrices!(
-        grad_greenfunction,
-        greenfunction,
-        observer,
-        source,
-        params.PATCH_RAD,
-        params.RAD_DIM,
-        params.INTERP_ORDER
-    )
 end

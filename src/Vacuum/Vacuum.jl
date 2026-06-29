@@ -28,12 +28,10 @@ export PlasmaGeometry
 
 Shared boundary-integral assembly for a single dense vacuum system.
 
-Given constructed surface geometries, the Fourier bases, and the kernel dispatch parameters,
+Given constructed surface geometries, the Fourier bases, and the toroidal mode number,
 this builds the double-/single-layer operators, solves the exterior and interior systems, and
 inverse-Fourier-transforms the result into the vacuum response matrix `wv` and the Green's
-functions `grri`/`grre`. It is the geometry-agnostic kernel shared by the 2D (per-n) and dense
-3D (wall) paths; all dimensionality/symmetry decisions are made by the callers, which pass in
-the appropriate `plasma_surf`/`wall` types, bases, and `kparams`.
+functions `grri`/`grre`.
 
 # Arguments
 
@@ -43,12 +41,8 @@ the appropriate `plasma_surf`/`wall` types, bases, and `kparams`.
   - `plasma_surf`, `wall`: constructed surface geometries (2D or 3D variants; `wall` must
     expose a `nowall::Bool` field).
   - `cos_mn_basis`, `sin_mn_basis`: Fourier basis coefficients (`num_points_surf × num_modes`).
-  - `kparams`: kernel dispatch parameters (`KernelParams2D` or `KernelParams3D`).
+  - `n`: toroidal mode number.
   - `force_wv_symmetry`: enforce Hermitian symmetry on `wv`.
-
-# Reference
-
-[Chance Phys. Plasmas 2007 052506 eq. 114-118]
 """
 @maybe_with_pool pool function _assemble_vacuum_response!(
     wv::AbstractMatrix{ComplexF64},
@@ -58,7 +52,7 @@ the appropriate `plasma_surf`/`wall` types, bases, and `kparams`.
     wall,
     cos_mn_basis::Matrix{Float64},
     sin_mn_basis::Matrix{Float64},
-    kparams;
+    n::Int;
     force_wv_symmetry::Bool=true
 )
     num_points_surf, num_modes = size(cos_mn_basis)
@@ -75,7 +69,7 @@ the appropriate `plasma_surf`/`wall` types, bases, and `kparams`.
     grri = @view grri_in[1:num_points_total, :]
 
     # Plasma–Plasma block
-    kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
+    compute_2D_kernel_matrices!(grad_green, green_temp, plasma_surf, plasma_surf, n)
 
     # Fourier transform obs=plasma, src=plasma block
     fourier_transform!(grre, green_temp, cos_mn_basis)
@@ -83,11 +77,11 @@ the appropriate `plasma_surf`/`wall` types, bases, and `kparams`.
 
     if !wall.nowall
         # Plasma–Wall block
-        kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
+        compute_2D_kernel_matrices!(grad_green, green_temp, plasma_surf, wall, n)
         # Wall–Wall block
-        kernel!(grad_green, green_temp, wall, wall, kparams)
+        compute_2D_kernel_matrices!(grad_green, green_temp, wall, wall, n)
         # Wall–Plasma block
-        kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
+        compute_2D_kernel_matrices!(grad_green, green_temp, wall, plasma_surf, n)
         # Fourier transform obs=wall, src=plasma block
         fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
         fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
@@ -146,7 +140,6 @@ function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settin
 
     for (idx_n, n) in enumerate(inputs.n_modes)
         cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, n, plasma_surf.ν)
-        kparams = KernelParams2D(n)
 
         # Diagonal block of wv and matching column block of the Green's functions
         block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
@@ -155,7 +148,7 @@ function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settin
         grri_block = @view vac_data.grri[:, cols]
         grre_block = @view vac_data.grre[:, cols]
 
-        _assemble_vacuum_response!(wv_block, grri_block, grre_block, plasma_surf, wall, cos_mn_basis, sin_mn_basis, kparams; force_wv_symmetry=inputs.force_wv_symmetry)
+        _assemble_vacuum_response!(wv_block, grri_block, grre_block, plasma_surf, wall, cos_mn_basis, sin_mn_basis, n; force_wv_symmetry=inputs.force_wv_symmetry)
     end
 
     # Populate coordinate arrays
@@ -212,8 +205,7 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
     # WallGeometry3D is an axisymmetric toroidal extrusion, so a walled 3D run is nfp=1 only.
     has_wall && nfp > 1 && error("3D vacuum with a wall supports nfp=1 only (got nfp=$(inputs.nfp)); use nowall for the field-periodic block-circulant path")
 
-    # Full-torus geometry (O(N) memory) used as the source surface; observers are restricted
-    # to field period 0 below, so the dense N×N operators are never formed.
+    # Full-torus geometry for source surface; observers are restricted to one field period
     full = expand_field_periods(inputs)
     plasma_surf = PlasmaGeometry3D(full)
     wall = has_wall ? WallGeometry3D(full, wall_settings) : nothing
@@ -233,18 +225,22 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
     # First block-row of the combined operator: observers in field period 0 (nb·M rows) ×
     # all sources (nb·N cols). The kernel places each plasma/wall sub-block by observer/source
     # type; the single-layer S is populated only for plasma sources, so green_row is nb·M × N.
-    kparams = KernelParams3D(11, 20, 5)
     grad_row = zeros!(pool, nb * M, nb * N)   # double-layer D (with +I on the period-0 diagonals)
     green_row = zeros!(pool, nb * M, N)       # single-layer S (plasma sources only)
     green_scratch = zeros!(pool, M, N)        # throwaway green buffer for wall-source kernel calls
 
+    # Kernel parameters, hardcoded for now
+    PATCH_RAD = 11
+    RAD_DIM = 20
+    INTERP_ORDER = 5
+
     # Plasma–plasma (single-layer → plasma-observer rows 1:M)
-    compute_3D_kernel_matrices!(grad_row, view(green_row, 1:M, :), plasma_surf, plasma_surf, kparams.PATCH_RAD, kparams.RAD_DIM, kparams.INTERP_ORDER; n_obs=M)
+    compute_3D_kernel_matrices!(grad_row, view(green_row, 1:M, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
     if has_wall
         # Plasma–wall (double-layer only); wall–plasma (single-layer → wall-observer rows M+1:2M); wall–wall
-        compute_3D_kernel_matrices!(grad_row, green_scratch, plasma_surf, wall, kparams.PATCH_RAD, kparams.RAD_DIM, kparams.INTERP_ORDER; n_obs=M)
-        compute_3D_kernel_matrices!(grad_row, view(green_row, (M+1):(2M), :), wall, plasma_surf, kparams.PATCH_RAD, kparams.RAD_DIM, kparams.INTERP_ORDER; n_obs=M)
-        compute_3D_kernel_matrices!(grad_row, green_scratch, wall, wall, kparams.PATCH_RAD, kparams.RAD_DIM, kparams.INTERP_ORDER; n_obs=M)
+        compute_3D_kernel_matrices!(grad_row, green_scratch, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrices!(grad_row, view(green_row, (M+1):(2M), :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrices!(grad_row, green_scratch, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
     end
 
     # Complex Fourier basis on a single field period, exp(i(mθ - nζ_local)).
