@@ -201,26 +201,6 @@ Struct containing input settings for vacuum wall geometry.
 end
 
 """
-    KernelParams2D(n::Int)
-
-Parameter struct for 2D vacuum kernel dispatch. Holds the toroidal mode number `n`.
-"""
-struct KernelParams2D
-    n::Int
-end
-
-"""
-    KernelParams3D(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
-
-Parameter struct for 3D vacuum kernel dispatch. Holds singular quadrature parameters.
-"""
-struct KernelParams3D
-    PATCH_RAD::Int
-    RAD_DIM::Int
-    INTERP_ORDER::Int
-end
-
-"""
     PlasmaGeometry
 
 Struct holding plasma geometry data on the mtheta grid for vacuum calculations. Arrays are
