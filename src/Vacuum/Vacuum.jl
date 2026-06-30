@@ -281,9 +281,9 @@ type (duck-typed on field names only).
 """
 function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
     if inputs.nzeta == 1
-        @time _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
+        _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
     else
-        @time _compute_vacuum_response_3d!(vac_data, inputs, wall_settings)
+        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings)
     end
 end
 
