@@ -24,13 +24,13 @@ include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
 
-include("ForceFreeStates/ForceFreeStates.jl")
-import .ForceFreeStates as ForceFreeStates
-export ForceFreeStates
-
 include("InnerLayer/InnerLayer.jl")
 import .InnerLayer as InnerLayer
 export InnerLayer
+
+include("ForceFreeStates/ForceFreeStates.jl")
+import .ForceFreeStates as ForceFreeStates
+export ForceFreeStates
 
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
@@ -52,11 +52,12 @@ include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
-using .ForceFreeStates: sing_lim!, sing_find!
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!
 using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
+using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag")
 
@@ -298,6 +299,14 @@ function main_from_inputs(
         end
     end
 
+    # For the outer-region Galerkin solve, exclude the q < qlow core (incl. any q≤1 sawtooth
+    # surfaces) by raising psilow to where q = qlow (RDCON sing_min). Without this, the gal FEM
+    # integrates through the unhandled q≤1 ideal singularity and contaminates Δ′ at the innermost
+    # kept surface when q0 < qlow. No-op (keeps the axis bound) when qlow ≤ qmin.
+    if ctrl.gal_flag
+        sing_min!(intr, ctrl, equil)
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
@@ -436,6 +445,15 @@ function main_from_inputs(
         end
     end
 
+    # Outer-region resistive Δ′ matrix via the singular Galerkin method (RDCON gal_solve)
+    gal_data = nothing
+    if ctrl.gal_flag
+        gal_start = time()
+        ctrl.mat_flag || error("gal_flag=true requires mat_flag=true (needs the F/G/K matrix splines)")
+        gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
+        @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
+    end
+
     if ctrl.write_outputs_to_HDF5
         write_outputs_to_HDF5(
             ctrl,
@@ -446,7 +464,8 @@ function main_from_inputs(
             ffit,
             git_version,
             inputs,
-            forcing_modes_snapshot;
+            forcing_modes_snapshot,
+            gal_data;
             ballooning_boundary=ballooning_boundary
         )
         @info "Results written to $(ctrl.HDF5_filename)"
@@ -488,6 +507,16 @@ function main_from_inputs(
         )
         pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=intr.dir_path)
 
+        # DRIVEN (RPEC): feed the coil-matched gal solution to PE instead of the shooting solution.
+        # The matched OdeState is in the identity-at-edge basis; build_flux_matrix rederives the edge BC
+        # from u_store[:,:,1,step], so PE consumes it unchanged. The shooting odet is left untouched for
+        # the Force-Free States HDF5 output.
+        pe_odet = odet
+        if ctrl.gal_flag && ctrl.gal_match_flag && gal_data !== nothing && gal_data.match !== nothing
+            @info "PerturbedEquilibrium: using the RPEC-matched gal solution"
+            pe_odet = gal_matched_odestate(gal_data, ffit, intr)
+        end
+
         # Reuse the forcing modes loaded at snapshot time (or injected by
         # `build_inputs_from_h5`) so the PE compute step never re-reads the original
         # forcing file. `compute_perturbed_equilibrium` short-circuits
@@ -505,7 +534,7 @@ function main_from_inputs(
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
+            equil, pe_odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
             metric, ffit
         )
 
@@ -589,7 +618,8 @@ function write_outputs_to_HDF5(
     ffit::Union{FourFitVars,Nothing}=nothing,
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
-    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing;
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    gal_data::Union{GalerkinResult,Nothing}=nothing;
     ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
@@ -597,6 +627,11 @@ function write_outputs_to_HDF5(
 
         # Store git version for reproducibility
         out_h5["info/git_version"] = git_version
+
+        # Outer-region Galerkin Δ′ matrix (RDCON), if computed
+        if gal_data !== nothing
+            write_galerkin!(out_h5, gal_data)
+        end
 
         # Self-contained run snapshot: the full merged TOML (so a rerun can reconstruct every
         # ForceFreeStates/Equilibrium/Wall/PE control struct), plus the equilibrium ingest
