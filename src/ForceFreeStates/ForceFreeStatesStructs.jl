@@ -181,6 +181,7 @@ A mutable struct holding internal state variables for stability calculations.
     kinsing_scan_cond::Vector{Float64} = Float64[]
     kinsing_scan_threshold::Float64 = 0.0
     psilim::Float64 = 0.0
+    psilow::Float64 = 0.0   # lower integration bound; raised above the axis by sing_min! when qlow > qmin (RDCON gal)
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), Series(zeros(5, 5)); bc=ZeroCurvBC())
@@ -214,7 +215,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
@@ -259,7 +259,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-8
@@ -290,6 +289,31 @@ A mutable struct containing control parameters for stability analysis, set by th
     use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
     populate_dense_xi::Bool = false  # When use_parallel=true, set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× parallel-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
+
+    # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port) ---
+    gal_flag::Bool = false          # enable outer-region Galerkin Δ′ solve
+    gal_solver::String = "LU"       # "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs)
+    gal_nx::Int = 256               # elements per interval between singular surfaces
+    gal_nq::Int = 6                 # Gauss-Lobatto quadrature order per element
+    gal_pfac::Float64 = 0.001       # grid packing ratio near singular surfaces
+    gal_dx0::Float64 = 5e-4         # resonant-element integration truncation distance (×1/|n q'|)
+    gal_dx1::Float64 = 1e-3         # resonant-element size (×1/|n q'|)
+    gal_dx2::Float64 = 1e-3         # extension-element size (×1/|n q'|)
+    gal_cutoff::Int = 10            # # of elements carrying the large solution as driving term
+    gal_tol::Float64 = 1e-10        # resonant-quadrature (QuadGK) tolerance
+    gal_gnstep::Int = 20000         # max resonant-quadrature evaluations (QuadGK maxevals in gal_resonant!)
+    gal_dx1dx2_flag::Bool = true    # enable special dx1/dx2 treatment for resonant/extension elements
+    gal_sing_order::Int = 6         # base power-series order for the Galerkin singular asymptotics
+    gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
+    gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
+    gal_edge_onesided::Bool = false # pack the two end intervals one-sided toward their single rational end (vs the Fortran symmetric "both" pack); avoids the fine edge cell that inflates cond(A). Default false = faithful to gal.f.
+    # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
+    gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
+    gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
+    gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
+    gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
+    gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
+    gal_gamma::Float64 = 5 / 3       # ratio of specific heats Γ for the resistive-layer coefficients (resist_eval G term)
     fixed_axis::Bool = false
 end
 
@@ -316,6 +340,7 @@ end
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
+    fmats_gal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)   # reduced Hermitian F̄ (un-factored) for the Galerkin solver
     kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 

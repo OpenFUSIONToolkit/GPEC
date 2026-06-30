@@ -126,11 +126,10 @@ etol = 1e-7
 shape = "nowall"
 
 [ForceFreeStates]
-bal_flag = false
+local_stability_flag = true
 mat_flag = true
 ode_flag = true
 vac_flag = true
-mer_flag = true
 force_termination = false
 
 psiedge = 1.00                # No edge-scan truncation (dmlim mechanism removed in develop)
