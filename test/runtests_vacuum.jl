@@ -468,7 +468,7 @@
     end
 
     # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
-    # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
+    # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default PATCH_RAD=11)
     @testset "Vacuum.jl (3D)" begin
         _make_3d_inputs(; mtheta=32, mtheta_eq=17, m_modes=1:2, n_modes=0:1, nzeta=32) = VacuumInput(
             mtheta_in=mtheta_eq,
@@ -521,13 +521,6 @@
             vac = VacuumInput(mtheta=32, nzeta=24, m_modes=[1, 2], n_modes=[1, 2])
             @test vac.nzeta == 24
             @test vac.mtheta == 32
-        end
-
-        @testset "KernelParams3D" begin
-            params = GeneralizedPerturbedEquilibrium.Vacuum.KernelParams3D(11, 20, 5)
-            @test params.PATCH_RAD == 11
-            @test params.RAD_DIM == 20
-            @test params.INTERP_ORDER == 5
         end
 
         @testset "PlasmaGeometry3D" begin
