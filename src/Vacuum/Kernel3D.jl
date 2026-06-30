@@ -477,11 +477,9 @@ function compute_3D_kernel_matrices!(
     grad_greenfunction_block ./= 2π
     populate_greenfunction && (greenfunction ./= 2π)
 
-    # Add the term that comes from the volume integral of Green's identity.
-    # Observer i is paired with source i (same point), so the +1 lands on the block diagonal;
-    # for a restricted observer subset only the first n_obs self-pairs are present.
+    # Add the term that comes from the volume integral of Green's identity
     if typeof(source) == typeof(observer)
-        for i in 1:min(n_obs, num_points)
+        for i in 1:n_obs
             grad_greenfunction_block[i, i] += 1.0
         end
     end

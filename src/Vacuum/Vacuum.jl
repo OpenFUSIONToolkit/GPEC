@@ -31,11 +31,12 @@ export PlasmaGeometry
 Each toroidal mode `n` decouples in 2D geometry, so the routine loops over `inputs.n_modes`,
 building the double-/single-layer operators, solving the exterior and interior systems, and
 filling the corresponding diagonal block of the response matrix and the matching column block
-of the Green's functions. Geometry is `n`-independent, but the Fourier basis is not.
+of the Green's functions.
 """
 @with_pool pool function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     mpert = length(inputs.m_modes)
+    num_points_surf = inputs.mtheta
 
     vac_data.wv .= 0
 
@@ -52,8 +53,6 @@ of the Green's functions. Geometry is `n`-independent, but the Fourier basis is 
         wv_block = @view vac_data.wv[block_idx, block_idx]
         grri_block = @view vac_data.grri[:, block_idx]
         grre_block = @view vac_data.grre[:, block_idx]
-
-        num_points_surf = ft.mtheta
 
         # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
         num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
@@ -89,16 +88,14 @@ of the Green's functions. Geometry is `n`-independent, but the Fourier basis is 
         grad_green_interior .= grad_green
 
         # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
-        F_ext = lu!(grad_green)
-        ldiv!(F_ext, grre)
+        ldiv!(lu!(grad_green), grre)
 
         # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
         grad_green_interior .*= -1
         for i in 1:num_points_total
             grad_green_interior[i, i] += 2.0
         end
-        F_int = lu!(grad_green_interior)
-        ldiv!(F_int, grri)
+        ldiv!(lu!(grad_green_interior), grri)
 
         # Project exterior kernel onto observer basis exp(-i*(mθ - nν)) and scale to get the response matrix
         mul!(wv_block, ft.basis, @view(grre[1:num_points_surf, :]))
@@ -164,8 +161,8 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
     exp_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta * nfp, n_modes; nfp=nfp)
 
     # Local work matrices
-    grad_row = zeros!(pool, n_obs, nb * num_points)   # double-layer D (with +I on the period-0 diagonals)
-    green_row = zeros!(pool, n_obs, num_points)       # single-layer S (plasma sources only)
+    grad_green = zeros!(pool, n_obs, nb * num_points)   # double-layer D (with +I on the period-0 diagonals)
+    green_temp = zeros!(pool, n_obs, num_points)       # single-layer S (plasma sources only)
 
     # Kernel parameters, hardcoded for now
     PATCH_RAD = 11
@@ -173,27 +170,27 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
     INTERP_ORDER = 5
 
     # Plasma–plasma block
-    compute_3D_kernel_matrices!(grad_row, view(green_row, 1:num_points_per_fp, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+    compute_3D_kernel_matrices!(grad_green, view(green_temp, 1:num_points_per_fp, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
 
     if !wall.nowall
         # Plasma–Wall block
-        compute_3D_kernel_matrices!(grad_row, view(green_row, 1:num_points_per_fp, :), plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrices!(grad_green, view(green_temp, 1:num_points_per_fp, :), plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
         # Wall–Plasma block
-        compute_3D_kernel_matrices!(grad_row, view(green_row, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrices!(grad_green, view(green_temp, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
         # Wall–Wall block
-        compute_3D_kernel_matrices!(grad_row, view(green_row, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrices!(grad_green, view(green_temp, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
     end
 
     if nfp == 1
         # nfp == 1 case: direct real solve on the built kernel matrices (equivalent to 2D)
-        ldiv!(lu!(grad_row), green_row)
-        G_plasma = @view green_row[1:num_points_per_fp, :]
+        ldiv!(lu!(grad_green), green_temp)
+        G_plasma = @view green_temp[1:num_points_per_fp, :]
         vac_data.wv .= (4π^2 / num_points_per_fp) .* (exp_mn_basis * (G_plasma * exp_mn_basis'))
     else
         # nfp > 1 case: block-circulant solve on the built kernel matrices
         # Solve one reduced (nb·M)×(nb·M) system per toroidal residue class k = mod(n, nfp)
-        D̂ = zeros!(pool, ComplexF64, nb * num_points_per_fp, nb * num_points_per_fp)
-        Ŝ = zeros!(pool, ComplexF64, nb * num_points_per_fp, num_points_per_fp)
+        D̂ = zeros!(pool, ComplexF64, n_obs, n_obs)
+        Ŝ = zeros!(pool, ComplexF64, n_obs, num_points_per_fp)
         for k in unique(mod.(n_modes, nfp))
             # Reduced operators D̂ₖ = Σ_d D_d ω^{k d}, Ŝₖ = Σ_d S_d ω^{k d} (fused, allocation-free).
             # D̂ keeps the nb-block source structure (plasma cols 1:M, wall cols M+1:2M); Ŝ is plasma-
@@ -205,10 +202,10 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
                 for s in 0:(nb-1)
                     src_cols = (s*num_points+d*num_points_per_fp+1):(s*num_points+(d+1)*num_points_per_fp)
                     dst_cols = (s*num_points_per_fp+1):((s+1)*num_points_per_fp)
-                    @views @. D̂[:, dst_cols] += phase * grad_row[:, src_cols]
+                    @views @. D̂[:, dst_cols] += phase * grad_green[:, src_cols]
                 end
                 scols = (d*num_points_per_fp+1):((d+1)*num_points_per_fp)
-                @views @. Ŝ += phase * green_row[:, scols]
+                @views @. Ŝ += phase * green_temp[:, scols]
             end
 
             # Exterior response operator for this sector: solve D̂ₖ G = Ŝₖ in place (Ŝ ← G = D̂ₖ⁻¹Ŝₖ)
@@ -284,7 +281,7 @@ type (duck-typed on field names only).
 """
 function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
     if inputs.nzeta == 1
-        _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
+        @time _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
     else
         @time _compute_vacuum_response_3d!(vac_data, inputs, wall_settings)
     end
