@@ -39,7 +39,6 @@ nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 0                # Expands lower bound of Fourier harmonics
 delta_mhigh = 0               # Expands upper bound of Fourier harmonics
 mthvac = 64                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
-thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "calculated" # Kinetic matrix source — exercises KineticForces.compute_calculated_kinetic_matrices callback with real physics
 kinetic_factor = 1.0          # Full-strength kinetic matrices (the "calculated" path is the real physics; no perturbation scaling)

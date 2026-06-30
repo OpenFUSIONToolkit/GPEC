@@ -1,5 +1,10 @@
 # Shooting.jl
 #
+# NOTE: This solver is NOT used in production and is not to be used. It was a
+# porting exercise (deltar.f) retained for reference only. The Galerkin solver
+# (Galerkin.jl) is the sole supported GGJ inner-layer solver; shooting underflows
+# at large |γ| and shares none of the production matching path. Do not call it.
+#
 # Stable backward shooting solver for the GGJ inner-layer model. Direct
 # Julia port of rmatch/deltar.f. Integrates the 4×4 origin-diagonalized
 # resistive-layer ODE from `tmax` (large-x asymptotic regime) backward to
@@ -7,10 +12,14 @@
 # Frobenius basis at the origin and reads off the parity-projected
 # matching data via `deltar_ratio`.
 #
-# The 4 origin Frobenius exponents are `al0 = (p1, 1/2, −p1, −1/2)` where
-# `p1 = √(−D_I)` (Mercier-stable required). The two "small" (singular)
-# modes are columns 3 and 4 (`x^{−p1}` and `x^{−1/2}`); the two "large"
-# (smooth) modes are columns 1 and 2 (`x^{p1}` and `x^{1/2}`).
+# This solves the same inner-region equations as the production Galerkin path
+# (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) but by a different numerical method: a
+# backward shoot in the origin-diagonalized basis rather than the matched
+# singular-Galerkin weak form. The 4 origin Frobenius exponents are
+# `al0 = (p1, 1/2, −p1, −1/2)` where `p1 = √(−D_I)` (Mercier-stable required;
+# D_I = E+F+H−1/4, GWP2016 Eq. A9). The two "small" (singular) modes are
+# columns 3 and 4 (`x^{−p1}` and `x^{−1/2}`); the two "large" (smooth) modes
+# are columns 1 and 2 (`x^{p1}` and `x^{1/2}`).
 #
 # Reference: A. H. Glasser, Phys. Plasmas **23**, 072505 (2016) and the
 # Fortran rmatch/deltar.f.
@@ -53,14 +62,18 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     p1v = p1(p)
     pplus = -0.5 + p1v
 
-    e = ComplexF64(p.E); f = ComplexF64(p.F); h = ComplexF64(p.H)
-    g = ComplexF64(p.G); k = ComplexF64(p.K); q = Q
+    e = ComplexF64(p.E);
+    f = ComplexF64(p.F);
+    h = ComplexF64(p.H)
+    g = ComplexF64(p.G);
+    k = ComplexF64(p.K);
+    q = Q
 
     q3 = q^3
     kk1 = 1 + k * q3
     a1 = (g - k * e) * q * q / kk1
     a2 = sqrt(0.5 / (p1v * q))
-    aplus  = h - 0.5 + p1v
+    aplus = h - 0.5 + p1v
     aminus = h - 0.5 - p1v
 
     # d0 — see deltar_origin lines 361–376.
@@ -70,23 +83,23 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     d0_m[1, 3] = -q * a2
     d0_m[1, 4] = 0
     d0_m[2, 2] = 1
-    d0_m[3, 1] =  aplus * a2
+    d0_m[3, 1] = aplus * a2
     d0_m[3, 3] = -aminus * a2
     d0_m[4, 1] = -aplus * a2
     d0_m[4, 2] = -a1
-    d0_m[4, 3] =  aminus * a2
+    d0_m[4, 3] = aminus * a2
     d0_m[4, 4] = 1
 
     # d0inv — same explicit antisymmetry pattern as deltar_origin lines 380–395.
     d0inv_m = zeros(ComplexF64, 4, 4)
-    d0inv_m[1, 1] =  d0_m[3, 3]
-    d0inv_m[2, 2] =  d0_m[4, 4]
-    d0inv_m[1, 2] =  d0_m[4, 3]
-    d0inv_m[2, 1] =  d0_m[3, 4]
-    d0inv_m[3, 3] =  d0_m[1, 1]
-    d0inv_m[4, 4] =  d0_m[2, 2]
-    d0inv_m[3, 4] =  d0_m[2, 1]
-    d0inv_m[4, 3] =  d0_m[1, 2]
+    d0inv_m[1, 1] = d0_m[3, 3]
+    d0inv_m[2, 2] = d0_m[4, 4]
+    d0inv_m[1, 2] = d0_m[4, 3]
+    d0inv_m[2, 1] = d0_m[3, 4]
+    d0inv_m[3, 3] = d0_m[1, 1]
+    d0inv_m[4, 4] = d0_m[2, 2]
+    d0inv_m[3, 4] = d0_m[2, 1]
+    d0inv_m[4, 3] = d0_m[1, 2]
     d0inv_m[1, 3] = -d0_m[1, 3]
     d0inv_m[2, 4] = -d0_m[2, 4]
     d0inv_m[1, 4] = -d0_m[2, 3]
@@ -106,9 +119,9 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     al1_m[3, 1] = q
     al1_m[4, 2] = -q / kk1
 
-    d0_s    = SMatrix{4,4,ComplexF64}(d0_m)
+    d0_s = SMatrix{4,4,ComplexF64}(d0_m)
     d0inv_s = SMatrix{4,4,ComplexF64}(d0inv_m)
-    al1_s   = d0inv_s * SMatrix{4,4,ComplexF64}(al1_m) * d0_s
+    al1_s = d0inv_s * SMatrix{4,4,ComplexF64}(al1_m) * d0_s
 
     # ups[i, j, k] — origin power-series coefficients (deltar_origin lines 440–460).
     # ups(:,:,1) = I; higher orders from the al1 recurrence.
@@ -120,7 +133,7 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
         for j in 1:4, i in 1:4
             acc = ComplexF64(0)
             for l in 1:4
-                acc += al1_s[i, l] * ups[l, j, kk - 1]
+                acc += al1_s[i, l] * ups[l, j, kk-1]
             end
             ups[i, j, kk] = acc / (al0[j] - al0[i] + 2 * (kk - 1))
         end
@@ -143,26 +156,30 @@ end
 # -----------------------------------------------------------------------
 
 function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
-                                d0inv::SMatrix{4,4,ComplexF64};
-                                rtol::Float64=1e-6, fmax::Float64=1.0)
-    e = ComplexF64(p.E); f = ComplexF64(p.F); h = ComplexF64(p.H)
-    g = ComplexF64(p.G); k = ComplexF64(p.K); q = Q
+    d0inv::SMatrix{4,4,ComplexF64};
+    rtol::Float64=1e-6, fmax::Float64=1.0)
+    e = ComplexF64(p.E);
+    f = ComplexF64(p.F);
+    h = ComplexF64(p.H)
+    g = ComplexF64(p.G);
+    k = ComplexF64(p.K);
+    q = Q
     dr = mercier_dr(p)
 
-    q3     = q^3
-    kk1    = 1 + k * q3
-    a1     = (g - k * e) * q * q / kk1
-    lamda  = sqrt(q)
+    q3 = q^3
+    kk1 = 1 + k * q3
+    a1 = (g - k * e) * q * q / kk1
+    lamda = sqrt(q)
     lamdaq = lamda * q
-    bb     = -0.25 * lamdaq * (1 + g + k * (dr - e))
-    cc     =  0.25 * kk1 * (a1 * q * (1 - dr / q3) + dr - h * h)
-    ddsq   = bb * bb - cc
-    dd     = sqrt(ddsq)
+    bb = -0.25 * lamdaq * (1 + g + k * (dr - e))
+    cc = 0.25 * kk1 * (a1 * q * (1 - dr / q3) + dr - h * h)
+    ddsq = bb * bb - cc
+    dd = sqrt(ddsq)
 
     # m matrix (2×2) — deltar_infinity lines 521–524.
     m11 = -lamdaq + dr / lamdaq
-    m12 =  h - dr / lamdaq
-    m21 =  kk1 * (h + dr / lamdaq)
+    m12 = h - dr / lamdaq
+    m21 = kk1 * (h + dr / lamdaq)
     m22 = -kk1 * (a1 / lamda + dr / lamdaq)
 
     pexp = SVector{4,ComplexF64}(bb - dd, bb + dd, -bb + dd, -bb - dd)
@@ -176,25 +193,25 @@ function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
         for i in 1:4
             d1_m[i, j] = d0inv[i, 1] * bmmat[1, j] + d0inv[i, 2] * bmmat[2, j] +
                          lamda * (-d0inv[i, 3] * bmmat[1, j] +
-                                   d0inv[i, 4] * bmmat[2, j] / kk1)
+                                  d0inv[i, 4] * bmmat[2, j] / kk1)
         end
     end
 
     # bpmat (2×2) and columns 3,4 of d1.
     sigma = bmmat[1, 2] / bmmat[2, 2]
-    tau   = bmmat[2, 1] / bmmat[1, 1]
+    tau = bmmat[2, 1] / bmmat[1, 1]
     stfac = 0.5 / (1 - sigma * tau)
     bpmat = zeros(ComplexF64, 2, 2)
     bpmat[1, 1] = stfac / bmmat[1, 1]
     bpmat[2, 2] = stfac / bmmat[2, 2]
-    bpmat[1, 2] = -tau   * bpmat[2, 2]
+    bpmat[1, 2] = -tau * bpmat[2, 2]
     bpmat[2, 1] = -sigma * bpmat[1, 1]
     @inbounds for j in 1:2
         for i in 1:4
-            d1_m[i, j + 2] = (d0inv[i, 1] * bpmat[1, j] -
-                              d0inv[i, 2] * bpmat[2, j] * kk1) / lamda +
-                              d0inv[i, 3] * bpmat[1, j] +
-                              d0inv[i, 4] * bpmat[2, j]
+            d1_m[i, j+2] = (d0inv[i, 1] * bpmat[1, j] -
+                            d0inv[i, 2] * bpmat[2, j] * kk1) / lamda +
+                           d0inv[i, 3] * bpmat[1, j] +
+                           d0inv[i, 4] * bpmat[2, j]
         end
     end
 
@@ -218,13 +235,13 @@ complex frequency `Q`, precomputing the origin and infinity asymptotic arrays
 used by the forward/backward shoots.
 """
 function _build_shooting_system(p::GGJParameters, Q::ComplexF64;
-                                nps::Int=8, rtol::Float64=1e-6, fmax::Float64=1.0)
+    nps::Int=8, rtol::Float64=1e-6, fmax::Float64=1.0)
     o = _build_origin_arrays(p, Q; nps=nps, rtol=rtol)
     inf = _build_infinity_arrays(p, Q, o.d0inv; rtol=rtol, fmax=fmax)
     return GGJShootingSystem(
         p, Q, o.p1v, o.pplus,
         o.al0, o.al1, o.d0, o.d0inv, o.ups, o.nps,
-        inf.d1, inf.pexp, inf.bl1, inf.tmax, o.tmin,
+        inf.d1, inf.pexp, inf.bl1, inf.tmax, o.tmin
     )
 end
 
@@ -242,7 +259,7 @@ function _origin_basis(sys::GGJShootingSystem, t::Real)
     @inbounds for j in 1:4, i in 1:4
         # Horner in t² over k = nps..1
         acc = sys.ups[i, j, nps]
-        for kk in (nps - 1):-1:1
+        for kk in (nps-1):-1:1
             acc = acc * t2 + sys.ups[i, j, kk]
         end
         u[i, j] = acc
@@ -284,7 +301,7 @@ end
 # -----------------------------------------------------------------------
 
 function _ggj_der!(dy::AbstractMatrix{ComplexF64}, y::AbstractMatrix{ComplexF64},
-                  sys::GGJShootingSystem, t::Real)
+    sys::GGJShootingSystem, t::Real)
     mul!(dy, sys.al1, y)
     @inbounds for j in axes(y, 2), i in axes(y, 1)
         dy[i, j] = dy[i, j] * t + sys.al0[i] * y[i, j] / t
@@ -339,9 +356,9 @@ controls the truncation error of the origin Frobenius series and the
 choice of `tmin`.
 """
 function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
-                     reltol::Float64=1e-6, abstol::Float64=1e-6,
-                     rtol_origin::Float64=1e-6, nps::Int=8,
-                     fmax::Float64=1.0, solver=Tsit5())
+    reltol::Float64=1e-6, abstol::Float64=1e-6,
+    rtol_origin::Float64=1e-6, nps::Int=8,
+    fmax::Float64=1.0, solver=Tsit5())
     Q = inner_Q(params, γ)
     sys = _build_shooting_system(params, Q; nps=nps, rtol=rtol_origin, fmax=fmax)
 
