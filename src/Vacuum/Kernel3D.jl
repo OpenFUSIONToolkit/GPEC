@@ -339,7 +339,7 @@ Takes advantage of field periodicity to evaluate the kernel only over a single f
 # Arguments
 
   - `grad_greenfunction`: Double-layer kernel matrix (Nobs × Nsrc) filled in place
-  - `greenfunction`: Single-layer kernel matrix (Nobs × Nsrc) filled in place
+  - `greenfunction`: Single-layer kernel matrix (Nobs × Nsrc); filled only when `source` is plasma
   - `observer`: Observer geometry (PlasmaGeometry3D)
   - `source`: Source geometry (PlasmaGeometry3D)
   - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
@@ -368,10 +368,9 @@ function compute_3D_kernel_matrices!(
         ((col_index-1)*num_points+1):(col_index*num_points)
     )
 
-    # Zero out green function matrix
-    fill!(greenfunction, 0.0)
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry3D
+    populate_greenfunction && fill!(greenfunction, 0.0)
 
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
     if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
@@ -476,7 +475,7 @@ function compute_3D_kernel_matrices!(
     # Use the same normalization as in the 2D kernel so we can just add I to the diagonal
     # This makes the grri logic identical to the 2D kernel.
     grad_greenfunction_block ./= 2π
-    greenfunction ./= 2π
+    populate_greenfunction && (greenfunction ./= 2π)
 
     # Add the term that comes from the volume integral of Green's identity.
     # Observer i is paired with source i (same point), so the +1 lands on the block diagonal;

@@ -37,14 +37,12 @@ function compute_plasma_response!(
 
     # Surface inductance L from Green's functions at psilim.
     # Requires a 2D (nzvac=1) vacuum response so rows are theta points only,
-    # matching Fortran gpeq_surface which uses grri(2*mthsurf, 2*mpert).
-    # vac_data.grri has shape [2*mthvac*nzvac, 2*mpert] and cannot be used directly.
     nn = ffs_intr.nlow
     vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, vac_data.mthvac, 1, ffs_intr.mlow:ffs_intr.mhigh, [nn])
     wall_nowall = Vacuum.WallShapeSettings(; shape="nowall")
     _, grri_2d_raw, grre_2d_raw, _, _ = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall)
-    grri_2d = Matrix{Float64}(grri_2d_raw)
-    grre_2d = Matrix{Float64}(grre_2d_raw)
+    grri_2d = Matrix{ComplexF64}(grri_2d_raw)
+    grre_2d = Matrix{ComplexF64}(grre_2d_raw)
     ν_vac = Vacuum.PlasmaGeometry(vac_input_2d).ν
     surface_inductance = compute_surface_inductance_from_greens(grri_2d, grre_2d, ffs_intr, nn, ν_vac)
     permeability = calc_permeability(plasma_inductance, surface_inductance)

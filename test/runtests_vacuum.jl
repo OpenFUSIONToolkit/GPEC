@@ -377,8 +377,8 @@
                 @test size(wv) == (num_modes, num_modes)
                 @test eltype(wv) == ComplexF64
                 @test all(isfinite, wv)
-                @test size(grri) == (2 * numpoints, 2 * num_modes)
-                @test size(grre) == (2 * numpoints, 2 * num_modes)
+                @test size(grri) == (2 * numpoints, num_modes)
+                @test size(grre) == (2 * numpoints, num_modes)
                 @test all(isfinite, grri)
                 @test all(isfinite, grre)
                 @test size(plasma_pts) == (numpoints, 3)
@@ -397,7 +397,7 @@
                 numpoints = inputs.mtheta * inputs.nzeta
                 num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                 @test size(wv) == (num_modes, num_modes)
-                @test size(grri) == (2 * numpoints, 2 * num_modes)
+                @test size(grri) == (2 * numpoints, num_modes)
                 @test all(isfinite, plasma_pts)
                 @test all(isfinite, wall_pts)
                 # plasma_pts layout: col1=R, col2=0, col3=Z
@@ -412,7 +412,7 @@
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (1, 1)
                 @test all(isfinite, wv)
-                @test size(grri, 2) == 2  # 2 * num_modes with num_modes=1
+                @test size(grri, 2) == 1
             end
 
             @testset "edge: small mtheta" begin
@@ -421,7 +421,7 @@
                 wall_settings = WallShapeSettings(shape="nowall")
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (2, 2)
-                @test size(grri) == (32, 4)  # 2*16, 2*2
+                @test size(grri) == (32, 2)  # 2*mtheta, num_modes=2
                 @test size(plasma_pts) == (16, 3)
             end
 
@@ -434,7 +434,7 @@
 
                     numpoints = inputs.mtheta * inputs.nzeta
                     num_modes = length(inputs.m_modes) * length(inputs.n_modes)
-                    vac = (wv=zeros(ComplexF64, num_modes, num_modes), grri=zeros(2 * numpoints, 2 * num_modes), grre=zeros(2 * numpoints, 2 * num_modes),
+                    vac = (wv=zeros(ComplexF64, num_modes, num_modes), grri=zeros(ComplexF64, 2 * numpoints, num_modes), grre=zeros(ComplexF64, 2 * numpoints, num_modes),
                         plasma_pts=zeros(numpoints, 3), wall_pts=zeros(numpoints, 3))
                     compute_vacuum_response!(vac, inputs, wall_settings)
 
@@ -596,8 +596,8 @@
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
             @test all(isfinite, wv)
-            @test size(grri) == (2 * numpoints, 2 * num_modes)
-            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test size(grri) == (2 * numpoints, num_modes)
+            @test size(grre) == (2 * numpoints, num_modes)
             @test all(isfinite, grri)
             @test all(isfinite, grre)
             @test size(plasma_pts) == (numpoints, 3)
@@ -620,8 +620,8 @@
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
             @test all(isfinite, wv)
-            @test size(grri) == (2 * numpoints, 2 * num_modes)
-            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test size(grri) == (2 * numpoints, num_modes)
+            @test size(grre) == (2 * numpoints, num_modes)
             @test all(isfinite, grri)
             @test all(isfinite, grre)
             @test size(plasma_pts) == (numpoints, 3)
@@ -638,7 +638,7 @@
             numpoints = inputs.mtheta * inputs.nzeta
             num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
-            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test size(grri) == (2 * numpoints, num_modes)
             @test all(isfinite, plasma_pts)
             @test all(isfinite, wall_pts)
             # Wall and plasma should differ (conformal wall offset from plasma)

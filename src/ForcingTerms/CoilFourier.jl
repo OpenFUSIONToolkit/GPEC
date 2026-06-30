@@ -183,20 +183,18 @@ function fourier_decompose_bn(
     mtheta = grid.mtheta
     nzeta = grid.nzeta
 
-    # Build 2D basis: cos(m*θ - n*ζ) and sin(m*θ - n*ζ)
+    # Build Fourier basis: exp(-i*(m*θ - n*ζ))
     # Using 3D call with npert=1, nlow=n gives shape (mtheta*nzeta, mpert)
-    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
+    basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
     bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j] ✓
     scale = 2.0 / (mtheta * nzeta)
 
-    bmn_real = scale .* (cos_basis' * bn_flat)
-    bmn_imag = scale .* (-sin_basis' * bn_flat)
+    bmn = scale .* (transpose(basis) * bn_flat)
 
     modes = ForcingMode[]
     for (idx, m) in enumerate(m_low:m_high)
-        push!(modes, ForcingMode(; n=n, m=m,
-            amplitude=complex(bmn_real[idx], bmn_imag[idx])))
+        push!(modes, ForcingMode(; n=n, m=m, amplitude=bmn[idx]))
     end
     return modes
 end
@@ -329,20 +327,18 @@ function convert_forcing_normalization!(
     grid = sample_boundary_grid(equil, mtheta, nzeta; psi=psi)
 
     # Reconstruct real-space B·n̂(θ, ζ) from input Fourier modes
-    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
+    basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
-    # Build amplitude vectors (real, imag) ordered m_low:m_high
-    amp_real = zeros(mpert)
-    amp_imag = zeros(mpert)
+    # Build amplitude vector ordered m_low:m_high
+    amp = zeros(ComplexF64, mpert)
     for mode in modes
         idx = mode.m - m_low + 1
         1 <= idx <= mpert || continue
-        amp_real[idx] = real(mode.amplitude)
-        amp_imag[idx] = imag(mode.amplitude)
+        amp[idx] = mode.amplitude
     end
 
     # Inverse DFT: reconstruct B·n̂(θ, ζ) at grid points
-    bn_hat = (cos_basis * amp_real .- sin_basis * amp_imag)  # length mtheta*nzeta
+    bn_hat = real.(conj(basis) * amp)  # length mtheta*nzeta
     bn_field = reshape(bn_hat, mtheta, nzeta)
 
     # Multiply by 2π × R × |dr/dθ_norm| to convert B·n̂ → unit-norm Phi_x integrand.
@@ -358,14 +354,13 @@ function convert_forcing_normalization!(
     # Re-Fourier transform bn_field → unit-norm (Phi_x) mode amplitudes
     bn_flat = vec(bn_field)
     scale = 2.0 / (mtheta * nzeta)
-    new_real = scale .* (cos_basis' * bn_flat)
-    new_imag = scale .* (-sin_basis' * bn_flat)
+    bmn = scale .* (transpose(basis) * bn_flat)
 
     # Write back into modes vector (in place, same ordering)
     for mode in modes
         idx = mode.m - m_low + 1
         1 <= idx <= mpert || continue
-        mode.amplitude = complex(new_real[idx], new_imag[idx])
+        mode.amplitude = bmn[idx]
     end
 end
 

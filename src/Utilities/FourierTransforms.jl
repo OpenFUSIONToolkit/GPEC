@@ -1,43 +1,10 @@
 """
     FourierTransforms
 
-Utility module for efficient Fourier transforms using pre-computed basis functions.
+Pre-computed complex Fourier basis and functor interface for θ ↔ mode transforms.
 
-Provides a functor-based interface for Fourier transforms between theta-space and mode-space
-representations. Supports both simple harmonic transforms (cos(m*θ), sin(m*θ)) and phase-shifted
-transforms (cos(m*θ + n*qa*δ), sin(m*θ + n*qa*δ)) used in vacuum field calculations.
-
-# Features
-
-- Pre-computes trigonometric basis functions for efficiency
-- Direct complex number support (no manual real/imaginary splitting)
-- Type-stable functor pattern for high performance
-- Supports different grids (mthvac, mtheta) with different mode ranges
-
-# Example
-
-```julia
-using GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
-
-# For PerturbedEquilibrium (no phase shift)
-ft = FourierTransform(mtheta, mpert, mlow)
-
-# For Vacuum (with n*qa*delta phase)
-ft_vac = FourierTransform(mthvac, mpert, mlow; n=1, qa=2.5, delta=delta_array)
-
-# Forward transform: theta-space → Fourier modes
-theta_data = randn(mtheta, 10)  # 10 different theta-space functions
-modes = ft(theta_data)          # Complex modes [mpert, 10]
-
-# Inverse transform: Fourier modes → theta-space
-reconstructed = inverse(ft, modes)
-```
-
-# Sign convention
-
-The forward transform uses `exp(-imθ)` (Fortran `iscdftf`) for both real- and
-complex-valued input; `inverse` uses `exp(+imθ)` (Fortran `iscdftb`). Hence
-`inverse(ft, ft(data)) ≈ data` for any real- or complex-valued `data`.
+Forward: `(transpose(basis) * data) / mtheta`; inverse: `conj(basis) * modes` (Fortran
+`iscdftf`/`iscdftb`; see `docs/src/conventions.md`).
 """
 module FourierTransforms
 
@@ -45,63 +12,51 @@ using LinearAlgebra
 
 export FourierTransform, inverse
 export compute_fourier_coefficients
-export transform!, inverse_transform!
-export fourier_transform!, fourier_inverse_transform!
 
 """
     compute_fourier_coefficients(mtheta, m_modes, n, ν)
 
-Build the 2D Fourier basis for the explicit poloidal mode list `m_modes` at a single toroidal
-mode `n`, with toroidal angle offset `ν` (length `mtheta`).
+Build complex basis ``\\exp(-i(m\\theta - n\\nu))`` on the uniform poloidal grid.
 
-# Arguments
+## Arguments
 
-- `mtheta::Int`: Number of poloidal grid points (theta resolution)
-- `m_modes::AbstractVector{<:Integer}`: Poloidal mode numbers
-- `n::Integer`: Toroidal mode number
-- `ν::AbstractVector{<:AbstractFloat}`: Toroidal angle offset array of length `mtheta`
+  - `mtheta`: number of poloidal grid points
+  - `m_modes`: poloidal mode numbers (one column per mode)
+  - `n`: toroidal mode number
+  - `ν`: toroidal angle offset on the poloidal grid, length `mtheta`
 
-# Returns
+## Returns
 
-`cos(m_modes[l]*θᵢ - n*νᵢ), sin(m_modes[l]*θᵢ - n*νᵢ)` each of size `(mtheta, length(m_modes))`.
+  - Basis matrix, size `(mtheta, length(m_modes))`
 """
 function compute_fourier_coefficients(mtheta::Int, m_modes::AbstractVector{<:Integer}, n::Integer, ν::Vector{Float64})
 
     @assert length(ν) == mtheta "ν must have length mtheta"
 
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    cos_mn_basis = cos.(m_modes' .* θ_grid .- n .* ν)
-    sin_mn_basis = sin.(m_modes' .* θ_grid .- n .* ν)
-
-    return cos_mn_basis, sin_mn_basis
+    arg = m_modes' .* θ_grid .- n .* ν
+    return exp.(-im .* arg)
 end
 
 """
     compute_fourier_coefficients(mtheta, m_modes, nzeta, n_modes; nfp=1)
 
-Build the 3D Fourier basis for every `(m, n)` pair in the Cartesian product `m_modes × n_modes`.
-Columns are ordered m-fast, n-slow (matching the `wv` matrix layout).
+Build 3D basis for every `(m, n)` in `m_modes × n_modes` (columns m-fast, n-slow).
 
-The toroidal grid uses the full-torus step `2π/nzeta`. When `nfp > 1`, only the first
-`nzeta ÷ nfp` toroidal points (one field period) are emitted, so the basis directly provides
-the per-period block `E_local` used by the field-periodic block-circulant reduction without any
-post-hoc row slicing. `nfp == 1` (default) emits the full torus, reproducing the legacy output.
+## Arguments
 
-# Arguments
+  - `mtheta`: poloidal grid points per toroidal plane
+  - `m_modes`: poloidal mode numbers
+  - `nzeta`: full-torus toroidal grid points (must be divisible by `nfp`)
+  - `n_modes`: toroidal mode numbers
 
-- `mtheta::Int`: Number of poloidal grid points (theta resolution)
-- `m_modes::AbstractVector{<:Integer}`: Poloidal mode numbers
-- `nzeta::Int`: Number of full-torus toroidal grid points (must be divisible by `nfp`)
-- `n_modes::AbstractVector{<:Integer}`: Toroidal mode numbers
+## Keyword Arguments
 
-# Keyword Arguments
+  - `nfp`: number of field periods; when `> 1`, emits one period only (`nzeta ÷ nfp` planes)
 
-- `nfp::Int=1`: Number of field periods. Emits `nzeta ÷ nfp` toroidal points (one period).
+## Returns
 
-# Returns
-
-`(cos_mn_basis, sin_mn_basis)` each of size `(mtheta*(nzeta÷nfp), length(m_modes)*length(n_modes))`
-where column `l = idx_m + (idx_n-1)*length(m_modes)` holds `cos(m_modes[idx_m]*θ - n_modes[idx_n]*ζ)`.
+  - Basis matrix, size `(mtheta * (nzeta ÷ nfp), length(m_modes) * length(n_modes))`
 """
 function compute_fourier_coefficients(
     mtheta::Int,
@@ -112,99 +67,64 @@ function compute_fourier_coefficients(
 )
     @assert nzeta % nfp == 0 "nzeta ($nzeta) must be divisible by nfp ($nfp)"
 
-    # Uniform theta grid: [0, 2π); toroidal grid on the full-torus step, one field period emitted
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
     ζ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
     nzeta_out = nzeta ÷ nfp
 
     mpert = length(m_modes)
-    sin_mn_basis = zeros(mtheta * nzeta_out, mpert * length(n_modes))
-    cos_mn_basis = zeros(mtheta * nzeta_out, mpert * length(n_modes))
+    basis = zeros(ComplexF64, mtheta * nzeta_out, mpert * length(n_modes))
     for (idx_n, n) in enumerate(n_modes)
         n_col_offset = (idx_n - 1) * mpert
         for (idx_m, m) in enumerate(m_modes)
             col = idx_m + n_col_offset
             for j in 1:nzeta_out, (i, θ) in enumerate(θ_grid)
                 idx = i + (j - 1) * mtheta
-                arg = m * θ - n * ζ_grid[j]
-                s, c = sincos(arg)
-                cos_mn_basis[idx, col] = c
-                sin_mn_basis[idx, col] = s
+                basis[idx, col] = cis(-(m * θ - n * ζ_grid[j]))
             end
         end
     end
 
-    return cos_mn_basis, sin_mn_basis
+    return basis
 end
 
 """
     FourierTransform
 
-Callable struct for efficient Fourier transforms with pre-computed basis functions.
+Struct with precomputed complex Fourier basis for repeated θ ↔ mode transforms.
 
 # Fields
 
-- `mtheta::Int`: Number of theta grid points
-- `mpert::Int`: Number of Fourier modes
-- `mlow::Int`: Lowest mode number
-- `cslth::Matrix{Float64}`: Cosine basis functions [mtheta, mpert]
-- `snlth::Matrix{Float64}`: Sine basis functions [mtheta, mpert]
-
-# Usage
-
-Create once with appropriate grid parameters, then use repeatedly:
-
-```julia
-# Create transform (coefficients computed once)
-ft = FourierTransform(mtheta, mpert, mlow)
-
-# Forward transform (callable): theta → modes
-modes = ft(theta_data)
-
-# Inverse transform: modes → theta
-theta_reconstructed = inverse(ft, modes)
-```
-
-See also: [`compute_fourier_coefficients`](@ref), [`inverse`](@ref)
+  - `mtheta`: poloidal grid size
+  - `mpert`: number of poloidal modes
+  - `mlow`: lowest poloidal mode number
+  - `basis`: ``\\exp(-i(m\\theta - n\\nu))``, size `(mtheta, mpert)`
 """
 struct FourierTransform
     mtheta::Int
     mpert::Int
     mlow::Int
-    cslth::Matrix{Float64}
-    snlth::Matrix{Float64}
+    basis::Matrix{ComplexF64}
 end
 
 """
-    FourierTransform(mtheta, mpert, mlow; n=0, qa=0.0, delta=zeros(mtheta))
+    FourierTransform(mtheta, mpert, mlow; n=0, ν=zeros(mtheta))
 
-Construct a FourierTransform object with pre-computed basis functions.
+Construct a transform with precomputed basis for contiguous modes `mlow:(mlow+mpert-1)`.
 
-# Arguments
+## Arguments
 
-- `mtheta::Int`: Number of poloidal grid points
-- `mpert::Int`: Number of Fourier modes
-- `mlow::Int`: Lowest mode number
+  - `mtheta`: number of poloidal grid points
+  - `mpert`: number of poloidal modes
+  - `mlow`: lowest poloidal mode number
 
-# Keyword Arguments
+## Keyword Arguments
 
-- `n::Int=0`: Toroidal mode number
-- `qa::Float64=0.0`: Safety factor at boundary
-- `delta::Vector{Float64}=zeros(mtheta)`: Toroidal phase shift array
+  - `n`: toroidal mode number (default 0)
+  - `ν`: toroidal angle offset on the poloidal grid, length `mtheta`
 
-# Returns
+## Returns
 
-`FourierTransform` object ready for forward and inverse transforms.
-
-# Examples
-
-```julia
-# Simple case: no phase shift (for PerturbedEquilibrium)
-ft = FourierTransform(480, 40, -20)
-
-# With toroidal phase (for Vacuum calculations)
-ft_vac = FourierTransform(480, 40, -20; n=1, ν=ν_array)
-```
+  - `FourierTransform` ready for forward and inverse transforms
 """
 function FourierTransform(
     mtheta::Int,
@@ -213,569 +133,55 @@ function FourierTransform(
     n::Int=0,
     ν::Vector{Float64}=zeros(Float64, mtheta)
 )
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mlow:(mlow + mpert - 1), n, ν)
-    return FourierTransform(mtheta, mpert, mlow, cos_mn_basis, sin_mn_basis)
+    basis = compute_fourier_coefficients(mtheta, mlow:(mlow+mpert-1), n, ν)
+    return FourierTransform(mtheta, mpert, mlow, basis)
 end
 
 """
-    (ft::FourierTransform)(data::AbstractVecOrMat{<:Real})
+    (ft::FourierTransform)(data)
 
-Forward Fourier transform: theta-space → mode-space (callable functor).
+Forward transform from θ-space to mode space.
 
-Transforms real-valued data at theta grid points into complex Fourier mode coefficients.
+## Arguments
 
-# Arguments
+  - `data`: real or complex samples on the poloidal grid — `Vector{mtheta}` or `Matrix{mtheta, :}`
 
-- `data::AbstractVecOrMat{Float64}`: Data at theta points
-  - If `Vector{Float64}` with length `mtheta`: single function to transform
-  - If `Matrix{Float64}` with size `(mtheta, n)`: n functions to transform simultaneously
+## Returns
 
-# Returns
-
-- Complex Fourier coefficients
-  - If input is `Vector`: returns `Vector{ComplexF64}` of length `mpert`
-  - If input is `Matrix`: returns `Matrix{ComplexF64}` of size `(mpert, n)`
-
-# Formula
-
-For each mode `l` (corresponding to mode number `m = mlow + l - 1`), using the
-`exp(-imθ)` convention (Fortran `iscdftf`):
-
-```
-mode[l] = (1/N) Σᵢ data[i] * exp(-i*(m*θᵢ + phase))
-        = (1/N) Σᵢ data[i] * (cos(m*θᵢ + phase) - im*sin(m*θᵢ + phase))
-```
-
-Identical convention to the complex-input method, so `inverse(ft, ft(data)) ≈ data`
-holds for both real- and complex-valued `data`.
-
-# Examples
-
-```julia
-ft = FourierTransform(480, 40, -20)
-
-# Transform a single function
-f_theta = sin.(theta_grid)
-f_modes = ft(f_theta)  # Vector{ComplexF64} of length 40
-
-# Transform multiple functions at once
-data = randn(480, 10)  # 10 different functions
-modes = ft(data)       # Matrix{ComplexF64} of size (40, 10)
-```
+  - Mode coefficients — `Vector{mpert}` or `Matrix{mpert, :}`
 """
-function (ft::FourierTransform)(data::AbstractVecOrMat{<:Real})
-    # Forward transform with 1/N normalization and exp(-imθ) convention (Fortran iscdftf),
-    # identical to the complex-input method below.
-
-    if data isa AbstractVector
-        # For vector input: [mtheta] → [mpert]
-        @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
-        real_part = ft.cslth' * data
-        imag_part = ft.snlth' * data
-        return complex.(real_part, -imag_part) ./ ft.mtheta
-    else
-        # For matrix input: [mtheta, n] → [mpert, n]
-        @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
-        real_part = ft.cslth' * data
-        imag_part = ft.snlth' * data
-        return complex.(real_part, -imag_part) ./ ft.mtheta
-    end
-end
-
-"""
-    (ft::FourierTransform)(data::AbstractVecOrMat{<:Complex})
-
-Forward Fourier transform for complex-valued theta-space data.
-
-Transforms complex data at theta grid points into complex Fourier mode coefficients.
-
-# Arguments
-
-- `data::AbstractVecOrMat{ComplexF64}`: Complex data at theta points
-
-# Returns
-
-- Complex Fourier coefficients with same shape as real input case
-
-# Formula
-
-For complex input `data = data_real + im*data_imag`, computes using exp(-imθ):
-
-```
-Re{mode[l]} = Σᵢ (data_real[i]*cos + data_imag[i]*sin)
-Im{mode[l]} = Σᵢ (-data_real[i]*sin + data_imag[i]*cos)
-```
-
-where cos and sin are the basis functions at theta point i for mode l.
-This matches the Fortran `iscdftf` convention: `f_m = (1/N) Σ_j f(θ_j) exp(-i m θ_j)`.
-"""
-function (ft::FourierTransform)(data::AbstractVecOrMat{<:Complex})
-    # Forward transform with 1/N normalization and exp(-imθ) convention
-    # (matches Fortran iscdftf: f_m = (1/N) Σ_j f_j * exp(-2πi*m*j/N))
-
+function (ft::FourierTransform)(data::AbstractVecOrMat{<:Number})
     if data isa AbstractVector
         @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
-        real_part = ft.cslth' * real.(data) .+ ft.snlth' * imag.(data)
-        imag_part = -(ft.snlth' * real.(data)) .+ ft.cslth' * imag.(data)
-        return complex.(real_part, imag_part) ./ ft.mtheta
     else
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
-        real_part = ft.cslth' * real.(data) .+ ft.snlth' * imag.(data)
-        imag_part = -(ft.snlth' * real.(data)) .+ ft.cslth' * imag.(data)
-        return complex.(real_part, imag_part) ./ ft.mtheta
     end
+
+    return (transpose(ft.basis) * data) ./ ft.mtheta
 end
 
 """
-    inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
+    inverse(ft, modes)
 
-Inverse Fourier transform: mode-space → theta-space.
+Inverse transform from mode space to θ-space.
 
-Reconstructs theta-space data from complex Fourier mode coefficients.
+## Arguments
 
-# Arguments
+  - `ft`: precomputed transform
+  - `modes`: complex mode coefficients — `Vector{mpert}` or `Matrix{mpert, :}`
 
-- `modes::AbstractVecOrMat{ComplexF64}`: Fourier mode coefficients
-  - If `Vector{ComplexF64}` with length `mpert`: single mode expansion to reconstruct
-  - If `Matrix{ComplexF64}` with size `(mpert, n)`: n mode expansions to reconstruct
+## Returns
 
-# Returns
-
-- Reconstructed data at theta points
-  - If input is `Vector`: returns `Vector{ComplexF64}` of length `mtheta`
-  - If input is `Matrix`: returns `Matrix{ComplexF64}` of size `(mtheta, n)`
-
-# Formula
-
-For each theta point `i`:
-
-```
-data[i] = (2π/mtheta) * Σₗ modes[l] * (cos(m*θᵢ + phase) + im*sin(m*θᵢ + phase))
-```
-
-This is equivalent to:
-```
-data[i] = (2π/mtheta) * Σₗ [Re{modes[l]}*cos - Im{modes[l]}*sin +
-                             im*(Re{modes[l]}*sin + Im{modes[l]}*cos)]
-```
-
-# Notes
-
-The normalization factor `2π/mtheta` ensures proper Fourier series reconstruction.
-
-For real-valued theta data, the result will have negligible imaginary parts (machine precision).
-Use `real.(inverse(ft, modes))` to extract the real part if needed.
-
-# Examples
-
-```julia
-ft = FourierTransform(480, 40, -20)
-
-# Reconstruct from modes
-modes = randn(ComplexF64, 40)
-theta_data = inverse(ft, modes)  # Vector{ComplexF64} of length 480
-
-# For real reconstruction
-theta_real = real.(inverse(ft, modes))
-```
+  - θ-space data — `Vector{mtheta}` or `Matrix{mtheta, :}`
 """
 function inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
-    # Inverse transform without normalization (matches Fortran iscdftb convention)
-    # f(θ) = Σₗ cₗ * exp(i*m*θ)
-    # Round-trip: forward(inverse(x)) = x  (1/N in forward cancels N summation terms)
-
     if modes isa AbstractVector
         @assert length(modes) == ft.mpert "Input vector must have length mpert=$(ft.mpert)"
-        real_part = ft.cslth * real.(modes) .- ft.snlth * imag.(modes)
-        imag_part = ft.cslth * imag.(modes) .+ ft.snlth * real.(modes)
-        return complex.(real_part, imag_part)
     else
         @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
-        real_part = ft.cslth * real.(modes) .- ft.snlth * imag.(modes)
-        imag_part = ft.cslth * imag.(modes) .+ ft.snlth * real.(modes)
-        return complex.(real_part, imag_part)
-    end
-end
-
-"""
-    inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Real})
-
-Inverse Fourier transform for real mode coefficients (pure cosine expansion).
-
-Special case where all modes are real-valued, corresponding to a cosine-only Fourier series.
-
-# Arguments
-
-- `modes::AbstractVecOrMat{Float64}`: Real Fourier coefficients
-
-# Returns
-
-- Real-valued data at theta points with normalization factor `2π/mtheta`
-
-# Formula
-
-```
-data[i] = (2π/mtheta) * Σₗ modes[l] * cos(m*θᵢ + phase)
-```
-
-# Notes
-
-This is a special case and less commonly used. Most applications use complex modes.
-"""
-function inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Real})
-    dth = 2π / ft.mtheta
-
-    if modes isa AbstractVector
-        @assert length(modes) == ft.mpert "Input vector must have length mpert=$(ft.mpert)"
-        return (ft.cslth * modes) .* dth
-    else
-        @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
-        return (ft.cslth * modes) .* dth
-    end
-end
-
-# ==============================================================================
-# In-place transform functions for performance-critical applications
-# ==============================================================================
-
-"""
-    transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Real})
-
-In-place forward Fourier transform for real-valued theta-space data.
-
-More efficient than the allocating version `ft(data)` when called repeatedly,
-as it reuses the pre-allocated output array.
-
-# Arguments
-
-- `output::AbstractVecOrMat{ComplexF64}`: Pre-allocated output array for Fourier modes
-  - For vector input: must have length `mpert`
-  - For matrix input: must have size `(mpert, n)` where `n = size(data, 2)`
-- `ft::FourierTransform`: Fourier transform object with pre-computed coefficients
-- `data::AbstractVecOrMat{Float64}`: Real-valued data at theta points
-  - For vector: length must be `mtheta`
-  - For matrix: first dimension must be `mtheta`
-
-# Returns
-
-- `output`: The modified output array (for chaining)
-
-# Performance
-
-This function uses in-place matrix multiplication (`mul!`) to avoid allocations,
-making it suitable for tight loops and performance-critical code.
-
-# Example
-
-```julia
-ft = FourierTransform(480, 40, -20)
-
-# Pre-allocate output buffer
-modes = zeros(ComplexF64, 40)
-
-# Reuse buffer in loop
-for i in 1:1000
-    data = get_theta_data(i)
-    transform!(modes, ft, data)  # No allocations
-    process_modes(modes)
-end
-```
-"""
-function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Real})
-    # exp(-imθ) convention (Fortran iscdftf), matching the allocating `ft(data::Real)`.
-    if data isa AbstractVector
-        @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
-        @assert length(output) == ft.mpert "Output vector must have length mpert=$(ft.mpert)"
-
-        # Extract real and imaginary views
-        real_part = reinterpret(Float64, output)
-        real_view = @view real_part[1:2:end]    # Real components
-        imag_view = @view real_part[2:2:end]    # Imaginary components
-
-        # In-place computation: real = cslth' * data, imag = -snlth' * data
-        mul!(real_view, ft.cslth', data)
-        mul!(imag_view, ft.snlth', data)
-        imag_view .*= -1
-        output ./= ft.mtheta
-    else
-        @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
-        @assert size(output, 1) == ft.mpert "Output matrix first dimension must be mpert=$(ft.mpert)"
-        @assert size(output, 2) == size(data, 2) "Output and input must have same number of columns"
-
-        # For matrices, we need temporary storage for real/imag parts
-        n_cols = size(data, 2)
-        real_part = similar(output, Float64, ft.mpert, n_cols)
-        imag_part = similar(output, Float64, ft.mpert, n_cols)
-
-        # In-place computation
-        mul!(real_part, ft.cslth', data)
-        mul!(imag_part, ft.snlth', data)
-
-        # Combine into complex output with 1/N normalization
-        output .= complex.(real_part, -imag_part) ./ ft.mtheta
     end
 
-    return output
-end
-
-"""
-    transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Complex})
-
-In-place forward Fourier transform for complex-valued theta-space data.
-
-# Arguments
-
-- `output::AbstractVecOrMat{ComplexF64}`: Pre-allocated output array for Fourier modes
-- `ft::FourierTransform`: Fourier transform object
-- `data::AbstractVecOrMat{ComplexF64}`: Complex-valued data at theta points
-
-# Returns
-
-- `output`: The modified output array
-
-# Formula
-
-For complex input `data = data_real + im*data_imag`, uses exp(-imθ):
-```
-Re{mode[l]} = Σᵢ (data_real[i]*cos + data_imag[i]*sin)
-Im{mode[l]} = Σᵢ (-data_real[i]*sin + data_imag[i]*cos)
-```
-"""
-function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Complex})
-    if data isa AbstractVector
-        @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
-        @assert length(output) == ft.mpert "Output vector must have length mpert=$(ft.mpert)"
-
-        # Temporary storage for intermediate results
-        real_part = similar(output, Float64)
-        imag_part = similar(output, Float64)
-        temp1 = similar(output, Float64)
-        temp2 = similar(output, Float64)
-
-        # Re{mode} = cslth' * real(data) + snlth' * imag(data)
-        mul!(temp1, ft.cslth', real.(data))
-        mul!(temp2, ft.snlth', imag.(data))
-        real_part .= temp1 .+ temp2
-
-        # Im{mode} = -snlth' * real(data) + cslth' * imag(data)
-        mul!(temp1, ft.cslth', imag.(data))
-        mul!(temp2, ft.snlth', real.(data))
-        imag_part .= temp1 .- temp2
-
-        output .= complex.(real_part, imag_part) ./ ft.mtheta
-    else
-        @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
-        @assert size(output, 1) == ft.mpert "Output matrix first dimension must be mpert=$(ft.mpert)"
-        @assert size(output, 2) == size(data, 2) "Output and input must have same number of columns"
-
-        n_cols = size(data, 2)
-        real_part = similar(output, Float64, ft.mpert, n_cols)
-        imag_part = similar(output, Float64, ft.mpert, n_cols)
-        temp1 = similar(real_part)
-        temp2 = similar(real_part)
-
-        # Re{mode} = cslth' * real(data) + snlth' * imag(data)
-        mul!(temp1, ft.cslth', real.(data))
-        mul!(temp2, ft.snlth', imag.(data))
-        real_part .= temp1 .+ temp2
-
-        # Im{mode} = -snlth' * real(data) + cslth' * imag(data)
-        mul!(temp1, ft.cslth', imag.(data))
-        mul!(temp2, ft.snlth', real.(data))
-        imag_part .= temp1 .- temp2
-
-        output .= complex.(real_part, imag_part) ./ ft.mtheta
-    end
-
-    return output
-end
-
-"""
-    inverse_transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
-
-In-place inverse Fourier transform: mode-space → theta-space.
-
-More efficient than the allocating version `inverse(ft, modes)` when called repeatedly.
-
-# Arguments
-
-- `output::AbstractVecOrMat{ComplexF64}`: Pre-allocated output array for theta-space data
-  - For vector: must have length `mtheta`
-  - For matrix: must have size `(mtheta, n)` where `n = size(modes, 2)`
-- `ft::FourierTransform`: Fourier transform object
-- `modes::AbstractVecOrMat{ComplexF64}`: Complex Fourier mode coefficients
-  - For vector: length must be `mpert`
-  - For matrix: first dimension must be `mpert`
-
-# Returns
-
-- `output`: The modified output array (for chaining)
-
-# Formula
-
-```
-data[i] = (2π/mtheta) * Σₗ [Re{modes[l]}*cos - Im{modes[l]}*sin +
-                             im*(Re{modes[l]}*sin + Im{modes[l]}*cos)]
-```
-
-# Example
-
-```julia
-ft = FourierTransform(480, 40, -20)
-
-# Pre-allocate output buffer
-theta_data = zeros(ComplexF64, 480)
-
-# Reuse buffer in loop
-for i in 1:1000
-    modes = get_modes(i)
-    inverse_transform!(theta_data, ft, modes)  # No allocations
-    process_theta_data(theta_data)
-end
-```
-"""
-function inverse_transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
-    # Inverse transform without normalization (matches Fortran iscdftb convention)
-
-    if modes isa AbstractVector
-        @assert length(modes) == ft.mpert "Input vector must have length mpert=$(ft.mpert)"
-        @assert length(output) == ft.mtheta "Output vector must have length mtheta=$(ft.mtheta)"
-
-        # Temporary storage
-        real_part = similar(output, Float64)
-        imag_part = similar(output, Float64)
-        temp1 = similar(output, Float64)
-        temp2 = similar(output, Float64)
-
-        # Re{data} = cslth * real(modes) - snlth * imag(modes)
-        mul!(temp1, ft.cslth, real.(modes))
-        mul!(temp2, ft.snlth, imag.(modes))
-        real_part .= temp1 .- temp2
-
-        # Im{data} = cslth * imag(modes) + snlth * real(modes)
-        mul!(temp1, ft.cslth, imag.(modes))
-        mul!(temp2, ft.snlth, real.(modes))
-        imag_part .= temp1 .+ temp2
-
-        output .= complex.(real_part, imag_part)
-    else
-        @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
-        @assert size(output, 1) == ft.mtheta "Output matrix first dimension must be mtheta=$(ft.mtheta)"
-        @assert size(output, 2) == size(modes, 2) "Output and input must have same number of columns"
-
-        n_cols = size(modes, 2)
-        real_part = similar(output, Float64, ft.mtheta, n_cols)
-        imag_part = similar(output, Float64, ft.mtheta, n_cols)
-        temp1 = similar(real_part)
-        temp2 = similar(real_part)
-
-        # Re{data} = cslth * real(modes) - snlth * imag(modes)
-        mul!(temp1, ft.cslth, real.(modes))
-        mul!(temp2, ft.snlth, imag.(modes))
-        real_part .= temp1 .- temp2
-
-        # Im{data} = cslth * imag(modes) + snlth * real(modes)
-        mul!(temp1, ft.cslth, imag.(modes))
-        mul!(temp2, ft.snlth, real.(modes))
-        imag_part .= temp1 .+ temp2
-
-        output .= complex.(real_part, imag_part)
-    end
-
-    return output
-end
-
-# ==============================================================================
-# Low-level matrix transforms with offsets (for Vacuum module compatibility)
-# ==============================================================================
-
-"""
-    fourier_transform!(gil::AbstractMatrix{Float64}, gij::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
-
-Low-level Fourier transform with offset support for Vacuum module.
-
-Performs a truncated Fourier transform of `gij` onto `gil` using pre-computed
-Fourier coefficients `cs`, with support for block offsets in the output matrix.
-
-This is used by the Vacuum module for transforming Green's function matrices that
-have specific block structure (e.g., plasma and wall contributions packed together).
-
-# Arguments
-
-- `gil::AbstractMatrix{Float64}`: Output matrix, updated in-place at offset block
-- `gij::AbstractMatrix{Float64}`: Input matrix (mtheta × mtheta) containing theta-space data
-- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert)
-- `row_offset::Int`: Row offset in `gil` matrix
-- `col_offset::Int`: Column offset in `gil` matrix
-
-# Operation
-
-Computes: `gil[row_offset+i, col_offset+l] = Σⱼ gij[i, j] * cs[j, l]` for i ∈ 1:size(cs, 1), l ∈ 1:size(cs, 2)
-
-# Notes
-
-- This function uses 0-based offset convention (add 1 for Julia indexing)
-- Used for packing real and imaginary parts in separate blocks of `gil`
-
-# Example
-
-```julia
-ft = FourierTransform(mtheta, mpert, mlow; n=n, qa=qa, delta=delta)
-gil = zeros(2*mtheta, 2*mpert)  # Packed real/imag structure
-gij = ... # Some theta-space data
-
-# Transform using cosine coefficients, real part block (offset 0, 0)
-fourier_transform!(gil, gij, ft.cslth; row_offset=0, col_offset=0)
-
-# Transform using sine coefficients, imaginary part block (offset 0, mpert)
-fourier_transform!(gil, gij, ft.snlth; row_offset=0, col_offset=mpert)
-```
-"""
-function fourier_transform!(gil::AbstractMatrix{Float64}, gij::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
-    mul!(view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), gij, cs)
-end
-
-"""
-    fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
-
-Low-level inverse Fourier transform with offset support for Vacuum module.
-
-Performs the inverse Fourier transform of `gil` onto `gll` using pre-computed
-Fourier coefficients `cs`, with support for block offsets in the input matrix.
-
-This is used by the Vacuum module for inverse transforming Green's function matrices
-back to mode space from theta space.
-
-# Arguments
-
-- `gll::Matrix{Float64}`: Output matrix (mpert × mpert), updated in-place
-- `gil::Matrix{Float64}`: Input matrix containing Fourier-transformed data
-- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert), either `cslth` or `snlth`
-- `m00::Int`: Row offset in `gil` matrix (0-based indexing convention)
-- `l00::Int`: Column offset in `gil` matrix (0-based indexing convention)
-
-# Operation
-
-Computes: `gll[l2, l1] = dθdζ * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
-
-# Notes
-
-- The normalization factor `1 / size(cs, 1)` matches the 1/N forward convention
-- This function uses 0-based offset convention (add 1 for Julia indexing)
-- The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
-# Example
-
-```julia
-ft = FourierTransform(mtheta, mpert, mlow; n=n, qa=qa, delta=delta)
-gil = ... # Transformed Green's function data
-arr = zeros(mpert, mpert)
-
-# Inverse transform from real part block using cosine coefficients
-fourier_inverse_transform!(arr, gil, ft.cslth)
-```
-"""
-function fourier_inverse_transform!(gll::AbstractMatrix{Float64}, gil::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
-    mul!(gll, cs', view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), 1.0 / size(cs, 1), 0.0)
+    return conj(ft.basis) * modes
 end
 
 end # module FourierTransforms

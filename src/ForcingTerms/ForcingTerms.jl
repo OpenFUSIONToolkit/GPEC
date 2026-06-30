@@ -6,7 +6,6 @@ using HDF5
 using LinearAlgebra
 
 import ..Equilibrium
-import ..Utilities.FourierTransforms: compute_fourier_coefficients
 
 """
     ForcingTermsControl
@@ -49,7 +48,9 @@ Data structure for a single forcing mode.
 ## Fields
 
   - `n::Int` - Toroidal mode number
+
   - `m::Int` - Poloidal mode number
+
   - `amplitude::ComplexF64` - Complex amplitude in unit-norm convention (= Fortran Phi_x,
     T·m² per unit-norm cell) after loading. File inputs are tagged by their input convention:
 
@@ -151,7 +152,7 @@ function load_forcing_ascii!(
         end
     end
 
-    data = readdlm(filepath; comments=true, comment_char='#')
+    data = readdlm(filepath; comments=true, comment_char=('#'))
     nrows = size(data, 1)
     ncols = size(data, 2)
 

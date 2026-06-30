@@ -163,8 +163,8 @@ function compute_singular_coupling_metrics!(
         # Compute Green's functions at this surface for this n (once per pair)
         vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
         _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
-        grri = Matrix{Float64}(grri_raw)
-        grre = Matrix{Float64}(grre_raw)
+        grri = Matrix{ComplexF64}(grri_raw)
+        grre = Matrix{ComplexF64}(grre_raw)
         ffs_intr.sing[s].grri = grri
         ffs_intr.sing[s].grre = grre
 
@@ -420,8 +420,8 @@ end
 
 """
     compute_surface_inductance_from_greens(
-        grri::Matrix{Float64},
-        grre::Matrix{Float64},
+        grri::Matrix{ComplexF64},
+        grre::Matrix{ComplexF64},
         ffs_intr::ForceFreeStatesInternal,
         nn::Int,
         ν::Vector{Float64}
@@ -437,8 +437,8 @@ the DFT (matching Fortran `gpvacuum_flxsurf`'s `EXP(-ifac*nn*dphi)` phase correc
 
 ## Arguments
 
-  - `grri`: Interior Green's function [2*mtheta, 2*mpert] (GROUPED: cos cols 1:mpert, sin cols mpert+1:2*mpert)
-  - `grre`: Exterior Green's function [2*mtheta, 2*mpert]
+  - `grri`: Interior Green's function [mtheta, mpert]
+  - `grre`: Exterior Green's function [mtheta, mpert]
   - `ffs_intr`: ForceFreeStates internal state
   - `nn`: Toroidal mode number
   - `ν`: Toroidal angle offset on the vacuum theta grid [mtheta]
@@ -448,14 +448,14 @@ the DFT (matching Fortran `gpvacuum_flxsurf`'s `EXP(-ifac*nn*dphi)` phase correc
 Surface inductance matrix [mpert × mpert]
 """
 @with_pool pool function compute_surface_inductance_from_greens(
-    grri::Matrix{Float64},
-    grre::Matrix{Float64},
+    grri::Matrix{ComplexF64},
+    grre::Matrix{ComplexF64},
     ffs_intr::ForceFreeStatesInternal,
     nn::Int,
     ν::Vector{Float64}
 )::Matrix{ComplexF64}
     mpert = ffs_intr.mpert
-    mtheta = size(grri, 1) ÷ 2
+    mtheta = length(ν)
     μ₀ = 4π * 1e-7
 
     ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
@@ -463,28 +463,20 @@ Surface inductance matrix [mpert × mpert]
     flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
     current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
 
+    kax = zeros!(pool, ComplexF64, mtheta)
     grri_surf = @view grri[1:mtheta, :]
     grre_surf = @view grre[1:mtheta, :]
 
-    kax_re = zeros!(pool, Float64, mtheta)
-    kax_im = zeros!(pool, Float64, mtheta)
-
-    # Toroidal phase correction: exp(-i*n*ν) matching Fortran gpvacuum_flxsurf
-    # EXP(-ifac*nn*dphi). Precompute since it's the same for all modes.
-    cos_nν = cos.(nn .* ν)
-    sin_nν = sin.(nn .* ν)
+    # Toroidal phase correction: exp(-i*n*ν)
+    phase = cis.(-nn .* ν)
 
     for i in 1:mpert
         flux_matrix[i, i] = 1.0
 
-        for k in 1:mtheta
-            kax_re[k] = (grri_surf[k, i] + grre_surf[k, i]) / (μ₀ * (2π)^2)
-            kax_im[k] = (grri_surf[k, mpert+i] + grre_surf[k, mpert+i]) / (μ₀ * (2π)^2)
-        end
+        kax .= (grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ₀ * (2π)^2)
 
-        # Port of Fortran gpvacuum_flxsurf: apply the toroidal phase exp(-i*n*ν),
-        # reverse theta (VACUUM theta runs opposite to DCON theta), then forward-DFT.
-        g_phased = (kax_re .- im .* kax_im) .* (cos_nν .- im .* sin_nν)
+        # Port of Fortran gpvacuum_flxsurf: apply toroidal phase, reverse theta, forward-DFT.
+        g_phased = kax .* phase
         current_matrix[:, i] = ft(_reverse_theta(g_phased))
     end
 

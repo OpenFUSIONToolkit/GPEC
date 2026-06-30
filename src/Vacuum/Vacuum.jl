@@ -9,7 +9,7 @@ using AdaptiveArrayPools
 
 # Import parent modules
 import ..Equilibrium
-using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
+using ..Utilities.FourierTransforms: FourierTransform, compute_fourier_coefficients
 
 include("Utilities.jl")
 include("DataTypes.jl")
@@ -24,14 +24,14 @@ export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
 """
-    _assemble_vacuum_response!(wv, grri_in, grre_in, plasma_surf, wall, cos_mn_basis, sin_mn_basis, kparams; force_wv_symmetry=true)
+    _assemble_vacuum_response!(wv, grri_in, grre_in, plasma_surf, wall, ft, n; force_wv_symmetry=true)
 
 Shared boundary-integral assembly for a single dense vacuum system.
 
-Given constructed surface geometries, the Fourier bases, and the toroidal mode number,
-this builds the double-/single-layer operators, solves the exterior and interior systems, and
-inverse-Fourier-transforms the result into the vacuum response matrix `wv` and the Green's
-functions `grri`/`grre`.
+Given constructed surface geometries, a pre-built [`FourierTransform`](@ref), and the toroidal
+mode number, this builds the double-/single-layer operators, solves the exterior and interior
+systems, and projects the result into the vacuum response matrix `wv` and the Green's functions
+`grri`/`grre`.
 
 # Arguments
 
@@ -40,22 +40,21 @@ functions `grri`/`grre`.
     `1:num_points_total` rows are written.
   - `plasma_surf`, `wall`: constructed surface geometries (2D or 3D variants; `wall` must
     expose a `nowall::Bool` field).
-  - `cos_mn_basis`, `sin_mn_basis`: Fourier basis coefficients (`num_points_surf × num_modes`).
+  - `ft`: [`FourierTransform`](@ref) with complex basis `exp(-i*(mθ-nν))` on the plasma surface.
   - `n`: toroidal mode number.
   - `force_wv_symmetry`: enforce Hermitian symmetry on `wv`.
 """
 @maybe_with_pool pool function _assemble_vacuum_response!(
     wv::AbstractMatrix{ComplexF64},
-    grri_in::AbstractMatrix{Float64},
-    grre_in::AbstractMatrix{Float64},
+    grri_in::AbstractMatrix{ComplexF64},
+    grre_in::AbstractMatrix{ComplexF64},
     plasma_surf,
     wall,
-    cos_mn_basis::Matrix{Float64},
-    sin_mn_basis::Matrix{Float64},
+    ft::FourierTransform,
     n::Int;
     force_wv_symmetry::Bool=true
 )
-    num_points_surf, num_modes = size(cos_mn_basis)
+    num_points_surf = ft.mtheta
 
     # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
     num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
@@ -71,9 +70,8 @@ functions `grri`/`grre`.
     # Plasma–Plasma block
     compute_2D_kernel_matrices!(grad_green, green_temp, plasma_surf, plasma_surf, n)
 
-    # Fourier transform obs=plasma, src=plasma block
-    fourier_transform!(grre, green_temp, cos_mn_basis)
-    fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=num_modes)
+    # Project plasma observer onto source basis exp(i*(mθ - nν))
+    mul!(view(grre, 1:num_points_surf, :), green_temp, conj(ft.basis))
 
     if !wall.nowall
         # Plasma–Wall block
@@ -82,9 +80,8 @@ functions `grri`/`grre`.
         compute_2D_kernel_matrices!(grad_green, green_temp, wall, wall, n)
         # Wall–Plasma block
         compute_2D_kernel_matrices!(grad_green, green_temp, wall, plasma_surf, n)
-        # Fourier transform obs=wall, src=plasma block
-        fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
-        fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
+        # Project wall observer onto source basis exp(i*(mθ - nν))
+        mul!(view(grre, (num_points_surf+1):num_points_total, :), green_temp, conj(ft.basis))
     end
 
     # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
@@ -104,16 +101,9 @@ functions `grri`/`grre`.
     F_int = lu!(grad_green_interior)
     ldiv!(F_int, grri)
 
-    # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-    arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
-    fourier_inverse_transform!(arr, grre, cos_mn_basis)
-    fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
-    fourier_inverse_transform!(ari, grre, sin_mn_basis)
-    fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
-
-    # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
-    wv .= 4π^2 * complex.(arr .+ aii, air .- ari)
-    force_wv_symmetry && hermitianpart!(wv)
+    # Project exterior kernel onto observer basis exp(-i*(mθ - nν)) and scale to get the response matrix
+    mul!(wv, transpose(ft.basis), @view(grre[1:num_points_surf, :]))
+    wv .*= 4π^2 / num_points_surf
 end
 
 """
@@ -130,7 +120,6 @@ on each pass.
 function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     mpert = length(inputs.m_modes)
-    numpert_total = mpert * length(inputs.n_modes)
 
     vac_data.wv .= 0
 
@@ -139,17 +128,18 @@ function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settin
     wall = WallGeometry(inputs, plasma_surf, wall_settings)
 
     for (idx_n, n) in enumerate(inputs.n_modes)
-        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.m_modes, n, plasma_surf.ν)
+        ft = FourierTransform(inputs.mtheta, mpert, inputs.m_modes[1]; n=n, ν=plasma_surf.ν)
 
         # Diagonal block of wv and matching column block of the Green's functions
         block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
-        cols = vcat(block_idx, numpert_total .+ block_idx)
         wv_block = @view vac_data.wv[block_idx, block_idx]
-        grri_block = @view vac_data.grri[:, cols]
-        grre_block = @view vac_data.grre[:, cols]
+        grri_block = @view vac_data.grri[:, block_idx]
+        grre_block = @view vac_data.grre[:, block_idx]
 
-        _assemble_vacuum_response!(wv_block, grri_block, grre_block, plasma_surf, wall, cos_mn_basis, sin_mn_basis, n; force_wv_symmetry=inputs.force_wv_symmetry)
+        _assemble_vacuum_response!(wv_block, grri_block, grre_block, plasma_surf, wall, ft, n; force_wv_symmetry=inputs.force_wv_symmetry)
     end
+
+    inputs.force_wv_symmetry && hermitianpart!(vac_data.wv)
 
     # Populate coordinate arrays
     @views begin
@@ -210,9 +200,8 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
     num_points = num_points_per_fp * nfp # full-torus point count
     mpert = length(m_modes)
 
-    # Complex Fourier basis on a single field period, exp(i(mθ - nζ_local)).
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta, n_modes; nfp=nfp)
-    exp_mn_basis = complex.(cos_mn_basis, sin_mn_basis)
+    # Complex Fourier basis exp(-i(mθ-nζ)) on a single field period
+    exp_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta * nfp, n_modes; nfp=nfp)
 
     nb = wall.nowall ? 1 : 2            # surface blocks: plasma, or [plasma; wall]
 
@@ -221,7 +210,6 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
     # type; the single-layer S is populated only for plasma sources, so green_row is nb·M × N.
     grad_row = zeros!(pool, nb * num_points_per_fp, nb * num_points)   # double-layer D (with +I on the period-0 diagonals)
     green_row = zeros!(pool, nb * num_points_per_fp, num_points)       # single-layer S (plasma sources only)
-    green_scratch = zeros!(pool, num_points_per_fp, num_points)        # throwaway green buffer for wall-source kernel calls
 
     # Kernel parameters, hardcoded for now
     PATCH_RAD = 11
@@ -231,10 +219,12 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
     # Plasma–plasma (single-layer → plasma-observer rows 1:M)
     compute_3D_kernel_matrices!(grad_row, view(green_row, 1:num_points_per_fp, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
     if !wall.nowall
-        # Plasma–wall (double-layer only); wall–plasma (single-layer → wall-observer rows M+1:2M); wall–wall
-        compute_3D_kernel_matrices!(grad_row, green_scratch, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        # Plasma–Wall block (single-layer unused; green_row view supplies observer row count only)
+        compute_3D_kernel_matrices!(grad_row, view(green_row, 1:num_points_per_fp, :), plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        # Wall–Plasma block
         compute_3D_kernel_matrices!(grad_row, view(green_row, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-        compute_3D_kernel_matrices!(grad_row, green_scratch, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        # Wall–Wall block
+        compute_3D_kernel_matrices!(grad_row, view(green_row, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
     end
 
     # Solve one reduced (nb·M)×(nb·M) system per toroidal residue class k = mod(n, nfp). Reusing
@@ -262,9 +252,9 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
         # Exterior response operator for this sector: solve D̂ₖ G = Ŝₖ in place (Ŝ ← G = D̂ₖ⁻¹Ŝₖ)
         ldiv!(lu!(D̂), Ŝ)
         mode_cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
-        Ek = @view exp_mn_basis[:, mode_cols]
+        E = @view exp_mn_basis[:, mode_cols]
         G_plasma = @view Ŝ[1:num_points_per_fp, :]   # plasma-observer rows of the combined exterior operator
-        vac_data.wv[mode_cols, mode_cols] .= (4π^2 / num_points_per_fp) .* (Ek' * (G_plasma * Ek))
+        vac_data.wv[mode_cols, mode_cols] .= (4π^2 / num_points_per_fp) .* (conj(E)' * (G_plasma * conj(E)))
     end
 
     inputs.force_wv_symmetry && hermitianpart!(vac_data.wv)
@@ -298,8 +288,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     vac = (
         wv=zeros(ComplexF64, num_modes, num_modes),
-        grri=zeros(2 * num_points, 2 * num_modes),
-        grre=zeros(2 * num_points, 2 * num_modes),
+        grri=zeros(ComplexF64, 2 * num_points, num_modes),
+        grre=zeros(ComplexF64, 2 * num_points, num_modes),
         plasma_pts=zeros(num_points, 3),
         wall_pts=zeros(num_points, 3)
     )
@@ -319,8 +309,8 @@ The `vac_data` argument is expected to provide the following writable fields wit
 sizes:
 
   - `wv::AbstractMatrix{ComplexF64}`             – vacuum response matrix
-  - `grri::AbstractMatrix{Float64}`              – interior Green's functions
-  - `grre::AbstractMatrix{Float64}`              – exterior Green's functions
+  - `grri::AbstractMatrix{ComplexF64}`           – interior Green's functions
+  - `grre::AbstractMatrix{ComplexF64}`           – exterior Green's functions
   - `plasma_pts::AbstractMatrix{Float64}`        – plasma surface coordinates
   - `wall_pts::AbstractMatrix{Float64}`          – wall surface coordinates
 
@@ -331,7 +321,7 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
     if inputs.nzeta == 1
         _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
     else
-        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings)
+        @time _compute_vacuum_response_3d!(vac_data, inputs, wall_settings)
     end
 end
 

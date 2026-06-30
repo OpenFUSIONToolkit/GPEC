@@ -76,8 +76,8 @@ The residue calculation needs to be updated for open walls.**
 # Returns
 
 Modifies `grad_greenfunction` and `greenfunction` in place.
-Note that greenfunction is zeroed each time this function is called,
-but grad_greenfunction is not since it fills a different block of the
+Note that greenfunction is zeroed only when the source is plasma;
+grad_greenfunction is not zeroed since it fills a different block of the
 (2 * mtheta, 2 * mtheta) depending on the source/observer.
 
 # Notes
@@ -107,10 +107,9 @@ but grad_greenfunction is not since it fills a different block of the
         ((col_index-1)*mtheta+1):(col_index*mtheta)
     )
 
-    # Zero out greenfunction at start of each kernel call
-    fill!(greenfunction, 0.0)
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry
+    populate_greenfunction && fill!(greenfunction, 0.0)
 
     # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
