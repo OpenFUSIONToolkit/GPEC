@@ -3,8 +3,8 @@
 
 Pre-computed complex Fourier basis and functor interface for θ ↔ mode transforms.
 
-Forward: `(transpose(basis) * data) / mtheta`; inverse: `conj(basis) * modes` (Fortran
-`iscdftf`/`iscdftb`; see `docs/src/conventions.md`).
+`basis[ℓ, i] = exp(-i(m_ℓ θ_i - n ν_i))` with shape `(mpert, mtheta)`. Forward: `basis * data / mtheta`;
+inverse: `adjoint(basis) * modes` (Fortran `iscdftf`/`iscdftb`; see `docs/src/conventions.md`).
 """
 module FourierTransforms
 
@@ -21,13 +21,13 @@ Build complex basis ``\\exp(-i(m\\theta - n\\nu))`` on the uniform poloidal grid
 ## Arguments
 
   - `mtheta`: number of poloidal grid points
-  - `m_modes`: poloidal mode numbers (one column per mode)
+  - `m_modes`: poloidal mode numbers (one row per mode)
   - `n`: toroidal mode number
   - `ν`: toroidal angle offset on the poloidal grid, length `mtheta`
 
 ## Returns
 
-  - Basis matrix, size `(mtheta, length(m_modes))`
+  - Basis matrix, size `(length(m_modes), mtheta)`
 """
 function compute_fourier_coefficients(mtheta::Int, m_modes::AbstractVector{<:Integer}, n::Integer, ν::Vector{Float64})
 
@@ -35,13 +35,13 @@ function compute_fourier_coefficients(mtheta::Int, m_modes::AbstractVector{<:Int
 
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
     arg = m_modes' .* θ_grid .- n .* ν
-    return exp.(-im .* arg)
+    return transpose(exp.(-im .* arg))
 end
 
 """
     compute_fourier_coefficients(mtheta, m_modes, nzeta, n_modes; nfp=1)
 
-Build 3D basis for every `(m, n)` in `m_modes × n_modes` (columns m-fast, n-slow).
+Build 3D basis for every `(m, n)` in `m_modes × n_modes` (rows m-fast, n-slow).
 
 ## Arguments
 
@@ -56,7 +56,7 @@ Build 3D basis for every `(m, n)` in `m_modes × n_modes` (columns m-fast, n-slo
 
 ## Returns
 
-  - Basis matrix, size `(mtheta * (nzeta ÷ nfp), length(m_modes) * length(n_modes))`
+  - Basis matrix, size `(length(m_modes) * length(n_modes), mtheta * (nzeta ÷ nfp))`
 """
 function compute_fourier_coefficients(
     mtheta::Int,
@@ -72,14 +72,14 @@ function compute_fourier_coefficients(
     nzeta_out = nzeta ÷ nfp
 
     mpert = length(m_modes)
-    basis = zeros(ComplexF64, mtheta * nzeta_out, mpert * length(n_modes))
+    basis = zeros(ComplexF64, mpert * length(n_modes), mtheta * nzeta_out)
     for (idx_n, n) in enumerate(n_modes)
-        n_col_offset = (idx_n - 1) * mpert
+        n_row_offset = (idx_n - 1) * mpert
         for (idx_m, m) in enumerate(m_modes)
-            col = idx_m + n_col_offset
+            row = idx_m + n_row_offset
             for j in 1:nzeta_out, (i, θ) in enumerate(θ_grid)
-                idx = i + (j - 1) * mtheta
-                basis[idx, col] = cis(-(m * θ - n * ζ_grid[j]))
+                col = i + (j - 1) * mtheta
+                basis[row, col] = cis(-(m * θ - n * ζ_grid[j]))
             end
         end
     end
@@ -97,7 +97,7 @@ Struct with precomputed complex Fourier basis for repeated θ ↔ mode transform
   - `mtheta`: poloidal grid size
   - `mpert`: number of poloidal modes
   - `mlow`: lowest poloidal mode number
-  - `basis`: ``\\exp(-i(m\\theta - n\\nu))``, size `(mtheta, mpert)`
+  - `basis`: ``\\exp(-i(m\\theta - n\\nu))``, size `(mpert, mtheta)`
 """
 struct FourierTransform
     mtheta::Int
@@ -157,7 +157,7 @@ function (ft::FourierTransform)(data::AbstractVecOrMat{<:Number})
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
     end
 
-    return (transpose(ft.basis) * data) ./ ft.mtheta
+    return (ft.basis * data) ./ ft.mtheta
 end
 
 """
@@ -181,7 +181,7 @@ function inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
         @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
     end
 
-    return conj(ft.basis) * modes
+    return adjoint(ft.basis) * modes
 end
 
 end # module FourierTransforms

@@ -78,8 +78,8 @@ function compute_sqrtamat(
         e_k .= 0.0
         e_k[k] = 1.0 + 0.0im
 
-        # Standard backward FT: f(θ_j) = (1/N) Σ_m c_m exp(-imθ_j) = (basis * c) / N
-        theta_vec = (ft.basis * e_k) ./ mtheta
+        # Standard backward FT: f(θ_j) = (1/N) Σ_m c_m exp(-imθ_j) = (transpose(basis) * c) / N
+        theta_vec = (transpose(ft.basis) * e_k) ./ mtheta
 
         # Multiply pointwise by √(J·|∇ψ|) in theta-space
         theta_vec .*= sqrt_jdp

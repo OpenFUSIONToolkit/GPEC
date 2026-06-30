@@ -86,12 +86,12 @@ end
         n = 2
         ν = collect(range(; start=0.0, length=N, step=0.05))
         basis = compute_fourier_coefficients(N, m_modes, n, ν)
-        @test size(basis) == (N, mpert)
+        @test size(basis) == (mpert, N)
 
         θ = collect(range(; start=0, length=N, step=2π/N))
         for (l, m) in enumerate(m_modes)
             expected = exp.(-im .* (m .* θ .- n .* ν))
-            @test all(isapprox.(basis[:, l], expected; atol))
+            @test all(isapprox.(basis[l, :], expected; atol))
         end
 
         ft = FourierTransform(N, mpert, mlow)
@@ -102,7 +102,7 @@ end
         mtheta, mpert, mlow = 8, 5, -2
         nzeta, npert, nlow = 6, 3, -1
         basis = compute_fourier_coefficients(mtheta, mlow:(mlow+mpert-1), nzeta, nlow:(nlow+npert-1))
-        @test size(basis) == (mtheta * nzeta, mpert * npert)
+        @test size(basis) == (mpert * npert, mtheta * nzeta)
     end
 end
 

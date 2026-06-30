@@ -71,7 +71,7 @@ systems, and projects the result into the vacuum response matrix `wv` and the Gr
     compute_2D_kernel_matrices!(grad_green, green_temp, plasma_surf, plasma_surf, n)
 
     # Project plasma observer onto source basis exp(i*(mθ - nν))
-    mul!(view(grre, 1:num_points_surf, :), green_temp, conj(ft.basis))
+    mul!(view(grre, 1:num_points_surf, :), green_temp, ft.basis')
 
     if !wall.nowall
         # Plasma–Wall block
@@ -81,7 +81,7 @@ systems, and projects the result into the vacuum response matrix `wv` and the Gr
         # Wall–Plasma block
         compute_2D_kernel_matrices!(grad_green, green_temp, wall, plasma_surf, n)
         # Project wall observer onto source basis exp(i*(mθ - nν))
-        mul!(view(grre, (num_points_surf+1):num_points_total, :), green_temp, conj(ft.basis))
+        mul!(view(grre, (num_points_surf+1):num_points_total, :), green_temp, ft.basis')
     end
 
     # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
@@ -102,7 +102,7 @@ systems, and projects the result into the vacuum response matrix `wv` and the Gr
     ldiv!(F_int, grri)
 
     # Project exterior kernel onto observer basis exp(-i*(mθ - nν)) and scale to get the response matrix
-    mul!(wv, transpose(ft.basis), @view(grre[1:num_points_surf, :]))
+    mul!(wv, ft.basis, @view(grre[1:num_points_surf, :]))
     wv .*= 4π^2 / num_points_surf
 end
 
@@ -252,9 +252,9 @@ class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns
         # Exterior response operator for this sector: solve D̂ₖ G = Ŝₖ in place (Ŝ ← G = D̂ₖ⁻¹Ŝₖ)
         ldiv!(lu!(D̂), Ŝ)
         mode_cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
-        E = @view exp_mn_basis[:, mode_cols]
+        E = @view exp_mn_basis[mode_cols, :]
         G_plasma = @view Ŝ[1:num_points_per_fp, :]   # plasma-observer rows of the combined exterior operator
-        vac_data.wv[mode_cols, mode_cols] .= (4π^2 / num_points_per_fp) .* (conj(E)' * (G_plasma * conj(E)))
+        vac_data.wv[mode_cols, mode_cols] .= (4π^2 / num_points_per_fp) .* (E * (G_plasma * E'))
     end
 
     inputs.force_wv_symmetry && hermitianpart!(vac_data.wv)

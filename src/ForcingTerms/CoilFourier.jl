@@ -171,7 +171,7 @@ When called after `project_normal_flux!`, the returned amplitudes are in unit-no
 convention equal to Fortran `Phi_x` (T·m² per unit-norm cell).
 
 Uses `compute_fourier_coefficients` from `Utilities.FourierTransforms` with the
-3D (mtheta×nzeta, mpert) basis matrix (npert=1, nlow=n).
+3D (mpert, mtheta×nzeta) basis matrix (npert=1, nlow=n).
 """
 function fourier_decompose_bn(
     bn::Matrix{Float64},
@@ -184,13 +184,13 @@ function fourier_decompose_bn(
     nzeta = grid.nzeta
 
     # Build Fourier basis: exp(-i*(m*θ - n*ζ))
-    # Using 3D call with npert=1, nlow=n gives shape (mtheta*nzeta, mpert)
+    # Using 3D call with npert=1, nlow=n gives shape (mpert, mtheta*nzeta)
     basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
     bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j] ✓
     scale = 2.0 / (mtheta * nzeta)
 
-    bmn = scale .* (transpose(basis) * bn_flat)
+    bmn = scale .* (basis * bn_flat)
 
     modes = ForcingMode[]
     for (idx, m) in enumerate(m_low:m_high)
@@ -338,7 +338,7 @@ function convert_forcing_normalization!(
     end
 
     # Inverse DFT: reconstruct B·n̂(θ, ζ) at grid points
-    bn_hat = real.(conj(basis) * amp)  # length mtheta*nzeta
+    bn_hat = real.(adjoint(basis) * amp)  # length mtheta*nzeta
     bn_field = reshape(bn_hat, mtheta, nzeta)
 
     # Multiply by 2π × R × |dr/dθ_norm| to convert B·n̂ → unit-norm Phi_x integrand.
@@ -354,7 +354,7 @@ function convert_forcing_normalization!(
     # Re-Fourier transform bn_field → unit-norm (Phi_x) mode amplitudes
     bn_flat = vec(bn_field)
     scale = 2.0 / (mtheta * nzeta)
-    bmn = scale .* (transpose(basis) * bn_flat)
+    bmn = scale .* (basis * bn_flat)
 
     # Write back into modes vector (in place, same ordering)
     for mode in modes
