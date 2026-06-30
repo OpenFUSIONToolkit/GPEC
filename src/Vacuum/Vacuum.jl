@@ -146,6 +146,9 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
 
+    (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
+    fill!(vac_data.wv, 0)
+
     # Full-torus geometry for source surface; observers are restricted to one field period
     full = expand_field_periods(inputs)
     plasma_surf = PlasmaGeometry3D(full)

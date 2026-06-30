@@ -6,6 +6,7 @@ using HDF5
 using LinearAlgebra
 
 import ..Equilibrium
+import ..Utilities.FourierTransforms: compute_fourier_coefficients
 
 """
     ForcingTermsControl
