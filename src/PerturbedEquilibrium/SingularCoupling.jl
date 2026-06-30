@@ -473,7 +473,8 @@ Surface inductance matrix [mpert × mpert]
     for i in 1:mpert
         flux_matrix[i, i] = 1.0
 
-        kax .= (grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ₀ * (2π)^2)
+        # Complex grri/e stores exp(i(mθ-nν)) projection, need conjugate for exp(-i(mθ-nν))
+        kax .= conj.(grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ₀ * (2π)^2)
 
         # Port of Fortran gpvacuum_flxsurf: apply toroidal phase, reverse theta, forward-DFT.
         g_phased = kax .* phase
