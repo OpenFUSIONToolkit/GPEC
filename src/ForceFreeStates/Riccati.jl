@@ -659,7 +659,7 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
                                T_left_inv::Vector{Matrix{ComplexF64}},
                                T_right_inv::Vector{Matrix{ComplexF64}}, has_ua::Bool,
                                wv::Union{Nothing,Matrix{ComplexF64}}, psio::Float64)
-    @warning "compute_delta_prime_matrix!: FM-axis fallback"
+    @warn "compute_delta_prime_matrix!: FM-axis fallback"
     nMat = (2 + 4 * msing) * N
     col_axis = 1:N
     col_edge = (N + 4N*msing + 1):nMat
