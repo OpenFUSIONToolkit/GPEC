@@ -601,6 +601,7 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     #M[1:2N, col_edge] .= 0.0
     #M[N+1:2N, col_axis] .= -I(N) #U_2 = I, U_1 = 0 -> for conditions 0 and 1
 
+    edge_drive_rows = Int[]    
     for j in 1:msing
         ipert_j = ipert_all[j]
         # Crossing: non-resonant modes continuity (asymptotic basis = identity)
@@ -623,6 +624,7 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
             M[junc_rows, _col_right(msing, N)] .= uShootR[msing]
             if rpec
                 M[junc_rows[1:N],    col_edge] .= -I(N)
+                edge_drive_rows = collect(junc_rows[1:N])
             elseif wv !== nothing
                 M[junc_rows[1:N],     col_edge] .= -I(N)
                 M[junc_rows[N+1:end], col_edge] .= wv .* psio^2
@@ -739,7 +741,7 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     end
 
     delta_coil = zeros(Tc, s2, N)
-    if compute_coil && edge_drive_rows !== nothing
+    if compute_coil && !isempty(edge_drive_rows)
         for kmode in 1:N
             fill!(b,0)
             b[edge_drive_rows[kmode]] = 1
