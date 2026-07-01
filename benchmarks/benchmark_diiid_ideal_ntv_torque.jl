@@ -264,15 +264,14 @@ function run_benchmark(fortran_dir::String=DEFAULT_FORTRAN_DIR)
     _p("\n--- Build PE state (Fortran Clebsch → dbob_m/divx_m) ---")
     t1 = time()
 
-    # Construct PerturbedEquilibriumState with Fortran Clebsch data
-    # Fortran xclebsch stores ξ^α directly; PE convention is ξ^α/χ₁
-    chi1 = 2π * equil.psio
+    # Construct PerturbedEquilibriumState with Fortran Clebsch data.
+    # Fortran gpec_xclebsch already writes ξ^α = xms/χ₁, exactly what the KF operator consumes — feed directly.
     pe_state = PE.PerturbedEquilibriumState(;
         psi_grid=psi_grid_f,
         xi_modes=(
             clebsch_psi=clebsch_psi,
             clebsch_psi1=clebsch_psi1,
-            clebsch_alpha=clebsch_alpha ./ chi1  # Store as ξ^α/χ₁ per PE convention
+            clebsch_alpha=clebsch_alpha
         )
     )
 

@@ -309,16 +309,15 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     psi_grid = pe_state.psi_grid
     npsi = length(psi_grid)
     mpert = ffs_intr.mpert
-    chi1 = kf_intr.chi1
 
     # Build xs_m: 3 CubicSeriesInterpolants from Clebsch displacement matrices
     # xs_m[1] = ξ^ψ (unregularized), xs_m[2] = ∂ξ^ψ/∂ψ (regularized), xs_m[3] = ξ^α
-    # Note: clebsch_alpha is stored as ξ^α/χ₁, multiply by chi1 to get ξ^α
     itp_opts = (; extrap=ExtendExtrap())
+    # clebsch_alpha is already the physical ξ^α = xms/χ₁ (as Fortran gpout_xclebsch writes it); use directly.
+    clebsch_alpha_mat = xi_modes.clebsch_alpha
     xs_m_1 = cubic_interp(psi_grid, Series(xi_modes.clebsch_psi); itp_opts...)
     xs_m_2 = cubic_interp(psi_grid, Series(xi_modes.clebsch_psi1); itp_opts...)
-    clebsch_alpha_raw = xi_modes.clebsch_alpha .* chi1
-    xs_m_3 = cubic_interp(psi_grid, Series(clebsch_alpha_raw); itp_opts...)
+    xs_m_3 = cubic_interp(psi_grid, Series(clebsch_alpha_mat); itp_opts...)
     kf_intr.xs_m = [xs_m_1, xs_m_2, xs_m_3]
 
     # Build geometric matrices (S,T,X,Y,Z) for JBB deweighting
@@ -355,7 +354,7 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
         # Get Clebsch displacement vectors at this ψ
         xsp  = view(xi_modes.clebsch_psi,  ipsi, :)       # ξ^ψ [mpert]
         xmp1 = view(xi_modes.clebsch_psi1, ipsi, :)       # ∂ξ^ψ/∂ψ [mpert]
-        xms  = view(clebsch_alpha_raw, ipsi, :)            # ξ^α [mpert]
+        xms  = view(clebsch_alpha_mat, ipsi, :)            # ξ^α [mpert]
 
         # Evaluate geometric matrices at ψ → mpert² flat vectors, reshape to mpert×mpert
         geom_mats.smats(smat_flat, psi; hint=hint_s)
