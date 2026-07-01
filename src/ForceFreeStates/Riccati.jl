@@ -315,7 +315,7 @@ function compute_delta_prime_matrix!(
     debug && _log_bvp_setup(chunks, sing, S_at_surface_left, use_S_axis, has_ua,
                             Phi_L_mats, Phi_R_mats, Phi_R_halves, ipert_all, wv, psio, N, msing)
 
-    if use_S_axis
+if use_S_axis
         uShootR, uShootL, uAxis = _build_S_axis_shooting_propagators(
             propagators, chunks, i_crossings, sing, msing, N,
             T_left_mats, T_right_mats, has_ua, ctrl, equil, ffit, intr, debug)
@@ -331,15 +331,18 @@ function compute_delta_prime_matrix!(
             T_left_inv, T_right_inv, has_ua, wv, psio)
         edge_drive_rows = nothing
     end
-
-    do_coil = ctrl !== nothing && ctrl.gal_rpec_flag && use_S_axis
-    intr.delta_prime_matrix, intr.delta_raw_matrix, intr.delta_coil_matrix = 
-        _solve_bvp_and_combine_pest3(M, msing, N, nMat, use_S_axis, ipert_all, 
-                                    col_edge, ctrl, debug;
-                                    compute_coil=do_coil, edge_drive_rows=edge_drive_rows)
     if debug
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
     end
+
+    # Coil solve only on the S-axis path (only path that returns edge_drive_rows) and
+    # only when the coil gate is on.
+    do_coil = ctrl !== nothing && ctrl.gal_rpec_flag && use_S_axis
+
+    intr.delta_prime_matrix, intr.delta_raw_matrix, intr.delta_coil_matrix =
+        _solve_bvp_and_combine_pest3(
+            M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug;
+            compute_coil = do_coil, edge_drive_rows = edge_drive_rows)
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -699,7 +702,7 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
             M[row_drive_base + 2j,   cr[ipert_j]] = 1
         end
     end
-    return M, nMat, col_edge
+    return M, nMat, col_edge, edge_drive_rows = Int[]
 end
 
 # Solve the BVP for each driving configuration and apply the PEST3 four-term combination.
