@@ -30,10 +30,10 @@ function compute_plasma_response!(
     end
 
     # Build flux matrix from ForceFreeStates eigenmodes [mode × eigenmode]
-    flux_matrix = build_flux_matrix(equil, ForceFreeStates_results, vac_data, ffs_intr)
+    flux_matrix = build_flux_matrix(equil, ForceFreeStates_results, ffs_intr)
 
-    # Plasma inductance Lambda (wt0 formula, Fortran resp_induct_flag=TRUE default)
-    plasma_inductance = calc_plasma_inductance(vac_data, ffs_intr, equil.psio)
+    # Compute plasma inductance
+    plasma_inductance = calc_plasma_inductance(ffs_intr, vac_data.wt0, equil.psio)
 
     # Surface inductance L from Green's functions at psilim.
     # Requires a 2D (nzvac=1) vacuum response so rows are theta points only,
@@ -45,7 +45,7 @@ function compute_plasma_response!(
     grre_2d = Matrix{ComplexF64}(grre_2d_raw)
     ν_vac = Vacuum.PlasmaGeometry(vac_input_2d).ν
     surface_inductance = compute_surface_inductance_from_greens(grri_2d, grre_2d, ffs_intr, nn, ν_vac)
-    permeability = calc_permeability(plasma_inductance, surface_inductance)
+    permeability = plasma_inductance / surface_inductance
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
     # Λ (plasma inductance) is not Hermitian — its anti-Hermitian part is the dissipative/torque response — so the adjoint matters.
@@ -74,7 +74,7 @@ function compute_plasma_response!(
     # forcing arrives as Φ_x, the field reconstruction below consumes Φ_tot, and the b̃ spectra are
     # formed via the conform operator R = S·A (Φ = R·b̃).
     forcing_flux = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
-    response_flux = compute_plasma_response_vector(permeability, forcing_flux)
+    response_flux = permeability * forcing_flux
 
     # Output forcing/response in the three Pharr field representations (all tesla):
     #   b̃ (root-area-weighted) = R⁻¹·Φ,  b (bare) = Σ⁻¹·b̃,  b̄ (area-weighted) = S·b̃.
