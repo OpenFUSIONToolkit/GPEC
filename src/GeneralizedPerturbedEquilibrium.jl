@@ -396,12 +396,6 @@ function main_from_inputs(
                 find_kinetic_singular_surfaces!(ffit, equil, intr)
             end
         end
-
-        # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during
-        # singular surface crossings in cross_ideal_singular_surf!. This makes it clear that
-        # asymptotics are only needed for ideal ForceFreeStates and are not inherent properties of
-        # the singular surface.
-
     end
 
     # Integrate Euler-Lagrange Equation
@@ -422,12 +416,10 @@ function main_from_inputs(
             @info "Computing free boundary energies ($wall_desc)"
         end
         vac_data = free_run!(odet, ctrl, equil, ffit, intr)
-        if real(vac_data.et[1]) < 0
-            if ctrl.verbose
+        if ctrl.verbose
+            if real(vac_data.et[1]) < 0
                 @warn "Free-boundary mode unstable for n = $nstring"
-            end
-        else
-            if ctrl.verbose
+            else
                 @info "All free-boundary modes stable for n = $nstring"
             end
         end
@@ -476,6 +468,12 @@ function main_from_inputs(
     # Early exit if user only requested force-free states
     if ctrl.force_termination
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        return
+    end
+
+    # No perturbed equilibrium calculations if free-boundary mode is unstable
+    if real(vac_data.et[1]) < 0
+        @warn "Since a free-boundary mode is unstable, perturbed equilibrium calculations will not run."
         return
     end
 
@@ -585,14 +583,7 @@ function main_from_inputs(
         @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
     end
 
-    # ----------------------------------------------------------------
-    # Done
-    # ----------------------------------------------------------------
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-
-    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
-
-    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
 
 end
 
@@ -604,10 +595,6 @@ This combines the functionality of several pieces of the Fortran code in `ode_ou
 primarily `ode_output_open` and the various `bin_euler` writes that occur throughout the
 integration. Some parameters are only dumped in their respective flags are true, e.g.
 vacuum data if `vac_flag` is true.
-
-### TODOs
-
-Combine spline unpacking if possible, too many extra lines
 """
 function write_outputs_to_HDF5(
     ctrl::ForceFreeStatesControl,

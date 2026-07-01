@@ -361,7 +361,6 @@ function compute_current_density(
     psi::Float64
 )::Float64
     # Physical constants
-    μ₀ = 4π * 1e-7
     chi1 = 2π * equil.psio
     twopi = 2π
 
@@ -412,8 +411,8 @@ function compute_current_density(
     # Trapezoidal rule end correction (subtract half of last point contribution)
     integral -= last_jac * last_delpsi * last_jcfun / mthsurf
 
-    # Final normalization: j_c = (1/integral) * χ₁² * q / μ₀
-    j_c = (1.0 / integral) * chi1^2 * q / μ₀
+    # Final normalization: j_c = (1/integral) * χ₁² * q / μ0
+    j_c = (1.0 / integral) * chi1^2 * q / μ0
 
     return j_c
 end
@@ -456,11 +455,9 @@ Surface inductance matrix [mpert × mpert]
 )::Matrix{ComplexF64}
     mpert = ffs_intr.mpert
     mtheta = length(ν)
-    μ₀ = 4π * 1e-7
 
     ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
 
-    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
     current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
 
     kax = zeros!(pool, ComplexF64, mtheta)
@@ -471,17 +468,15 @@ Surface inductance matrix [mpert × mpert]
     phase = cis.(-nn .* ν)
 
     for i in 1:mpert
-        flux_matrix[i, i] = 1.0
-
         # Complex grri/e stores exp(i(mθ-nν)) projection, need conjugate for exp(-i(mθ-nν))
-        kax .= conj.(grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ₀ * (2π)^2)
+        kax .= conj.(grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ0 * (2π)^2)
 
-        # Port of Fortran gpvacuum_flxsurf: apply toroidal phase, reverse theta, forward-DFT.
+        # Apply toroidal phase, reverse theta, forward-DFT.
         g_phased = kax .* phase
         current_matrix[:, i] = ft(_reverse_theta(g_phased))
     end
 
-    # Compute surface inductance: L_surf = flux * inv(current) = inv(current)
+    # Compute surface inductance: L_surf = flux * inv(current) = inv(current) when flux is the identity matrix
     L_surf = zeros(ComplexF64, mpert, mpert)
 
     current_mag = maximum(abs.(current_matrix))
@@ -489,21 +484,19 @@ Surface inductance matrix [mpert × mpert]
     if current_mag < 1e-15
         @warn "Current matrix is all zeros! Cannot compute surface inductance." maxlog=1
         for i in 1:mpert
-            L_surf[i, i] = μ₀ * 1e-6
+            L_surf[i, i] = μ0 * 1e-6
         end
     else
         try
             regularization = 1e-12 * current_mag
             current_reg = current_matrix + regularization * I
 
-            L_surf = flux_matrix * inv(current_reg)
-
-            # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
-            L_surf = 0.5 * (L_surf + L_surf')
+            L_surf = inv(current_reg)
+            hermitianpart!(L_surf)
         catch e
             @warn "Surface inductance inversion failed: $e" maxlog=1
             for i in 1:mpert
-                L_surf[i, i] = μ₀ * 1e-6
+                L_surf[i, i] = μ0 * 1e-6
             end
         end
     end

@@ -69,8 +69,7 @@ function calc_plasma_inductance(ffs_intr::ForceFreeStatesInternal, wt0::Matrix{C
     singfac = vec((ffs_intr.mlow:ffs_intr.mhigh) .- ffs_intr.qlim .* (ffs_intr.nlow:ffs_intr.nhigh)')
 
     # Convert to metric units
-    mu0 = 4π * 1e-7
-    wt0_norm = wt0 .* (psio^2 / (mu0 * 2))
+    wt0_norm = wt0 .* (psio^2 / (μ0 * 2))
 
     # Convert from displacement to flux space using 1 / (singfac * chi1 * 2π) factor
     chi1 = 2π * psio
