@@ -384,89 +384,6 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
 end
 
 """
-    _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
-
-Estimate the logarithmic slope A from two field-line probe integrations near the separatrix,
-using the asymptotic form q(ψ) ≃ −A·ln(1−ψ) (Fitzpatrick 2024, eq. 19).
-
-Returns A = |Δq| / ln(2). Falls back to A=2.0 on integration failure.
-"""
-function _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
-    eps_sep = max(1.0 - psihigh, 0.001)
-    psi1 = clamp(1.0 - 3 * eps_sep, raw_profile.config.psilow + 0.01, 0.999)
-    psi2 = clamp(1.0 - 1.5 * eps_sep, raw_profile.config.psilow + 0.01, 0.999)
-    try
-        out1 = fieldline_int(psi1, raw_profile, ro, zo, rs2)
-        q1 = out1[2].f * out1[1][end, 4] / (2π)
-        out2 = fieldline_int(psi2, raw_profile, ro, zo, rs2)
-        q2 = out2[2].f * out2[1][end, 4] / (2π)
-        A = max(abs(q2 - q1) / log(2), 0.1)
-        @info "Estimated separatrix log slope A = $(@sprintf("%.3f", A)) from probe integrations at psi = $(@sprintf("%.4f", psi1)), $(@sprintf("%.4f", psi2))"
-        return A
-    catch err
-        @warn "Failed to estimate log slope from probe integrations, using default A=2.0: $err"
-        return 2.0
-    end
-end
-
-"""
-    _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
-
-Estimate the uniform knot spacing needed in the middle ψ region to resolve the sharpest
-profile feature (usually the pressure pedestal) to relative accuracy `tau`.
-
-Uses central-difference second derivatives of all 4 sq_in profiles on a 300-point sample.
-The required spacing for profile k is h_k = sqrt(8τ / d2_norm_k) where d2_norm_k is
-max|f''| / max|f| over [psi_split_core, psi_split_edge].
-"""
-function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
-    n_samp = 300
-    psi_samp = range(psi_split_core, psi_split_edge; length=n_samp)
-    h_samp = step(psi_samp)
-    h_min = Inf
-    # Size the buffer to the actual profile count, not a hardcoded 4 (cf. InverseEquilibrium.jl).
-    nq = size(sq_in.y, 2)
-    buf = zeros(nq)
-    all_vals = [
-        begin
-            sq_in(buf, ψ)
-            copy(buf)
-        end for ψ in psi_samp
-    ]
-    for k in 1:nq
-        vals = [all_vals[i][k] for i in 1:n_samp]
-        f_scale = max(maximum(abs.(vals)), 1e-12)
-        d2_max = 0.0
-        for i in 2:(n_samp-1)
-            d2 = abs(vals[i+1] - 2vals[i] + vals[i-1]) / (h_samp^2 * f_scale)
-            d2_max = max(d2_max, d2)
-        end
-        d2_max < 1e-10 && continue
-        h_min = min(h_min, sqrt(8 * tau / d2_max))
-    end
-    return clamp(h_min, 1e-3, 0.2)
-end
-
-"""
-    make_optimal_mpsi(psilow, psihigh, A, sq_in; tau, psi_split_core, psi_split_edge)
-
-Compute the minimum number of radial knots needed to achieve target accuracy τ in q,
-given the separatrix log slope A. Three-region geometric grid: core, pedestal, far edge.
-The middle-region spacing is driven by profile curvature (P, F, dV/dψ, q) via sq_in.
-"""
-function make_optimal_mpsi(psilow, psihigh, A, sq_in;
-    tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
-    dlog = (13.0 * tau / A)^(1/4)
-    N_edge = ceil(Int, log((1.0 - psi_split_edge) / (1.0 - psihigh)) / dlog) + 1
-    h_mid = _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
-    N_mid = ceil(Int, (psi_split_edge - psi_split_core) / h_mid)
-    N_core = ceil(Int, log(psi_split_core / psilow) / dlog)
-    mpsi = N_core + N_mid + N_edge
-    @info "Auto-mpsi: N_core=$N_core + N_mid=$N_mid + N_edge=$N_edge = $mpsi (A=$(@sprintf("%.3f",A)), h_mid=$(@sprintf("%.4f",h_mid)), tau=$tau)"
-    return N_core, N_mid, N_edge
-end
-
-"""
     make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge; psi_split_core, psi_split_edge)
 
 Build a three-region ψ grid with (N_core + N_mid + N_edge)+1 knots, using the counts
@@ -486,39 +403,36 @@ function make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge;
 end
 
 """
-    _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    _build_psi_grid(equil_params, psilow, psihigh)
 
 Resolve `mpsi` and build `psi_nodes` for any supported `grid_type`.
 
-For `"log_asymptotic"` with `mpsi=0`, estimates the separatrix log slope from two probe
-integrations and computes the minimum knot count for `psi_accuracy`. For `"ldp"`, uses
-the sin²-spaced grid. Shared by `direct_fieldline_int` and `efit_by_inversion` solvers.
+For `"log_asymptotic"` with `mpsi=0` (the auto grid), this is the coarse pass-1 layout of
+the two-pass refinement — the main driver measures the formed equilibrium and re-forms on
+the `refined_psi_grid` result. Shared by `direct_fieldline_int` and `efit_by_inversion`
+solvers.
 """
-function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+function _build_psi_grid(equil_params, psilow, psihigh)
     mpsi = equil_params.mpsi
-    n_core_mid_edge = nothing
     if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
-        A = _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
-        n_core_mid_edge = make_optimal_mpsi(psilow, psihigh, A, raw_profile.sq_in; tau=equil_params.psi_accuracy)
-        mpsi = sum(n_core_mid_edge)
+        # Two-pass auto grid: this is the coarse pass-1 layout; the driver measures the
+        # formed equilibrium's curvature and re-forms on a refined grid (GridRefinement.jl).
+        mpsi = 128
+        @info "Auto psi grid: forming pass-1 equilibrium on coarse $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
     elseif mpsi == 0
         mpsi = 128
     end
 
     psi_nodes = if equil_params.grid_type == "log_asymptotic"
-        if n_core_mid_edge !== nothing
-            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...;)
-        else
-            # Fixed mpsi specified: distribute by log-weights
-            log_core = log(0.03 / psilow)
-            log_mid = log(0.98 / 0.03)
-            log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
-            log_total = log_core + log_mid + log_edge
-            N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
-            N_core = round(Int, mpsi * log_core / log_total)
-            N_mid = mpsi - N_edge - N_core
-            make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
-        end
+        # Distribute mpsi across the three regions by log-weights
+        log_core = log(0.03 / psilow)
+        log_mid = log(0.98 / 0.03)
+        log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
+        log_total = log_core + log_mid + log_edge
+        N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
+        N_core = round(Int, mpsi * log_core / log_total)
+        N_mid = mpsi - N_edge - N_core
+        make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
     elseif equil_params.grid_type == "ldp"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
     elseif equil_params.grid_type == "pow1"
@@ -562,11 +476,11 @@ robustness.
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # direct_position! must run before building psi_nodes: probe integrations need ro, zo, rs2
+    # Locate the magnetic axis and separatrix for the field-line integrations
     ro, zo, _, rs2 = direct_position!(raw_profile)
 
     psi_nodes = override_psi_nodes === nothing ?
-                _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2) :
+                _build_psi_grid(equil_params, psilow, psihigh) :
                 _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
     mpsi = length(psi_nodes) - 1
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)

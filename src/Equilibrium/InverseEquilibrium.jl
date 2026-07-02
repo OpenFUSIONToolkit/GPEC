@@ -139,40 +139,22 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         sq_xs = _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
         mpsi = length(sq_xs) - 1
     elseif grid_type == "log_asymptotic"
-        n_core_mid_edge = nothing
         if mpsi == 0 && config.psi_accuracy > 0
-            # Estimate A from q profile near psihigh (q is column 3 in sq_in)
-            ε = max(1.0 - psihigh, 0.001)
-            ψ₁ = clamp(1.0 - 3ε, psilow + 0.01, 0.999)
-            ψ₂ = clamp(1.0 - 1.5ε, psilow + 0.01, 0.999)
-            A = try
-                buf = zeros(size(sq_in.y, 2))
-                sq_in(buf, ψ₁)
-                q1 = buf[3]
-                sq_in(buf, ψ₂)
-                q2 = buf[3]
-                max(abs(q2 - q1) / log(2), 0.1)
-            catch
-                @warn "Could not estimate log slope from q profile, using default A=2.0"
-                2.0
-            end
-            n_core_mid_edge = make_optimal_mpsi(psilow, psihigh, A, sq_in; tau=config.psi_accuracy)
-            mpsi = sum(n_core_mid_edge)
+            # Two-pass auto grid: coarse pass-1 layout; the driver refines and re-forms
+            # on the measured-curvature grid (GridRefinement.jl).
+            mpsi = 128
+            @info "Auto psi grid: forming pass-1 equilibrium on coarse $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
         elseif mpsi == 0
             mpsi = 128
         end
-        sq_xs = if n_core_mid_edge !== nothing
-            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...)
-        else
-            log_core = log(0.03 / psilow)
-            log_mid = log(0.98 / 0.03)
-            log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
-            log_total = log_core + log_mid + log_edge
-            N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
-            N_core = round(Int, mpsi * log_core / log_total)
-            N_mid = mpsi - N_edge - N_core
-            make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
-        end
+        log_core = log(0.03 / psilow)
+        log_mid = log(0.98 / 0.03)
+        log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
+        log_total = log_core + log_mid + log_edge
+        N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
+        N_core = round(Int, mpsi * log_core / log_total)
+        N_mid = mpsi - N_edge - N_core
+        sq_xs = make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
     elseif grid_type == "ldp"
         if mpsi == 0
             mpsi = 128

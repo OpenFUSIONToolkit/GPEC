@@ -410,11 +410,11 @@ function equilibrium_solver_by_inversion(
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # Find magnetic axis and separatrix before building psi_nodes (needed for probe integrations)
+    # Locate the magnetic axis and separatrix for the contour tracing
     ro, zo, _, rs2 = direct_position!(raw_profile)
 
     psi_nodes = override_psi_nodes === nothing ?
-                _build_psi_grid(equil_params, psilow, psihigh, direct_fieldline_int, raw_profile, ro, zo, rs2) :
+                _build_psi_grid(equil_params, psilow, psihigh) :
                 _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
     mpsi = length(psi_nodes) - 1
 
