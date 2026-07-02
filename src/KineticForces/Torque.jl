@@ -422,7 +422,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        ibmax::Int, theta_bmax::Float64,
                        smat=nothing, tmat=nothing, xmat=nothing,
                        ymat=nothing, zmat=nothing,
-                       nlmda::Int=64, ntheta::Int=128,
+                       nlmda::Int=128, ntheta::Int=128,
                        nutype::String="harmonic", f0type::String="maxwellian",
                        nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
                        energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
@@ -477,8 +477,10 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # Build CubicSeriesInterpolant on normalized data (single build)
-    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
+    # Build CubicSeriesInterpolant on normalized data (single build).
+    # CubicFit endpoint BC = 4-point polynomial fit, matching Fortran
+    # cspline_fit(fbnce,'extrap') endpoint-derivative extrapolation.
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=CubicFit())
 
     # 3. Set rex/imx multipliers (Fortran lines 839-847)
     method_suffix = length(method) >= 4 ? method[2:4] : ""
@@ -808,7 +810,8 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         end
     end
 
-    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
+    # CubicFit endpoint BC matches Fortran cspline_fit(fbnce,'extrap').
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=CubicFit())
 
     # Dual-output pitch integration: one energy sweep per (λ, E) produces both
     # halves. Packed return is [wmm | tmm], each length nqty.
