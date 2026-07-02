@@ -77,11 +77,13 @@ Read `T_total_*` and `dW_total_*` scalar reference values from the Fortran
 function read_pentrc_reference(pentrc_nc::String)
     NCDatasets.Dataset(pentrc_nc, "r") do ds
         gatt = ds.attrib
+        # Reference runs may enable only a subset of methods (e.g. fgar only); missing attributes → NaN.
+        att(k) = haskey(gatt, k) ? Float64(gatt[k]) : NaN
         return (
-            T_total_fgar=Float64(gatt["T_total_fgar"]),
-            T_total_tgar=Float64(gatt["T_total_tgar"]),
-            dW_total_fgar=Float64(gatt["dW_total_fgar"]),
-            dW_total_tgar=Float64(gatt["dW_total_tgar"])
+            T_total_fgar=att("T_total_fgar"),
+            T_total_tgar=att("T_total_tgar"),
+            dW_total_fgar=att("dW_total_fgar"),
+            dW_total_tgar=att("dW_total_tgar")
         )
     end
 end
@@ -142,7 +144,6 @@ nn_high = 1
 delta_mlow = 8
 delta_mhigh = 8
 mthvac = 512
-thmax0 = 1
 
 kinetic_source = "fixed"
 kinetic_factor = 0.0
