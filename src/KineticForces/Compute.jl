@@ -11,6 +11,39 @@ using adaptive Gauss-Kronrod quadrature at all levels (ψ, λ, energy).
 # ============================================================================
 
 """
+    psi_panel_points(sing_psis, x0, xout) → Vector{Float64}
+
+Build the ψ-quadrature node list `[x0, rationals strictly inside (x0, xout), xout]`.
+Paneling the integral at the rational surfaces puts the resonant torque-density peaks
+(reg_spot/collisionally broadened, but narrow in ψ) on Gauss-Kronrod interval endpoints,
+which the rule handles natively instead of hunting them by adaptive bisection. Surfaces
+within 1e-8 of a bound are dropped to avoid degenerate panels.
+"""
+function psi_panel_points(sing_psis::Vector{Float64}, x0::Float64, xout::Float64)
+    return [x0; filter(p -> x0 + 1e-8 < p < xout - 1e-8, sing_psis); xout]
+end
+
+"""
+    check_psi_quadrature_convergence(total, quad_err, ctrl, method)
+
+Warn when the ψ torque quadrature terminated without satisfying the requested tolerances
+(hit `maxevals_psi`), or when a nonzero user-set `atol_psi` dominated termination — the
+silent-garbage scenario for weak applied fields, since NTV scales as δB².
+"""
+function check_psi_quadrature_convergence(total::ComplexF64, quad_err::Float64,
+                                          ctrl::KineticForcesControl, method::String)
+    if quad_err > max(ctrl.atol_psi, ctrl.rtol_psi * abs(total))
+        @warn "ψ torque quadrature ($method) did not converge within maxevals_psi=$(ctrl.maxevals_psi): " *
+              "error estimate $quad_err vs |T|=$(abs(total)) N·m. Raise maxevals_psi or loosen rtol_psi."
+    elseif ctrl.atol_psi > ctrl.rtol_psi * abs(total)
+        @warn "atol_psi=$(ctrl.atol_psi) N·m dominated ψ quadrature termination ($method): " *
+              "|T|=$(abs(total)) N·m is small relative to atol_psi, so the relative error is uncontrolled. " *
+              "NTV scales as δB², so weak applied fields shrink the torque quadratically — recommend atol_psi=0 (rtol-only)."
+    end
+    return nothing
+end
+
+"""
     integrate_psi_quadgk(n, nl, zi, mi, wdfac, divxfac, electron, method,
                           equil, intr, ctrl, kinetic_profiles; psi_min, psi_max) → NamedTuple
 
@@ -25,6 +58,11 @@ NamedTuple with:
 - `torque_profile`: NamedTuple of (psi, dtdpsi, t_cumulative) from evaluation points
 - `matrix_integrated`: Trapezoidal-integrated mpert×mpert×6 matrix (if matrix method)
 - `psi_nsteps::Int`: Number of integrand evaluations
+- `psi_quad_error::Float64`: Quadrature error estimate for the total torque
+
+The integral is paneled at the rational-surface ψ locations (`intr.sing_psis`) and capped
+at `ctrl.maxevals_psi` evaluations; a warning is emitted if the quadrature fails to reach
+`ctrl.rtol_psi`/`ctrl.atol_psi` or if a nonzero `atol_psi` dominates termination.
 """
 function integrate_psi_quadgk(
     n::Int, nl::Int, zi::Int, mi::Int,
@@ -97,8 +135,12 @@ function integrate_psi_quadgk(
         end
     end
 
+    pts = psi_panel_points(intr.sing_psis, x0, xout)
+
     bi = QuadGK.BatchIntegrand(psi_batch!, ComplexF64[], Float64[])
-    total, _ = quadgk(bi, x0, xout; atol=ctrl.atol_psi, rtol=ctrl.rtol_psi)
+    total, quad_err = quadgk(bi, pts...; atol=ctrl.atol_psi, rtol=ctrl.rtol_psi, maxevals=ctrl.maxevals_psi)
+
+    check_psi_quadrature_convergence(total, quad_err, ctrl, method)
 
     # Sort logs by ψ for the diagnostic torque profile.
     perm = sortperm(logged_psi)
@@ -129,7 +171,9 @@ function integrate_psi_quadgk(
         end
     end
 
-    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts)
+    @info "ψ torque quadrature ($method): T=$total N·m, error estimate $quad_err, $npts integrand evaluations over $(length(pts) - 1) panels"
+
+    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts, psi_quad_error=quad_err)
 end
 
 

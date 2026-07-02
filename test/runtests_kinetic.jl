@@ -335,6 +335,10 @@
         @test ctrl.nutype == "harmonic"
         @test ctrl.f0type == "maxwellian"
         @test ctrl.psilims == [0.0, 1.0]
+        # ψ quadrature is rtol-primary: atol_psi is amplitude-sensitive (NTV ∝ δB²)
+        @test ctrl.atol_psi == 0.0
+        @test ctrl.rtol_psi == 1e-2
+        @test ctrl.maxevals_psi == 2000
     end
 
     @testset "KineticForcesInternal defaults" begin
@@ -343,6 +347,32 @@
         @test intr.bo == 0.0
         @test intr.mpert == 0
         @test intr.chi1 == 0.0
+        @test isempty(intr.sing_psis)
+    end
+
+    @testset "psi_panel_points" begin
+        sing_psis = [0.2, 0.5, 0.8]
+        # Interior rationals become panel boundaries, in order
+        @test KF.psi_panel_points(sing_psis, 0.1, 0.9) == [0.1, 0.2, 0.5, 0.8, 0.9]
+        # Rationals outside the integration bounds are dropped
+        @test KF.psi_panel_points(sing_psis, 0.3, 0.7) == [0.3, 0.5, 0.7]
+        # Rationals at (or within 1e-8 of) a bound would create a degenerate panel — dropped
+        @test KF.psi_panel_points(sing_psis, 0.2, 0.8) == [0.2, 0.5, 0.8]
+        @test KF.psi_panel_points([0.2 + 5e-9], 0.2, 0.9) == [0.2, 0.9]
+        # No rational surfaces: plain two-point interval
+        @test KF.psi_panel_points(Float64[], 0.0, 1.0) == [0.0, 1.0]
+    end
+
+    @testset "check_psi_quadrature_convergence" begin
+        ctrl = KF.KineticForcesControl()  # atol_psi=0, rtol_psi=1e-2
+        total = 1.0 + 0.0im
+        # Converged: error below rtol*|T|, no warning
+        @test_logs KF.check_psi_quadrature_convergence(total, 1e-3, ctrl, "fgar")
+        # Hit maxevals: error above tolerance
+        @test_logs (:warn, r"maxevals_psi") KF.check_psi_quadrature_convergence(total, 0.5, ctrl, "fgar")
+        # Nonzero atol_psi dominating a small torque: the silent-garbage scenario
+        ctrl.atol_psi = 1e-2
+        @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl, "fgar")
     end
 
     @testset "METHOD_REGISTRY" begin
