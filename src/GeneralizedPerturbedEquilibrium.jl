@@ -237,7 +237,10 @@ function main_from_inputs(
         psi_nodes = Equilibrium.refined_psi_grid(equil;
             tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory)
         rerun_input = if additional_input !== nothing
-            additional_input  # analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable
+            # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
+            # path re-runs read_imas, which must resolve the same psihigh both passes;
+            # _validate_psi_nodes errors loudly if it does not.
+            additional_input
         elseif equil.ingest isa Equilibrium.DirectIngest
             Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
         elseif equil.ingest isa Equilibrium.InverseIngest

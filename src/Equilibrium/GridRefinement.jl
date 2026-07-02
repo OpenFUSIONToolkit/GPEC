@@ -223,9 +223,11 @@ end
 
 Place N+1 nodes over [xs[1], xs[end]] by equidistributing the density integral
 M(ψ) = ∫ρ dψ (trapezoid on the sample nodes, piecewise-linear inversion). Endpoints are
-exactly xs[1] and xs[end]; interior nodes are strictly increasing since ρ > 0.
+exactly xs[1] and xs[end]; interior nodes are strictly increasing since ρ > 0, which is
+a required precondition (a zero density would make M non-invertible).
 """
 function _equidistribute(xs::Vector{Float64}, rho::Vector{Float64}, N::Int)
+    all(>(0), rho) || error("_equidistribute requires strictly positive density")
     n = length(xs)
     M = zeros(Float64, n)
     @inbounds for i in 2:n
