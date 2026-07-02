@@ -5,7 +5,7 @@
 
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
 psihigh = 0.9995                        # Upper limit of normalized poloidal flux
