@@ -100,6 +100,10 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
 
     # Create periodic interpolant for poloidal quantities
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
+    # Extrap cubic of B for the v_par factor + bounce points (Fortran vspl, fit
+    # "extrap"); CubicFit ≡ Fortran extrap. Kept separate from the periodic tspl
+    # so v_par matches Fortran torque.F90:599-600,677 exactly (see _vpar_from_extrap).
+    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -144,7 +148,9 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         end
         if Bθ > bmax
             bmax = Bθ
-            theta_bmax = θn
+            # theta_bmax intentionally NOT refined: Fortran uses the nodal-argmax
+            # knot xs[ibmax] as the transit start t1/t2 (torque.F90:610-611,648-649);
+            # the refined extremum (:301) is diagnostic-only. Keep theta_bmax = xs[ibmax].
         end
     end
 
@@ -241,6 +247,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    method, op_wmats;
                                    chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
                                    mpert=intr.mpert, ibmax=ibmax, theta_bmax=theta_bmax,
+                                   B_extrap=B_extrap,
                                    smat=smat_f, tmat=tmat_f, xmat=xmat_f,
                                    ymat=ymat_f, zmat=zmat_f,
                                    energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
@@ -419,7 +426,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
                        dbob_m_f, divx_m_f, divxfac, wdfac, method, op_wmats;
                        chi1::Float64, ro::Float64, mfac::Vector{Int}, mpert::Int,
-                       ibmax::Int, theta_bmax::Float64,
+                       ibmax::Int, theta_bmax::Float64, B_extrap,
                        smat=nothing, tmat=nothing, xmat=nothing,
                        ymat=nothing, zmat=nothing,
                        nlmda::Int=128, ntheta::Int=128,
@@ -433,7 +440,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     # 1. Compute bounce-averaged quantities
     bounce = compute_bounce_data(
         psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
-        tspl, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
+        tspl, B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
         mass, chrg, T_s, method;
         nlmda, ntheta, smat, tmat, xmat, ymat, zmat)
 
@@ -638,6 +645,8 @@ function _setup_surface_state(
     end
 
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
+    # Extrap cubic of B for v_par + bounce points (Fortran vspl "extrap"); see _vpar_from_extrap.
+    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -671,7 +680,9 @@ function _setup_surface_state(
             end
             if Bθ > bmax
                 bmax = Bθ
-                theta_bmax = θn
+                # theta_bmax intentionally NOT refined: Fortran uses the nodal-argmax
+                # knot xs[ibmax] for t1/t2 (torque.F90:610-611,648-649); refined extremum
+                # is diagnostic-only. Keep theta_bmax = xs[ibmax].
             end
         end
     end
@@ -708,7 +719,7 @@ function _setup_surface_state(
 
     return (;
         chrg, mass,
-        tspl, bmax, bmin, ibmax, theta_bmax,
+        tspl, B_extrap, bmax, bmin, ibmax, theta_bmax,
         q, n_s, T_s, welec,
         wdian, wdiat, wtran, wgyro, nuk,
         epsr,
@@ -773,7 +784,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
 
     bounce = compute_bounce_data(
         psi, n, l, state.q, bo, state.bmax, state.bmin, state.ibmax, state.theta_bmax,
-        state.tspl, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
+        state.tspl, state.B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
         state.mass, state.chrg, state.T_s, "fwmm";
         nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
 

@@ -235,7 +235,7 @@ end
 
 """
     compute_bounce_data(psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
-                        tspl, mfac, chi1, ro, dbob_m_f, divx_m_f,
+                        tspl, B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f,
                         divxfac, wdfac, mass, chrg, T_s, method;
                         nlmda=128, ntheta=128,
                         smat=nothing, tmat=nothing, xmat=nothing,
@@ -277,7 +277,7 @@ function compute_bounce_data(
     psi::Float64, n::Int, l::Int, q::Float64,
     bo::Float64, bmax::Float64, bmin::Float64,
     ibmax::Int, theta_bmax::Float64,
-    tspl, mfac::Vector{Int}, chi1::Float64, ro::Float64,
+    tspl, B_extrap, mfac::Vector{Int}, chi1::Float64, ro::Float64,
     dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     mass::Float64, chrg::Float64,
@@ -325,13 +325,13 @@ function compute_bounce_data(
 
         # Find bounce points and build θ sub-grid
         _, _, tdt_pts, tdt_wts = _find_bounce_points_and_grid(
-            lmda, bo, sigma, tspl, ibmax, theta_bmax,
+            lmda, bo, sigma, B_extrap, ibmax, theta_bmax,
             lmdatpb, lmdamax, psi, ntheta)
 
         # Bounce integrals over θ (Fortran lines 674-735)
         wbbar, wdbar, dJdJ_val, wmats_lmda = _bounce_integrate(
             tdt_pts, tdt_wts, lmda, lnq, sigma, n, q, bo,
-            tspl, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
+            tspl, B_extrap, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
             do_matrices, mpert, smat, tmat, xmat, ymat, zmat)
 
         # Physical frequencies (Fortran lines 744-745)
@@ -390,31 +390,41 @@ end
 
 
 """
+    _vpar_from_extrap(B_extrap, lmda, bo, θ) → v_par
+
+Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` evaluated from the **extrap**
+cubic of B (`B_extrap`), matching Fortran's separate `vspl` (torque.F90:599-600,
+`vpar = vspl%f(1)` at :677 — "more consistent w/ bnce pts than direct from tspl").
+Because the "extrap" endpoint derivatives are linear in the nodal data, the extrap
+cubic of `1−(λ/bo)B` equals `1−(λ/bo)·(extrap cubic of B)`, so we build `B_extrap`
+once per surface (CubicFit ≡ Fortran extrap) and reuse it for the vpar factor, the
+bounce-point roots, and the deepest-well test — NOT the periodic `tspl`.
+"""
+@inline _vpar_from_extrap(B_extrap, lmda::Float64, bo::Float64, θ::Float64) =
+    1.0 - (lmda / bo) * B_extrap(mod(θ, 1.0))
+
+
+"""
 Find bounce points for trapped/passing particles and build θ sub-grid.
 Returns (t1, t2, theta_points, theta_weights).
 """
 function _find_bounce_points_and_grid(
     lmda::Float64, bo::Float64, sigma::Int,
-    tspl, ::Int, theta_bmax::Float64,
+    B_extrap, ::Int, theta_bmax::Float64,
     ::Float64, ::Float64, psi::Float64,
     ntheta::Int
 )
     if sigma == 0  # trapped
-        # Build v_par(θ) = 1 - (λ/bo)*B(θ) and find roots
-        # Use a dense θ grid to find zero crossings
-        nfine = 256
-        theta_fine = range(0.0, 1.0, length=nfine+1)
-        vpar_fine = [1.0 - (lmda / bo) * tspl(mod(θ, 1.0))[1] for θ in theta_fine]
-
-        # Find zero crossings
-        bpts = Float64[]
-        for i in 1:nfine
-            if vpar_fine[i] * vpar_fine[i+1] < 0
-                # Bisect for better accuracy
-                θ_root = _bisect_vpar(tspl, lmda, bo, theta_fine[i], theta_fine[i+1])
-                push!(bpts, θ_root)
-            end
-        end
+        # Bounce points = roots of v_par(θ) = 1 − (λ/bo)·B_extrap(θ) in (0,1).
+        # Fortran fits vspl "extrap" and calls spline_roots (torque.F90:600-602), which
+        # solves each equilibrium interval's cubic analytically. Roots.find_zeros
+        # adaptively finds ALL roots of the SAME extrap cubic (B_extrap), so the root
+        # values match spline_roots (robust to the near-boundary interior dip a fixed
+        # sign-change scan could miss). Sorted DESCENDING to match spline_roots order
+        # (spline.f:1782-1785), which the marginally-trapped and deepest-well wrap
+        # logic below assume.
+        vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
+        bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
 
         nbpts = length(bpts)
         if nbpts < 1
@@ -427,7 +437,7 @@ function _find_bounce_points_and_grid(
             t2 = bpts[1] + 1.0
         else
             # Find deepest potential well (Fortran lines 616-639)
-            t1, t2 = _find_deepest_well(bpts, tspl, lmda, bo)
+            t1, t2 = _find_deepest_well(bpts, B_extrap, lmda, bo)
         end
 
         # Power-law grid refined near bounce points
@@ -444,55 +454,10 @@ end
 
 
 """
-    _bisect_vpar(tspl, lmda, bo, θa, θb; tol=1e-12, maxiter=50) → θ
-
-Bisect on `θ ∈ [θa, θb]` to find a bounce point — the angle where the parallel
-velocity vanishes, `v_par(θ) = 1 - (λ/bo) · B(θ) = 0`. The caller is responsible
-for supplying a bracket where `v_par(θa)` and `v_par(θb)` have opposite signs;
-this routine does not check, it just halves toward the sign change.
-
-# Arguments
-- `tspl`: 1D θ-interpolant returning at least `[B(θ), …]` at first index;
-  `tspl(mod(θ, 1.0))[1]` extracts the local field magnitude.
-- `lmda`: pitch-angle parameter λ = μ·bo / E.
-- `bo`: on-axis toroidal field used to normalise λ.
-- `θa, θb`: bracket endpoints (normalised θ ∈ [0,1)); typically straddling a B-peak.
-
-# Keyword arguments
-- `tol`: termination tolerance — exits when either `|v_par(θ_mid)| < tol` or the
-  bracket width `θb − θa < tol`. Default `1e-12` is tight enough that the
-  residual `v_par` is dominated by the spline-evaluation roundoff of `tspl`.
-- `maxiter`: hard iteration cap. Default `50` halves the bracket by ~10⁻¹⁵, well
-  past `tol` on a unit-scale bracket; the cap is a runaway guard rather than the
-  expected exit. On exhaustion the midpoint of the final bracket is returned.
-
-# Returns
-- `θ::Float64`: the converged (or capped) bounce-point angle.
-"""
-function _bisect_vpar(tspl, lmda::Float64, bo::Float64, θa::Float64, θb::Float64; tol=1e-12, maxiter=50)
-    va = 1.0 - (lmda / bo) * tspl(mod(θa, 1.0))[1]
-    for _ in 1:maxiter
-        θm = 0.5 * (θa + θb)
-        vm = 1.0 - (lmda / bo) * tspl(mod(θm, 1.0))[1]
-        if abs(vm) < tol || (θb - θa) < tol
-            return θm
-        end
-        if va * vm < 0
-            θb = θm
-        else
-            θa = θm
-            va = vm
-        end
-    end
-    return 0.5 * (θa + θb)
-end
-
-
-"""
 Find deepest potential well among bounce point pairs.
 Ports Fortran lines 616-639.
 """
-function _find_deepest_well(bpts::Vector{Float64}, tspl, lmda::Float64, bo::Float64)
+function _find_deepest_well(bpts::Vector{Float64}, B_extrap, lmda::Float64, bo::Float64)
     nbpts = length(bpts)
     best_vpar = 0.0
     best_t1 = 0.0
@@ -506,7 +471,7 @@ function _find_deepest_well(bpts::Vector{Float64}, tspl, lmda::Float64, bo::Floa
         else
             θmid = 0.5 * (bpts[i] + bpts[j])
         end
-        vpar_mid = 1.0 - (lmda / bo) * tspl(mod(θmid, 1.0))[1]
+        vpar_mid = _vpar_from_extrap(B_extrap, lmda, bo, θmid)
         if vpar_mid > best_vpar
             best_t1 = bpts[i]
             best_t2 = bpts[j]
@@ -535,7 +500,7 @@ Ports Fortran torque.F90 lines 674-793.
 function _bounce_integrate(
     tdt_pts::Vector{Float64}, tdt_wts::Vector{Float64},
     lmda::Float64, lnq::Float64, sigma::Int, n::Int, q::Float64, bo::Float64,
-    tspl, chi1::Float64, ro::Float64,
+    tspl, B_extrap, chi1::Float64, ro::Float64,
     mfac::Vector{Int}, dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     do_matrices::Bool, mpert::Int,
@@ -576,7 +541,10 @@ function _bounce_integrate(
         jac = tspl_f[4]
         djdpsi = tspl_f[5]
 
-        vpar = 1.0 - (lmda / bo) * B_val
+        # vpar from the extrap cubic of B (Fortran vspl, torque.F90:677), NOT the
+        # periodic tspl B_val — which stays as the numerator field below (Fortran
+        # bspl uses tspl%f(1)/(4) for the numerator, vspl%f(1) only for 1/√vpar).
+        vpar = 1.0 - (lmda / bo) * B_extrap(θmod)
 
         if vpar <= 0
             # Zero crossing near bounce points — Fortran torque.F90:678-697 fill
