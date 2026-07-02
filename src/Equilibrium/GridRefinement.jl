@@ -7,22 +7,40 @@ kinetic profiles) and equidistributes it, pinning mandatory knots (e.g. rational
 via `merge_mandatory_nodes`. Pass 2 re-forms the equilibrium on the refined grid through
 the `override_psi_nodes` keyword of `setup_equilibrium`.
 
-The density uses the cubic-interpolation error model err ≈ h⁴|f''''|/384, so the knot
-count of every region scales as psi_accuracy^(-1/4) and tightening the tolerance refines
-all regions proportionally. Fourth derivatives are estimated by divided differences on the
-pass-1 nodes only — nodal values come from independent field-line integrations and are
-immune to inter-knot spline ringing.
+The density uses the cubic *derivative* interpolation error model err(f′) ≈ h³|f''''|/24 —
+the stability physics consumes spline derivatives (q′ at rational surfaces, p′ and V′ in
+the Euler-Lagrange and ballooning coefficients), whose error at a given spacing is far
+larger than the value error. Every region's knot count then scales as
+psi_accuracy^(-1/3), so tightening the tolerance refines edge, pedestal, and mid
+proportionally. Fourth derivatives are estimated by divided differences on the pass-1
+nodes only — nodal values come from independent field-line integrations and are immune to
+inter-knot spline ringing.
+
+Curvature is measured with respect to ρ = √ψ_N, in which the equilibrium is regular at
+the magnetic axis (R−R₀ ~ √ψ_N makes the geometry channels behave as ψ_N^(k/2) there, so
+their ψ-derivatives diverge but their ρ-derivatives do not); the resulting ρ-spacing maps
+back to the ψ density through dψ/dρ = 2√ψ_N, giving natural √ψ core packing.
 """
 
-# Cubic spline interpolation error constant: err ≈ h⁴|f''''|/384
-const CUBIC_ERR_CONST = 384.0
-# |f''''|/f_scale below this is treated as integrator noise, not curvature
+# Cubic spline derivative interpolation error constant: err(f′) ≈ h³|f''''|/24
+const CUBIC_DERIV_ERR_CONST = 24.0
+# |f''''|/f_scale below this is treated as integrator noise, not curvature. The absolute
+# floor covers well-spaced grids; a relative-noise term ε/h⁴ dominates where the sample
+# grid is tightly packed, since divided differences amplify per-node noise as h⁻⁴ there
+# (a-priori floors carry those regions instead).
 const D4_NOISE_FLOOR = 1e3
+const NODE_NOISE_REL = 1e-8
 # Per-quantity target spacing clamp (ψ_N units)
 const H_TARGET_MIN = 1e-4
 const H_TARGET_MAX = 0.2
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
+# Local packing around mandatory (rational) surfaces: knot spacing h_s = coef·τ^(1/3) at
+# the surface, geometric growth away from it, applied within the given radius. The Δ'
+# asymptotic matching samples the ψ-splined coefficient matrices around each singular
+# surface, so their local interpolation error controls Δ' convergence there.
+const SING_PACK_COEF = 0.06
+const SING_PACK_RADIUS = 0.05
 
 """
     wants_two_pass(config::EquilibriumConfig) -> Bool
@@ -76,92 +94,97 @@ function _fourth_derivative_nodes(xs::AbstractVector{<:Real}, ys::AbstractVector
 end
 
 """
-    _density_from_curvature!(rho, xs, d4, f_scale, tau)
+    _density_from_curvature!(rho, d4, f_scale, tau; xs=nothing)
 
-Accumulate (in place, by max) the knot density implied by the h⁴ error model for one
-quantity: ρ = 1/h_target with h_target = (384·τ·f_scale/|f''''|)^(1/4), clamped to
-[`H_TARGET_MIN`, `H_TARGET_MAX`]. Normalized curvature below `D4_NOISE_FLOOR` is ignored.
+Accumulate (in place, by max) the knot density implied by the h³ derivative error model
+for one quantity: ρ = 1/h_target with h_target = (24·τ·f_scale/|f''''|)^(1/3), clamped to
+[`H_TARGET_MIN`, `H_TARGET_MAX`]. Normalized curvature below the noise floor is ignored;
+when `xs` is given the floor grows as `NODE_NOISE_REL`/h_local⁴ on tightly packed sample
+grids, where divided differences amplify nodal noise.
 """
-function _density_from_curvature!(rho::Vector{Float64}, d4::Vector{Float64}, f_scale::Float64, tau::Float64)
-    @inbounds for i in eachindex(rho)
+function _density_from_curvature!(rho::Vector{Float64}, d4::Vector{Float64}, f_scale::Float64, tau::Float64;
+    xs::Union{Nothing,Vector{Float64}}=nothing)
+    n = length(rho)
+    @inbounds for i in 1:n
+        noise_floor = D4_NOISE_FLOOR
+        if xs !== nothing
+            h_loc = (xs[min(i + 2, n)] - xs[max(i - 2, 1)]) / 4
+            noise_floor = max(noise_floor, NODE_NOISE_REL / h_loc^4)
+        end
         d4n = d4[i] / f_scale
-        d4n < D4_NOISE_FLOOR && continue
-        h = clamp((CUBIC_ERR_CONST * tau / d4n)^0.25, H_TARGET_MIN, H_TARGET_MAX)
+        d4n < noise_floor && continue
+        h = clamp((CUBIC_DERIV_ERR_CONST * tau / d4n)^(1 / 3), H_TARGET_MIN, H_TARGET_MAX)
         rho[i] = max(rho[i], 1.0 / h)
     end
     return rho
 end
 
 """
-    _measured_edge_log_slope(xs, q_vals; nk=5) -> Float64
-
-Estimate the separatrix log slope A of q ≈ −A·ln(1−ψ) from the outermost pass-1 q nodes.
-Returns the fallback A=2.0 when the estimate is non-finite or non-positive (e.g. reversed
-edge shear); analytic equilibria with finite edge q give a genuinely small A and hence a
-weak edge floor.
-"""
-function _measured_edge_log_slope(xs::Vector{Float64}, q_vals::AbstractVector{<:Real}; nk::Int=5)
-    n = length(xs)
-    n < nk + 1 && return 2.0
-    j = n - nk
-    denom = log((1.0 - xs[j]) / (1.0 - xs[n]))
-    A = (q_vals[n] - q_vals[j]) / denom
-    return (isfinite(A) && A > 0) ? A : 2.0
-end
-
-"""
-    _knot_density(equil::PlasmaEquilibrium; tau, kin=nothing) -> Vector{Float64}
+    _knot_density(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[]) -> Vector{Float64}
 
 Knot density ρ(ψ) (knots per unit ψ_N) at the pass-1 nodes `equil.profiles.xs`, combining
 by max:
 
-  - measured h⁴-model curvature of the 1D profiles F, P, dV/dψ, q;
+  - measured h³-derivative-model curvature of the 1D profiles F, P, dV/dψ, q;
   - curvature of the four rzphi geometry channels along every `THETA_STRIDE`-th θ-line
     (max over θ) — the bicubic ψ-axis shares these knots, so geometry sharpness must
     attract knots just like the 1D profiles;
   - curvature of the kinetic profiles n_i, n_e, T_i, T_e, ω_E when `kin` is given
     (their own grid, rebroadcast by linear interpolation) — steep pedestal gradients in
     the kinetic data pull knots into the pedestal;
-  - a-priori floors: geometric-in-log(1−ψ) at the edge with slope A measured from the
-    pass-1 q nodes, geometric-in-log(ψ) in the core, and a global minimum density.
+  - a-priori floors: geometric-in-log(1−ψ) at the edge and geometric-in-log(ψ) in the
+    core, plus a global minimum density. For the separatrix asymptote q ≈ −A·ln(1−ψ)
+    (q′ = A/(1−ψ)), geometric packing with dlog = (4τ)^(1/3) gives uniform *relative* q′
+    error dlog³/4 = τ independent of A — guarding pass-1 undersampling of the divergence
+    without over-packing equilibria whose edge q is finite;
+  - local packing around each `mandatory` (rational) surface: spacing `SING_PACK_COEF`·τ^(1/3)
+    at the surface with geometric growth away from it, within `SING_PACK_RADIUS`.
 
 A running max over ±1 node smooths single-stencil dropouts.
 """
-function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing)
+function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing,
+    mandatory::Vector{Float64}=Float64[])
     xs = equil.profiles.xs
     n = length(xs)
-    rho = zeros(Float64, n)
+    # Curvature is measured against ρ = √ψ (regular at the axis); the ρ-space density
+    # rho_r converts to the ψ density at the end via dρ/dψ = 1/(2√ψ).
+    rs = sqrt.(xs)
+    rho_r = zeros(Float64, n)
 
     # 1D profiles
     for spl in (equil.profiles.F_spline, equil.profiles.P_spline, equil.profiles.dVdpsi_spline, equil.profiles.q_spline)
         vals = spl.y
         f_scale = max(maximum(abs, vals), 1e-12)
-        _density_from_curvature!(rho, _fourth_derivative_nodes(xs, vals), f_scale, tau)
+        _density_from_curvature!(rho_r, _fourth_derivative_nodes(rs, vals), f_scale, tau; xs=rs)
     end
 
-    # 2D geometry channels: per-θ-line curvature along ψ, max over θ, plane-wide scale
+    # 2D geometry channels: per-θ-line curvature along ρ, max over θ, plane-wide scale
     for interp in (equil.rzphi_rsquared, equil.rzphi_offset, equil.rzphi_nu, equil.rzphi_jac)
         vals2d = @view interp.nodal_derivs.partials[1, :, :]
         f_scale = max(maximum(abs, vals2d), 1e-12)
         for itheta in 1:THETA_STRIDE:size(vals2d, 2)
-            _density_from_curvature!(rho, _fourth_derivative_nodes(xs, @view(vals2d[:, itheta])), f_scale, tau)
+            _density_from_curvature!(rho_r, _fourth_derivative_nodes(rs, @view(vals2d[:, itheta])), f_scale, tau; xs=rs)
         end
     end
 
     # Kinetic profiles on their own grid, rebroadcast onto xs
     if kin !== nothing
+        rs_kin = sqrt.(kin.xs)
         rho_kin = zeros(Float64, length(kin.xs))
         for spl in (kin.ni_spline, kin.ne_spline, kin.Ti_spline, kin.Te_spline, kin.omegaE_spline)
             vals = spl.y
             f_scale = max(maximum(abs, vals), 1e-12)
-            _density_from_curvature!(rho_kin, _fourth_derivative_nodes(kin.xs, vals), f_scale, tau)
+            _density_from_curvature!(rho_kin, _fourth_derivative_nodes(rs_kin, vals), f_scale, tau; xs=rs_kin)
         end
-        kin_itp = cubic_interp(kin.xs, rho_kin; extrap=ExtendExtrap())
+        kin_itp = cubic_interp(rs_kin, rho_kin; extrap=ExtendExtrap())
         @inbounds for i in 1:n
-            (kin.xs[1] <= xs[i] <= kin.xs[end]) || continue
-            rho[i] = max(rho[i], kin_itp(xs[i]))
+            (rs_kin[1] <= rs[i] <= rs_kin[end]) || continue
+            rho_r[i] = max(rho_r[i], kin_itp(rs[i]))
         end
     end
+
+    # Convert the ρ-space density to ψ space: ρ_ψ(ψ) = ρ_ρ(ρ)·dρ/dψ = ρ_ρ/(2√ψ)
+    rho = [rho_r[i] / (2.0 * rs[i]) for i in 1:n]
 
     # Running max over ±1 node
     rho_s = copy(rho)
@@ -170,13 +193,27 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
         i < n && (rho_s[i] = max(rho_s[i], rho[i+1]))
     end
 
-    # A-priori floors: edge/core geometric packing and a global minimum
-    A = _measured_edge_log_slope(xs, equil.profiles.q_spline.y)
-    dlog = (13.0 * tau / A)^0.25
+    # A-priori regions: geometric edge floor, and a pure a-priori geometric core — the
+    # nodal data of the smallest flux surfaces is dominated by integration and axis
+    # extrapolation error, so measured curvature is not trusted below the core split.
+    dlog = (4.0 * tau)^(1 / 3)
     @inbounds for i in 1:n
-        xs[i] >= 0.9 && (rho_s[i] = max(rho_s[i], 1.0 / (dlog * (1.0 - xs[i]))))
-        xs[i] <= 0.03 && (rho_s[i] = max(rho_s[i], 1.0 / (dlog * xs[i])))
+        if xs[i] <= 0.03
+            rho_s[i] = 1.0 / (dlog * xs[i])
+        elseif xs[i] >= 0.9
+            rho_s[i] = max(rho_s[i], 1.0 / (dlog * (1.0 - xs[i])))
+        end
         rho_s[i] = max(rho_s[i], 1.0 / H_TARGET_MAX)
+    end
+
+    # Local packing around mandatory (rational) surfaces
+    h_s = max(SING_PACK_COEF * tau^(1 / 3), H_TARGET_MIN)
+    for psi_m in mandatory
+        @inbounds for i in 1:n
+            d = abs(xs[i] - psi_m)
+            d > SING_PACK_RADIUS && continue
+            rho_s[i] = max(rho_s[i], 1.0 / max(dlog * d, h_s))
+        end
     end
     return rho_s
 end
@@ -275,7 +312,7 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     delta_frac::Float64=0.25,
     N_cap::Int=1024)
     xs = equil.profiles.xs
-    rho = _knot_density(equil; tau, kin)
+    rho = _knot_density(equil; tau, kin, mandatory)
     M_total = sum(0.5 * (rho[i] + rho[i-1]) * (xs[i] - xs[i-1]) for i in 2:length(xs))
     N = clamp(ceil(Int, M_total), 32, N_cap)
     N == N_cap && M_total > N_cap &&
@@ -285,14 +322,15 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
 end
 
 """
-    implied_knot_count(equil::PlasmaEquilibrium; tau, kin=nothing) -> Int
+    implied_knot_count(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[]) -> Int
 
 Knot count the measured-curvature density model implies for a formed equilibrium. Used as
 a post-refinement consistency diagnostic: if this differs substantially from the actual
 grid size, the pass-1 grid under- or over-sampled a feature.
 """
-function implied_knot_count(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing)
+function implied_knot_count(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing,
+    mandatory::Vector{Float64}=Float64[])
     xs = equil.profiles.xs
-    rho = _knot_density(equil; tau, kin)
+    rho = _knot_density(equil; tau, kin, mandatory)
     return ceil(Int, sum(0.5 * (rho[i] + rho[i-1]) * (xs[i] - xs[i-1]) for i in 2:length(xs)))
 end
