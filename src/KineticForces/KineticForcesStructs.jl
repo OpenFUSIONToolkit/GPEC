@@ -254,9 +254,15 @@ the equilibrium geometry parameters needed for NTV calculations.
 function KineticForcesInternal(equil; verbose::Bool=false)
     mthsurf = length(equil.rzphi_ys) - 1
     nth = mthsurf + 1
+    # Fortran PENTRC (dcon_interface.f set_geom): bo = |sq%f(1)|/(2π·ro) at ψ=0 —
+    # the toroidal field AT THE MAGNETIC AXIS, from F extrapolated to the axis.
+    # NOT params.b0 (= bt0, the edge-extrapolated vacuum field at rmean, ~2%
+    # different on DIII-D). bo normalizes λ = μ·bo/E and v_par = 1−λB/bo, so this
+    # offset shifted the trapped/passing boundary and all bounce integrals (#269).
+    bo_axis = abs(equil.profiles.F_spline(0.0)) / (2π * equil.ro)
     KineticForcesInternal(;
         ro      = equil.ro,
-        bo      = equil.params.b0,
+        bo      = bo_axis,
         chi1    = 2π * equil.psio,
         mthsurf,
         tpsi_xs       = collect(range(0.0, 1.0, length=nth)),
