@@ -8,8 +8,8 @@ power_r = 0                    # Major radius power exponent for Jacobian
 grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
 psilow = 1e-4                  # Lower limit of normalized flux coordinate
 psihigh = 0.993                # Upper limit of normalized flux coordinate (0.993 stays clear of the separatrix; truncating at ≳0.998 is numerically unreasonable here)
-mpsi = 128                     # Number of radial grid points (0 = auto-compute from psi_accuracy)
-psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
+mpsi = 128                     # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
 etol = 1e-10                   # Error tolerance for equilibrium solver

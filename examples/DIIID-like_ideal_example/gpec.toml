@@ -10,8 +10,8 @@ jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_
 grid_type = "log_asymptotic"   # Radial grid packing type
 psilow = 1e-4                  # Lower limit of normalized poloidal flux
 psihigh = 0.9995               # Upper limit of normalized poloidal flux
-mpsi = 0                       # Number of radial grid points (0 = auto-compute from psi_accuracy)
-psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
+mpsi = 0                       # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
 etol = 1e-10                   # Error tolerance for equilibrium solver
