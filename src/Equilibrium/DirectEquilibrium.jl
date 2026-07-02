@@ -553,7 +553,8 @@ robustness.
     including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
     the physics quantity spline (`eqfun`).
 """
-@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput, fieldline_int=direct_fieldline_int)
+@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput, fieldline_int=direct_fieldline_int;
+    override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
 
     equil_params = raw_profile.config
     psio = raw_profile.psio
@@ -564,7 +565,9 @@ robustness.
     # direct_position! must run before building psi_nodes: probe integrations need ro, zo, rs2
     ro, zo, _, rs2 = direct_position!(raw_profile)
 
-    psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    psi_nodes = override_psi_nodes === nothing ?
+                _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2) :
+                _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
     mpsi = length(psi_nodes) - 1
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 

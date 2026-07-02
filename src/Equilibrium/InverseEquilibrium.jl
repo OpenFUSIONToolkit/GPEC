@@ -41,7 +41,7 @@ end
 
 
 
-function equilibrium_solver(input::InverseRunInput)
+function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
     @info "Starting Inverse Equilibrium Processing"
     # Extract input parameters
 
@@ -135,7 +135,10 @@ function equilibrium_solver(input::InverseRunInput)
     # c-----------------------------------------------------------------------
     # c     set up radial grid
     # c-----------------------------------------------------------------------
-    if grid_type == "log_asymptotic"
+    if override_psi_nodes !== nothing
+        sq_xs = _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
+        mpsi = length(sq_xs) - 1
+    elseif grid_type == "log_asymptotic"
         n_core_mid_edge = nothing
         if mpsi == 0 && config.psi_accuracy > 0
             # Estimate A from q profile near psihigh (q is column 3 in sq_in)

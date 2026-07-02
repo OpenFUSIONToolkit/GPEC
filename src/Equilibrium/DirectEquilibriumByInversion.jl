@@ -401,7 +401,8 @@ function equilibrium_solver_by_inversion(
     resolution_factor::Float64=4.0,
     refine::Union{Nothing,Int}=nothing,
     β_r::Union{Nothing,Float64}=nothing,
-    β_z::Union{Nothing,Float64}=nothing
+    β_z::Union{Nothing,Float64}=nothing,
+    override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing
 )
     equil_params = raw_profile.config
     psio = raw_profile.psio
@@ -412,7 +413,9 @@ function equilibrium_solver_by_inversion(
     # Find magnetic axis and separatrix before building psi_nodes (needed for probe integrations)
     ro, zo, _, rs2 = direct_position!(raw_profile)
 
-    psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, direct_fieldline_int, raw_profile, ro, zo, rs2)
+    psi_nodes = override_psi_nodes === nothing ?
+                _build_psi_grid(equil_params, psilow, psihigh, direct_fieldline_int, raw_profile, ro, zo, rs2) :
+                _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
     mpsi = length(psi_nodes) - 1
 
     # Detect plasma topology for sinh-stretching direction
@@ -671,7 +674,7 @@ function equilibrium_solver_by_inversion(
     inv_input = InverseRunInput(raw_profile.config, raw_profile.sq_in,
         rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, nothing)
 
-    pe = equilibrium_solver(inv_input)
+    pe = equilibrium_solver(inv_input; override_psi_nodes)
 
     # Round-trip validation: (ψ,θ) → (R,Z) → ψ_spline − ψ_target.
     # Checks 4 angles at the outermost surface and at 75% of the radial grid.
