@@ -724,21 +724,16 @@ function write_outputs_to_HDF5(
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
-        # Root-area-weighted (Φ-space) energies are the default — they are Jacobian-
-        # invariant. The ξ-space values sit under EdgeScan/XiNorm/ and are retained for
-        # benchmarking against the Fortran GPEC lineage.
+        # Generalized (W, N) pencil energies — power-normalized, Jacobian-invariant; these are
+        # the values findmax_dW_edge! uses to choose the truncation point.
         if !isempty(odet.edge_scan.psi)
             es = odet.edge_scan
             out_h5["EdgeScan/psi"] = es.psi
             out_h5["EdgeScan/q"] = es.q
-            out_h5["EdgeScan/total_energy"] = es.rootA_total_eigenvalue
-            out_h5["EdgeScan/plasma_energy"] = es.rootA_plasma_energy
-            out_h5["EdgeScan/vacuum_energy"] = es.rootA_vacuum_energy
-            out_h5["EdgeScan/vacuum_eigenvalue"] = es.rootA_vacuum_eigenvalue
-            out_h5["EdgeScan/XiNorm/total_energy"] = es.total_eigenvalue
-            out_h5["EdgeScan/XiNorm/plasma_energy"] = es.plasma_energy
-            out_h5["EdgeScan/XiNorm/vacuum_energy"] = es.vacuum_energy
-            out_h5["EdgeScan/XiNorm/vacuum_eigenvalue"] = es.vacuum_eigenvalue
+            out_h5["EdgeScan/total_energy"] = es.total_eigenvalue
+            out_h5["EdgeScan/plasma_energy"] = es.plasma_energy
+            out_h5["EdgeScan/vacuum_energy"] = es.vacuum_energy
+            out_h5["EdgeScan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
         end
 
         # Write singular surface data
@@ -782,27 +777,20 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
 
-        # Write free-boundary stability data. Root-area-weighted (Φ-space) is the
-        # default — Jacobian-invariant. ξ-space counterparts sit under
-        # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
-        # W_freeboundary_eigenmodes holds the eigenvector matrix of W_freeboundary with
-        # columns sorted most-unstable first; the same phase normalization is applied in
-        # both spaces (largest-magnitude entry made real-positive).
-        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.rootA_wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.rootA_wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.rootA_wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.rootA_wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.rootA_et : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.rootA_ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.rootA_ev : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
+        # Write free-boundary stability data. The eigenmode energies are the generalized
+        # eigenvalues of the pencil (W, N) with N the power-normalization (surface-norm) matrix:
+        # power-normalized mode energies (⟨|ξ|²⟩ = 1 metric) that are invariant to the choice of
+        # working (Jacobian) coordinate. W_freeboundary_eigenmodes holds the generalized
+        # eigenvectors, columns sorted most-unstable first, normalized to unit power norm with
+        # the largest-magnitude entry made real-positive.
+        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
+        out_h5["FreeBoundaryStability/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
 
         # Cartesian surface point clouds used downstream for visualisation and
         # perturbed-equilibrium plotting.

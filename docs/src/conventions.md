@@ -317,9 +317,16 @@ The internal flux-conform operator is just ``R = \Sigma\sqrt{A} = `` `rootarea_t
   `reluctance`, `plasma_inductance`, `surface_inductance`) are stored in this coordinate-invariant space
   under `perturbed_equilibrium/response_matrices/`. The stored `rootarea_to_area_weight_operator` ``S``
   recovers the area-weighted field forms (``L_{\bar b} = S\,\tilde L\,S^\dagger``) and the scalar
-  `surface_area` ``A`` recovers flux (``\Phi = A\,\bar b``). The coordinate-invariant ideal-MHD energies
-  written by the stability stage (`FreeBoundaryStability/eigenmode_energies`) are the ``\tilde b``
-  quadratic form scaled by the scalar ``c = A``: ``\mathrm{d}W = c\,\tilde b^\dagger W_t\,\tilde b``.
+  `surface_area` ``A`` recovers flux (``\Phi = A\,\bar b``).
+- **Eigenmode energies** (`FreeBoundaryStability/eigenmode_energies`) — the generalized eigenvalues of the
+  pencil ``W\,v = \lambda\,N\,v``, where ``N`` is the power-normalization (surface-norm) matrix built from
+  the Jacobian Fourier coefficients: ``\xi^\dagger N\,\xi = \oint J\,|\xi(\theta)|^2\,d\theta\,/\,V' =
+  \langle|\xi|^2\rangle``. The eigenvalues are stationary values of the power quotient
+  ``\xi^\dagger W \xi / \xi^\dagger N \xi`` — energies per unit surface-averaged squared displacement
+  (a normalization convention, not raw joules). Because ``W`` and ``N`` transform by the same congruence
+  under a change of working (Jacobian) coordinate, the spectrum is invariant to that coordinate choice.
+  ``N`` is not an inertia matrix (the stability stage carries no velocities); it is the DCON power
+  normalization promoted from a post-hoc per-eigenvector division into the metric of the eigenproblem.
 
 
 ## Rotation Velocity Conventions (KineticForces)
