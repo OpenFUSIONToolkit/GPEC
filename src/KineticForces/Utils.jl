@@ -74,6 +74,7 @@ function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfil
     avg_r = equil.geometry.avg_r_spline
     avg_R = equil.geometry.avg_R_spline
 
+    # ε clamp (Fortran torque.F90 does not clamp): bounds wdhat ∝ 1/ε near the axis; paneling-only.
     epsr_f = psi -> max(avg_r(psi) / avg_R(psi), 1e-6)
     wbhat_f = psi -> (π / 4) * sqrt(epsr_f(psi) / 2) * sqrt(2 * T_spline(psi) / mass) / (q_spline(psi) * ro)
     wdhat_f = psi -> q_spline(psi) * T_spline(psi) / (2 * epsr_f(psi) * ro^2 * chrg * bo) * wdfac
