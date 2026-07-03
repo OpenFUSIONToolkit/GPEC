@@ -128,8 +128,11 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
     f0type::String = "maxwellian"   # Distribution function: "maxwellian", "jkp", "cgl"
 
-    # Diagnostic parameters
-    psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi
+    # Integration limits in ψ. The lower bound defaults above the axis because the
+    # bounce/drift frequencies degenerate as ψ→0, producing a spurious near-axis dT/dψ
+    # spike that wastes quadrature work; the core contributes negligibly to NTV torque in
+    # typical edge-forced cases. Set [0.0, 1.0] deliberately for core-localized studies.
+    psilims::Vector{Float64} = [0.1, 1.0]
 
     # Diagnostic output flags
     eq_out::Bool = false            # Output equilibrium profiles
@@ -314,10 +317,9 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     kf_intr.mfac = collect(ffs_intr.mlow:ffs_intr.mhigh)
     kf_intr.psilim = ffs_intr.psilim
 
-    # Rational-surface ψ locations (ideal + kinetic) become panel boundaries for the
-    # outer ψ torque quadrature; dedupe surfaces closer than 1e-8 in ψ.
-    psis = sort!(vcat([s.psifac for s in ffs_intr.sing], [s.psifac for s in ffs_intr.kinsing]))
-    kf_intr.sing_psis = [p for (i, p) in enumerate(psis) if i == 1 || p - psis[i-1] > 1e-8]
+    # Rational-surface ψ locations (ideal + kinetic EL) become panel boundaries for the
+    # outer ψ torque quadrature; dedupe against coincident points happens in psi_panel_points.
+    kf_intr.sing_psis = sort!(vcat([s.psifac for s in ffs_intr.sing], [s.psifac for s in ffs_intr.kinsing]))
 
     # Bail if no xi_modes available (PE didn't run or failed)
     if pe_state.xi_modes === nothing || isempty(pe_state.psi_grid)

@@ -11,16 +11,21 @@ using adaptive Gauss-Kronrod quadrature at all levels (ψ, λ, energy).
 # ============================================================================
 
 """
-    psi_panel_points(sing_psis, x0, xout) → Vector{Float64}
+    psi_panel_points(interior, x0, xout) → Vector{Float64}
 
-Build the ψ-quadrature node list `[x0, rationals strictly inside (x0, xout), xout]`.
-Paneling the integral at the rational surfaces puts the resonant torque-density peaks
-(reg_spot/collisionally broadened, but narrow in ψ) on Gauss-Kronrod interval endpoints,
-which the rule handles natively instead of hunting them by adaptive bisection. Surfaces
-within 1e-8 of a bound are dropped to avoid degenerate panels.
+Build the ψ-quadrature node list `[x0, interior points strictly inside (x0, xout), xout]`.
+`interior` is the raw union of resonant-surface locations (rational surfaces ∪ kinetic
+resonances); this function owns the ordering: sort, drop near-duplicates (< 1e-8 apart,
+e.g. a kinetic resonance coinciding with a rational), and drop points within 1e-8 of a
+bound to avoid degenerate panels. Paneling the integral at these surfaces puts the
+resonant torque-density peaks (reg_spot/collisionally broadened, but narrow in ψ) on
+Gauss-Kronrod interval endpoints, which the rule handles natively instead of hunting them
+by adaptive bisection.
 """
-function psi_panel_points(sing_psis::Vector{Float64}, x0::Float64, xout::Float64)
-    return [x0; filter(p -> x0 + 1e-8 < p < xout - 1e-8, sing_psis); xout]
+function psi_panel_points(interior::Vector{Float64}, x0::Float64, xout::Float64)
+    pts = sort(filter(p -> x0 + 1e-8 < p < xout - 1e-8, interior))
+    deduped = [p for (i, p) in enumerate(pts) if i == 1 || p - pts[i-1] > 1e-8]
+    return [x0; deduped; xout]
 end
 
 """
@@ -82,7 +87,7 @@ function integrate_psi_quadgk(
     xout = min(psi_max, intr.psilim, 1.0 - 1e-6)
 
     if x0 >= xout
-        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0)
+        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0)
     end
 
     # Buffers for the batch callback. The outer ψ-integral is intentionally
@@ -135,7 +140,10 @@ function integrate_psi_quadgk(
         end
     end
 
-    pts = psi_panel_points(intr.sing_psis, x0, xout)
+    # Panels at the rational surfaces the run resolved plus the kinetic-resonance
+    # surfaces (ω_E zero crossings) — both are torque-density peaks.
+    resonance_psis = kinetic_resonance_psi_nodes(kinetic_profiles)
+    pts = psi_panel_points(vcat(intr.sing_psis, resonance_psis), x0, xout)
 
     bi = QuadGK.BatchIntegrand(psi_batch!, ComplexF64[], Float64[])
     total, quad_err = quadgk(bi, pts...; atol=ctrl.atol_psi, rtol=ctrl.rtol_psi, maxevals=ctrl.maxevals_psi)
@@ -171,7 +179,10 @@ function integrate_psi_quadgk(
         end
     end
 
-    @info "ψ torque quadrature ($method): T=$total N·m, error estimate $quad_err, $npts integrand evaluations over $(length(pts) - 1) panels"
+    n_rational = count(p -> x0 + 1e-8 < p < xout - 1e-8, intr.sing_psis)
+    n_resonance = count(p -> x0 + 1e-8 < p < xout - 1e-8, resonance_psis)
+    @info "ψ torque quadrature ($method): T=$total N·m, error estimate $quad_err, $npts integrand evaluations over " *
+          "$(length(pts) - 1) panels ($n_rational rational + $n_resonance ω_E-zero surfaces)"
 
     return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts, psi_quad_error=quad_err)
 end

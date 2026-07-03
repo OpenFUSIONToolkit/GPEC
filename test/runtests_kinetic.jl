@@ -334,7 +334,8 @@
         @test ctrl.mi == 2
         @test ctrl.nutype == "harmonic"
         @test ctrl.f0type == "maxwellian"
-        @test ctrl.psilims == [0.0, 1.0]
+        # Lower ψ bound floored above the axis (near-axis frequency degeneracy)
+        @test ctrl.psilims == [0.1, 1.0]
         # ψ quadrature is rtol-primary: atol_psi is amplitude-sensitive (NTV ∝ δB²)
         @test ctrl.atol_psi == 0.0
         @test ctrl.rtol_psi == 1e-2
@@ -352,15 +353,50 @@
 
     @testset "psi_panel_points" begin
         sing_psis = [0.2, 0.5, 0.8]
-        # Interior rationals become panel boundaries, in order
+        # Interior surfaces become panel boundaries, in order
         @test KF.psi_panel_points(sing_psis, 0.1, 0.9) == [0.1, 0.2, 0.5, 0.8, 0.9]
-        # Rationals outside the integration bounds are dropped
+        # Surfaces outside the integration bounds are dropped
         @test KF.psi_panel_points(sing_psis, 0.3, 0.7) == [0.3, 0.5, 0.7]
-        # Rationals at (or within 1e-8 of) a bound would create a degenerate panel — dropped
+        # Surfaces at (or within 1e-8 of) a bound would create a degenerate panel — dropped
         @test KF.psi_panel_points(sing_psis, 0.2, 0.8) == [0.2, 0.5, 0.8]
         @test KF.psi_panel_points([0.2 + 5e-9], 0.2, 0.9) == [0.2, 0.9]
-        # No rational surfaces: plain two-point interval
+        # No surfaces: plain two-point interval
         @test KF.psi_panel_points(Float64[], 0.0, 1.0) == [0.0, 1.0]
+        # Unsorted union input (rationals ∪ kinetic resonances) is sorted
+        @test KF.psi_panel_points([0.8, 0.2, 0.5], 0.1, 0.9) == [0.1, 0.2, 0.5, 0.8, 0.9]
+        # Near-coincident points (kinetic resonance on a rational) collapse to one
+        @test KF.psi_panel_points([0.5, 0.5 + 5e-9, 0.2], 0.1, 0.9) == [0.1, 0.2, 0.5, 0.9]
+    end
+
+    @testset "find_sign_change_roots" begin
+        xs = collect(range(0.0, 1.0; length=101))
+        # Two known zeros of a smooth profile
+        spl = KF.cubic_interp(xs, @. sin(2π * xs) + 0.5)
+        roots = KF.find_sign_change_roots(spl, xs)
+        @test length(roots) == 2
+        expected = [(π - asin(-0.5)) / (2π), (2π + asin(-0.5)) / (2π)]
+        @test isapprox(roots, expected; atol=1e-6)
+        # Monotone positive profile: no crossings
+        @test isempty(KF.find_sign_change_roots(KF.cubic_interp(xs, 1.0 .+ xs), xs))
+        # Exact zero at a node is not a strict sign change — no crash, no root from that pair
+        vals = collect(1.0 .- 2 .* xs)
+        vals[51] = 0.0  # xs[51] = 0.5 is the true zero
+        spl0 = KF.cubic_interp(xs, vals)
+        @test length(KF.find_sign_change_roots(spl0, xs)) <= 1
+    end
+
+    @testset "kinetic_resonance_psi_nodes" begin
+        EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+        xs = collect(range(0.0, 1.0; length=101))
+        flat = fill(1.0e19, 101)
+        Tflat = fill(1.0e3, 101)
+        # ω_E crosses zero once at ψ = 0.9 (linear profile)
+        omegaE = @. 1.0e5 * (0.9 - xs) / 0.9
+        kin = EQ.KineticProfileSplines(xs, flat, flat, Tflat, Tflat, omegaE,
+                                       fill(17.0, 101), fill(1.0e3, 101), fill(1.0e3, 101), fill(1.0, 101))
+        nodes = KF.kinetic_resonance_psi_nodes(kin)
+        @test length(nodes) == 1
+        @test isapprox(nodes[1], 0.9; atol=1e-8)
     end
 
     @testset "check_psi_quadrature_convergence" begin
