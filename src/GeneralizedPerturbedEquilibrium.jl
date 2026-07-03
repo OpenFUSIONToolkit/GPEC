@@ -171,7 +171,91 @@ function main_from_inputs(
     ffs_table = inputs["ForceFreeStates"]
     _drop_deprecated_ffs_keys!(ffs_table)
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
+
+    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified").
+    # Validated before equilibrium formation: the two-pass grid refinement needs the
+    # n range to pin rational-surface knots.
+    if ctrl.nn_low == 0 && ctrl.nn_high == 0
+        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
+    elseif ctrl.nn_low == 0
+        ctrl.nn_low = ctrl.nn_high
+    elseif ctrl.nn_high == 0
+        ctrl.nn_high = ctrl.nn_low
+    end
+    if ctrl.nn_low > ctrl.nn_high
+        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
+    end
+    # checks for negative n
+    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
+    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
+    if ctrl.nn_high < 1
+        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
+              "n < 1 modes are not supported")
+    end
+    if ctrl.nn_low < 1
+        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
+        ctrl.nn_low = 1
+    end
+    intr.nlow = ctrl.nn_low
+    intr.nhigh = ctrl.nn_high
+    intr.npert = intr.nhigh - intr.nlow + 1
+    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
+
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
+
+    # Build KineticForces control and load kinetic profiles once — reused by the grid
+    # refinement below, the stability kinetic callback (via `calculated_cb`), and the
+    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in stability
+    # does not need kinetic_profiles, but the post-PE block always does, so we load
+    # whenever a [KineticForces] section is present or the stability path requests the
+    # calculated source. psio is invariant across grid re-formation.
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
+        KineticForces.KineticForcesControl(;
+            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
+        KineticForces.KineticForcesControl()
+
+    kinetic_profiles = nothing
+    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+    if needs_kinetic_profiles
+        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
+        kinetic_profiles = Equilibrium.load_kinetic_profiles(
+            kinetic_file;
+            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
+            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+            chi1=2π * equil.psio)
+    end
+
+    # Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry,
+    # kinetic profiles), pin knots on rational surfaces, and re-form on the refined grid
+    # from the in-memory input — no file re-read.
+    if Equilibrium.wants_two_pass(eq_config)
+        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
+        psi_nodes = Equilibrium.refined_psi_grid(equil;
+            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory)
+        rerun_input = if additional_input !== nothing
+            # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
+            # path re-runs read_imas, which must resolve the same psihigh both passes;
+            # _validate_psi_nodes errors loudly if it does not.
+            additional_input
+        elseif equil.ingest isa Equilibrium.DirectIngest
+            Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
+        elseif equil.ingest isa Equilibrium.InverseIngest
+            Equilibrium.build_inverse_from_ingest(eq_config, equil.ingest)
+        else
+            nothing  # fall back to re-reading the input file
+        end
+        equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory)
+        if implied > 1.5 * (length(psi_nodes) - 1)
+            @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
+                  "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
+        end
+        @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$nstring)"
+    end
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -253,33 +337,6 @@ function main_from_inputs(
     # Fit data to splines
     intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
 
-    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
-    if ctrl.nn_low == 0 && ctrl.nn_high == 0
-        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
-    elseif ctrl.nn_low == 0
-        ctrl.nn_low = ctrl.nn_high
-    elseif ctrl.nn_high == 0
-        ctrl.nn_high = ctrl.nn_low
-    end
-    if ctrl.nn_low > ctrl.nn_high
-        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
-    end
-    # checks for negative n
-    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
-    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
-    if ctrl.nn_high < 1
-        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
-              "n < 1 modes are not supported")
-    end
-    if ctrl.nn_low < 1
-        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
-        ctrl.nn_low = 1
-    end
-    intr.nlow = ctrl.nn_low
-    intr.nhigh = ctrl.nn_high
-    intr.npert = intr.nhigh - intr.nlow + 1
-    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
-
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
@@ -327,32 +384,6 @@ function main_from_inputs(
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
-
-    # Build KineticForces control and load kinetic profiles once — reused by
-    # both the stability kinetic callback (via `calculated_cb` below) and the
-    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in
-    # stability does not need kinetic_profiles, but the post-PE block always
-    # does, so we load whenever a [KineticForces] section is present or the
-    # stability path requests the calculated source.
-    kf_ctrl =
-        haskey(inputs, "KineticForces") ?
-        KineticForces.KineticForcesControl(;
-            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
-        KineticForces.KineticForcesControl()
-
-    kinetic_profiles = nothing
-    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
-    if needs_kinetic_profiles
-        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
-        kinetic_profiles = Equilibrium.load_kinetic_profiles(
-            kinetic_file;
-            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
-            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
-            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
-            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
-            chi1=2π * equil.psio)
-    end
 
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag

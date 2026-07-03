@@ -57,21 +57,44 @@ tuning is needed.
 
 ## Radial grid packing
 
-The default `grid_type = "log_asymptotic"` uses a three-region grid that respects
-the asymptotic behavior of q near both the magnetic axis and the separatrix:
+With `grid_type = "auto"` and `mpsi = 0` (the defaults; `"log_asymptotic"` is a legacy alias), the radial grid is
+built by a **two-pass measured-curvature refinement** driven by the single accuracy knob
+`psi_accuracy` (τ):
 
-- **Core** (ψ < 0.15): geometric spacing in log(ψ) — handles the axis where profiles
-  behave as ψⁿ
-- **Middle** (0.15 ≤ ψ ≤ 0.95): uniform spacing — preserves resolution through the
-  pedestal region
-- **Edge** (ψ > 0.95): geometric spacing in log(1−ψ) — tracks the logarithmic
-  divergence q ~ −A·ln(1−ψ) near a diverted separatrix
+1. **Pass 1** forms the equilibrium on a coarse three-region layout (geometric in
+   log(ψ) at the core, uniform in the middle, geometric in log(1−ψ) at the edge).
+2. A knot density is derived from the *measured* pass-1 data using the cubic-spline
+   derivative error model err(f′) ≈ h³|f''''|/24 ≤ τ·|f|. Fourth derivatives are
+   estimated by divided differences on the pass-1 nodes only — nodal values come from
+   independent field-line integrations, so the estimate is immune to inter-knot spline
+   ringing. The density combines, by max:
+   - the 1D profiles F, P, dV/dψ, and q;
+   - the 2D geometry channels (r², η-offset, ν, Jacobian) along sampled θ-lines, since
+     the bicubic ψ-axis shares the same knots;
+   - the kinetic profiles (n, T, ω_E) when loaded, so steep pedestal gradients attract
+     knots;
+   - a-priori geometric floors at the core and edge (uniform relative q′ error against
+     the separatrix asymptote q ~ −A·ln(1−ψ), independent of A);
+   - local packing around every rational surface q = m/n in the requested n range,
+     which the main driver pins as mandatory knots.
+3. The density integral is equidistributed into the knot vector, mandatory
+   rational-surface knots are inserted with a minimum-spacing snap guard, and
+   **pass 2** re-forms the equilibrium on the refined grid from the in-memory input
+   (no file re-read).
 
-With `mpsi = 0` (the default), the number of radial knots is chosen automatically
-from the `psi_accuracy` parameter (target absolute error in q). Two probe field-line
-integrations near psihigh estimate the local log-slope A, and the knot count is set so
-the cubic spline error stays below `psi_accuracy` throughout the domain. The legacy
-`grid_type = "ldp"` (sin²-spaced) and explicit `mpsi` are still supported.
+Every region's knot count scales as τ^(-1/3), so tightening `psi_accuracy` refines
+the core, pedestal, and edge proportionally. The legacy `grid_type = "ldp"`
+(sin²-spaced), `"pow1"`, `"uniform"`, and explicit `mpsi > 0` (single-pass, fixed
+layout) are still supported. Library users calling `setup_equilibrium` directly with
+`mpsi = 0` receive the coarse pass-1 grid; use `refined_psi_grid` and the
+`override_psi_nodes` keyword to apply the refinement manually.
+
+The packing on the DIII-D-like example (n=1) compared to fixed `ldp` grids — note the
+coarse spacing across the smooth mid-radius, the spacing dips at each rational surface,
+and the core/pedestal/edge packing (`benchmarks/plot_grid_knot_placement.jl` regenerates
+this figure):
+
+![Radial knot packing: auto two-pass vs ldp](assets/grid_knot_placement.png)
 
 ## API Reference
 
