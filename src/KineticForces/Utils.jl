@@ -30,17 +30,54 @@ function find_sign_change_roots(f, grid)
 end
 
 """
-    kinetic_resonance_psi_nodes(kinetic_profiles) → Vector{Float64}
+    _resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n, nl) → Vector{Float64}
+
+Scan `grid` for the zeros of the thermal-energy resonance operator
+`Ω_ℓ(x=1; ψ) = ℓ·ω_b(ψ) + n·(ω_E(ψ) + ω_d(ψ))` for every bounce harmonic ℓ ∈ −nl:nl,
+given per-ψ frequency callables. Roots from all harmonics are concatenated (deduplication
+against coincident surfaces happens in `psi_panel_points`).
+"""
+function _resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n::Int, nl::Int)
+    nodes = Float64[]
+    for l in -nl:nl
+        append!(nodes, find_sign_change_roots(psi -> l * wbhat_f(psi) + n * (welec_f(psi) + wdhat_f(psi)), grid))
+    end
+    return nodes
+end
+
+"""
+    kinetic_resonance_psi_nodes(kinetic_profiles, equil; n, nl, zi=1, mi=2, electron=false, wdfac=1.0) → Vector{Float64}
 
 ψ_N locations of kinetic resonance surfaces, for use as ψ-quadrature panel boundaries
 (and, per the kinetic-aware grid-packing plan, as mandatory equilibrium knots).
 
-Currently locates the ℓ = 0 superbanana-plateau resonance ω_E(ψ) = 0, where the ExB
-frequency in the resonance denominator Ω(x) = ℓ_eff·ω_b·√x + n·(ω_E + ω_d·x) vanishes at
-low energy and the NTV torque density peaks. The bounce/precession terms (cylindrical
-ω_b, ω_d estimates at thermal energy x = 1, Logan & Park 2013 §IV–V) are a planned
-extension behind additional keyword arguments; both consumers call this function unchanged.
+Locates the zeros of the trapped-branch (leff = ℓ) resonance denominator
+`Ω(x) = leff·ω_b·√x + n·(ω_E + ω_d·x)` evaluated at thermal energy x = 1, for every bounce
+harmonic ℓ ∈ −nl:nl — this is where the energy-space resonance sweeps through the thermal
+bulk and the NTV torque density peaks (Logan & Park, Phys. Plasmas 20, 122507 (2013),
+§IV–V). The ℓ = 0 node is the ω_d-shifted ExB (superbanana-plateau) resonance.
+
+The frequencies use the pitch-averaged large-aspect-ratio closed forms of the `rlar`
+method (`tpsi!` in Torque.jl / Fortran pentrc torque.F90): `ω_b = (π/4)·√(ε/2)·wtran` and
+`ω_d = q·T_s/(2·ε·R₀²·Z·e·B₀)·wdfac`, with ε = ⟨r⟩/⟨R⟩ clamped away from the axis where
+the estimate degenerates. Panel placement only needs ~peak-width accuracy, so these cheap
+estimates (single spline evaluations) are sufficient and no bounce averaging is performed.
 """
-function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfileSplines)
-    return find_sign_change_roots(kinetic_profiles.omegaE_spline, kinetic_profiles.xs)
+function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
+                                     n::Int, nl::Int, zi::Int=1, mi::Int=2, electron::Bool=false, wdfac::Float64=1.0)
+    chrg = electron ? -e : zi * e
+    mass = electron ? me : mi * mp
+    T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline
+    ro = equil.ro
+    bo = equil.params.b0
+    q_spline = equil.profiles.q_spline
+    avg_r = equil.geometry.avg_r_spline
+    avg_R = equil.geometry.avg_R_spline
+
+    epsr_f = psi -> max(avg_r(psi) / avg_R(psi), 1e-6)
+    wbhat_f = psi -> (π / 4) * sqrt(epsr_f(psi) / 2) * sqrt(2 * T_spline(psi) / mass) / (q_spline(psi) * ro)
+    wdhat_f = psi -> q_spline(psi) * T_spline(psi) / (2 * epsr_f(psi) * ro^2 * chrg * bo) * wdfac
+
+    grid = filter(x -> x > 0, kinetic_profiles.xs)
+    return _resonance_nodes_from_frequencies(wbhat_f, kinetic_profiles.omegaE_spline, wdhat_f, grid; n, nl)
 end

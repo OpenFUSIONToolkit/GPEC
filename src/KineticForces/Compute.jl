@@ -87,7 +87,8 @@ function integrate_psi_quadgk(
     xout = min(psi_max, intr.psilim, 1.0 - 1e-6)
 
     if x0 >= xout
-        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0)
+        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0,
+                panel_psis=Float64[], resonance_psis=Float64[])
     end
 
     # Buffers for the batch callback. The outer ψ-integral is intentionally
@@ -141,8 +142,8 @@ function integrate_psi_quadgk(
     end
 
     # Panels at the rational surfaces the run resolved plus the kinetic-resonance
-    # surfaces (ω_E zero crossings) — both are torque-density peaks.
-    resonance_psis = kinetic_resonance_psi_nodes(kinetic_profiles)
+    # surfaces (thermal-energy Ω_ℓ = 0 for ℓ ∈ -nl:nl) — both are torque-density peaks.
+    resonance_psis = kinetic_resonance_psi_nodes(kinetic_profiles, equil; n, nl, zi, mi, electron, wdfac)
     pts = psi_panel_points(vcat(intr.sing_psis, resonance_psis), x0, xout)
 
     bi = QuadGK.BatchIntegrand(psi_batch!, ComplexF64[], Float64[])
@@ -182,9 +183,10 @@ function integrate_psi_quadgk(
     n_rational = count(p -> x0 + 1e-8 < p < xout - 1e-8, intr.sing_psis)
     n_resonance = count(p -> x0 + 1e-8 < p < xout - 1e-8, resonance_psis)
     @info "ψ torque quadrature ($method): T=$total N·m, error estimate $quad_err, $npts integrand evaluations over " *
-          "$(length(pts) - 1) panels ($n_rational rational + $n_resonance ω_E-zero surfaces)"
+          "$(length(pts) - 1) panels ($n_rational rational + $n_resonance kinetic resonance surfaces)"
 
-    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts, psi_quad_error=quad_err)
+    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts, psi_quad_error=quad_err,
+            panel_psis=pts, resonance_psis=sort(resonance_psis))
 end
 
 
@@ -240,6 +242,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         dtdpsi_out = ComplexF64[]
         t_cum_out = ComplexF64[]
         psi_nsteps_total = 0
+        panel_psis_out = Float64[]
+        resonance_psis_out = Float64[]
 
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
@@ -257,10 +261,14 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             total_torque += result.total
             psi_nsteps_total += result.psi_nsteps
 
-            if n_idx == 1 && !isnothing(result.torque_profile)
-                psi_grid_out = result.torque_profile.psi
-                dtdpsi_out = result.torque_profile.dtdpsi
-                t_cum_out = result.torque_profile.t_cumulative
+            if n_idx == 1
+                panel_psis_out = result.panel_psis
+                resonance_psis_out = result.resonance_psis
+                if !isnothing(result.torque_profile)
+                    psi_grid_out = result.torque_profile.psi
+                    dtdpsi_out = result.torque_profile.dtdpsi
+                    t_cum_out = result.torque_profile.t_cumulative
+                end
             end
 
             # Insert n-block into full matrix
@@ -284,6 +292,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             dtdpsi=dtdpsi_out,
             t_cumulative=t_cum_out,
             psi_nsteps=psi_nsteps_total,
+            panel_psis=panel_psis_out,
+            resonance_psis=resonance_psis_out,
         )
         state.method_results[method] = result_entry
 

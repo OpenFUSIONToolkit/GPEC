@@ -128,11 +128,8 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
     f0type::String = "maxwellian"   # Distribution function: "maxwellian", "jkp", "cgl"
 
-    # Integration limits in ψ. The lower bound defaults above the axis because the
-    # bounce/drift frequencies degenerate as ψ→0, producing a spurious near-axis dT/dψ
-    # spike that wastes quadrature work; the core contributes negligibly to NTV torque in
-    # typical edge-forced cases. Set [0.0, 1.0] deliberately for core-localized studies.
-    psilims::Vector{Float64} = [0.1, 1.0]
+    # Diagnostic parameters
+    psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi
 
     # Diagnostic output flags
     eq_out::Bool = false            # Output equilibrium profiles
@@ -488,6 +485,9 @@ Results for one NTV computation method across all flux surfaces.
     dtdpsi::Vector{ComplexF64} = ComplexF64[]
     t_cumulative::Vector{ComplexF64} = ComplexF64[]
     psi_nsteps::Int = 0
+    # ψ-quadrature panel boundaries and the located kinetic-resonance surfaces (first n)
+    panel_psis::Vector{Float64} = Float64[]
+    resonance_psis::Vector{Float64} = Float64[]
 end
 
 """
