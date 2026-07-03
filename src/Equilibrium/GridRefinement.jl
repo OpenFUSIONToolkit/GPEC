@@ -7,19 +7,34 @@ kinetic profiles) and equidistributes it, pinning mandatory knots (e.g. rational
 via `merge_mandatory_nodes`. Pass 2 re-forms the equilibrium on the refined grid through
 the `override_psi_nodes` keyword of `setup_equilibrium`.
 
-The density uses the cubic *derivative* interpolation error model err(f′) ≈ h³|f''''|/24 —
-the stability physics consumes spline derivatives (q′ at rational surfaces, p′ and V′ in
-the Euler-Lagrange and ballooning coefficients), whose error at a given spacing is far
-larger than the value error. Every region's knot count then scales as
-psi_accuracy^(-1/3), so tightening the tolerance refines edge, pedestal, and mid
-proportionally. Fourth derivatives are estimated by divided differences on the pass-1
-nodes only — nodal values come from independent field-line integrations and are immune to
-inter-knot spline ringing.
+There is ONE sizing rule everywhere — the cubic *derivative* interpolation error model
+err(f′) ≈ h³|f''''|/24 ≤ τ·f_scale — applied to three sources of curvature |f''''|:
 
-Curvature is measured with respect to ρ = √ψ_N, in which the equilibrium is regular at
-the magnetic axis (R−R₀ ~ √ψ_N makes the geometry channels behave as ψ_N^(k/2) there, so
-their ψ-derivatives diverge but their ρ-derivatives do not); the resulting ρ-spacing maps
-back to the ψ density through dψ/dρ = 2√ψ_N, giving natural √ψ core packing.
+ 1. *Measured* (mid-radius and edge): 5-point divided differences of the pass-1 nodal
+    values. Nodal values come from independent field-line integrations, so the estimate
+    is immune to inter-knot spline ringing. This source dominates wherever pass-1 data
+    supports it — including the edge, where the pass-1 layout is already log-packed
+    (on the DIII-D example the measured density supplies ~3× what the edge model demands).
+ 2. *Separatrix model* (edge floor, ψ ≥ 0.9): q ≈ −A·ln(1−ψ) fed through the same rule
+    gives geometric packing with uniform relative q′ error, independent of A. Normally
+    inactive; insurance against a pass-1 that under-sampled the divergence.
+ 3. *Axis model* (core, ψ ≤ 0.03): the equilibrium is a power law in ψ (smooth in
+    ρ = √ψ) near the axis, and the same rule on that form gives geometric-in-log(ψ)
+    packing. Here the model *replaces* measurement rather than flooring it — nodal data
+    from the smallest flux surfaces is dominated by integration and axis-extrapolation
+    error, which refinement amplifies rather than resolves.
+
+The stability physics consumes spline derivatives (q′ at rational surfaces, p′ and V′ in
+the Euler-Lagrange and ballooning coefficients), whose error at a given spacing is far
+larger than the value error — hence the derivative model. Every region's knot count
+scales as psi_accuracy^(-1/3), so tightening the tolerance refines edge, pedestal, and
+mid proportionally.
+
+Measured curvature is taken with respect to ρ = √ψ_N, in which the equilibrium is regular
+at the magnetic axis (R−R₀ ~ √ψ_N makes the geometry channels behave as ψ_N^(k/2) there,
+so their ψ-derivatives diverge under refinement but their ρ-derivatives do not); the
+resulting ρ-spacing maps back to the ψ density through dψ/dρ = 2√ψ_N, giving natural √ψ
+core packing outside the modeled core region as well.
 """
 
 # Cubic spline derivative interpolation error constant: err(f′) ≈ h³|f''''|/24
@@ -132,18 +147,19 @@ by max:
   - curvature of the kinetic profiles n_i, n_e, T_i, T_e, ω_E when `kin` is given
     (their own grid, rebroadcast by linear interpolation) — steep pedestal gradients in
     the kinetic data pull knots into the pedestal;
-  - a-priori floors: geometric-in-log(1−ψ) at the edge and geometric-in-log(ψ) in the
-    core, plus a global minimum density. For the separatrix asymptote q ≈ −A·ln(1−ψ)
-    (q′ = A/(1−ψ)), geometric packing with dlog = (4τ)^(1/3) gives uniform *relative* q′
-    error dlog³/4 = τ independent of A — guarding pass-1 undersampling of the divergence
-    without over-packing equilibria whose edge q is finite;
-  - local packing around each `mandatory` (rational) surface: spacing `SING_PACK_COEF`·τ^(1/3)
+  - the model-curvature regions (same h³ rule on analytic |f''''| — see the module
+    docstring): the edge floor for ψ ≥ 0.9, geometric-in-log(1−ψ) with dlog = (4τ)^(1/3)
+    from uniform relative q′ error on q ≈ −A·ln(1−ψ), independent of A and normally
+    inactive; and the core for ψ ≤ 0.03, geometric-in-log(ψ) from the power-law axis
+    form, which replaces the (noise-dominated) measurement there. A global minimum
+    density applies everywhere;
+  - local packing around each `mandatory` (rational) surface: spacing `sing_pack_coef`·τ^(1/3)
     at the surface with geometric growth away from it, within `SING_PACK_RADIUS`.
 
 A running max over ±1 node smooths single-stencil dropouts.
 """
 function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing,
-    mandatory::Vector{Float64}=Float64[])
+    mandatory::Vector{Float64}=Float64[], sing_pack_coef::Float64=SING_PACK_COEF)
     xs = equil.profiles.xs
     n = length(xs)
     # Curvature is measured against ρ = √ψ (regular at the axis); the ρ-space density
@@ -207,7 +223,7 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
     end
 
     # Local packing around mandatory (rational) surfaces
-    h_s = max(SING_PACK_COEF * tau^(1 / 3), H_TARGET_MIN)
+    h_s = max(sing_pack_coef * tau^(1 / 3), H_TARGET_MIN)
     for psi_m in mandatory
         @inbounds for i in 1:n
             d = abs(xs[i] - psi_m)
@@ -299,22 +315,25 @@ end
 
 """
     refined_psi_grid(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[],
-                     delta_frac=0.25, N_cap=1024) -> Vector{Float64}
+                     delta_frac=0.25, N_cap=1024, sing_pack_coef=SING_PACK_COEF) -> Vector{Float64}
 
 Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: measured-curvature knot
 density (`_knot_density`), equidistribution, and mandatory-knot insertion
 (`merge_mandatory_nodes`). `tau` is the target interpolation accuracy (`psi_accuracy`);
 `kin` optionally supplies kinetic profiles whose pedestal gradients attract knots;
-`mandatory` lists ψ values that must appear as knots (e.g. rational surfaces).
+`mandatory` lists ψ values that must appear as knots (e.g. rational surfaces);
+`sing_pack_coef` scales the knot spacing at those surfaces (convergence studies only —
+the default is scan-calibrated).
 """
 function refined_psi_grid(equil::PlasmaEquilibrium;
     tau::Float64,
     kin::Union{Nothing,KineticProfileSplines}=nothing,
     mandatory::Vector{Float64}=Float64[],
     delta_frac::Float64=0.25,
-    N_cap::Int=1024)
+    N_cap::Int=1024,
+    sing_pack_coef::Float64=SING_PACK_COEF)
     xs = equil.profiles.xs
-    rho = _knot_density(equil; tau, kin, mandatory)
+    rho = _knot_density(equil; tau, kin, mandatory, sing_pack_coef)
     M_total = sum(0.5 * (rho[i] + rho[i-1]) * (xs[i] - xs[i-1]) for i in 2:length(xs))
     N = clamp(ceil(Int, M_total), 32, N_cap)
     N == N_cap && M_total > N_cap &&
