@@ -57,7 +57,7 @@ tuning is needed.
 
 ## Radial grid packing
 
-With `grid_type = "log_asymptotic"` and `mpsi = 0` (the defaults), the radial grid is
+With `grid_type = "auto"` and `mpsi = 0` (the defaults; `"log_asymptotic"` is a legacy alias), the radial grid is
 built by a **two-pass measured-curvature refinement** driven by the single accuracy knob
 `psi_accuracy` (τ):
 
@@ -88,6 +88,13 @@ the core, pedestal, and edge proportionally. The legacy `grid_type = "ldp"`
 layout) are still supported. Library users calling `setup_equilibrium` directly with
 `mpsi = 0` receive the coarse pass-1 grid; use `refined_psi_grid` and the
 `override_psi_nodes` keyword to apply the refinement manually.
+
+The packing on the DIII-D-like example (n=1) compared to fixed `ldp` grids — note the
+coarse spacing across the smooth mid-radius, the spacing dips at each rational surface,
+and the core/pedestal/edge packing (`benchmarks/plot_grid_knot_placement.jl` regenerates
+this figure):
+
+![Radial knot packing: auto two-pass vs ldp](assets/grid_knot_placement.png)
 
 ## API Reference
 

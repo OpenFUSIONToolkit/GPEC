@@ -19,10 +19,12 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp", "pow1", "uniform")
+  - `grid_type::String` - Grid type for flux surface discretization ("auto" — two-pass measured-curvature
+    refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
+    "log_asymptotic" is a legacy alias for "auto")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
-  - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="log_asymptotic" selects the
+  - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
     two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
     pins knots on rational surfaces, and re-forms on the refined grid. Standalone `setup_equilibrium`
     callers get the coarse pass-1 grid unless they refine via `refined_psi_grid` + `override_psi_nodes`.
@@ -46,7 +48,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     power_r::Int = 0
     power_rc::Int = 0
 
-    grid_type::String = "log_asymptotic"
+    grid_type::String = "auto"
     psilow::Float64 = 1e-2
     psihigh::Float64 = 0.9995
     mpsi::Int = 0

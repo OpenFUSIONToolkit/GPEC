@@ -138,7 +138,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     if override_psi_nodes !== nothing
         sq_xs = _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
         mpsi = length(sq_xs) - 1
-    elseif grid_type == "log_asymptotic"
+    elseif grid_type in ("auto", "log_asymptotic")
         if mpsi == 0 && config.psi_accuracy > 0
             # Two-pass auto grid: coarse pass-1 layout; the driver refines and re-forms
             # on the measured-curvature grid (GridRefinement.jl).

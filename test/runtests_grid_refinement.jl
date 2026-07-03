@@ -101,11 +101,15 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
 
     @testset "Solovev two-pass integration" begin
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
-            eq_type="sol", grid_type="log_asymptotic", mpsi=0, psi_accuracy=1e-3,
+            eq_type="sol", grid_type="auto", mpsi=0, psi_accuracy=1e-3,
             psilow=0.01, psihigh=0.995)
         sol_config = GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig()
 
         @test GridRef.wants_two_pass(eq_config)
+        # Legacy alias still selects the two-pass grid
+        alias_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
+            eq_type="sol", grid_type="log_asymptotic", mpsi=0, psi_accuracy=1e-3)
+        @test GridRef.wants_two_pass(alias_config)
 
         equil1 = GridRef.setup_equilibrium(eq_config, sol_config)
 

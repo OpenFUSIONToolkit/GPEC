@@ -407,14 +407,14 @@ end
 
 Resolve `mpsi` and build `psi_nodes` for any supported `grid_type`.
 
-For `"log_asymptotic"` with `mpsi=0` (the auto grid), this is the coarse pass-1 layout of
+For `"auto"` (or the legacy alias `"log_asymptotic"`) with `mpsi=0`, this is the coarse pass-1 layout of
 the two-pass refinement — the main driver measures the formed equilibrium and re-forms on
 the `refined_psi_grid` result. Shared by `direct_fieldline_int` and `efit_by_inversion`
 solvers.
 """
 function _build_psi_grid(equil_params, psilow, psihigh)
     mpsi = equil_params.mpsi
-    if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
+    if equil_params.grid_type in ("auto", "log_asymptotic") && mpsi == 0 && equil_params.psi_accuracy > 0
         # Two-pass auto grid: this is the coarse pass-1 layout; the driver measures the
         # formed equilibrium's curvature and re-forms on a refined grid (GridRefinement.jl).
         mpsi = 128
@@ -423,7 +423,7 @@ function _build_psi_grid(equil_params, psilow, psihigh)
         mpsi = 128
     end
 
-    psi_nodes = if equil_params.grid_type == "log_asymptotic"
+    psi_nodes = if equil_params.grid_type in ("auto", "log_asymptotic")
         # Distribute mpsi across the three regions by log-weights
         log_core = log(0.03 / psilow)
         log_mid = log(0.98 / 0.03)
