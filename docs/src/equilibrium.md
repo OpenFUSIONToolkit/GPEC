@@ -109,6 +109,15 @@ this figure):
 
 ![Radial knot packing: auto two-pass vs ldp](assets/grid_knot_placement.png)
 
+Decomposing the density by source on the same example shows the pedestal band
+(ψ_N ≈ 0.85–0.98) is driven by *measured* curvature, not the edge floor: the pressure,
+q, and dV/dψ profiles contribute comparably, and the rzphi geometry channels — the
+Grad-Shafranov response to the same pedestal p′ (Shafranov-shift / angle-offset
+steepening) — contribute the most at every node in the band. Because the density is
+measured from the formed solution, the packing follows the pedestal wherever it sits:
+
+![Knot-density decomposition by source](assets/density_decomposition.png)
+
 ## API Reference
 
 ```@autodocs
