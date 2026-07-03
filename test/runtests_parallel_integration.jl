@@ -284,16 +284,21 @@ using TOML
             inputs["ForceFreeStates"]["verbose"] = false
             inputs["ForceFreeStates"]["use_parallel"] = use_parallel
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-            # Pin the grid: this testset targets the integration machinery, so it must not
-            # move when the auto-grid (two-pass, driver-orchestrated) evolves. The example
-            # ships mpsi=0, which standalone setup_equilibrium forms as the coarse pass-1 grid.
-            inputs["Equilibrium"]["grid_type"] = "ldp"
-            inputs["Equilibrium"]["mpsi"] = 256
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+            # Apply the two-pass auto grid exactly as the main driver does (the example ships
+            # grid_type="auto", mpsi=0): rational-surface knots + measured-curvature refinement,
+            # re-formed from the captured ingest. The pinned values below are for this grid,
+            # which is the production default.
+            if GeneralizedPerturbedEquilibrium.Equilibrium.wants_two_pass(eq_config)
+                mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
+                psi_nodes = GeneralizedPerturbedEquilibrium.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
+                rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
+                equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+            end
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
@@ -314,13 +319,14 @@ using TOML
 
         et_par, intr_par = run_diiid(true)
 
-        # Parallel FM et[1] regression on the pinned ldp/mpsi=256 grid, where the
-        # bidirectional assembly gives et ≈ 1.20. Single-point pinning of et_par is
-        # platform-sensitive at the few-percent level (BLAS variant / FP rounding through
-        # the BVP solve and outer-plasma Riccati pass shift the eigenvalue ~5-10 %), so we
-        # bracket the eigenvalue rather than pin a tight value. A true regression of the
+        # Parallel FM et[1] regression on the production-default two-pass auto grid, where
+        # the bidirectional assembly gives et ≈ 1.31 (ldp/mpsi=256 gives ≈ 1.20 — the
+        # eigenvalue is grid-sensitive at the ~10% level at these knot counts). Single-point
+        # pinning of et_par is platform-sensitive at the few-percent level (BLAS variant /
+        # FP rounding through the BVP solve and outer-plasma Riccati pass), so we bracket
+        # the eigenvalue rather than pin a tight value. A true regression of the
         # bidirectional assembly (an O(10%)+ energy error) still fails this bracket loudly.
-        @test 1.1 < et_par < 1.3
+        @test 1.2 < et_par < 1.45
         # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
         # comment above). BVP Δ' matrix regression for DIIID-like is in the
         # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
@@ -493,16 +499,19 @@ using TOML
         inputs["ForceFreeStates"]["verbose"] = false
         inputs["ForceFreeStates"]["use_parallel"] = true
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-        # Pin the grid: this testset targets the BVP assembly, so it must not move when
-        # the auto-grid (two-pass, driver-orchestrated) evolves. The example ships mpsi=0,
-        # which standalone setup_equilibrium forms as the coarse pass-1 grid.
-        inputs["Equilibrium"]["grid_type"] = "ldp"
-        inputs["Equilibrium"]["mpsi"] = 256
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        # Apply the two-pass auto grid exactly as the main driver does (see the FM testset
+        # above); the pinned values below are for this grid, the production default.
+        if GeneralizedPerturbedEquilibrium.Equilibrium.wants_two_pass(eq_config)
+            mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
+            psi_nodes = GeneralizedPerturbedEquilibrium.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
+            rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+        end
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
             (Symbol(k) => v for (k, v) in inputs["Wall"])...)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
@@ -542,16 +551,19 @@ using TOML
 
         # Pinned diagonal `delta_prime_matrix` values for the DIIID-like case (msing = 5),
         # PEST3-convention self-response Δ' from the STRIDE BVP with vacuum coupling, on
-        # the pinned ldp/mpsi=256 grid. Tolerances split by grid- and FP-sensitivity:
-        #   - dpm[1]–dpm[3] (q=2,3,4): real parts are grid-converged (agree with denser
-        #     ldp-512 and refined two-pass grids to a few %); pin Re at rtol=2e-2. The
-        #     imaginary parts arise from the PEST3 four-term cancellation and drift in
-        #     magnitude and sign with grid and BLAS variant; bound |Im| relative to |Re|.
+        # the production-default two-pass auto grid (τ=1e-3, ~200 knots). Tolerances split
+        # by grid- and FP-sensitivity:
+        #   - dpm[1]–dpm[3] (q=2,3,4): real parts approach the grid-converged values
+        #     (ldp-512 / two-pass τ=1e-4 give ≈ 8.90, −3.86, −10.2) to within ~5%; pin the
+        #     auto-grid values at rtol=2e-2 so a behavior change is caught, and tighten
+        #     psi_accuracy to converge further. The imaginary parts arise from the PEST3
+        #     four-term cancellation and drift in magnitude and sign with grid and BLAS
+        #     variant; bound |Im| relative to |Re|.
         #   - dpm[4], dpm[5] (q=5,6 near-separatrix): not grid-converged — value and sign
         #     vary O(1) between ldp-256/512 and refined grids. Assert finite and non-zero
         #     only (the earlier tight pins tracked a single grid's noise, not physics).
-        @test isapprox(real(dpm[1, 1]), +8.787850e+00; rtol=2e-2)
-        @test isapprox(real(dpm[2, 2]), -3.883926e+00; rtol=2e-2)
+        @test isapprox(real(dpm[1, 1]), +8.459458e+00; rtol=2e-2)
+        @test isapprox(real(dpm[2, 2]), -4.035389e+00; rtol=2e-2)
         @test isapprox(real(dpm[3, 3]), -1.021928e+01; rtol=5e-2)
         @test abs(imag(dpm[1, 1])) < 0.05 * abs(real(dpm[1, 1]))
         @test abs(imag(dpm[2, 2])) < 0.05 * abs(real(dpm[2, 2]))
