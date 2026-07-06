@@ -900,6 +900,7 @@ function compute_kinetic_matrices_at_psi!(
     zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
     electron::Bool, equil, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
+    nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
     # Bypass ψ > 1 (no kinetic contribution outside plasma)
@@ -914,6 +915,7 @@ function compute_kinetic_matrices_at_psi!(
 
     kinetic_energy_matrices_for_euler_lagrange!(
         kwmat, ktmat, state, psi, n, l, wdfac, intr;
+        nutype, f0type, nufac,
         energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
         pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
 

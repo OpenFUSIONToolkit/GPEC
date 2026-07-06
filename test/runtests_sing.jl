@@ -83,7 +83,8 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
     function load_equilibrium_from_gpec(gpec_path::String)
         inputs = TOML.parsefile(gpec_path)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dirname(gpec_path))
-        return GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+        addl = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        return GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, addl)
     end
 
     @testset "sing_der" begin
@@ -127,7 +128,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         odet.u[:, :, 1] .= umat_p1;
         odet.u[:, :, 2] .= umat_p2
 
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, mband=intr.mband, numpert_total=intr.numpert_total)
+        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, numpert_total=intr.numpert_total)
         ffit.amats = cubic_interp(psifac_dummy, Series(reshape(amats, points, :)); ffit.itp_opts...)
         ffit.bmats = cubic_interp(psifac_dummy, Series(reshape(bmats, points, :)); ffit.itp_opts...)
         ffit.cmats = cubic_interp(psifac_dummy, Series(reshape(cmats, points, :)); ffit.itp_opts...)

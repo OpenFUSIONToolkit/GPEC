@@ -136,6 +136,48 @@ use_parallel = true
 The residual ~2% gap comes from the different crossing convention (Riccati-style direct
 zeroing vs GR), not from ODE tolerance; it is present in both 1-thread and 4-thread runs.
 
+## Local stability: Mercier and ballooning (s–α)
+
+Setting `local_stability_flag = true` in `[ForceFreeStates]` runs a local high-``n``
+stability scan over every flux surface, in addition to the global ideal analysis above.
+For the derivation and implementation details behind these diagnostics, see
+[Ballooning and Mercier Local Stability](ballooning.md).
+Three diagnostics are produced and stored under the `locstab/` HDF5 group, each a profile
+in normalized poloidal flux ``\psi``:
+
+- **Mercier criterion ``D_I``** (`locstab/di`) — the ideal interchange criterion. A surface
+  is Mercier-unstable where ``D_I > 0``. It is evaluated from the ``\det(\bar{d}_0)`` of the
+  integrated local-mode matrix.
+- **Resistive interchange ``D_R``** (`locstab/dr`) — the Glasser–Greene–Johnson resistive
+  interchange criterion ``D_R = D_I + (H - 1/2)^2``. The ``D_I`` term is the same
+  ``\det(\bar{d}_0)`` value reported in `locstab/di`; ``H`` is computed from the legacy
+  Mercier/GGJ flux-surface averages of the field and metric quantities. ``D_R > 0``
+  indicates resistive interchange instability.
+- **Ballooning ``\Delta'``** (`locstab/ballooning_Delta_prime`) — the high-``n`` ballooning
+  stability index, obtained by integrating the ballooning equation along the field line and
+  taking the jump in the logarithmic derivative of the solution between the two asymptotic
+  ends.
+
+!!! note "Two different Δ' quantities"
+    `locstab/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
+    distinct from the **resistive tearing** ``\Delta'`` described in the next section, which
+    is written under `singular/` and `perturbed_equilibrium/singular_coupling/delta_prime`.
+    They measure different instabilities; do not confuse them.
+
+### s–α diagram
+
+The local criteria can be mapped over a two-parameter ``(p', q')`` scan at a single flux
+surface — the classic s–α (shear–pressure) stability diagram. For a chosen surface the
+pressure gradient ``p'`` and shear ``q'`` are scaled away from their equilibrium values, and
+``\Delta'`` and ``D_I`` are recomputed on the resulting grid. The ``\Delta' = 0`` and
+``D_I = 0`` contours bound the ballooning- and Mercier-stable regions, with the equilibrium
+operating point marked inside.
+
+The example script `examples/DIIID-like_ideal_example/analyze_example.jl` demonstrates the
+full workflow: it plots the ``s`` and ``\alpha`` profiles, the ``D_I`` and ballooning
+``\Delta'`` profiles, and the 2-D s–α maps with their zero contours, using
+`salpha_reference`, `compute_ballooning_stability!`, and `scan_delta_prime_map`.
+
 ## Δ' tearing stability parameter
 
 ### Per-surface Δ' (`delta_prime`)
@@ -212,6 +254,9 @@ numsteps_init     = 200    # initial step budget per chunk
 numunorms_init    = 50     # renorm checkpoint budget
 reltol            = 1e-6   # ODE relative tolerance
 
+# Local stability
+local_stability_flag = false  # scan Mercier D_I, resistive D_R, and ballooning Δ' over ψ
+
 # Output
 verbose              = true
 write_outputs_to_HDF5 = true
@@ -222,8 +267,12 @@ environment variable; it is not a runtime parameter.
 
 ## API Reference
 
+The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separately in
+`docs/src/galerkin.md`.
+
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
+Pages = ["ForceFreeStates.jl", "ForceFreeStatesStructs.jl", "Ballooning.jl", "Resist.jl", "EulerLagrange.jl", "Sing.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati.jl"]
 ```
 
 ## Example usage
@@ -252,10 +301,9 @@ FFS.sing_find!(intr, equil)
 intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
 intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
 intr.mpert = intr.mhigh - intr.mlow + 1
-intr.mband = intr.mpert - 1
 intr.numpert_total = intr.mpert * intr.npert
 
-metric = FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+metric = FFS.make_metric(equil, intr.mpert)
 ffit   = FFS.make_matrix(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
@@ -306,6 +354,7 @@ end
 
 ## See also
 
+- `docs/src/galerkin.md` — RDCON outer-region Galerkin Δ′ solver (part of this module)
 - `docs/src/equilibrium.md` — build the `PlasmaEquilibrium` object required by this module
 - `docs/src/vacuum.md` — vacuum response computed from the EL solution in `free_run!`
 - `docs/src/perturbed_equilibrium.md` — downstream singular coupling analysis using Δ'

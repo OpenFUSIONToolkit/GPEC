@@ -16,7 +16,7 @@ include("GGJ/GGJ.jl")
 
 import .GGJ: GGJModel, GGJParameters, build_asymptotics, evaluate_asymptotics, pick_xmax
 import .GGJ: InnerAsymptoticsCache, mercier_di, mercier_dr, inner_Q, rescale_delta
-import .GGJ: glasser_wang_2020_eq55
+import .GGJ: glasser_wang_2020_eq55, solve_inner_converged  # solve_inner_converged: experimental, not exported (reachable as a qualified call only)
 # SLAYER imports go here
 
 export InnerLayerModel, solve_inner
