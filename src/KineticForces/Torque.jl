@@ -190,7 +190,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
     nueff = nu_s / (2 * epsr)
 
-
     # Method selection — route on the registry dispatch tag (errors on unknown method)
     kind = method_kind(method)
     if kind == :fcgl
@@ -233,7 +232,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
                                    rex_override=rex_override, imx_override=imx_override)
     end
-
 
     return nothing
 end
