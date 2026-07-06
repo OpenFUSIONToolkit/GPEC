@@ -626,7 +626,14 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
             # Edge junction (ViaW: edge condition where q(psi_edge)=0)
             M[junc_rows, _col_right(msing, N)] .= uShootR[msing]
             if rpec
-                M[junc_rows[1:N],    col_edge] .= -I(N)
+                # Coil/rpec drive: prescribe the edge displacement u_edge as a Dirichlet unit source
+                # on the value rows (junc_rows[1:N] carry uShootR·c_right|_value, so this couples to
+                # the interior); record u'_edge in the c_edge slack via the derivative rows.
+                # Homogeneously u_edge = 0 (fixed edge, matching the Galerkin identity-edge
+                # convention); each coil column drives one edge poloidal mode to 1 → resonant
+                # response is the delta_coil block. Driving the value rows here (rather than the
+                # -I(N) coupling that leaves c_edge a decoupled slack) is what makes delta_coil nonzero.
+                M[junc_rows[N+1:end], col_edge] .= -I(N)
                 edge_drive_rows = collect(junc_rows[1:N])
             elseif wv !== nothing
                 M[junc_rows[1:N],     col_edge] .= -I(N)
