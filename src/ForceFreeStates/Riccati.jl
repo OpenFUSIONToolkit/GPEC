@@ -647,7 +647,7 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
         M[row_offset, _col_right(j, N)[ipert_j]] = 1 #(ViaW edit these)
     end
     @assert row_offset == nMat "Row count mismatch: expected $nMat, got $row_offset"
-    edge_drive_rows = collect((row_offset - 2N + 1):(row_offset - 2N + N))
+    # edge_drive_rows = collect((row_offset - 2N + 1):(row_offset - 2N + N))
     return M, nMat, col_edge, edge_drive_rows
 end
 
