@@ -1,7 +1,10 @@
-# ISLET — Integrated SoLver for Evolving Tearing
+# Islands — drift-kinetic island/layer solver
 
-> Working name. ISLET = a small island. Rename is a one-commit operation (see the
-> JPEC→GPEC precedent); don't bikeshed it now.
+> GPEC submodule (`src/Islands/`, `module Islands`). The name is a plain
+> description of the domain — the resonant magnetic island/layer region — per the
+> repo module-naming convention (simple, intuitive names, not standalone-code
+> acronyms; repo-root CLAUDE.md). Earlier drafts used the working acronym
+> "ISLET"; that has been retired.
 
 ## One-paragraph pitch
 
@@ -12,7 +15,7 @@ transport threshold w_d), each valid only in its asymptotic corner of parameter
 space. This mirrors the pre-SLAYER state of linear error-field penetration theory,
 where Fitzpatrick's and Cole & Fitzpatrick's regime-specific thresholds coexisted
 until Park's SLAYER (Phys. Plasmas 29, 2022) solved the underlying layer equations
-numerically for arbitrary parameters and recovered every analytic limit. ISLET is
+numerically for arbitrary parameters and recovered every analytic limit. Islands is
 the nonlinear analog: a steady-state, multi-species drift-kinetic solver for the
 resonant island/layer region that returns the growth moment Δ_cos(w, ω; p) and
 torque moment Δ_sin(w, ω; p) for arbitrary parameters, replacing the sum of
@@ -29,7 +32,7 @@ manifold.
    literature; it is the flagship result.
 2. **Toggleable ordering stack.** Every approximation in the Imada 2019 /
    Dudkovskaia 2021–2023 / Leigh 2023 (DK-NTM / RDK-NTM / kokuchou) lineage is a
-   runtime toggle, so their theory is a *benchmark configuration* of ISLET, and
+   runtime toggle, so their theory is a *benchmark configuration* of Islands, and
    the impact of each ordering is measurable all the way up to the unreduced
    problem.
 3. **Multi-species physics.** High-Z minority impurities (W: mixed-collisionality
@@ -42,44 +45,49 @@ manifold.
 
 ## Relationship to the existing toolchain
 
-ISLET develops **inside the OpenFUSIONToolkit GPEC repository** as a
+Islands develops **inside the OpenFUSIONToolkit GPEC repository** as a
 subdirectory Julia package (see docs/06 §1). Status of the GPEC-side assets
 (checked 2026-07-07):
 
-- **Outer region + linear layer:** everything ISLET consumes arrives with the
+- **Outer region + linear layer:** everything Islands consumes arrives with the
   Tearing module work (PR #238, `feature/tearing-growthrates`, sequenced to
-  land before ISLET starts): SLAYER Δ(Q) and GGJ inner-layer models
+  land before Islands starts): SLAYER Δ(Q) and GGJ inner-layer models
   (`src/Tearing/InnerLayer/`), the dispersion/root-finding layer, and the
   outer-region Δ′ as a full 2m×2m matrix (`delta_prime_raw` from
-  ForceFreeStates with the new Riccati ideal solver). ISLET never recomputes
+  ForceFreeStates with the new Riccati ideal solver). Islands never recomputes
   global ideal-MHD physics; the SLAYER Δ(Q) is a Level-3 *verification target*
-  called directly in CI (docs/05 D1). If ISLET work begins before #238 merges,
+  called directly in CI (docs/05 D1). If Islands work begins before #238 merges,
   branch from `feature/tearing-growthrates`, not `develop`.
 - **EP corrections to Δ'** (fast-ion pressure in the outer region) stay on the
   GPEC side (`src/KineticForces`, the PENTRC/NTV machinery — also the natural
-  NTV restoring-torque source for Level 4 torque balance); ISLET handles
+  NTV restoring-torque source for Level 4 torque balance); Islands handles
   resonant/orbit-width EP physics at the island.
 
 ## Document map
 
+Design docs live in `docs/src/islands/design/`; module conventions in
+`src/Islands/CLAUDE.md`. The `docs/NN` shorthand used throughout means design
+doc `NN` (`docs/src/islands/design/NN-*.md`).
+
 | File | Contents |
 |---|---|
-| `CLAUDE.md` | Project conventions for Claude Code: style, testing gates, [VERIFY] policy, merge policy |
-| `docs/00-roadmap.md` | Level 0–4 plan, milestones, risk register, decision log |
-| `docs/01-physics-level0.md` | Level 0 equation set: coordinates, DKE, quasineutrality, moments, nondimensionalization |
-| `docs/02-species-and-eps.md` | Species abstraction; tungsten (Level 1) and energetic particles (Level 2) physics specs |
-| `docs/03-architecture.md` | Julia package layout, operator stack, toggles, AD strategy, coupling interfaces |
-| `docs/04-numerics.md` | Discretization, boundary layers, Newton–Krylov, continuation, performance model |
-| `docs/05-verification.md` | The benchmark ladder: every analytic limit and published number ISLET must recover, per level |
-| `docs/06-autonomy-and-tooling.md` | GPEC-repo integration, autonomous Claude Code workflows, GPD, skills, subagents, setup checklist |
-| `docs/07-documentation-and-papers.md` | Living documentation system (Physics Book, State Dashboard, figure pipeline) and the paper series; level gates are manuscripts |
-| `docs/08-reference-library.md` | Map of the in-repo PDF sources (`docs/resources/Drift_Kinetic_Island_References/`), per-source load-bearing content, and known cross-source inconsistencies |
+| `src/Islands/CLAUDE.md` | Module conventions for Claude Code: layout map, style, testing gates, [VERIFY] policy, merge policy |
+| `design/00-roadmap.md` | Level 0–4 plan, milestones, risk register, decision log |
+| `design/01-physics-level0.md` | Level 0 equation set: coordinates, DKE, quasineutrality, moments, nondimensionalization |
+| `design/02-species-and-eps.md` | Species abstraction; tungsten (Level 1) and energetic particles (Level 2) physics specs |
+| `design/03-architecture.md` | In-repo module layout, operator stack, toggles, AD strategy, coupling interfaces |
+| `design/04-numerics.md` | Discretization, boundary layers, Newton–Krylov, continuation, performance model |
+| `design/05-verification.md` | The benchmark ladder: every analytic limit and published number Islands must recover, per level |
+| `design/06-autonomy-and-tooling.md` | GPEC-repo integration, autonomous Claude Code workflows, GPD, skills, subagents, setup checklist |
+| `design/07-documentation-and-papers.md` | Living documentation system (Physics Book, State Dashboard, figure pipeline) and the paper series; level gates are manuscripts |
+| `design/08-reference-library.md` | Map of the in-repo PDF sources (`docs/resources/Drift_Kinetic_Island_References/`), per-source load-bearing content, and known cross-source inconsistencies |
 
 ## Reading order for a new contributor (human or Claude)
 
 `00-roadmap` → `01-physics-level0` → `03-architecture` → `05-verification`, then
-`02` and `04` as needed. Nothing in `src/` may contradict these documents; when it
-must, the document is amended *first* (doc-first workflow, see CLAUDE.md).
+`02` and `04` as needed. Nothing in `src/Islands/` may contradict these documents;
+when it must, the document is amended *first* (doc-first workflow, see
+`src/Islands/CLAUDE.md`).
 
 ## Canonical references
 

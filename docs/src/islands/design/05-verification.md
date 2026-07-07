@@ -1,8 +1,8 @@
 # 05 — Verification ladder
 
-The project's credibility is this document. Every claim of the form "ISLET
-generalizes X" is backed by "ISLET reproduces X in its limit." Benchmarks are
-code in `benchmarks/`, each with: named configuration, target (formula/number/
+The project's credibility is this document. Every claim of the form "Islands
+generalizes X" is backed by "Islands reproduces X in its limit." Benchmarks are
+code in `benchmarks/islands/`, each with: named configuration, target (formula/number/
 dataset), tolerance, grid-convergence requirement, and status. CI runs a fast
 subset; full ladder runs before any tagged release or paper submission.
 
@@ -12,7 +12,7 @@ have been transcribed from the in-repo PDFs with equation/page cites and await
 one human sign-off; remaining [VERIFY] items state exactly what is missing.
 
 **Standing triage rule for York-lineage targets**: L23 §2.6 documents errors
-in the published I19 equation set (docs/01 header warning). Where ISLET
+in the published I19 equation set (docs/01 header warning). Where Islands
 disagrees with a published DK-NTM number but agrees with the L23-amended
 physics, the triage outcome "their published equation set" is available — but
 only after the [VERIFY] resolution is logged with the specific amended term.
@@ -42,7 +42,7 @@ only after the [VERIFY] resolution is logged with the specific amended term.
 | B5b | **RDK-NTM improved-model threshold**: w_c ≈ 0.45 ρ_θi (0.46 fit) ≡ 1.41–1.47 ρ_bi half-width ≡ 2.85 ρ_bi full width. Config: as B5a but **:improved** drift model (L̂_B⁻¹ = 0 proxy), ν_i★ = 10⁻³–10⁻⁴, Φ′_eqm = 0, η_j = 1. The 8.73 → 1.46 pair is authoritative in the D23a abstract | [CHECKED: D21 abstract + Fig. 8; D23a abstract] |
 | B5c | **kokuchou finite-ν_★ threshold surface**: w_c[r_s] ≈ 0.440 ρ̂_θi + 0.0178 ν_★ − 7.54×10⁻⁵ (2D OLS, R² = 0.9916), and per-ν_★ fits w_c/ρ̂_θi = {0.397, 0.427, 0.451, 0.487} at ν_★ = {5, 10, 15, 20}×10⁻³. Validity: ρ̂_θi ∈ [1,5]×10⁻³, ε = 0.1, ω_E = 0, m/n = 2/1, **L23-amended equation set**. The ν_★-dependence of the threshold is the new physics here | [CHECKED: L23 Eqs. 6.3.1–6.3.2, Figs. 6.10–6.12] |
 | B6 | Δ vs. w curves and separatrix-layer structure vs. published RDK-NTM figures: D23b Fig. 3 (layer-resolved g at both σ), Fig. 4 (g(p_φ) separatrix zoom), Fig. 6 (u_∥i contours with/without layer), Fig. 7 (δΦ contours), Fig. 9 (Δ_neo, Δ*_bs, Δ_pol vs. w against 1/w and 1/w³); layer effect on threshold: w_c 0.78 → 0.52 ρ_θi at ω_E = 0, ν_i = 10⁻³ | [CHECKED: D23b §3–4] |
-| B7 | DK mode vs. RDK cross-check mode agreement above the documented ν̂ floor; prior-art agreement window ν_★ ~ 10⁻³–10⁻⁴ (D21 Appendix C benchmarked DK-NTM against RDK-NTM there); note kokuchou could not operate below ν_★ = 5×10⁻³ — beating that floor is an ISLET numerics deliverable | internal; [CHECKED: D21 App. C; L23 §5.3] |
+| B7 | DK mode vs. RDK cross-check mode agreement above the documented ν̂ floor; prior-art agreement window ν_★ ~ 10⁻³–10⁻⁴ (D21 Appendix C benchmarked DK-NTM against RDK-NTM there); note kokuchou could not operate below ν_★ = 5×10⁻³ — beating that floor is an Islands numerics deliverable | internal; [CHECKED: D21 App. C; L23 §5.3] |
 | B8 | W minority: multi-species neoclassical fluxes & bootstrap modification vs. NEO multi-species; PS-impurity/banana-bulk mixed regime | NEO |
 | B9 | Threshold-vs-experiment context check (not pass/fail): La Haye NSTX+DIII-D fit w_c = 0.26 ρ̂_θi ≈ 0.955 ρ_bi half-width (quoted as full width 1.91 ρ_bi in the source), vs. B5b/B5c — the residual gap (rotation, shaping, finite ε) is the Level 2–4 motivation | [CHECKED: L23 pp. 131–132, Fig. 6.12; La Haye 2012] |
 
@@ -61,7 +61,7 @@ only after the [VERIFY] resolution is logged with the specific amended term.
 
 | ID | Target |
 |---|---|
-| D1 | **Linear limit vs. SLAYER**: (Δ_cos + iΔ_sin)(Q) across drift-MHD regimes; frame/Q mapping documented. **Prerequisite**: the in-repo SLAYER Δ(Q) lands with the Tearing module PR (#238, `src/Tearing/InnerLayer/SLAYER/`), sequenced before ISLET M0 (docs/00, docs/06 §1); this benchmark then calls it directly in CI. Published Park 2022 curves remain the independent cross-check. [VERIFY: Park PoP 29 (2022) conventions — paper not in the reference library; acquire] |
+| D1 | **Linear limit vs. SLAYER**: (Δ_cos + iΔ_sin)(Q) across drift-MHD regimes; frame/Q mapping documented. **Prerequisite**: the in-repo SLAYER Δ(Q) lands with the Tearing module PR (#238, `src/Tearing/InnerLayer/SLAYER/`), sequenced before Islands M0 (docs/00, docs/06 §1); this benchmark then calls it directly in CI. Published Park 2022 curves remain the independent cross-check. [VERIFY: Park PoP 29 (2022) conventions — paper not in the reference library; acquire] |
 | D2 | Constant-ψ recovery: prescribed-island results re-derived as the small-Δ′, w ≫ δ_layer limit of the self-consistent solve |
 | D3 | Fluid-limit toggles vs. an established nonlinear cylindrical two-fluid code (TM1-class case) for island growth and penetration |
 | D4 | Penetration bifurcation: fold structure and hysteresis qualitatively vs. Fitzpatrick 1998; thresholds with L4 torque balance vs. SLAYER-derived thresholds in the linear limit |
@@ -103,7 +103,7 @@ Not pass/fail — measured differences, each a figure or paper section:
    file's history before the triage concludes anything other than "our bug."
 4. Every ladder benchmark ships with a figure script per the docs/07 §2
    pipeline; the same script feeds CI artifacts, the state gallery, and paper
-   panels. Ladder status renders automatically into docs/state/STATE.md — this
+   panels. Ladder status renders automatically into docs/src/islands/state/STATE.md — this
    file defines targets; the dashboard reports reality.
 5. Threshold numbers are always reported as **half-widths with the unit
    stated** (ρ_θi and ρ_bi = ε^{1/2}ρ_θi both given at the run's ε), because

@@ -22,7 +22,7 @@ paper outline (the figure contract), not ends with it.
       convention, docs/01 §1). No Ampère solve.
 - O4. Fixed equilibrium-E_r parameter ω_E (≡ −ω₀, the island propagation
       frequency in the zero-E_r frame; docs/01 §5). The published York
-      thresholds sit at ω_E = 0; ISLET treats ω_E as a scanned input from day
+      thresholds sit at ω_E = 0; Islands treats ω_E as a scanned input from day
       one (D23b already does), because Δ_pol ∝ ω_E² with a sign reversal near
       −0.89 ω_dia,e makes single-ω_E polarization values misleading.
 - O5. Timescale ordering ω, ω_*, ω_D ≪ ω_bounce (orbit-averaged leading order
@@ -53,7 +53,7 @@ is a direct 4D implementation of this exact level and documents where it
 breaks: ν_★ floor 5×10⁻³ and ŵ ceiling 0.75 ρ̂_θi set by memory + separatrix
 resolution, Picard non-convergence, a singular trapped-passing matching
 matrix, and a spurious solution branch from Neumann far-field BCs (docs/04
-§§2–3, 6). ISLET's architecture (matrix-free Newton–Krylov, adaptive
+§§2–3, 6). Islands' architecture (matrix-free Newton–Krylov, adaptive
 layer-packed grids, neoclassical-matching BCs) is chosen point-by-point
 against that failure list. Getting *below* kokuchou's ν_★ floor while matching
 its thresholds is the headline Level-0 numerics deliverable.
@@ -152,7 +152,7 @@ EAST 91972).
   implementation arrives with GPEC's Tearing module work (PR #238,
   `feature/tearing-growthrates`: `src/Tearing/InnerLayer/SLAYER/` Riccati layer
   model + GGJ under the same interface, dispersion root-finding, and the
-  `delta_prime_raw` outer-region Δ′). That PR is sequenced to land before ISLET
+  `delta_prime_raw` outer-region Δ′). That PR is sequenced to land before Islands
   work begins (docs/06 §1); ladder D1's in-CI form then calls it directly.
   The transition regime w ~ δ_layer (penetration bifurcation, kinetic) is the
   flagship new-physics deliverable.
@@ -231,8 +231,8 @@ Parallelism: M3–M4 and M7 are independent of each other; M5–M6 depends on M3
 **Sequencing against GPEC:** the Tearing module PR (#238,
 `feature/tearing-growthrates` — SLAYER + GGJ inner layers, dispersion solver,
 Δ′ machinery) lands **before** M0. If M0 starts while #238 is still open, the
-ISLET branch is cut from `feature/tearing-growthrates` rather than `develop`,
-so the SLAYER/Δ′ interfaces ISLET consumes are in hand from the first commit.
+Islands branch is cut from `feature/tearing-growthrates` rather than `develop`,
+so the SLAYER/Δ′ interfaces Islands consumes are in hand from the first commit.
 
 ## Risk register
 
@@ -244,7 +244,7 @@ so the SLAYER/Δ′ interfaces ISLET consumes are in hand from the first commit.
 | Far-field BCs admit spurious solution branches (kokuchou's "winged" states under Neumann) | 0+ | Neoclassical-matching far-field BCs, never bare Neumann; continuation warm-starts; spurious-branch detection via far-field flow comparison against no-island neoclassics (docs/01 §3) |
 | Published equation sets in the lineage contain errors (L23 §2.6 amendment list against I19 Eq. A.1) | 0 | Independent re-derivation before implementation ([VERIFY]/[DERIVED] policy); benchmark against L23-amended physics; standing triage category in docs/05 reporting rules |
 | (x, ξ) small-amplitude limit fails to reproduce delicate linear layer structure | 3 | This is *the* physics risk. De-risk via M7 fluid track; verify against SLAYER regime-by-regime; budget the painful months here |
-| In-repo SLAYER not merged yet (on `develop` it is a placeholder; the implementation lives on PR #238 `feature/tearing-growthrates`) | 3 | Sequence #238 before M0; branch ISLET from `feature/tearing-growthrates` if starting earlier; fall back to published Park 2022 curves only if that branch stalls |
+| In-repo SLAYER not merged yet (on `develop` it is a placeholder; the implementation lives on PR #238 `feature/tearing-growthrates`) | 3 | Sequence #238 before M0; branch Islands from `feature/tearing-growthrates` if starting earlier; fall back to published Park 2022 curves only if that branch stalls |
 | Non-conservative collision discretization poisons bootstrap | 1 | NEO no-island cross-check as a CI-level gate; conservation tests as unit tests |
 | ω_E sensitivity of polarization makes single-point Δ misleading (Δ_pol ∝ ω_E², sign flip near −0.89 ω_dia,e; L23's anomalous electron Δ_pol at ω_E = 0) | 0–4 | Always publish Δ as surfaces over (w, ω_E), never single points, until Level 4 closes ω_E; E4/E6 toggle studies address the open electron-Δ_pol question |
 | 5D cost explosion at Level 2 | 2 | Orbit-averaged (4D) mode retained as toggle; trace-species linear passes; emulator strategy assumes expensive solves |
@@ -261,9 +261,11 @@ so the SLAYER/Δ′ interfaces ISLET consumes are in hand from the first commit.
   empirical case against the alternative.
 - D3 (adopted): species list first-class at Level 0. Rationale: retrofit cost ≫
   upfront cost; trace-role machinery needed by both W and EP tracks.
-- D4 (adopted): Julia, single package + subpackages if needed. Rationale: AD
-  through the operator stack (exact Jacobians + ∂Δ/∂p sensitivities), GPEC-stack
-  affinity.
+- D4 (adopted): Julia, as a submodule of the GeneralizedPerturbedEquilibrium
+  package (`src/Islands/`, `module Islands` — no separate Project.toml).
+  Rationale: AD through the operator stack (exact Jacobians + ∂Δ/∂p
+  sensitivities), and GPEC-stack affinity (direct calls to the Δ′/SLAYER/
+  equilibrium machinery, docs/06 §1).
 - D5 (open): velocity coordinates (λ, E) vs. (v_∥, v_⊥) vs. (θ_b-aligned).
   Default (λ, E) with σ = sgn(v_∥); revisit at Level 2 when θ is retained.
   Note: prior art all uses y = λB_max with the y_c = 1 boundary; the singular

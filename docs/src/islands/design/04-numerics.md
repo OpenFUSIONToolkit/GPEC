@@ -75,7 +75,7 @@ Two prior-art failure modes to design against:
    separatrix gradients *steeper* than in the original DK-NTM runs — kokuchou
    could not reach DK-NTM's ν_★ = 10⁻³ operating point (floor at 5×10⁻³) nor
    ŵ > 0.75ρ̂_θi at that floor, with memory as the binding constraint
-   [CHECKED: L23 §5.3, §6.1.2, p. 116]. ISLET's matrix-free posture removes
+   [CHECKED: L23 §5.3, §6.1.2, p. 116]. Islands' matrix-free posture removes
    kokuchou's specific memory wall (§6 below) but not the resolution demand.
 
 Posture (unchanged in spirit, now with numbers): adaptive packing driven by
@@ -98,7 +98,7 @@ DK-NTM once other bugs were fixed). kokuchou's fix: truncated SVD (cutoff
 10⁻⁷; exactly one singular value truncated) applied only at the boundary
 solve.
 
-Implications for ISLET's Newton–Krylov (no y-sweep, one global residual):
+Implications for Islands' Newton–Krylov (no y-sweep, one global residual):
 
 - The same near-null-space will reappear as **Jacobian ill-conditioning
   localized at the y_c block**. The physics-block preconditioner must treat
@@ -119,7 +119,7 @@ Before any physics benchmark: MMS per operator and for the assembled L0 system
 (source terms chosen so a prescribed smooth g*, Φ̃* solve the equations).
 Verifies discretization order and the AD-generated JVPs simultaneously
 (JVP checked against finite differences of the residual). MMS configs live in
-`verify/` and run in CI at low resolution. Supplement with the sources' cheap
+`src/Islands/verify/` and run in CI at low resolution. Supplement with the sources' cheap
 analytic unit targets (docs/01 §6: h(Ω) identities, k = −1.173, ⟨ν̂⟩_v,
 f_p = 1 − 1.46√ε) — L23 Ch. 4 demonstrates these catch inherited bugs that
 integration tests miss.
@@ -133,7 +133,7 @@ integration tests miss.
   anti-pattern: kokuchou's production runs *never met* their Picard convergence
   criterion (Φ̂ array-max residual >100%/iteration at large ŵ) even as Δ_loc
   stabilized, and the array-averaged residual hid locally-divergent regions
-  [CHECKED: L23 §3.1.5, §6.1.1]. ISLET solves (g_j, Φ̃) as one Newton system;
+  [CHECKED: L23 §3.1.5, §6.1.1]. Islands solves (g_j, Φ̃) as one Newton system;
   convergence is measured by the global residual norm *and* its spatial max,
   both archived.
 - **Preconditioning** (the make-or-break): physics-block preconditioner —
@@ -154,7 +154,7 @@ kokuchou's y-sweep shooting method stores dense (n_ξn_p)² recursion blocks:
 at n_ξ = 30, n_p = 145 that is ≈16.6 GB *per energy grid point* and
 O(0.67 N³) ≈ 5.5×10¹⁰ flops per y-point (0.4 hr/energy-point on ARCHER2,
 O(100 GB) RAM total) — and memory, not physics, set its ν_★ floor and ŵ
-ceiling [CHECKED: L23 pp. 80–84]. ISLET's matrix-free Newton–Krylov stores
+ceiling [CHECKED: L23 pp. 80–84]. Islands' matrix-free Newton–Krylov stores
 O(#dof) vectors instead; the trade is preconditioner engineering (§5). Every
 solve logs a cost-model entry (dof, iterations, wall time) — the emulator
 strategy depends on knowing what a point costs, and the L23 numbers are the

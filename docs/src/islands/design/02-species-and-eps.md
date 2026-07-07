@@ -2,7 +2,7 @@
 
 ## 1. Species as a first-class dimension (Level 0 requirement, D3)
 
-Every kinetic object in ISLET is indexed by species. The solve is per-species DKEs
+Every kinetic object in Islands is indexed by species. The solve is per-species DKEs
 coupled through (i) quasineutrality (and Ampère at L3), (ii) the collision
 operator's field-particle terms (L1+), and (iii) the output moments, which sum
 over species. Designing for N species at Level 0 costs ~nothing (the L0 test is a
@@ -131,7 +131,7 @@ Alphas violate the orderings W leaves intact:
 
 EP pressure also modifies Δ′ (outer-region kinetic corrections — same physics
 class as GPEC/PENT stability integrals). That stays on the perturbed-equilibrium
-side and arrives through the Δ′(w) input. ISLET owns only resonant/orbit-width EP
+side and arrives through the Δ′(w) input. Islands owns only resonant/orbit-width EP
 physics at the island. State this in every EP paper to preempt double-counting
 questions, and define the split precisely: outer kinetic Δ′ evaluated with the
 island region excised at the matching radius |x| = L_x [interface spec in

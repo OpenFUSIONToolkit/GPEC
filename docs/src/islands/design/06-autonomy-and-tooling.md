@@ -8,12 +8,15 @@ one-time actions; everything else is standing guidance for agent sessions.
 
 ## 1. Living inside the GPEC repo (supersedes docs/03 §5 where in-repo)
 
-ISLET develops inside the OpenFUSIONToolkit GPEC repository as a **subdirectory
-Julia package** (e.g. `islet/` with its own `Project.toml`, depending on GPEC):
+Islands develops inside the OpenFUSIONToolkit GPEC repository as a **submodule of
+the GeneralizedPerturbedEquilibrium package** (`src/Islands/`, `module Islands` —
+no separate `Project.toml`; it shares the repo's environment and CI). Layout:
+code in `src/Islands/`, docs in `docs/src/islands/` (see `src/Islands/CLAUDE.md`
+for the full map):
 
 - **The interfaces become function calls.** docs/03 §5 specified file-based
   interfaces to Δ′ and SLAYER because a standalone repo needed them. In-repo,
-  everything ISLET consumes arrives with the Tearing module work (PR #238,
+  everything Islands consumes arrives with the Tearing module work (PR #238,
   `feature/tearing-growthrates`): SLAYER Δ(Q) (Fitzpatrick Riccati layer model,
   `src/Tearing/InnerLayer/SLAYER/`), GGJ under the same `InnerLayer` interface,
   the dispersion/root-finding layer (`src/Tearing/Dispersion/`), and the
@@ -21,29 +24,30 @@ Julia package** (e.g. `islet/` with its own `Project.toml`, depending on GPEC):
   `pest3_decompose` from ForceFreeStates, fed by the new `Riccati.jl` ideal
   solver) — all as direct Julia calls, no digitization, no format drift.
   Equilibrium representations are reused, not re-ingested. This is the single
-  biggest win of colocating. **Sequencing:** #238 lands before ISLET M0; if
-  ISLET starts earlier, branch from `feature/tearing-growthrates` (docs/00
+  biggest win of colocating. **Sequencing:** #238 lands before Islands M0; if
+  Islands starts earlier, branch from `feature/tearing-growthrates` (docs/00
   milestone sequencing) so the interfaces are in hand from the first commit.
   On `develop` today the old `src/InnerLayer/SLAYER/Slayer.jl` is still a
   placeholder — do not code against `develop`'s module layout; #238 also moves
   GGJ under `src/Tearing/`. `src/KineticForces` (PENTRC/NTV) exists on
   `develop` and is the natural Level-4 torque-balance counterpart.
-- **Namespace discipline**: ISLET imports GPEC; GPEC never imports ISLET until
-  ISLET is stable enough to be a documented feature. One-way dependency,
-  enforced by CI (a test that greps GPEC sources for `using .Islet`-type
+- **Namespace discipline**: Islands imports GPEC; GPEC never imports Islands until
+  Islands is stable enough to be a documented feature. One-way dependency,
+  enforced by CI (a test that greps GPEC sources for `using .Islands`-type
   references).
 - **CLAUDE.md layering**: Claude Code loads nested CLAUDE.md files; the repo
   root keeps GPEC-wide conventions (including the existing merge-conflict
-  synthesis policy), and `islet/CLAUDE.md` (this project's, from this bundle)
-  applies within the subtree. On conflict, the more specific file governs for
-  work inside `islet/`; flag genuine contradictions to the human rather than
+  synthesis policy), and `src/Islands/CLAUDE.md` applies within the module
+  subtree. On conflict, the more specific file governs for work inside
+  `src/Islands/`; flag genuine contradictions to the human rather than
   resolving silently.
-- **CI**: ISLET tests/benchmarks run as separate CI jobs so a red ISLET ladder
+- **CI**: Islands tests/benchmarks run as separate CI jobs so a red Islands ladder
   never blocks unrelated GPEC merges (and vice versa), but the SLAYER/DCON
   cross-checks run in *both* suites once they exist — they protect the
   interface from both sides.
 - **Branch discipline for autonomous work**: `main` protected; all agent work
-  on `islet/<milestone>-<topic>` branches via PR; parallel milestones (e.g.
+  on `feature/islands-<milestone>-<topic>` branches via PR (GPEC GitFlow
+  convention, repo-root CLAUDE.md); parallel milestones (e.g.
   M3–M4 alongside M7, per docs/00) in separate git worktrees so concurrent
   sessions never share a working tree.
 
@@ -65,7 +69,7 @@ is never a judgment call. Launch prompts follow this template:
 > task. Do not weaken a benchmark tolerance or re-baseline a target to reach
 > done; that is a blocker, not a fix.
 
-### 2.2 Non-blocking escalation: `islet/QUESTIONS.md`
+### 2.2 Non-blocking escalation: `docs/src/islands/QUESTIONS.md`
 
 Autonomous runs must never stall waiting for a human, and must never guess on
 the things CLAUDE.md forbids guessing (coefficients, signs, normalizations,
@@ -78,7 +82,8 @@ reference the IDs they were blocked on or unblocked by.
 
 ### 2.3 Guardrails in tooling, not vigilance
 
-**[HUMAN SETUP]** in `islet/.claude/settings.json` (project-scoped, checked in):
+**[HUMAN SETUP]** in the repo-root `.claude/settings.json` (the checked-in
+project settings shared across GPEC; add Islands-specific rules here):
 
 - `permissions`: allow the routine loop (edit within repo, `julia --project`
   test/benchmark commands, git branch/commit/push, `gh pr` on this repo); deny
@@ -107,7 +112,8 @@ version rather than this document.
 **[HUMAN SETUP]**, building on the prior GPEC GitHub-App exploration (org
 permission constraints noted there still apply — may need org-owner action):
 
-- `anthropics/claude-code-action` for PR review on `islet/**` paths, with a
+- `anthropics/claude-code-action` for PR review on `src/Islands/**` and
+  `docs/src/islands/**` paths, with a
   review prompt pointing at CLAUDE.md and docs/: check [VERIFY] policy
   compliance, no regime-branches in operators, ladder IDs addressed.
 - Issue-triggered autonomous work: label `claude-task` on an issue containing
@@ -131,7 +137,7 @@ permission constraints noted there still apply — may need org-owner action):
   context stays on implementation; summarize subagent findings into the PR.
 - Commit granularly with ladder/QUESTIONS references; a session that ends
   without a pushed branch and status note has failed its exit criteria.
-- Post-session, append a short entry to `islet/LOG.md`: what moved, what's
+- Post-session, append a short entry to `docs/src/islands/LOG.md`: what moved, what's
   blocked, next action. This file is the cross-session memory spine — read it
   at session start along with QUESTIONS.md.
 
@@ -157,10 +163,10 @@ division of labor:
   ladder needs (e.g. docs/05 C6 resonant-EP limit); literature mapping
   (`map-research`) for the polarization-current sign genealogy before touching
   B4; eventually manuscript drafting. GPD derivations feed
-  `docs/derivations/` as `[DERIVED]` artifacts per CLAUDE.md — they *propose*
+  `docs/src/islands/derivations/` as `[DERIVED]` artifacts per CLAUDE.md — they *propose*
   [VERIFY] clearances; a human still signs off.
 - **Native lane — implementation**: code, numerics, CI, benchmarks stay under
-  this bundle's CLAUDE.md + docs. GPD is a research harness, not a
+  the Islands module's CLAUDE.md + docs. GPD is a research harness, not a
   software-engineering harness; don't let two workflow systems fight over the
   same task.
 
@@ -169,7 +175,7 @@ what it injects before granting — a command pack is prompt-layer software and
 should be audited and version-pinned like any dependency. Confirm its
 project-artifact directories (`GPD/`, `~/.gpd`) are gitignored or deliberately
 committed, and that its instructions don't contradict CLAUDE.md (if they do,
-CLAUDE.md wins inside `islet/`; note conflicts in QUESTIONS.md).
+CLAUDE.md wins inside `src/Islands/`; note conflicts in QUESTIONS.md).
 
 Its sibling GSD (general-purpose "Get Shit Done" workflow, which GPD is
 modeled on) is an optional trial for milestone execution on the native lane;
@@ -218,13 +224,14 @@ would otherwise be re-explained:
    per-thread preallocation patterns, allocation-test policy, `@inbounds`
    policy, OrdinaryDiffEq-vs-QuadGK division of labor, Interpolations boundary
    conditions. Encodes the lessons already learned so no session relearns them.
-3. **islet-conventions** (`islet/`): the load-bearing distillation of docs/01–05
-   — half-width convention, frames module rule, [VERIFY]/[DERIVED] workflow,
-   operator-stack rules, escalation protocol. Keeps subagents aligned without
-   loading the full docs.
-4. **benchmark-ladder** (`islet/`): how to run `verify/` and `benchmarks/`,
-   where reference data lives, how to read convergence artifacts, what
-   re-baselining requires. Paired with the ladder from day one.
+3. **islands-conventions** (repo-root `.claude/skills/`): the load-bearing
+   distillation of docs/01–05 — half-width convention, frames module rule,
+   [VERIFY]/[DERIVED] workflow, operator-stack rules, escalation protocol.
+   Keeps subagents aligned without loading the full docs.
+4. **benchmark-ladder** (repo-root `.claude/skills/`): how to run
+   `src/Islands/verify/` and `benchmarks/islands/`, where reference data lives,
+   how to read convergence artifacts, what re-baselining requires. Paired with
+   the ladder from day one.
 5. **paper-figures** (later): publication figure conventions (Makie/matplotlib
    styles, the editable-SVG lessons), once results exist.
 
@@ -261,15 +268,17 @@ the hook/skill/prompt, don't absorb the load manually.
 ## 6. Setup checklist (condensed)
 
 **[HUMAN SETUP]**, in order:
-1. Create `islet/` subpackage skeleton in the GPEC repo; drop this bundle in;
-   commit docs before any code.
-2. Project settings: permissions allow/deny, hooks, checked into `islet/.claude/`.
+1. Create the `src/Islands/` module skeleton (submodule of
+   GeneralizedPerturbedEquilibrium — no separate `Project.toml`); the design
+   docs already live under `docs/src/islands/`. Commit docs before any code.
+2. Project settings: permissions allow/deny, hooks, checked into the repo-root
+   `.claude/`.
 3. Branch protection on main; worktree convention documented in LOG.md.
 4. GitHub Actions: claude-code-action PR review; `claude-task` issue workflow;
    nightly/weekly ladder crons; API key secret.
 5. Plugin marketplaces + skill-creator + code-simplifier.
 6. Build gpec-map and julia-conventions skills (human-dictated, skill-creator
-   evaluated); islet-conventions and benchmark-ladder skills alongside M0–M1.
+   evaluated); islands-conventions and benchmark-ladder skills alongside M0–M1.
 7. Define the three subagents.
 8. GPD: project-local install, audit, trial on one [VERIFY] clearance and one
    derivation task; decide lane adoption after two weeks of use.

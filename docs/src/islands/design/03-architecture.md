@@ -7,31 +7,40 @@ loop, the architecture has failed.
 
 ## 1. Package layout
 
+Islands is a GPEC submodule (`module Islands`, no separate `Project.toml` — it
+shares the GeneralizedPerturbedEquilibrium package environment). Its files are
+distributed across the repo's existing trees, not a self-contained package dir:
+
 ```
-ISLET.jl/
-├── Project.toml
-├── CLAUDE.md
-├── README.md
-├── docs/                    # these design documents (normative)
-├── src/
-│   ├── ISLET.jl
-│   ├── geometry/            # AbstractEquilibrium: AnalyticCircular (L0),
-│   │                        #   MillerAnalytic (L2 entry; the D23a geometry),
-│   │                        #   NumericalEquilibrium (L2; DCON/gEQDSK ingest)
-│   ├── phasespace/          # grids (x, ξ[, θ]; λ, E, σ), maps, quadrature,
-│   │                        #   layer-clustered mappings (docs/04)
-│   ├── species/             # Species, backgrounds, roles (docs/02)
-│   ├── frames/              # THE frequency/frame conversion module (docs/01 §5)
-│   ├── operators/           # the stack (see §2)
-│   ├── fields/              # Φ̃ quasineutrality residual; A_∥ Ampère residual (L3)
-│   ├── closures/            # torque balance, χ⊥ transport, radiation (L4)
-│   ├── moments/             # Δ_cos, Δ_sin, profiles, channel decompositions
-│   ├── solvers/             # Newton–Krylov, continuation, trace-species linear pass
-│   ├── io/                  # config (TOML), results (HDF5/JLD2), provenance
-│   └── verify/              # benchmark harness callable from tests AND scripts
-├── test/                    # unit + symmetry + conservation tests (fast)
-├── benchmarks/              # the docs/05 ladder (slow; CI-gated subsets)
-└── scripts/                 # surface generation, paper figures
+src/Islands/                 # the module (module Islands)
+├── CLAUDE.md                # module conventions (nested; Claude Code auto-loads)
+├── Islands.jl               # module entry
+├── geometry/                # AbstractEquilibrium: AnalyticCircular (L0),
+│                            #   MillerAnalytic (L2 entry; the D23a geometry),
+│                            #   NumericalEquilibrium (L2; DCON/gEQDSK ingest)
+├── phasespace/              # grids (x, ξ[, θ]; λ, E, σ), maps, quadrature,
+│                            #   layer-clustered mappings (docs/04)
+├── species/                 # Species, backgrounds, roles (docs/02)
+├── frames/                  # THE frequency/frame conversion module (docs/01 §5)
+├── operators/               # the stack (see §2)
+├── fields/                  # Φ̃ quasineutrality residual; A_∥ Ampère residual (L3)
+├── closures/                # torque balance, χ⊥ transport, radiation (L4)
+├── moments/                 # Δ_cos, Δ_sin, profiles, channel decompositions
+├── solvers/                 # Newton–Krylov, continuation, trace-species linear pass
+├── io/                      # config (TOML), results (HDF5/JLD2), provenance
+└── verify/                  # benchmark harness callable from tests AND scripts
+
+docs/src/islands/            # docs (rendered by the GPEC Documenter site)
+├── index.md                 # overview / landing page
+├── design/                  # these design documents (normative, aspirational)
+├── (Physics Book chapters)  # as-implemented equations (docs/07)
+├── derivations/  papers/  state/  notes/  LOG.md  QUESTIONS.md
+
+test/runtests_islands_*.jl   # unit + symmetry + conservation tests (fast),
+                             #   included from the repo's test/runtests.jl
+benchmarks/islands/          # the docs/05 ladder (slow; CI-gated subsets)
+└── figures/                 # surface generation + paper/gallery figure scripts
+regression-harness/          # islands cases integrated with the rest (islands_*)
 ```
 
 ## 2. The operator stack
@@ -63,7 +72,7 @@ struct RadiationSink       <: AbstractTerm end   # (L4, energy closure)
 ```
 
 Configuration = list of terms per species + field-equation set + closure set,
-read from a TOML config. **Named configurations are pinned in `verify/`**:
+read from a TOML config. **Named configurations are pinned in `src/Islands/verify/`**:
 `:imada2019` (B5a; note it targets the L23-amended physics, not I19 Eq. A.1 as
 printed — docs/01 header), `:dudkovskaia2021` (B5b), `:leigh2023` (B5c),
 `:sauter_limit`, `:slayer_limit`, … — the toggle-comparison studies the
@@ -73,7 +82,7 @@ its configuration.
 Rules:
 - No term may inspect which other terms are active (no hidden coupling).
 - Every term carries its own verification hook (an analytic limit or manufactured
-  solution registered in `verify/`).
+  solution registered in `src/Islands/verify/`).
 - Orderings that *remove* structure (e.g. orbit averaging O5) are implemented as
   alternative phase-space configurations, not operators: `phase = :orbit_averaged
   (4D)` vs `:full (5D)`. Terms are written against an abstract phase-space
@@ -112,7 +121,7 @@ Rules:
 
 ## 5. External interfaces
 
-> **Superseded where in-repo (docs/06 §1):** with ISLET living inside the GPEC
+> **Superseded where in-repo (docs/06 §1):** with Islands living inside the GPEC
 > repository, the Δ′ and SLAYER interfaces below become direct Julia calls
 > against GPEC's implementations, exercised in CI. The file-based forms remain
 > the spec for any standalone/external consumers.
@@ -123,11 +132,11 @@ Rules:
 - **Equilibrium input (L2)**: gEQDSK + profiles, mapped through the same
   representations the GPEC stack uses; `AnalyticCircular` remains permanently
   available for regression.
-- **SLAYER (L3 verification)**: comparison harness that maps ISLET's linear-limit
+- **SLAYER (L3 verification)**: comparison harness that maps Islands' linear-limit
   (Δ_cos + iΔ_sin) onto SLAYER's Δ(Q) convention — the frames module owns the Q
   mapping [VERIFY: Park 2022 conventions — paper not yet in the reference
   library]. **Status:** the in-repo SLAYER arrives with the Tearing module PR
-  (#238, `src/Tearing/InnerLayer/SLAYER/`), sequenced before ISLET starts
+  (#238, `src/Tearing/InnerLayer/SLAYER/`), sequenced before Islands starts
   (docs/06 §1); code against the Tearing-module layout, not `develop`'s old
   `src/InnerLayer` placeholder.
 - **NEO/NCLASS (L1 verification)**: no-island neoclassical cross-check driver

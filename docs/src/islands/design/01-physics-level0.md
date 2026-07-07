@@ -26,7 +26,7 @@ closure and large-w limits).
 > ∂²ĝ/∂p̂² diffusion term (making it ∝ ρ̂²_θi), a missing ν̂_ii ρ̂_θi coefficient
 > on ∂ĝ/∂p̂, missing factors on the Maxwellian-gradient drive terms, a corrected
 > momentum-conserving term Û_∥i(ĝ + p̂F̂′_Ms), and a sign fix in the Δ_loc
-> relation. **ISLET must implement from an independently re-derived equation
+> relation. **Islands must implement from an independently re-derived equation
 > set benchmarked against L23's amended form, never from I19 Eq. (A.1) as
 > printed.** This is the empirical justification for the whole [VERIFY]
 > policy: the literature's O(1) coefficients are demonstrably not to be
@@ -45,11 +45,11 @@ B ≈ B₀(1 − ε cos θ), ε = r_s/R₀ ≪ 1 [CHECKED: I19 Eq. (3)].
   D21/D23b normalize radial quantities to the island width w_ψ
   (ρ̂_θj = I V_Tj/(ω_cj w_ψ)); the 2018 PRL normalizes to ψ_s. These
   inconsistent conventions across the same lineage are a transcription hazard —
-  ISLET's own normalization (§5) is r_s-based, with conversion factors in one
+  Islands' own normalization (§5) is r_s-based, with conversion factors in one
   place. [CHECKED: I19 p. 6; D21 Eq. 19; PRL Eq. (4) note]
 - Helical angle: ξ = m(θ − φ/q_s) (I19 Eq. (6)); Diss19/D21 use ξ = φ − q_s θ
   with the cos nξ harmonic — same island, different angle multiplicity. Pin
-  ISLET's ξ to the I19 form and document the map. **Island rest frame:** all
+  Islands' ξ to the I19 form and document the map. **Island rest frame:** all
   Level-0 solves are steady in this frame.
 - Poloidal angle θ is eliminated at leading order by orbit averaging at fixed
   p_φ (O5); it reappears at Level 2.
@@ -148,7 +148,7 @@ passing-particle physics, not banana-orbit physics; ρ_bi is merely the natural
 unit at ε = 0.1). Trapped particles: S ∝ p̂ (no island structure); response
 tied to the magnetic island.
 
-In DK (4D direct) mode ISLET does **not** impose S-structure; it must *emerge*.
+In DK (4D direct) mode Islands does **not** impose S-structure; it must *emerge*.
 The RDK reduction — solve the 1D collisional constraint ⟨Ĉ/𝒜⟩_ξ^S g^(0,0) = 0
 per S-contour [CHECKED: D21 Eqs. 23–24; explicit coefficient forms Diss19
 Eqs. D.60–D.62 and D23b Eq. 19 + Appendix A] — is retained as a cross-check
@@ -211,9 +211,9 @@ L23 Eq. (2.4.14)]:
 
     e_iΦ̂/T_i = [ δn̄_i/n₀ + x − ĥ(Ω) ] / (2 L̂_{n0})
 
-(T_e = T_i assumed in the sources; ISLET keeps τ = T_e/T_i general and flags
+(T_e = T_i assumed in the sources; Islands keeps τ = T_e/T_i general and flags
 departures). With kinetic electrons, the Picard form δΦ̂ = (δn̂_i − δn̂_e)/2
-[CHECKED: Diss19 Eq. 2.45]. In ISLET both reduce to one quasineutrality
+[CHECKED: Diss19 Eq. 2.45]. In Islands both reduce to one quasineutrality
 residual inside the global Newton system (docs/03) — the sources' nested
 Picard loops (Φ outer, ū_∥i inner; I19 fig. A1) are precisely the fragile
 iteration structure Newton–Krylov replaces; L23 §6.1.1 reports the Picard
@@ -226,7 +226,7 @@ E_r potential as |x| → L_x; periodic in ξ. **Do not use bare Neumann
 ∂ĝ/∂p̂ = 0**: L23 §5.3/§7.1 traces its non-physical "winged" solution branch
 (flows extending 8–10 island widths, disagreeing with neoclassical theory) to
 the Neumann condition admitting multiple numerically-valid solutions, and
-recommends matching to the analytic far-field limit — which is exactly ISLET's
+recommends matching to the analytic far-field limit — which is exactly Islands'
 neoclassical-matching BC. [CHECKED: L23 pp. 113–115, 141]
 
 Ampère is **not** solved at Level 0 (O3). The Ampère residual is evaluated as
@@ -260,7 +260,7 @@ Eqs. 33–34; D23b §4]:
   solve never separates channels.)
 - Species partition (ion vs electron) alongside: L23 finds the *electron*
   channel dominates both Δ_bs and (unexpectedly, at ω_E = 0) the stabilizing
-  Δ_pol — an open physics question ISLET can settle with the ω_E scan.
+  Δ_pol — an open physics question Islands can settle with the ω_E scan.
 
 **Analytic large-w limits to recover** (ladder B2): Δ_bs+Δ_cur ∝ 1/w matching
 WCHH96 Eq. (85) — with the caveat that Eq. (85) is derived in the E_r = 0
@@ -292,7 +292,7 @@ alongside the frequency maps. [CHECKED: I19 p. 6; L23 Eqs. 2.3.40–2.3.46]
 - The effective density gradient shifts with frame:
   L_n⁻¹ = L_{n0}⁻¹(1 + Z_j ω_E/ω_dia,e). [CHECKED: Diss19 p. 46]
 - Level-0 sources' published thresholds are at ω_E = 0 (no equilibrium E_r);
-  D23b treats ω_E as an input parameter — exactly ISLET's O4. Torque-balance
+  D23b treats ω_E as an input parameter — exactly Islands' O4. Torque-balance
   roots (Δ_sin = 0) exist at discrete ω̂_E (Diss19 benchmark: ω₀ = −0.93
   ω_dia,e selected among ±0.93, ±1.28); Δ_pol ∝ ω_E² away from zero and
   **reverses sign at ω_E ≈ −0.89 ω_dia,e** (D23b Fig. 8) — the modern, frame-

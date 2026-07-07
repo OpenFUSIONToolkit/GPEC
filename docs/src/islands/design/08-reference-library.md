@@ -43,7 +43,7 @@ per the docs/01 header semantics.
 ## Known cross-source inconsistencies (pinned so nobody re-trips on them)
 
 1. **Normalization drift within the lineage**: PRL18 normalizes to ψ_s, I19/L23
-   to r_s, D21/D23b to w_ψ. ISLET pins r_s-based forms with maps in
+   to r_s, D21/D23b to w_ψ. Islands pins r_s-based forms with maps in
    `src/frames/` (docs/01 §5).
 2. **Helical angle**: I19/L23 use ξ = m(θ − φ/q_s); Diss19/D21 use
    ξ = φ − q_s θ with cos nξ. Same island, different angle multiplicity.

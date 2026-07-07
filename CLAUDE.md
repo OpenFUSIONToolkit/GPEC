@@ -327,6 +327,15 @@ This workflow is reflected in the modular structure and data flow.
 
 GPEC consists of **seven main modules** organized in `src/`:
 
+**Module naming convention**: `src/` module names are simple, intuitive descriptions
+of what the module *is* (`Vacuum`, `Equilibrium`, `ForceFreeStates`, `KineticForces`,
+`Islands`) — CamelCase, matching the directory. Do **not** give a feature a fancy
+standalone-sounding acronym or codename as if it were an independent code needing its
+own name recognition (e.g. no `ISLET`, `PENTRC`-style names for new modules). The
+domain the module addresses is the name. Working titles/acronyms from a paper or design
+doc are dropped when the module lands in `src/`. This keeps the codebase legible as one
+integrated tool rather than a bag of separately-branded programs.
+
 #### Foundation Modules
 
 1. **Splines** (`src/Splines/`) - Numerical interpolation library
