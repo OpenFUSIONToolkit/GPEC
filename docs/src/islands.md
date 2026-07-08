@@ -52,3 +52,21 @@ figure contract is `docs/src/islands/papers/paper-1/OUTLINE.md`.
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Islands]
 ```
+
+### Phase-space grids (`Islands.PhaseSpace`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.PhaseSpace]
+```
+
+### Operator stack (`Islands.Operators`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Operators]
+```
+
+### Verification harness (`Islands.Verify`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Verify]
+```
