@@ -10,6 +10,7 @@ relevant.
 
 ## 2026-07-08 — M1 skeleton: phase-space grids + operator stack + MMS/AD harness
 
+- **PR**: #320 (`feature/islands-m1` → `feature/islands`); full suite green.
 - **Moved**: Landed the M1 core (design `03 §1–2`, `04`, ladder `A1/A2`). Three
   `src/Islands/` submodules, all structure-only (no `[VERIFY]` physics numbers):
   - `phasespace/PhaseSpace.jl` — the `(x, ξ, y, E, σ)` grids with layer-clustered
