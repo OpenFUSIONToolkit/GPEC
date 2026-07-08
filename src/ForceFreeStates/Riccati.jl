@@ -628,6 +628,33 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
+# Loop the 2N boundary conditions of Eq. (37) [Glasser-Kolemen 2018 PoP 25, 032501].
+# M is the BVP matrix from _assemble_bvp_S_axis. The last 2*msing rows at the driving rows:
+# setting one to 1 assigns that big-solution coefficients. Solve once per boundary condition
+# and collect the small-solution coefficients into the raw D' matrix.
+function loop_boundary_conditions(M::Matrix{ComplexF64}, msing::Int, N::Int,
+                                  ipert_all::Vector{Int})
+    nMat = size(M, 1)
+    s2 = 2 * msing
+    M_lu = lu(M)
+    dp_raw = zeros(ComplexF64, s2, s2)
+    b = zeros(ComplexF64, nMat)
+
+    for jsing in 1:msing, side in 1:2
+        dRow = 2jsing - (2 - side)
+        fill!(b, 0)
+        b[nMat - s2 + dRow] = 1
+        x = M_lu \ b
+
+        for ksing in 1:msing
+            ipert_k = ipert_all[ksing]
+            dp_raw[dRow, 2ksing-1] = x[col_left(ksing, N)[ipert_k + N]]
+            dp_raw[dRow, 2ksing]   = x[col_right(ksing, N)[ipert_k + N]]
+        end
+        return dp_raw
+    end
+
+
 # Fallback BVP assembly with FM-based axis BC (used when no Riccati S matrices are available).
 # Uses the conditioned axis propagator Phi_R[1][:,N+1:2N] in place of S-axis matching.
 function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
