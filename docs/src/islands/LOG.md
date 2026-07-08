@@ -8,6 +8,16 @@ relevant.
 
 ---
 
+## 2026-07-08 — Fix invalid deny rules in `.claude/settings.json`
+
+- **Moved**: `/doctor` flagged two skipped permission-deny rules —
+  `Bash(git push:* main)` / `Bash(git push:* develop)` — invalid because `:*`
+  (prefix match) is only allowed at the end of a pattern. Rewrote them with a
+  mid-pattern wildcard (`Bash(git push* main)` / `Bash(git push* develop)`) so
+  they load and again deny pushes to `main`/`develop` for any remote/flags.
+- **Blocked**: nothing.
+- **Next**: unchanged — pending items are the Phase A bootstrap **Next** below.
+
 ## 2026-07-08 — Phase A bootstrap (supervised)
 
 - **Moved**: Created the `Islands` submodule skeleton (`src/Islands/Islands.jl`,
