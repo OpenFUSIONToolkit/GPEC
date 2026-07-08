@@ -1,14 +1,12 @@
-# M2 launch prompt (Islands overnight autonomous run)
+# M2 milestone contract (Islands)
 
-> This file is fed verbatim to the overnight loop:
-> `claude --permission-mode dontAsk --continue -p "$(cat docs/src/islands/design/M2-launch-prompt.md)"`.
-> It is the milestone contract (design doc `06 §2.1`). Keep it stable across
-> relaunches so `--continue` resumes the same objective.
+> The milestone contract for Islands M2 (design doc `06 §2.1`). Set it as the
+> `/goal` completion condition when working M2.
 
 You are working milestone **M2** of the Islands module (`src/Islands/`), a
-steady-state drift-kinetic island/layer solver, autonomously and unattended. M1
-(phase-space grids + operator-stack skeleton + MMS/AD harness) is complete
-(PR #320); M2 builds the **Level-0 solve machinery** on top of it.
+steady-state drift-kinetic island/layer solver. M1 (phase-space grids +
+operator-stack skeleton + MMS/AD harness) is complete (PR #320); M2 builds the
+**Level-0 solve machinery** on top of it.
 
 ## Read first (every session)
 
@@ -132,8 +130,9 @@ sign, or normalization.** The moment you would need a specific number/sign from 
 literature that isn't human-cleared: (a) implement the *structure* with the
 coefficient as a named parameter, (b) add a skipped benchmark referencing the tag,
 (c) write a `QUESTIONS.md` entry (context / question / options / recommendation /
-gated work), and (d) **switch to the next unblocked task**. Guessing a coefficient
-is the exact failure this project exists to prevent. Manufactured, order-unity test
+gated work), and (d) **ask the user to clear it if they are available, otherwise
+move to the next unblocked task**. Guessing a coefficient is the exact failure this
+project exists to prevent. Manufactured, order-unity test
 coefficients in the MMS/verification harness are legitimate (they test numerics, not
 physics) and carry no tag — do not confuse the two.
 
@@ -154,13 +153,10 @@ physics) and carry no tag — do not confuse the two.
   Push only Islands branches (never `develop`/`main`; the hooks enforce this).
 - Never weaken a tolerance or re-baseline a target to reach "done" — that is a
   blocker, not a fix.
-- Append a `LOG.md` entry (what moved / blocked / next) before ending each session.
-  The `Stop` hook will keep you from ending with a dirty tree or a broken build. A
-  session that ends without a pushed branch and a status note has failed its exit
-  criteria (`06 §2.5`).
-- If you exhaust the milestone's unblocked work (everything remaining is gated on
-  `QUESTIONS.md`/human clearance), commit, log, and let the session end — the outer
-  loop and the human pick it up.
+- Append a `LOG.md` entry (what moved / blocked / next) before wrapping up a working
+  session, and keep the tree clean and the build green (`06 §2.5`).
+- If the remaining work is all gated on human clearance, surface the blockers to the
+  user (they can clear a tag or ratify D7/D8 live) rather than stalling.
 
 ## Definition of NOT done (do not stop early)
 
