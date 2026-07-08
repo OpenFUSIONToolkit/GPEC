@@ -15,12 +15,17 @@ relevant.
   (`include` + `import . as` + `export`, last submodule slot before `Rerun.jl`).
   Stood up this `LOG.md` and `QUESTIONS.md`, the `.claude` unattended-run
   guardrails, the `physics-verifier` subagent, and the M1 launch prompt.
+- **Landed CI-green** on `feature/islands` (PR #318): both `runtests` jobs pass
+  (the wiring is valid — the package loads and the full suite passes) and the
+  docs build passes. One fix was needed en route: the exported `Islands` module
+  docstring required a manual page under `checkdocs=:exports`, so
+  `docs/src/islands.md` (an `@autodocs` block) was added and wired into
+  `docs/make.jl` (repo-root CLAUDE.md docs-coverage rule).
 - **Blocked**: `julia` is not on the automation shell's PATH (no module, not in
-  `$HOME`) → local `using GeneralizedPerturbedEquilibrium` + test run could not
-  be executed here; relying on CI (test.yaml) to validate the wiring on push.
-  See **Q1** — the overnight loop's scratch-clone environment must expose
-  `julia` or it cannot run tests.
-- **Next**: land Phase A on `feature/islands`, confirm CI green (tests + docs),
-  then the first overnight run works milestone **M1** (design `00 §M1`) —
+  `$HOME`) → changes could not be run locally; CI is the only Julia validation
+  here. See **Q1** — the overnight loop's scratch-clone environment must expose
+  `julia` or it cannot run tests / meet M1's definition-of-done.
+- **Next**: (human) resolve Q1 + one supervised `dontAsk` dry-run of the hooks,
+  then launch the overnight loop on milestone **M1** (design `00 §M1`) —
   phase-space grids + operator-stack skeleton + MMS/AD harness (ladder A1, A2),
   no `[VERIFY]` physics coefficients.
