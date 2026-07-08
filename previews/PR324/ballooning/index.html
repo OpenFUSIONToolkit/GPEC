@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Ballooning Local Stability · GPEC.jl</title><meta name="title" content="Ballooning Local Stability · GPEC.jl"/><meta property="og:title" content="Ballooning Local Stability · GPEC.jl"/><meta property="twitter:title" content="Ballooning Local Stability · GPEC.jl"/><meta name="description" content="Documentation for GPEC.jl."/><meta property="og:description" content="Documentation for GPEC.jl."/><meta property="twitter:description" content="Documentation for GPEC.jl."/><meta property="og:url" content="https://OpenFUSIONToolkit.github.io/GPEC/ballooning/"/><meta property="twitter:url" content="https://OpenFUSIONToolkit.github.io/GPEC/ballooning/"/><link rel="canonical" href="https://OpenFUSIONToolkit.github.io/GPEC/ballooning/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.svg" alt="GPEC.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">GPEC.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../set_up/">Setup</a></li><li><a class="tocitem" href="../workflow/">Workflow</a></li><li><a class="tocitem" href="../conventions/">Conventions Reference</a></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../vacuum/">Vacuum</a></li><li><a class="tocitem" href="../equilibrium/">Equilibrium</a></li><li><a class="tocitem" href="../stability/">Stability Analysis</a></li><li><a class="tocitem" href="../galerkin/">Galerkin Solver</a></li><li class="is-active"><a class="tocitem" href>Ballooning Local Stability</a><ul class="internal"><li><a class="tocitem" href="#Ballooning-mode-equation"><span>Ballooning-mode equation</span></a></li><li><a class="tocitem" href="#Asymptotic-basis-and-Mercier-exponent"><span>Asymptotic basis and Mercier exponent</span></a></li><li><a class="tocitem" href="#First-order-asymptotic-matching"><span>First-order asymptotic matching</span></a></li><li><a class="tocitem" href="#Local-thin-layer-ordering"><span>Local thin-layer ordering</span></a></li><li><a class="tocitem" href="#Local-P&#39;-and-q&#39;-perturbations"><span>Local <span>$P&#39;$</span> and <span>$q&#39;$</span> perturbations</span></a></li><li><a class="tocitem" href="#\\mathbf{N}_0-matrix-construction"><span><span>$\mathbf{N}_0$</span> matrix construction</span></a></li><li><a class="tocitem" href="#\\mathbf{N}_1-correction"><span><span>$\mathbf{N}_1$</span> correction</span></a></li><li><a class="tocitem" href="#Practical-implementation-in-Bal.jl"><span>Practical implementation in <code>Bal.jl</code></span></a></li></ul></li><li><a class="tocitem" href="../kinetic_forces/">KineticForces</a></li><li><a class="tocitem" href="../forcing_terms/">Forcing Terms</a></li><li><a class="tocitem" href="../perturbed_equilibrium/">Perturbed Equilibrium</a></li><li><a class="tocitem" href="../inner_layer/">Inner Layer</a></li><li><a class="tocitem" href="../islands/">Islands</a></li><li><a class="tocitem" href="../analysis/">Analysis</a></li><li><a class="tocitem" href="../utilities/">Utilities</a></li></ul></li><li><a class="tocitem" href="../citations/">Citations</a></li><li><a class="tocitem" href="../developer_notes/">Developer Notes</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">API Reference</a></li><li class="is-active"><a href>Ballooning Local Stability</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Ballooning Local Stability</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/GPEC" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/src/ballooning.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Ballooning-and-Mercier-Local-Stability"><a class="docs-heading-anchor" href="#Ballooning-and-Mercier-Local-Stability">Ballooning and Mercier Local Stability</a><a id="Ballooning-and-Mercier-Local-Stability-1"></a><a class="docs-heading-anchor-permalink" href="#Ballooning-and-Mercier-Local-Stability" title="Permalink"></a></h1><p>This note describes the physical and mathematical foundations of <code>Bal.jl</code>, which computes local Mercier and high-<span>$n$</span> ballooning stability. It covers the ballooning-mode equation, the asymptotic boundary treatment, and the local perturbation framework used to generate the <span>$s$</span>-<span>$\alpha$</span> diagram.</p><h2 id="Ballooning-mode-equation"><a class="docs-heading-anchor" href="#Ballooning-mode-equation">Ballooning-mode equation</a><a id="Ballooning-mode-equation-1"></a><a class="docs-heading-anchor-permalink" href="#Ballooning-mode-equation" title="Permalink"></a></h2><h3 id="Ballooning-representation"><a class="docs-heading-anchor" href="#Ballooning-representation">Ballooning representation</a><a id="Ballooning-representation-1"></a><a class="docs-heading-anchor-permalink" href="#Ballooning-representation" title="Permalink"></a></h3><p>In a tokamak equilibrium, physical quantities are periodic in the poloidal angle <span>$\theta$</span> and toroidal angle <span>$\zeta$</span>. The perturbation function <span>$\varphi$</span> satisfies</p><p class="math-container">\[\varphi(\psi, \theta, \beta)
+= \varphi(\psi, \theta, \beta + 1)
+= \varphi(\psi, \theta + 1, \beta - q),\]</p><p>where <span>$q$</span> is the safety factor.</p><p>Ballooning modes have long wavelengths along magnetic field lines and short wavelengths perpendicular to the field. They are represented using a covering-space function <span>$\hat{\varphi}$</span>, defined on <span>$-\infty &lt; \theta &lt; \infty$</span>:</p><p class="math-container">\[\varphi(\psi, \theta, \beta)
+= \sum_{l=-\infty}^{\infty}
+\hat{\varphi}(\psi, \theta - l)
+\exp[-2\pi i n(\beta + lq)].\]</p><p>Here</p><p class="math-container">\[\beta = \zeta - q\theta + \int q&#39;\theta_0(\psi)\,d\psi\]</p><p>is the Clebsch coordinate. The wave-number vector contains a secular term from the magnetic shear <span>$q&#39;$</span>:</p><p class="math-container">\[|\nabla\beta|^2
+= |\nabla\zeta - q\nabla\theta|^2
++ q&#39;^2(\theta-\theta_0)^2|\nabla\psi|^2
+- 2q&#39;(\theta-\theta_0)(\nabla\zeta-q\nabla\theta)\cdot\nabla\psi.\]</p><h3 id="Ideal-marginal-ballooning-equation"><a class="docs-heading-anchor" href="#Ideal-marginal-ballooning-equation">Ideal marginal ballooning equation</a><a id="Ideal-marginal-ballooning-equation-1"></a><a class="docs-heading-anchor-permalink" href="#Ideal-marginal-ballooning-equation" title="Permalink"></a></h3><p>At the stability boundary, <span>$\gamma = 0$</span>. Variation of the ideal-MHD energy principle gives the ballooning ODE</p><p class="math-container">\[\mathbf{B}\cdot\nabla
+\left(
+  \frac{|\nabla\beta|^2}{B^2}
+  \mathbf{B}\cdot\nabla\hat{\varphi}
+\right)
++ 2\frac{P&#39;}{\chi&#39;}\kappa_w\hat{\varphi}
+= 0,\]</p><p>where <span>$\chi$</span> is the poloidal flux and <span>$P&#39;$</span> is the pressure-gradient term used by the local-stability equations. Written using the Jacobian <span>$\mathcal{J}$</span>,</p><p class="math-container">\[\frac{\chi&#39;}{\mathcal{J}}\frac{\partial}{\partial\theta}
+\left(
+  \frac{|\nabla\beta|^2}{B^2}
+  \frac{\chi&#39;}{\mathcal{J}}
+  \frac{\partial\hat{\varphi}}{\partial\theta}
+\right)
++ 2\frac{P&#39;}{\chi&#39;}\kappa_w\hat{\varphi}
+= 0.\]</p><p><code>Bal.jl</code> converts this to a first-order matrix equation,</p><p class="math-container">\[\frac{\partial\mathbf{u}}{\partial\theta} = \mathbf{L}\mathbf{u},
+\qquad
+\mathbf{u} =
+\begin{pmatrix}
+\hat{\varphi} \\
+\dfrac{|\nabla\beta|^2}{B^2}
+\dfrac{\chi&#39;}{\mathcal{J}}
+\dfrac{\partial\hat{\varphi}}{\partial\theta}
+\end{pmatrix},\]</p><p>with</p><p class="math-container">\[\mathbf{L}
+= \frac{\mathcal{J}}{\chi&#39;}
+\begin{pmatrix}
+0 &amp; \dfrac{B^2}{|\nabla\beta|^2} \\
+-2\dfrac{P&#39;}{\chi&#39;}\kappa_w &amp; 0
+\end{pmatrix}.\]</p><h3 id="Curvature-decomposition"><a class="docs-heading-anchor" href="#Curvature-decomposition">Curvature decomposition</a><a id="Curvature-decomposition-1"></a><a class="docs-heading-anchor-permalink" href="#Curvature-decomposition" title="Permalink"></a></h3><p>The instability drive is the projected curvature</p><p class="math-container">\[\kappa_w
+\equiv
+\frac{\boldsymbol{\kappa}\times\mathbf{B}}{B^2}\cdot\nabla\beta.\]</p><p>Using <span>$\nabla\beta = \nabla\zeta - q\nabla\theta - q&#39;\theta\nabla\psi$</span>, the curvature separates into non-secular and secular pieces:</p><p class="math-container">\[\kappa_w = \kappa_n - q&#39;\theta\kappa_s,\]</p><p>where</p><p class="math-container">\[\kappa_s
+\equiv
+\frac{\boldsymbol{\kappa}\times\mathbf{B}}{B^2}\cdot\nabla\psi
+= -\frac{\pi f}{\mathcal{J}}
+\frac{\partial}{\partial\theta}
+\left(\frac{1}{B^2}\right).\]</p><p>This decomposition is the main structure used to assemble the ballooning coefficient matrix.</p><h2 id="Asymptotic-basis-and-Mercier-exponent"><a class="docs-heading-anchor" href="#Asymptotic-basis-and-Mercier-exponent">Asymptotic basis and Mercier exponent</a><a id="Asymptotic-basis-and-Mercier-exponent-1"></a><a class="docs-heading-anchor-permalink" href="#Asymptotic-basis-and-Mercier-exponent" title="Permalink"></a></h2><p>In the <span>$\theta\to\infty$</span> limit, the coefficient matrix diverges because <span>$|\nabla\beta|^2 \simeq q&#39;^2\theta^2|\nabla\psi|^2$</span>. <code>Bal.jl</code> applies the canonical transformation</p><p class="math-container">\[\mathbf{R} = \operatorname{diag}(\theta^{-1/2}, \theta^{1/2})\]</p><p>and solves</p><p class="math-container">\[\frac{\partial\mathbf{v}}{\partial\theta} = \mathbf{M}\mathbf{v},
+\qquad
+\mathbf{M}
+=
+\begin{pmatrix}
+\dfrac{1}{2\theta}
+&amp;
+\dfrac{\mathcal{J}}{\chi&#39;}
+\dfrac{B^2\theta}{|\nabla\beta|^2}
+\\
+-\dfrac{\mathcal{J}}{\chi&#39;}
+\dfrac{2P&#39;\kappa_w}{\chi&#39;\theta}
+&amp;
+-\dfrac{1}{2\theta}
+\end{pmatrix}.\]</p><p>To keep the lowest-order matrix finite, the code applies</p><p class="math-container">\[\mathbf{S}
+=
+\begin{pmatrix}
+1 &amp; 0 \\
+\sigma &amp; 1
+\end{pmatrix},
+\qquad
+\sigma =
+-\frac{2\pi f P&#39;q&#39;}{\chi&#39;^2 B^2}.\]</p><p>The transformed matrices <span>$\mathbf{N}_k = \mathbf{S}^{-1}\mathbf{M}_k\mathbf{S}$</span> enter the recurrence relation</p><p class="math-container">\[\frac{\partial\mathbf{w}^{(k+1)}}{\partial\theta}
+=
+[\mathbf{N}_0-(\alpha+k)\mathbf{I}]\mathbf{w}^{(k)}
++ \sum_{l=1}^{k}\mathbf{N}_l\mathbf{w}^{(k-l)}.\]</p><p>The Mercier exponent <span>$\alpha$</span> follows from the zeroth-order solvability condition:</p><p class="math-container">\[\det[\langle\mathbf{N}_0\rangle-\alpha\mathbf{I}] = 0,
+\qquad
+\alpha = \pm\sqrt{-D_I}.\]</p><h3 id="Equivalence-with-the-surface-average-Mercier-formula"><a class="docs-heading-anchor" href="#Equivalence-with-the-surface-average-Mercier-formula">Equivalence with the surface-average Mercier formula</a><a id="Equivalence-with-the-surface-average-Mercier-formula-1"></a><a class="docs-heading-anchor-permalink" href="#Equivalence-with-the-surface-average-Mercier-formula" title="Permalink"></a></h3><p>The previous <code>Mercier.jl</code> evaluated the Mercier index from flux-surface averages. The two routes are mathematically equivalent: they are different reductions of the same large-<span>$\theta$</span> ballooning solvability condition.</p><p>Let the flux-surface average used by the old implementation be</p><p class="math-container">\[\langle X\rangle_{\mathrm{fs}}
+\equiv
+\int_0^1 \frac{\mathcal{J}}{V&#39;} X(\theta)\,d\theta,\]</p><p>and define</p><p class="math-container">\[A_1 = \left\langle\frac{B^2}{|\nabla\psi|^2}\right\rangle_{\mathrm{fs}},
+\qquad
+A_2 = \left\langle\frac{1}{|\nabla\psi|^2}\right\rangle_{\mathrm{fs}},\]</p><p class="math-container">\[A_3 = \left\langle\frac{1}{B^2}\right\rangle_{\mathrm{fs}},
+\qquad
+A_4 = \left\langle\frac{1}{B^2|\nabla\psi|^2}\right\rangle_{\mathrm{fs}},
+\qquad
+A_5 = \left\langle B^2\right\rangle_{\mathrm{fs}}.\]</p><p>Below, an overbar denotes the period integral used to form the <code>Bal.jl</code> <span>$\bar{d}_0$</span> matrix:</p><p class="math-container">\[\overline{X} \equiv \int_0^1 X(\theta)\,d\theta.\]</p><p>With <span>$F = 2\pi f$</span>, the old code evaluated</p><p class="math-container">\[T =
+\frac{F P&#39; V&#39;}{q&#39;\chi&#39;^3} A_2,\]</p><p>and then</p><p class="math-container">\[D_I^{\mathrm{avg}}
+=
+-\frac14
++ T(1-T)
++ P&#39;\left(\frac{V&#39;}{q&#39;\chi&#39;^2}\right)^2 A_1
+\left[
+  P&#39;\left(A_3+\frac{F^2}{\chi&#39;^2}A_4\right)
+  - \frac{V&#39;&#39;}{V&#39;}
+\right].\]</p><p>This is the surface-average Mercier expression that appeared in the old <code>Mercier.jl</code> and, temporarily, in the earlier <code>resistive_interchange</code> helper. The associated GGJ resistive-interchange quantity used</p><p class="math-container">\[H =
+\frac{F P&#39; V&#39;}{q&#39;\chi&#39;^3}
+\left(
+  A_2 - \frac{A_1}{A_5}
+\right),
+\qquad
+D_R = D_I + \left(H-\frac12\right)^2.\]</p><p>The determinant route starts from the same ballooning equation, takes the large-<span>$\theta$</span> limit, applies the <span>$\mathbf{R}$</span> and <span>$\mathbf{S}$</span> transformations, and obtains the periodic lowest-order system</p><p class="math-container">\[\frac{\partial\mathbf{w}^{(1)}}{\partial\theta}
+=
+(\mathbf{N}_0-\alpha\mathbf{I})\mathbf{w}^{(0)}.\]</p><p>Solvability requires the mean operator to have a null vector:</p><p class="math-container">\[[\overline{\mathbf{N}_0}-\alpha\mathbf{I}]\mathbf{w}^{(0)}=0.\]</p><p>The transformed matrix is traceless by construction,</p><p class="math-container">\[\operatorname{tr}\overline{\mathbf{N}_0} = 0,\]</p><p>so the characteristic equation reduces to</p><p class="math-container">\[\alpha^2 + \det\overline{\mathbf{N}_0} = 0.\]</p><p>Comparing this with the Mercier exponent definition <span>$\alpha^2 = -D_I$</span> gives</p><p class="math-container">\[D_I = \det\overline{\mathbf{N}_0}.\]</p><p>The reduction can be written explicitly. For the unperturbed Mercier scan, <span>$\mathbf{N}_0$</span> has the code form</p><p class="math-container">\[\mathbf{N}_0(\theta)
+=
+\begin{pmatrix}
+\frac12 + M_{12}\sigma &amp; M_{12} \\
+M_{21}-\sigma-M_{12}\sigma^2 &amp; -\frac12-M_{12}\sigma
+\end{pmatrix},\]</p><p>where</p><p class="math-container">\[M_{12}
+=
+\frac{\mathcal{J}}{\chi&#39;}
+\frac{B^2}{q&#39;^2|\nabla\psi|^2},
+\qquad
+M_{21}
+=
+-2\frac{\mathcal{J}}{\chi&#39;^2}P&#39;\kappa_n,
+\qquad
+\sigma
+=
+-\frac{F P&#39; q&#39;}{\chi&#39;^2 B^2}.\]</p><p>The averaged matrix can therefore be written as</p><p class="math-container">\[\bar{d}_0
+\equiv
+\overline{\mathbf{N}_0}
+=
+\begin{pmatrix}
+\frac12+B &amp; A \\
+K &amp; -\frac12-B
+\end{pmatrix},\]</p><p>with</p><p class="math-container">\[A = \overline{M_{12}},
+\qquad
+B = \overline{M_{12}\sigma},
+\qquad
+K = \overline{M_{21}-\sigma-M_{12}\sigma^2}.\]</p><p>The first two averages are direct:</p><p class="math-container">\[A
+=
+\frac{V&#39;}{q&#39;^2\chi&#39;}A_1,\]</p><p class="math-container">\[B
+=
+\overline{
+  \frac{\mathcal{J}}{\chi&#39;}
+  \frac{B^2}{q&#39;^2|\nabla\psi|^2}
+  \left(
+    -\frac{F P&#39; q&#39;}{\chi&#39;^2B^2}
+  \right)
+}
+=
+-\frac{F P&#39; V&#39;}{q&#39;\chi&#39;^3}A_2
+=
+-T.\]</p><p>For <span>$K$</span>, separate the three pieces:</p><p class="math-container">\[K
+=
+\overline{M_{21}}
+-\overline{\sigma}
+-\overline{M_{12}\sigma^2}.\]</p><p>The last term is also direct:</p><p class="math-container">\[\overline{M_{12}\sigma^2}
+=
+\overline{
+  \frac{\mathcal{J}}{\chi&#39;}
+  \frac{B^2}{q&#39;^2|\nabla\psi|^2}
+  \frac{F^2P&#39;^2q&#39;^2}{\chi&#39;^4B^4}
+}
+=
+\frac{F^2P&#39;^2V&#39;}{\chi&#39;^5}A_4.\]</p><p>The remaining curvature combination reduces by the axisymmetric equilibrium identity used in the Mercier derivation:</p><p class="math-container">\[\int_0^1
+\left(
+  2\mathcal{J}\kappa_n
+  - \frac{Fq&#39;}{B^2}
+\right)d\theta
+=
+\frac{V&#39;}{\chi&#39;}
+\left(
+  P&#39;A_3 - \frac{V&#39;&#39;}{V&#39;}
+\right).\]</p><p>Using <span>$M_{21}=-2\mathcal{J}P&#39;\kappa_n/\chi&#39;^2$</span> and <span>$\sigma=-FP&#39;q&#39;/(\chi&#39;^2B^2)$</span>, this gives</p><p class="math-container">\[\overline{M_{21}}-\overline{\sigma}
+=
+-\frac{P&#39;}{\chi&#39;^2}
+\int_0^1
+\left(
+  2\mathcal{J}\kappa_n
+  - \frac{Fq&#39;}{B^2}
+\right)d\theta
+=
+-\frac{P&#39;V&#39;}{\chi&#39;^3}
+\left(
+  P&#39;A_3 - \frac{V&#39;&#39;}{V&#39;}
+\right).\]</p><p>Therefore</p><p class="math-container">\[K
+=
+-\frac{P&#39;V&#39;}{\chi&#39;^3}
+\left[
+  P&#39;\left(A_3+\frac{F^2}{\chi&#39;^2}A_4\right)
+  - \frac{V&#39;&#39;}{V&#39;}
+\right].\]</p><p>Now take the determinant:</p><p class="math-container">\[\det\bar{d}_0
+=
+\left(\frac12+B\right)\left(-\frac12-B\right)-AK.\]</p><p>Substituting <span>$B=-T$</span> gives the first part of the old Mercier expression:</p><p class="math-container">\[\left(\frac12-T\right)\left(-\frac12+T\right)
+=
+-\frac14+T(1-T).\]</p><p>Substituting <span>$A$</span> and <span>$K$</span> gives the second part:</p><p class="math-container">\[-AK
+=
+\frac{V&#39;}{q&#39;^2\chi&#39;}A_1
+\frac{P&#39;V&#39;}{\chi&#39;^3}
+\left[
+  P&#39;\left(A_3+\frac{F^2}{\chi&#39;^2}A_4\right)
+  - \frac{V&#39;&#39;}{V&#39;}
+\right]\]</p><p class="math-container">\[=
+P&#39;\left(\frac{V&#39;}{q&#39;\chi&#39;^2}\right)^2 A_1
+\left[
+  P&#39;\left(A_3+\frac{F^2}{\chi&#39;^2}A_4\right)
+  - \frac{V&#39;&#39;}{V&#39;}
+\right].\]</p><p>Thus the determinant route gives exactly</p><p class="math-container">\[\det\bar{d}_0
+=
+-\frac14
++ T(1-T)
++ P&#39;\left(\frac{V&#39;}{q&#39;\chi&#39;^2}\right)^2 A_1
+\left[
+  P&#39;\left(A_3+\frac{F^2}{\chi&#39;^2}A_4\right)
+  - \frac{V&#39;&#39;}{V&#39;}
+\right]
+=
+D_I^{\mathrm{avg}}.\]</p><p>So, under the same normalization and exact equilibrium identities,</p><p class="math-container">\[D_I^{\mathrm{det}}
+\equiv
+\det(\bar{d}_0)
+=
+D_I^{\mathrm{avg}}.\]</p><p>The implementation difference is numerical rather than physical. The old surface-average route evaluates the closed Mercier formula directly, while the new <code>Bal.jl</code> route constructs the same Mercier index from the averaged large-<span>$\theta$</span> local-mode matrix. In finite-precision calculations the two can separate near the magnetic axis or other ill-conditioned surfaces because both forms contain factors such as <span>$1/q&#39;$</span> and <span>$1/q&#39;^2$</span>. Away from those regions, they should agree to the accuracy of the equilibrium derivatives and surface quadrature.</p><p>The divergent big solution and decaying small solution have leading forms</p><p class="math-container">\[\mathbf{u}_{\mathrm{large}}^{(0)}
+\simeq
+\begin{pmatrix}
+\theta^{\alpha-1/2} \\
+\theta^{\alpha+1/2}(\sigma+w_{21})
+\end{pmatrix},
+\qquad
+\mathbf{u}_{\mathrm{small}}^{(0)}
+\simeq
+\begin{pmatrix}
+\theta^{-\alpha-1/2} \\
+\theta^{-\alpha+1/2}(\sigma+w_{22})
+\end{pmatrix}.\]</p><h2 id="First-order-asymptotic-matching"><a class="docs-heading-anchor" href="#First-order-asymptotic-matching">First-order asymptotic matching</a><a id="First-order-asymptotic-matching-1"></a><a class="docs-heading-anchor-permalink" href="#First-order-asymptotic-matching" title="Permalink"></a></h2><p>The zeroth-order large-<span>$\theta$</span> solution alone is not accurate enough at a finite integration boundary <span>$\theta_{\max}$</span>. <code>Bal.jl</code> therefore includes the first-order correction <span>$\mathbf{w}^{(1)}$</span>:</p><p class="math-container">\[\frac{\partial\mathbf{w}^{(1)}}{\partial\theta}
+=
+(\mathbf{N}_0-\alpha\mathbf{I})\mathbf{w}^{(0)}
+=
+\tilde{\mathbf{N}}_0(\theta)\mathbf{w}^{(0)}.\]</p><p>The first-order solution is written as</p><p class="math-container">\[\mathbf{w}^{(1)}(\theta)
+=
+\left(\int\tilde{\mathbf{N}}_0(\theta)\,d\theta\right)\mathbf{w}^{(0)}
++ \mathbf{c}^{(1)}
+\equiv
+\tilde{\mathbf{w}}^{(1)}(\theta) + \mathbf{c}^{(1)}.\]</p><p>The constant vector is fixed by the first-order solvability condition,</p><p class="math-container">\[[\langle\mathbf{N}_0\rangle-(\alpha+1)\mathbf{I}]\mathbf{c}^{(1)}
+=
+-
+\left\langle
+  [\mathbf{N}_0-(\alpha+1)\mathbf{I}]
+  \tilde{\mathbf{w}}^{(1)}(\theta)
+  + \mathbf{N}_1\mathbf{w}^{(0)}
+\right\rangle.\]</p><p>This gives the asymptotic boundary form</p><p class="math-container">\[\mathbf{u}_{\mathrm{boundary}}
+\simeq
+\mathbf{R}\mathbf{S}
+\left(
+  \mathbf{w}^{(0)}
+  + \frac{1}{\theta}\mathbf{w}^{(1)}(\theta)
+\right).\]</p><h2 id="Local-thin-layer-ordering"><a class="docs-heading-anchor" href="#Local-thin-layer-ordering">Local thin-layer ordering</a><a id="Local-thin-layer-ordering-1"></a><a class="docs-heading-anchor-permalink" href="#Local-thin-layer-ordering" title="Permalink"></a></h2><p>The <span>$s$</span>-<span>$\alpha$</span> diagram scans local instability near a flux surface <span>$\psi_b$</span> without recomputing the full equilibrium. A thin-layer parameter <span>$0 &lt; \mu \ll 1$</span> is introduced through</p><p class="math-container">\[s = \frac{\psi-\psi_b}{\mu},
+\qquad
+\frac{\partial}{\partial\psi}
+=
+\frac{1}{\mu}\frac{\partial}{\partial s}.\]</p><p>Profiles are expanded as background plus local perturbation,</p><p class="math-container">\[P(\psi) = P^{(0)}(\psi) + \mu P^{(1)}(s) + \cdots,
+\qquad
+q(\psi) = q^{(0)}(\psi) + \mu q^{(1)}(s) + \cdots.\]</p><p>After differentiation, the <span>$\mu$</span> amplitude cancels the <span>$1/\mu$</span> derivative scale. Thus the derivative-level perturbations are order unity:</p><p class="math-container">\[P_\psi = P_\psi^{(0)} + P_s^{(1)},
+\qquad
+q_\psi = q_\psi^{(0)} + q_s^{(1)}.\]</p><p>The subscript <span>$s$</span> therefore represents the promoted local derivative perturbation used as the practical scan variable in the <span>$s$</span>-<span>$\alpha$</span> diagram. Retained first-order contributions are denoted by a superscript <span>$[1]$</span>; for example, <span>$I_{\mathrm{per}}^{[1]}$</span> is the retained local periodic variation of the integrated shear.</p><h2 id="Local-P&#39;-and-q&#39;-perturbations"><a class="docs-heading-anchor" href="#Local-P&#39;-and-q&#39;-perturbations">Local <span>$P&#39;$</span> and <span>$q&#39;$</span> perturbations</a><a id="Local-P&#39;-and-q&#39;-perturbations-1"></a><a class="docs-heading-anchor-permalink" href="#Local-P&#39;-and-q&#39;-perturbations" title="Permalink"></a></h2><p>Using the integrated-shear function</p><p class="math-container">\[I_{\mathrm{tot}} = q&#39;(\theta-\theta_k) + I_{\mathrm{per}},\]</p><p>the wave-number space and curvature are written</p><p class="math-container">\[\left(\frac{|\nabla\beta|}{B}\right)^2
+=
+\frac{1}{\chi&#39;^2|\nabla\psi|^2}
++ \frac{|\nabla\psi|^2}{B^2}I_{\mathrm{tot}}^2,\]</p><p class="math-container">\[\kappa_w
+=
+\frac{\boldsymbol{\kappa}\cdot\nabla\psi}
+{\chi&#39;|\nabla\psi|^2}
+- \kappa_s I_{\mathrm{tot}}.\]</p><p>With</p><p class="math-container">\[I_{\mathrm{tot}}
+= I_{\mathrm{tot}}^{(0)} + I_{\mathrm{tot}}^{[1]},
+\qquad
+I_{\mathrm{tot}}^{[1]}
+= q_s^{(1)}(\theta-\theta_k) + I_{\mathrm{per}}^{[1]},\]</p><p>the retained order-unity perturbation terms are</p><p class="math-container">\[\left(\frac{|\nabla\beta|^2}{B^2}\right)_{O(1),\mathrm{ret}}
+=
+\frac{|\nabla\psi|_0^2}{B_0^2}
+\left[
+  2I_{\mathrm{tot}}^{(0)}I_{\mathrm{tot}}^{[1]}
+  + \left(I_{\mathrm{tot}}^{[1]}\right)^2
+\right],\]</p><p class="math-container">\[\kappa_w^{[1]}
+=
+-\kappa_s^{(0)}I_{\mathrm{tot}}^{[1]}.\]</p><p>The cross term and nonlinear <span>$(I_{\mathrm{tot}}^{[1]})^2$</span> term are retained in the matrix assembly rather than discarded by linearization.</p><h2 id="\\mathbf{N}_0-matrix-construction"><a class="docs-heading-anchor" href="#\\mathbf{N}_0-matrix-construction"><span>$\mathbf{N}_0$</span> matrix construction</a><a id="\\mathbf{N}_0-matrix-construction-1"></a><a class="docs-heading-anchor-permalink" href="#\\mathbf{N}_0-matrix-construction" title="Permalink"></a></h2><p>The lower-triangular element of the canonical transformation combines the local <span>$P&#39;$</span> and <span>$q&#39;$</span> perturbations:</p><p class="math-container">\[\sigma
+=
+-\frac{2\pi f}{\chi_0&#39;^2B_0^2}
+\left(P_\psi^{(0)} + P_s^{(1)}\right)
+\left(q_\psi^{(0)} + q_s^{(1)}\right).\]</p><p>The <span>$(1,2)$</span> component of the asymptotic matrix responds to <span>$q_s^{(1)}$</span>:</p><p class="math-container">\[(\mathbf{M}_0)_{12}
+=
+\frac{\mathcal{J}_0}{\chi_0&#39;}
+\frac{B_0^2}
+{\left(q_\psi^{(0)}+q_s^{(1)}\right)^2|\nabla\psi|_0^2}.\]</p><p>The <span>$(2,1)$</span> component uses the expanded non-secular curvature,</p><p class="math-container">\[\kappa_n(\theta)
+=
+\kappa_n^{(0)}(\theta)
++ \kappa_s^{(0)}(\theta)q_s^{(1)}\theta_k
+- \kappa_s^{(0)}(\theta)I_{\mathrm{per}}^{[1]}(\theta),\]</p><p>which gives</p><p class="math-container">\[(\mathbf{M}_0)_{21}
+=
+-\frac{2\mathcal{J}_0}{\chi_0&#39;^2}
+\left(P_\psi^{(0)} + P_s^{(1)}\right)
+\left[
+  \kappa_n^{(0)}(\theta)
+  + \kappa_s^{(0)}(\theta)q_s^{(1)}\theta_k
+  - \kappa_s^{(0)}(\theta)I_{\mathrm{per}}^{[1]}(\theta)
+\right].\]</p><p>The final matrix <span>$\mathbf{N}_0(\theta)=\mathbf{S}^{-1}\mathbf{M}_0(\theta)\mathbf{S}$</span> is period-averaged to form <span>$\langle\mathbf{N}_0\rangle$</span> in the Mercier solvability equation.</p><h2 id="\\mathbf{N}_1-correction"><a class="docs-heading-anchor" href="#\\mathbf{N}_1-correction"><span>$\mathbf{N}_1$</span> correction</a><a id="\\mathbf{N}_1-correction-1"></a><a class="docs-heading-anchor-permalink" href="#\\mathbf{N}_1-correction" title="Permalink"></a></h2><p>The first-order asymptotic boundary condition requires the <span>$O(\theta^{-2})$</span> matrix <span>$\mathbf{N}_1$</span>. In the large-<span>$\theta$</span> limit, only the upper-right component of <span>$\mathbf{M}_1$</span> remains:</p><p class="math-container">\[\mathbf{M}_1(\theta)
+=
+\begin{pmatrix}
+0 &amp; a_1(\theta) \\
+0 &amp; 0
+\end{pmatrix},\]</p><p>where</p><p class="math-container">\[a_1(\theta)
+=
+-2\frac{\mathcal{J}_0}{\chi_0&#39;}
+\frac{B_0^2}
+{|\nabla\psi|_0^2\left(q_\psi^{(0)}+q_s^{(1)}\right)^3}
+\left[
+  I_{\mathrm{per}}^{(0)}(\theta)
+  + I_{\mathrm{per}}^{[1]}(\theta)
+  - \left(q_\psi^{(0)}+q_s^{(1)}\right)\theta_k
+\right].\]</p><p>Applying the <span>$\mathbf{S}^{-1}$</span> transformation gives</p><p class="math-container">\[\mathbf{N}_1(\theta)
+=
+a_1(\theta)
+\begin{pmatrix}
+\sigma &amp; 1 \\
+-\sigma^2 &amp; -\sigma
+\end{pmatrix}.\]</p><p>Thus <span>$\mathbf{N}_1$</span> is closed in terms of <span>$I_{\mathrm{per}}^{[1]}$</span>, <span>$P_s^{(1)}$</span>, and <span>$q_s^{(1)}$</span>. The <span>$I_{\mathrm{per}}^{[1]}$</span> and <span>$q_s^{(1)}$</span> terms control <span>$a_1(\theta)$</span>, while <span>$P_s^{(1)}$</span> enters through <span>$\sigma$</span>.</p><h2 id="Practical-implementation-in-Bal.jl"><a class="docs-heading-anchor" href="#Practical-implementation-in-Bal.jl">Practical implementation in <code>Bal.jl</code></a><a id="Practical-implementation-in-Bal.jl-1"></a><a class="docs-heading-anchor-permalink" href="#Practical-implementation-in-Bal.jl" title="Permalink"></a></h2><h3 id="Geometric-curvature-formula"><a class="docs-heading-anchor" href="#Geometric-curvature-formula">Geometric curvature formula</a><a id="Geometric-curvature-formula-1"></a><a class="docs-heading-anchor-permalink" href="#Geometric-curvature-formula" title="Permalink"></a></h3><p>The non-secular curvature calculation uses the geometric expression</p><p class="math-container">\[\kappa_n^{(0)}
+=
+-\frac{1}{\mathcal{J}_0B_0}
+\frac{\partial}{\partial\psi}
+\left(\frac{\mathcal{J}_0B_0}{\chi&#39;_0}\right)
++
+\frac{1}{\mathcal{J}_0B_0}
+\frac{\partial}{\partial\theta}
+\left(
+  \mathcal{J}_0
+  \frac{\mathbf{B}_0\cdot\nabla\theta\times\nabla\zeta}{B_0}
+\right)
++
+\frac{2\pi f q&#39;_0}{B_0^2\mathcal{J}_0}.\]</p><p>This avoids relying entirely on Grad-Shafranov identities, which can amplify numerical equilibrium errors near the edge or in other regions where the input equilibrium does not satisfy the Grad-Shafranov equation exactly.</p><h3 id="Two-loop-structure"><a class="docs-heading-anchor" href="#Two-loop-structure">Two-loop structure</a><a id="Two-loop-structure-1"></a><a class="docs-heading-anchor-permalink" href="#Two-loop-structure" title="Permalink"></a></h3><p>The code separates the calculation into two loops to avoid repeatedly differentiating noisy geometric quantities.</p><ul><li><strong>Loop 1:</strong> Use only unperturbed background quantities, such as <span>$P&#39;$</span> and <span>$q&#39;$</span>, to precompute the base structural curvature <span>$\kappa_n^{(0)}$</span>.</li><li><strong>Loop 2:</strong> Insert the requested local perturbations, such as <span>$P_s^{(1)}$</span>, <span>$q_s^{(1)}$</span>, and <span>$I_{\mathrm{per}}^{[1]}$</span>. The code adds only the analytically derived algebraic perturbation ``\kappa<em>s^{(0)}q</em>s^{(1)}\theta_k<ul><li>\kappa<em>s^{(0)}I</em>{\mathrm{per}}^{[1]}`` to the precomputed</li></ul><span>$\kappa_n^{(0)}$</span>.</li></ul><p>This preserves the perturbation structure while avoiding unstable repeated geometric differentiation.</p><h3 id="\\theta_{\\max}-and-Baloo.f-style-matching"><a class="docs-heading-anchor" href="#\\theta_{\\max}-and-Baloo.f-style-matching"><span>$\theta_{\max}$</span> and <code>Baloo.f</code>-style matching</a><a id="\\theta_{\\max}-and-Baloo.f-style-matching-1"></a><a class="docs-heading-anchor-permalink" href="#\\theta_{\\max}-and-Baloo.f-style-matching" title="Permalink"></a></h3><p>For large <span>$\theta$</span>, the wave-number factor behaves like a quadratic polynomial,</p><p class="math-container">\[a_2\theta^2 + a_1\theta + a_0
+=
+a_2\left(\theta+\frac{a_1}{2a_2}\right)^2
++ \left(a_0-\frac{a_1^2}{4a_2}\right).\]</p><p>The residual scale is <span>$c = a_0-a_1^2/(4a_2)$</span>. To make the asymptotic approximation valid, the code chooses an integration boundary where the <span>$\theta^2$</span> term dominates, using the scale <span>$\sqrt{|c/a_2|}$</span>. Because the shooting boundary is a single flux-surface quantity, <code>Bal.jl</code> evaluates this scale on the ballooning theta grid and uses the largest finite value on that surface. The base integration boundary is then capped as <span>$\theta_{\max}=\min(16.5,10\max_\theta\sqrt{|c/a_2|})$</span>.</p><p>Directly extracting <span>$c_{a1}$</span> or <span>$\Delta&#39;$</span> from the small asymptotic solution is numerically fragile. The comparison below shows that the <code>Baloo.f</code> style, which sets the displacement to vanish at <span>$\pm\theta_{\max}$</span> and computes <span>$\Delta&#39;$</span> from the resulting solution, gives the most stable continuous profile.</p><p><img src="../assets/ballooning/delta_prime_matching.png" alt="Comparison of numerical stability among methods for extracting ``\\Delta&#39;`` and ``c_{a1}``."/></p><p><code>Bal.jl</code> therefore adopts the <code>Baloo.f</code>-style boundary replacement for the ballooning <span>$\Delta&#39;$</span> calculation.</p><h3 id="Ballooning-angle-and-integral-gauge-correction"><a class="docs-heading-anchor" href="#Ballooning-angle-and-integral-gauge-correction">Ballooning angle and integral-gauge correction</a><a id="Ballooning-angle-and-integral-gauge-correction-1"></a><a class="docs-heading-anchor-permalink" href="#Ballooning-angle-and-integral-gauge-correction" title="Permalink"></a></h3><p>The ballooning angle <span>$\theta_k$</span> is the integration constant specifying where the total accumulated local shear is zero:</p><p class="math-container">\[I_{\mathrm{tot}}(\theta_k) = 0.\]</p><p>In <code>Bal.jl</code>,</p><p class="math-container">\[I_{\mathrm{tot}}
+=
+\left(q&#39;^{(0)}+q_s^{(1)}\right)(\theta-\theta_k)
++ \left(I_{\mathrm{per}}^{(0)}(\theta)
+   + I_{\mathrm{per}}^{[1]}(\theta)\right).\]</p><p>To satisfy the gauge exactly, the periodic shear functions are shifted so that they vanish at <span>$\theta_k$</span>:</p><p class="math-container">\[I_{\mathrm{per}}^{(0)}(\theta)
+\leftarrow
+I_{\mathrm{per}}^{(0)}(\theta)
+- I_{\mathrm{per}}^{(0)}(\theta_k),\]</p><p class="math-container">\[I_{\mathrm{per}}^{[1]}(\theta)
+\leftarrow
+I_{\mathrm{per}}^{[1]}(\theta)
+- I_{\mathrm{per}}^{[1]}(\theta_k).\]</p><p>This aligns the numerical implementation with the theoretical gauge used in the ballooning formulation.</p><h3 id="locstab_fs-outputs"><a class="docs-heading-anchor" href="#locstab_fs-outputs"><code>locstab_fs</code> outputs</a><a id="locstab_fs-outputs-1"></a><a class="docs-heading-anchor-permalink" href="#locstab_fs-outputs" title="Permalink"></a></h3><p><code>Bal.jl</code> now computes both the Mercier criterion and the ballooning <span>$\Delta&#39;$</span>. The previous standalone <code>Mercier.jl</code> path can therefore be removed from the local stability calculation. The comparison below shows agreement between the previous Mercier calculation and the new <code>Bal.jl</code> calculation.</p><p><img src="../assets/ballooning/mercier_comparison.png" alt="Comparison of Mercier criterion calculations from `Mercier.jl` and `Bal.jl`."/></p><p>The local-stability output now stores ballooning <span>$\Delta&#39;$</span> in the fourth <code>locstab_fs</code> entry. In the HDF5 output this is written as <code>locstab/ballooning_Delta_prime</code>, distinct from the tearing <span>$\Delta&#39;$</span> outputs under <code>singular/</code> and <code>perturbed_equilibrium/singular_coupling/</code>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../galerkin/">« Galerkin Solver</a><a class="docs-footer-nextpage" href="../kinetic_forces/">KineticForces »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 8 July 2026 19:39">Wednesday 8 July 2026</span>. Using Julia version 1.11.9.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
