@@ -37,6 +37,7 @@ makedocs(;
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
             "Inner Layer" => "inner_layer.md",
+            "Islands" => "islands.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"
        ],
