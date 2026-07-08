@@ -41,6 +41,22 @@ makedocs(;
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"
        ],
+        "Islands" => [
+            "Overview" => "islands/index.md",
+            "Numerics (as implemented)" => "islands/numerics.md",
+            "Paper I — figure contract" => "islands/papers/paper-1/OUTLINE.md",
+            "Design documents" => [
+                "00 — Roadmap" => "islands/design/00-roadmap.md",
+                "01 — Level-0 physics" => "islands/design/01-physics-level0.md",
+                "02 — Species and EPs" => "islands/design/02-species-and-eps.md",
+                "03 — Architecture" => "islands/design/03-architecture.md",
+                "04 — Numerics" => "islands/design/04-numerics.md",
+                "05 — Verification ladder" => "islands/design/05-verification.md",
+                "06 — Autonomy and tooling" => "islands/design/06-autonomy-and-tooling.md",
+                "07 — Documentation and papers" => "islands/design/07-documentation-and-papers.md",
+                "08 — Reference library" => "islands/design/08-reference-library.md"
+            ]
+        ],
         "Citations" => "citations.md",
         "Developer Notes" => "developer_notes.md",
     ],

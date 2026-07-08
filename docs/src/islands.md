@@ -3,8 +3,14 @@
 The Islands module is a steady-state, multi-species drift-kinetic solver for the
 resonant magnetic island/layer region in tokamaks — the nonlinear analog of
 SLAYER, generalizing the Modified Rutherford Equation. It is under active
-development. The design documents live under `islands/design/` in the
-documentation source tree, and the module conventions in `src/Islands/CLAUDE.md`.
+development; the module conventions live in `src/Islands/CLAUDE.md`.
+
+This page is the **API reference**. The narrative documentation lives in the
+**Islands** section of this site: the [project overview](islands/index.md),
+the equations-and-figures chapter of what is
+[implemented and verified so far](islands/numerics.md), the
+[Paper I figure contract](islands/papers/paper-1/OUTLINE.md), and the full
+[design document set](islands/design/00-roadmap.md).
 
 ## Status — M1 skeleton + M2 Level-0 solve machinery (structure, gated physics)
 
