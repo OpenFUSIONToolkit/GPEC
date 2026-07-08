@@ -59,10 +59,40 @@ Modules = [GeneralizedPerturbedEquilibrium.Islands]
 Modules = [GeneralizedPerturbedEquilibrium.Islands.PhaseSpace]
 ```
 
+### Species (`Islands.SpeciesLists`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.SpeciesLists]
+```
+
+### Frames and parameters (`Islands.Frames`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Frames]
+```
+
 ### Operator stack (`Islands.Operators`)
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Islands.Operators]
+```
+
+### Field-equation closure structure (`Islands.Fields`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Fields]
+```
+
+### Output moments (`Islands.Moments`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Moments]
+```
+
+### Newton–Krylov solve (`Islands.Solvers`)
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Solvers]
 ```
 
 ### Verification harness (`Islands.Verify`)
