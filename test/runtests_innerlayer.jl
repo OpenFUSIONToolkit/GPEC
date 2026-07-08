@@ -49,3 +49,39 @@ const GGJ = IL.GGJ
         @test abs(imag(Δ[2])) < 1e-3 * abs(Δ[2])
     end
 end
+
+@testset "InnerLayer GGJ :ray backend (rotated-contour collocation)" begin
+    # Ported 2026-07-08 from the standalone GGJRay package (validated there:
+    # manufactured Δ* to 3e-14, Fortran rmatch pins, 96-equilibrium robustness
+    # scans to Q = 500i). These tests pin the port, not the method.
+    p = IL.glasser_wang_2020_eq55()
+
+    @testset "agrees with :galerkin at the paper point Q = 0.1234" begin
+        γ = 0.1234 * GGJ.q0(p)
+        Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, γ)
+        # Same Fortran-cross-checked pins as the Galerkin testset above.
+        @test real(Δ[1]) ≈ 3.698368e4 rtol = 1e-3
+        @test real(Δ[2]) ≈ 14.759721 rtol = 1e-3
+        @test abs(imag(Δ[1])) < 1e-3 * abs(Δ[1])
+        @test abs(imag(Δ[2])) < 1e-3 * abs(Δ[2])
+        # :ray is the default backend.
+        @test IL.GGJModel() === IL.GGJModel{:ray}()
+    end
+
+    @testset "q4 physical benchmark at Q = 500i (regime beyond :galerkin)" begin
+        q4 = IL.q4_surface_benchmark()
+        γ = 500.0im * GGJ.q0(q4)
+        Δ = IL.solve_inner(IL.GGJModel(), q4, γ)
+        # Pins from the standalone GGJRay validation (post ε_mix fix;
+        # S-invariant to 3e-4 / 7e-9 and θ-stable there).
+        @test Δ[1] ≈ 2.4720608737 + 13.354123514im rtol = 1e-4
+        @test Δ[2] ≈ 0.13749694953 + 0.74275468725im rtol = 1e-4
+
+        # Δ is an analytic invariant of the contour angle: the outward
+        # θ-check drift is a direct numerical error measurement.
+        Q = GGJ.inner_Q(q4, γ)
+        r2 = IL.solve_ray(q4, Q; θ=1.2 * angle(Q) / 4)
+        @test abs(r2.Δ[2] - Δ[2]) / abs(Δ[2]) < 1e-5
+        @test abs(r2.Δ[1] - Δ[1]) / abs(Δ[1]) < 1e-3
+    end
+end
