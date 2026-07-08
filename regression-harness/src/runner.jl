@@ -109,6 +109,38 @@ open(ARGS[2], "w") do f
 end
 """
 
+# Islands L0 structural regression: the solve-level MMS (Newton-Krylov recovers
+# the manufactured state), the coefficient-free A7 closure identity, and the A8
+# y_c-block conditioning monitor. Tracks the structural (pre-physics) numbers
+# that would silently move if the discretization, solver, or quadratures drift;
+# the physics B-ladder stays skipped until [VERIFY] clearance (QUESTIONS Q2-Q4).
+const COMPUTED_ISLANDS_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using HDF5
+const Isl = GeneralizedPerturbedEquilibrium.Islands
+t_start = time()
+r = Isl.Verify.solve_mms(17)
+a7 = Isl.Fields.flat_average_d2h_dx2(2.0, 1.0)
+grid = Isl.PhaseSpace.IslandGrid(nx=7, nxi=8, ny=7, nE=2, halfwidth_x=6.0, clustering_x=1.0,
+                                 y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+setup = Isl.Verify.zero_drive_setup(grid)
+J = Isl.Solvers.dense_jacobian(setup.f, zeros(setup.N))
+mon = Isl.Verify.yc_block_sigma_min(J, grid)
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["islands/solve_mms_err"] = r.err
+    fid["islands/newton_iters"] = Float64(r.iterations)
+    fid["islands/gmres_iters"] = Float64(r.gmres_iters)
+    fid["islands/a7_identity"] = abs(a7)
+    fid["islands/yc_sigma_min"] = mon.sigma_min
+end
+open(ARGS[2], "w") do f
+    println(f, elapsed)
+end
+"""
+
 """
 Run GPEC for a single commit/ref and case. Dispatches to run_local for
 the working tree or run_at_commit for a git ref.
@@ -141,6 +173,8 @@ function _computed_script_template(case_spec::CaseSpec)
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
     elseif case_spec.name == "efit_fixedbdy_separatrix"
         return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
+    elseif case_spec.name == "islands_l0_structural"
+        return COMPUTED_ISLANDS_SCRIPT_TEMPLATE
     end
     error("No computed-script template registered for case '$(case_spec.name)'")
 end
