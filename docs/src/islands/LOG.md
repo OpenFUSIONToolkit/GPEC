@@ -39,6 +39,14 @@ relevant.
     (solve-MMS err 5.254e-2, 6 Newton/1210 GMRES, A7 8.0e-17, σ_min 0.1139).
   - Paper-I figure contract: `docs/src/islands/papers/paper-1/OUTLINE.md`
     (claims C1–C3 green as CI artifacts; C4–C8 gated on Q2–Q4).
+  - **Rendered docs story** (user-flagged gap vs docs/07's M0–M1 intent): new
+    `docs/src/islands/numerics.md` — the equations + figures of everything as
+    implemented — plus the pinned figure script
+    (`benchmarks/islands/figures/make_structural_figures.jl`, five structural
+    figures committed as docs assets) and a full "Islands" site-nav section
+    (overview, numerics chapter, Paper-I contract, design docs 00–08).
+    Remaining docs/07 infra for later milestones: anchor-sync CI check,
+    STATE.md dashboard.
 - **Physics debugging note**: the first solve-MMS attempt failed to converge —
   the generic `Collisions` (a_y ∂²y) term has no y-BCs, so its BVP
   discretization is unstable under refinement; the *mimetic* divergence form
