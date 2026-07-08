@@ -11,7 +11,9 @@ relevant.
 ## 2026-07-08 — M2 L0 solve machinery: Newton–Krylov + moments + species/frames/fields (structure, gated physics)
 
 - **Contract**: `docs/src/islands/design/M2-launch-prompt.md` (interactive /goal
-  run). Branch `feature/islands-m2` (stacked on `feature/islands-m1`/PR #320).
+  run). Branch `feature/islands-m2`, **PR #324** (stacked on
+  `feature/islands-m1`/PR #320; retargets to `feature/islands` when #320 merges).
+  Full suite green locally.
 - **Moved**: the full L0 solve *structure*, every physics coefficient a supplied
   `[VERIFY]`-gated parameter (physics-verifier: **PASS**):
   - `solvers/` — matrix-free Newton–Krylov (Krylov.jl GMRES on a preallocated
