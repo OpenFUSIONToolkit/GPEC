@@ -15,9 +15,8 @@ steady-state drift-kinetic island/layer solver, autonomously and unattended. M1
 `src/Islands/CLAUDE.md` (module conventions + the [VERIFY] policy),
 `docs/src/islands/LOG.md` and `docs/src/islands/QUESTIONS.md` (session memory +
 open blockers), then the design docs
-`docs/src/islands/design/{00-roadmap,01-physics-level0,02-species-and-eps,03-architecture,04-numerics,05-verification,06-autonomy,07-documentation-and-papers}.md`
-(read by number `NN`; the file globs match). The repo-root `CLAUDE.md` governs
-GPEC-wide conventions.
+`docs/src/islands/design/{00-roadmap,01-physics-level0,02-species-and-eps,03-architecture,04-numerics,05-verification,06-autonomy-and-tooling,07-documentation-and-papers}.md`.
+The repo-root `CLAUDE.md` governs GPEC-wide conventions.
 
 ## The gating reality (read this before you plan)
 
