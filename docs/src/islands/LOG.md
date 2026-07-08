@@ -8,6 +8,25 @@ relevant.
 
 ---
 
+## 2026-07-08 — Harden Stop hook against OMFIT LD_LIBRARY_PATH contamination
+
+- **Moved**: Diagnosed why the Stop hook's package-load check fails on this box.
+  A loaded OMFIT module (`module load omfit/unstable`) leaks
+  `LD_LIBRARY_PATH=/mnt/codes/atom/mambaforge/envs/omfit/lib:` into the session;
+  those conda libs shadow Julia's bundled artifacts, giving `undefined symbol`
+  errors in CHOLMOD and the Plots/Cairo/GR native stack (and the ubiquitous
+  `libtinfo.so.6` bash warning). Not a code issue — CI is green, and
+  `env -u LD_LIBRARY_PATH julia … using GeneralizedPerturbedEquilibrium` loads
+  clean (exit 0). Fixed `stop-check.sh` to run the build check with
+  `env -u LD_LIBRARY_PATH` (no-op on a clean shell / CI). Repo deps were
+  instantiated here; the shared depot (`/mnt/codes/ncl2128/.julia`) is populated.
+- **Blocked**: nothing new. This is the concrete shape of **Q1** — the
+  automation shell must invoke julia with a clean `LD_LIBRARY_PATH` (unload
+  OMFIT, or unset the var) or the overnight loop's *actual* gpec runs fail the
+  same way, not just the hook.
+- **Next**: (human) launch the loop from a shell without the OMFIT module
+  (`module unload omfit`); hook hardening is defense-in-depth on top of that.
+
 ## 2026-07-08 — Fix invalid deny rules in `.claude/settings.json`
 
 - **Moved**: `/doctor` flagged two skipped permission-deny rules —

@@ -25,11 +25,15 @@ fi
 
 # 2. Build/tests must pass. Requires julia on PATH (see QUESTIONS.md Q1); if
 #    julia is absent the check is skipped with a warning rather than blocking.
+# Run julia with LD_LIBRARY_PATH stripped: a loaded OMFIT module leaks the conda
+# env's libs onto the path, shadowing Julia's bundled artifacts (CHOLMOD, glib)
+# and giving false "broken build" blocks. Julia uses its own RPATH, so unsetting
+# is a no-op on a clean shell / CI.
 if command -v julia >/dev/null 2>&1; then
   # Once M1 lands test/runtests_islands_*.jl, prefer running just those:
   #   julia --project=. test/runtests.jl test/runtests_islands_grids.jl ...
   # Until then, a package-load smoke check.
-  if ! julia --project=. -e 'using GeneralizedPerturbedEquilibrium' >/dev/null 2>&1; then
+  if ! env -u LD_LIBRARY_PATH julia --project=. -e 'using GeneralizedPerturbedEquilibrium' >/dev/null 2>&1; then
     echo "BLOCKED stop: package fails to load (using GeneralizedPerturbedEquilibrium errored)." >&2
     exit 2
   fi
