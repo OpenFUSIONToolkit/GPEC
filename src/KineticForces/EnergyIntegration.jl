@@ -217,6 +217,8 @@ add-back below), and its on-axis `0/0` window by the analytic regular-part limit
     @inbounds for k in 1:npole
         val -= residues[k] / (x - x_poles[k])
     end
+    # At a ν=0 pole Ω rounds to 0 and the physical term is 0/0; substitute the nearest
+    # pole's analytic regular-part limit, keeping the other (finite) pole subtractions.
     if !isfinite(val)
         k = 1
         @inbounds for j in 2:npole
