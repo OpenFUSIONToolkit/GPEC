@@ -21,21 +21,23 @@ supervising sessions.
 
 ---
 
-## Q1 — Julia not on the automation shell PATH — OPEN
+## Q1 — Julia not on the automation shell PATH — RESOLVED (by Claude, 2026-07-08)
 
 - **Context**: Phase A bootstrap. Verifying the `Islands` module skeleton loads
   (`using GeneralizedPerturbedEquilibrium`) and running the test suite requires
-  `julia`, but it is not on the non-interactive shell's PATH (no `julia` module,
+  `julia`, but it was not on the non-interactive shell's PATH (no `julia` module,
   none in `$HOME`; other users have installs under `/mnt/homes*/…/julia*`).
 - **Question**: What is the canonical `julia` invocation for automation on this
   cluster, and will the overnight loop's scratch-clone environment expose it?
-  The unattended loop **cannot run `julia --project` tests without it** — this is
-  a hard prerequisite for Phase B, not just a local convenience.
-- **Options**: (a) a `module load <julia>` line prepended in the loop's shell
-  rc / launch script; (b) an absolute path to a `juliaup`/`julia` binary the
-  user owns; (c) install juliaup under `ncl2128` and pin 1.11.
-- **Recommendation**: user provides the module/path; bake it into the tmux
-  launch script (and the Stop hook, which runs the fast test subset). Until
-  then, CI (`test.yaml`) is the only validation of Julia changes.
-- **Gated work**: local verification of every Julia change; the Phase-B overnight
-  loop's ability to run tests / meet its definition-of-done.
+- **Resolution**: the `ncl2128`-owned install is at
+  `/mnt/homes_global/ncl2128/software/julia-1.11.7/bin/julia` (option (b): an
+  absolute path to a user-owned binary), and it is on this session's PATH. The
+  M1 run used it to build and run `test/runtests.jl` locally. The **only caveat**
+  is the OMFIT `LD_LIBRARY_PATH` contamination already documented in LOG
+  (2026-07-08): the binary must be invoked with a clean loader path —
+  `env -u LD_LIBRARY_PATH /mnt/homes_global/ncl2128/software/julia-1.11.7/bin/julia
+  --project=. …` — or the conda libs shadow Julia's bundled artifacts. The Stop
+  hook already applies `env -u LD_LIBRARY_PATH`; the overnight loop's launch
+  script must do the same for its own gpec runs.
+- **Gated work (now unblocked)**: local verification of every Julia change; the
+  overnight loop's ability to run tests / meet its definition-of-done.
