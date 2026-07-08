@@ -692,6 +692,8 @@ function _bounce_integrate(
         scale = wbbar / ro^2
         Mu = (mpert * (mpert + 1)) ÷ 2
         wmats_lmda = scr.wmats_lmda
+        # Fill with NaN to catch uninitialized entries
+        fill!(wmats_lmda, ComplexF64(NaN, NaN))
 
         # A (Hermitian): upper triangle of W_Z†W_Z, rank-1 → conj(wz[i])·wz[j].
         off = 0
