@@ -1,0 +1,339 @@
+"""
+    PhaseSpace
+
+Phase-space grids and discretization operators for the Islands drift-kinetic
+solver: the `(x, ξ, λ→y, E, σ)` coordinates of design doc `03 §1` with the
+layer-clustered mappings of `04 §1`.
+
+This module is **pure numerics** — grid node placement, spectral/finite-difference
+differentiation matrices, and quadrature weights. It contains no physics
+coefficients: nothing here carries a `[VERIFY]`/`[CHECKED]` tag, and the
+milestone-M1 discipline (build the discretization, not the physics numbers)
+lives one layer up in `Operators`.
+
+Design-order summary (verified by the MMS ladder A1, `Verify`):
+
+  - `ξ` (helical angle): Fourier pseudo-spectral on the periodic domain `[0, L)`
+    — exponential convergence for smooth periodic data (`04 §1`).
+  - `x` (radial) and `y` (pitch): high-order finite differences on a stretched,
+    layer-clustered grid — algebraic convergence at the requested `order`
+    (`04 §1`; the layer packing targets `x = 0` and `y = y_c = 1`).
+  - `E` (energy): Gauss quadrature on the `F₀`-weighted semi-infinite domain
+    (`04 §1`, Maxwellian weight at Level 0 via Gauss–Laguerre).
+  - `σ = ±1`: the two `sgn(v_∥)` sheets.
+"""
+module PhaseSpace
+
+using LinearAlgebra
+import FastGaussQuadrature
+
+export FourierGrid, MappedFDGrid, GaussGrid, IslandGrid
+export nnodes, differentiate_fourier, fd_weights
+
+# ---------------------------------------------------------------------------
+# Finite-difference weights (Fornberg 1988, Math. Comp. 51, 699) — weights for
+# derivatives 0..m of a function sampled at arbitrary `nodes`, evaluated at x0.
+# Returns `w[j+1, d+1]` = weight of node j for the d-th derivative.
+# ---------------------------------------------------------------------------
+"""
+    fd_weights(m, nodes, x0)
+
+Finite-difference weights for derivatives `0:m` of a function sampled at
+`nodes`, evaluated at `x0`, via Fornberg's recurrence. `w[j, d+1]` multiplies
+`f(nodes[j])` in the approximation of the `d`-th derivative. Exact for
+polynomials up to degree `length(nodes) - 1`.
+"""
+function fd_weights(m::Int, nodes::AbstractVector{<:Real}, x0::Real)
+    n = length(nodes)
+    @assert m < n "need at least m+1 nodes for the m-th derivative"
+    w = zeros(Float64, n, m + 1)
+    c1 = 1.0
+    c4 = nodes[1] - x0
+    w[1, 1] = 1.0
+    for i in 2:n
+        mn = min(i, m + 1)
+        c2 = 1.0
+        c5 = c4
+        c4 = nodes[i] - x0
+        for j in 1:(i-1)
+            c3 = nodes[i] - nodes[j]
+            c2 *= c3
+            if j == i - 1
+                for k in mn:-1:2
+                    w[i, k] = c1 * ((k - 1) * w[i-1, k-1] - c5 * w[i-1, k]) / c2
+                end
+                w[i, 1] = -c1 * c5 * w[i-1, 1] / c2
+            end
+            for k in mn:-1:2
+                w[j, k] = (c4 * w[j, k] - (k - 1) * w[j, k-1]) / c3
+            end
+            w[j, 1] = c4 * w[j, 1] / c3
+        end
+        c1 = c2
+    end
+    return w
+end
+
+# ---------------------------------------------------------------------------
+# ξ: Fourier pseudo-spectral, periodic on [0, L).
+# ---------------------------------------------------------------------------
+"""
+    FourierGrid(n; L=2π)
+
+Uniform periodic grid of `n` nodes on `[0, L)` with the Fourier spectral
+first-derivative matrix `D1` (`04 §1`, `ξ` coordinate). `n` must be even.
+
+## Fields
+
+  - `n`     — number of nodes.
+  - `L`     — period length.
+  - `nodes` — node positions `j·L/n`, `j = 0:n-1`.
+  - `D1`    — `n×n` spectral first-derivative matrix.
+"""
+struct FourierGrid
+    n::Int
+    L::Float64
+    nodes::Vector{Float64}
+    D1::Matrix{Float64}
+end
+
+function FourierGrid(n::Int; L::Real=2π)
+    iseven(n) || throw(ArgumentError("FourierGrid needs an even node count (got $n)"))
+    h = 2π / n                          # computational grid spacing on [0, 2π)
+    nodes = collect((0:(n-1)) .* (L / n))
+    D1 = zeros(Float64, n, n)
+    @inbounds for i in 1:n, j in 1:n
+        if i != j
+            k = i - j
+            D1[i, j] = 0.5 * (-1.0)^k / tan(k * h / 2)
+        end
+    end
+    D1 .*= (2π / L)                     # rescale d/dξ from [0,2π) to [0,L)
+    return FourierGrid(n, Float64(L), nodes, D1)
+end
+
+"""
+    differentiate_fourier(g, grid)
+
+Spectral first derivative of a periodic sample vector `g` on `grid` (allocating
+convenience wrapper around `grid.D1 * g`; hot paths use the matrix directly).
+"""
+differentiate_fourier(g::AbstractVector, grid::FourierGrid) = grid.D1 * g
+
+# ---------------------------------------------------------------------------
+# x, y: high-order finite differences on a layer-clustered stretched grid.
+#
+# A uniform computational coordinate s ∈ [-1, 1] is mapped to the physical
+# coordinate by a smooth, monotonic, layer-clustering map; physical derivative
+# matrices follow by the chain rule so the FD order is preserved (`04 §1`).
+# ---------------------------------------------------------------------------
+"""
+    MappedFDGrid(n; halfwidth, clustering=0.0, center=0.0, domain=:symmetric, order=4)
+
+High-order finite-difference grid of `n` nodes with layer clustering.
+
+The uniform computational coordinate `s ∈ [-1, 1]` is mapped to the physical
+coordinate by `sinh` stretching (`clustering = β`): points cluster toward the
+map center as `β` grows, and the map degenerates to uniform as `β → 0`. This is
+the design-doc packing that targets the internal layers — `x = 0` (rational
+surface) and `y = y_c = 1` (trapped–passing boundary), `04 §1–2`.
+
+`domain = :symmetric` gives `[center - halfwidth, center + halfwidth]` with
+clustering at `center`; `domain = :half` gives `[0, halfwidth]` with clustering
+at `center` (used for `y ∈ [0, y_max]` packed at `y_c`).
+
+Physical first/second-derivative matrices `D1`, `D2` are built with Fornberg
+weights on windows sized per derivative (`order + d` points for the `d`-th
+derivative, shifted one-sided near the boundaries) so both reach `order`-th
+order accuracy *uniformly*, including at the boundary rows; the chain rule uses
+the analytic map Jacobian `x'(s)` and `x''(s)`.
+
+`wq` holds composite-Simpson quadrature weights on the same nodes (built on the
+uniform computational grid and pushed through the map Jacobian), so
+`∫ f dx ≈ Σ wq[j] f(nodes[j])` at fourth order — matching the FD order for the
+velocity-moment integrals (`03 §2`, moments). Requires an odd `n`.
+
+## Fields
+
+  - `n`, `order` — node count and nominal FD order.
+  - `nodes`      — physical node positions.
+  - `D1`, `D2`   — `n×n` physical first/second-derivative matrices.
+  - `wq`         — composite-Simpson quadrature weights on `nodes`.
+"""
+struct MappedFDGrid
+    n::Int
+    order::Int
+    nodes::Vector{Float64}
+    D1::Matrix{Float64}
+    D2::Matrix{Float64}
+    wq::Vector{Float64}
+end
+
+function MappedFDGrid(n::Int; halfwidth::Real, clustering::Real=0.0, center::Real=0.0,
+    domain::Symbol=:symmetric, order::Int=4)
+    isodd(n) || throw(ArgumentError("MappedFDGrid needs odd n for composite Simpson (got $n)"))
+    # widest window is for D2 (order+2 points); need enough nodes for it.
+    n > order + 2 || throw(ArgumentError("need n > order+2 ($n ≤ $(order + 2))"))
+
+    s = collect(range(-1.0, 1.0; length=n))            # uniform computational grid
+    hw = Float64(halfwidth)
+    β = Float64(clustering)
+
+    # Map s → physical, with analytic first/second derivatives of the map.
+    if domain === :symmetric
+        # x(s) = center + hw·sinh(β s)/sinh(β): monotone, clusters at s=0 ↔ x=center.
+        if abs(β) < 1e-12
+            xs = center .+ hw .* s
+            dxds = fill(hw, n)
+            d2xds2 = zeros(n)
+        else
+            sb = sinh(β)
+            xs = center .+ hw .* sinh.(β .* s) ./ sb
+            dxds = hw .* β .* cosh.(β .* s) ./ sb
+            d2xds2 = hw .* β^2 .* sinh.(β .* s) ./ sb
+        end
+    elseif domain === :half
+        # Map [-1,1] → [0, hw] with clustering at s* ↔ x=center via sinh about s*.
+        # u(s) = sinh(β(s - s*)); x = hw·(u - u(-1))/(u(1) - u(-1)).
+        sstar = clamp(2 * (center / hw) - 1, -1.0, 1.0)
+        if abs(β) < 1e-12
+            xs = hw .* (s .+ 1) ./ 2
+            dxds = fill(hw / 2, n)
+            d2xds2 = zeros(n)
+        else
+            u(z) = sinh(β * (z - sstar))
+            um1 = u(-1.0)
+            span = u(1.0) - um1
+            xs = hw .* (u.(s) .- um1) ./ span
+            dxds = hw .* β .* cosh.(β .* (s .- sstar)) ./ span
+            d2xds2 = hw .* β^2 .* sinh.(β .* (s .- sstar)) ./ span
+        end
+    else
+        throw(ArgumentError("unknown domain $domain (use :symmetric or :half)"))
+    end
+
+    D1s = _fd_matrix(s, 1, order)
+    D2s = _fd_matrix(s, 2, order)
+
+    # Chain rule: d/dx = (1/x')·d/ds ; d²/dx² = (1/x'²)·d²/ds² − (x''/x'³)·d/ds.
+    invp = 1.0 ./ dxds
+    D1 = Diagonal(invp) * D1s
+    D2 = Diagonal(invp .^ 2) * D2s - Diagonal(d2xds2 .* invp .^ 3) * D1s
+
+    # Composite Simpson on uniform s (ds = 2/(n-1)), times the map Jacobian dx/ds.
+    ds = 2.0 / (n - 1)
+    wq = similar(dxds)
+    @inbounds for j in 1:n
+        c = (j == 1 || j == n) ? 1.0 : (iseven(j) ? 4.0 : 2.0)
+        wq[j] = c * ds / 3 * dxds[j]
+    end
+
+    return MappedFDGrid(n, order, xs, Matrix(D1), Matrix(D2), wq)
+end
+
+# Dense derivative matrix for the `deriv`-th derivative on an arbitrary 1D node
+# set at the requested `order`, using windows of `order + deriv` points (the
+# minimum for `order`-th accuracy of the `deriv`-th derivative), rounded up to
+# an odd width so the interior window is centered; near the ends the window is
+# shifted one-sided. Weights are Fornberg's, exact for polynomials up to the
+# window degree.
+function _fd_matrix(nodes::AbstractVector{<:Real}, deriv::Int, order::Int)
+    n = length(nodes)
+    stencil = order + deriv
+    isodd(stencil) || (stencil += 1)   # centered interior window needs odd width
+    stencil = min(stencil, n)
+    D = zeros(Float64, n, n)
+    half = stencil ÷ 2
+    @inbounds for i in 1:n
+        lo = clamp(i - half, 1, n - stencil + 1)
+        hi = lo + stencil - 1
+        w = fd_weights(deriv, @view(nodes[lo:hi]), nodes[i])
+        for (col, j) in enumerate(lo:hi)
+            D[i, j] = w[col, deriv+1]
+        end
+    end
+    return D
+end
+
+# ---------------------------------------------------------------------------
+# E: Gauss quadrature on the F₀-weighted semi-infinite energy domain.
+# ---------------------------------------------------------------------------
+"""
+    GaussGrid(n; kind=:laguerre)
+
+Gauss quadrature nodes/weights for velocity-space (energy) integrals over the
+`F₀`-weighted semi-infinite domain (`04 §1`). `kind = :laguerre` gives the
+Level-0 Maxwellian weight `∫₀^∞ f(E) e^{-E} dE ≈ Σ wᵢ f(Eᵢ)` (Gauss–Laguerre);
+the slowing-down weight (Level 2) only changes `kind`, not the machinery.
+
+## Fields
+
+  - `n`       — number of quadrature nodes.
+  - `nodes`   — abscissae `Eᵢ`.
+  - `weights` — quadrature weights `wᵢ` (the `F₀` weight is folded in).
+"""
+struct GaussGrid
+    n::Int
+    nodes::Vector{Float64}
+    weights::Vector{Float64}
+end
+
+function GaussGrid(n::Int; kind::Symbol=:laguerre)
+    if kind === :laguerre
+        nodes, weights = FastGaussQuadrature.gausslaguerre(n)
+    elseif kind === :legendre
+        nodes, weights = FastGaussQuadrature.gausslegendre(n)
+    else
+        throw(ArgumentError("unknown quadrature kind $kind"))
+    end
+    return GaussGrid(n, collect(nodes), collect(weights))
+end
+
+# ---------------------------------------------------------------------------
+# Bundle: the full Level-0 orbit-averaged 4D phase space (x, ξ, y, E) plus σ.
+# ---------------------------------------------------------------------------
+"""
+    IslandGrid(; nx, nxi, ny, nE, halfwidth_x, clustering_x, y_max, y_c,
+               clustering_y, xi_period=2π, energy_kind=:laguerre, order=4)
+
+The assembled Level-0 phase-space grid: radial `x`, helical `ξ`, pitch `y`,
+energy `E`, and the two `σ = ±1` sheets (`03 §1`). Grids are packed at the
+internal layers (`x = 0`, `y = y_c`) per `04 §1`.
+
+## Fields
+
+  - `x`  — radial `MappedFDGrid` (clustered at `x = 0`).
+  - `ξ`  — helical `FourierGrid`.
+  - `y`  — pitch `MappedFDGrid` on `[0, y_max]` (clustered at `y_c`).
+  - `E`  — energy `GaussGrid`.
+  - `σ`  — `[+1.0, -1.0]`.
+"""
+struct IslandGrid
+    x::MappedFDGrid
+    ξ::FourierGrid
+    y::MappedFDGrid
+    E::GaussGrid
+    σ::Vector{Float64}
+end
+
+function IslandGrid(; nx::Int, nxi::Int, ny::Int, nE::Int,
+    halfwidth_x::Real, clustering_x::Real=0.0,
+    y_max::Real, y_c::Real=1.0, clustering_y::Real=0.0,
+    xi_period::Real=2π, energy_kind::Symbol=:laguerre, order::Int=4)
+    x = MappedFDGrid(nx; halfwidth=halfwidth_x, clustering=clustering_x, center=0.0,
+        domain=:symmetric, order=order)
+    ξ = FourierGrid(nxi; L=xi_period)
+    y = MappedFDGrid(ny; halfwidth=y_max, clustering=clustering_y, center=y_c,
+        domain=:half, order=order)
+    E = GaussGrid(nE; kind=energy_kind)
+    return IslandGrid(x, ξ, y, E, [1.0, -1.0])
+end
+
+"""
+    nnodes(grid::IslandGrid)
+
+Tuple `(nx, nξ, ny, nE, nσ)` of the phase-space grid dimensions.
+"""
+nnodes(g::IslandGrid) = (g.x.n, g.ξ.n, g.y.n, g.E.n, length(g.σ))
+
+end # module PhaseSpace

@@ -1,0 +1,350 @@
+"""
+    Verify
+
+The Islands verification harness (`04 §4`, `05 §A`): manufactured-solution (MMS)
+convergence checks and AD-vs-finite-difference JVP checks for the operator
+stack. Callable from the test suite (`test/runtests_islands_*.jl`) and from
+scripts.
+
+**These are structural (pre-physics) checks — ladder A1/A2.** They exercise the
+*discretization order* and the *AD plumbing* using arbitrary, order-unity
+manufactured coefficients. That is deliberate and policy-clean: nothing here is
+a physics coefficient, so nothing here carries a `[VERIFY]` tag. Physics
+benchmarks (ladder B+) live in `benchmarks/islands/` and stay `[VERIFY]`-gated
+until human-cleared.
+
+Design orders checked:
+
+  - `ξ` derivatives — Fourier spectral (a bandlimited manufactured `ξ`-profile is
+    differentiated to machine precision).
+  - `x`, `y` derivatives — high-order finite differences at the grid `order`
+    (default 4): halving the mesh cuts the error by `2^order`.
+  - assembled kinetic residual — the min of the above (algebraic, set by `x`/`y`).
+"""
+module Verify
+
+using LinearAlgebra
+import ForwardDiff
+import ..PhaseSpace: IslandGrid, MappedFDGrid, GaussGrid, nnodes
+import ..Operators: IslandState, IslandCache, IslandStack, residual!, velocity_moment!,
+    apply!, statelength, flatten!, unflatten!,
+    ParallelStreaming, MagneticDrift, ExBDrift, Collisions, GradientDrive,
+    PerpTransport, Quasineutrality
+
+export manufactured_state,
+    test_coefficients, build_stack,
+    mms_operator_error, mms_assembled_error, estimate_order,
+    jvp_fd_maxerror, moment_selfconvergence,
+    term_allocations, residual_allocations
+
+# ---------------------------------------------------------------------------
+# Manufactured solution: smooth, separable, ξ-periodic and bandlimited.
+# Each factor's analytic first/second derivatives are known in closed form,
+# so the continuous value of every operator is exact at the nodes.
+# ---------------------------------------------------------------------------
+_Gx(x) = exp(-x^2 / 2)
+_Gx′(x) = -x * _Gx(x)
+_Gx″(x) = (x^2 - 1) * _Gx(x)
+_Gξ(ξ) = sin(ξ) + 0.5 * cos(2ξ)
+_Gξ′(ξ) = cos(ξ) - sin(2ξ)
+_Gy(y) = exp(-(y - 1)^2 / 2)
+_Gy′(y) = -(y - 1) * _Gy(y)
+_Gy″(y) = ((y - 1)^2 - 1) * _Gy(y)
+_GE(E) = exp(-0.3 * E)
+_Gσ(σ) = 1 + 0.25 * σ
+
+_Px(x) = exp(-x^2 / 4)
+_Px′(x) = -(x / 2) * _Px(x)
+_Pξ(ξ) = cos(ξ)
+_Pξ′(ξ) = -sin(ξ)
+
+# Fill a 5D array over (x, ξ, y, E, σ) from a scalar function of the node coords.
+function _fill5(grid::IslandGrid, f)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    A = Array{Float64}(undef, nx, nξ, ny, nE, nσ)
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ, ix in 1:nx
+        A[ix, iξ, iy, iE, iσ] = f(grid.x.nodes[ix], grid.ξ.nodes[iξ], grid.y.nodes[iy],
+            grid.E.nodes[iE], grid.σ[iσ])
+    end
+    return A
+end
+
+function _fill2(grid::IslandGrid, f)
+    nx, nξ, = nnodes(grid)
+    A = Array{Float64}(undef, nx, nξ)
+    @inbounds for iξ in 1:nξ, ix in 1:nx
+        A[ix, iξ] = f(grid.x.nodes[ix], grid.ξ.nodes[iξ])
+    end
+    return A
+end
+
+"""
+    manufactured_state(grid)
+
+Return `(U, deriv)` where `U::IslandState` holds the manufactured `g*`, `Φ*` on
+`grid` and `deriv` is a NamedTuple of the analytic partial-derivative arrays
+(`dgdx`, `dgdξ`, `dgdy`, `d2gdy2`, `d2gdx2`, `dΦdx`, `dΦdξ`) used to form exact
+continuous operator values.
+"""
+function manufactured_state(grid::IslandGrid)
+    g = _fill5(grid, (x, ξ, y, E, σ) -> _Gx(x) * _Gξ(ξ) * _Gy(y) * _GE(E) * _Gσ(σ))
+    Φ = _fill2(grid, (x, ξ) -> _Px(x) * _Pξ(ξ))
+    U = IslandState(g, Φ)
+    deriv = (
+        dgdx=_fill5(grid, (x, ξ, y, E, σ) -> _Gx′(x) * _Gξ(ξ) * _Gy(y) * _GE(E) * _Gσ(σ)),
+        dgdξ=_fill5(grid, (x, ξ, y, E, σ) -> _Gx(x) * _Gξ′(ξ) * _Gy(y) * _GE(E) * _Gσ(σ)),
+        dgdy=_fill5(grid, (x, ξ, y, E, σ) -> _Gx(x) * _Gξ(ξ) * _Gy′(y) * _GE(E) * _Gσ(σ)),
+        d2gdy2=_fill5(grid, (x, ξ, y, E, σ) -> _Gx(x) * _Gξ(ξ) * _Gy″(y) * _GE(E) * _Gσ(σ)),
+        d2gdx2=_fill5(grid, (x, ξ, y, E, σ) -> _Gx″(x) * _Gξ(ξ) * _Gy(y) * _GE(E) * _Gσ(σ)),
+        dΦdx=_fill2(grid, (x, ξ) -> _Px′(x) * _Pξ(ξ)),
+        dΦdξ=_fill2(grid, (x, ξ) -> _Px(x) * _Pξ′(ξ))
+    )
+    return U, deriv
+end
+
+# ---------------------------------------------------------------------------
+# Test coefficients: arbitrary, smooth, order-unity. NOT physics — they exercise
+# the discretization. `a_y > 0` keeps the pitch operator a sensible diffusion.
+# ---------------------------------------------------------------------------
+"""
+    test_coefficients(grid)
+
+Build a NamedTuple of arbitrary smooth manufactured coefficient arrays/scalars
+for every term (`a_xi`, `a_x`, `c_D`, `a_y`, `b_y`, `drive`, `c_E`, `χ`, `α`).
+These are MMS test values, not physics coefficients.
+"""
+function test_coefficients(grid::IslandGrid)
+    return (
+        a_xi=_fill5(grid, (x, ξ, y, E, σ) -> 1.0 + 0.2 * cos(ξ) + 0.1 * x),
+        a_x=_fill5(grid, (x, ξ, y, E, σ) -> 0.8 + 0.1 * sin(2ξ) + 0.05 * y),
+        c_D=_fill5(grid, (x, ξ, y, E, σ) -> 0.5 * σ * (1 + 0.1 * E)),
+        a_y=_fill5(grid, (x, ξ, y, E, σ) -> 0.3 + 0.05 * x^2),
+        b_y=_fill5(grid, (x, ξ, y, E, σ) -> 0.1 * (y - 1)),
+        drive=_fill5(grid, (x, ξ, y, E, σ) -> 0.2 * exp(-x^2) * cos(ξ)),
+        c_E=0.7,
+        χ=0.15,
+        α=1.3
+    )
+end
+
+# ---------------------------------------------------------------------------
+# Continuous (exact) operator values from the analytic manufactured derivatives.
+# ---------------------------------------------------------------------------
+function _continuous(term::Symbol, deriv, c)
+    if term === :streaming
+        return c.a_xi .* deriv.dgdξ .+ c.a_x .* deriv.dgdx
+    elseif term === :drift
+        return c.c_D .* deriv.dgdξ
+    elseif term === :collisions
+        return c.a_y .* deriv.d2gdy2 .+ c.b_y .* deriv.dgdy
+    elseif term === :perp
+        return c.χ .* deriv.d2gdx2
+    elseif term === :drive
+        return c.drive
+    elseif term === :exb
+        # broadcast the 2D potential gradients over (y, E, σ)
+        dΦdx = reshape(deriv.dΦdx, size(deriv.dΦdx, 1), size(deriv.dΦdx, 2), 1, 1, 1)
+        dΦdξ = reshape(deriv.dΦdξ, size(deriv.dΦdξ, 1), size(deriv.dΦdξ, 2), 1, 1, 1)
+        return c.c_E .* (dΦdξ .* deriv.dgdx .- dΦdx .* deriv.dgdξ)
+    else
+        throw(ArgumentError("unknown term $term"))
+    end
+end
+
+function _term_object(term::Symbol, c)
+    if term === :streaming
+        return ParallelStreaming(c.a_xi, c.a_x)
+    elseif term === :drift
+        return MagneticDrift(c.c_D; variant=:original)
+    elseif term === :collisions
+        return Collisions(c.a_y, c.b_y; model=:pitch_angle)
+    elseif term === :perp
+        return PerpTransport(c.χ)
+    elseif term === :drive
+        return GradientDrive(c.drive)
+    elseif term === :exb
+        return ExBDrift(c.c_E)
+    else
+        throw(ArgumentError("unknown term $term"))
+    end
+end
+
+# ---------------------------------------------------------------------------
+# MMS error drivers
+# ---------------------------------------------------------------------------
+"""
+    mms_operator_error(grid, term)
+
+Max-norm error between the discrete `apply!` of a single kinetic `term`
+(`:streaming`, `:drift`, `:exb`, `:collisions`, `:perp`, `:drive`) on the
+manufactured state and its exact continuous value on `grid`.
+"""
+function mms_operator_error(grid::IslandGrid, term::Symbol)
+    U, deriv = manufactured_state(grid)
+    c = test_coefficients(grid)
+    R = IslandState(grid)
+    cache = IslandCache(grid)
+    apply!(R, _term_object(term, c), U, grid, cache)
+    exact = _continuous(term, deriv, c)
+    return maximum(abs, R.g .- exact)
+end
+
+"""
+    mms_assembled_error(grid; terms=(:streaming,:drift,:exb,:collisions,:perp,:drive))
+
+Max-norm error between the assembled discrete kinetic residual (sum of `terms`)
+on the manufactured state and the summed continuous values.
+"""
+function mms_assembled_error(grid::IslandGrid;
+    terms=(:streaming, :drift, :exb, :collisions, :perp, :drive))
+    U, deriv = manufactured_state(grid)
+    c = test_coefficients(grid)
+    R = IslandState(grid)
+    cache = IslandCache(grid)
+    exact = zeros(size(R.g))
+    for t in terms
+        apply!(R, _term_object(t, c), U, grid, cache)
+        exact .+= _continuous(t, deriv, c)
+    end
+    return maximum(abs, R.g .- exact)
+end
+
+"""
+    estimate_order(errors, refine)
+
+Observed convergence order from a sequence of `errors` at mesh-refinement
+factors `refine` (ratio of successive node counts): `log(eₖ/eₖ₊₁)/log(rₖ)`.
+Returns the vector of per-step orders.
+"""
+function estimate_order(errors::AbstractVector, refine::AbstractVector)
+    return [log(errors[k] / errors[k+1]) / log(refine[k]) for k in 1:(length(errors)-1)]
+end
+
+# ---------------------------------------------------------------------------
+# Assembled stack for the JVP check (includes the E×B nonlinearity + field).
+# ---------------------------------------------------------------------------
+"""
+    build_stack(grid; coeffs=test_coefficients(grid))
+
+Assemble an `IslandStack` with the full Level-0-shaped term set (streaming,
+drift, E×B, collisions, drive) plus the quasineutrality field term, using the
+supplied (manufactured) coefficients. Used by the JVP check.
+"""
+function build_stack(grid::IslandGrid; coeffs=test_coefficients(grid))
+    kinetic = (
+        ParallelStreaming(coeffs.a_xi, coeffs.a_x),
+        MagneticDrift(coeffs.c_D; variant=:original),
+        ExBDrift(coeffs.c_E),
+        Collisions(coeffs.a_y, coeffs.b_y; model=:pitch_angle),
+        GradientDrive(coeffs.drive)
+    )
+    return IslandStack(kinetic, Quasineutrality(coeffs.α))
+end
+
+"""
+    jvp_fd_maxerror(grid; h=1e-6, seed=1)
+
+Compare the forward-mode-AD Jacobian–vector product of the assembled residual
+against a central finite-difference directional derivative, at the manufactured
+state in a deterministic direction. Returns the max-norm difference (ladder A2).
+The residual is nonlinear (E×B bracket + g/Φ coupling), so this is a genuine
+check of both the AD plumbing and its correctness.
+"""
+function jvp_fd_maxerror(grid::IslandGrid; h::Float64=1e-6, seed::Int=1)
+    stack = build_stack(grid)
+    cache_f = IslandCache{Float64}(grid)
+    U, = manufactured_state(grid)
+
+    N = statelength(grid)
+    u0 = Vector{Float64}(undef, N)
+    flatten!(u0, U)
+    # deterministic direction (no RNG dependence)
+    v = Float64[0.5 + 0.5 * sin(seed * k) for k in 1:N]
+    v ./= norm(v)
+
+    # residual as a flat-vector function, generic over eltype
+    function resid_vec!(out, uvec)
+        T = eltype(uvec)
+        Ut = IslandState(reshape(view(uvec, 1:length(U.g)), size(U.g)),
+            reshape(view(uvec, (length(U.g)+1):length(uvec)), size(U.Φ)))
+        Rt = IslandState(reshape(view(out, 1:length(U.g)), size(U.g)),
+            reshape(view(out, (length(U.g)+1):length(out)), size(U.Φ)))
+        cache = IslandCache{T}(grid)
+        residual!(Rt, Ut, stack, grid, cache)
+        return out
+    end
+
+    # AD JVP:  d/dε residual(u0 + ε v) |_{ε=0}
+    jvp_ad = ForwardDiff.derivative(0.0) do ε
+        out = Vector{typeof(ε)}(undef, N)
+        resid_vec!(out, u0 .+ ε .* v)
+    end
+
+    # central-difference JVP
+    rp = similar(u0)
+    rm = similar(u0)
+    resid_vec!(rp, u0 .+ h .* v)
+    resid_vec!(rm, u0 .- h .* v)
+    jvp_fd = (rp .- rm) ./ (2h)
+
+    return maximum(abs, jvp_ad .- jvp_fd)
+end
+
+# ---------------------------------------------------------------------------
+# Velocity-moment quadrature self-convergence (Simpson in y, at grid order).
+# ---------------------------------------------------------------------------
+"""
+    moment_selfconvergence(grid_coarse, grid_fine)
+
+Max-norm difference between the velocity moment of the manufactured `g*` on two
+`y`-resolutions. The two grids must share `(nx, nξ)` so the moments live on the
+same `(x, ξ)` grid and compare pointwise; refine `ny` (and/or `nE`) between them
+to probe the `y`-quadrature order.
+"""
+function moment_selfconvergence(grid_coarse::IslandGrid, grid_fine::IslandGrid)
+    nnodes(grid_coarse)[1:2] == nnodes(grid_fine)[1:2] ||
+        throw(ArgumentError("moment_selfconvergence needs grids sharing (nx, nξ)"))
+    Uc, = manufactured_state(grid_coarse)
+    Uf, = manufactured_state(grid_fine)
+    Mc = zeros(nnodes(grid_coarse)[1], nnodes(grid_coarse)[2])
+    Mf = zeros(nnodes(grid_fine)[1], nnodes(grid_fine)[2])
+    velocity_moment!(Mc, Uc.g, grid_coarse)
+    velocity_moment!(Mf, Uf.g, grid_fine)
+    return maximum(abs, Mc .- Mf)
+end
+
+# ---------------------------------------------------------------------------
+# Allocation probes (hot-path allocation regression, `04 §9`).
+# ---------------------------------------------------------------------------
+"""
+    term_allocations(grid, term)
+
+Bytes allocated by a single warmed `apply!` of kinetic `term` on `grid`. Should
+be zero for the allocation-free hot path.
+"""
+function term_allocations(grid::IslandGrid, term::Symbol)
+    c = test_coefficients(grid)
+    U, = manufactured_state(grid)
+    R = IslandState(grid)
+    cache = IslandCache(grid)
+    t = _term_object(term, c)
+    apply!(R, t, U, grid, cache)          # warm up compilation
+    return @allocated apply!(R, t, U, grid, cache)
+end
+
+"""
+    residual_allocations(grid; coeffs=test_coefficients(grid))
+
+Bytes allocated by a single warmed full-`residual!` assembly on `grid`. Should
+be zero for the allocation-free hot path.
+"""
+function residual_allocations(grid::IslandGrid; coeffs=test_coefficients(grid))
+    stack = build_stack(grid; coeffs=coeffs)
+    U, = manufactured_state(grid)
+    R = IslandState(grid)
+    cache = IslandCache(grid)
+    residual!(R, U, stack, grid, cache)   # warm up compilation
+    return @allocated residual!(R, U, stack, grid, cache)
+end
+
+end # module Verify
