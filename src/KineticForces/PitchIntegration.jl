@@ -47,7 +47,7 @@ struct PitchGARParams{F}
     fbnce::F           # CubicSeriesInterpolant: fbnce(λ) → [wb, wd, f₁, ...] (typed for stability)
     fbnce_norm::Vector{Float64}  # normalization factors (1/median)
     fbnce_hint::Base.RefValue{Int}  # sticky bracket-search hint for fbnce(λ)
-    fvals::Vector{ComplexF64}    # reusable buffer for the in-place fbnce(fvals, λ) evaluation
+    fvals::Vector{ComplexF64}    # reusable buffer for the in-place fbnce(fvals, λ) evaluation; must be complex — the wt-path fbnce carries complex op_wmats data
     esegbuf::Vector{QuadGK.Segment{Float64,ComplexF64,Float64}}  # reusable energy-integral QuadGK segment buffer
 end
 

@@ -274,19 +274,33 @@ Per-surface scratch buffers for the bounce-averaging inner loops. Allocated once
 θ- and mode-sized arrays). Sizes are fixed for a flux surface (`ntheta` sub-grid points,
 `mpert` Fourier modes), so a single set of buffers serves the whole λ sweep. Buffers that
 the callers zero-initialize are `fill!`-reset per λ, preserving bit-for-bit results.
+
+## Fields
+- `cum_wb_arr::Vector{Float64}`: length `ntheta` — cumulative bounce action
+- `jvtheta::Vector{ComplexF64}`: length `ntheta` — action integrand
+- `wmu_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_μ per θ
+- `wen_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_E per θ
+- `expm::Vector{ComplexF64}`: length `mpert` — Fourier basis at a θ
+- `pl::Vector{ComplexF64}`: length `ntheta` — bounce phase factor
+- `wmu_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_μ
+- `wen_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_E
+- `wmats_lmda::Vector{ComplexF64}`: length `nqty_matrix(mpert)` — packed W outer products
+- `tspl_f::Vector{Float64}`: length 5 — in-place tspl(θ) evaluation
+- `vpar_fine::Vector{Float64}`: length `nfine+1` — v_par(θ) for bounce-point search;
+  `_find_bounce_points_and_grid` derives its fine-grid size from this buffer's length
 """
 struct BounceScratch
-    cum_wb_arr::Vector{Float64}       # ntheta — cumulative bounce action
-    jvtheta::Vector{ComplexF64}       # ntheta — action integrand
-    wmu_mt::Matrix{ComplexF64}        # mpert × ntheta — W_μ per θ
-    wen_mt::Matrix{ComplexF64}        # mpert × ntheta — W_E per θ
-    expm::Vector{ComplexF64}          # mpert — Fourier basis at a θ
-    pl::Vector{ComplexF64}            # ntheta — bounce phase factor
-    wmu_ba::Vector{ComplexF64}        # mpert — bounce-averaged W_μ
-    wen_ba::Vector{ComplexF64}        # mpert — bounce-averaged W_E
-    wmats_lmda::Vector{ComplexF64}    # nqty_matrix(mpert) — packed W outer products
-    tspl_f::Vector{Float64}           # 5 — in-place tspl(θ) evaluation
-    vpar_fine::Vector{Float64}        # nfine+1 — v_par(θ) for bounce-point search
+    cum_wb_arr::Vector{Float64}
+    jvtheta::Vector{ComplexF64}
+    wmu_mt::Matrix{ComplexF64}
+    wen_mt::Matrix{ComplexF64}
+    expm::Vector{ComplexF64}
+    pl::Vector{ComplexF64}
+    wmu_ba::Vector{ComplexF64}
+    wen_ba::Vector{ComplexF64}
+    wmats_lmda::Vector{ComplexF64}
+    tspl_f::Vector{Float64}
+    vpar_fine::Vector{Float64}
 end
 
 function BounceScratch(ntheta::Int, mpert::Int; nfine::Int=256)
@@ -356,7 +370,8 @@ function _find_bounce_points_and_grid(
 )
     if sigma == 0  # trapped
         # Build v_par(θ) = 1 - (λ/bo)*B(θ) and find roots on a dense θ grid.
-        nfine = 256
+        # Grid size derives from the scratch buffer so it stays in sync with BounceScratch's nfine.
+        nfine = length(scr.vpar_fine) - 1
         theta_fine = range(0.0, 1.0, length=nfine+1)
         vpar_fine = scr.vpar_fine
         @inbounds for i in 1:(nfine+1)

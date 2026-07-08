@@ -209,7 +209,7 @@ formula; its causal branch is carried by the signed zero of `−pole_offset` (se
 add-back below), and its on-axis `0/0` window by the analytic regular-part limit.
 """
 # Real x-space resonant integrand with pole subtractions
-# Explicit function keeps memory allocation out of the QuadGK inner loop. 
+# Explicit function keeps memory allocation out of the QuadGK inner loop.
 @inline function _resonant_integrand(x::Float64, p::EnergyParams,
         residues::Vector{ComplexF64}, x_poles::Vector{ComplexF64}, npole::Int,
         leff::Float64, wb::Float64, n::Int, wd::Float64)::ComplexF64
