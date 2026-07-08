@@ -19,20 +19,26 @@ milestone M1 proceeds.
 module Islands
 
 # Submodule layout follows docs/src/islands/design/03-architecture.md §1.
-# M1 lands the discretization + operator-stack skeleton + verification harness;
-# the remaining submodules (species, frames, fields, moments, solvers) land as
-# later milestones proceed.
+# M1 landed the discretization + operator stack + MMS/AD harness; M2 lands the
+# L0 solve machinery (species, frames, solve, fields, moments) as gated
+# structure. Remaining design dirs (geometry/, closures/, io/) arrive with the
+# milestones that need them (L2/L4/M2-io).
 include("phasespace/PhaseSpace.jl")   # grids (x, ξ, λ→y, E, σ), layer-clustered maps
+include("species/Species.jl")         # Species, backgrounds, roles (D3)
+include("frames/Frames.jl")           # THE frequency/frame conversion module (gated forms)
 include("operators/Operators.jl")     # the AbstractTerm stack + residual assembly
-include("verify/Verify.jl")           # MMS + AD-vs-FD JVP harness (ladder A1, A2)
-#   include("species/Species.jl")     # Species, backgrounds, roles                 (M2+)
-#   include("frames/Frames.jl")       # THE frequency/frame conversion module       (M2+)
-#   include("fields/Fields.jl")       # Φ̃ quasineutrality (A_∥ Ampère at L3)        (M2+/L3)
-#   include("moments/Moments.jl")     # Δ_cos, Δ_sin, profiles, channel decomps      (M2)
-#   include("solvers/Solvers.jl")     # Newton–Krylov, continuation, trace pass      (M2)
+include("fields/Fields.jl")           # quasineutrality closure structure, h(Ω)/Q(Ω)
+include("moments/Moments.jl")         # J̄_∥, Δ_cos/Δ_sin projections, ⟨·⟩_Ω diagnostics
+include("solvers/Solvers.jl")         # Newton–Krylov, preconditioner, continuation
+include("verify/Verify.jl")           # MMS + AD-vs-FD JVP harness, y_c monitor
 
 import .PhaseSpace
+import .SpeciesLists
+import .Frames
 import .Operators
+import .Fields
+import .Moments
+import .Solvers
 import .Verify
 
 end # module Islands
