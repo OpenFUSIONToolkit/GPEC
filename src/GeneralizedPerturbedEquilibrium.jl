@@ -615,6 +615,11 @@ function write_outputs_to_HDF5(
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
         end
 
+        # Edge coil-response matrix (2msing × numpert_total) from the Eq. (37) edge-BC loop.
+        if intr.msing > 0 && !isempty(intr.delta_coil_matrix)
+            out_h5["singular/delta_coil_matrix"] = intr.delta_coil_matrix
+        end
+
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
         # used to find them. Populated only when kinetic crossings were searched for.
         out_h5["singular/kinetic/kmsing"] = intr.kmsing

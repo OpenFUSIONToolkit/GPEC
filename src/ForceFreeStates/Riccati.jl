@@ -334,6 +334,12 @@ function compute_delta_prime_matrix!(
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
     end
 
+    # rpec coil-response loop needs the vacuum edge (col_edge coupled in junc_rows[1:N]) and the
+    # S-axis row layout that `loop_edge_boundary_conditions` assumes for its edge-BC rows.
+    if use_S_axis && wv !== nothing
+        intr.delta_coil_matrix = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all)
+    end
+
     intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
         M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
 end
@@ -633,7 +639,7 @@ end
 # setting one to 1 assigns that big-solution coefficients. Solve once per boundary condition
 # and collect the small-solution coefficients into the raw D' matrix.
 function loop_boundary_conditions(M::Matrix{ComplexF64}, msing::Int, N::Int,
-                                  ipert_all::Vector{Int})
+    ipert_all::Vector{Int})
     nMat = size(M, 1)
     s2 = 2 * msing
     M_lu = lu(M)
@@ -643,17 +649,46 @@ function loop_boundary_conditions(M::Matrix{ComplexF64}, msing::Int, N::Int,
     for jsing in 1:msing, side in 1:2
         dRow = 2jsing - (2 - side)
         fill!(b, 0)
-        b[nMat - s2 + dRow] = 1
+        b[nMat-s2+dRow] = 1
         x = M_lu \ b
 
         for ksing in 1:msing
             ipert_k = ipert_all[ksing]
-            dp_raw[dRow, 2ksing-1] = x[col_left(ksing, N)[ipert_k + N]]
-            dp_raw[dRow, 2ksing]   = x[col_right(ksing, N)[ipert_k + N]]
+            dp_raw[dRow, 2ksing-1] = x[_col_left(ksing, N)[ipert_k+N]]
+            dp_raw[dRow, 2ksing] = x[_col_right(ksing, N)[ipert_k+N]]
         end
-        return dp_raw
     end
+    return dp_raw
+end
 
+# Coil-response loop (galerkin gal_rpec convention) for the edge block of Eq. (37) [Glasser-Kolemen
+# 2018 PoP 25 082502]. For each edge poloidal mode k, pin the edge to a Dirichlet identity and drive
+# α_edge = e_k as a unit source, solve the square system (block-6 driving rows held at 0), and read the
+# resonant small-solution coefficient at each surface → delta_coil (2·msing × N). Pass the vacuum M.
+function loop_edge_boundary_conditions(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int,
+    ipert_all::Vector{Int})
+    nMat = size(M, 1)
+    edge_rows = (nMat-2msing-N+1):(nMat-2msing) # wall edge-BC rows of the last surface
+    Mc = copy(M)
+    Mc[edge_rows, :] .= 0
+    Mc[edge_rows, col_edge] .= Matrix{ComplexF64}(I, N, N) # α_edge = RHS
+    Mc_lu = lu(Mc)
+
+    delta_coil = zeros(ComplexF64, 2msing, N)
+    rhs = zeros(ComplexF64, nMat)
+    for k in 1:N
+        fill!(rhs, 0)
+        rhs[edge_rows[k]] = 1 # unit edge source: drive α_edge = e_k (galerkin rpec convention)
+        x = Mc_lu \ rhs
+
+        for j in 1:msing # read resonant small solution at each surface
+            ipert_j = ipert_all[j]
+            delta_coil[2j-1, k] = x[_col_left(j, N)[ipert_j+N]]
+            delta_coil[2j, k] = x[_col_right(j, N)[ipert_j+N]]
+        end
+    end
+    return delta_coil
+end
 
 # Fallback BVP assembly with FM-based axis BC (used when no Riccati S matrices are available).
 # Uses the conditioned axis propagator Phi_R[1][:,N+1:2N] in place of S-axis matching.

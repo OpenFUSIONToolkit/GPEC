@@ -195,6 +195,12 @@ A mutable struct holding internal state variables for stability calculations.
     raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    """
+    Edge coil-response matrix of shape (2msing × numpert_total). Column k is the resonant
+    small-solution response at each surface side to driving edge poloidal mode k, built by
+    looping the Eq. (37) edge boundary condition through the Riccati BVP (`loop_edge_boundary_conditions`).
+    """
+    delta_coil_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """
