@@ -80,6 +80,13 @@ function reconstruct_physical_fields(
     npsi = size(ForceFreeStates_results.u_store, 4)
     psi_grid = ForceFreeStates_results.psi_store[1:npsi]
 
+    # Pin BLAS to a single thread for the per-surface reconstruction below. Each threaded
+    # loop over ψ calls only small BLAS kernels (per-surface mpert×mpert solves and mode
+    # DFTs), so leaving BLAS multi-threaded oversubscribes the cores against the Julia
+    # `@threads` over ψ and destroys thread scaling. Restored before returning.
+    _blas_nthreads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+
     # Sum weighted eigenmode contributions to get ξ_ψ, dξ_ψ/dψ, and ξ_s in mode space
     xi_psi_modes, xi_psi1_modes, xi_s_modes = sum_eigenmode_contributions(
         response_vector,
@@ -192,6 +199,7 @@ function reconstruct_physical_fields(
         R=b_R, Z=b_Z, phi=b_phi
     )
 
+    BLAS.set_num_threads(_blas_nthreads)
     return xi_modes, b_modes
 end
 
@@ -235,17 +243,18 @@ function sum_eigenmode_contributions(
     xi_s_modes = zeros(ComplexF64, npsi, mpert)
     # Surfaces are independent; threaded over ψ (run with `julia -t N` or JULIA_NUM_THREADS).
     Threads.@threads :static for ipsi in 1:npsi
-        # u_store[:,:,1] = Ξ_ψ (radial displacement)
+        # u_store[:,:,1] = Ξ_ψ (radial displacement). @view avoids copying the mpert×mpert
+        # eigenmode-matrix slice on every surface (mul! takes the view directly).
         mul!(view(xi_psi_modes, ipsi, :),
-            ForceFreeStates_results.u_store[:, :, 1, ipsi],
+            @view(ForceFreeStates_results.u_store[:, :, 1, ipsi]),
             alpha)
         # ud_store[:,:,1] = dΞ_ψ/dψ (radial derivative)
         mul!(view(xi_psi1_modes, ipsi, :),
-            ForceFreeStates_results.ud_store[:, :, 1, ipsi],
+            @view(ForceFreeStates_results.ud_store[:, :, 1, ipsi]),
             alpha)
         # ud_store[:,:,2] = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
         mul!(view(xi_s_modes, ipsi, :),
-            ForceFreeStates_results.ud_store[:, :, 2, ipsi],
+            @view(ForceFreeStates_results.ud_store[:, :, 2, ipsi]),
             alpha)
     end
 
@@ -393,8 +402,10 @@ function compute_clebsch_displacements(
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
-        # amat is positive-definite by construction (Newcomb kinetic-energy form), so cholesky is safe.
-        amat_fact = cholesky(Hermitian(amat, :L))
+        # amat is positive-definite by construction (Newcomb kinetic-energy form), so cholesky is
+        # safe. cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
+        # ffit.amats each surface), avoiding a fresh factorization allocation per surface.
+        amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
         xms_vec .*= -1                                     # xms = -A\(B*xmp1 + C*xsp)
 
@@ -963,19 +974,27 @@ function _apply_rzphi_transform(
     Z_modes = zeros(ComplexF64, npsi, mpert)
     phi_modes = zeros(ComplexF64, npsi, mpert)
 
-    # Per-thread theta-space buffers; the immutable `ft` functor and `geom` are shared read-only.
-    fun_bufs = [(R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta)) for _ in 1:Threads.maxthreadid()]
+    # Per-thread scratch (the immutable `ft` functor and `geom` are shared read-only): θ-space
+    # transform inputs/outputs (length mtheta) and mode-space forward-DFT outputs (length mpert),
+    # so the DFTs run in place with no per-surface allocation.
+    bufs = [(R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta),
+             psi=zeros(ComplexF64, mtheta), th=zeros(ComplexF64, mtheta), ze=zeros(ComplexF64, mtheta),
+             Ro=zeros(ComplexF64, mpert), Zo=zeros(ComplexF64, mpert), Po=zeros(ComplexF64, mpert))
+            for _ in 1:Threads.maxthreadid()]
 
     Threads.@threads :static for ipsi in 1:npsi
-        buf = fun_bufs[Threads.threadid()]
+        buf = bufs[Threads.threadid()]
         R_fun = buf.R
         Z_fun = buf.Z
         phi_fun = buf.P
 
-        # Inverse DFT: modes → theta-space
-        psi_fun = Utilities.FourierTransforms.inverse(ft, view(psi_input, ipsi, :))
-        theta_fn = Utilities.FourierTransforms.inverse(ft, view(theta_input, ipsi, :))
-        zeta_fn = Utilities.FourierTransforms.inverse(ft, view(cova_zeta_input, ipsi, :))
+        # Inverse DFT: modes → theta-space (in place)
+        psi_fun = buf.psi
+        theta_fn = buf.th
+        zeta_fn = buf.ze
+        Utilities.FourierTransforms.inverse_transform!(psi_fun, ft, view(psi_input, ipsi, :))
+        Utilities.FourierTransforms.inverse_transform!(theta_fn, ft, view(theta_input, ipsi, :))
+        Utilities.FourierTransforms.inverse_transform!(zeta_fn, ft, view(cova_zeta_input, ipsi, :))
 
         # Pointwise transformation (Fortran gpeq_rzphi, gpeq.f:484-489)
         for itheta in 1:mtheta
@@ -994,10 +1013,13 @@ function _apply_rzphi_transform(
             phi_fun[itheta] = geom.t33[itheta, ipsi] * xvz
         end
 
-        # Forward DFT: theta-space → modes
-        R_modes[ipsi, :] .= ft(R_fun)
-        Z_modes[ipsi, :] .= ft(Z_fun)
-        phi_modes[ipsi, :] .= ft(phi_fun)
+        # Forward DFT: theta-space → modes (in place)
+        Utilities.FourierTransforms.transform!(buf.Ro, ft, R_fun)
+        Utilities.FourierTransforms.transform!(buf.Zo, ft, Z_fun)
+        Utilities.FourierTransforms.transform!(buf.Po, ft, phi_fun)
+        R_modes[ipsi, :] .= buf.Ro
+        Z_modes[ipsi, :] .= buf.Zo
+        phi_modes[ipsi, :] .= buf.Po
     end
 
     return R_modes, Z_modes, phi_modes
