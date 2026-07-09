@@ -11,6 +11,7 @@ per the docs/01 header semantics.
 
 | Abbrev. | File | What it is | Load-bearing content |
 |---|---|---|---|
+| **WCHH96** | `1996-Wilson-Threshold_for_neoclassical_magnetic_islands_in_a_low_collision_frequency_tokamak.pdf` | Wilson, Connor, Hastie & Hegna, PoP **3**, 248 (1996), doi:10.1063/1.871830. The foundational analytic NTM-threshold paper of the lineage (added 2026-07-09) | The analytic flattened-electron closure (the h(Ω) construction and coupled electron-flow relation — the primary source behind docs/01 §2.4, previously cited only via I19/L23/Diss19 transcriptions); the large-w bootstrap limit **Eq. (85)** (ladder B2 target); the collisional polarization discussion. First-hand source for the M2b electron-closure derivation cross-checks |
 | **PRL18** | `2018-Imada-Nonlinear_Kinetic_Ion_Response_to_Small_Scale_Magnetic_Islands_in_Tokamak_Plasmas.pdf` | Imada et al., PRL 121, 175001 (2018). First announcement of DK-NTM | Compact statement of the drift-island result (w_c ≃ 2.7 ρ_θi); **caution: uses ψ_s-based normalizations, different from I19's r_s-based ones** — see docs/01 §1 |
 | **JPCS18** | `2018-Imada-Drift_kinetic_response_of_ions_to_magnetic_island_perturbation_and_effects_on_NTM_threshold.pdf` | Imada et al., Varenna proceedings (2018) | Condensed DK-NTM derivation; explicit electron-flow and h(Ω) formulas; renames Δ′_bs → Δ′_loc; MRE context incl. Δ_pol ∝ 1/w³ discussion |
 | **I19** | `2019-Imada-Finite_ion_orbit_width_effect_on_the_neoclassical_tearing_mode_threshold_in_a_tokamak_plasma.pdf` | Imada et al., NF 59, 046016 (2019). The complete DK-NTM reference paper | Full equation hierarchy (Eqs. 23–34); master 4D equation Eq. (32); S-function Eq. (33); collision operator Eqs. (9)–(12); electron closure §3 (Eqs. 14–22); numerics appendix (shooting method, y_c matching Eqs. A.7–A.10, Picard loops, Eq. A.11 quasineutrality); w_c ≃ 2.76 ρ_θi (Fig. 9). **Known errata: see L23 §2.6 amendment list** (docs/01 header warning) |
@@ -25,21 +26,18 @@ per the docs/01 header semantics.
 | Abbrev. | File | What it is | Role |
 |---|---|---|---|
 | **JOP18** | `2018-Dudkovskaia-Island_Stability_in_Phase_Space.pdf` | Dudkovskaia, Garbet, Lesur, Wilson — JPCS 1125, 012009 (2018) | **Not about magnetic islands.** Bump-on-tail *phase-space* island stability (Vlasov–Fokker-Planck–Poisson secondary modes). Relevant only as (a) the methodological antecedent of the RDK bounce/angle-variable and separatrix-layer machinery, (b) EP-physics background for the Level-2 precession-resonance study (ladder C6). Do not cite it as an NTM threshold source |
+| **B26** | `../2026-Burgess-Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer.pdf` (general `docs/resources/` dir) | Burgess et al. (2026): tearing stability prediction combining toroidal outer-region calculations with the Park 2022 SLAYER two-fluid slab layer | **The methodological template Islands generalizes** (user-flagged, 2026-07-09): outer-region toroidal Δ′ matched to a regime-generalized *linear, zero-width* inner layer (SLAYER Δ(Q)) gives classical-tearing stability across drift-MHD regimes. Islands is the same architecture with the inner region extended from the zero-width linear layer to finite-width islands (NTMs) — the D1/L3 unification target and the `Δ_cos + iΔ_sin ↔ Δ(Q)` small-amplitude limit (ladder D1). Read alongside Park 2022 for the Q-convention and the outer/inner matching interface (`docs/03 §5`) |
 
 ## Referenced but not yet in the library (acquire)
 
-- H. R. Wilson, J. W. Connor, R. J. Hastie & C. C. Hegna, "Threshold for
-  neoclassical magnetic islands in a low collision frequency tokamak",
-  Phys. Plasmas **3**, 248 (1996), doi:10.1063/1.871830 — **WCHH96**. The
-  analytic electron closure (its Eq. 55/74 lineage) and the large-w limit
-  target (its Eq. 85) are load-bearing for docs/01 §2.4 and ladder B2;
-  currently cited via I19/L23/Diss19 transcriptions only.
+- ~~WCHH96~~ **Acquired** (2026-07-09): now in the library table above.
 - ~~Park, Phys. Plasmas 29 (2022) — SLAYER. Needed for the D1 Q-convention
   map.~~ **Found in-repo** (2026-07-09): it lives in the general GPEC library,
   `docs/resources/2022-Park-Parametric dependencies of resonant layer responses
   across linear, two-fluid, drift-MHD regimes.pdf` — outside this island
   subfolder, which is why this map missed it. The D1 Q-convention `[VERIFY]`
-  can be worked from that file.
+  can be worked from that file; see also **B26** above for the SLAYER-based
+  outer/inner matching workflow Islands generalizes.
 - La Haye et al. (2012 NSTX/DIII-D scaling; 2006) — experimental threshold fits
   behind ladder B9.
 - Sauter et al., PoP 6, 2834 (1999); Glasser–Greene–Johnson 1975; Fitzpatrick

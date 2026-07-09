@@ -113,14 +113,17 @@ supervising sessions.
     possible typo in the paper itself]` — sets the `Δ_cos/Δ_sin` prefactor.
   - B5a run collisionality: I19 §4.2 states `ν_★ = 0.01`; L23 p. 82 quotes DK-NTM at
     `ν_★ = 10⁻³`. Resolve before pinning the B5a tolerance.
-  - Acquire **WCHH96** — H. R. Wilson, J. W. Connor, R. J. Hastie & C. C.
-    Hegna, "Threshold for neoclassical magnetic islands in a low collision
-    frequency tokamak", Phys. Plasmas **3**, 248 (1996), doi:10.1063/1.871830
-    (analytic electron closure / large-w limits, B2) — currently cited only via
-    transcription. ~~and Park PoP 29 (2022)~~ **Park 2022 found in-repo**
-    (2026-07-09): `docs/resources/2022-Park-Parametric dependencies of resonant
-    layer responses across linear, two-fluid, drift-MHD regimes.pdf` (the docs/08
-    island-subfolder map had missed it; map corrected).
+  - ~~Acquire WCHH96 and Park PoP 29 (2022)~~ **Both resolved (2026-07-09)**:
+    the user added WCHH96 (Wilson, Connor, Hastie & Hegna, PoP **3**, 248
+    (1996), doi:10.1063/1.871830) to the island reference library, and Park
+    2022 was found already in-repo in the general `docs/resources/` dir (the
+    docs/08 island-subfolder map had missed it; map corrected). The user also
+    flagged **Burgess 2026** (`docs/resources/2026-Burgess-…Two-Fluid Slab
+    Layer.pdf`) as the methodological template: toroidal outer-region Δ′ +
+    SLAYER regime-generalized linear layer — Islands extends that inner region
+    from zero-width linear layers to finite-width islands (recorded in docs/08
+    as **B26**). Remaining open in Q4: the `ψ̃` amplitude check and the B5a run
+    collisionality.
 - **Options**: (a) user resolves from the source PDFs; (b) an independent
   re-derivation pins `ψ̃` and the collisionality is read from the reproduced run.
 - **Recommendation**: resolve `ψ̃` by re-derivation (it is a clean dimensional check);
