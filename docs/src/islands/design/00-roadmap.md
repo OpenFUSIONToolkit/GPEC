@@ -273,12 +273,15 @@ so the SLAYER/Δ′ interfaces Islands consumes are in hand from the first commi
 - D6 (open): kinetic electron treatment at Level 3 — full DKE vs. reduced
   (parallel-kinetic) electron model. Decide after M7 results. The RDK-NTM
   kinetic-electron formulation (Diss19 Eq. D.61) is the full-DKE candidate.
-- D7 (proposed 2026-07-07, needs human ratification): implement Level-0
+- D7 (adopted; ratified by the user 2026-07-08, QUESTIONS Q2): implement Level-0
   physics from an independent re-derivation cross-checked against the
   L23-amended equation set, treating I19 Eq. (A.1) as printed as known-errata;
   ω_E enters as a scanned input parameter at Level 0 (not deferred to L4).
   Rationale: L23 §2.6 amendment list; D23b ω_E-parametric formulation.
-- D8 (proposed 2026-07-07, needs human ratification): benchmark grid = the
-  three-code triangle (DK-NTM published numbers, RDK-NTM improved-model
+  Clearance mode (user, 2026-07-08): **re-derivation first** — the Q3
+  coefficient set is cleared by human sign-off of in-repo derivations
+  (`docs/src/islands/derivations/`), not of literature transcriptions.
+- D8 (adopted; ratified by the user 2026-07-08, QUESTIONS Q2): benchmark grid =
+  the three-code triangle (DK-NTM published numbers, RDK-NTM improved-model
   numbers, kokuchou finite-ν_★ surface) with the B5a/B5b/B5c configurations
   pinned in docs/05, superseding the single "York thresholds" gate item.

@@ -42,7 +42,12 @@ supervising sessions.
 - **Gated work (now unblocked)**: local verification of every Julia change; the
   overnight loop's ability to run tests / meet its definition-of-done.
 
-## Q2 — Ratify Decisions D7 and D8 — OPEN
+## Q2 — Ratify Decisions D7 and D8 — RESOLVED (by the user, 2026-07-08)
+
+- **Resolution**: both ratified as written (option (a)); recorded in the
+  `docs/00` Decision Log. D7 additionally carries the user's clearance-mode
+  choice for Q3: **re-derivation first** — the L0 coefficient set is cleared by
+  human sign-off of in-repo derivations, not literature transcriptions.
 
 - **Context**: M2 setup. The L0 equation set and benchmark targets rest on two
   Decision-Log proposals (`docs/00`) that are dated 2026-07-07 and still marked
@@ -62,7 +67,15 @@ supervising sessions.
 - **Gated work**: pinning any L0 physics coefficient; the York gates B5a/b/c; the
   Paper-I physics claims.
 
-## Q3 — Clear the Level-0 coefficient set ([CHECKED] → human sign-off) — OPEN
+## Q3 — Clear the Level-0 coefficient set ([CHECKED] → human sign-off) — OPEN (mode decided)
+
+- **Mode decision (user, 2026-07-08, via Q2/D7)**: option (b) — **re-derivation
+  first**. The next milestone (M2b) produces independent derivations of each
+  item below in `docs/src/islands/derivations/` (marked `[DERIVED]`, with a
+  cross-check table against the `[CHECKED]` transcriptions and every
+  discrepancy flagged); the human then signs off the *derivations*, which
+  clears the corresponding coefficients. Items remain individually OPEN until
+  that sign-off.
 
 - **Context**: M2 builds the L0 solve machinery with every physics coefficient a
   parameterized `[VERIFY]` stub. Reaching the York gates needs these `[CHECKED]`
