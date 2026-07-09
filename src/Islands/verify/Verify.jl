@@ -27,15 +27,17 @@ using LinearAlgebra
 import ForwardDiff
 import ..PhaseSpace: IslandGrid, MappedFDGrid, GaussGrid, nnodes
 import ..Operators: IslandState, IslandCache, IslandStack, residual!, velocity_moment!,
-    apply!, statelength, flatten!, unflatten!,
+    apply!, statelength, flatten!, unflatten!, g_flat_index,
     ParallelStreaming, MagneticDrift, ExBDrift, Collisions, GradientDrive,
-    PerpTransport, Quasineutrality
+    PerpTransport, RadiationSink, Quasineutrality, FarFieldConditions
+import ..Solvers: flat_residual, newton_krylov
 
 export manufactured_state,
     test_coefficients, build_stack,
     mms_operator_error, mms_assembled_error, estimate_order,
     jvp_fd_maxerror, moment_selfconvergence,
-    term_allocations, residual_allocations
+    term_allocations, residual_allocations,
+    yc_block_sigma_min, solve_mms, zero_drive_setup
 
 # ---------------------------------------------------------------------------
 # Manufactured solution: smooth, separable, ξ-periodic and bandlimited.
@@ -345,6 +347,114 @@ function residual_allocations(grid::IslandGrid; coeffs=test_coefficients(grid))
     cache = IslandCache(grid)
     residual!(R, U, stack, grid, cache)   # warm up compilation
     return @allocated residual!(R, U, stack, grid, cache)
+end
+
+# ---------------------------------------------------------------------------
+# Solve-level MMS configurations (ladder A1-solve, A5) — the manufactured
+# configurations live here per 04 §4 so tests and benchmark scripts share them.
+# ---------------------------------------------------------------------------
+"""
+    zero_drive_setup(grid)
+
+The ladder-A5 configuration: the manufactured advective stack with **all drives
+off** (no `GradientDrive`, no source), so `g ≡ 0, Φ ≡ 0` is the exact solution
+and the residual there is machine zero (`01 §6`). Returns `(f, N)` — the flat
+residual function and state length — for the null test and the trivial-Newton
+check. The `RadiationSink(−1)` entry is a **unit relaxation shift** (a
+manufactured test coefficient, not physics) making the zero state locally unique.
+"""
+function zero_drive_setup(grid::IslandGrid)
+    c = test_coefficients(grid)
+    shift = fill(-1.0, size(c.drive))
+    kin = (ParallelStreaming(c.a_xi, c.a_x), MagneticDrift(c.c_D; variant=:original),
+        ExBDrift(c.c_E), Collisions(c.a_y, c.b_y; model=:pitch_angle), RadiationSink(shift))
+    stack = IslandStack(kin, Quasineutrality(c.α))
+    return (f=flat_residual(stack, grid), N=statelength(grid))
+end
+
+"""
+    solve_mms(nx; nxi=8, ny=9, nE=2, rtol=1e-10, memory=300)
+
+The assembled **solve-level** MMS (the ladder-A1 extension to a full converged
+Newton–Krylov solve): the advective manufactured stack (streaming + drift +
+E×B + unit relaxation shift + quasineutrality) with far-field matching BCs
+taken from the manufactured state, forced by the *analytic* continuous source
+so the discrete solution differs from `g*` by the discretization error. The
+first-order-in-`x` stack needs only the `x` far-field conditions (the pitch
+operator's degenerate zero-flux structure is exercised separately, ladder A4).
+Returns `(err, converged, iterations, gmres_iters)` where `err` is the max-norm
+solution error against the manufactured state — refining `nx` must show the
+design order.
+"""
+function solve_mms(nx::Int; nxi::Int=8, ny::Int=9, nE::Int=2, rtol::Real=1e-10, memory::Int=300)
+    grid = IslandGrid(; nx=nx, nxi=nxi, ny=ny, nE=nE, halfwidth_x=6.0, clustering_x=1.0,
+        y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+    c = test_coefficients(grid)
+    shift = fill(-1.0, size(c.drive))
+    kin = (ParallelStreaming(c.a_xi, c.a_x), MagneticDrift(c.c_D; variant=:original),
+        ExBDrift(c.c_E), RadiationSink(shift))
+    stack = IslandStack(kin, Quasineutrality(c.α))
+    Ustar, deriv = manufactured_state(grid)
+    bc = FarFieldConditions(Ustar.g[1, :, :, :, :], Ustar.g[nx, :, :, :, :], Ustar.Φ[1, :], Ustar.Φ[nx, :])
+    f0! = flat_residual(stack, grid; bc=bc)
+    N = statelength(grid)
+    # continuous source: the analytic values of every active term at (g*, Φ*)
+    Sg = c.a_xi .* deriv.dgdξ .+ c.a_x .* deriv.dgdx .+ c.c_D .* deriv.dgdξ .+ Ustar.g
+    dPx = reshape(deriv.dΦdx, nx, nxi, 1, 1, 1)
+    dPξ = reshape(deriv.dΦdξ, nx, nxi, 1, 1, 1)
+    Sg .+= c.c_E .* (dPξ .* deriv.dgdx .- dPx .* deriv.dgdξ)
+    Sg[1, :, :, :, :] .= 0.0
+    Sg[nx, :, :, :, :] .= 0.0                      # BC rows carry no source
+    MΦ = zeros(nx, nxi)
+    velocity_moment!(MΦ, Ustar.g, grid)
+    SΦ = MΦ .- c.α .* Ustar.Φ                       # field rows: discretely consistent source
+    SΦ[1, :] .= 0.0
+    SΦ[nx, :] .= 0.0
+    S = zeros(N)
+    flatten!(S, IslandState(Sg, SΦ))
+    f!(out, u) = (f0!(out, u); out .-= S; out)
+    sol = newton_krylov(f!, zeros(N); rtol=rtol, atol=1e-13, max_iter=30, memory=memory)
+    ustar = zeros(N)
+    flatten!(ustar, Ustar)
+    return (err=maximum(abs, sol.u .- ustar), converged=sol.converged,
+        iterations=sol.iterations, gmres_iters=sol.gmres_iters)
+end
+
+# ---------------------------------------------------------------------------
+# y_c matching-block conditioning monitor (ladder A8, 04 §3).
+# ---------------------------------------------------------------------------
+"""
+    yc_block_sigma_min(J, grid; window=3)
+
+Ladder-A8 conditioning monitor: the smallest singular value of the pitch-pencil
+sub-block of the (tiny-grid debug) Jacobian `J` nearest the trapped–passing
+boundary `y_c`, minimized over all `(x, ξ, E, σ)` pencils. The prior art's
+`y_c` matching system was intrinsically near-singular (rcond ≈ 1e-16, L23 §4.2)
+and produced machine-dependent **noise, not crashes** — so this must be
+*tested for*, not observed. Returns `(sigma_min, pencil)` where `pencil` is the
+`(ix, iξ, iE, iσ)` of the minimizing block.
+"""
+function yc_block_sigma_min(J::AbstractMatrix, grid::IslandGrid; window::Int=3)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    window <= ny || throw(ArgumentError("window ($window) exceeds ny ($ny)"))
+    # contiguous y-index window centered on the node nearest y_c
+    ic = argmin(abs.(grid.y.nodes .- grid.y_c))
+    lo = clamp(ic - window ÷ 2, 1, ny - window + 1)
+    iys = lo:(lo+window-1)
+    σmin = Inf
+    pencil = (0, 0, 0, 0)
+    idx = Vector{Int}(undef, window)
+    for iσ in 1:nσ, iE in 1:nE, iξ in 1:nξ, ix in 1:nx
+        for (k, iy) in enumerate(iys)
+            idx[k] = g_flat_index(grid, ix, iξ, iy, iE, iσ)
+        end
+        s = svdvals(J[idx, idx])[end]
+        if s < σmin
+            σmin = s
+            pencil = (ix, iξ, iE, iσ)
+        end
+    end
+    return (sigma_min=σmin, pencil=pencil)
 end
 
 end # module Verify

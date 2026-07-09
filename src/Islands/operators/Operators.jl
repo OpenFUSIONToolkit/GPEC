@@ -36,7 +36,10 @@ import ..PhaseSpace: IslandGrid, nnodes
 export IslandState, IslandCache, IslandStack, AbstractTerm
 export ParallelStreaming, MagneticDrift, ExBDrift, Collisions, GradientDrive,
     PerpTransport, RadiationSink, Quasineutrality
-export apply!, residual!, velocity_moment!, statelength, flatten!, unflatten!
+export PitchAngleDiffusion, conservative_pitch_operator
+export FarFieldConditions, apply_farfield!
+export apply!, residual!, velocity_moment!, weighted_moment!, statelength,
+    flatten!, unflatten!, g_flat_index, Φ_flat_index
 
 # ---------------------------------------------------------------------------
 # State, cache
@@ -160,6 +163,53 @@ struct Collisions{A} <: AbstractTerm
     model::Symbol
 end
 Collisions(a_y, b_y; model::Symbol=:pitch_angle) = Collisions(a_y, b_y, model)
+
+"""
+    PitchAngleDiffusion(K, c)
+
+Pitch-angle collision operator in **discretely conservative (mimetic) form**
+(`01 §2.3` structure; ladder A4): adds `c ⋅ (K g)` along `y`, where `K` is the
+divergence-form matrix built by [`conservative_pitch_operator`](@ref) and `c` is
+a supplied coefficient array over `(x, ξ, E, σ)` — **`y`-independent by
+construction**, so the exact discrete particle conservation and entropy-sign
+properties of `K` are preserved (the physical `ν̂(v̂)` energy dependence lives in
+`c`'s `E`-dependence and is `[VERIFY]`-gated). The momentum-restoring
+field-particle piece of the Level-0 operator is gated physics (QUESTIONS Q3)
+and is not part of this structure.
+"""
+struct PitchAngleDiffusion{M<:AbstractMatrix,A} <: AbstractTerm
+    K::M
+    c::A
+end
+
+"""
+    conservative_pitch_operator(ygrid, P, wmeas)
+
+Build the mimetic divergence-form pitch operator on `ygrid`
+(`C[g] = (1/w) d/dy(P w dg/dy)` discretized as `K = −Wq⁻¹ Gᵀ diag(P .* wq) G`
+with `G = ygrid.D1` and `Wq = wmeas .* ygrid.wq`), returning `(K, Wq)`.
+
+Because `G` differentiates constants exactly and the quadrature weights are
+positive, `K` satisfies **exactly** (to machine precision, ladder A4):
+
+  - particle conservation: `Wqᵀ (K g) = 0` for any `g` (zero-flux built in);
+  - entropy sign: `gᵀ diag(Wq) K g = −(Gg)ᵀ diag(P .* wq)(Gg) ≤ 0` for `P ≥ 0`.
+
+`P` (the pitch-space diffusivity profile, physically the `λ√(1−λB)`-structure)
+and `wmeas` (the velocity-space measure) are **supplied** profiles — their
+Level-0 physics forms are `[VERIFY]`-gated (QUESTIONS Q3); any positive test
+profiles exercise the conservation structure.
+"""
+function conservative_pitch_operator(ygrid, P::AbstractVector, wmeas::AbstractVector)
+    length(P) == ygrid.n || throw(ArgumentError("P must have length $(ygrid.n)"))
+    length(wmeas) == ygrid.n || throw(ArgumentError("wmeas must have length $(ygrid.n)"))
+    all(>=(0), P) || throw(ArgumentError("diffusivity profile P must be nonnegative"))
+    all(>(0), wmeas) || throw(ArgumentError("measure weights wmeas must be positive"))
+    G = ygrid.D1
+    Wq = wmeas .* ygrid.wq
+    K = -Diagonal(1.0 ./ Wq) * (G' * Diagonal(P .* ygrid.wq) * G)
+    return Matrix(K), Wq
+end
 
 """
     GradientDrive(drive)
@@ -321,6 +371,24 @@ function apply!(R::IslandState, t::Collisions, U::IslandState, grid::IslandGrid,
     return R
 end
 
+function apply!(R::IslandState, t::PitchAngleDiffusion, U::IslandState, grid::IslandGrid, ::IslandCache)
+    K = t.K
+    c = t.c
+    g = U.g
+    nx, nξ, ny, nE, nσ = size(g)
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iξ in 1:nξ, ix in 1:nx
+        cv = c[ix, iξ, iE, iσ]
+        for a in 1:ny
+            acc = zero(eltype(R.g))
+            for b in 1:ny
+                acc += K[a, b] * g[ix, iξ, b, iE, iσ]
+            end
+            R.g[ix, iξ, a, iE, iσ] += cv * acc
+        end
+    end
+    return R
+end
+
 function apply!(R::IslandState, t::GradientDrive, U::IslandState, ::IslandGrid, ::IslandCache)
     @inbounds @. R.g += t.drive
     return R
@@ -388,6 +456,78 @@ function velocity_moment!(M, g, grid::IslandGrid; accumulate::Bool=false)
     return M
 end
 
+"""
+    weighted_moment!(M, g, W, grid; scale=1, accumulate=false)
+
+Accumulate the weighted velocity moment `scale · ∫dy ∫dE Σ_σ W(y, E, σ) g` into
+`M[ix, iξ]` (`03 §2`, moments). `W` is a supplied `(ny, nE, nσ)` velocity-space
+weight — e.g. the `v̂_∥`-structure of the parallel-flow moment, whose Level-0
+physics form is `[VERIFY]`-gated (QUESTIONS Q3). `scale` carries a per-species
+factor (e.g. the charge `Z_j`). `velocity_moment!` is the `W ≡ 1` special case.
+"""
+function weighted_moment!(M, g, W, grid::IslandGrid; scale=1, accumulate::Bool=false)
+    accumulate || fill!(M, zero(eltype(M)))
+    wy = grid.y.wq
+    wE = grid.E.weights
+    nx, nξ, ny, nE, nσ = size(g)
+    size(W) == (ny, nE, nσ) || throw(ArgumentError("weight W must have size (ny, nE, nσ) = $((ny, nE, nσ))"))
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+        w = scale * wy[iy] * wE[iE] * W[iy, iE, iσ]
+        for iξ in 1:nξ, ix in 1:nx
+            M[ix, iξ] += w * g[ix, iξ, iy, iE, iσ]
+        end
+    end
+    return M
+end
+
+# ---------------------------------------------------------------------------
+# Far-field boundary conditions (01 §3, 04 §1): match g and Φ to supplied
+# far-field states at |x| = L_x. NEVER bare Neumann — L23 traced its spurious
+# "winged" solution branch to Neumann non-uniqueness; the physical far field is
+# the neoclassical (no-island) solution, which is [VERIFY]-gated physics and
+# therefore *supplied* here, not computed.
+# ---------------------------------------------------------------------------
+"""
+    FarFieldConditions(g_left, g_right, Φ_left, Φ_right)
+
+Dirichlet-type far-field matching data at the two radial boundaries (`01 §3`):
+`g → g_far` and `Φ̂ → Φ̂_far` as `|x| → L_x`. The residual rows at `ix = 1, nx`
+are replaced by `(U − far)` so the Newton solve pins the far field. The
+neoclassical no-island `g_far` is gated physics (QUESTIONS Q3) — callers supply
+it (tests use manufactured far fields).
+
+## Fields
+
+  - `g_left`, `g_right` — `(nξ, ny, nE, nσ)` far-field distributions at `ix = 1`, `ix = nx`.
+  - `Φ_left`, `Φ_right` — length-`nξ` far-field potentials at `ix = 1`, `ix = nx`.
+"""
+struct FarFieldConditions{T,A4<:AbstractArray{T,4},V<:AbstractVector{T}}
+    g_left::A4
+    g_right::A4
+    Φ_left::V
+    Φ_right::V
+end
+
+"""
+    apply_farfield!(R, U, bc, grid)
+
+Replace the residual rows at the radial boundaries with the far-field matching
+conditions `U − far` (`01 §3`). Called after the operator stack in
+[`residual!`](@ref); allocation-free and AD-transparent.
+"""
+function apply_farfield!(R::IslandState, U::IslandState, bc::FarFieldConditions, grid::IslandGrid)
+    nx, nξ, ny, nE, nσ = size(U.g)
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
+        R.g[1, iξ, iy, iE, iσ] = U.g[1, iξ, iy, iE, iσ] - bc.g_left[iξ, iy, iE, iσ]
+        R.g[nx, iξ, iy, iE, iσ] = U.g[nx, iξ, iy, iE, iσ] - bc.g_right[iξ, iy, iE, iσ]
+    end
+    @inbounds for iξ in 1:nξ
+        R.Φ[1, iξ] = U.Φ[1, iξ] - bc.Φ_left[iξ]
+        R.Φ[nx, iξ] = U.Φ[nx, iξ] - bc.Φ_right[iξ]
+    end
+    return R
+end
+
 # ---------------------------------------------------------------------------
 # Stack + residual assembly
 # ---------------------------------------------------------------------------
@@ -418,6 +558,19 @@ function residual!(R::IslandState, U::IslandState, stack::IslandStack, grid::Isl
     fill_state!(R, zero(eltype(R)))
     _apply_kinetic!(R, stack.kinetic, U, grid, cache)
     apply!(R, stack.field, U, grid, cache)
+    return R
+end
+
+"""
+    residual!(R, U, stack, grid, cache, bc)
+
+Residual assembly with far-field boundary conditions: assemble the stack, then
+replace the radial-boundary rows with the `FarFieldConditions` matching
+residual (`01 §3`).
+"""
+function residual!(R::IslandState, U::IslandState, stack::IslandStack, grid::IslandGrid, cache::IslandCache, bc::FarFieldConditions)
+    residual!(R, U, stack, grid, cache)
+    apply_farfield!(R, U, bc, grid)
     return R
 end
 
@@ -463,6 +616,28 @@ function unflatten!(U::IslandState, v)
     copyto!(vec(U.g), view(v, 1:ng))
     copyto!(vec(U.Φ), view(v, (ng+1):(ng+length(U.Φ))))
     return U
+end
+
+"""
+    g_flat_index(grid, ix, iξ, iy, iE, iσ)
+
+Flat-state-vector index of `g[ix, iξ, iy, iE, iσ]` under the `flatten!` layout
+(`g` block column-major, then `Φ`). Used by the `y_c`-block conditioning
+monitor (ladder A8) to address pitch-pencil sub-blocks of the dense Jacobian.
+"""
+function g_flat_index(grid::IslandGrid, ix::Int, iξ::Int, iy::Int, iE::Int, iσ::Int)
+    nx, nξ, ny, nE, = nnodes(grid)
+    return ix + nx * ((iξ - 1) + nξ * ((iy - 1) + ny * ((iE - 1) + nE * (iσ - 1))))
+end
+
+"""
+    Φ_flat_index(grid, ix, iξ)
+
+Flat-state-vector index of `Φ[ix, iξ]` under the `flatten!` layout.
+"""
+function Φ_flat_index(grid::IslandGrid, ix::Int, iξ::Int)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    return nx * nξ * ny * nE * nσ + ix + nx * (iξ - 1)
 end
 
 end # module Operators

@@ -8,6 +8,57 @@ relevant.
 
 ---
 
+## 2026-07-08 — M2 L0 solve machinery: Newton–Krylov + moments + species/frames/fields (structure, gated physics)
+
+- **Contract**: `docs/src/islands/design/M2-launch-prompt.md` (interactive /goal
+  run). Branch `feature/islands-m2`, **PR #324** (stacked on
+  `feature/islands-m1`/PR #320; retargets to `feature/islands` when #320 merges).
+  Full suite green locally.
+- **Moved**: the full L0 solve *structure*, every physics coefficient a supplied
+  `[VERIFY]`-gated parameter (physics-verifier: **PASS**):
+  - `solvers/` — matrix-free Newton–Krylov (Krylov.jl GMRES on a preallocated
+    ForwardDiff JVP; Eisenstat–Walker; line search; convergence on norm AND
+    max-norm per `04 §5`), `YBlockJacobi` physics-block preconditioner with
+    TSVD-regularized pencil solves (the `04 §3` y_c treatment), dense tiny-grid
+    debug Jacobian, pseudo-arclength continuation with fold detection (toy fold
+    found at step 6 of the test problem).
+  - `species/` (D3 plumbing), `frames/` (conversion forms, NaN-gated
+    `FrameConvention`), `fields/` (Q(Ω)/h(Ω) structure + NaN-gated
+    `ElectronClosure`), `moments/` (J̄_∥, Δ projections with required gated
+    prefactors, ⟨·⟩_Ω diagnostics), operators additions (mimetic
+    `PitchAngleDiffusion`, `FarFieldConditions` — never bare Neumann,
+    `weighted_moment!`).
+  - **Structural gates green** (67 new tests in `runtests_islands_solve.jl`):
+    A5 (residual exactly 0 at g≡0), solve-MMS at design order (3.98 observed,
+    nx 17→33), A4 (conservation ≲1e-11, entropy sign exact), A3 parity, A7
+    ⟨∂²h/∂x²⟩_Ω ≈ 1e-16, A8 σ_min monitor + singular detection. Preconditioner
+    cuts a stiff collisional solve from 79.5 s/28 Newton to 0.6 s/7 (GMRES
+    1700→200-class); all new kernels pass `--check-bounds=yes`.
+  - `benchmarks/islands/` created: B2/B4/B5 scripts **skipped**, each naming its
+    gating QUESTIONS IDs; `regression-harness` case `islands_l0_structural`
+    (solve-MMS err 5.254e-2, 6 Newton/1210 GMRES, A7 8.0e-17, σ_min 0.1139).
+  - Paper-I figure contract: `docs/src/islands/papers/paper-1/OUTLINE.md`
+    (claims C1–C3 green as CI artifacts; C4–C8 gated on Q2–Q4).
+  - **Rendered docs story** (user-flagged gap vs docs/07's M0–M1 intent): new
+    `docs/src/islands/numerics.md` — the equations + figures of everything as
+    implemented — plus the pinned figure script
+    (`benchmarks/islands/figures/make_structural_figures.jl`, five structural
+    figures committed as docs assets) and a full "Islands" site-nav section
+    (overview, numerics chapter, Paper-I contract, design docs 00–08).
+    Remaining docs/07 infra for later milestones: anchor-sync CI check,
+    STATE.md dashboard.
+- **Physics debugging note**: the first solve-MMS attempt failed to converge —
+  the generic `Collisions` (a_y ∂²y) term has no y-BCs, so its BVP
+  discretization is unstable under refinement; the *mimetic* divergence form
+  (degenerate P → 0 endpoints, zero-flux built in) is the correct structure and
+  the far-field x-BCs are what make the advective solve well-posed. Exactly the
+  design's point (`01 §3`, `04 §1`).
+- **Blocked**: the York gates (B5a/b/c, B2, B4) and Paper-I claims C4–C8 — all
+  on the human clearance queue **Q2/Q3/Q4** (unchanged).
+- **Next**: human clears Q2–Q4 → thin run fills the L0 coefficients from the
+  D7 re-derivation and un-skips the B-ladder; independent M2+ work: kinetic-
+  electron toggle (E4), io/ TOML section, trace-species linear pass.
+
 ## 2026-07-08 — M1 skeleton: phase-space grids + operator stack + MMS/AD harness
 
 - **PR**: #320 (`feature/islands-m1` → `feature/islands`); full suite green.

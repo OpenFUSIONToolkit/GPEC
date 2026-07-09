@@ -1,0 +1,227 @@
+# runtests_islands_solve.jl
+#
+# Islands M2 — Level-0 solve machinery, structural verification gates
+# (docs/src/islands/design/05 §A; the M2 milestone contract):
+#   A5  zero-drive null: g ≡ 0 ⇒ residual = machine zero; Newton converges trivially.
+#   A1+ assembled solve-MMS: Newton–Krylov recovers the manufactured state at design order.
+#   A8  y_c matching-block smallest-singular-value conditioning monitor.
+#   A4  (L0) exact discrete particle conservation + entropy sign of the mimetic
+#       pitch-angle collision operator.
+#   A3  Δ_cos even / Δ_sin odd parity under ξ-reflection (manufactured J̄_∥).
+#   A7  the coefficient-free closure identity ⟨∂²h/∂x²⟩_Ω = 0.
+#   +   preconditioner quality (GMRES iteration reduction), far-field BC rows,
+#       pseudo-arclength fold detection, species/frames plumbing.
+#
+# STRUCTURAL (pre-physics) checks: manufactured order-unity coefficients only.
+# Every physics coefficient in src/ is a [VERIFY]-gated supplied parameter
+# (QUESTIONS Q2–Q4); the York-gate physics benchmarks stay skipped in
+# benchmarks/islands/ until human clearance.
+
+using LinearAlgebra
+
+const IslM2 = GeneralizedPerturbedEquilibrium.Islands
+const PS2 = IslM2.PhaseSpace
+const Op2 = IslM2.Operators
+const So2 = IslM2.Solvers
+const V2 = IslM2.Verify
+const Mo2 = IslM2.Moments
+const Fi2 = IslM2.Fields
+const Sp2 = IslM2.SpeciesLists
+const Fr2 = IslM2.Frames
+
+_sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, clustering_x=1.0,
+    y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+
+@testset "Islands L0 solve machinery (M2)" begin
+
+    @testset "species plumbing (02 §1, D3)" begin
+        bg = Sp2.Maxwellian(; n=1.0, T=1.0, dlnn_dr=-1.0)
+        ion = Sp2.Species(; name=:D, Z=1.0, m=1.0, background=bg, role=Sp2.Bulk)
+        trc = Sp2.Species(; name=:Dtrace, Z=1.0, m=1.0, background=Sp2.Maxwellian(; n=1e-4, T=1.0), role=Sp2.Trace)
+        @test Sp2.validate_species([ion, trc]) == [ion, trc]
+        @test Sp2.is_bulk(ion) && Sp2.is_trace(trc)
+        @test Sp2.bulk_species([ion, trc]) == [ion]
+        # the L0 test pair: trace deuterium copy of the bulk passes the criteria
+        @test isempty(Sp2.check_trace_criteria([ion, trc]))
+        # a heavy trace at bulk-like density violates and is flagged (warn, never degrade)
+        w = Sp2.Species(; name=:W, Z=40.0, m=92.0, background=Sp2.Maxwellian(; n=0.01, T=1.0), role=Sp2.Trace)
+        @test Sp2.check_trace_criteria([ion, w]) == [:W]
+        # structural validation
+        @test_throws ArgumentError Sp2.validate_species([trc])            # no Bulk
+        @test_throws ArgumentError Sp2.validate_species([ion, ion])       # duplicate names
+    end
+
+    @testset "frames: gated conventions poison, mechanics work (01 §5)" begin
+        conv = Fr2.FrameConvention()                    # all NaN until human-cleared (Q3)
+        @test !Fr2.is_cleared(conv)
+        @test isnan(Fr2.omega_dia_form(2, 1.0, -1.0, 2.0, conv))
+        @test isnan(Fr2.effective_dlnn_form(-1.0, 1.0, 0.5, conv))
+        # the frame-invariant combination is pure bookkeeping
+        @test Fr2.frame_shift(1.7, 0.4) ≈ 1.3
+        # parameter-vector validation
+        p = Fr2.Level0Parameters(; w_hat=1.0, omega_E_hat=0.0, epsilon=0.1, inv_Lq_hat=1.0, q_s=2.0)
+        @test p.tau == 1.0
+        @test_throws ArgumentError Fr2.Level0Parameters(-1.0, 0.0, 0.1, 1.0, 2.0, 1.0, Dict{Symbol,Float64}())
+    end
+
+    @testset "A4 — mimetic pitch operator: exact conservation + entropy sign" begin
+        g = _sgrid(9)
+        P = @. g.y.nodes * (4.0 - g.y.nodes) + 0.1     # arbitrary positive test profile
+        wm = @. 1.0 + 0.1 * g.y.nodes
+        K, Wq = Op2.conservative_pitch_operator(g.y, P, wm)
+        for gv in (sin.(g.y.nodes) .+ 0.3 .* g.y.nodes .^ 2, exp.(-g.y.nodes), g.y.nodes)
+            @test abs(dot(Wq, K * gv)) < 1e-11          # particle conservation, machine level
+            @test dot(gv .* Wq, K * gv) <= 1e-13        # entropy sign (0 only for constants)
+        end
+        @test abs(dot(ones(g.y.n) .* Wq, K * ones(g.y.n))) < 1e-12   # constants in the null space
+        @test_throws ArgumentError Op2.conservative_pitch_operator(g.y, -P, wm)
+        # the term applies c ⋅ (K g) and is allocation-free
+        nx, nξ, ny, nE, nσ = PS2.nnodes(g)
+        c4 = fill(2.0, nx, nξ, nE, nσ)
+        term = Op2.PitchAngleDiffusion(K, c4)
+        U, = V2.manufactured_state(g)
+        R = Op2.IslandState(g)
+        cache = Op2.IslandCache(g)
+        Op2.apply!(R, term, U, g, cache)
+        @test R.g[3, 2, :, 1, 1] ≈ 2.0 .* (K * U.g[3, 2, :, 1, 1])
+        @test (@allocated Op2.apply!(R, term, U, g, cache)) == 0
+    end
+
+    @testset "A5 — zero-drive null test" begin
+        g = _sgrid(7; ny=7)
+        setup = V2.zero_drive_setup(g)
+        r = ones(setup.N)
+        setup.f(r, zeros(setup.N))
+        @test maximum(abs, r) == 0.0                    # residual is EXACTLY machine zero
+        # Newton from a small perturbation falls back to the zero state
+        sol = So2.newton_krylov(setup.f, 1e-3 .* sin.(1:setup.N); rtol=1e-12, atol=1e-12)
+        @test sol.converged
+        @test norm(sol.u) < 1e-9
+    end
+
+    @testset "A1 — assembled solve-MMS at design order" begin
+        r17 = V2.solve_mms(17)
+        r33 = V2.solve_mms(33)
+        @test r17.converged && r33.converged
+        # solution error against the manufactured state converges at design order
+        @test log(r17.err / r33.err) / log(33 / 17) > 3.3
+        @test r33.err < 5e-3
+    end
+
+    @testset "preconditioner: y-block Jacobi with TSVD cuts GMRES iterations (04 §5)" begin
+        g = _sgrid(9)
+        nx, nξ, ny, nE, nσ = PS2.nnodes(g)
+        P = @. g.y.nodes * (4.0 - g.y.nodes)            # degenerate endpoints: zero-flux built in
+        K, = Op2.conservative_pitch_operator(g.y, P, ones(ny))
+        cstiff = fill(30.0, nx, nξ, nE, nσ)             # stiff collisional pencil
+        shift = fill(-1.0, nx, nξ, ny, nE, nσ)
+        stack = Op2.IslandStack((Op2.PitchAngleDiffusion(K, cstiff), Op2.RadiationSink(shift)),
+            Op2.Quasineutrality(1.3))
+        f0! = So2.flat_residual(stack, g)
+        N = Op2.statelength(g)
+        b = sin.((1:N) ./ 7)
+        f!(out, u) = (f0!(out, u); out .-= b; out)
+        pc = So2.YBlockJacobi(g, (ix, iξ, iE, iσ) -> I(ny) + cstiff[ix, iξ, iE, iσ] .* K; phi_scale=-1.3)
+        s0 = So2.newton_krylov(f!, zeros(N); rtol=1e-10, memory=300)
+        s1 = So2.newton_krylov(f!, zeros(N); rtol=1e-10, memory=300, precond=pc)
+        @test s0.converged && s1.converged
+        @test maximum(abs, s0.u .- s1.u) < 1e-8         # same solution
+        @test s1.gmres_iters < s0.gmres_iters ÷ 2       # preconditioner earns its keep
+    end
+
+    @testset "far-field BCs replace the boundary residual rows (01 §3)" begin
+        g = _sgrid(7; ny=7)
+        nx, nξ, ny, nE, nσ = PS2.nnodes(g)
+        U, = V2.manufactured_state(g)
+        bc = Op2.FarFieldConditions(0.1 .+ zeros(nξ, ny, nE, nσ), 0.2 .+ zeros(nξ, ny, nE, nσ),
+            fill(0.3, nξ), fill(0.4, nξ))
+        stack = V2.build_stack(g)
+        R = Op2.IslandState(g)
+        cache = Op2.IslandCache(g)
+        Op2.residual!(R, U, stack, g, cache, bc)
+        @test R.g[1, 2, 3, 1, 1] ≈ U.g[1, 2, 3, 1, 1] - 0.1
+        @test R.g[nx, 2, 3, 1, 2] ≈ U.g[nx, 2, 3, 1, 2] - 0.2
+        @test R.Φ[1, 5] ≈ U.Φ[1, 5] - 0.3
+        @test R.Φ[nx, 5] ≈ U.Φ[nx, 5] - 0.4
+        # interior rows are untouched by the BC application
+        R2 = Op2.IslandState(g)
+        Op2.residual!(R2, U, stack, g, cache)
+        @test R.g[2:(nx-1), :, :, :, :] == R2.g[2:(nx-1), :, :, :, :]
+    end
+
+    @testset "A8 — y_c matching-block conditioning monitor" begin
+        g = _sgrid(7; ny=7)
+        setup = V2.zero_drive_setup(g)
+        J = So2.dense_jacobian(setup.f, zeros(setup.N))
+        mon = V2.yc_block_sigma_min(J, g)
+        @test isfinite(mon.sigma_min) && mon.sigma_min > 0
+        @test all(mon.pencil .>= 1)
+        # the monitor detects an artificially singularized pencil block (the
+        # silent-noise regression of L23 §4.2 must be *tested for*)
+        idx = [Op2.g_flat_index(g, 1, 1, iy, 1, 1) for iy in 3:5]
+        Jsing = copy(J)
+        Jsing[idx, :] .= 0.0
+        @test V2.yc_block_sigma_min(Jsing, g).sigma_min < 1e-14
+    end
+
+    @testset "A3 — Δ_cos even / Δ_sin odd under ξ-reflection" begin
+        g = _sgrid(9)
+        J = [exp(-x^2) * (2.0 + 1.5 * cos(ξ) + 0.7 * sin(ξ)) for x in g.x.nodes, ξ in g.ξ.nodes]
+        Jr = [exp(-x^2) * (2.0 + 1.5 * cos(-ξ) + 0.7 * sin(-ξ)) for x in g.x.nodes, ξ in g.ξ.nodes]
+        d = Mo2.delta_moments(J, g; prefactor_cos=1.0, prefactor_sin=1.0)
+        dr = Mo2.delta_moments(Jr, g; prefactor_cos=1.0, prefactor_sin=1.0)
+        @test d.Δcos ≈ dr.Δcos atol = 1e-12             # even
+        @test d.Δsin ≈ -dr.Δsin atol = 1e-12            # odd
+        @test abs(d.Δsin) > 0.1                         # the projection actually sees the sin part
+        # ξ-projection is spectrally exact: a pure cos ξ current has zero sin moment
+        Jc = [cos(ξ) for x in g.x.nodes, ξ in g.ξ.nodes]
+        @test abs(Mo2.delta_moments(Jc, g; prefactor_cos=1.0, prefactor_sin=1.0).Δsin) < 1e-13
+    end
+
+    @testset "moments: J̄_∥ assembly and Ω-average diagnostics" begin
+        g = _sgrid(9)
+        nx, nξ, ny, nE, nσ = PS2.nnodes(g)
+        U, = V2.manufactured_state(g)
+        W = ones(ny, nE, nσ)
+        ion = Sp2.Species(; name=:D, Z=1.0, m=1.0, background=Sp2.Maxwellian(; n=1.0, T=1.0), role=Sp2.Bulk)
+        anti = Sp2.Species(; name=:A, Z=-1.0, m=1.0, background=Sp2.Maxwellian(; n=1.0, T=1.0), role=Sp2.Bulk)
+        Jp = zeros(nx, nξ)
+        # equal & opposite charges with identical g cancel exactly
+        Mo2.parallel_current!(Jp, [U.g, U.g], [ion, anti], [W, W], g)
+        @test maximum(abs, Jp) < 1e-14
+        # single species with W ≡ 1 reduces to the plain velocity moment
+        Mo2.parallel_current!(Jp, [U.g], [ion], [W], g)
+        Mref = zeros(nx, nξ)
+        Op2.velocity_moment!(Mref, U.g, g)
+        @test Jp ≈ Mref
+        # ⟨1⟩_Ω = 1 outside and inside the separatrix; constant J has no polarization part
+        @test Mo2.omega_average((x, ξ) -> 1.0, 1.5, 1.0) ≈ 1.0 rtol = 1e-8
+        @test Mo2.omega_average((x, ξ) -> 1.0, 0.2, 1.0) ≈ 1.0 rtol = 1e-6
+        cs = Mo2.channel_split((x, ξ) -> 3.0, 2.0, 1.0)
+        @test cs.bs ≈ 3.0 rtol = 1e-8
+        @test abs(cs.pol(0.5, 1.0)) < 1e-8
+        @test Mo2.omega_label(0.0, 0.0, 1.0) ≈ -1.0     # O-point
+        @test Mo2.omega_label(1.0, float(π), 1.0) ≈ 3.0
+    end
+
+    @testset "A7 — flattened-electron identity ⟨∂²h/∂x²⟩_Ω = 0 (coefficient-free)" begin
+        for Ω in (1.2, 2.0, 5.0), pref in (1.0, 3.7)     # prefactor-independent
+            @test abs(Fi2.flat_average_d2h_dx2(Ω, 1.0; prefactor=pref)) < 1e-10
+        end
+        @test Fi2.h_profile(0.5; prefactor=1.0) == 0.0   # exactly flat inside the separatrix
+        @test Fi2.h_profile(2.0; prefactor=1.0) > 0.0
+        @test Fi2.Q_omega(3.0) > Fi2.Q_omega(1.5)        # Q grows with Ω
+        @test !Fi2.is_cleared(Fi2.ElectronClosure())     # closure constants stay NaN-gated (Q3)
+        @test isnan(Fi2.ElectronClosure().k_HS)
+    end
+
+    @testset "pseudo-arclength continuation detects the toy fold (03 §3)" begin
+        ftoy!(out, u, p) = (out[1] = u[1]^2 + p; out)
+        pa = So2.pseudo_arclength(ftoy!, [1.0], -1.0; ds=0.3, nsteps=15, rtol=1e-12, atol=1e-12)
+        @test length(pa.ps) > 10                         # stepped through, no stall at the fold
+        @test !isempty(pa.folds)                         # the fold at p = 0 is detected
+        @test maximum(pa.ps) < 0.05                      # never steps past the fold parameter
+        # both branches visited: u > 0 before the fold, u < 0 after
+        @test any(z -> z[1] > 0.5, pa.us) && any(z -> z[1] < -0.5, pa.us)
+    end
+end

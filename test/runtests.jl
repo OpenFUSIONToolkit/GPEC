@@ -38,4 +38,5 @@ else
     include("./runtests_rerun_from_h5.jl")
     include("./runtests_islands_grids.jl")
     include("./runtests_islands_operators.jl")
+    include("./runtests_islands_solve.jl")
 end

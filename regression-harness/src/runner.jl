@@ -2,7 +2,9 @@
 Runner: orchestrates checking out commits, running GPEC, and extracting results.
 """
 
-"""Read the GPEC-only runtime from the timing file written by the subprocess."""
+"""
+Read the GPEC-only runtime from the timing file written by the subprocess.
+"""
 function _read_timing_file(path::String)::Float64
     if isfile(path)
         return parse(Float64, strip(read(path, String)))
@@ -29,7 +31,7 @@ function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
     for (dotted, val) in overrides
         ks = split(dotted, ".")
         d = cfg
-        for k in ks[1:(end - 1)]
+        for k in ks[1:(end-1)]
             d = get!(d, k, Dict{String,Any}())
         end
         d[ks[end]] = val
@@ -109,28 +111,60 @@ open(ARGS[2], "w") do f
 end
 """
 
+# Islands L0 structural regression: the solve-level MMS (Newton-Krylov recovers
+# the manufactured state), the coefficient-free A7 closure identity, and the A8
+# y_c-block conditioning monitor. Tracks the structural (pre-physics) numbers
+# that would silently move if the discretization, solver, or quadratures drift;
+# the physics B-ladder stays skipped until [VERIFY] clearance (QUESTIONS Q2-Q4).
+const COMPUTED_ISLANDS_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using HDF5
+const Isl = GeneralizedPerturbedEquilibrium.Islands
+t_start = time()
+r = Isl.Verify.solve_mms(17)
+a7 = Isl.Fields.flat_average_d2h_dx2(2.0, 1.0)
+grid = Isl.PhaseSpace.IslandGrid(nx=7, nxi=8, ny=7, nE=2, halfwidth_x=6.0, clustering_x=1.0,
+                                 y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+setup = Isl.Verify.zero_drive_setup(grid)
+J = Isl.Solvers.dense_jacobian(setup.f, zeros(setup.N))
+mon = Isl.Verify.yc_block_sigma_min(J, grid)
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["islands/solve_mms_err"] = r.err
+    fid["islands/newton_iters"] = Float64(r.iterations)
+    fid["islands/gmres_iters"] = Float64(r.gmres_iters)
+    fid["islands/a7_identity"] = abs(a7)
+    fid["islands/yc_sigma_min"] = mon.sigma_min
+end
+open(ARGS[2], "w") do f
+    println(f, elapsed)
+end
+"""
+
 """
 Run GPEC for a single commit/ref and case. Dispatches to run_local for
 the working tree or run_at_commit for a git ref.
 """
 function run_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
-                    case_spec::CaseSpec, repo_root::String;
-                    force::Bool=false, verbose::Bool=false,
-                    no_instantiate::Bool=false)
+    case_spec::CaseSpec, repo_root::String;
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false)
     if case_spec.kind == "computed"
         if commit_hash == LOCAL_REF
             return run_computed_local(db, case_spec, repo_root;
-                                      verbose=verbose, no_instantiate=no_instantiate)
+                verbose=verbose, no_instantiate=no_instantiate)
         end
         return run_computed_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
-                                      force=force, verbose=verbose, no_instantiate=no_instantiate)
+            force=force, verbose=verbose, no_instantiate=no_instantiate)
     end
     if commit_hash == LOCAL_REF
         return run_local(db, case_spec, repo_root;
-                         force=force, verbose=verbose, no_instantiate=no_instantiate)
+            force=force, verbose=verbose, no_instantiate=no_instantiate)
     end
     return run_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
-                         force=force, verbose=verbose, no_instantiate=no_instantiate)
+        force=force, verbose=verbose, no_instantiate=no_instantiate)
 end
 
 """
@@ -141,6 +175,8 @@ function _computed_script_template(case_spec::CaseSpec)
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
     elseif case_spec.name == "efit_fixedbdy_separatrix"
         return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
+    elseif case_spec.name == "islands_l0_structural"
+        return COMPUTED_ISLANDS_SCRIPT_TEMPLATE
     end
     error("No computed-script template registered for case '$(case_spec.name)'")
 end
@@ -153,11 +189,11 @@ import GeneralizedPerturbedEquilibrium), reads the resulting tempfile h5 with
 so callers can handle store_failed_run uniformly.
 """
 function _execute_computed(case_spec::CaseSpec, project_root::String;
-                           verbose::Bool, no_instantiate::Bool,
-                           stderr_buf::IO)
+    verbose::Bool, no_instantiate::Bool,
+    stderr_buf::IO)
     instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"
     script_content = replace(_computed_script_template(case_spec),
-                             "%INSTANTIATE%" => instantiate_line)
+        "%INSTANTIATE%" => instantiate_line)
     tmpscript = tempname() * ".jl"
     h5path = tempname() * ".h5"
     timingfile = tempname() * ".timing"
@@ -166,8 +202,8 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
         if verbose
             run(pipeline(`julia --project=$project_root $tmpscript $h5path $timingfile`))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $timingfile`,
-                         stdout=devnull, stderr=stderr_buf))
+            run(pipeline(`julia --project=$project_root $tmpscript $h5path $timingfile`;
+                stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
         if !isfile(h5path)
@@ -186,18 +222,18 @@ end
 Run a kind="computed" case against the working tree.
 """
 function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
-                            verbose::Bool=false, no_instantiate::Bool=false)
+    verbose::Bool=false, no_instantiate::Bool=false)
     delete_cached(db, LOCAL_REF, case_spec.name)
     date = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
     @info "Running: $(case_spec.name) @ local (working tree, computed)"
     stderr_buf = IOBuffer()
     try
         extracted, runtime_s = _execute_computed(case_spec, repo_root;
-                                                 verbose=verbose,
-                                                 no_instantiate=no_instantiate,
-                                                 stderr_buf=stderr_buf)
+            verbose=verbose,
+            no_instantiate=no_instantiate,
+            stderr_buf=stderr_buf)
         store_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                  runtime_s, extracted)
+            runtime_s, extracted)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
         err_msg = if e isa ProcessFailedException
@@ -212,7 +248,7 @@ function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::Strin
         err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed (local computed): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                         err_msg_short)
+            err_msg_short)
     end
 end
 
@@ -220,9 +256,9 @@ end
 Run a kind="computed" case at a specific git commit via worktree.
 """
 function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
-                                case_spec::CaseSpec, repo_root::String;
-                                force::Bool=false, verbose::Bool=false,
-                                no_instantiate::Bool=false)
+    case_spec::CaseSpec, repo_root::String;
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false)
     if !force && is_cached(db, commit_hash, case_spec.name)
         info = get_run_info(db, commit_hash, case_spec.name)
         if info !== nothing
@@ -243,11 +279,11 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
     try
         worktree_path = create_worktree(commit_hash, repo_root)
         extracted, runtime_s = _execute_computed(case_spec, worktree_path;
-                                                 verbose=verbose,
-                                                 no_instantiate=no_instantiate,
-                                                 stderr_buf=stderr_buf)
+            verbose=verbose,
+            no_instantiate=no_instantiate,
+            stderr_buf=stderr_buf)
         store_run(db, commit_hash, commit_info.short, commit_info.date,
-                  commit_info.msg, case_spec.name, runtime_s, extracted)
+            commit_info.msg, case_spec.name, runtime_s, extracted)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
         err_msg = if e isa ProcessFailedException
@@ -262,7 +298,7 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
         err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed (computed) for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                         commit_info.msg, case_spec.name, err_msg_short)
+            commit_info.msg, case_spec.name, err_msg_short)
     finally
         if worktree_path !== nothing
             remove_worktree(worktree_path, repo_root)
@@ -275,8 +311,8 @@ Run GPEC in the current working tree (uncommitted changes included).
 Always re-runs (local results are never cached since the working tree is mutable).
 """
 function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
-                   force::Bool=false, verbose::Bool=false,
-                   no_instantiate::Bool=false)
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false)
     # Always delete previous local results and re-run
     delete_cached(db, LOCAL_REF, case_spec.name)
 
@@ -287,7 +323,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     if !isdir(example_path)
         @warn "Example directory not found: $(case_spec.example_dir)"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                         "Example directory not found: $(case_spec.example_dir)")
+            "Example directory not found: $(case_spec.example_dir)")
         return
     end
 
@@ -309,8 +345,8 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         if verbose
             run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`))
         else
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`,
-                         stdout=devnull, stderr=stderr_buf))
+            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`;
+                stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
 
@@ -318,13 +354,13 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         if !isfile(h5path)
             @warn "gpec.h5 not produced"
             store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                             "gpec.h5 not produced after successful run")
+                "gpec.h5 not produced after successful run")
             return
         end
 
         extracted = extract_quantities(h5path, case_spec.quantities, runtime_s)
         store_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                  runtime_s, extracted)
+            runtime_s, extracted)
 
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
@@ -341,7 +377,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed (local): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                         err_msg_short)
+            err_msg_short)
     finally
         if tmpscript !== nothing
             rm(tmpscript; force=true)
@@ -360,9 +396,9 @@ Run GPEC for a specific git commit via worktree. Stores results in the database.
 Skips if already cached (unless force=true).
 """
 function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
-                       case_spec::CaseSpec, repo_root::String;
-                       force::Bool=false, verbose::Bool=false,
-                       no_instantiate::Bool=false)
+    case_spec::CaseSpec, repo_root::String;
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false)
     # Check cache
     if !force && is_cached(db, commit_hash, case_spec.name)
         info = get_run_info(db, commit_hash, case_spec.name)
@@ -398,8 +434,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         if !isdir(example_path)
             @warn "Example directory not found at commit $(commit_info.short): $(case_spec.example_dir)"
             store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                             commit_info.msg, case_spec.name,
-                             "Example directory not found: $(case_spec.example_dir)")
+                commit_info.msg, case_spec.name,
+                "Example directory not found: $(case_spec.example_dir)")
             return
         end
 
@@ -418,8 +454,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         if verbose
             run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`,
-                         stdout=devnull, stderr=stderr_buf))
+            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`;
+                stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
 
@@ -428,8 +464,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         if !isfile(h5path)
             @warn "gpec.h5 not produced at $(commit_info.short)"
             store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                             commit_info.msg, case_spec.name,
-                             "gpec.h5 not produced after successful run")
+                commit_info.msg, case_spec.name,
+                "gpec.h5 not produced after successful run")
             return
         end
 
@@ -438,7 +474,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
 
         # Store in database
         store_run(db, commit_hash, commit_info.short, commit_info.date,
-                  commit_info.msg, case_spec.name, runtime_s, extracted)
+            commit_info.msg, case_spec.name, runtime_s, extracted)
 
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
@@ -456,7 +492,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                         commit_info.msg, case_spec.name, err_msg_short)
+            commit_info.msg, case_spec.name, err_msg_short)
     finally
         # Clean up
         if tmpscript !== nothing

@@ -302,11 +302,13 @@ internal layers (`x = 0`, `y = y_c`) per `04 §1`.
 
 ## Fields
 
-  - `x`  — radial `MappedFDGrid` (clustered at `x = 0`).
-  - `ξ`  — helical `FourierGrid`.
-  - `y`  — pitch `MappedFDGrid` on `[0, y_max]` (clustered at `y_c`).
-  - `E`  — energy `GaussGrid`.
-  - `σ`  — `[+1.0, -1.0]`.
+  - `x`   — radial `MappedFDGrid` (clustered at `x = 0`).
+  - `ξ`   — helical `FourierGrid`.
+  - `y`   — pitch `MappedFDGrid` on `[0, y_max]` (clustered at `y_c`).
+  - `E`   — energy `GaussGrid`.
+  - `σ`   — `[+1.0, -1.0]`.
+  - `y_c` — trapped–passing boundary location in `y` (the layer the pitch grid
+    packs toward; consumed by the `y_c`-block conditioning monitor, ladder A8).
 """
 struct IslandGrid
     x::MappedFDGrid
@@ -314,6 +316,7 @@ struct IslandGrid
     y::MappedFDGrid
     E::GaussGrid
     σ::Vector{Float64}
+    y_c::Float64
 end
 
 function IslandGrid(; nx::Int, nxi::Int, ny::Int, nE::Int,
@@ -326,7 +329,7 @@ function IslandGrid(; nx::Int, nxi::Int, ny::Int, nE::Int,
     y = MappedFDGrid(ny; halfwidth=y_max, clustering=clustering_y, center=y_c,
         domain=:half, order=order)
     E = GaussGrid(nE; kind=energy_kind)
-    return IslandGrid(x, ξ, y, E, [1.0, -1.0])
+    return IslandGrid(x, ξ, y, E, [1.0, -1.0], Float64(y_c))
 end
 
 """
