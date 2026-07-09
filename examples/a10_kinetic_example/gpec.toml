@@ -9,7 +9,7 @@
 [Equilibrium]
 eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
-jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"              # Radial grid packing type
 psilow = 1e-3                  # Lower limit of normalized poloidal flux
 psihigh = 0.99                 # Upper limit of normalized poloidal flux

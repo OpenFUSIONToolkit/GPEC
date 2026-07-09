@@ -1,10 +1,7 @@
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
-jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                   # Poloidal field power exponent for Jacobian
-power_b = 0                    # Toroidal field power exponent for Jacobian
-power_r = 0                    # Major radius power exponent for Jacobian
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
 psilow = 1e-4                  # Lower limit of normalized flux coordinate
 psihigh = 0.993                # Upper limit of normalized flux coordinate (0.993 stays clear of the separatrix; truncating at ≳0.998 is numerically unreasonable here)

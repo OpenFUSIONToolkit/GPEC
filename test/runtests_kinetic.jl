@@ -441,4 +441,59 @@
         @test mr.total_energy == 0.0 + 0.0im
         @test isempty(mr.records)
     end
+
+    # =========================================================================
+    # Kinetic profile I/O: HDF5 schema, ASCII back-compat, writer round-trip
+    # =========================================================================
+    @testset "kinetic profile I/O" begin
+        E = GeneralizedPerturbedEquilibrium.Equilibrium
+        exdir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+        gpeckf = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.gpeckf")
+        h5 = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.h5")
+
+        @testset "extension dispatch + raw read" begin
+            da = E.read_kinetic_file(gpeckf)
+            db = E.read_kinetic_file(h5)
+            # legacy ASCII carries no optional fields; the example .h5 carries chi
+            @test da.chi_e === nothing && da.chi_phi === nothing
+            @test db.chi_e !== nothing && db.chi_phi !== nothing
+            # core columns identical (the .h5 was generated from the .gpeckf)
+            @test da.psi == db.psi
+            @test da.n_e == db.n_e
+            @test da.T_i == db.T_i
+            @test da.omega_E == db.omega_E
+        end
+
+        @testset "NTV splines identical: ASCII vs HDF5" begin
+            ka = E.load_kinetic_profiles(gpeckf)
+            kb = E.load_kinetic_profiles(h5)
+            for p in 0.0:0.1:1.0
+                @test ka.ne_spline(p) == kb.ne_spline(p)
+                @test ka.Ti_spline(p) == kb.Ti_spline(p)
+                @test ka.omegaE_spline(p) == kb.omegaE_spline(p)
+                @test ka.zeff_spline(p) == kb.zeff_spline(p)
+            end
+        end
+
+        @testset "writer round-trip" begin
+            db = E.read_kinetic_file(h5)
+            tmp = tempname() * ".h5"
+            E.write_kinetic_h5(tmp, db; provenance="roundtrip")
+            dc = E.read_kinetic_file(tmp)
+            @test dc.chi_e ≈ db.chi_e
+            @test dc.chi_phi ≈ db.chi_phi
+            @test dc.n_e ≈ db.n_e
+            @test dc.provenance == "roundtrip"
+            rm(tmp; force=true)
+        end
+
+        @testset "missing required field errors" begin
+            # HDF5 with only psi + n_e: NTV load must error on the missing T_i
+            tmp = tempname() * ".h5"
+            d = E.KineticProfileData(; psi=[0.0, 0.5, 1.0], n_e=[1e19, 9e18, 8e18])
+            E.write_kinetic_h5(tmp, d)
+            @test_throws ErrorException E.load_kinetic_profiles(tmp)
+            rm(tmp; force=true)
+        end
+    end
 end

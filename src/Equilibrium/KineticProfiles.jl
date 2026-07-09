@@ -1,13 +1,132 @@
 """
     KineticProfiles
 
-Reading and processing kinetic profile data (density, temperature, rotation)
-from ASCII tables. The output is a `KineticProfileSplines` of independent named
-splines that downstream physics modules (KineticForces NTV, etc.) can read
-directly without re-implementing data shimming.
+Reading and processing kinetic profile data (density, temperature, rotation,
+and optionally transport diffusivities) from the GPEC HDF5 kinetic format or
+from legacy 6-column ASCII tables (`.gpeckf`/`.kin`). The processed output is a
+`KineticProfileSplines` of independent named splines that downstream physics
+modules (KineticForces NTV, etc.) read directly without re-implementing data
+shimming.
 """
 
 using DelimitedFiles
+using HDF5
+
+"""
+    KineticProfileData
+
+Raw kinetic-profile columns read from a kinetic file (HDF5 or ASCII), before
+resampling and spline construction. `psi` (normalized poloidal flux) is always
+present; every profile field is `nothing` when the source omits it, so each
+consumer validates only the fields it needs. Units: densities m⁻³,
+temperatures eV, frequencies rad/s, diffusivities m²/s.
+
+| field       | meaning                              |
+|-------------|--------------------------------------|
+| `n_i`       | main-ion density                     |
+| `n_e`       | electron density                     |
+| `T_i`/`T_e` | ion / electron temperature           |
+| `omega_E`   | ExB rotation                         |
+| `omega_tor` | toroidal rotation (optional)         |
+| `chi_e`     | perpendicular heat diffusivity χ⊥    |
+| `chi_phi`   | toroidal momentum diffusivity χ_φ    |
+"""
+struct KineticProfileData
+    psi::Vector{Float64}
+    n_i::Union{Nothing,Vector{Float64}}
+    n_e::Union{Nothing,Vector{Float64}}
+    T_i::Union{Nothing,Vector{Float64}}
+    T_e::Union{Nothing,Vector{Float64}}
+    omega_E::Union{Nothing,Vector{Float64}}
+    omega_tor::Union{Nothing,Vector{Float64}}
+    chi_e::Union{Nothing,Vector{Float64}}
+    chi_phi::Union{Nothing,Vector{Float64}}
+    provenance::String
+end
+
+function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
+    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing, provenance="")
+    _v(x) = x === nothing ? nothing : Float64.(collect(x))
+    return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), String(provenance))
+end
+
+const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
+
+# Dataset units written into / expected from the HDF5 kinetic schema.
+const _KINETIC_H5_UNITS = Dict("psi" => "normalized poloidal flux", "n_i" => "m^-3",
+    "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
+    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_phi" => "m^2/s")
+
+"""
+    read_kinetic_file(path; group="/") -> KineticProfileData
+
+Read a kinetic-profile file, dispatching on extension: HDF5 (`.h5`/`.hdf5`) via
+the GPEC kinetic schema, otherwise a 6-column ASCII table (`.gpeckf`/`.kin`/`.dat`:
+`psi_n n_i n_e T_i[eV] T_e[eV] omega_E`). Returns the raw columns; downstream
+consumers validate the fields they require.
+"""
+function read_kinetic_file(path::AbstractString; group::AbstractString="/")
+    isfile(path) || error("Kinetic profile file not found: $path")
+    ext = lowercase(splitext(path)[2])
+    return ext in _KINETIC_H5_EXTS ? _read_kinetic_h5(path; group=group) : _read_kinetic_ascii(path)
+end
+
+"""Read a legacy 6-column ASCII kinetic table into a `KineticProfileData`."""
+function _read_kinetic_ascii(path::AbstractString)
+    psi, ni, ne, Ti, Te, omegaE = _read_kinetic_table(path)
+    return KineticProfileData(; psi=psi, n_i=ni, n_e=ne, T_i=Ti, T_e=Te, omega_E=omegaE,
+        provenance="ASCII 6-column: $(basename(path))")
+end
+
+"""Read the GPEC HDF5 kinetic schema. Only `psi` is required; other datasets are
+optional and surfaced as-is."""
+function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
+    h5open(path, "r") do f
+        g = group == "/" ? f : f[group]
+        haskey(g, "psi") || error("kinetic HDF5 '$path' group '$group': missing required dataset 'psi'")
+        rd(name) = haskey(g, name) ? Float64.(vec(read(g[name]))) : nothing
+        prov = ""
+        ats = attributes(g)
+        haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
+        return KineticProfileData(; psi=Float64.(vec(read(g["psi"]))),
+            n_i=rd("n_i"), n_e=rd("n_e"), T_i=rd("T_i"), T_e=rd("T_e"),
+            omega_E=rd("omega_E"), omega_tor=rd("omega_tor"),
+            chi_e=rd("chi_e"), chi_phi=rd("chi_phi"), provenance=prov)
+    end
+end
+
+"""
+    write_kinetic_h5(path, data; group="/", schema_version="1.0", provenance=data.provenance)
+
+Write a `KineticProfileData` to the GPEC HDF5 kinetic schema. Each present field
+is written as a dataset with a `units` attribute; absent (`nothing`) fields are
+skipped. The group carries `schema_version` and `provenance` attributes.
+"""
+function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
+    group::AbstractString="/", schema_version::AbstractString="1.0",
+    provenance::AbstractString=data.provenance)
+    h5open(path, "w") do f
+        g = group == "/" ? f : create_group(f, group)
+        function put(name, v)
+            v === nothing && return
+            g[name] = collect(Float64, v)
+            attributes(g[name])["units"] = _KINETIC_H5_UNITS[name]
+        end
+        put("psi", data.psi)
+        put("n_i", data.n_i)
+        put("n_e", data.n_e)
+        put("T_i", data.T_i)
+        put("T_e", data.T_e)
+        put("omega_E", data.omega_E)
+        put("omega_tor", data.omega_tor)
+        put("chi_e", data.chi_e)
+        put("chi_phi", data.chi_phi)
+        attributes(g)["schema_version"] = schema_version
+        attributes(g)["provenance"] = provenance
+    end
+    return path
+end
 
 """
     load_kinetic_profiles(kinetic_file::AbstractString;
@@ -17,20 +136,21 @@ using DelimitedFiles
                           chi1::Union{Nothing,Float64}=nothing)
         → KineticProfileSplines
 
-Parse an ASCII kinetic profile file, interpolate onto a regular 101-point ψ
-grid, optionally apply profile scaling knobs, derive collisional / Z_eff
-diagnostics, and return a `KineticProfileSplines` with independent named cubic
-splines.
+Parse a kinetic profile file (ASCII or HDF5, dispatched by `read_kinetic_file`),
+interpolate onto a regular 101-point ψ grid, optionally apply profile scaling
+knobs, derive collisional / Z_eff diagnostics, and return a
+`KineticProfileSplines` with independent named cubic splines.
 
 # Expected file format
 
-Six whitespace-separated columns (header rows are filtered out):
+An HDF5 file following the GPEC kinetic schema (fields read by name), or a legacy
+six-column whitespace-separated ASCII table (header rows are filtered out):
 
     psi_n  n_i[m^-3]  n_e[m^-3]  T_i[eV]  T_e[eV]  omega_E[rad/s]
 
 # Arguments
 
-  - `kinetic_file`: Path to the ASCII kinetic profile file
+  - `kinetic_file`: Path to the ASCII or HDF5 kinetic profile file (see `read_kinetic_file`)
   - `zi`, `zimp`: Main ion and impurity charge numbers
   - `mi`, `mimp`: Main ion and impurity mass numbers (in proton masses)
   - `density_factor`: Density scaling factor (applied to ni, ne)
@@ -60,12 +180,17 @@ function load_kinetic_profiles(kinetic_file::AbstractString;
     ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
     chi1::Union{Nothing,Float64}=nothing)
 
-    if !isfile(kinetic_file)
-        error("Kinetic profile file not found: $kinetic_file")
-    end
+    data = read_kinetic_file(kinetic_file)
 
-    psi_input, ni_input, ne_input, Ti_input_eV, Te_input_eV, omegaE_input =
-        _read_kinetic_table(kinetic_file)
+    # NTV requires n_e, T_i, T_e, omega_E; n_i defaults to n_e (quasineutrality)
+    # when absent. omega_tor / chi_e / chi_phi (if present) are ignored here.
+    _need(field, name) = field === nothing ? error("kinetic file '$kinetic_file' missing required '$name'") : field
+    psi_input = data.psi
+    ne_input = _need(data.n_e, "n_e")
+    Ti_input_eV = _need(data.T_i, "T_i")
+    Te_input_eV = _need(data.T_e, "T_e")
+    omegaE_input = _need(data.omega_E, "omega_E")
+    ni_input = data.n_i === nothing ? copy(ne_input) : data.n_i
 
     eV_to_J = 1.602e-19
     mp = 1.672_614e-27
