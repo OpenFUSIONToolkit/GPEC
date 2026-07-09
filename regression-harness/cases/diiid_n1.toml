@@ -360,6 +360,17 @@ label = "NTV torque FGAR (Re,Im) [N·m]"
 noise_threshold = 1e-2
 order = 95
 
+# NTV kinetic energy (δW) through the same post-PE FGAR path. This is the
+# quantity most sensitive to the bounce-averaging chain (quadrature scheme,
+# v_par source, bo normalization), so it guards that whole path directly.
+[quantities.ntv_energy_fgar]
+h5path = "kinetic_forces/fgar/total_energy"
+type = "real_vector"
+extract = "all_real"
+label = "NTV energy FGAR (Re,Im) [J]"
+noise_threshold = 1e-3
+order = 96
+
 # Profiles (checksums)
 [quantities.q_profile]
 h5path = "splines/profiles/q"
