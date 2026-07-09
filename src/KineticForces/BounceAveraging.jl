@@ -292,6 +292,9 @@ function compute_bounce_data(
     mpert = length(mfac)
     do_matrices = !isnothing(smat)
 
+    # Per-surface scratch, reused across all λ.
+    scr = BounceScratch(ntheta, mpert)
+
     # Trapped-passing boundary and λ range
     lmdatpb = bo / bmax
     lmdamax = bo / bmin
@@ -332,7 +335,7 @@ function compute_bounce_data(
         wbbar, wdbar, dJdJ_val, wmats_lmda = _bounce_integrate(
             tdt_pts, tdt_wts, lmda, lnq, sigma, n, q, bo,
             tspl, B_extrap, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
-            do_matrices, mpert, smat, tmat, xmat, ymat, zmat)
+            do_matrices, mpert, smat, tmat, xmat, ymat, zmat, scr)
 
         # Physical frequencies (Fortran lines 744-745)
         wb_arr[ilmda] = wbbar * bhat
@@ -348,6 +351,56 @@ function compute_bounce_data(
 
     return BounceData(nlmda, lambda, dlambda, sigma_arr,
                       wb_arr, wd_arr, dJdJ_arr, wmats_arr)
+end
+
+
+"""
+    BounceScratch(ntheta, mpert)
+
+Per-surface scratch buffers for the bounce-averaging inner loops. Allocated once in
+`compute_bounce_data` and reused across every λ (each λ previously reallocated these
+θ- and mode-sized arrays). Sizes are fixed for a flux surface (`ntheta` sub-grid points,
+`mpert` Fourier modes), so a single set of buffers serves the whole λ sweep. Buffers that
+the callers zero-initialize are `fill!`-reset per λ, preserving bit-for-bit results.
+
+## Fields
+- `cum_wb_arr::Vector{Float64}`: length `ntheta` — cumulative bounce action
+- `jvtheta::Vector{ComplexF64}`: length `ntheta` — action integrand
+- `wmu_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_μ per θ
+- `wen_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_E per θ
+- `expm::Vector{ComplexF64}`: length `mpert` — Fourier basis at a θ
+- `pl::Vector{ComplexF64}`: length `ntheta` — bounce phase factor
+- `wmu_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_μ
+- `wen_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_E
+- `wmats_lmda::Vector{ComplexF64}`: length `nqty_matrix(mpert)` — packed W outer products
+- `tspl_f::Vector{Float64}`: length 5 — in-place tspl(θ) evaluation
+"""
+struct BounceScratch
+    cum_wb_arr::Vector{Float64}
+    jvtheta::Vector{ComplexF64}
+    wmu_mt::Matrix{ComplexF64}
+    wen_mt::Matrix{ComplexF64}
+    expm::Vector{ComplexF64}
+    pl::Vector{ComplexF64}
+    wmu_ba::Vector{ComplexF64}
+    wen_ba::Vector{ComplexF64}
+    wmats_lmda::Vector{ComplexF64}
+    tspl_f::Vector{Float64}
+end
+
+function BounceScratch(ntheta::Int, mpert::Int)
+    return BounceScratch(
+        Vector{Float64}(undef, ntheta),
+        Vector{ComplexF64}(undef, ntheta),
+        Matrix{ComplexF64}(undef, mpert, ntheta),
+        Matrix{ComplexF64}(undef, mpert, ntheta),
+        Vector{ComplexF64}(undef, mpert),
+        Vector{ComplexF64}(undef, ntheta),
+        Vector{ComplexF64}(undef, mpert),
+        Vector{ComplexF64}(undef, mpert),
+        Vector{ComplexF64}(undef, nqty_matrix(mpert)),
+        Vector{Float64}(undef, 5),
+    )
 end
 
 
@@ -504,7 +557,7 @@ function _bounce_integrate(
     mfac::Vector{Int}, dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     do_matrices::Bool, mpert::Int,
-    smat, tmat, xmat, ymat, zmat
+    smat, tmat, xmat, ymat, zmat, scr::BounceScratch
 )
     ntheta = length(tdt_pts)
     theta0 = tdt_pts[1]
@@ -517,17 +570,20 @@ function _bounce_integrate(
     g_wd = zeros(Float64, ntheta)      # bspl%fs(:,2): drift integrand · dθ/dx
 
     # Action integrand
-    jvtheta = zeros(ComplexF64, ntheta)
+    jvtheta = scr.jvtheta
+    fill!(jvtheta, ComplexF64(0.0))
 
     # W vectors for matrix path
-    wmu_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
-    wen_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
+    wmu_mt = scr.wmu_mt
+    wen_mt = scr.wen_mt
+    if do_matrices
+        fill!(wmu_mt, ComplexF64(0.0))
+        fill!(wen_mt, ComplexF64(0.0))
+    end
 
-    # Pre-allocated scratch for hot-loop tspl evaluation + Fourier-basis buffer
-    # (avoids Vector{Float64}(5) + Vector{ComplexF64}(mpert) allocation per θ
-    # sub-grid point — previously ~256 allocs × 126 inner iters per call).
-    tspl_f = Vector{Float64}(undef, 5)
-    expm = Vector{ComplexF64}(undef, mpert)
+    # Scratch for hot-loop tspl evaluation + Fourier-basis buffer (fully written per use).
+    tspl_f = scr.tspl_f
+    expm = scr.expm
 
     for i in 2:ntheta-1  # Edge weights are 0 from powspace
         θ = tdt_pts[i]
@@ -623,7 +679,7 @@ function _bounce_integrate(
     h = 1.0 / (ntheta - 1)
     d_wb = Vector{Float64}(undef, ntheta)
     _fortran_spline_derivs!(d_wb, g_wb, h)
-    fsi_wb = Vector{Float64}(undef, ntheta)
+    fsi_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten by cumint
     _fortran_spline_cumint!(fsi_wb, g_wb, d_wb, h)
     total_wb = fsi_wb[ntheta]
     total_wd = _fortran_spline_quad(g_wd, h)
@@ -642,7 +698,7 @@ function _bounce_integrate(
     # running trapezoid — matching bspl%fsi exactly.
     pl_denom = (2 - sigma) * total_wb
     one_minus_sigma = 1 - sigma
-    pl = Vector{ComplexF64}(undef, ntheta)
+    pl = scr.pl  # per-surface scratch; fully overwritten
     @inbounds for i in 1:ntheta
         pl[i] = cis(-twopi * lnq * fsi_wb[i] / pl_denom)
     end
@@ -662,9 +718,10 @@ function _bounce_integrate(
     if do_matrices
         # Bounce-average W_μ and W_E vectors (Fortran lines 762-767): per mode,
         # cspline_fit("extrap") + cspline_int of conj(W_m(θ))·(pl + (1-σ)/pl),
-        # matching the bjspl quadrature above.
-        wmu_ba = zeros(ComplexF64, mpert)
-        wen_ba = zeros(ComplexF64, mpert)
+        # matching the bjspl quadrature above. Results land in per-surface scratch,
+        # fully overwritten per mode.
+        wmu_ba = scr.wmu_ba
+        wen_ba = scr.wen_ba
         wsamp = Vector{ComplexF64}(undef, ntheta)
         wder = Vector{ComplexF64}(undef, ntheta)
         @inbounds for mi in 1:mpert
@@ -697,7 +754,9 @@ function _bounce_integrate(
         # Scale by wbbar/ro² (Fortran line 789)
         scale = wbbar / ro^2
         Mu = (mpert * (mpert + 1)) ÷ 2
-        wmats_lmda = Vector{ComplexF64}(undef, nqty_matrix(mpert))
+        wmats_lmda = scr.wmats_lmda
+        # Fill with NaN to catch uninitialized entries
+        fill!(wmats_lmda, ComplexF64(NaN, NaN))
 
         # A (Hermitian): upper triangle of W_Z†W_Z, rank-1 → conj(wz[i])·wz[j].
         off = 0

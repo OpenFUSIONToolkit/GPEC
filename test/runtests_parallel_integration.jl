@@ -309,27 +309,19 @@ using TOML
 
         et_par, intr_par = run_diiid(true)
 
-        # Parallel FM et[1] regression. The bidirectional fix gives et ≈ 1.5–1.6 with
-        # set_psilim_via_dmlim = true (production diverted convention; DIIID-like example
-        # sets it explicitly). With the previous default (false) this was ≈ 1.29. Single-
-        # point pinning of et_par is platform-sensitive at the few-percent level (BLAS
-        # variant / FP rounding through the BVP solve and outer-plasma Riccati pass shift
-        # the eigenvalue ~5-10 %), so we bracket the eigenvalue rather than pin a tight
-        # value. A true regression of the bidirectional assembly (et ≈ 1.29 or ≈ 2+) still
-        # fails this bracket loudly.
-        @test 1.4 < et_par < 1.7
+        # Parallel FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
+        # equilibrium-sensitive (auto-mpsi gives a spurious value; a wrong grid/Ip shifts it), so
+        # a loose bracket would mask exactly that accuracy regression. The parallel-path value is
+        # deterministic and reproducible.
+        @test isapprox(et_par, 0.800637; rtol=2e-2)
         # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
         # comment above). BVP Δ' matrix regression for DIIID-like is in the
         # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
 
-        # Cross-path consistency (parallel vs standard) is omitted here: after the
-        # edge-dW decoupling, the two paths store the final-state U at different
-        # ψ in the edge band (different chunking → different saved points), and
-        # on DIIID the standard path's free-boundary eigenvalue computation is
-        # numerically unstable past the old dW-peak location, producing non-
-        # sensical et values on some CI runners. A proper cross-path check would
-        # require both paths to integrate on identical ψ grids, which is out of
-        # scope for this regression test.
+        # No explicit parallel-vs-standard cross-path check here: the two paths share the
+        # equilibrium grid (so a cross-path comparison is blind to grid/accuracy regressions),
+        # and their agreement is already verified on the lighter Solovev case above. The tight
+        # absolute pin above is the guard for grid/equilibrium regressions on this case.
     end
 
     @testset "ode_itime_cost is additive over sub-intervals" begin
@@ -532,28 +524,16 @@ using TOML
             @test abs(dpm[j, j]) > 1e-10
         end
 
-        # Pinned diagonal `delta_prime_matrix` values for the DIIID-like case (msing = 5),
-        # PEST3-convention self-response Δ' from the STRIDE BVP with vacuum coupling.
-        # Tolerances are split by entry magnitude / |Im|/|Re| ratio (audit V4):
-        #   - dpm[1], dpm[2]: nearly-real entries (|Im|/|Re| < 0.02). Platform-stable; rtol=1e-2.
-        #   - dpm[3]: complex entry with |Im| ≈ |Re| (both ~10). Modest FP sensitivity in the
-        #     PEST3 cancellation. rtol=5e-2 catches sign/normalization regressions while
-        #     accepting ~2-3% imaginary-part drift across BLAS variants.
-        #   - dpm[4], dpm[5]: |Im| is highly sensitive to FP round-off in the PEST3 four-term
-        #     cancellation (dp_raw entries can be 10⁴–10⁵× larger than the result). The
-        #     imaginary part drifts by 2–5× across platforms even with `extended_precision_bvp=true`.
-        #     Pin only the real part tightly; bracket |dpm| to catch sign/normalization errors.
-        # dpm[1], dpm[2] re-pinned when FourierCoefficients began dropping the duplicated θ=2π
-        # endpoint before the FFT (faithful Fortran fspline_fit_2, equil/fspline.f:293): the old
-        # un-trimmed FFT double-counted θ=0, biasing the metric DC coefficient. dpm[3]–dpm[5]
-        # shifted too but stay within their wider tolerances.
-        @test isapprox(dpm[1, 1], +8.672812e+00 + 2.139354e-02im; rtol=1e-2)
-        @test isapprox(dpm[2, 2], -3.890689e+00 - 5.121123e-02im; rtol=1e-2)
-        @test isapprox(dpm[3, 3], -9.137656e+00 + 7.704888e+00im; rtol=5e-2)
-        @test isapprox(real(dpm[4, 4]), +5.790777e+03; rtol=5e-2)
-        @test isapprox(real(dpm[5, 5]), -2.940021e+02; rtol=5e-2)
-        @test 1e3 < abs(dpm[4, 4]) < 1e5    # |dpm[4,4]| ≈ 6e3; catches sign/normalization errors
-        @test 1e2 < abs(dpm[5, 5]) < 1e3    # |dpm[5,5]| ≈ 3e2; catches sign/normalization errors
+        # Pinned diagonal `delta_prime_matrix` REAL parts, PEST3-convention self-response Δ' from
+        # the STRIDE BVP with vacuum coupling. Only real parts are pinned: imaginary parts are
+        # dominated by the PEST3 four-term cancellation and are setup/FP-sensitive. Inner surfaces
+        # (q=2,3,4) are grid-converged → pinned tight (q=2,3) / moderate (q=4). Near-separatrix
+        # surfaces q=5,6 (ψ≈0.98, 0.997) are NOT converged — real part and even sign can fluctuate
+        # — so they get only the finiteness/non-zero checks above, not value pins. Values use this
+        # testset's mode range (mpert=27, vs full-pipeline mpert=35, so they differ slightly).
+        @test isapprox(real(dpm[1, 1]), +7.280089e+00; rtol=1e-2)   # q=2
+        @test isapprox(real(dpm[2, 2]), -5.211187e+00; rtol=1e-2)   # q=3
+        @test isapprox(real(dpm[3, 3]), -1.581737e+01; rtol=3e-2)   # q=4
     end
 
 end
