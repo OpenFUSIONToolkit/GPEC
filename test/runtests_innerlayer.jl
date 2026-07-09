@@ -85,3 +85,59 @@ end
         @test abs(r2.Δ[1] - Δ[1]) / abs(Δ[1]) < 1e-3
     end
 end
+
+@testset "InnerLayer GGJ :ray internal machinery" begin
+    p = IL.q4_surface_benchmark()
+
+    @testset "cheblobatto nodes and differentiation matrix" begin
+        t, D = GGJ.cheblobatto(8)
+        @test length(t) == 9
+        @test issorted(t)                         # ascending, per the reflected convention
+        @test t[1] ≈ -1 && t[end] ≈ 1
+        @test D * ones(9) ≈ zeros(9) atol = 1e-10  # d/dt of a constant is zero
+        @test D * t ≈ ones(9) atol = 1e-10         # d/dt of the linear function is one
+    end
+
+    @testset "ode_matrix: ordinary point and type-generic build" begin
+        Q = 5.0im
+        # x = 0 is an ordinary point: the coefficient matrix is finite there.
+        M0 = GGJ.ode_matrix(p, Q, 0.0)
+        @test all(isfinite, M0)
+        @test M0[1, 4] == 1 && M0[2, 5] == 1 && M0[3, 6] == 1   # v' = (Ψ',Ξ',Υ') block
+        # The extended-precision build agrees with the Float64 build.
+        Md = GGJ.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
+        @test ComplexF64.(Md) ≈ GGJ.ode_matrix(p, Q, 0.3) rtol = 1e-12
+    end
+
+    @testset "parity_rows match the deltac boundary convention" begin
+        @test GGJ.parity_rows(1) == [4, 2, 3]     # odd:  Ψ'(0)=Ξ(0)=Υ(0)=0
+        @test GGJ.parity_rows(2) == [1, 5, 6]     # even: Ψ(0)=Ξ'(0)=Υ'(0)=0
+    end
+
+    @testset "decaying_pair is an orthonormal 6×2 frame" begin
+        Q = 5.0im
+        θ = angle(Q) / 4
+        E = GGJ.decaying_pair(p, Q, θ, 60.0)
+        @test size(E) == (6, 2)
+        @test all(isfinite, E)
+        @test E' * E ≈ I(2) atol = 1e-10          # columns orthonormal
+    end
+
+    @testset "profile diagnostics reconstruct finite fields" begin
+        res = IL.solve_ray(p, 5.0im)
+        prof = IL.solution_profile(res; npc=6)
+        @test size(prof.Ψ, 2) == 2 && length(prof.s) == size(prof.Ψ, 1)
+        @test all(isfinite, prof.Ψ) && all(isfinite, prof.Ξ) && all(isfinite, prof.Υ)
+        # Analytic tail evaluates on the trusted series radius.
+        asy = IL.asymptotic_profile(p, res, [res.S, 2 * res.S])
+        @test all(isfinite, asy.Ψ)
+    end
+
+    @testset "delta_convergence: small spread, consistent with solve_inner" begin
+        Q = 5.0im
+        conv = IL.delta_convergence(p, Q; verbose=false)
+        Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, Q * GGJ.q0(p))
+        @test conv.Δ ≈ Δ rtol = 1e-6              # baseline == the plain solve
+        @test maximum(conv.spread) < 1e-4         # honest error bar is small here
+    end
+end

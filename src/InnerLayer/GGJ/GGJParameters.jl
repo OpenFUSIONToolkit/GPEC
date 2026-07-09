@@ -112,8 +112,10 @@ inner_Q(p::GGJParameters, γ::Number) = ComplexF64(γ) / q0(p)
     rescale_delta(Δ, p::GGJParameters) -> SVector{2,ComplexF64}
 
 Map the scaled inner-layer matching data back to physical Δ at the rational
-surface by the `X₀^(2√(−D_I))` rescaling implied by the power-like matching
-(GWP2016 Sec. IV; the inner solution ~ X^{r±} converts to physical x = X₀ X).
+surface by the `X₀^(−2√(−D_I)) = S^(2√(−D_I)/3)` rescaling, together with the
+`v₁^(2√(−D_I))` linear-scale factor, implied by the power-like matching
+(GWP2016 Sec. IV; the inner solution ~ X^{r±} converts to physical x = X₀ X, so
+the large/small amplitude ratio Δ scales by X₀^{−(r₊−r₋)} = X₀^(−2√(−D_I))).
 Operates element-wise on a 2-vector of `(Δ_odd, Δ_even)`.
 """
 function rescale_delta(Δ::AbstractVector, p::GGJParameters)
