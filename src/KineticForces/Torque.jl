@@ -94,9 +94,9 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
 
     # Create periodic interpolant for poloidal quantities
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
-    # Extrap cubic of B for the v_par factor + bounce points (Fortran vspl, fit
-    # "extrap"); CubicFit ≡ Fortran extrap. Kept separate from the periodic tspl
-    # so v_par matches Fortran torque.F90:599-600,677 exactly (see _vpar_from_extrap).
+    # v_par and the bounce points use a separate endpoint-fit (non-periodic) cubic
+    # of B, like Fortran's vspl. The endpoint fit of 1−(λ/bo)B equals 1−(λ/bo)
+    # times the fit of B, so one B_extrap per surface serves every λ.
     B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
 
     bmax = maximum(B_vals)
@@ -142,9 +142,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         end
         if Bθ > bmax
             bmax = Bθ
-            # theta_bmax intentionally NOT refined: Fortran uses the nodal-argmax
-            # knot xs[ibmax] as the transit start t1/t2 (torque.F90:610-611,648-649);
-            # the refined extremum (:301) is diagnostic-only. Keep theta_bmax = xs[ibmax].
+            # theta_bmax stays at the nodal knot xs[ibmax]: the transit starts at
+            # the knot (as in Fortran), not at the refined extremum.
         end
     end
 
@@ -465,9 +464,8 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # Build CubicSeriesInterpolant on normalized data (single build).
-    # CubicFit endpoint BC = 4-point polynomial fit, matching Fortran
-    # cspline_fit(fbnce,'extrap') endpoint-derivative extrapolation.
+    # Build CubicSeriesInterpolant on normalized data (single build); CubicFit
+    # endpoint BC matches the Fortran "extrap" fit.
     fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=CubicFit())
 
     # 3. Set rex/imx multipliers (Fortran lines 839-847)
@@ -626,7 +624,7 @@ function _setup_surface_state(
     end
 
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
-    # Extrap cubic of B for v_par + bounce points (Fortran vspl "extrap"); see _vpar_from_extrap.
+    # Endpoint-fit (non-periodic) cubic of B for v_par and bounce points (Fortran vspl equivalent).
     B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
 
     bmax = maximum(B_vals)
@@ -661,9 +659,8 @@ function _setup_surface_state(
             end
             if Bθ > bmax
                 bmax = Bθ
-                # theta_bmax intentionally NOT refined: Fortran uses the nodal-argmax
-                # knot xs[ibmax] for t1/t2 (torque.F90:610-611,648-649); refined extremum
-                # is diagnostic-only. Keep theta_bmax = xs[ibmax].
+                # theta_bmax stays at the nodal knot xs[ibmax]: the transit starts at
+                # the knot (as in Fortran), not at the refined extremum.
             end
         end
     end
