@@ -142,96 +142,11 @@ end
 
 
 # ============================================================================
-# Fortran spline-quadrature helpers (uniform grid)
-# ============================================================================
-# The Fortran bounce integrals are NOT Riemann/trapezoid sums: torque.F90 fits
-# the θ-samples with equil/spline.f `spline_fit(...,"extrap")` (C² cubic with
-# endpoint derivatives from a 4-point Lagrange fit) and integrates the fitted
-# cubic exactly via `spline_int`:  ∫ over interval = h/12·(6(f_i+f_{i+1}) +
-# h·(d_i−d_{i+1})).  The 1/√v_par integrand near bounce points makes the
-# quadrature scheme a leading-order effect (trapezoid gave a systematic ~3.5%
-# inflation of ∫J·B/√v_par in the trapped region → wb 3.5% low, dW off; see
-# issue #269), so we reproduce the Fortran scheme exactly.
-
-"""
-    _fortran_spline_derivs!(d, f, h, cp)
-
-Nodal first derivatives of the C² cubic spline through `f` on a uniform grid
-of spacing `h`, with endpoint derivatives from a 4-point Lagrange fit (the
-`CubicFit` boundary condition; same fit as the original Fortran spline package's
-"extrap" option). Works for real and complex `f`. Requires `length(f) ≥ 4`.
-`cp` is a Float64 workspace of length ≥ `length(f) - 2` (Thomas sweep storage).
-"""
-function _fortran_spline_derivs!(d::AbstractVector{T}, f::AbstractVector{T}, h::Float64, cp::Vector{Float64}) where {T}
-    n = length(f)
-    @assert length(d) == n && n >= 4 && length(cp) >= n - 2
-    # Endpoint derivatives: 4-point Lagrange (uniform grid): [-11/6, 3, -3/2, 1/3]/h
-    d[1] = (-11 * f[1] + 18 * f[2] - 9 * f[3] + 2 * f[4]) / (6h)
-    d[n] = (11 * f[n] - 18 * f[n-1] + 9 * f[n-2] - 2 * f[n-3]) / (6h)
-    # Interior: d[i-1] + 4·d[i] + d[i+1] = 3(f[i+1]-f[i-1])/h, i = 2..n-1,
-    # with known d[1], d[n] moved to the RHS. Thomas algorithm on (1,4,1).
-    @inbounds begin
-        rhs2 = 3 * (f[3] - f[1]) / h - d[1]
-        cp[1] = 1.0 / 4.0
-        d[2] = rhs2 / 4.0
-        for i in 3:n-1
-            rhs = 3 * (f[i+1] - f[i-1]) / h
-            if i == n - 1
-                rhs -= d[n]
-            end
-            denom = 4.0 - cp[i-2]
-            cp[i-1] = 1.0 / denom
-            d[i] = (rhs - d[i-1]) / denom
-        end
-        for i in n-2:-1:2
-            d[i] -= cp[i-1] * d[i+1]
-        end
-    end
-    return d
-end
-
-"""
-    _fortran_spline_integral(f, d, h) → total
-
-Exact integral of the cubic-Hermite spline with node values `f` and node
-derivatives `d` on a uniform grid of spacing `h`. Ports `spline_int`:
-per-interval `h/12·(6(f_i+f_{i+1}) + h·(d_i−d_{i+1}))`.
-"""
-function _fortran_spline_integral(f::AbstractVector{T}, d::AbstractVector{T}, h::Float64) where {T}
-    total = zero(T)
-    @inbounds for i in 1:length(f)-1
-        total += (h / 12) * (6 * (f[i] + f[i+1]) + h * (d[i] - d[i+1]))
-    end
-    return total
-end
-
-"""
-    _fortran_spline_cumint!(fsi, f, d, h)
-
-Cumulative nodal integrals (`fsi[i] = ∫₀^{x_i}` of the fitted spline),
-matching Fortran `spline_int`'s `fsi` accumulation. `fsi[1] = 0`.
-"""
-function _fortran_spline_cumint!(fsi::AbstractVector{T}, f::AbstractVector{T}, d::AbstractVector{T}, h::Float64) where {T}
-    fsi[1] = zero(T)
-    @inbounds for i in 1:length(f)-1
-        fsi[i+1] = fsi[i] + (h / 12) * (6 * (f[i] + f[i+1]) + h * (d[i] - d[i+1]))
-    end
-    return fsi
-end
-
-"""Convenience: spline-fit + exact integral of samples `f` on a uniform grid, using workspaces `d` and `cp`."""
-function _fortran_spline_quad(f::AbstractVector{T}, h::Float64, d::AbstractVector{T}, cp::Vector{Float64}) where {T}
-    _fortran_spline_derivs!(d, f, h, cp)
-    return _fortran_spline_integral(f, d, h)
-end
-
-
-# ============================================================================
 # Core bounce averaging
 # ============================================================================
 
 """
-    compute_bounce_data(psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
+    compute_bounce_data(psi, n, l, q, bo, bmax, bmin, theta_bmax,
                         tspl, B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f,
                         divxfac, wdfac, mass, chrg, T_s, method;
                         nlmda=128, ntheta=128,
@@ -251,8 +166,7 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 - `q`: Safety factor at this ψ
 - `bo`: On-axis toroidal field [T]
 - `bmax, bmin`: Max/min of B(θ) at this ψ
-- `ibmax`: Index of Bmax in poloidal grid
-- `theta_bmax`: θ location of Bmax
+- `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
 - `tspl`: Poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
 - `mfac`: Poloidal mode numbers [mlow:mhigh]
 - `chi1`: 2π·ψ₀ flux normalization
@@ -273,7 +187,7 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 function compute_bounce_data(
     psi::Float64, n::Int, l::Int, q::Float64,
     bo::Float64, bmax::Float64, bmin::Float64,
-    ibmax::Int, theta_bmax::Float64,
+    theta_bmax::Float64,
     tspl, B_extrap, mfac::Vector{Int}, chi1::Float64, ro::Float64,
     dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
@@ -378,16 +292,11 @@ the callers zero-initialize are `fill!`-reset per λ, preserving bit-for-bit res
 - `wmats_lmda::Vector{ComplexF64}`: length `nqty_matrix(mpert)` — packed W outer products
 - `tspl_f::Vector{Float64}`: length 5 — in-place tspl(θ) evaluation
 """
-struct BounceScratch
+struct BounceScratch{TR, TC}
     g_wb::Vector{Float64}
     g_wd::Vector{Float64}
     cum_wb_arr::Vector{Float64}
-    d_re::Vector{Float64}
-    cp::Vector{Float64}
     jvtheta::Vector{ComplexF64}
-    bj_samples::Vector{ComplexF64}
-    d_c::Vector{ComplexF64}
-    wsamp::Vector{ComplexF64}
     wmu_mt::Matrix{ComplexF64}
     wen_mt::Matrix{ComplexF64}
     expm::Vector{ComplexF64}
@@ -396,18 +305,20 @@ struct BounceScratch
     wen_ba::Vector{ComplexF64}
     wmats_lmda::Vector{ComplexF64}
     tspl_f::Vector{Float64}
+    itp_r::TR
+    itp_c::TC
 end
 
 function BounceScratch(ntheta::Int, mpert::Int)
+    # Reusable fit-and-integrate interpolants on the unit θ-quadrature grid;
+    # per λ their y contents are overwritten and z refit in place.
+    xs = range(0.0, 1.0, length=ntheta)
+    itp_r = cubic_interp(xs, zeros(Float64, ntheta); bc=CubicFit())
+    itp_c = cubic_interp(xs, zeros(ComplexF64, ntheta); bc=CubicFit())
     return BounceScratch(
         Vector{Float64}(undef, ntheta),
         Vector{Float64}(undef, ntheta),
         Vector{Float64}(undef, ntheta),
-        Vector{Float64}(undef, ntheta),
-        Vector{Float64}(undef, ntheta),
-        Vector{ComplexF64}(undef, ntheta),
-        Vector{ComplexF64}(undef, ntheta),
-        Vector{ComplexF64}(undef, ntheta),
         Vector{ComplexF64}(undef, ntheta),
         Matrix{ComplexF64}(undef, mpert, ntheta),
         Matrix{ComplexF64}(undef, mpert, ntheta),
@@ -417,7 +328,15 @@ function BounceScratch(ntheta::Int, mpert::Int)
         Vector{ComplexF64}(undef, mpert),
         Vector{ComplexF64}(undef, nqty_matrix(mpert)),
         Vector{Float64}(undef, 5),
+        itp_r,
+        itp_c,
     )
+end
+
+"""Refit `itp` in place to its current `y` contents (reuses the cached factorization)."""
+@inline function _refit!(itp)
+    FastInterpolations._solve_system!(itp.z, itp.cache, itp.y, itp.bc)
+    return itp
 end
 
 
@@ -692,13 +611,15 @@ function _bounce_integrate(
     # Total bounce integrals — Fortran fits bspl%xs = linspace(0,1,ntheta) with
     # spline_fit("extrap") and integrates the cubic exactly (spline_int). The
     # tdt(2,i) weights contain dθ/dx so the samples live on the unit x-grid.
-    h = 1.0 / (ntheta - 1)
-    d_wb = scr.d_re
-    _fortran_spline_derivs!(d_wb, g_wb, h, scr.cp)
-    fsi_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten by cumint
-    _fortran_spline_cumint!(fsi_wb, g_wb, d_wb, h)
+    itp_r = scr.itp_r
+    copyto!(itp_r.y, g_wb)
+    _refit!(itp_r)
+    fsi_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten
+    FastInterpolations.cumulative_integrate!(fsi_wb, itp_r)
     total_wb = fsi_wb[ntheta]
-    total_wd = _fortran_spline_quad(g_wd, h, scr.d_re, scr.cp)
+    copyto!(itp_r.y, g_wd)
+    _refit!(itp_r)
+    total_wd = FastInterpolations.integrate(itp_r)
 
     if total_wb ≈ 0.0
         # Degenerate case — return zeros
@@ -720,11 +641,13 @@ function _bounce_integrate(
     end
 
     # Action bounce integral (Fortran bjspl: cspline_fit("extrap") + cspline_int).
-    bj_samples = scr.bj_samples
+    itp_c = scr.itp_c
+    bj_samples = itp_c.y
     @inbounds for i in 1:ntheta
         bj_samples[i] = conj(jvtheta[i]) * (pl[i] + one_minus_sigma / pl[i])
     end
-    bj_integral = _fortran_spline_quad(bj_samples, h, scr.d_c, scr.cp)
+    _refit!(itp_c)
+    bj_integral = FastInterpolations.integrate(itp_c)
 
     # |δJ|² (Fortran line 756) — division by 2 corrects quadratic form
     dJdJ_val = wbbar * abs(bj_integral)^2 / 2.0 / ro^2
@@ -738,16 +661,18 @@ function _bounce_integrate(
         # fully overwritten per mode.
         wmu_ba = scr.wmu_ba
         wen_ba = scr.wen_ba
-        wsamp = scr.wsamp
+        wsamp = itp_c.y
         @inbounds for mi in 1:mpert
             for i in 1:ntheta
                 wsamp[i] = conj(wmu_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
             end
-            wmu_ba[mi] = _fortran_spline_quad(wsamp, h, scr.d_c, scr.cp)
+            _refit!(itp_c)
+            wmu_ba[mi] = FastInterpolations.integrate(itp_c)
             for i in 1:ntheta
                 wsamp[i] = conj(wen_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
             end
-            wen_ba[mi] = _fortran_spline_quad(wsamp, h, scr.d_c, scr.cp)
+            _refit!(itp_c)
+            wen_ba[mi] = FastInterpolations.integrate(itp_c)
         end
 
         # Reshape as 1×mpert for matrix multiply (Fortran lines 771-772)
