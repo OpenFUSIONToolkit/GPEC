@@ -28,11 +28,18 @@ per the docs/01 header semantics.
 
 ## Referenced but not yet in the library (acquire)
 
-- Wilson, Connor, Hastie & Hegna, PoP 3, 248 (1996) — **WCHH96**. The analytic
-  electron closure (its Eq. 55/74 lineage) and the large-w limit target
-  (its Eq. 85) are load-bearing for docs/01 §2.4 and ladder B2; currently
-  cited via I19/L23/Diss19 transcriptions only.
-- Park, Phys. Plasmas 29 (2022) — SLAYER. Needed for the D1 Q-convention map.
+- H. R. Wilson, J. W. Connor, R. J. Hastie & C. C. Hegna, "Threshold for
+  neoclassical magnetic islands in a low collision frequency tokamak",
+  Phys. Plasmas **3**, 248 (1996), doi:10.1063/1.871830 — **WCHH96**. The
+  analytic electron closure (its Eq. 55/74 lineage) and the large-w limit
+  target (its Eq. 85) are load-bearing for docs/01 §2.4 and ladder B2;
+  currently cited via I19/L23/Diss19 transcriptions only.
+- ~~Park, Phys. Plasmas 29 (2022) — SLAYER. Needed for the D1 Q-convention
+  map.~~ **Found in-repo** (2026-07-09): it lives in the general GPEC library,
+  `docs/resources/2022-Park-Parametric dependencies of resonant layer responses
+  across linear, two-fluid, drift-MHD regimes.pdf` — outside this island
+  subfolder, which is why this map missed it. The D1 Q-convention `[VERIFY]`
+  can be worked from that file.
 - La Haye et al. (2012 NSTX/DIII-D scaling; 2006) — experimental threshold fits
   behind ladder B9.
 - Sauter et al., PoP 6, 2834 (1999); Glasser–Greene–Johnson 1975; Fitzpatrick
