@@ -40,9 +40,6 @@ function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
 end
 
-# Reflect a periodic theta-space vector θ → -θ (the theta reversal in gpvacuum_flxsurf).
-_reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
-
 """
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
@@ -160,19 +157,12 @@ function compute_singular_coupling_metrics!(
             continue
         end
 
-        # Compute Green's functions at this surface for this n (once per pair)
+        # Surface-current matrix at this surface for this n (once per pair)
         vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
-        _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
-        grri = Matrix{ComplexF64}(grri_raw)
-        grre = Matrix{ComplexF64}(grre_raw)
-        ffs_intr.sing[s].grri = grri
-        ffs_intr.sing[s].grre = grre
-
-        # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
-        ν_vac = Vacuum.PlasmaGeometry(vac_input).ν
+        _, current_matrix, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_L=true)
 
         # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
-        L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, nn, ν_vac)
+        L_surf = calc_surface_inductance(current_matrix)
         m_idx = m_res - mlow + 1
         L_mm = L_surf[m_idx, m_idx]
 
@@ -419,69 +409,17 @@ function compute_current_density(
 end
 
 """
-    compute_surface_inductance_from_greens(
-        grri::Matrix{ComplexF64},
-        grre::Matrix{ComplexF64},
-        ffs_intr::ForceFreeStatesInternal,
-        nn::Int,
-        ν::Vector{Float64}
-    )::Matrix{ComplexF64}
+    calc_surface_inductance(current_matrix::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
 
-Compute surface inductance matrix from Green's functions at flux surface.
+Invert the vacuum surface-current matrix into surface inductance `L`.
 
-Implements the GPEC `gpvacuum_flxsurf` algorithm.
-
-The Julia vacuum code uses SFL Fourier basis `cos(m*θ - n*ν)` in the column transform,
-so the row DFT must apply the matching toroidal phase correction `exp(-i*n*ν)` before
-the DFT (matching Fortran `gpvacuum_flxsurf`'s `EXP(-ifac*nn*dphi)` phase correction).
-
-## Arguments
-
-  - `grri`: Interior Green's function [mtheta, mpert]
-  - `grre`: Exterior Green's function [mtheta, mpert]
-  - `ffs_intr`: ForceFreeStates internal state
-  - `nn`: Toroidal mode number
-  - `ν`: Toroidal angle offset on the vacuum theta grid [mtheta]
-
-## Returns
-
-Surface inductance matrix [mpert × mpert]
+Vacuum returns `current_matrix` from the Green’s→kax/DFT path (`gpvacuum_flxsurf`);
+this helper applies regularization, inversion, and Hermitianization.
 """
-@with_pool pool function compute_surface_inductance_from_greens(
-    grri::Matrix{ComplexF64},
-    grre::Matrix{ComplexF64},
-    ffs_intr::ForceFreeStatesInternal,
-    nn::Int,
-    ν::Vector{Float64}
-)::Matrix{ComplexF64}
-    mpert = ffs_intr.mpert
-    mtheta = length(ν)
+function calc_surface_inductance(current_matrix::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
+
+    mpert = size(current_matrix, 1)
     μ₀ = 4π * 1e-7
-
-    ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
-
-    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
-    current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
-
-    kax = zeros!(pool, ComplexF64, mtheta)
-    grri_surf = @view grri[1:mtheta, :]
-    grre_surf = @view grre[1:mtheta, :]
-
-    # Toroidal phase correction: exp(-i*n*ν)
-    phase = cis.(-nn .* ν)
-
-    for i in 1:mpert
-        flux_matrix[i, i] = 1.0
-
-        # Complex grri/e stores exp(i(mθ-nν)) projection, need conjugate for exp(-i(mθ-nν))
-        kax .= conj.(grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ₀ * (2π)^2)
-
-        # Port of Fortran gpvacuum_flxsurf: apply toroidal phase, reverse theta, forward-DFT.
-        g_phased = kax .* phase
-        current_matrix[:, i] = ft(_reverse_theta(g_phased))
-    end
-
-    # Compute surface inductance: L_surf = flux * inv(current) = inv(current)
     L_surf = zeros(ComplexF64, mpert, mpert)
 
     current_mag = maximum(abs.(current_matrix))
@@ -493,11 +431,9 @@ Surface inductance matrix [mpert × mpert]
         end
     else
         try
-            regularization = 1e-12 * current_mag
-            current_reg = current_matrix + regularization * I
-
-            L_surf = flux_matrix * inv(current_reg)
-
+            current_reg = current_matrix + 1e-12 * current_mag * I
+            # L = flux * inv(current) with flux = I
+            L_surf = inv(current_reg)
             # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
             L_surf = 0.5 * (L_surf + L_surf')
         catch e

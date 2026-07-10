@@ -160,7 +160,7 @@ q-window minimum.
 
         # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
         vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh; force_wv_symmetry=ctrl.force_wv_symmetry)
-        wv, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+        wv, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
         @views wv_array[i, :, :] .= wv
     end
 

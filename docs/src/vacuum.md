@@ -75,7 +75,7 @@ wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(
 )
 
 # Compute vacuum response matrix
-wv, grri, xzpts = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wall_settings)
+wv, _, _, _ = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wall_settings)
 ```
 
 ### Vacuum Field Calculation at Observation Points
