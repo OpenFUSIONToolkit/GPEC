@@ -117,20 +117,12 @@ function compute_perturbed_equilibrium(
 
     # Compute plasma response
     if ctrl.compute_response
-        if vac_data === nothing
-            @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in [ForceFreeStates] section."
-        else
-            compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, metric, ffit)
-        end
+        compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, metric, ffit)
     end
 
     # Compute singular coupling metrics
     if ctrl.compute_singular_coupling
-        if vac_data === nothing
-            @warn "Vacuum data not available. Skipping singular coupling calculation. Set vac_flag=true in [ForceFreeStates] section."
-        else
-            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
-        end
+        compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
     end
 
     return state

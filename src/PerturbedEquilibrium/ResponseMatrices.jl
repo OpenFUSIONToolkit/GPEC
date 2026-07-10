@@ -192,21 +192,11 @@ function map_forcing_to_eigenmodes(
     numpert_total = intr.mpert * intr.npert
     forcing_vector = zeros(ComplexF64, numpert_total)
 
-    # Create mode index map: (m,n) -> linear index
+    # Combine all forcing modes into a single vector
     for forcing_mode in forcing_modes
-        # Find matching mode in eigenmode basis
-        for i in 1:numpert_total
-            # Calculate m and n for this index
-            # Using 0-based indexing converted to 1-based:
-            # m = (i-1) % mpert + mlow
-            # n = (i-1) ÷ mpert + nlow
-            m_mode = (i - 1) % intr.mpert + intr.mlow
-            n_mode = (i - 1) ÷ intr.mpert + intr.nlow
-
-            if m_mode == forcing_mode.m && n_mode == forcing_mode.n
-                forcing_vector[i] = forcing_mode.amplitude
-                break
-            end
+        i = (forcing_mode.m - intr.mlow) + (forcing_mode.n - intr.nlow) * intr.mpert + 1
+        if 1 <= i <= numpert_total
+            forcing_vector[i] = forcing_mode.amplitude
         end
     end
 
