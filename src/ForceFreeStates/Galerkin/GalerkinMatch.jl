@@ -45,6 +45,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         bpen = zeros(ComplexF64, msing, mcoil)
         inner_psi = Vector{Float64}[]   # no inner layer in the ideal limit
         inner_xi = Matrix{ComplexF64}[]
+        inner_b = Matrix{ComplexF64}[]
         inner_params = InnerLayer.GGJParameters[]   # inner layer skipped in the ideal limit
         rpec_eig = zeros(ComplexF64, msing)
         residual = 0.0
@@ -72,6 +73,8 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         inner_psi = Vector{Vector{Float64}}(undef, msing)
         inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₁, antisymmetric across ψ_s
         inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₂, symmetric across ψ_s
+        inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ₁ = scale·resc·Ψ₁, symmetric (Ψ′₁(0)=0)
+        inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ₂ = scale·resc·Ψ₂, antisymmetric (Ψ₂(0)=0)
         inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
         for i in 1:msing
             params = resist_eval(sings[i], equil, intr; eta=ctrl.gal_eta[i], rho=ctrl.gal_rho[i],
@@ -85,14 +88,25 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             deltar[i, 1] = Δ[1]
             deltar[i, 2] = Δ[2]
             x0i = InnerLayer.GGJ.x0(params)
-            resc = (params.v1 / x0i)^(0.5 + InnerLayer.GGJ.p1(params))   # deltac.f amplitude rescale
-            scale = chi1 * im * nn * sings[i].q1 * x0i                   # match.f b-field scaling
+            # Amplitude rescale: inner solutions are normalized in X = v1·δψ/x0 (inner_psi below);
+            # converting a big-branch (μ₋ = −1/2−p1) amplitude to the outer δψ-normalization gives
+            # resc = (v1/x0)^(−μ₋), the companion of rescale_delta's (v1/x0)^(2p1) = (v1/x0)^(μ₊−μ₋).
+            resc = (params.v1 / x0i)^(0.5 + InnerLayer.GGJ.p1(params))
+            # b-field scaling, derived from the code's own outer convention (SingularCoupling):
+            #   b_m = 2πi·χ₁·(m−nq)·ξ_m,  m−nq = −n·q′·δψ,  δψ = (x0/v1)·X,  resc·Ξ(X) ↔ ξ_m,
+            # and the far-field identity Ψ = X·Ξ (GWP2016 Eq. 16; Ψ is the normal-field variable, Eq. A17):
+            #   b_m = −2πi·χ₁·n·q′·(x0/v1)·resc·Ψ.
+            scale = -2π * chi1 * im * nn * sings[i].q1 * x0i / params.v1
             pen[i, 1] = scale * prof.Ψ[1, 1] * resc                     # layer center X=0, parity 1 (Ψ(0)≠0)
             pen[i, 2] = scale * prof.Ψ[1, 2] * resc                     # parity 2 (Ψ(0)=0 ⇒ ~0)
             xvar = prof.x .* (x0i / params.v1)                          # inner X → ψ-distance (deltac.f:1822)
             inner_psi[i] = vcat(reverse(sings[i].psifac .- xvar), sings[i].psifac .+ xvar)
             inner_odd[i] = resc .* vcat(reverse(.-prof.Ξ[:, 1]), prof.Ξ[:, 1])   # comp 2, parity 1 (odd: −left,+right)
             inner_even[i] = resc .* vcat(reverse(prof.Ξ[:, 2]), prof.Ξ[:, 2])    # comp 2, parity 2 (even)
+            # b^ψ profiles on the same two-sided grid: Ψ is the normal-field variable (GWP2016 A17),
+            # b_m(δψ) = scale·resc·Ψ(X) throughout the layer (→ outer frozen-in relation via Ψ = XΞ).
+            inner_bodd[i] = (scale * resc) .* vcat(reverse(prof.Ψ[:, 1]), prof.Ψ[:, 1])     # parity 1: Ψ even
+            inner_beven[i] = (scale * resc) .* vcat(reverse(.-prof.Ψ[:, 2]), prof.Ψ[:, 2])  # parity 2: Ψ odd
         end
 
         # --- assemble the 4·msing matching system (match.f) ---
@@ -138,6 +152,9 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         # Matched inner-layer ξ_ψ(ψ) per surface, per coil drive (match.f intotsol): odd parity weighted by
         # cin[2i] (cofin(2·ising)), even parity by cin[2i-1] (cofin(2·ising-1)).
         inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+        # Matched inner-layer b^ψ(ψ) per surface, per coil drive — the overlap-validation companion of
+        # inner_xi: in the matching region it must lie on the outer b^ψ eigenfunction.
+        inner_b = [inner_bodd[i] * transpose(cin[2i, :]) .+ inner_beven[i] * transpose(cin[2i-1, :]) for i in 1:msing]
     end
 
     # --- matched outer ξ/ξ′ per coil drive (match.f); ideal: cout=0 ⇒ bare coil column ---
@@ -156,7 +173,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         end
     end
 
-    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, inner_params, rpec_eig, residual)
+    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, inner_b, inner_params, rpec_eig, residual)
 end
 
 """

@@ -270,6 +270,7 @@ function write_galerkin!(out_h5, result::GalerkinResult)
         for i in eachindex(m.inner_psi)
             out_h5["galerkin/match/inner/psi_$i"] = m.inner_psi[i]
             out_h5["galerkin/match/inner/xi_$i"] = m.inner_xi[i]
+            out_h5["galerkin/match/inner/b_$i"] = m.inner_b[i]
         end
         out_h5["galerkin/match/residual"] = m.residual
         # Per-surface GGJ inner-layer coefficients (resist_eval), replacing the old
