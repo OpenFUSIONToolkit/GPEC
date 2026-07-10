@@ -92,6 +92,8 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         for (name, v) in (("gal_eta", ctrl.gal_eta), ("gal_rho", ctrl.gal_rho), ("gal_rotation", ctrl.gal_rotation))
             length(v) == msing || error("gal_match_rpec: $name has length $(length(v)), expected msing=$msing (one value per surface, core→edge)")
         end
+        ctrl.gal_inner_solver in ("ray", "galerkin") ||
+            error("gal_match_rpec: gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
 
         # --- inner-layer matching data Δ(Q) per surface (deltac_run; match.f) ---
         # solve_inner_profile returns the same Δ as solve_inner plus the reconstructed inner-layer field,
@@ -115,11 +117,31 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             inner_params[i] = params
             γ = 2π * im * nn * ctrl.gal_rotation[i]    # forced eigenvalue; gal_rotation is f [Hz], γ = 2πi·n·f
             rpec_eig[i] = γ
-            # Inner-solve knobs matched to the Fortran rmatch deltac/inps reference (DELTAC_LIST): inps basis,
-            # inps_xfac=10 (xmax×10, grid nx = 128·10 = 1280), nq=5, cutoff=5, order_pow=8 (↔ kmax).
-            Δ, _, prof, _ = InnerLayer.GGJ.solve_inner_profile(params, γ; xfac=10.0, nx=1280, nq=5, cutoff=5, kmax=8)   # (Δ₁, Δ₂) in deltac.f convention
-            deltar[i, 1] = Δ[1]
-            deltar[i, 2] = Δ[2]
+            # gal_inner_solver = "ray" (default) sources the inner layer from the rotated-ray
+            # backend: the certified Δ comes from the optimal-contour solve at θ = arg(Q)/4 (robust
+            # for |Q| ≳ 1, where the galerkin inner solver drifts), and the profile quantities
+            # (pen, inner_xi, inner_b) from a θ=0 re-solve on the real axis — valid at physical
+            # (RPEC) |Q| since the on-axis pseudo-resonance is a regular point resolved by the BVP
+            # refinement. The θ=0-vs-optimal-θ Δ agreement doubles as a runtime certificate (two
+            # maximally different contours through the same entire solutions).
+            if ctrl.gal_inner_solver == "ray"
+                Q = InnerLayer.GGJ.inner_Q(params, γ)
+                rr = InnerLayer.GGJ.solve_ray(params, Q)              # certified Δ (optimal θ)
+                deltar[i, 1] = rr.Δ[1]
+                deltar[i, 2] = rr.Δ[2]
+                r0 = InnerLayer.GGJ.solve_ray(params, Q; θ=0.0)       # real-axis profile solve
+                relΔ = abs(r0.Δ[1] - rr.Δ[1]) / max(abs(rr.Δ[1]), 1e-300)
+                relΔ > 1e-3 && @warn "GGJ ray: θ=0 profile solve disagrees with certified Δ" surface = i relΔ
+                p0 = InnerLayer.GGJ.solution_profile(r0)
+                profΨ, profΞ, xg = p0.Ψ, p0.Ξ, p0.s
+            else
+                # Inner-solve knobs matched to the Fortran rmatch deltac/inps reference (DELTAC_LIST): inps
+                # basis, inps_xfac=10 (xmax×10, grid nx = 128·10 = 1280), nq=5, cutoff=5, order_pow=8 (↔ kmax).
+                Δ, _, prof, _ = InnerLayer.GGJ.solve_inner_profile(params, γ; xfac=10.0, nx=1280, nq=5, cutoff=5, kmax=8)   # (Δ₁, Δ₂) in deltac.f convention
+                deltar[i, 1] = Δ[1]
+                deltar[i, 2] = Δ[2]
+                profΨ, profΞ, xg = prof.Ψ, prof.Ξ, prof.x
+            end
             x0i = InnerLayer.GGJ.x0(params)
             # Amplitude rescale: inner solutions are normalized in X = v1·δψ/x0 (inner_psi below);
             # converting a big-branch (μ₋ = −1/2−p1) amplitude to the outer δψ-normalization gives
@@ -130,16 +152,16 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             # and the far-field identity Ψ = X·Ξ (GWP2016 Eq. 16; Ψ is the normal-field variable, Eq. A17):
             #   b_m = −2πi·χ₁·n·q′·(x0/v1)·resc·Ψ.
             scale = -2π * chi1 * im * nn * sings[i].q1 * x0i / params.v1
-            pen[i, 1] = scale * prof.Ψ[1, 1] * resc                     # layer center X=0, parity 1 (Ψ(0)≠0)
-            pen[i, 2] = scale * prof.Ψ[1, 2] * resc                     # parity 2 (Ψ(0)=0 ⇒ ~0)
-            xvar = prof.x .* (x0i / params.v1)                          # inner X → ψ-distance (deltac.f:1822)
+            pen[i, 1] = scale * profΨ[1, 1] * resc                      # layer center X=0, parity 1 (Ψ(0)≠0)
+            pen[i, 2] = scale * profΨ[1, 2] * resc                      # parity 2 (Ψ(0)=0 ⇒ ~0)
+            xvar = xg .* (x0i / params.v1)                              # inner X → ψ-distance (deltac.f:1822)
             inner_psi[i] = vcat(reverse(sings[i].psifac .- xvar), sings[i].psifac .+ xvar)
-            inner_odd[i] = resc .* vcat(reverse(.-prof.Ξ[:, 1]), prof.Ξ[:, 1])   # comp 2, parity 1 (odd: −left,+right)
-            inner_even[i] = resc .* vcat(reverse(prof.Ξ[:, 2]), prof.Ξ[:, 2])    # comp 2, parity 2 (even)
+            inner_odd[i] = resc .* vcat(reverse(.-profΞ[:, 1]), profΞ[:, 1])   # comp 2, parity 1 (odd: −left,+right)
+            inner_even[i] = resc .* vcat(reverse(profΞ[:, 2]), profΞ[:, 2])    # comp 2, parity 2 (even)
             # b^ψ profiles on the same two-sided grid: Ψ is the normal-field variable (GWP2016 A17),
             # b_m(δψ) = scale·resc·Ψ(X) throughout the layer (→ outer frozen-in relation via Ψ = XΞ).
-            inner_bodd[i] = (scale * resc) .* vcat(reverse(prof.Ψ[:, 1]), prof.Ψ[:, 1])     # parity 1: Ψ even
-            inner_beven[i] = (scale * resc) .* vcat(reverse(.-prof.Ψ[:, 2]), prof.Ψ[:, 2])  # parity 2: Ψ odd
+            inner_bodd[i] = (scale * resc) .* vcat(reverse(profΨ[:, 1]), profΨ[:, 1])     # parity 1: Ψ even
+            inner_beven[i] = (scale * resc) .* vcat(reverse(.-profΨ[:, 2]), profΨ[:, 2])  # parity 2: Ψ odd
         end
 
         # --- assemble the 4·msing matching system (match.f) ---
