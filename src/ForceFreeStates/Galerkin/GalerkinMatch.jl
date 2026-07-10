@@ -45,6 +45,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         bpen = zeros(ComplexF64, msing, mcoil)
         inner_psi = Vector{Float64}[]   # no inner layer in the ideal limit
         inner_xi = Matrix{ComplexF64}[]
+        inner_params = InnerLayer.GGJParameters[]   # inner layer skipped in the ideal limit
         rpec_eig = zeros(ComplexF64, msing)
         residual = 0.0
     else
@@ -71,9 +72,11 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         inner_psi = Vector{Vector{Float64}}(undef, msing)
         inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₁, antisymmetric across ψ_s
         inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₂, symmetric across ψ_s
+        inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
         for i in 1:msing
             params = resist_eval(sings[i], equil, intr; eta=ctrl.gal_eta[i], rho=ctrl.gal_rho[i],
                 gamma=ctrl.gal_gamma, ising=i)
+            inner_params[i] = params
             γ = 2π * im * nn * ctrl.gal_rotation[i]    # forced eigenvalue; gal_rotation is f [Hz], γ = 2πi·n·f
             rpec_eig[i] = γ
             # Inner-solve knobs matched to the Fortran rmatch deltac/inps reference (DELTAC_LIST): inps basis,
@@ -153,7 +156,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         end
     end
 
-    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, rpec_eig, residual)
+    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, inner_params, rpec_eig, residual)
 end
 
 """

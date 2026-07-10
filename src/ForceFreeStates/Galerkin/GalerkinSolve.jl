@@ -272,6 +272,14 @@ function write_galerkin!(out_h5, result::GalerkinResult)
             out_h5["galerkin/match/inner/xi_$i"] = m.inner_xi[i]
         end
         out_h5["galerkin/match/residual"] = m.residual
+        # Per-surface GGJ inner-layer coefficients (resist_eval), replacing the old
+        # GAL_DUMP_INNER temp-CSV hook: everything needed to reconstruct the layer
+        # problem (E,F,G,H,K,M) and its scales (taua, taur ⇒ S = taur/taua, v1).
+        if !isempty(m.inner_params)
+            for f in (:E, :F, :G, :H, :K, :M, :taua, :taur, :v1)
+                out_h5["galerkin/match/inner_params/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
+            end
+        end
     end
     return nothing
 end
