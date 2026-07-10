@@ -360,14 +360,16 @@ label = "NTV torque FGAR (Re,Im) [N·m]"
 noise_threshold = 1e-2
 order = 95
 
-# NTV kinetic energy (δW) through the same post-PE FGAR path. This is the
-# quantity most sensitive to the bounce-averaging chain (quadrature scheme,
-# v_par source, bo normalization), so it guards that whole path directly.
+# NTV kinetic energy δW = Im(T)/(2n) through the same post-PE FGAR path. Stored
+# on disk as [δW, 0] (the imaginary slot is always zero), so only the first
+# element carries information. Derivable from the torque above, but tracked
+# explicitly at a tighter threshold to guard Im(T), which is the component the
+# bounce-averaging chain moves most.
 [quantities.ntv_energy_fgar]
 h5path = "kinetic_forces/fgar/total_energy"
 type = "real_vector"
-extract = "all_real"
-label = "NTV energy FGAR (Re,Im) [J]"
+extract = "real_first"
+label = "NTV kinetic energy dW FGAR [J]"
 noise_threshold = 1e-3
 order = 96
 
