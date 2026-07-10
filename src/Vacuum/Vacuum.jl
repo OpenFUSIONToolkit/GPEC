@@ -23,46 +23,6 @@ export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
-const μ0 = 4π * 1e-7
-
-# Vacuum code uses reverse-θ ordering relative to the equilibrium θ grid.
-_reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
-
-"""
-    _surface_current_matrix_from_greens!(current_matrix, grri, grre, mlow, mpert, nn, ν)
-
-Build the Fourier surface-current matrix from interior/exterior Green's functions
-(plasma-surface rows only). Implements the GPEC `gpvacuum_flxsurf` kax/DFT loop;
-regularization and inversion to surface inductance `L` are left to PerturbedEquilibrium.
-"""
-@with_pool pool function _surface_current_matrix_from_greens!(
-    current_matrix::AbstractMatrix{ComplexF64},
-    grri::AbstractMatrix{ComplexF64},
-    grre::AbstractMatrix{ComplexF64},
-    mlow::Int,
-    mpert::Int,
-    nn::Int,
-    ν::AbstractVector{Float64}
-)
-    mtheta = length(ν)
-    ft = FourierTransform(mtheta, mpert, mlow)
-
-    kax = zeros!(pool, ComplexF64, mtheta)
-    grri_surf = @view grri[1:mtheta, :]
-    grre_surf = @view grre[1:mtheta, :]
-    phase = cis.(-nn .* ν)
-
-    for i in 1:mpert
-        # Complex grri/e stores exp(i(mθ-nν)) projection; conjugate for exp(-i(mθ-nν)).
-        # Eq. 10 of Park 2007
-        kax .= conj.(grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ0 * (2π)^2)
-        g_phased = kax .* phase
-        # Eq. 21b of Park 2007
-        current_matrix[:, i] = ft(_reverse_theta(g_phased))
-    end
-    return current_matrix
-end
-
 """
     _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_L=false)
 
@@ -136,8 +96,13 @@ Green's functions are internal scratch only.
             end
             ldiv!(lu!(grad_green_interior), grri)
 
+            # Build surface-current matrix from interior/exterior Green's functions
+            # Eq. 10 of Park 2007: J_surface ∝ conj(grri + grre)
+            # ft.basis = exp(-i(mθ - nν)); conjugate to get exp(-i(mθ + nν)) to match original phase convention
             cm_block = @view vac_data.current_matrix[block_idx, block_idx]
-            _surface_current_matrix_from_greens!(cm_block, grri, grre, mlow, mpert, n, plasma_surf.ν)
+            @views g_sum = conj.(grri[1:num_points_surf, :] .+ grre[1:num_points_surf, :])
+            mul!(cm_block, conj.(ft.basis), g_sum)
+            cm_block ./= num_points_surf
         else
             # Only need exterior system for wv
             ldiv!(lu!(grad_green), grre)

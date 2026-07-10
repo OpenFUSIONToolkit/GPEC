@@ -414,7 +414,7 @@ end
 Invert the vacuum surface-current matrix into surface inductance `L`.
 
 Vacuum returns `current_matrix` from the Green’s→kax/DFT path (`gpvacuum_flxsurf`);
-this helper applies regularization, inversion, and Hermitianization.
+this helper applies normalization, regularization, inversion, and Hermitianization.
 """
 function calc_surface_inductance(current_matrix::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
 
@@ -431,9 +431,10 @@ function calc_surface_inductance(current_matrix::AbstractMatrix{ComplexF64})::Ma
         end
     else
         try
-            current_reg = current_matrix + 1e-12 * current_mag * I
+            current_matrix ./= μ₀ * (2π)^2
+            current_matrix += 1e-12 * current_mag * I
             # L = flux * inv(current) with flux = I
-            L_surf = inv(current_reg)
+            L_surf = inv(current_matrix)
             # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
             L_surf = 0.5 * (L_surf + L_surf')
         catch e
