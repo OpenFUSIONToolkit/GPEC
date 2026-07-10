@@ -159,10 +159,10 @@ function compute_singular_coupling_metrics!(
 
         # Surface-current matrix at this surface for this n (once per pair)
         vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
-        _, current_matrix, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_L=true)
+        _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_L=true)
 
         # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
-        L_surf = calc_surface_inductance(current_matrix)
+        L_surf = calc_surface_inductance(I_v)
         m_idx = m_res - mlow + 1
         L_mm = L_surf[m_idx, m_idx]
 
@@ -409,20 +409,20 @@ function compute_current_density(
 end
 
 """
-    calc_surface_inductance(current_matrix::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
+    calc_surface_inductance(I_v::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
 
 Invert the vacuum surface-current matrix into surface inductance `L`.
 
-Vacuum returns `current_matrix` from the Green’s→kax/DFT path (`gpvacuum_flxsurf`);
-this helper applies normalization, regularization, inversion, and Hermitianization.
+Vacuum returns `I_v` from the Green’s functions, this helper applies GPEC normalization,
+regularization, inversion, and Hermitianization.
 """
-function calc_surface_inductance(current_matrix::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
+function calc_surface_inductance(I_v::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
 
-    mpert = size(current_matrix, 1)
+    mpert = size(I_v, 1)
     μ₀ = 4π * 1e-7
     L_surf = zeros(ComplexF64, mpert, mpert)
 
-    current_mag = maximum(abs.(current_matrix))
+    current_mag = maximum(abs.(I_v))
 
     if current_mag < 1e-15
         @warn "Current matrix is all zeros! Cannot compute surface inductance." maxlog=1
@@ -431,10 +431,10 @@ function calc_surface_inductance(current_matrix::AbstractMatrix{ComplexF64})::Ma
         end
     else
         try
-            current_matrix ./= μ₀ * (2π)^2
-            current_matrix += 1e-12 * current_mag * I
-            # L = flux * inv(current) with flux = I
-            L_surf = inv(current_matrix)
+            I_v ./= μ₀ * (2π)^2
+            I_v += 1e-12 * current_mag * I
+            # L = flux * inv(Iᵛ) with flux = I
+            L_surf = inv(I_v)
             # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
             L_surf = 0.5 * (L_surf + L_surf')
         catch e

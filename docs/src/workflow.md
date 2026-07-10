@@ -59,7 +59,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Outputs**:
 - `wv` — Vacuum response matrix (scaled by the singular factor (m - nq)(m' - nq), see Chance 1997)
-- `current_matrix` — Vacuum surface-current matrix Iᵛ when `compute_L=true` (otherwise zeros); PerturbedEquilibrium inverts this to surface inductance `L`
+- `I_v` — Vacuum surface-current matrix Iᵛ when `compute_L=true` (otherwise zeros); PerturbedEquilibrium inverts this to surface inductance `L`
 
 **Key references**: [Chance et al. (1997)](citations.md#Vacuum-Module), [Chance et al. (2007)](citations.md#Vacuum-Module)
 
@@ -181,5 +181,5 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The file is 
 | `locstab/` | Local stability: Mercier criterion, shear |
 | `integration/` | ODE integration results: energy matrices, eigenvalues |
 | `singular/` | Per-surface data: ψ_s, m/n, Δ', small solution coefficients |
-| `vacuum/` | Vacuum response matrices: wv (and current_matrix when computed for PE) |
+| `vacuum/` | Vacuum response matrices: wv (and I_v when computed for PE) |
 | `perturbed/` | Perturbed equilibrium: ξ, b in mode space, island diagnostics |

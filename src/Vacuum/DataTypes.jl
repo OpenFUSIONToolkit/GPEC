@@ -78,7 +78,8 @@ function VacuumInput(
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
 
     # Remove the last point to go from the [0, 2π] grid to VACUUM's [0, 2π) grid
-    # and reverse the arrays for VACUUM's CW θ direction
+    # and reverse the arrays for VACUUM's CW θ direction (θ_VAC = -θ_GPEC). This handedness is why
+    # operators returned to GPEC (e.g. the surface-inductance current matrix) are conjugated.
     return VacuumInput(;
         x=reverse(r)[1:(end-1)],
         z=reverse(z)[1:(end-1)],
