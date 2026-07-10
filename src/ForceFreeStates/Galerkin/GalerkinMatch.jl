@@ -13,7 +13,40 @@
 # identity-at-edge basis (coil column j has ξ_edge = e_j).
 
 """
-    gal_match_rpec(ctrl, equil, intr, gal_result) -> GalMatchResult
+    gal_deltamn_kernels(asymps, sings, intr, nn) -> (KL, KR)
+
+Per-surface unit-small-solution kernels for the coefficient-based Δ_mn: the resonant-harmonic
+`bwp1/(2πχ₁) = i·(singfac·ξ′ − n·q′·ξ)` of the UNIT small Frobenius solution, evaluated at the
+conventional brackets ψ_s ∓ δ with δ = 5e-4/(|n|·|q′|) — the same offsets as SingularCoupling's
+finite-jump fallback (spot_psi), so the two paths measure the same object. The matched solution's
+Δ_mn is then `Δ_mn[i,j] = KR[i]·c_small_R[i,j] − KL[i]·c_small_L[i,j]`: the small-solution
+(shielding) content only. The big/penetrated branch is excluded — its finite-offset contribution
+diverges as δ^{−(1/2+p₁)} and is not part of the physical Δ_mn (in ideal runs it is zero anyway).
+"""
+function gal_deltamn_kernels(asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
+    intr::ForceFreeStatesInternal, nn::Int)
+    msing = length(sings)
+    KL = zeros(ComplexF64, msing)
+    KR = zeros(ComplexF64, msing)
+    for i in 1:msing
+        q1 = sings[i].q1
+        imres = round(Int, sings[i].q * nn) - intr.mlow + 1
+        δ = 5e-4 / (abs(nn) * abs(q1))
+        for (K, sgn) in ((KR, 1.0), (KL, -1.0))
+            z = sgn * δ
+            ua = sing_get_ua_gal(asymps[i], z)
+            dua = sing_get_dua_gal(asymps[i], z)
+            ξ = ua[imres, 2, 1]
+            ξ′ = dua[imres, 2, 1]
+            singfac = -nn * q1 * z              # m_res − n·q(ψ_s+z) to leading order
+            K[i] = im * (singfac * ξ′ - nn * q1 * ξ)
+        end
+    end
+    return KL, KR
+end
+
+"""
+    gal_match_rpec(ctrl, equil, intr, gal_result, asymps) -> GalMatchResult
 
 Solve the coil-driven RPEC matching from the outer Δ′ (`gal_result`) and the per-surface inner-layer Δ.
 Requires `gal_result.solution` (reconstructed outer ξ/ξ′) and the rpec coil block `gal_result.delta_coil`.
@@ -23,7 +56,7 @@ The resistive path uses per-surface inputs `ctrl.gal_eta`/`gal_rho`/`gal_rotatio
 solution is the bare ideal coil column (Fortran rmatch `coil%ideal_flag`) — the DCON/EL reference.
 """
 function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStatesInternal,
-    gal_result::GalerkinResult)
+    gal_result::GalerkinResult, asymps::Vector{GalSingAsymp})
 
     msing = gal_result.msing
     mpert = intr.numpert_total
@@ -34,6 +67,12 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         error("gal_match_rpec: gal_result.solution is missing (need the gal-reconstructed ξ/ξ′)")
     isempty(gal_result.delta_coil) &&
         error("gal_match_rpec: delta_coil is empty — gal_rpec_flag must be true for RPEC matching")
+
+    # Singular-surface set (same helper as galerkin_solve); needed by both branches (Δ_mn kernels)
+    # and by the resistive inner-layer loop.
+    sings, _, _ = gal_resonant_surfaces(intr, equil)
+    length(sings) == msing ||
+        error("gal_match_rpec: re-derived $(length(sings)) surfaces, expected msing=$msing")
 
     if ctrl.gal_ideal_flag
         # Ideal limit (Fortran rmatch coil%ideal_flag, match.f): skip the inner layer entirely
@@ -53,12 +92,6 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         for (name, v) in (("gal_eta", ctrl.gal_eta), ("gal_rho", ctrl.gal_rho), ("gal_rotation", ctrl.gal_rotation))
             length(v) == msing || error("gal_match_rpec: $name has length $(length(v)), expected msing=$msing (one value per surface, core→edge)")
         end
-
-        # Re-derive the gal singular-surface set (same helper as galerkin_solve) for the SingType objects
-        # resist_eval needs.
-        sings, _, _ = gal_resonant_surfaces(intr, equil)
-        length(sings) == msing ||
-            error("gal_match_rpec: re-derived $(length(sings)) surfaces, expected msing=$msing")
 
         # --- inner-layer matching data Δ(Q) per surface (deltac_run; match.f) ---
         # solve_inner_profile returns the same Δ as solve_inner plus the reconstructed inner-layer field,
@@ -173,7 +206,19 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         end
     end
 
-    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, inner_b, inner_params, rpec_eig, residual)
+    # Coefficient-based Δ_mn (both branches; ideal has cout = 0 ⇒ coil small content only).
+    # Small-solution content of the matched solution at each surface side: the resonant solutions'
+    # small coefficients (delta rows 1:2msing) weighted by cout, plus the coil column's own small
+    # content (delta rows 2msing+1:end). Slots: column 2i-1 = left, 2i = right of surface i.
+    KL, KR = gal_deltamn_kernels(asymps, sings, intr, nn)
+    Dm = gal_result.delta
+    S_small = transpose(cout) * Dm[1:2msing, :] .+ Dm[(2msing+1):(2msing+mcoil), :]   # (mcoil × 2msing)
+    delta_mn = Matrix{ComplexF64}(undef, msing, mcoil)
+    for i in 1:msing, j in 1:mcoil
+        delta_mn[i, j] = KR[i] * S_small[j, 2i] - KL[i] * S_small[j, 2i-1]
+    end
+
+    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, inner_b, delta_mn, inner_params, rpec_eig, residual)
 end
 
 """

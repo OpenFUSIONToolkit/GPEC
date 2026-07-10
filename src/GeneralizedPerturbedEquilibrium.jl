@@ -517,10 +517,16 @@ function main_from_inputs(
         if ctrl.gal_flag && ctrl.gal_match_flag && gal_data !== nothing && gal_data.match !== nothing
             @info "PerturbedEquilibrium: using the RPEC-matched gal solution"
             pe_odet = gal_matched_odestate(gal_data, ffit, intr)
+            pe_intr.odet_from_gal = true
             # Inner-layer penetrated field per coil-drive column, same basis as the matched OdeState
             # columns; SingularCoupling uses it as the official penetrated field (pointwise midpoint
             # is only the fallback). Ideal mode: match.bpen is identically zero ⇒ B_pen ≡ 0.
             pe_intr.inner_bpen = gal_data.match.bpen
+            # Δ_mn coefficient object (gal paths, ideal + resistive): small-solution content at the
+            # conventional brackets — replaces the finite-jump evaluation in SingularCoupling.
+            # (The non-galerkin ideal pathway gets its own Δ object separately; until then shooting
+            # runs fall back to the finite jump.)
+            pe_intr.ffs_delta_mn = gal_data.match.delta_mn
         elseif ctrl.kinetic_factor == 0
             # Ideal shooting run: perfect shielding — the penetrated field is exactly zero, same
             # dispatch as the gal-ideal path. Only KINETIC shooting remains on the pointwise

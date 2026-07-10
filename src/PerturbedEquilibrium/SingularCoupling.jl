@@ -40,6 +40,20 @@ function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
 end
 
+# Cubic Hermite interpolant DERIVATIVE at psi. Used when the endpoint derivatives are analytic
+# (gal-matched OdeState: ud_store carries the exact ξ′ including the resonant Frobenius content),
+# so the interpolated derivative is consistent with the stored analytic one — unlike a chord slope,
+# which differences singular content across nodes.
+function _hermite_cubic_deriv(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
+    h = psi_b - psi_a
+    t = (psi - psi_a) / h
+    d00 = (6t^2 - 6t) / h
+    d10 = 3t^2 - 4t + 1
+    d01 = (-6t^2 + 6t) / h
+    d11 = 3t^2 - 2t
+    return @. d00 * u_a + d10 * du_a + d01 * u_b + d11 * du_b
+end
+
 # Reflect a periodic theta-space vector θ → -θ (the theta reversal in gpvacuum_flxsurf).
 _reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
 
@@ -134,10 +148,12 @@ function compute_singular_coupling_metrics!(
     state.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
     state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     state.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
-    # B_pen dispatch: a ForceFreeStates-provided layer-center penetrated field (identically zero in
-    # ideal mode) becomes the OFFICIAL C_penetrated_area_weighted_field; the pointwise midpoint
-    # evaluation below is only the fallback.
+    # Dispatch flags: ForceFreeStates-provided objects take precedence over the bracket evaluations.
+    #  - inner_bpen: layer-center penetrated field (identically zero in ideal mode) → becomes the
+    #    OFFICIAL C_penetrated_area_weighted_field; pointwise midpoint is only the fallback.
+    #  - ffs_delta_mn: coefficient-based Δ_mn → replaces the finite-jump C_delta_prime when present.
     use_inner_bpen = !isempty(intr.inner_bpen)
+    use_ffs_delta = !isempty(intr.ffs_delta_mn)
     use_inner_bpen && (state.C_penetrated_field_inner = zeros(ComplexF64, n_rational, numpert_total))
     state.rational_psi = zeros(Float64, n_rational)
     state.rational_q = zeros(Float64, n_rational)
@@ -225,12 +241,21 @@ function compute_singular_coupling_metrics!(
 
         u_l = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
         u_r = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
-        # Derivative (ud): chord slope from u_store only — ud_store can be systematically off near
-        # outer surfaces (q=4/5) where the ODE solution varies rapidly; near-cancellation in bwp1
-        # then amplifies even a ~10% ud_store error into a large Delta' error. Chord slope avoids
-        # this by using only u values, which are accurately stored by the ODE integrator.
-        ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
-        ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
+        # Derivative (ud): two paths.
+        #  - gal-matched OdeState (intr.odet_from_gal): ud_store is the ANALYTIC ξ′ from the gal basis,
+        #    including the resonant Frobenius series — use the Hermite-cubic derivative built from
+        #    (u, ud), which is exact where the representation is.
+        #  - shooting OdeState: chord slope from u_store only — ud_store can be systematically off near
+        #    outer surfaces (q=4/5) where the ODE solution varies rapidly; near-cancellation in bwp1
+        #    then amplifies even a ~10% ud_store error into a large Delta' error. Chord slope avoids
+        #    this by using only u values, which are accurately stored by the ODE integrator.
+        if intr.odet_from_gal
+            ud_l = _hermite_cubic_deriv(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
+            ud_r = _hermite_cubic_deriv(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
+        else
+            ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
+            ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
+        end
 
         q_l = equil.profiles.q_spline(lpsi)
         q1_l = equil.profiles.q_deriv(lpsi)
@@ -270,6 +295,12 @@ function compute_singular_coupling_metrics!(
             pen_row = (transpose(C_coeffs) * @view(intr.inner_bpen[s, :])) ./ area
             state.C_penetrated_field_inner[row, :] = pen_row
             state.C_penetrated_area_weighted_field[row, :] = pen_row
+        end
+
+        # Δ_mn: prefer the ForceFreeStates coefficient-based object (same contraction); the
+        # finite-jump value assigned above remains only as the fallback.
+        if use_ffs_delta && s <= size(intr.ffs_delta_mn, 1)
+            state.C_delta_prime[row, :] = transpose(C_coeffs) * @view(intr.ffs_delta_mn[s, :])
         end
 
         # LHS normalization audit (#233) — output scalar coordinate-invariance per row:

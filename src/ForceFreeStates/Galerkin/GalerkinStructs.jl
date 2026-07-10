@@ -170,6 +170,7 @@ struct GalMatchResult
     inner_psi::Vector{Vector{Float64}}
     inner_xi::Vector{Matrix{ComplexF64}}
     inner_b::Vector{Matrix{ComplexF64}}   # per surface, matched inner-layer b^ψ(ψ) on inner_psi (overlap validation)
+    delta_mn::Matrix{ComplexF64}          # (msing × mcoil) coefficient-based Δ_mn (small-solution content at the conventional brackets)
     inner_params::Vector{InnerLayer.GGJParameters}  # per-surface layer coefficients from resist_eval (empty in the ideal limit)
     rpec_eig::Vector{ComplexF64}
     residual::Float64

@@ -81,8 +81,18 @@ Internal state variables for perturbed equilibrium calculations.
     # coil-drive basis as the matched OdeState solutions, so PE's C_coeffs contraction applies.
     # DISPATCH: when non-empty, this is the OFFICIAL penetrated field (C_penetrated_area_weighted_field);
     # the pointwise surface interpolation is only the fallback. Ideal mode (gal OR shooting) passes
-    # identically zero — perfect shielding. Empty → pointwise fallback (kinetic shooting: outstanding).
+    # identically zero — perfect shielding. Empty → pointwise fallback, which after the main.jl wiring
+    # only happens for KINETIC shooting runs (outstanding).
     inner_bpen::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    # ForceFreeStates-provided Δ_mn per (match surface × coil-drive column), same basis/contraction
+    # as inner_bpen, in the C_delta_prime output convention ([∂ψ(𝒥b·∇ψ)]/(2πχ₁) per unit drive).
+    # DISPATCH: when non-empty it replaces the finite-jump evaluation (which is offset-dependent for
+    # p₁ ≠ 1/2 and penetration-contaminated in resistive runs). To be populated by ForceFreeStates:
+    # ideal Δ_coil calculation (in progress) and the layer-consistent resistive Δ (Fortran parity, TBD).
+    ffs_delta_mn::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    # True when the PE OdeState is the gal(-matched) solution: ud_store then carries the analytic ξ′
+    # (incl. resonant series), enabling the exact-derivative path in SingularCoupling.
+    odet_from_gal::Bool = false
 end
 
 """
