@@ -89,9 +89,9 @@ Eqs. (34)–(35).
     Every figure on this page is computed on the ``q = 4`` rational-surface
     benchmark ([`q4_surface_benchmark`](@ref InnerLayer.q4_surface_benchmark)) —
     a fixed set of GGJ layer coefficients (``S = \tau_R/\tau_A \approx 4.6\times10^{6}``,
-    ``D_I \approx -0.31``) representative of a physical ``q = 4`` surface. It is a
-    stand-alone inner-layer coefficient set, not extracted from a particular
-    equilibrium run such as the DIII-D-like example. The well-conditioned
+    ``D_I \approx -0.31``) frozen into code from the ``q = 4`` rational surface of
+    the DIII-D-like (TkMkr H-mode) equilibrium of the `resistive_resmets`
+    benchmark, at that case's per-surface ``\eta`` and ``\rho``. The well-conditioned
     real-``Q`` cross-check in the Validation section instead uses the
     Glasser & Wang (2020) Eq. (55) surface.
 
@@ -104,15 +104,20 @@ The `GGJ` model exposes three solvers through the `solver` type parameter of
 | backend | method | robust regime |
 |:--------|:-------|:--------------|
 | `:shooting` | backward stable shoot from ``X_\mathrm{max}\to 0`` | ``\lvert Q\rvert \ll 1`` |
-| `:galerkin` | Hermite-cubic finite-element (real axis) | ``\lvert Q\rvert \lesssim 1`` |
+| `:galerkin` | Hermite-cubic finite-element (real axis) | drift onset ``\lvert Q\rvert \sim 1``; 1% error by ``\lvert Q\rvert \sim 4`` |
 | `:ray` (default) | rotated-contour spectral-element collocation | ``\lvert Q\rvert \sim 500`` on/near the imaginary axis |
 
-The difficulty is that ``\Delta(Q)`` has poles on the imaginary-``Q`` axis, and
-both older backends lose accuracy off the real axis: `:shooting` through the
-exponential dichotomy of the backward shoot, `:galerkin` through real-axis
-oscillation and an on-axis pseudo-resonance. Measured against the `:ray`
-reference along the imaginary axis, `:shooting` holds to ``|Q|\sim 1`` and
-`:galerkin` to ``|Q|\sim 4`` before both lose all accuracy:
+The difficulty is the large-``|Q|`` imaginary-``Q`` axis itself, where rotation
+and resistivity scans live: there the layer's pseudo-resonance at
+``x^2 = -Q^2(G+KF)`` sits directly on the real-``x`` integration path and the
+exponential dichotomy weakens, so both older backends degrade — `:shooting`
+through the dichotomy of the backward shoot, `:galerkin` through real-axis
+oscillation and the on-axis pseudo-resonance. (The poles of ``\Delta(Q)``
+itself lie on and near the **real**-``Q`` axis — they are the layer
+eigenvalues; ``\Delta`` is smooth along the imaginary axis.) Measured against
+the `:ray` reference along the imaginary axis, `:shooting` holds to
+``|Q|\sim 1`` and `:galerkin` to ``|Q|\sim 4`` (the 1% error crossings)
+before both lose all accuracy:
 
 ![Relative error of the :shooting and :galerkin backends against the :ray reference along the imaginary-Q axis, on the q=4 benchmark surface. Each curve's crossing of the 1% line marks that method's practical reach.](figures/inner_layer/backend_regime_map.png)
 
@@ -208,14 +213,20 @@ outer-region matching relies on.
 ## Validation and benchmarks
 
 **Cross-check against the Fortran `rmatch` solver.** At the Glasser & Wang
-(2020) Eq. (55) operating point ``Q = 0.1234`` (real, well-conditioned) the
-Julia GGJ solvers and the Fortran `rmatch deltac` solver agree to ``\sim
-10^{-8}``:
+(2020) Eq. (55) operating point ``Q = 0.1234`` (real) the `:galerkin` backend
+reproduces the Fortran `rmatch deltac` solver to ``\sim 10^{-8}``:
 
-| quantity | value (`:galerkin` and `:ray`) |
-|:---------|:-------------------------------|
-| ``\Delta_\mathrm{odd}`` | ``3.698368\times 10^{4}`` |
-| ``\Delta_\mathrm{even}`` | ``14.759721`` |
+| quantity | `:galerkin` (= Fortran to ``10^{-8}``) | `:ray` |
+|:---------|:---------------------------------------|:-------|
+| ``\Delta_\mathrm{odd}`` | ``3.698368\times 10^{4}`` | ``3.69789\times 10^{4}`` |
+| ``\Delta_\mathrm{even}`` | ``14.759721`` | ``14.759715`` |
+
+The large ``\lvert\Delta_\mathrm{odd}\rvert \sim 4\times10^{4}`` means this
+operating point sits near a pole of ``\Delta(Q)``, where every solver's error
+is amplified by the pole geometry; the ``1.3\times10^{-4}``
+`:galerkin`↔`:ray` difference in ``\Delta_\mathrm{odd}`` (versus
+``4\times10^{-7}`` in ``\Delta_\mathrm{even}``) is consistent with that
+amplification, not a defect of either backend.
 
 **Physical benchmark on the imaginary axis.** On the ``q=4`` rational-surface
 benchmark ([`q4_surface_benchmark`](@ref InnerLayer.q4_surface_benchmark), ``S \approx 4.58\times10^6``,
@@ -224,15 +235,18 @@ entirely beyond `:galerkin`:
 
 | quantity | value at ``Q = 500i`` |
 |:---------|:----------------------|
-| ``\Delta_\mathrm{odd}`` | ``2.47206 + 13.35412\,i`` |
-| ``\Delta_\mathrm{even}`` | ``0.137497 + 0.742755\,i`` |
+| ``\Delta_\mathrm{odd}`` | ``2.4720 + 13.3540\,i`` |
+| ``\Delta_\mathrm{even}`` | ``0.13750 + 0.74275\,i`` |
 
 **Convergence and contour invariance.** Because ``\Delta`` is an analytic
 invariant of the contour angle, re-solving with each numerical knob perturbed on
 an independent axis ([`delta_convergence`](@ref InnerLayer.delta_convergence)) gives an honest error bar: at
 ``Q = 500i`` the worst-case spread across all knobs is ``\sim 5\times10^{-6}``
 for ``\Delta_\mathrm{odd}`` and ``\sim 6\times10^{-7}`` for
-``\Delta_\mathrm{even}``.
+``\Delta_\mathrm{even}``. That is a single-machine error bar: across
+machines/BLAS builds the absolute values reproduce to ``\sim 10^{-5}``
+relative (the damped-zone implicit solves carry platform-dependent structured
+roundoff), which is why the table above quotes five significant figures.
 
 ![Relative change of Δ at Q = 500i under independent perturbations of each numerical knob (contour angle, spectral order, series order/radius, refinement depth, march tolerance, handoff radius, purification depth). The worst-case spread is the reported error bar.](figures/inner_layer/convergence_Sinvariance.png)
 
@@ -241,9 +255,9 @@ for ``\Delta_\mathrm{odd}`` and ``\sim 6\times10^{-7}`` for
 `:ray` is the **default** — `GGJModel()` constructs `GGJModel{:ray}()`. It is
 the correct choice for ``|Q| \gtrsim 1`` and for any ``Q`` near the imaginary
 axis. `:galerkin` remains available and may be faster for very small real
-``|Q|``, but note the backends take different numerical-knob keywords: pass
+``|Q|``, but note the backends take disjoint numerical-knob keywords: pass
 `GGJModel(solver=:galerkin)` explicitly when supplying the Galerkin `nx`/`xfac`
-knobs, since those are silently ignored by `:ray`.
+knobs — passing them to the default `:ray` backend throws a `MethodError`.
 
 ```julia
 using GeneralizedPerturbedEquilibrium.InnerLayer

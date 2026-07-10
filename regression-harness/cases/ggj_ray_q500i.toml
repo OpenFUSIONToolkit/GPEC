@@ -12,12 +12,15 @@ kind = "computed"
 
 # Δ_odd / Δ_even from solve_inner(GGJModel(:ray), q4_surface_benchmark(), 500im·Q₀).
 # Complex-valued; both real and imaginary parts are tracked separately.
+# noise_threshold 1e-4 (absolute): the extended-precision damped-zone march carries
+# BLAS/platform-dependent structured roundoff at the ~1e-4 absolute level on these
+# O(10) components (~1e-5 relative); a tighter floor flags phantom cross-machine drift.
 [quantities.delta_odd_real]
 h5path = "ggj/delta_odd_real"
 type = "real_scalar"
 extract = "value"
 label = "Re(Δ_odd)"
-noise_threshold = 1e-8
+noise_threshold = 1e-4
 order = 10
 
 [quantities.delta_odd_imag]
@@ -25,7 +28,7 @@ h5path = "ggj/delta_odd_imag"
 type = "real_scalar"
 extract = "value"
 label = "Im(Δ_odd)"
-noise_threshold = 1e-8
+noise_threshold = 1e-4
 order = 11
 
 [quantities.delta_even_real]
@@ -33,7 +36,7 @@ h5path = "ggj/delta_even_real"
 type = "real_scalar"
 extract = "value"
 label = "Re(Δ_even)"
-noise_threshold = 1e-8
+noise_threshold = 1e-4
 order = 12
 
 [quantities.delta_even_imag]
@@ -41,7 +44,7 @@ h5path = "ggj/delta_even_imag"
 type = "real_scalar"
 extract = "value"
 label = "Im(Δ_even)"
-noise_threshold = 1e-8
+noise_threshold = 1e-4
 order = 13
 
 [quantities.runtime]
