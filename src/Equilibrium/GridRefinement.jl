@@ -35,10 +35,10 @@ const H_TARGET_MIN = 1e-4
 const H_TARGET_MAX = 0.2
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
-# Local packing around mandatory (rational) surfaces: knot spacing h_s = coef·τ^(1/3) at
-# the surface, geometric growth away from it, applied within the given radius. The Δ'
-# asymptotic matching samples the ψ-splined coefficient matrices around each singular
-# surface, so their local interpolation error controls Δ' convergence there.
+# Local density elevation around mandatory (rational) surfaces: knot spacing h_s = coef·τ^(1/3)
+# at the surface, geometric growth away from it, applied within the given radius. This keeps the
+# equidistributed base grid from starving the approach to each rational; the explicit ladder
+# (ForceFreeStates.rational_psi_ladder) then owns the fine, τ-invariant layer resolution.
 const SING_PACK_COEF = 0.06
 const SING_PACK_RADIUS = 0.05
 
@@ -206,7 +206,7 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
         rho_s[i] = max(rho_s[i], 1.0 / H_TARGET_MAX)
     end
 
-    # Local packing around mandatory (rational) surfaces
+    # Local density elevation around mandatory (rational) surfaces
     h_s = max(SING_PACK_COEF * tau^(1 / 3), H_TARGET_MIN)
     for psi_m in mandatory
         @inbounds for i in 1:n
@@ -249,22 +249,23 @@ function _equidistribute(xs::Vector{Float64}, rho::Vector{Float64}, N::Int)
 end
 
 """
-    merge_mandatory_nodes(grid, mandatory; delta_frac=0.25) -> Vector{Float64}
+    merge_mandatory_nodes(grid, mandatory; delta_frac=0.25, collapse_atol=1e-7) -> Vector{Float64}
 
-Insert mandatory knots (e.g. rational surfaces) into a base grid with a minimum-spacing
-guard: for each mandatory node, δ_min = `delta_frac` × (containing base-grid interval),
-and any pre-existing non-mandatory node within δ_min is dropped (snap — the mandatory node
-is never moved). Endpoints always win: mandatory nodes outside the open span or within
-δ_min of an endpoint are discarded. Mandatory nodes within δ_min of an earlier mandatory
-node are collapsed onto it — the same physical surface can be found through several (m, n)
-pairs differing only by root-finder noise, and a near-zero interval would ring the
-reconstructed splines; two genuinely distinct surfaces closer than δ_min cannot be
-resolved separately at the local grid resolution anyway.
+Insert mandatory knots (e.g. rational surfaces, or a geometric ladder straddling them) into
+a base grid with a minimum-spacing guard: for each mandatory node, δ_min = `delta_frac` ×
+(containing base-grid interval), and any pre-existing non-mandatory node within δ_min is
+dropped (snap — the mandatory node is never moved). Endpoints always win: mandatory nodes
+outside the open span or within δ_min of an endpoint are discarded. Mandatory nodes within
+`collapse_atol` of an earlier mandatory node are collapsed onto it — the same physical
+surface can be found through several (m, n) pairs differing only by root-finder noise, and a
+near-zero interval would ring the reconstructed splines. Collapse uses an absolute tolerance,
+not δ_min, so intentionally fine mandatory clusters (a singular-layer ladder whose spacing is
+far below the base interval) survive while true duplicates still merge.
 
 The function is agnostic to node provenance, so future mandatory sources (e.g. kinetic
 resonance surfaces) plug in without change.
 """
-function merge_mandatory_nodes(grid::Vector{Float64}, mandatory::Vector{Float64}; delta_frac::Float64=0.25)
+function merge_mandatory_nodes(grid::Vector{Float64}, mandatory::Vector{Float64}; delta_frac::Float64=0.25, collapse_atol::Float64=1e-7)
     isempty(mandatory) && return copy(grid)
     lo, hi = grid[1], grid[end]
     mand = sort(unique(mandatory))
@@ -281,8 +282,8 @@ function merge_mandatory_nodes(grid::Vector{Float64}, mandatory::Vector{Float64}
         (lo < m < hi) || continue
         δ = delta_frac * base_h(m)
         (m - lo < δ || hi - m < δ) && continue
-        if m - last_mand < δ
-            @debug "merge_mandatory_nodes: collapsing mandatory node ψ=$m onto ψ=$last_mand (spacing < δ_min)"
+        if m - last_mand < collapse_atol
+            @debug "merge_mandatory_nodes: collapsing mandatory node ψ=$m onto ψ=$last_mand (spacing < collapse_atol)"
             continue
         end
         # Snap: drop non-mandatory, non-endpoint nodes within δ of the mandatory node
