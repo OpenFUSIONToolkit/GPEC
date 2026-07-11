@@ -20,8 +20,9 @@ transcription or vice versa).
 | Island flux amplitude ``\tilde\psi`` | [ψ̃ amplitude](psi-tilde-amplitude.md) | ✅ signed off 2026-07-11 |
 | Magnetic drift frequency ``\hat\omega_D`` + `:original`/`:improved` toggle | [ω̂_D drift frequency](omega-D-drift-frequency.md) | ✅ signed off 2026-07-11 |
 | Pitch-angle collision operator + deflection frequency + ``\nu_\star`` | [collision operator](collision-operator.md) | ✅ signed off 2026-07-11 (``\langle\hat\nu_{ii}\rangle_u`` deferred) |
+| Flattened-electron closure ``h(\Omega)`` + amplitude | [electron closure](electron-closure.md) | drafted — awaiting sign-off (``k``, ``f_p`` deferred) |
 
-The remaining Q3 items (the analytic ``\langle\hat\nu_{ii}\rangle_u`` velocity
-average, the flattened-electron closure ``h(\Omega)``/``k``/``f_p``, the
-quasineutrality closure, and the ``\Delta_{\cos}/\Delta_{\sin}`` prefactors) are
-added here as the derivation lane proceeds (M2b contract).
+The remaining items (the analytic ``\langle\hat\nu_{ii}\rangle_u`` velocity
+average, the electron-closure constants ``k``/``f_p``, the quasineutrality
+closure, and the ``\Delta_{\cos}/\Delta_{\sin}`` prefactors) are added here as the
+derivation lane proceeds (M2b contract).

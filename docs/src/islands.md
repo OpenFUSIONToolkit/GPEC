@@ -99,6 +99,15 @@ Modules = [GeneralizedPerturbedEquilibrium.Islands.Fields]
 Modules = [GeneralizedPerturbedEquilibrium.Islands.Moments]
 ```
 
+### Cleared physics coefficients (`Islands.Coefficients`)
+
+Human-cleared Level-0 coefficient builders (the M2b derivation-lane fill-ins;
+see the Derivations section).
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Coefficients]
+```
+
 ### Newton–Krylov solve (`Islands.Solvers`)
 
 ```@autodocs
