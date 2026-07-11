@@ -18,8 +18,11 @@ then implementation** — ending with the B-ladder physics benchmarks running.
 4 are the spine of this milestone), `docs/src/islands/LOG.md` and
 `QUESTIONS.md` (Q3 items and mode, Q4), then design docs
 `docs/src/islands/design/{00-roadmap,01-physics-level0,03-architecture,04-numerics,05-verification}.md`
-and the as-implemented chapter `docs/src/islands/numerics.md`. The source PDFs
-are in the `docs/08` reference library. The repo-root `CLAUDE.md` governs
+— **especially docs/05 "Target tiers and reproducibility" and Decision D9
+(00): the physics gates are scalings/differentials, absolute numbers are
+audit-gated** — and the as-implemented chapter `docs/src/islands/numerics.md`.
+The source PDFs are in the `docs/08` reference library. The repo-root
+`CLAUDE.md` governs
 GPEC-wide conventions.
 
 ## Goal (set this as your `/goal` completion condition)
@@ -57,24 +60,39 @@ GPEC-wide conventions.
    populates the M2 gated parameters, each value annotated with its derivation
    anchor. Un-gate progressively: partial sign-off ⇒ partial fill-in; anything
    unsigned stays NaN/supplied.
-4. **The B-ladder starts running**: for cleared configurations, un-skip the
-   corresponding `benchmarks/islands/` scripts and run them with the docs/05
-   reporting rules (grid-convergence + tolerance archived with every result;
-   half-widths with both `ρ_θi` and `ρ_bi` stated). The DoD is **benchmarks
-   running with archived artifacts and honest triage** — B5 threshold
-   *agreement* is the Level-0 gate, not this milestone's precondition;
-   disagreements are triaged per docs/05 rule 3 (our bug / their approximation
-   / their published-equation error / transcription error) with the resolution
-   logged before any conclusion.
-5. Q4 source acquisition: WCHH96 and Park PoP 29 (2022) PDFs into the `docs/08`
-   library (ask the user — they may have them); escalate in `QUESTIONS.md` if
-   unavailable and proceed with what the in-repo sources support.
-6. The full suite passes; the Physics Book chapter
+4. **The input-completeness audit** (Decision D9, docs/05 "Target tiers"): a
+   per-source *input manifest* (using the docs/05 template) for each threshold
+   source — I19, D21, D23a/b, L23 — written into a new
+   `docs/src/islands/design/09-input-manifests.md` (or a docs/05 appendix;
+   executor's choice), each required input either cited to where the paper
+   states it or recorded as "unspecified → assumption + sensitivity scan
+   needed". This audit is what decides, per target, whether a T4 absolute
+   comparison is even attemptable or the target stays T3. It is itself a
+   Paper-I methods deliverable (OUTLINE claim C9). B5a's collisionality
+   contradiction is the type specimen — resolve it *in the manifest*, not by
+   picking a number.
+5. **The B-ladder starts running — tiered (D9)**: for cleared configurations,
+   un-skip the `benchmarks/islands/` scripts. The DoD is the **primary-tier
+   gates running with archived artifacts**: the T2 drift-model **toggle
+   differential** (:original → :improved w_c ratio, measured within Islands),
+   and the T3 **scaling/existence/trend** sweeps (1/w and 1/w³, layer widths
+   ∝ ν^{1/2}, ω_E² with a sign reversal existing, threshold existence at
+   w_c ~ O(ρ_θi), dw_c/dν_★ > 0) with fitted exponents/signs. **T4 absolute
+   comparisons are attempted only for manifests the audit completes, and
+   reported only with the manifest + an input-sensitivity scan** (docs/05
+   reporting rules 6–8) — never as bare pass/fail. Follow the docs/05 reporting
+   rules (grid-convergence archived; half-widths with both ρ_θi and ρ_bi
+   stated); triage disagreements per docs/05 rule 3 (now including
+   "under-specified source configuration"). B5 absolute *agreement* is never
+   this milestone's precondition.
+6. Q4 source status: WCHH96 and Park 2022 are both in the library (resolved
+   2026-07-09; docs/08). Nothing to acquire — proceed with the in-repo sources.
+7. The full suite passes; the Physics Book chapter
    (`docs/src/islands/numerics.md` or a new physics chapter) is updated **in
    the same PR** for every equation that becomes as-implemented (docs/07
    policy), with figures regenerated via the pinned script where outputs
    change.
-7. A PR is open onto `feature/islands`, and `physics-verifier` has passed on
+8. A PR is open onto `feature/islands`, and `physics-verifier` has passed on
    every physics-adjacent commit — its job here is checking **provenance**:
    derivations marked `[DERIVED]`, transcriptions never silently promoted,
    no unsigned coefficient in `src/`.
@@ -111,8 +129,11 @@ GPEC-wide conventions.
 
 Any coefficient in `src/` without a recorded human sign-off; a derivation
 presented without its cross-check table; a discrepancy resolved silently; a
-benchmark "passing" via tuned coefficients or weakened tolerance; the suite
-red; docs not updated with the as-implemented equations; or the tree dirty.
-Conversely: B5 threshold *disagreement* after honest triage is a reportable
-result, not a failure — do not chase agreement past what the derivations
-support.
+benchmark "passing" via tuned coefficients or weakened tolerance; a **T4
+absolute comparison reported without its input manifest and sensitivity scan**
+(Decision D9); the suite red; docs not updated with the as-implemented
+equations; or the tree dirty. Conversely: a T4 absolute *disagreement* after
+honest triage — including "the source is under-specified" — is a reportable
+result, not a failure. **Do not chase absolute agreement**; the primary gates
+are the T2 differentials and T3 scalings, and pursuing an absolute number past
+what the derivations and input manifests support is itself out of bounds.

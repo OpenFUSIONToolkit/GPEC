@@ -48,10 +48,14 @@ only, no physics numbers (module `CLAUDE.md`, the `[VERIFY]` policy):
 
 Structural gates **A1–A5, A7 (coefficient-free part), A8** run in CI. The
 physics numbers (drift-frequency coefficients, collision kernels, closure
-constants, the Δ prefactors, York thresholds) remain `[VERIFY]`-gated: the
+constants, the Δ prefactors, threshold values) remain `[VERIFY]`-gated: the
 B-ladder benchmarks in `benchmarks/islands/` ship skipped, each naming the
-`QUESTIONS.md` entries (Q2–Q4) whose human clearance un-gates it. The Paper-I
-figure contract is `docs/src/islands/papers/paper-1/OUTLINE.md`.
+`QUESTIONS.md` entries (Q2–Q4) whose human clearance un-gates it. The
+literature-facing physics gates are **tiered by reproducibility** (Decision D9,
+docs/05): scalings, regime trends, and internal differentials are the primary
+quantitative checks, and absolute literature numbers are audit-gated (reported
+only with input manifests). The Paper-I figure contract is
+`docs/src/islands/papers/paper-1/OUTLINE.md`.
 
 ## API Reference
 

@@ -112,7 +112,13 @@ supervising sessions.
     or `(w_ψ²/4)(q_s/q_s′)` (one I19 extraction)? `[VERIFY: check I19 as printed —
     possible typo in the paper itself]` — sets the `Δ_cos/Δ_sin` prefactor.
   - B5a run collisionality: I19 §4.2 states `ν_★ = 0.01`; L23 p. 82 quotes DK-NTM at
-    `ν_★ = 10⁻³`. Resolve before pinning the B5a tolerance.
+    `ν_★ = 10⁻³`. **Reframed by Decision D9 (2026-07-11)**: this is no longer a
+    tolerance to pin but the **type specimen of the input-completeness problem**
+    — I19 is internally inconsistent about its own run, so its absolute w_c is a
+    T4 (audit-gated) target, not a pass/fail number. It is resolved *in the M2b
+    input manifest* (`docs/09`/audit), recording both values as the source's
+    ambiguity; the primary B5 gates (T2 toggle differential, T3 existence/trend)
+    do not depend on it.
   - ~~Acquire WCHH96 and Park PoP 29 (2022)~~ **Both resolved (2026-07-09)**:
     the user added WCHH96 (Wilson, Connor, Hastie & Hegna, PoP **3**, 248
     (1996), doi:10.1063/1.871830) to the island reference library, and Park
@@ -125,8 +131,18 @@ supervising sessions.
     as **B26**). Remaining open in Q4: the `ψ̃` amplitude check and the B5a run
     collisionality.
 - **Options**: (a) user resolves from the source PDFs; (b) an independent
-  re-derivation pins `ψ̃` and the collisionality is read from the reproduced run.
-- **Recommendation**: resolve `ψ̃` by re-derivation (it is a clean dimensional check);
-  read the B5a collisionality from whichever run the D8 triangle pins as canonical.
-- **Gated work**: the `Δ_cos/Δ_sin` normalization; the B5a threshold tolerance; the
-  B2 large-w and D1 SLAYER comparisons.
+  re-derivation pins `ψ̃` and the collisionality is recorded in the input manifest.
+- **Recommendation**: resolve `ψ̃` by re-derivation (a clean dimensional check, M2b);
+  record the B5a collisionality ambiguity in the input manifest rather than
+  "resolving" it — per D9 the absolute B5a value is audit-gated, not a gate.
+- **Gated work**: the `Δ_cos/Δ_sin` normalization (the `ψ̃` item); the T4 B5a/B2
+  absolute comparisons (the manifest items) — the T2/T3 primary gates are not
+  blocked by these.
+
+**Tier note (Decision D9, 2026-07-11):** verification targets are now tiered by
+reproducibility (docs/05 "Target tiers"). This changes what the Q3/Q4 clearances
+*buy*: a cleared coefficient set un-gates the **primary** T2 (internal
+differentials) and T3 (scalings/trends/existence) physics gates directly; the T4
+absolute literature comparisons additionally require the M2b input-completeness
+audit and are reported only with input manifests + sensitivity scans, never as
+bare pass/fail. The derivation lane inherits this framing.

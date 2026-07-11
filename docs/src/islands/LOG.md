@@ -8,6 +8,38 @@ relevant.
 
 ---
 
+## 2026-07-11 — Re-scope verification targets: tiered by reproducibility (Decision D9)
+
+- **Moved**: user flagged that absolute literature numbers (w_c ≃ 2.76 ρ_θi ≡
+  8.73 ρ_bi, 0.45 ρ_θi ≡ 1.46 ρ_bi, the kokuchou 0.440… fit, the −0.89 ω_dia,e
+  reversal, the D23a shaping widths) were quoted as if they were pass/fail
+  targets — but reproducing an absolute number needs *every* input of the
+  source's exact scenario, which the lineage under-specifies (B5a's own
+  collisionality is internally contradictory). Direction: qualitative/scaling
+  checks (the Park 2022 / Burgess 2026 modality) are the real physics gates.
+- **Decision D9** (adopted, docs/00): a **four-tier target taxonomy** written
+  into docs/05 ("Target tiers and reproducibility"): T1 exact math / T2 internal
+  cross-checks & toggle differentials (the sharpest quantitative claims) / T3
+  scalings-trends-existence vs. literature (primary literature-facing gates) /
+  T4 absolute reproduction — **audit-gated**, never pass/fail without an *input
+  manifest*, downgraded to T3 where the source is under-specified. Added a fifth
+  triage outcome ("under-specified source configuration") and three reporting
+  rules (publish the manifest; prefer differentials/ratios; sensitivity scans).
+- **Applied** across docs/05 (every B/C row retagged; A7 constants marked T1),
+  docs/00 (Level-0 gate softened, D9 logged), the Paper-I OUTLINE (C5–C7
+  reframed scaling-first; new C9 = the input-completeness audit as a methods
+  deliverable), the three B-benchmark scripts + README (tier-labeled headers),
+  the M2b prompt (new deliverable: per-source input manifests in a `docs/09`
+  audit; B-ladder DoD = T2 differential + T3 scalings, T4 only with manifests),
+  QUESTIONS (B5a collisionality reframed as the audit type specimen), and the
+  numerics chapter / islands.md status. Docs-only; no `src/` or test changes.
+- **Why it strengthens the project**: T2 internal differentials give *sharper*
+  claims than absolute matches (we control both sides); the input audit is
+  itself publishable reproducibility content; and it aligns the ladder with the
+  SLAYER-validation precedent Islands models itself on.
+- **Next**: unchanged — M2b derivation lane, now with the input-completeness
+  audit folded into its DoD.
+
 ## 2026-07-08 — M2 L0 solve machinery: Newton–Krylov + moments + species/frames/fields (structure, gated physics)
 
 - **Contract**: `docs/src/islands/design/M2-launch-prompt.md` (interactive /goal

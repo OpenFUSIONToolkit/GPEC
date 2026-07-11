@@ -293,10 +293,16 @@ commits.
 
 ## 9. What comes next
 
-The physics story — the drift-kinetic coefficients, the York threshold triangle
-(DK-NTM ``8.73\,\rho_{bi}`` → RDK-NTM ``1.46\,\rho_{bi}``), the
-``\Delta_{\text{pol}}(\omega_E)`` sign-reversal curve — is written as the
-[Paper I figure contract](papers/paper-1/OUTLINE.md) and un-gates claim by
-claim as the human clearance queue (`QUESTIONS.md` Q2–Q4) is worked through.
-The [design documents](design/00-roadmap.md) hold the full eight-milestone
-program.
+The physics story — the drift-kinetic coefficients, the drift-model threshold
+*scalings and toggle differentials*, the ``\Delta_{\text{pol}}(\omega_E)``
+sign-reversal *behavior* — is written as the
+[Paper I figure contract](papers/paper-1/OUTLINE.md) and un-gates claim by claim
+as the derivation lane and human clearances (`QUESTIONS.md` Q2–Q4) are worked
+through. Following the SLAYER-validation precedent (Park 2022 / Burgess 2026),
+the physics gates are **tiered by reproducibility** (Decision D9, docs/05):
+scalings, regime trends, and internally-controlled differentials are the primary
+quantitative checks; absolute literature numbers (e.g. the "``8.73 \to 1.46\,
+\rho_{bi}``" drift-model shift) are reported only alongside an input manifest and
+sensitivity scan, because reproducing an absolute threshold requires every input
+of the source's exact scenario — which the lineage under-specifies. The
+[design documents](design/00-roadmap.md) hold the full eight-milestone program.

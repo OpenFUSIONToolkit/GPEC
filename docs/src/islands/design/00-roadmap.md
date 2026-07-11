@@ -61,13 +61,17 @@ its thresholds is the headline Level-0 numerics deliverable.
 **Outputs:** Δ_cos(w, ω_E; p), Δ_sin(w, ω_E; p); flux-surface profiles (n, T,
 Φ, flows) across the island; J_∥(x, ξ) with species/channel partitions.
 
-**Gate:** (i) large-w analytic limits (ladder B2: Δ_bs+Δ_cur ∝ 1/w vs. WCHH96
-Eq. (85), Δ_pol ∝ 1/w³); (ii) York thresholds with exact configurations
-(B5a: w_c ≃ 2.76 ρ_θi ≡ 8.73 ρ_bi, :original drift model; B5b: w_c ≈ 0.45
-ρ_θi ≡ 1.46 ρ_bi half-width, :improved model; B5c: kokuchou's
-w_c ≈ 0.440 ρ̂_θi + 0.0178 ν_★ − 7.54×10⁻⁵ finite-ν_★ surface); (iii)
-separatrix-layer polarization structure and the Δ_pol(ω_E) sign-reversal curve
-of D23b (B4, B6).
+**Gate** (tiered per Decision D9 — the gate is the tiered B-ladder green, not
+absolute-number matches; docs/05 "Target tiers"): (i) large-w *scalings*
+Δ_bs+Δ_cur ∝ 1/w and Δ_pol ∝ 1/w³ (B2, T3), the WCHH96 Eq. (85) coefficient
+audit-gated; (ii) the drift-model **toggle differential** — the ~×6 w_c shift
+:original → :improved measured within Islands (B5b, T2, the robust form of the
+sources' 8.73 → 1.46 ρ_bi story) — plus threshold *existence* at w_c ~ O(ρ_θi)
+and kokuchou's dw_c/dν_★ > 0 trend (B5a/B5c, T3); the absolute w_c values
+(2.76/0.45 ρ_θi, the 0.440… fit surface) are T4, reportable only with input
+manifests; (iii) separatrix-layer polarization structure and the *existence and
+ω_E²-scaling* of the Δ_pol(ω_E) sign reversal (B4, B6, T3), its −0.89 location
+T4.
 
 ---
 
@@ -285,3 +289,18 @@ so the SLAYER/Δ′ interfaces Islands consumes are in hand from the first commi
   the three-code triangle (DK-NTM published numbers, RDK-NTM improved-model
   numbers, kokuchou finite-ν_★ surface) with the B5a/B5b/B5c configurations
   pinned in docs/05, superseding the single "York thresholds" gate item.
+- D9 (adopted; user-directed 2026-07-11): **verification targets are tiered by
+  reproducibility** (docs/05 "Target tiers and reproducibility"). Reproducing a
+  published *absolute* number requires every input of the source's exact
+  scenario, and the lineage under-specifies these (B5a's own collisionality is
+  internally contradictory) — so the primary literature-facing physics gates are
+  **scalings, trends, and internal differentials** (T1 exact math / T2 internal
+  cross-checks & toggle ratios / T3 scaling-and-existence vs. literature), and
+  absolute-number reproduction (T4) is aspirational and **audit-gated**: never
+  pass/fail without a published input manifest, and downgraded to T3 where the
+  source is under-specified. Clarifies (does not revoke) D8 — the three-code
+  triangle stays the comparison set, but internal differentials, not absolute
+  matches, are the sharp quantitative claims. Rationale: the SLAYER-validation
+  precedent (Park 2022 / Burgess 2026, docs/08 B26) validates by regime scalings,
+  not single points; and a fifth triage outcome ("under-specified source
+  configuration") is added.
