@@ -200,20 +200,26 @@ Replaced wholesale at Level 1 by the multi-species Fokker–Planck operator.
 ### 2.4 Electrons at Level 0 (O7) — closure now exact
 
 ρ_θe ≪ w ⇒ electron drift islands coincide with the magnetic island. The
-analytic closure is WCHH96's, as used by I19/L23 [CHECKED: I19 Eqs. (14)–(22);
-L23 §2.4]:
+analytic closure is WCHH96's, as used by I19/L23. The h(Ω) profile and its
+amplitude are [CLEARED: human sign-off 2026-07-11 — derivation
+docs/src/islands/derivations/electron-closure.md; the closure constraint
+⟨∂²h/∂x²⟩_Ω = 0 gives h′ = C/Q, far-field matching h → x gives C = w_ψ/2√2,
+matching I19 Eq. 18]:
 
     f_e = (1 − e_eΦ/T_e) F_Mes + h(Ω) F′_Mes − (Iv_∥/ω_ce) F′_Mes ∂h/∂ψ + h̄_e
     h(Ω) = Θ(Ω−1) (w_ψ/2√2) ∫₁^Ω dΩ′/Q(Ω′),   Q(Ω) = (1/2π)∮√(Ω+cos ξ) dξ
 
 h(Ω) is exactly flat inside the separatrix, → x far away, and satisfies
-⟨∂²h/∂x²⟩_Ω = 0 (unit-test target; L23 Eq. 4.1.1). Flux-surface-averaged
-electron flow [CHECKED: I19 Eq. (22); L23 Eqs. 2.5.5–2.5.8]:
+⟨∂²h/∂x²⟩_Ω = 0 (the closure constraint itself; unit-test target, L23 Eq. 4.1.1,
+green as ladder A7). Flux-surface-averaged electron flow — **structure**
+[CLEARED 2026-07-11], **constants k, f_p deferred** [CHECKED: I19 Eq. (22);
+L23 Eqs. 2.5.5–2.5.8]:
 
     ⟨⟨Bu_∥e⟩_θ⟩_Ω/(B₀v_the) = −[f_t/(1+f_t)](Iv_the/ω_ce)(n′/n)(1 + η_e + ½ k f_c η_e)⟨∂h/∂ψ⟩_Ω
                               + [f_c/(1+f_t)] ⟨⟨Bu_∥i⟩_θ⟩_Ω/(B₀v_thi)
 
-with k ≃ −1.173 (Hirshman–Sigmar; unit-test: L23 reproduces −1.1730) and
+with **[CHECKED, uncleared — deferred sub-items, own derivations]** k ≃ −1.173
+(Hirshman–Sigmar; unit-test: L23 reproduces −1.1730) and
 f_p ≃ 1 − 1.46√ε. Note the electron current depends on the *numerically
 computed ion flow* (momentum conservation) — the closure is coupled, not
 one-way. Toggle `electrons = :flattened | :kinetic`: the `:kinetic` option is

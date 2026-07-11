@@ -9,8 +9,10 @@ identity.
 -1.173`` and the passing-fraction constant in ``f_p\simeq 1-1.46\sqrt\varepsilon``
 — specific neoclassical constants, each its own short derivation.
 
-**Status:** awaiting human sign-off. Until signed off, `Fields.h_profile`'s
-prefactor and `Fields.ElectronClosure` constants stay supplied, gated arguments.
+**Status:** ✅ **signed off 2026-07-11** (clearance recorded in docs/01 §2.4) for
+the ``h(\Omega)`` form and amplitude — implemented as `Coefficients.h_amplitude`
+(``C=w_\psi/2\sqrt2``), feeding `Fields.h_profile`'s prefactor. The flow constants
+``k`` and ``f_p`` (§6) remain **deferred / NaN-gated**.
 
 ## 1. Setup
 

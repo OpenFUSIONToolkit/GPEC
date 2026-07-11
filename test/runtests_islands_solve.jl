@@ -271,8 +271,16 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test Fi2.h_profile(0.5; prefactor=1.0) == 0.0   # exactly flat inside the separatrix
         @test Fi2.h_profile(2.0; prefactor=1.0) > 0.0
         @test Fi2.Q_omega(3.0) > Fi2.Q_omega(1.5)        # Q grows with Ω
-        @test !Fi2.is_cleared(Fi2.ElectronClosure())     # closure constants stay NaN-gated (Q3)
+        @test !Fi2.is_cleared(Fi2.ElectronClosure())     # closure constants (k, f_p) stay NaN-gated (Q3)
         @test isnan(Fi2.ElectronClosure().k_HS)
+        # the h(Ω) amplitude C = w_ψ/2√2 is cleared (sign-off 2026-07-11); feeds h_profile's prefactor
+        Co = IslM2.Coefficients
+        @test Co.h_amplitude(0.3) ≈ 0.3 / (2 * sqrt(2))
+        # far-field: with C = w_ψ/2√2 and Q → √Ω, h = C ∫₁^Ω dΩ'/Q → 2C(√Ω − 1)
+        # = (w_ψ/√2)(√Ω − 1), approaching x = (w_ψ/√2)√Ω (derivation §3)
+        w = 0.4
+        Ω = 400.0
+        @test Fi2.h_profile(Ω; prefactor=Co.h_amplitude(w)) ≈ (w / sqrt(2)) * (sqrt(Ω) - 1) rtol = 2e-2
     end
 
     @testset "pseudo-arclength continuation detects the toy fold (03 §3)" begin

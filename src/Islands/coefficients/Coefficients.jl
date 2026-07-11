@@ -27,6 +27,7 @@ import QuadGK
 
 export magnetic_drift_frequency, orbit_average_drift_brackets
 export pitch_diffusivity, deflection_frequency
+export h_amplitude
 
 # Model circular equilibrium field modulation (docs/01 §1, I19 p. 6):
 # b(θ) = B/B_max = (1 − ε cos θ)/(1 + ε); b ∈ [b_min, 1], b_min = b(0), b(π)=1.
@@ -161,5 +162,21 @@ function deflection_frequency(v_hat::Real; nu_tilde::Real=1.0, model::Symbol=:ch
         throw(ArgumentError("model must be :chandrasekhar or :vcubed (got $model)"))
     end
 end
+
+# ---------------------------------------------------------------------------
+# Flattened-electron closure (cleared 2026-07-11; derivation electron-closure.md)
+# ---------------------------------------------------------------------------
+"""
+    h_amplitude(w_psi)
+
+The flattened-electron profile amplitude ``C = w_\\psi/(2\\sqrt2)`` (docs/01 §2.4;
+derivation `electron-closure.md` §3), i.e. the prefactor of
+``h(\\Omega)=\\Theta(\\Omega-1)\\,C\\int_1^\\Omega d\\Omega'/Q(\\Omega')``. Derived
+from the flattening constraint ``\\langle\\partial^2 h/\\partial x^2\\rangle_\\Omega=0``
+(``\\Rightarrow h'=C/Q``) plus far-field matching ``h\\to x``. Feeds
+`Fields.h_profile`'s `prefactor` (and `Fields.ElectronClosure.h_prefactor`); the
+closure constants ``k`` and ``f_p`` remain gated.
+"""
+h_amplitude(w_psi::Real) = w_psi / (2 * sqrt(2))
 
 end # module Coefficients
