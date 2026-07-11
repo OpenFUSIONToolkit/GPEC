@@ -63,7 +63,8 @@ makedocs(;
                 "05 — Verification ladder" => "islands/design/05-verification.md",
                 "06 — Autonomy and tooling" => "islands/design/06-autonomy-and-tooling.md",
                 "07 — Documentation and papers" => "islands/design/07-documentation-and-papers.md",
-                "08 — Reference library" => "islands/design/08-reference-library.md"
+                "08 — Reference library" => "islands/design/08-reference-library.md",
+                "09 — Input manifests" => "islands/design/09-input-manifests.md"
             ]
         ],
         "Citations" => "citations.md",
