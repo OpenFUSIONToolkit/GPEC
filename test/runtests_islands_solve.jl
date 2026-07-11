@@ -245,6 +245,25 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test_throws ArgumentError Co.magnetic_drift_frequency(; kw..., inv_LB=0.7, variant=:bogus)
     end
 
+    @testset "collision operator — cleared diffusivity P(λ) + deflection frequency ν(v̂)" begin
+        Co = IslM2.Coefficients
+        # P(λ) = λ√(1−λB) ≥ 0, vanishing at both endpoints (zero-flux)
+        @test Co.pitch_diffusivity(0.0, 2.0) == 0.0
+        @test Co.pitch_diffusivity(0.5, 2.0) == 0.0        # λ = 1/B endpoint
+        @test Co.pitch_diffusivity(0.25, 2.0) ≈ 0.25 * sqrt(1 - 0.5)
+        @test Co.pitch_diffusivity(0.3, 2.0) > 0
+        @test_throws ArgumentError Co.pitch_diffusivity(0.6, 2.0)   # λ > 1/B
+        # deflection frequency: high-v → ν̃/v̂³ (φ−G → 1 − 1/2v̂² + …); low-v → (4/3√π)/v̂²
+        @test Co.deflection_frequency(6.0) * 6.0^3 ≈ 1.0 rtol = 2e-2       # φ−G → 1 (slow 1/2v̂² tail)
+        @test Co.deflection_frequency(30.0) * 30.0^3 ≈ 1.0 rtol = 1e-3     # tighter at larger v̂
+        @test Co.deflection_frequency(0.02) * 0.02^2 ≈ 4 / (3 * sqrt(π)) rtol = 1e-2  # 1/v̂² divergence
+        # the Chandrasekhar form diverges slower than the reduced v̂⁻³ at low v̂
+        @test Co.deflection_frequency(0.05; model=:chandrasekhar) < Co.deflection_frequency(0.05; model=:vcubed)
+        @test Co.deflection_frequency(1.0; model=:vcubed) == 1.0
+        @test_throws ArgumentError Co.deflection_frequency(1.0; model=:bogus)
+        @test_throws ArgumentError Co.deflection_frequency(-1.0)
+    end
+
     @testset "A7 — flattened-electron identity ⟨∂²h/∂x²⟩_Ω = 0 (coefficient-free)" begin
         for Ω in (1.2, 2.0, 5.0), pref in (1.0, 3.7)     # prefactor-independent
             @test abs(Fi2.flat_average_d2h_dx2(Ω, 1.0; prefactor=pref)) < 1e-10

@@ -19,7 +19,7 @@ transcription or vice versa).
 |---|---|---|
 | Island flux amplitude ``\tilde\psi`` | [ψ̃ amplitude](psi-tilde-amplitude.md) | ✅ signed off 2026-07-11 |
 | Magnetic drift frequency ``\hat\omega_D`` + `:original`/`:improved` toggle | [ω̂_D drift frequency](omega-D-drift-frequency.md) | ✅ signed off 2026-07-11 |
-| Pitch-angle collision operator + deflection frequency + ``\nu_\star`` | [collision operator](collision-operator.md) | drafted — awaiting sign-off (``\langle\hat\nu_{ii}\rangle_u`` deferred) |
+| Pitch-angle collision operator + deflection frequency + ``\nu_\star`` | [collision operator](collision-operator.md) | ✅ signed off 2026-07-11 (``\langle\hat\nu_{ii}\rangle_u`` deferred) |
 
 The remaining Q3 items (the analytic ``\langle\hat\nu_{ii}\rangle_u`` velocity
 average, the flattened-electron closure ``h(\Omega)``/``k``/``f_p``, the

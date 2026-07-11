@@ -11,8 +11,12 @@ QUESTIONS Q3).
 and the orbit-averaged/discretized diffusivity profile that feeds
 `PitchAngleDiffusion` (numerics, ties to the conservation gate A4).
 
-**Status:** awaiting human sign-off. Until signed off, `Collisions` /
-`PitchAngleDiffusion` coefficients stay supplied, gated arguments.
+**Status:** ✅ **signed off 2026-07-11** (clearance recorded in docs/01 §2.3) for
+the operator structure, deflection frequency, and ``\nu_\star`` normalization —
+implemented as `Coefficients.pitch_diffusivity` and
+`Coefficients.deflection_frequency`. The ``\langle\hat\nu_{ii}\rangle_u``
+constant (§7) and the discretized diffusivity profile remain **deferred /
+gated**.
 
 ## 1. Starting point and what must be shown
 

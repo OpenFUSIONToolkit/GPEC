@@ -14,12 +14,19 @@ Cleared so far:
   - [`magnetic_drift_frequency`](@ref) — the orbit-averaged drift frequency
     ``\\hat\\omega_D`` and the `:original`/`:improved` ``\\hat L_B^{-1}`` toggle
     (sign-off 2026-07-11; derivation `omega-D-drift-frequency.md`, docs/01 §2.1).
+  - [`pitch_diffusivity`](@ref), [`deflection_frequency`](@ref) — the Lorentz
+    collision operator's self-adjoint diffusivity ``P(\\lambda)=\\lambda\\sqrt{1-\\lambda B}``
+    and the velocity dependence ``\\nu_{jj}(\\hat v)=\\tilde\\nu[\\phi-G]/\\hat v^3``
+    (sign-off 2026-07-11; derivation `collision-operator.md`, docs/01 §2.3). The
+    ``\\langle\\hat\\nu_{ii}\\rangle_u`` momentum-restoring constant is a deferred
+    sub-item and stays gated.
 """
 module Coefficients
 
 import QuadGK
 
 export magnetic_drift_frequency, orbit_average_drift_brackets
+export pitch_diffusivity, deflection_frequency
 
 # Model circular equilibrium field modulation (docs/01 §1, I19 p. 6):
 # b(θ) = B/B_max = (1 − ε cos θ)/(1 + ε); b ∈ [b_min, 1], b_min = b(0), b(π)=1.
@@ -99,6 +106,60 @@ function magnetic_drift_frequency(; y::Real, v_hat::Real, sigma::Real, epsilon::
     LB = variant === :improved ? zero(float(inv_LB)) : float(inv_LB)
     A, G = orbit_average_drift_brackets(; y=y, epsilon=epsilon, rtol=rtol)
     return (sigma * v_hat / (1 + epsilon)) * (inv_Lq * A - 0.5 * LB * G)
+end
+
+# ---------------------------------------------------------------------------
+# Collision operator (cleared 2026-07-11; derivation collision-operator.md)
+# ---------------------------------------------------------------------------
+"""
+    pitch_diffusivity(λ, B)
+
+The Lorentz pitch-angle operator's self-adjoint **diffusivity**
+``P(\\lambda) = \\lambda\\sqrt{1-\\lambda B} \\ge 0`` (docs/01 §2.3; derivation
+`collision-operator.md` §2), for the operator ``w^{-1}\\partial_\\lambda(P \\partial_\\lambda)`` with measure ``w = B/\\sqrt{1-\\lambda B}``. `P` vanishes at
+`λ=0` and the trapped–passing edge `λ=1/B` (zero-flux endpoints), so it feeds
+`conservative_pitch_operator` directly and preserves the A4 conservation gate.
+"""
+function pitch_diffusivity(λ::Real, B::Real)
+    B > 0 || throw(ArgumentError("B must be positive"))
+    (0 <= λ <= 1 / B) || throw(ArgumentError("λ must be in [0, 1/B]"))
+    return λ * sqrt(max(1 - λ * B, 0.0))
+end
+
+# error function φ(X) = (2/√π)∫₀ˣ e^{−t²}dt and its derivative φ'(X) = (2/√π)e^{−X²}
+_phi(X; rtol=1e-10) = (2 / sqrt(π)) * first(QuadGK.quadgk(t -> exp(-t^2), 0.0, X; rtol=rtol))
+_dphi(X) = (2 / sqrt(π)) * exp(-X^2)
+# Chandrasekhar function G(X) = [φ − Xφ']/(2X²)
+_chandrasekhar_G(X; rtol=1e-10) = (_phi(X; rtol=rtol) - X * _dphi(X)) / (2 * X^2)
+
+"""
+    deflection_frequency(v_hat; nu_tilde=1.0, model=:chandrasekhar, rtol=1e-10)
+
+The velocity dependence of the deflection frequency (docs/01 §2.3; derivation
+`collision-operator.md` §3):
+
+```math
+\\nu_{jj}(\\hat v) = \\tilde\\nu\\,\\frac{\\phi(\\hat v) - G(\\hat v)}{\\hat v^3}
+\\quad(\\texttt{:chandrasekhar}),
+\\qquad
+\\nu_{jj}(\\hat v) = \\tilde\\nu\\,\\hat v^{-3}\\quad(\\texttt{:vcubed}),
+```
+
+with ``\\phi`` the error function and ``G`` the Chandrasekhar function. The
+`:chandrasekhar` form ``\\to \\tfrac{4\\tilde\\nu}{3\\sqrt\\pi}\\hat v^{-2}`` at low
+speed (the derived linear ``\\phi-G`` limit) and ``\\to \\tilde\\nu\\hat v^{-3}`` at
+high speed; the `:vcubed` form is the reduced Diss19/D21 model. The energy-
+dependence sub-toggle (ladder E3).
+"""
+function deflection_frequency(v_hat::Real; nu_tilde::Real=1.0, model::Symbol=:chandrasekhar, rtol::Real=1e-10)
+    v_hat > 0 || throw(ArgumentError("v_hat must be positive"))
+    if model === :vcubed
+        return nu_tilde / v_hat^3
+    elseif model === :chandrasekhar
+        return nu_tilde * (_phi(v_hat; rtol=rtol) - _chandrasekhar_G(v_hat; rtol=rtol)) / v_hat^3
+    else
+        throw(ArgumentError("model must be :chandrasekhar or :vcubed (got $model)"))
+    end
 end
 
 end # module Coefficients

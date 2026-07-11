@@ -167,23 +167,31 @@ mode valid for δ_j = ν_j/(εω_b) ≪ 1.
 
 ### 2.3 Collision operator (Level 0)
 
-Momentum-conserving pitch-angle (Lorentz) model [CHECKED: I19 Eqs. (9)–(12);
-Diss19 Eqs. 2.25–2.30; lineage: WCHH96 Eq. (62)]:
+Momentum-conserving pitch-angle (Lorentz) model [CLEARED: human sign-off
+2026-07-11 — derivation docs/src/islands/derivations/collision-operator.md;
+operator structure, deflection frequency, and ν_★ normalization agree first-hand
+with I19 Eqs. (9)–(12), L23 Eq. (2.3.40); no discrepancy]:
 
     C_jj(f) = 2ν_jj(v)[ (√(1−λB)/B) ∂_λ( λ√(1−λB) ∂_λ f ) + v_∥ ū_∥j f /v²_thj · F_Mj-normalized ]
     ū_∥j(f) = (1/(n⟨ν_jj⟩_v)) ∫d³v ν_jj v_∥ f          (momentum restoring)
     C_ei drags on the ION flow u_∥i (species coupling)
 
+The pitch-angle bracket is the Lorentz operator in self-adjoint form
+w⁻¹∂_λ(P∂_λ) with diffusivity P(λ) = λ√(1−λB) and measure w = B/√(1−λB) (the
+change of variables from the pitch cosine fixes the 2ν_jj prefactor exactly).
 λ-derivatives at **fixed ψ**, not fixed p_φ (a classic transcription trap).
 Energy dependence: two variants exist in the lineage and become a documented
 sub-toggle — I19/L23 use the full ν_jj(v) = ν̃_jj[φ(v̂) − G(v̂)]/v̂³ (Chandrasekhar
 G; needed for neoclassical fidelity), while Diss19/D21 use the simpler
-ν(V) ∝ V⁻³. L23 additionally derives the analytic velocity average
-⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2 − ln(1+√2)) and uses it in place of an
-inaccurate numerical u-integral (ν̃ ∝ u⁻² divergence at low u) — adopt this.
-[CHECKED: L23 Eq. 4.1.6, p. 88]
+ν(V) ∝ V⁻³. Both diverge as v̂ → 0 (φ − G → (4/3√π)v̂ linear ⟹ ν̃ ~ v̂⁻² for the
+Chandrasekhar form, v̂⁻³ for the reduced), motivating the analytic velocity
+average L23 additionally derives:
+⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2 − ln(1+√2)). **[This ⟨ν̂_ii⟩_u constant remains
+[CHECKED]-uncleared — its own short derivation is a deferred M2b sub-item;
+L23 Eq. 4.1.6, p. 88.]**
 
-Collisionality normalization: ν_★ = ν_jj Rq/(ε^{3/2} v_th) (banana regime
+Collisionality normalization [CLEARED 2026-07-11, same derivation]:
+ν_★ = ν_jj Rq/(ε^{3/2} v_th) (banana regime
 ν_★ ≪ 1); ν̂_jj = ε^{3/2}ν_★ ν̃_jj(u). [CHECKED: L23 Eq. (2.3.40); Diss19
 footnote 26]
 
