@@ -204,6 +204,19 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test Mo2.omega_label(1.0, float(π), 1.0) ≈ 3.0
     end
 
+    @testset "island_flux_amplitude — cleared ψ̃ = (w_ψ²/4)(q_s'/q_s) relation" begin
+        # cleared physics relation (sign-off 2026-07-11; derivations/psi-tilde-amplitude.md)
+        w, dq, q = 0.3, 0.8, 1.2
+        ψ̃ = Mo2.island_flux_amplitude(; w_psi=w, dq_dpsi=dq, q_s=q)
+        @test ψ̃ ≈ (w^2 / 4) * (dq / q)
+        # round-trip: ψ̃ inverts the half-width relation w_ψ = 2√(ψ̃/|χ₀''|), χ₀'' = q_s'/q_s
+        χ0pp = dq / q
+        @test 2 * sqrt(ψ̃ / χ0pp) ≈ w                    # recovers the input half-width
+        # scales as w²
+        @test Mo2.island_flux_amplitude(; w_psi=2w, dq_dpsi=dq, q_s=q) ≈ 4 * ψ̃
+        @test_throws ArgumentError Mo2.island_flux_amplitude(; w_psi=w, dq_dpsi=dq, q_s=0.0)
+    end
+
     @testset "A7 — flattened-electron identity ⟨∂²h/∂x²⟩_Ω = 0 (coefficient-free)" begin
         for Ω in (1.2, 2.0, 5.0), pref in (1.0, 3.7)     # prefactor-independent
             @test abs(Fi2.flat_average_d2h_dx2(Ω, 1.0; prefactor=pref)) < 1e-10

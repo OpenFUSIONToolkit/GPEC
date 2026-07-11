@@ -9,8 +9,11 @@ projections `Δ_cos`/`Δ_sin`, and the island flux-surface-average diagnostics
 **Gating:** the projection and quadrature machinery here is pure numerics. The
 physics enters through (i) the per-species velocity-space weights `W_j` (the
 `v̂_∥`-structure — `[VERIFY]`-gated, QUESTIONS Q3), and (ii) the `Δ` moment
-prefactors (`±μ₀R/2ψ̃` with `ψ̃` under an open `[VERIFY]`, and the sin-moment
-normalization still `[DERIVED]`-unpinned — QUESTIONS Q4). Both are **required
+prefactors (`±μ₀R/2ψ̃`). The `ψ̃` amplitude is **cleared** — see
+[`island_flux_amplitude`](@ref) (human sign-off 2026-07-11; derivation
+`docs/src/islands/derivations/psi-tilde-amplitude.md`, docs/01 §1) — but the
+`μ₀R` normalization and the sin-moment normalization pin (`[DERIVED]`,
+docs/01 §4) are not, so `delta_moments`' prefactors remain **required
 caller-supplied arguments** with no defaults; nothing here assigns them.
 
 The island label convention is the module-CLAUDE.md pin: `Ω = 2x²/w² − cos ξ`,
@@ -25,6 +28,31 @@ import ..Operators: weighted_moment!
 import ..SpeciesLists: Species
 
 export parallel_current!, delta_moments, omega_label, omega_average, channel_split
+export island_flux_amplitude
+
+"""
+    island_flux_amplitude(; w_psi, dq_dpsi, q_s)
+
+The prescribed single-helicity island flux amplitude (`01 §1`, ordering O3):
+
+```math
+\\tilde\\psi = \\frac{w_\\psi^2}{4}\\,\\frac{q_s'}{q_s},
+\\qquad q_s' = dq/d\\psi|_s ,
+```
+
+with `w_psi` the island **half**-width in `ψ`-space and `dq_dpsi`, `q_s` the
+safety-factor derivative and value at the rational surface. This is a **cleared
+physics relation** — human sign-off 2026-07-11, independent re-derivation
+(Decision D7): `docs/src/islands/derivations/psi-tilde-amplitude.md`. It
+resolves the former `q_s'/q_s` vs `q_s/q_s'` `[VERIFY]` (I19 as printed has a
+typo; the physical form is `q_s'/q_s`, consistent with I19's own Ω convention
+and Diss19/D21/L23). Feeds the `Δ`-moment prefactor `∓μ₀R/(2 ψ̃)`
+([`delta_moments`](@ref); the `μ₀R` and sin normalization remain gated).
+"""
+function island_flux_amplitude(; w_psi::Real, dq_dpsi::Real, q_s::Real)
+    q_s != 0 || throw(ArgumentError("q_s must be nonzero"))
+    return (w_psi^2 / 4) * (dq_dpsi / q_s)
+end
 
 """
     parallel_current!(Jpar, gs, species, weights, grid)

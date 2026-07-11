@@ -10,10 +10,11 @@ a typo in the published paper — the physical amplitude is ``q_s'/q_s`` — by 
 independent arguments, including I19's *own* internally-inconsistent ``\Omega``
 convention (its Eq. 7).
 
-**Status:** awaiting human sign-off. Until signed off, the ``\tilde\psi``
-prefactor of the ``\Delta_{\cos}/\Delta_{\sin}`` moments (`Moments.delta_moments`)
-stays a supplied, gated argument — this derivation does **not** authorize
-writing a value into `src/` by itself.
+**Status:** ✅ **signed off 2026-07-11** (clearance recorded in docs/01 §1). The
+relation is implemented as `Moments.island_flux_amplitude`; the
+``\Delta_{\cos}/\Delta_{\sin}`` moment *prefactors* ``\mp\mu_0 R/(2\tilde\psi)``
+remain caller-supplied because the ``\mu_0 R`` normalization and the sin-moment
+normalization pin (docs/01 §4) are separate, still-open items.
 
 ## 1. Setup and orderings
 

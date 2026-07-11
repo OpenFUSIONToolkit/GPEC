@@ -57,12 +57,17 @@ B ≈ B₀(1 − ε cos θ), ε = r_s/R₀ ≪ 1 [CHECKED: I19 Eq. (3)].
 Perturbation (prescribed at Level 0, O3), single-helicity, constant-ψ:
 
     A_∥ = −(ψ̃/R) cos ξ,      ψ̃ = (w_ψ²/4)(q_s′/q_s),   q_s′ = dq/dψ|_s
-                              [CHECKED: I19 Eq. (5); Diss19 p. 30; L23 Eq. (2.1.4)]
+                              [CLEARED: human sign-off 2026-07-11 —
+                              derivation docs/src/islands/derivations/psi-tilde-amplitude.md;
+                              matches Diss19 p. 30, L23 Eq. (2.1.4), and I19's own Ω (I19 Eq. 7)]
 
 where **w_ψ is the island HALF-width in ψ-space**, w = w_ψ/(RB_θ) the
-half-width in minor radius. Note: one extraction of I19 rendered the amplitude
-as (w_ψ²/4)(q_s/q_s′); dimensional analysis and Diss19/D21/L23 all give
-q_s′/q_s. [VERIFY: check I19 as printed — possible typo in the paper itself.]
+half-width in minor radius. **[VERIFY] RESOLVED (2026-07-11):** first-hand check
+confirmed I19 as printed (print p. 3, text after Eq. 6) shows (w_ψ²/4)(q_s/q_s′)
+— a **published typo**. I19 is internally inconsistent: its own Ω convention
+(Eq. 7) requires q_s′/q_s, as do dimensional analysis and Diss19/D21/L23. The
+cleared form is **q_s′/q_s** (independent re-derivation, Decision D7; triage:
+their published-equation error, the docs/05 York-lineage standing rule).
 
 Island label and convention (pinned, matches every source in the lineage):
 
