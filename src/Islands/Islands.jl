@@ -29,6 +29,7 @@ include("frames/Frames.jl")           # THE frequency/frame conversion module (g
 include("operators/Operators.jl")     # the AbstractTerm stack + residual assembly
 include("fields/Fields.jl")           # quasineutrality closure structure, h(Ω)/Q(Ω)
 include("moments/Moments.jl")         # J̄_∥, Δ_cos/Δ_sin projections, ⟨·⟩_Ω diagnostics
+include("coefficients/Coefficients.jl") # human-cleared L0 physics coefficient builders (M2b, D7)
 include("solvers/Solvers.jl")         # Newton–Krylov, preconditioner, continuation
 include("verify/Verify.jl")           # MMS + AD-vs-FD JVP harness, y_c monitor
 
@@ -38,6 +39,7 @@ import .Frames
 import .Operators
 import .Fields
 import .Moments
+import .Coefficients
 import .Solvers
 import .Verify
 

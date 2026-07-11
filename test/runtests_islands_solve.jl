@@ -217,6 +217,34 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test_throws ArgumentError Mo2.island_flux_amplitude(; w_psi=w, dq_dpsi=dq, q_s=0.0)
     end
 
+    @testset "magnetic_drift_frequency — cleared ω̂_D + :original/:improved toggle" begin
+        Co = IslM2.Coefficients
+        # cleared physics (sign-off 2026-07-11; derivations/omega-D-drift-frequency.md)
+        # ε→0 analytic limit: b→1 ⟹ A→√(1−y), G→(2−y)/√(1−y)
+        for y in (0.2, 0.5, 0.8)
+            A, G = Co.orbit_average_drift_brackets(; y=y, epsilon=1e-5)
+            @test A ≈ sqrt(1 - y) rtol = 1e-3
+            @test G ≈ (2 - y) / sqrt(1 - y) rtol = 1e-3
+        end
+        # the :improved toggle forces the L̂_B term to zero
+        kw = (; y=0.5, v_hat=1.2, sigma=1.0, epsilon=0.1, inv_Lq=1.0)
+        ωimp = Co.magnetic_drift_frequency(; kw..., inv_LB=0.7, variant=:improved)
+        ωlb0 = Co.magnetic_drift_frequency(; kw..., inv_LB=0.0, variant=:original)
+        @test ωimp ≈ ωlb0                                # :improved == :original with L̂_B⁻¹=0
+        # σ-odd, v̂-linear (the σv̂/(1+ε) prefactor)
+        ωp = Co.magnetic_drift_frequency(; kw..., inv_LB=0.7, variant=:original)
+        ωm = Co.magnetic_drift_frequency(; y=0.5, v_hat=1.2, sigma=-1.0, epsilon=0.1, inv_Lq=1.0, inv_LB=0.7)
+        @test ωp ≈ -ωm
+        @test Co.magnetic_drift_frequency(; y=0.5, v_hat=2.4, sigma=1.0, epsilon=0.1, inv_Lq=1.0, inv_LB=0.7) ≈ 2 * ωp
+        # the toggle is a real, large effect here (grad-B nearly cancels the shear term)
+        @test !isapprox(ωp, ωimp; rtol=0.5)
+        # trapped particles (1 < y < (1+ε)/(1−ε)) give finite brackets; forbidden y rejected
+        At, Gt = Co.orbit_average_drift_brackets(; y=1.1, epsilon=0.1)
+        @test isfinite(At) && isfinite(Gt) && At > 0 && Gt > 0
+        @test_throws ArgumentError Co.orbit_average_drift_brackets(; y=1.5, epsilon=0.1)
+        @test_throws ArgumentError Co.magnetic_drift_frequency(; kw..., inv_LB=0.7, variant=:bogus)
+    end
+
     @testset "A7 — flattened-electron identity ⟨∂²h/∂x²⟩_Ω = 0 (coefficient-free)" begin
         for Ω in (1.2, 2.0, 5.0), pref in (1.0, 3.7)     # prefactor-independent
             @test abs(Fi2.flat_average_d2h_dx2(Ω, 1.0; prefactor=pref)) < 1e-10

@@ -119,17 +119,23 @@ the operator stack (docs/03 §2).
 
 ### 2.1 Magnetic drift frequency: the original/improved toggle (now precise)
 
-Orbit-averaged precession [CHECKED: I19 Eq. (32) def.; D21 Eqs. 15, B1]:
+Orbit-averaged precession [CLEARED: human sign-off 2026-07-11 — derivation
+docs/src/islands/derivations/omega-D-drift-frequency.md; first-hand agreement
+with I19 Eq. (32), D21 Eqs. (B1), (A2), Diss19; no discrepancy]:
 
     ω̂_D = [σv̂/(1+ε)] [ (1/L̂_q)⟨√(1−yb)/b⟩_θ − (1/2)(1/L̂_B)⟨(2−yb)/(b√(1−yb))⟩_θ ]
 
+The two terms are the shear-coupled drift-orbit-width precession (1/L̂_q, from the
+finite orbit width x_D = ρ̂_θi(σv̂/(1+ε))√(1−yb)/b) and the grad-B drift (1/L̂_B).
+
 - **:original** (I19/DK-NTM): finite constant L̂_B⁻¹ = (ψ_s/B)∂B/∂ψ — retains a
   non-vanishing ∇B term after orbit averaging.
-- **:improved** (D21/RDK-NTM): Appendix A of D21 shows
-  ∂B/∂ψ = −(B_φ/(R₀²B_θ)) cos θ + O(ε²) — the cos θ modulation makes the term
-  ε-small after orbit averaging; **L̂_B⁻¹ = 0 is the documented proxy** (D21
-  footnote 10, Fig. 8 compares proxy vs full cos θ form directly).
-  [CHECKED: D21 Eq. A2, p. 16]
+- **:improved** (D21/RDK-NTM): Appendix A of D21 shows (from
+  ∂B/∂ψ = I′/R − (I/R²)∂R/∂ψ, low-β) ∂B/∂ψ = −(B_φ/(R₀²B_θ)) cos θ + O(ε²) — the
+  cos θ modulation makes ⟨cos θ·even⟩_θ = O(ε), so the term is ε-small after
+  orbit averaging; **L̂_B⁻¹ = 0 is the documented proxy** (D21 footnote 10, Fig. 8
+  compares proxy vs full cos θ form directly). [CLEARED 2026-07-11, same
+  derivation; the toggle is carried by MagneticDrift.variant.]
 
 This single toggle is what moved the threshold half-width 8.73 ρ_bi → 1.46 ρ_bi
 (D23a abstract). It is the archetype of the toggle-impact studies (docs/05 E1).

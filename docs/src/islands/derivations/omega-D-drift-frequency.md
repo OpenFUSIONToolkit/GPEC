@@ -9,8 +9,9 @@ highest-impact physics item — it is the ``\hat\omega_D`` term that produces th
 (the reproducible T2 form of the sources' ``8.73 \to 1.46\,\rho_{bi}`` story;
 Decision D9, docs/05).
 
-**Status:** awaiting human sign-off. Until signed off, `MagneticDrift.c_D` stays
-a supplied, gated coefficient.
+**Status:** ✅ **signed off 2026-07-11** (clearance recorded in docs/01 §2.1).
+Implemented as `Coefficients.magnetic_drift_frequency` (both variants); it builds
+`MagneticDrift.c_D` on the phase-space grid.
 
 ## 1. What ``\hat\omega_D`` is
 
