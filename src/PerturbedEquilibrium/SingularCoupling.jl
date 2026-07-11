@@ -152,10 +152,17 @@ function compute_singular_coupling_metrics!(
     edge_mn = intr.plasma_response ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
     C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
 
-    # Phase 3: Compute full coupling matrix rows
+    # Phase 3: Compute full coupling matrix rows. Each rational surface is independent -- it
+    # builds its own Green's functions (a fresh, allocation-local vacuum solve) and writes
+    # disjoint coupling-matrix rows / sing[s] -- so thread the loop over surfaces. BLAS is
+    # pinned to one thread across it (each surface's solve is small; multi-threaded BLAS would
+    # oversubscribe against the Julia threads). Restored after the loop.
     psi_store_all = ForceFreeStates_results.psi_store
     nstep = ForceFreeStates_results.step
-    for (row, (s, nn)) in enumerate(resonant_pairs)
+    _blas_nthreads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    Threads.@threads :static for row in 1:length(resonant_pairs)
+        (s, nn) = resonant_pairs[row]
         sing_surf = ffs_intr.sing[s]
         m_res = round(Int, sing_surf.q * nn)
 
@@ -280,6 +287,7 @@ function compute_singular_coupling_metrics!(
             @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ'(diag)=$(@sprintf("%.3e", dp_diag))"
         end
     end
+    BLAS.set_num_threads(_blas_nthreads)
 
     # Phase 4: Apply forcing amplitudes → R = C · Φ_x. The applied resonant scalars are
     # physical, coordinate-invariant quantities, so evaluate them from the flux-space C and
