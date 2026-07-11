@@ -44,6 +44,10 @@ makedocs(;
         "Islands" => [
             "Overview" => "islands/index.md",
             "Numerics (as implemented)" => "islands/numerics.md",
+            "Derivations" => [
+                "Overview" => "islands/derivations/index.md",
+                "ψ̃ amplitude" => "islands/derivations/psi-tilde-amplitude.md"
+            ],
             "Paper I — figure contract" => "islands/papers/paper-1/OUTLINE.md",
             "Design documents" => [
                 "00 — Roadmap" => "islands/design/00-roadmap.md",
