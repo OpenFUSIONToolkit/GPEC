@@ -231,13 +231,19 @@ machinery as ions, Diss19 Eq. D.61 / D21 §5) and is *required* at Level 3
 
     n_i[Φ; g_i] = n_e[Φ; closure]   →   Φ(x, ξ)
 
-Exact Level-0 closed form with flattened electrons [CHECKED: I19 Eq. (A.11);
-L23 Eq. (2.4.14)]:
+Exact Level-0 closed form with flattened electrons [CLEARED: human sign-off
+2026-07-11 — derivation docs/src/islands/derivations/quasineutrality-closure.md;
+derived from the ion/electron density moments, matches I19 Eq. (A.11) exactly at
+τ=1; the general-τ form is the new result]:
 
-    e_iΦ̂/T_i = [ δn̄_i/n₀ + x − ĥ(Ω) ] / (2 L̂_{n0})
+    e_iΦ̂/T_i = (τ/(τ+1)) [ δn̄_i/n₀ + L̂_{n0}⁻¹ (x − ĥ(Ω)) ]      (arbitrary τ)
+             = [ δn̄_i/n₀·L̂_{n0} + x − ĥ(Ω) ] / (2 L̂_{n0})       (τ=1, I19 A.11 form)
 
-(T_e = T_i assumed in the sources; Islands keeps τ = T_e/T_i general and flags
-departures). With kinetic electrons, the Picard form δΦ̂ = (δn̂_i − δn̂_e)/2
+(T_e = T_i assumed in the sources; Islands keeps τ = T_e/T_i general — the
+τ/(τ+1) closure coefficient is the sum of ion+electron adiabatic responses. The
+code uses the raw-moment form with δn̄_i = ∫g_i d³v the actual velocity moment,
+so I19's δn_i normalization convention is a cross-check nuance only, not a code
+dependency.) With kinetic electrons, the Picard form δΦ̂ = (δn̂_i − δn̂_e)/2
 [CHECKED: Diss19 Eq. 2.45]. In Islands both reduce to one quasineutrality
 residual inside the global Newton system (docs/03) — the sources' nested
 Picard loops (Φ outer, ū_∥i inner; I19 fig. A1) are precisely the fragile

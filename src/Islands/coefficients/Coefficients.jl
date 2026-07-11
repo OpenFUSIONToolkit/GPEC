@@ -28,6 +28,7 @@ import QuadGK
 export magnetic_drift_frequency, orbit_average_drift_brackets
 export pitch_diffusivity, deflection_frequency
 export h_amplitude
+export quasineutrality_coefficient
 
 # Model circular equilibrium field modulation (docs/01 §1, I19 p. 6):
 # b(θ) = B/B_max = (1 − ε cos θ)/(1 + ε); b ∈ [b_min, 1], b_min = b(0), b(π)=1.
@@ -178,5 +179,30 @@ from the flattening constraint ``\\langle\\partial^2 h/\\partial x^2\\rangle_\\O
 closure constants ``k`` and ``f_p`` remain gated.
 """
 h_amplitude(w_psi::Real) = w_psi / (2 * sqrt(2))
+
+# ---------------------------------------------------------------------------
+# Quasineutrality closure (cleared 2026-07-11; derivation quasineutrality-closure.md)
+# ---------------------------------------------------------------------------
+"""
+    quasineutrality_coefficient(tau)
+
+The Level-0 quasineutrality closure coefficient ``\\tau/(\\tau+1)`` (docs/01 §3;
+derivation `quasineutrality-closure.md`), where ``\\tau=T_e/T_i``:
+
+```math
+\\hat\\Phi = \\frac{\\tau}{\\tau+1}\\Big[\\frac{\\delta\\bar n_i}{n_0}
+   + \\hat L_{n0}^{-1}\\,(x-\\hat h)\\Big].
+```
+
+The ``\\tau/(\\tau+1)`` factor is the sum of the ion and electron adiabatic
+shielding responses (``\\to 1/2`` at ``\\tau=1``, the sources' ``T_e=T_i``). The
+raw ion-density moment ``\\delta\\bar n_i=M[g_i]`` (`velocity_moment!`) enters
+directly — no ``\\delta n_i`` normalization convention — so this coefficient plus
+the ``\\hat L_{n0}^{-1}(x-\\hat h)`` drive populate `Operators.Quasineutrality`.
+"""
+function quasineutrality_coefficient(tau::Real)
+    tau > 0 || throw(ArgumentError("tau = T_e/T_i must be positive"))
+    return tau / (tau + 1)
+end
 
 end # module Coefficients

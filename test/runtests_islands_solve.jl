@@ -281,6 +281,11 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         w = 0.4
         Ω = 400.0
         @test Fi2.h_profile(Ω; prefactor=Co.h_amplitude(w)) ≈ (w / sqrt(2)) * (sqrt(Ω) - 1) rtol = 2e-2
+        # quasineutrality closure coefficient τ/(τ+1) → 1/2 at τ=1 (cleared 2026-07-11)
+        @test Co.quasineutrality_coefficient(1.0) ≈ 0.5
+        @test Co.quasineutrality_coefficient(2.0) ≈ 2 / 3
+        @test Co.quasineutrality_coefficient(1e6) ≈ 1.0 rtol = 1e-5   # τ → ∞ (cold ions)
+        @test_throws ArgumentError Co.quasineutrality_coefficient(0.0)
     end
 
     @testset "pseudo-arclength continuation detects the toy fold (03 §3)" begin

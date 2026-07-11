@@ -6,8 +6,10 @@ coefficient ``1/(2\hat L_{n0})`` (`[CHECKED: I19 Eq. A.11; L23 Eq. 2.4.14;
 Picard form Diss19 Eq. 2.45]`, QUESTIONS Q3), plus the arbitrary-``\tau``
 generalization docs/01 §3 asks for.
 
-**Status:** awaiting human sign-off. Until signed off, `Operators.Quasineutrality`'s
-closure coefficient `α` stays a supplied, gated argument.
+**Status:** ✅ **signed off 2026-07-11** (clearance recorded in docs/01 §3),
+after an independent triple-check of the δn normalization — implemented as
+`Coefficients.quasineutrality_coefficient(τ)` (``= τ/(τ+1)``). The code uses the
+raw-moment form, so I19's `δn_i` normalization is a cross-check nuance only.
 
 ## 1. Setup
 
@@ -80,11 +82,20 @@ using ``n_0'(\psi-\psi_s)/n_0=\hat L_{n0}^{-1}x`` and
 
 **exactly I19 Eq. A.11**, ``\hat\Phi=[\delta n_i/n_0+x-\hat h]/(2\hat L_{n0})``,
 provided I19's normalized ion perturbation is
-``\delta n_i/n_0\equiv\hat L_{n0}\,\delta\bar n_i/n_0`` (its convention scales the
-kinetic density perturbation by the gradient length so the whole bracket shares
-the ``1/(2\hat L_{n0})``). This is a **normalization convention, not a
-discrepancy** — the physically-invariant statement is the boxed general-``\tau``
-form of §3, whose ``x-\hat h`` piece and ``\tau=1`` coefficient match I19 exactly.
+``\delta n_i/n_0\equiv\hat L_{n0}\,\delta\bar n_i/n_0``. This is a
+**normalization convention, not a discrepancy**, and it is *physically forced*:
+the raw kinetic moment ``\delta\bar n_i=\int g_i\,d^3v`` is gradient-**driven**
+(``g_i`` is sourced by the Maxwellian-gradient terms of the drift-kinetic
+equation, so ``\delta\bar n_i\propto\hat L_{n0}^{-1}`` already), so I19 factors
+that common gradient out for a uniform bracket. The physically-invariant
+statement is the **boxed general-``\tau`` form of §3 with the raw moment
+``\delta\bar n_i``**, whose ``x-\hat h`` piece and coefficient match I19 exactly.
+
+**Implementation note (removes any convention ambiguity from `src`):** the code
+uses the **raw-moment form** — ``\delta\bar n_i`` is the actual velocity moment
+``M[g_i]`` that `velocity_moment!` already computes — so `Operators.Quasineutrality`
+never references I19's ``\delta n_i`` normalization. The un-reverified I19 scaling
+affects only the *cross-check reading* of A.11, not what is built.
 
 ## 4. Kinetic-electron (Picard) form
 
