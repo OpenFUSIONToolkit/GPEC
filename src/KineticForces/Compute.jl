@@ -47,14 +47,21 @@ function integrate_psi_quadgk(
         return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0)
     end
 
-    # Buffers for the batch callback. The outer ψ-integral is intentionally
-    # serial: QuadGK.BatchIntegrand's refine loop invokes the callback many
-    # times with small batches (~15 nodes per Kronrod rule), and Threads.@threads
-    # fork-join overhead at this granularity dominates the ~40 ms per-ψ work,
-    # producing catastrophic slowdowns at ≥2 threads. Serial `for` inside the
-    # batch matches 1-thread wall time and is the fastest correct option found.
-    tpsi_val = Ref{ComplexF64}(0.0im)
-    wtw_l = is_matrix_method ? zeros(ComplexF64, mpert, mpert, 6) : nothing
+    # The outer ψ-integral (the QuadGK batch / ψ-node loop) stays serial: QuadGK's refine
+    # loop invokes the callback with small batches (~15 nodes), so threading it is
+    # fork-join-bound. Instead thread the inner bounce-harmonic loop (2·nl+1 harmonics),
+    # which carries the ~40 ms of per-ψ work. `tpsi!` writes per-`intr` scratch buffers and
+    # spline hints, so each thread gets its own `deepcopy(intr)` (the same per-thread-scratch
+    # pattern the self-consistent kinetic matrix build uses). Per-harmonic results are stored
+    # by index and reduced in fixed ℓ order, so the sum is identical to the serial reduction
+    # and independent of thread count.
+    nharm = 1 + 2 * nl
+    nth = Threads.maxthreadid()
+    thread_intrs = [deepcopy(intr) for _ in 1:nth]
+    thread_tpsi = [Ref{ComplexF64}(0.0im) for _ in 1:nth]
+    thread_wtw = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nth] : nothing
+    harm_vals = Vector{ComplexF64}(undef, nharm)
+    harm_elems = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nharm] : nothing
 
     logged_psi = Float64[]
     logged_dtdpsi = ComplexF64[]
@@ -64,35 +71,36 @@ function integrate_psi_quadgk(
         for k in eachindex(x)
             psi = Float64(x[k])
 
-            if is_matrix_method && !isnothing(wtw_l)
-                wtw_l .= 0
-            end
-            elems_accum = is_matrix_method ? zeros(ComplexF64, mpert, mpert, 6) : nothing
-
-            total = ComplexF64(0.0)
-            for ell_idx in 1:(1 + 2 * nl)
+            # Each bounce harmonic is independent; thread over them, each thread using its own
+            # `intr` copy and writing its own harm_vals[ell_idx] / harm_elems[ell_idx] slot.
+            Threads.@threads :static for ell_idx in 1:nharm
+                tid = Threads.threadid()
                 l = ell_idx - 1 - nl
-                if is_matrix_method && !isnothing(wtw_l)
-                    wtw_l .= 0
-                end
-
-                tpsi!(tpsi_val, psi, n, l, zi, mi, wdfac, divxfac,
-                      electron, method, equil, intr, kinetic_profiles;
-                      op_wmats=wtw_l,
+                w = is_matrix_method ? thread_wtw[tid] : nothing
+                is_matrix_method && fill!(w, 0)
+                tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
+                      electron, method, equil, thread_intrs[tid], kinetic_profiles;
+                      op_wmats=w,
                       atol_xlmda=ctrl.atol_xlmda, rtol_xlmda=ctrl.rtol_xlmda)
-                total += tpsi_val[]
-
-                if is_matrix_method && !isnothing(wtw_l) && !isnothing(elems_accum)
-                    elems_accum .+= wtw_l
-                end
+                harm_vals[ell_idx] = thread_tpsi[tid][]
+                is_matrix_method && (harm_elems[ell_idx] .= w)
             end
 
+            # Reduce in fixed ℓ order (bit-identical to the serial sum).
+            total = ComplexF64(0.0)
+            for ell_idx in 1:nharm
+                total += harm_vals[ell_idx]
+            end
             y[k] = total
 
             push!(logged_psi, psi)
             push!(logged_dtdpsi, total)
-            if is_matrix_method && !isnothing(elems_accum)
-                push!(logged_elems, copy(elems_accum))
+            if is_matrix_method
+                elems_accum = zeros(ComplexF64, mpert, mpert, 6)
+                for ell_idx in 1:nharm
+                    elems_accum .+= harm_elems[ell_idx]
+                end
+                push!(logged_elems, elems_accum)
             end
         end
     end
