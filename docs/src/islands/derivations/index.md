@@ -22,7 +22,7 @@ transcription or vice versa).
 | Pitch-angle collision operator + deflection frequency + ``\nu_\star`` | [collision operator](collision-operator.md) | ✅ signed off 2026-07-11 (``\langle\hat\nu_{ii}\rangle_u`` deferred) |
 | Flattened-electron closure ``h(\Omega)`` + amplitude | [electron closure](electron-closure.md) | ✅ signed off 2026-07-11 (``k``, ``f_p`` deferred) |
 | Quasineutrality closure ``1/(2\hat L_{n0})`` (arbitrary ``\tau``) | [quasineutrality closure](quasineutrality-closure.md) | ✅ signed off 2026-07-11 |
-| ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | drafted — awaiting sign-off |
+| ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | ✅ signed off 2026-07-11 |
 
 The six main Q3/Q4 coefficient families are now covered. The remaining pieces are
 the **deferred numerical sub-constants** — ``\langle\hat\nu_{ii}\rangle_u``

@@ -29,6 +29,7 @@ export magnetic_drift_frequency, orbit_average_drift_brackets
 export pitch_diffusivity, deflection_frequency
 export h_amplitude
 export quasineutrality_coefficient
+export delta_moment_prefactors
 
 # Model circular equilibrium field modulation (docs/01 §1, I19 p. 6):
 # b(θ) = B/B_max = (1 − ε cos θ)/(1 + ε); b ∈ [b_min, 1], b_min = b(0), b(π)=1.
@@ -203,6 +204,28 @@ the ``\\hat L_{n0}^{-1}(x-\\hat h)`` drive populate `Operators.Quasineutrality`.
 function quasineutrality_coefficient(tau::Real)
     tau > 0 || throw(ArgumentError("tau = T_e/T_i must be positive"))
     return tau / (tau + 1)
+end
+
+# ---------------------------------------------------------------------------
+# Δ-moment prefactors (cleared 2026-07-11; derivation delta-moment-prefactors.md)
+# ---------------------------------------------------------------------------
+"""
+    delta_moment_prefactors(; mu0_R, w_psi, dq_dpsi, q_s)
+
+The ``\\Delta_{\\cos}``/``\\Delta_{\\sin}`` output-moment prefactors (docs/01 §4;
+derivation `delta-moment-prefactors.md`): returns
+`(cos=-\\mu_0 R/(2\\tilde\\psi), sin=+\\mu_0 R/(2\\tilde\\psi))` for
+[`Moments.delta_moments`](@ref), with ``\\tilde\\psi`` the cleared island flux
+amplitude [`island_flux_amplitude`](@ref). ``\\Delta_{\\cos}=\\Delta_{\\rm neo}``
+matches Diss19 Eq. 4.12 (stationarity ``\\Delta'+\\Delta_{\\rm neo}=0``); the sin
+normalization is the symmetric `[DERIVED]` pin so that
+``\\Delta_{\\cos}+i\\Delta_{\\sin}`` maps onto the linear-layer ``\\Delta(Q)``.
+"""
+function delta_moment_prefactors(; mu0_R::Real, w_psi::Real, dq_dpsi::Real, q_s::Real)
+    ψ̃ = (w_psi^2 / 4) * (dq_dpsi / q_s)     # = island_flux_amplitude (docs/01 §1)
+    ψ̃ != 0 || throw(ArgumentError("ψ̃ must be nonzero (check w_psi, dq_dpsi)"))
+    pref = mu0_R / (2 * ψ̃)
+    return (cos=-pref, sin=+pref)
 end
 
 end # module Coefficients

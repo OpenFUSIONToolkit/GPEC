@@ -286,6 +286,12 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test Co.quasineutrality_coefficient(2.0) ≈ 2 / 3
         @test Co.quasineutrality_coefficient(1e6) ≈ 1.0 rtol = 1e-5   # τ → ∞ (cold ions)
         @test_throws ArgumentError Co.quasineutrality_coefficient(0.0)
+        # Δ-moment prefactors ∓μ₀R/2ψ̃ (cleared 2026-07-11), ψ̃ = (w²/4)(q'/q)
+        pf = Co.delta_moment_prefactors(; mu0_R=3.0, w_psi=0.3, dq_dpsi=0.8, q_s=1.2)
+        ψt = Mo2.island_flux_amplitude(; w_psi=0.3, dq_dpsi=0.8, q_s=1.2)
+        @test pf.cos ≈ -3.0 / (2 * ψt)
+        @test pf.sin ≈ +3.0 / (2 * ψt)
+        @test pf.sin ≈ -pf.cos              # symmetric [DERIVED] pin
     end
 
     @testset "pseudo-arclength continuation detects the toy fold (03 §3)" begin

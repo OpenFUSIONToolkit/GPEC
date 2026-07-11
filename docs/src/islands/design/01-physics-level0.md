@@ -275,8 +275,10 @@ Eqs. 7–8, 32]:
 so the kinetic drive and torque moments are
 
     Δ_cos ≡ Δ_neo = −(μ₀R/2ψ̃) ∫ dψ ∮ dξ J̄_∥ cos ξ,     stationarity: Δ′ + Δ_neo = 0
-    Δ_sin          =  (μ₀R/2ψ̃) ∫ dψ ∮ dξ J̄_∥ sin ξ     [CHECKED: Diss19 Eq. 4.12 for Δ_neo;
-                                                          sin-moment normalization chosen symmetric — [DERIVED] pin at implementation]
+    Δ_sin          =  (μ₀R/2ψ̃) ∫ dψ ∮ dξ J̄_∥ sin ξ     [CLEARED: human sign-off 2026-07-11 —
+                                                          derivation docs/src/islands/derivations/delta-moment-prefactors.md;
+                                                          Δ_cos matches Diss19 Eq. 4.12, ψ̃ cleared (§1), μ₀R geometry;
+                                                          sin-normalization pinned symmetric ([DERIVED: 2026-07-11])]
 
 with ψ̃ = (w_ψ²/4)(q_s′/q_s), and the Rutherford LHS (2τ_R/r_s²) dw/dt (w =
 half-width). Decomposition diagnostics [CHECKED: Diss19 Eqs. 4.13–4.15; D21

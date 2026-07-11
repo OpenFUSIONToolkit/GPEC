@@ -8,8 +8,9 @@ prefactors ``\mp\mu_0 R/(2\tilde\psi)`` (`[CHECKED: Diss19 Eq. 4.12 for
 \Delta_{\cos}; sin-normalization DERIVED]`, QUESTIONS Q4), building on the
 already-cleared ``\tilde\psi`` (`island_flux_amplitude`).
 
-**Status:** awaiting human sign-off. Until signed off, `Moments.delta_moments`
-keeps `prefactor_cos`/`prefactor_sin` as required, supplied arguments.
+**Status:** ✅ **signed off 2026-07-11** (clearance recorded in docs/01 §4).
+Implemented as `Coefficients.delta_moment_prefactors` (returns
+`(cos=-μ₀R/2ψ̃, sin=+μ₀R/2ψ̃)`), feeding `Moments.delta_moments`.
 
 ## 1. The two Ampère projections
 
