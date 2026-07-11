@@ -46,7 +46,8 @@ makedocs(;
             "Numerics (as implemented)" => "islands/numerics.md",
             "Derivations" => [
                 "Overview" => "islands/derivations/index.md",
-                "ψ̃ amplitude" => "islands/derivations/psi-tilde-amplitude.md"
+                "ψ̃ amplitude" => "islands/derivations/psi-tilde-amplitude.md",
+                "ω̂_D drift frequency" => "islands/derivations/omega-D-drift-frequency.md"
             ],
             "Paper I — figure contract" => "islands/papers/paper-1/OUTLINE.md",
             "Design documents" => [

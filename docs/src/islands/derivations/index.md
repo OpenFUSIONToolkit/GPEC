@@ -17,10 +17,11 @@ transcription or vice versa).
 
 | Coefficient | Chapter | Status |
 |---|---|---|
-| Island flux amplitude ``\tilde\psi`` | [ψ̃ amplitude](psi-tilde-amplitude.md) | drafted — awaiting sign-off |
+| Island flux amplitude ``\tilde\psi`` | [ψ̃ amplitude](psi-tilde-amplitude.md) | ✅ signed off 2026-07-11 |
+| Magnetic drift frequency ``\hat\omega_D`` + `:original`/`:improved` toggle | [ω̂_D drift frequency](omega-D-drift-frequency.md) | drafted — awaiting sign-off |
 
-The remaining Q3 items (``\hat\omega_D`` + the ``\hat L_B^{-1}`` toggle, the
-pitch-angle collision kernel + ``\langle\hat\nu_{ii}\rangle_u``, the
-flattened-electron closure ``h(\Omega)``/``k``/``f_p``, the quasineutrality
-closure, and the ``\Delta_{\cos}/\Delta_{\sin}`` prefactors) are added here as
-the derivation lane proceeds (M2b contract).
+The remaining Q3 items (the pitch-angle collision kernel +
+``\langle\hat\nu_{ii}\rangle_u``, the flattened-electron closure
+``h(\Omega)``/``k``/``f_p``, the quasineutrality closure, and the
+``\Delta_{\cos}/\Delta_{\sin}`` prefactors) are added here as the derivation
+lane proceeds (M2b contract).
