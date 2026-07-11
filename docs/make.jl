@@ -50,7 +50,8 @@ makedocs(;
                 "ω̂_D drift frequency" => "islands/derivations/omega-D-drift-frequency.md",
                 "Collision operator" => "islands/derivations/collision-operator.md",
                 "Electron closure" => "islands/derivations/electron-closure.md",
-                "Quasineutrality closure" => "islands/derivations/quasineutrality-closure.md"
+                "Quasineutrality closure" => "islands/derivations/quasineutrality-closure.md",
+                "Δ-moment prefactors" => "islands/derivations/delta-moment-prefactors.md"
             ],
             "Paper I — figure contract" => "islands/papers/paper-1/OUTLINE.md",
             "Design documents" => [
