@@ -8,6 +8,32 @@ relevant.
 
 ---
 
+## 2026-07-11 — Q5 field fix: wire the cleared quasineutrality closure (Φ now driven)
+
+- **Moved**: closed the M2c-surfaced QN **structural gap** (QUESTIONS Q5). The
+  quasineutrality closure was signed off in M2b but the operator carried only
+  `R_Φ = M[g] − αΦ` (no drive), so the Level-0 potential collapsed to zero.
+  Implemented the full cleared closure: `Operators.Quasineutrality` gained an
+  optional `source` field; `Configure.configure_level0` now builds
+  **`α = (τ+1)/τ`** (= `1/quasineutrality_coefficient(τ)` — the reciprocal, =2 at
+  τ=1) and the drive **`S = L̂_{n0}⁻¹(x − ĥ(Ω))`** (`Configure.quasineutrality_source`,
+  from the cleared `h_amplitude`/`h_profile`, one width `w=w_psi` for both `Ω`
+  and the `ĥ` prefactor per `electron-closure.md §3`). Added `inv_Ln0` to
+  `Level0Physics`; removed `alpha` from the gated inputs (`quasineutrality` moved
+  to `cleared`). **Verified: max|Φ| ≈ 5.7 after solve** (was ~0). 194 islands
+  tests green; **physics-verifier PASS** (α reciprocal, source sign, width
+  convention all checked vs the signed-off derivation); `build_docs_local.jl`
+  green. Doc-first: docs/01 §3, `quasineutrality-closure.md §6`, numerics.md,
+  QUESTIONS Q5 all amended.
+- **Blocked**: nothing new. The *kinetic* Q5 families (streaming, E×B, gradient
+  drive, `⟨ν̂_ii⟩_u`, pitch measure, far field) remain gated — the field equation
+  is now the fully cleared closure, but a physics threshold still needs those.
+- **Next**: (human/next lane) the remaining Q5 kinetic clearances — the
+  parallel-streaming coefficients are the highest-leverage next (they + a far
+  field would let a real `g` develop). `f_p` sign-off still pending
+  (`passing-fraction.md`). The B-ladder scaffolding is wired to light up as each
+  clears.
+
 ## 2026-07-11 — M2c: L0 configuration assembly + input-completeness audit (autonomous)
 
 - **Moved (M2b lane complete → M2c started)**:

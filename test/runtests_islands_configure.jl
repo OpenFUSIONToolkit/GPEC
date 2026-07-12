@@ -32,8 +32,8 @@ _grid() = PSc.IslandGrid(; nx=9, nxi=8, ny=9, nE=3, halfwidth_x=6.0, clustering_
     y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
 
 _phys(; variant=:original, model=:chandrasekhar) = Cfg.Level0Physics(; epsilon=0.1,
-    inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, tau=1.0,
-    variant=variant, collision_model=model)
+    inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0,
+    tau=1.0, variant=variant, collision_model=model)
 
 _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0, T=1.0), role=Spc.Bulk)]
 
@@ -52,7 +52,8 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         # provenance tuples name exactly which coefficients are cleared vs gated
         @test :magnetic_drift in cfg.cleared
         @test :delta_prefactors in cfg.cleared
-        @test :quasineutrality_alpha in cfg.gated        # QUESTIONS Q5 structural gap
+        @test :quasineutrality in cfg.cleared            # closure now wired (01 §3)
+        @test !(:quasineutrality_alpha in cfg.gated)     # no longer a structural gap
         @test :streaming in cfg.gated
     end
 
@@ -132,6 +133,21 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         cache = Opc.IslandCache(grid)
         Opc.residual!(R, U, cfg.stack, grid, cache, cfg.bc)
         @test all(isfinite, R.g) && all(isfinite, R.Φ)
+    end
+
+    @testset "quasineutrality drive makes Φ nonzero (the Q5 field fix)" begin
+        # the cleared L̂_{n0}⁻¹(x−ĥ) source drives Φ; without it Φ collapses to 0.
+        S = Cfg.quasineutrality_source(grid, phys)
+        @test any(!iszero, S)                            # the drive is nontrivial
+        @test cfg.stack.field.source !== nothing         # wired into the operator
+        @test cfg.stack.field.α ≈ (phys.tau + 1) / phys.tau  # α = (τ+1)/τ, not τ/(τ+1)
+        # solved Φ is nonzero in the interior (boundaries pinned by the far field)
+        f! = Soc.flat_residual(cfg.stack, grid; bc=cfg.bc)
+        N = Opc.statelength(grid)
+        sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-9, atol=1e-13, max_iter=40, memory=200)
+        Usol = Opc.IslandState(grid)
+        Opc.unflatten!(Usol, sol.u)
+        @test maximum(abs, Usol.Φ) > 1e-6                # Φ no longer trivially zero
     end
 
     @testset "assembly validates the species list" begin

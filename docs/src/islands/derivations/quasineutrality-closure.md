@@ -120,13 +120,17 @@ is a definitional convention, resolved in §3; the derivation additionally
 supplies the arbitrary-``\tau`` generalization the sources omit
 (they assume ``T_e=T_i``).
 
-## 6. What sign-off authorizes
+## 6. What sign-off authorizes — now implemented (2026-07-11)
 
 On sign-off (recorded in docs/01 §3): the closure coefficient
 ``\tau/(\tau+1)`` (``\to 1/2`` at ``\tau=1``) and the ``\hat L_{n0}^{-1}(x-\hat h)``
-structure may populate `Operators.Quasineutrality`'s residual — i.e. the field
-residual ``R_\Phi = M[g]-\alpha\hat\Phi`` gets ``\alpha`` and the drive built
-from this relation, with ``\tau`` from the parameter vector
-(`Frames.Level0Parameters`). The moment machinery (`velocity_moment!`) and the
-``\hat h``/``Q`` functions are already implemented; nothing here authorizes the
-``\Delta`` prefactors (a separate derivation).
+structure populate `Operators.Quasineutrality`'s residual. **Implemented:** the
+field residual is ``R_\Phi = M[g]-\alpha\hat\Phi + S`` with
+``\alpha = (\tau+1)/\tau`` (the reciprocal of the closure coefficient — solving
+the boxed relation for the residual root; `Configure.configure_level0` builds it
+as `1/quasineutrality_coefficient(τ)`) and the drive
+``S = \hat L_{n0}^{-1}(x-\hat h(\Omega))`` from `Configure.quasineutrality_source`
+(the ``\hat h`` amplitude ``w/2\sqrt2`` from the cleared `Coefficients.h_amplitude`,
+the profile from `Fields.h_profile`). The moment machinery (`velocity_moment!`)
+and the ``\hat h``/``Q`` functions were already implemented; nothing here
+authorizes the ``\Delta`` prefactors (a separate, also-cleared derivation).

@@ -168,17 +168,15 @@ bare pass/fail. The derivation lane inherits this framing.
   - **Gradient drive** `drive` (`Operators.GradientDrive`): the `(v_E+v_D+v_ψ̃)·∇F₀`
     source — needs the frame shift (`Frames.FrameConvention`, still NaN-gated,
     Q3) and the equilibrium gradient structure.
-  - **Quasineutrality closure — a structural gap, not just a constant.** The
-    cleared closure `Φ̂ = τ/(τ+1)[δn̄_i/n₀ + L̂_{n0}⁻¹(x−ĥ)]` (Q3, derivation
-    `quasineutrality-closure.md`) implies the operator residual
-    `R_Φ = M[g] − α Φ + L̂_{n0}⁻¹(x−ĥ)` with **`α = (τ+1)/τ`** and an
-    **`L̂_{n0}⁻¹(x−ĥ)` field source**. `Operators.Quasineutrality` currently
-    carries only `M[g] − α Φ` (no source), and `α` is not the same object as
-    `Coefficients.quasineutrality_coefficient(τ) = τ/(τ+1)`. Decide: add a
-    `field_drive` to `Quasineutrality` (or a `FieldSource` term) and wire
-    `α = (τ+1)/τ` from the cleared closure — this is an operator-structure change
-    and must be doc-first (amend `docs/01 §3`, `docs/03 §2`). Until then `α` and
-    the `(x−ĥ)` drive are supplied/gated.
+  - **Quasineutrality closure — RESOLVED (2026-07-11).** The cleared closure
+    `Φ̂ = τ/(τ+1)[δn̄_i/n₀ + L̂_{n0}⁻¹(x−ĥ)]` (Q3, `quasineutrality-closure.md`,
+    signed off) is now implemented: `Operators.Quasineutrality` carries a
+    `source` field, and `Configure.configure_level0` builds the residual
+    `R_Φ = M[g] − α Φ̂ + S` with `α = (τ+1)/τ` (= `1/quasineutrality_coefficient(τ)`)
+    and `S = L̂_{n0}⁻¹(x−ĥ)` (`Configure.quasineutrality_source`, from the cleared
+    `h_amplitude`/`h_profile`). The Level-0 potential is now driven (was trivially
+    zero). docs/01 §3 records it; the derivation §6 was the authorization. **No
+    longer gates a Level-0 physics run.**
   - **Collision magnitude** `nu_tilde`: the `⟨ν̂_ii⟩_u`/`ν_★` normalization scaling
     the cleared `ν_{jj}(v̂)` shape — the deferred sub-constant already tracked in
     Q3 (`⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2−ln(1+√2))`, L23 Eq. 4.1.6). Still

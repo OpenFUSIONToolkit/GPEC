@@ -252,6 +252,15 @@ convergence criterion was *never met* in production (Φ̂ array-max residuals
 > 100%/iteration at large ŵ) even as Δ stabilized — treat that as the
 cautionary tale motivating D2.
 
+**Implemented (2026-07-11):** `Operators.Quasineutrality` carries the full closure
+— the residual is `R_Φ = M[g] − α Φ̂ + S`, with `α = (τ+1)/τ` (the reciprocal of
+the `τ/(τ+1)` closure coefficient, from `Coefficients.quasineutrality_coefficient`)
+and the field source `S = L̂_{n0}⁻¹(x − ĥ(Ω))` built by
+`Configure.quasineutrality_source` from the cleared `ĥ` profile
+(`Coefficients.h_amplitude`, `Fields.h_profile`). This closes the earlier gap
+where the operator carried only `M[g] − α Φ`: without the `(x − ĥ)` source the
+Level-0 potential was trivially zero (QUESTIONS Q5, field term now resolved).
+
 Boundary conditions: g → neoclassical (no-island) solution and Φ̂ → background
 E_r potential as |x| → L_x; periodic in ξ. **Do not use bare Neumann
 ∂ĝ/∂p̂ = 0**: L23 §5.3/§7.1 traces its non-physical "winged" solution branch

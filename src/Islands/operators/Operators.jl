@@ -244,16 +244,29 @@ end
 
 """
     Quasineutrality(α)
+    Quasineutrality(α, source)
 
-The Level-0 field residual (`01 §3`): `R_Φ = M[g] − α Φ`, where `M[g]` is the
-velocity moment `∫dy ∫dE Σ_σ g` (Gauss in `E`, Simpson in `y`) and `α` encodes
-the flattened-electron closure scaling (structure of `e_iΦ̂/T_i/(2 L̂_{n0})`,
-supplied). This closes `Φ(x, ξ)` inside the global Newton system rather than the
-sources' fragile nested Picard loop (`01 §3`, `03 §3`).
+The Level-0 field residual (`01 §3`): `R_Φ = M[g] − α Φ + source`, where `M[g]`
+is the velocity moment `∫dy ∫dE Σ_σ g` (Gauss in `E`, Simpson in `y`), `α` is
+the adiabatic-shielding coefficient `(τ+1)/τ`, and `source` is the
+`L̂_{n0}⁻¹(x − ĥ(Ω))` flattened-electron drive of the cleared closure (`01 §3`,
+`quasineutrality-closure.md`). Both come from the **human-cleared** closure
+(sign-off 2026-07-11) — built by `Configure.configure_level0` from
+`Coefficients.quasineutrality_coefficient` and the `ĥ` profile. `source`
+defaults to `nothing` (a pure `M[g] − α Φ` residual) for the manufactured-test
+and pre-drive configurations. This closes `Φ(x, ξ)` inside the global Newton
+system rather than the sources' fragile nested Picard loop (`01 §3`, `03 §3`).
+
+## Fields
+
+  - `α`      — adiabatic-shielding coefficient multiplying `Φ` (`(τ+1)/τ`).
+  - `source` — the `(nx, nξ)` `L̂_{n0}⁻¹(x − ĥ)` field drive, or `nothing`.
 """
-struct Quasineutrality{S} <: AbstractTerm
+struct Quasineutrality{S,A} <: AbstractTerm
     α::S
+    source::A
 end
+Quasineutrality(α) = Quasineutrality(α, nothing)
 
 # ---------------------------------------------------------------------------
 # Discrete kernels (allocation-free, generic over eltype)
@@ -428,6 +441,7 @@ end
 function apply!(R::IslandState, t::Quasineutrality, U::IslandState, grid::IslandGrid, ::IslandCache)
     velocity_moment!(R.Φ, U.g, grid; accumulate=true)
     @inbounds @. R.Φ += -t.α * U.Φ
+    t.source === nothing || @inbounds(@. R.Φ += t.source)
     return R
 end
 

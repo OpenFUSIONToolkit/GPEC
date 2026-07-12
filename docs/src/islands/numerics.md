@@ -74,7 +74,7 @@ others are active, no regime branches anywhere):
 ```math
 R_g(U) \;=\; \sum_{\text{terms } T} T[U],
 \qquad
-R_\Phi(U) \;=\; M[g] - \alpha\,\tilde\Phi ,
+R_\Phi(U) \;=\; M[g] - \alpha\,\tilde\Phi + S_\Phi ,
 ```
 
 with the Level-0 term structures (each coefficient below is **supplied data**,
@@ -87,7 +87,7 @@ its physics value gated):
 | `ExBDrift` | ``c_E \left( \partial_\xi\tilde\Phi\, \partial_x g - \partial_x\tilde\Phi\, \partial_\xi g \right)`` — the ``(x,\xi)`` Poisson bracket, the one state-nonlinear Level-0 term | the ``E\times B`` coupling |
 | `PitchAngleDiffusion` | ``c\,(K g)`` along ``y`` (mimetic form, §3) | ``\hat\nu(E)`` and the pitch diffusivity profile |
 | `GradientDrive` | additive source | the ``(\mathbf v_E + \mathbf v_D + \mathbf v_{\tilde\psi})\cdot\nabla F_0`` drive |
-| `Quasineutrality` | ``M[g] - \alpha\tilde\Phi`` | the closure coefficient ``\alpha`` |
+| `Quasineutrality` | ``M[g] - \alpha\tilde\Phi + S_\Phi`` | **cleared** — ``\alpha=(\tau+1)/\tau`` and the drive ``S_\Phi=\hat L_{n0}^{-1}(x-\hat h)`` (§8) |
 
 Every `apply!` kernel is allocation-free (a CI regression test holds this at
 **0 bytes**) and generic over the element type, so ForwardDiff dual numbers
@@ -289,18 +289,25 @@ builders (§7, the M2b derivation lane) onto the operator stack:
   coefficient from `pitch_diffusivity` / `deflection_frequency`, fed to the
   mimetic `conservative_pitch_operator` (§3);
 - the ``\Delta_{\cos}`` / ``\Delta_{\sin}`` prefactors from
-  `delta_moment_prefactors` (§7).
+  `delta_moment_prefactors` (§7);
+- the **quasineutrality field term** — ``\alpha=(\tau+1)/\tau`` from
+  `quasineutrality_coefficient` and the drive
+  ``S_\Phi=\hat L_{n0}^{-1}(x-\hat h(\Omega))`` from `quasineutrality_source`
+  (the ``\hat h`` amplitude ``w/2\sqrt2`` from `h_amplitude`, the profile from
+  `Fields.h_profile`), closing the Level-0 potential (§2; the drive whose absence
+  had left ``\Phi`` trivially zero).
 
 The coefficient families that are **not yet cleared** — parallel streaming, the
-``E\times B`` coupling, the gradient drive, the quasineutrality operator
-coefficient (and the missing ``\hat L_{n0}^{-1}(x-\hat h)`` field source), the
-collision magnitude ``\langle\hat\nu_{ii}\rangle_u``, the orbit-averaged pitch
-measure, and the neoclassical far field — are **supplied** through
-`GatedLevel0Inputs`, never assigned a physics value here (QUESTIONS Q5). This is
-why M2c delivers a runnable **scaffold**, not a Level-0 physics result: with
-`level0_placeholders` (documented non-physics values) the assembled residual is
-well-formed and Newton–Krylov converges structurally, but a physics threshold
-awaits the Q5 clearances. Implemented by: `Configure.configure_level0`.
+``E\times B`` coupling, the gradient drive, the collision magnitude
+``\langle\hat\nu_{ii}\rangle_u``, the orbit-averaged pitch measure, and the
+neoclassical far field — are **supplied** through `GatedLevel0Inputs`, never
+assigned a physics value here (QUESTIONS Q5). So the assembly is still a
+**scaffold** for the *kinetic* physics (those families remain gated), even though
+its field equation is now the fully cleared closure: with `level0_placeholders`
+(documented non-physics values for the gated kinetic inputs) the assembled
+residual is well-formed, ``\Phi`` is genuinely driven, and Newton–Krylov
+converges. A physics threshold still awaits the remaining Q5 kinetic clearances.
+Implemented by: `Configure.configure_level0`.
 
 ## 9. Verification evidence (the A-ladder, all green in CI)
 
