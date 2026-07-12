@@ -181,7 +181,16 @@ bare pass/fail. The derivation lane inherits this framing.
     the `(x−ĥ)` drive are supplied/gated.
   - **Collision magnitude** `nu_tilde`: the `⟨ν̂_ii⟩_u`/`ν_★` normalization scaling
     the cleared `ν_{jj}(v̂)` shape — the deferred sub-constant already tracked in
-    Q3 (`⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2−ln(1+√2))`, L23 Eq. 4.1.6).
+    Q3 (`⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2−ln(1+√2))`, L23 Eq. 4.1.6). Still
+    escalated (needs the L23 integrand read in detail).
+  - **Passing fraction** `f_p ≃ 1 − 1.46√ε` (electron closure, Q3): **now
+    drafted** — `derivations/passing-fraction.md` `[DERIVED: 2026-07-11]` derives
+    it from the effective trapped-fraction integral and numerically confirms the
+    coefficient (`1.4624`, matching the quoted `1.46` to 3 s.f.). **Awaiting
+    sign-off** (does not yet clear `Fields.ElectronClosure.f_p`); one open item
+    for the reviewer — confirm I19 Eq. 22 uses the same effective-trapped-fraction
+    definition. The Hirshman–Sigmar `k ≃ −1.173` remains escalated (needs the
+    parallel-viscosity moment problem).
   - **Orbit-averaged pitch measure** `B_profile`: the collision operator's `|B|`
     on the `y`-grid is the *orbit-averaged* field (turning-point structure), not a
     single local `B`; the cleared `pitch_diffusivity(λ,B)` is the local building

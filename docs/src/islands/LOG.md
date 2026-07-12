@@ -50,6 +50,14 @@ relevant.
     the as-implemented assembly section + `Implemented by:` markers. Tested with
     negative controls (a missing operator ⇒ undocumented; a bogus symbol ⇒
     dangling). 189 islands tests green; `build_docs_local.jl` green.
+  - **Deferred-constant draft** (M2c #5): `derivations/passing-fraction.md`
+    `[DERIVED]` derives the electron-closure passing fraction `f_p ≃ 1−1.46√ε`
+    from the effective trapped-fraction integral and **numerically confirms** the
+    coefficient (`1.4624`, = quoted `1.46` to 3 s.f.). **Drafted, awaiting
+    sign-off** — does NOT clear `Fields.ElectronClosure.f_p` (stays NaN-gated).
+    One open reviewer item (I19 Eq. 22's f_p definition). `⟨ν̂_ii⟩_u` and the
+    Hirshman–Sigmar `k` left escalated (need specific source integrands) — not
+    drafted speculatively.
 - **Blocked (escalated → QUESTIONS Q5)**: the L0 assembly surfaced that several
   operator-stack coefficient families are **not yet cleared** — parallel
   streaming (`a_xi`/`a_x`), `E×B` `c_E`, gradient drive, the collision magnitude

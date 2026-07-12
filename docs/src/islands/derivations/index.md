@@ -23,8 +23,12 @@ transcription or vice versa).
 | Flattened-electron closure ``h(\Omega)`` + amplitude | [electron closure](electron-closure.md) | ✅ signed off 2026-07-11 (``k``, ``f_p`` deferred) |
 | Quasineutrality closure ``1/(2\hat L_{n0})`` (arbitrary ``\tau``) | [quasineutrality closure](quasineutrality-closure.md) | ✅ signed off 2026-07-11 |
 | ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | ✅ signed off 2026-07-11 |
+| Passing fraction ``f_p \simeq 1-1.46\sqrt\varepsilon`` (electron closure) | [passing fraction](passing-fraction.md) | 🔶 drafted — awaiting sign-off |
 
-The six main Q3/Q4 coefficient families are now covered. The remaining pieces are
-the **deferred numerical sub-constants** — ``\langle\hat\nu_{ii}\rangle_u``
-(collision), ``k`` and the ``1.46`` in ``f_p`` (electron closure) — each its own
-short follow-up derivation.
+The six main Q3/Q4 coefficient families are signed off. Of the **deferred
+numerical sub-constants**, the passing fraction ``f_p`` is now **drafted**
+(derived + numerically cross-checked, awaiting sign-off — it does not yet clear
+into `src/`). The remaining two — ``\langle\hat\nu_{ii}\rangle_u`` (collision)
+and the Hirshman–Sigmar ``k`` (electron closure) — are **not** drafted: each
+needs its specific source integrand read in detail and is escalated in
+`QUESTIONS.md` Q3/Q5 rather than derived speculatively.
