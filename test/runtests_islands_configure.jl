@@ -138,3 +138,31 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test_throws ArgumentError Cfg.configure_level0(grid, phys, Spc.Species[]; gated=gated)
     end
 end
+
+@testset "Islands anchor-sync (docs/07 §1.1)" begin
+    Vfy = IslC.Verify
+    ops_file = normpath(joinpath(@__DIR__, "..", "src", "Islands", "operators", "Operators.jl"))
+
+    @testset "the operator stack and the as-implemented docs are in sync" begin
+        r = Vfy.check_anchor_sync()
+        @test isempty(r.undocumented)      # every AbstractTerm operator is documented
+        @test isempty(r.dangling)          # every `Implemented by:` symbol resolves
+    end
+
+    @testset "the check CATCHES drift (negative controls)" begin
+        # a doc missing an operator ⇒ that operator is flagged undocumented
+        missing_doc = tempname() * ".md"
+        write(missing_doc, "Implemented by: `Operators.MagneticDrift`.\n")
+        r1 = Vfy.check_anchor_sync(; docfiles=[missing_doc])
+        @test "ParallelStreaming" in r1.undocumented
+        @test isempty(r1.dangling)         # the one symbol it names does resolve
+        rm(missing_doc; force=true)
+
+        # a doc naming a nonexistent symbol ⇒ that symbol is flagged dangling
+        bogus_doc = tempname() * ".md"
+        write(bogus_doc, "Implemented by: `Operators.NotARealOperator`.\n")
+        r2 = Vfy.check_anchor_sync(; docfiles=[bogus_doc])
+        @test "Operators.NotARealOperator" in r2.dangling
+        rm(bogus_doc; force=true)
+    end
+end

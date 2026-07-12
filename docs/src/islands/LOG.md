@@ -43,6 +43,13 @@ relevant.
   - **B-ladder scaffolding** (M2c #4): `benchmarks/islands/benchmark_B{2,4,5}*.jl`
     wired to `configure_level0` with a one-line un-skip (`const UNGATED = true`),
     kept skipped on QUESTIONS Q3/Q5. B5 carries the full T2 toggle scaffold.
+  - **Anchor-sync check** (M2c #3b, docs/07 §1.1): `Verify.check_anchor_sync`
+    enforces the bidirectional operator↔docs sync — every `AbstractTerm` operator
+    named by an `Implemented by:` marker in `numerics.md` (forward), every marker
+    symbol resolving to a real Islands binding (reverse). numerics.md §8 gained
+    the as-implemented assembly section + `Implemented by:` markers. Tested with
+    negative controls (a missing operator ⇒ undocumented; a bogus symbol ⇒
+    dangling). 189 islands tests green; `build_docs_local.jl` green.
 - **Blocked (escalated → QUESTIONS Q5)**: the L0 assembly surfaced that several
   operator-stack coefficient families are **not yet cleared** — parallel
   streaming (`a_xi`/`a_x`), `E×B` `c_E`, gradient drive, the collision magnitude
@@ -53,12 +60,17 @@ relevant.
   possible until that lands. This is why M2c delivers the assembly **scaffold**,
   not a physics result. These need a second derivation lane (an "M2d",
   human-present) run like M2b.
-- **Next**: (human) work Q5 — clear the remaining coefficient families and fix the
-  QN operator structure (doc-first: amend docs/01 §3 + docs/03 §2). That un-gates
-  the B-ladder T2/T3 physics gates (scaffolding + STATE dashboard already wired).
-  M2c remaining autonomous item: the **anchor-sync CI check** (#3b) — deferred
-  because it needs the as-implemented Physics Book chapters + `# physics:` anchors
-  on the operators, a larger docs deliverable. The M2c goal prompt is re-entrant.
+  Autonomous M2c is now complete (#1 assembly, #2 audit, #3 docs infra [STATE +
+  anchor-sync], #4 B-ladder scaffolding, #6 as-implemented numerics.md; all
+  green, physics-verifier PASS on the assembly).
+- **Next**: (human) work **Q5** — clear the remaining coefficient families and fix
+  the QN operator structure (doc-first: amend docs/01 §3 + docs/03 §2). That is
+  the only thing gating a Level-0 *physics* run; it un-gates the B-ladder T2/T3
+  gates (scaffolding, STATE dashboard, anchor-sync all already wired). Then #5
+  (deferred sub-constants ⟨ν̂_ii⟩_u/k/f_p) is a focused sign-off session like M2b.
+  When the full as-implemented Physics Book chapters (docs/07 §1.1) are scoped,
+  point the operators' anchors there; `Verify.check_anchor_sync` already enforces
+  the sync against `numerics.md` today. The M2c goal prompt is re-entrant.
 
 ## 2026-07-11 — Re-scope verification targets: tiered by reproducibility (Decision D9)
 

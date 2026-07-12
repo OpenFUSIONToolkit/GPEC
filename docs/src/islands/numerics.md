@@ -94,8 +94,17 @@ Every `apply!` kernel is allocation-free (a CI regression test holds this at
 flow through the entire stack — that is what makes the solver's Jacobian exact
 (§5).
 
-*Implementing symbols:* `Operators.AbstractTerm`, `Operators.apply!`,
-`Operators.residual!`, `Operators.IslandStack`.
+Implemented by: `Operators.ParallelStreaming`, `Operators.MagneticDrift`,
+`Operators.ExBDrift`, `Operators.Collisions`, `Operators.PitchAngleDiffusion`,
+`Operators.GradientDrive`, `Operators.PerpTransport`, `Operators.RadiationSink`,
+`Operators.Quasineutrality`.
+
+The last two are Level-4 closure stubs, and `Collisions` is the non-mimetic
+collision slot superseded at Level 0 by `PitchAngleDiffusion` (§3); the stack is
+assembled by `Operators.residual!` over an `Operators.IslandStack`. The
+anchor-sync check `Verify.check_anchor_sync` holds this list in step with the
+`AbstractTerm` subtypes so a new operator without documentation, or a doc naming
+a deleted symbol, fails the check.
 
 ## 3. The conservative collision structure
 
@@ -265,7 +274,35 @@ is verified exactly (ladder **A3**).
 `Moments.omega_average`, `Fields.Q_omega`, `Fields.h_profile`,
 `Fields.flat_average_d2h_dx2`.
 
-## 8. Verification evidence (the A-ladder, all green in CI)
+## 8. The Level-0 configuration assembly (M2c)
+
+`Islands.Configure.configure_level0(grid, phys, species; gated)` assembles a
+Level-0 named configuration — the `IslandStack` + far-field conditions + `Δ`
+prefactors the solver consumes — by wiring the **human-cleared** coefficient
+builders (§7, the M2b derivation lane) onto the operator stack:
+
+- the magnetic drift `c_D[ix, iξ, iy, iE, iσ]` from `magnetic_drift_frequency`,
+  evaluated on the phase-space grid (``\hat v = \sqrt E``, the ``:original`` /
+  ``:improved`` toggle, and the forbidden pitch region ``y \ge (1+\varepsilon)/
+  (1-\varepsilon)`` zeroed since it carries no particles);
+- the pitch-collision diffusivity ``P`` and the energy-dependent deflection
+  coefficient from `pitch_diffusivity` / `deflection_frequency`, fed to the
+  mimetic `conservative_pitch_operator` (§3);
+- the ``\Delta_{\cos}`` / ``\Delta_{\sin}`` prefactors from
+  `delta_moment_prefactors` (§7).
+
+The coefficient families that are **not yet cleared** — parallel streaming, the
+``E\times B`` coupling, the gradient drive, the quasineutrality operator
+coefficient (and the missing ``\hat L_{n0}^{-1}(x-\hat h)`` field source), the
+collision magnitude ``\langle\hat\nu_{ii}\rangle_u``, the orbit-averaged pitch
+measure, and the neoclassical far field — are **supplied** through
+`GatedLevel0Inputs`, never assigned a physics value here (QUESTIONS Q5). This is
+why M2c delivers a runnable **scaffold**, not a Level-0 physics result: with
+`level0_placeholders` (documented non-physics values) the assembled residual is
+well-formed and Newton–Krylov converges structurally, but a physics threshold
+awaits the Q5 clearances. Implemented by: `Configure.configure_level0`.
+
+## 9. Verification evidence (the A-ladder, all green in CI)
 
 The manufactured-solution ladder verifies discretization order and the AD
 plumbing simultaneously — per operator, for the assembled residual, and through
@@ -283,22 +320,25 @@ a full converged Newton solve forced by the analytic source:
 | A5 | zero-drive null: ``g \equiv 0 \Rightarrow R = 0`` | **exactly** machine zero |
 | A7 | ``\langle \partial^2 h / \partial x^2 \rangle_\Omega = 0`` | ``10^{-16}`` |
 | A8 | ``y_c``-block ``\sigma_{\min}`` monitor + singular detection | active |
+| M2c | L0 assembly builds; cleared ``c_D`` faithful; placeholder solve converges | exact / 5 Newton iters |
 | — | allocation regression on every hot kernel | 0 bytes |
 
 Everything above regenerates from one pinned script
 (`benchmarks/islands/figures/make_structural_figures.jl`) and runs in the test
-suite (`test/runtests_islands_{grids,operators,solve}.jl`); the
+suite (`test/runtests_islands_{grids,operators,solve,configure}.jl`); the
 `islands_l0_structural` regression case tracks the headline numbers across
-commits.
+commits. The always-current ladder status is the
+[State dashboard](state/STATE.md).
 
-## 9. What comes next
+## 10. What comes next
 
 The physics story — the drift-kinetic coefficients, the drift-model threshold
 *scalings and toggle differentials*, the ``\Delta_{\text{pol}}(\omega_E)``
 sign-reversal *behavior* — is written as the
 [Paper I figure contract](papers/paper-1/OUTLINE.md) and un-gates claim by claim
-as the derivation lane and human clearances (`QUESTIONS.md` Q2–Q4) are worked
-through. Following the SLAYER-validation precedent (Park 2022 / Burgess 2026),
+as the derivation lane and human clearances (`QUESTIONS.md` Q2–Q5) are worked
+through — Q5 being the remaining Level-0 coefficient families the M2c assembly
+surfaced as still-gated. Following the SLAYER-validation precedent (Park 2022 / Burgess 2026),
 the physics gates are **tiered by reproducibility** (Decision D9, docs/05):
 scalings, regime trends, and internally-controlled differentials are the primary
 quantitative checks; absolute literature numbers (e.g. the "``8.73 \to 1.46\,

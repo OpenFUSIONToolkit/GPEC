@@ -39,6 +39,7 @@ export manufactured_state,
     term_allocations, residual_allocations,
     yc_block_sigma_min, solve_mms, zero_drive_setup
 export ladder_status, write_state_dashboard
+export check_anchor_sync
 
 # ---------------------------------------------------------------------------
 # Manufactured solution: smooth, separable, ξ-periodic and bandlimited.
@@ -536,6 +537,80 @@ function write_state_dashboard(io::IO=stdout; commit::AbstractString="unknown", 
     println(io, "Tiers (Decision D9, docs/05 \"Target tiers\"): T1 exact math · T2 internal")
     println(io, "differentials · T3 scalings/trends/existence · T4 absolute (audit-gated).")
     return io
+end
+
+# ---------------------------------------------------------------------------
+# Anchor-sync check (docs/07 §1.1, §4.2): the bidirectional operator ↔ docs
+# consistency the CI enforces.
+# ---------------------------------------------------------------------------
+# Resolve a dotted symbol (e.g. "Operators.MagneticDrift") from `root` (Islands),
+# walking submodules. Returns true iff every component is defined.
+function _resolve_symbol(qualified::AbstractString, root::Module)
+    m = root
+    parts = split(qualified, '.')
+    for (i, p) in enumerate(parts)
+        sym = Symbol(p)
+        isdefined(m, sym) || return false
+        i == length(parts) && return true
+        v = getfield(m, sym)
+        v isa Module || return false
+        m = v
+    end
+    return true
+end
+
+# Extract the backtick-quoted symbols from every `Implemented by:` block of a
+# doc — the block runs from the marker to the next blank line, so a wrapped
+# multi-line list is captured whole.
+function _implemented_by_symbols(docfile::AbstractString)
+    text = read(docfile, String)
+    syms = String[]
+    for block in eachmatch(r"Implemented by:(.*?)(?:\n\n|\z)"s, text)
+        for m in eachmatch(r"`([^`]+)`", block.captures[1])
+            push!(syms, String(m.captures[1]))
+        end
+    end
+    return syms
+end
+
+# The AbstractTerm operator names declared in the Operators source. The `<:
+# AbstractTerm` must sit *outside* the type-parameter braces, so a struct that
+# merely carries an `F<:AbstractTerm` type parameter (e.g. `IslandStack`) is not
+# a false match.
+function _operator_names(operators_file::AbstractString)
+    text = read(operators_file, String)
+    return [String(m.captures[1]) for m in eachmatch(r"struct\s+(\w+)(?:\{[^}]*\})?\s*<:\s*AbstractTerm\b", text)]
+end
+
+"""
+    check_anchor_sync(root=parentmodule(@__MODULE__); operators_file, docfiles)
+
+The docs/07 §1.1 bidirectional anchor-sync check, as a pure function CI can gate
+on. Returns `(undocumented, dangling)`:
+
+  - `undocumented` — `AbstractTerm` operators declared in `operators_file` whose
+    name is **not** claimed by any `Implemented by:` marker in `docfiles` (an
+    operator with no as-implemented documentation);
+  - `dangling` — backtick-quoted symbols on an `Implemented by:` line that do
+    **not** resolve to a defined name under `root` (a doc pointing at a
+    nonexistent/renamed symbol).
+
+Both empty ⇒ the operator stack and the as-implemented docs are in sync. `root`
+defaults to the `Islands` module; `operators_file`/`docfiles` default to the
+in-repo paths relative to this source file.
+"""
+function check_anchor_sync(root::Module=parentmodule(@__MODULE__);
+    operators_file::AbstractString=normpath(joinpath(@__DIR__, "..", "operators", "Operators.jl")),
+    docfiles=[normpath(joinpath(@__DIR__, "..", "..", "..", "docs", "src", "islands", "numerics.md"))])
+    implemented = String[]
+    for f in docfiles
+        isfile(f) && append!(implemented, _implemented_by_symbols(f))
+    end
+    implemented_leaves = Set(last(split(s, '.')) for s in implemented)
+    ops = _operator_names(operators_file)
+    undocumented = [op for op in ops if !(op in implemented_leaves)]
+    dangling = [s for s in implemented if !_resolve_symbol(s, root)]
+    return (undocumented=undocumented, dangling=dangling)
 end
 
 end # module Verify
