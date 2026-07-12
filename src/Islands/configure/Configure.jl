@@ -13,12 +13,12 @@ onto operator-stack coefficients *cleanly*; the assembly wires exactly those and
 
   - **Cleared, wired here** (populated by `Coefficients.*`, never literals):
     the orbit-averaged magnetic drift `c_D` ([`drift_coefficient_table`], from
-    [`Coefficients.magnetic_drift_frequency`](@ref)); the pitch-collision
-    *shapes* ([`Coefficients.pitch_diffusivity`](@ref) →
+    `Coefficients.magnetic_drift_frequency`); the pitch-collision
+    *shapes* (`Coefficients.pitch_diffusivity` →
     `Operators.conservative_pitch_operator`, and
-    [`Coefficients.deflection_frequency`](@ref) → the energy-dependent collision
+    `Coefficients.deflection_frequency` → the energy-dependent collision
     coefficient); and the `Δ`-moment prefactors
-    ([`Coefficients.delta_moment_prefactors`](@ref)).
+    (`Coefficients.delta_moment_prefactors`).
   - **Not yet a cleared coefficient family → supplied, gated** (QUESTIONS Q5):
     the parallel-streaming coefficients `a_xi`/`a_x`, the `E×B` coupling `c_E`,
     the gradient-drive source `drive`, the quasineutrality operator coefficient
@@ -142,7 +142,7 @@ end
 
 Build the orbit-averaged magnetic-drift coefficient `c_D[ix, iξ, iy, iE, iσ]` for
 `Operators.MagneticDrift` by evaluating the **cleared**
-[`Coefficients.magnetic_drift_frequency`](@ref) on the phase-space grid
+`Coefficients.magnetic_drift_frequency` on the phase-space grid
 (`01 §2.1`). `ω̂_D` depends on `(y, E, σ)` only (through `v̂ = √E` and the orbit
 brackets `A(y)`, `G(y)`), so the `(y, E, σ)` table is broadcast over `(x, ξ)`.
 The orbit brackets are computed once per `y` (they depend only on `y`, `ε`) and
@@ -208,7 +208,7 @@ end
     pitch_diffusivity_profile(grid, B_profile) -> (P, wmeas)
 
 Evaluate the **cleared** Lorentz pitch diffusivity
-[`Coefficients.pitch_diffusivity`](@ref) `P(λ) = λ√(1−λB)` and the collision
+`Coefficients.pitch_diffusivity` `P(λ) = λ√(1−λB)` and the collision
 measure `w = B/√(1−λB)` on the `y`-grid (`01 §2.3`), with `λ = y` in the
 `B_max = 1` normalization and `B = B_profile[iy]` the (gated) orbit-averaged
 field. Returns `(P, wmeas)` for `Operators.conservative_pitch_operator`, which
@@ -238,7 +238,7 @@ end
 
 Build the energy-dependent collision coefficient `c[ix, iξ, iE, iσ]` for
 `Operators.PitchAngleDiffusion` from the **cleared**
-[`Coefficients.deflection_frequency`](@ref) `ν_{jj}(v̂)` (`01 §2.3`), scaled by the
+`Coefficients.deflection_frequency` `ν_{jj}(v̂)` (`01 §2.3`), scaled by the
 gated magnitude `nu_tilde` (QUESTIONS Q3, carries `⟨ν̂_ii⟩_u`/`ν_★`). It is
 **`y`-independent by construction** (dimensions `(x, ξ, E, σ)`), as
 `PitchAngleDiffusion` requires so the mimetic `K`'s exact conservation is
@@ -272,7 +272,7 @@ Assemble the Level-0 named configuration (`03 §2`): returns a NamedTuple
     quasineutrality field term;
   - `bc` — the far-field `Operators.FarFieldConditions` (from `gated.bc`);
   - `delta_prefactors` — the cleared `(cos, sin)` `Δ`-moment prefactors
-    ([`Coefficients.delta_moment_prefactors`](@ref));
+    (`Coefficients.delta_moment_prefactors`);
   - `cleared`, `gated` — the provenance tuples naming which coefficients came
     from cleared `Coefficients.*` builders vs. supplied gated inputs.
 

@@ -35,7 +35,14 @@ relevant.
     values so the assembled stack **converges structurally** (verified: 5 Newton
     iters, ‖F‖=1.3e-9). 184 islands tests green (new `runtests_islands_configure.jl`);
     the y=0 orbit-average guard was relaxed (`y>0`→`y>=0`, a domain-boundary fix,
-    no y>0 value changes).
+    no y>0 value changes). **Physics-verifier PASS** on the diff.
+  - **docs/07 STATE dashboard** (M2c #3a): `Verify.write_state_dashboard` +
+    `ladder_status` generate `docs/src/islands/state/STATE.md` (auto-gen header,
+    do-not-hand-edit) — the docs/05 ladder as a status table (8 A-ladder rows
+    green, B/C physics rows gated on QUESTIONS). Nav-wired.
+  - **B-ladder scaffolding** (M2c #4): `benchmarks/islands/benchmark_B{2,4,5}*.jl`
+    wired to `configure_level0` with a one-line un-skip (`const UNGATED = true`),
+    kept skipped on QUESTIONS Q3/Q5. B5 carries the full T2 toggle scaffold.
 - **Blocked (escalated → QUESTIONS Q5)**: the L0 assembly surfaced that several
   operator-stack coefficient families are **not yet cleared** — parallel
   streaming (`a_xi`/`a_x`), `E×B` `c_E`, gradient drive, the collision magnitude
@@ -47,9 +54,11 @@ relevant.
   not a physics result. These need a second derivation lane (an "M2d",
   human-present) run like M2b.
 - **Next**: (human) work Q5 — clear the remaining coefficient families and fix the
-  QN operator structure (doc-first: amend docs/01 §3 + docs/03 §2). Then M2c
-  items #3 (docs/07 STATE + anchor-sync), #4 (B-ladder scaffolding), and the
-  T2/T3 physics gates unblock. The M2c goal prompt is re-entrant.
+  QN operator structure (doc-first: amend docs/01 §3 + docs/03 §2). That un-gates
+  the B-ladder T2/T3 physics gates (scaffolding + STATE dashboard already wired).
+  M2c remaining autonomous item: the **anchor-sync CI check** (#3b) — deferred
+  because it needs the as-implemented Physics Book chapters + `# physics:` anchors
+  on the operators, a larger docs deliverable. The M2c goal prompt is re-entrant.
 
 ## 2026-07-11 — Re-scope verification targets: tiered by reproducibility (Decision D9)
 

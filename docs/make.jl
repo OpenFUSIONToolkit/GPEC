@@ -40,10 +40,11 @@ makedocs(;
             "Islands" => "islands.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"
-       ],
+        ],
         "Islands" => [
             "Overview" => "islands/index.md",
             "Numerics (as implemented)" => "islands/numerics.md",
+            "State dashboard" => "islands/state/STATE.md",
             "Derivations" => [
                 "Overview" => "islands/derivations/index.md",
                 "ψ̃ amplitude" => "islands/derivations/psi-tilde-amplitude.md",
@@ -68,7 +69,7 @@ makedocs(;
             ]
         ],
         "Citations" => "citations.md",
-        "Developer Notes" => "developer_notes.md",
+        "Developer Notes" => "developer_notes.md"
     ],
     checkdocs=:exports
 )

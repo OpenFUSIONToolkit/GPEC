@@ -217,8 +217,8 @@ end
 The ``\\Delta_{\\cos}``/``\\Delta_{\\sin}`` output-moment prefactors (docs/01 §4;
 derivation `delta-moment-prefactors.md`): returns
 `(cos=-\\mu_0 R/(2\\tilde\\psi), sin=+\\mu_0 R/(2\\tilde\\psi))` for
-[`Moments.delta_moments`](@ref), with ``\\tilde\\psi`` the cleared island flux
-amplitude [`island_flux_amplitude`](@ref). ``\\Delta_{\\cos}=\\Delta_{\\rm neo}``
+`Moments.delta_moments`, with ``\\tilde\\psi`` the cleared island flux
+amplitude `Moments.island_flux_amplitude`. ``\\Delta_{\\cos}=\\Delta_{\\rm neo}``
 matches Diss19 Eq. 4.12 (stationarity ``\\Delta'+\\Delta_{\\rm neo}=0``); the sin
 normalization is the symmetric `[DERIVED]` pin so that
 ``\\Delta_{\\cos}+i\\Delta_{\\sin}`` maps onto the linear-layer ``\\Delta(Q)``.
