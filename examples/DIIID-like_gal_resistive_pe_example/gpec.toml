@@ -26,6 +26,7 @@ tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial 
 equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
+HDF5_filename = "gpec_stride.h5"  # write our STRIDE output here, preserving the galerkin reference gpec.h5
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 mat_flag = true                # Construct coefficient matrices for diagnostic purposes (required by gal_flag)
 ode_flag = true                # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)

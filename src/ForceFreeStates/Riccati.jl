@@ -336,8 +336,23 @@ function compute_delta_prime_matrix!(
 
     # rpec coil-response loop needs the vacuum edge (col_edge coupled in junc_rows[1:N]) and the
     # S-axis row layout that `loop_edge_boundary_conditions` assumes for its edge-BC rows.
-    if use_S_axis && wv !== nothing
-        intr.delta_coil_matrix = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all)
+    # (The edge BC / RHS formulation itself is chosen inside that function via ENV["DELTACOIL_MODE"].)
+    if use_S_axis && wv !== nothing                        #only run the coil loop on the S-axis path with a vacuum edge (real W_V present)
+        #KNOB — Q1 per-surface normalization. snorm = |n·q'|^α (derived: sing_get_ua small basis ~ dpsi^α at
+        #dpsi ∝ 1/(n·q'), α = Mercier exponent). To test a different normalization, change `alpha`/the power below.
+        nq = [abs(Float64(minimum(sing[j].n)) * Float64(sing[j].q1)) for j in 1:msing]   #per surface: |n·q'| (n = toroidal mode, q' = dq/dψ at the surface)
+        alpha = (ctrl !== nothing && equil !== nothing && ffit !== nothing) ?            #if we have the inputs to rebuild the asymptotics...
+                [real(compute_sing_asymptotics(sing[j], ctrl, equil, ffit, intr; sig=1.0).alpha[1]) for j in 1:msing] :   #...compute α = Mercier exponent per surface (√−D_I)
+                fill(0.55, msing)                                                        #...otherwise fall back to a typical α ≈ 0.55
+        snorm = nq .^ alpha                                                              #the derived per-surface factor: snorm[j] = |n·q'|^α_j  (EDIT exponent to retune)
+        # DELTACOIL_COMP tests the ξ-vs-ξ' basis convention: multiply the small coeff by dpsi^p per surface
+        # (dpsi = singfac_min/|n·q'|; reading ξ' vs ξ differs by one dpsi). "xi"(default)=p0, "xip"=+1, "xip_half"=+0.5, "xi_neg"=-1.
+        comp = get(ENV, "DELTACOIL_COMP", "xi")
+        pcomp = comp == "xip" ? 1.0 : comp == "xip_half" ? 0.5 : comp == "xi_neg" ? -1.0 : 0.0
+        if pcomp != 0.0 && ctrl !== nothing
+            snorm = snorm .* (ctrl.singfac_min ./ nq) .^ pcomp                            #apply dpsi^p (ξ→ξ' relative scaling)
+        end
+        intr.delta_coil_matrix = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all, snorm)   #run the coil loop and store the result on the internal state
     end
 
     intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
@@ -634,57 +649,77 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
-# Loop the 2N boundary conditions of Eq. (37) [Glasser-Kolemen 2018 PoP 25, 032501].
-# M is the BVP matrix from _assemble_bvp_S_axis. The last 2*msing rows at the driving rows:
-# setting one to 1 assigns that big-solution coefficients. Solve once per boundary condition
-# and collect the small-solution coefficients into the raw D' matrix.
-function loop_boundary_conditions(M::Matrix{ComplexF64}, msing::Int, N::Int,
-    ipert_all::Vector{Int})
-    nMat = size(M, 1)
-    s2 = 2 * msing
-    M_lu = lu(M)
-    dp_raw = zeros(ComplexF64, s2, s2)
+# Δ' loop: drive each of the 2·msing big-solution BCs of Eq. (37) in turn, collect the small-solution
+# (+N slot) coeffs at every surface into the raw Δ' matrix [Glasser-Kolemen 2018 PoP 25, 032501].
+function loop_boundary_conditions(M::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int})
+    nMat = size(M, 1)                   #BVP unknowns = (2 + 4·msing)·N
+    s2 = 2 * msing                      #number of BCs (left/right per surface)
+    M_lu = lu(M)                        #factorize the full Eq.(37) matrix once; only the RHS changes per BC
+    dp_raw = zeros(ComplexF64, s2, s2)  #raw Δ': rows = driver BC, cols = surface side
     b = zeros(ComplexF64, nMat)
-
     for jsing in 1:msing, side in 1:2
-        dRow = 2jsing - (2 - side)
+        dRow = 2jsing - (2 - side)      #BC index: surface jsing, side 1=left/2=right
         fill!(b, 0)
-        b[nMat-s2+dRow] = 1
+        b[nMat-s2+dRow] = 1             #drive this big-solution coeff = 1 (bottom driving rows)
         x = M_lu \ b
-
         for ksing in 1:msing
             ipert_k = ipert_all[ksing]
-            dp_raw[dRow, 2ksing-1] = x[_col_left(ksing, N)[ipert_k+N]]
-            dp_raw[dRow, 2ksing] = x[_col_right(ksing, N)[ipert_k+N]]
+            dp_raw[dRow, 2ksing-1] = x[_col_left(ksing, N)[ipert_k+N]]  #left small-solution coeff
+            dp_raw[dRow, 2ksing] = x[_col_right(ksing, N)[ipert_k+N]]   #right small-solution coeff
         end
     end
     return dp_raw
 end
 
-# Coil-response loop (galerkin gal_rpec convention) for the edge block of Eq. (37) [Glasser-Kolemen
-# 2018 PoP 25 082502]. For each edge poloidal mode k, pin the edge to a Dirichlet identity and drive
-# α_edge = e_k as a unit source, solve the square system (block-6 driving rows held at 0), and read the
-# resonant small-solution coefficient at each surface → delta_coil (2·msing × N). Pass the vacuum M.
+# Coil-response loop for the Eq. (37) edge block [Glasser-Kolemen 2018 PoP 25 082502]: for each edge poloidal
+# mode k, copy the full BVP matrix, impose the Eq. (38) edge BC via `bc!`, solve, and read the snorm-scaled
+# small-solution coeff (+N slot) at every surface → delta_coil (2·msing × N). To change the boundary condition,
+# edit `bc!` below — it mutates the copy Mc for edge mode k and returns the RHS to drive (return `nothing` for a
+# homogeneous null-space solve). top/bot = the Eq. (38) 1_M-identity / -W_V edge row blocks; col_edge = edge cols.
 function loop_edge_boundary_conditions(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int,
-    ipert_all::Vector{Int})
+    ipert_all::Vector{Int}, snorm::Vector{Float64})
     nMat = size(M, 1)
-    edge_rows = (nMat-2msing-N+1):(nMat-2msing) # wall edge-BC rows of the last surface
-    Mc = copy(M)
-    Mc[edge_rows, :] .= 0
-    Mc[edge_rows, col_edge] .= Matrix{ComplexF64}(I, N, N) # α_edge = RHS
-    Mc_lu = lu(Mc)
-
-    delta_coil = zeros(ComplexF64, 2msing, N)
-    rhs = zeros(ComplexF64, nMat)
+    top = (nMat-2msing-2N+1):(nMat-2msing-N)        #Eq.38 top rows (1_M identity)
+    bot = (nMat-2msing-N+1):(nMat-2msing)           #Eq.38 bottom rows (-W_V)
+    # DELTACOIL_EDGE selects the edge BC to test against galerkin (default "driven"). bc! mutates the copy Mc for
+    # edge mode k and returns the RHS (or nothing for a homogeneous null-space solve):
+    #   "driven"  – replace the W_V bottom with a Dirichlet identity (α_edge = RHS), unit drive at bot[k]. Well-posed.
+    #   "wv"      – keep the assembled true W_V edge untouched, unit drive at bot[k] (galerkin's vacuum edge).
+    #   "wv_top"  – keep the true W_V edge, drive via the top (1_M) row top[k] instead.
+    #   "wv_null"     – keep the true W_V edge untouched, RHS = 0 → svd null space (DEGENERATE: Mc is k-independent so
+    #                   all 24 columns come out identical, and M is nonsingular so the "null" vector is just noise).
+    #   "wv_null_pin" – keep the true W_V edge but replace the k-th driving row with a unit pin on edge mode k, RHS = 0.
+    #                   This makes Mc k-dependent and rank-deficient, so svd null space is a physical per-mode mode.
+    edge = get(ENV, "DELTACOIL_EDGE", "driven")
+    drive_rows = (nMat-2msing+1):nMat               #Eq.37 driving rows (pin the resonant big-solution coeffs)
+    function bc!(Mc, k)
+        edge == "wv_null" && return nothing         #true W_V edge untouched, homogeneous (all-zero RHS) → null space
+        if edge == "wv_null_pin"
+            Mc[drive_rows, :] .= 0                   #drop the big-solution driving constraints
+            Mc[drive_rows[1], col_edge[k]] = 1      #pin edge mode k in their place → k-dependent, rank-deficient Mc
+            return nothing                           #RHS = 0 → svd null space (now physical, per edge mode k)
+        end
+        rhs = zeros(ComplexF64, nMat)
+        if edge == "driven"
+            Mc[bot, :] .= 0
+            Mc[bot, col_edge] .= I(N)               #Dirichlet identity edge: α_edge = RHS
+            rhs[bot[k]] = 1                          #unit drive on edge mode k
+        elseif edge == "wv_top"
+            rhs[top[k]] = 1                          #drive the true W_V edge via the top 1_M row
+        else                                        #"wv": drive the true W_V edge via the bottom row
+            rhs[bot[k]] = 1
+        end
+        return rhs
+    end
+    delta_coil = zeros(ComplexF64, 2msing, N)       #rows = surface side, cols = edge mode k
     for k in 1:N
-        fill!(rhs, 0)
-        rhs[edge_rows[k]] = 1 # unit edge source: drive α_edge = e_k (galerkin rpec convention)
-        x = Mc_lu \ rhs
-
-        for j in 1:msing # read resonant small solution at each surface
+        Mc = copy(M)                                #fresh full Eq.(37) matrix per mode k
+        rhs = bc!(Mc, k)
+        x = rhs === nothing ? svd(Mc).V[:, end] : lu(Mc) \ rhs
+        for j in 1:msing
             ipert_j = ipert_all[j]
-            delta_coil[2j-1, k] = x[_col_left(j, N)[ipert_j+N]]
-            delta_coil[2j, k] = x[_col_right(j, N)[ipert_j+N]]
+            delta_coil[2j-1, k] = snorm[j] * x[_col_left(j, N)[ipert_j+N]]
+            delta_coil[2j, k] = snorm[j] * x[_col_right(j, N)[ipert_j+N]]
         end
     end
     return delta_coil

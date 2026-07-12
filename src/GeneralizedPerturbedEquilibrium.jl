@@ -81,7 +81,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"] if Symbol(k) in fieldnames(ForceFreeStatesControl))...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
     # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
@@ -618,6 +618,7 @@ function write_outputs_to_HDF5(
         # Edge coil-response matrix (2msing × numpert_total) from the Eq. (37) edge-BC loop.
         if intr.msing > 0 && !isempty(intr.delta_coil_matrix)
             out_h5["singular/delta_coil_matrix"] = intr.delta_coil_matrix
+            out_h5["singular/delta_coil_abs"] = abs.(intr.delta_coil_matrix)  # real |.| for H5Web heatmap view
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
