@@ -8,6 +8,49 @@ relevant.
 
 ---
 
+## 2026-07-11 — M2c: L0 configuration assembly + input-completeness audit (autonomous)
+
+- **Moved (M2b lane complete → M2c started)**:
+  - **Derivation lane 6/6 cleared** (earlier this session): ψ̃, ω̂_D + drift
+    toggle, collision operator, h(Ω) closure, quasineutrality, Δ prefactors — all
+    human-signed-off and in `src/` via `Coefficients.*`/`Moments.*` (recorded in
+    docs/01 + `derivations/`). Re-derivation caught the I19 ψ̃ published typo, the
+    collision low-v limit error, and the quasineutrality δn normalization.
+  - **Input-completeness audit** (Decision D9 deliverable): new
+    `docs/09-input-manifests.md` — per-source manifests (I19, D21, D23a/b, L23).
+    Headline: I19's own run collisionality is contradictory (0.01 vs 10⁻³) and its
+    Δ′ unspecified, so B5a's absolute threshold is only a T3 (existence) target;
+    **L23 (thesis) is the only clean T4 candidate**. Itself a reproducibility
+    result (Paper-I C9). Nav-wired.
+  - **M2c goal prompt** authored (`design/M2c-launch-prompt.md`): L0 assembly +
+    audit + docs/07 infra, autonomous-mode (un-gate nothing, escalate to
+    QUESTIONS, never guess).
+  - **L0 configuration assembly** (`src/Islands/configure/Configure.jl`,
+    `configure_level0`): wires the **cleared** coefficients onto the operator
+    stack — `c_D` node-for-node from `magnetic_drift_frequency` (verified Δ=0.0,
+    with the `:improved` toggle and forbidden-region zeroing), the pitch-collision
+    shapes from `pitch_diffusivity`/`deflection_frequency`, the Δ prefactors from
+    `delta_moment_prefactors`. Everything uncleared is a **supplied gated input**
+    (`GatedLevel0Inputs`); `level0_placeholders` gives documented non-physics
+    values so the assembled stack **converges structurally** (verified: 5 Newton
+    iters, ‖F‖=1.3e-9). 184 islands tests green (new `runtests_islands_configure.jl`);
+    the y=0 orbit-average guard was relaxed (`y>0`→`y>=0`, a domain-boundary fix,
+    no y>0 value changes).
+- **Blocked (escalated → QUESTIONS Q5)**: the L0 assembly surfaced that several
+  operator-stack coefficient families are **not yet cleared** — parallel
+  streaming (`a_xi`/`a_x`), `E×B` `c_E`, gradient drive, the collision magnitude
+  `⟨ν̂_ii⟩_u`/`ν_★`, the orbit-averaged pitch measure, and the neoclassical far
+  field — plus a **structural gap**: the quasineutrality operator lacks the
+  `L̂_{n0}⁻¹(x−ĥ)` field source the cleared closure requires (and its α is the
+  reciprocal of `quasineutrality_coefficient`), so no Level-0 *physics* run is
+  possible until that lands. This is why M2c delivers the assembly **scaffold**,
+  not a physics result. These need a second derivation lane (an "M2d",
+  human-present) run like M2b.
+- **Next**: (human) work Q5 — clear the remaining coefficient families and fix the
+  QN operator structure (doc-first: amend docs/01 §3 + docs/03 §2). Then M2c
+  items #3 (docs/07 STATE + anchor-sync), #4 (B-ladder scaffolding), and the
+  T2/T3 physics gates unblock. The M2c goal prompt is re-entrant.
+
 ## 2026-07-11 — Re-scope verification targets: tiered by reproducibility (Decision D9)
 
 - **Moved**: user flagged that absolute literature numbers (w_c ≃ 2.76 ρ_θi ≡

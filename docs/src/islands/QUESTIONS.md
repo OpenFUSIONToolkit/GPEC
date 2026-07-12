@@ -146,3 +146,57 @@ differentials) and T3 (scalings/trends/existence) physics gates directly; the T4
 absolute literature comparisons additionally require the M2b input-completeness
 audit and are reported only with input manifests + sensitivity scans, never as
 bare pass/fail. The derivation lane inherits this framing.
+
+## Q5 — The remaining un-cleared Level-0 operator coefficient families (a second derivation lane) — OPEN
+
+- **Context**: M2c assembled `Configure.configure_level0` — the Level-0
+  named-configuration builder. Wiring the cleared coefficients onto the operator
+  stack surfaced that the M2b derivation lane cleared the coefficient families
+  that appear as *closures/moments* (`ω̂_D`, the collision `P`/`ν` shapes, the
+  quasineutrality scalar, the `Δ` prefactors), but **several operator-stack
+  coefficients are not yet a cleared family** and were left supplied/gated in
+  `Configure.GatedLevel0Inputs`. `ω̂_D` (`MagneticDrift.c_D`), the pitch
+  diffusivity shape, the deflection-frequency shape, and the `Δ` prefactors *are*
+  wired from cleared `Coefficients.*`; the items below are not.
+- **Question**: clear (by the D7 re-derivation-first route, `docs/derivations/`,
+  human sign-off) each remaining Level-0 operator coefficient:
+  - **Parallel-streaming** `a_xi`, `a_x` (`Operators.ParallelStreaming`): the
+    island-frame streaming coefficients (the `v_∥ b·∇` / island `B̃_r ∂x`
+    structure). `[VERIFY: I19 Eq. (A.1) streaming term — re-derive per D7]`.
+  - **`E×B` coupling** `c_E` (`Operators.ExBDrift`): the Poisson-bracket
+    normalization; entangled with the frames convention (Frames NaN-gated).
+  - **Gradient drive** `drive` (`Operators.GradientDrive`): the `(v_E+v_D+v_ψ̃)·∇F₀`
+    source — needs the frame shift (`Frames.FrameConvention`, still NaN-gated,
+    Q3) and the equilibrium gradient structure.
+  - **Quasineutrality closure — a structural gap, not just a constant.** The
+    cleared closure `Φ̂ = τ/(τ+1)[δn̄_i/n₀ + L̂_{n0}⁻¹(x−ĥ)]` (Q3, derivation
+    `quasineutrality-closure.md`) implies the operator residual
+    `R_Φ = M[g] − α Φ + L̂_{n0}⁻¹(x−ĥ)` with **`α = (τ+1)/τ`** and an
+    **`L̂_{n0}⁻¹(x−ĥ)` field source**. `Operators.Quasineutrality` currently
+    carries only `M[g] − α Φ` (no source), and `α` is not the same object as
+    `Coefficients.quasineutrality_coefficient(τ) = τ/(τ+1)`. Decide: add a
+    `field_drive` to `Quasineutrality` (or a `FieldSource` term) and wire
+    `α = (τ+1)/τ` from the cleared closure — this is an operator-structure change
+    and must be doc-first (amend `docs/01 §3`, `docs/03 §2`). Until then `α` and
+    the `(x−ĥ)` drive are supplied/gated.
+  - **Collision magnitude** `nu_tilde`: the `⟨ν̂_ii⟩_u`/`ν_★` normalization scaling
+    the cleared `ν_{jj}(v̂)` shape — the deferred sub-constant already tracked in
+    Q3 (`⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2−ln(1+√2))`, L23 Eq. 4.1.6).
+  - **Orbit-averaged pitch measure** `B_profile`: the collision operator's `|B|`
+    on the `y`-grid is the *orbit-averaged* field (turning-point structure), not a
+    single local `B`; the cleared `pitch_diffusivity(λ,B)` is the local building
+    block. Clear the orbit-averaged measure form.
+  - **Neoclassical far field** `bc` (`Operators.FarFieldConditions`): the
+    no-island `g_far`/`Φ_far` (never bare Neumann — L23 §5.3), gated physics
+    already flagged under Q3.
+- **Options**: (a) a focused second derivation lane (an "M2d") clearing these
+  item-by-item like M2b, human-present; (b) clear the highest-leverage first
+  (streaming + the QN structural fix un-gate a genuine physics residual).
+- **Recommendation**: (a) — run it exactly like the M2b lane (re-derive →
+  physics-verifier → sign-off → clear into `Coefficients.*` / operator structure).
+  The QN structural gap is the highest priority: without the `(x−ĥ)` source the
+  Level-0 quasineutrality field is trivially `Φ = 0`, so no Level-0 *physics* run
+  is possible until it lands (the M2c assembly runs *structurally* on placeholders
+  only). **This is why M2c delivers the assembly scaffold, not a physics result.**
+- **Gated work**: any Level-0 *physics* solve (as opposed to the structural
+  convergence check); the B-ladder T2/T3 physics gates; the L23/B5c T4 attempt.

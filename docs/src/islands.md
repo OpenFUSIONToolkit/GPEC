@@ -42,9 +42,14 @@ only, no physics numbers (module `CLAUDE.md`, the `[VERIFY]` policy):
     Eisenstat–Walker forcing), the TSVD-regularized physics-block preconditioner
     skeleton (`04 §3, §5`), tiny-grid dense debug Jacobian, and pseudo-arclength
     continuation with fold detection.
+  - `Islands.Configure` — the Level-0 named-configuration assembly (`03 §2`):
+    wires the cleared `Coefficients.*` builders onto the operator stack (`c_D`,
+    the pitch-collision shapes, the `Δ` prefactors) and supplies the still-gated
+    coefficient families (QUESTIONS Q5) as named inputs, producing a runnable
+    `IslandStack` + far-field BCs + `Δ` prefactors.
   - `Islands.Verify` — MMS/JVP harness (ladder A1/A2), solve-level MMS and
     zero-drive configurations (A5), and the `y_c`-block conditioning monitor
-    (A8), exercised by `test/runtests_islands_{grids,operators,solve}.jl`.
+    (A8), exercised by `test/runtests_islands_{grids,operators,solve,configure}.jl`.
 
 Structural gates **A1–A5, A7 (coefficient-free part), A8** run in CI. The
 physics numbers (drift-frequency coefficients, collision kernels, closure
@@ -112,6 +117,16 @@ Modules = [GeneralizedPerturbedEquilibrium.Islands.Coefficients]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Islands.Solvers]
+```
+
+### Level-0 configuration assembly (`Islands.Configure`)
+
+Wires the cleared `Coefficients.*` builders onto the operator stack and supplies
+the still-gated coefficient families (QUESTIONS Q5) as named inputs; produces the
+runnable `IslandStack` + far-field BCs + `Δ` prefactors.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Islands.Configure]
 ```
 
 ### Verification harness (`Islands.Verify`)

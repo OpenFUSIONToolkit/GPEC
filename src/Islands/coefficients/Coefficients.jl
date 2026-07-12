@@ -59,7 +59,9 @@ mechanism; the trapped brackets follow I19's stated ``\\langle\\cdot\\rangle_\\t
 function orbit_average_drift_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
     ε = float(epsilon)
     0 < ε < 1 || throw(ArgumentError("epsilon must be in (0, 1) (got $epsilon)"))
-    y > 0 || throw(ArgumentError("y must be positive"))
+    # y = 0 (deeply-passing endpoint) is physical: A=⟨1/b⟩, G=⟨2/b⟩ are finite; the
+    # guard admits the closed pitch domain [0, 1/b_min) the grid samples.
+    y >= 0 || throw(ArgumentError("y must be nonnegative"))
     y_forbidden = (1 + ε) / (1 - ε)          # 1/b_min: no particle beyond this
     y < y_forbidden || throw(ArgumentError("y = $y exceeds 1/b_min = $y_forbidden (forbidden region)"))
 

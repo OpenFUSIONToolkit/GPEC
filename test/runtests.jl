@@ -39,4 +39,5 @@ else
     include("./runtests_islands_grids.jl")
     include("./runtests_islands_operators.jl")
     include("./runtests_islands_solve.jl")
+    include("./runtests_islands_configure.jl")
 end
