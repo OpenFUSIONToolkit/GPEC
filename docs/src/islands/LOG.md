@@ -8,6 +8,26 @@ relevant.
 
 ---
 
+## 2026-07-11 — Q5: gradient-drive structural finding (drive = far-field BC)
+
+- **Moved**: read I19 first-hand (Eqs. 8, 23–32) to derive the gradient drive.
+  **Finding** (`derivations/gradient-drive.md`, draft): the master equation
+  (I19 Eq. 32) is **homogeneous** — no interior source; the drive is the
+  **far-field boundary condition** `Ḡ₀ → p_φ(ω_si^T/ω_ci)(n'/n)F_Mi` (Eq. 29).
+  So `Operators.GradientDrive = 0` at Level 0, and the Q5 `gradient_drive` and
+  `far_field` items **merge** into one object — the diamagnetic far field
+  `g_drive = D_dia·x·[1+(v̂²−3/2)η_i]·F_Mi`. The `x`-linearity, temperature
+  correction, and Maxwellian are cleared structure; the **normalized amplitude
+  `D_dia` bundles the frame convention** `Frames.C_dia` (NaN-gated) — clearing
+  the drive = clearing `C_dia` (ion `ω_dia` normalization). Nothing entered
+  `src/` (draft, docs-only). QUESTIONS Q5 + derivations index/nav updated.
+- **Blocked**: `D_dia` + the frame convention `C_dia`/`sign_omega0`/
+  `C_gradient_shift` (Q3) — a bundled human sign-off; the normalized ion
+  diamagnetic amplitude needs the careful `ω_si/ω_ci` normalization algebra.
+- **Next**: complete `D_dia` (ion `ω_dia` in the code normalization) + sign off
+  the frame convention, then wire `g_far` and set `GradientDrive = 0`. This is
+  the last structural blocker for a real `g` to develop.
+
 ## 2026-07-11 — Q5: clear the parallel (island) streaming coefficients
 
 - **Moved**: re-derived the island-streaming channel from the master DKE
