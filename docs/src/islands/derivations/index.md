@@ -23,6 +23,7 @@ transcription or vice versa).
 | Flattened-electron closure ``h(\Omega)`` + amplitude | [electron closure](electron-closure.md) | ✅ signed off 2026-07-11 (``k``, ``f_p`` deferred) |
 | Quasineutrality closure ``1/(2\hat L_{n0})`` (arbitrary ``\tau``) | [quasineutrality closure](quasineutrality-closure.md) | ✅ signed off 2026-07-11 |
 | ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | ✅ signed off 2026-07-11 |
+| Parallel (island) streaming ``a_\xi``, ``a_x`` (advection along ``\Omega``) | [parallel streaming](parallel-streaming.md) | ✅ signed off 2026-07-11 |
 | Passing fraction ``f_p \simeq 1-1.46\sqrt\varepsilon`` (electron closure) | [passing fraction](passing-fraction.md) | 🔶 drafted — awaiting sign-off |
 
 The six main Q3/Q4 coefficient families are signed off. Of the **deferred

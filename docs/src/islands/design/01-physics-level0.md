@@ -117,6 +117,16 @@ The three transport channels of the design (island-induced streaming, magnetic
 drift, E×B) are the three bracketed frequencies above; they map one-to-one onto
 the operator stack (docs/03 §2).
 
+**Island-streaming [CLEARED: human sign-off 2026-07-11 — derivation
+docs/src/islands/derivations/parallel-streaming.md]:** the streaming braces
+`(x/L̂_q)Θ(y_c−y) ∂_ξ` and `(ŵ²/4L̂_q) sinξ Θ(y_c−y) ∂_p̂` give, in the
+`c_D = ω̂_D` normalization (divide by −m ρ̂_θi), `a_ξ = (L̂_q⁻¹/ρ̂_θi) x Θ` and
+`a_x = −(L̂_q⁻¹ŵ²/4ρ̂_θi) sinξ Θ` — which factor exactly into
+`(L̂_q⁻¹ŵ²/4ρ̂_θi)Θ·{Ω, ·}`, advection along the island flux surfaces (a
+coefficient-free structural check). Implemented as
+`Configure.streaming_coefficients` → `Operators.ParallelStreaming`, passing-only
+(`Θ`), leaving the cleared `c_D` unchanged.
+
 ### 2.1 Magnetic drift frequency: the original/improved toggle (now precise)
 
 Orbit-averaged precession [CLEARED: human sign-off 2026-07-11 — derivation

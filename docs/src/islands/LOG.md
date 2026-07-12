@@ -8,6 +8,27 @@ relevant.
 
 ---
 
+## 2026-07-11 — Q5: clear the parallel (island) streaming coefficients
+
+- **Moved**: re-derived the island-streaming channel from the master DKE
+  (I19 Eq. 32) — `derivations/parallel-streaming.md`, **human sign-off**. Key
+  result: the two coefficients factor **exactly** into `{Ω, g}` flux-surface
+  advection, `a_ξ = (L̂_q⁻¹/ρ̂_θi)x Θ`, `a_x = −(L̂_q⁻¹ŵ²/4ρ̂_θi)sinξ Θ` (passing-
+  only via `Θ(y_c−y)`) — a coefficient-free structural check that leaves no
+  freedom. Normalization chosen (÷ −m ρ̂_θi) to keep the cleared `c_D = ω̂_D`
+  untouched. Implemented as `Configure.streaming_coefficients` with a new
+  `Level0Physics.rho_hat_theta_i`; `:streaming` moved from gated to cleared;
+  `a_xi`/`a_x` removed from `GatedLevel0Inputs`. **physics-verifier PASS**; 1494
+  islands assertions green (incl. a per-node `{Ω,g}` structure test);
+  `build_docs_local.jl` green. Doc-first: docs/01 §2, QUESTIONS Q5,
+  numerics.md §2/§8 amended.
+- **Blocked**: nothing new. Cleared now: streaming, drift, collision *shapes*,
+  quasineutrality field, Δ prefactors. Still gated (Q5): `E×B` coupling, gradient
+  drive, collision magnitude `⟨ν̂_ii⟩_u`, orbit-averaged pitch measure, far field.
+- **Next**: the gradient drive + far field are the remaining structural blockers
+  for a real `g` to develop (the drive is the source; the far field is the BC).
+  `f_p` sign-off still pending. Same rhythm: derive → present → sign off → clear.
+
 ## 2026-07-11 — Q5 field fix: wire the cleared quasineutrality closure (Φ now driven)
 
 - **Moved**: closed the M2c-surfaced QN **structural gap** (QUESTIONS Q5). The

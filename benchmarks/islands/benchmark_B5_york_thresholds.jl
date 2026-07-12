@@ -40,7 +40,8 @@ const UNGATED = false
 
 # The B5 physics parameter set (eps=0.1, m/n=2/1, tau=1; docs/09 I19/D21 manifest).
 _b5_phys(variant) = Isl.Configure.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=1.0,
-    q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0, tau=1.0, variant=variant)
+    q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0, rho_hat_theta_i=0.05,
+    tau=1.0, variant=variant)
 
 # Assemble the :original and :improved configurations that the T2 toggle compares.
 # Structurally valid today; a *physics* w_c needs the cleared gated inputs (Q5).

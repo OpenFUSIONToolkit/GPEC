@@ -160,9 +160,12 @@ bare pass/fail. The derivation lane inherits this framing.
   wired from cleared `Coefficients.*`; the items below are not.
 - **Question**: clear (by the D7 re-derivation-first route, `docs/derivations/`,
   human sign-off) each remaining Level-0 operator coefficient:
-  - **Parallel-streaming** `a_xi`, `a_x` (`Operators.ParallelStreaming`): the
-    island-frame streaming coefficients (the `v_∥ b·∇` / island `B̃_r ∂x`
-    structure). `[VERIFY: I19 Eq. (A.1) streaming term — re-derive per D7]`.
+  - **Parallel-streaming** `a_xi`, `a_x` (`Operators.ParallelStreaming`):
+    **RESOLVED (2026-07-11)** — re-derived (`parallel-streaming.md`, signed off)
+    from I19 Eq. 32; the coefficients factor exactly into `{Ω, ·}` flux-surface
+    advection (a coefficient-free structural check). Implemented as
+    `Configure.streaming_coefficients` with a new `Level0Physics.rho_hat_theta_i`;
+    normalization chosen to keep the cleared `c_D = ω̂_D` unchanged.
   - **`E×B` coupling** `c_E` (`Operators.ExBDrift`): the Poisson-bracket
     normalization; entangled with the frames convention (Frames NaN-gated).
   - **Gradient drive** `drive` (`Operators.GradientDrive`): the `(v_E+v_D+v_ψ̃)·∇F₀`

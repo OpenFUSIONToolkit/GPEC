@@ -31,9 +31,13 @@ const Cfg = IslC.Configure
 _grid() = PSc.IslandGrid(; nx=9, nxi=8, ny=9, nE=3, halfwidth_x=6.0, clustering_x=1.0,
     y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
 
+# ρ̂_θi is order-unity here so the island-streaming a_xi = (inv_Lq/ρ̂_θi)·x stays
+# commensurate with the (structural, non-physics) test domain and the naive
+# Newton–Krylov converges without the physics preconditioner; the cleared
+# coefficient *structure* (the {Ω,g} advection) is ρ̂_θi-independent in form.
 _phys(; variant=:original, model=:chandrasekhar) = Cfg.Level0Physics(; epsilon=0.1,
     inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0,
-    tau=1.0, variant=variant, collision_model=model)
+    rho_hat_theta_i=1.0, tau=1.0, variant=variant, collision_model=model)
 
 _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0, T=1.0), role=Spc.Bulk)]
 
@@ -54,7 +58,8 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test :delta_prefactors in cfg.cleared
         @test :quasineutrality in cfg.cleared            # closure now wired (01 §3)
         @test !(:quasineutrality_alpha in cfg.gated)     # no longer a structural gap
-        @test :streaming in cfg.gated
+        @test :streaming in cfg.cleared                  # island streaming now wired (01 §2)
+        @test :exb in cfg.gated                          # E×B still gated
     end
 
     @testset "CLEARED c_D wired faithfully vs magnetic_drift_frequency" begin
@@ -133,6 +138,31 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         cache = Opc.IslandCache(grid)
         Opc.residual!(R, U, cfg.stack, grid, cache, cfg.bc)
         @test all(isfinite, R.g) && all(isfinite, R.Φ)
+    end
+
+    @testset "island streaming = advection along Ω (the {Ω,g} structure)" begin
+        a_xi, a_x = Cfg.streaming_coefficients(grid, phys)
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        w = phys.w_psi
+        pref = phys.inv_Lq * w^2 / (4 * phys.rho_hat_theta_i)
+        for iy in 1:ny
+            Θ = grid.y.nodes[iy] < grid.y_c ? 1.0 : 0.0
+            for iξ in 1:nξ, ix in 1:nx
+                x = grid.x.nodes[ix]
+                ξ = grid.ξ.nodes[iξ]
+                # a_xi must equal pref·Θ·∂ₓΩ = pref·Θ·(4x/w²); a_x = pref·Θ·(−∂_ξΩ) = pref·Θ·(−sinξ)
+                @test a_xi[ix, iξ, iy, 1, 1] ≈ pref * Θ * (4 * x / w^2) atol = 1e-12
+                @test a_x[ix, iξ, iy, 1, 1] ≈ pref * Θ * (-sin(ξ)) atol = 1e-12
+            end
+        end
+        # passing-only: trapped nodes (y ≥ y_c) carry zero streaming
+        itrap = findfirst(>=(grid.y_c), grid.y.nodes)
+        if itrap !== nothing
+            @test all(iszero, @view a_xi[:, :, itrap, :, :])
+            @test all(iszero, @view a_x[:, :, itrap, :, :])
+        end
+        # E, σ independence (broadcast)
+        @test a_xi[3, 2, 2, 1, 1] == a_xi[3, 2, 2, nE, nσ]
     end
 
     @testset "quasineutrality drive makes Φ nonzero (the Q5 field fix)" begin

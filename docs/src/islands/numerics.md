@@ -82,7 +82,7 @@ its physics value gated):
 
 | Term | Structure | Gated coefficient |
 |---|---|---|
-| `ParallelStreaming` | ``a_\xi\, \partial_\xi g + a_x\, \partial_x g`` | island-induced streaming frequencies |
+| `ParallelStreaming` | ``a_\xi\, \partial_\xi g + a_x\, \partial_x g`` | **cleared** — ``(\hat L_q^{-1}\hat w^2/4\hat\rho_{\theta i})\Theta\,\{\Omega,\cdot\}`` advection along island surfaces (§8) |
 | `MagneticDrift` | ``c_D\, \partial_\xi g`` (with the `:original`/`:improved` ``\hat L_B^{-1}`` toggle) | the precession frequency ``\hat\omega_D(y, E; \sigma)`` |
 | `ExBDrift` | ``c_E \left( \partial_\xi\tilde\Phi\, \partial_x g - \partial_x\tilde\Phi\, \partial_\xi g \right)`` — the ``(x,\xi)`` Poisson bracket, the one state-nonlinear Level-0 term | the ``E\times B`` coupling |
 | `PitchAngleDiffusion` | ``c\,(K g)`` along ``y`` (mimetic form, §3) | ``\hat\nu(E)`` and the pitch diffusivity profile |
@@ -285,6 +285,10 @@ builders (§7, the M2b derivation lane) onto the operator stack:
   evaluated on the phase-space grid (``\hat v = \sqrt E``, the ``:original`` /
   ``:improved`` toggle, and the forbidden pitch region ``y \ge (1+\varepsilon)/
   (1-\varepsilon)`` zeroed since it carries no particles);
+- the **island-streaming** coefficients ``a_\xi``, ``a_x`` from
+  `streaming_coefficients` — the passing-particle (`Θ(y_c−y)`) advection along
+  island flux surfaces, ``(\hat L_q^{-1}\hat w^2/4\hat\rho_{\theta i})\Theta\,\{\Omega,\cdot\}``
+  (`parallel-streaming.md`; normalized to leave `c_D = ω̂_D` unchanged);
 - the pitch-collision diffusivity ``P`` and the energy-dependent deflection
   coefficient from `pitch_diffusivity` / `deflection_frequency`, fed to the
   mimetic `conservative_pitch_operator` (§3);
@@ -297,13 +301,14 @@ builders (§7, the M2b derivation lane) onto the operator stack:
   `Fields.h_profile`), closing the Level-0 potential (§2; the drive whose absence
   had left ``\Phi`` trivially zero).
 
-The coefficient families that are **not yet cleared** — parallel streaming, the
-``E\times B`` coupling, the gradient drive, the collision magnitude
+The coefficient families that are **not yet cleared** — the ``E\times B``
+coupling, the gradient drive, the collision magnitude
 ``\langle\hat\nu_{ii}\rangle_u``, the orbit-averaged pitch measure, and the
 neoclassical far field — are **supplied** through `GatedLevel0Inputs`, never
 assigned a physics value here (QUESTIONS Q5). So the assembly is still a
-**scaffold** for the *kinetic* physics (those families remain gated), even though
-its field equation is now the fully cleared closure: with `level0_placeholders`
+**scaffold** for the remaining *kinetic* physics (those families remain gated),
+even though the streaming, drift, and field equation are now cleared: with
+`level0_placeholders`
 (documented non-physics values for the gated kinetic inputs) the assembled
 residual is well-formed, ``\Phi`` is genuinely driven, and Newton–Krylov
 converges. A physics threshold still awaits the remaining Q5 kinetic clearances.
