@@ -168,17 +168,16 @@ bare pass/fail. The derivation lane inherits this framing.
     normalization chosen to keep the cleared `c_D = ω̂_D` unchanged.
   - **`E×B` coupling** `c_E` (`Operators.ExBDrift`): the Poisson-bracket
     normalization; entangled with the frames convention (Frames NaN-gated).
-  - **Gradient drive** `drive` — **STRUCTURE FOUND (2026-07-11**,
-    `gradient-drive.md`): reading I19 first-hand (Eqs. 28–32) shows the master
-    equation is **homogeneous** — there is **no interior source**; the drive is
-    the **far-field boundary condition** `Ḡ₀ → p_φ(ω_si^T/ω_ci)(n'/n)F_Mi`
-    (Eq. 29). So `Operators.GradientDrive` is **zero** at Level 0 and the drive
-    **merges with `far_field`** into one object: the diamagnetic far field
-    `g_drive = D_dia·x·[1+(v̂²−3/2)η_i]·F_Mi`. The `x`-linearity, `(v̂²−3/2)η_i`
-    temperature correction, and Maxwellian are cleared structure; the **normalized
-    amplitude `D_dia` is bundled with the frame convention** `Frames.C_dia`
-    (still NaN-gated) — clearing the drive = clearing `C_dia` (the ion `ω_dia`
-    normalization) in the same sign-off.
+  - **Gradient drive** `drive` + **far field** `bc` — **RESOLVED (2026-07-11**,
+    `gradient-drive.md`, signed off): reading I19 first-hand (Eqs. 28–32), the
+    master equation is **homogeneous** (no interior source); the drive is the
+    **far-field boundary condition** `Ḡ₀ → p_φ(ω_si^T/ω_si)(n'/n)F_Mi = p_φ F'_Mi`
+    (Eq. 29 — the ratio is `ω_si^T/ω_si = 1+(v̂²−3/2)η_i`, a **temperature factor,
+    not a frequency ratio**; an earlier reading of `ω_ci` was a misread, so **no
+    frame convention is needed**). Implemented: `Operators.GradientDrive = 0` and
+    `Configure.gradient_far_field` builds `g_far = x L̂_{n0}⁻¹[1+(E−3/2)η_i]`
+    (`Φ̂_far = 0` at `ω_E = 0`), with a new `Level0Physics.eta_i`. The
+    `gradient_drive` **and** `far_field` families are both cleared.
   - **Quasineutrality closure — RESOLVED (2026-07-11).** The cleared closure
     `Φ̂ = τ/(τ+1)[δn̄_i/n₀ + L̂_{n0}⁻¹(x−ĥ)]` (Q3, `quasineutrality-closure.md`,
     signed off) is now implemented: `Operators.Quasineutrality` carries a

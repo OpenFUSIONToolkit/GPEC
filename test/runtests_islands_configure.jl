@@ -37,7 +37,7 @@ _grid() = PSc.IslandGrid(; nx=9, nxi=8, ny=9, nE=3, halfwidth_x=6.0, clustering_
 # coefficient *structure* (the {Ω,g} advection) is ρ̂_θi-independent in form.
 _phys(; variant=:original, model=:chandrasekhar) = Cfg.Level0Physics(; epsilon=0.1,
     inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0,
-    rho_hat_theta_i=1.0, tau=1.0, variant=variant, collision_model=model)
+    rho_hat_theta_i=1.0, eta_i=0.5, tau=1.0, variant=variant, collision_model=model)
 
 _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0, T=1.0), role=Spc.Bulk)]
 
@@ -59,7 +59,28 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test :quasineutrality in cfg.cleared            # closure now wired (01 §3)
         @test !(:quasineutrality_alpha in cfg.gated)     # no longer a structural gap
         @test :streaming in cfg.cleared                  # island streaming now wired (01 §2)
+        @test :gradient_drive in cfg.cleared             # far-field drive, zero source (01 §2)
+        @test :far_field in cfg.cleared
         @test :exb in cfg.gated                          # E×B still gated
+    end
+
+    @testset "gradient drive = zero source + diamagnetic far field (01 §2)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        # I19 Formulation A: the interior GradientDrive source is zero
+        gd = cfg.stack.kinetic[5]
+        @test gd isa Opc.GradientDrive
+        @test all(iszero, gd.drive)
+        # far field g_far = x·L̂_n0⁻¹·[1+(E−3/2)η_i] at the boundaries, Φ_far = 0
+        bc = Cfg.gradient_far_field(grid, phys)
+        xL, xR = grid.x.nodes[1], grid.x.nodes[nx]
+        for iE in 1:nE
+            temp = 1 + (grid.E.nodes[iE] - 1.5) * phys.eta_i
+            @test bc.g_left[2, 3, iE, 1] ≈ xL * phys.inv_Ln0 * temp atol = 1e-12
+            @test bc.g_right[2, 3, iE, 1] ≈ xR * phys.inv_Ln0 * temp atol = 1e-12
+        end
+        @test all(iszero, bc.Φ_left) && all(iszero, bc.Φ_right)   # ω_E = 0
+        # isotropic in ξ, y, σ (leading order)
+        @test bc.g_left[1, 1, 2, 1] == bc.g_left[nξ, ny, 2, nσ]
     end
 
     @testset "CLEARED c_D wired faithfully vs magnetic_drift_frequency" begin

@@ -22,14 +22,15 @@ onto operator-stack coefficients *cleanly*; the assembly wires exactly those and
     coefficient); the **quasineutrality field term** — `α = (τ+1)/τ` from
     `Coefficients.quasineutrality_coefficient` and the `L̂_{n0}⁻¹(x − ĥ)` drive
     ([`quasineutrality_source`], from the cleared `ĥ` profile), closing the
-    Level-0 potential (`01 §3`); and the `Δ`-moment prefactors
-    (`Coefficients.delta_moment_prefactors`).
+    Level-0 potential (`01 §3`); the **gradient drive** — zero interior source
+    plus the neoclassical far field `g_far = x L̂_{n0}⁻¹[1+(E−3/2)η_i]`
+    ([`gradient_far_field`], I19 Formulation A, `01 §2`); and the `Δ`-moment
+    prefactors (`Coefficients.delta_moment_prefactors`).
   - **Not yet a cleared coefficient family → supplied, gated** (QUESTIONS Q5):
-    the `E×B` coupling `c_E`, the gradient-drive source `drive`, the
-    orbit-averaged pitch measure/field `B_profile`, the collision magnitude
-    `nu_tilde` (carries the deferred `⟨ν̂_ii⟩_u`), and the neoclassical far-field
-    state. These enter through [`GatedLevel0Inputs`]; nothing here assigns a
-    physics value to them.
+    the `E×B` coupling `c_E`, the orbit-averaged pitch measure/field `B_profile`,
+    and the collision magnitude `nu_tilde` (carries the deferred `⟨ν̂_ii⟩_u`).
+    These enter through [`GatedLevel0Inputs`]; nothing here assigns a physics
+    value to them.
 
 The gated pieces are the subject of a future derivation lane (QUESTIONS Q5): the
 assembly *surfaces* exactly what Level-0 physics is still uncleared rather than
@@ -54,7 +55,7 @@ import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species
 
 export Level0Physics, GatedLevel0Inputs, configure_level0, level0_placeholders
 export drift_coefficient_table, collision_coefficient, pitch_diffusivity_profile
-export quasineutrality_source, streaming_coefficients
+export quasineutrality_source, streaming_coefficients, gradient_far_field
 
 # ---------------------------------------------------------------------------
 # Physics parameter carrier (the cleared inputs)
@@ -83,6 +84,9 @@ gated (uncleared) pieces live in [`GatedLevel0Inputs`].
     quasineutrality drive amplitude (`01 §3`).
   - `rho_hat_theta_i` — normalized ion poloidal gyroradius `ρ̂_θi` (`~ ŵ` by the
     O2 ordering); sets the island-streaming scale (`01 §2`, `parallel-streaming.md`).
+  - `eta_i`           — `η_i = L_n/L_{T_i} = (T_i'/T_i)/(n'/n)`, the
+    temperature-gradient ratio in the gradient-drive far field (`01 §2`,
+    `gradient-drive.md`); `0` = flat temperature.
   - `tau`             — `T_e/T_i` (quasineutrality closure, `01 §3`).
   - `variant`         — `:original`/`:improved` drift-model toggle (`01 §2.1`).
   - `collision_model` — `:chandrasekhar`/`:vcubed` deflection-frequency energy
@@ -98,6 +102,7 @@ Base.@kwdef struct Level0Physics
     mu0_R::Float64
     inv_Ln0::Float64
     rho_hat_theta_i::Float64
+    eta_i::Float64 = 0.0
     tau::Float64 = 1.0
     variant::Symbol = :original
     collision_model::Symbol = :chandrasekhar
@@ -107,7 +112,7 @@ end
 # Gated inputs carrier (the uncleared pieces — supplied, never guessed here)
 # ---------------------------------------------------------------------------
 """
-    GatedLevel0Inputs(; a_xi, a_x, c_E, drive, alpha, nu_tilde, B_profile, bc)
+    GatedLevel0Inputs(; c_E, nu_tilde, B_profile)
 
 The Level-0 operator coefficients that are **not yet a cleared coefficient
 family** and are therefore *supplied* to [`configure_level0`], not derived from
@@ -119,23 +124,16 @@ documented non-physics placeholders of [`level0_placeholders`](@ref).
 
   - `c_E`          — `E×B` coupling scalar (`Operators.ExBDrift`; the frame/
     normalization is uncleared, QUESTIONS Q3/Q5).
-  - `drive`        — gradient-drive source, shaped like `g`
-    (`Operators.GradientDrive`; `(v·∇F₀)` with the frame shift NaN-gated in
-    `Frames`, QUESTIONS Q3/Q5).
   - `nu_tilde`     — collision magnitude scaling the cleared `ν_{jj}(v̂)` shape;
     carries the deferred `⟨ν̂_ii⟩_u`/`ν_★` normalization (QUESTIONS Q3).
   - `B_profile`    — orbit-averaged `|B|/B_max` on the `y`-grid, feeding the
     cleared `pitch_diffusivity` shape and the collision measure (the orbit
     average is gated, QUESTIONS Q5).
-  - `bc`           — `Operators.FarFieldConditions`: the neoclassical no-island
-    far field (gated physics, QUESTIONS Q3).
 """
-Base.@kwdef struct GatedLevel0Inputs{A5,S,V,BC}
+Base.@kwdef struct GatedLevel0Inputs{S,V}
     c_E::S
-    drive::A5
     nu_tilde::S
     B_profile::V
-    bc::BC
 end
 
 # ---------------------------------------------------------------------------
@@ -308,6 +306,40 @@ function streaming_coefficients(grid::IslandGrid, phys::Level0Physics)
 end
 
 """
+    gradient_far_field(grid, phys) -> FarFieldConditions
+
+Build the **cleared** neoclassical far-field boundary state — the Level-0
+gradient drive (`01 §2`; derivation `gradient-drive.md`, sign-off 2026-07-11).
+I19's master equation is homogeneous (no interior source); the gradients enter
+as the far field `Ḡ₀ → g_drive = p_φ F'_{Mi}`, which in the code normalization is
+
+```math
+g_{\\rm far}(x{=}\\pm L_x, \\xi, y, E, \\sigma) = x\\,\\hat L_{n0}^{-1}\\,[\\,1 + (E-\\tfrac32)\\eta_i\\,]
+```
+
+\\noindent
+— linear in the boundary `x = ±halfwidth`, the temperature correction through
+`E = v̂²`, isotropic in `ξ, y, σ` at leading order (the Maxwellian `e^{-E}` is
+carried by the energy-grid measure). `L̂_{n0}⁻¹ = phys.inv_Ln0`,
+`η_i = phys.eta_i`. At Level 0 `ω_E = 0`, so `Φ̂_far = 0`. Returns the
+`Operators.FarFieldConditions` (the companion `Operators.GradientDrive` source is
+zero — I19 Formulation A).
+"""
+function gradient_far_field(grid::IslandGrid, phys::Level0Physics)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    x_left = grid.x.nodes[1]
+    x_right = grid.x.nodes[nx]
+    g_left = Array{Float64}(undef, nξ, ny, nE, nσ)
+    g_right = Array{Float64}(undef, nξ, ny, nE, nσ)
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
+        temp = 1 + (grid.E.nodes[iE] - 1.5) * phys.eta_i     # 1 + (E − 3/2)η_i
+        g_left[iξ, iy, iE, iσ] = x_left * phys.inv_Ln0 * temp
+        g_right[iξ, iy, iE, iσ] = x_right * phys.inv_Ln0 * temp
+    end
+    return FarFieldConditions(g_left, g_right, zeros(nξ), zeros(nξ))  # Φ̂_far = 0 (ω_E = 0)
+end
+
+"""
     quasineutrality_source(grid, phys) -> Matrix{Float64}
 
 Build the **cleared** flattened-electron drive `S[ix, iξ] = L̂_{n0}⁻¹(x − ĥ(Ω))`
@@ -347,7 +379,8 @@ Assemble the Level-0 named configuration (`03 §2`): returns a NamedTuple
   - `stack::Operators.IslandStack` — the operator stack (streaming, magnetic
     drift, `E×B`, mimetic pitch collisions, gradient drive) + the
     quasineutrality field term;
-  - `bc` — the far-field `Operators.FarFieldConditions` (from `gated.bc`);
+  - `bc` — the cleared far-field `Operators.FarFieldConditions` (the gradient
+    drive, from [`gradient_far_field`]);
   - `delta_prefactors` — the cleared `(cos, sin)` `Δ`-moment prefactors
     (`Coefficients.delta_moment_prefactors`);
   - `cleared`, `gated` — the provenance tuples naming which coefficients came
@@ -355,10 +388,11 @@ Assemble the Level-0 named configuration (`03 §2`): returns a NamedTuple
 
 The magnetic drift `c_D`, the island streaming `a_xi`/`a_x`, the pitch-collision
 `P`/`K` and `c`, the quasineutrality field term (`α` + the `L̂_{n0}⁻¹(x − ĥ)`
-drive), and the `Δ` prefactors are populated from the **cleared** coefficient
-builders. The `E×B`, gradient-drive, collision magnitude, pitch measure, and far
-field are **supplied** through `gated::GatedLevel0Inputs` (QUESTIONS Q3/Q5) —
-this function assigns no physics value to them.
+drive), the gradient drive (zero source + the far field `bc`), and the `Δ`
+prefactors are populated from the **cleared** coefficient builders. The `E×B`,
+collision magnitude, and pitch measure are **supplied** through
+`gated::GatedLevel0Inputs` (QUESTIONS Q5) — this function assigns no physics
+value to them.
 
 `species` is validated (a Level-0 config must have a bulk ion); its
 per-species roles/backgrounds drive the gated builders that are not yet cleared.
@@ -380,54 +414,51 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
     α = 1 / quasineutrality_coefficient(phys.tau)          # (τ+1)/τ, adiabatic shielding
     S_Φ = quasineutrality_source(grid, phys)               # L̂_{n0}⁻¹(x − ĥ)
 
+    # cleared gradient drive (I19 Formulation A, gradient-drive.md): the master
+    # equation is homogeneous — zero interior source; the drive is the far field.
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    drive0 = zeros(Float64, nx, nξ, ny, nE, nσ)
+    bc = gradient_far_field(grid, phys)
+
     kinetic = (
         ParallelStreaming(a_xi, a_x),                      # cleared (01 §2)
         MagneticDrift(c_D; variant=phys.variant),          # cleared
         ExBDrift(gated.c_E),                               # gated
         PitchAngleDiffusion(K, c_coll),                    # cleared shape (magnitude gated)
-        GradientDrive(gated.drive)                         # gated
+        GradientDrive(drive0)                              # cleared: zero source (drive is the far field)
     )
     stack = IslandStack(kinetic, Quasineutrality(α, S_Φ))  # cleared closure (01 §3)
 
-    return (stack=stack, bc=gated.bc, delta_prefactors=Δpref,
-        cleared=(:magnetic_drift, :streaming, :pitch_diffusivity, :deflection_frequency, :delta_prefactors, :quasineutrality),
-        gated=(:exb, :gradient_drive, :nu_tilde, :pitch_measure, :far_field))
+    return (stack=stack, bc=bc, delta_prefactors=Δpref,
+        cleared=(:magnetic_drift, :streaming, :pitch_diffusivity, :deflection_frequency, :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
+        gated=(:exb, :nu_tilde, :pitch_measure))
 end
 
 # ---------------------------------------------------------------------------
 # Documented non-physics placeholders (structural runs only)
 # ---------------------------------------------------------------------------
 """
-    level0_placeholders(grid; drive_amp=0.1, c_E=0.0, nu_tilde=1.0, B_edge=0.999)
+    level0_placeholders(grid; c_E=0.0, nu_tilde=1.0, B_edge=0.999)
 
 Build a [`GatedLevel0Inputs`] of **documented non-physics placeholder** values so
 the assembled stack can be exercised *structurally* — that `configure_level0`
 produces a well-formed, solvable `IslandStack` — **never for a physics result**
-(the gated coefficients are uncleared, QUESTIONS Q5). Choices:
+(the remaining gated coefficients are uncleared, QUESTIONS Q5). Choices:
 
   - `c_E = 0` (drop the `E×B` nonlinearity so the structural residual is linear);
-  - a smooth localized `drive` of amplitude `drive_amp`;
   - `nu_tilde = 1` (order-unity);
   - a `B_profile` that keeps `y·B ≤ 1` on the grid (`B = min(1, B_edge/y)`), so
-    the cleared `pitch_diffusivity` stays in-domain;
-  - zero far-field states (homogeneous Dirichlet at `|x| = L_x`).
+    the cleared `pitch_diffusivity` stays in-domain.
 
-Every value is a structural stand-in; a physics run supplies cleared inputs.
+Every value is a structural stand-in; a physics run supplies cleared inputs. The
+gradient drive and far field are now *cleared* (built by `configure_level0` from
+`phys`), so they are no longer placeholders here.
 """
-function level0_placeholders(grid::IslandGrid; drive_amp::Real=0.1, c_E::Real=0.0,
-    nu_tilde::Real=1.0, B_edge::Real=0.999)
-    nx, nξ, ny, nE, nσ = nnodes(grid)
-    drive = Array{Float64}(undef, nx, nξ, ny, nE, nσ)
-    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ, ix in 1:nx
-        x = grid.x.nodes[ix]
-        ξ = grid.ξ.nodes[iξ]
-        drive[ix, iξ, iy, iE, iσ] = drive_amp * exp(-x^2) * cos(ξ)
-    end
+function level0_placeholders(grid::IslandGrid; c_E::Real=0.0, nu_tilde::Real=1.0, B_edge::Real=0.999)
+    ny = grid.y.n
     # B_profile ≤ 1/y keeps the cleared pitch_diffusivity in [0,1]; B ≤ 1 (B_max norm)
     B_profile = [min(1.0, B_edge / max(grid.y.nodes[iy], eps())) for iy in 1:ny]
-    bc = FarFieldConditions(zeros(nξ, ny, nE, nσ), zeros(nξ, ny, nE, nσ), zeros(nξ), zeros(nξ))
-    return GatedLevel0Inputs(; c_E=Float64(c_E), drive=drive, nu_tilde=Float64(nu_tilde),
-        B_profile=B_profile, bc=bc)
+    return GatedLevel0Inputs(; c_E=Float64(c_E), nu_tilde=Float64(nu_tilde), B_profile=B_profile)
 end
 
 end # module Configure

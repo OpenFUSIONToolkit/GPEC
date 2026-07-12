@@ -8,6 +8,27 @@ relevant.
 
 ---
 
+## 2026-07-12 — Q5: clear the gradient drive (far-field BC, no frame convention)
+
+- **Moved**: completed the gradient drive by re-reading I19 Eq. 29 first-hand.
+  **Correction**: the earlier draft misread the ratio as `ω_si^T/ω_ci` (⇒ frame
+  convention); it is `ω_si^T/ω_si = 1+(v̂²−3/2)η_i` — a **temperature factor, not
+  a frequency ratio**, so **no frame convention is needed**. The drive is the
+  standard neoclassical `p_φ F'_Mi`, imposed as the **far-field BC** (master eq
+  homogeneous, I19 Formulation A). Cleared: `Operators.GradientDrive = 0` and
+  `Configure.gradient_far_field` builds `g_far = x L̂_{n0}⁻¹[1+(E−3/2)η_i]`
+  (`Φ̂_far = 0`), with a new `Level0Physics.eta_i`. Both `gradient_drive` and
+  `far_field` moved gated→cleared; `drive`/`bc` dropped from `GatedLevel0Inputs`.
+  1511 islands assertions green (the assembly now solves with the *physical* far
+  field). `gradient-drive.md` signed off; docs/01 §2, QUESTIONS Q5, numerics.md,
+  index/nav updated.
+- **Blocked**: only three kinetic families remain gated (Q5): the `E×B` coupling
+  `c_E`, the collision magnitude `⟨ν̂_ii⟩_u`, and the orbit-averaged pitch
+  measure. Plus the deferred `k ≃ −1.173`.
+- **Next**: E×B coupling (Poisson-bracket normalization) or the collision
+  magnitude `⟨ν̂_ii⟩_u` (needs L23 Eq. 4.1.6). With these three, the L0 solve is
+  fully physical.
+
 ## 2026-07-11 — Q3/Q5: clear the passing fraction f_p
 
 - **Moved**: signed off `derivations/passing-fraction.md` and cleared

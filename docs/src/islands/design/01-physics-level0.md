@@ -127,6 +127,15 @@ coefficient-free structural check). Implemented as
 `Configure.streaming_coefficients` → `Operators.ParallelStreaming`, passing-only
 (`Θ`), leaving the cleared `c_D` unchanged.
 
+**Gradient drive [CLEARED: human sign-off 2026-07-11 — derivation
+gradient-drive.md]:** the master equation (Eq. 32) is **homogeneous** — I19's
+`Ḡ₀ = p_φ(ω_si^T/ω_si)(n'/n)F_Mi + h̄₀` (Eq. 29, `ω_si^T/ω_si = 1+(v̂²−3/2)η_i`
+a temperature factor, *not* a frequency ratio) is the standard neoclassical drive
+`p_φ F'_Mi`, imposed as the **far-field boundary condition**, not an interior
+source. So `Operators.GradientDrive = 0` and the far field is
+`g_far = x L̂_{n0}⁻¹[1+(E−3/2)η_i]` (`Φ̂_far = 0` at `ω_E = 0`), built by
+`Configure.gradient_far_field`. No frame convention enters (Level-0, `ω_E = 0`).
+
 ### 2.1 Magnetic drift frequency: the original/improved toggle (now precise)
 
 Orbit-averaged precession [CLEARED: human sign-off 2026-07-11 — derivation

@@ -301,14 +301,16 @@ builders (§7, the M2b derivation lane) onto the operator stack:
   `Fields.h_profile`), closing the Level-0 potential (§2; the drive whose absence
   had left ``\Phi`` trivially zero).
 
-The coefficient families that are **not yet cleared** — the ``E\times B``
-coupling, the gradient drive, the collision magnitude
-``\langle\hat\nu_{ii}\rangle_u``, the orbit-averaged pitch measure, and the
-neoclassical far field — are **supplied** through `GatedLevel0Inputs`, never
-assigned a physics value here (QUESTIONS Q5). So the assembly is still a
-**scaffold** for the remaining *kinetic* physics (those families remain gated),
-even though the streaming, drift, and field equation are now cleared: with
-`level0_placeholders`
+The gradient drive is cleared as I19 Formulation A — a **zero** interior
+`GradientDrive` source plus the neoclassical far field
+``g_{\rm far} = x\hat L_{n0}^{-1}[1+(E-\tfrac32)\eta_i]`` (`gradient_far_field`;
+`Φ̂_far = 0` at `ω_E = 0`). The families that remain **not yet cleared** — the
+``E\times B`` coupling, the collision magnitude ``\langle\hat\nu_{ii}\rangle_u``,
+and the orbit-averaged pitch measure — are **supplied** through
+`GatedLevel0Inputs`, never assigned a physics value here (QUESTIONS Q5). So the
+assembly is still a **scaffold** for those three *kinetic* pieces, even though
+the streaming, drift, gradient drive, far field, and field equation are now
+cleared: with `level0_placeholders`
 (documented non-physics values for the gated kinetic inputs) the assembled
 residual is well-formed, ``\Phi`` is genuinely driven, and Newton–Krylov
 converges. A physics threshold still awaits the remaining Q5 kinetic clearances.
