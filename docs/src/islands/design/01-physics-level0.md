@@ -228,10 +228,12 @@ L23 Eqs. 2.5.5–2.5.8]:
     ⟨⟨Bu_∥e⟩_θ⟩_Ω/(B₀v_the) = −[f_t/(1+f_t)](Iv_the/ω_ce)(n′/n)(1 + η_e + ½ k f_c η_e)⟨∂h/∂ψ⟩_Ω
                               + [f_c/(1+f_t)] ⟨⟨Bu_∥i⟩_θ⟩_Ω/(B₀v_thi)
 
-with **[CHECKED, uncleared — deferred sub-items, own derivations]** k ≃ −1.173
-(Hirshman–Sigmar; unit-test: L23 reproduces −1.1730) and
-f_p ≃ 1 − 1.46√ε. Note the electron current depends on the *numerically
-computed ion flow* (momentum conservation) — the closure is coupled, not
+with k ≃ −1.173 (Hirshman–Sigmar; **[CHECKED, uncleared — deferred, own
+derivation]**; unit-test: L23 reproduces −1.1730) and f_p ≃ 1 − 1.46√ε
+**[CLEARED: human sign-off 2026-07-11 — derivation passing-fraction.md;
+`Coefficients.passing_fraction(ε) = 1 − 1.4624√ε`, the effective trapped-fraction
+coefficient, = 1.46 to 3 s.f.]**. Note the electron current depends on the
+*numerically computed ion flow* (momentum conservation) — the closure is coupled, not
 one-way. Toggle `electrons = :flattened | :kinetic`: the `:kinetic` option is
 exactly RDK-NTM's defining feature (electrons solved with the same drift-island
 machinery as ions, Diss19 Eq. D.61 / D21 §5) and is *required* at Level 3

@@ -25,12 +25,14 @@ transcription or vice versa).
 | ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | ✅ signed off 2026-07-11 |
 | Parallel (island) streaming ``a_\xi``, ``a_x`` (advection along ``\Omega``) | [parallel streaming](parallel-streaming.md) | ✅ signed off 2026-07-11 |
 | Gradient drive = the diamagnetic far-field BC (I19 Eq. 29) | [gradient drive](gradient-drive.md) | 🔶 structure found — amplitude + frame sign pending |
-| Passing fraction ``f_p \simeq 1-1.46\sqrt\varepsilon`` (electron closure) | [passing fraction](passing-fraction.md) | 🔶 drafted — awaiting sign-off |
+| Passing fraction ``f_p \simeq 1-1.46\sqrt\varepsilon`` (electron closure) | [passing fraction](passing-fraction.md) | ✅ signed off 2026-07-11 |
 
-The six main Q3/Q4 coefficient families are signed off. Of the **deferred
-numerical sub-constants**, the passing fraction ``f_p`` is now **drafted**
-(derived + numerically cross-checked, awaiting sign-off — it does not yet clear
-into `src/`). The remaining two — ``\langle\hat\nu_{ii}\rangle_u`` (collision)
-and the Hirshman–Sigmar ``k`` (electron closure) — are **not** drafted: each
-needs its specific source integrand read in detail and is escalated in
-`QUESTIONS.md` Q3/Q5 rather than derived speculatively.
+The six main Q3/Q4 coefficient families are signed off, plus the parallel
+streaming and the passing fraction ``f_p`` (`Coefficients.passing_fraction`).
+The gradient drive's *structure* is found (it is the far-field BC, not a source);
+its normalized amplitude is bundled with the frame convention and awaits
+completion. Of the **deferred numerical sub-constants**, ``f_p`` is now cleared;
+the remaining two — ``\langle\hat\nu_{ii}\rangle_u`` (collision) and the
+Hirshman–Sigmar ``k`` (electron closure) — are escalated in `QUESTIONS.md`
+Q3/Q5 (each needs its specific source integrand) rather than derived
+speculatively.

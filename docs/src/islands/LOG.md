@@ -8,6 +8,20 @@ relevant.
 
 ---
 
+## 2026-07-11 — Q3/Q5: clear the passing fraction f_p
+
+- **Moved**: signed off `derivations/passing-fraction.md` and cleared
+  `Coefficients.passing_fraction(ε) = 1 − 1.4624√ε` (the effective
+  trapped-fraction coefficient, derived + numerically confirmed, = the sources'
+  quoted 1.46 to 3 s.f.). Authorizes `Fields.ElectronClosure.f_p`. 1499 islands
+  assertions green (limits + monotonicity + the 1.46 match); docs green.
+  docs/01 §2.4, QUESTIONS Q3/Q5, derivations index/nav updated.
+- **Blocked**: the companion Hirshman–Sigmar `k ≃ −1.173` stays deferred (needs
+  the parallel-viscosity moment problem). Gradient-drive amplitude + frame
+  convention still pending (bundled sign-off, `gradient-drive.md`).
+- **Next**: the gradient-drive amplitude/frame convention is the last structural
+  blocker; then E×B, collision magnitude, pitch measure. `k` its own derivation.
+
 ## 2026-07-11 — Q5: gradient-drive structural finding (drive = far-field BC)
 
 - **Moved**: read I19 first-hand (Eqs. 8, 23–32) to derive the gradient drive.

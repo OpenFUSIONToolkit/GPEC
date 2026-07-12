@@ -27,7 +27,7 @@ import QuadGK
 
 export magnetic_drift_frequency, orbit_average_drift_brackets
 export pitch_diffusivity, deflection_frequency
-export h_amplitude
+export h_amplitude, passing_fraction
 export quasineutrality_coefficient
 export delta_moment_prefactors
 
@@ -182,6 +182,23 @@ from the flattening constraint ``\\langle\\partial^2 h/\\partial x^2\\rangle_\\O
 closure constants ``k`` and ``f_p`` remain gated.
 """
 h_amplitude(w_psi::Real) = w_psi / (2 * sqrt(2))
+
+"""
+    passing_fraction(epsilon)
+
+The flattened-electron closure **passing (circulating) particle fraction**
+``f_p = 1 - f_t \\simeq 1 - 1.4624\\,\\sqrt\\varepsilon`` (docs/01 §2.4; derivation
+`passing-fraction.md`, human sign-off 2026-07-11). The leading coefficient
+`1.4624` is the ``\\varepsilon\\to0`` limit of the effective trapped-fraction
+integral (Lin-Liu–Miller / Wesson) derived and numerically confirmed in the
+derivation; it matches the sources' quoted ``1.46`` (I19 Eq. 22) to three
+significant figures. Clears `Fields.ElectronClosure.f_p`; the Hirshman–Sigmar
+`k` constant of the same closure remains gated (QUESTIONS Q3/Q5).
+"""
+function passing_fraction(epsilon::Real)
+    epsilon >= 0 || throw(ArgumentError("epsilon must be nonnegative"))
+    return 1 - 1.4624 * sqrt(epsilon)
+end
 
 # ---------------------------------------------------------------------------
 # Quasineutrality closure (cleared 2026-07-11; derivation quasineutrality-closure.md)

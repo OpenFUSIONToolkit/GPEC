@@ -3,11 +3,11 @@
 **Provenance:** `[DERIVED: 2026-07-11]` — independent derivation of the
 electron-closure passing-fraction constant (Decision D7), one of the deferred
 sub-constants of the flattened-electron closure (QUESTIONS Q3/Q5).
-**Status:** 🔶 **drafted — awaiting human sign-off.** This chapter derives the
-constant and cross-checks it numerically; it does **not** clear `f_p` into
-`src/` (the `Fields.ElectronClosure.f_p` field stays `NaN`-gated until a human
-signs off, per the `[VERIFY]` policy). One cross-check is left explicitly open
-for the reviewer (§4).
+**Status:** ✅ **signed off 2026-07-11** — implemented as
+`Coefficients.passing_fraction(ε) = 1 − 1.4624√ε`, which may populate
+`Fields.ElectronClosure.f_p`. This chapter derives the constant and cross-checks
+it numerically (§3); the reviewer accepted the `1.4624 ≈ 1.46` match (§4). The
+companion Hirshman–Sigmar `k` remains gated.
 
 ## 1. What `f_p` is
 

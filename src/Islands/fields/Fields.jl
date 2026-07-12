@@ -122,7 +122,8 @@ un-cleared closure poisons results instead of committing to a guess:
 ## Fields
 
   - `k_HS`        — the Hirshman–Sigmar flow coefficient (sources: `≃ −1.173`).
-  - `f_p`         — the passing fraction form (sources: `≃ 1 − 1.46√ε`).
+  - `f_p`         — the passing fraction (**cleared** 2026-07-11:
+    `Coefficients.passing_fraction(ε) = 1 − 1.4624√ε`; may populate this field).
   - `h_prefactor` — the `h(Ω)` amplitude (sources: `w_ψ/2√2`).
   - `C_phi`       — the quasineutrality closure coefficient (sources: `1/2L̂_{n0}`).
 """
