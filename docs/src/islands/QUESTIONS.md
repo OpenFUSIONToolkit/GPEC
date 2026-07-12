@@ -166,8 +166,18 @@ bare pass/fail. The derivation lane inherits this framing.
     advection (a coefficient-free structural check). Implemented as
     `Configure.streaming_coefficients` with a new `Level0Physics.rho_hat_theta_i`;
     normalization chosen to keep the cleared `c_D = ω̂_D` unchanged.
-  - **`E×B` coupling** `c_E` (`Operators.ExBDrift`): the Poisson-bracket
-    normalization; entangled with the frames convention (Frames NaN-gated).
+  - **`E×B` coupling** `c_E` (`Operators.ExBDrift`) — **core derived, clearance
+    pending (2026-07-12)**. Matching the master-eq E×B terms
+    (`−(ρ̂_θi/2)⟨(1/v̂_∥)∂Φ̂/∂x⟩ ∂_ξ`, `−(ρ̂_θi/2)⟨(1/v̂_∥)∂Φ̂/∂ξ⟩ ∂_p̂`) to the
+    operator `−c_E{Φ̂,g}`, in the `c_D=ω̂_D` normalization (÷ −m ρ̂_θi), gives
+    **`c_E = ½⟨1/v̂_∥⟩_θ`** (NOT frame-entangled — the `⟨1/v̂_∥⟩` is the orbit
+    transit-time weight, `v̂_∥ = σv̂√(1−yb)`). Three wrinkles to finish carefully:
+    (i) `c_E` is **velocity-dependent** `(y,E,σ)` → `Operators.ExBDrift` must take
+    an array coefficient (currently scalar); (ii) needs a new orbit bracket
+    `⟨1/√(1−yb)⟩_θ` (same machinery as `orbit_average_drift_brackets`, same y_c
+    singularity); (iii) the **passing-vs-trapped σ-parity** of `⟨1/v̂_∥⟩` needs
+    care (passing: σ-odd `∝σ`; trapped: the bounce sum — verify). Next session:
+    nail (iii), then implement.
   - **Gradient drive** `drive` + **far field** `bc` — **RESOLVED (2026-07-11**,
     `gradient-drive.md`, signed off): reading I19 first-hand (Eqs. 28–32), the
     master equation is **homogeneous** (no interior source); the drive is the
