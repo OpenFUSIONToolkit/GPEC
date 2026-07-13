@@ -416,7 +416,7 @@ Invert the vacuum surface-current matrix into surface inductance `L`.
 Vacuum returns `I_v` from the Green’s functions, this helper applies GPEC normalization,
 regularization, inversion, and Hermitianization.
 """
-function calc_surface_inductance(I_v::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
+function calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
 
     mpert = size(I_v, 1)
     μ₀ = 4π * 1e-7
