@@ -8,6 +8,47 @@ relevant.
 
 ---
 
+## 2026-07-12 — Q5: clear the full orbit-averaged collision operator (5/6 terms; last operator gate)
+
+- **Moved**: cleared the **full orbit-averaged collision operator**
+  (`orbit-averaged-collision.md`, **human sign-off**) — the last Level-0 operator
+  gate. Reading L23 Eq. 2.3.47 / appendix 8.3.2 first-hand showed "B_profile" is
+  the tip of a **six-term** operator. Implemented the five **differential** terms
+  in the code normalization ÷(−m ρ̂_θi): the σ-**odd** mimetic **pitch diffusion**
+  D+E — an exact `y`-divergence `∂_y(P_oa ∂_y)`, `P_oa = y⟨√(1−yb)⟩_θ`
+  (orbit-averaged, replacing the local single-`B` placeholder), **flat measure**
+  (divergence identity `d/dy[yS] = ⟨(2−3yb)/2√(1−yb)⟩` verified to 1e-11); the
+  σ-even `∂_x` **drag** (A); the σ-odd `∂²_x` **neoclassical** diffusion (B, using
+  `⟨1/√(1−yb)⟩_θ`); the σ-even `∂²_{xy}` **cross** (C). New:
+  `Coefficients.orbit_average_pitch_brackets`, `Configure.{pitch_diffusivity_profile,
+  pitch_collision_coefficient, collisional_drag_coefficient,
+  neoclassical_diffusion_coefficient, collisional_cross_coefficient}`,
+  `Operators.{CollisionalDrag, NeoclassicalDiffusion, CollisionalCross}` + kernels;
+  a **σ-parity correction** (pitch diffusion is σ-odd via the `1/v̂_∥` weight, not
+  σ-even); a forbidden-pitch **`g=0` domain BC** (`FarFieldConditions.forbidden_y`,
+  since physically-zeroed collision coefficients left forbidden nodes
+  unconstrained); and a new `Level0Physics.m` (collision terms carry `1/(m ρ̂_θi)`,
+  which the drift's `m` cancellation does not). **`GatedLevel0Inputs` /
+  `level0_placeholders` removed — no gated kinetic inputs remain** (Q5 fully
+  cleared). **physics-verifier caught a real sign bug**: the derivation §3 asserted
+  the collision code coefficients negative, but ÷(−m ρ̂_θi) of L23's leading `−`
+  gives **positive** (matching the streaming anchor `a_ξ=+(x/L̂q)Θ/ρ̂θ`) — all five
+  flipped `−→+`, §3 now shows the flip step, **physics-verifier PASS** on re-check.
+  1595 islands assertions green (incl. node-for-node coefficient/σ-parity checks +
+  an A4 conservation/entropy gate on the shipped `P_oa`); `build_docs_local.jl`
+  green. Doc-first: docs/01 §2.3, QUESTIONS Q5, numerics.md §2/§8, derivations
+  index/nav; B5 benchmark de-gated.
+- **Blocked**: two collision follow-ups (not gates on the differential solve):
+  (1) the **momentum-restoring** term F (nonlocal velocity integral
+  `2ν̂_ii(1+ε)Ū_∥ᵢ`, its magnitude `⟨ν̂_ii⟩_u` already cleared) — a new operator
+  type; (2) **repoint `Verify.jl` (build_stack/MMS) to the new operators** so the
+  assembled-MMS/A4 harness covers `PitchAngleDiffusion(K,c_pitch)` +
+  Drag/Neoclassical/Cross (physics-verifier follow-up; the shipped `P_oa` is A4-gated
+  in the configure test, and the kernels reuse MMS-covered stencils). Plus the
+  deferred Hirshman–Sigmar `k ≃ −1.173`.
+- **Next**: the momentum-restoring term F (completes the collision operator), then
+  the Verify.jl MMS repointing. With F, the Level-0 collision physics is complete.
+
 ## 2026-07-12 — Q5: clear the collision magnitude (ν_★ + momentum-restoring ⟨ν̂_ii⟩_u)
 
 - **Moved**: closed the collision-magnitude Q5 item (`collision-magnitude.md`,

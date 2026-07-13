@@ -41,17 +41,17 @@ const UNGATED = false
 # The B5 physics parameter set (eps=0.1, m/n=2/1, tau=1; docs/09 I19/D21 manifest).
 _b5_phys(variant) = Isl.Configure.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=1.0,
     q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0, rho_hat_theta_i=0.05,
-    eta_i=1.0, tau=1.0, variant=variant)
+    eta_i=1.0, nu_star=0.01, m=2.0, tau=1.0, variant=variant)
 
 # Assemble the :original and :improved configurations that the T2 toggle compares.
-# Structurally valid today; a *physics* w_c needs the cleared gated inputs (Q5).
+# Every Level-0 operator coefficient is now cleared (QUESTIONS Q5); the momentum-
+# restoring collision term (F) remains a pending operator addition.
 function _assemble_b5(variant)
     grid = Isl.PhaseSpace.IslandGrid(; nx=41, nxi=16, ny=17, nE=6, halfwidth_x=8.0,
         clustering_x=1.2, y_max=1.2, y_c=1.0, clustering_y=0.8, order=4)
     species = [Isl.SpeciesLists.Species(; name=:i, Z=1.0, m=1.0,
         background=Isl.SpeciesLists.Maxwellian(; n=1.0, T=1.0), role=Isl.SpeciesLists.Bulk)]
-    gated = Isl.Configure.level0_placeholders(grid)              # PLACEHOLDER — not physics (Q5)
-    return Isl.Configure.configure_level0(grid, _b5_phys(variant), species; gated=gated)
+    return Isl.Configure.configure_level0(grid, _b5_phys(variant), species)
 end
 
 # threshold_width(cfg) — the marginal-island w_c from the MRE root dw/dt=0. GATED:

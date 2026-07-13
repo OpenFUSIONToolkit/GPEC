@@ -6,38 +6,29 @@ parameter set + a species list into a runnable `Operators.IslandStack`, its
 far-field boundary conditions, and the `Δ`-moment prefactors — the object the
 solver consumes.
 
-**What this module does and does not do (the honest state, M2c).** The M2b
-derivation lane cleared six Level-0 coefficient families. Only some of those map
-onto operator-stack coefficients *cleanly*; the assembly wires exactly those and
-**gates the rest**:
+**Every Level-0 operator coefficient is now cleared** (QUESTIONS Q5 fully
+cleared): the assembly wires each from `phys` via a cleared `Coefficients.*`
+builder — no gated kinetic inputs, no placeholders:
 
-  - **Cleared, wired here** (populated by `Coefficients.*`, never literals):
-    the orbit-averaged magnetic drift `c_D` ([`drift_coefficient_table`], from
-    `Coefficients.magnetic_drift_frequency`); the **island-streaming**
-    coefficients `a_xi`/`a_x` ([`streaming_coefficients`], the `{Ω, ·}`
-    flux-surface advection, `01 §2`); the **`E×B` coupling** `c_E`
-    ([`exb_coupling_table`], `½⟨1/v̂_∥⟩_θ`, passing-only, `01 §2`); the
-    pitch-collision *shape* (`Coefficients.pitch_diffusivity` →
-    `Operators.conservative_pitch_operator`, and
-    `Coefficients.deflection_frequency` → the energy-dependent collision
-    coefficient) scaled by the **cleared magnitude** `ε^{3/2}ν_★` (from
-    `phys.nu_star`, `collision-magnitude.md`); the **quasineutrality field term** — `α = (τ+1)/τ` from
-    `Coefficients.quasineutrality_coefficient` and the `L̂_{n0}⁻¹(x − ĥ)` drive
-    ([`quasineutrality_source`], from the cleared `ĥ` profile), closing the
-    Level-0 potential (`01 §3`); the **gradient drive** — zero interior source
-    plus the neoclassical far field `g_far = x L̂_{n0}⁻¹[1+(E−3/2)η_i]`
-    ([`gradient_far_field`], I19 Formulation A, `01 §2`); and the `Δ`-moment
-    prefactors (`Coefficients.delta_moment_prefactors`).
-  - **Not yet a cleared coefficient family → supplied, gated** (QUESTIONS Q5):
-    the orbit-averaged pitch measure/field `B_profile`. This enters through
-    [`GatedLevel0Inputs`]; nothing here assigns a physics value to it.
+  - the orbit-averaged magnetic drift `c_D` ([`drift_coefficient_table`]); the
+    **island-streaming** `a_xi`/`a_x` ([`streaming_coefficients`], `{Ω, ·}`
+    advection); the **`E×B` coupling** `c_E` ([`exb_coupling_table`],
+    `½⟨1/v̂_∥⟩_θ`, passing-only);
+  - the **full orbit-averaged collision operator** (`orbit-averaged-collision.md`):
+    the σ-odd mimetic **pitch diffusion** D+E (`P_oa = y⟨√(1−yb)⟩`, flat measure,
+    [`pitch_diffusivity_profile`] + [`pitch_collision_coefficient`]); the `∂_x`
+    **drag** A ([`collisional_drag_coefficient`]); the `∂²_x` **neoclassical**
+    diffusion B ([`neoclassical_diffusion_coefficient`]); the `∂²_{xy}` **cross**
+    term C ([`collisional_cross_coefficient`]) — magnitude `ε^{3/2}ν_★` from
+    `phys.nu_star`, `1/(m ρ̂_θi)` from `phys.m`;
+  - the **quasineutrality field term** — `α = (τ+1)/τ` and the `L̂_{n0}⁻¹(x − ĥ)`
+    drive ([`quasineutrality_source`]), closing the Level-0 potential (`01 §3`);
+    the **gradient drive** — zero interior source + the neoclassical far field
+    ([`gradient_far_field`], I19 Formulation A); and the `Δ`-moment prefactors.
 
-The gated pieces are the subject of a future derivation lane (QUESTIONS Q5): the
-assembly *surfaces* exactly what Level-0 physics is still uncleared rather than
-papering over it with guesses. [`level0_placeholders`](@ref) supplies documented
-**non-physics** values for the gated inputs so the assembled residual/solve can
-be exercised *structurally* (that the stack is well-formed and solvable) — never
-for a physics result.
+The only collision piece not yet a stack operator is the momentum-restoring
+field-particle term (its magnitude `⟨ν̂_ii⟩_u` is cleared in
+`collision-magnitude.md`); it is a separate future operator addition.
 """
 module Configure
 
@@ -45,16 +36,19 @@ using LinearAlgebra
 import ..PhaseSpace: IslandGrid, nnodes, MappedFDGrid
 import ..Operators: IslandStack, FarFieldConditions,
     ParallelStreaming, MagneticDrift, ExBDrift, PitchAngleDiffusion,
-    GradientDrive, Quasineutrality, conservative_pitch_operator
+    GradientDrive, Quasineutrality, conservative_pitch_operator,
+    CollisionalDrag, NeoclassicalDiffusion, CollisionalCross
 import ..Coefficients:
     magnetic_drift_frequency, orbit_average_drift_brackets, orbit_average_exb_bracket,
-    pitch_diffusivity, deflection_frequency, delta_moment_prefactors,
+    orbit_average_pitch_brackets,
+    deflection_frequency, delta_moment_prefactors,
     h_amplitude, quasineutrality_coefficient
 import ..Fields: h_profile
 import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species
 
-export Level0Physics, GatedLevel0Inputs, configure_level0, level0_placeholders
-export drift_coefficient_table, collision_coefficient, pitch_diffusivity_profile
+export Level0Physics, configure_level0
+export drift_coefficient_table, pitch_diffusivity_profile, pitch_collision_coefficient
+export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
 export quasineutrality_source, streaming_coefficients, gradient_far_field
 export exb_coupling_table
 
@@ -65,9 +59,9 @@ export exb_coupling_table
     Level0Physics(; epsilon, inv_Lq, inv_LB, q_s, dq_dpsi, w_psi, mu0_R,
                     tau=1.0, variant=:original, collision_model=:chandrasekhar)
 
-The Level-0 physics parameters that feed the **cleared** coefficient builders
-(`01 §1`–`§4`). These are ordinary scenario inputs, not gated coefficients — the
-gated (uncleared) pieces live in [`GatedLevel0Inputs`].
+The Level-0 physics parameters (scenario inputs) that feed the **cleared**
+coefficient builders (`01 §1`–`§4`). Every Level-0 operator coefficient is now
+built from these — there are no gated kinetic inputs (QUESTIONS Q5 cleared).
 
 ## Fields
 
@@ -91,6 +85,10 @@ gated (uncleared) pieces live in [`GatedLevel0Inputs`].
   - `nu_star`         — banana-regime collisionality `ν_★ = ν_{jj}Rq/(ε^{3/2}v_th)`
     (`01 §2.3`, `collision-magnitude.md`); a **scenario scan input** (`ν_★ ≪ 1`,
     Decision D7). Sets the collision magnitude `ν̂_jj = ε^{3/2}ν_★ ν̃_jj(v̂)`.
+  - `m`               — resonant **poloidal mode number** (the rational `m/n`); a
+    scenario input. Unlike the drift/streaming/E×B channels (where `m` cancels in
+    the ÷−m ρ̂_θi normalization), the collision terms carry an explicit `1/(m ρ̂_θi)`
+    (`01 §2.3`, `orbit-averaged-collision.md` §3).
   - `tau`             — `T_e/T_i` (quasineutrality closure, `01 §3`).
   - `variant`         — `:original`/`:improved` drift-model toggle (`01 §2.1`).
   - `collision_model` — `:chandrasekhar`/`:vcubed` deflection-frequency energy
@@ -108,35 +106,16 @@ Base.@kwdef struct Level0Physics
     rho_hat_theta_i::Float64
     eta_i::Float64 = 0.0
     nu_star::Float64 = 0.01
+    m::Float64 = 2.0
     tau::Float64 = 1.0
     variant::Symbol = :original
     collision_model::Symbol = :chandrasekhar
 end
 
 # ---------------------------------------------------------------------------
-# Gated inputs carrier (the uncleared pieces — supplied, never guessed here)
-# ---------------------------------------------------------------------------
-"""
-    GatedLevel0Inputs(; B_profile)
-
-The Level-0 operator coefficients that are **not yet a cleared coefficient
-family** and are therefore *supplied* to [`configure_level0`], not derived from
-`Coefficients.*` (QUESTIONS Q5). Nothing in this module assigns them a physics
-value; a caller either supplies cleared physics (once available) or the
-documented non-physics placeholders of [`level0_placeholders`](@ref).
-
-## Fields
-
-  - `B_profile`    — orbit-averaged `|B|/B_max` on the `y`-grid, feeding the
-    cleared `pitch_diffusivity` shape and the collision measure (the orbit
-    average is gated, QUESTIONS Q5).
-"""
-Base.@kwdef struct GatedLevel0Inputs{V}
-    B_profile::V
-end
-
-# ---------------------------------------------------------------------------
-# Cleared coefficient wiring
+# Cleared coefficient wiring — every Level-0 operator coefficient is now built
+# from `phys` via cleared `Coefficients.*` builders (QUESTIONS Q5 fully cleared:
+# no gated kinetic inputs remain).
 # ---------------------------------------------------------------------------
 """
     drift_coefficient_table(grid, phys) -> Array{Float64,5}
@@ -205,56 +184,188 @@ function drift_coefficient_table(grid::IslandGrid, phys::Level0Physics)
     return cD
 end
 
-"""
-    pitch_diffusivity_profile(grid, B_profile) -> (P, wmeas)
-
-Evaluate the **cleared** Lorentz pitch diffusivity
-`Coefficients.pitch_diffusivity` `P(λ) = λ√(1−λB)` and the collision
-measure `w = B/√(1−λB)` on the `y`-grid (`01 §2.3`), with `λ = y` in the
-`B_max = 1` normalization and `B = B_profile[iy]` the (gated) orbit-averaged
-field. Returns `(P, wmeas)` for `Operators.conservative_pitch_operator`, which
-builds the mimetic operator preserving the A4 conservation gate for any `P ≥ 0`.
-The caller must supply a `B_profile` keeping `0 ≤ y·B ≤ 1` on the grid (the
-turning-point structure is part of the gated orbit average, QUESTIONS Q5).
-"""
-function pitch_diffusivity_profile(grid::IslandGrid, B_profile::AbstractVector)
-    ny = grid.y.n
-    length(B_profile) == ny || throw(ArgumentError("B_profile must have length ny = $ny"))
-    P = Vector{Float64}(undef, ny)
-    wmeas = Vector{Float64}(undef, ny)
-    @inbounds for iy in 1:ny
-        λ = grid.y.nodes[iy]
-        B = B_profile[iy]
-        arg = 1 - λ * B
-        (0 <= λ * B <= 1) || throw(ArgumentError("λB = $(λ * B) at iy=$iy outside [0,1]; supply a valid orbit-averaged B_profile"))
-        P[iy] = pitch_diffusivity(λ, B)                   # cleared: λ√(1−λB)
-        # collision measure w = B/√(1−λB); regularize the zero-flux edge (√arg→0)
-        wmeas[iy] = B / sqrt(max(arg, 1e-12))
+# Cleared orbit-averaged pitch brackets (S=⟨√(1−yb)⟩, T=⟨1/√(1−yb)⟩) with a
+# graceful miss at the near-separatrix y_c layer / forbidden region (returns
+# `nothing`), handled by the caller exactly as `_try_drift_brackets`.
+function _try_pitch_brackets(y::Real, ε::Real)
+    try
+        return orbit_average_pitch_brackets(; y=y, epsilon=ε)
+    catch err
+        err isa Union{ErrorException,DomainError} || rethrow(err)
+        return nothing
     end
-    return P, wmeas
 end
 
 """
-    collision_coefficient(grid, phys, nu_tilde) -> Array{Float64,4}
+    pitch_diffusivity_profile(grid, phys) -> (P_oa, wmeas)
 
-Build the energy-dependent collision coefficient `c[ix, iξ, iE, iσ]` for
-`Operators.PitchAngleDiffusion` from the **cleared**
-`Coefficients.deflection_frequency` `ν_{jj}(v̂)` (`01 §2.3`), scaled by the
-**cleared** magnitude `nu_tilde = ε^{3/2}ν_★` (`collision-magnitude.md`, built by
-`configure_level0` from `phys.nu_star`). It is
-**`y`-independent by construction** (dimensions `(x, ξ, E, σ)`), as
-`PitchAngleDiffusion` requires so the mimetic `K`'s exact conservation is
-preserved; the physical velocity dependence lives entirely in the `E`-axis via
-`v̂ = √E`. Uses `phys.collision_model` for the `:chandrasekhar`/`:vcubed` toggle.
+Build the **cleared orbit-averaged** pitch-diffusion profile for the mimetic
+`Operators.conservative_pitch_operator` (`01 §2.3`; derivation
+`orbit-averaged-collision.md` §4, terms D+E). The orbit-averaged operator is the
+pure `y`-divergence `∂_y(P_oa ∂_y)` with
+
+```math
+P_{\\rm oa}(y) = y\\,\\langle\\sqrt{1-yb}\\rangle_\\theta = y\\,S(y),
+\\qquad \\texttt{wmeas} = 1 ,
+```
+
+`S(y)` from the cleared `Coefficients.orbit_average_pitch_brackets` (passing full
+circuit / trapped bounce, forbidden region → `0`). `P_oa` **replaces** the former
+local single-`B` diffusivity `λ√(1−λB)` (the `B_profile` placeholder), and the
+**flat measure** (`wmeas = 1`) replaces `B/√(1−λB)` — L23 confirms the `⟨√(1−yb)⟩`
+term of `∂²_y` vanishes at `y = 0, 1/b` (natural zero-flux BC), so the operator
+conserves `∫g dy` and preserves the A4 gate for the new `P_oa ≥ 0`. The
+`y_c`-layer node (where the passing/trapped average jumps) carries `P_oa = 0`
+(gated placeholder; the physical jump is handled by the `y_c` matching, `04 §3`).
+Returns `(P_oa, wmeas)`; introduces **no** new physics parameter (only `ε`).
 """
-function collision_coefficient(grid::IslandGrid, phys::Level0Physics, nu_tilde::Real)
+function pitch_diffusivity_profile(grid::IslandGrid, phys::Level0Physics)
+    ny = grid.y.n
+    ε = phys.epsilon
+    y_forbidden = (1 + ε) / (1 - ε)                       # 1/b_min: no particle beyond
+    P_oa = zeros(Float64, ny)                             # forbidden / y_c layer ⇒ 0
+    wmeas = ones(Float64, ny)                             # flat measure (divergence form)
+    @inbounds for iy in 1:ny
+        y = grid.y.nodes[iy]
+        y < y_forbidden || continue                       # forbidden region ⇒ 0
+        br = _try_pitch_brackets(y, ε)
+        br === nothing && continue                        # y_c layer: placeholder 0
+        S, _ = br
+        P_oa[iy] = y * S                                  # y⟨√(1−yb)⟩_θ
+    end
+    return P_oa, wmeas
+end
+
+# ν̂_ii(v̂) = ε^{3/2}ν_★ ν̃(v̂): the cleared deflection frequency at the code magnitude
+@inline _nu_hat_ii(phys::Level0Physics, v̂::Real) =
+    deflection_frequency(v̂; nu_tilde=phys.epsilon^1.5 * phys.nu_star, model=phys.collision_model)
+
+"""
+    pitch_collision_coefficient(grid, phys) -> Array{Float64,4}
+
+Build the **cleared** σ-odd coefficient `c[ix, iξ, iE, iσ]` of the orbit-averaged
+pitch diffusion (terms D+E, `01 §2.3`; `orbit-averaged-collision.md` §3–§4) for
+`Operators.PitchAngleDiffusion` (which applies `c ⋅ (K g)` with `K = ∂_y(P_oa ∂_y)`
+from [`pitch_diffusivity_profile`]):
+
+```math
+c = \\frac{2\\,\\hat\\nu_{ii}(\\hat v)(1+\\varepsilon)}{m\\,\\hat\\rho_{\\theta i}\\,\\sigma\\hat v},
+\\qquad \\hat v = \\sqrt E .
+```
+
+**σ-odd** (`1/σ = σ`; the `1/v̂_∥` transit weight, as for `ω̂_D`/`c_E`) — this
+**corrects** the former σ-even placeholder. `y`-independent (dims `(x,ξ,E,σ)`), as
+`PitchAngleDiffusion` requires so the mimetic `K`'s exact conservation is
+preserved (the `y`-structure lives in `P_oa`). Carries the collision `1/(m ρ̂_θi)`
+normalization (`§3`) and the `(1+ε)`; `ν̂_ii = ε^{3/2}ν_★ ν̃(v̂)`.
+"""
+function pitch_collision_coefficient(grid::IslandGrid, phys::Level0Physics)
     nx, nξ, ny, nE, nσ = nnodes(grid)
+    # +sign: L23 prints the D+E term with a leading −; ÷(−m ρ̂_θi) flips it to +
+    # (the same ÷(−m ρ̂_θi) that makes streaming a_xi positive; §3)
+    pref = 2 * (1 + phys.epsilon) / (phys.m * phys.rho_hat_theta_i)
     c = Array{Float64}(undef, nx, nξ, nE, nσ)
-    @inbounds for iE in 1:nE
-        v̂ = sqrt(grid.E.nodes[iE])
-        ν = deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model)
-        for iσ in 1:nσ, iξ in 1:nξ, ix in 1:nx
-            c[ix, iξ, iE, iσ] = ν
+    @inbounds for iσ in 1:nσ
+        σ = grid.σ[iσ]
+        for iE in 1:nE
+            v̂ = sqrt(grid.E.nodes[iE])
+            val = pref * _nu_hat_ii(phys, v̂) / (σ * v̂)   # σ-odd (1/σ = σ)
+            for iξ in 1:nξ, ix in 1:nx
+                c[ix, iξ, iE, iσ] = val
+            end
+        end
+    end
+    return c
+end
+
+"""
+    collisional_drag_coefficient(grid, phys) -> Array{Float64,5}
+
+Build the **cleared** collision `∂_x` drag coefficient `a_x[ix,iξ,iy,iE,iσ]` for
+`Operators.CollisionalDrag` (term A, `01 §2.3`; `orbit-averaged-collision.md`
+§2–§3): `a_x = +ν̂_ii(v̂)/m · Θ(y_c − y)` — **σ-even**, passing-only, `ρ̂_θi`
+cancels (the `+` is the ÷−m ρ̂_θi flip of L23's leading `−`). `ν̂_ii = ε^{3/2}ν_★ ν̃(√E)`.
+"""
+function collisional_drag_coefficient(grid::IslandGrid, phys::Level0Physics)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    a = zeros(Float64, nx, nξ, ny, nE, nσ)
+    @inbounds for iy in 1:ny
+        grid.y.nodes[iy] < grid.y_c || continue          # passing-only (Θ_y)
+        for iE in 1:nE
+            v̂ = sqrt(grid.E.nodes[iE])
+            val = _nu_hat_ii(phys, v̂) / phys.m       # +: ÷(−m ρ̂_θi) of L23's leading −ν̂_ii ρ̂_θ
+            for iσ in 1:nσ, iξ in 1:nξ, ix in 1:nx
+                a[ix, iξ, iy, iE, iσ] = val
+            end
+        end
+    end
+    return a
+end
+
+"""
+    neoclassical_diffusion_coefficient(grid, phys) -> Array{Float64,5}
+
+Build the **cleared** neoclassical `∂²_x` diffusion coefficient
+`c[ix,iξ,iy,iE,iσ]` for `Operators.NeoclassicalDiffusion` (term B, `01 §2.3`;
+`orbit-averaged-collision.md` §2–§3):
+
+```math
+c = \\frac{\\hat\\nu_{ii}(\\hat v)\\,\\sigma\\hat v\\,\\hat\\rho_{\\theta i}}{2m(1+\\varepsilon)}\\,y\\,T(y),
+\\qquad T(y)=\\langle 1/\\sqrt{1-yb}\\rangle_\\theta ,
+```
+
+**σ-odd** (`σu`), with `T` from `Coefficients.orbit_average_pitch_brackets`
+(passing + trapped; the `1/√` `y_c`-layer node → gated placeholder `0`). The `ρ̂_θi²`
+of L23 (§2.6 amendment) reduces to a single `ρ̂_θi` here after the ÷−m ρ̂_θi
+normalization. `ν̂_ii = ε^{3/2}ν_★ ν̃(√E)`.
+"""
+function neoclassical_diffusion_coefficient(grid::IslandGrid, phys::Level0Physics)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    ε = phys.epsilon
+    pref = phys.rho_hat_theta_i / (2 * phys.m * (1 + ε))   # +: ÷(−m ρ̂_θi) of L23's leading −
+    y_forbidden = (1 + ε) / (1 - ε)
+    c = zeros(Float64, nx, nξ, ny, nE, nσ)
+    @inbounds for iy in 1:ny
+        y = grid.y.nodes[iy]
+        y < y_forbidden || continue                       # forbidden region ⇒ 0
+        br = _try_pitch_brackets(y, ε)
+        br === nothing && continue                        # y_c layer ⇒ 0
+        _, T = br
+        for iσ in 1:nσ
+            σ = grid.σ[iσ]
+            for iE in 1:nE
+                v̂ = sqrt(grid.E.nodes[iE])
+                val = pref * _nu_hat_ii(phys, v̂) * (σ * v̂) * y * T   # σ-odd
+                for iξ in 1:nξ, ix in 1:nx
+                    c[ix, iξ, iy, iE, iσ] = val
+                end
+            end
+        end
+    end
+    return c
+end
+
+"""
+    collisional_cross_coefficient(grid, phys) -> Array{Float64,5}
+
+Build the **cleared** collision `∂²_{xy}` cross coefficient `c[ix,iξ,iy,iE,iσ]`
+for `Operators.CollisionalCross` (term C, `01 §2.3`;
+`orbit-averaged-collision.md` §2–§3): `c = +2ν̂_ii(v̂) y/m · Θ(y_c − y)` —
+**σ-even**, passing-only, `ρ̂_θi` cancels (the `+` is the ÷−m ρ̂_θi flip of L23's
+leading `−`). `ν̂_ii = ε^{3/2}ν_★ ν̃(√E)`.
+"""
+function collisional_cross_coefficient(grid::IslandGrid, phys::Level0Physics)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    c = zeros(Float64, nx, nξ, ny, nE, nσ)
+    @inbounds for iy in 1:ny
+        y = grid.y.nodes[iy]
+        y < grid.y_c || continue                          # passing-only (Θ_y)
+        for iE in 1:nE
+            v̂ = sqrt(grid.E.nodes[iE])
+            val = 2 * _nu_hat_ii(phys, v̂) * y / phys.m   # +: ÷(−m ρ̂_θi) of L23's leading −
+            for iσ in 1:nσ, iξ in 1:nξ, ix in 1:nx
+                c[ix, iξ, iy, iE, iσ] = val
+            end
         end
     end
     return c
@@ -393,7 +504,11 @@ function gradient_far_field(grid::IslandGrid, phys::Level0Physics)
         g_left[iξ, iy, iE, iσ] = x_left * phys.inv_Ln0 * temp
         g_right[iξ, iy, iE, iσ] = x_right * phys.inv_Ln0 * temp
     end
-    return FarFieldConditions(g_left, g_right, zeros(nξ), zeros(nξ))  # Φ̂_far = 0 (ω_E = 0)
+    # forbidden pitch region (y ≥ 1/b_min): no particles ⇒ pin g = 0 (else the
+    # physically-zeroed collision coefficients leave these nodes unconstrained)
+    y_forbidden = (1 + phys.epsilon) / (1 - phys.epsilon)
+    forbidden_y = [grid.y.nodes[iy] >= y_forbidden for iy in 1:ny]
+    return FarFieldConditions(g_left, g_right, zeros(nξ), zeros(nξ), forbidden_y)  # Φ̂_far = 0 (ω_E = 0)
 end
 
 """
@@ -428,98 +543,78 @@ end
 # The assembly
 # ---------------------------------------------------------------------------
 """
-    configure_level0(grid, phys, species; gated)
+    configure_level0(grid, phys, species)
 
 Assemble the Level-0 named configuration (`03 §2`): returns a NamedTuple
 `(stack, bc, delta_prefactors, cleared, gated)` where
 
   - `stack::Operators.IslandStack` — the operator stack (streaming, magnetic
-    drift, `E×B`, mimetic pitch collisions, gradient drive) + the
-    quasineutrality field term;
+    drift, `E×B`, the full orbit-averaged collision operator [mimetic pitch
+    diffusion + `∂_x` drag + `∂²_x` neoclassical + `∂²_{xy}` cross], gradient
+    drive) + the quasineutrality field term;
   - `bc` — the cleared far-field `Operators.FarFieldConditions` (the gradient
     drive, from [`gradient_far_field`]);
-  - `delta_prefactors` — the cleared `(cos, sin)` `Δ`-moment prefactors
-    (`Coefficients.delta_moment_prefactors`);
-  - `cleared`, `gated` — the provenance tuples naming which coefficients came
-    from cleared `Coefficients.*` builders vs. supplied gated inputs.
+  - `delta_prefactors` — the cleared `(cos, sin)` `Δ`-moment prefactors;
+  - `cleared`, `gated` — provenance tuples; **`gated` is now empty** — every
+    Level-0 operator coefficient is built from `phys` via cleared `Coefficients.*`
+    builders (QUESTIONS Q5 fully cleared).
 
-The magnetic drift `c_D`, the island streaming `a_xi`/`a_x`, the `E×B` coupling
-`c_E`, the pitch-collision `P`/`K` and `c` (magnitude `ε^{3/2}ν_★` from
-`phys.nu_star`), the quasineutrality field term (`α` + the `L̂_{n0}⁻¹(x − ĥ)`
-drive), the gradient drive (zero source + the far field `bc`), and the `Δ`
-prefactors are populated from the **cleared** coefficient builders. Only the
-orbit-averaged pitch measure `B_profile` is **supplied** through
-`gated::GatedLevel0Inputs` (QUESTIONS Q5) — this function assigns no physics
-value to it.
+Every coefficient is populated from the **cleared** builders: the magnetic drift
+`c_D`, island streaming `a_xi`/`a_x`, `E×B` `c_E`, the orbit-averaged collision
+coefficients (pitch diffusion `P_oa`/`K`/`c` [σ-odd], drag, neoclassical, cross;
+`orbit-averaged-collision.md`), the quasineutrality field term (`α` + the
+`L̂_{n0}⁻¹(x − ĥ)` drive), the gradient drive (zero source + far field `bc`), and
+the `Δ` prefactors. The momentum-restoring field-particle term is a separate
+future operator addition (its magnitude `⟨ν̂_ii⟩_u` is cleared).
 
-`species` is validated (a Level-0 config must have a bulk ion); its
-per-species roles/backgrounds drive the gated builders that are not yet cleared.
+`species` is validated (a Level-0 config must have a bulk ion).
 """
-function configure_level0(grid::IslandGrid, phys::Level0Physics, species::AbstractVector{<:Species};
-    gated::GatedLevel0Inputs)
+function configure_level0(grid::IslandGrid, phys::Level0Physics, species::AbstractVector{<:Species})
     validate_species(species)
-
-    # cleared coefficient wiring
-    c_D = drift_coefficient_table(grid, phys)
-    P, wmeas = pitch_diffusivity_profile(grid, gated.B_profile)
-    K, _ = conservative_pitch_operator(grid.y, P, wmeas)
-    nu_tilde = phys.epsilon^1.5 * phys.nu_star            # cleared magnitude ε^{3/2}ν_★ (collision-magnitude.md)
-    c_coll = collision_coefficient(grid, phys, nu_tilde)
-    Δpref = delta_moment_prefactors(; mu0_R=phys.mu0_R, w_psi=phys.w_psi, dq_dpsi=phys.dq_dpsi, q_s=phys.q_s)
-
-    # cleared island streaming (advection along Ω; parallel-streaming.md)
-    a_xi, a_x = streaming_coefficients(grid, phys)
-    # cleared E×B coupling (½⟨1/v̂_∥⟩, passing-only; exb-coupling.md)
-    c_E = exb_coupling_table(grid, phys)
-    # cleared quasineutrality field term (α + drive from the signed-off closure)
-    α = 1 / quasineutrality_coefficient(phys.tau)          # (τ+1)/τ, adiabatic shielding
-    S_Φ = quasineutrality_source(grid, phys)               # L̂_{n0}⁻¹(x − ĥ)
-
-    # cleared gradient drive (I19 Formulation A, gradient-drive.md): the master
-    # equation is homogeneous — zero interior source; the drive is the far field.
     nx, nξ, ny, nE, nσ = nnodes(grid)
+
+    # cleared magnetic drift + island streaming + E×B (01 §2)
+    c_D = drift_coefficient_table(grid, phys)
+    a_xi, a_x = streaming_coefficients(grid, phys)
+    c_E = exb_coupling_table(grid, phys)
+
+    # cleared full orbit-averaged collision operator (01 §2.3; orbit-averaged-collision.md):
+    #   D+E mimetic pitch diffusion (σ-odd, P_oa = y⟨√(1−yb)⟩, flat measure)
+    P_oa, wmeas = pitch_diffusivity_profile(grid, phys)
+    K, _ = conservative_pitch_operator(grid.y, P_oa, wmeas)
+    c_pitch = pitch_collision_coefficient(grid, phys)
+    a_drag = collisional_drag_coefficient(grid, phys)          # A: ∂_x drag
+    c_neo = neoclassical_diffusion_coefficient(grid, phys)     # B: ∂²_x neoclassical
+    c_cross = collisional_cross_coefficient(grid, phys)        # C: ∂²_xy cross
+
+    # cleared quasineutrality field term (α + drive from the signed-off closure)
+    α = 1 / quasineutrality_coefficient(phys.tau)              # (τ+1)/τ, adiabatic shielding
+    S_Φ = quasineutrality_source(grid, phys)                   # L̂_{n0}⁻¹(x − ĥ)
+
+    # cleared gradient drive (I19 Formulation A, gradient-drive.md): homogeneous
+    # interior — zero source; the drive is the far field.
     drive0 = zeros(Float64, nx, nξ, ny, nE, nσ)
     bc = gradient_far_field(grid, phys)
 
+    Δpref = delta_moment_prefactors(; mu0_R=phys.mu0_R, w_psi=phys.w_psi, dq_dpsi=phys.dq_dpsi, q_s=phys.q_s)
+
     kinetic = (
-        ParallelStreaming(a_xi, a_x),                      # cleared (01 §2)
-        MagneticDrift(c_D; variant=phys.variant),          # cleared
-        ExBDrift(c_E),                                      # cleared (01 §2, exb-coupling.md)
-        PitchAngleDiffusion(K, c_coll),                    # cleared shape + magnitude ε^{3/2}ν_★
-        GradientDrive(drive0)                              # cleared: zero source (drive is the far field)
+        ParallelStreaming(a_xi, a_x),                         # cleared (01 §2)
+        MagneticDrift(c_D; variant=phys.variant),             # cleared
+        ExBDrift(c_E),                                         # cleared (exb-coupling.md)
+        PitchAngleDiffusion(K, c_pitch),                      # cleared collision D+E (σ-odd)
+        CollisionalDrag(a_drag),                              # cleared collision A (∂_x)
+        NeoclassicalDiffusion(c_neo),                         # cleared collision B (∂²_x)
+        CollisionalCross(c_cross),                            # cleared collision C (∂²_xy)
+        GradientDrive(drive0)                                 # cleared: zero source (far field)
     )
-    stack = IslandStack(kinetic, Quasineutrality(α, S_Φ))  # cleared closure (01 §3)
+    stack = IslandStack(kinetic, Quasineutrality(α, S_Φ))     # cleared closure (01 §3)
 
     return (stack=stack, bc=bc, delta_prefactors=Δpref,
-        cleared=(:magnetic_drift, :streaming, :exb, :pitch_diffusivity, :deflection_frequency, :nu_tilde, :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
-        gated=(:pitch_measure,))
-end
-
-# ---------------------------------------------------------------------------
-# Documented non-physics placeholders (structural runs only)
-# ---------------------------------------------------------------------------
-"""
-    level0_placeholders(grid; B_edge=0.999)
-
-Build a [`GatedLevel0Inputs`] of **documented non-physics placeholder** values so
-the assembled stack can be exercised *structurally* — that `configure_level0`
-produces a well-formed, solvable `IslandStack` — **never for a physics result**
-(the remaining gated coefficient, the orbit-averaged pitch measure, is uncleared,
-QUESTIONS Q5). Choice:
-
-  - a `B_profile` that keeps `y·B ≤ 1` on the grid (`B = min(1, B_edge/y)`), so
-    the cleared `pitch_diffusivity` stays in-domain.
-
-The `B_profile` is a structural stand-in; a physics run supplies the cleared
-orbit-averaged measure. The `E×B` coupling, collision magnitude (`ε^{3/2}ν_★`
-from `phys.nu_star`), gradient drive, and far field are now *cleared* (built by
-`configure_level0` from `phys`), so they are no longer placeholders here.
-"""
-function level0_placeholders(grid::IslandGrid; B_edge::Real=0.999)
-    ny = grid.y.n
-    # B_profile ≤ 1/y keeps the cleared pitch_diffusivity in [0,1]; B ≤ 1 (B_max norm)
-    B_profile = [min(1.0, B_edge / max(grid.y.nodes[iy], eps())) for iy in 1:ny]
-    return GatedLevel0Inputs(; B_profile=B_profile)
+        cleared=(:magnetic_drift, :streaming, :exb, :pitch_diffusion, :collisional_drag,
+            :neoclassical_diffusion, :collisional_cross, :collision_magnitude,
+            :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
+        gated=())
 end
 
 end # module Configure

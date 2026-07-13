@@ -51,6 +51,7 @@ makedocs(;
                 "ω̂_D drift frequency" => "islands/derivations/omega-D-drift-frequency.md",
                 "Collision operator" => "islands/derivations/collision-operator.md",
                 "Collision magnitude" => "islands/derivations/collision-magnitude.md",
+                "Orbit-averaged collision" => "islands/derivations/orbit-averaged-collision.md",
                 "Electron closure" => "islands/derivations/electron-closure.md",
                 "Quasineutrality closure" => "islands/derivations/quasineutrality-closure.md",
                 "Δ-moment prefactors" => "islands/derivations/delta-moment-prefactors.md",

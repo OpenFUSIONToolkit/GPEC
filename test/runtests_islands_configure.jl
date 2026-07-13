@@ -6,14 +6,10 @@
 #   - the CLEARED coefficients are wired faithfully onto the operator stack
 #     (c_D ≡ Coefficients.magnetic_drift_frequency node-for-node; the :improved
 #     toggle; the pitch diffusivity/deflection shapes; the Δ prefactors);
-#   - the still-gated coefficient families (QUESTIONS Q5) are the supplied inputs;
-#   - the assembled residual runs and Newton–Krylov converges STRUCTURALLY on the
-#     documented non-physics placeholder config (never a physics result — the
-#     gated coefficients are uncleared).
-#
-# STRUCTURAL check: the placeholder gated inputs are explicitly non-physics
-# (Configure.level0_placeholders); a physics run supplies cleared inputs once the
-# Q5 derivation lane clears the remaining coefficient families.
+#   - QUESTIONS Q5 is now fully cleared: every Level-0 operator coefficient is
+#     built from `phys` via a cleared `Coefficients.*` builder (no gated inputs),
+#     including the full orbit-averaged collision operator (orbit-averaged-collision.md);
+#   - the assembled residual runs and Newton–Krylov converges.
 
 using LinearAlgebra
 using Test
@@ -37,7 +33,7 @@ _grid() = PSc.IslandGrid(; nx=9, nxi=8, ny=9, nE=3, halfwidth_x=6.0, clustering_
 # coefficient *structure* (the {Ω,g} advection) is ρ̂_θi-independent in form.
 _phys(; variant=:original, model=:chandrasekhar) = Cfg.Level0Physics(; epsilon=0.1,
     inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0,
-    rho_hat_theta_i=1.0, eta_i=0.5, tau=1.0, variant=variant, collision_model=model)
+    rho_hat_theta_i=1.0, eta_i=0.5, nu_star=0.01, m=2.0, tau=1.0, variant=variant, collision_model=model)
 
 _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0, T=1.0), role=Spc.Bulk)]
 
@@ -45,12 +41,12 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
     grid = _grid()
     phys = _phys()
     species = _ion()
-    gated = Cfg.level0_placeholders(grid)
-    cfg = Cfg.configure_level0(grid, phys, species; gated=gated)
+    cfg = Cfg.configure_level0(grid, phys, species)
 
     @testset "well-formed stack + provenance" begin
         @test cfg.stack isa Opc.IslandStack
-        @test length(cfg.stack.kinetic) == 5              # streaming, drift, E×B, collisions, drive
+        # streaming, drift, E×B, pitch D+E, drag A, neoclassical B, cross C, drive
+        @test length(cfg.stack.kinetic) == 8
         @test cfg.stack.field isa Opc.Quasineutrality
         @test cfg.bc isa Opc.FarFieldConditions
         # provenance tuples name exactly which coefficients are cleared vs gated
@@ -62,16 +58,19 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test :gradient_drive in cfg.cleared             # far-field drive, zero source (01 §2)
         @test :far_field in cfg.cleared
         @test :exb in cfg.cleared                        # E×B now wired (01 §2, exb-coupling.md)
-        @test !(:exb in cfg.gated)
-        @test :nu_tilde in cfg.cleared                   # collision magnitude ε^{3/2}ν_★ (collision-magnitude.md)
-        @test !(:nu_tilde in cfg.gated)
-        @test cfg.gated == (:pitch_measure,)             # only the orbit-averaged pitch measure remains gated
+        # the full orbit-averaged collision operator (orbit-averaged-collision.md)
+        @test :pitch_diffusion in cfg.cleared            # D+E (σ-odd, orbit-averaged P_oa)
+        @test :collisional_drag in cfg.cleared           # A (∂_x)
+        @test :neoclassical_diffusion in cfg.cleared     # B (∂²_x)
+        @test :collisional_cross in cfg.cleared          # C (∂²_xy)
+        @test :collision_magnitude in cfg.cleared        # ε^{3/2}ν_★
+        @test cfg.gated == ()                            # every L0 operator coefficient is cleared
     end
 
     @testset "gradient drive = zero source + diamagnetic far field (01 §2)" begin
         nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
         # I19 Formulation A: the interior GradientDrive source is zero
-        gd = cfg.stack.kinetic[5]
+        gd = cfg.stack.kinetic[8]
         @test gd isa Opc.GradientDrive
         @test all(iszero, gd.drive)
         # far field g_far = x·L̂_n0⁻¹·[1+(E−3/2)η_i] at the boundaries, Φ_far = 0
@@ -125,33 +124,66 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test cD_imp[4, 3, iy, iE, iσ] != cD_orig[4, 3, iy, iE, iσ]               # the toggle bites
     end
 
-    @testset "CLEARED collision shapes wired from Coefficients" begin
-        # c is y-independent, energy-dependent = nu_tilde · deflection_frequency(√E)
-        c = Cfg.collision_coefficient(grid, phys, 1.0)
-        nx, nξ, nE, nσ = size(c)
+    @testset "CLEARED orbit-averaged pitch diffusion D+E (σ-odd, P_oa=y⟨√(1−yb)⟩)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        # P_oa = y·S(y), flat measure (wmeas ≡ 1); node-for-node vs the cleared bracket
+        P_oa, wmeas = Cfg.pitch_diffusivity_profile(grid, phys)
+        @test all(>=(0), P_oa)
+        @test all(==(1.0), wmeas)                         # flat measure (divergence form)
+        # A4 for the shipped orbit-averaged P_oa: the mimetic K conserves ∫g dy and
+        # has the correct entropy sign (dissipative) — for any test g
+        K, Wq = Opc.conservative_pitch_operator(grid.y, P_oa, wmeas)
+        gtest = sin.(range(0.3, 2.7; length=grid.y.n))
+        @test abs(dot(Wq, K * gtest)) < 1e-10             # particle conservation
+        @test dot(gtest, Diagonal(Wq) * (K * gtest)) <= 1e-12   # entropy sign ≤ 0
+        y_forbidden = (1 + 0.1) / (1 - 0.1)
+        for iy in 1:ny
+            y = grid.y.nodes[iy]
+            (y >= y_forbidden || abs(y - 1.0) < 5e-2) && continue   # forbidden / y_c layer → 0
+            S, _ = Coc.orbit_average_pitch_brackets(; y=y, epsilon=0.1)
+            @test P_oa[iy] ≈ y * S atol = 1e-10
+        end
+        # the σ-odd pitch coefficient = −2ν̂ii(1+ε)/(m ρ̂_θ σ√E); reversing σ flips sign
+        cp = cfg.stack.kinetic[4].c
+        nu_tilde = phys.epsilon^1.5 * phys.nu_star
         for iE in 1:nE
             v̂ = sqrt(grid.E.nodes[iE])
-            ν = Coc.deflection_frequency(v̂; nu_tilde=1.0, model=:chandrasekhar)
-            @test c[3, 2, iE, 1] ≈ ν atol = 1e-12
+            ν̂ii = Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model)
+            want = 2 * ν̂ii * (1 + 0.1) / (phys.m * phys.rho_hat_theta_i * (1) * v̂)  # σ=+1 (+: ÷−mρ̂θ flip)
+            @test cp[3, 2, iE, 1] ≈ want atol = 1e-12
+            @test cp[3, 2, iE, 1] ≈ -cp[3, 2, iE, 2] atol = 1e-14   # σ-odd
         end
-        # P profile from the cleared pitch_diffusivity, in-domain and nonnegative
-        P, wmeas = Cfg.pitch_diffusivity_profile(grid, gated.B_profile)
-        @test all(>=(0), P)
-        @test all(>(0), wmeas)
-        iy = 4
-        λ = grid.y.nodes[iy]
-        @test P[iy] ≈ Coc.pitch_diffusivity(λ, gated.B_profile[iy]) atol = 1e-12
+    end
+
+    @testset "CLEARED collision drag / neoclassical / cross (A/B/C)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        nu_tilde = phys.epsilon^1.5 * phys.nu_star
+        a_drag = cfg.stack.kinetic[5].a_x                 # A: −ν̂ii/m, passing-only, σ-even
+        c_neo = cfg.stack.kinetic[6].c                    # B: σ-odd, uses T=⟨1/√(1−yb)⟩
+        c_cross = cfg.stack.kinetic[7].c                  # C: −2ν̂ii y/m, passing-only, σ-even
+        @test cfg.stack.kinetic[5] isa Opc.CollisionalDrag
+        @test cfg.stack.kinetic[6] isa Opc.NeoclassicalDiffusion
+        @test cfg.stack.kinetic[7] isa Opc.CollisionalCross
+        ip = findfirst(y -> 0 < y < 0.9, grid.y.nodes)    # a passing node
+        v̂ = sqrt(grid.E.nodes[1]); ν̂ii = Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model)
+        @test a_drag[4, 3, ip, 1, 1] ≈ ν̂ii / phys.m atol = 1e-12     # +: ÷−mρ̂θ flip of L23's leading −
+        @test a_drag[4, 3, ip, 1, 1] == a_drag[4, 3, ip, 1, 2]        # σ-even
+        @test c_cross[4, 3, ip, 1, 1] ≈ 2 * ν̂ii * grid.y.nodes[ip] / phys.m atol = 1e-12
+        @test c_cross[4, 3, ip, 1, 1] == c_cross[4, 3, ip, 1, 2]      # σ-even
+        # B: neoclassical σ-odd, node-for-node vs the T bracket
+        _, T = Coc.orbit_average_pitch_brackets(; y=grid.y.nodes[ip], epsilon=0.1)
+        wantB = ν̂ii * (1 * v̂) * phys.rho_hat_theta_i / (2 * phys.m * (1 + 0.1)) * grid.y.nodes[ip] * T
+        @test c_neo[4, 3, ip, 1, 1] ≈ wantB atol = 1e-12
+        @test c_neo[4, 3, ip, 1, 1] ≈ -c_neo[4, 3, ip, 1, 2] atol = 1e-14   # σ-odd
+        # passing-only masks: A, C vanish for trapped
+        itrap = findfirst(>=(grid.y_c), grid.y.nodes)
+        if itrap !== nothing
+            @test all(iszero, @view a_drag[:, :, itrap, :, :])
+            @test all(iszero, @view c_cross[:, :, itrap, :, :])
+        end
     end
 
     @testset "CLEARED collision magnitude nu_tilde = ε^{3/2}ν_★ (collision-magnitude.md)" begin
-        # the assembled collision coefficient uses the cleared magnitude built
-        # from phys.nu_star (not a supplied placeholder)
-        nu_tilde = phys.epsilon^1.5 * phys.nu_star
-        c_stack = cfg.stack.kinetic[4].c                  # PitchAngleDiffusion.c
-        for iE in 1:size(c_stack, 3)
-            v̂ = sqrt(grid.E.nodes[iE])
-            @test c_stack[3, 2, iE, 1] ≈ Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model) atol = 1e-12
-        end
         # the momentum-restoring average reproduces L23 Eq. 4.1.6 to its quoted digits
         nu_avg = Coc.momentum_restoring_average(; epsilon=0.1, nu_star=0.01)
         @test nu_avg ≈ 1.267537e-4 rtol = 1e-5            # L23 p. 88 unit-test value
@@ -169,12 +201,10 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test cfg.delta_prefactors.cos ≈ -cfg.delta_prefactors.sin atol = 1e-9   # symmetric pin
     end
 
-    @testset "structural solve converges on the placeholder config" begin
-        # the cleared E×B term makes the placeholder residual genuinely nonlinear
-        # (couples g and Φ), so use the same Newton budget as the QN-drive solve.
-        # Assert the grid-independent per-equation max-norm (04 §5's convergence
-        # criterion): the √N-scaled L2 norm floors above 1e-7 only because the E×B
-        # spreads a ~1e-8 residual across ~N=4000 unknowns.
+    @testset "structural solve converges on the fully-cleared config" begin
+        # every operator coefficient is now physical (incl. the full orbit-averaged
+        # collision operator); assert the grid-independent per-equation max-norm
+        # (04 §5), the √N-scaled L2 floors slightly higher across ~N unknowns.
         f! = Soc.flat_residual(cfg.stack, grid; bc=cfg.bc)
         N = Opc.statelength(grid)
         sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-9, atol=1e-13, max_iter=40, memory=200)
@@ -187,6 +217,11 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         cache = Opc.IslandCache(grid)
         Opc.residual!(R, U, cfg.stack, grid, cache, cfg.bc)
         @test all(isfinite, R.g) && all(isfinite, R.Φ)
+        # allocation regression: the full stack (incl. the new collision operators
+        # CollisionalDrag/NeoclassicalDiffusion/CollisionalCross) is allocation-free.
+        # Measure through a function barrier so testset-scope boxing isn't counted.
+        _ralloc(R, U, st, g, c, b) = (Opc.residual!(R, U, st, g, c, b); @allocated Opc.residual!(R, U, st, g, c, b))
+        @test _ralloc(R, U, cfg.stack, grid, cache, cfg.bc) == 0
     end
 
     @testset "island streaming = advection along Ω (the {Ω,g} structure)" begin
@@ -263,7 +298,7 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
     end
 
     @testset "assembly validates the species list" begin
-        @test_throws ArgumentError Cfg.configure_level0(grid, phys, Spc.Species[]; gated=gated)
+        @test_throws ArgumentError Cfg.configure_level0(grid, phys, Spc.Species[])
     end
 end
 

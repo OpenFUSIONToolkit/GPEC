@@ -216,10 +216,20 @@ bare pass/fail. The derivation lane inherits this framing.
     trapped-fraction coefficient, = quoted `1.46` to 3 s.f.), authorizes
     `Fields.ElectronClosure.f_p`. The Hirshman–Sigmar `k ≃ −1.173` remains
     escalated (needs the parallel-viscosity moment problem).
-  - **Orbit-averaged pitch measure** `B_profile`: the collision operator's `|B|`
-    on the `y`-grid is the *orbit-averaged* field (turning-point structure), not a
-    single local `B`; the cleared `pitch_diffusivity(λ,B)` is the local building
-    block. Clear the orbit-averaged measure form.
+  - **Orbit-averaged pitch measure** `B_profile`: **RESOLVED (2026-07-12**,
+    `orbit-averaged-collision.md`, signed off). Reading L23 Eq. 2.3.47 / appendix
+    8.3.2 first-hand showed `B_profile` is the tip of the **full** orbit-averaged
+    collision operator (six terms). The pitch diffusivity is the orbit-averaged
+    `⟨√(1−yb)⟩_θ` (not a local `B`), giving the exact `y`-divergence
+    `∂_y(y⟨√(1−yb)⟩_θ ∂_y)` with flat measure; and the pitch diffusion is **σ-odd**
+    (the `1/v̂_∥` weight) — a correction to the former σ-even placeholder. Cleared &
+    implemented: the five **differential** terms (D+E pitch, A drag, B neoclassical,
+    C cross) via `Coefficients.orbit_average_pitch_brackets` +
+    `Configure.*_coefficient` + `Operators.{PitchAngleDiffusion, CollisionalDrag,
+    NeoclassicalDiffusion, CollisionalCross}`, plus the forbidden-pitch `g=0` domain
+    BC and the new `Level0Physics.m`. `B_profile` and `GatedLevel0Inputs` are
+    **removed** — **no gated kinetic inputs remain**. The sixth term (momentum-restoring
+    F, nonlocal) is a pending operator addition (its magnitude `⟨ν̂_ii⟩_u` cleared).
   - **Neoclassical far field** `bc` (`Operators.FarFieldConditions`): the
     no-island `g_far`/`Φ_far` (never bare Neumann — L23 §5.3), gated physics
     already flagged under Q3.

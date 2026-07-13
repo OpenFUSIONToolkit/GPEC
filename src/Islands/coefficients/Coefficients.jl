@@ -26,7 +26,7 @@ module Coefficients
 import QuadGK
 
 export magnetic_drift_frequency, orbit_average_drift_brackets
-export orbit_average_exb_bracket
+export orbit_average_exb_bracket, orbit_average_pitch_brackets
 export pitch_diffusivity, deflection_frequency, momentum_restoring_average
 export h_amplitude, passing_fraction
 export quasineutrality_coefficient
@@ -109,6 +109,50 @@ function orbit_average_exb_bracket(; y::Real, epsilon::Real, rtol::Real=1e-8)
     fB(θ) = 1 / sqrt(max(1 - y * _b(θ, ε), 0.0))
     B1, _ = QuadGK.quadgk(fB, 0.0, 2π; rtol=rtol)
     return B1 / (2π)
+end
+
+"""
+    orbit_average_pitch_brackets(; y, epsilon, rtol=1e-8)
+
+The two poloidal-orbit integrals of the **orbit-averaged collision operator**
+(docs/01 §2.3; derivation `orbit-averaged-collision.md` §5), in I19's
+``\\langle\\cdot\\rangle_\\theta`` form:
+
+```math
+S(y) = \\big\\langle \\sqrt{1-yb} \\big\\rangle_\\theta,
+\\qquad
+T(y) = \\Big\\langle \\frac1{\\sqrt{1-yb}} \\Big\\rangle_\\theta ,
+```
+
+with `b(θ) = (1−ε cos θ)/(1+ε)`. Returns `(S, T)`. `S` feeds the pitch-diffusion
+diffusivity `P_oa = y·S(y)` (terms D+E); `T` feeds the neoclassical `∂²_p` term
+(term B). **Passing** (`y < y_c = 1`): the full circuit ``\\tfrac1{2\\pi}\\int_0^{2\\pi}``.
+**Trapped** (`1 < y < (1+ε)/(1−ε)`): the bounce integral
+``\\tfrac1{2\\pi}\\sum_\\sigma\\int_{-\\theta_b}^{\\theta_b}`` between turning points
+``\\cos\\theta_b = [1-(1+ε)/y]/ε`` (σ-even integrands ⇒ `/π`). `S`'s integrand is
+**bounded** (no singularity — the mimetic divergence form of D+E never forms `S'`);
+`T` carries the integrable `1/√(1−yb)` turning-point singularity, as the drift
+`G` bracket, handled by the adaptive quadrature.
+"""
+function orbit_average_pitch_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
+    ε = float(epsilon)
+    0 < ε < 1 || throw(ArgumentError("epsilon must be in (0, 1) (got $epsilon)"))
+    y >= 0 || throw(ArgumentError("y must be nonnegative"))
+    y_forbidden = (1 + ε) / (1 - ε)
+    y < y_forbidden || throw(ArgumentError("y = $y exceeds 1/b_min = $y_forbidden (forbidden region)"))
+    fS(θ) = sqrt(max(1 - y * _b(θ, ε), 0.0))
+    fT(θ) = 1 / sqrt(max(1 - y * _b(θ, ε), 0.0))
+    if y < 1                                  # passing: full circuit
+        S, _ = QuadGK.quadgk(fS, 0.0, 2π; rtol=rtol)
+        T, _ = QuadGK.quadgk(fT, 0.0, 2π; rtol=rtol)
+        return (S / (2π), T / (2π))
+    else                                      # trapped: bounce integral between turning points
+        cosθb = (1 - (1 + ε) / y) / ε
+        θb = acos(clamp(cosθb, -1.0, 1.0))
+        S, _ = QuadGK.quadgk(fS, -θb, 0.0, θb; rtol=rtol)
+        T, _ = QuadGK.quadgk(fT, -θb, 0.0, θb; rtol=rtol)
+        return (S / π, T / π)
+    end
 end
 
 """

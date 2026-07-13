@@ -239,6 +239,27 @@ footnote 26]. The collision **magnitude** `nu_tilde = ε^{3/2}ν_★` is thus cl
 scan input (Decision D7) and `configure_level0` builds `nu_tilde = ε^{3/2}ν_★`,
 un-gating the collision operator's magnitude.
 
+**Full orbit-averaged collision operator [CLEARED: human sign-off 2026-07-12 —
+derivation orbit-averaged-collision.md; first-hand from L23 Eqs. 2.3.34–2.3.35,
+2.3.47, appendix 8.3.2].** The `⟨(1/v̂_∥)Ĉ_ii⟩_θ` collision side of I19 Eq. (32)
+orbit-averages to six terms (L23 Eq. 2.3.47), each put in the code normalization
+÷(−m ρ̂_θi) — note the collision terms carry an explicit `1/(m ρ̂_θi)` (unlike the
+drift, `m` does *not* cancel). The five **differential** terms are now cleared and
+wired: the σ-**odd** mimetic **pitch diffusion** D+E — an exact `y`-divergence
+`∂_y(P_oa ∂_y)` with `P_oa = y⟨√(1−yb)⟩_θ` (orbit-averaged, replacing the
+local single-`B` placeholder) and **flat measure** (L23: the `⟨√(1−yb)⟩` term
+vanishes at `y=0,1/b`, natural BC); the σ-even `∂_x` **drag** (A); the σ-odd `∂²_x`
+**neoclassical** diffusion (B, the only cross-`pφ` transport, using
+`⟨1/√(1−yb)⟩_θ`); and the σ-even `∂²_{xy}` **cross** term (C). The **σ-parity
+correction** (the pitch diffusion is σ-odd via the `1/v̂_∥` weight, like `ω̂_D`/`c_E`
+— not σ-even) is the key fidelity fix. Implemented as `Operators.PitchAngleDiffusion`
+(rebuilt) + `CollisionalDrag`/`NeoclassicalDiffusion`/`CollisionalCross`, from
+`Configure`'s cleared builders; the forbidden pitch region (`y ≥ 1/b_min`, no
+particles) is pinned `g=0` (a domain BC). `m` (poloidal mode number) is a new
+`Level0Physics` scenario input. The sixth term — the **momentum-restoring**
+field-particle integral (F, `2ν̂_ii(1+ε)Ū_∥ᵢ`, using the cleared `⟨ν̂_ii⟩_u`) — is a
+nonlocal operator addition still pending.
+
 Replaced wholesale at Level 1 by the multi-species Fokker–Planck operator.
 
 ### 2.4 Electrons at Level 0 (O7) — closure now exact

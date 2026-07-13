@@ -37,6 +37,7 @@ export IslandState, IslandCache, IslandStack, AbstractTerm
 export ParallelStreaming, MagneticDrift, ExBDrift, Collisions, GradientDrive,
     PerpTransport, RadiationSink, Quasineutrality
 export PitchAngleDiffusion, conservative_pitch_operator
+export CollisionalDrag, NeoclassicalDiffusion, CollisionalCross
 export FarFieldConditions, apply_farfield!
 export apply!, residual!, velocity_moment!, weighted_moment!, statelength,
     flatten!, unflatten!, g_flat_index, Φ_flat_index
@@ -219,6 +220,43 @@ function conservative_pitch_operator(ygrid, P::AbstractVector, wmeas::AbstractVe
 end
 
 """
+    CollisionalDrag(a_x)
+
+The orbit-averaged collision `∂_p` drag (term A, `01 §2.3`;
+`orbit-averaged-collision.md`): adds `a_x ∂g/∂x`, with `a_x` a supplied
+coefficient array shaped like `g` (`−ν̂_ii/m`, passing-only `Θ_y`). Structurally
+an `∂_x` advection, distinct from the island `ParallelStreaming` channel.
+"""
+struct CollisionalDrag{A} <: AbstractTerm
+    a_x::A
+end
+
+"""
+    NeoclassicalDiffusion(c)
+
+The neoclassical `∂²_p` diffusion (term B, `01 §2.3`;
+`orbit-averaged-collision.md`) — the only Level-0 term giving cross-`pφ` (radial)
+transport: adds `c ∂²g/∂x²`, with `c` a supplied `(x,ξ,y,E,σ)` coefficient array
+(`−(ν̂_ii σu ρ̂_θ/2m(1+ε)) y⟨1/√(1−yb)⟩_θ`). Distinct from the Level-4
+`PerpTransport` stub (scalar `χ`); here `c` is the cleared collision coefficient.
+"""
+struct NeoclassicalDiffusion{A} <: AbstractTerm
+    c::A
+end
+
+"""
+    CollisionalCross(c)
+
+The collision `∂²_{yp}` cross term (term C, `01 §2.3`;
+`orbit-averaged-collision.md`): adds `c ∂²g/∂x∂y`, with `c` a supplied
+`(x,ξ,y,E,σ)` coefficient array (`−2ν̂_ii y/m`, passing-only `Θ_y`). The mixed
+`x`,`y` second derivative couples the radial and pitch grids.
+"""
+struct CollisionalCross{A} <: AbstractTerm
+    c::A
+end
+
+"""
     GradientDrive(drive)
 
 The `(v_E + v_D + v_ψ̃)·∇F₀` gradient drive (`03 §2`, `01 §2`): a state-independent
@@ -342,6 +380,38 @@ end
     return Rg
 end
 
+# array-coefficient ∂²/∂x² (NeoclassicalDiffusion): adds coef .* D2x g along dim 1
+@inline function _add_dx2!(Rg, coef, g, D)
+    nx, nξ, ny, nE, nσ = size(g)
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
+        for a in 1:nx
+            acc = zero(eltype(Rg))
+            for b in 1:nx
+                acc += D[a, b] * g[b, iξ, iy, iE, iσ]
+            end
+            Rg[a, iξ, iy, iE, iσ] += coef[a, iξ, iy, iE, iσ] * acc
+        end
+    end
+    return Rg
+end
+
+# mixed ∂²/∂x∂y (CollisionalCross): adds coef .* ∂x(∂y g); apply Dy (dim 3) then Dx (dim 1)
+@inline function _add_dxy!(Rg, coef, g, Dx, Dy)
+    nx, nξ, ny, nE, nσ = size(g)
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iξ in 1:nξ, iy in 1:ny, ix in 1:nx
+        acc = zero(eltype(Rg))
+        for bx in 1:nx
+            dy = zero(eltype(Rg))
+            for by in 1:ny
+                dy += Dy[iy, by] * g[bx, iξ, by, iE, iσ]
+            end
+            acc += Dx[ix, bx] * dy
+        end
+        Rg[ix, iξ, iy, iE, iσ] += coef[ix, iξ, iy, iE, iσ] * acc
+    end
+    return Rg
+end
+
 # ∂Φ/∂x and ∂Φ/∂ξ into cache buffers (allocation-free)
 @inline function _potential_gradients!(cache::IslandCache, Φ, Dx, Dξ)
     nx, nξ = size(Φ)
@@ -416,6 +486,21 @@ end
 
 function apply!(R::IslandState, t::PerpTransport, U::IslandState, grid::IslandGrid, ::IslandCache)
     _add_dx2_scalar!(R.g, t.χ, U.g, grid.x.D2)
+    return R
+end
+
+function apply!(R::IslandState, t::CollisionalDrag, U::IslandState, grid::IslandGrid, ::IslandCache)
+    _add_dx!(R.g, t.a_x, U.g, grid.x.D1)
+    return R
+end
+
+function apply!(R::IslandState, t::NeoclassicalDiffusion, U::IslandState, grid::IslandGrid, ::IslandCache)
+    _add_dx2!(R.g, t.c, U.g, grid.x.D2)
+    return R
+end
+
+function apply!(R::IslandState, t::CollisionalCross, U::IslandState, grid::IslandGrid, ::IslandCache)
+    _add_dxy!(R.g, t.c, U.g, grid.x.D1, grid.y.D1)
     return R
 end
 
@@ -518,17 +603,29 @@ are replaced by `(U − far)` so the Newton solve pins the far field. The
 neoclassical no-island `g_far` is gated physics (QUESTIONS Q3) — callers supply
 it (tests use manufactured far fields).
 
+Also carries the **forbidden-pitch domain condition**: where `forbidden_y[iy]`
+(no valid orbit, `y ≥ 1/b_min` — no particles), `g` is pinned to `0` at **all**
+`ix` (not just the boundaries), since every physics coefficient vanishes there and
+the node would otherwise be unconstrained (`01 §2.3`, `orbit-averaged-collision.md`).
+
 ## Fields
 
   - `g_left`, `g_right` — `(nξ, ny, nE, nσ)` far-field distributions at `ix = 1`, `ix = nx`.
   - `Φ_left`, `Φ_right` — length-`nξ` far-field potentials at `ix = 1`, `ix = nx`.
+  - `forbidden_y` — length-`ny` `Bool` mask; `true` pins `g = 0` at that pitch node
+    for all `ix` (the forbidden region). Defaults to all-`false` (no pinning) for
+    the 4-argument constructor used by manufactured tests.
 """
 struct FarFieldConditions{T,A4<:AbstractArray{T,4},V<:AbstractVector{T}}
     g_left::A4
     g_right::A4
     Φ_left::V
     Φ_right::V
+    forbidden_y::Vector{Bool}
 end
+
+FarFieldConditions(g_left, g_right, Φ_left, Φ_right) =
+    FarFieldConditions(g_left, g_right, Φ_left, Φ_right, fill(false, size(g_left, 2)))
 
 """
     apply_farfield!(R, U, bc, grid)
@@ -542,6 +639,13 @@ function apply_farfield!(R::IslandState, U::IslandState, bc::FarFieldConditions,
     @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
         R.g[1, iξ, iy, iE, iσ] = U.g[1, iξ, iy, iE, iσ] - bc.g_left[iξ, iy, iE, iσ]
         R.g[nx, iξ, iy, iE, iσ] = U.g[nx, iξ, iy, iE, iσ] - bc.g_right[iξ, iy, iE, iσ]
+    end
+    # forbidden-pitch domain condition: pin g = 0 (no particles) at all ix
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+        bc.forbidden_y[iy] || continue
+        for iξ in 1:nξ, ix in 1:nx
+            R.g[ix, iξ, iy, iE, iσ] = U.g[ix, iξ, iy, iE, iσ]
+        end
     end
     @inbounds for iξ in 1:nξ
         R.Φ[1, iξ] = U.Φ[1, iξ] - bc.Φ_left[iξ]

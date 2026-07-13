@@ -85,7 +85,10 @@ its physics value gated):
 | `ParallelStreaming` | ``a_\xi\, \partial_\xi g + a_x\, \partial_x g`` | **cleared** — ``(\hat L_q^{-1}\hat w^2/4\hat\rho_{\theta i})\Theta\,\{\Omega,\cdot\}`` advection along island surfaces (§8) |
 | `MagneticDrift` | ``c_D\, \partial_\xi g`` (with the `:original`/`:improved` ``\hat L_B^{-1}`` toggle) | the precession frequency ``\hat\omega_D(y, E; \sigma)`` |
 | `ExBDrift` | ``c_E \left( \partial_\xi\tilde\Phi\, \partial_x g - \partial_x\tilde\Phi\, \partial_\xi g \right)`` — the ``(x,\xi)`` Poisson bracket, the one state-nonlinear Level-0 term | **cleared** — ``c_E=\tfrac12\langle 1/\hat v_\parallel\rangle_\theta`` (passing σ-odd ``(\sigma/2\sqrt E)B_1(y)``, trapped ≡ 0; §8) |
-| `PitchAngleDiffusion` | ``c\,(K g)`` along ``y`` (mimetic form, §3) | **shape + magnitude cleared** — ``c=\varepsilon^{3/2}\nu_\star\,\tilde\nu(E)`` (§8); only the orbit-averaged pitch measure ``B(y)`` gated |
+| `PitchAngleDiffusion` | ``c\,(K g)`` along ``y`` (mimetic form, §3) | **cleared** — orbit-averaged collision D+E: σ-odd ``c\propto\hat\nu_{ii}/(m\hat\rho_{\theta i}\sigma\hat v)``, ``K=\partial_y(y\langle\sqrt{1-yb}\rangle_\theta\,\partial_y)``, flat measure (§8) |
+| `CollisionalDrag` | ``a_x\,\partial_x g`` | **cleared** — collision A: ``+\hat\nu_{ii}/m``, passing-only, σ-even (§8) |
+| `NeoclassicalDiffusion` | ``c\,\partial_x^2 g`` | **cleared** — collision B (cross-``p_\phi`` transport): σ-odd ``+\tfrac{\hat\nu_{ii}\sigma\hat v\,\hat\rho_{\theta i}}{2m(1+\varepsilon)}y\langle 1/\sqrt{1-yb}\rangle_\theta`` (§8) |
+| `CollisionalCross` | ``c\,\partial_{xy}^2 g`` | **cleared** — collision C: ``+2\hat\nu_{ii}y/m``, passing-only, σ-even (§8) |
 | `GradientDrive` | additive source | the ``(\mathbf v_E + \mathbf v_D + \mathbf v_{\tilde\psi})\cdot\nabla F_0`` drive |
 | `Quasineutrality` | ``M[g] - \alpha\tilde\Phi + S_\Phi`` | **cleared** — ``\alpha=(\tau+1)/\tau`` and the drive ``S_\Phi=\hat L_{n0}^{-1}(x-\hat h)`` (§8) |
 
@@ -96,8 +99,9 @@ flow through the entire stack — that is what makes the solver's Jacobian exact
 
 Implemented by: `Operators.ParallelStreaming`, `Operators.MagneticDrift`,
 `Operators.ExBDrift`, `Operators.Collisions`, `Operators.PitchAngleDiffusion`,
-`Operators.GradientDrive`, `Operators.PerpTransport`, `Operators.RadiationSink`,
-`Operators.Quasineutrality`.
+`Operators.CollisionalDrag`, `Operators.NeoclassicalDiffusion`,
+`Operators.CollisionalCross`, `Operators.GradientDrive`, `Operators.PerpTransport`,
+`Operators.RadiationSink`, `Operators.Quasineutrality`.
 
 The last two are Level-4 closure stubs, and `Collisions` is the non-mimetic
 collision slot superseded at Level 0 by `PitchAngleDiffusion` (§3); the stack is
@@ -296,13 +300,19 @@ builders (§7, the M2b derivation lane) onto the operator stack:
   orbit bracket ``B_1(y)=\langle 1/\sqrt{1-yb}\rangle_\theta``
   (`orbit_average_exb_bracket`); trapped ≡ 0 (`exb-coupling.md`; the ``\hat\rho_{\theta i}``
   cancels, so no new physics parameter);
-- the pitch-collision diffusivity ``P`` and the energy-dependent deflection
-  coefficient from `pitch_diffusivity` / `deflection_frequency`, fed to the
-  mimetic `conservative_pitch_operator` (§3), scaled by the **cleared magnitude**
-  ``\texttt{nu\_tilde}=\varepsilon^{3/2}\nu_\star`` (from the `Level0Physics.nu_star`
-  scenario field; `collision-magnitude.md`, with the momentum-restoring average
-  ``\langle\hat\nu_{ii}\rangle_u=\tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}(\sqrt2-\ln(1+\sqrt2))``
-  cleared as `Coefficients.momentum_restoring_average`);
+- the **full orbit-averaged collision operator** (`orbit-averaged-collision.md`):
+  the σ-odd mimetic **pitch diffusion** D+E — `pitch_diffusivity_profile`
+  (``P_{oa}=y\langle\sqrt{1-yb}\rangle_\theta``, flat measure) fed to
+  `conservative_pitch_operator`, and the σ-odd coefficient
+  `pitch_collision_coefficient` (``\propto\hat\nu_{ii}(1+\varepsilon)/(m\hat\rho_{\theta i}\sigma\hat v)``);
+  the `∂_x` **drag** (`collisional_drag_coefficient`), `∂²_x` **neoclassical**
+  (`neoclassical_diffusion_coefficient`, using ``\langle 1/\sqrt{1-yb}\rangle_\theta``),
+  and `∂²_{xy}` **cross** (`collisional_cross_coefficient`) terms — magnitude
+  ``\varepsilon^{3/2}\nu_\star`` (from `Level0Physics.nu_star`), ``1/(m\hat\rho_{\theta i})``
+  (from `Level0Physics.m`); the forbidden pitch region (``y\ge 1/b_{\min}``) is
+  pinned ``g=0``. The momentum-restoring average
+  ``\langle\hat\nu_{ii}\rangle_u`` (`Coefficients.momentum_restoring_average`) is
+  cleared for the pending momentum-restoring operator term (F);
 - the ``\Delta_{\cos}`` / ``\Delta_{\sin}`` prefactors from
   `delta_moment_prefactors` (§7);
 - the **quasineutrality field term** — ``\alpha=(\tau+1)/\tau`` from
@@ -315,16 +325,12 @@ builders (§7, the M2b derivation lane) onto the operator stack:
 The gradient drive is cleared as I19 Formulation A — a **zero** interior
 `GradientDrive` source plus the neoclassical far field
 ``g_{\rm far} = x\hat L_{n0}^{-1}[1+(E-\tfrac32)\eta_i]`` (`gradient_far_field`;
-`Φ̂_far = 0` at `ω_E = 0`). The one family that remains **not yet cleared** — the
-orbit-averaged pitch measure ``B(y)`` — is **supplied** through
-`GatedLevel0Inputs`, never assigned a physics value here (QUESTIONS Q5). So the
-assembly is still a **scaffold** for that single *kinetic* piece, even though the
-streaming, drift, E×B coupling, collision (shape + magnitude), gradient drive,
-far field, and field equation are now cleared: with `level0_placeholders`
-(documented non-physics values for the gated kinetic inputs) the assembled
-residual is well-formed, ``\Phi`` is genuinely driven, and Newton–Krylov
-converges. A physics threshold still awaits the remaining Q5 kinetic clearances.
-Implemented by: `Configure.configure_level0`.
+`Φ̂_far = 0` at `ω_E = 0`). **Every Level-0 operator coefficient is now cleared**
+— `GatedLevel0Inputs` is removed and `configure_level0(grid, phys, species)` takes
+no gated argument (QUESTIONS Q5 fully cleared). The assembled residual is
+well-formed, ``\Phi`` is genuinely driven, and Newton–Krylov converges (max-norm
+`< 1e-7`). The only collision piece not yet a stack operator is the nonlocal
+momentum-restoring term (F). Implemented by: `Configure.configure_level0`.
 
 ## 9. Verification evidence (the A-ladder, all green in CI)
 
