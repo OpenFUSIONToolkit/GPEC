@@ -202,17 +202,23 @@ On sign-off (recorded in docs/01 §2.3):
 2. Add `m` (poloidal mode number) to `Configure.Level0Physics` (scenario input,
    the rational `m/n`).
 3. **Modify `PitchAngleDiffusion`**: `P_oa = y⟨√(1−yb)⟩_θ`, `wmeas = 1`, and the
-   σ-**odd** coefficient `c[x,ξ,E,σ] = −2ν̂_ii(√E)(1+ε)/(m ρ̂_θi σ√E)` — replacing
-   the σ-even placeholder and the local-`B` diffusivity.
-4. Add the four remaining terms as operators (A `∂_x` drag, B `∂²_x` neoclassical
-   with an array coeff, C `∂²_{xy}` cross, F nonlocal momentum), each with its
-   `F̂′`/drive split and `Θ_y` mask per §6–§7.
-5. Remove `B_profile` from `GatedLevel0Inputs` (**emptying it** — the Level-0
-   operator stack becomes fully cleared). Update `level0_placeholders`,
-   `configure_level0` (no more `gated` kinetic inputs), the docs, and the
-   anchor-sync/STATE dashboard.
+   σ-**odd** coefficient `c[x,ξ,E,σ] = +2ν̂_ii(√E)(1+ε)/(m ρ̂_θi σ√E)` (positive —
+   §3 sign-flip) — replacing the σ-even placeholder and the local-`B` diffusivity.
+4. Add the four **differential** terms as operators (D+E pitch, A `∂_x` drag, B
+   `∂²_x` neoclassical, C `∂²_{xy}` cross), σ-parities per §2, positive per §3.
+5. Remove `GatedLevel0Inputs`/`level0_placeholders`; `configure_level0` takes no
+   `gated` argument. Add the forbidden-pitch `g=0` domain BC.
 
-This is a **multi-term milestone**, not a single coefficient: it clears the last
-Level-0 operator gate (QUESTIONS Q5) and makes the whole L0 collision physics
-physical. Only the Hirshman–Sigmar `k ≃ −1.173` (electron closure, its own
+**Status of the six terms.** The five **differential** terms (1–4 above) are
+**implemented and physics-verifier PASS** (2026-07-12). The sixth — the
+**momentum-restoring** nonlocal term F — is **blocked and escalated** (QUESTIONS
+Q5): its structure is clear (§6, `Ū_∥ᵢ` moment + `2ν̂_ii(1+ε)Ū F̂_M`
+redistribution, positive sign), but `Ū` is the **parallel-flow velocity moment**
+whose weight `W(y,E,σ)` is `[VERIFY]`-gated (Q3), and the `g↔F̂_M` energy-measure
+convention (the Gauss–Laguerre `e^{−E}` vs `Ū`'s plain `∫du`) must be pinned
+first. Not guessed — F waits on Q3. Its magnitude `⟨ν̂_ii⟩_u` is already cleared.
+
+This is a **multi-term milestone**: it clears the last Level-0 operator gate for
+the **differential** collision physics (QUESTIONS Q5). The momentum-restoring F
+and the Hirshman–Sigmar `k ≃ −1.173` (electron closure, its own
 moment problem) then remains deferred.

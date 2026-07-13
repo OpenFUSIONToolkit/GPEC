@@ -229,7 +229,25 @@ bare pass/fail. The derivation lane inherits this framing.
     NeoclassicalDiffusion, CollisionalCross}`, plus the forbidden-pitch `g=0` domain
     BC and the new `Level0Physics.m`. `B_profile` and `GatedLevel0Inputs` are
     **removed** — **no gated kinetic inputs remain**. The sixth term (momentum-restoring
-    F, nonlocal) is a pending operator addition (its magnitude `⟨ν̂_ii⟩_u` cleared).
+    F, nonlocal) is a pending operator addition (see next item).
+  - **Momentum-restoring term F** (`2ν̂_ii(1+ε)Ū_∥ᵢ(ĝ+pF̂′)F̂_M`, the collision
+    operator's field-particle piece) — **BLOCKED on a gated normalization
+    (2026-07-12)**, escalated rather than guessed. The *structure* is clear
+    (L23 Eq. 2.3.47/8.3.17): a nonlocal operator that (i) forms the parallel-flow
+    moment `Ū_∥ᵢ(x,ξ) = (1/√π⟨ν̂_ii⟩_u) Σ_σ σ ∫du u³ν̂_ii ∫dy ĝ` (b²→1), then (ii)
+    redistributes `2ν̂_ii(1+ε)Ū F̂_M`, σ-even, sign positive (÷−m ρ̂_θi of the RHS,
+    like the other five). Its magnitude `⟨ν̂_ii⟩_u` is **cleared**
+    (`collision-magnitude.md`). **The blocker:** `Ū` is exactly the **parallel-flow
+    velocity moment** whose weight `W(y,E,σ)` (the `v̂_∥`-structure, `∫du u³ν̂_ii`)
+    is **`[VERIFY]`-gated (Q3)** — `Moments.parallel_current!` / `Operators.jl:185`
+    already flag the field-particle piece as Q3-gated. Compounding: the code's
+    energy grid is **Gauss–Laguerre** (`Σ wₑ f ≈ ∫ f e^{−E}dE`, the Maxwellian
+    folded in), but `Ū`'s moment is a **plain** `∫du u³ν̂_ii` — so the `g↔F̂_M`
+    convention (is `g` stored with the Maxwellian in or out?) must be pinned before
+    the moment measure is unambiguous. **Question:** clear the parallel-flow
+    velocity-moment weight `W` and the `g↔F̂_M` energy-measure convention (Q3), then
+    F follows. **Recommendation:** do NOT guess the measure; clear Q3's `W` first
+    (it also un-gates the `J̄_∥` output moment). Nothing entered `src/` for F.
   - **Neoclassical far field** `bc` (`Operators.FarFieldConditions`): the
     no-island `g_far`/`Φ_far` (never bare Neumann — L23 §5.3), gated physics
     already flagged under Q3.
