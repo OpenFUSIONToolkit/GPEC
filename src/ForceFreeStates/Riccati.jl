@@ -336,15 +336,37 @@ function compute_delta_prime_matrix!(
 
     # rpec coil-response loop needs the vacuum edge (col_edge coupled in junc_rows[1:N]) and the
     # S-axis row layout that `loop_edge_boundary_conditions` assumes for its edge-BC rows.
+    # (The edge BC / RHS formulation itself is chosen inside that function via ENV["DELTACOIL_MODE"].)
     if use_S_axis && wv !== nothing                        #only run the coil loop on the S-axis path with a vacuum edge (real W_V present)
-        #Q1 per-surface normalization: snorm = |n·q'|^α (derived: sing_get_ua small basis ~ dpsi^α at
-        #dpsi ∝ 1/(n·q'), α = Mercier exponent).
+        #KNOB — Q1 per-surface normalization. snorm = |n·q'|^α (derived: sing_get_ua small basis ~ dpsi^α at
+        #dpsi ∝ 1/(n·q'), α = Mercier exponent). To test a different normalization, change `alpha`/the power below.
         nq = [abs(Float64(minimum(sing[j].n)) * Float64(sing[j].q1)) for j in 1:msing]   #per surface: |n·q'| (n = toroidal mode, q' = dq/dψ at the surface)
         alpha = (ctrl !== nothing && equil !== nothing && ffit !== nothing) ?            #if we have the inputs to rebuild the asymptotics...
                 [real(compute_sing_asymptotics(sing[j], ctrl, equil, ffit, intr; sig=1.0).alpha[1]) for j in 1:msing] :   #...compute α = Mercier exponent per surface (√−D_I)
                 fill(0.55, msing)                                                        #...otherwise fall back to a typical α ≈ 0.55
-        snorm = nq .^ alpha                                                              #the derived per-surface factor: snorm[j] = |n·q'|^α_j
-        intr.delta_coil_matrix = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all, snorm)   #run the coil loop and store the result on the internal state
+        snorm = nq .^ alpha                                                              #the derived per-surface factor: snorm[j] = |n·q'|^α_j  (EDIT exponent to retune)
+        # DELTACOIL_COMP tests the ξ-vs-ξ' basis convention: multiply the small coeff by dpsi^p per surface
+        # (dpsi = singfac_min/|n·q'|; reading ξ' vs ξ differs by one dpsi). "xi"(default)=p0, "xip"=+1, "xip_half"=+0.5, "xi_neg"=-1.
+        comp = get(ENV, "DELTACOIL_COMP", "xi")
+        pcomp = comp == "xip" ? 1.0 : comp == "xip_half" ? 0.5 : comp == "xi_neg" ? -1.0 : 0.0
+        if pcomp != 0.0 && ctrl !== nothing
+            snorm = snorm .* (ctrl.singfac_min ./ nq) .^ pcomp                            #apply dpsi^p (ξ→ξ' relative scaling)
+        end
+        #DELTACOIL_PROJECT (experimental): build weak-form projection weights so the readout is the
+        #cell-integrated projection Σ_m W_m·x_m/W[small] (mode-mixing) instead of a single coefficient.
+        Wl = Wr = nothing
+        if get(ENV, "DELTACOIL_PROJECT", "") != "" && ctrl !== nothing && equil !== nothing && ffit !== nothing
+            Wl = Vector{Vector{ComplexF64}}(undef, msing)
+            Wr = Vector{Vector{ComplexF64}}(undef, msing)
+            for j in 1:msing
+                dlo = ctrl.singfac_min / nq[j]; dhi = dlo * 100                           #resonant cell [dpsi_lo, dpsi_hi]
+                aR = compute_sing_asymptotics(sing[j], ctrl, equil, ffit, intr; sig=1.0)
+                aL = compute_sing_asymptotics(sing[j], ctrl, equil, ffit, intr; sig=-1.0)
+                Wr[j] = _projection_weight(aR, ipert_all[j] + N, dlo, dhi)
+                Wl[j] = _projection_weight(aL, ipert_all[j] + N, dlo, dhi)
+            end
+        end
+        intr.delta_coil_matrix = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all, snorm; Wl, Wr)   #run the coil loop
     end
 
     intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
@@ -642,7 +664,7 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
 end
 
 # Δ' loop: drive each of the 2·msing big-solution BCs of Eq. (37) in turn, collect the small-solution
-# (+N slot) coeffs at every surface into the raw Δ' matrix [Glasser-Kolemen 2018 PoP 25, 032501].
+# (+N slot) coeffs at every surface into the raw Δ' matrix [Glasser-Kolemen 2018].
 function loop_boundary_conditions(M::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int})
     nMat = size(M, 1)                   #BVP unknowns = (2 + 4·msing)·N
     s2 = 2 * msing                      #number of BCs (left/right per surface)
@@ -663,26 +685,69 @@ function loop_boundary_conditions(M::Matrix{ComplexF64}, msing::Int, N::Int, ipe
     return dp_raw
 end
 
-# Coil-response loop for the Eq. (37) edge block Φ(a₂,1) [Glasser-Kolemen 2018 PoP 25 082502]: for each edge poloidal
-# mode k, copy the full BVP matrix, impose the Eq. (38) edge BC (top 1_N identity pinned at mode k, bottom -W_V = 0),
-# with the entire RHS = 0 → svd null-space solve, and read the snorm-scaled small-solution coeff (+N slot) at every
-# surface → delta_coil (2·msing × N).
+# Weak-form projection weight (EXPERIMENTAL, ENV DELTACOIL_PROJECT): W[m] = ∫ Σ_h conj(u^S_h)·u^basis_{m,h}(ξ)
+# d(dpsi) over the resonant cell — mirrors RDCON's gal_resonant cell-integrated projection (without the energy
+# operator STRIDE lacks). Reading Σ_m W_m·x_m / W[small] replaces the pointwise single-coefficient read and
+# mixes modes via the cross-overlaps of u^S with the big/nonresonant basis functions.
+function _projection_weight(asymp::SingAsymptotics, small_col::Int, dpsi_lo::Float64, dpsi_hi::Float64)
+    npts = 24
+    ds = exp.(range(log(dpsi_lo), log(dpsi_hi); length=npts))
+    nbasis = size(asymp.vmat, 2)
+    W = zeros(ComplexF64, nbasis)
+    for t in 1:npts
+        ua = sing_get_ua(asymp, ds[t])
+        uS = conj.(ua[:, small_col, 1])                 #conj small-solution ξ component, over harmonics
+        dstep = t < npts ? (ds[t+1] - ds[t]) : (ds[t] - ds[t-1])
+        for m in 1:nbasis
+            W[m] += dstep * sum(uS .* @view ua[:, m, 1])
+        end
+    end
+    return W
+end
+
+# Coil-response loop for the Eq. (37) edge block [Glasser-Kolemen 2018 PoP 25 082502]: for each edge poloidal
+# mode k, copy the full BVP matrix, impose the Eq. (38) edge BC via `bc!`, solve, and read the snorm-scaled
+# small-solution coeff (+N slot) at every surface → delta_coil (2·msing × N). If Wl/Wr are given (weak-form
+# projection weights), read the cell-integrated projection Σ_m W_m·x_m / W[small] instead of the single coeff.
 function loop_edge_boundary_conditions(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int,
-    ipert_all::Vector{Int}, snorm::Vector{Float64})
+    ipert_all::Vector{Int}, snorm::Vector{Float64}; Wl=nothing, Wr=nothing)
     nMat = size(M, 1)
-    top = (nMat-2msing-2N+1):(nMat-2msing-N)        #Eq.38 top rows (1_N identity)
+    top = (nMat-2msing-2N+1):(nMat-2msing-N)        #Eq.38 top rows (1_M identity)
     bot = (nMat-2msing-N+1):(nMat-2msing)           #Eq.38 bottom rows (-W_V)
+    # DELTACOIL_EDGE selects the edge BC to test against galerkin (default "driven"). bc! mutates the copy Mc for
+    # edge mode k and returns the RHS (or nothing for a homogeneous null-space solve):
+    #   "driven" – replace the W_V bottom with a Dirichlet identity (α_edge = RHS), unit drive at bot[k]. Well-posed.
+    #   "wv"     – keep the assembled true W_V edge untouched, unit drive at bot[k] (galerkin's vacuum edge).
+    #   "wv_top" – keep the true W_V edge, drive via the top (1_M) row top[k] instead.
+    edge = get(ENV, "DELTACOIL_EDGE", "driven")
+    function bc!(Mc, k)
+        rhs = zeros(ComplexF64, nMat)
+        if edge == "driven"
+            Mc[bot, :] .= 0
+            Mc[bot, col_edge] .= I(N)               
+            rhs[bot[k]] = 1                          #unit drive on edge mode k
+        elseif edge == "wv_top"
+            rhs[top[k]] = 1                          #drive the true W_V edge via the top 1_M row
+        else                                        #"wv": drive the true W_V edge via the bottom row
+            rhs[bot[k]] = 1
+        end
+        return rhs
+    end
     delta_coil = zeros(ComplexF64, 2msing, N)       #rows = surface side, cols = edge mode k
-    for k in 1:N                                    #loop the edge block Φ(a₂,1), one column per edge mode k
+    for k in 1:N
         Mc = copy(M)                                #fresh full Eq.(37) matrix per mode k
-        Mc[bot, col_edge] .= 0                      #Eq.38 bottom: -W_V = 0
-        Mc[top, col_edge] .= 0
-        Mc[top[k], col_edge[k]] = 1                 #Eq.38 top: 1_N = 1 for edge mode k
-        x = svd(Mc).V[:, end]                       #RHS = 0 → null-space (smallest singular vector)
+        rhs = bc!(Mc, k)
+        x = rhs === nothing ? svd(Mc).V[:, end] : lu(Mc) \ rhs
         for j in 1:msing
             ipert_j = ipert_all[j]
-            delta_coil[2j-1, k] = snorm[j] * x[_col_left(j, N)[ipert_j+N]]
-            delta_coil[2j, k] = snorm[j] * x[_col_right(j, N)[ipert_j+N]]
+            cl = _col_left(j, N); cr = _col_right(j, N)
+            if Wl === nothing
+                delta_coil[2j-1, k] = snorm[j] * x[cl[ipert_j+N]]
+                delta_coil[2j, k] = snorm[j] * x[cr[ipert_j+N]]
+            else                                    #weak-form cell-integrated projection (experimental)
+                delta_coil[2j-1, k] = snorm[j] * (sum(Wl[j] .* @view x[cl]) / Wl[j][ipert_j+N])
+                delta_coil[2j, k] = snorm[j] * (sum(Wr[j] .* @view x[cr]) / Wr[j][ipert_j+N])
+            end
         end
     end
     return delta_coil
