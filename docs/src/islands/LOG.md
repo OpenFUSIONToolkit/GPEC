@@ -8,6 +8,37 @@ relevant.
 
 ---
 
+## 2026-07-12 — Q5: clear the collision magnitude (ν_★ + momentum-restoring ⟨ν̂_ii⟩_u)
+
+- **Moved**: closed the collision-magnitude Q5 item (`collision-magnitude.md`,
+  **human sign-off**). Read L23 Eqs. 4.1.4–4.1.6 (p. 87–88) first-hand and
+  **derived** the momentum-restoring speed average `⟨ν̂_ii⟩_u =
+  (4ε^{3/2}ν_★/3√π)(√2−ln(1+√2))` from L23's reduced integrand: the reduction
+  `u⁴ν̃_jj = u·erf − erf/2u + e^{−u²}/√π` plus three standard integrals
+  (`∫u e^{−u²}erf=1/2√2`, `∫e^{−2u²}=½√(π/2)`, `∫u⁻¹e^{−u²}erf=ln(1+√2)=arcsinh(1)`).
+  **Verified independently** (QuadGK): all three integrals + the `u⁴ν̃` reduction
+  exact to 15 digits, `⟨1⟩_u=1` (normalized), and the full value reproduces L23's
+  own unit-test `1.267537×10⁻⁴` (ε=0.1, ν_★=0.01) to all 7 digits. Cleared as
+  `Coefficients.momentum_restoring_average`. Also wired the collision **magnitude**
+  `nu_tilde = ε^{3/2}ν_★` from a new `Level0Physics.nu_star` scenario field (the
+  §4 ν_★ normalization, already signed off) — `:nu_tilde` moved gated→cleared,
+  `nu_tilde` dropped from `GatedLevel0Inputs` (now `B_profile`-only). This
+  un-gates the collision operator's magnitude. **physics-verifier PASS**; 1577
+  islands assertions green (incl. the L23 1.2675e-4 reproduction + ε^{3/2}/ν_★
+  scalings); `build_docs_local.jl` green. Doc-first: docs/01 §2.3, QUESTIONS Q5,
+  numerics.md §2/§8, collision-operator.md §7 (deferred item now resolved),
+  derivations index/nav.
+- **Blocked**: **one** kinetic family remains gated (Q5): the orbit-averaged
+  pitch measure `B_profile` (the collision operator's `|B|` on the y-grid is the
+  orbit-averaged/turning-point field, not a single local B; ties to the A4
+  conservation gate). Plus the deferred Hirshman–Sigmar `k ≃ −1.173` (its own
+  parallel-viscosity moment problem, L23 Eq. 4.1.7). The momentum-restoring
+  *operator term* itself is a separate future addition (its magnitude is cleared).
+- **Next**: the orbit-averaged pitch measure `B_profile` — the **last** Level-0
+  operator coefficient gate. Clearing it makes the whole L0 operator stack
+  physical (only `k` and the momentum-restoring term remain, both beyond the
+  minimal L0 solve). Same rhythm: derive → present → sign off → clear.
+
 ## 2026-07-12 — Q5: clear the E×B coupling c_E (passing σ-odd, trapped ≡ 0)
 
 - **Moved**: derived and cleared the `E×B` coupling `c_E` (`exb-coupling.md`,

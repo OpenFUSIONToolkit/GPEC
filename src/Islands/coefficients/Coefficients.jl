@@ -27,7 +27,7 @@ import QuadGK
 
 export magnetic_drift_frequency, orbit_average_drift_brackets
 export orbit_average_exb_bracket
-export pitch_diffusivity, deflection_frequency
+export pitch_diffusivity, deflection_frequency, momentum_restoring_average
 export h_amplitude, passing_fraction
 export quasineutrality_coefficient
 export delta_moment_prefactors
@@ -194,6 +194,36 @@ function deflection_frequency(v_hat::Real; nu_tilde::Real=1.0, model::Symbol=:ch
     else
         throw(ArgumentError("model must be :chandrasekhar or :vcubed (got $model)"))
     end
+end
+
+"""
+    momentum_restoring_average(; epsilon, nu_star)
+
+The **momentum-restoring** velocity-averaged collision frequency
+``\\langle\\hat\\nu_{ii}\\rangle_u`` (docs/01 §2.3; derivation
+`collision-magnitude.md`, human sign-off 2026-07-12):
+
+```math
+\\langle\\hat\\nu_{ii}\\rangle_u
+ = \\frac{4\\,\\varepsilon^{3/2}\\nu_\\star}{3\\sqrt\\pi}\\big(\\sqrt2-\\ln(1+\\sqrt2)\\big)
+ \\approx 0.40083\\,\\varepsilon^{3/2}\\nu_\\star ,
+```
+
+the normalized Maxwellian speed average ``\\langle\\cdots\\rangle_u=(8/3\\sqrt\\pi)
+\\int_0^\\infty u^4 e^{-u^2}(\\cdots)du`` of ``\\hat\\nu_{ii}(u)=\\varepsilon^{3/2}
+\\nu_\\star[\\phi-G]/u^3`` (the cleared [`deflection_frequency`](@ref) shape). L23
+evaluates it analytically (L23 Eq. 4.1.6, p. 88) because ``\\tilde\\nu`` diverges
+as ``u\\to0``, spoiling coarse speed quadrature; the pure number
+``(4/3\\sqrt\\pi)(\\sqrt2-\\ln(1+\\sqrt2))=0.400830\\ldots`` reproduces L23's own
+unit-test value ``1.267537\\times10^{-4}`` at ``\\varepsilon=0.1,\\nu_\\star=0.01``.
+This magnitude enters the momentum-restoring flow ``\\bar u_{\\parallel i}``
+(I19 Eq. 12); ``\\nu_\\star`` is a scenario scan input (banana regime
+``\\nu_\\star\\ll1``, Decision D7).
+"""
+function momentum_restoring_average(; epsilon::Real, nu_star::Real)
+    epsilon >= 0 || throw(ArgumentError("epsilon must be nonnegative"))
+    nu_star >= 0 || throw(ArgumentError("nu_star must be nonnegative (banana regime ν_★ ≪ 1)"))
+    return (4 * epsilon^1.5 * nu_star / (3 * sqrt(π))) * (sqrt(2) - log(1 + sqrt(2)))
 end
 
 # ---------------------------------------------------------------------------

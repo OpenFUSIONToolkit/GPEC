@@ -63,6 +63,9 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test :far_field in cfg.cleared
         @test :exb in cfg.cleared                        # E×B now wired (01 §2, exb-coupling.md)
         @test !(:exb in cfg.gated)
+        @test :nu_tilde in cfg.cleared                   # collision magnitude ε^{3/2}ν_★ (collision-magnitude.md)
+        @test !(:nu_tilde in cfg.gated)
+        @test cfg.gated == (:pitch_measure,)             # only the orbit-averaged pitch measure remains gated
     end
 
     @testset "gradient drive = zero source + diamagnetic far field (01 §2)" begin
@@ -138,6 +141,25 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         iy = 4
         λ = grid.y.nodes[iy]
         @test P[iy] ≈ Coc.pitch_diffusivity(λ, gated.B_profile[iy]) atol = 1e-12
+    end
+
+    @testset "CLEARED collision magnitude nu_tilde = ε^{3/2}ν_★ (collision-magnitude.md)" begin
+        # the assembled collision coefficient uses the cleared magnitude built
+        # from phys.nu_star (not a supplied placeholder)
+        nu_tilde = phys.epsilon^1.5 * phys.nu_star
+        c_stack = cfg.stack.kinetic[4].c                  # PitchAngleDiffusion.c
+        for iE in 1:size(c_stack, 3)
+            v̂ = sqrt(grid.E.nodes[iE])
+            @test c_stack[3, 2, iE, 1] ≈ Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model) atol = 1e-12
+        end
+        # the momentum-restoring average reproduces L23 Eq. 4.1.6 to its quoted digits
+        nu_avg = Coc.momentum_restoring_average(; epsilon=0.1, nu_star=0.01)
+        @test nu_avg ≈ 1.267537e-4 rtol = 1e-5            # L23 p. 88 unit-test value
+        @test nu_avg ≈ (4 * 0.1^1.5 * 0.01 / (3 * sqrt(π))) * (sqrt(2) - log(1 + sqrt(2))) atol = 1e-15
+        # scales linearly in ν_★ and as ε^{3/2}
+        @test Coc.momentum_restoring_average(; epsilon=0.1, nu_star=0.02) ≈ 2 * nu_avg atol = 1e-14
+        @test Coc.momentum_restoring_average(; epsilon=0.4, nu_star=0.01) ≈ nu_avg * (0.4 / 0.1)^1.5 atol = 1e-14
+        @test Coc.momentum_restoring_average(; epsilon=0.0, nu_star=0.01) == 0.0
     end
 
     @testset "CLEARED Δ prefactors (symmetric, from delta_moment_prefactors)" begin

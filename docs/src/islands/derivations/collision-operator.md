@@ -7,16 +7,17 @@ collision operator structure, the deflection-frequency velocity dependence
 normalization (`[CHECKED: I19 Eqs. 9–12; Diss19 Eqs. 2.25–2.30; WCHH96 Eq. 62]`,
 QUESTIONS Q3).
 **Deferred (flagged sub-items, §7):** the analytic velocity average
-``\langle\hat\nu_{ii}\rangle_u`` (L23 Eq. 4.1.6 — a separate short derivation),
-and the orbit-averaged/discretized diffusivity profile that feeds
-`PitchAngleDiffusion` (numerics, ties to the conservation gate A4).
+``\langle\hat\nu_{ii}\rangle_u`` — ✅ **now cleared** in the follow-up
+`collision-magnitude.md` (signed off 2026-07-12); and the orbit-averaged/discretized
+diffusivity profile that feeds `PitchAngleDiffusion` (numerics, ties to the
+conservation gate A4 — still open).
 
 **Status:** ✅ **signed off 2026-07-11** (clearance recorded in docs/01 §2.3) for
 the operator structure, deflection frequency, and ``\nu_\star`` normalization —
 implemented as `Coefficients.pitch_diffusivity` and
 `Coefficients.deflection_frequency`. The ``\langle\hat\nu_{ii}\rangle_u``
-constant (§7) and the discretized diffusivity profile remain **deferred /
-gated**.
+constant (§7) is **now cleared** (`collision-magnitude.md`, 2026-07-12); only the
+discretized/orbit-averaged diffusivity profile remains open.
 
 ## 1. Starting point and what must be shown
 
@@ -181,17 +182,17 @@ structurally fixed here; its **magnitude** enters through
 
 ## 7. Deferred sub-items (flagged, not asserted)
 
-- **Analytic velocity average ``\langle\hat\nu_{ii}\rangle_u``.** The low-``\hat v``
-  divergence of ``\tilde\nu`` (``\hat v^{-2}`` Chandrasekhar / ``\hat v^{-3}``
-  reduced, §3) makes the momentum-restoring velocity integral of §6 poorly
-  behaved under naive quadrature; L23 Eq. 4.1.6 (p. 88) gives the closed form
-  ``\langle\hat\nu_{ii}\rangle_u = \tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}
-  (\sqrt2-\ln(1+\sqrt2))``. **This specific constant is not derived here** — it
-  requires L23's exact reduced integrand and is a self-contained follow-up
-  derivation (policy rule 4: not presented as derived until it is). The
-  ``\sqrt2`` reflects the ion self-collision reduced mass; ``\ln(1+\sqrt2)=
-  \operatorname{arcsinh}(1)`` points to a ``\int d\hat v/\sqrt{1+\hat v^2}``-type
-  reduction.
+- **Analytic velocity average ``\langle\hat\nu_{ii}\rangle_u``.** ✅ **now
+  derived** — its own follow-up derivation `collision-magnitude.md` (signed off
+  2026-07-12) establishes ``\langle\hat\nu_{ii}\rangle_u =
+  \tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}(\sqrt2-\ln(1+\sqrt2))`` first-hand
+  from L23's reduced integrand (Eqs. 4.1.4–4.1.6) and the three standard integrals
+  (``\int u\,e^{-u^2}\mathrm{erf}=1/2\sqrt2``, ``\int e^{-2u^2}=\tfrac12\sqrt{\pi/2}``,
+  ``\int u^{-1}e^{-u^2}\mathrm{erf}=\ln(1+\sqrt2)=\operatorname{arcsinh}(1)``),
+  reproducing L23's unit-test ``1.267537\times10^{-4}`` to 7 digits. Cleared as
+  `Coefficients.momentum_restoring_average`. The low-``\hat v`` divergence of
+  ``\tilde\nu`` (``\hat v^{-2}`` Chandrasekhar / ``\hat v^{-3}`` reduced, §3) is
+  exactly why L23 uses the analytic value rather than the coarse speed quadrature.
 - **Discretized diffusivity profile for `PitchAngleDiffusion`.** The mapping of
   ``P(\lambda)=\lambda\sqrt{1-\lambda B}`` and the measure through the
   orbit-average and onto the ``y=\lambda B_{\max}`` grid (with the ``\theta``-
@@ -206,7 +207,7 @@ structurally fixed here; its **magnitude** enters through
 | I19 Eq. (11) (first-hand) | ``\nu_{jj}=\tilde\nu_{jj}[\phi(\hat v)-G(\hat v)]/\hat v^3`` | ✅ deflection frequency + limits |
 | I19 Eqs. (12)–(13) (first-hand) | ``\bar u_{\parallel j}``, ``\langle\nu_{jj}\rangle_v``, ``\int d^3v`` | ✅ structure (constant deferred, §7) |
 | L23 Eq. 2.3.40 | ``\nu_\star=\nu_{jj}Rq/(\varepsilon^{3/2}v_{th})`` | ✅ normalization |
-| L23 Eq. 4.1.6 | ``\langle\hat\nu_{ii}\rangle_u=\tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}(\sqrt2-\ln(1+\sqrt2))`` | ⏳ deferred (§7) |
+| L23 Eq. 4.1.6 | ``\langle\hat\nu_{ii}\rangle_u=\tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}(\sqrt2-\ln(1+\sqrt2))`` | ✅ now derived (`collision-magnitude.md`, §7) |
 
 **Triage:** operator structure, deflection frequency, and normalization agree
 with all first-hand sources — no discrepancy. The one number that carries a

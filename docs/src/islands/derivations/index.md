@@ -19,7 +19,8 @@ transcription or vice versa).
 |---|---|---|
 | Island flux amplitude ``\tilde\psi`` | [ψ̃ amplitude](psi-tilde-amplitude.md) | ✅ signed off 2026-07-11 |
 | Magnetic drift frequency ``\hat\omega_D`` + `:original`/`:improved` toggle | [ω̂_D drift frequency](omega-D-drift-frequency.md) | ✅ signed off 2026-07-11 |
-| Pitch-angle collision operator + deflection frequency + ``\nu_\star`` | [collision operator](collision-operator.md) | ✅ signed off 2026-07-11 (``\langle\hat\nu_{ii}\rangle_u`` deferred) |
+| Pitch-angle collision operator + deflection frequency + ``\nu_\star`` | [collision operator](collision-operator.md) | ✅ signed off 2026-07-11 |
+| Collision magnitude ``\nu_\star`` + momentum-restoring ``\langle\hat\nu_{ii}\rangle_u=\tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}(\sqrt2-\ln(1+\sqrt2))`` | [collision magnitude](collision-magnitude.md) | ✅ signed off 2026-07-12 |
 | Flattened-electron closure ``h(\Omega)`` + amplitude | [electron closure](electron-closure.md) | ✅ signed off 2026-07-11 (``k``, ``f_p`` deferred) |
 | Quasineutrality closure ``1/(2\hat L_{n0})`` (arbitrary ``\tau``) | [quasineutrality closure](quasineutrality-closure.md) | ✅ signed off 2026-07-11 |
 | ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | ✅ signed off 2026-07-11 |
@@ -29,11 +30,12 @@ transcription or vice versa).
 | Passing fraction ``f_p \simeq 1-1.46\sqrt\varepsilon`` (electron closure) | [passing fraction](passing-fraction.md) | ✅ signed off 2026-07-11 |
 
 The six main Q3/Q4 coefficient families are signed off, plus the parallel
-streaming and the passing fraction ``f_p`` (`Coefficients.passing_fraction`).
-The gradient drive's *structure* is found (it is the far-field BC, not a source);
-its normalized amplitude is bundled with the frame convention and awaits
-completion. Of the **deferred numerical sub-constants**, ``f_p`` is now cleared;
-the remaining two — ``\langle\hat\nu_{ii}\rangle_u`` (collision) and the
-Hirshman–Sigmar ``k`` (electron closure) — are escalated in `QUESTIONS.md`
-Q3/Q5 (each needs its specific source integrand) rather than derived
-speculatively.
+streaming, the passing fraction ``f_p`` (`Coefficients.passing_fraction`), the
+E×B coupling ``c_E``, and the collision magnitude (``\nu_\star`` normalization +
+``\langle\hat\nu_{ii}\rangle_u``). The gradient drive is cleared as the
+diamagnetic far-field BC (not a source). Of the **deferred numerical
+sub-constants**, ``f_p`` and ``\langle\hat\nu_{ii}\rangle_u`` are now cleared;
+only the Hirshman–Sigmar ``k`` (electron closure, `QUESTIONS.md` Q3/Q5 — its own
+parallel-viscosity moment problem, L23 Eq. 4.1.7) remains escalated rather than
+derived speculatively. The one remaining Level-0 operator gate is the
+orbit-averaged pitch measure `B_profile`.

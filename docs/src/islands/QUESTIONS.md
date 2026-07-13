@@ -199,10 +199,17 @@ bare pass/fail. The derivation lane inherits this framing.
     `h_amplitude`/`h_profile`). The Level-0 potential is now driven (was trivially
     zero). docs/01 §3 records it; the derivation §6 was the authorization. **No
     longer gates a Level-0 physics run.**
-  - **Collision magnitude** `nu_tilde`: the `⟨ν̂_ii⟩_u`/`ν_★` normalization scaling
-    the cleared `ν_{jj}(v̂)` shape — the deferred sub-constant already tracked in
-    Q3 (`⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2−ln(1+√2))`, L23 Eq. 4.1.6). Still
-    escalated (needs the L23 integrand read in detail).
+  - **Collision magnitude** `nu_tilde`: **RESOLVED (2026-07-12**,
+    `collision-magnitude.md`, signed off): read L23 Eqs. 4.1.4–4.1.6 (p. 87–88)
+    first-hand and derived the momentum-restoring average
+    `⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2−ln(1+√2))` from L23's reduced integrand +
+    three standard integrals (`∫u e^{−u²}erf=1/2√2`, `∫e^{−2u²}=½√(π/2)`,
+    `∫u⁻¹e^{−u²}erf=ln(1+√2)`), reproducing L23's unit-test `1.267537×10⁻⁴` to 7
+    digits — cleared as `Coefficients.momentum_restoring_average`. The collision
+    **magnitude** `nu_tilde = ε^{3/2}ν_★` is wired from a new `Level0Physics.nu_star`
+    scenario field (§4 normalization, already signed off); `:nu_tilde` moved
+    gated→cleared, un-gating the collision operator's magnitude. The
+    momentum-restoring *operator term* is a separate future addition.
   - **Passing fraction** `f_p ≃ 1 − 1.46√ε` (electron closure, Q3): **RESOLVED
     (2026-07-11)** — `derivations/passing-fraction.md` signed off; cleared as
     `Coefficients.passing_fraction(ε) = 1 − 1.4624√ε` (the effective

@@ -85,7 +85,7 @@ its physics value gated):
 | `ParallelStreaming` | ``a_\xi\, \partial_\xi g + a_x\, \partial_x g`` | **cleared** — ``(\hat L_q^{-1}\hat w^2/4\hat\rho_{\theta i})\Theta\,\{\Omega,\cdot\}`` advection along island surfaces (§8) |
 | `MagneticDrift` | ``c_D\, \partial_\xi g`` (with the `:original`/`:improved` ``\hat L_B^{-1}`` toggle) | the precession frequency ``\hat\omega_D(y, E; \sigma)`` |
 | `ExBDrift` | ``c_E \left( \partial_\xi\tilde\Phi\, \partial_x g - \partial_x\tilde\Phi\, \partial_\xi g \right)`` — the ``(x,\xi)`` Poisson bracket, the one state-nonlinear Level-0 term | **cleared** — ``c_E=\tfrac12\langle 1/\hat v_\parallel\rangle_\theta`` (passing σ-odd ``(\sigma/2\sqrt E)B_1(y)``, trapped ≡ 0; §8) |
-| `PitchAngleDiffusion` | ``c\,(K g)`` along ``y`` (mimetic form, §3) | ``\hat\nu(E)`` and the pitch diffusivity profile |
+| `PitchAngleDiffusion` | ``c\,(K g)`` along ``y`` (mimetic form, §3) | **shape + magnitude cleared** — ``c=\varepsilon^{3/2}\nu_\star\,\tilde\nu(E)`` (§8); only the orbit-averaged pitch measure ``B(y)`` gated |
 | `GradientDrive` | additive source | the ``(\mathbf v_E + \mathbf v_D + \mathbf v_{\tilde\psi})\cdot\nabla F_0`` drive |
 | `Quasineutrality` | ``M[g] - \alpha\tilde\Phi + S_\Phi`` | **cleared** — ``\alpha=(\tau+1)/\tau`` and the drive ``S_\Phi=\hat L_{n0}^{-1}(x-\hat h)`` (§8) |
 
@@ -298,7 +298,11 @@ builders (§7, the M2b derivation lane) onto the operator stack:
   cancels, so no new physics parameter);
 - the pitch-collision diffusivity ``P`` and the energy-dependent deflection
   coefficient from `pitch_diffusivity` / `deflection_frequency`, fed to the
-  mimetic `conservative_pitch_operator` (§3);
+  mimetic `conservative_pitch_operator` (§3), scaled by the **cleared magnitude**
+  ``\texttt{nu\_tilde}=\varepsilon^{3/2}\nu_\star`` (from the `Level0Physics.nu_star`
+  scenario field; `collision-magnitude.md`, with the momentum-restoring average
+  ``\langle\hat\nu_{ii}\rangle_u=\tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}(\sqrt2-\ln(1+\sqrt2))``
+  cleared as `Coefficients.momentum_restoring_average`);
 - the ``\Delta_{\cos}`` / ``\Delta_{\sin}`` prefactors from
   `delta_moment_prefactors` (§7);
 - the **quasineutrality field term** — ``\alpha=(\tau+1)/\tau`` from
@@ -311,11 +315,11 @@ builders (§7, the M2b derivation lane) onto the operator stack:
 The gradient drive is cleared as I19 Formulation A — a **zero** interior
 `GradientDrive` source plus the neoclassical far field
 ``g_{\rm far} = x\hat L_{n0}^{-1}[1+(E-\tfrac32)\eta_i]`` (`gradient_far_field`;
-`Φ̂_far = 0` at `ω_E = 0`). The families that remain **not yet cleared** — the
-collision magnitude ``\langle\hat\nu_{ii}\rangle_u`` and the orbit-averaged pitch
-measure — are **supplied** through `GatedLevel0Inputs`, never assigned a physics
-value here (QUESTIONS Q5). So the assembly is still a **scaffold** for those two
-*kinetic* pieces, even though the streaming, drift, E×B coupling, gradient drive,
+`Φ̂_far = 0` at `ω_E = 0`). The one family that remains **not yet cleared** — the
+orbit-averaged pitch measure ``B(y)`` — is **supplied** through
+`GatedLevel0Inputs`, never assigned a physics value here (QUESTIONS Q5). So the
+assembly is still a **scaffold** for that single *kinetic* piece, even though the
+streaming, drift, E×B coupling, collision (shape + magnitude), gradient drive,
 far field, and field equation are now cleared: with `level0_placeholders`
 (documented non-physics values for the gated kinetic inputs) the assembled
 residual is well-formed, ``\Phi`` is genuinely driven, and Newton–Krylov

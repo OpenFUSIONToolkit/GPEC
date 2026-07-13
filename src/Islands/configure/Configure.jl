@@ -17,10 +17,11 @@ onto operator-stack coefficients *cleanly*; the assembly wires exactly those and
     coefficients `a_xi`/`a_x` ([`streaming_coefficients`], the `{Ω, ·}`
     flux-surface advection, `01 §2`); the **`E×B` coupling** `c_E`
     ([`exb_coupling_table`], `½⟨1/v̂_∥⟩_θ`, passing-only, `01 §2`); the
-    pitch-collision *shapes* (`Coefficients.pitch_diffusivity` →
+    pitch-collision *shape* (`Coefficients.pitch_diffusivity` →
     `Operators.conservative_pitch_operator`, and
     `Coefficients.deflection_frequency` → the energy-dependent collision
-    coefficient); the **quasineutrality field term** — `α = (τ+1)/τ` from
+    coefficient) scaled by the **cleared magnitude** `ε^{3/2}ν_★` (from
+    `phys.nu_star`, `collision-magnitude.md`); the **quasineutrality field term** — `α = (τ+1)/τ` from
     `Coefficients.quasineutrality_coefficient` and the `L̂_{n0}⁻¹(x − ĥ)` drive
     ([`quasineutrality_source`], from the cleared `ĥ` profile), closing the
     Level-0 potential (`01 §3`); the **gradient drive** — zero interior source
@@ -28,9 +29,8 @@ onto operator-stack coefficients *cleanly*; the assembly wires exactly those and
     ([`gradient_far_field`], I19 Formulation A, `01 §2`); and the `Δ`-moment
     prefactors (`Coefficients.delta_moment_prefactors`).
   - **Not yet a cleared coefficient family → supplied, gated** (QUESTIONS Q5):
-    the orbit-averaged pitch measure/field `B_profile` and the collision
-    magnitude `nu_tilde` (carries the deferred `⟨ν̂_ii⟩_u`). These enter through
-    [`GatedLevel0Inputs`]; nothing here assigns a physics value to them.
+    the orbit-averaged pitch measure/field `B_profile`. This enters through
+    [`GatedLevel0Inputs`]; nothing here assigns a physics value to it.
 
 The gated pieces are the subject of a future derivation lane (QUESTIONS Q5): the
 assembly *surfaces* exactly what Level-0 physics is still uncleared rather than
@@ -88,6 +88,9 @@ gated (uncleared) pieces live in [`GatedLevel0Inputs`].
   - `eta_i`           — `η_i = L_n/L_{T_i} = (T_i'/T_i)/(n'/n)`, the
     temperature-gradient ratio in the gradient-drive far field (`01 §2`,
     `gradient-drive.md`); `0` = flat temperature.
+  - `nu_star`         — banana-regime collisionality `ν_★ = ν_{jj}Rq/(ε^{3/2}v_th)`
+    (`01 §2.3`, `collision-magnitude.md`); a **scenario scan input** (`ν_★ ≪ 1`,
+    Decision D7). Sets the collision magnitude `ν̂_jj = ε^{3/2}ν_★ ν̃_jj(v̂)`.
   - `tau`             — `T_e/T_i` (quasineutrality closure, `01 §3`).
   - `variant`         — `:original`/`:improved` drift-model toggle (`01 §2.1`).
   - `collision_model` — `:chandrasekhar`/`:vcubed` deflection-frequency energy
@@ -104,6 +107,7 @@ Base.@kwdef struct Level0Physics
     inv_Ln0::Float64
     rho_hat_theta_i::Float64
     eta_i::Float64 = 0.0
+    nu_star::Float64 = 0.01
     tau::Float64 = 1.0
     variant::Symbol = :original
     collision_model::Symbol = :chandrasekhar
@@ -113,7 +117,7 @@ end
 # Gated inputs carrier (the uncleared pieces — supplied, never guessed here)
 # ---------------------------------------------------------------------------
 """
-    GatedLevel0Inputs(; nu_tilde, B_profile)
+    GatedLevel0Inputs(; B_profile)
 
 The Level-0 operator coefficients that are **not yet a cleared coefficient
 family** and are therefore *supplied* to [`configure_level0`], not derived from
@@ -123,14 +127,11 @@ documented non-physics placeholders of [`level0_placeholders`](@ref).
 
 ## Fields
 
-  - `nu_tilde`     — collision magnitude scaling the cleared `ν_{jj}(v̂)` shape;
-    carries the deferred `⟨ν̂_ii⟩_u`/`ν_★` normalization (QUESTIONS Q3).
   - `B_profile`    — orbit-averaged `|B|/B_max` on the `y`-grid, feeding the
     cleared `pitch_diffusivity` shape and the collision measure (the orbit
     average is gated, QUESTIONS Q5).
 """
-Base.@kwdef struct GatedLevel0Inputs{S,V}
-    nu_tilde::S
+Base.@kwdef struct GatedLevel0Inputs{V}
     B_profile::V
 end
 
@@ -239,7 +240,8 @@ end
 Build the energy-dependent collision coefficient `c[ix, iξ, iE, iσ]` for
 `Operators.PitchAngleDiffusion` from the **cleared**
 `Coefficients.deflection_frequency` `ν_{jj}(v̂)` (`01 §2.3`), scaled by the
-gated magnitude `nu_tilde` (QUESTIONS Q3, carries `⟨ν̂_ii⟩_u`/`ν_★`). It is
+**cleared** magnitude `nu_tilde = ε^{3/2}ν_★` (`collision-magnitude.md`, built by
+`configure_level0` from `phys.nu_star`). It is
 **`y`-independent by construction** (dimensions `(x, ξ, E, σ)`), as
 `PitchAngleDiffusion` requires so the mimetic `K`'s exact conservation is
 preserved; the physical velocity dependence lives entirely in the `E`-axis via
@@ -442,12 +444,13 @@ Assemble the Level-0 named configuration (`03 §2`): returns a NamedTuple
     from cleared `Coefficients.*` builders vs. supplied gated inputs.
 
 The magnetic drift `c_D`, the island streaming `a_xi`/`a_x`, the `E×B` coupling
-`c_E`, the pitch-collision `P`/`K` and `c`, the quasineutrality field term (`α` +
-the `L̂_{n0}⁻¹(x − ĥ)` drive), the gradient drive (zero source + the far field
-`bc`), and the `Δ` prefactors are populated from the **cleared** coefficient
-builders. The collision magnitude and pitch measure are **supplied** through
+`c_E`, the pitch-collision `P`/`K` and `c` (magnitude `ε^{3/2}ν_★` from
+`phys.nu_star`), the quasineutrality field term (`α` + the `L̂_{n0}⁻¹(x − ĥ)`
+drive), the gradient drive (zero source + the far field `bc`), and the `Δ`
+prefactors are populated from the **cleared** coefficient builders. Only the
+orbit-averaged pitch measure `B_profile` is **supplied** through
 `gated::GatedLevel0Inputs` (QUESTIONS Q5) — this function assigns no physics
-value to them.
+value to it.
 
 `species` is validated (a Level-0 config must have a bulk ion); its
 per-species roles/backgrounds drive the gated builders that are not yet cleared.
@@ -460,7 +463,8 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
     c_D = drift_coefficient_table(grid, phys)
     P, wmeas = pitch_diffusivity_profile(grid, gated.B_profile)
     K, _ = conservative_pitch_operator(grid.y, P, wmeas)
-    c_coll = collision_coefficient(grid, phys, gated.nu_tilde)
+    nu_tilde = phys.epsilon^1.5 * phys.nu_star            # cleared magnitude ε^{3/2}ν_★ (collision-magnitude.md)
+    c_coll = collision_coefficient(grid, phys, nu_tilde)
     Δpref = delta_moment_prefactors(; mu0_R=phys.mu0_R, w_psi=phys.w_psi, dq_dpsi=phys.dq_dpsi, q_s=phys.q_s)
 
     # cleared island streaming (advection along Ω; parallel-streaming.md)
@@ -481,40 +485,41 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
         ParallelStreaming(a_xi, a_x),                      # cleared (01 §2)
         MagneticDrift(c_D; variant=phys.variant),          # cleared
         ExBDrift(c_E),                                      # cleared (01 §2, exb-coupling.md)
-        PitchAngleDiffusion(K, c_coll),                    # cleared shape (magnitude gated)
+        PitchAngleDiffusion(K, c_coll),                    # cleared shape + magnitude ε^{3/2}ν_★
         GradientDrive(drive0)                              # cleared: zero source (drive is the far field)
     )
     stack = IslandStack(kinetic, Quasineutrality(α, S_Φ))  # cleared closure (01 §3)
 
     return (stack=stack, bc=bc, delta_prefactors=Δpref,
-        cleared=(:magnetic_drift, :streaming, :exb, :pitch_diffusivity, :deflection_frequency, :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
-        gated=(:nu_tilde, :pitch_measure))
+        cleared=(:magnetic_drift, :streaming, :exb, :pitch_diffusivity, :deflection_frequency, :nu_tilde, :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
+        gated=(:pitch_measure,))
 end
 
 # ---------------------------------------------------------------------------
 # Documented non-physics placeholders (structural runs only)
 # ---------------------------------------------------------------------------
 """
-    level0_placeholders(grid; nu_tilde=1.0, B_edge=0.999)
+    level0_placeholders(grid; B_edge=0.999)
 
 Build a [`GatedLevel0Inputs`] of **documented non-physics placeholder** values so
 the assembled stack can be exercised *structurally* — that `configure_level0`
 produces a well-formed, solvable `IslandStack` — **never for a physics result**
-(the remaining gated coefficients are uncleared, QUESTIONS Q5). Choices:
+(the remaining gated coefficient, the orbit-averaged pitch measure, is uncleared,
+QUESTIONS Q5). Choice:
 
-  - `nu_tilde = 1` (order-unity);
   - a `B_profile` that keeps `y·B ≤ 1` on the grid (`B = min(1, B_edge/y)`), so
     the cleared `pitch_diffusivity` stays in-domain.
 
-Every value is a structural stand-in; a physics run supplies cleared inputs. The
-`E×B` coupling, gradient drive, and far field are now *cleared* (built by
+The `B_profile` is a structural stand-in; a physics run supplies the cleared
+orbit-averaged measure. The `E×B` coupling, collision magnitude (`ε^{3/2}ν_★`
+from `phys.nu_star`), gradient drive, and far field are now *cleared* (built by
 `configure_level0` from `phys`), so they are no longer placeholders here.
 """
-function level0_placeholders(grid::IslandGrid; nu_tilde::Real=1.0, B_edge::Real=0.999)
+function level0_placeholders(grid::IslandGrid; B_edge::Real=0.999)
     ny = grid.y.n
     # B_profile ≤ 1/y keeps the cleared pitch_diffusivity in [0,1]; B ≤ 1 (B_max norm)
     B_profile = [min(1.0, B_edge / max(grid.y.nodes[iy], eps())) for iy in 1:ny]
-    return GatedLevel0Inputs(; nu_tilde=Float64(nu_tilde), B_profile=B_profile)
+    return GatedLevel0Inputs(; B_profile=B_profile)
 end
 
 end # module Configure

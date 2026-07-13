@@ -221,14 +221,23 @@ G; needed for neoclassical fidelity), while Diss19/D21 use the simpler
 ν(V) ∝ V⁻³. Both diverge as v̂ → 0 (φ − G → (4/3√π)v̂ linear ⟹ ν̃ ~ v̂⁻² for the
 Chandrasekhar form, v̂⁻³ for the reduced), motivating the analytic velocity
 average L23 additionally derives:
-⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2 − ln(1+√2)). **[This ⟨ν̂_ii⟩_u constant remains
-[CHECKED]-uncleared — its own short derivation is a deferred M2b sub-item;
-L23 Eq. 4.1.6, p. 88.]**
+⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2 − ln(1+√2)) **[CLEARED: human sign-off 2026-07-12
+— derivation docs/src/islands/derivations/collision-magnitude.md; first-hand from
+L23 Eqs. 4.1.4–4.1.6, p. 87–88, reproducing L23's unit-test 1.267537×10⁻⁴ to 7
+digits]**. It is the normalized Maxwellian speed average ⟨·⟩_u = (8/3√π)∫₀^∞
+u⁴e^{−u²}(·)du of ν̂_ii = ε^{3/2}ν_★[φ−G]/u³; the `√2` from the ion self-collision
+integral, `ln(1+√2) = arcsinh(1)` from ∫u⁻¹e^{−u²}erf du. It carries the
+momentum-restoring flow's magnitude (I19 Eq. 12); implemented as
+`Coefficients.momentum_restoring_average` (the restoring *operator term* is a
+separate future addition — this clears its constant).
 
 Collisionality normalization [CLEARED 2026-07-11, same derivation]:
 ν_★ = ν_jj Rq/(ε^{3/2} v_th) (banana regime
 ν_★ ≪ 1); ν̂_jj = ε^{3/2}ν_★ ν̃_jj(u). [CHECKED: L23 Eq. (2.3.40); Diss19
-footnote 26]
+footnote 26]. The collision **magnitude** `nu_tilde = ε^{3/2}ν_★` is thus cleared
+(`collision-magnitude.md`): `Configure.Level0Physics` carries `ν_★` as a scenario
+scan input (Decision D7) and `configure_level0` builds `nu_tilde = ε^{3/2}ν_★`,
+un-gating the collision operator's magnitude.
 
 Replaced wholesale at Level 1 by the multi-species Fokker–Planck operator.
 
