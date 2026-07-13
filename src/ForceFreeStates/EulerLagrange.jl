@@ -785,7 +785,17 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    # TODO: REMOVE BEFORE COMMIT/MERGE
+    # Optional dense edge sampling: force ODE stops across [psiedge, psilim] ∩ this chunk so the
+    # dW(ψ) diagnostic scan is smoothly resolved (Vern9 otherwise strides through smooth regions).
+    edge_tstops = Float64[]
+    if ctrl.edge_scan_npts > 0 && ctrl.psiedge < intr.psilim
+        lo = max(ctrl.psiedge, chunk.psi_start)
+        hi = min(intr.psilim, chunk.psi_end)
+        lo < hi && (edge_tstops = collect(range(lo, hi; length=ctrl.edge_scan_npts)))
+    end
+    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb,
+        tstops=edge_tstops, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,

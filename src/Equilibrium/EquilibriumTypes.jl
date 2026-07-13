@@ -805,6 +805,58 @@ function KineticProfileSplines(xs::Vector{Float64},
 end
 
 """
+    TokamakerExterior
+
+Optional exterior (vacuum-region) representation attached to a `PlasmaEquilibrium`
+built from a TokaMaker free-boundary solution. Populated only by the trace_surf reader
+(`eq_type = "tokamaker"`); `nothing` for every other equilibrium kind, whose source data
+does not describe the region outside the LCFS. The interior `rzphi_*` grid remains
+ψ ∈ [psilow, psihigh ≤ 1] so `ForceFreeStates` stability is unaffected; this exterior grid
+is consumed only by perturbed-equilibrium reconstruction and plotting in the vacuum region.
+
+Two complementary representations, matching the two vacuum topologies:
+
+  - **Traced flux-coordinate grid** (populated): closed vacuum flux surfaces traced at
+    normalized flux ψ̂ > 1, marched outward until surfaces stop closing (the X-point for a
+    diverted plasma, the limiter/wall for a limited one). Provides R(ψ̂,θ), Z(ψ̂,θ) on the
+    same θ grid as the interior.
+  - **Real-space field map** (STUB — fields reserved, currently `nothing`): raw ψ(R,Z) / B(R,Z)
+    over the plasma→wall region, needed to represent the open-field SOL of a diverted case
+    where no closed exterior surfaces exist. Plumbed here but not yet populated; see the
+    diverted-SOL TODO in `TokamakerEquilibrium.jl`.
+
+## Fields
+
+  - `psi_ext::Vector{Float64}` — normalized flux ψ̂ (> 1) of each traced exterior surface
+  - `theta::Vector{Float64}` — shared poloidal-angle grid (matches interior `rzphi_ys`)
+  - `R_ext::Matrix{Float64}` — R(ψ̂,θ) of the traced exterior surfaces [m], size (n_ext, mtheta+1)
+  - `Z_ext::Matrix{Float64}` — Z(ψ̂,θ) of the traced exterior surfaces [m]
+  - `diverted::Bool` — whether the source equilibrium is diverted (TokaMaker `get_refs`)
+  - `psi_bounds::Vector{Float64}` — (ψ_axis, ψ_boundary) absolute flux bounds [Wb/rad]
+  - `field_R::Union{Nothing,Vector{Float64}}` — STUB: R grid of the real-space field map [m]
+  - `field_Z::Union{Nothing,Vector{Float64}}` — STUB: Z grid of the real-space field map [m]
+  - `psi_field::Union{Nothing,Matrix{Float64}}` — STUB: ψ(R,Z) over plasma→wall [Wb/rad]
+  - `B_field::Union{Nothing,Array{Float64,3}}` — STUB: B(R,Z) = (B_R, B_Z, B_φ) over plasma→wall [T]
+"""
+struct TokamakerExterior
+    psi_ext::Vector{Float64}
+    theta::Vector{Float64}
+    R_ext::Matrix{Float64}
+    Z_ext::Matrix{Float64}
+    diverted::Bool
+    psi_bounds::Vector{Float64}
+    field_R::Union{Nothing,Vector{Float64}}
+    field_Z::Union{Nothing,Vector{Float64}}
+    psi_field::Union{Nothing,Matrix{Float64}}
+    B_field::Union{Nothing,Array{Float64,3}}
+end
+
+# Traced surfaces populated; the real-space field map is left as a stub (diverted-SOL TODO).
+TokamakerExterior(psi_ext, theta, R_ext, Z_ext, diverted, psi_bounds) =
+    TokamakerExterior(psi_ext, theta, R_ext, Z_ext, diverted, psi_bounds,
+        nothing, nothing, nothing, nothing)
+
+"""
     PlasmaEquilibrium(...)
 
 The final, self-contained result of the equilibrium reconstruction.
@@ -851,6 +903,8 @@ This object provides a complete representation of the processed plasma equilibri
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
+  - `exterior::Union{Nothing,TokamakerExterior}`: optional vacuum-region flux grid, populated
+    only by the TokaMaker trace_surf reader and `nothing` otherwise (see [`TokamakerExterior`](@ref))
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -878,13 +932,14 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     psio::Float64
 
     ingest::EquilibriumIngest
+    exterior::Union{Nothing,TokamakerExterior}
 end
 
 # Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest, so allow
-# construction without it; ingest defaults to nothing and is assigned post-construction.
+# construction without it; ingest and exterior default to nothing and are assigned post-construction.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
     eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
     PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing)
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing, nothing)

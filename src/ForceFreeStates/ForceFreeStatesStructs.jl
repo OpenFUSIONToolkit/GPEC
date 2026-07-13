@@ -239,6 +239,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
+  - `edge_scan_npts::Int` - Diagnostic only. Remove before commit/merge. If `>0` and `psiedge < psilim`, forces this many uniformly-spaced ODE stops (via `tstops`) across the `[psiedge, psilim]` portion of each chunk, so the edge dW(ψ) scan is densely and smoothly sampled where Vern9 would otherwise take large adaptive steps between rationals. Default `0` disables it and leaves the integration untouched.
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
@@ -284,6 +285,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     HDF5_filename::String = "gpec.h5"
     force_wv_symmetry::Bool = true
     save_interval::Int = 3
+    edge_scan_npts::Int = 0   # If >0 and psiedge<psilim, force this many uniform ODE stops per edge chunk so the dW(ψ) diagnostic scan is densely/smoothly sampled (Vern9 otherwise takes large steps between rationals). Diagnostic only; 0 = off, no effect on the integration result.
     force_termination::Bool = false
     use_riccati::Bool = false
     use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.

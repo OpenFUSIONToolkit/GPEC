@@ -19,6 +19,7 @@ include("DirectEquilibrium.jl")
 include("DirectEquilibriumArcLength.jl")
 include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
+include("TokamakerEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 include("GeometryProfiles.jl")
 include("KineticProfiles.jl")
@@ -126,6 +127,16 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
             error("setup_equilibrium: eq_type=\"imas\" requires an IMASdd.dd passed as additional_input")
         end
         eq_input = read_imas(eq_config, additional_input)
+    elseif eq_type == "tokamaker"
+        additional_input === nothing &&
+            error("setup_equilibrium: eq_type=\"tokamaker\" requires a TokaMakerEquilibrium passed as additional_input")
+        eq_input = read_tokamaker(eq_config, additional_input)
+    elseif eq_type == "tokamaker_direct"
+        additional_input === nothing &&
+            error("setup_equilibrium: eq_type=\"tokamaker_direct\" requires a TokaMakerEquilibrium passed as additional_input")
+        eq_input = read_tokamaker_direct(eq_config, additional_input)
+    elseif eq_type == "tokamaker_refine"
+        eq_input = read_tokamaker_refine(eq_config, additional_input)
     else
         error("Equilibrium type $(eq_type) is not implemented")
     end
@@ -140,6 +151,13 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 
     # Forward the captured ingest so the gpec.h5 writer can snapshot it (nothing for analytic).
     plasma_equilibrium.ingest = eq_input.ingest
+
+    # Trace route only: build the vacuum-region exterior flux grid from the live TokaMaker eq.
+    # Skipped on the rerun path (additional_input is a replayed RunInput, not a TokaMaker eq);
+    # the exterior grid is not yet serialized to gpec.h5.
+    if eq_type == "tokamaker" && !(additional_input isa InverseRunInput || additional_input isa DirectRunInput)
+        plasma_equilibrium.exterior = build_tokamaker_exterior(eq_config, additional_input, plasma_equilibrium.rzphi_ys)
+    end
 
     equilibrium_global_parameters!(plasma_equilibrium)
     equilibrium_qfind!(plasma_equilibrium)
