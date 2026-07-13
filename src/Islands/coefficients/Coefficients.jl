@@ -26,6 +26,7 @@ module Coefficients
 import QuadGK
 
 export magnetic_drift_frequency, orbit_average_drift_brackets
+export orbit_average_exb_bracket
 export pitch_diffusivity, deflection_frequency
 export h_amplitude, passing_fraction
 export quasineutrality_coefficient
@@ -80,6 +81,34 @@ function orbit_average_drift_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
         G, _ = QuadGK.quadgk(fG, -θb, 0.0, θb; rtol=rtol)
         return (A / π, G / π)
     end
+end
+
+"""
+    orbit_average_exb_bracket(; y, epsilon, rtol=1e-8)
+
+The passing-orbit poloidal integral ``B_1(y)`` of the ``E×B`` coupling
+``c_E = \\tfrac12\\langle 1/\\hat v_\\parallel\\rangle_\\theta`` (docs/01 §2;
+derivation `exb-coupling.md` §5):
+
+```math
+B_1(y) = \\Big\\langle \\frac1{\\sqrt{1-yb}} \\Big\\rangle_\\theta
+       = \\frac1{2\\pi}\\int_0^{2\\pi}\\frac{d\\theta}{\\sqrt{1-yb(\\theta)}},
+```
+
+with `b(θ) = (1−ε cos θ)/(1+ε)`, on the **passing** interval `0 ≤ y < y_c = 1`.
+Trapped particles are excluded by construction: there the σ-odd `1/v̂_∥` cancels
+between the two banana legs, so `c_E ≡ 0` (derivation §4) and this bracket is not
+evaluated (`y ≥ 1` throws). `B₁` shares the drift ``G``-bracket's integrable
+`1/√(1−yb)` turning-point structure and diverges **logarithmically** as `y → 1⁻`
+(the near-separatrix `y_c` layer), where the caller supplies the gated placeholder.
+"""
+function orbit_average_exb_bracket(; y::Real, epsilon::Real, rtol::Real=1e-8)
+    ε = float(epsilon)
+    0 < ε < 1 || throw(ArgumentError("epsilon must be in (0, 1) (got $epsilon)"))
+    0 <= y < 1 || throw(ArgumentError("orbit_average_exb_bracket is passing-only (0 ≤ y < 1); got y = $y (trapped c_E ≡ 0)"))
+    fB(θ) = 1 / sqrt(max(1 - y * _b(θ, ε), 0.0))
+    B1, _ = QuadGK.quadgk(fB, 0.0, 2π; rtol=rtol)
+    return B1 / (2π)
 end
 
 """

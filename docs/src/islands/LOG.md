@@ -8,6 +8,38 @@ relevant.
 
 ---
 
+## 2026-07-12 — Q5: clear the E×B coupling c_E (passing σ-odd, trapped ≡ 0)
+
+- **Moved**: derived and cleared the `E×B` coupling `c_E` (`exb-coupling.md`,
+  **human sign-off**). Matching the two master-eq E×B braces to the
+  `Operators.ExBDrift` Poisson bracket in the `c_D=ω̂_D` normalization (÷ −m ρ̂_θi,
+  `ρ̂_θi` cancels — **no new physics parameter**) gives `c_E = ½⟨1/v̂_∥⟩_θ`,
+  `1/v̂_∥ = σ/(v̂√(1−yb))`. **σ-parity nailed (the crux)**: passing (`y<y_c`) is
+  **σ-odd** `c_E = (σ/2√E)B₁(y)` with a new orbit bracket
+  `B₁(y)=⟨1/√(1−yb)⟩_θ`; trapped (`y>y_c`) is **identically 0** — the σ-odd
+  `1/v̂_∥` cancels between the two banana legs under `Σ_σ`. The decisive check: the
+  published drift-island label requires trapped `S ∝ p̂` (docs/01 §2.2), which the
+  E×B piece would break unless it vanishes — so trapped=0 is *required*, not
+  chosen. E×B is thus a **passing-particle** effect, like island-streaming.
+  Implemented: `Coefficients.orbit_average_exb_bracket` (B₁, passing-only, same
+  y_c-layer handling as the drift `G`), `Configure.exb_coupling_table`, and
+  `Operators.ExBDrift` generalized to a **velocity-dependent array** coefficient
+  (scalar path kept for tests). `:exb` moved gated→cleared; `c_E` dropped from
+  `GatedLevel0Inputs`. **physics-verifier PASS**; 1566 islands assertions green
+  (incl. passing σ-odd node-for-node, trapped≡0, σ-flip); `build_docs_local.jl`
+  green. The M2c structural-solve assertion switched to the grid-independent
+  **max-norm** (04 §5 criterion) since the now-active E×B spreads a ~1e-8 residual
+  across ~N unknowns, inflating the √N L2 norm past 1e-7 (per-equation residual
+  4.5e-8; not a physics change). Doc-first: docs/01 §2 (+ fixed the §2 line-107
+  orbit-average convention to match both cleared code paths), QUESTIONS Q5,
+  numerics.md §2/§8, derivations index/nav.
+- **Blocked**: only **two** kinetic families remain gated (Q5): the collision
+  magnitude `⟨ν̂_ii⟩_u` (needs L23 Eq. 4.1.6 integrand) and the orbit-averaged
+  pitch measure `B_profile`. Plus the deferred `k ≃ −1.173`.
+- **Next**: the collision magnitude `⟨ν̂_ii⟩_u` or the orbit-averaged pitch
+  measure — the last two kinetic clearances for a fully physical L0 solve. Same
+  rhythm: derive → present → sign off → clear.
+
 ## 2026-07-12 — Q5: clear the gradient drive (far-field BC, no frame convention)
 
 - **Moved**: completed the gradient drive by re-reading I19 Eq. 29 first-hand.

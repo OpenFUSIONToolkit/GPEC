@@ -166,18 +166,20 @@ bare pass/fail. The derivation lane inherits this framing.
     advection (a coefficient-free structural check). Implemented as
     `Configure.streaming_coefficients` with a new `Level0Physics.rho_hat_theta_i`;
     normalization chosen to keep the cleared `c_D = ω̂_D` unchanged.
-  - **`E×B` coupling** `c_E` (`Operators.ExBDrift`) — **core derived, clearance
-    pending (2026-07-12)**. Matching the master-eq E×B terms
-    (`−(ρ̂_θi/2)⟨(1/v̂_∥)∂Φ̂/∂x⟩ ∂_ξ`, `−(ρ̂_θi/2)⟨(1/v̂_∥)∂Φ̂/∂ξ⟩ ∂_p̂`) to the
-    operator `−c_E{Φ̂,g}`, in the `c_D=ω̂_D` normalization (÷ −m ρ̂_θi), gives
-    **`c_E = ½⟨1/v̂_∥⟩_θ`** (NOT frame-entangled — the `⟨1/v̂_∥⟩` is the orbit
-    transit-time weight, `v̂_∥ = σv̂√(1−yb)`). Three wrinkles to finish carefully:
-    (i) `c_E` is **velocity-dependent** `(y,E,σ)` → `Operators.ExBDrift` must take
-    an array coefficient (currently scalar); (ii) needs a new orbit bracket
-    `⟨1/√(1−yb)⟩_θ` (same machinery as `orbit_average_drift_brackets`, same y_c
-    singularity); (iii) the **passing-vs-trapped σ-parity** of `⟨1/v̂_∥⟩` needs
-    care (passing: σ-odd `∝σ`; trapped: the bounce sum — verify). Next session:
-    nail (iii), then implement.
+  - **`E×B` coupling** `c_E` (`Operators.ExBDrift`) — **RESOLVED (2026-07-12**,
+    `exb-coupling.md`, signed off): matching the master-eq E×B terms to the
+    `ExBDrift` Poisson bracket in the `c_D=ω̂_D` normalization (÷ −m ρ̂_θi, `ρ̂_θi`
+    cancels) gives **`c_E = ½⟨1/v̂_∥⟩_θ`**, `1/v̂_∥ = σ/(v̂√(1−yb))`. The three
+    wrinkles resolved: (i) `c_E` is velocity-dependent `(y,E,σ)` → `Operators.ExBDrift`
+    generalized to accept an **array** coefficient (backward-compatible with the
+    scalar test path); (ii) a new orbit bracket `B₁(y) = ⟨1/√(1−yb)⟩_θ`
+    (`Coefficients.orbit_average_exb_bracket`, same machinery + y_c singularity as
+    the drift `G`); (iii) the **σ-parity nailed** — passing (`y<y_c`) is **σ-odd**
+    `c_E = (σ/2√E)B₁(y)`; trapped (`y>y_c`) is **identically zero** (the σ-odd
+    `1/v̂_∥` cancels between the two banana legs under `Σ_σ`), which the
+    drift-island label *requires* (trapped `S ∝ p̂`, docs/01 §2.2). So E×B is a
+    **passing-particle** effect, like island-streaming. Implemented as
+    `Configure.exb_coupling_table`; introduces no new physics parameter (only `ε`).
   - **Gradient drive** `drive` + **far field** `bc` — **RESOLVED (2026-07-11**,
     `gradient-drive.md`, signed off): reading I19 first-hand (Eqs. 28–32), the
     master equation is **homogeneous** (no interior source); the drive is the

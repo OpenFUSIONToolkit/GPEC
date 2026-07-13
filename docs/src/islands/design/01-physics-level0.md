@@ -104,7 +104,9 @@ The radial coordinate is traded for the canonical momentum
     p_φ = (ψ − ψ_s) − I v_∥/ω_cj        [CHECKED: I19 Eq. (2)]
 
 and θ is annihilated by orbit averaging at fixed p_φ (passing: (1/2π)∮dθ;
-trapped: (1/2π)Σ_σ σ∫_{−θ_b}^{θ_b}dθ) [CHECKED: I19 Eq. (31); Diss19 Eq. 2.24].
+trapped: (1/2π)Σ_σ∫_{−θ_b}^{θ_b}dθ, a signed sum over the two banana legs — so a
+σ-even integrand gives ×2 while a σ-odd one like 1/v̂_∥ cancels to 0, §2.1/§2)
+[CHECKED: I19 Eq. (31); Diss19 Eq. 2.24].
 The master 4D equation for the orbit-averaged distribution Ḡ₀(p̂, ξ, y; v̂, σ)
 is **I19 Eq. (32)** (structure confirmed; coefficients subject to the L23 §2.6
 amendments — implement from re-derivation):
@@ -126,6 +128,20 @@ docs/src/islands/derivations/parallel-streaming.md]:** the streaming braces
 coefficient-free structural check). Implemented as
 `Configure.streaming_coefficients` → `Operators.ParallelStreaming`, passing-only
 (`Θ`), leaving the cleared `c_D` unchanged.
+
+**E×B coupling [CLEARED: human sign-off 2026-07-12 — derivation
+docs/src/islands/derivations/exb-coupling.md]:** the two E×B braces
+`−(ρ̂_θi/2)⟨(1/v̂_∥)∂_xΦ̂⟩_θ ∂_ξ` and `−(ρ̂_θi/2)⟨(1/v̂_∥)∂_ξΦ̂⟩_θ ∂_p̂` give, in the
+`c_D = ω̂_D` normalization (÷ −m ρ̂_θi, `ρ̂_θi` cancels), the coefficient of the
+`Operators.ExBDrift` Poisson bracket `c_E[(∂_ξΦ̂)(∂_x g)−(∂_xΦ̂)(∂_ξ g)]`:
+`c_E = ½⟨1/v̂_∥⟩_θ` with `1/v̂_∥ = σ/(v̂√(1−yb))`. **σ-parity:** passing
+(`y < y_c`) is σ-odd, `c_E = (σ/2√E)·B₁(y)` with the new orbit bracket
+`B₁(y) = ⟨1/√(1−yb)⟩_θ`; trapped (`y > y_c`) is **identically zero** — the σ-odd
+`1/v̂_∥` cancels between the two banana legs under `Σ_σ`, which the drift-island
+label requires (trapped `S ∝ p̂`, §2.2). So E×B is a **passing-particle** effect,
+like island-streaming. Implemented as `Configure.exb_coupling_table` (from
+`Coefficients.orbit_average_exb_bracket`) → `Operators.ExBDrift` (now a
+velocity-dependent array coefficient). No new physics parameter (only `ε`).
 
 **Gradient drive [CLEARED: human sign-off 2026-07-11 — derivation
 gradient-drive.md]:** the master equation (Eq. 32) is **homogeneous** — I19's

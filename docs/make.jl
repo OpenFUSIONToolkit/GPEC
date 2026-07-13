@@ -54,6 +54,7 @@ makedocs(;
                 "Quasineutrality closure" => "islands/derivations/quasineutrality-closure.md",
                 "Δ-moment prefactors" => "islands/derivations/delta-moment-prefactors.md",
                 "Parallel streaming" => "islands/derivations/parallel-streaming.md",
+                "E×B coupling" => "islands/derivations/exb-coupling.md",
                 "Gradient drive" => "islands/derivations/gradient-drive.md",
                 "Passing fraction" => "islands/derivations/passing-fraction.md"
             ],

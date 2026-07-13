@@ -24,6 +24,7 @@ transcription or vice versa).
 | Quasineutrality closure ``1/(2\hat L_{n0})`` (arbitrary ``\tau``) | [quasineutrality closure](quasineutrality-closure.md) | ✅ signed off 2026-07-11 |
 | ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | ✅ signed off 2026-07-11 |
 | Parallel (island) streaming ``a_\xi``, ``a_x`` (advection along ``\Omega``) | [parallel streaming](parallel-streaming.md) | ✅ signed off 2026-07-11 |
+| E×B coupling ``c_E = \tfrac12\langle 1/\hat v_\parallel\rangle_\theta`` (passing σ-odd, trapped ≡ 0) | [E×B coupling](exb-coupling.md) | ✅ signed off 2026-07-12 |
 | Gradient drive = the diamagnetic far-field BC (I19 Eq. 29) | [gradient drive](gradient-drive.md) | ✅ signed off 2026-07-11 |
 | Passing fraction ``f_p \simeq 1-1.46\sqrt\varepsilon`` (electron closure) | [passing fraction](passing-fraction.md) | ✅ signed off 2026-07-11 |
 

@@ -61,7 +61,8 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test :streaming in cfg.cleared                  # island streaming now wired (01 §2)
         @test :gradient_drive in cfg.cleared             # far-field drive, zero source (01 §2)
         @test :far_field in cfg.cleared
-        @test :exb in cfg.gated                          # E×B still gated
+        @test :exb in cfg.cleared                        # E×B now wired (01 §2, exb-coupling.md)
+        @test !(:exb in cfg.gated)
     end
 
     @testset "gradient drive = zero source + diamagnetic far field (01 §2)" begin
@@ -147,11 +148,16 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
     end
 
     @testset "structural solve converges on the placeholder config" begin
+        # the cleared E×B term makes the placeholder residual genuinely nonlinear
+        # (couples g and Φ), so use the same Newton budget as the QN-drive solve.
+        # Assert the grid-independent per-equation max-norm (04 §5's convergence
+        # criterion): the √N-scaled L2 norm floors above 1e-7 only because the E×B
+        # spreads a ~1e-8 residual across ~N=4000 unknowns.
         f! = Soc.flat_residual(cfg.stack, grid; bc=cfg.bc)
         N = Opc.statelength(grid)
-        sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-8, atol=1e-12, max_iter=30, memory=200)
+        sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-9, atol=1e-13, max_iter=40, memory=200)
         @test sol.converged
-        @test sol.residual_norms[end] < 1e-7
+        @test sol.residual_max < 1e-7
         # residual is finite everywhere at a nonzero state
         U = Opc.IslandState(grid)
         Opc.fill_state!(U, 0.3)
@@ -184,6 +190,39 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         end
         # E, σ independence (broadcast)
         @test a_xi[3, 2, 2, 1, 1] == a_xi[3, 2, 2, nE, nσ]
+    end
+
+    @testset "CLEARED E×B coupling c_E = ½⟨1/v̂_∥⟩ (passing σ-odd, trapped ≡ 0)" begin
+        cE = Cfg.exb_coupling_table(grid, phys)
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        # passing nodes (y < y_c, away from the y_c layer): c_E = (σ/2√E)·B₁(y),
+        # node-for-node vs the cleared bracket
+        for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+            y = grid.y.nodes[iy]
+            (y >= grid.y_c) && continue                   # passing-only
+            (abs(y - 1.0) < 5e-2) && continue             # skip the gated y_c layer
+            v̂ = sqrt(grid.E.nodes[iE])
+            σ = grid.σ[iσ]
+            B1 = Coc.orbit_average_exb_bracket(; y=y, epsilon=0.1)
+            @test cE[4, 3, iy, iE, iσ] ≈ (σ / (2 * v̂)) * B1 atol = 1e-10
+        end
+        # trapped nodes (y ≥ y_c): c_E ≡ 0 exactly (σ-odd banana-leg cancellation)
+        for iy in 1:ny
+            if grid.y.nodes[iy] >= grid.y_c
+                @test all(iszero, @view cE[:, :, iy, :, :])
+            end
+        end
+        # σ-odd: reversing v_∥ flips the coupling (like the drift x_D ∝ σ)
+        ipass = findfirst(y -> 0 < y < 0.9, grid.y.nodes)
+        @test ipass !== nothing
+        @test cE[4, 3, ipass, 2, 1] ≈ -cE[4, 3, ipass, 2, 2] atol = 1e-12
+        @test cE[4, 3, ipass, 2, 1] != 0.0                # nonzero for passing
+        # x, ξ independence (broadcast over the solve plane)
+        @test cE[2, 5, ipass, 2, 1] == cE[7, 1, ipass, 2, 1]
+        # the coupling is the velocity-dependent (array) ExBDrift coefficient in the stack
+        @test cfg.stack.kinetic[3] isa Opc.ExBDrift
+        @test cfg.stack.kinetic[3].c_E isa AbstractArray  # array, not scalar (velocity-dependent)
+        @test cfg.stack.kinetic[3].c_E == cE
     end
 
     @testset "quasineutrality drive makes Φ nonzero (the Q5 field fix)" begin

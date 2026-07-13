@@ -142,12 +142,19 @@ MagneticDrift(c_D; variant::Symbol=:original) = MagneticDrift(c_D, variant)
 
 `E×B` advection as the Poisson bracket of `Φ` and `g` in `(x, ξ)`
 (`01 §2`): adds `c_E (∂Φ/∂ξ · ∂g/∂x − ∂Φ/∂x · ∂g/∂ξ)`. This is the one Level-0
-kinetic term nonlinear in the state (couples `g` and `Φ`); `c_E` is a supplied
-scalar coupling.
+kinetic term nonlinear in the state (couples `g` and `Φ`). `c_E` is either a
+supplied **scalar** (manufactured tests) or a **velocity-dependent array** shaped
+like `g` — the cleared coupling `c_E = ½⟨1/v̂_∥⟩_θ` depends on `(y, E, σ)`
+(passing σ-odd, trapped ≡ 0; `01 §2`, derivation `exb-coupling.md`).
 """
 struct ExBDrift{S} <: AbstractTerm
     c_E::S
 end
+
+# c_E may be a scalar (tests) or a (x,ξ,y,E,σ) array (the cleared velocity-
+# dependent coupling); dispatch keeps the hot path allocation-free either way.
+@inline _cE_at(cE::Number, ix, iξ, iy, iE, iσ) = cE
+@inline _cE_at(cE::AbstractArray, ix, iξ, iy, iE, iσ) = @inbounds cE[ix, iξ, iy, iE, iσ]
 
 """
     Collisions(a_y, b_y; model=:pitch_angle)
@@ -433,7 +440,8 @@ function apply!(R::IslandState, t::ExBDrift, U::IslandState, grid::IslandGrid, c
         for b in 1:nξ
             dgdξ += Dξ[iξ, b] * g[ix, b, iy, iE, iσ]
         end
-        R.g[ix, iξ, iy, iE, iσ] += cE * (dΦdξ[ix, iξ] * dgdx - dΦdx[ix, iξ] * dgdξ)
+        cEv = _cE_at(cE, ix, iξ, iy, iE, iσ)
+        R.g[ix, iξ, iy, iE, iσ] += cEv * (dΦdξ[ix, iξ] * dgdx - dΦdx[ix, iξ] * dgdξ)
     end
     return R
 end
