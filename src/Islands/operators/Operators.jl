@@ -302,16 +302,25 @@ defaults to `nothing` (a pure `M[g] − α Φ` residual) for the manufactured-te
 and pre-drive configurations. This closes `Φ(x, ξ)` inside the global Newton
 system rather than the sources' fragile nested Picard loop (`01 §3`, `03 §3`).
 
+The density moment `M[g] = δn̄_i` uses the **physical `∫d³v` measure** when `wy`/`wE`
+are supplied (`Configure.physical_velocity_weights`: the `√E/2` speed and
+`1/√(1−y b_min)` pitch Jacobians, `velocity-moment-measure.md`); they default to
+`nothing` (the flat quadrature) for manufactured tests.
+
 ## Fields
 
   - `α`      — adiabatic-shielding coefficient multiplying `Φ` (`(τ+1)/τ`).
   - `source` — the `(nx, nξ)` `L̂_{n0}⁻¹(x − ĥ)` field drive, or `nothing`.
+  - `wy`, `wE` — physical velocity-moment weights for `M[g]`, or `nothing` (flat).
 """
-struct Quasineutrality{S,A} <: AbstractTerm
+struct Quasineutrality{S,A,W} <: AbstractTerm
     α::S
     source::A
+    wy::W
+    wE::W
 end
-Quasineutrality(α) = Quasineutrality(α, nothing)
+Quasineutrality(α) = Quasineutrality(α, nothing, nothing, nothing)
+Quasineutrality(α, source) = Quasineutrality(α, source, nothing, nothing)
 
 # ---------------------------------------------------------------------------
 # Discrete kernels (allocation-free, generic over eltype)
@@ -532,7 +541,11 @@ function apply!(R::IslandState, t::ExBDrift, U::IslandState, grid::IslandGrid, c
 end
 
 function apply!(R::IslandState, t::Quasineutrality, U::IslandState, grid::IslandGrid, ::IslandCache)
-    velocity_moment!(R.Φ, U.g, grid; accumulate=true)
+    if t.wy === nothing
+        velocity_moment!(R.Φ, U.g, grid; accumulate=true)
+    else
+        velocity_moment!(R.Φ, U.g, grid; accumulate=true, wy=t.wy, wE=t.wE)
+    end
     @inbounds @. R.Φ += -t.α * U.Φ
     t.source === nothing || @inbounds(@. R.Φ += t.source)
     return R
@@ -542,17 +555,17 @@ end
 # Velocity moment  M[g](x,ξ) = ∫dy ∫dE Σ_σ g   (Simpson in y, Gauss in E).
 # ---------------------------------------------------------------------------
 """
-    velocity_moment!(M, g, grid; accumulate=false)
+    velocity_moment!(M, g, grid; accumulate=false, wy=grid.y.wq, wE=grid.E.weights)
 
-Accumulate the phase-space velocity moment `∫dy ∫dE Σ_σ g` into `M[ix, iξ]`
-using the Simpson `y`-weights and Gauss `E`-weights of `grid` (`03 §2`). Set
-`accumulate=true` to add into `M` (residual assembly); otherwise `M` is zeroed
-first.
+Accumulate the phase-space velocity moment `∫dy ∫dE Σ_σ g` into `M[ix, iξ]`. The
+`wy`/`wE` weights default to the grid's flat quadrature (Simpson `y`, Gauss `E`);
+pass the **physical** `∫d³v` weights (`Configure.physical_velocity_weights`: the
+`√E/2` speed Jacobian and the `1/√(1−y b_min)` pitch Jacobian, `velocity-moment-measure.md`)
+to get the physical moment (`01 §4`). `accumulate=true` adds into `M`.
 """
-function velocity_moment!(M, g, grid::IslandGrid; accumulate::Bool=false)
+function velocity_moment!(M, g, grid::IslandGrid; accumulate::Bool=false,
+    wy::AbstractVector=grid.y.wq, wE::AbstractVector=grid.E.weights)
     accumulate || fill!(M, zero(eltype(M)))
-    wy = grid.y.wq
-    wE = grid.E.weights
     nx, nξ, ny, nE, nσ = size(g)
     @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
         w = wy[iy] * wE[iE]
@@ -564,18 +577,18 @@ function velocity_moment!(M, g, grid::IslandGrid; accumulate::Bool=false)
 end
 
 """
-    weighted_moment!(M, g, W, grid; scale=1, accumulate=false)
+    weighted_moment!(M, g, W, grid; scale=1, accumulate=false, wy=grid.y.wq, wE=grid.E.weights)
 
 Accumulate the weighted velocity moment `scale · ∫dy ∫dE Σ_σ W(y, E, σ) g` into
-`M[ix, iξ]` (`03 §2`, moments). `W` is a supplied `(ny, nE, nσ)` velocity-space
-weight — e.g. the `v̂_∥`-structure of the parallel-flow moment, whose Level-0
-physics form is `[VERIFY]`-gated (QUESTIONS Q3). `scale` carries a per-species
-factor (e.g. the charge `Z_j`). `velocity_moment!` is the `W ≡ 1` special case.
+`M[ix, iξ]` (`03 §2`, `01 §4`). `W` is the `(ny, nE, nσ)` velocity weight — for the
+parallel flow `W = v̂_∥ = σ√E√(1−yb)` (`Configure.parallel_flow_weight`, cleared
+`velocity-moment-measure.md`). `wy`/`wE` default to the grid's flat quadrature;
+pass the physical `∫d³v` weights for the physical moment. `scale` carries a
+per-species factor (charge `Z_j`). `velocity_moment!` is the `W ≡ 1` case.
 """
-function weighted_moment!(M, g, W, grid::IslandGrid; scale=1, accumulate::Bool=false)
+function weighted_moment!(M, g, W, grid::IslandGrid; scale=1, accumulate::Bool=false,
+    wy::AbstractVector=grid.y.wq, wE::AbstractVector=grid.E.weights)
     accumulate || fill!(M, zero(eltype(M)))
-    wy = grid.y.wq
-    wE = grid.E.weights
     nx, nξ, ny, nE, nσ = size(g)
     size(W) == (ny, nE, nσ) || throw(ArgumentError("weight W must have size (ny, nE, nσ) = $((ny, nE, nσ))"))
     @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny

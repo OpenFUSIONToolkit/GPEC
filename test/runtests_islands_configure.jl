@@ -297,6 +297,35 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test maximum(abs, Usol.Φ) > 1e-6                # Φ no longer trivially zero
     end
 
+    @testset "CLEARED physical ∫d³v moment measure + parallel-flow weight (velocity-moment-measure.md)" begin
+        wy, wE = Cfg.physical_velocity_weights(grid, phys)
+        β = (1 - 0.1) / (1 + 0.1)                          # b_min
+        yedge = 1 / β
+        # the pitch-Jacobian weights integrate ∫dy/√(1−βy) = 2/β exactly, forbidden y zeroed
+        @test sum(wy) ≈ 2 / β atol = 1e-10
+        for iy in 1:grid.y.n
+            (grid.y.nodes[iy] >= yedge) && @test wy[iy] == 0.0
+            @test wy[iy] >= 0.0
+        end
+        # the speed Jacobian: wE_phys = wE·√E/2
+        for iE in 1:grid.E.n
+            @test wE[iE] ≈ grid.E.weights[iE] * sqrt(grid.E.nodes[iE]) / 2 atol = 1e-14
+        end
+        # the physical moment machinery is wired into the QN operator
+        @test cfg.stack.field.wy !== nothing && cfg.stack.field.wE !== nothing
+        @test cfg.stack.field.wy == wy
+        # the parallel-flow weight W = v̂_∥ = σ√E√(1−y b_min), σ-odd, forbidden zeroed
+        W = Cfg.parallel_flow_weight(grid, phys)
+        @test size(W) == (grid.y.n, grid.E.n, 2)
+        for iy in 1:grid.y.n, iE in 1:grid.E.n
+            v̂ = sqrt(grid.E.nodes[iE])
+            @test W[iy, iE, 1] ≈ v̂ * sqrt(max(1 - grid.y.nodes[iy] * β, 0.0)) atol = 1e-12
+            @test W[iy, iE, 1] ≈ -W[iy, iE, 2] atol = 1e-14   # σ-odd
+        end
+        # the pitch Jacobian cancels for the flow: wy·W_σ=+1 is regular (finite) everywhere
+        @test all(isfinite, [wy[iy] * W[iy, 2, 1] for iy in 1:grid.y.n])
+    end
+
     @testset "assembly validates the species list" begin
         @test_throws ArgumentError Cfg.configure_level0(grid, phys, Spc.Species[])
     end

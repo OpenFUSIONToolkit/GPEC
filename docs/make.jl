@@ -52,6 +52,7 @@ makedocs(;
                 "Collision operator" => "islands/derivations/collision-operator.md",
                 "Collision magnitude" => "islands/derivations/collision-magnitude.md",
                 "Orbit-averaged collision" => "islands/derivations/orbit-averaged-collision.md",
+                "Velocity-moment measure" => "islands/derivations/velocity-moment-measure.md",
                 "Electron closure" => "islands/derivations/electron-closure.md",
                 "Quasineutrality closure" => "islands/derivations/quasineutrality-closure.md",
                 "Δ-moment prefactors" => "islands/derivations/delta-moment-prefactors.md",

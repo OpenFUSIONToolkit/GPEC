@@ -50,7 +50,7 @@ export Level0Physics, configure_level0
 export drift_coefficient_table, pitch_diffusivity_profile, pitch_collision_coefficient
 export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
 export quasineutrality_source, streaming_coefficients, gradient_far_field
-export exb_coupling_table
+export exb_coupling_table, physical_velocity_weights, parallel_flow_weight
 
 # ---------------------------------------------------------------------------
 # Physics parameter carrier (the cleared inputs)
@@ -474,6 +474,74 @@ function exb_coupling_table(grid::IslandGrid, phys::Level0Physics)
 end
 
 """
+    physical_velocity_weights(grid, phys) -> (wy_phys, wE_phys)
+
+Build the **cleared physical `∫d³v` measure** weights (`01 §4`; derivation
+`velocity-moment-measure.md`, sign-off 2026-07-13) for
+`Operators.velocity_moment!`/`weighted_moment!`, replacing the flat quadrature:
+
+  - `wE_phys[iE] = wE[iE]·√E/2` — the `∫dv̂ v̂²` **speed Jacobian** folded into the
+    Gauss–Laguerre `e^{−E}` weight (`E = v̂²`);
+  - `wy_phys[iy]` — the **pitch Jacobian** `∫dy/√(1−y b_min)` on the `y`-grid, with
+    `b_min = (1−ε)/(1+ε)` the flux-surface (outboard) field (§7, flux-surface `b`).
+    Built as an exact **singular-weight quadrature** (each node carries the exact
+    `∫dy/√(1−y b_min)` over its cell, clipped to `[0, 1/b_min]`), so the integrable
+    `y→1/b_min` edge is handled without blow-up (the `IinvB` treatment, L23 §8.4.1)
+    and the forbidden region `y>1/b_min` carries zero weight.
+
+The global `πb_min` constant is absorbed into the downstream normalization
+(`L̂_{n0}`/the `Δ` prefactor). Setting `W=1` gives the physical density
+`δn̄_i = {ĝ}_v`; `W = v̂_∥` ([`parallel_flow_weight`]) gives `J̄_∥`.
+"""
+function physical_velocity_weights(grid::IslandGrid, phys::Level0Physics)
+    ε = phys.epsilon
+    β = (1 - ε) / (1 + ε)                                 # b_min (outboard midplane, flux-surface b)
+    yedge = 1 / β                                         # = (1+ε)/(1−ε), the deeply-trapped edge
+    yn = grid.y.nodes
+    ny = grid.y.n
+    # exact ∫_a^b dy/√(1−βy), clipped to [0, yedge]
+    Jint(a, b) = (a = clamp(a, 0.0, yedge); b = clamp(b, 0.0, yedge);
+    b > a ? (2 / β) * (sqrt(max(1 - β * a, 0.0)) - sqrt(max(1 - β * b, 0.0))) : 0.0)
+    wy_phys = zeros(Float64, ny)
+    @inbounds for iy in 1:ny
+        yn[iy] < yedge || continue                        # forbidden (no particles) ⇒ 0
+        yl = iy == 1 ? yn[1] : (yn[iy-1] + yn[iy]) / 2    # cell = [midpoint-left, midpoint-right]
+        # extend the last valid node's cell to the singular edge (don't split the
+        # edge integral onto the zeroed forbidden node)
+        yr = (iy < ny && yn[iy+1] >= yedge) ? yedge : (iy == ny ? yn[ny] : (yn[iy] + yn[iy+1]) / 2)
+        wy_phys[iy] = Jint(yl, yr)
+    end
+    wE_phys = [grid.E.weights[iE] * sqrt(grid.E.nodes[iE]) / 2 for iE in 1:grid.E.n]
+    return wy_phys, wE_phys
+end
+
+"""
+    parallel_flow_weight(grid, phys) -> Array{Float64,3}
+
+Build the **cleared** parallel-flow velocity weight `W[iy,iE,iσ] = v̂_∥ =
+σ√E√(1−y b_min)` (`01 §4`, Q3; derivation `velocity-moment-measure.md`) for
+`Operators.weighted_moment!` → `Moments.parallel_current!` → `J̄_∥`. With the
+physical measure ([`physical_velocity_weights`]) the `√(1−y b_min)` cancels the
+pitch Jacobian, so `J̄_∥ ∝ Σ_σ σ ∫dy∫dE (E/2) g` is regular. **σ-odd**; `b_min =
+(1−ε)/(1+ε)`; `√(max(1−y b_min,0))` zeros the forbidden region.
+"""
+function parallel_flow_weight(grid::IslandGrid, phys::Level0Physics)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    β = (1 - phys.epsilon) / (1 + phys.epsilon)           # b_min
+    W = Array{Float64}(undef, ny, nE, nσ)
+    @inbounds for iσ in 1:nσ
+        σ = grid.σ[iσ]
+        for iE in 1:nE
+            v̂ = sqrt(grid.E.nodes[iE])
+            for iy in 1:ny
+                W[iy, iE, iσ] = σ * v̂ * sqrt(max(1 - grid.y.nodes[iy] * β, 0.0))
+            end
+        end
+    end
+    return W
+end
+
+"""
     gradient_far_field(grid, phys) -> FarFieldConditions
 
 Build the **cleared** neoclassical far-field boundary state — the Level-0
@@ -587,9 +655,11 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
     c_neo = neoclassical_diffusion_coefficient(grid, phys)     # B: ∂²_x neoclassical
     c_cross = collisional_cross_coefficient(grid, phys)        # C: ∂²_xy cross
 
-    # cleared quasineutrality field term (α + drive from the signed-off closure)
+    # cleared quasineutrality field term (α + drive from the signed-off closure),
+    # with the cleared physical ∫d³v measure for δn̄_i = M[g] (velocity-moment-measure.md)
     α = 1 / quasineutrality_coefficient(phys.tau)              # (τ+1)/τ, adiabatic shielding
     S_Φ = quasineutrality_source(grid, phys)                   # L̂_{n0}⁻¹(x − ĥ)
+    wy_phys, wE_phys = physical_velocity_weights(grid, phys)
 
     # cleared gradient drive (I19 Formulation A, gradient-drive.md): homogeneous
     # interior — zero source; the drive is the far field.
@@ -608,7 +678,7 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
         CollisionalCross(c_cross),                            # cleared collision C (∂²_xy)
         GradientDrive(drive0)                                 # cleared: zero source (far field)
     )
-    stack = IslandStack(kinetic, Quasineutrality(α, S_Φ))     # cleared closure (01 §3)
+    stack = IslandStack(kinetic, Quasineutrality(α, S_Φ, wy_phys, wE_phys))  # cleared closure + physical measure (01 §3, §4)
 
     return (stack=stack, bc=bc, delta_prefactors=Δpref,
         cleared=(:magnetic_drift, :streaming, :exb, :pitch_diffusion, :collisional_drag,

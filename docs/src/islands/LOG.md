@@ -8,6 +8,34 @@ relevant.
 
 ---
 
+## 2026-07-13 — Q6/Q3: clear the physical ∫d³v moment measure + parallel-flow weight W (unblocks term F)
+
+- **Moved**: attempting to clear Q3's parallel-flow weight `W` surfaced that the
+  code's `velocity_moment!`/`weighted_moment!` used a **flat** measure missing the
+  physical `∫d³v` Jacobians (`√E/2` speed, `1/√(1−yb)` pitch) — and that the
+  **already-cleared QN density `δn̄_i`** used that flat moment. Escalated as **Q6**;
+  the user chose the **physical `∫d³v`** with **flux-surface `b`**. Derived and
+  cleared (`velocity-moment-measure.md`, **human sign-off**): the `√E/2` speed
+  Jacobian (folded into Gauss–Laguerre), the `1/√(1−y b_min)` pitch Jacobian
+  (`b_min=(1−ε)/(1+ε)`, an **exact singular-weight quadrature** = the `IinvB` edge,
+  forbidden region zeroed), via `Configure.physical_velocity_weights`; and the
+  parallel-flow weight **`W = v̂_∥ = σ√E√(1−y b_min)`** (`Configure.parallel_flow_weight`,
+  clearing Q3's `W`; its `√(1−yb)` cancels the pitch Jacobian so `J̄_∥` is regular).
+  `velocity_moment!`/`weighted_moment!` gained `wy`/`wE` kwargs (default flat, so M1/M2
+  manufactured tests are untouched); `Operators.Quasineutrality` gained the physical
+  weights and its `δn̄_i` is now physical (**`max|Φ|` shifted 5.7→4.5**, the approved
+  QN revision; closure algebra `α`/`S` unchanged). **physics-verifier PASS**; 1596
+  islands assertions green (incl. `Σwy=2/b_min` exact, forbidden zeroed, `W` σ-odd,
+  QN wired); `build_docs_local.jl` green. Doc-first: docs/01 §3/§4, QUESTIONS Q6
+  (resolved)/Q3 (`W`)/Q5 (F unblocked), Moments docstrings, derivations index/nav.
+- **Blocked**: nothing new. **Term F (momentum restoring) is now UNBLOCKED** — `Ū`
+  is a bounded physical moment (`W` + the cleared `u³ν̂_ii/⟨ν̂_ii⟩_u` weight), ready
+  to implement as the nonlocal operator. Deferred: Hirshman–Sigmar `k ≃ −1.173`;
+  the Verify.jl MMS repointing (collision operators).
+- **Next**: implement term F (completes the collision operator; now unblocked), and
+  wire `parallel_current!`/`J̄_∥` → the Δ outputs with the cleared `W` + physical
+  measure.
+
 ## 2026-07-12 — Q5: clear the full orbit-averaged collision operator (5/6 terms; last operator gate)
 
 - **Moved**: cleared the **full orbit-averaged collision operator**

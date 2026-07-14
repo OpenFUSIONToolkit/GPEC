@@ -22,6 +22,7 @@ transcription or vice versa).
 | Pitch-angle collision operator + deflection frequency + ``\nu_\star`` | [collision operator](collision-operator.md) | ✅ signed off 2026-07-11 |
 | Collision magnitude ``\nu_\star`` + momentum-restoring ``\langle\hat\nu_{ii}\rangle_u=\tfrac{4\varepsilon^{3/2}\nu_\star}{3\sqrt\pi}(\sqrt2-\ln(1+\sqrt2))`` | [collision magnitude](collision-magnitude.md) | ✅ signed off 2026-07-12 |
 | Full orbit-averaged collision operator (6 terms; σ-odd pitch diffusion ``\partial_y(y\langle\sqrt{1-yb}\rangle\partial_y)``) | [orbit-averaged collision](orbit-averaged-collision.md) | ✅ signed off 2026-07-12 (5/6 differential terms implemented; momentum F pending) |
+| Physical ``\int d^3v`` moment measure + parallel-flow weight ``W=\hat v_\parallel`` (+ QN density revision) | [velocity-moment measure](velocity-moment-measure.md) | ✅ signed off 2026-07-13 |
 | Flattened-electron closure ``h(\Omega)`` + amplitude | [electron closure](electron-closure.md) | ✅ signed off 2026-07-11 (``k``, ``f_p`` deferred) |
 | Quasineutrality closure ``1/(2\hat L_{n0})`` (arbitrary ``\tau``) | [quasineutrality closure](quasineutrality-closure.md) | ✅ signed off 2026-07-11 |
 | ``\Delta_{\cos}/\Delta_{\sin}`` moment prefactors ``\mp\mu_0 R/2\tilde\psi`` | [Δ-moment prefactors](delta-moment-prefactors.md) | ✅ signed off 2026-07-11 |

@@ -310,7 +310,12 @@ derived from the ion/electron density moments, matches I19 Eq. (A.11) exactly at
 τ/(τ+1) closure coefficient is the sum of ion+electron adiabatic responses. The
 code uses the raw-moment form with δn̄_i = ∫g_i d³v the actual velocity moment,
 so I19's δn_i normalization convention is a cross-check nuance only, not a code
-dependency.) With kinetic electrons, the Picard form δΦ̂ = (δn̂_i − δn̂_e)/2
+dependency. **The `∫d³v` is the physical measure [CLEARED: human sign-off
+2026-07-13 — derivation velocity-moment-measure.md]: the `√E/2` speed Jacobian
+and the `1/√(1−y b_min)` pitch Jacobian (flux-surface `b_min=(1−ε)/(1+ε)`, exact
+singular-weight quadrature), via `Configure.physical_velocity_weights` wired into
+`Operators.Quasineutrality`. This revised the earlier flat-measure `δn̄_i`
+(`max|Φ|` shifted ≈5.7→4.5); the closure algebra `α`/`S` is unchanged.**) With kinetic electrons, the Picard form δΦ̂ = (δn̂_i − δn̂_e)/2
 [CHECKED: Diss19 Eq. 2.45]. In Islands both reduce to one quasineutrality
 residual inside the global Newton system (docs/03) — the sources' nested
 Picard loops (Φ outer, ū_∥i inner; I19 fig. A1) are precisely the fragile
@@ -341,9 +346,13 @@ a diagnostic from day one; its resonant moments are the Δ outputs:
 
 ## 4. Output moments and MRE assembly (normalization now exact)
 
-Parallel current J̄_∥ = θ-average of Σ_j e_j n_j u_∥j. The two projections of
-parallel Ampère through the island [CHECKED: Diss19 Eqs. 2.9–2.10; D21
-Eqs. 7–8, 32]:
+Parallel current J̄_∥ = θ-average of Σ_j e_j n_j u_∥j = Σ_j Z_j ∫ W_j g_j, with the
+**parallel-flow weight W = v̂_∥ = σ√E√(1−y b_min) [CLEARED: human sign-off
+2026-07-13 — velocity-moment-measure.md; `Configure.parallel_flow_weight`]**: in
+the physical `∫d³v` measure its `√(1−y b_min)` cancels the pitch Jacobian, so J̄_∥
+is regular (`∝ Σ_σ σ ∫dy∫dE (E/2) g`). This un-gates `Moments.parallel_current!`
+→ the Δ outputs. The two projections of parallel Ampère through the island
+[CHECKED: Diss19 Eqs. 2.9–2.10; D21 Eqs. 7–8, 32]:
 
     (1/μ₀R) Δ′ ψ̃ = ∫_ℝ dψ ∮ dξ J̄_∥ cos ξ        (growth: matching to Δ′)
     0            = ∫_ℝ dψ ∮ dξ J̄_∥ sin ξ        (torque balance / rotation)

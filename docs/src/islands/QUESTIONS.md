@@ -248,6 +248,10 @@ bare pass/fail. The derivation lane inherits this framing.
     velocity-moment weight `W` and the `g↔F̂_M` energy-measure convention (Q3), then
     F follows. **Recommendation:** do NOT guess the measure; clear Q3's `W` first
     (it also un-gates the `J̄_∥` output moment). Nothing entered `src/` for F.
+    — **UNBLOCKED (2026-07-13)**: Q6 cleared the physical `∫d³v` measure and the
+    parallel-flow weight `W = v̂_∥` (`velocity-moment-measure.md`), so `Ū` is now a
+    bounded physical moment (`W` + the cleared `u³ν̂_ii/⟨ν̂_ii⟩_u` weight) with no
+    remaining gated normalization. F is ready to implement as a nonlocal operator.
   - **Neoclassical far field** `bc` (`Operators.FarFieldConditions`): the
     no-island `g_far`/`Φ_far` (never bare Neumann — L23 §5.3), gated physics
     already flagged under Q3.
@@ -262,3 +266,60 @@ bare pass/fail. The derivation lane inherits this framing.
   only). **This is why M2c delivers the assembly scaffold, not a physics result.**
 - **Gated work**: any Level-0 *physics* solve (as opposed to the structural
   convergence check); the B-ladder T2/T3 physics gates; the L23/B5c T4 attempt.
+
+## Q6 — The velocity-moment measure convention (blocks the parallel-flow weight W, term F, and re-opens the QN density moment) — RESOLVED (by the user, 2026-07-13)
+
+- **Resolution**: option (b) — the **physical `∫d³v`** measure, with the
+  **flux-surface `b`** (`b_min = (1−ε)/(1+ε)`, full trapped range). Derived and
+  cleared in `derivations/velocity-moment-measure.md` (signed off 2026-07-13):
+  `Operators.velocity_moment!`/`weighted_moment!` gained the physical measure
+  (`√E/2` speed Jacobian via Gauss–Laguerre, `1/√(1−y b_min)` pitch Jacobian as an
+  exact singular-weight quadrature — the `IinvB` edge, forbidden region zeroed),
+  built by `Configure.physical_velocity_weights`. The parallel-flow weight
+  `W = v̂_∥ = σ√E√(1−y b_min)` is cleared (`Configure.parallel_flow_weight`,
+  resolving Q3's `W`). The QN density moment `δn̄_i = M[g]` is re-implemented with
+  the physical measure (wired into `Operators.Quasineutrality`; the closure
+  algebra `α`/`S` unchanged; `max|Φ|` shifted 5.7→4.5 as approved). This also
+  **unblocks term F** (Q5) — `Ū` is the same physical moment + the cleared
+  `u³ν̂_ii/⟨ν̂_ii⟩_u` weight, no new gated normalization.
+
+## Q6 (original) — The velocity-moment measure convention — [see resolution above]
+
+- **Context**: Clearing Q3's parallel-flow velocity weight `W(y,E,σ)` (used by
+  `Moments.parallel_current!` for `J̄_∥`, and by term F's `Ū_∥ᵢ`) surfaced that the
+  code's velocity-moment machinery (`Operators.velocity_moment!` / `weighted_moment!`)
+  uses a **flat** measure — `Σ_σ ∫dy [Simpson, flat] ∫dE [Gauss–Laguerre, e^{−E}]` —
+  with the Maxwellian carried by the E-grid (`g = shape`, confirmed:
+  `Configure.gradient_far_field` docstring) but **no physical d³v Jacobians**. The
+  physical velocity-volume integral is (L23 Eq. 8.4.1/8.4.2)
+  `{ĝ}_v = πB Σ_σ ∫dv̂ v̂² ∫dy/√(1−yb) ĝ` — i.e. a `√E/2` speed Jacobian and a
+  **`1/√(1−yb)` pitch Jacobian** (whose `y→b⁻¹` singularity L23 §8.4.1 handles by a
+  numeric+analytic split, the `IinvB` function). The current `velocity_moment!`
+  (flat) lacks both.
+- **What is determinable (not a guess)**: for the **parallel flow** the physical
+  weight `v̂_∥ = σ√E√(1−yb)` *cancels* the `1/√(1−yb)` pitch Jacobian, so
+  `J̄_∥ = πB Σ_σ σ ∫dy ∫dE (E/2) e^{−E} g` ⇒ **`W = const·σ·(E/2)`, flat in y,
+  σ-odd, ∝E** (the `const = πB Z` folds into the cleared `Δ`-prefactor `μ₀R/2ψ̃`).
+  Term F's `Ū` follows the same structure (with the extra `u³ν̂_ii`/`⟨ν̂_ii⟩_u`).
+- **The blocker it exposes**: the **density** moment `δn̄_i = ∫ĝ d³v` has *no*
+  such cancellation — it needs the `1/√(1−yb)` pitch Jacobian and the `√E/2` speed
+  Jacobian. But the **already-cleared** QN closure (`quasineutrality-closure.md`,
+  signed off 2026-07-11) uses the **flat** `velocity_moment!` as `δn̄_i` "directly."
+  So the flat convention is either (a) a *deliberate simplification* (then `W` is
+  the flat-convention `v̂_∥` weight `σ√E√(1−yb)`, and `δn̄_i` stays flat — physically
+  approximate), or (b) the flat `velocity_moment!` is an **incomplete** stand-in for
+  the physical `∫d³v` (then it needs the `√E/2` + `1/√(1−yb)`+`IinvB` Jacobians
+  added — which **revises the cleared QN `δn̄_i`** and gives `W = σ·E/2`).
+- **Question**: which moment convention does Islands intend — (a) the flat
+  simplified moment (self-consistent, physically approximate, `W = σ√E√(1−yb)`,
+  QN unchanged), or (b) the **physical `∫d³v`** with the `v²`/`1/√(1−yb)`/`IinvB`
+  Jacobians (`W = σ·E/2`, and the cleared QN `δn̄_i` re-implemented physically)?
+- **Recommendation**: (b) — the physical `∫d³v` is unambiguous (L23 Eq. 8.4.1) and
+  the flat convention mis-weights the velocity moments (the density/polarization and
+  the `Δ` outputs depend on it). This is a **foundational moment-machinery
+  clearance** (a small module: the physical `velocity_moment!`/`weighted_moment!`
+  measure + the `IinvB` singular-pitch split), not a single coefficient, and it
+  **revises signed-off QN work** — hence a human decision, not a guess.
+- **Gated work**: the parallel-flow weight `W` (Q3) and hence `J̄_∥`/the `Δ`
+  outputs; the momentum-restoring term F (Q5); the physical fidelity of the cleared
+  QN `δn̄_i`. Nothing entered `src/`.

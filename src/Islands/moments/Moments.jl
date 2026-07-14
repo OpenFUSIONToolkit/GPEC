@@ -8,8 +8,10 @@ projections `Δ_cos`/`Δ_sin`, and the island flux-surface-average diagnostics
 
 **Gating:** the projection and quadrature machinery here is pure numerics. The
 physics enters through (i) the per-species velocity-space weights `W_j` (the
-`v̂_∥`-structure — `[VERIFY]`-gated, QUESTIONS Q3), and (ii) the `Δ` moment
-prefactors (`±μ₀R/2ψ̃`). The `ψ̃` amplitude is **cleared** — see
+`v̂_∥`-structure — **cleared** `W = v̂_∥ = σ√E√(1−y b_min)`,
+`Configure.parallel_flow_weight`, sign-off 2026-07-13, with the physical `∫d³v`
+measure `velocity-moment-measure.md`), and (ii) the `Δ` moment prefactors
+(`±μ₀R/2ψ̃`). The `ψ̃` amplitude is **cleared** — see
 [`island_flux_amplitude`](@ref) (human sign-off 2026-07-11; derivation
 `docs/src/islands/derivations/psi-tilde-amplitude.md`, docs/01 §1) — but the
 `μ₀R` normalization and the sin-moment normalization pin (`[DERIVED]`,
@@ -59,8 +61,11 @@ end
 
 Assemble `J̄_∥(x, ξ) = Σ_j Z_j ∫ W_j g_j` into `Jpar[ix, iξ]` (`01 §4`): one
 `weighted_moment!` per species, charge-scaled and accumulated. `gs`, `species`
-and `weights` are aligned vectors; each `W_j` is the supplied `(ny, nE, nσ)`
-parallel-flow velocity weight (gated physics, QUESTIONS Q3).
+and `weights` are aligned vectors; each `W_j` is the **cleared** `(ny, nE, nσ)`
+parallel-flow velocity weight `W = v̂_∥ = σ√E√(1−y b_min)`
+(`Configure.parallel_flow_weight`, sign-off 2026-07-13, `velocity-moment-measure.md`).
+Pass the physical `∫d³v` weights (`Configure.physical_velocity_weights`) to
+`weighted_moment!` so the moment carries the physical measure.
 """
 function parallel_current!(Jpar, gs::AbstractVector, species::AbstractVector{<:Species}, weights::AbstractVector, grid::IslandGrid)
     length(gs) == length(species) == length(weights) ||
