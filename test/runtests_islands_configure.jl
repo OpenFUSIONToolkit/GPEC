@@ -45,8 +45,9 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
 
     @testset "well-formed stack + provenance" begin
         @test cfg.stack isa Opc.IslandStack
-        # streaming, drift, E×B, pitch D+E, drag A, neoclassical B, cross C, drive
-        @test length(cfg.stack.kinetic) == 8
+        # streaming, drift, E×B, pitch D+E, drag A, neoclassical B, cross C,
+        # momentum F, drive
+        @test length(cfg.stack.kinetic) == 9
         @test cfg.stack.field isa Opc.Quasineutrality
         @test cfg.bc isa Opc.FarFieldConditions
         # provenance tuples name exactly which coefficients are cleared vs gated
@@ -63,6 +64,7 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test :collisional_drag in cfg.cleared           # A (∂_x)
         @test :neoclassical_diffusion in cfg.cleared     # B (∂²_x)
         @test :collisional_cross in cfg.cleared          # C (∂²_xy)
+        @test :momentum_restoring in cfg.cleared         # F (nonlocal, velocity-moment-measure.md)
         @test :collision_magnitude in cfg.cleared        # ε^{3/2}ν_★
         @test cfg.gated == ()                            # every L0 operator coefficient is cleared
     end
@@ -70,7 +72,7 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
     @testset "gradient drive = zero source + diamagnetic far field (01 §2)" begin
         nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
         # I19 Formulation A: the interior GradientDrive source is zero
-        gd = cfg.stack.kinetic[8]
+        gd = cfg.stack.kinetic[9]
         @test gd isa Opc.GradientDrive
         @test all(iszero, gd.drive)
         # far field g_far = x·L̂_n0⁻¹·[1+(E−3/2)η_i] at the boundaries, Φ_far = 0
@@ -181,6 +183,38 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
             @test all(iszero, @view a_drag[:, :, itrap, :, :])
             @test all(iszero, @view c_cross[:, :, itrap, :, :])
         end
+    end
+
+    @testset "CLEARED momentum-restoring term F (nonlocal, velocity-moment-measure.md)" begin
+        mr = cfg.stack.kinetic[8]
+        @test mr isa Opc.MomentumRestoring
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        β = (1 - 0.1) / (1 + 0.1)
+        nu_tilde = phys.epsilon^1.5 * phys.nu_star
+        # W = ν̂_ii·v̂_∥ = ν̂_ii·σ√E√(1−y b_min), σ-odd
+        for iE in 1:nE
+            v̂ = sqrt(grid.E.nodes[iE]); ν̂ii = Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model)
+            iy = findfirst(y -> 0 < y < 0.9, grid.y.nodes)
+            @test mr.W[iy, iE, 1] ≈ ν̂ii * v̂ * sqrt(1 - grid.y.nodes[iy] * β) atol = 1e-12
+            @test mr.W[iy, iE, 1] ≈ -mr.W[iy, iE, 2] atol = 1e-14   # σ-odd
+            # redistribute = 2ν̂_ii(1+ε)/(m ρ̂_θi), positive, E-dependent, σ-even
+            @test mr.redistribute[iE] ≈ 2 * ν̂ii * (1 + 0.1) / (phys.m * phys.rho_hat_theta_i) atol = 1e-12
+            @test mr.redistribute[iE] > 0
+        end
+        # inv_norm = 1/(√π⟨ν̂_ii⟩_u)
+        @test mr.inv_norm ≈ 1 / (sqrt(π) * Coc.momentum_restoring_average(; epsilon=0.1, nu_star=phys.nu_star)) atol = 1e-12
+        # nonlocal but LINEAR in g: F(2g) = 2 F(g)
+        cache = Opc.IslandCache(grid)
+        U = Opc.IslandState(grid); Opc.fill_state!(U, 0.3); R1 = Opc.IslandState(grid); Opc.fill_state!(R1, 0.0)
+        Opc.apply!(R1, mr, U, grid, cache)
+        U2 = Opc.IslandState(grid); Opc.fill_state!(U2, 0.6); R2 = Opc.IslandState(grid); Opc.fill_state!(R2, 0.0)
+        Opc.apply!(R2, mr, U2, grid, cache)
+        @test maximum(abs, R2.g .- 2 .* R1.g) < 1e-12
+        @test any(!iszero, R1.g)                         # it actually contributes
+        # zero collisionality ⇒ no restoring term to build (⟨ν̂_ii⟩_u = 0)
+        @test_throws ArgumentError Cfg.momentum_restoring_term(grid, Cfg.Level0Physics(; epsilon=0.1,
+            inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0,
+            rho_hat_theta_i=1.0, nu_star=0.0, m=2.0))
     end
 
     @testset "CLEARED collision magnitude nu_tilde = ε^{3/2}ν_★ (collision-magnitude.md)" begin

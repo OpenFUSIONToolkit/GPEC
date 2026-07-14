@@ -256,9 +256,14 @@ correction** (the pitch diffusion is σ-odd via the `1/v̂_∥` weight, like `ω
 (rebuilt) + `CollisionalDrag`/`NeoclassicalDiffusion`/`CollisionalCross`, from
 `Configure`'s cleared builders; the forbidden pitch region (`y ≥ 1/b_min`, no
 particles) is pinned `g=0` (a domain BC). `m` (poloidal mode number) is a new
-`Level0Physics` scenario input. The sixth term — the **momentum-restoring**
-field-particle integral (F, `2ν̂_ii(1+ε)Ū_∥ᵢ`, using the cleared `⟨ν̂_ii⟩_u`) — is a
-nonlocal operator addition still pending.
+`Level0Physics` scenario input. **The sixth term — the momentum-restoring
+field-particle integral (F) — is now cleared [human sign-off 2026-07-14]:** the
+one **nonlocal** Level-0 term, `Ū(x,ξ) = (1/√π⟨ν̂_ii⟩_u){ν̂_ii v̂_∥ g}_v` (the
+physical `∫d³v` moment, `velocity-moment-measure.md`) redistributed as
+`+2ν̂_ii(1+ε)Ū/(m ρ̂_θi)` (σ-even, positive; `F̂_M=e^{−E}` cancels in the `g=shape`
+convention), using the cleared `⟨ν̂_ii⟩_u`. Linear in `g`, allocation-free
+(`Operators.MomentumRestoring`, `Configure.momentum_restoring_term`). **The full
+Level-0 collision operator (all six terms) is now complete.**
 
 Replaced wholesale at Level 1 by the multi-species Fokker–Planck operator.
 

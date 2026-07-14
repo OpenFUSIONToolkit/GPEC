@@ -89,6 +89,7 @@ its physics value gated):
 | `CollisionalDrag` | ``a_x\,\partial_x g`` | **cleared** — collision A: ``+\hat\nu_{ii}/m``, passing-only, σ-even (§8) |
 | `NeoclassicalDiffusion` | ``c\,\partial_x^2 g`` | **cleared** — collision B (cross-``p_\phi`` transport): σ-odd ``+\tfrac{\hat\nu_{ii}\sigma\hat v\,\hat\rho_{\theta i}}{2m(1+\varepsilon)}y\langle 1/\sqrt{1-yb}\rangle_\theta`` (§8) |
 | `CollisionalCross` | ``c\,\partial_{xy}^2 g`` | **cleared** — collision C: ``+2\hat\nu_{ii}y/m``, passing-only, σ-even (§8) |
+| `MomentumRestoring` | ``r(E)\,\bar U(x,\xi)`` — the one **nonlocal** term (a velocity moment redistributed) | **cleared** — collision F: ``\bar U=\tfrac{1}{\sqrt\pi\langle\hat\nu_{ii}\rangle_u}\{\hat\nu_{ii}\hat v_\parallel g\}_v``, ``r=2\hat\nu_{ii}(1+\varepsilon)/(m\hat\rho_{\theta i})`` (§8) |
 | `GradientDrive` | additive source | the ``(\mathbf v_E + \mathbf v_D + \mathbf v_{\tilde\psi})\cdot\nabla F_0`` drive |
 | `Quasineutrality` | ``M[g] - \alpha\tilde\Phi + S_\Phi`` | **cleared** — ``\alpha=(\tau+1)/\tau`` and the drive ``S_\Phi=\hat L_{n0}^{-1}(x-\hat h)`` (§8) |
 
@@ -100,7 +101,8 @@ flow through the entire stack — that is what makes the solver's Jacobian exact
 Implemented by: `Operators.ParallelStreaming`, `Operators.MagneticDrift`,
 `Operators.ExBDrift`, `Operators.Collisions`, `Operators.PitchAngleDiffusion`,
 `Operators.CollisionalDrag`, `Operators.NeoclassicalDiffusion`,
-`Operators.CollisionalCross`, `Operators.GradientDrive`, `Operators.PerpTransport`,
+`Operators.CollisionalCross`, `Operators.MomentumRestoring`,
+`Operators.GradientDrive`, `Operators.PerpTransport`,
 `Operators.RadiationSink`, `Operators.Quasineutrality`.
 
 The last two are Level-4 closure stubs, and `Collisions` is the non-mimetic
@@ -310,9 +312,13 @@ builders (§7, the M2b derivation lane) onto the operator stack:
   and `∂²_{xy}` **cross** (`collisional_cross_coefficient`) terms — magnitude
   ``\varepsilon^{3/2}\nu_\star`` (from `Level0Physics.nu_star`), ``1/(m\hat\rho_{\theta i})``
   (from `Level0Physics.m`); the forbidden pitch region (``y\ge 1/b_{\min}``) is
-  pinned ``g=0``. The momentum-restoring average
-  ``\langle\hat\nu_{ii}\rangle_u`` (`Coefficients.momentum_restoring_average`) is
-  cleared for the pending momentum-restoring operator term (F);
+  pinned ``g=0``. The sixth, **nonlocal momentum-restoring** term F
+  (`momentum_restoring_term` → `Operators.MomentumRestoring`) forms the
+  parallel-flow moment ``\bar U=(1/\sqrt\pi\langle\hat\nu_{ii}\rangle_u)\{\hat\nu_{ii}\hat v_\parallel g\}_v``
+  (physical measure; ``\langle\hat\nu_{ii}\rangle_u`` from
+  `Coefficients.momentum_restoring_average`) and redistributes
+  ``+2\hat\nu_{ii}(1+\varepsilon)\bar U/(m\hat\rho_{\theta i})`` — **all six
+  collision terms complete**;
 - the ``\Delta_{\cos}`` / ``\Delta_{\sin}`` prefactors from
   `delta_moment_prefactors` (§7);
 - the **quasineutrality field term** — ``\alpha=(\tau+1)/\tau`` from

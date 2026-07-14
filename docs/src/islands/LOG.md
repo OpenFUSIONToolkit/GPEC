@@ -8,6 +8,32 @@ relevant.
 
 ---
 
+## 2026-07-14 — Q5: clear the momentum-restoring term F — the Level-0 collision operator is COMPLETE (6/6)
+
+- **Moved**: implemented the sixth and final collision term — the **momentum-restoring**
+  field-particle integral (F), the one **nonlocal** Level-0 term (`orbit-averaged-collision.md`
+  §6, now unblocked by the Q6 physical measure). `Operators.MomentumRestoring` +
+  `Configure.momentum_restoring_term`: forms the parallel-flow moment
+  `Ū(x,ξ) = (1/√π⟨ν̂_ii⟩_u){ν̂_ii v̂_∥ g}_v` (physical `∫d³v` measure, moment weight
+  `W = ν̂_ii·v̂_∥` σ-odd) into a new `cache.Ubar`, then adds the σ-even redistribution
+  `+2ν̂_ii(1+ε)Ū/(m ρ̂_θi)` (positive — ÷−m ρ̂_θi of the RHS; `F̂_M=e^{−E}` cancels in
+  the `g=shape` convention). **Linear** in g (a moment), **allocation-free** (via
+  `cache.Ubar`), AD-transparent. Uses only cleared inputs (`⟨ν̂_ii⟩_u`, `v̂_∥`, `ν̂_ii`).
+  **physics-verifier PASS** (traced Ū vs L23 Eq. 8.3.17 line-by-line, the positive
+  sign, linearity, no guessed number); 1690 islands assertions green (incl. W σ-odd,
+  redistribute positive, `F(2g)=2F(g)`, nu_star=0 guard); `build_docs_local.jl` green.
+  Doc-first: docs/01 §2.3, QUESTIONS Q5 (F resolved), numerics.md §2/§8,
+  orbit-averaged-collision.md status (6/6), anchor-sync marker.
+- **Blocked**: nothing on the collision operator — **all six terms complete**, no
+  gated kinetic physics remains. One flagged structural-completeness item (verifier,
+  non-blocking): the `Ū(pF̂′)` drive piece of A/F folds into the far-field/drive
+  (I19 Formulation A, `orbit-averaged-collision.md` §7) — the operators act on `g`
+  which satisfies the neoclassical far-field BC. Deferred: Hirshman–Sigmar
+  `k ≃ −1.173`; the Verify.jl MMS repointing (collision operators).
+- **Next**: wire `Moments.parallel_current!`/`J̄_∥` → the Δ outputs with the cleared
+  `W` + physical measure (the primary physics deliverable); the B-ladder physics
+  gates are now un-gated (the full L0 operator + closure are physical).
+
 ## 2026-07-13 — Q6/Q3: clear the physical ∫d³v moment measure + parallel-flow weight W (unblocks term F)
 
 - **Moved**: attempting to clear Q3's parallel-flow weight `W` surfaced that the

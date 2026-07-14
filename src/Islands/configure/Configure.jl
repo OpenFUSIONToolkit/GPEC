@@ -37,11 +37,11 @@ import ..PhaseSpace: IslandGrid, nnodes, MappedFDGrid
 import ..Operators: IslandStack, FarFieldConditions,
     ParallelStreaming, MagneticDrift, ExBDrift, PitchAngleDiffusion,
     GradientDrive, Quasineutrality, conservative_pitch_operator,
-    CollisionalDrag, NeoclassicalDiffusion, CollisionalCross
+    CollisionalDrag, NeoclassicalDiffusion, CollisionalCross, MomentumRestoring
 import ..Coefficients:
     magnetic_drift_frequency, orbit_average_drift_brackets, orbit_average_exb_bracket,
     orbit_average_pitch_brackets,
-    deflection_frequency, delta_moment_prefactors,
+    deflection_frequency, momentum_restoring_average, delta_moment_prefactors,
     h_amplitude, quasineutrality_coefficient
 import ..Fields: h_profile
 import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species
@@ -51,6 +51,7 @@ export drift_coefficient_table, pitch_diffusivity_profile, pitch_collision_coeff
 export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
 export quasineutrality_source, streaming_coefficients, gradient_far_field
 export exb_coupling_table, physical_velocity_weights, parallel_flow_weight
+export momentum_restoring_term
 
 # ---------------------------------------------------------------------------
 # Physics parameter carrier (the cleared inputs)
@@ -542,6 +543,42 @@ function parallel_flow_weight(grid::IslandGrid, phys::Level0Physics)
 end
 
 """
+    momentum_restoring_term(grid, phys) -> Operators.MomentumRestoring
+
+Build the **cleared** momentum-restoring field-particle collision term (term F,
+`01 §2.3`; `orbit-averaged-collision.md` §6, `velocity-moment-measure.md`), the
+one nonlocal Level-0 term. It forms the parallel-flow moment
+`Ū(x,ξ) = (1/√π⟨ν̂_ii⟩_u) {ν̂_ii v̂_∥ g}_v` (physical `∫d³v` measure) and adds the
+σ-even redistribution `2ν̂_ii(√E)(1+ε)/(m ρ̂_θi) · Ū` (positive — ÷−m ρ̂_θi of the
+RHS; the `F̂_M=e^{−E}` cancels in the `g=shape` convention). The moment weight is
+`W = ν̂_ii(√E)·v̂_∥ = ν̂_ii·σ√E√(1−y b_min)`, and `⟨ν̂_ii⟩_u` is the cleared
+`Coefficients.momentum_restoring_average` (`collision-magnitude.md`).
+"""
+function momentum_restoring_term(grid::IslandGrid, phys::Level0Physics)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    ε = phys.epsilon
+    β = (1 - ε) / (1 + ε)                                 # b_min
+    νu = momentum_restoring_average(; epsilon=ε, nu_star=phys.nu_star)   # ⟨ν̂_ii⟩_u
+    νu != 0 || throw(ArgumentError("⟨ν̂_ii⟩_u = 0 (nu_star = 0); momentum restoring needs collisions"))
+    inv_norm = 1 / (sqrt(π) * νu)
+    W = Array{Float64}(undef, ny, nE, nσ)                 # ν̂_ii · v̂_∥ (σ-odd)
+    redistribute = Vector{Float64}(undef, nE)             # 2ν̂_ii(1+ε)/(m ρ̂_θi), E-dependent, σ-even
+    @inbounds for iE in 1:nE
+        v̂ = sqrt(grid.E.nodes[iE])
+        ν̂ii = _nu_hat_ii(phys, v̂)
+        redistribute[iE] = 2 * ν̂ii * (1 + ε) / (phys.m * phys.rho_hat_theta_i)
+        for iσ in 1:nσ
+            σ = grid.σ[iσ]
+            for iy in 1:ny
+                W[iy, iE, iσ] = ν̂ii * σ * v̂ * sqrt(max(1 - grid.y.nodes[iy] * β, 0.0))  # ν̂_ii v̂_∥
+            end
+        end
+    end
+    wy_phys, wE_phys = physical_velocity_weights(grid, phys)
+    return MomentumRestoring(W, redistribute, wy_phys, wE_phys, inv_norm)
+end
+
+"""
     gradient_far_field(grid, phys) -> FarFieldConditions
 
 Build the **cleared** neoclassical far-field boundary state — the Level-0
@@ -654,6 +691,7 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
     a_drag = collisional_drag_coefficient(grid, phys)          # A: ∂_x drag
     c_neo = neoclassical_diffusion_coefficient(grid, phys)     # B: ∂²_x neoclassical
     c_cross = collisional_cross_coefficient(grid, phys)        # C: ∂²_xy cross
+    mom_restore = momentum_restoring_term(grid, phys)          # F: nonlocal momentum restoring
 
     # cleared quasineutrality field term (α + drive from the signed-off closure),
     # with the cleared physical ∫d³v measure for δn̄_i = M[g] (velocity-moment-measure.md)
@@ -676,13 +714,14 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
         CollisionalDrag(a_drag),                              # cleared collision A (∂_x)
         NeoclassicalDiffusion(c_neo),                         # cleared collision B (∂²_x)
         CollisionalCross(c_cross),                            # cleared collision C (∂²_xy)
+        mom_restore,                                          # cleared collision F (momentum, nonlocal)
         GradientDrive(drive0)                                 # cleared: zero source (far field)
     )
     stack = IslandStack(kinetic, Quasineutrality(α, S_Φ, wy_phys, wE_phys))  # cleared closure + physical measure (01 §3, §4)
 
     return (stack=stack, bc=bc, delta_prefactors=Δpref,
         cleared=(:magnetic_drift, :streaming, :exb, :pitch_diffusion, :collisional_drag,
-            :neoclassical_diffusion, :collisional_cross, :collision_magnitude,
+            :neoclassical_diffusion, :collisional_cross, :momentum_restoring, :collision_magnitude,
             :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
         gated=())
 end

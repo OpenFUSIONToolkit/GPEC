@@ -251,7 +251,13 @@ bare pass/fail. The derivation lane inherits this framing.
     — **UNBLOCKED (2026-07-13)**: Q6 cleared the physical `∫d³v` measure and the
     parallel-flow weight `W = v̂_∥` (`velocity-moment-measure.md`), so `Ū` is now a
     bounded physical moment (`W` + the cleared `u³ν̂_ii/⟨ν̂_ii⟩_u` weight) with no
-    remaining gated normalization. F is ready to implement as a nonlocal operator.
+    remaining gated normalization.
+    — **RESOLVED (2026-07-14)**: F implemented as `Operators.MomentumRestoring` +
+    `Configure.momentum_restoring_term` — the one nonlocal Level-0 term:
+    `Ū(x,ξ) = (1/√π⟨ν̂_ii⟩_u){ν̂_ii v̂_∥ g}_v` (physical measure) redistributed as
+    `+2ν̂_ii(1+ε)Ū/(m ρ̂_θi)` (σ-even, positive; `F̂_M=e^{−E}` cancels in the `g=shape`
+    convention). Linear in `g`, allocation-free. **The full Level-0 collision
+    operator (all six terms) is now complete** — no gated kinetic physics remains.
   - **Neoclassical far field** `bc` (`Operators.FarFieldConditions`): the
     no-island `g_far`/`Φ_far` (never bare Neumann — L23 §5.3), gated physics
     already flagged under Q3.

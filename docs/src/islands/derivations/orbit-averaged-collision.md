@@ -19,8 +19,10 @@ collisional_drag_coefficient, neoclassical_diffusion_coefficient,
 collisional_cross_coefficient}`, `Operators.{PitchAngleDiffusion (rebuilt),
 CollisionalDrag, NeoclassicalDiffusion, CollisionalCross}`, plus the forbidden-pitch
 `g=0` domain BC and the new `Level0Physics.m`. The sixth term — the
-**momentum-restoring** nonlocal integral (F) — is a pending operator addition
-(its magnitude `⟨ν̂_ii⟩_u` is cleared, `collision-magnitude.md`).
+**momentum-restoring** nonlocal integral (F) — is **now also implemented**
+(sign-off 2026-07-14, once the physical `∫d³v` measure landed,
+`velocity-moment-measure.md`): `Operators.MomentumRestoring` +
+`Configure.momentum_restoring_term`. **All six terms complete.**
 
 ## 1. Scope — what "clearing B_profile" actually is
 

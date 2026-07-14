@@ -37,7 +37,7 @@ export IslandState, IslandCache, IslandStack, AbstractTerm
 export ParallelStreaming, MagneticDrift, ExBDrift, Collisions, GradientDrive,
     PerpTransport, RadiationSink, Quasineutrality
 export PitchAngleDiffusion, conservative_pitch_operator
-export CollisionalDrag, NeoclassicalDiffusion, CollisionalCross
+export CollisionalDrag, NeoclassicalDiffusion, CollisionalCross, MomentumRestoring
 export FarFieldConditions, apply_farfield!
 export apply!, residual!, velocity_moment!, weighted_moment!, statelength,
     flatten!, unflatten!, g_flat_index, Φ_flat_index
@@ -84,17 +84,19 @@ end
     IslandCache{T}(grid)
 
 Per-solve scratch buffers, typed to the state element type `T` so the hot path
-allocates nothing (and so AD duals get dual-typed scratch). Currently holds the
-two potential-gradient fields consumed by the `E×B` bracket.
+allocates nothing (and so AD duals get dual-typed scratch). Holds the two
+potential-gradient fields consumed by the `E×B` bracket and the `Ū` parallel-flow
+buffer consumed by the momentum-restoring term.
 """
 struct IslandCache{T}
     dΦdx::Matrix{T}
     dΦdξ::Matrix{T}
+    Ubar::Matrix{T}
 end
 
 function IslandCache{T}(grid::IslandGrid) where {T}
     nx, nξ, = nnodes(grid)
-    return IslandCache{T}(zeros(T, nx, nξ), zeros(T, nx, nξ))
+    return IslandCache{T}(zeros(T, nx, nξ), zeros(T, nx, nξ), zeros(T, nx, nξ))
 end
 IslandCache(grid::IslandGrid) = IslandCache{Float64}(grid)
 
@@ -254,6 +256,34 @@ The collision `∂²_{yp}` cross term (term C, `01 §2.3`;
 """
 struct CollisionalCross{A} <: AbstractTerm
     c::A
+end
+
+"""
+    MomentumRestoring(W, redistribute, wy, wE, inv_norm)
+
+The collision operator's **momentum-restoring** field-particle term (term F,
+`01 §2.3`; `orbit-averaged-collision.md`, `velocity-moment-measure.md`): the one
+**nonlocal** Level-0 term. Forms the parallel-flow moment
+`Ū(x,ξ) = inv_norm · ∫dy∫dE Σ_σ W(y,E,σ) g` (`W = ν̂_ii v̂_∥`, physical measure
+`wy`/`wE`; `inv_norm = 1/(√π⟨ν̂_ii⟩_u)`), then adds the σ-even redistribution
+`redistribute(E) · Ū(x,ξ)` to the residual (`redistribute = 2ν̂_ii(1+ε)/(m ρ̂_θi)`;
+the `F̂_M = e^{−E}` cancels in the `g = shape` convention). Linear in `g` (Ū is a
+linear moment), so AD flows through; uses the `cache.Ubar` scratch to stay
+allocation-free.
+
+## Fields
+
+  - `W`           — `(ny, nE, nσ)` moment weight `ν̂_ii v̂_∥` (σ-odd).
+  - `redistribute` — length-`nE` redistribution coefficient (E-dependent, σ-even).
+  - `wy`, `wE`    — physical `∫d³v` velocity weights.
+  - `inv_norm`    — `1/(√π⟨ν̂_ii⟩_u)`.
+"""
+struct MomentumRestoring{A3,V,S} <: AbstractTerm
+    W::A3
+    redistribute::V
+    wy::V
+    wE::V
+    inv_norm::S
 end
 
 """
@@ -510,6 +540,19 @@ end
 
 function apply!(R::IslandState, t::CollisionalCross, U::IslandState, grid::IslandGrid, ::IslandCache)
     _add_dxy!(R.g, t.c, U.g, grid.x.D1, grid.y.D1)
+    return R
+end
+
+function apply!(R::IslandState, t::MomentumRestoring, U::IslandState, grid::IslandGrid, cache::IslandCache)
+    # Ū(x,ξ) = inv_norm · ∫dy∫dE Σ_σ W(y,E,σ) g   (physical ∫d³v measure)
+    weighted_moment!(cache.Ubar, U.g, t.W, grid; wy=t.wy, wE=t.wE)
+    Ū = cache.Ubar
+    inv_norm = t.inv_norm
+    redistribute = t.redistribute
+    nx, nξ, ny, nE, nσ = size(U.g)
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ, ix in 1:nx
+        R.g[ix, iξ, iy, iE, iσ] += redistribute[iE] * inv_norm * Ū[ix, iξ]
+    end
     return R
 end
 
