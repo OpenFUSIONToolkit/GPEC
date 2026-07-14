@@ -615,10 +615,13 @@ function write_outputs_to_HDF5(
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
         end
 
-        # Edge coil-response matrix (2msing × numpert_total) from the Eq. (37) edge-BC loop.
+        # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
+        # the galerkin/delta_coil layout so H5Web heatmaps share axes (x = edge mode, y = surface-side).
+        # Internal intr.delta_coil_matrix stays (2msing × numpert_total); transpose only at write.
         if intr.msing > 0 && !isempty(intr.delta_coil_matrix)
-            out_h5["singular/delta_coil_matrix"] = intr.delta_coil_matrix
-            out_h5["singular/delta_coil_abs"] = abs.(intr.delta_coil_matrix)  # real |.| for H5Web heatmap view
+            dc = permutedims(intr.delta_coil_matrix)
+            out_h5["singular/delta_coil_matrix"] = dc
+            out_h5["singular/delta_coil_abs"] = abs.(dc)  # real |.| for H5Web heatmap view
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
