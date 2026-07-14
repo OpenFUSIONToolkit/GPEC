@@ -64,16 +64,34 @@ function _resample_contour_to_theta(R::AbstractVector, Z::AbstractVector,
     Rs = Rs[keep]
     Zs = Zs[keep]
 
-    # Periodic wrap: repeat the first knot at α+1 so interpolation covers the full circle.
-    α_wrap = [αs; αs[1] + 1.0]
-    R_wrap = [Rs; Rs[1]]
-    Z_wrap = [Zs; Zs[1]]
-
     Rθ = similar(theta_grid, Float64)
     Zθ = similar(theta_grid, Float64)
-    for (j, θ) in enumerate(theta_grid)
-        Rθ[j] = _linear_periodic(α_wrap, R_wrap, θ)
-        Zθ[j] = _linear_periodic(α_wrap, Z_wrap, θ)
+    m = length(αs)
+    if m >= 6
+        # Periodic cubic resampling. Extend the knots with a wrapped margin on both ends so every
+        # θ ∈ [0,1] query is interior and C² across the α=0 seam. Cubic is O(h⁴)-accurate and
+        # unbiased; the former linear resampling was O(h²) with a systematic inward-chord bias, and
+        # its ψ-uncorrelated per-surface error is amplified by the inverse solver's radial ∇ψ
+        # derivative into the C1 (eqfun_metric1) coefficient that sets Δ' at the rational surfaces.
+        w = min(4, m)
+        α_ext = vcat(αs[m-w+1:m] .- 1.0, αs, αs[1:w] .+ 1.0)
+        R_ext = vcat(Rs[m-w+1:m], Rs, Rs[1:w])
+        Z_ext = vcat(Zs[m-w+1:m], Zs, Zs[1:w])
+        spR = cubic_interp(α_ext, R_ext; extrap=ExtendExtrap())
+        spZ = cubic_interp(α_ext, Z_ext; extrap=ExtendExtrap())
+        for (j, θ) in enumerate(theta_grid)
+            Rθ[j] = spR(θ)
+            Zθ[j] = spZ(θ)
+        end
+    else
+        # Too few knots for a stable cubic — fall back to periodic-linear.
+        α_wrap = [αs; αs[1] + 1.0]
+        R_wrap = [Rs; Rs[1]]
+        Z_wrap = [Zs; Zs[1]]
+        for (j, θ) in enumerate(theta_grid)
+            Rθ[j] = _linear_periodic(α_wrap, R_wrap, θ)
+            Zθ[j] = _linear_periodic(α_wrap, Z_wrap, θ)
+        end
     end
     return Rθ, Zθ
 end
