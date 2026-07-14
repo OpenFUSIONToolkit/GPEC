@@ -8,6 +8,40 @@ relevant.
 
 ---
 
+## 2026-07-14 — FIRST PHYSICS: solved state → the resonant-current Δ outputs (output assembly + decomposition)
+
+- **Moved**: wired the physical solve into the **Δ outputs** — the first physics
+  deliverable off the converged state. (1) `Moments.parallel_current!` gained
+  `wy`/`wE` kwargs forwarded to `weighted_moment!`, so `J̄_∥` now carries the
+  **physical `∫d³v` measure** (was the flat default) — the cleared `W = v̂_∥`'s
+  `√(1−y b_min)` cancels the pitch Jacobian, `J̄_∥` regular. (2) New output-assembly
+  entry point `Configure.delta_outputs(grid, phys, species, Usol, cfg)`: builds the
+  cleared `W` (`parallel_flow_weight`) + physical measure, forms `J̄_∥` from the
+  solved bulk-ion `g`, projects to `Δ_neo ≡ Δ_cos` and `Δ_sin` with the cleared
+  `∓μ₀R/2ψ̃` prefactors (`cfg.delta_prefactors`), so `Δ_cos+iΔ_sin ↔` layer-`Δ(Q)`.
+  (3) Decomposition diagnostics (`Moments.channel_decomposition`, docs/01 §4, L23
+  Eq. 2.5.3 *approximate* split): lifts `J̄_∥` to a callable (`grid_interpolant`,
+  separable local-Lagrange, reusing PhaseSpace `fd_weights`), reconstructs the
+  flux-surface-constant `⟨J̄_∥⟩_Ω` **bootstrap+curvature** channel and the
+  **`Δ_pol` polarization** residual, plus the `⟨J̄_∥⟩_Ω` profile. **No new [VERIFY]
+  coefficient** — assembly + diagnostics only. **physics-verifier PASS** (every
+  physics number from a cleared builder / `cfg.delta_prefactors`; Δ_cos≡Δ_neo sign
+  + prefactor mapping, the open/closed `⟨·⟩_Ω` branch, and the physical-measure
+  forwarding all match docs/01 §4). 138 solve + 1540 configure + 5 anchor-sync
+  assertions green (nodal-exact interpolant, off-node accuracy, flux-function
+  `Δ_pol→0`, `⟨J̄_∥⟩_Ω` profile recovers `f(Ω)`, additive split, single-bulk
+  contract); `build_docs_local.jl` green. Doc-first: numerics.md §7 (Δ moments,
+  physical measure, decomposition, entry point) + §8 (F stale-line fix).
+- **Blocked**: nothing on Step 1. The **absolute** threshold `w_c` (B-ladder T4)
+  needs an external outer-region `Δ′` input + the docs/09 manifest — ESCALATE, do
+  not guess, if it comes up. Deferred: Hirshman–Sigmar `k ≃ −1.173`; the Verify.jl
+  MMS repointing (collision operators); the electron/species partition of `J̄_∥`
+  (docs/01 §4, a later diagnostic — L0 `delta_outputs` is single-bulk-ion).
+- **Next**: Step 2 — the B-ladder T2/T3 physics gates (un-skip the B-benchmarks
+  via `const UNGATED`). Primary: **B5** the `:original/:improved` drift-toggle
+  differential (the reproducible 8.73→1.46 ρ_bi form); then **B2** large-w
+  `Δ_bs+Δ_cur ∝ 1/w` (T3), **B4** `Δ_pol(ω_E)` trend (T3).
+
 ## 2026-07-14 — Q5: clear the momentum-restoring term F — the Level-0 collision operator is COMPLETE (6/6)
 
 - **Moved**: implemented the sixth and final collision term — the **momentum-restoring**

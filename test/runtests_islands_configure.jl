@@ -21,6 +21,7 @@ const Soc = IslC.Solvers
 const Coc = IslC.Coefficients
 const Spc = IslC.SpeciesLists
 const Cfg = IslC.Configure
+const Mo = IslC.Moments
 
 # small physical grid: y_max spans the full pitch domain (forbidden region +
 # y_c layer) so the assembly's robustness there is exercised.
@@ -358,6 +359,41 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         end
         # the pitch Jacobian cancels for the flow: wy·W_σ=+1 is regular (finite) everywhere
         @test all(isfinite, [wy[iy] * W[iy, 2, 1] for iy in 1:grid.y.n])
+    end
+
+    @testset "delta_outputs: solved state → Δ moments (01 §4, first physics deliverable)" begin
+        # converge the fully-cleared config, then assemble the Δ outputs.
+        f! = Soc.flat_residual(cfg.stack, grid; bc=cfg.bc)
+        N = Opc.statelength(grid)
+        sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-9, atol=1e-13, max_iter=40, memory=200)
+        @test sol.converged
+        Usol = Opc.IslandState(grid)
+        Opc.unflatten!(Usol, sol.u)
+
+        out = Cfg.delta_outputs(grid, phys, species, Usol, cfg)
+        # everything is finite and the primary moments are real numbers
+        @test all(isfinite, out.Jpar)
+        @test isfinite(out.Δ_neo) && isfinite(out.Δsin)
+        @test out.Δcos == out.Δ_neo                              # Δ_cos ≡ Δ_neo alias
+        # J̄_∥ carries the physical measure: rebuild it explicitly and match
+        W = Cfg.parallel_flow_weight(grid, phys)
+        wy, wE = Cfg.physical_velocity_weights(grid, phys)
+        Jref = zeros(grid.x.n, grid.ξ.n)
+        Mo.parallel_current!(Jref, [Usol.g], species, [W], grid; wy=wy, wE=wE)
+        @test out.Jpar ≈ Jref
+        # the growth moment uses the cleared prefactor and the decomposition is additive
+        Δref = Mo.delta_moments(out.Jpar, grid; prefactor_cos=cfg.delta_prefactors.cos, prefactor_sin=cfg.delta_prefactors.sin)
+        @test out.Δ_neo ≈ Δref.Δcos && out.Δsin ≈ Δref.Δsin
+        @test out.bootstrap_curvature + out.polarization ≈ out.Δ_neo
+        # the Ω-average profile is finite where it is defined (NaN only at the
+        # excluded O-point/separatrix samples)
+        @test any(isfinite, out.omega_average_profile.value)
+        for v in out.omega_average_profile.value
+            @test isnan(v) || isfinite(v)
+        end
+        # single-bulk-ion contract: two bulk species is rejected
+        anti = Spc.Species(; name=:i2, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0, T=1.0), role=Spc.Bulk)
+        @test_throws ArgumentError Cfg.delta_outputs(grid, phys, [species[1], anti], Usol, cfg)
     end
 
     @testset "assembly validates the species list" begin

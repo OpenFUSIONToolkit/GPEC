@@ -34,7 +34,7 @@ module Configure
 
 using LinearAlgebra
 import ..PhaseSpace: IslandGrid, nnodes, MappedFDGrid
-import ..Operators: IslandStack, FarFieldConditions,
+import ..Operators: IslandStack, IslandState, FarFieldConditions,
     ParallelStreaming, MagneticDrift, ExBDrift, PitchAngleDiffusion,
     GradientDrive, Quasineutrality, conservative_pitch_operator,
     CollisionalDrag, NeoclassicalDiffusion, CollisionalCross, MomentumRestoring
@@ -44,9 +44,10 @@ import ..Coefficients:
     deflection_frequency, momentum_restoring_average, delta_moment_prefactors,
     h_amplitude, quasineutrality_coefficient
 import ..Fields: h_profile
-import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species
+import ..Moments: parallel_current!, delta_moments, channel_decomposition
+import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species, bulk_species
 
-export Level0Physics, configure_level0
+export Level0Physics, configure_level0, delta_outputs
 export drift_coefficient_table, pitch_diffusivity_profile, pitch_collision_coefficient
 export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
 export quasineutrality_source, streaming_coefficients, gradient_far_field
@@ -724,6 +725,52 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
             :neoclassical_diffusion, :collisional_cross, :momentum_restoring, :collision_magnitude,
             :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
         gated=())
+end
+
+# ---------------------------------------------------------------------------
+# Output assembly: solved state → the Δ growth/torque moments (01 §4)
+# ---------------------------------------------------------------------------
+"""
+    delta_outputs(grid, phys, species, Usol, cfg)
+
+Assemble the Level-0 output moments from a **converged** solve (`01 §4`), the
+first physics deliverable of the solved state. Given the solved `Usol::IslandState`
+(the bulk-ion distribution `g`), the physics parameters `phys`, the `species`
+list, and the configuration `cfg` (from [`configure_level0`](@ref), carrying the
+cleared `Δ` prefactors), it:
+
+  - builds the cleared parallel-flow weight `W = v̂_∥` ([`parallel_flow_weight`])
+    and the physical `∫d³v` measure ([`physical_velocity_weights`]);
+  - forms the parallel current `J̄_∥(x, ξ) = Σ_j Z_j ∫ W_j g_j`
+    (`Moments.parallel_current!`) — at Level 0 the single solved **bulk-ion**
+    channel (the electron/species partition of `01 §4` is a later diagnostic);
+  - projects `J̄_∥` onto the growth and torque moments with the cleared
+    prefactors `∓μ₀R/2ψ̃`: `Δ_neo ≡ Δ_cos` (stationarity `Δ′ + Δ_neo = 0`) and
+    `Δ_sin`, so `Δ_cos + iΔ_sin` maps onto the linear-layer `Δ(Q)`;
+  - decomposes the growth moment into the bootstrap+curvature and polarization
+    channels (`Moments.channel_decomposition`, an approximate diagnostic).
+
+Returns a NamedTuple `(Jpar, Δ_neo, Δcos, Δsin, bootstrap_curvature,
+polarization, omega_average_profile)`. Requires exactly one bulk species (the
+Level-0 solve is single-bulk-ion; multi-bulk is a later milestone).
+"""
+function delta_outputs(grid::IslandGrid, phys::Level0Physics, species::AbstractVector{<:Species}, Usol::IslandState, cfg)
+    validate_species(species)
+    bulk = bulk_species(species)
+    length(bulk) == 1 || throw(ArgumentError("delta_outputs: the Level-0 solve is single-bulk-ion (got $(length(bulk)) bulk species)"))
+
+    W = parallel_flow_weight(grid, phys)
+    wy, wE = physical_velocity_weights(grid, phys)
+    Jpar = zeros(eltype(Usol.g), grid.x.n, grid.ξ.n)
+    parallel_current!(Jpar, [Usol.g], bulk, [W], grid; wy=wy, wE=wE)
+
+    pc, ps = cfg.delta_prefactors.cos, cfg.delta_prefactors.sin
+    Δ = delta_moments(Jpar, grid; prefactor_cos=pc, prefactor_sin=ps)
+    dec = channel_decomposition(Jpar, grid, phys.w_psi; prefactor_cos=pc)
+
+    return (Jpar=Jpar, Δ_neo=Δ.Δcos, Δcos=Δ.Δcos, Δsin=Δ.Δsin,
+        bootstrap_curvature=dec.bootstrap_curvature, polarization=dec.polarization,
+        omega_average_profile=dec.omega_average_profile)
 end
 
 end # module Configure

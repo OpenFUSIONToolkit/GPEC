@@ -204,6 +204,45 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test Mo2.omega_label(1.0, float(π), 1.0) ≈ 3.0
     end
 
+    @testset "grid_interpolant + Ω-decomposition diagnostics (01 §4)" begin
+        g = _sgrid(17)
+        # analytic smooth field on the grid; the interpolant is nodally exact and
+        # accurate off-node, periodic in ξ.
+        Ffun(x, ξ) = cos(ξ) * exp(-x^2 / 8)                                    # smooth, mode-1 in ξ
+        F = [Ffun(x, ξ) for x in g.x.nodes, ξ in g.ξ.nodes]
+        itp = Mo2.grid_interpolant(F, g)
+        for ix in (1, 5, 9, g.x.n), iξ in (1, 3, 6)
+            @test itp(g.x.nodes[ix], g.ξ.nodes[iξ]) ≈ F[ix, iξ] atol = 1e-12   # nodal exactness
+        end
+        xm = (g.x.nodes[8] + g.x.nodes[9]) / 2
+        ξm = (g.ξ.nodes[3] + g.ξ.nodes[4]) / 2
+        @test itp(xm, ξm) ≈ Ffun(xm, ξm) rtol = 5e-3                            # off-node accuracy
+        @test itp(1.3, 0.7 + 2π) ≈ itp(1.3, 0.7) atol = 1e-12                   # ξ-periodic
+        @test_throws ArgumentError Mo2.grid_interpolant(zeros(3, 3), g)
+
+        # a flux-surface-constant current J = f(Ω) is pure bootstrap+curvature:
+        # its ⟨·⟩_Ω reconstruction reproduces it, so Δ_pol → 0.
+        w = 2.0
+        fΩ(Ω) = exp(-0.2 * Ω)
+        J = [fΩ(Mo2.omega_label(x, ξ, w)) for x in g.x.nodes, ξ in g.ξ.nodes]
+        Δneo = Mo2.delta_moments(J, g; prefactor_cos=1.0, prefactor_sin=0.0).Δcos
+        dec = Mo2.channel_decomposition(J, g, w; prefactor_cos=1.0)
+        @test dec.bootstrap_curvature + dec.polarization ≈ Δneo                 # additive split
+        @test abs(dec.polarization) < 5e-2 * abs(Δneo)                          # flux function ⇒ ~no polarization
+        # the ⟨J̄_∥⟩_Ω profile of a flux function recovers f(Ω) at each Ω sample
+        prof = dec.omega_average_profile
+        for i in eachindex(prof.Ω)
+            isnan(prof.value[i]) && continue
+            @test prof.value[i] ≈ fΩ(prof.Ω[i]) rtol = 2e-2
+        end
+        # a non-flux current has a genuine polarization channel
+        Jnf = [exp(-x^2 / 4) * (2.0 + cos(ξ)) for x in g.x.nodes, ξ in g.ξ.nodes]
+        decnf = Mo2.channel_decomposition(Jnf, g, w; prefactor_cos=1.0)
+        Δnf = Mo2.delta_moments(Jnf, g; prefactor_cos=1.0, prefactor_sin=0.0).Δcos
+        @test decnf.bootstrap_curvature + decnf.polarization ≈ Δnf
+        @test abs(decnf.polarization) > 1e-8                                     # not flux-constant
+    end
+
     @testset "island_flux_amplitude — cleared ψ̃ = (w_ψ²/4)(q_s'/q_s) relation" begin
         # cleared physics relation (sign-off 2026-07-11; derivations/psi-tilde-amplitude.md)
         w, dq, q = 0.3, 0.8, 1.2

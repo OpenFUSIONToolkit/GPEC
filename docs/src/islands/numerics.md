@@ -264,21 +264,46 @@ The output moments are the two Ampère projections of the species-summed
 parallel current ``\bar J_\parallel = \sum_j Z_j \int W_j\, g_j`` (`01 §4`):
 
 ```math
-\Delta_{\cos} = C_{\cos} \int dx \oint d\xi\; \bar J_\parallel \cos\xi,
+\Delta_{\rm neo} \equiv \Delta_{\cos} = C_{\cos} \int dx \oint d\xi\; \bar J_\parallel \cos\xi,
 \qquad
 \Delta_{\sin} = C_{\sin} \int dx \oint d\xi\; \bar J_\parallel \sin\xi,
 ```
 
-where the ``\xi``-projection is spectrally exact on the periodic grid and the
-prefactors ``C_{\cos}, C_{\sin}`` (physically ``\mp\mu_0 R / 2\tilde\psi``) are
-**required, gated arguments** — ``\tilde\psi`` carries an open `[VERIFY]` and
-the sin normalization is `[DERIVED]`-unpinned (QUESTIONS Q4). The parity
-structure ``\Delta_{\cos}`` even / ``\Delta_{\sin}`` odd under ``\xi``-reflection
-is verified exactly (ladder **A3**).
+where the ``\xi``-projection is spectrally exact on the periodic grid. The
+current is assembled with the **cleared** parallel-flow weight
+``W = \hat v_\parallel = \sigma\sqrt E\sqrt{1-y b_{\min}}`` and the physical
+``\int d^3v`` measure (`Configure.parallel_flow_weight` /
+`physical_velocity_weights`, `velocity-moment-measure.md`): the ``\sqrt{1-y b_{\min}}``
+of ``W`` cancels the pitch Jacobian, so ``\bar J_\parallel`` is regular. The
+prefactors ``C_{\cos}=-\mu_0R/2\tilde\psi``, ``C_{\sin}=+\mu_0R/2\tilde\psi`` are
+**cleared** (`delta_moment_prefactors`, §8; ``\tilde\psi`` from
+`island_flux_amplitude`, the sin normalization the symmetric `[DERIVED]` pin) so
+that ``\Delta_{\cos}+i\Delta_{\sin}`` maps onto the linear-layer ``\Delta(Q)``,
+and ``\Delta_{\rm neo}`` obeys the stationarity balance ``\Delta' + \Delta_{\rm neo}=0``.
+The parity structure ``\Delta_{\cos}`` even / ``\Delta_{\sin}`` odd under
+``\xi``-reflection is verified exactly (ladder **A3**).
 
-*Implementing symbols:* `Moments.parallel_current!`, `Moments.delta_moments`,
-`Moments.omega_average`, `Fields.Q_omega`, `Fields.h_profile`,
-`Fields.flat_average_d2h_dx2`.
+The growth moment splits (an *approximate diagnostic*, L23 Eq. 2.5.3;
+`channel_decomposition`) into the **bootstrap+curvature** channel — the
+``\cos\xi`` projection of the flux-surface-constant part
+``\bar J_{\rm bs}(x,\xi) = \langle\bar J_\parallel\rangle_{\Omega(x,\xi)}`` — and
+the **polarization** residual ``\Delta_{\rm pol} = \Delta_{\rm neo} -
+(\Delta_{\rm bs}+\Delta_{\rm cur})``, the piece that flux-surface-averages to
+zero. The reconstruction lifts the discrete ``\bar J_\parallel`` to a callable
+via a separable local-Lagrange interpolant (`grid_interpolant`) that the
+``\langle\cdot\rangle_\Omega`` quadrature samples.
+
+The output assembly `Configure.delta_outputs(grid, phys, species, Usol, cfg)`
+turns a converged solve (`Usol`, the bulk-ion ``g``) into
+``(\bar J_\parallel, \Delta_{\rm neo}, \Delta_{\sin},`` the decomposition
+channels, and the ``\langle\bar J_\parallel\rangle_\Omega`` profile``)`` — the
+first physics deliverable of the solved state (the electron/species partition of
+`01 §4` is a later diagnostic).
+
+*Implementing symbols:* `Configure.delta_outputs`, `Moments.parallel_current!`,
+`Moments.delta_moments`, `Moments.channel_decomposition`,
+`Moments.grid_interpolant`, `Moments.omega_average`, `Fields.Q_omega`,
+`Fields.h_profile`, `Fields.flat_average_d2h_dx2`.
 
 ## 8. The Level-0 configuration assembly (M2c)
 
@@ -335,8 +360,9 @@ The gradient drive is cleared as I19 Formulation A — a **zero** interior
 — `GatedLevel0Inputs` is removed and `configure_level0(grid, phys, species)` takes
 no gated argument (QUESTIONS Q5 fully cleared). The assembled residual is
 well-formed, ``\Phi`` is genuinely driven, and Newton–Krylov converges (max-norm
-`< 1e-7`). The only collision piece not yet a stack operator is the nonlocal
-momentum-restoring term (F). Implemented by: `Configure.configure_level0`.
+`< 1e-7`). **All six collision terms — including the nonlocal
+momentum-restoring F — are now stack operators.** Implemented by:
+`Configure.configure_level0`.
 
 ## 9. Verification evidence (the A-ladder, all green in CI)
 
