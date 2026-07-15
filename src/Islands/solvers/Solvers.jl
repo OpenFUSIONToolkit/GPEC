@@ -18,6 +18,12 @@ Pieces:
     pencil blocks with **TSVD-regularized** solves, the explicit `y_c`-matching
     treatment of `04 §3` (GMRES must never resolve the near-singular directions
     itself).
+  - [`PlaneJacobi`](@ref) — the `(x, ξ)` advection-plane preconditioner that
+    actually tames the physical-`ρ̂_θi` conditioning (`cond ~10⁹ → ~10⁵`): the
+    per-`(y, E, σ)` in-plane block, TSVD-regularized like `YBlockJacobi`, its
+    blocks extracted matrix-free by the y-colored JVP of [`plane_blocks`](@ref)
+    (the nonlocal momentum-restoring term dropped so the reduced Jacobian is
+    block-diagonal in the planes).
   - [`newton_krylov`](@ref) — inexact Newton with Eisenstat–Walker forcing and
     a backtracking line search.
   - [`pseudo_arclength`](@ref) — the continuation scaffold with fold detection
@@ -34,10 +40,10 @@ import Krylov
 import ForwardDiff
 import ..PhaseSpace: IslandGrid, nnodes
 import ..Operators: IslandState, IslandCache, IslandStack, FarFieldConditions,
-    residual!, flatten!, unflatten!, statelength
+    MomentumRestoring, residual!, flatten!, unflatten!, statelength
 
 export flat_residual, JVPOperator, dense_jacobian
-export YBlockJacobi, newton_krylov, newton_direct, pseudo_arclength
+export YBlockJacobi, PlaneJacobi, plane_blocks, newton_krylov, newton_direct, pseudo_arclength
 
 # Tag for the solver's ForwardDiff duals (one directional derivative).
 struct JVPTag end
@@ -247,6 +253,155 @@ function LinearAlgebra.ldiv!(y::AbstractVector, P::YBlockJacobi, x::AbstractVect
                 acc += Pi[a, b] * xg[ix, iξ, b, iE, iσ]
             end
             yg[ix, iξ, a, iE, iσ] = acc
+        end
+    end
+    @inbounds for i in (ng+1):length(x)
+        y[i] = x[i] / P.phi_scale
+    end
+    return y
+end
+
+# ---------------------------------------------------------------------------
+# (x, ξ) advection-plane preconditioner (04 §5) — the scalable matrix-free fix
+# for the physical Level-0 conditioning
+# ---------------------------------------------------------------------------
+"""
+    without_momentum_restoring(stack)
+
+Return `stack` with the nonlocal `Operators.MomentumRestoring` term removed. That
+term (a velocity moment redistributed across *all* pitch/energy pencils) is the
+one Level-0 operator that couples every `(x, ξ)` plane densely; dropping it is
+what leaves the reduced Jacobian **block-diagonal in the planes**, so its diagonal
+blocks can be extracted plane-by-plane (a legitimate preconditioner approximation,
+`src/Islands/CLAUDE.md`). Every other term is kept — including pitch/cross, whose
+*within-plane* collision diagonal is what regularizes the otherwise-singular pure
+`(x, ξ)` advection block.
+"""
+function without_momentum_restoring(stack::IslandStack)
+    kept = Tuple(t for t in stack.kinetic if !(t isa MomentumRestoring))
+    return IslandStack(kept, stack.field)
+end
+
+"""
+    plane_blocks(f!, u, grid; band=2*grid.y.order)
+
+Extract the `(x, ξ)` **plane blocks** of the Jacobian of `f!` at `u` by
+**y-colored JVP** (`04 §5`). Each `(iy, iE, iσ)` pitch/energy/sign pencil owns a
+contiguous `nx·nξ` slice of the flattened `g` block (the `flatten!` layout); its
+plane block is the `(nx·nξ)×(nx·nξ)` diagonal block of the Jacobian mapping that
+plane's in-plane residual to its own `g`-values.
+
+The reduced Level-0 stack (`f!` built from [`without_momentum_restoring`](@ref))
+couples different planes **only** through the pitch/cross collision operators,
+which are *banded in `y`* (the pitch matrix `K = Gᵀ D G` inherits a half-bandwidth
+`≤ order` from the `y`-grid `D1`) and act only within a fixed `(iE, iσ)`. So planes
+whose `iy` are spaced more than the band apart never cross-couple and can be seeded
+**together**: for each in-plane node `c₀` and each `y`-color, one JVP recovers
+column `c₀` of every same-color plane's block at once — `nx·nξ · (band+1)` JVPs,
+independent of `ny·nE·nσ`. `band = 2·order` is a conservative default (the true
+band is `≤ order`).
+
+Returns an `Array{Matrix{Float64},3}` indexed `[iy, iE, iσ]`. `u` is not aliased.
+"""
+function plane_blocks(f!, u::AbstractVector{Float64}, grid::IslandGrid; band::Int=2 * grid.y.order)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    m = nx * nξ
+    N = statelength(grid)
+    J = JVPOperator(f!, collect(u))
+    ncolor = min(ny, band + 1)
+    blocks = Array{Matrix{Float64},3}(undef, ny, nE, nσ)
+    for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+        blocks[iy, iE, iσ] = zeros(m, m)
+    end
+    plane_base(iy, iE, iσ) = m * ((iy - 1) + ny * ((iE - 1) + nE * (iσ - 1)))
+    color(iy) = ((iy - 1) % ncolor) + 1
+    v = zeros(N)
+    out = zeros(N)
+    for c in 1:ncolor, c0 in 1:m
+        fill!(v, 0.0)
+        for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+            color(iy) == c && (v[plane_base(iy, iE, iσ)+c0] = 1.0)
+        end
+        mul!(out, J, v)
+        for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+            color(iy) == c || continue
+            base = plane_base(iy, iE, iσ)
+            B = blocks[iy, iE, iσ]
+            for a in 1:m
+                B[a, c0] = out[base+a]
+            end
+        end
+    end
+    return blocks
+end
+
+"""
+    PlaneJacobi(grid, block; svd_cutoff=1e-10, phi_scale=1.0)
+    PlaneJacobi(stack, grid, u; bc=nothing, band=2*grid.y.order, svd_cutoff=1e-10, phi_scale=1.0)
+
+Block-Jacobi preconditioner over the `(x, ξ)` **advection planes** — the scalable
+matrix-free fix for the physical Level-0 conditioning (`04 §5`). The physical
+`ρ̂_θi` streaming/collision coefficients drive `cond(J) ~ 10⁹` (growing as
+`1/ρ̂_θi`); the ill-conditioning is *cross-pencil advection*, so the `y`-pencil
+[`YBlockJacobi`](@ref) is the wrong tool (it makes it worse), while inverting the
+exact `(x, ξ)`-plane block per `(iy, iE, iσ)` drops the preconditioned condition
+number by four orders of magnitude (`~10⁹ → ~10⁵`), which is what lets GMRES
+solve the Newton linear systems at physical parameters.
+
+The first form mirrors [`YBlockJacobi`](@ref): `block(iy, iE, iσ)` returns the
+`(nx·nξ)×(nx·nξ)` in-plane block, each factored by SVD and truncated below
+`svd_cutoff · σ_max` (the same TSVD regularization). `phi_scale` is the diagonal
+applied to the `Φ` rows — pass `-α` (the negated quasineutrality shielding
+coefficient, the `Φ`-diagonal of the residual). Apply via `ldiv!`
+(`newton_krylov(...; precond=P, ldiv=true)`).
+
+The second form builds the blocks in one shot: it drops the nonlocal term
+([`without_momentum_restoring`](@ref)), wraps the reduced stack as a residual
+([`flat_residual`](@ref) with optional far-field `bc`), and extracts the plane
+blocks by y-colored JVP ([`plane_blocks`](@ref)) at the linearization point `u`.
+"""
+struct PlaneJacobi
+    grid::IslandGrid
+    pinvs::Array{Matrix{Float64},3}
+    phi_scale::Float64
+end
+
+function PlaneJacobi(grid::IslandGrid, block; svd_cutoff::Real=1e-10, phi_scale::Real=1.0)
+    nx, nξ, ny, nE, nσ = nnodes(grid)
+    m = nx * nξ
+    pinvs = Array{Matrix{Float64},3}(undef, ny, nE, nσ)
+    for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+        B = Matrix{Float64}(block(iy, iE, iσ))
+        size(B) == (m, m) || throw(ArgumentError("plane block must be (nx·nξ)×(nx·nξ) = ($m, $m)"))
+        F = svd(B)
+        smax = F.S[1]
+        sinv = [s > svd_cutoff * smax ? 1.0 / s : 0.0 for s in F.S]
+        pinvs[iy, iE, iσ] = F.V * Diagonal(sinv) * F.U'
+    end
+    return PlaneJacobi(grid, pinvs, Float64(phi_scale))
+end
+
+function PlaneJacobi(stack::IslandStack, grid::IslandGrid, u::AbstractVector{Float64};
+    bc::Union{Nothing,FarFieldConditions}=nothing, band::Int=2 * grid.y.order,
+    svd_cutoff::Real=1e-10, phi_scale::Real=1.0)
+    fred! = flat_residual(without_momentum_restoring(stack), grid; bc=bc)
+    blocks = plane_blocks(fred!, u, grid; band=band)
+    return PlaneJacobi(grid, (iy, iE, iσ) -> blocks[iy, iE, iσ]; svd_cutoff=svd_cutoff, phi_scale=phi_scale)
+end
+
+function LinearAlgebra.ldiv!(y::AbstractVector, P::PlaneJacobi, x::AbstractVector)
+    nx, nξ, ny, nE, nσ = nnodes(P.grid)
+    m = nx * nξ
+    ng = m * ny * nE * nσ
+    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+        base = m * ((iy - 1) + ny * ((iE - 1) + nE * (iσ - 1)))
+        Pi = P.pinvs[iy, iE, iσ]
+        for a in 1:m
+            acc = 0.0
+            for b in 1:m
+                acc += Pi[a, b] * x[base+b]
+            end
+            y[base+a] = acc
         end
     end
     @inbounds for i in (ng+1):length(x)

@@ -28,6 +28,7 @@ const Mo2 = IslM2.Moments
 const Fi2 = IslM2.Fields
 const Sp2 = IslM2.SpeciesLists
 const Fr2 = IslM2.Frames
+const Cfg2 = IslM2.Configure
 
 _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, clustering_x=1.0,
     y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
@@ -157,6 +158,79 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         g2!(out, u) = (So2.flat_residual(stack2, g)(out, u); out .-= b; out)
         sd2 = So2.newton_direct(g2!, zeros(N); rtol=1e-9, atol=1e-12)
         @test sd2.converged                                # exact solve converges regardless of conditioning
+    end
+
+    @testset "PlaneJacobi: (x,ξ)-plane preconditioner tames the physical-ρ̂_θi conditioning" begin
+        # A physical Level-0 config (ρ̂_θi = 0.05) whose Jacobian is severely
+        # ill-conditioned (cond ~ 1e9); the (x,ξ)-plane block per (y,E,σ) is the
+        # scalable fix — YBlockJacobi (y-pencil) is the wrong tool, PlaneJacobi drops
+        # cond by ~4 orders of magnitude and makes matrix-free Newton–Krylov converge.
+        _phys(g) = Cfg2.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=0.7, q_s=2.0, dq_dpsi=0.8,
+            w_psi=0.5, mu0_R=3.0, inv_Ln0=1.0, rho_hat_theta_i=0.05, eta_i=0.5,
+            nu_star=0.01, m=2.0, tau=1.0, variant=:original)
+        ion = Sp2.Species(; name=:D, Z=1.0, m=1.0, background=Sp2.Maxwellian(; n=1.0, T=1.0, dlnn_dr=-1.0), role=Sp2.Bulk)
+
+        # (a) coloring correctness: on an order-2 grid with ny > (band+1) so the y-colors
+        #     repeat, the y-colored JVP reproduces the reduced-stack diagonal plane blocks
+        #     EXACTLY (the pitch/cross coupling is y-banded, so same-color planes never mix).
+        gc = PS2.IslandGrid(; nx=5, nxi=6, ny=7, nE=1, halfwidth_x=6.0, clustering_x=1.0,
+            y_max=4.0, y_c=1.0, clustering_y=0.8, order=2)
+        nxc, nξc, nyc, nEc, nσc = PS2.nnodes(gc)
+        mc = nxc * nξc
+        cfgc = Cfg2.configure_level0(gc, _phys(gc), [ion])
+        Nc = Op2.statelength(gc)
+        uc = 0.01 .* sin.((1:Nc) ./ 3)
+        redc = So2.without_momentum_restoring(cfgc.stack)
+        fredc! = So2.flat_residual(redc, gc; bc=cfgc.bc)
+        Jredc = So2.dense_jacobian(fredc!, uc)
+        band = 2 * gc.y.order
+        @test min(nyc, band + 1) < nyc                        # colors actually repeat here
+        blocks = So2.plane_blocks(fredc!, uc, gc; band=band)
+        maxblkerr = 0.0
+        for iσ in 1:nσc, iE in 1:nEc, iy in 1:nyc
+            b = mc * ((iy - 1) + nyc * ((iE - 1) + nEc * (iσ - 1)))
+            maxblkerr = max(maxblkerr, maximum(abs, blocks[iy, iE, iσ] .- Jredc[b+1:b+mc, b+1:b+mc]))
+        end
+        @test maxblkerr < 1e-12                               # exact: no same-color cross-plane leakage
+
+        # (b) conditioning + solve on a small **island-resolved** physical grid
+        #     (coarser grids under-resolve the separatrix response and Newton itself
+        #     struggles — a resolution effect, not a preconditioner one).
+        g = PS2.IslandGrid(; nx=9, nxi=6, ny=11, nE=1, halfwidth_x=6.0, clustering_x=1.0,
+            y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+        phys = _phys(g)
+        cfg = Cfg2.configure_level0(g, phys, [ion])
+        N = Op2.statelength(g)
+        α = 1 / Cfg2.quasineutrality_coefficient(phys.tau)
+        f! = So2.flat_residual(cfg.stack, g; bc=cfg.bc)
+
+        Jfull = So2.dense_jacobian(f!, zeros(N))
+        pc = So2.PlaneJacobi(cfg.stack, g, zeros(N); bc=cfg.bc, phi_scale=-α)
+        # assemble the dense action of the preconditioner to measure cond(M⁻¹J)
+        Minv = zeros(N, N)
+        col = zeros(N)
+        ej = zeros(N)
+        for j in 1:N
+            fill!(ej, 0.0)
+            ej[j] = 1.0
+            LinearAlgebra.ldiv!(col, pc, ej)
+            Minv[:, j] .= col
+        end
+        condJ = cond(Jfull)
+        condMJ = cond(Minv * Jfull)
+        @test condJ > 1e8                                     # physical ρ̂_θi ⇒ severely ill-conditioned
+        @test condMJ < condJ / 1e3                            # ≥3 orders of magnitude reduction
+        @test condMJ < 1e6                                    # lands in the ~10⁵ regime (cf. LOG 4.5e5)
+
+        sd = So2.newton_direct(f!, zeros(N); rtol=1e-10, atol=1e-13, max_iter=60)
+        sp = So2.newton_krylov(f!, zeros(N); rtol=1e-10, atol=1e-13, max_iter=25, memory=300, precond=pc)
+        s0 = So2.newton_krylov(f!, zeros(N); rtol=1e-10, atol=1e-13, max_iter=25, memory=300)
+        @test sd.converged && sp.converged                    # direct + preconditioned Krylov both converge
+        @test !s0.converged                                   # unpreconditioned GMRES stalls at physical ρ̂_θi
+        @test maximum(abs, sd.u .- sp.u) < 1e-5               # preconditioned Krylov matches the direct solve
+        @test sp.gmres_iters < s0.gmres_iters ÷ 2             # far cheaper than unpreconditioned GMRES
+
+        @test_throws ArgumentError So2.PlaneJacobi(g, (iy, iE, iσ) -> zeros(3, 3))   # wrong block size
     end
 
     @testset "far-field BCs replace the boundary residual rows (01 §3)" begin

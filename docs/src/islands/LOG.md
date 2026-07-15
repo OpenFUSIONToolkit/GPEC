@@ -8,6 +8,46 @@ relevant.
 
 ---
 
+## 2026-07-15 (cont. 2) — Solver milestone: PlaneJacobi lands (y-colored JVP) — the physical solve is preconditioned
+
+- **Moved**: implemented `Solvers.PlaneJacobi`, the `(x,ξ)` advection-plane
+  preconditioner — the scalable matrix-free fix for the physical-`ρ̂_θi` conditioning.
+  The third dead-end from the prior entry is resolved exactly as planned: build the
+  plane blocks from the stack **minus the nonlocal momentum-restoring** term (kept
+  everything else — pitch/cross supply the within-plane collision diagonal that
+  regularizes the otherwise-singular pure `(x,ξ)` advection block), extracted by
+  **y-colored JVP**. Scratch-validated the whole chain BEFORE writing production
+  code: (a) the reduced stack couples planes *only* via pitch/cross, which are
+  y-banded (`K=GᵀDG` half-bandwidth `≤ order`; I re-derived this rather than trust
+  `2·order`) and act within fixed `(E,σ)`, so same-color planes (spaced > band)
+  never cross-couple — the colored extraction is **bit-exact** vs the reduced-stack
+  dense diagonal blocks (0.0 error, even with colors repeating); (b) the
+  reduced-stack blocks precondition the FULL J essentially identically to the
+  exact-full blocks (momentum's diagonal contribution is negligible); (c) on a
+  physical grid `cond(J)=3.0e8 → cond(M⁻¹J)=8.4e4` (order-4 realistic grid:
+  `1.08e9 → 1.4e5`, the LOG's "4.5e5" ballpark, grid-dependent); (d) preconditioned
+  `newton_krylov` **converges** at `ρ̂_θi=0.05` (5 Newton, 343 GMRES) where
+  unpreconditioned **stalls** (converged=false, 7381 GMRES), matching `newton_direct`.
+- **Landed**: `Solvers.PlaneJacobi` (struct + block-callback constructor + one-shot
+  `(stack, grid, u; bc, …)` convenience + `LinearAlgebra.ldiv!`, mirroring
+  `YBlockJacobi`; SVD/TSVD-regularized plane blocks, `phi_scale=−α` on Φ rows),
+  `Solvers.plane_blocks` (the y-colored JVP extractor, stack-agnostic), and
+  `Solvers.without_momentum_restoring`. Pure numerics — no physics content. Unit
+  test mirrors the `newton_direct` test (coloring exactness + cond reduction ≥3
+  orders + preconditioned-converges-where-unpreconditioned-stalls + matches direct
+  + wrong-block-size throws). 154 solve assertions green; grids/operators/configure
+  green; `build_docs_local.jl` green. Doc-first: numerics.md §5.
+- **Blocked / next**: nothing on the preconditioner. **Next** (milestone order):
+  the resolution-adequacy protocol (`Δx ≪ w` island-resolved grid helper) → the
+  resolved `Δ_neo(w)` checkpoint (expect `∝1/w` at large w; reassess if not) →
+  rework `channel_decomposition` (restrict `⟨·⟩_Ω` to the island region, ξ-mean
+  outside; physics-verifier before commit) → B2/B5b + F5/F7 + `_LADDER`/STATE +
+  regression. A resolution note surfaced along the way: coarse grids (nx≲7, or the
+  mid nE=2 grids) don't converge even with PJ or `newton_direct` — a genuine
+  under-resolution effect (the separatrix response), not a preconditioner one; this
+  is exactly what the resolution-adequacy protocol must pin. The `w_c` threshold
+  (Δ′ convention) and frames ω-conventions remain the human-sign-off gates (unchanged).
+
 ## 2026-07-15 (cont.) — Solver milestone: continuation works; PlaneJacobi is subtler than planned
 
 - **Moved**: (a) **w-continuation confirmed working** (scratch): adaptive natural-parameter

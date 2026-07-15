@@ -202,8 +202,39 @@ A companion diagnostic tracks the smallest singular value of the ``y_c``-block
 of the (tiny-grid, debug) dense Jacobian — ladder **A8** — so a silent
 conditioning regression is *tested for*, not observed.
 
+**The ``(x, \xi)`` advection-plane preconditioner (physical ``\hat\rho_{\theta i}``).**
+At physical parameters the Jacobian is severely ill-conditioned —
+``\mathrm{cond}(J)\sim 10^{9}``, growing as ``1/\hat\rho_{\theta i}`` through the
+``1/\hat\rho_{\theta i}`` streaming and collision coefficients — and unpreconditioned
+GMRES stalls. The ill-conditioning is a **cross-pencil advection** effect, not the
+``y_c`` collision block, so the ``y``-pencil `YBlockJacobi` is the wrong tool (it
+makes it *worse*). Inverting instead the exact ``(x,\xi)`` **plane block** per
+``(y, E, \sigma)`` drops the preconditioned condition number by ``\sim`` four orders
+of magnitude (``\mathrm{cond}(M^{-1}J)\sim 10^{5}``), which is what lets matrix-free
+Newton–Krylov converge at physical ``\hat\rho_{\theta i}``, matching `newton_direct`.
+
+The plane blocks are built **matrix-free** by a *y-colored JVP*: each
+``(iy, iE, i\sigma)`` pencil owns a contiguous ``n_x n_\xi`` slice of the flattened
+``g`` (the `flatten!` layout), and — once the one **nonlocal** term (the
+momentum-restoring ``\bar U``, which couples every plane densely) is dropped — the
+reduced Jacobian couples planes *only* through the pitch/cross collision operators,
+which are **banded in ``y``** (the mimetic ``K = G^{\mathsf T} D G`` inherits a
+half-bandwidth ``\le \mathrm{order}`` from the ``y``-grid ``D_1``) and act only within
+a fixed ``(E, \sigma)``. Planes whose ``iy`` are spaced beyond the band never
+cross-couple, so they are seeded **together** by color: for each in-plane node and
+each ``y``-color, one Jacobian–vector product recovers that column of every
+same-color plane block at once — ``n_x n_\xi\,(2\,\mathrm{order}+1)`` products,
+independent of ``n_y n_E n_\sigma``. Each block is TSVD-regularized exactly like the
+``y``-pencil blocks; the ``\Phi`` rows carry the diagonal ``-\alpha`` (the
+quasineutrality shielding coefficient). The nonlocal term is dropped only *inside the
+preconditioner* — the solved residual is the full stack — and preconditioner
+approximations are the one place `src/Islands/CLAUDE.md` sanctions such regime
+knowledge.
+
 *Implementing symbols:* `Solvers.newton_krylov`, `Solvers.JVPOperator`,
-`Solvers.YBlockJacobi`, `Solvers.dense_jacobian`, `Verify.yc_block_sigma_min`.
+`Solvers.YBlockJacobi`, `Solvers.PlaneJacobi`, `Solvers.plane_blocks`,
+`Solvers.without_momentum_restoring`, `Solvers.dense_jacobian`,
+`Verify.yc_block_sigma_min`.
 
 ## 6. Continuation and fold detection
 
