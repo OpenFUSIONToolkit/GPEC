@@ -29,6 +29,7 @@ import FastGaussQuadrature
 
 export FourierGrid, MappedFDGrid, GaussGrid, IslandGrid
 export nnodes, differentiate_fourier, fd_weights
+export island_clustering_x, central_x_spacing, is_island_resolved, resolved_island_grid
 
 # ---------------------------------------------------------------------------
 # Finite-difference weights (Fornberg 1988, Math. Comp. 51, 699) — weights for
@@ -338,5 +339,103 @@ end
 Tuple `(nx, nξ, ny, nE, nσ)` of the phase-space grid dimensions.
 """
 nnodes(g::IslandGrid) = (g.x.n, g.ξ.n, g.y.n, g.E.n, length(g.σ))
+
+# ---------------------------------------------------------------------------
+# Island-resolution protocol (04 §2): the radial grid must resolve the island
+# half-width — the Δ moments live on the separatrix (x ~ w), not the x = 0 node,
+# so a coarse grid gives Lx-/clustering-sensitive garbage. These helpers size the
+# radial clustering so Δx(0) ≤ w/K (K nodes across the island half-width).
+# ---------------------------------------------------------------------------
+"""
+    island_clustering_x(w, Lx, nx; K=8, beta_cap=12.0)
+
+The `sinh`-map clustering `β` (the `clustering_x` of [`MappedFDGrid`](@ref)) that
+resolves an island of **half-width** `w` on `nx` symmetric nodes over
+`[-Lx, Lx]`: it packs the center so the central radial spacing satisfies
+`Δx(0) ≤ w/K` — `K` nodes across the island half-width (`04 §2`; the Δ-moment
+response peaks at the separatrix `x ~ w`, so `Δx ≪ w` is the adequacy condition).
+
+The exact two-node central spacing of the symmetric map is
+`Δx(0) = Lx·sinh(βΔs)/sinh(β)` with `Δs = 2/(nx-1)`; since it decreases
+monotonically in `β`, the required `β` is found by bisection. Returns `0.0`
+(uniform, no clustering) when the plain spacing `Lx·Δs` already meets `w/K`.
+Throws if resolving `w/K` would need `β > beta_cap` (the grid would be so
+center-packed the far field is starved — increase `nx` or `Lx`, or lower `K`).
+"""
+function island_clustering_x(w::Real, Lx::Real, nx::Integer; K::Real=8, beta_cap::Real=12.0)
+    (w > 0 && Lx > 0) || throw(ArgumentError("island_clustering_x: w and Lx must be positive"))
+    nx >= 3 || throw(ArgumentError("island_clustering_x: nx must be ≥ 3"))
+    Δs = 2 / (nx - 1)
+    target = (w / (K * Lx)) * (1 - 1e-6)         # required Δx(0)/Lx (hair under, so ≤ holds strictly)
+    target >= Δs && return 0.0                   # uniform spacing already resolves it
+    h(β) = sinh(β * Δs) / sinh(β)                # Δx(0)/Lx as a function of β (↓)
+    lo, hi = 0.0, 1.0
+    while h(hi) > target
+        hi *= 2
+        hi > 1e4 && break                        # bracket search safety (should never trigger)
+    end
+    for _ in 1:200
+        mid = (lo + hi) / 2
+        h(mid) > target ? (lo = mid) : (hi = mid)
+    end
+    β = (lo + hi) / 2
+    β > beta_cap && throw(
+        ArgumentError(
+            "island_clustering_x: resolving w/K = $(w / K) on nx = $nx nodes over Lx = $Lx needs β = $(round(β, digits=2)) > beta_cap = $beta_cap (far field starved) — increase nx or Lx, or lower K"
+        )
+    )
+    return β
+end
+
+"""
+    central_x_spacing(grid::IslandGrid)
+
+The smallest radial node spacing of `grid` — the central spacing `Δx(0)` for a
+center-clustered grid. The island-resolution diagnostic paired with
+[`island_clustering_x`](@ref).
+"""
+central_x_spacing(grid::IslandGrid) = minimum(diff(grid.x.nodes))
+
+"""
+    is_island_resolved(grid, w; K=8, min_Lx_over_w=5.0)
+
+Check whether `grid` adequately resolves an island of half-width `w` (`04 §2`,
+docs/05 reporting): the central radial spacing must satisfy `Δx(0) ≤ w/K` **and**
+the radial domain must reach `≥ min_Lx_over_w · w` (the far field must be truly
+far, `L_x/w ≳ 5`). Returns a NamedTuple
+`(resolved, central_spacing, nodes_per_halfwidth, Lx_over_w)` for the
+two-resolution convergence protocol (no Δ-output benchmark passes on one grid).
+"""
+function is_island_resolved(grid::IslandGrid, w::Real; K::Real=8, min_Lx_over_w::Real=5.0)
+    w > 0 || throw(ArgumentError("is_island_resolved: w must be positive"))
+    Δ0 = central_x_spacing(grid)
+    Lx = grid.x.nodes[end]                       # right edge = half-width (symmetric, center 0)
+    ratio = Lx / w
+    return (resolved=(Δ0 <= w / K && ratio >= min_Lx_over_w), central_spacing=Δ0,
+        nodes_per_halfwidth=w / Δ0, Lx_over_w=ratio)
+end
+
+"""
+    resolved_island_grid(; w, nx, K=8, Lx_over_w=6.0, nxi, ny, nE, y_max,
+                         y_c=1.0, clustering_y=0.0, xi_period=2π,
+                         energy_kind=:laguerre, order=4, beta_cap=12.0)
+
+Build an [`IslandGrid`](@ref) that resolves an island of **half-width** `w`
+(`04 §2`): the radial domain is `[-Lx, Lx]` with `Lx = Lx_over_w · w` (far field
+`L_x/w ≳ 5`) and `clustering_x` is set by [`island_clustering_x`](@ref) so
+`Δx(0) ≤ w/K`. All other coordinates pass through to the `IslandGrid`
+constructor. Pair with [`is_island_resolved`](@ref) and run every Δ-output at
+`≥ 2` resolutions (vary `nx`/`K`) to confirm convergence.
+"""
+function resolved_island_grid(; w::Real, nx::Integer, K::Real=8, Lx_over_w::Real=6.0,
+    nxi::Integer, ny::Integer, nE::Integer, y_max::Real, y_c::Real=1.0,
+    clustering_y::Real=0.0, xi_period::Real=2π, energy_kind::Symbol=:laguerre,
+    order::Integer=4, beta_cap::Real=12.0)
+    Lx = Lx_over_w * w
+    βx = island_clustering_x(w, Lx, nx; K=K, beta_cap=beta_cap)
+    return IslandGrid(; nx=nx, nxi=nxi, ny=ny, nE=nE, halfwidth_x=Lx, clustering_x=βx,
+        y_max=y_max, y_c=y_c, clustering_y=clustering_y, xi_period=xi_period,
+        energy_kind=energy_kind, order=order)
+end
 
 end # module PhaseSpace

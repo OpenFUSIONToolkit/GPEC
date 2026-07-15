@@ -90,4 +90,34 @@ const PS = GeneralizedPerturbedEquilibrium.Islands.PhaseSpace
         # even nx is rejected (Simpson needs odd)
         @test_throws ArgumentError PS.MappedFDGrid(16; halfwidth=6.0)
     end
+
+    @testset "island-resolution protocol: Δx(0) ≤ w/K (04 §2)" begin
+        # island_clustering_x picks β so the central spacing hits the w/K target exactly
+        for (w, Lx, nx, K) in ((0.5, 3.0, 21, 8), (1.0, 6.0, 31, 8), (0.3, 2.0, 41, 10), (2.0, 12.0, 25, 6))
+            β = PS.island_clustering_x(w, Lx, nx; K=K)
+            gx = PS.MappedFDGrid(nx; halfwidth=Lx, clustering=β, center=0.0, domain=:symmetric, order=4)
+            Δ0 = minimum(diff(gx.nodes))
+            @test Δ0 <= w / K * (1 + 1e-6)                 # target met (exact two-node spacing)
+            @test Δ0 > w / K * 0.98                        # and not wastefully over-resolved
+        end
+        # a domain already fine at uniform spacing needs no clustering
+        @test PS.island_clustering_x(5.0, 6.0, 9; K=1) == 0.0
+        # over-clustering (too few nodes for the requested w/K) is refused, not silently starved
+        @test_throws ArgumentError PS.island_clustering_x(0.01, 20.0, 9; K=10)
+        @test_throws ArgumentError PS.island_clustering_x(-1.0, 6.0, 21)
+
+        # resolved_island_grid + the is_island_resolved diagnostic
+        g = PS.resolved_island_grid(; w=0.5, nx=25, K=8, Lx_over_w=6.0, nxi=8, ny=9, nE=2, y_max=4.0, clustering_y=0.8)
+        @test PS.nnodes(g) == (25, 8, 9, 2, 2)
+        @test g.x.nodes[end] ≈ 6.0 * 0.5                   # Lx = Lx_over_w · w
+        chk = PS.is_island_resolved(g, 0.5; K=8)
+        @test chk.resolved
+        @test chk.central_spacing <= 0.5 / 8
+        @test chk.Lx_over_w ≈ 6.0
+        @test chk.nodes_per_halfwidth >= 8
+        @test PS.central_x_spacing(g) == minimum(diff(g.x.nodes))
+        # an under-resolved grid (coarse, near far field) is flagged not resolved
+        coarse = PS.IslandGrid(; nx=9, nxi=8, ny=9, nE=2, halfwidth_x=1.0, clustering_x=0.0, y_max=4.0, clustering_y=0.8)
+        @test !PS.is_island_resolved(coarse, 0.5; K=8).resolved   # both Δx≪w and Lx/w≥5 fail
+    end
 end

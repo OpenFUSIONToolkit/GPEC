@@ -60,8 +60,24 @@ background at Level 2 changes the map, not the machinery).
 
 ![layer-clustered grids](figures/grids_clustering.png)
 
+**Island-resolution adequacy.** The Δ output moments (§7) are dominated by the
+current response at the **separatrix** ``x \sim w``, not at the ``x = 0`` node, so
+a grid that under-resolves the island half-width ``w`` gives ``L_x``- and
+clustering-sensitive garbage (a coarse grid put the whole moment on a single
+node). The adequacy condition is ``\Delta x(0) \le w/K`` — ``K`` radial nodes
+across the island half-width (``K \approx 5``–``10``) — **with** a far field that
+is truly far, ``L_x/w \gtrsim 5``. `island_clustering_x` inverts the exact
+``\sinh``-map central spacing ``\Delta x(0) = L_x\,\sinh(\beta\Delta s)/\sinh\beta``
+for the clustering ``\beta`` that meets ``\Delta x(0) \le w/K`` on a given node
+budget (refusing to over-cluster and starve the far field); `resolved_island_grid`
+assembles such a grid and `is_island_resolved` reports the two adequacy numbers.
+Every Δ-output benchmark runs at ``\ge 2`` resolutions and reports convergence —
+no pass on a single grid (docs/05).
+
 *Implementing symbols:* `PhaseSpace.FourierGrid`, `PhaseSpace.MappedFDGrid`,
-`PhaseSpace.GaussGrid`, `PhaseSpace.IslandGrid`, `PhaseSpace.fd_weights`.
+`PhaseSpace.GaussGrid`, `PhaseSpace.IslandGrid`, `PhaseSpace.fd_weights`,
+`PhaseSpace.island_clustering_x`, `PhaseSpace.resolved_island_grid`,
+`PhaseSpace.is_island_resolved`, `PhaseSpace.central_x_spacing`.
 
 ## 2. The operator stack
 
