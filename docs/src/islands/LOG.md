@@ -8,6 +8,33 @@ relevant.
 
 ---
 
+## 2026-07-15 (cont.) — Solver milestone: continuation works; PlaneJacobi is subtler than planned
+
+- **Moved**: (a) **w-continuation confirmed working** (scratch): adaptive natural-parameter
+  continuation (step-halving + warm-start) with `newton_direct` reaches larger `w` smoothly
+  in 3–4 Newton iters — the globalization enabler works. (b) The **resolution wall** is
+  confirmed decisive: at a coarse grid `Δ_neo(w=0.5) = −3.6` vs the resolved `+6.6` (sign
+  flip) — the Level-0 response peaks at the **separatrix (x~w)**, away from the x=0 cluster,
+  so a clean checkpoint needs adequate x-resolution → needs the matrix-free preconditioner.
+- **Blocked — PlaneJacobi is a real sub-problem** (attempt reverted, not committed): the
+  `(x,ξ)`-plane preconditioner is right *in principle* (exact plane block → cond 1.24e9→4.5e5),
+  but building it matrix-free is subtle. Two dead ends found: (1) **colored-JVP with all planes
+  seeded at once is contaminated** — the nonlocal **momentum-restoring** term couples *all*
+  planes densely, corrupting every block (cond→3e21). (2) Building from a **pure-advection
+  sub-stack is singular** — first-order `(x,ξ)` advection has null modes (constant-in-ξ:
+  `∂ξ const=0`); the *exact* plane block is regularized by the **collision diagonal** (`c·K[iy,iy]`
+  of pitch diffusion), so dropping the collisions removes exactly the regularization (cond still
+  2e21). **Correct approach (next)**: build the plane block from the stack **minus
+  momentum-restoring** (keep advection + neo + pitch/cross for their within-plane diagonal),
+  extracted by **y-colored JVP** — the pitch/cross operators are y-*banded* (`K` from a banded
+  `D1`), so y-planes spaced `> 2·order` apart don't cross-couple and can be seeded together
+  (`≈ np·(2·order+1)` JVPs per build, ≪ N). Or analytic plane-block assembly from the
+  coefficient arrays.
+- **Next**: implement PlaneJacobi via y-colored JVP (exclude momentum), reproduce cond→4.5e5 +
+  preconditioned `newton_krylov` convergence at physical `ρ̂_θi`; then the resolved `Δ_neo(w)`
+  checkpoint. Fallback if PlaneJacobi stays hard: `newton_direct` + continuation at the
+  best-affordable dense grid (N≲1e4) for a first resolution-caveated B2 result.
+
 ## 2026-07-15 — Solver-robustness milestone: the first converged PHYSICAL solves + a 3-layer diagnosis
 
 - **Moved**: attempting to run the B-ladder (B2/B5b) surfaced that **the Level-0
