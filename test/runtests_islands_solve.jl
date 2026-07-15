@@ -129,6 +129,36 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test s1.gmres_iters < s0.gmres_iters ÷ 2       # preconditioner earns its keep
     end
 
+    @testset "newton_direct: exact-solve Newton matches newton_krylov + robust when it stalls" begin
+        g = _sgrid(9)
+        nx, nξ, ny, nE, nσ = PS2.nnodes(g)
+        P = @. g.y.nodes * (4.0 - g.y.nodes)
+        K, = Op2.conservative_pitch_operator(g.y, P, ones(ny))
+        cstiff = fill(30.0, nx, nξ, nE, nσ)
+        shift = fill(-1.0, nx, nξ, ny, nE, nσ)
+        stack = Op2.IslandStack((Op2.PitchAngleDiffusion(K, cstiff), Op2.RadiationSink(shift)),
+            Op2.Quasineutrality(1.3))
+        f0! = So2.flat_residual(stack, g)
+        N = Op2.statelength(g)
+        b = sin.((1:N) ./ 7)
+        f!(out, u) = (f0!(out, u); out .-= b; out)
+        sd = So2.newton_direct(f!, zeros(N); rtol=1e-10, atol=1e-13)
+        sk = So2.newton_krylov(f!, zeros(N); rtol=1e-10, memory=300)
+        @test sd.converged
+        @test sd.gmres_iters == 0                          # direct solve, no Krylov
+        @test maximum(abs, sd.u .- sk.u) < 1e-7            # same solution as matrix-free
+        @test sd.iterations <= 8                           # quadratic: few Newton steps
+        # robust on an ill-conditioned advective stack where naive GMRES needs a preconditioner:
+        # a stiff streaming coefficient (large a_xi) that conditions J poorly
+        astiff = fill(0.0, nx, nξ, ny, nE, nσ)
+        axstiff = [40.0 * g.x.nodes[ix] for ix in 1:nx, iξ in 1:nξ, iy in 1:ny, iE in 1:nE, iσ in 1:nσ]
+        stack2 = Op2.IslandStack((Op2.ParallelStreaming(astiff, axstiff),
+                Op2.PitchAngleDiffusion(K, cstiff), Op2.RadiationSink(shift)), Op2.Quasineutrality(1.3))
+        g2!(out, u) = (So2.flat_residual(stack2, g)(out, u); out .-= b; out)
+        sd2 = So2.newton_direct(g2!, zeros(N); rtol=1e-9, atol=1e-12)
+        @test sd2.converged                                # exact solve converges regardless of conditioning
+    end
+
     @testset "far-field BCs replace the boundary residual rows (01 §3)" begin
         g = _sgrid(7; ny=7)
         nx, nξ, ny, nE, nσ = PS2.nnodes(g)

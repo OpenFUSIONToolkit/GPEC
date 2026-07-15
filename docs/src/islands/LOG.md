@@ -8,6 +8,40 @@ relevant.
 
 ---
 
+## 2026-07-15 — Solver-robustness milestone: the first converged PHYSICAL solves + a 3-layer diagnosis
+
+- **Moved**: attempting to run the B-ladder (B2/B5b) surfaced that **the Level-0
+  physics solve had never actually converged at physical parameters** — every prior
+  "converged" solve (incl. the configure test) uses an artificial order-unity
+  `ρ̂_θi=1.0`. A deep diagnosis (all in `/tmp` scratch, evidence-based) peeled **three
+  layered, tractable issues — none a physics bug**:
+  1. **Solver conditioning**: matrix-free `newton_krylov` stalls (residual plateaus
+     ~1e-4, GMRES burns 30k iters) because `cond(J) ~ 1e9` (grows as `1/ρ̂_θi` from the
+     `1/ρ̂_θi` streaming + collision coefficients). A **dense-direct Newton converges in
+     6–9 iters at physical `ρ̂_θi=0.05`** regardless of conditioning. Naive block-Jacobi
+     *worsens* it (y: 1.24e9→1.55e12); the **(x,ξ) advection-plane block** drops it
+     **1.24e9→4.5e5** — so `YBlockJacobi` (y-only) is the wrong tool; the scalable
+     matrix-free fix is an (x,ξ)-plane preconditioner (future).
+  2. **Island x-resolution**: the per-x profile of `∮J̄_∥cosξ` is entirely localized on
+     the **single x=0 node** (neighbors 2.7 away) — the island (half-width `w`) was
+     **grossly under-resolved**, so the Δ moment ≈ one node × a huge quad weight, wildly
+     `Lx`/clustering-sensitive (the "domain-dependence"/sign-flips). With strong
+     x-clustering (Δx≪w), **`Δ_neo` stabilizes** (6.6 vs 5.8 across Lx=5→8; was
+     sign-flipping).
+  3. **Diagnostic fragility**: with `Δ_neo` stable, **`Δ_pol` still swings −2.4→−30.9** —
+     the new `channel_decomposition` (⟨J̄_∥⟩_Ω bootstrap/pol split) is not robust (its
+     interpolant/Ω-quadrature over the full domain is ill-behaved far from the island).
+- **Landed**: `Solvers.newton_direct` (dense-Jacobian exact-solve Newton + Armijo LS,
+  reusing `dense_jacobian`) — the robust benchmark solve for N≲1e4; 143 islands-solve
+  assertions green (incl. a new test: matches `newton_krylov` on a well-conditioned
+  case, converges on a stiff advective stack). No physics content (pure numerics).
+- **Blocked / next**: (1) establish **resolved-island benchmark grids** (strong
+  x-clustering) + confirm resolved `Δ_neo(w) ∝ 1/w` at large w (the primary B2 target via
+  the *robust* direct moment; a resolved large-w sweep is running); (2) **rework
+  `channel_decomposition`** for a robust bootstrap/polarization split (needed for the
+  `Δ_pol ∝ 1/w³` B2 sub-target); (3) then the full B2 + B5b. The `w_c` threshold (Δ′
+  convention) and frames ω-conventions remain the human-sign-off gates (unchanged).
+
 ## 2026-07-14 — FIRST PHYSICS: solved state → the resonant-current Δ outputs (output assembly + decomposition)
 
 - **Moved**: wired the physical solve into the **Δ outputs** — the first physics

@@ -37,7 +37,7 @@ import ..Operators: IslandState, IslandCache, IslandStack, FarFieldConditions,
     residual!, flatten!, unflatten!, statelength
 
 export flat_residual, JVPOperator, dense_jacobian
-export YBlockJacobi, newton_krylov, pseudo_arclength
+export YBlockJacobi, newton_krylov, newton_direct, pseudo_arclength
 
 # Tag for the solver's ForwardDiff duals (one directional derivative).
 struct JVPTag end
@@ -136,6 +136,67 @@ function dense_jacobian(f!, u::Vector{Float64})
         end
     end
     return J
+end
+
+# ---------------------------------------------------------------------------
+# Direct-solve Newton (dense Jacobian) — robust benchmark solve
+# ---------------------------------------------------------------------------
+"""
+    newton_direct(f!, u0; rtol=1e-8, atol=1e-10, max_iter=40, ls_max=30, verbose=false)
+
+Newton with an **exact (dense) linear solve** each step: forms the Jacobian via
+[`dense_jacobian`](@ref) and solves `J δu = −F` by dense LU, with a backtracking
+(Armijo-on-`‖F‖`) line search. Same convergence criterion (norm **and** max-norm)
+and return shape as [`newton_krylov`](@ref) (`gmres_iters = 0`).
+
+This is the robust solve for the **Level-0 physics configurations**, whose
+Jacobian is severely ill-conditioned at physical parameters
+(`cond(J) ~ 10⁹`, growing as `1/ρ̂_θi` from the `1/ρ̂_θi` streaming and collision
+coefficients). The matrix-free [`newton_krylov`](@ref) stalls there — restarted
+GMRES cannot solve the linear system — whereas an exact solve gives quadratic
+Newton convergence (6–9 iterations) regardless of conditioning. Because it is
+dense (`O(N²)` memory, `O(N³)` factor), it is for **benchmark-scale grids**
+(`N ≲ 10⁴`); the scalable matrix-free path is `newton_krylov` with a preconditioner
+that captures the `(x, ξ)` advection plane (the ill-conditioning is a cross-pencil
+advection effect, not the `y_c` collision block — so `YBlockJacobi` is the wrong
+tool here).
+"""
+function newton_direct(f!, u0::AbstractVector{Float64};
+    rtol::Real=1e-8, atol::Real=1e-10, max_iter::Int=40, ls_max::Int=30, verbose::Bool=false)
+    u = collect(u0)
+    F = similar(u)
+    f!(F, u)
+    nF = norm(F)
+    tol = max(atol, rtol * max(nF, eps()))
+    hist = Float64[nF]
+    utrial = similar(u)
+    Ftrial = similar(u)
+    k = 0
+    while (nF > tol || maximum(abs, F) > tol) && k < max_iter
+        k += 1
+        J = dense_jacobian(f!, u)
+        du = J \ (-F)
+        λ = 1.0
+        nFt = Inf
+        for _ in 1:ls_max
+            @. utrial = u + λ * du
+            f!(Ftrial, utrial)
+            nFt = norm(Ftrial)
+            nFt <= (1 - 1e-4 * λ) * nF && break
+            λ /= 2
+        end
+        verbose && @info "newton_direct iter $k: ‖F‖=$nF → $nFt (λ=$λ)"
+        if nFt < nF
+            u .= utrial
+            F .= Ftrial
+            nF = nFt
+        else
+            verbose && @warn "newton_direct line search stalled at iter $k"
+            break
+        end
+        push!(hist, nF)
+    end
+    return (u=u, converged=(nF <= tol), iterations=k, residual_norms=hist, residual_max=maximum(abs, F), gmres_iters=0)
 end
 
 # ---------------------------------------------------------------------------
