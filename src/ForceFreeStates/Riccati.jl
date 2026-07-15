@@ -371,6 +371,28 @@ function compute_delta_prime_matrix!(
 
     intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
         M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+
+    # Resistive inner-layer matching (Wang 2020 Eq. 11): feed the RAW outer Δ' block (dp_raw) and the
+    # RAW edge-driven Δ_coil (snorm = 1, so both share one normalization — Step-1 result) into the
+    # coil-driven outer↔inner match. Gated on ctrl.gal_match_flag; needs the S-axis vacuum-edge BVP.
+    if use_S_axis && wv !== nothing && ctrl !== nothing && ctrl.gal_match_flag && equil !== nothing
+        delta_out_raw = loop_boundary_conditions(M, msing, N, ipert_all)                       #raw Δ_out (2msing×2msing)
+        delta_coil_raw = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all, ones(Float64, msing))  #raw Δ_coil (snorm=1)
+        mres = resonant_match_rpec(delta_out_raw, delta_coil_raw, sing, equil, intr, ctrl)
+        intr.resonant_match_cout = mres.cout
+        intr.resonant_match_cin = mres.cin
+        intr.resonant_match_deltar = mres.deltar
+        intr.resonant_match_rpec_eig = mres.rpec_eig
+        intr.resonant_match_flux = mres.reconnected_flux
+        intr.resonant_match_residual = mres.residual
+        @info @sprintf("Resistive inner-layer match: residual=%.2e, ‖cout‖=%.3e, ‖cin‖=%.3e (%d surfaces, %d coil modes)",
+            mres.residual, norm(mres.cout), norm(mres.cin), msing, size(mres.cout, 2))
+        for i in 1:msing
+            @info @sprintf("   surf %d (q=%.3g): Δ_in=(%.3e%+.3ei, %.3e%+.3ei)  γ=%.3e%+.3ei",
+                i, sing[i].q, real(mres.deltar[i,1]), imag(mres.deltar[i,1]), real(mres.deltar[i,2]), imag(mres.deltar[i,2]),
+                real(mres.rpec_eig[i]), imag(mres.rpec_eig[i]))
+        end
+    end
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,

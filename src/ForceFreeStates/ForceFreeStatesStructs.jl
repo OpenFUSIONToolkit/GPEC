@@ -201,6 +201,13 @@ A mutable struct holding internal state variables for stability calculations.
     looping the Eq. (37) edge boundary condition through the Riccati BVP (`loop_edge_boundary_conditions`).
     """
     delta_coil_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    # Resistive inner-layer-matched coil response (Wang 2020 Eq. 11): C = -(Δ_out - Δ_in)^{-1} Δ_coil.
+    resonant_match_cout::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)   # outer coeffs (2msing × ncoil)
+    resonant_match_cin::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)    # inner coeffs (2msing × ncoil)
+    resonant_match_deltar::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0) # per-surface inner-layer Δ (msing × 2)
+    resonant_match_rpec_eig::Vector{ComplexF64} = ComplexF64[]                  # forced eigenvalue γ_s = 2πi·n·f
+    resonant_match_flux::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)   # reconnected resonant flux (2msing × ncoil)
+    resonant_match_residual::Float64 = NaN
 end
 
 """
@@ -303,6 +310,14 @@ A mutable struct containing control parameters for stability analysis, set by th
     populate_dense_xi::Bool = false  # When use_parallel=true, set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× parallel-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
     fixed_axis::Bool = false
+    # Resistive inner-layer matching (Wang 2020 asymptotic matching): C = -(Δ_out - Δ_in(i2πf))^{-1} Δ_coil.
+    # Per-surface resistive inputs (core→edge), consumed by resist_eval + InnerLayer.solve_inner.
+    gal_match_flag::Bool = false          # Enable the coil-driven outer↔inner resistive match (needs use_parallel Δ' BVP)
+    gal_ideal_flag::Bool = false          # true → skip the inner layer (ideal limit; cout=0, bare coil columns)
+    gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η [Ω·m]
+    gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³]
+    gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz]; forced eigenvalue γ_s = 2πi·n·f
+    gal_gamma::Float64 = 5.0 / 3.0        # ratio of specific heats Γ for the resistive-layer coefficients
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}

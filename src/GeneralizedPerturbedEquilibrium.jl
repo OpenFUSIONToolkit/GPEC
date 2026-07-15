@@ -13,13 +13,13 @@ include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
 
-include("ForceFreeStates/ForceFreeStates.jl")
-import .ForceFreeStates as ForceFreeStates
-export ForceFreeStates
-
 include("InnerLayer/InnerLayer.jl")
 import .InnerLayer as InnerLayer
 export InnerLayer
+
+include("ForceFreeStates/ForceFreeStates.jl")
+import .ForceFreeStates as ForceFreeStates
+export ForceFreeStates
 
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
@@ -622,6 +622,20 @@ function write_outputs_to_HDF5(
             dc = permutedims(intr.delta_coil_matrix)
             out_h5["singular/delta_coil_matrix"] = dc
             out_h5["singular/delta_coil_abs"] = abs.(dc)  # real |.| for H5Web heatmap view
+        end
+
+        # Resistive inner-layer-matched coil response (Wang et al. PoP 27, 122509 (2020), Eq. 11:
+        # C = -(Δ_out - Δ_in(i2πf))^{-1} Δ_coil). Computed in ResistiveMatch.jl via the STRIDE/Riccati
+        # outer Δ' + the GGJ inner layer (resist_eval → InnerLayer.solve_inner).
+        if intr.msing > 0 && !isempty(intr.resonant_match_deltar)
+            g = create_group(out_h5, "singular/resonant_match")
+            g["deltar"]   = intr.resonant_match_deltar    # (msing × 2)  per-surface inner-layer Δ(Q)
+            g["cout"]     = intr.resonant_match_cout       # (2msing × ncoil)  matched outer coefficients
+            g["cin"]      = intr.resonant_match_cin        # (2msing × ncoil)  matched inner coefficients
+            g["rpec_eig"] = intr.resonant_match_rpec_eig   # (msing)  forced eigenvalue γ_s = 2πi·n·f
+            g["reconnected_flux"] = intr.resonant_match_flux       # (2msing × ncoil)  matched small-solution (reconnected) amplitude
+            g["reconnected_flux_abs"] = abs.(intr.resonant_match_flux)  # |.| for H5Web heatmap view
+            g["residual"] = intr.resonant_match_residual
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan

@@ -15,6 +15,7 @@ using Roots
 import ..Equilibrium
 import ..Utilities
 import ..Vacuum
+import ..InnerLayer
 using Printf
 using DoubleFloats
 import StaticArrays: @MMatrix
@@ -33,6 +34,8 @@ include("Utils.jl")
 include("PowerNorm.jl")
 include("Free.jl")
 include("Riccati.jl")
+include("Resist.jl")
+include("ResistiveMatch.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
