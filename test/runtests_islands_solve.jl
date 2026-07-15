@@ -452,4 +452,55 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         # both branches visited: u > 0 before the fold, u < 0 after
         @test any(z -> z[1] > 0.5, pa.us) && any(z -> z[1] < -0.5, pa.us)
     end
+
+    @testset "natural_continuation: warm-start chaining + adaptive halving reach large w (03 §3)" begin
+        # A manufactured stiff residual whose root drifts with the parameter w and
+        # whose Newton basin narrows as ~1/w: cold-from-zero and a single warm jump
+        # both fail at large w, but stepping w up (warm-started, adaptive step) reaches
+        # it. f_i(u) = tanh(w(u_i − r_i(w))) + ε(u_i − r_i(w)); root u = r(w), J
+        # nonsingular (the ε floor), basin far and narrow far from the previous root.
+        n = 12
+        t0 = [0.5 + 0.3 * sin(i) for i in 1:n]
+        a = [0.05 * cos(i) for i in 1:n]
+        ε = 1e-2
+        root(w) = t0 .+ a .* w
+        function make_f(w)
+            r = root(w)
+            return function (out, u)
+                for i in 1:n
+                    d = u[i] - r[i]
+                    out[i] = tanh(w * d) + ε * d
+                end
+                return out
+            end
+        end
+        solve_at(w, uw) = So2.newton_direct(make_f(w), uw; rtol=1e-10, atol=1e-12, max_iter=40)
+
+        # cold Newton from zero fails at large w; so does a single warm jump 1 → 30
+        @test !solve_at(30.0, zeros(n)).converged
+        s1 = solve_at(1.0, zeros(n))
+        @test s1.converged
+        @test !solve_at(30.0, s1.u).converged
+
+        # stepped continuation reaches w = 30 and lands on the exact drifting root
+        cont = So2.natural_continuation([1.0, 2.0, 5.0, 10.0, 20.0, 30.0], solve_at, zeros(n))
+        @test cont.converged
+        @test cont.ws == [1.0, 2.0, 5.0, 10.0, 20.0, 30.0]
+        @test maximum(abs, cont.us[end] .- root(30.0)) < 1e-8      # correct solution at the final w
+        for k in eachindex(cont.ws)                                 # correct at every requested w
+            @test maximum(abs, cont.us[k] .- root(cont.ws[k])) < 1e-8
+        end
+
+        # adaptive halving alone bridges a coarse 2-point schedule the single jump missed
+        @test So2.natural_continuation([1.0, 30.0], solve_at, zeros(n)).converged
+
+        # graceful failure: an unreachable target (here a solver that refuses any
+        # w > 1) returns converged = false with the progress made so far (the
+        # min-step floor is hit), never throwing or hanging
+        blocked(w, uw) = w <= 1.0 ? solve_at(w, uw) : (u=uw, converged=false)
+        stuck = So2.natural_continuation([1.0, 5.0], blocked, zeros(n))
+        @test !stuck.converged
+        @test stuck.ws == [1.0]                                     # only the reachable target banked
+        @test_throws ArgumentError So2.natural_continuation([2.0, 1.0], solve_at, zeros(n))  # must be sorted
+    end
 end

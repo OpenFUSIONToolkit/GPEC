@@ -26,6 +26,9 @@ Pieces:
     block-diagonal in the planes).
   - [`newton_krylov`](@ref) — inexact Newton with Eisenstat–Walker forcing and
     a backtracking line search.
+  - [`natural_continuation`](@ref) — natural-parameter continuation over an
+    increasing `w`-schedule (warm-start chaining + adaptive step control): the
+    globalization that reaches large island widths the cold Newton solve cannot.
   - [`pseudo_arclength`](@ref) — the continuation scaffold with fold detection
     from day one (`03 §3`: the Level-3 penetration bifurcation is a fold; the
     solver must step around folds, not fail at them).
@@ -43,7 +46,8 @@ import ..Operators: IslandState, IslandCache, IslandStack, FarFieldConditions,
     MomentumRestoring, residual!, flatten!, unflatten!, statelength
 
 export flat_residual, JVPOperator, dense_jacobian
-export YBlockJacobi, PlaneJacobi, plane_blocks, newton_krylov, newton_direct, pseudo_arclength
+export YBlockJacobi, PlaneJacobi, plane_blocks, newton_krylov, newton_direct
+export natural_continuation, pseudo_arclength
 
 # Tag for the solver's ForwardDiff duals (one directional derivative).
 struct JVPTag end
@@ -484,6 +488,77 @@ function newton_krylov(f!, u0::AbstractVector{Float64};
         push!(hist, nF)
     end
     return (u=u, converged=(nF <= tol), iterations=k, residual_norms=hist, residual_max=maximum(abs, F), gmres_iters=gmres_total)
+end
+
+# ---------------------------------------------------------------------------
+# Natural-parameter continuation (globalization for the w-sweep, 03 §3)
+# ---------------------------------------------------------------------------
+"""
+    natural_continuation(ws, solve_at, u0; min_step_frac=1/128, grow=2.0, verbose=false)
+
+Natural-parameter continuation over the increasing schedule `ws` (`03 §3`) — the
+globalization that reaches large island widths the cold Newton solve cannot. Each
+requested target `ws[k]` is reached by marching the parameter up from the previous
+converged state, **warm-starting every solve from the last converged one**, with
+**adaptive step control**: the step shrinks (halves) whenever a solve fails and
+grows (by `grow`, capped at the remaining distance) after each success. A step
+that shrinks below `min_step_frac` of the distance to the current target aborts.
+
+`solve_at(w, u_warm)` must return a NamedTuple with fields `u` and `converged`
+(e.g. [`newton_direct`](@ref) or preconditioned [`newton_krylov`](@ref) on the
+stack reconfigured at `w`) — it is the *only* place the stack is rebuilt, once per
+accepted parameter step, never per residual evaluation. A `solve_at` that throws
+(e.g. a singular linearization from too large a step) is treated as a
+non-convergence and triggers a step halving.
+
+Returns `(ws, us, converged)`: `us[k]` is the converged state at the requested
+`ws[k]`; the interior halving/growth sub-steps are not returned. On abort,
+`converged = false` and `ws`/`us` hold the targets reached so far. Simpler than
+[`pseudo_arclength`](@ref) (no tangent, no fold handling) — for the monotone B2
+`w`-sweep where no folds are expected; keep `pseudo_arclength` for the Level-3
+penetration fold.
+"""
+function natural_continuation(ws::AbstractVector{<:Real}, solve_at, u0::AbstractVector{Float64};
+    min_step_frac::Real=1 / 128, grow::Real=2.0, verbose::Bool=false)
+    isempty(ws) && throw(ArgumentError("natural_continuation: ws must be non-empty"))
+    issorted(ws) || throw(ArgumentError("natural_continuation: ws must be non-decreasing"))
+    trysolve(w, u) =
+        try
+            solve_at(w, u)
+        catch
+            (u=u, converged=false)
+        end
+    reached = Float64[]
+    us = Vector{Vector{Float64}}()
+    s = trysolve(float(ws[1]), collect(u0))
+    s.converged || return (ws=reached, us=us, converged=false)
+    push!(reached, float(ws[1]))
+    push!(us, copy(s.u))
+    u_cur = copy(s.u)
+    w_cur = float(ws[1])
+    for k in 2:length(ws)
+        w_target = float(ws[k])
+        span = w_target - w_cur
+        span <= 1e-12 * max(1.0, abs(w_target)) && (push!(reached, w_target); push!(us, copy(u_cur)); continue)
+        dw = span
+        while w_cur < w_target - 1e-12 * max(1.0, abs(w_target))
+            w_try = min(w_cur + dw, w_target)
+            s = trysolve(w_try, u_cur)
+            if s.converged
+                w_cur = w_try
+                u_cur = copy(s.u)
+                dw = min(w_target - w_cur, grow * dw)
+                verbose && @info "natural_continuation: reached w=$w_try"
+            else
+                dw /= 2
+                verbose && @info "natural_continuation: halve step at w=$w_try → dw=$dw"
+                dw < min_step_frac * span && return (ws=reached, us=us, converged=false)
+            end
+        end
+        push!(reached, w_target)
+        push!(us, copy(u_cur))
+    end
+    return (ws=reached, us=us, converged=true)
 end
 
 # ---------------------------------------------------------------------------

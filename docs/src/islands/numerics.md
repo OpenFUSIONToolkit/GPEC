@@ -238,9 +238,23 @@ knowledge.
 
 ## 6. Continuation and fold detection
 
-Δ-surface generation, Newton globalization, and (at Level 3) the penetration
-bifurcation all ride on pseudo-arclength continuation, so fold handling is in
-from day one. The corrector solves the extended system
+**Natural-parameter continuation (the ``w``-sweep globalization).** At physical
+parameters the cold Newton solve reaches only modest island widths — beyond a
+point Newton from a zero initial guess leaves the basin and the line search
+stalls. `natural_continuation` walks the width ``w`` up an increasing schedule,
+**warm-starting every solve from the last converged state** and controlling the
+step adaptively (halve on a failed or singular solve, grow on success, capped by
+the distance to the next requested ``w``), so each step starts inside the basin.
+It rebuilds the operator stack only once per accepted step — never per residual
+evaluation — and treats a solve that throws (a singular linearization from too
+large a step) as a non-convergence that triggers a halving. This is the
+globalization that makes the large-``w`` B2 sweep reachable; it is deliberately
+simpler than the pseudo-arclength scaffold (no tangent, no fold handling) because
+the monotone ``w``-sweep has no folds.
+
+**Pseudo-arclength continuation and fold detection.** Δ-surface generation and
+(at Level 3) the penetration bifurcation ride on pseudo-arclength continuation,
+so fold handling is in from day one. The corrector solves the extended system
 
 ```math
 G(z) = \begin{pmatrix} F(u, p) \\ t \cdot (z - z_{\text{pred}}) \end{pmatrix} = 0,
@@ -252,7 +266,7 @@ tangent's parameter component ``t_p``:
 
 ![continuation fold](figures/continuation_fold.png)
 
-*Implementing symbol:* `Solvers.pseudo_arclength`.
+*Implementing symbols:* `Solvers.natural_continuation`, `Solvers.pseudo_arclength`.
 
 ## 7. Island geometry, the electron-closure functions, and the Δ moments
 
