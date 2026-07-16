@@ -59,7 +59,7 @@ using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag")
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry")
 
 # Drop deprecated [ForceFreeStates] keys so legacy gpec.toml files
 # keep parsing instead of throwing an unknown-keyword error.
