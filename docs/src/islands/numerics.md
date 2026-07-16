@@ -330,7 +330,17 @@ parallel current ``\bar J_\parallel = \sum_j Z_j \int W_j\, g_j`` (`01 §4`):
 \Delta_{\sin} = C_{\sin} \int dx \oint d\xi\; \bar J_\parallel \sin\xi,
 ```
 
-where the ``\xi``-projection is spectrally exact on the periodic grid. The
+where the ``\xi``-projection is spectrally exact on the periodic grid, giving the
+per-node radial profiles ``m_{\cos,\sin}(x)=\oint d\xi\,\bar J_\parallel\{\cos,\sin\}\xi``;
+the ``x``-integration is a **cubic-spline quadrature** of those profiles
+(`FastInterpolations`), not the grid's composite-Simpson weights. This matters
+because the island physics packs the radial grid at ``x=0``, and composite Simpson
+puts very large weights on the sparse far-field nodes — over-weighting the small
+radial tail and making the raw moment grid-sensitive; integrating the interpolated
+profile removes that clustering artifact. (This fixes the *quadrature* only: a
+resolution-convergent ``\Delta_{\rm neo}`` additionally requires a far field that
+lets the perturbed response localize, so the tail genuinely decays — the open
+far-field-BC question, QUESTIONS **Q7**.) The
 current is assembled with the **cleared** parallel-flow weight
 ``W = \hat v_\parallel = \sigma\sqrt E\sqrt{1-y b_{\min}}`` and the physical
 ``\int d^3v`` measure (`Configure.parallel_flow_weight` /

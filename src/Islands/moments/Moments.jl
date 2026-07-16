@@ -25,6 +25,7 @@ module Moments
 
 using LinearAlgebra
 import QuadGK
+import FastInterpolations
 import ..PhaseSpace: IslandGrid, nnodes, fd_weights
 import ..Operators: weighted_moment!
 import ..SpeciesLists: Species
@@ -90,27 +91,40 @@ The two Ampère projections of `J̄_∥` through the island (`01 §4`):
     Δ_sin = prefactor_sin · ∫dx ∮dξ J̄_∥ sin ξ
 
 `ξ`-integration is the uniform-grid trapezoid (spectrally exact on the periodic
-grid); `x`-integration uses the grid's Simpson weights. The prefactors
-(`∓μ₀R/2ψ̃`, `01 §4`) are **gated** — `ψ̃` carries an open `[VERIFY]` and the
-sin normalization is `[DERIVED]`-unpinned (QUESTIONS Q4) — so both are required
-arguments. Returns `(Δcos, Δsin)`.
+grid), giving the per-node radial profiles `m_{cos,sin}(x) = ∮dξ J̄_∥ {cos,sin}ξ`.
+The `x`-integration is then a **cubic-spline quadrature** (`FastInterpolations`)
+of those profiles — *not* the grid's composite-Simpson weights. On the
+layer-clustered radial grid the island physics demands (nodes packed at `x = 0`),
+Simpson puts very large weights on the sparse far-field nodes and over-weights the
+small radial tail, making the moment grid-sensitive; integrating the interpolated
+profile removes that clustering artifact. (This corrects the quadrature only; a
+resolution-convergent `Δ_neo` additionally needs a far-field that lets the
+response localize — QUESTIONS Q7.) Diagnostic post-processing (allocates, not a
+hot path). The prefactors (`∓μ₀R/2ψ̃`, `01 §4`) are **gated** — `ψ̃` carries an
+open `[VERIFY]` and the sin normalization is `[DERIVED]`-unpinned (QUESTIONS Q4) —
+so both are required arguments. Returns `(Δcos, Δsin)`.
 """
 function delta_moments(Jpar, grid::IslandGrid; prefactor_cos, prefactor_sin)
     nx, nξ = size(Jpar)
     (nx, nξ) == (grid.x.n, grid.ξ.n) || throw(ArgumentError("Jpar must be (nx, nξ) = $((grid.x.n, grid.ξ.n))"))
     wξ = grid.ξ.L / grid.ξ.n
-    pc = zero(eltype(Jpar))
-    ps = zero(eltype(Jpar))
-    @inbounds for iξ in 1:nξ
-        c = cos(grid.ξ.nodes[iξ])
-        s = sin(grid.ξ.nodes[iξ])
-        for ix in 1:nx
-            w = grid.x.wq[ix] * wξ * Jpar[ix, iξ]
-            pc += w * c
-            ps += w * s
+    mcos = Vector{Float64}(undef, nx)                       # ∮dξ J̄_∥ cosξ per radial node
+    msin = Vector{Float64}(undef, nx)                       # ∮dξ J̄_∥ sinξ per radial node
+    @inbounds for ix in 1:nx
+        pc = 0.0
+        ps = 0.0
+        for iξ in 1:nξ
+            j = wξ * Jpar[ix, iξ]
+            pc += j * cos(grid.ξ.nodes[iξ])
+            ps += j * sin(grid.ξ.nodes[iξ])
         end
+        mcos[ix] = pc
+        msin[ix] = ps
     end
-    return (Δcos=prefactor_cos * pc, Δsin=prefactor_sin * ps)
+    x = grid.x.nodes
+    Ic = FastInterpolations.integrate(FastInterpolations.cubic_interp(x, mcos; extrap=FastInterpolations.ExtendExtrap()), x[1], x[nx])
+    Is = FastInterpolations.integrate(FastInterpolations.cubic_interp(x, msin; extrap=FastInterpolations.ExtendExtrap()), x[1], x[nx])
+    return (Δcos=prefactor_cos * Ic, Δsin=prefactor_sin * Is)
 end
 
 """

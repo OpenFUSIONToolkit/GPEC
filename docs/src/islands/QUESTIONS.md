@@ -382,3 +382,53 @@ bare pass/fail. The derivation lane inherits this framing.
   differential. The solver stack (PlaneJacobi / continuation / resolution protocol)
   is **not** blocked — it is done and green. Nothing was changed in `src/` for this;
   it is a definition/normalization decision.
+
+### Update (2026-07-16) — sharpened by the York cross-check + the integration experiment
+
+The question is now **narrower and concrete**. Two of the three original options are
+effectively resolved by evidence:
+
+- **York source check (papers; codes not public)**: Diss19 Eq. 4.12 defines `Δ_neo`
+  as **exactly our volume moment**, balanced `Δ₀+Δneo=0` (`Δ₀` = the outer jump), and
+  it **converges** for them (Figs 4.13–4.15 → bootstrap ∝1/w). ⇒ **Option (ii)
+  [reformulate as a matched jump] is OFF the table** — the jump is `Δ₀`, and the
+  volume moment is the correct, York-faithful `Δneo`. **Option (iii) [value is just
+  small] is unlikely** — York gets finite O(1) plottable `Δneo(w)`.
+- **Integration experiment** isolated two independent causes:
+  1. **Quadrature rule** — Simpson on the center-clustered grid over-weights the
+     coarse far-field nodes (Simpson vs accurate spline differ 3×, sign-flip on
+     clustered grids). **RESOLVED**: `Moments.delta_moments` now uses cubic-spline
+     quadrature (physics-verifier PASS, physics-neutral). This was necessary but **not
+     sufficient**.
+  2. **Far-field BC** — on converged, outer-resolved grids the spline `Δneo` still
+     diverges with resolution (−1.05 → −2.84) and the `m1(x)=∮J̄cosξ` peak migrates
+     from the island to the domain edge: our Dirichlet `g_far = x·L̂_{n0}⁻¹[1+(E−3/2)η_i]`
+     (∝x) over-constrains the boundary, the interior does not self-match it, and a
+     resolution-sharpening **boundary layer** forms that contaminates the whole solve.
+
+- **The remaining decision (the real Q7)**: how to impose the Level-0 **far-field /
+  outer boundary** so the perturbed response **localizes** (the resonant current tail
+  decays), without the spurious "winged" branch our design rejected bare Neumann for
+  (doc 01 §3; L23 §5.3/§7.1). Concretely, the design chose `g_far ∝ x` as "the
+  analytic far-field," but the experiment shows that specific form does not let the
+  solution reach its own asymptote. Options:
+  - **(A) Analytic far-field, corrected** — implement the *actual* asymptotic
+    interior solution as the boundary state (what L23 §7.1 "analytic far-field BC"
+    future-work intends), so the interior self-matches and no boundary layer forms.
+    Requires the analytic large-`|x|` form of `ĝ` (the neoclassical + drift-island
+    asymptote), a derivation/sign-off item.
+  - **(B) York-style localized BC** — `∂ĝ/∂p=0` (ĝ→const), matching kokuchou, with an
+    explicit remedy for the winged-branch non-uniqueness (e.g. an anchored constant /
+    a solvability constraint) so it stays single-valued.
+  - **(C) Decomposition / domain mitigation** — solve for and integrate the *localized*
+    perturbed current (subtract the ∝x background analytically before the moment) and/or
+    keep a modest domain so the boundary layer is pushed out of the physical region.
+- **Recommendation**: (A) is the most physically faithful and matches L23's own
+  recommendation; (B) is the direct York analogue but re-imports the pathology our
+  design avoided; (C) is a lighter mitigation that may suffice if the ∝x part
+  subtracts cleanly. This is a **modeling decision on signed-off physics (`g_far`)** →
+  human sign-off + physics-verifier before implementation; do not guess. The extraction
+  form and the quadrature are **not** in question anymore.
+- **Gated work (unchanged)**: the resolution-convergent `Δ_neo(w)` checkpoint; B2
+  (∝1/w); the `channel_decomposition` rework; B5b. The solver stack, the resolution
+  protocol, the extraction form, and now the moment quadrature are all done/green.

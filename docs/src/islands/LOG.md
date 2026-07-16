@@ -8,6 +8,53 @@ relevant.
 
 ---
 
+## 2026-07-16 (cont.) — York cross-check + integration experiment: quadrature fixed (delta_moments spline); far-field BC is the residual blocker
+
+- **York source check (from the papers; the codes are NOT public)**: Diss19
+  (Dudkovskaia thesis) Eq. 4.12 defines `Δ_neo = −(μ₀R/2ψ̃)∫dψ∫dξ J̄_∥cosξ` —
+  **exactly our volume moment** (bs/pol split Eqs 4.13–4.15 = our
+  `channel_decomposition`), balanced `Δ₀+Δneo=0` with `Δ₀` the **outer jump**. Their
+  integral **converges** (Figs 4.13–4.15 → bootstrap ∝1/w). kokuchou (L23): a **small
+  domain (~2–3 island widths)**, a **uniform high-res central region** covering the
+  drift-shifted island, and far-field **`∂ĝ/∂p=0` (ĝ→const, self-matching)** — plus
+  L23 §5.10: `h(Ω)→x` cancels the `xL̂_{n0}⁻¹` drive so the QN source → 0 far out;
+  everything localizes → the perturbed current decays → the moment converges. **So the
+  extraction FORM is confirmed correct** (Q7 option (ii) "matched jump" is NOT what
+  York does — the jump is Δ₀). No wholesale conversion to York: we extend their physics
+  (e.g. Diss19 notes the polarization's *external* contribution is comparable-and-
+  opposite to the inner), so we want a flexible domain + robust integration, not their
+  tight box.
+- **3-way integration experiment (user-approved)**: on converged matrix-free solves,
+  integrate the radial Δ moment via (1) Simpson (`grid.x.wq`) vs (2) cubic-spline
+  quadrature (`FastInterpolations`, the repo idiom) of the same `m1(x)=∮J̄cosξ`;
+  clustered vs near-uniform grids. Findings: (a) **quadrature RULE matters** — Simpson
+  vs spline differ 3× (sign-flip on clustered grids) because Simpson over-weights the
+  coarse far-field nodes of the center-clustered grid. → **fixed** (below). (b) But
+  accurate integration is **necessary-not-sufficient**: on the two converged (uniform)
+  grids the spline value still diverges with resolution (−1.05 → −2.84) and the `m1`
+  peak **migrates from the island (x=0) to the domain edge (x=−5.78)** — a
+  resolution-sharpening **boundary layer** at the far-field boundary that contaminates
+  the whole solve (island `|x|<2w` collapses 0.96→0.17). `m1` is pinned ~0 at the very
+  edge (BC) with a growing spike just inside. **Diagnosis**: our Dirichlet far field
+  `g_far = x·L̂_{n0}⁻¹[1+(E−3/2)η_i]` (∝x) over-constrains the edge; the interior does
+  not self-match it, so a boundary layer forms and sharpens — the far-field issue L23
+  §7.1 flagged (analytic far-field BC), and why York's `∂ĝ/∂p=0` localizes and ours
+  doesn't.
+- **Landed (this commit)**: `Moments.delta_moments` x-integration swapped
+  Simpson→cubic-spline quadrature (`FastInterpolations`), removing the clustering
+  artifact; the definition/prefactors/ξ-projection are unchanged. **physics-verifier
+  PASS** (pure quadrature swap, physics-neutral: no coefficient/sign/normalization/
+  definition change; parity + additive-split preserved). Doc-first numerics.md §7 +
+  docstring (scoped explicitly as "quadrature only; convergence still needs the
+  far-field fix, Q7"). 169 solve + 1540 configure + 5 anchor-sync green;
+  `build_docs_local.jl` green.
+- **Escalated / next**: **Q7 updated** — the quadrature half is done; the **far-field
+  BC is the standing physics decision** (analytic far-field à la L23 §7.1 vs a
+  York-style localized `∂ĝ/∂p=0` with the winged-branch fix vs domain mitigation),
+  written up as concrete options for human sign-off. NOT implemented — `g_far` is
+  signed-off physics. `Δ_neo(w)` checkpoint / B2 / item-4 remain gated on the far-field
+  decision, NOT on the extraction form or the quadrature.
+
 ## 2026-07-16 — Option (a) tested → ruled out: Δ_neo moment is not resolution-convergent; escalated as Q7
 
 - **Moved**: ran the user-approved option-(a) test (does a bigger box / island
