@@ -8,6 +8,43 @@ relevant.
 
 ---
 
+## 2026-07-15 (cont. 3) — Solver milestone: continuation + resolution protocol land; quick-check shows dense is under-resolved (checkpoint gate)
+
+- **Moved**: landed the two remaining solver enablers and ran the milestone
+  quick-check. (1) `Solvers.natural_continuation` (commit `b6dfdb83`) — natural-
+  parameter w-continuation (warm-start chaining + adaptive halve-on-fail/grow-on-
+  success), stack-agnostic, tested on a manufactured stiff drifting-root problem
+  where cold-start AND a single warm jump both fail but stepping succeeds; robust to
+  a solve that throws (singular linearization → treated as non-convergence → halve).
+  (2) `PhaseSpace` island-resolution protocol (commit `f7829186`) —
+  `island_clustering_x` (invert the exact sinh central spacing for the β giving
+  `Δx(0) ≤ w/K`), `resolved_island_grid`, `is_island_resolved`, `central_x_spacing`.
+  Both pure numerics, tested, doc-first (numerics.md §6/§1).
+- **Quick-check (the milestone decision gate) — the resolved `Δ_neo(w)` checkpoint
+  is NOT reachable with dense `newton_direct`**: swept `Δ_neo(w)` on per-w resolved
+  grids. (a) First pass (K mismatched, only the finer grid converged) trended
+  `Δ_neo ∝ w` (log-log slope → +0.9), OPPOSITE the expected `∝1/w`. (b) Clean
+  fixed-`K=8` convergence study (nx 15→33, up to the dense ceiling `N≈11k`, `nE=3`,
+  all converged) shows `Δ_neo` is **not resolution-converged** — it swings **24–41%**
+  between the two finest affordable grids and **flips sign** (positive at coarse →
+  negative at fine, stabilizing negative for all w). So the coarse grids are
+  qualitatively wrong (the diagnosed single-node-moment artifact) and the finest
+  dense grid still hasn't settled → the `∝w` read from (a) is **untrustworthy**.
+  **Conclusion: a resolution-tool limit, not a physics bug** — the Δ moment peaks at
+  the separatrix and needs `Δx ≪ w` over an `Lx ≳ 5w` domain, which exceeds the dense
+  `N ≲ 1e4` cap (exactly the x-resolution wall the 2026-07-15 diagnosis predicted).
+  No physics coefficient/sign/threshold is implicated, so nothing new to QUESTIONS.md.
+- **Blocked / next (stop-and-reassess gate honored — NOT proceeding to items 4/5)**:
+  the trustworthy `Δ_neo(w)` checkpoint requires the **matrix-free** resolved sweep —
+  `PlaneJacobi` + `newton_krylov` (+ `natural_continuation`) on grids **beyond** the
+  dense cap, with convergence in BOTH `K` (island nodes across the half-width) and
+  `nx`. Items 1 (PlaneJacobi) + 2 (continuation) + 3 (resolution protocol) are the
+  enablers, all now in place. This matrix-free convergence campaign is the honest
+  precondition before item 4 (channel_decomposition rework) and item 5 (B2/B5b) — do
+  not read a `Δ_neo(w)` trend or touch the decomposition until a resolution-converged
+  curve exists. The `w_c`/Δ′ convention and frames-ω gates remain the standing
+  human-sign-off items (unchanged).
+
 ## 2026-07-15 (cont. 2) — Solver milestone: PlaneJacobi lands (y-colored JVP) — the physical solve is preconditioned
 
 - **Moved**: implemented `Solvers.PlaneJacobi`, the `(x,ξ)` advection-plane
