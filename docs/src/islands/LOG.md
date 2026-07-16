@@ -8,6 +8,39 @@ relevant.
 
 ---
 
+## 2026-07-16 — Option (a) tested → ruled out: Δ_neo moment is not resolution-convergent; escalated as Q7
+
+- **Moved**: ran the user-approved option-(a) test (does a bigger box / island
+  restriction converge `Δ_neo`?). It does **not**, and the diagnosis is now sharp
+  enough to escalate. Evidence (matrix-free solves, `w=1`, physical `ρ̂_θi`):
+  - **Lx-sensitivity**: growing `Lx/w = 6→12→20` does not converge `Δ_neo`; at fixed
+    central `K` the bigger box starves the outer region and the solve stops
+    converging (`Lx/w=12`, `conv=0`). The response `m1(x)=∮J̄cosξ` **decays outward**
+    (RMS ~30× smaller at the edge) — physically localized — but the outer bands still
+    contribute 15–32% of `Δ` because the center-clustered grid puts **huge Simpson
+    weights** on the small tail.
+  - **Cutoff-restriction (decisive)**: `Δ_neo` restricted to `|x|<{1.5,2,3,4}w` across
+    `K=8,12,16` **shrinks toward ~0** (all ≲0.1 at K=16) while the full-domain value
+    **grows** 1.40→1.74→2.20. So essentially **all** the reported `Δ_neo` is the
+    spurious outer-tail quadrature artifact; the genuine island cos-moment is small
+    and resolution-noisy. Restricting to the island does **not** give a converged
+    value either.
+- **Conclusion**: the `Δ_neo = C∫dx∮dξ J̄cosξ` **volume-moment extraction itself is
+  the blocker**, not the solver (which is done: PlaneJacobi + continuation +
+  resolution protocol converge cleanly past the dense cap). Candidate (a)
+  [box/quadrature only] is insufficient; the issue also touches candidate (c) [the
+  extraction definition — volume moment vs matched-asymptotic `Δ'` jump; docs/01 §4].
+  This is a physics/normalization decision, not a guessable numerics tweak.
+- **Escalated**: wrote **QUESTIONS Q7** — the intended `Δ_neo` extraction + quadrature
+  (volume moment with a resolved outer region + island restriction + decaying far
+  field; vs a matched-asymptotic jump; vs the small island value being physical with
+  the `∝1/w` target on a different channel). A moment/output change → physics-verifier
+  before any implementation. Nothing changed in `src/`.
+- **Next**: **blocked on Q7** for the `Δ_neo(w)` checkpoint, B2, and item-4
+  `channel_decomposition` (all sit on `Δ_neo`). The solver enablers (items 1/2/3) are
+  landed and green — that half of the milestone is complete and reusable. Do not run
+  the full `Δ_neo(w)` sweep until Q7 is resolved (it would produce artifact numbers).
+
 ## 2026-07-15 (cont. 4) — Matrix-free probe: solver works past the dense wall, but Δ_neo is OUTER-region-dominated (not the island) — moment-extraction issue
 
 - **Moved (the solver half is GREEN)**: the matrix-free path — `PlaneJacobi` +

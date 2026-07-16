@@ -329,3 +329,56 @@ bare pass/fail. The derivation lane inherits this framing.
 - **Gated work**: the parallel-flow weight `W` (Q3) and hence `J̄_∥`/the `Δ`
   outputs; the momentum-restoring term F (Q5); the physical fidelity of the cleared
   QN `δn̄_i`. Nothing entered `src/`.
+
+## Q7 — The Δ_neo output moment is not resolution-convergent (outer-tail-dominated) — OPEN
+
+- **Context**: With the matrix-free resolved solve now working past the dense cap
+  (`PlaneJacobi` + `newton_krylov` + `natural_continuation` + the resolution
+  protocol; all converge cleanly on `N` up to ~20k at physical `ρ̂_θi=0.05`), the
+  first resolved `Δ_neo(w)` checkpoint was attempted and **`Δ_neo` does not
+  resolution-converge**. At `w=1`, sweeping island resolution `K=8→12→16` (nodes
+  across the half-width) gives `Δ_neo = 1.40 → 1.74 → 2.20` — a monotone power-law
+  growth, not convergence. Diagnostics (per-x integrand `m1(x)=∮dξ J̄_∥cosξ`,
+  radial-band breakdown, cutoff-restricted moments) show the cause is **not** the
+  solver and **not** a rational-surface singularity:
+  - the physical response `m1(x)` **decays outward** (RMS falls ~30× from the
+    island to the edge), i.e. it localizes;
+  - but the moment `Δ_neo = C∫dx∮dξ J̄_∥cosξ` is **dominated by the outer region**
+    `|x|≫w`, where the center-clustered grid carries **large Simpson weights** on
+    the small (and sign-oscillating) tail — a quadrature artifact that **grows with
+    resolution** as the outer region is starved of nodes;
+  - restricting the integral to the island (`|x| < 1.5–4w`) does **not** rescue it:
+    those values are small and **trend toward ~0** as `K` increases (all ≲0.1 at
+    K=16), while the full value keeps growing — so essentially **all** of the
+    reported `Δ_neo` is the spurious outer tail, and the genuine island-region
+    cos-moment is small and resolution-noisy.
+  - Growing the box (`Lx/w = 6→12→20`) does not help: it further starves the outer
+    region (the solve stops converging at `Lx/w=12` for fixed central `K`).
+- **Question**: What is the intended `Δ_neo` extraction, and how should it be
+  quadratured?
+  - (i) a **volume moment** `C∫dx∮dξ J̄_∥cosξ` — if so, the outer region must be
+    resolved for the quadrature (the center-clustered grid cannot be, at fixed
+    budget) and/or the integral restricted to where the response lives, and the far
+    field must genuinely decay; **or**
+  - (ii) a **matched-asymptotic jump** (`Δ'`-style: the jump in the outer solution's
+    logarithmic derivative across the layer), for which a naive volume integral is
+    the wrong operator; **or**
+  - (iii) is the **small island-region value the physical `Δ_neo`** (the outer tail
+    is pure quadrature artifact to be removed), with the `∝1/w` B2 target then
+    applying to a specific channel (e.g. `Δ_bs`) rather than the raw moment?
+- **Options**: (a) keep the volume moment but fix the quadrature/grid (resolve the
+  outer region + a principled island restriction + a decaying far field); (b)
+  reformulate the Δ extraction as a matched-asymptotic jump; (c) accept the small
+  island value as physical and re-target the B2 scaling onto the correct channel.
+- **Recommendation**: do **not** guess — the extraction definition and its
+  normalization are a physics decision on `docs/01 §4` / `numerics.md §7`. My best
+  guess is (a) as the immediate step to get a resolution-stable number (a proper
+  outer quadrature + island restriction), but the physical meaning must be checked
+  against the tearing-`Δ` definition (matched asymptotics) before any `Δ_neo(w)`
+  trend is trusted. This is a moment/output change → **physics-verifier** before any
+  implementation, per the module policy.
+- **Gated work**: the resolved `Δ_neo(w)` checkpoint; the B2 `Δ_neo ∝ 1/w` gate;
+  the `channel_decomposition` rework (it sits on top of `Δ_neo`); the B5b toggle
+  differential. The solver stack (PlaneJacobi / continuation / resolution protocol)
+  is **not** blocked — it is done and green. Nothing was changed in `src/` for this;
+  it is a definition/normalization decision.
