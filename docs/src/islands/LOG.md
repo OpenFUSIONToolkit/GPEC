@@ -8,6 +8,42 @@ relevant.
 
 ---
 
+## 2026-07-15 (cont. 4) — Matrix-free probe: solver works past the dense wall, but Δ_neo is OUTER-region-dominated (not the island) — moment-extraction issue
+
+- **Moved (the solver half is GREEN)**: the matrix-free path — `PlaneJacobi` +
+  `newton_krylov` (cold from zeros, preconditioner built once at `u=0`) — **converges
+  cleanly on resolved grids well beyond the dense `N≲1e4` cap** at physical `ρ̂_θi=0.05`,
+  `w=1`: `N=10854` (7–9 Newton, ~3.7k GMRES, rmax 7e-8), `N=15678`, `N=20502` all
+  `conv=1`. Items 1/2/3 are validated end-to-end on real physics grids. So reaching
+  resolution past the dense wall is a **solved problem**.
+- **Blocked — Δ_neo does NOT resolution-converge, and the diagnosis is a moment/far-
+  field issue, not the solver**: sweeping island resolution `K=8→12→16` (N up to 20.5k,
+  all converged) gives `Δ_neo = 1.40 → 1.74 → 2.20` — a **monotone ~20–25%-per-step
+  power-law growth (`≈K^{0.5–0.8}`), not convergence**. The per-x integrand
+  `m1(x)=∮dξ J̄_∥cosξ` shows **why**: the moment is **not localized to the island** —
+  only **7–14%** of `Δ_neo` comes from `|x|<w`, and that fraction **decreases** with
+  resolution (0.14→0.07). `m1(x)` does not decay outward; at `K=12` the largest `|m1|`
+  sits at `x≈5.07` (near the domain edge `Lx=6`), and the outer region — carrying large
+  quadrature weights on the clustered grid — dominates `∫dx J̄_∥cosξ`. So `Δ_neo`'s
+  resolution-divergence is a **far-field / outer-region effect** (the response isn't
+  localizing to the island; the naive full-domain volume integral is dominated by the
+  poorly-resolved, non-decaying outer region), **NOT** a rational-surface singularity and
+  **NOT** a solver failure.
+- **Next / decision (stay stopped before items 4/5; surfaced to the user)**: the raw
+  `Δ_neo = C∫dx∮dξ J̄_∥cosξ` volume moment is not extracting a localized (island) quantity
+  at `Lx/w=6`, so a `Δ_neo(w)` trend from it is not yet meaningful, and the
+  `channel_decomposition` rework (item 4) can't sit on top of it. Candidate root causes to
+  discriminate BEFORE any fix (do not guess): (a) domain too small — the response simply
+  hasn't decayed by `Lx/w=6`; test `Lx/w = 12,20` and see if `m1` decays and `Δ_neo`
+  stabilizes (a resolution knob, cheap-ish); (b) the far-field/gradient-drive setup
+  (`g_far = x L̂_{n0}^{-1}[1+(E-3/2)η_i]`, linear-in-x to the boundary) produces a
+  non-decaying outer response that a volume moment mis-captures; (c) the Δ extraction
+  itself should be a matched-asymptotic jump (`Δ'`-style, outer-solution log-derivative
+  across the layer), not a naive `∫dx` — a physics/normalization question on docs/01 §4.
+  (b)/(c) are physics-adjacent → physics-verifier + likely a QUESTIONS.md escalation; (a)
+  is a cheap numerical check to run first. Not written to QUESTIONS.md yet — the root cause
+  isn't pinned (writing one now would presume the cause).
+
 ## 2026-07-15 (cont. 3) — Solver milestone: continuation + resolution protocol land; quick-check shows dense is under-resolved (checkpoint gate)
 
 - **Moved**: landed the two remaining solver enablers and ran the milestone
