@@ -4,6 +4,27 @@ Kinetic torque and energy calculations for perturbed equilibria.
 Implements neoclassical toroidal viscosity (NTV) from the PENTRC formulation
 ([Logan & Park, 2013](citations.md); [Logan, 2015](citations.md)).
 
+## Kinetic profile file formats
+
+Kinetic profiles are read by `read_kinetic_file`, which dispatches on the file
+extension:
+
+  - **HDF5 (`.h5`/`.hdf5`)** — the GPEC kinetic schema (recommended). Datasets
+    at the file root: required `psi` (normalized poloidal flux), `n_e`, `T_i`,
+    `T_e`, `omega_E` (and `n_i`, defaulting to `n_e` if omitted); optional
+    `omega_tor`, `chi_e` (perpendicular heat diffusivity ``\chi_\perp``), and
+    `chi_phi` (toroidal momentum diffusivity ``\chi_\phi``). Each dataset
+    carries a `units` attribute; the root carries `schema_version` and
+    `provenance`. Densities are m⁻³, temperatures eV, frequencies rad/s,
+    diffusivities m²/s. Write files with `write_kinetic_h5`.
+  - **ASCII (`.gpeckf`/`.kin`/`.dat`)** — legacy six-column whitespace table
+    `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`, retained for backward
+    compatibility. Header rows are skipped.
+
+The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_phi`,
+when present, are carried for the resistive-layer (SLAYER) analysis and ignored
+here.
+
 ## Profile Scaling Knobs
 
 Seven scaling factors are available on `KineticForcesControl` to modify kinetic

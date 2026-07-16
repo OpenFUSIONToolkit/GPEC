@@ -208,9 +208,34 @@ The collisionless case (ν ≡ 0, real-axis pole) is the exact ν→0⁺ limit o
 formula; its causal branch is carried by the signed zero of `−pole_offset` (see the
 add-back below), and its on-axis `0/0` window by the analytic regular-part limit.
 """
+# Real x-space resonant integrand with pole subtractions
+# Explicit function keeps memory allocation out of the QuadGK inner loop.
+@inline function _resonant_integrand(x::Float64, p::EnergyParams,
+        residues::Vector{ComplexF64}, x_poles::Vector{ComplexF64}, npole::Int,
+        leff::Float64, wb::Float64, n::Int, wd::Float64)::ComplexF64
+    val = _energy_integrand_real(x, p)
+    @inbounds for k in 1:npole
+        val -= residues[k] / (x - x_poles[k])
+    end
+    # At a ν=0 pole Ω rounds to 0 and the physical term is 0/0; substitute the nearest
+    # pole's analytic regular-part limit, keeping the other (finite) pole subtractions.
+    if !isfinite(val)
+        k = 1
+        @inbounds for j in 2:npole
+            abs(x - real(x_poles[j])) < abs(x - real(x_poles[k])) && (k = j)
+        end
+        val = _real_pole_regular_part(real(x_poles[k]), p, leff, wb, n, wd)
+        @inbounds for j in 1:npole
+            j == k && continue
+            val -= residues[j] / (x - x_poles[j])
+        end
+    end
+    return val
+end
+
 function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
                                         n::Int, we::Float64, wd::Float64,
-                                        atol::Float64, rtol::Float64)::ComplexF64
+                                        atol::Float64, rtol::Float64, segbuf=nothing)::ComplexF64
     x_res_list = find_resonance_energies(leff, wb, n, we, wd)   # ≤ 2 roots of a quadratic in √x
     x_poles = ComplexF64[]
     residues = ComplexF64[]
@@ -240,29 +265,10 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
     npole = length(residues)
 
     # Physical x-space integrand N(x)·exp(-x)/(i·Ω) minus the subtracted pole parts.
-    integrand = x -> begin
-        val = _energy_integrand_real(x, p)
-        @inbounds for k in 1:npole
-            val -= residues[k] / (x - x_poles[k])
-        end
-        # At a ν=0 pole Ω rounds to 0 and the physical term is 0/0; substitute the nearest
-        # pole's analytic regular-part limit, keeping the other (finite) pole subtractions.
-        if !isfinite(val)
-            k = 1
-            @inbounds for j in 2:npole
-                abs(x - real(x_poles[j])) < abs(x - real(x_poles[k])) && (k = j)
-            end
-            val = _real_pole_regular_part(real(x_poles[k]), p, leff, wb, n, wd)
-            @inbounds for j in 1:npole
-                j == k && continue
-                val -= residues[j] / (x - x_poles[j])
-            end
-        end
-        return val
-    end
+    integrand = x -> _resonant_integrand(x, p, residues, x_poles, npole, leff, wb, n, wd)
 
     if npole == 0
-        val, _ = quadgk(integrand, 0.0, X_ENERGY_MAX; atol=atol, rtol=rtol)
+        val, _ = quadgk(integrand, 0.0, X_ENERGY_MAX; atol=atol, rtol=rtol, segbuf=segbuf)
         return val
     end
 
@@ -271,9 +277,9 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
     # positional args — a `breaks...` splat of a runtime-length Vector is type-unstable.
     breaks = unique(sort(real.(x_poles)))
     smooth_val, _ = if length(breaks) == 1
-        quadgk(integrand, 0.0, breaks[1], X_ENERGY_MAX; atol=atol, rtol=rtol)
+        quadgk(integrand, 0.0, breaks[1], X_ENERGY_MAX; atol=atol, rtol=rtol, segbuf=segbuf)
     else
-        quadgk(integrand, 0.0, breaks[1], breaks[2], X_ENERGY_MAX; atol=atol, rtol=rtol)
+        quadgk(integrand, 0.0, breaks[1], breaks[2], X_ENERGY_MAX; atol=atol, rtol=rtol, segbuf=segbuf)
     end
     return smooth_val + pole_contribution
 end
@@ -309,7 +315,7 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
                               n::Int, psi::Float64, lambda::Float64, method::String;
                               nutype::String="harmonic", f0type::String="maxwellian",
                               nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
-                              atol::Float64=1e-7, rtol::Float64=1e-5)::ComplexF64
+                              atol::Float64=1e-7, rtol::Float64=1e-5, segbuf=nothing)::ComplexF64
 
     p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
                      nutype, f0type, nufac, ximag, qt)
@@ -317,13 +323,13 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
     # CGL has no resonance denominator and no pole — integrate the physical
     # x-space integrand directly over the half line (QuadGK maps [0,∞) itself).
     if f0type == "cgl"
-        val, _ = quadgk(x -> _energy_integrand_real(x, p), 0.0, Inf; atol=atol, rtol=rtol)
+        val, _ = quadgk(x -> _energy_integrand_real(x, p), 0.0, Inf; atol=atol, rtol=rtol, segbuf=segbuf)
         return val
     end
 
     # Single resonant path for any collisionality: real x-space PV+residue with a
     # pole x_pole = x_res - i·ν/Ω′ (off-axis for ν>0, real for ν≡0).
-    return _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol)
+    return _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol, segbuf)
 end
 
 """
