@@ -24,7 +24,7 @@ export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
 # Relative anti-Hermitian residual above which we warn that the vacuum grid should be refined.
-const _WV_HERMITICITY_WARN_TOL = 1e-6
+const _WV_HERMITICITY_WARN_TOL = 1e-4
 
 """
     _symmetrize_vacuum_energy!(wv)
@@ -45,8 +45,8 @@ function _symmetrize_vacuum_energy!(wv::AbstractMatrix)
         # Relative anti-Hermitian residual ‖½(W−W†)‖/‖½(W+W†)‖
         rel_residual = norm(wv - wv') / herm_norm
         if rel_residual > _WV_HERMITICITY_WARN_TOL
-            @warn "Vacuum energy matrix Wᵛ is non-Hermitian above $(_WV_HERMITICITY_WARN_TOL) tolerance before " *
-                  "symmetrization. Increase vacuum grid resolution to reduce it." maxlog = 1
+            @warn "Vacuum energy matrix Wᵛ is non-Hermitian above tolerance $(rel_residual) > $(_WV_HERMITICITY_WARN_TOL) before " *
+                  "symmetrization. Increase vacuum grid resolution to reduce it."
         end
     end
     hermitianpart!(wv)
