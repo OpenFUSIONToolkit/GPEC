@@ -8,6 +8,33 @@ relevant.
 
 ---
 
+## 2026-07-17 (cont. 2) — A resolution sweep: A is correct + well-posed but does NOT fix the boundary layer (negative result)
+
+- **Result**: the `:analytic` resolution-convergence sweep came back **negative**.
+  `:analytic` converges cleanly (unlike `:neumann`) and localizes at nx=41 (m1 peak
+  @ island, Δ_neo=−1.13), but at nx=61 it **diverges just like `:dirichlet`**:
+  Δ_neo=−2.94 (dirichlet: −2.84) with the m1 peak back at the domain **edge**
+  (x=−5.78) — the boundary layer returns. `:analytic` and `:dirichlet` are nearly
+  identical at both resolutions. **The hypothesis that the dropped `O(ρ̂_θi)`
+  orbit-shift offset causes the boundary layer is WRONG**: `⟨x_D⟩` is only ~1% of the
+  far-field value at |x|=Lx, far too small to change the layer. The boundary layer is
+  a larger, different effect — intrinsic to pinning the *value* (Dirichlet) of a
+  *linear* far field at a domain that is (apparently) too small for the interior to
+  have reached its asymptote, and it *sharpens with resolution* (absent at nx=41,
+  present at nx=61).
+- **Standing**: A remains a **correct, physics-verified, well-posed** improvement
+  (the true far field to `O(ρ̂_θi)`; no null mode) — committed `186893e8`, valuable as
+  the toggle/comparison even though it is not the convergence fix. The
+  `analytic-far-field.md` `[DERIVED]` sign-off item is unchanged.
+- **Reassessment / next**: the convergence blocker is NOT the far-field *offset*.
+  Leading candidate now: **domain size** — at `Lx/w=6` the response has not decayed to
+  the linear asymptote, so any linear value-BC (dirichlet or analytic) is incompatible
+  → a resolution-sharpening boundary layer. Test: `:analytic`/`:dirichlet` at
+  `Lx/w=12,20` on near-uniform grids — does the layer vanish and Δ_neo converge? If
+  yes, the fix is "adequate domain + A"; if no, the far field needs more than
+  linear+offset (full asymptotic matching) or a different treatment. Surfaced to the
+  user; `Δ_neo(w)` checkpoint / B2 still gated on this.
+
 ## 2026-07-17 (cont.) — A landed: the `:analytic` drift-orbit-shifted far field (derived from cleared quantities)
 
 - **Moved (user: "derive + implement A")**: derived and implemented the `:analytic`
