@@ -601,35 +601,53 @@ zero — I19 Formulation A).
 
 `mode` selects the radial far-field form (QUESTIONS Q7):
 
-  - `:dirichlet` (default) — pin the value `g → g_far` (the `∝x` form above);
+  - `:dirichlet` (default) — pin the value `g → g_far` (the `∝x` form above, i.e.
+    the leading `p̂ ≈ x` approximation);
   - `:neumann` — pin the **slope** `∂g/∂x → ∂g_far/∂x = L̂_{n0}^{-1}[1+(E-\\tfrac32)η_i]`
     (the York/kokuchou localized form: `g` floats by a constant so the response
     reaches its own asymptote instead of forming an edge boundary layer). The slope
     is the `x`-derivative of the same linear far field, so the drive is unchanged.
+  - `:analytic` — pin the value to the **drift-orbit-shifted** far field
+    `g_far = (x − ⟨x_D⟩_θ) L̂_{n0}^{-1}[1+(E−\\tfrac32)η_i]`, restoring the `O(ρ̂_θi)`
+    orbit-width term the leading-order `:dirichlet` form drops (`analytic-far-field.md`,
+    `[DERIVED]`). `⟨x_D⟩_θ = ρ̂_θi (σ√E/(1+ε)) A(y)` uses the **cleared** drift bracket
+    `A(y)=⟨√(1−yb)/b⟩_θ` ([`orbit_average_drift_brackets`]) — no new coefficient.
+    Well-posed (Dirichlet → pins the level) *and* accurate (true asymptote → no
+    boundary layer); applied as a `:dirichlet` value condition.
 """
 function gradient_far_field(grid::IslandGrid, phys::Level0Physics; mode::Symbol=:dirichlet)
-    mode in (:dirichlet, :neumann) || throw(ArgumentError("gradient_far_field: mode must be :dirichlet or :neumann (got $mode)"))
+    mode in (:dirichlet, :neumann, :analytic) || throw(ArgumentError("gradient_far_field: mode must be :dirichlet, :neumann or :analytic (got $mode)"))
     nx, nξ, ny, nE, nσ = nnodes(grid)
     x_left = grid.x.nodes[1]
     x_right = grid.x.nodes[nx]
     g_left = Array{Float64}(undef, nξ, ny, nE, nσ)
     g_right = Array{Float64}(undef, nξ, ny, nE, nσ)
+    y_forbidden = (1 + phys.epsilon) / (1 - phys.epsilon)    # 1/b_min: no particles beyond
+    # ⟨x_D⟩_θ orbit-width shift for :analytic: ρ̂_θi (σ√E/(1+ε)) A(y), A(y)=⟨√(1−yb)/b⟩_θ
+    # the cleared drift bracket (orbit_average_drift_brackets). Forbidden y (no particles,
+    # pinned g=0) and the near-y_c bracket miss both ⇒ no shift (analytic-far-field.md).
+    Ay = mode === :analytic ?
+         [grid.y.nodes[iy] >= y_forbidden ? 0.0 : (bk = _try_drift_brackets(grid.y.nodes[iy], phys.epsilon); bk === nothing ? 0.0 : bk[1]) for iy in 1:ny] : Float64[]
     @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
         temp = 1 + (grid.E.nodes[iE] - 1.5) * phys.eta_i     # 1 + (E − 3/2)η_i
         slope = phys.inv_Ln0 * temp                          # ∂g_far/∂x = L̂_{n0}⁻¹[1+(E−3/2)η_i]
         if mode === :neumann
             g_left[iξ, iy, iE, iσ] = slope                   # pin the slope (localized/York form)
             g_right[iξ, iy, iE, iσ] = slope
+        elseif mode === :analytic
+            xD = phys.rho_hat_theta_i * (grid.σ[iσ] * sqrt(grid.E.nodes[iE]) / (1 + phys.epsilon)) * Ay[iy]  # ⟨x_D⟩_θ
+            g_left[iξ, iy, iE, iσ] = (x_left - xD) * slope    # drift-orbit-shifted value: p̂ = x − ⟨x_D⟩
+            g_right[iξ, iy, iE, iσ] = (x_right - xD) * slope
         else
-            g_left[iξ, iy, iE, iσ] = x_left * slope          # pin the value g_far ∝ x
+            g_left[iξ, iy, iE, iσ] = x_left * slope           # pin the value g_far ∝ x
             g_right[iξ, iy, iE, iσ] = x_right * slope
         end
     end
     # forbidden pitch region (y ≥ 1/b_min): no particles ⇒ pin g = 0 (else the
     # physically-zeroed collision coefficients leave these nodes unconstrained)
-    y_forbidden = (1 + phys.epsilon) / (1 - phys.epsilon)
     forbidden_y = [grid.y.nodes[iy] >= y_forbidden for iy in 1:ny]
-    return FarFieldConditions(g_left, g_right, zeros(nξ), zeros(nξ), forbidden_y; mode=mode)  # Φ̂_far = 0 (ω_E = 0)
+    app_mode = mode === :neumann ? :neumann : :dirichlet      # :analytic is a value (Dirichlet) condition
+    return FarFieldConditions(g_left, g_right, zeros(nξ), zeros(nξ), forbidden_y; mode=app_mode)  # Φ̂_far = 0 (ω_E = 0)
 end
 
 """
@@ -689,11 +707,12 @@ the `Δ` prefactors. The momentum-restoring field-particle term is a separate
 future operator addition (its magnitude `⟨ν̂_ii⟩_u` is cleared).
 
 `farfield_mode` selects the radial far-field boundary form ([`gradient_far_field`],
-QUESTIONS Q7): `:dirichlet` (default, pin `g → g_far ∝ x` — the I19-Formulation-A
-drive-in-the-BC form) or `:neumann` (pin `∂g/∂x → slope` — the York/kokuchou
-localized form, so the response reaches its own asymptote rather than forming an
-edge boundary layer). A toggle for the far-field comparison; the physical choice is
-an open Q7 decision.
+QUESTIONS Q7): `:dirichlet` (default, pin `g → g_far ∝ x` — leading `p̂ ≈ x`),
+`:neumann` (pin the slope — the York/kokuchou localized form; well-localized but
+leaves an additive-constant null mode), or `:analytic` (pin the drift-orbit-shifted
+value `(x − ⟨x_D⟩_θ)·slope` — the `[DERIVED]` improvement `analytic-far-field.md`
+that restores the `O(ρ̂_θi)` orbit-width term, well-posed *and* localizing). A toggle
+for the far-field comparison; the physical choice is an open Q7 decision.
 
 `species` is validated (a Level-0 config must have a bulk ion).
 """

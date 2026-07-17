@@ -8,6 +8,37 @@ relevant.
 
 ---
 
+## 2026-07-17 (cont.) — A landed: the `:analytic` drift-orbit-shifted far field (derived from cleared quantities)
+
+- **Moved (user: "derive + implement A")**: derived and implemented the `:analytic`
+  far-field mode — the principled Q7 fix. The exact far field is the neoclassical
+  response at the **canonical momentum** `p̂ = x − x_D` (I19 Eq. 2, `p_φ=(ψ−ψs)−Iv_∥/ω_c`);
+  the code's `:dirichlet` uses the leading `p̂ ≈ x`, dropping the `O(ρ̂_θi)` orbit-width
+  term (which `gradient-drive.md` §2 explicitly discarded as "a small shift at |x|=Lx"
+  — the boundary-layer evidence shows it is NOT negligible). `:analytic` restores it:
+  `g_far = (x − ⟨x_D⟩_θ)·slope`, `⟨x_D⟩_θ = ρ̂_θi(σ√E/(1+ε))A(y)` with the **cleared**
+  drift bracket `A(y)=⟨√(1−yb)/b⟩_θ` (the boxed `x_D` of the signed-off
+  `omega-D-drift-frequency.md` §2). **No new coefficient** — every factor is already
+  cleared. Well-posed (Dirichlet → pins the level, no winged-branch null mode) AND
+  accurate (true asymptote → no boundary layer). Applied as a `:dirichlet` value
+  condition. Doc-first: `derivations/analytic-far-field.md` `[DERIVED: 2026-07-17]`;
+  Configure docstrings.
+- **physics-verifier PASS**: every derivation link confirmed against primary sources
+  (I19 Eq. 2; the boxed `x_D`; `A(y)` = the cleared bracket's first element; the term
+  `gradient-drive.md` §2 dropped), no new/guessed coefficient/sign/normalization,
+  `:dirichlet` default untouched, forbidden-y/`y_c`-miss guarded (zero shift, not
+  guessed). The one item reserved for **human sign-off**: the orbit-*averaged* `⟨x_D⟩_θ`
+  choice (vs local `x_D(θ)`) — correctly gated by `[DERIVED]`.
+- **Numerics (early)**: `:analytic` **converges** (nx=41 conv=1, m1 peak @ island x=0.00,
+  Δ_neo=−1.13) — already beating both baselines: `:dirichlet` diverges (−1.05→−2.84,
+  peak→edge) and `:neumann` doesn't converge (winged branch). The resolution-
+  convergence sweep (nx=61,81) is running to confirm Δ_neo settles. Tests: 1563
+  configure (was 1540; new `:analytic` test asserts the exact cleared formula + σ-oddness
+  + forbidden-y-no-shift + back-compat).
+- **Next**: finish the A resolution-convergence sweep → report A-vs-dirichlet (the
+  paper comparison); then, on human sign-off of `analytic-far-field.md`, the resolved
+  `Δ_neo(w)` checkpoint / B2 become reachable.
+
 ## 2026-07-17 — Far-field BC toggle (B = York localized ∂g/∂x form) landed; A next
 
 - **Moved (user-directed: "do B as a toggle to plot A's impact in the paper; if B

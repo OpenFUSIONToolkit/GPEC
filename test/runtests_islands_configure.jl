@@ -89,6 +89,34 @@ _ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0
         @test bc.g_left[1, 1, 2, 1] == bc.g_left[nξ, ny, 2, nσ]
     end
 
+    @testset ":analytic far field restores the drift-orbit shift ⟨x_D⟩ (analytic-far-field.md)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        bcD = Cfg.gradient_far_field(grid, phys; mode=:dirichlet)
+        bcA = Cfg.gradient_far_field(grid, phys; mode=:analytic)
+        @test bcA.mode == :dirichlet                              # :analytic applies as a value (Dirichlet) condition
+        @test_throws ArgumentError Cfg.gradient_far_field(grid, phys; mode=:bogus)
+        xL, xR = grid.x.nodes[1], grid.x.nodes[nx]
+        # at the deeply-passing endpoint y=0 the cleared bracket A(y)=⟨√(1−yb)/b⟩_θ is
+        # well-defined; g_far = (x − ⟨x_D⟩)·slope with ⟨x_D⟩ = ρ̂_θi(σ√E/(1+ε))A(y)
+        iy = 1
+        A0 = Coc.orbit_average_drift_brackets(; y=grid.y.nodes[iy], epsilon=phys.epsilon)[1]
+        for iσ in 1:nσ, iE in 1:nE
+            xD = phys.rho_hat_theta_i * (grid.σ[iσ] * sqrt(grid.E.nodes[iE]) / (1 + phys.epsilon)) * A0
+            temp = 1 + (grid.E.nodes[iE] - 1.5) * phys.eta_i
+            slope = phys.inv_Ln0 * temp
+            @test bcA.g_left[1, iy, iE, iσ] ≈ (xL - xD) * slope atol = 1e-12
+            @test bcA.g_right[1, iy, iE, iσ] ≈ (xR - xD) * slope atol = 1e-12
+            # differs from :dirichlet by exactly the −⟨x_D⟩·slope shift
+            @test bcA.g_left[1, iy, iE, iσ] - bcD.g_left[1, iy, iE, iσ] ≈ -xD * slope atol = 1e-12
+        end
+        # the shift is σ-odd (∝ σ), so the σ=+1 and σ=−1 far fields differ
+        @test bcA.g_left[1, iy, 2, 1] != bcA.g_left[1, iy, 2, 2]
+        # forbidden-y nodes carry no shift (no particles, pinned g=0): far field = :dirichlet
+        fy = findfirst(bcA.forbidden_y)
+        @test fy !== nothing
+        @test bcA.g_left[1, fy, 2, 1] ≈ bcD.g_left[1, fy, 2, 1] atol = 1e-12
+    end
+
     @testset "CLEARED c_D wired faithfully vs magnetic_drift_frequency" begin
         cD = Cfg.drift_coefficient_table(grid, phys)
         nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
