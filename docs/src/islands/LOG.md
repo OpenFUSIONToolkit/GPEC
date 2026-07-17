@@ -26,14 +26,29 @@ relevant.
   docstrings + `configure_level0`/`gradient_far_field` docs; new `:neumann` unit test
   (D1-row slope residual + constant-annihilation + default-`:dirichlet` back-compat).
   178 solve (was 169) + 1540 configure + 5 anchor-sync green.
-- **In progress**: the B-vs-dirichlet convergence/localization experiment (does
-  `:neumann` converge, keep the `m1` peak at the island not the edge, and give a
-  resolution-convergent `Δ_neo`?) is running. Baseline confirmed (dirichlet nx=41:
-  `Δ_neo=−1.05`, m1 peak at x=0). **Next**: read the `:neumann` rows; if B localizes/
-  converges as expected, proceed directly into **A** (the corrected analytic
-  far-field — the true large-|x| asymptote of ĝ, so the response decays cleanly) as a
-  third mode, and report A in the context of B (the paper comparison). If A needs an
-  underivable coefficient, escalate rather than guess.
+- **B experiment result — bare `:neumann` FAILS the winged-branch (expected)**: at
+  `w=1`, physical `ρ̂_θi`, near-uniform grids, `:neumann` (symmetric slope-pinning) does
+  **not converge** — nx=41 `conv=0` (Δ=0.15, m1 peak@edge), nx=61 `conv=0` (Δ=7.37,
+  m1 peak@island); the values swing wildly, the signature of Newton wandering an
+  unconstrained null space. Root cause (as anticipated + design-doc/L23 warned): pure
+  symmetric Neumann leaves `g`'s absolute level undetermined — an additive-constant
+  null mode `g→g+c(E,σ)` for σ-even `c` with zero density-moment (quasineutrality's
+  `M[g]` and the σ-odd momentum term don't see it) → singular Jacobian → the solve
+  stalls. Dirichlet over-constrains (boundary layer); bare Neumann under-constrains
+  (null mode) — neither works. So the **"if B works, proceed to A" precondition is
+  false**; reassessed rather than auto-proceeding.
+- **Reassessment**: the principled fix is **A** — pin the value to the *correct*
+  asymptote (linear `∝x` **plus** the drift-island-shift correction), which is
+  well-posed (pins the level → no null mode) AND accurate (the true asymptote → no
+  boundary layer). This is exactly the "analytic far-field BC" L23 §7.1 lists as
+  **unimplemented future work** (tied to the drift-island shift `ρ_shift`/`p̃`
+  coordinate) — genuinely novel beyond York, a `[DERIVED]` + physics-verifier +
+  human-sign-off task. Bare `:neumann` (B) stays in as the *baseline that exhibits the
+  winged-branch* (the paper motivation for A); making it a converging baseline would
+  need a numeric null-mode anchor (a Robin/one-sided regularization — a knob).
+  Surfaced to the user for the path decision (anchor-B-as-baseline vs invest in A's
+  asymptote derivation); the toggle infrastructure (committed `f8b519d1`) supports
+  either.
 
 ## 2026-07-16 (cont.) — York cross-check + integration experiment: quadrature fixed (delta_moments spline); far-field BC is the residual blocker
 
