@@ -167,16 +167,32 @@ the correct structure.)
 
 ## 4. Boundary conditions
 
-Far-field rows at ``|x| = L_x`` are replaced by matching conditions
-``g - g_\infty`` and ``\tilde\Phi - \tilde\Phi_\infty`` (Dirichlet-type against
-supplied far-field states). **Never bare Neumann** ``\partial_x g = 0``: the
-prior art traced a spurious "winged" solution branch directly to Neumann
-non-uniqueness (`01 §3`). The physical far field — the no-island neoclassical
-solution — is gated physics, so the code takes it as supplied data; the tests
-use manufactured far fields. These conditions are also what make the
-first-order-in-``x`` advective solve well-posed.
+Far-field rows at ``|x| = L_x`` are replaced by matching conditions against
+supplied far-field states. `FarFieldConditions` carries a **`mode`** selecting the
+radial form (`01 §3`; QUESTIONS **Q7**):
 
-*Implementing symbols:* `Operators.FarFieldConditions`, `Operators.apply_farfield!`.
+  - **`:dirichlet`** (default) — pin the *value* ``g - g_\infty`` (and
+    ``\tilde\Phi - \tilde\Phi_\infty``). This is the I19-Formulation-A form with the
+    drive carried in the far field, ``g_\infty = x\,\hat L_{n0}^{-1}[1+(E-\tfrac32)\eta_i]``
+    (``\propto x``). It is *not* bare Neumann ``\partial_x g = 0`` — the prior art
+    traced a spurious "winged" branch to Neumann non-uniqueness (`01 §3`) — but the
+    ``\propto x`` value over-constrains the edge and seeds a resolution-sharpening
+    boundary layer (the diagnosed Q7 problem).
+  - **`:neumann`** — pin the *slope* ``\partial_x g - s_\infty`` with
+    ``s_\infty = \partial_x g_\infty = \hat L_{n0}^{-1}[1+(E-\tfrac32)\eta_i]`` (the
+    x-derivative of the *same* cleared far field, so the drive is unchanged). This is
+    the York/kokuchou localized form (``\partial_x\hat g = 0`` for ``\hat g = g -
+    g_\infty``): ``g`` may float by a constant and reach its own asymptote, so the
+    localized response decays instead of forming a boundary layer. It is *slope-*
+    Neumann against the background gradient, not bare Neumann to zero.
+
+The physical far field is gated physics, taken as supplied data (tests use
+manufactured far fields); which `mode` is physically correct is the open Q7
+decision — the toggle exists to compare them. These conditions are also what make
+the first-order-in-``x`` advective solve well-posed.
+
+*Implementing symbols:* `Operators.FarFieldConditions`, `Operators.apply_farfield!`,
+`Configure.gradient_far_field`.
 
 ## 5. The Newton–Krylov solve
 

@@ -598,8 +598,17 @@ carried by the energy-grid measure). `L̂_{n0}⁻¹ = phys.inv_Ln0`,
 `η_i = phys.eta_i`. At Level 0 `ω_E = 0`, so `Φ̂_far = 0`. Returns the
 `Operators.FarFieldConditions` (the companion `Operators.GradientDrive` source is
 zero — I19 Formulation A).
+
+`mode` selects the radial far-field form (QUESTIONS Q7):
+
+  - `:dirichlet` (default) — pin the value `g → g_far` (the `∝x` form above);
+  - `:neumann` — pin the **slope** `∂g/∂x → ∂g_far/∂x = L̂_{n0}^{-1}[1+(E-\\tfrac32)η_i]`
+    (the York/kokuchou localized form: `g` floats by a constant so the response
+    reaches its own asymptote instead of forming an edge boundary layer). The slope
+    is the `x`-derivative of the same linear far field, so the drive is unchanged.
 """
-function gradient_far_field(grid::IslandGrid, phys::Level0Physics)
+function gradient_far_field(grid::IslandGrid, phys::Level0Physics; mode::Symbol=:dirichlet)
+    mode in (:dirichlet, :neumann) || throw(ArgumentError("gradient_far_field: mode must be :dirichlet or :neumann (got $mode)"))
     nx, nξ, ny, nE, nσ = nnodes(grid)
     x_left = grid.x.nodes[1]
     x_right = grid.x.nodes[nx]
@@ -607,14 +616,20 @@ function gradient_far_field(grid::IslandGrid, phys::Level0Physics)
     g_right = Array{Float64}(undef, nξ, ny, nE, nσ)
     @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
         temp = 1 + (grid.E.nodes[iE] - 1.5) * phys.eta_i     # 1 + (E − 3/2)η_i
-        g_left[iξ, iy, iE, iσ] = x_left * phys.inv_Ln0 * temp
-        g_right[iξ, iy, iE, iσ] = x_right * phys.inv_Ln0 * temp
+        slope = phys.inv_Ln0 * temp                          # ∂g_far/∂x = L̂_{n0}⁻¹[1+(E−3/2)η_i]
+        if mode === :neumann
+            g_left[iξ, iy, iE, iσ] = slope                   # pin the slope (localized/York form)
+            g_right[iξ, iy, iE, iσ] = slope
+        else
+            g_left[iξ, iy, iE, iσ] = x_left * slope          # pin the value g_far ∝ x
+            g_right[iξ, iy, iE, iσ] = x_right * slope
+        end
     end
     # forbidden pitch region (y ≥ 1/b_min): no particles ⇒ pin g = 0 (else the
     # physically-zeroed collision coefficients leave these nodes unconstrained)
     y_forbidden = (1 + phys.epsilon) / (1 - phys.epsilon)
     forbidden_y = [grid.y.nodes[iy] >= y_forbidden for iy in 1:ny]
-    return FarFieldConditions(g_left, g_right, zeros(nξ), zeros(nξ), forbidden_y)  # Φ̂_far = 0 (ω_E = 0)
+    return FarFieldConditions(g_left, g_right, zeros(nξ), zeros(nξ), forbidden_y; mode=mode)  # Φ̂_far = 0 (ω_E = 0)
 end
 
 """
@@ -649,7 +664,7 @@ end
 # The assembly
 # ---------------------------------------------------------------------------
 """
-    configure_level0(grid, phys, species)
+    configure_level0(grid, phys, species; farfield_mode=:dirichlet)
 
 Assemble the Level-0 named configuration (`03 §2`): returns a NamedTuple
 `(stack, bc, delta_prefactors, cleared, gated)` where
@@ -673,9 +688,16 @@ coefficients (pitch diffusion `P_oa`/`K`/`c` [σ-odd], drag, neoclassical, cross
 the `Δ` prefactors. The momentum-restoring field-particle term is a separate
 future operator addition (its magnitude `⟨ν̂_ii⟩_u` is cleared).
 
+`farfield_mode` selects the radial far-field boundary form ([`gradient_far_field`],
+QUESTIONS Q7): `:dirichlet` (default, pin `g → g_far ∝ x` — the I19-Formulation-A
+drive-in-the-BC form) or `:neumann` (pin `∂g/∂x → slope` — the York/kokuchou
+localized form, so the response reaches its own asymptote rather than forming an
+edge boundary layer). A toggle for the far-field comparison; the physical choice is
+an open Q7 decision.
+
 `species` is validated (a Level-0 config must have a bulk ion).
 """
-function configure_level0(grid::IslandGrid, phys::Level0Physics, species::AbstractVector{<:Species})
+function configure_level0(grid::IslandGrid, phys::Level0Physics, species::AbstractVector{<:Species}; farfield_mode::Symbol=:dirichlet)
     validate_species(species)
     nx, nξ, ny, nE, nσ = nnodes(grid)
 
@@ -703,7 +725,7 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
     # cleared gradient drive (I19 Formulation A, gradient-drive.md): homogeneous
     # interior — zero source; the drive is the far field.
     drive0 = zeros(Float64, nx, nξ, ny, nE, nσ)
-    bc = gradient_far_field(grid, phys)
+    bc = gradient_far_field(grid, phys; mode=farfield_mode)
 
     Δpref = delta_moment_prefactors(; mu0_R=phys.mu0_R, w_psi=phys.w_psi, dq_dpsi=phys.dq_dpsi, q_s=phys.q_s)
 

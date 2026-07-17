@@ -8,6 +8,33 @@ relevant.
 
 ---
 
+## 2026-07-17 — Far-field BC toggle (B = York localized ∂g/∂x form) landed; A next
+
+- **Moved (user-directed: "do B as a toggle to plot A's impact in the paper; if B
+  works, proceed straight into A")**: implemented the far-field **mode toggle** on
+  `Operators.FarFieldConditions` — `:dirichlet` (default, unchanged: pin the value
+  `g → g_far ∝ x`, the I19-Formulation-A drive-in-BC form) vs `:neumann` (pin the
+  **slope** `∂g/∂x → s_far`, the York/kokuchou localized form `∂ĝ/∂p=0` for
+  `ĝ = g − g_far`, so `g` floats by a constant and reaches its own asymptote instead
+  of forming the diagnosed edge boundary layer). `apply_farfield!` branches (Neumann
+  via the x-grid `D1` boundary row); `Configure.gradient_far_field(...; mode)` builds
+  the value or the slope (`s_far = L̂_{n0}⁻¹[1+(E−3/2)η_i]` = ∂/∂x of the *same*
+  cleared far field — no new coefficient); `configure_level0(...; farfield_mode)`
+  threads it. **physics-verifier PASS** (physics-neutral: `:dirichlet` a no-op,
+  `:neumann` slope is exactly the derivative of the cleared value, no coefficient/
+  sign/normalization introduced, no tag cleared). Doc-first: numerics.md §4 +
+  docstrings + `configure_level0`/`gradient_far_field` docs; new `:neumann` unit test
+  (D1-row slope residual + constant-annihilation + default-`:dirichlet` back-compat).
+  178 solve (was 169) + 1540 configure + 5 anchor-sync green.
+- **In progress**: the B-vs-dirichlet convergence/localization experiment (does
+  `:neumann` converge, keep the `m1` peak at the island not the edge, and give a
+  resolution-convergent `Δ_neo`?) is running. Baseline confirmed (dirichlet nx=41:
+  `Δ_neo=−1.05`, m1 peak at x=0). **Next**: read the `:neumann` rows; if B localizes/
+  converges as expected, proceed directly into **A** (the corrected analytic
+  far-field — the true large-|x| asymptote of ĝ, so the response decays cleanly) as a
+  third mode, and report A in the context of B (the paper comparison). If A needs an
+  underivable coefficient, escalate rather than guess.
+
 ## 2026-07-16 (cont.) — York cross-check + integration experiment: quadrature fixed (delta_moments spline); far-field BC is the residual blocker
 
 - **York source check (from the papers; the codes are NOT public)**: Diss19

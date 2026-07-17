@@ -664,13 +664,26 @@ Also carries the **forbidden-pitch domain condition**: where `forbidden_y[iy]`
 `ix` (not just the boundaries), since every physics coefficient vanishes there and
 the node would otherwise be unconstrained (`01 §2.3`, `orbit-averaged-collision.md`).
 
+The **`mode`** selects the radial far-field form (`01 §3`; QUESTIONS Q7):
+
+  - `:dirichlet` (default) — pin the *value* `g → g_far`; `g_left`/`g_right` hold
+    the far-field distribution. This is the I19-Formulation-A drive-in-the-BC form
+    (`g_far ∝ x`); it over-constrains the edge and seeds a resolution-sharpening
+    boundary layer (the diagnosed Q7 problem).
+  - `:neumann` — pin the *slope* `∂g/∂x → s_far` (the York/kokuchou localized
+    form, `∂ĝ/∂p = 0` with `ĝ = g − g_far`); `g_left`/`g_right` hold the target
+    slopes `s_far`. `g` may then float by a constant and reach its own asymptote,
+    so the localized response decays instead of forming a boundary layer.
+
 ## Fields
 
-  - `g_left`, `g_right` — `(nξ, ny, nE, nσ)` far-field distributions at `ix = 1`, `ix = nx`.
+  - `g_left`, `g_right` — `(nξ, ny, nE, nσ)` far-field data at `ix = 1`, `ix = nx`:
+    the *value* `g_far` (`:dirichlet`) or the *slope* `∂g/∂x` (`:neumann`).
   - `Φ_left`, `Φ_right` — length-`nξ` far-field potentials at `ix = 1`, `ix = nx`.
   - `forbidden_y` — length-`ny` `Bool` mask; `true` pins `g = 0` at that pitch node
     for all `ix` (the forbidden region). Defaults to all-`false` (no pinning) for
     the 4-argument constructor used by manufactured tests.
+  - `mode` — `:dirichlet` (value) or `:neumann` (slope). Defaults to `:dirichlet`.
 """
 struct FarFieldConditions{T,A4<:AbstractArray{T,4},V<:AbstractVector{T}}
     g_left::A4
@@ -678,23 +691,41 @@ struct FarFieldConditions{T,A4<:AbstractArray{T,4},V<:AbstractVector{T}}
     Φ_left::V
     Φ_right::V
     forbidden_y::Vector{Bool}
+    mode::Symbol
 end
 
-FarFieldConditions(g_left, g_right, Φ_left, Φ_right) =
-    FarFieldConditions(g_left, g_right, Φ_left, Φ_right, fill(false, size(g_left, 2)))
+FarFieldConditions(g_left, g_right, Φ_left, Φ_right; mode::Symbol=:dirichlet) =
+    FarFieldConditions(g_left, g_right, Φ_left, Φ_right, fill(false, size(g_left, 2)), mode)
+FarFieldConditions(g_left, g_right, Φ_left, Φ_right, forbidden_y; mode::Symbol=:dirichlet) =
+    FarFieldConditions(g_left, g_right, Φ_left, Φ_right, forbidden_y, mode)
 
 """
     apply_farfield!(R, U, bc, grid)
 
 Replace the residual rows at the radial boundaries with the far-field matching
-conditions `U − far` (`01 §3`). Called after the operator stack in
-[`residual!`](@ref); allocation-free and AD-transparent.
+conditions (`01 §3`): `U − g_far` for `:dirichlet`, or `∂U/∂x − s_far` for
+`:neumann` (the radial derivative from the `x`-grid `D1`). Called after the
+operator stack in [`residual!`](@ref); allocation-free and AD-transparent.
 """
 function apply_farfield!(R::IslandState, U::IslandState, bc::FarFieldConditions, grid::IslandGrid)
     nx, nξ, ny, nE, nσ = size(U.g)
-    @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
-        R.g[1, iξ, iy, iE, iσ] = U.g[1, iξ, iy, iE, iσ] - bc.g_left[iξ, iy, iE, iσ]
-        R.g[nx, iξ, iy, iE, iσ] = U.g[nx, iξ, iy, iE, iσ] - bc.g_right[iξ, iy, iE, iσ]
+    if bc.mode === :neumann
+        D1 = grid.x.D1
+        @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
+            dl = zero(eltype(R.g))
+            dr = zero(eltype(R.g))
+            for k in 1:nx
+                dl += D1[1, k] * U.g[k, iξ, iy, iE, iσ]
+                dr += D1[nx, k] * U.g[k, iξ, iy, iE, iσ]
+            end
+            R.g[1, iξ, iy, iE, iσ] = dl - bc.g_left[iξ, iy, iE, iσ]
+            R.g[nx, iξ, iy, iE, iσ] = dr - bc.g_right[iξ, iy, iE, iσ]
+        end
+    else
+        @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny, iξ in 1:nξ
+            R.g[1, iξ, iy, iE, iσ] = U.g[1, iξ, iy, iE, iσ] - bc.g_left[iξ, iy, iE, iσ]
+            R.g[nx, iξ, iy, iE, iσ] = U.g[nx, iξ, iy, iE, iσ] - bc.g_right[iξ, iy, iE, iσ]
+        end
     end
     # forbidden-pitch domain condition: pin g = 0 (no particles) at all ix
     @inbounds for iσ in 1:nσ, iE in 1:nE, iy in 1:ny

@@ -253,6 +253,42 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test R.g[2:(nx-1), :, :, :, :] == R2.g[2:(nx-1), :, :, :, :]
     end
 
+    @testset "far-field :neumann mode pins the radial slope (York/Q7 toggle)" begin
+        g = _sgrid(7; ny=7)
+        nx, nξ, ny, nE, nσ = PS2.nnodes(g)
+        U, = V2.manufactured_state(g)
+        slopeL = fill(0.5, nξ, ny, nE, nσ)
+        slopeR = fill(-0.3, nξ, ny, nE, nσ)
+        stack = V2.build_stack(g)
+        cache = Op2.IslandCache(g)
+        # :neumann replaces the boundary rows with (∂g/∂x − slope), from the x-grid D1
+        bcn = Op2.FarFieldConditions(slopeL, slopeR, zeros(nξ), zeros(nξ); mode=:neumann)
+        @test bcn.mode == :neumann
+        Rn = Op2.IslandState(g)
+        Op2.residual!(Rn, U, stack, g, cache, bcn)
+        D1 = g.x.D1
+        for (iξ, iy, iE, iσ) in ((2, 3, 1, 1), (4, 2, 1, 2))
+            dl = sum(D1[1, k] * U.g[k, iξ, iy, iE, iσ] for k in 1:nx)
+            dr = sum(D1[nx, k] * U.g[k, iξ, iy, iE, iσ] for k in 1:nx)
+            @test Rn.g[1, iξ, iy, iE, iσ] ≈ dl - slopeL[iξ, iy, iE, iσ]
+            @test Rn.g[nx, iξ, iy, iE, iσ] ≈ dr - slopeR[iξ, iy, iE, iσ]
+        end
+        # a constant-in-x g has zero radial slope: the neumann boundary residual is
+        # then exactly −slope (D1 annihilates constants on the mapped grid)
+        Uc = Op2.IslandState(g)
+        fill!(Uc.g, 2.7)
+        Rc = Op2.IslandState(g)
+        Op2.residual!(Rc, Uc, stack, g, cache, bcn)
+        @test Rc.g[1, 2, 3, 1, 1] ≈ -slopeL[2, 3, 1, 1] atol = 1e-12
+        @test Rc.g[nx, 4, 2, 1, 2] ≈ -slopeR[4, 2, 1, 2] atol = 1e-12
+        # the 4-arg constructor still defaults to :dirichlet (value-pinning), unchanged
+        bcd = Op2.FarFieldConditions(slopeL, slopeR, zeros(nξ), zeros(nξ))
+        @test bcd.mode == :dirichlet
+        Rd = Op2.IslandState(g)
+        Op2.residual!(Rd, U, stack, g, cache, bcd)
+        @test Rd.g[1, 2, 3, 1, 1] ≈ U.g[1, 2, 3, 1, 1] - slopeL[2, 3, 1, 1]
+    end
+
     @testset "A8 — y_c matching-block conditioning monitor" begin
         g = _sgrid(7; ny=7)
         setup = V2.zero_drive_setup(g)
