@@ -8,6 +8,36 @@ relevant.
 
 ---
 
+## 2026-07-17 (cont. 3) — Physical-regime test: the edge feature is a domain-FRACTION artifact (scale-invariant), not a plasma-scale effect
+
+- **Context (user catch)**: the convergence sweeps used `w_psi=1.0`, `Lx=6` — but
+  `x=(ψ−ψs)/ψs` so `|x|~1` is the plasma edge; `w=1`/`Lx=6` is an island the size of
+  the plasma and a domain 6× the minor radius, far outside the local model. Retested
+  in the **physical** regime `w=0.1` (≈2ρ̂_θi, ≪1), thin domain `Lx=0.6`.
+- **Result — does NOT dissolve; it is scale-invariant**: `:dirichlet` at `w=0.1`
+  **fails to converge** (nx=41,61 both conv=0, it=40 max; Δ_neo swings 0.84→−14.8),
+  and the m1 peak is at **x/w ≈ −5.3…−5.6**, i.e. ≈0.9·(Lx/w=6) — the SAME domain
+  *fraction* (near the outer edge) as the `w=1` case (peak @ x=−5.78 = 0.96·Lx). So
+  the edge feature scales with the **domain**, not the absolute `x`: it is an
+  **outer-boundary artifact at ~0.9·Lx, independent of w**, NOT a plasma-scale
+  (`x~1`) effect. And physical `w` makes the solve *harder* (non-convergent), not
+  easier.
+- **Where this leaves the Δ_neo convergence**: none of the tried fixes crack it —
+  the quadrature spline (helped, insufficient), `:neumann`/B (winged null mode),
+  `:analytic`/A (offset ~1% too small), physical scaling (worse). The feature is at a
+  fixed fraction near the outer boundary and *sharpens with resolution*. Open
+  hypotheses (not yet distinguished): (i) a **solve-accuracy** artifact — the outer
+  region has the largest streaming `a_xi ∝ x` (stiffest, worst-conditioned), so the
+  finer grid's residual concentrates there (would explain non-convergence + the edge
+  peak, and points at the preconditioner/tolerance, NOT the BC); (ii) the response is
+  genuinely **not localized** in this model (long passing-particle radial tail), so a
+  volume moment over any finite domain is edge-dominated — then York's *small* domain
+  (2–3w, island-dominated) is essential, opposite to our 6w. **Stepping back for a
+  human steer rather than more autonomous solves.** Committed to date:
+  quadrature-fix, the 3-mode far-field toggle (dirichlet/neumann/analytic, A
+  `[DERIVED]`); none regress — they are correct pieces that don't (yet) yield a
+  convergent Δ_neo.
+
 ## 2026-07-17 (cont. 2) — A resolution sweep: A is correct + well-posed but does NOT fix the boundary layer (negative result)
 
 - **Result**: the `:analytic` resolution-convergence sweep came back **negative**.
