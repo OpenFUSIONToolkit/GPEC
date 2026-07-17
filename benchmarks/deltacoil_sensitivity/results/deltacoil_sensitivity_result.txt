@@ -1,0 +1,32 @@
+  Sweep A — delta_coil vs outer truncation dmlim ∈ (0,1)  [set_psilim_via_dmlim=true]
+  |delta_coil| per surface (blank = surface absent at that setting)
+========================================================================
+  q\dmlim |       0.1 |       0.3 |       0.5 |       0.7 |       0.9
+  q=2.0  | 1.140e+01 | 1.172e+01 | 1.107e+01 | 1.100e+01 | 1.114e+01
+  q=3.0  | 9.389e+00 | 9.560e+00 | 9.619e+00 | 9.319e+00 | 9.279e+00
+  q=4.0  | 1.242e+01 | 1.251e+01 | 1.457e+01 | 1.305e+01 | 1.251e+01
+  q=5.0  | 3.857e+01 | 3.349e+01 |         — |         — |         —   <- edge
+  ------------------------------------------------------------------
+  relative change of |delta_coil| vs dmlim=0.9 (reference):
+  q=2.0  |  2.36e-02 |  5.24e-02 |  6.31e-03 |  1.19e-02 |  0.00e+00
+  q=3.0  |  1.18e-02 |  3.02e-02 |  3.66e-02 |  4.33e-03 |  0.00e+00
+  q=4.0  |  7.45e-03 |  5.73e-04 |  1.64e-01 |  4.32e-02 |  0.00e+00
+
+========================================================================
+  Sweep B — delta_coil vs rational-surface cutoff singfac_min  [dmlim fixed at 0.2]
+  |delta_coil| per surface (blank = surface absent at that setting)
+========================================================================
+  q\sfac |     1e-05 |    0.0001 |     0.001
+  q=2.0  | 1.155e+01 | 1.155e+01 | 1.155e+01
+  q=3.0  | 9.469e+00 | 9.469e+00 | 9.469e+00
+  q=4.0  | 1.245e+01 | 1.245e+01 | 1.245e+01
+  q=5.0  | 3.509e+01 | 3.510e+01 | 3.509e+01   <- edge
+  ------------------------------------------------------------------
+  relative change of |delta_coil| vs sfac=0.001 (reference):
+  q=2.0  |  8.85e-06 |  1.11e-05 |  0.00e+00
+  q=3.0  |  1.99e-05 |  1.52e-05 |  0.00e+00
+  q=4.0  |  8.78e-06 |  2.23e-05 |  0.00e+00
+  q=5.0  |  5.56e-06 |  3.68e-05 |  0.00e+00
+
+interpretation: flat rows ⇒ delta_coil robust to that knob at that surface; the edge-most
+surface is where truncation (dmlim) and approach distance (singfac_min) bite hardest.
