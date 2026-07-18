@@ -8,6 +8,37 @@ relevant.
 
 ---
 
+## 2026-07-18 — Exact-solve diagnostic: the edge feature IS a matrix-free artifact, but the physical solve is near-singular (deeper than the BC)
+
+- **Test**: `newton_direct` (EXACT dense solve, no preconditioner) at physical
+  `w=0.03` (≈0.6 ρ̂_θi), thin `Lx=0.18`, to remove the matrix-free solver as a variable.
+- **Two decisive findings from the first (converged-enough to read) row** (nx=25,
+  N=5550): (1) the exact solve puts the **m1 peak at the ISLAND (x/w=0.00)**, NOT the
+  edge — so the "edge feature at ~0.9·Lx" seen in every matrix-free sweep **was a
+  matrix-free (PlaneJacobi/Krylov) artifact**, concentrated in the stiff outer
+  streaming region. Good: the response *does* localize. (2) BUT the exact solve
+  **does not converge** either — the Armijo line search **stalls at resmax≈7e-3**
+  (it=54/60), i.e. the Newton step stops reducing the residual. A dense-LU exact
+  solve stalling ⇒ a **near-singular Jacobian** at physical parameters. This is
+  almost certainly the **documented `y_c` trapped-passing matching layer** (design
+  `04 §3`, ladder A8: the prior art measured rcond~1e-16 there and needs TSVD
+  regularization) — `newton_direct` uses plain LU with NO regularization, so it
+  stalls exactly where the TSVD-preconditioned `newton_krylov` copes.
+- **Synthesis**: neither solver is clean — `newton_direct` (exact) stalls on the
+  `y_c` near-singularity (no TSVD); `newton_krylov+PlaneJacobi` (TSVD) copes with
+  `y_c` but injects an outer-edge artifact and doesn't converge at small `w`. The
+  **Δ_neo non-convergence is a SOLVE problem, not a far-field-BC problem** — the far
+  field (B/A) was the wrong lever. A remains a correct, verified physics piece (the
+  toggle), but it is not the fix.
+- **Cost/limit**: `newton_direct` is ~11 min/solve at N~5.5k (N column-evals/step) —
+  too slow for sweeps. Many experiments run this session (compute-heavy) without a
+  clean convergent Δ_neo. **Stepping back for a human steer.** Principled next
+  diagnostics (not yet run): (i) the **A8 `yc_block_sigma_min` monitor** on the
+  physical dense Jacobian to confirm/quantify the near-singular `y_c` block — if it is
+  the `y_c` layer, the fix is regularizing the *solve* (TSVD in the direct path /
+  tuning the plane-block regularization), not the BC; (ii) replicate York's exact
+  converging small-domain setup as a reference to isolate our-formulation vs a bug.
+
 ## 2026-07-17 (cont. 3) — Physical-regime test: the edge feature is a domain-FRACTION artifact (scale-invariant), not a plasma-scale effect
 
 - **Context (user catch)**: the convergence sweeps used `w_psi=1.0`, `Lx=6` — but
