@@ -8,6 +8,35 @@ relevant.
 
 ---
 
+## 2026-07-18 (cont.) — A8 conditioning investigation: NOT near-singular, NOT the y_c layer — the stall is globalization + a matrix-free edge artifact (hopeful)
+
+- **A8 monitor result (overturns the y_c hypothesis)**: the `y_c` trapped-passing
+  block is **NOT** the near-singularity — its smallest singular value (1.7e-4…5e-4)
+  is **43–1230× LARGER** than the whole-Jacobian σmin (1e-7…1e-5). The near-null
+  direction is elsewhere, ~99% in `g` (not `Φ`, not the forbidden-y rows).
+- **No genuine null mode**: σmin is **bounded** (~1–2e-5, does not shrink with
+  resolution nx=9→21) and cond is only **~4e5** (mild grid) to **~6e6** (resolved,
+  heavily-clustered β=3.55 grid — clustering for the tiny `w=0.03` island worsens
+  cond ~14× but only to ~10⁶–10⁷). **This is well within `newton_direct`'s exact-LU
+  capability** (a step on cond~10⁷ is accurate to ~10⁻⁹).
+- **Reframed diagnosis (much more hopeful)**: the physical solve is **moderately
+  conditioned, not near-singular**, and the `y_c` layer is fine. So `newton_direct`
+  stalling at `resmax≈7e-3` (w=0.03, cold from zeros) is a **globalization /
+  initial-guess** problem — Newton from zeros at small `w` misses the basin — NOT a
+  singularity or conditioning failure. This is exactly what `Solvers.natural_continuation`
+  (already built + tested) is for. And the **exact solve LOCALIZES correctly**
+  (m1 peak @ island) — so the moment/far-field are fine; the outer-**edge** feature
+  was purely a **matrix-free (PlaneJacobi) accuracy artifact** in the stiff outer
+  streaming region (a preconditioner-quality issue, separable).
+- **Net**: two addressable numerical issues, both with existing tools — (a)
+  globalize the solve with **continuation** (reach the small-`w` / large-`w` basins
+  robustly), using the **exact `newton_direct`** at modest grids (it localizes
+  correctly); (b) if the matrix-free path is needed for scale, **improve the
+  PlaneJacobi outer-region accuracy**. NOT a far-field-BC problem (B/A were the wrong
+  lever, though A is a correct verified toggle). **Next**: confirm the globalization
+  hypothesis — `newton_direct` + `natural_continuation` reaching a converged w=0.03
+  solve — then a resolved `Δ_neo(w)` via the exact-solve path.
+
 ## 2026-07-18 — Exact-solve diagnostic: the edge feature IS a matrix-free artifact, but the physical solve is near-singular (deeper than the BC)
 
 - **Test**: `newton_direct` (EXACT dense solve, no preconditioner) at physical
