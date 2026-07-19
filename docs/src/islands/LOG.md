@@ -8,6 +8,41 @@ relevant.
 
 ---
 
+## 2026-07-18 (cont. 2) — Globalization hypothesis NOT confirmed: the exact solve crawls to resmax~1e-3 regardless of initial guess
+
+- **Test**: `newton_direct` at physical `w=0.03` from ZEROS vs the FAR-FIELD
+  extrapolation (`g = x·slope` everywhere — satisfies the BC). Result (nx=21):
+  both **fail to converge** at max_iter — zeros `resmax=2e-2`, far-field
+  `resmax=2.5e-3`. The good guess helps (~10× lower residual) but does **not** crack
+  it; `Δ` differs wildly (−79 vs −29), so neither is trustworthy. **Globalization
+  (initial guess) is NOT the fix.**
+- **State (honest)**: after extensive investigation this session, the physical
+  Level-0 solve does **not robustly converge** below `resmax ~ 10⁻³` under any path
+  tried — matrix-free (edge artifact; fails at small w) or exact `newton_direct`
+  (crawls, from any init). Ruled OUT: the far-field BC (B/A were the wrong lever),
+  the `y_c` matching block (A8), a genuine null mode / near-singularity (cond only
+  ~10⁶–10⁷ at u=0), and simple globalization. Confirmed OK: the response localizes
+  (exact solve, m1 peak @ island), the quadrature/moment/extraction. **Remaining
+  suspicion**: the crawl (exact Newton, moderate cond at u=0, but residual won't fall)
+  points at either the **strong nonlinearity** (the ExB Poisson-bracket term — Newton
+  overshoots, Armijo damps to a crawl) or conditioning worsening near the solution, or
+  a **consistency** question (does a discrete root exist at this resolution?). Not
+  resolved.
+- **Assessment**: I have spent a large amount of compute/experimentation without a
+  converged physical solve; the experimental poking is not converging on the cause.
+  **Handing back for a strategic decision** rather than more autonomous solves.
+  Options: (i) a focused **solver-robustness** effort (continuation in the ExB
+  nonlinearity / a trust-region or pseudo-transient Newton, vs the current
+  line-search) — the crawl smells like a globalization-of-the-nonlinearity problem
+  the current Armijo can't handle; (ii) a **ground-truth comparison with York's
+  actual numerics** (kokuchou/DK-NTM: what residual tolerance + method did they
+  reach? Picard may have a looser criterion, or their small domain matters); (iii)
+  human structural/physics judgment. **Landed + solid this session (all committed,
+  tests green, non-regressing)**: the `delta_moments` quadrature fix, `PlaneJacobi`,
+  `natural_continuation`, the resolution protocol, and the 3-mode far-field toggle
+  (A `[DERIVED]` + physics-verifier PASS) — correct infrastructure, but the
+  convergent physical `Δ_neo` remains unachieved.
+
 ## 2026-07-18 (cont.) — A8 conditioning investigation: NOT near-singular, NOT the y_c layer — the stall is globalization + a matrix-free edge artifact (hopeful)
 
 - **A8 monitor result (overturns the y_c hypothesis)**: the `y_c` trapped-passing
