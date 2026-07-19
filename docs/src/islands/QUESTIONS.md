@@ -432,3 +432,42 @@ effectively resolved by evidence:
 - **Gated work (unchanged)**: the resolution-convergent `Δ_neo(w)` checkpoint; B2
   (∝1/w); the `channel_decomposition` rework; B5b. The solver stack, the resolution
   protocol, the extraction form, and now the moment quadrature are all done/green.
+
+### Update (2026-07-18) — the far-field was ruled out; the real blocker is the physical-SOLVE non-convergence
+
+The far-field investigation this Q7 triggered is **complete, and it was the wrong
+lever** (full detail: LOG 2026-07-17/18). A 3-mode far-field toggle now exists
+(`:dirichlet` / `:neumann` / `:analytic`):
+
+- **B (`:neumann`, York-localized slope BC)** — fails: an additive-constant null
+  mode (the "winged branch"), the solve does not converge.
+- **A (`:analytic`, drift-orbit-shifted `g_far = (x−⟨x_D⟩_θ)·slope`)** — derived from
+  **already-cleared** quantities (`derivations/analytic-far-field.md`,
+  `[DERIVED: 2026-07-17]`), **physics-verifier PASS**, well-posed (no null mode) and
+  more accurate than `:dirichlet`. **But it does NOT fix the `Δ_neo` convergence** —
+  the orbit-shift offset is ~1% of the far-field, too small to matter.
+
+**What actually blocks a resolution-convergent `Δ_neo` is the physical Level-0 solve
+itself not converging** (below `resmax ~ 10⁻³`), NOT the extraction or the far field.
+Ruled out this session (LOG 2026-07-18): the far-field BC, the `y_c` matching block
+(A8: it is 43–1230× better-conditioned than the near-null direction), a genuine
+null mode / near-singularity (`cond ~ 10⁶–10⁷` at `u=0`), and initial-guess /
+globalization. Confirmed fine: the response localizes (exact `newton_direct`, m1
+peak @ island) and the quadrature/moment (the spline `delta_moments` fix landed).
+Remaining, unconfirmed suspicion: the strong **ExB nonlinearity** overwhelming the
+Armijo line search (Newton crawls), or a discrete-**consistency** question.
+
+**So the standing open items are now TWO, and neither is "which far-field is right for
+the moment":**
+
+1. **(New, the actual blocker) Physical-solve robustness** — make the Level-0 solve
+   converge at physical parameters. Candidate directions (LOG 2026-07-18): a
+   solver-robustness effort (continuation in the ExB coupling / trust-region or
+   pseudo-transient Newton vs the current Armijo line search); and/or a **ground-truth
+   comparison with York's actual numerics** (kokuchou/DK-NTM — what residual
+   tolerance + method did they reach, on their small 2–3w domain?) to establish
+   whether the discretized problem converges *for anyone*. **Recommended first: the
+   York ground-truth reference** — without it, solver work is guessing.
+2. **(Standing) A's `[DERIVED]` sign-off** — the orbit-averaged `⟨x_D⟩_θ` far-field
+   (`analytic-far-field.md`) still needs human sign-off (a correct improvement + the
+   paper's "our vs York" toggle), independent of the convergence blocker.
