@@ -524,3 +524,27 @@ been gating on the wrong quantity at an unphysically tight tolerance.
   re-take `Δ_neo` at physical `ŵ ~ ρ̂_θi` with the fixed spline `delta_moments` and
   check whether it (and the current moment) *stabilises* across resolution even as
   `resmax` floors — the kokuchou `Δ_loc` test. Only the *gate change* needs sign-off.
+
+### Update (2026-07-19, measured) — the kokuchou test: output IS field-residual-insensitive (gate confirmed wrong) BUT does NOT resolution-converge → the blocker is the extraction/grid, not the solve
+
+Ran the kokuchou `Δ_loc` test (LOG 2026-07-19 cont.; physical `ρ̂_θi=0.05`, `w=0.05`):
+
+- **The gate question is answered by evidence**: at fixed resolution `Δ_neo` is
+  **insensitive to the field residual** (`−434` at `resmax=1e-5` vs `−441` at
+  `resmax=0.15`). So **option (a) [gate on the output, not `resmax`] is empirically
+  the right posture** — the recommendation stands and is now measured, not just
+  argued. (Still a threshold/methodology sign-off item.)
+- **But a NEW finding supersedes the "which solver" framing**: `Δ_neo` does **not
+  resolution-converge** — the exact solve gives `−435 → −38 → −9.3` across x-res with
+  the moment peak migrating off the magnetic-island centre. And crucially the **exact
+  solve converges the FIELD fine** (`resmax=1e-5`) — so the 2026-07-18 "physical-solve
+  non-convergence" blocker was largely a **matrix-free-preconditioner** artifact, not
+  the real problem. **The real blocker is the output EXTRACTION / non-localisation**
+  (this is Q7-*original*, 2026-07-16, resurfacing) + the **grid**: the response layer
+  sits at the drift island (shifted `ρ̂_θi ω̂_D(y,σ,u)`, velocity-spread), not the
+  magnetic island our rectilinear x-mesh packs (design 04 §1; L23 §3.1.6).
+- **New gated decision (a build, needs a steer)**: implement the **drift-island-
+  separatrix grid map** `x(s; y,v̂,σ-envelope)` (design 04 §1 / L23 §7.1.1 `p̃`; a GRID
+  MAP only — D1 stands) so the moment's velocity-spread support is resolved, THEN
+  re-test `Δ_neo` resolution-convergence. This supersedes solver-robustness work as
+  the precondition for a trustworthy `Δ_neo(w)`.

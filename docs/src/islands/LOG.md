@@ -8,6 +8,49 @@ relevant.
 
 ---
 
+## 2026-07-19 (cont.) — Kokuchou Δ_loc measurement: the OUTPUT extraction (not the solve) is the blocker — redirects the 2026-07-18 pivot
+
+- **Moved (user: "measure Δ stability now")**: ran the kokuchou `Δ_loc` test at a
+  physical point (`ρ̂_θi=0.05`, `w=0.05`, `ŵ/ρ̂_θi=1`, Lx/w=6, nξ=8, ny=9, nE=3,
+  `:dirichlet`) — does `Δ_neo` stabilise across x-resolution as York's `Δ_loc` does?
+  Two solve paths (matrix-free `newton_krylov`+`PlaneJacobi`; exact `newton_direct`).
+  Scratch scripts under `/tmp` (not committed, per discipline).
+- **Two clean signals**:
+  1. **At fixed resolution, `Δ_neo` is insensitive to the FIELD residual** — nx=13
+     gave `Δ_neo=−434` at `resmax=1.0e-5` (60 iters) and `−441` at `resmax=0.15`
+     (45 iters). This **confirms the ground-truth**: gating on field `resmax` is the
+     wrong lever; the output barely moves as the field residual falls 4 orders.
+  2. **Across x-resolution, `Δ_neo` does NOT converge** — exact solve
+     `Δ_neo = −435 → −38 → −9.3` (nx=13,17,21; ~1–2 orders of magnitude), with the
+     `m1(x)=∮J̄cosξ` peak **migrating off the magnetic-island centre**
+     (`x/w = +0.48 → −0.32 → −0.91`). Not a field artifact (per signal 1). The
+     channels are huge and cancelling (`Δbs≈+1065`, `Δpol≈−1506` at nx=13) — the
+     documented item-4 fragility, now at physical w.
+- **Diagnosis (redirects 2026-07-18)**: the **exact solve CONVERGES the field**
+  here (`resmax=1e-5` at nx=13) — so the field is **not** the universal blocker the
+  2026-07-18 LOG concluded; that non-convergence was largely the **matrix-free
+  (PlaneJacobi) path** stalling at ~1e-3, not the underlying problem. **The real
+  standing blocker is the OUTPUT EXTRACTION / non-localisation** — the volume-moment
+  `Δ_neo` is resolution-sensitive (collapsing/peak-migrating), exactly Q7-**original**
+  (2026-07-16: island-restricted moment → ~0 while full value grows) + milestone
+  item-4 (`channel_decomposition` fragility) + **design 04 §1**: the response layer
+  sits at the **drift** island (shifted `ρ̂_θi ω̂_D(y,σ,u)`, spread over velocity
+  space), NOT the magnetic island our rectilinear x-mesh packs — a magnetic-island-
+  centred grid structurally cannot resolve a moment whose support moves across
+  velocity space (L23 §3.1.6, the same rectilinear-mesh-vs-rounded-drift-island
+  mismatch that was kokuchou's dominant accuracy limiter).
+- **Caveats (honest)**: only 3 coarse resolutions (nE=3); the max_iter=45 trend runs
+  weren't fully field-converged (signal-1 shows that doesn't change the conclusion).
+  Whether `Δ_neo` is heading to a small finite value (under-resolution artifact
+  shrinking) or genuinely non-convergent is not disambiguated (would need nx≥25).
+- **Blocked / next (needs a steer — a real build, not a probe)**: the concrete lever
+  named by design 04 §1 + L23 §7.1.1 is a **drift-island-separatrix grid map**
+  `x(s; y,v̂,σ-envelope)` absorbing the orbit shift `p̃ = ψ − I(v_∥/ω_c)` (as a GRID
+  MAP; D1 stands — not a solve coordinate), so the moment's velocity-spread support
+  is resolved. This is the honest precondition for a resolution-convergent `Δ_neo`;
+  it supersedes further solver-robustness work. Surfaced to the user. Docs-only this
+  session (LOG + QUESTIONS Q7 update); nothing in `src/`.
+
 ## 2026-07-19 — York ground-truth (recommended first task): the FIELD converges for nobody; the OUTPUT `Δ` is what York gates on — our resmax~1e-3 stall is NOT a bug
 
 - **Moved (literature ground-truth, per the M1-launch recommendation)**: read L23
