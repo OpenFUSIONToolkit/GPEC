@@ -486,58 +486,89 @@ end
 # (PhaseSpace stays physics-free).
 # ---------------------------------------------------------------------------
 """
-    banded_x_nodes(; R, h, Lx, growth=1.2)
+    banded_x_nodes(; R, h, Lx, max_ratio=1.3)
 
 Symmetric radial node vector for the drift-island band grid (`04 §1`): a uniform
-central band of spacing `h` covering at least `[-R, R]`, then a geometric tail on
-each side (spacing growing by `growth` per step) out to `±Lx`. `R` is the shift
-envelope half-width and `h = w/K` the island-resolution spacing; require
-`Lx > R` (the far field must lie beyond the drift-island envelope, not merely
-beyond the magnetic island). Returns an ascending, strictly-increasing,
-symmetric vector including `0`, `±(band edge)`, and exactly `±Lx`.
+central band of spacing `h` covering at least `[-R, R]`, then a **graded** tail on
+each side out to exactly `±Lx`. `R` is the shift envelope half-width and `h = w/K`
+the island-resolution spacing; require `Lx > R` (the far field must lie beyond the
+drift-island envelope, not merely beyond the magnetic island).
+
+**Smoothness is essential**: the `(x, ξ)` plane-block preconditioner
+([`PlaneJacobi`](@ref)) anti-preconditions on a grid with an abrupt spacing jump.
+The tail therefore grows **geometrically with a single ratio `r ≤ max_ratio`**,
+solved (bisection) so the geometric sum lands *exactly* on `Lx` — every adjacent
+interval ratio is then `r` (including the band→tail join), with no truncated
+"sliver" interval. The node count `n_tail` is the smallest that admits an
+`r ∈ (1, max_ratio]`; if the tail is shorter than one band step it is a single
+uniform step. Returns an ascending, strictly-increasing, symmetric vector
+including `0`, the band nodes, and exactly `±Lx`.
 """
-function banded_x_nodes(; R::Real, h::Real, Lx::Real, growth::Real=1.2)
+function banded_x_nodes(; R::Real, h::Real, Lx::Real, max_ratio::Real=1.3)
     (R > 0 && h > 0) || throw(ArgumentError("banded_x_nodes: R and h must be positive"))
-    growth > 1 || throw(ArgumentError("banded_x_nodes: growth must be > 1"))
+    max_ratio > 1 || throw(ArgumentError("banded_x_nodes: max_ratio must be > 1"))
     Lx > R || throw(ArgumentError("banded_x_nodes: need Lx ($Lx) > R ($R) — far field must lie beyond the drift-island envelope"))
     nband = ceil(Int, R / h)                         # band half-node-count (covers ≥ R)
     Rb = nband * h                                    # actual band edge (≥ R)
     Rb < Lx || throw(ArgumentError("banded_x_nodes: band edge $Rb reaches Lx $Lx — increase Lx or lower R/K"))
-    tail = Float64[]                                  # right tail: Rb → Lx, geometric
-    x = Rb
-    step = h
-    while x < Lx - 1e-12
-        step *= growth
-        x += step
-        push!(tail, x)
+    S = (Lx - Rb) / h                                 # tail span in units of h
+    right = collect(1:nband) .* h                     # (0, Rb] uniform band nodes
+    # geometric tail: n intervals with ratio r, Σ_{k=1}^{n} h rᵏ = Lx-Rb ⇒ sum(r,n)=S.
+    # For r>1, sum(r,n) > n, so r ≤ max_ratio is feasible only when n < S and
+    # sum(max_ratio,n) ≥ S. Take the smallest n meeting the coarsest-tail bound; if that
+    # n ≥ S (tail too short to grade), fall back to a uniform tail (spacing ≤ h — smooth).
+    gesum(r, n) = isapprox(r, 1; atol=1e-12) ? float(n) : r * (r^n - 1) / (r - 1)
+    n_geo = 1
+    while gesum(max_ratio, n_geo) < S
+        n_geo += 1
     end
-    isempty(tail) ? push!(tail, Lx) : (tail[end] = Lx)   # land exactly on Lx
-    right = vcat(collect(1:nband) .* h, tail)         # (0, Rb] band nodes then tail
+    if n_geo < S - 1e-9                               # graded geometric tail (r > 1 feasible)
+        lo, hi = 1.0 + 1e-12, Float64(max_ratio)
+        for _ in 1:200
+            mid = (lo + hi) / 2
+            gesum(mid, n_geo) < S ? (lo = mid) : (hi = mid)
+        end
+        r = (lo + hi) / 2
+        x = Rb
+        step = h
+        for k in 1:n_geo
+            step *= r
+            x += step
+            push!(right, k == n_geo ? Lx : x)         # force the last node exactly onto Lx
+        end
+    else                                              # short tail: uniform steps ≤ h (smooth)
+        n_u = max(1, ceil(Int, S))
+        du = (Lx - Rb) / n_u
+        for k in 1:n_u
+            push!(right, k == n_u ? Lx : Rb + k * du)
+        end
+    end
     return vcat(-reverse(right), 0.0, right)
 end
 
 """
-    drift_island_grid(; R, w, K=8, Lx_over_w=12.0, growth=1.2, nxi, ny, nE, y_max,
+    drift_island_grid(; R, w, K=8, Lx_over_w=12.0, max_ratio=1.3, nxi, ny, nE, y_max,
                       y_c=1.0, clustering_y=0.0, xi_period=2π, energy_kind=:laguerre,
                       order=4)
 
 Build an [`IslandGrid`](@ref) whose radial axis is the drift-island **band grid**
 ([`banded_x_nodes`](@ref)): a uniform central region of spacing `w/K` covering the
-shift envelope `[-R, R]`, coarsening to `±Lx = ±Lx_over_w·w` outside (`04 §1`).
-`R` is the drift-island shift envelope half-width (from
-`Configure.drift_island_shift_envelope`); pass `R` such that `Lx > R`. The
-`ξ`, `y`, `E` axes are built exactly as [`IslandGrid`](@ref). The resulting `nx`
-is determined by the band/tail layout (not an input); read it from the grid.
+shift envelope `[-R, R]`, coarsening (adjacent ratio `≤ max_ratio`) to
+`±Lx = ±Lx_over_w·w` outside (`04 §1`). `R` is the drift-island shift envelope
+half-width (from `Configure.drift_island_shift_envelope`); pass `R` such that
+`Lx > R`. The `ξ`, `y`, `E` axes are built exactly as [`IslandGrid`](@ref). The
+resulting `nx` is determined by the band/tail layout (not an input); read it from
+the grid.
 
 Pair with [`is_island_resolved`](@ref) for the central-spacing check and run every
 Δ-output at `≥ 2` resolutions (vary `K`) to confirm convergence.
 """
 function drift_island_grid(; R::Real, w::Real, K::Real=8, Lx_over_w::Real=12.0,
-    growth::Real=1.2, nxi::Integer, ny::Integer, nE::Integer, y_max::Real,
+    max_ratio::Real=1.3, nxi::Integer, ny::Integer, nE::Integer, y_max::Real,
     y_c::Real=1.0, clustering_y::Real=0.0, xi_period::Real=2π,
     energy_kind::Symbol=:laguerre, order::Integer=4)
     Lx = Lx_over_w * w
-    nodes = banded_x_nodes(; R=R, h=w / K, Lx=Lx, growth=growth)
+    nodes = banded_x_nodes(; R=R, h=w / K, Lx=Lx, max_ratio=max_ratio)
     x = MappedFDGrid(nodes; order=order)
     ξ = FourierGrid(nxi; L=xi_period)
     y = MappedFDGrid(ny; halfwidth=y_max, clustering=clustering_y, center=y_c, domain=:half, order=order)

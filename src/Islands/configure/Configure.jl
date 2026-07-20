@@ -223,7 +223,7 @@ function drift_island_shift_envelope(grid::IslandGrid, phys::Level0Physics)
 end
 
 """
-    drift_island_resolved_grid(phys; K=8, Lx_over_w=12.0, growth=1.2, margin=1.0,
+    drift_island_resolved_grid(phys; K=8, Lx_over_w=12.0, max_ratio=1.3, margin=1.0,
                                nxi, ny, nE, y_max, y_c=1.0, clustering_y=0.0,
                                energy_kind=:laguerre, order=4) -> IslandGrid
 
@@ -238,7 +238,7 @@ the same `(y, E)` grid the final grid uses. Use for the resolution-convergence
 magnetic island at `x=0`.
 """
 function drift_island_resolved_grid(phys::Level0Physics; K::Real=8, Lx_over_w::Real=12.0,
-    growth::Real=1.2, margin::Real=1.0, nxi::Integer, ny::Integer, nE::Integer,
+    max_ratio::Real=1.3, margin::Real=1.0, nxi::Integer, ny::Integer, nE::Integer,
     y_max::Real, y_c::Real=1.0, clustering_y::Real=0.0, energy_kind::Symbol=:laguerre,
     order::Integer=4)
     w = phys.w_psi
@@ -247,7 +247,7 @@ function drift_island_resolved_grid(phys::Level0Physics; K::Real=8, Lx_over_w::R
         nxi=nxi, ny=ny, nE=nE, y_max=y_max, y_c=y_c, clustering_y=clustering_y,
         energy_kind=energy_kind, order=order)
     R = drift_island_shift_envelope(prov, phys) + margin * w
-    return drift_island_grid(; R=R, w=w, K=K, Lx_over_w=Lx_over_w, growth=growth,
+    return drift_island_grid(; R=R, w=w, K=K, Lx_over_w=Lx_over_w, max_ratio=max_ratio,
         nxi=nxi, ny=ny, nE=nE, y_max=y_max, y_c=y_c, clustering_y=clustering_y,
         energy_kind=energy_kind, order=order)
 end

@@ -8,6 +8,30 @@ relevant.
 
 ---
 
+## 2026-07-20 (cont.) — Root-caused the band-grid preconditioner failure: an abrupt spacing JUMP; smoothed the tail (WIP, empirical confirm in progress)
+
+- **Diagnosed (dense cond experiments)**: the band grid made `PlaneJacobi`
+  **anti-precondition** — on the smooth sinh grid PlaneJacobi drops `cond(M⁻¹J)`
+  71× (1.5e6→2.1e4), but on the band grid it was making cond WORSE. Root cause: the
+  band grid had a **35× adjacent-spacing jump** (vs the sinh grid's 1.41×) — a
+  *sliver* last interval created by the old `banded_x_nodes` clamp (`tail[end]=Lx`
+  after the geometric loop overshot). That wrecks the FD conditioning → the plane
+  blocks' TSVD inverse injects noise. **Refreshing the preconditioner at the iterate
+  did NOT help (1.7×)** — it was never the frozen-ExB; it was the grid.
+- **Fix (numerics, no physics)**: rewrote `banded_x_nodes` to build a **graded**
+  geometric tail with a single ratio `r ≤ max_ratio` (default 1.3), solved by
+  bisection so the tail lands *exactly* on `Lx` — every adjacent ratio is `r`, no
+  sliver; a uniform-tail fallback for short tails. New smoothness test asserts
+  `max Δx-ratio ≤ max_ratio`. Renamed the `growth` kwarg → `max_ratio`.
+- **Confirmed (dense cond)**: on the **smoothed** band grid the max Δx-ratio dropped
+  **35.5 → 1.20**, and `PlaneJacobi` now **drops** `cond(M⁻¹J)` **7×**
+  (2.3e7→3.2e6) — a genuine preconditioner again, not anti-preconditioning. (Still
+  below the sinh grid's 71×, as the band spans more scales — acceptable.) So the
+  matrix-free path is unblocked on the band grid.
+- **Next**: full islands test suite (validate the `banded_x_nodes` rewrite), then the
+  `Δ_neo` re-test on the smoothed band grid with matrix-free — does it now converge +
+  localize (vs the edge artifact before)?
+
 ## 2026-07-20 — Drift-island band grid built (04 §1): the response layer's velocity-spread envelope reaches ~4w, so the magnetic-island-centred grid missed it
 
 - **Moved (user: "build the drift-island grid map")**: implemented the band grid

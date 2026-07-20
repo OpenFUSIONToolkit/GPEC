@@ -121,10 +121,11 @@ const PS = GeneralizedPerturbedEquilibrium.Islands.PhaseSpace
         @test !PS.is_island_resolved(coarse, 0.5; K=8).resolved   # both Δx≪w and Lx/w≥5 fail
     end
 
-    @testset "drift-island band grid: uniform envelope band + geometric tails (04 §1)" begin
+    @testset "drift-island band grid: uniform band + smooth graded tail (04 §1)" begin
         w, K, R, Lx = 0.05, 8, 0.25, 0.6
         h = w / K
-        nodes = PS.banded_x_nodes(; R=R, h=h, Lx=Lx, growth=1.2)
+        max_ratio = 1.3
+        nodes = PS.banded_x_nodes(; R=R, h=h, Lx=Lx, max_ratio=max_ratio)
         # ascending, strictly increasing, symmetric, includes 0 and lands on ±Lx
         @test issorted(nodes) && all(diff(nodes) .> 0)
         @test maximum(abs.(nodes .+ reverse(nodes))) < 1e-12       # symmetric about 0
@@ -134,17 +135,19 @@ const PS = GeneralizedPerturbedEquilibrium.Islands.PhaseSpace
         band = filter(x -> abs(x) <= R + 1e-12, nodes)
         @test maximum(diff(band)) <= h * (1 + 1e-9)
         @test all(≈(h; atol=1e-12), diff(band))                    # band is uniform
-        # tails coarsen (spacing grows outward); the final interval is clamped to
-        # land exactly on Lx so it may be smaller — check the geometric interior.
+        # SMOOTHNESS (the fix): every adjacent spacing ratio ≤ max_ratio — no sliver
+        # jump. This is what lets the (x,ξ) plane-block preconditioner work on the grid.
+        dx = diff(nodes)
+        @test maximum(dx[2:end] ./ dx[1:(end - 1)]) <= max_ratio + 1e-9
+        # the tail coarsens outward (graded, lands exactly on Lx)
         right = filter(x -> x > 0, nodes)
         dtail = diff(right[right.>=R])
         @test dtail[1] > h                                         # first tail step coarser than the band
-        @test issorted(dtail[1:(end - 1)])                         # geometric growth (interior)
-        @test maximum(dtail) > h                                   # tail is coarser than the band
+        @test issorted(dtail)                                      # monotone geometric grading, no sliver
         # guards
         @test_throws ArgumentError PS.banded_x_nodes(; R=0.25, h=h, Lx=0.2)   # Lx ≤ R
         @test_throws ArgumentError PS.banded_x_nodes(; R=-1.0, h=h, Lx=Lx)
-        @test_throws ArgumentError PS.banded_x_nodes(; R=R, h=h, Lx=Lx, growth=1.0)
+        @test_throws ArgumentError PS.banded_x_nodes(; R=R, h=h, Lx=Lx, max_ratio=1.0)
 
         # MappedFDGrid from explicit nodes: Fornberg D1/D2 exact on polynomials to order
         g = PS.MappedFDGrid(nodes; order=4)
