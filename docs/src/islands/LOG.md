@@ -8,6 +8,47 @@ relevant.
 
 ---
 
+## 2026-07-19 — York ground-truth (recommended first task): the FIELD converges for nobody; the OUTPUT `Δ` is what York gates on — our resmax~1e-3 stall is NOT a bug
+
+- **Moved (literature ground-truth, per the M1-launch recommendation)**: read L23
+  (Leigh 2023) §3.1.5/§3.1.6/§6.1.1/§6.2 and Diss19 (Dudkovskaia 2019) Ch. III/IV
+  first-hand (not just the LOG's earlier note). Full synthesis with page cites:
+  `docs/src/islands/notes/york-convergence-ground-truth.md`. Answers the blocking
+  question "does the discretized problem converge for anyone?": **not the
+  self-consistent field — for nobody.**
+- **kokuchou (L23) — the direct 4D `{p,ξ}` solve, our closest analogue** — uses
+  **Picard** (not Newton), tolerance **ε¹≈10%** (justified by the `O(ε^{3/2})`
+  equation accuracy). L23 §6.1.1 p.118: that 10% criterion **never met in any run**
+  (max 4 iters); `Φ̂` iterative residual **>100%/iter** across the whole physical
+  E×B regime. **Yet `Δ_loc` (the OUTPUT) converges stably** (§6.2 Fig.6.3) despite
+  the non-converging field. Cause = the `O(ρ̂_θi)` drift-island separatrix layer that
+  sits at `x` shifted by `ρ̂_θi ω̂_D(y,σ,u)` (varies over velocity space) AND moves
+  with `Φ̂` between iterations → a rectilinear single-location mesh can't track it.
+- **RDK-NTM (Diss19)** reports converged `Δ` only via (i) the `S`-streamline
+  coordinate (analytic layers following the drift island; low-`ν_★` only) and
+  (ii) reporting headline `Δ` (bootstrap ∝1/w) at the **"0th iteration in Φ"
+  (Φ=0, E×B off)** — i.e. pre-nonlinearity.
+- **Reframe of the blocker**: our **resmax~10⁻³ field-residual floor is ~100× BELOW
+  what kokuchou achieved and ~1000× below York's own 10% criterion** — it is the
+  documented, universal, physics-rooted moving-E×B-layer non-convergence, not a bug.
+  We have been gating on the **wrong quantity** (field residual, not the output `Δ`)
+  at an **unphysically tight tolerance**. The two robustness levers the LOG had only
+  *suspected* (E×B-coupling continuation; and grid packing) are now **named by the
+  ground truth**: continuation from `Φ=0` (RDK-NTM's 0th iteration) and packing the
+  mesh at the **drift-island separatrix** (design 04 §1), not the magnetic island
+  (our current mesh packs the wrong contour).
+- **Blocked / escalated**: adopting York's **output-convergence** posture as our
+  definition of done — gate on `Δ_neo`/current-moment *stability* at the few-%
+  (`O(ε^{3/2})`) level instead of `resmax~10⁻³` — is a **methodology/threshold
+  decision** → written up in **QUESTIONS Q7 (2026-07-19 update)** for human sign-off
+  (recommendation: adopt output-convergence + pursue the two named numerics levers;
+  always report `resmax` as a diagnostic; never weaken the science to reach "done").
+- **Next (unblocked — measuring needs no sign-off)**: re-take `Δ_neo` at physical
+  `ŵ ~ ρ̂_θi` with the fixed spline `delta_moments` and test whether it (and
+  `⟨J̄_∥cosξ⟩`) **stabilises across resolution even as `resmax` floors** — the
+  kokuchou `Δ_loc` test. Only the *gate change* itself awaits sign-off. Nothing
+  changed in `src/` this session; docs-only (note + QUESTIONS + LOG).
+
 ## 2026-07-18 (cont. 2) — Globalization hypothesis NOT confirmed: the exact solve crawls to resmax~1e-3 regardless of initial guess
 
 - **Test**: `newton_direct` at physical `w=0.03` from ZEROS vs the FAR-FIELD

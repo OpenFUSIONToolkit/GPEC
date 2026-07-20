@@ -471,3 +471,56 @@ the moment":**
 2. **(Standing) A's `[DERIVED]` sign-off** — the orbit-averaged `⟨x_D⟩_θ` far-field
    (`analytic-far-field.md`) still needs human sign-off (a correct improvement + the
    paper's "our vs York" toggle), independent of the convergence blocker.
+
+### Update (2026-07-19) — York ground-truth read: the FIELD converges for nobody; the OUTPUT `Δ` is what York gates on. New methodology decision.
+
+Read L23 (Leigh 2023) §3.1.5/§3.1.6/§6.1.1/§6.2 and Diss19 (Dudkovskaia 2019)
+Ch. III/IV first-hand this session (full synthesis with page cites:
+`notes/york-convergence-ground-truth.md`). The result reframes blocker item 1:
+
+- **kokuchou (L23), the direct 4D `{p,ξ}` solve — our closest analogue — never
+  converges its self-consistent field.** It uses Picard iteration with a stated
+  tolerance of **ε¹ ≈ 10%** (justified by the `O(ε^{3/2})` accuracy of the
+  drift-kinetic equation). L23 §6.1.1 (p. 118): that 10% criterion **"did not come
+  to within (ε = 10%) relative error after the maximum of 4 iterations for any of
+  the runs"**; the `Φ̂` iterative residual is **> 100%/iteration** across the whole
+  physical E×B regime (`ŵ ≳ 10⁻³ r_s`). **But the OUTPUT `Δ_loc` converges stably**
+  (§6.2, Fig. 6.3) *despite* the non-converging field. The physical cause is the
+  `O(ρ̂_θi)` drift-island separatrix layer that (a) sits at an `x` shifted by
+  `ρ̂_θi ω̂_D(y,σ,u)` *varying across velocity space* and (b) *moves with `Φ̂`
+  between iterations* — a rectilinear single-location mesh cannot track it
+  (`[CHECKED: L23 §3.1.6, Eqs. 6.1.1–6.1.2]`, already in design 04 §2/§5).
+- **RDK-NTM (Diss19)** reports converged `Δ` only because it (i) works in the
+  `S`-streamline coordinate (analytic matched layers that *follow* the drift
+  island; valid only at low `ν_★`) and (ii) reports many headline `Δ`
+  (e.g. bootstrap `∝ 1/w`) at the **"0th iteration in Φ" (Φ = 0, E×B off)**.
+
+**So our resmax ~ 10⁻³ field-residual floor is NOT a bug** — it is ~100× *below*
+what kokuchou achieved and ~1000× below York's own 10% criterion, and it reflects
+the documented, universal, physics-rooted moving-E×B-layer non-convergence. We have
+been gating on the wrong quantity at an unphysically tight tolerance.
+
+- **Question (new, methodology/threshold — do not decide silently)**: should
+  Islands adopt York's **output-convergence** posture as its definition of done —
+  i.e. gate on the **stability of the output moment `Δ_neo` (and `⟨J̄_∥ cosξ⟩`)
+  across resolution / continuation** at the `O(ε^{3/2})`≈few-% level, rather than on
+  the global field residual `resmax` at `10⁻³`? This is a change to the convergence
+  gate *and* its tolerance, both of which the no-guess discipline reserves for human
+  sign-off.
+- **Options**: (a) adopt output-convergence (gate on `Δ` stability; report `resmax`
+  as a diagnostic, not a gate) — matches York and the `O(ε^{3/2})` physics;
+  (b) keep the `resmax` gate but relax the tolerance to the physically-justified
+  few-% level; (c) keep the strict `resmax ~ 10⁻³` gate and invest in making the
+  field itself converge (drift-island-separatrix mesh packing + E×B continuation)
+  — more faithful/ambitious than York, but no source demonstrates it is achievable.
+- **Recommendation**: (a) as the definition of done, **with** the (c) numerics
+  (E×B-coupling continuation from `Φ = 0`; grid packed at the drift-island
+  separatrix per design 04 §1) pursued to make the *output* robust — because the
+  ground truth names exactly those two levers. Report `resmax` always, gate on `Δ`.
+  Do **not** weaken the science to reach "done"; adopt the field's own,
+  physics-justified success metric.
+- **Gated work**: the resolution/continuation-convergent `Δ_neo(w)` checkpoint; B2
+  (`∝ 1/w`); B5b. **Immediate unblocked next step (no sign-off needed to *measure*)**:
+  re-take `Δ_neo` at physical `ŵ ~ ρ̂_θi` with the fixed spline `delta_moments` and
+  check whether it (and the current moment) *stabilises* across resolution even as
+  `resmax` floors — the kokuchou `Δ_loc` test. Only the *gate change* needs sign-off.
