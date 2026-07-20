@@ -47,10 +47,32 @@ relevant.
 - **Cost note**: the band is ~5× wider than the magnetic island, so ~5× more x-nodes
   at the same Δx (nx~100 to resolve the envelope) — kokuchou's memory wall; the
   matrix-free solve (PlaneJacobi) is the intended absorber.
-- **Next**: re-run the `Δ_neo` resolution-convergence test on the band grid — does
-  resolving the drift-island envelope finally make `Δ_neo` converge across
-  resolution? (compute-heavy; the payoff test.) Then, if converged, the B2 `Δ_neo(w)`
-  sweep becomes reachable.
+- **Payoff test (band-grid `Δ_neo` resolution) — band grid VALIDATED but not
+  sufficient; blocker now precisely located at the matrix-free preconditioner**:
+  - **matrix-free** (`newton_krylov`+`PlaneJacobi`) on the band grid: `Δ_neo` still
+    unstable (K=4→6: `+13.8 → −55`, sign flip), with the m1 peak at **x/w=−7.36 ≈
+    −0.9·Lx** — the domain EDGE, i.e. the documented PlaneJacobi outer-region
+    artifact, NOT the drift islands (which are at ±R inside the resolved band).
+  - **exact** `newton_direct` on the band grid (small N to be tractable): the moment
+    **LOCALIZES at the island** (m1 peak x/w=−0.33, +1.25 for K=3,4) — confirming the
+    edge feature WAS the matrix-free artifact and the band grid puts the moment where
+    the physics is. **But** the exact solve is now **poorly conditioned on the band
+    grid** (resmax 0.1–0.4; K=4 hit max_iter at 26 min) — more band nodes worsen the
+    conditioning/cost, so `Δ_neo` still isn't resolution-stable (−146 → −200).
+  - **Net**: the band grid is a **necessary, validated** piece (drift islands were
+    unresolved; the exact solve now localizes on it), but **not sufficient** — a
+    convergent, resolution-stable `Δ_neo` is now blocked on the **solve** on the band
+    grid: matrix-free injects the outer-edge artifact (`PlaneJacobi` outer-region
+    accuracy, flagged 2026-07-18) and exact is too slow/ill-conditioned at the band's
+    N. This is exactly the milestone premise (island resolution fights dense-direct ⇒
+    matrix-free mandatory) — the remaining work is **fixing the matrix-free
+    preconditioner's stiff outer-streaming block so it stops injecting the edge
+    feature** on the band grid. Candidate refinement: a smoother band→tail transition
+    (the current uniform→geometric spacing jump may hurt the FD conditioning).
+- **Next (needs a steer)**: improve `PlaneJacobi`'s outer-region accuracy (or a
+  sparse/banded exact solve exploiting the operator structure) so the matrix-free
+  `Δ_neo` on the band grid localizes AND converges — then B2 `Δ_neo(w)` is reachable.
+  Scratch scripts in `/tmp` (not committed). Everything else committed + pushed.
 
 ## 2026-07-19 (cont.) — Kokuchou Δ_loc measurement: the OUTPUT extraction (not the solve) is the blocker — redirects the 2026-07-18 pivot
 
