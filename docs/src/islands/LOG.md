@@ -28,9 +28,29 @@ relevant.
   (2.3e7→3.2e6) — a genuine preconditioner again, not anti-preconditioning. (Still
   below the sinh grid's 71×, as the band spans more scales — acceptable.) So the
   matrix-free path is unblocked on the band grid.
-- **Next**: full islands test suite (validate the `banded_x_nodes` rewrite), then the
-  `Δ_neo` re-test on the smoothed band grid with matrix-free — does it now converge +
-  localize (vs the edge artifact before)?
+- **Full islands suite green** (grids 63, configure 1563, anchor 12, operators 30,
+  solve 178) — the `banded_x_nodes` rewrite is validated. Committed + pushed
+  (`918397ca`).
+- **Δ_neo re-test on the smoothed band grid (matrix-free) — substantial improvement,
+  not full closure**. Before→after smoothing (K=4,6, physical `ρ̂_θi=w=0.05`):
+  - **field residual ~10× lower**: `resmax 2–3e-3 → 1.7–4.6e-4` (matrix-free now
+    nearly converges the field, PlaneJacobi working);
+  - **`Δ_neo` more stable**: `125%` (sign-flipping +13.8/−55) → **`66%`** (−20.8/−12.5,
+    no flip, magnitude *decreasing*) across K=4→6;
+  - **m1 peak migrating back toward the island**: edge (`x/w=−7.4`) → **band edge
+    (`x/w=−2.2`)** ≈ `±(R+w)`. So the outer-edge artifact is largely gone; the peak
+    now sits at the **band→tail transition (~2w)**.
+  - **Still open**: `Δ_neo` not yet resolution-converged (66%), and the peak at the
+    band edge points at either (a) the preconditioner still moderate (`cond(M⁻¹J)≈3e6`
+    after the 7× drop — GMRES + un-captured cross-plane/momentum terms leave a
+    ~1e-4 floor), or (b) the physical response extending to ~2w (envelope/domain), or
+    (c) a residual band→tail transition effect. Improving but not done.
+- **Next (candidate levers, needs a steer)**: (i) strengthen `PlaneJacobi` further
+  (capture more cross-plane coupling / a Schur outer block) to push `cond(M⁻¹J)`
+  below ~1e5 so matrix-free fully converges; (ii) a K=8 point to see whether `Δ_neo`
+  is slowly converging or plateauing; (iii) widen the resolved envelope past 2w if
+  the response genuinely extends there. Scratch scripts in `/tmp`; all code + tests
+  committed + pushed.
 
 ## 2026-07-20 — Drift-island band grid built (04 §1): the response layer's velocity-spread envelope reaches ~4w, so the magnetic-island-centred grid missed it
 
