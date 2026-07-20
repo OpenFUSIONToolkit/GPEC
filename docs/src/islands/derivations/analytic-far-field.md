@@ -78,8 +78,10 @@ signed-off `gradient-drive.md`. **No new coefficient, sign, or normalization.**
 ## 4. Contrast with the drift-island shift `ρ_shift`
 
 `⟨x_D⟩` (orbit width, `∝ ρ̂_θi σ\sqrt E A(y)`) is **not** the drift-island shift
-`x_D^{\rm island} = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2 `[CLEARED]`; L23 §3.1, the location
-of the drift-island O-point). They are distinct finite-orbit-width effects; the far
+`x_D^{\rm island} = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2 `[CHECKED: I19 Eq. 33; D21 Eq. 21;
+Diss19 Eq. 2.37]`; L23 §3.1, the location of the drift-island O-point — the `ω̂_D`
+coefficient is `[CLEARED]` §2.1, but the shift *structure* is `[CHECKED]`, awaiting
+sign-off, QUESTIONS Q8). They are distinct finite-orbit-width effects; the far
 field carries the orbit width `⟨x_D⟩`, the mesh-sizing uses `x_D^{\rm island}`. Note
 the two are consistent: the shear part of `ρ̂_θi ω̂_D L̂_q` equals `⟨x_D⟩` exactly (the
 `L̂_q` cancels the `1/L̂_q` inside `ω̂_D`). (An earlier draft of this note wrote

@@ -31,10 +31,19 @@ relevant.
     `±Lx`, `Lx` beyond the envelope) and a `MappedFDGrid(nodes;order)` constructor
     (Fornberg D1/D2 on arbitrary nodes; x-`wq` trapezoidal — unused downstream, the
     Δ x-integral uses spline quadrature).
-- **Verified**: grids 63/63, configure 1563/1563, anchor-sync 12/12 green. Doc-first:
-  numerics.md §1 (band-grid subsection + implementing symbols); design 04 §1 already
-  prescribed it. physics-verifier run on the diff (physics-adjacent: reuses cleared
-  ω̂_D × L̂_q).
+- **Verified**: grids 63/63, configure 1563/1563, anchor-sync 12/12, operators 30/30,
+  solve 178/178 green. Doc-first: numerics.md §1 (band-grid subsection + implementing
+  symbols); design 04 §1 already prescribed it.
+- **physics-verifier: BLOCK → resolved**. Verdict: the physics is faithful (L̂_q
+  direction correct, no guessed coefficient, passing-only correct, no leaked values),
+  but I had **mislabeled the shift structure `[CLEARED]`** — docs/01 §2.2 tags it
+  `[CHECKED: I19 Eq. 33; D21 Eq. 21; Diss19 Eq. 2.37]` (the erratum-prone I19 lineage;
+  the `ω̂_D` *coefficient* is `[CLEARED]` §2.1, but the *shift form* is not signed off).
+  Fixed the tag in `Configure` docstring + numerics.md + analytic-far-field.md, and
+  **escalated to QUESTIONS Q8** (clear the `x_D = ρ̂_θi ω̂_D L̂_q` structure). Mitigation
+  recorded: the `[CHECKED]` shift enters only to **size** the grid (margin-protected),
+  never as a physics output value — the grid map's correctness gate is the empirical
+  `Δ_neo` convergence test, not the shift value.
 - **Cost note**: the band is ~5× wider than the magnetic island, so ~5× more x-nodes
   at the same Δx (nx~100 to resolve the envelope) — kokuchou's memory wall; the
   matrix-free solve (PlaneJacobi) is the intended absorber.

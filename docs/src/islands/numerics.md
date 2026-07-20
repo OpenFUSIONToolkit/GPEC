@@ -78,7 +78,10 @@ no pass on a single grid (docs/05).
 resolves the *magnetic* island, but the perturbed response localises on the
 **drift** islands, which sit at ``x`` shifted from ``x=0`` by
 ``x_D^{\rm island}(y,E,\sigma) = \hat\rho_{\theta i}\,\hat\omega_D\,\hat L_q``
-(docs/01 §2.2, `[CLEARED]`) — σ-signed and **spread across velocity space**. At
+(shift *structure* docs/01 §2.2 `[CHECKED: I19 Eq. 33]`; the ``\hat\omega_D``
+coefficient is `[CLEARED]`, §2.1 — the shift form itself awaits sign-off,
+QUESTIONS Q8, and enters only to **size** the grid) — σ-signed and **spread across
+velocity space**. At
 physical ``\hat\rho_{\theta i}\sim w`` the shift envelope reaches several island
 half-widths (measured ``\max|x_D^{\rm island}| \approx 4w`` at
 ``\hat\rho_{\theta i}=w``), so the drift islands lie in what a magnetic-island-

@@ -548,3 +548,35 @@ Ran the kokuchou `Δ_loc` test (LOG 2026-07-19 cont.; physical `ρ̂_θi=0.05`, 
   MAP only — D1 stands) so the moment's velocity-spread support is resolved, THEN
   re-test `Δ_neo` resolution-convergence. This supersedes solver-robustness work as
   the precondition for a trustworthy `Δ_neo(w)`.
+
+## Q8 — Clear the drift-island shift structure `x_D = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2, `[CHECKED]` → sign-off) — OPEN
+
+- **Context (2026-07-20)**: the drift-island **band grid** (`04 §1`; `LOG 2026-07-20`)
+  sizes its uniform central region from the drift-island shift envelope
+  `R = max_passing |x_D^island|`, `x_D^island = ρ̂_θi ω̂_D L̂_q`. The `ω̂_D`
+  *coefficient* is `[CLEARED]` (§2.1, signed off 2026-07-11), but the **shift
+  structure** `x_D = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2, line 180) is only
+  `[CHECKED: I19 Eq. (33); D21 Eq. 21; Diss19 Eq. 2.37]` — machine-checked + cited,
+  **not** human-signed-off. The physics-verifier flagged an initial mislabel of this
+  as `[CLEARED]` (now corrected to `[CHECKED]` in `Configure.drift_island_shift_envelope`,
+  `numerics.md`, `analytic-far-field.md`). The I19-Eq.-33 lineage is exactly the
+  erratum-prone set CLAUDE.md rule 6 / L23 §2.6 warns about, so the tag grade is
+  load-bearing.
+- **Question**: is the drift-island shift structure `x_D = ρ̂_θi ω̂_D L̂_q` (the `L̂_q`
+  form, passing particles, `S = (ŵ²/4L̂_q)[2(p̂−ρ̂_θi ω̂_D L̂_q)²/ŵ² − cosξ]Θ(y_c−y)`)
+  correct as printed, or does it carry an L23-§2.6-class erratum? Clear it (record
+  paper + Eq. in docs/01 §2.2), or flag the discrepancy.
+- **Mitigation already in place (why this does not gate the grid build)**: the
+  `[CHECKED]` shift enters **only to size the grid** — the band spans `[-(R+w), R+w]`
+  with a `+w` margin and geometric far tails, so an O(1) error in the shift form
+  mis-sizes the fine region but still resolves a wide neighbourhood with the far field
+  beyond it. It is **never** baked into a physics output. The grid map's *correctness*
+  gate is empirical: the `Δ_neo` resolution-convergence test on the band grid (the
+  payoff test), not the shift value.
+- **Options**: (a) clear via first-hand PDF re-derivation (D7 route), like the M2b
+  lane; (b) clear by transcription check against I19 Eq. 33 / D21 Eq. 21 / Diss19
+  Eq. 2.37 (weaker — rule 6 cautions against for this lineage).
+- **Recommendation**: (a). Until then the band grid stands on the `[CHECKED]` tag,
+  validated empirically by `Δ_neo` convergence; no output depends on the shift value.
+- **Gated work**: promoting the drift-island grid map from "empirically validated" to
+  "physics-cleared"; any *output* that would use `x_D^island` as a value (none today).

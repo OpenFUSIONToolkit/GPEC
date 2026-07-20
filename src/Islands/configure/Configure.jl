@@ -191,17 +191,22 @@ end
     drift_island_shift_envelope(grid, phys) -> Float64
 
 The half-width `R = max_passing |x_D^island|` of the drift-island shift envelope
-(`01 §2.2`, `[CLEARED]`; `04 §1`). The drift island for a passing particle sits at
+(`04 §1`). The drift island for a passing particle sits at
 `x_D^island(y,E,σ) = ρ̂_θi ω̂_D(y,E,σ) L̂_q` — shifted from the magnetic island
-(`x=0`), σ-signed, and varying across velocity space. Reuses the **cleared**
-`ω̂_D` via [`drift_coefficient_table`] (`c_D = ω̂_D`; `L̂_q = 1/phys.inv_Lq`); the
-max is over **passing** nodes only (`y < grid.y_c` — trapped particles have no
-shifted island, `01 §2.2`), and forbidden / near-`y_c`-miss nodes carry
-`ω̂_D ≡ 0` there (as in `drift_coefficient_table`). The radial grid must resolve
-`[-(R+w), R+w]`, not merely `[-w, w]`: at physical `ρ̂_θi ~ w` the envelope reaches
-several island half-widths (the drift islands lie in what a magnetic-island-centred
-grid leaves as coarse far field). Built entirely from cleared quantities — no new
-coefficient, sign, or normalization.
+(`x=0`), σ-signed, and varying across velocity space. The shift **structure** is
+`01 §2.2` `[CHECKED: I19 Eq. (33); D21 Eq. 21; Diss19 Eq. 2.37]` — the `ω̂_D`
+*coefficient* it multiplies is `[CLEARED]` (`01 §2.1`), but the shift form itself is
+not yet human-signed-off (QUESTIONS Q8; the I19-Eq.-33 lineage is erratum-prone,
+CLAUDE.md rule 6). It enters here only to **size** the grid (a numerics use,
+margin-protected by the `+w` band + far tails), never as a physics value in an
+output. Reuses the cleared `ω̂_D` via [`drift_coefficient_table`] (`c_D = ω̂_D`;
+`L̂_q = 1/phys.inv_Lq`); the max is over **passing** nodes only
+(`y < grid.y_c` — trapped particles have no shifted island, `01 §2.2`), and
+forbidden / near-`y_c`-miss nodes carry `ω̂_D ≡ 0` there (as in
+`drift_coefficient_table`). The radial grid must resolve `[-(R+w), R+w]`, not merely
+`[-w, w]`: at physical `ρ̂_θi ~ w` the envelope reaches several island half-widths
+(the drift islands lie in what a magnetic-island-centred grid leaves as coarse far
+field). Introduces **no new coefficient, sign, or normalization**.
 """
 function drift_island_shift_envelope(grid::IslandGrid, phys::Level0Physics)
     cD = drift_coefficient_table(grid, phys)          # c_D = ω̂_D, broadcast over (x,ξ)
