@@ -120,4 +120,46 @@ const PS = GeneralizedPerturbedEquilibrium.Islands.PhaseSpace
         coarse = PS.IslandGrid(; nx=9, nxi=8, ny=9, nE=2, halfwidth_x=1.0, clustering_x=0.0, y_max=4.0, clustering_y=0.8)
         @test !PS.is_island_resolved(coarse, 0.5; K=8).resolved   # both Δx≪w and Lx/w≥5 fail
     end
+
+    @testset "drift-island band grid: uniform envelope band + geometric tails (04 §1)" begin
+        w, K, R, Lx = 0.05, 8, 0.25, 0.6
+        h = w / K
+        nodes = PS.banded_x_nodes(; R=R, h=h, Lx=Lx, growth=1.2)
+        # ascending, strictly increasing, symmetric, includes 0 and lands on ±Lx
+        @test issorted(nodes) && all(diff(nodes) .> 0)
+        @test maximum(abs.(nodes .+ reverse(nodes))) < 1e-12       # symmetric about 0
+        @test any(x -> abs(x) < 1e-14, nodes)                      # includes x=0
+        @test nodes[1] ≈ -Lx && nodes[end] ≈ Lx
+        # the central band resolves the envelope at ≤ w/K (uniform spacing there)
+        band = filter(x -> abs(x) <= R + 1e-12, nodes)
+        @test maximum(diff(band)) <= h * (1 + 1e-9)
+        @test all(≈(h; atol=1e-12), diff(band))                    # band is uniform
+        # tails coarsen (spacing grows outward); the final interval is clamped to
+        # land exactly on Lx so it may be smaller — check the geometric interior.
+        right = filter(x -> x > 0, nodes)
+        dtail = diff(right[right.>=R])
+        @test dtail[1] > h                                         # first tail step coarser than the band
+        @test issorted(dtail[1:(end - 1)])                         # geometric growth (interior)
+        @test maximum(dtail) > h                                   # tail is coarser than the band
+        # guards
+        @test_throws ArgumentError PS.banded_x_nodes(; R=0.25, h=h, Lx=0.2)   # Lx ≤ R
+        @test_throws ArgumentError PS.banded_x_nodes(; R=-1.0, h=h, Lx=Lx)
+        @test_throws ArgumentError PS.banded_x_nodes(; R=R, h=h, Lx=Lx, growth=1.0)
+
+        # MappedFDGrid from explicit nodes: Fornberg D1/D2 exact on polynomials to order
+        g = PS.MappedFDGrid(nodes; order=4)
+        @test g.n == length(nodes) && g.nodes == nodes
+        f3 = g.nodes .^ 3
+        @test maximum(abs, g.D1 * f3 .- 3 .* g.nodes .^ 2) / maximum(abs, 3 .* g.nodes .^ 2) < 1e-8
+        @test maximum(abs, g.D2 * f3 .- 6 .* g.nodes) < 1e-6
+        @test all(g.wq .> 0) && sum(g.wq) ≈ (nodes[end] - nodes[1])   # trapezoidal weights sum to the interval
+        @test_throws ArgumentError PS.MappedFDGrid([0.0, 1.0, 0.5]; order=4)   # not sorted
+
+        # drift_island_grid assembles an IslandGrid whose band resolves [-R, R]
+        dg = PS.drift_island_grid(; R=R, w=w, K=K, Lx_over_w=12.0, nxi=8, ny=9, nE=3, y_max=4.0, clustering_y=0.8)
+        @test dg.x.nodes[end] ≈ 12.0 * w                           # Lx = Lx_over_w · w
+        @test PS.central_x_spacing(dg) <= h * (1 + 1e-9)           # central spacing ≤ w/K
+        @test any(x -> abs(abs(x) - R) < h, dg.x.nodes)            # nodes sit at the shifted drift island ±R
+        @test dg.y_c == 1.0 && PS.nnodes(dg)[2:end] == (8, 9, 3, 2)
+    end
 end

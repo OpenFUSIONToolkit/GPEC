@@ -30,6 +30,7 @@ import FastGaussQuadrature
 export FourierGrid, MappedFDGrid, GaussGrid, IslandGrid
 export nnodes, differentiate_fourier, fd_weights
 export island_clustering_x, central_x_spacing, is_island_resolved, resolved_island_grid
+export banded_x_nodes, drift_island_grid
 
 # ---------------------------------------------------------------------------
 # Finite-difference weights (Fornberg 1988, Math. Comp. 51, 699) — weights for
@@ -229,6 +230,39 @@ function MappedFDGrid(n::Int; halfwidth::Real, clustering::Real=0.0, center::Rea
         wq[j] = c * ds / 3 * dxds[j]
     end
 
+    return MappedFDGrid(n, order, xs, Matrix(D1), Matrix(D2), wq)
+end
+
+"""
+    MappedFDGrid(nodes::AbstractVector; order=4)
+
+Build a [`MappedFDGrid`](@ref) directly from an explicit, ascending physical node
+vector — the general (non-analytic-map) grid used by the drift-island band grid
+([`drift_island_grid`](@ref)), whose nodes are a uniform high-resolution central
+band plus geometric tails (`04 §1`) rather than a single-`sinh` cluster.
+
+`D1`, `D2` are the Fornberg finite-difference matrices for the given nodes (the
+same [`_fd_matrix`](@ref) machinery as the analytic-map path; `order`-th order on
+smoothly-varying spacing, degrading locally where the spacing jumps). `wq` is the
+composite-**trapezoidal** rule on `nodes` — the radial-`x` quadrature weights are
+not used for physics outputs (velocity moments use the `y`/`E` weights; the `Δ`
+radial integral uses cubic-spline quadrature in `Moments.delta_moments`), so a
+robust low-order `wq` here is deliberate, not an accuracy regression.
+"""
+function MappedFDGrid(nodes::AbstractVector{<:Real}; order::Int=4)
+    n = length(nodes)
+    n > order + 2 || throw(ArgumentError("MappedFDGrid(nodes): need n > order+2 ($n ≤ $(order + 2))"))
+    issorted(nodes) || throw(ArgumentError("MappedFDGrid(nodes): nodes must be ascending"))
+    xs = collect(Float64, nodes)
+    all(diff(xs) .> 0) || throw(ArgumentError("MappedFDGrid(nodes): nodes must be strictly increasing"))
+    D1 = _fd_matrix(xs, 1, order)
+    D2 = _fd_matrix(xs, 2, order)
+    wq = zeros(n)
+    @inbounds for j in 1:n
+        hl = j > 1 ? xs[j] - xs[j - 1] : 0.0
+        hr = j < n ? xs[j + 1] - xs[j] : 0.0
+        wq[j] = 0.5 * (hl + hr)
+    end
     return MappedFDGrid(n, order, xs, Matrix(D1), Matrix(D2), wq)
 end
 
@@ -436,6 +470,79 @@ function resolved_island_grid(; w::Real, nx::Integer, K::Real=8, Lx_over_w::Real
     return IslandGrid(; nx=nx, nxi=nxi, ny=ny, nE=nE, halfwidth_x=Lx, clustering_x=βx,
         y_max=y_max, y_c=y_c, clustering_y=clustering_y, xi_period=xi_period,
         energy_kind=energy_kind, order=order)
+end
+
+# ---------------------------------------------------------------------------
+# Drift-island band grid (04 §1): the perturbed response localises on the
+# drift-island separatrices, which sit at x shifted from the magnetic island
+# (x=0) by ±x_D^island(y,v̂,σ) and are SPREAD across velocity space. A single
+# sinh cluster at x=0 resolves only |x|≲w and leaves the shifted drift islands in
+# the coarse far field, so the Δ-moment is under-resolved. The band grid instead
+# lays a UNIFORM high-resolution central region (spacing ≤ w/K) over the whole
+# shift envelope [-R, R] and coarsens geometrically to ±Lx outside — matching the
+# "uniform high-res central region covering the drift-shifted island" of the prior
+# art (L23 Ch. 3). The physical shift envelope R is a physics quantity computed by
+# `Configure.drift_island_shift_envelope`; here R enters as a plain number
+# (PhaseSpace stays physics-free).
+# ---------------------------------------------------------------------------
+"""
+    banded_x_nodes(; R, h, Lx, growth=1.2)
+
+Symmetric radial node vector for the drift-island band grid (`04 §1`): a uniform
+central band of spacing `h` covering at least `[-R, R]`, then a geometric tail on
+each side (spacing growing by `growth` per step) out to `±Lx`. `R` is the shift
+envelope half-width and `h = w/K` the island-resolution spacing; require
+`Lx > R` (the far field must lie beyond the drift-island envelope, not merely
+beyond the magnetic island). Returns an ascending, strictly-increasing,
+symmetric vector including `0`, `±(band edge)`, and exactly `±Lx`.
+"""
+function banded_x_nodes(; R::Real, h::Real, Lx::Real, growth::Real=1.2)
+    (R > 0 && h > 0) || throw(ArgumentError("banded_x_nodes: R and h must be positive"))
+    growth > 1 || throw(ArgumentError("banded_x_nodes: growth must be > 1"))
+    Lx > R || throw(ArgumentError("banded_x_nodes: need Lx ($Lx) > R ($R) — far field must lie beyond the drift-island envelope"))
+    nband = ceil(Int, R / h)                         # band half-node-count (covers ≥ R)
+    Rb = nband * h                                    # actual band edge (≥ R)
+    Rb < Lx || throw(ArgumentError("banded_x_nodes: band edge $Rb reaches Lx $Lx — increase Lx or lower R/K"))
+    tail = Float64[]                                  # right tail: Rb → Lx, geometric
+    x = Rb
+    step = h
+    while x < Lx - 1e-12
+        step *= growth
+        x += step
+        push!(tail, x)
+    end
+    isempty(tail) ? push!(tail, Lx) : (tail[end] = Lx)   # land exactly on Lx
+    right = vcat(collect(1:nband) .* h, tail)         # (0, Rb] band nodes then tail
+    return vcat(-reverse(right), 0.0, right)
+end
+
+"""
+    drift_island_grid(; R, w, K=8, Lx_over_w=12.0, growth=1.2, nxi, ny, nE, y_max,
+                      y_c=1.0, clustering_y=0.0, xi_period=2π, energy_kind=:laguerre,
+                      order=4)
+
+Build an [`IslandGrid`](@ref) whose radial axis is the drift-island **band grid**
+([`banded_x_nodes`](@ref)): a uniform central region of spacing `w/K` covering the
+shift envelope `[-R, R]`, coarsening to `±Lx = ±Lx_over_w·w` outside (`04 §1`).
+`R` is the drift-island shift envelope half-width (from
+`Configure.drift_island_shift_envelope`); pass `R` such that `Lx > R`. The
+`ξ`, `y`, `E` axes are built exactly as [`IslandGrid`](@ref). The resulting `nx`
+is determined by the band/tail layout (not an input); read it from the grid.
+
+Pair with [`is_island_resolved`](@ref) for the central-spacing check and run every
+Δ-output at `≥ 2` resolutions (vary `K`) to confirm convergence.
+"""
+function drift_island_grid(; R::Real, w::Real, K::Real=8, Lx_over_w::Real=12.0,
+    growth::Real=1.2, nxi::Integer, ny::Integer, nE::Integer, y_max::Real,
+    y_c::Real=1.0, clustering_y::Real=0.0, xi_period::Real=2π,
+    energy_kind::Symbol=:laguerre, order::Integer=4)
+    Lx = Lx_over_w * w
+    nodes = banded_x_nodes(; R=R, h=w / K, Lx=Lx, growth=growth)
+    x = MappedFDGrid(nodes; order=order)
+    ξ = FourierGrid(nxi; L=xi_period)
+    y = MappedFDGrid(ny; halfwidth=y_max, clustering=clustering_y, center=y_c, domain=:half, order=order)
+    E = GaussGrid(nE; kind=energy_kind)
+    return IslandGrid(x, ξ, y, E, [1.0, -1.0], Float64(y_c))
 end
 
 end # module PhaseSpace

@@ -455,4 +455,41 @@ end
         @test "Operators.NotARealOperator" in r2.dangling
         rm(bogus_doc; force=true)
     end
+
+    @testset "drift-island shift envelope reuses the cleared ω̂_D (01 §2.2, 04 §1)" begin
+        grid = _grid()
+        phys = _phys()
+        # the envelope is max over PASSING (y<y_c) nodes of |ρ̂_θi ω̂_D L̂_q|, built
+        # from the cleared drift table — no new coefficient.
+        cD = Cfg.drift_coefficient_table(grid, phys)
+        Lq = 1 / phys.inv_Lq
+        expect = 0.0
+        for iy in 1:grid.y.n
+            grid.y.nodes[iy] < grid.y_c || continue          # passing only
+            for iE in 1:grid.E.n, iσ in 1:length(grid.σ)
+                expect = max(expect, abs(phys.rho_hat_theta_i * Lq * cD[1, 1, iy, iE, iσ]))
+            end
+        end
+        R = Cfg.drift_island_shift_envelope(grid, phys)
+        @test R ≈ expect                                     # exact reuse, node-for-node
+        @test R > 0                                          # nontrivial shift
+        # deterministic (passing-only; trapped/forbidden carry no shifted island)
+        @test Cfg.drift_island_shift_envelope(grid, phys) == R
+
+        # drift_island_resolved_grid: use a PHYSICAL point (ρ̂_θi ~ w) so the envelope
+        # is a few w and the far field Lx=12w lies beyond it (at ρ̂_θi=1 the test _phys
+        # is unphysical — envelope ≫ w — and the builder correctly refuses Lx ≤ R).
+        physp = Cfg.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=0.7, q_s=2.0,
+            dq_dpsi=0.8, w_psi=0.05, mu0_R=3.0, inv_Ln0=1.0, rho_hat_theta_i=0.05,
+            eta_i=0.5, nu_star=0.01, m=2.0, tau=1.0)
+        w = physp.w_psi
+        dg = Cfg.drift_island_resolved_grid(physp; K=6, Lx_over_w=12.0, nxi=8, ny=15,
+            nE=6, y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+        Rp = Cfg.drift_island_shift_envelope(dg, physp)
+        @test Rp > 0.5 * w                                           # physical envelope is several w
+        @test PSc.central_x_spacing(dg) <= w / 6 * (1 + 1e-9)         # resolves w/K
+        @test dg.x.nodes[end] ≈ 12.0 * w                             # far field beyond the envelope
+        # the drift islands (near ±Rp) now fall inside the fine band, not the coarse tail
+        @test any(x -> abs(abs(x) - Rp) < w, dg.x.nodes)
+    end
 end

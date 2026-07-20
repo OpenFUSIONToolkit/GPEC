@@ -33,7 +33,7 @@ field-particle term (its magnitude `⟨ν̂_ii⟩_u` is cleared in
 module Configure
 
 using LinearAlgebra
-import ..PhaseSpace: IslandGrid, nnodes, MappedFDGrid
+import ..PhaseSpace: IslandGrid, nnodes, MappedFDGrid, resolved_island_grid, drift_island_grid
 import ..Operators: IslandStack, IslandState, FarFieldConditions,
     ParallelStreaming, MagneticDrift, ExBDrift, PitchAngleDiffusion,
     GradientDrive, Quasineutrality, conservative_pitch_operator,
@@ -48,7 +48,8 @@ import ..Moments: parallel_current!, delta_moments, channel_decomposition
 import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species, bulk_species
 
 export Level0Physics, configure_level0, delta_outputs
-export drift_coefficient_table, pitch_diffusivity_profile, pitch_collision_coefficient
+export drift_coefficient_table, drift_island_shift_envelope, drift_island_resolved_grid
+export pitch_diffusivity_profile, pitch_collision_coefficient
 export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
 export quasineutrality_source, streaming_coefficients, gradient_far_field
 export exb_coupling_table, physical_velocity_weights, parallel_flow_weight
@@ -184,6 +185,66 @@ function drift_coefficient_table(grid::IslandGrid, phys::Level0Physics)
         end
     end
     return cD
+end
+
+"""
+    drift_island_shift_envelope(grid, phys) -> Float64
+
+The half-width `R = max_passing |x_D^island|` of the drift-island shift envelope
+(`01 §2.2`, `[CLEARED]`; `04 §1`). The drift island for a passing particle sits at
+`x_D^island(y,E,σ) = ρ̂_θi ω̂_D(y,E,σ) L̂_q` — shifted from the magnetic island
+(`x=0`), σ-signed, and varying across velocity space. Reuses the **cleared**
+`ω̂_D` via [`drift_coefficient_table`] (`c_D = ω̂_D`; `L̂_q = 1/phys.inv_Lq`); the
+max is over **passing** nodes only (`y < grid.y_c` — trapped particles have no
+shifted island, `01 §2.2`), and forbidden / near-`y_c`-miss nodes carry
+`ω̂_D ≡ 0` there (as in `drift_coefficient_table`). The radial grid must resolve
+`[-(R+w), R+w]`, not merely `[-w, w]`: at physical `ρ̂_θi ~ w` the envelope reaches
+several island half-widths (the drift islands lie in what a magnetic-island-centred
+grid leaves as coarse far field). Built entirely from cleared quantities — no new
+coefficient, sign, or normalization.
+"""
+function drift_island_shift_envelope(grid::IslandGrid, phys::Level0Physics)
+    cD = drift_coefficient_table(grid, phys)          # c_D = ω̂_D, broadcast over (x,ξ)
+    Lq = 1 / phys.inv_Lq
+    ρ = phys.rho_hat_theta_i
+    R = 0.0
+    for iy in 1:grid.y.n
+        grid.y.nodes[iy] < grid.y_c || continue       # passing particles only (01 §2.2)
+        for iE in 1:grid.E.n, iσ in 1:length(grid.σ)
+            R = max(R, abs(ρ * Lq * cD[1, 1, iy, iE, iσ]))
+        end
+    end
+    return R
+end
+
+"""
+    drift_island_resolved_grid(phys; K=8, Lx_over_w=12.0, growth=1.2, margin=1.0,
+                               nxi, ny, nE, y_max, y_c=1.0, clustering_y=0.0,
+                               energy_kind=:laguerre, order=4) -> IslandGrid
+
+Build an [`IslandGrid`](@ref) whose radial band resolves the **drift-island shift
+envelope** for physics `phys` (`04 §1`): computes
+`R = drift_island_shift_envelope + margin·w` on the target `(y, E)` velocity grid,
+then lays a uniform central region of spacing `w/K` over `[-R, R]` coarsening to
+`±Lx_over_w·w` outside ([`PhaseSpace.drift_island_grid`]). `w = phys.w_psi`.
+Because the envelope grows with `nE` (through `ω̂_D ∝ v̂ = √E`), `R` is measured on
+the same `(y, E)` grid the final grid uses. Use for the resolution-convergence
+`Δ_neo` sweep in place of [`PhaseSpace.resolved_island_grid`], which packs only the
+magnetic island at `x=0`.
+"""
+function drift_island_resolved_grid(phys::Level0Physics; K::Real=8, Lx_over_w::Real=12.0,
+    growth::Real=1.2, margin::Real=1.0, nxi::Integer, ny::Integer, nE::Integer,
+    y_max::Real, y_c::Real=1.0, clustering_y::Real=0.0, energy_kind::Symbol=:laguerre,
+    order::Integer=4)
+    w = phys.w_psi
+    # provisional grid: only its (y, E, σ) axes enter the envelope (x is irrelevant).
+    prov = resolved_island_grid(; w=w, nx=order + 5, K=1.0, Lx_over_w=Lx_over_w,
+        nxi=nxi, ny=ny, nE=nE, y_max=y_max, y_c=y_c, clustering_y=clustering_y,
+        energy_kind=energy_kind, order=order)
+    R = drift_island_shift_envelope(prov, phys) + margin * w
+    return drift_island_grid(; R=R, w=w, K=K, Lx_over_w=Lx_over_w, growth=growth,
+        nxi=nxi, ny=ny, nE=nE, y_max=y_max, y_c=y_c, clustering_y=clustering_y,
+        energy_kind=energy_kind, order=order)
 end
 
 # Cleared orbit-averaged pitch brackets (S=⟨√(1−yb)⟩, T=⟨1/√(1−yb)⟩) with a

@@ -8,6 +8,41 @@ relevant.
 
 ---
 
+## 2026-07-20 — Drift-island band grid built (04 §1): the response layer's velocity-spread envelope reaches ~4w, so the magnetic-island-centred grid missed it
+
+- **Moved (user: "build the drift-island grid map")**: implemented the band grid
+  that resolves the **drift-island shift envelope**, not the magnetic island.
+  - **Envelope quantified first (the scientific gate)**: at physical
+    `ρ̂_θi=0.05, w=0.05`, `X = max_passing|x_D^island| = 0.197 = 3.94·w`. The drift
+    islands sit at `x~±0.2`, entirely OUTSIDE the old fine region `[-w,+w]=[-0.05,0.05]`
+    — in the coarse tail. Hard confirmation of the 2026-07-19 diagnosis (why `Δ_neo`
+    was resolution-divergent and the m1 peak migrated).
+  - **Doc contradiction found + resolved**: the mesh shift is
+    `x_D^island = ρ̂_θi ω̂_D L̂_q` — docs/01 §2.2 (`[CLEARED]`) and design 04 §1 both
+    say **L̂_q**; `analytic-far-field.md §4` (a `[DERIVED]` parenthetical) wrote
+    `L̂_q⁻¹`. Structurally the L̂_q form is right (its shear part = `⟨x_D⟩` orbit width,
+    since `L̂_q` cancels the `1/L̂_q` inside `ω̂_D`). Corrected the outlier typo; the
+    CLEARED docs/01 §2.2 is authoritative. Flagged, not silently resolved.
+  - **Implemented** (reuses the **cleared** `ω̂_D` — no new coefficient):
+    `Configure.drift_island_shift_envelope` (`R = max_passing|ρ̂_θi ω̂_D L̂_q|`,
+    passing `y<y_c` only — trapped have no shifted island, 01 §2.2) and
+    `drift_island_resolved_grid`; `PhaseSpace.banded_x_nodes` /`drift_island_grid`
+    (uniform central band at `Δx≤w/K` over `[-(R+w),R+w]` + geometric tails to
+    `±Lx`, `Lx` beyond the envelope) and a `MappedFDGrid(nodes;order)` constructor
+    (Fornberg D1/D2 on arbitrary nodes; x-`wq` trapezoidal — unused downstream, the
+    Δ x-integral uses spline quadrature).
+- **Verified**: grids 63/63, configure 1563/1563, anchor-sync 12/12 green. Doc-first:
+  numerics.md §1 (band-grid subsection + implementing symbols); design 04 §1 already
+  prescribed it. physics-verifier run on the diff (physics-adjacent: reuses cleared
+  ω̂_D × L̂_q).
+- **Cost note**: the band is ~5× wider than the magnetic island, so ~5× more x-nodes
+  at the same Δx (nx~100 to resolve the envelope) — kokuchou's memory wall; the
+  matrix-free solve (PlaneJacobi) is the intended absorber.
+- **Next**: re-run the `Δ_neo` resolution-convergence test on the band grid — does
+  resolving the drift-island envelope finally make `Δ_neo` converge across
+  resolution? (compute-heavy; the payoff test.) Then, if converged, the B2 `Δ_neo(w)`
+  sweep becomes reachable.
+
 ## 2026-07-19 (cont.) — Kokuchou Δ_loc measurement: the OUTPUT extraction (not the solve) is the blocker — redirects the 2026-07-18 pivot
 
 - **Moved (user: "measure Δ stability now")**: ran the kokuchou `Δ_loc` test at a

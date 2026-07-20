@@ -74,10 +74,32 @@ assembles such a grid and `is_island_resolved` reports the two adequacy numbers.
 Every Δ-output benchmark runs at ``\ge 2`` resolutions and reports convergence —
 no pass on a single grid (docs/05).
 
+**The drift-island band grid (`04 §1`).** A single ``\sinh`` cluster at ``x=0``
+resolves the *magnetic* island, but the perturbed response localises on the
+**drift** islands, which sit at ``x`` shifted from ``x=0`` by
+``x_D^{\rm island}(y,E,\sigma) = \hat\rho_{\theta i}\,\hat\omega_D\,\hat L_q``
+(docs/01 §2.2, `[CLEARED]`) — σ-signed and **spread across velocity space**. At
+physical ``\hat\rho_{\theta i}\sim w`` the shift envelope reaches several island
+half-widths (measured ``\max|x_D^{\rm island}| \approx 4w`` at
+``\hat\rho_{\theta i}=w``), so the drift islands lie in what a magnetic-island-
+centred grid leaves as coarse far field — and the ``\Delta`` moment there is
+under-resolved and resolution-divergent. `drift_island_shift_envelope` computes
+the envelope half-width ``R=\max_{\rm passing}|x_D^{\rm island}|`` reusing the
+**cleared** ``\hat\omega_D`` (over passing ``y<y_c`` only — trapped particles have
+no shifted island); `banded_x_nodes`/`drift_island_grid` then lay a **uniform**
+high-resolution central band of spacing ``\le w/K`` over ``[-(R+w),\,R+w]`` and
+coarsen geometrically to ``\pm L_x`` outside (with ``L_x`` beyond the envelope, not
+merely beyond the magnetic island). This is the "uniform high-res central region
+covering the drift-shifted island" of the prior art (L23 Ch. 3); the cost is more
+radial nodes (the envelope is wider), which the matrix-free solve (§5) absorbs.
+`drift_island_resolved_grid` builds it directly from `phys`.
+
 *Implementing symbols:* `PhaseSpace.FourierGrid`, `PhaseSpace.MappedFDGrid`,
 `PhaseSpace.GaussGrid`, `PhaseSpace.IslandGrid`, `PhaseSpace.fd_weights`,
 `PhaseSpace.island_clustering_x`, `PhaseSpace.resolved_island_grid`,
-`PhaseSpace.is_island_resolved`, `PhaseSpace.central_x_spacing`.
+`PhaseSpace.is_island_resolved`, `PhaseSpace.central_x_spacing`,
+`PhaseSpace.banded_x_nodes`, `PhaseSpace.drift_island_grid`,
+`Configure.drift_island_shift_envelope`, `Configure.drift_island_resolved_grid`.
 
 ## 2. The operator stack
 
