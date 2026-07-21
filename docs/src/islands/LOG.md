@@ -8,6 +8,36 @@ relevant.
 
 ---
 
+## 2026-07-21 (cont.) — Converged-solve scan: CONVERGENCE IS SOLVED; Δ_neo is ~99% far-field-dominated (Q7 extraction, now proven on converged solves)
+
+- **Moved**: 2nd Slurm array on the ADEQUATE domain (Lx≥16w, where the solve
+  converges), K-convergence + Lx-stability + an **island-fraction** diagnostic
+  (fraction of `∫m1(x)dx` from `|x|<3w`).
+- **Δ_neo IS roughly K-convergent once the domain is adequate**: at `Lx=20w`,
+  `Δ_neo = −1.65, −1.88, −1.80` for K=4,6,8 (~15% spread, all converged
+  resmax≤1.7e-8) — vs the oscillating `−24/−14/−22/−12` at `Lx=8w`. Island
+  resolution converges when the domain and field are adequate.
+- **THE decisive number — `islandfrac ≈ 0.01–0.03` for EVERY config**: only **1–3%
+  of `Δ_neo` comes from `|x|<3w`** (the island); **97–99% is the outer region**, the
+  m1 cos-moment peaking near the domain edge (`x/w = −13…−19`). And `Δ_neo` is **not
+  domain-convergent** — it shrinks `−2.78 → −1.88 → −1.48 → −1.06` as
+  `Lx = 16→20→24→28`. So the raw volume-moment `Δ_neo = C∫dx∮dξ J̄cosξ` is
+  **far-field-dominated**, NOT the localized island quantity; the ξ-structured current
+  does not decay to the boundary.
+- **Net (the whole arc resolves)**: **convergence is SOLVED** (domain `Lx≳20w` +
+  smoothed band grid + working `PlaneJacobi` → clean converged physical solves, ~5–9
+  Newton iters, resmax~1e-11). What remains is exactly the **original Q7 extraction
+  question** — now proven on *converged* solves with a hard number (1% island
+  fraction), no longer confounded by non-convergence. The far field (`g_far ∝ x`
+  Dirichlet) and/or the volume-moment definition let the outer region dominate; the
+  fix is a Q7 decision (subtract the ∝x background before the moment / a decaying
+  far-field BC / a matched-asymptotic extraction) — **signed-off physics, needs human
+  sign-off, do NOT guess**. Q7 updated with the converged-solve evidence.
+- **Next (Q7-gated)**: the extraction. With a converged base, the cleanest test of
+  each Q7 option is now possible (e.g. does subtracting `g_far` from `g` before the
+  moment give a domain-stable, island-localized `Δ_neo`?). Held for the human decision
+  on `docs/01 §4` / `numerics.md §7`. Scan is scratch; LOG + QUESTIONS committed.
+
 ## 2026-07-21 — Slurm scan (K × domain × band-width): the DOMAIN SIZE is the convergence lever — Lx=20w gives the FIRST cleanly-converged physical solve
 
 - **Moved (user: K-convergence + a parallel resolved-width scan on Slurm)**: fired a

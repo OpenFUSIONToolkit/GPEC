@@ -549,6 +549,35 @@ Ran the kokuchou `Δ_loc` test (LOG 2026-07-19 cont.; physical `ρ̂_θi=0.05`, 
   re-test `Δ_neo` resolution-convergence. This supersedes solver-robustness work as
   the precondition for a trustworthy `Δ_neo(w)`.
 
+### Update (2026-07-21, CONVERGED) — the solve is fixed; the extraction is confirmed as the sole remaining blocker (proven on converged solves)
+
+The convergence chain is complete (LOG 2026-07-20/21): the drift-island **band grid**
+(resolve the velocity-spread envelope, `~2w`) + a **smoothed tail** (so `PlaneJacobi`
+preconditions instead of anti-preconditions) + an **adequate domain `Lx≳20w`** give
+the **first cleanly-converged physical Level-0 solves** (matrix-free, ~5–9 Newton
+iters, `resmax~1e-11`). On that converged base:
+
+- **`Δ_neo` is roughly K-convergent** (Lx=20w: `−1.65/−1.88/−1.80` for K=4/6/8), so
+  island resolution is fine — but
+- **`Δ_neo` is ~99% far-field-dominated**: an **island-fraction diagnostic** (share of
+  `∫m1(x)dx` from `|x|<3w`) reads **0.01–0.03** for *every* config; the m1 cos-moment
+  peaks near the domain edge (`x/w=−13…−19`) and **`Δ_neo` is not domain-convergent**
+  (shrinks `−2.78→−1.06` as `Lx=16→28`). The ξ-structured current does **not** decay
+  to the boundary.
+
+So Q7 is now **sharp and proven, not confounded by non-convergence**: the raw volume
+moment `C∫dx∮dξ J̄cosξ` over the full domain is *not* the localized island quantity —
+the outer region (the `g_far ∝ x` far-field response) carries 99% of it. **The
+decision (unchanged in kind, now evidence-backed) is the extraction**:
+(a) subtract the `∝x` far-field background from `g` (or from `J̄`) before the moment;
+(b) a genuinely decaying far-field BC (York `∂ĝ/∂p=0` with the winged-branch fix);
+(c) a matched-asymptotic (`Δ'`-style) extraction. This is a **signed-off-physics
+decision on `docs/01 §4` / `numerics.md §7`** → human sign-off + physics-verifier
+before implementation; do NOT guess. With a converged base, each option is now
+directly testable (e.g. does subtracting `g_far` give a domain-stable, island-
+localized `Δ_neo`?). **Gated work: the resolution/domain-convergent `Δ_neo(w)`, B2,
+B5b — all now sit ONLY on this extraction decision; the solve is done.**
+
 ## Q8 — Clear the drift-island shift structure `x_D = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2, `[CHECKED]` → sign-off) — OPEN
 
 - **Context (2026-07-20)**: the drift-island **band grid** (`04 §1`; `LOG 2026-07-20`)
