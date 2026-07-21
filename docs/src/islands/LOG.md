@@ -8,6 +8,40 @@ relevant.
 
 ---
 
+## 2026-07-21 — Slurm scan (K × domain × band-width): the DOMAIN SIZE is the convergence lever — Lx=20w gives the FIRST cleanly-converged physical solve
+
+- **Moved (user: K-convergence + a parallel resolved-width scan on Slurm)**: fired a
+  10-config Slurm array (`LocalQ`, matrix-free on the smoothed band grid, physical
+  `ρ̂_θi=w=0.05`) over K, domain `Lx/w`, and band `margin`. Scratch:
+  `/tmp/.../bandgrid_scan.jl` + `scan.sbatch`.
+- **#2 — K (island resolution) does NOT converge `Δ_neo`** (Lx=8w, margin=1):
+  `Δ_neo = −24, −14, −22, −12` for K=4,6,8,10 — **oscillating**, fields not converged
+  (resmax~1e-4). Island resolution is **not** the limiter; the band already resolves
+  the drift islands.
+- **#3 — the DOMAIN SIZE `Lx` is the convergence lever** (K=6, margin=1):
+  `Lx/w = 6, 8, 12, 20` → resmax `4.6e-4, 5.6e-4, 1.6e-6, **9.3e-11**`, and
+  **`Lx=20w` CONVERGES** (`converged=true`, **9 Newton iters**, `Δ_neo=−1.88`, O(1)
+  channels `Δbs=−4.6/Δpol=+2.7`). **The first cleanly-converged physical Level-0 solve
+  in this whole effort.** The far field at `Lx=8w` was too close: the drift-island
+  envelope reaches ~2w, so the domain must sit *well* beyond it (~20w), not the ~6–8w
+  the old resolution protocol used. Widening the band `margin` alone (1→5) does not
+  stabilize `Δ_neo` (−13.6, −13.8, −1.1, −7.0) — it is the *outer domain*, not the
+  fine-band width.
+- **Synthesis / reframe**: the convergence blocker was ultimately the **far-field
+  domain being too small**, now fixed by `Lx≳20w` + the smoothed band grid + the
+  working `PlaneJacobi`. Chain of the whole arc: gate-on-output (York) → extraction/grid
+  (measurement) → drift-island band grid (resolve the envelope) → smoothing (fix
+  PlaneJacobi) → **large domain (fix convergence)**. Each was necessary.
+- **Still open (now on a CONVERGED base)**: at `Lx=20` the m1 peak is still near the
+  domain edge and `Δ_neo` varies with `Lx` — the volume-moment **extraction**
+  (original Q7: outer-region-dominated / far-field decay) is the remaining piece, now
+  studyable on a *converged* solve for the first time.
+- **Next**: re-run the `Δ_neo` **K-convergence at the adequate `Lx=20w`** (does it
+  converge in K now that the domain and field are adequate?), and characterize the
+  m1(x) integrand on the converged solve (is `Δ_neo` island- or edge-dominated?) →
+  informs the Q7 extraction decision. All code + tests committed + pushed; scan is
+  scratch (not committed).
+
 ## 2026-07-20 (cont.) — Root-caused the band-grid preconditioner failure: an abrupt spacing JUMP; smoothed the tail (WIP, empirical confirm in progress)
 
 - **Diagnosed (dense cond experiments)**: the band grid made `PlaneJacobi`
