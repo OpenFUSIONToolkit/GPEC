@@ -10,6 +10,7 @@ Post-processing and visualization utilities for GPEC simulation outputs.
   - `CoilForcing`: Plotting functions for coil forcing spectra
   - `PerturbedEquilibrium`: Plotting functions for perturbed equilibrium and singular coupling results
   - `PerturbedEquilibriumModes`: Data helpers to convert modal GPEC output to (ψ, θ) and (ψ, θ, φ) grids
+  - `FieldLineTracing`: Poincaré, connection-length, footprint, and island-width plots
 """
 module Analysis
 
@@ -18,5 +19,6 @@ include("Equilibrium.jl")
 include("CoilForcing.jl")
 include("PerturbedEquilibrium.jl")
 include("PerturbedEquilibriumModes.jl")
+include("FieldLineTracing.jl")
 
 end # module Analysis

@@ -9,6 +9,7 @@ The Analysis module provides post-processing and visualization utilities for GPE
 - `CoilForcing`: Plotting functions for coil geometry and normal field spectra
 - `PerturbedEquilibrium`: Plotting functions for perturbed equilibrium results
 - `PerturbedEquilibriumModes`: Data helpers to convert modal GPEC output to (ψ, θ) and (ψ, θ, φ) grids
+- `FieldLineTracing`: Poincaré, connection-length, footprint, and island-width plots
 
 ```@docs
 GeneralizedPerturbedEquilibrium.Analysis
@@ -42,4 +43,10 @@ Modules = [GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibrium]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibriumModes]
+```
+
+## FieldLineTracing
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Analysis.FieldLineTracing]
 ```

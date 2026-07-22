@@ -36,6 +36,7 @@ makedocs(;
             "KineticForces" => "kinetic_forces.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
+            "Field-Line Tracing" => "fieldlinetracing.md",
             "Inner Layer" => "inner_layer.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"

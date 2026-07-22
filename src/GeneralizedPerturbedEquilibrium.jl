@@ -44,6 +44,10 @@ include("KineticForces/KineticForces.jl")
 import .KineticForces as KineticForces
 export KineticForces
 
+include("FieldLineTracing/FieldLineTracing.jl")
+import .FieldLineTracing as FieldLineTracing
+export FieldLineTracing
+
 include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
@@ -585,6 +589,36 @@ function main_from_inputs(
         end
 
         @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
+    end
+
+    # ----------------------------------------------------------------
+    # FieldLineTracing (magnetic islands, stochasticity, footprints)
+    # ----------------------------------------------------------------
+    if "FieldLineTracing" in keys(inputs)
+        @info "\n  FieldLineTracing\n$_SECTION"
+        flt_start = time()
+
+        # Tracing consumes the reconstructed perturbed field, so it needs a PE state.
+        if !@isdefined(pe_state)
+            @info "Skipping field-line tracing: no perturbed-equilibrium data (add a [PerturbedEquilibrium] section)."
+        else
+            flt_ctrl = FieldLineTracing.FieldLineTracingControl(;
+                (Symbol(k) => v for (k, v) in inputs["FieldLineTracing"])...
+            )
+            flt_intr = FieldLineTracing.FieldLineTracingInternal(; dir_path=intr.dir_path)
+            flt_state = FieldLineTracing.compute_field_line_tracing(
+                equil, pe_odet, ctrl.vac_flag ? vac_data : nothing, intr, pe_intr, pe_ctrl,
+                flt_ctrl, flt_intr, metric, ffit, pe_state
+            )
+            if flt_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(intr.dir_path, flt_ctrl.HDF5_filename), "cw") do h5file
+                    FieldLineTracing.write_to_hdf5!(h5file, flt_state)
+                end
+                @info "Results written to $(flt_ctrl.HDF5_filename)"
+            end
+        end
+
+        @info "FieldLineTracing completed in $(@sprintf("%.3f", time() - flt_start)) s"
     end
 
     # ----------------------------------------------------------------

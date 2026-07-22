@@ -20,6 +20,12 @@ Plots.savefig(p_ffs, joinpath(@__DIR__, "ffs_summary.png"))
 display(p_pe);
 Plots.savefig(p_pe, joinpath(@__DIR__, "pe_summary.png"))
 
+# Field-line tracing: Poincaré section, connection length, and island widths
+p_flt = Analysis.FieldLineTracing.plot_field_line_tracing_summary(h5path)
+display(p_flt)
+flt_path = joinpath(@__DIR__, "field_line_tracing_summary.png")
+Plots.savefig(p_flt, flt_path)
+
 # BALOO-style first ballooning stability boundary: experimental α vs critical α
 p_baloo = Analysis.ForceFreeStates.plot_ballooning_alpha_boundary(h5path)
 display(p_baloo)
@@ -47,7 +53,7 @@ geqdsk_cases = [
 base_toml = TOML.parsefile(joinpath(@__DIR__, "gpec.toml"))
 
 println("Saved figures:")
-for p in (joinpath(@__DIR__, "equilibrium_summary.png"), joinpath(@__DIR__, "ffs_summary.png"), joinpath(@__DIR__, "pe_summary.png"), baloo_path)
+for p in (joinpath(@__DIR__, "equilibrium_summary.png"), joinpath(@__DIR__, "ffs_summary.png"), joinpath(@__DIR__, "pe_summary.png"), flt_path, baloo_path)
     println("  ", p)
 end
 

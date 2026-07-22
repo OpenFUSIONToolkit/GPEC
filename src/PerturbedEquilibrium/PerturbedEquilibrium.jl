@@ -37,6 +37,10 @@ export ForcingMode
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
 
+# Note: build_flux_matrix, map_forcing_to_eigenmodes, and reconstruct_physical_fields are
+# reused by FieldLineTracing via qualified access (PerturbedEquilibrium.<name>); they are
+# internal helpers and intentionally not exported.
+
 """
     compute_perturbed_equilibrium(
         equil, ForceFreeStates_results, vac_data, ffs_intr,
