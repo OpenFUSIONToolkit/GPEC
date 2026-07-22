@@ -10,12 +10,13 @@ function make_solovev_intr(inputs, ctrl, equil, ex)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     FFS.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+    intr.nlow = ctrl.nn_low;
+    intr.nhigh = ctrl.nn_high;
+    intr.npert = 1
     FFS.sing_find!(intr, equil)
-    intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+    intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
     intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.mband = intr.mpert - 1
     intr.numpert_total = intr.mpert * intr.npert
     return intr
 end
@@ -27,10 +28,10 @@ end
     @testset "renormalize_riccati_inplace!" begin
         N = 4
         # Build a random (U₁, U₂) pair and verify renorm gives S = U₁·U₂⁻¹ with U₂_new = I
-        rng = [1.0+0.5im  0.2im    0.1      0.3im;
-               0.0        1.2+0.1im 0.0im   0.2;
-               0.1+0.1im  0.0      0.9+0.3im 0.1im;
-               0.0im      0.2      0.0      1.1+0.2im]
+        rng = [1.0+0.5im 0.2im 0.1 0.3im;
+            0.0 1.2+0.1im 0.0im 0.2;
+            0.1+0.1im 0.0 0.9+0.3im 0.1im;
+            0.0im 0.2 0.0 1.1+0.2im]
         U1 = rng .+ 0.5*I(N)
         U2 = 0.5*rng .+ I(N)  # near-identity to ensure invertibility
 
@@ -43,15 +44,15 @@ end
         FFS.renormalize_riccati_inplace!(u, N)
 
         @test u[:, :, 2] ≈ I(N)
-        @test u[:, :, 1] ≈ S_expected  rtol=1e-12
+        @test u[:, :, 1] ≈ S_expected rtol=1e-12
     end
 
     @testset "renormalize_riccati_inplace! idempotent" begin
         N = 3
         # If U₂ = I already, renorm should leave u unchanged
-        S = [1.0+0.5im  0.2im    0.1;
-             0.0im      1.2+0.1im 0.0;
-             0.1+0.1im  0.0      0.9+0.3im]
+        S = [1.0+0.5im 0.2im 0.1;
+            0.0im 1.2+0.1im 0.0;
+            0.1+0.1im 0.0 0.9+0.3im]
         u = zeros(ComplexF64, N, N, 2)
         u[:, :, 1] .= S
         u[:, :, 2] .= I(N)
@@ -59,14 +60,14 @@ end
         FFS.renormalize_riccati_inplace!(u, N)
 
         @test u[:, :, 2] ≈ I(N)
-        @test u[:, :, 1] ≈ S  rtol=1e-12
+        @test u[:, :, 1] ≈ S rtol=1e-12
     end
 
     @testset "renormalize_riccati! (OdeState)" begin
         N = 3
-        rng = [1.0+0.5im  0.2im    0.1;
-               0.0im      1.2+0.1im 0.0;
-               0.1+0.1im  0.0      0.9+0.3im]
+        rng = [1.0+0.5im 0.2im 0.1;
+            0.0im 1.2+0.1im 0.0;
+            0.1+0.1im 0.0 0.9+0.3im]
         U1 = rng .+ 0.5*I(N)
         U2 = 0.2*rng .+ I(N)
 
@@ -80,7 +81,7 @@ end
         FFS.renormalize_riccati!(odet, intr)
 
         @test odet.u[:, :, 2] ≈ I(N)
-        @test odet.u[:, :, 1] ≈ S_expected  rtol=1e-12
+        @test odet.u[:, :, 1] ≈ S_expected rtol=1e-12
     end
 
     # ── Shared Solovev setup ──────────────────────────────────────────────────
@@ -98,15 +99,16 @@ end
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
 
-    ctrl  = FFS.ForceFreeStatesControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ctrl = FFS.ForceFreeStatesControl(;
+        (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-                GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
+        GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
+        GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
-    metric   = FFS.make_metric(equil; mband=intr_tmp.mband)
-    ffit     = FFS.make_matrix(equil, intr_tmp, metric)
-    N        = intr_tmp.numpert_total
+    metric = FFS.make_metric(equil, intr_tmp.mpert)
+    ffit = FFS.make_matrix(equil, intr_tmp, metric)
+    N = intr_tmp.numpert_total
 
     # Riccati integration
     intr_ric = make_solovev_intr(inputs, ctrl, equil, ex)
@@ -117,14 +119,14 @@ end
     delta_prime_inline = [copy(intr_ric.sing[s].delta_prime) for s in 1:intr_ric.msing]
 
     vac_ric = FFS.free_run!(odet_ric, ctrl, equil, ffit, intr_ric)
-    et_ric  = real(vac_ric.et[1])
+    et_ric = real(vac_ric.et[1])
 
     # Standard integration (needed only for energy comparison).  eulerlagrange_integration
     # returns (odet, propagators, chunks, S_at_surface_left); only odet is used here.
     intr_std = make_solovev_intr(inputs, ctrl, equil, ex)
     odet_std, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr_std)
-    vac_std  = FFS.free_run!(odet_std, ctrl, equil, ffit, intr_std)
-    et_std   = real(vac_std.et[1])
+    vac_std = FFS.free_run!(odet_std, ctrl, equil, ffit, intr_std)
+    et_std = real(vac_std.et[1])
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -148,7 +150,7 @@ end
     @testset "Riccati end state has U₂ ≈ I" begin
         # After riccati_eulerlagrange_integration, odet.u[:,:,2] should be identity
         # (canonical Riccati convention after final renorm)
-        @test odet_ric.u[:, :, 2] ≈ I(N)  rtol=1e-10
+        @test odet_ric.u[:, :, 2] ≈ I(N) rtol=1e-10
     end
 
     @testset "riccati_der! formula — Glasser 2018 Eq. 19" begin
@@ -175,28 +177,30 @@ end
             S = (A + A') / 2
 
             # Manual RHS: w†·F̄⁻¹·w − S·Ḡ·S
-            L    = zeros(ComplexF64, N, N)
+            L = zeros(ComplexF64, N, N)
             Kmat = zeros(ComplexF64, N, N)
             Gmat = zeros(ComplexF64, N, N)
-            ffit.fmats_lower(vec(L),    psi; hint=ffit._hint)
+            ffit.fmats_lower(vec(L), psi; hint=ffit._hint)
             ffit.kmats(vec(Kmat), psi; hint=ffit._hint)
             ffit.gmats(vec(Gmat), psi; hint=ffit._hint)
-            q       = equil.profiles.q_spline(psi)
+            q = equil.profiles.q_spline(psi)
             singfac = vec(1.0 ./ ((intr_ric.mlow:intr_ric.mhigh) .-
-                                   q .* (intr_ric.nlow:intr_ric.nhigh)'))
+                                  q .* (intr_ric.nlow:intr_ric.nhigh)'))
             w = -Kmat * S
-            for i in 1:N; w[i, i] += singfac[i]; end
+            for i in 1:N
+                w[i, i] += singfac[i]
+            end
             v = copy(w)
             ldiv!(LowerTriangular(L), v)
             ldiv!(UpperTriangular(L'), v)
             dS_manual = adjoint(w) * v - S * Gmat * S
 
             # riccati_der! RHS
-            u_ric  = zeros(ComplexF64, N, N, 2)
+            u_ric = zeros(ComplexF64, N, N, 2)
             du_ric = zeros(ComplexF64, N, N, 2)
             u_ric[:, :, 1] .= S
             u_ric[:, :, 2] .= Matrix{ComplexF64}(I, N, N)
-            dummy  = FFS.IntegrationChunk(psi, psi, false, 0, 1)
+            dummy = FFS.IntegrationChunk(psi, psi, false, 0, 1)
             params = (ctrl, equil, ffit, intr_ric, odet_tmp, dummy)
             FFS.riccati_der!(du_ric, u_ric, params, psi)
 

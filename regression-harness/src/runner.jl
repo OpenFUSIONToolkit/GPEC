@@ -10,6 +10,36 @@ function _read_timing_file(path::String)::Float64
     return NaN
 end
 
+"""
+Materialize the directory GPEC will actually run in.
+
+With no `overrides`, the example deck runs in place (returns it untouched). With overrides,
+the deck is copied to a throwaway temp dir and the named gpec.toml keys are patched there,
+so one shared example can serve several cases (e.g. a collisionless variant via
+`"KineticForces.nutype" => "zero"`). Override keys are dotted paths into the TOML; missing
+intermediate tables are created. Returns `(rundir, is_temp)`; the caller removes the temp
+tree when `is_temp`.
+"""
+function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
+    isempty(overrides) && return (example_path, false)
+    rundir = joinpath(mktempdir(), "deck")
+    cp(example_path, rundir)
+    rm(joinpath(rundir, "gpec.h5"); force=true)   # drop any stale output copied along
+    cfg = TOML.parsefile(joinpath(rundir, "gpec.toml"))
+    for (dotted, val) in overrides
+        ks = split(dotted, ".")
+        d = cfg
+        for k in ks[1:(end - 1)]
+            d = get!(d, k, Dict{String,Any}())
+        end
+        d[ks[end]] = val
+    end
+    open(joinpath(rundir, "gpec.toml"), "w") do io
+        TOML.print(io, cfg)
+    end
+    return (rundir, true)
+end
+
 const RUNNER_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -49,6 +79,61 @@ open(ARGS[2], "w") do f
 end
 """
 
+# GGJ rotated-ray backend at Q = 500i on the q=4 benchmark surface — a regime beyond the
+# :galerkin backend. Builds the physical rate γ = 500i·Q₀ so inner_Q lands exactly on the
+# imaginary axis at 500i, then writes the parity matching data. Runtime to ARGS[2] as usual.
+const COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.InnerLayer
+using HDF5
+p = q4_surface_benchmark()
+γ = 500.0im * InnerLayer.GGJ.q0(p)
+t_start = time()
+Δ = solve_inner(GGJModel(solver=:ray), p, γ)
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["ggj/delta_odd_real"]  = real(Δ[1])
+    fid["ggj/delta_odd_imag"]  = imag(Δ[1])
+    fid["ggj/delta_even_real"] = real(Δ[2])
+    fid["ggj/delta_even_imag"] = imag(Δ[2])
+end
+open(ARGS[2], "w") do f
+    println(f, elapsed)
+end
+"""
+
+# Self-contained separatrix-finder regression (PR #296). Loads a fixed-boundary EFIT whose
+# computational box hugs the LCFS (eps=0.05 TokaMaker aspect-scan g-file): outside the prescribed
+# LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
+# bracketed-Brent separatrix finder could not bracket psi=sibry and equilibrium setup threw. Calls
+# setup_equilibrium directly and writes the leading equilibrium scalars: errors on the buggy code,
+# passes with the Newton finder. Runtime is written to ARGS[2] for parity with the GPEC runner.
+const COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.Equilibrium
+using HDF5
+root = dirname(Base.active_project())
+gfile = joinpath(root, "examples", "efit_fixedbdy_separatrix_example", "eq_eps0.0500000_k1.000_d0.000.geqdsk")
+cfg = Equilibrium.EquilibriumConfig(; eq_type="efit", eq_filename=gfile)
+t_start = time()
+pe = Equilibrium.setup_equilibrium(cfg)
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["equil/psio"]  = pe.psio
+    fid["equil/q0"]    = pe.params.q0
+    fid["equil/q95"]   = pe.params.q95
+    fid["equil/betat"] = pe.params.betat
+    fid["equil/betan"] = pe.params.betan
+end
+open(ARGS[2], "w") do f
+    println(f, elapsed)
+end
+"""
+
 """
 Run GPEC for a single commit/ref and case. Dispatches to run_local for
 the working tree or run_at_commit for a git ref.
@@ -79,6 +164,10 @@ Pick the subprocess script template for a `kind="computed"` case.
 function _computed_script_template(case_spec::CaseSpec)
     if case_spec.name == "ggj_reference"
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
+    elseif case_spec.name == "ggj_ray_q500i"
+        return COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE
+    elseif case_spec.name == "efit_fixedbdy_separatrix"
+        return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
     end
     error("No computed-script template registered for case '$(case_spec.name)'")
 end
@@ -231,9 +320,13 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
 
     tmpscript = nothing
     timingfile = nothing
+    rundir = nothing
+    rundir_is_temp = false
     stderr_buf = IOBuffer()
 
     try
+        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+
         instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"
         script_content = replace(RUNNER_SCRIPT_TEMPLATE, "%INSTANTIATE%" => instantiate_line)
         tmpscript = tempname() * ".jl"
@@ -241,14 +334,14 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         write(tmpscript, script_content)
 
         if verbose
-            run(pipeline(`julia --project=$repo_root $tmpscript $example_path $timingfile`))
+            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`))
         else
-            run(pipeline(`julia --project=$repo_root $tmpscript $example_path $timingfile`,
+            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`,
                          stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
 
-        h5path = joinpath(example_path, "gpec.h5")
+        h5path = joinpath(rundir, "gpec.h5")
         if !isfile(h5path)
             @warn "gpec.h5 not produced"
             store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
@@ -283,6 +376,9 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         if timingfile !== nothing
             rm(timingfile; force=true)
         end
+        if rundir_is_temp && rundir !== nothing
+            rm(dirname(rundir); recursive=true, force=true)
+        end
     end
 end
 
@@ -316,6 +412,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     worktree_path = nothing
     tmpscript = nothing
     timingfile = nothing
+    rundir = nothing
+    rundir_is_temp = false
     stderr_buf = IOBuffer()
 
     try
@@ -332,6 +430,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             return
         end
 
+        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+
         # Write temp runner script
         instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"
         script_content = replace(RUNNER_SCRIPT_TEMPLATE, "%INSTANTIATE%" => instantiate_line)
@@ -343,15 +443,15 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         project_root = worktree_path
 
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $example_path $timingfile`))
+            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $example_path $timingfile`,
+            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`,
                          stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
 
         # Check for gpec.h5
-        h5path = joinpath(example_path, "gpec.h5")
+        h5path = joinpath(rundir, "gpec.h5")
         if !isfile(h5path)
             @warn "gpec.h5 not produced at $(commit_info.short)"
             store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
@@ -391,6 +491,9 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         end
         if timingfile !== nothing
             rm(timingfile; force=true)
+        end
+        if rundir_is_temp && rundir !== nothing
+            rm(dirname(rundir); recursive=true, force=true)
         end
         if worktree_path !== nothing
             remove_worktree(worktree_path, repo_root)

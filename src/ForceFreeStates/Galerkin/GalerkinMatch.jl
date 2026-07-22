@@ -1,0 +1,304 @@
+# GalerkinMatch.jl
+#
+# DRIVEN (RPEC) outer↔inner asymptotic matching. Port of rmatch `match_rpec` (match.f) and the
+# outer total-solution construction of `match_output_solution` (match.f).
+#
+# Per rational surface: the forced eigenvalue γ_s = 2πi·n·f_s (gal_rotation is the rotation f in Hz, so γ
+# is the layer Doppler frequency), the inner-layer matching data Δ(Q) via the Galerkin GGJ solver
+# (InnerLayer.solve_inner), then the 4·msing matching
+# system mat·[cout;cin] = rmat is assembled (rmat = −transpose of the gal Δ′ coil block) and solved for
+# the per-coil outer/inner coefficients. The matched outer solution for coil drive j is
+#   ξ_j = Σ_{isol=1}^{2 msing} cout[isol,j]·sols[:,:,isol] + sols[:,:,2 msing+j]
+# and identically for ξ′ with sols_deriv. Stacking over j gives the matched fundamental matrix in the
+# identity-at-edge basis (coil column j has ξ_edge = e_j).
+
+"""
+    gal_deltamn_kernels(asymps, sings, intr, nn) -> (KL, KR)
+
+Per-surface unit-small-solution kernels for the coefficient-based Δ_mn: the resonant-harmonic
+`bwp1/(2πχ₁) = i·(singfac·ξ′ − n·q′·ξ)` of the UNIT small Frobenius solution, evaluated at the
+conventional brackets ψ_s ∓ δ with δ = 5e-4/(|n|·|q′|) — the same offsets as SingularCoupling's
+finite-jump fallback (spot_psi), so the two paths measure the same object. The matched solution's
+Δ_mn is then `Δ_mn[i,j] = KR[i]·c_small_R[i,j] − KL[i]·c_small_L[i,j]`: the small-solution
+(shielding) content only. The big/penetrated branch is excluded — its finite-offset contribution
+diverges as δ^{−(1/2+p₁)} and is not part of the physical Δ_mn (in ideal runs it is zero anyway).
+"""
+function gal_deltamn_kernels(asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
+    intr::ForceFreeStatesInternal, nn::Int)
+    msing = length(sings)
+    KL = zeros(ComplexF64, msing)
+    KR = zeros(ComplexF64, msing)
+    for i in 1:msing
+        q1 = sings[i].q1
+        imres = round(Int, sings[i].q * nn) - intr.mlow + 1
+        δ = 5e-4 / (abs(nn) * abs(q1))
+        for (K, sgn) in ((KR, 1.0), (KL, -1.0))
+            z = sgn * δ
+            ua = sing_get_ua_gal(asymps[i], z)
+            dua = sing_get_dua_gal(asymps[i], z)
+            ξ = ua[imres, 2, 1]
+            ξ′ = dua[imres, 2, 1]
+            singfac = -nn * q1 * z              # m_res − n·q(ψ_s+z) to leading order
+            K[i] = im * (singfac * ξ′ - nn * q1 * ξ)
+        end
+    end
+    return KL, KR
+end
+
+"""
+    gal_match_rpec(ctrl, equil, intr, gal_result, asymps) -> GalMatchResult
+
+Solve the coil-driven RPEC matching from the outer Δ′ (`gal_result`) and the per-surface inner-layer Δ.
+Requires `gal_result.solution` (reconstructed outer ξ/ξ′) and the rpec coil block `gal_result.delta_coil`.
+
+The resistive path uses per-surface inputs `ctrl.gal_eta`/`gal_rho`/`gal_rotation` (length `msing`) +
+`ctrl.gal_gamma`. When `ctrl.gal_ideal_flag`, the inner layer is skipped and `cout=0`, so the matched
+solution is the bare ideal coil column (Fortran rmatch `coil%ideal_flag`) — the DCON/EL reference.
+"""
+function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStatesInternal,
+    gal_result::GalerkinResult, asymps::Vector{GalSingAsymp})
+
+    msing = gal_result.msing
+    mpert = intr.numpert_total
+    nn = intr.nlow
+    mcoil = mpert   # rpec: one coil column per poloidal harmonic
+
+    gal_result.solution !== nothing ||
+        error("gal_match_rpec: gal_result.solution is missing (need the gal-reconstructed ξ/ξ′)")
+    isempty(gal_result.delta_coil) &&
+        error("gal_match_rpec: delta_coil is empty — gal_rpec_flag must be true for RPEC matching")
+
+    # Singular-surface set (same helper as galerkin_solve); needed by both branches (Δ_mn kernels)
+    # and by the resistive inner-layer loop.
+    sings, _, _ = gal_resonant_surfaces(intr, equil)
+    length(sings) == msing ||
+        error("gal_match_rpec: re-derived $(length(sings)) surfaces, expected msing=$msing")
+
+    if ctrl.gal_ideal_flag
+        # Ideal limit (Fortran rmatch coil%ideal_flag, match.f): skip the inner layer entirely
+        # and set the resistive plasma combination to zero. The gal outer solve is already fully ideal, so
+        # the shared construction below collapses to the bare ideal coil column sols(:,:,csol).
+        cout = zeros(ComplexF64, 2msing, mcoil)
+        cin = zeros(ComplexF64, 2msing, mcoil)
+        deltar = zeros(ComplexF64, msing, 2)
+        bpen = zeros(ComplexF64, msing, mcoil)
+        inner_psi = Vector{Float64}[]   # no inner layer in the ideal limit
+        inner_xi = Matrix{ComplexF64}[]
+        inner_b = Matrix{ComplexF64}[]
+        inner_params = InnerLayer.GGJParameters[]   # inner layer skipped in the ideal limit
+        rpec_eig = zeros(ComplexF64, msing)
+        residual = 0.0
+    else
+        for (name, v) in (("gal_eta", ctrl.gal_eta), ("gal_rho", ctrl.gal_rho), ("gal_rotation", ctrl.gal_rotation))
+            length(v) == msing || error("gal_match_rpec: $name has length $(length(v)), expected msing=$msing (one value per surface, core→edge)")
+        end
+        ctrl.gal_inner_solver in ("ray", "galerkin") ||
+            error("gal_match_rpec: gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
+
+        # --- inner-layer matching data Δ(Q) per surface (deltac_run; match.f) ---
+        # solve_inner_profile returns the same Δ as solve_inner plus the reconstructed inner-layer field,
+        # so the layer-center value (penetrated field) comes for free from the single matching solve.
+        deltar = zeros(ComplexF64, msing, 2)
+        rpec_eig = zeros(ComplexF64, msing)
+        # Per-surface layer-center field weights pen[i,k] = scale·Ψ_k(0), parity k=1,2 (match.f intotsol_b).
+        chi1 = 2π * equil.psio
+        pen = zeros(ComplexF64, msing, 2)
+        # Per-surface inner-layer ξ_ψ building blocks for the matched solution (match.f intotsol, deltac comp 2):
+        # the ψ grid ψ_s ± X·x0/v1 (left reversed then right) and the resc-scaled odd/even parity profiles.
+        inner_psi = Vector{Vector{Float64}}(undef, msing)
+        inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₁, antisymmetric across ψ_s
+        inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₂, symmetric across ψ_s
+        inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ₁ = scale·resc·Ψ₁, symmetric (Ψ′₁(0)=0)
+        inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ₂ = scale·resc·Ψ₂, antisymmetric (Ψ₂(0)=0)
+        inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
+        for i in 1:msing
+            params = resist_eval(sings[i], equil, intr; eta=ctrl.gal_eta[i], rho=ctrl.gal_rho[i],
+                gamma=ctrl.gal_gamma, ising=i)
+            inner_params[i] = params
+            γ = 2π * im * nn * ctrl.gal_rotation[i]    # forced eigenvalue; gal_rotation is f [Hz], γ = 2πi·n·f
+            rpec_eig[i] = γ
+            # gal_inner_solver = "ray" (default) sources the inner layer from the rotated-ray
+            # backend: the certified Δ comes from the optimal-contour solve at θ = arg(Q)/4 (robust
+            # for |Q| ≳ 1, where the galerkin inner solver drifts), and the profile quantities
+            # (pen, inner_xi, inner_b) from a θ=0 re-solve on the real axis — valid at physical
+            # (RPEC) |Q| since the on-axis pseudo-resonance is a regular point resolved by the BVP
+            # refinement. The θ=0-vs-optimal-θ Δ agreement doubles as a runtime certificate (two
+            # maximally different contours through the same entire solutions).
+            if ctrl.gal_inner_solver == "ray"
+                Q = InnerLayer.GGJ.inner_Q(params, γ)
+                rr = InnerLayer.GGJ.solve_ray(params, Q)              # certified Δ (optimal θ)
+                deltar[i, 1] = rr.Δ[1]
+                deltar[i, 2] = rr.Δ[2]
+                r0 = InnerLayer.GGJ.solve_ray(params, Q; θ=0.0)       # real-axis profile solve
+                relΔ = abs(r0.Δ[1] - rr.Δ[1]) / max(abs(rr.Δ[1]), 1e-300)
+                relΔ > 1e-3 && @warn "GGJ ray: θ=0 profile solve disagrees with certified Δ" surface = i relΔ
+                p0 = InnerLayer.GGJ.solution_profile(r0)
+                profΨ, profΞ, xg = p0.Ψ, p0.Ξ, p0.s
+            else
+                # Inner-solve knobs matched to the Fortran rmatch deltac/inps reference (DELTAC_LIST): inps
+                # basis, inps_xfac=10 (xmax×10, grid nx = 128·10 = 1280), nq=5, cutoff=5, order_pow=8 (↔ kmax).
+                Δ, _, prof, _ = InnerLayer.GGJ.solve_inner_profile(params, γ; xfac=10.0, nx=1280, nq=5, cutoff=5, kmax=8)   # (Δ₁, Δ₂) in deltac.f convention
+                deltar[i, 1] = Δ[1]
+                deltar[i, 2] = Δ[2]
+                profΨ, profΞ, xg = prof.Ψ, prof.Ξ, prof.x
+            end
+            x0i = InnerLayer.GGJ.x0(params)
+            # Amplitude rescale: inner solutions are normalized in X = v1·δψ/x0 (inner_psi below);
+            # converting a big-branch (μ₋ = −1/2−p1) amplitude to the outer δψ-normalization gives
+            # resc = (v1/x0)^(−μ₋), the companion of rescale_delta's (v1/x0)^(2p1) = (v1/x0)^(μ₊−μ₋).
+            resc = (params.v1 / x0i)^(0.5 + InnerLayer.GGJ.p1(params))
+            # b-field scaling, derived from the code's own outer convention (SingularCoupling):
+            #   b_m = 2πi·χ₁·(m−nq)·ξ_m,  m−nq = −n·q′·δψ,  δψ = (x0/v1)·X,  resc·Ξ(X) ↔ ξ_m,
+            # and the far-field identity Ψ = X·Ξ (GWP2016 Eq. 16; Ψ is the normal-field variable, Eq. A17):
+            #   b_m = −2πi·χ₁·n·q′·(x0/v1)·resc·Ψ.
+            scale = -2π * chi1 * im * nn * sings[i].q1 * x0i / params.v1
+            pen[i, 1] = scale * profΨ[1, 1] * resc                      # layer center X=0, parity 1 (Ψ(0)≠0)
+            pen[i, 2] = scale * profΨ[1, 2] * resc                      # parity 2 (Ψ(0)=0 ⇒ ~0)
+            xvar = xg .* (x0i / params.v1)                              # inner X → ψ-distance (deltac.f:1822)
+            inner_psi[i] = vcat(reverse(sings[i].psifac .- xvar), sings[i].psifac .+ xvar)
+            inner_odd[i] = resc .* vcat(reverse(.-profΞ[:, 1]), profΞ[:, 1])   # comp 2, parity 1 (odd: −left,+right)
+            inner_even[i] = resc .* vcat(reverse(profΞ[:, 2]), profΞ[:, 2])    # comp 2, parity 2 (even)
+            # b^ψ profiles on the same two-sided grid: Ψ is the normal-field variable (GWP2016 A17),
+            # b_m(δψ) = scale·resc·Ψ(X) throughout the layer (→ outer frozen-in relation via Ψ = XΞ).
+            inner_bodd[i] = (scale * resc) .* vcat(reverse(profΨ[:, 1]), profΨ[:, 1])     # parity 1: Ψ even
+            inner_beven[i] = (scale * resc) .* vcat(reverse(.-profΨ[:, 2]), profΨ[:, 2])  # parity 2: Ψ odd
+        end
+
+        # --- assemble the 4·msing matching system (match.f) ---
+        delta_out = gal_result.delta[1:2msing, 1:2msing]   # outer Δ′ plasma block
+        mat = zeros(ComplexF64, 4msing, 4msing)
+        rmat = zeros(ComplexF64, 4msing, mcoil)
+        @views mat[(2msing+1):4msing, 1:2msing] .= transpose(delta_out)          # Δ_out
+        @views rmat[(2msing+1):4msing, :] .= .-transpose(gal_result.delta_coil)  # −Δ_coil source
+        for ising in 1:msing
+            idx1 = 2ising - 1
+            idx2 = 2ising
+            idx3 = idx1 + 2msing
+            idx4 = idx2 + 2msing
+            delta1 = deltar[ising, 1]
+            delta2 = deltar[ising, 2]
+            mat[idx1, idx1] = 1
+            mat[idx2, idx2] = 1
+            mat[idx1, idx3] = -1
+            mat[idx1, idx4] = 1
+            mat[idx2, idx3] = -1
+            mat[idx2, idx4] = -1
+            # inner-layer Δ block signs per match.f match_rpec
+            mat[idx3, idx3] = -delta1
+            mat[idx3, idx4] = delta2
+            mat[idx4, idx3] = -delta1
+            mat[idx4, idx4] = -delta2
+        end
+
+        # --- solve mat·cof = rmat for the outer/inner coefficients (match.f) ---
+        cof = mat \ rmat
+        residual = norm(mat * cof - rmat) / max(norm(rmat), 1e-300)
+        cout = cof[1:2msing, :]
+        cin = cof[(2msing+1):4msing, :]
+
+        # Inner-layer penetrated (reconnected) resonant field at each rational surface, read off the GGJ
+        # inner solution at the layer center exactly as Fortran match_output_solution builds intotsol_b
+        # (match.f) — cusp-free, fit-free. bpen[i,j] = pen₁(i)·cin[2i,j] + pen₂(i)·cin[2i-1,j].
+        bpen = zeros(ComplexF64, msing, mcoil)
+        for i in 1:msing, j in 1:mcoil
+            bpen[i, j] = pen[i, 1] * cin[2i, j] + pen[i, 2] * cin[2i-1, j]
+        end
+
+        # Matched inner-layer ξ_ψ(ψ) per surface, per coil drive (match.f intotsol): odd parity weighted by
+        # cin[2i] (cofin(2·ising)), even parity by cin[2i-1] (cofin(2·ising-1)).
+        inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+        # Matched inner-layer b^ψ(ψ) per surface, per coil drive — the overlap-validation companion of
+        # inner_xi: in the matching region it must lie on the outer b^ψ eigenfunction.
+        inner_b = [inner_bodd[i] * transpose(cin[2i, :]) .+ inner_beven[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+    end
+
+    # --- matched outer ξ/ξ′ per coil drive (match.f); ideal: cout=0 ⇒ bare coil column ---
+    sols = gal_result.solution.xi          # (mpert, ngrid, nsol)
+    sols_deriv = gal_result.solution.xi_deriv
+    ngrid = size(sols, 2)
+    xi = zeros(ComplexF64, mpert, ngrid, mcoil)
+    xi_deriv = zeros(ComplexF64, mpert, ngrid, mcoil)
+    for j in 1:mcoil
+        csol = 2msing + j                  # this coil's particular-solution column
+        @views xi[:, :, j] .= sols[:, :, csol]
+        @views xi_deriv[:, :, j] .= sols_deriv[:, :, csol]
+        for isol in 1:2msing
+            @views xi[:, :, j] .+= cout[isol, j] .* sols[:, :, isol]
+            @views xi_deriv[:, :, j] .+= cout[isol, j] .* sols_deriv[:, :, isol]
+        end
+    end
+
+    # Coefficient-based Δ_mn (both branches; ideal has cout = 0 ⇒ coil small content only).
+    # Small-solution content of the matched solution at each surface side: the resonant solutions'
+    # small coefficients (delta rows 1:2msing) weighted by cout, plus the coil column's own small
+    # content (delta rows 2msing+1:end). Slots: column 2i-1 = left, 2i = right of surface i.
+    KL, KR = gal_deltamn_kernels(asymps, sings, intr, nn)
+    Dm = gal_result.delta
+    S_small = transpose(cout) * Dm[1:2msing, :] .+ Dm[(2msing+1):(2msing+mcoil), :]   # (mcoil × 2msing)
+    delta_mn = Matrix{ComplexF64}(undef, msing, mcoil)
+    for i in 1:msing, j in 1:mcoil
+        delta_mn[i, j] = KR[i] * S_small[j, 2i] - KL[i] * S_small[j, 2i-1]
+    end
+
+    return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, inner_b, delta_mn, inner_params, rpec_eig, residual)
+end
+
+"""
+    gal_matched_odestate(gal_result, ffit, intr) -> OdeState
+
+Pack the RPEC-matched outer solution into an `OdeState` shaped exactly like the shooting integrator's,
+so `PerturbedEquilibrium` consumes it unchanged. Mirrors Fortran `idcon_build`'s gal branch
+(idcon.f) and `globalsol.bin` (the on-surface `issing` points are dropped, match.f):
+
+  - `u_store[:,:,1,ip] = ξ_ψ`  (matched fundamental matrix, mode×coil-drive, identity-at-edge basis)
+  - `ud_store[:,:,1,ip] = dξ_ψ/dψ`  (analytic)
+  - `ud_store[:,:,2,ip] = ξ_s = −A⁻¹(B·ξ′ + C·ξ)`  via `ffit` (same outer ideal-MHD relation as `sing_der!`)
+  - `u_store[:,:,2] = 0`  (PE never reads it; matches Fortran's unused u2 in the gal path)
+
+The grid is the gal-native grid (inner→edge); `step` indexes the edge so `build_flux_matrix` derives the
+edge BC from `u_store[:,:,1,step]`.
+"""
+function gal_matched_odestate(gal_result::GalerkinResult, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    gal_result.match !== nothing || error("gal_matched_odestate: no match result (run with gal_match_flag=true)")
+    sol = gal_result.solution
+    m = gal_result.match
+    mpert = intr.numpert_total
+
+    # Drop the on-surface (issing) grid points — zero placeholders where the resonant series diverges.
+    keep = .!sol.issing
+    psi_f = sol.psi[keep]
+    q_f = sol.q[keep]
+    xi_f = m.xi[:, keep, :]          # (mpert, ngrid_f, mcoil)
+    dxi_f = m.xi_deriv[:, keep, :]
+    ngrid_f = length(psi_f)
+
+    u_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
+    ud_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
+
+    amat = Matrix{ComplexF64}(undef, mpert, mpert)
+    bmat = Matrix{ComplexF64}(undef, mpert, mpert)
+    cmat = Matrix{ComplexF64}(undef, mpert, mpert)
+    tmp = Matrix{ComplexF64}(undef, mpert, mpert)
+    hint = Ref(1)
+    for ip in 1:ngrid_f
+        ξ = @view xi_f[:, ip, :]
+        ξ′ = @view dxi_f[:, ip, :]
+        @views u_store[:, :, 1, ip] .= ξ
+        @views ud_store[:, :, 1, ip] .= ξ′
+        # ξ_s = −A⁻¹(B·ξ′ + C·ξ), exactly as the ideal path of sing_der! (Sing.jl:1015-1049)
+        ffit.amats(vec(amat), psi_f[ip]; hint=hint)
+        ffit.bmats(vec(bmat), psi_f[ip]; hint=hint)
+        ffit.cmats(vec(cmat), psi_f[ip]; hint=hint)
+        LinearAlgebra.LAPACK.potrf!('U', amat)
+        LinearAlgebra.LAPACK.potrs!('U', amat, bmat)   # bmat ← A⁻¹ B
+        LinearAlgebra.LAPACK.potrs!('U', amat, cmat)   # cmat ← A⁻¹ C
+        xs = @view ud_store[:, :, 2, ip]
+        mul!(tmp, bmat, ξ′)
+        xs .= .-tmp
+        mul!(tmp, cmat, ξ)
+        xs .-= tmp
+    end
+
+    return OdeState(; numpert_total=mpert, numunorms_init=1, msing=gal_result.msing, numsteps_init=ngrid_f,
+        step=ngrid_f, total_steps=ngrid_f, psi_store=psi_f, q_store=q_f, u_store=u_store, ud_store=ud_store)
+end

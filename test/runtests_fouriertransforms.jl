@@ -174,7 +174,7 @@ end
 @testset "empty_FourierCoefficients" begin
     fc = empty_FourierCoefficients()
     @test isempty(fc.xs)
-    @test fc.mband == 0
+    @test fc.mmax == 0
     @test fc.nqty == 0
     @test size(fc.cos_coeffs) == (0, 1, 0)
     @test size(fc.sin_coeffs) == (0, 1, 0)

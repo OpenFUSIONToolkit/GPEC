@@ -1,25 +1,27 @@
 # Resist.jl
 #
 # Per-rational-surface resistive inner-layer parameters (Glasser–Greene–Johnson).
-# Julia port of RDCON's `resist_eval` (resist.f): computes the flux-surface-averaged
-# coefficients E, F, H, M, G, K and the local time scales τ_A, τ_R at a singular surface.
+# Julia port of the RDCON `resist_eval` (resist.f): evaluates the flux-surface-averaged
+# curvature/mass coefficients E, F, H, M, G, K and the local Alfvén / resistive time scales
+# τ_A, τ_R at a singular surface.
 #
-# Returns an `InnerLayer.GGJParameters`, so a resistive ForceFreeStates run can pass its
-# per-surface coefficients straight to the GGJ inner solver. (InnerLayer is included first
-# so this type is available here.)
+# Returns an `InnerLayer.GGJParameters` directly (the inner-layer matching input type), so a
+# resistive ForceFreeStates run can hand its per-surface coefficients straight to the GGJ inner
+# solver. InnerLayer is included before ForceFreeStates precisely so this type is available here.
 #
-# Resistivity η and mass density ρ are required per-surface inputs. The Fortran Spitzer block
-# (hardcoded ne/Te → η, ρ) is intentionally not ported; the caller supplies η and ρ from its
-# own transport/profile model. τ_A and τ_R are built from a purely geometric factor times the
-# explicit η and ρ (no RMATCH-style divide-out / re-multiply).
+# Resistivity η and mass density ρ are REQUIRED inputs (per surface) — there is no built-in
+# resistivity/density model. We deliberately do NOT port the Fortran `resist.f` Spitzer block
+# (hardcoded ne/Te → η, ρ); the caller supplies η and ρ from whatever transport/profile model is
+# appropriate. τ_A and τ_R are then formed from physically separable pieces: a purely geometric
+# factor times the explicit η and ρ (no RMATCH-style divide-out / re-multiply).
 #
-# Deliberate differences from the Fortran reference:
-#   - Rational surfaces lie between grid nodes (q = m/n), so geometry is evaluated with the
-#     callable bicubic interpolants at the exact (ψ_s, θ) — using DerivOp(0,1) for θ-derivatives —
-#     rather than the nodal-grid access used by mercier_scan!.
-#   - η and ρ are caller-supplied (no Spitzer model, no hardcoded defaults).
+# Differences from the Fortran reference (deliberate):
+#   - Rational surfaces lie off the equilibrium grid (q = m/n between nodes), so the geometry
+#     is evaluated with the callable bicubic interpolants at the exact (ψ_s, θ) — using
+#     DerivOp(0,1) for θ-derivatives — rather than the nodal-grid access mercier_scan! uses.
+#   - η and ρ are caller-supplied (no Spitzer model, no hardcoded ne/Te/mi defaults).
 #
-# Reference: Glasser, Greene & Johnson, Phys. Fluids 18, 875 (1975); Glasser, PoP 23, 072505 (2016).
+# Reference: Glasser, Greene & Johnson, Phys. Fluids 18, 875 (1975); Glasser PoP 23, 072505 (2016).
 
 """
     resist_eval(sing, equil, intr; eta, rho, gamma, ising=0) -> InnerLayer.GGJParameters

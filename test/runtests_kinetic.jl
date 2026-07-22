@@ -217,10 +217,44 @@
             @test collisionless ≈ small_nu rtol=1e-3
         end
 
-        @testset "xr > 700 Maxwellian-underflow guard" begin
-            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900 > 700.
-            # The pole sits where exp(-x_res) underflows; subtraction trips 0·log(-1) = NaN
-            # unless the guard at EnergyIntegration.jl:207 fires first.
+        @testset "collisionless tail-pole resonance (regression: was NaN)" begin
+            # Resonance deep in the Maxwellian tail (x_res ≈ 56): n·wd·s² + leff·wb·s + n·we = 0
+            # with wb=1e3, wd=5e2, we=-3.5483e4 ⟹ s=√56, x_res≈56. Under the old u-space pole
+            # handling u_res = 1-exp(-56) rounds to 1.0, tripping 0·(-Inf)=NaN. The real-x-space
+            # branch keeps x_res a well-conditioned O(1) number, and the resonance contribution
+            # (∝ exp(-56)) is negligible so the result equals the ν→0⁺ limit (issue #281).
+            args = (0.0, 2.0e3, -3.5483e4, 5.0e2, 1.0e3)
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            @test KF.find_resonance_energies(1.0, 1.0e3, 1, -3.5483e4, 5.0e2)[1] ≈ 56.0 rtol = 1e-2
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(real(collisionless))
+            @test isfinite(imag(collisionless))
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "Ω′ < 0 collisionless causal branch" begin
+            # The unified add-back R·[log(xmax-x_pole) - log(-x_pole)] gets the causal
+            # ∓iπ·sign(Ω′) branch from the SIGNED ZERO of pole_offset = ν/Ω′ at ν=0.
+            # Pick n·wd < 0 so Ω′ = leff·wb/(2√x) + n·wd flips sign in the tail; the
+            # collisionless result must still equal the ν→0⁺ (small-ν krook) limit, which
+            # carries the sign naturally through its off-axis pole.
+            args = (0.0, 2.0e3, 3.5e4, -5.0e2, 1.0e3)   # we>0, wd<0 ⟹ tail root with Ω′<0
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(collisionless)
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "tail pole beyond X_ENERGY_MAX dropped" begin
+            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900,
+            # well past X_ENERGY_MAX. The pole sits where exp(-x_res) underflows; the
+            # `xr >= X_ENERGY_MAX` check in _integrate_energy_resonant drops it cleanly.
             @test KF.find_resonance_energies(1.0, 1.0, 1, -30.0, 0.0)[1] ≈ 900.0
             result = KF.integrate_energy(
                 0.5, 0.0, -30.0, 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
@@ -230,11 +264,36 @@
             @test isfinite(imag(result))
         end
 
+        @testset "pole at and within 1e-13 of X_ENERGY_MAX (boundary robustness)" begin
+            # Direct analog of the original u→1 bug, relocated to x→X_ENERGY_MAX: a
+            # resonance pole sitting exactly at, just below, and just above the upper
+            # integration limit. Linear case (wd=0) with leff=wb=n=1 gives
+            # x_res = (n·we/(leff·wb))² = we², so we = -√x_target places the pole.
+            xmax = KF.X_ENERGY_MAX
+            run_xres(x_target) = KF.integrate_energy(
+                0.5, 0.3, -sqrt(x_target), 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            below = run_xres(xmax - 1e-13)   # pole kept, subtracted analytically
+            at = run_xres(xmax)              # find_resonance rounds to ≤ xmax; >= guard drops at endpoint
+            above = run_xres(xmax + 1e-13)   # pole dropped (outside domain)
+            @test isfinite(below) && isfinite(at) && isfinite(above)
+            # Continuous across the boundary: the only term that changes is the pole's
+            # contribution ∝ exp(-xmax) ~ exp(-100) ~ 4e-44, negligible on the O(1) bulk
+            # integral. No NaN from log(xmax - x_pole) at the exact endpoint.
+            @test below ≈ at rtol=1e-9
+            @test at ≈ above rtol=1e-9
+            # Collisionless result equals the ν→0⁺ (small-ν krook) limit.
+            small_nu = KF.integrate_energy(
+                0.5, 0.3, -sqrt(xmax - 1e-13), 0.0, 1.0, 1e-6, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test below ≈ small_nu rtol=1e-3
+        end
+
         @testset "pole_offset overflow guard" begin
             # Tiny wb gives small omega_prime = leff·wb/(2√x_res) = 5e-16 at x_res=1, while
-            # nuk = 1e300 forces nu_res / omega_prime = 2e315 → Inf. The guard at
-            # EnergyIntegration.jl:220 must skip this pole rather than build a non-finite
-            # u_pole. Parameters keep abs(wb) > 1e-30 so find_resonance_energies still returns x_res.
+            # nuk = 1e300 forces pole_offset = ν/omega_prime = 2e315 → Inf. The
+            # `isfinite(pole_offset) || continue` guard in _integrate_energy_resonant must skip
+            # this pole. Parameters keep abs(wb) > 1e-30 so find_resonance_energies still returns x_res.
             @test KF.find_resonance_energies(1.0, 1e-15, 1, -1e-15, 0.0)[1] ≈ 1.0
             result = KF.integrate_energy(
                 0.5, 0.0, -1e-15, 0.0, 1e-15, 1e300, 0, 1.0, 1, 0.5, 0.5, "fgar";
@@ -311,5 +370,60 @@
         @test mr.total_torque == 0.0 + 0.0im
         @test mr.total_energy == 0.0 + 0.0im
         @test isempty(mr.records)
+    end
+
+    # =========================================================================
+    # Kinetic profile I/O: HDF5 schema, ASCII back-compat, writer round-trip
+    # =========================================================================
+    @testset "kinetic profile I/O" begin
+        E = GeneralizedPerturbedEquilibrium.Equilibrium
+        exdir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+        gpeckf = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.gpeckf")
+        h5 = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.h5")
+
+        @testset "extension dispatch + raw read" begin
+            da = E.read_kinetic_file(gpeckf)
+            db = E.read_kinetic_file(h5)
+            # legacy ASCII carries no optional fields; the example .h5 carries chi
+            @test da.chi_e === nothing && da.chi_phi === nothing
+            @test db.chi_e !== nothing && db.chi_phi !== nothing
+            # core columns identical (the .h5 was generated from the .gpeckf)
+            @test da.psi == db.psi
+            @test da.n_e == db.n_e
+            @test da.T_i == db.T_i
+            @test da.omega_E == db.omega_E
+        end
+
+        @testset "NTV splines identical: ASCII vs HDF5" begin
+            ka = E.load_kinetic_profiles(gpeckf)
+            kb = E.load_kinetic_profiles(h5)
+            for p in 0.0:0.1:1.0
+                @test ka.ne_spline(p) == kb.ne_spline(p)
+                @test ka.Ti_spline(p) == kb.Ti_spline(p)
+                @test ka.omegaE_spline(p) == kb.omegaE_spline(p)
+                @test ka.zeff_spline(p) == kb.zeff_spline(p)
+            end
+        end
+
+        @testset "writer round-trip" begin
+            db = E.read_kinetic_file(h5)
+            tmp = tempname() * ".h5"
+            E.write_kinetic_h5(tmp, db; provenance="roundtrip")
+            dc = E.read_kinetic_file(tmp)
+            @test dc.chi_e ≈ db.chi_e
+            @test dc.chi_phi ≈ db.chi_phi
+            @test dc.n_e ≈ db.n_e
+            @test dc.provenance == "roundtrip"
+            rm(tmp; force=true)
+        end
+
+        @testset "missing required field errors" begin
+            # HDF5 with only psi + n_e: NTV load must error on the missing T_i
+            tmp = tempname() * ".h5"
+            d = E.KineticProfileData(; psi=[0.0, 0.5, 1.0], n_e=[1e19, 9e18, 8e18])
+            E.write_kinetic_h5(tmp, d)
+            @test_throws ErrorException E.load_kinetic_profiles(tmp)
+            rm(tmp; force=true)
+        end
     end
 end

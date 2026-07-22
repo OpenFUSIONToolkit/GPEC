@@ -17,19 +17,19 @@ using TOML
 
         # Apply identity propagator to an arbitrary state
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(N, 10, 5, 0)
-        u1_in = [1.0+0.5im  0.2im   0.0;
-                 0.1+0.1im  1.2+0.1im 0.0;
-                 0.0im      0.0      0.9+0.3im]
-        u2_in = [0.8+0.1im  0.1im   0.0;
-                 0.0im      1.0+0.2im 0.1;
-                 0.1im      0.0      1.1+0.0im]
+        u1_in = [1.0+0.5im 0.2im 0.0;
+            0.1+0.1im 1.2+0.1im 0.0;
+            0.0im 0.0 0.9+0.3im]
+        u2_in = [0.8+0.1im 0.1im 0.0;
+            0.0im 1.0+0.2im 0.1;
+            0.1im 0.0 1.1+0.0im]
         odet.u[:, :, 1] .= u1_in
         odet.u[:, :, 2] .= u2_in
 
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
 
-        @test odet.u[:, :, 1] ≈ u1_in  rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_in  rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_in rtol=1e-12
+        @test odet.u[:, :, 2] ≈ u2_in rtol=1e-12
     end
 
     @testset "apply_propagator! linearity" begin
@@ -38,12 +38,12 @@ using TOML
         prop = GeneralizedPerturbedEquilibrium.ForceFreeStates.ChunkPropagator(N)
 
         # Fill block_upper_ic and block_lower_ic with random data
-        rng_upper = [1.1+0.2im  0.1im   0.05;
-                     0.0im      0.9+0.3im 0.1;
-                     0.2+0.1im  0.0      1.0+0.1im]
-        rng_lower = [0.8+0.1im  0.1im   0.0;
-                     0.0im      1.2+0.2im 0.1;
-                     0.0im      0.1      0.9+0.1im]
+        rng_upper = [1.1+0.2im 0.1im 0.05;
+            0.0im 0.9+0.3im 0.1;
+            0.2+0.1im 0.0 1.0+0.1im]
+        rng_lower = [0.8+0.1im 0.1im 0.0;
+            0.0im 1.2+0.2im 0.1;
+            0.0im 0.1 0.9+0.1im]
         prop.block_upper_ic[:, :, 1] .= rng_upper
         prop.block_upper_ic[:, :, 2] .= 0.5 * rng_upper
         prop.block_lower_ic[:, :, 1] .= 0.3 * rng_lower
@@ -65,8 +65,8 @@ using TOML
         u1_expected = U1_upper * u1_in + U1_lower * u2_in
         u2_expected = U2_upper * u1_in + U2_lower * u2_in
 
-        @test odet.u[:, :, 1] ≈ u1_expected  rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_expected  rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_expected rtol=1e-12
+        @test odet.u[:, :, 2] ≈ u2_expected rtol=1e-12
     end
 
     @testset "apply_propagator_inverse! is inverse of apply_propagator!" begin
@@ -77,19 +77,19 @@ using TOML
         prop = GeneralizedPerturbedEquilibrium.ForceFreeStates.ChunkPropagator(N)
 
         # Near-identity blocks guarantee the 2N×2N matrix [A B; C D] is invertible
-        A = I(N) .+ 0.15 * [1.0+0.2im  0.1im   0.05; 0.0im  0.9+0.3im  0.1; 0.2+0.1im  0.0  1.0+0.1im]
-        B = 0.1  * [0.8+0.1im  0.1im   0.0;    0.0im  1.2+0.2im  0.1; 0.0im  0.1  0.9+0.1im]
-        C = 0.1  * [0.5+0.1im  0.0im   0.1;    0.1im  0.8+0.2im  0.0; 0.0im  0.0  0.7+0.1im]
-        D = I(N) .+ 0.15 * [0.9+0.1im  0.0im   0.05; 0.0im  1.0+0.2im  0.0; 0.1+0.1im  0.0  0.95+0.1im]
+        A = I(N) .+ 0.15 * [1.0+0.2im 0.1im 0.05; 0.0im 0.9+0.3im 0.1; 0.2+0.1im 0.0 1.0+0.1im]
+        B = 0.1 * [0.8+0.1im 0.1im 0.0; 0.0im 1.2+0.2im 0.1; 0.0im 0.1 0.9+0.1im]
+        C = 0.1 * [0.5+0.1im 0.0im 0.1; 0.1im 0.8+0.2im 0.0; 0.0im 0.0 0.7+0.1im]
+        D = I(N) .+ 0.15 * [0.9+0.1im 0.0im 0.05; 0.0im 1.0+0.2im 0.0; 0.1+0.1im 0.0 0.95+0.1im]
 
         prop.block_upper_ic[:, :, 1] .= A
         prop.block_lower_ic[:, :, 1] .= B
         prop.block_upper_ic[:, :, 2] .= C
         prop.block_lower_ic[:, :, 2] .= D
 
-        u1_in = [1.0+0.5im  0.2im   0.0;
-                 0.1+0.1im  1.2+0.1im 0.0;
-                 0.0im      0.0      0.9+0.3im]
+        u1_in = [1.0+0.5im 0.2im 0.0;
+            0.1+0.1im 1.2+0.1im 0.0;
+            0.0im 0.0 0.9+0.3im]
         u2_in = I(N) .+ 0.1im * ones(N, N)
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(N, 10, 5, 0)
@@ -100,8 +100,8 @@ using TOML
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator_inverse!(odet, prop)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
 
-        @test odet.u[:, :, 1] ≈ u1_in  rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_in  rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_in rtol=1e-12
+        @test odet.u[:, :, 2] ≈ u2_in rtol=1e-12
     end
 
     @testset "balance_integration_chunks produces target count" begin
@@ -114,17 +114,18 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
+        intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
         intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -153,7 +154,7 @@ using TOML
         # gap of ≈2·singfac_min/|n·q1| between the pre-crossing and post-crossing intervals.
         for i in eachindex(balanced)[2:end]
             if !balanced[i-1].needs_crossing
-                @test balanced[i].psi_start ≈ balanced[i-1].psi_end  rtol=1e-10
+                @test balanced[i].psi_start ≈ balanced[i-1].psi_end rtol=1e-10
             else
                 # Inner-layer gap: post-crossing chunk starts AFTER the rational surface
                 @test balanced[i].psi_start > balanced[i-1].psi_end
@@ -177,17 +178,18 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
+        intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
         intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -237,18 +239,19 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-            intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+            intr.nlow = ctrl.nn_low;
+            intr.nhigh = ctrl.nn_high;
+            intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
             intr.mpert = intr.mhigh - intr.mlow + 1
-            intr.mband = intr.mpert - 1
             intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
+            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
@@ -285,18 +288,19 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-            intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+            intr.nlow = ctrl.nn_low;
+            intr.nhigh = ctrl.nn_high;
+            intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
             intr.mpert = intr.mhigh - intr.mlow + 1
-            intr.mband = intr.mpert - 1
             intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
+            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
@@ -305,27 +309,19 @@ using TOML
 
         et_par, intr_par = run_diiid(true)
 
-        # Parallel FM et[1] regression. The bidirectional fix gives et ≈ 1.5–1.6 with
-        # set_psilim_via_dmlim = true (production diverted convention; DIIID-like example
-        # sets it explicitly). With the previous default (false) this was ≈ 1.29. Single-
-        # point pinning of et_par is platform-sensitive at the few-percent level (BLAS
-        # variant / FP rounding through the BVP solve and outer-plasma Riccati pass shift
-        # the eigenvalue ~5-10 %), so we bracket the eigenvalue rather than pin a tight
-        # value. A true regression of the bidirectional assembly (et ≈ 1.29 or ≈ 2+) still
-        # fails this bracket loudly.
-        @test 1.4 < et_par < 1.7
+        # Parallel FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
+        # equilibrium-sensitive (auto-mpsi gives a spurious value; a wrong grid/Ip shifts it), so
+        # a loose bracket would mask exactly that accuracy regression. The parallel-path value is
+        # deterministic and reproducible.
+        @test isapprox(et_par, 0.800637; rtol=2e-2)
         # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
         # comment above). BVP Δ' matrix regression for DIIID-like is in the
         # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
 
-        # Cross-path consistency (parallel vs standard) is omitted here: after the
-        # edge-dW decoupling, the two paths store the final-state U at different
-        # ψ in the edge band (different chunking → different saved points), and
-        # on DIIID the standard path's free-boundary eigenvalue computation is
-        # numerically unstable past the old dW-peak location, producing non-
-        # sensical et values on some CI runners. A proper cross-path check would
-        # require both paths to integrate on identical ψ grids, which is out of
-        # scope for this regression test.
+        # No explicit parallel-vs-standard cross-path check here: the two paths share the
+        # equilibrium grid (so a cross-path comparison is blind to grid/accuracy regressions),
+        # and their agreement is already verified on the lighter Solovev case above. The tight
+        # absolute pin above is the guard for grid/equilibrium regressions on this case.
     end
 
     @testset "ode_itime_cost is additive over sub-intervals" begin
@@ -343,17 +339,18 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
+        intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
         intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
 
         # Use the first chunk from chunk_el_integration_bounds: guaranteed rational-free interior
@@ -406,18 +403,19 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-            intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+            intr.nlow = ctrl.nn_low;
+            intr.nhigh = ctrl.nn_high;
+            intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
             intr.mpert = intr.mhigh - intr.mlow + 1
-            intr.mband = intr.mpert - 1
             intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
+            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             return odet
@@ -435,24 +433,24 @@ using TOML
             @test length(odet_a.q_store) == length(odet_b.q_store)
             @test size(odet_a.u_store) == size(odet_b.u_store)
             @test size(odet_a.ud_store) == size(odet_b.ud_store)
-            @test maximum(abs.(odet_a.psi_store .- odet_b.psi_store))    == 0.0
-            @test maximum(abs.(odet_a.q_store   .- odet_b.q_store))      == 0.0
-            @test maximum(abs.(odet_a.u_store   .- odet_b.u_store))      == 0.0
-            @test maximum(abs.(odet_a.ud_store  .- odet_b.ud_store))     == 0.0
-            @test maximum(abs.(odet_a.crit_store .- odet_b.crit_store))  == 0.0
+            @test maximum(abs.(odet_a.psi_store .- odet_b.psi_store)) == 0.0
+            @test maximum(abs.(odet_a.q_store .- odet_b.q_store)) == 0.0
+            @test maximum(abs.(odet_a.u_store .- odet_b.u_store)) == 0.0
+            @test maximum(abs.(odet_a.ud_store .- odet_b.ud_store)) == 0.0
+            @test maximum(abs.(odet_a.crit_store .- odet_b.crit_store)) == 0.0
         end
 
         @testset "Solovev (small N)" begin
             ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
             odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true;  populate_dense_xi=true)
+            odet_par = run_and_capture(ex, true; populate_dense_xi=true)
             assert_bit_identical(odet_std, odet_par)
         end
 
         @testset "DIIID-like (large N)" begin
             ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
             odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true;  populate_dense_xi=true)
+            odet_par = run_and_capture(ex, true; populate_dense_xi=true)
             assert_bit_identical(odet_std, odet_par)
         end
 
@@ -464,8 +462,8 @@ using TOML
             # test above is meaningful — it's NOT trivially passing because
             # both modes accidentally produce the same sparse data.
             ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-            odet_std    = run_and_capture(ex, false)
-            odet_sparse = run_and_capture(ex, true;  populate_dense_xi=false)
+            odet_std = run_and_capture(ex, false)
+            odet_sparse = run_and_capture(ex, true; populate_dense_xi=false)
             @test odet_sparse.step < odet_std.step
             # ud_store entries inside FM chunks are left at the @kwdef
             # `undef` initial value when populate_dense_xi=false; ensure the
@@ -488,18 +486,19 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
             (Symbol(k) => v for (k, v) in inputs["Wall"])...)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
+        intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
         intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
         odet, fm_propagators, fm_chunks, fm_S_left =
             GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
@@ -525,28 +524,16 @@ using TOML
             @test abs(dpm[j, j]) > 1e-10
         end
 
-        # Pinned diagonal `delta_prime_matrix` values for the DIIID-like case (msing = 5),
-        # PEST3-convention self-response Δ' from the STRIDE BVP with vacuum coupling.
-        # Tolerances are split by entry magnitude / |Im|/|Re| ratio (audit V4):
-        #   - dpm[1], dpm[2]: nearly-real entries (|Im|/|Re| < 0.02). Platform-stable; rtol=1e-2.
-        #   - dpm[3]: complex entry with |Im| ≈ |Re| (both ~10). Modest FP sensitivity in the
-        #     PEST3 cancellation. rtol=5e-2 catches sign/normalization regressions while
-        #     accepting ~2-3% imaginary-part drift across BLAS variants.
-        #   - dpm[4], dpm[5]: |Im| is highly sensitive to FP round-off in the PEST3 four-term
-        #     cancellation (dp_raw entries can be 10⁴–10⁵× larger than the result). The
-        #     imaginary part drifts by 2–5× across platforms even with `extended_precision_bvp=true`.
-        #     Pin only the real part tightly; bracket |dpm| to catch sign/normalization errors.
-        # dpm[1], dpm[2] re-pinned when FourierCoefficients began dropping the duplicated θ=2π
-        # endpoint before the FFT (faithful Fortran fspline_fit_2, equil/fspline.f:293): the old
-        # un-trimmed FFT double-counted θ=0, biasing the metric DC coefficient. dpm[3]–dpm[5]
-        # shifted too but stay within their wider tolerances.
-        @test isapprox(dpm[1, 1], +8.672812e+00 + 2.139354e-02im; rtol=1e-2)
-        @test isapprox(dpm[2, 2], -3.890689e+00 - 5.121123e-02im; rtol=1e-2)
-        @test isapprox(dpm[3, 3], -9.137656e+00 + 7.704888e+00im; rtol=5e-2)
-        @test isapprox(real(dpm[4, 4]), +5.790777e+03; rtol=5e-2)
-        @test isapprox(real(dpm[5, 5]), -2.940021e+02; rtol=5e-2)
-        @test 1e3 < abs(dpm[4, 4]) < 1e5    # |dpm[4,4]| ≈ 6e3; catches sign/normalization errors
-        @test 1e2 < abs(dpm[5, 5]) < 1e3    # |dpm[5,5]| ≈ 3e2; catches sign/normalization errors
+        # Pinned diagonal `delta_prime_matrix` REAL parts, PEST3-convention self-response Δ' from
+        # the STRIDE BVP with vacuum coupling. Only real parts are pinned: imaginary parts are
+        # dominated by the PEST3 four-term cancellation and are setup/FP-sensitive. Inner surfaces
+        # (q=2,3,4) are grid-converged → pinned tight (q=2,3) / moderate (q=4). Near-separatrix
+        # surfaces q=5,6 (ψ≈0.98, 0.997) are NOT converged — real part and even sign can fluctuate
+        # — so they get only the finiteness/non-zero checks above, not value pins. Values use this
+        # testset's mode range (mpert=27, vs full-pipeline mpert=35, so they differ slightly).
+        @test isapprox(real(dpm[1, 1]), +7.280089e+00; rtol=1e-2)   # q=2
+        @test isapprox(real(dpm[2, 2]), -5.211187e+00; rtol=1e-2)   # q=3
+        @test isapprox(real(dpm[3, 3]), -1.581737e+01; rtol=3e-2)   # q=4
     end
 
 end

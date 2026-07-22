@@ -21,6 +21,7 @@ Forcing Data:
   - `forcing_data_format::String` - Format: "ascii", "hdf5", or "coil"
 
 Coil settings (used when `forcing_data_format = "coil"`):
+
   - `machine::String` - Machine name prefix for .dat files (e.g. "d3d")
   - `dat_dir::String` - Directory containing .dat files; defaults to bundled `coil_geometries/`
   - `mtheta_coil::Int` - Poloidal grid resolution for boundary field evaluation (default: 480)
@@ -51,8 +52,9 @@ Data structure for a single forcing mode.
   - `m::Int` - Poloidal mode number
   - `amplitude::ComplexF64` - Complex amplitude in unit-norm convention (= Fortran Phi_x,
     T·m² per unit-norm cell) after loading. File inputs are tagged by their input convention:
-      - `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
-      - `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
+
+      + `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
+      + `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
 """
 Base.@kwdef mutable struct ForcingMode
     n::Int = 0
@@ -67,24 +69,28 @@ Load forcing data from ASCII or HDF5 file. Returns the normalization tag read
 from the file (or `"normal_field_T"` by default if no tag is present).
 
 **Normalization tags** (set in the file, not in the TOML):
-- `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention.
-  Most intuitive for users; converted to unit-norm (Phi_x) on load.
-- `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
-  Multiplied by (2π)² on load to reach unit-norm (Phi_x).
+
+  - `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention.
+    Most intuitive for users; converted to unit-norm (Phi_x) on load.
+  - `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
+    Multiplied by (2π)² on load to reach unit-norm (Phi_x).
 
 **ASCII format** — optional `# normalization: <tag>` header line, then data rows:
+
 ```
 # normalization: normal_field_T
 1  2  0.5  0.1
 1  3  0.3  -0.2
 ```
-Columns: n, m, real(amplitude), [optional] imag(amplitude)
+
+Columns: n, m, amplitude_real, amplitude_imag
 
 **HDF5 format** — optional root attribute `normalization` (string), plus datasets:
-- `"n"`: Integer array of toroidal mode numbers
-- `"m"`: Integer array of poloidal mode numbers
-- `"amplitude_real"`: Real parts of amplitudes
-- `"amplitude_imag"`: Imaginary parts of amplitudes (optional, default 0)
+
+  - `"n"`: Integer array of toroidal mode numbers
+  - `"m"`: Integer array of poloidal mode numbers
+  - `"amplitude_real"`: Real parts of amplitudes
+  - `"amplitude_imag"`: Imaginary parts of amplitudes
 """
 function load_forcing_data!(
     forcing_modes::Vector{ForcingMode},
@@ -119,7 +125,7 @@ end
 Load forcing data from ASCII file. Returns normalization tag (`"normal_field_T"` by default).
 
 Optional first `# normalization: <tag>` header line sets the normalization.
-Remaining `#`-prefixed lines and blank lines are ignored. Data columns: n, m, real, [imag].
+Remaining `#`-prefixed lines and blank lines are ignored. Data columns: n, m, amplitude_real, amplitude_imag.
 """
 function load_forcing_ascii!(
     forcing_modes::Vector{ForcingMode},
@@ -149,8 +155,8 @@ function load_forcing_ascii!(
     nrows = size(data, 1)
     ncols = size(data, 2)
 
-    if ncols < 3
-        error("ASCII forcing file must have at least 3 columns (n, m, real_amplitude)")
+    if ncols < 4
+        error("ASCII forcing file must have 4 columns (n, m, amplitude_real, amplitude_imag)")
     end
 
     empty!(forcing_modes)
@@ -159,7 +165,7 @@ function load_forcing_ascii!(
         n = Int(data[i, 1])
         m = Int(data[i, 2])
         real_part = Float64(data[i, 3])
-        imag_part = ncols >= 4 ? Float64(data[i, 4]) : 0.0
+        imag_part = Float64(data[i, 4])
 
         push!(forcing_modes, ForcingMode(;
             n=n,
@@ -176,7 +182,7 @@ end
 Load forcing data from HDF5 file. Returns normalization tag (`"normal_field_T"` by default).
 
 Optional root attribute `normalization` (string) sets the normalization.
-Required datasets: `n`, `m`, `amplitude_real`. Optional: `amplitude_imag`.
+Required datasets: `n`, `m`, `amplitude_real`, `amplitude_imag`.
 """
 function load_forcing_hdf5!(
     forcing_modes::Vector{ForcingMode},
@@ -194,7 +200,7 @@ function load_forcing_hdf5!(
         n_array = read(file, "n")
         m_array = read(file, "m")
         amp_real = read(file, "amplitude_real")
-        amp_imag = haskey(file, "amplitude_imag") ? read(file, "amplitude_imag") : zeros(length(n_array))
+        amp_imag = read(file, "amplitude_imag")
 
         if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
             error("Inconsistent array lengths in HDF5 forcing file")
@@ -214,10 +220,61 @@ function load_forcing_hdf5!(
     return norm_tag
 end
 
+# Coil-forcing helpers; these depend on ForcingTermsControl and ForcingMode defined above.
 include("CoilGeometry.jl")
 include("BiotSavart.jl")
 include("CoilFourier.jl")
 
-export ForcingTermsControl, ForcingMode, load_forcing_data!
+"""
+    save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
+
+Write forcing modes to an open HDF5 group using the same layout that
+`load_forcing_hdf5!` consumes: datasets `n`, `m`, `amplitude_real`,
+`amplitude_imag`. Used by the gpec.h5 snapshot writer so the replay path can
+re-read forcing data from the output file with no reference to the original
+ASCII/HDF5 ingest file.
+"""
+function save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
+    n_arr = Int[mode.n for mode in forcing_modes]
+    m_arr = Int[mode.m for mode in forcing_modes]
+    re_arr = Float64[real(mode.amplitude) for mode in forcing_modes]
+    im_arr = Float64[imag(mode.amplitude) for mode in forcing_modes]
+    group["n"] = n_arr
+    group["m"] = m_arr
+    group["amplitude_real"] = re_arr
+    group["amplitude_imag"] = im_arr
+    return nothing
+end
+
+"""
+    load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+
+Populate `forcing_modes` from an already-open HDF5 group with datasets `n`,
+`m`, `amplitude_real`, `amplitude_imag`. Mirror of `save_forcing_to_h5` for the
+rerun path — deliberately accepts an open group rather than a file path so
+the snapshot data can live inside `gpec.h5/input/raw_inputs/forcing_terms/`.
+"""
+function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+    n_array = read(group, "n")
+    m_array = read(group, "m")
+    amp_real = read(group, "amplitude_real")
+    amp_imag = read(group, "amplitude_imag")
+
+    if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
+        error("Inconsistent array lengths in HDF5 forcing group")
+    end
+
+    empty!(forcing_modes)
+    for i in eachindex(n_array)
+        push!(forcing_modes, ForcingMode(;
+            n=Int(n_array[i]),
+            m=Int(m_array[i]),
+            amplitude=complex(amp_real[i], amp_imag[i])
+        ))
+    end
+    return forcing_modes
+end
+
+export ForcingTermsControl, ForcingMode, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
 
 end # module ForcingTerms

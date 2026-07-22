@@ -46,7 +46,7 @@
         sudo mv julia-1.11.3 /opt/
         ```
 
-        ☆ Ensure these commands match the tarball you installed. These commands match the above tarball and might need to be modified for you installation.
+        ☆ Ensure these commands match the tarball you installed. These commands match the above tarball and might need to be modified for your installation.
 
     3. Add Julia to PATH:
 

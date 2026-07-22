@@ -1078,6 +1078,8 @@ function riccati_integrator_callback!(integrator)
 
     ctrl, _, _, intr, odet, chunk = integrator.p
 
+    odet.total_steps += 1  # count every accepted solver step (saved or not), as segment_callback! does
+
     # Use unified tolerance (matches integrate_el_region! on develop)
     integrator.opts.reltol = ctrl.eulerlagrange_tolerance
 
@@ -1499,6 +1501,7 @@ function integrate_propagator_chunk!(
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     prop.block_upper_ic .= sol.u[end]
+    odet_proxy.total_steps += sol.stats.naccept  # thread-local; summed into odet after the BVP barrier
 
     # Lower block IC: U₁ = 0, U₂ = I
     u_lower = zeros(ComplexF64, N, N, 2)
@@ -1510,6 +1513,7 @@ function integrate_propagator_chunk!(
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     prop.block_lower_ic .= sol.u[end]
+    odet_proxy.total_steps += sol.stats.naccept
 end
 
 """
@@ -1709,6 +1713,10 @@ function parallel_eulerlagrange_integration(
     _log_parallel_start(ctrl, odet, equil, chunks, bvp_threads)
 
     _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, ffit, intr, odet_proxies, bvp_threads)
+
+    # Harvest solver-step counts accumulated thread-locally in each proxy during the BVP phase.
+    # The outer re-integration below uses riccati_integrate_chunk!, which counts via its callback.
+    odet.total_steps += sum(p.total_steps for p in odet_proxies)
 
     S_at_surface_left, last_crossing_step =
         _assemble_propagators_serially!(odet, propagators, chunks, ctrl, equil, ffit, intr)

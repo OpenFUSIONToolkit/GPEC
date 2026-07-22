@@ -8,10 +8,12 @@ using TOML
 using FastInterpolations
 using AdaptiveArrayPools
 import StaticArrays: @MMatrix, SVector
+import ..Utilities
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
 include("FluxSurfaceMetrics.jl")
+include("CoordinateInvariant.jl")
 include("ReadEquilibrium.jl")
 include("DirectEquilibrium.jl")
 include("DirectEquilibriumArcLength.jl")
@@ -24,11 +26,46 @@ include("KineticProfiles.jl")
 # --- Expose types and functions to the user ---
 export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
-    KineticProfileSplines, load_kinetic_profiles
+    KineticProfileSplines, load_kinetic_profiles,
+    KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
+export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
+
+# efit-family equilibrium kinds that share the separatrix-clamp / inversion handling.
+const EFIT_KINDS = ("efit", "efit_arclength", "efit_by_inversion")
+
+"""
+    AnalyticEqSpec
+
+Single-source-of-truth entry describing one analytic-equilibrium kind: the `gpec.toml`
+section that carries its parameters, the `*Config` type built from that section, and the
+run function that turns the config into solver input. `tj_analytic` and `tj_analytic_direct`
+share `TJAnalyticConfig` but bind different run functions, so `run_fn` is per-entry rather
+than derived from `config_type`.
+
+## Fields
+
+  - `section::String` — `gpec.toml` section key (e.g. `"SOL_INPUT"`)
+  - `config_type::DataType` — `*Config` type, constructed via its `(::Dict)` / `(::String)` ctor
+  - `run_fn::Function` — `(EquilibriumConfig, config) -> eq_input` solver entry point
+"""
+struct AnalyticEqSpec
+    section::String
+    config_type::DataType
+    run_fn::Function
+end
+
+# Registry of analytic equilibrium kinds. Both `setup_equilibrium` (fresh runs) and the
+# rerun input builder dispatch off this table, so adding a new analytic kind is one new row.
+const ANALYTIC_EQ = Dict(
+    "sol" => AnalyticEqSpec("SOL_INPUT", SolovevConfig, sol_run),
+    "lar" => AnalyticEqSpec("LAR_INPUT", LargeAspectRatioConfig, lar_run),
+    "tj_analytic" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run),
+    "tj_analytic_direct" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run_direct)
+)
 
 """
     setup_equilibrium(eq_config::EquilibriumConfig)
@@ -43,7 +80,25 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 
     eq_type = eq_config.eq_type
 
-    if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
+    # Rerun path: caller (e.g. build_inputs_from_h5) already rebuilt the solver input from
+    # the stored raw arrays. Bind it onto the current config and skip the reader.
+    if additional_input isa DirectRunInput
+        eq_input = additional_input
+        eq_input.config = eq_config
+        # Re-run the separatrix clamp for efit-family replays so an overridden
+        # psihigh from the rerun TOML is re-validated against the closed flux region.
+        if eq_type in EFIT_KINDS
+            psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
+            if adjusted
+                @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
+                      "clamped to $(round(psihigh_safe; sigdigits=7))"
+                eq_input.config.psihigh = psihigh_safe
+            end
+        end
+    elseif additional_input isa InverseRunInput
+        eq_input = additional_input
+        eq_input.config = eq_config
+    elseif eq_type in EFIT_KINDS
         eq_input = read_efit(eq_config)
         psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
         if adjusted
@@ -55,41 +110,24 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
-    elseif eq_type == "lar"
-        if additional_input === nothing
-            additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
-        end
-        eq_input = lar_run(eq_config, additional_input)
-    elseif eq_type == "tj_analytic"
-        # TJ-analytic equilibrium (GPEC adaptation of the profile family
-        # used by R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ) fed
-        # through the inverse pipeline.
-        if additional_input === nothing
-            additional_input = TJAnalyticConfig(eq_config.eq_filename)
-        end
-        eq_input = tj_analytic_run(eq_config, additional_input)
-    elseif eq_type == "tj_analytic_direct"
-        # TJ-analytic equilibrium (R. Fitzpatrick's TJ-code profile
-        # family, https://github.com/rfitzp/TJ) fed through the direct-GS
-        # solver: builds ψ(R, Z) on a 2D grid and delegates to the same solver
-        # as `efit`.  Reproduces the full geqdsk-path physics including
-        # higher-order geometric effects that the inverse solver misses.
-        if additional_input === nothing
-            additional_input = TJAnalyticConfig(eq_config.eq_filename)
-        end
-        eq_input = tj_analytic_run_direct(eq_config, additional_input)
-    elseif eq_type == "sol"
-        if additional_input === nothing
-            additional_input = SolovevConfig(eq_config.eq_filename)
-        end
-        eq_input = sol_run(eq_config, additional_input)
+    elseif haskey(ANALYTIC_EQ, eq_type)
+        # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
+        # Their parameters live in the embedded `[*_INPUT]` section and are passed in as the
+        # `*Config` additional_input (built by build_analytic_config on the TOML/rerun paths).
+        spec = ANALYTIC_EQ[eq_type]
+        additional_input isa spec.config_type ||
+            error(
+                "setup_equilibrium: analytic eq_type=\"$eq_type\" requires its $(spec.config_type) " *
+                "passed as additional_input (built from the embedded [$(spec.section)] section)."
+            )
+        eq_input = spec.run_fn(eq_config, additional_input)
     elseif eq_type == "imas"
         if additional_input === nothing
             error("setup_equilibrium: eq_type=\"imas\" requires an IMASdd.dd passed as additional_input")
         end
         eq_input = read_imas(eq_config, additional_input)
     else
-        error("Equilibrium type $(eq_config.eq_type) is not implemented")
+        error("Equilibrium type $(eq_type) is not implemented")
     end
 
     if eq_type == "efit_by_inversion"
@@ -99,6 +137,9 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     else
         plasma_equilibrium = equilibrium_solver(eq_input)
     end
+
+    # Forward the captured ingest so the gpec.h5 writer can snapshot it (nothing for analytic).
+    plasma_equilibrium.ingest = eq_input.ingest
 
     equilibrium_global_parameters!(plasma_equilibrium)
     equilibrium_qfind!(plasma_equilibrium)
@@ -266,19 +307,16 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.crnt = crnt
     pe.params.bwall = bwall
 
-    # Flux surface integrals of profile quantities (used for betat, betap*, betaj)
+    # Flux-surface integrals over the full normalized flux [0, 1]; ExtendExtrap carries the integral past the first/last grid points (integrands are smooth/vanishing at the axis).
+    xs = profiles.xs
+    fsi(y) = FastInterpolations.integrate(cubic_interp(xs, y; extrap=ExtendExtrap()), 0.0, 1.0)
     P_vals = profiles.P_spline.y
     dVdpsi_vals = profiles.dVdpsi_spline.y
-    hs_pdv   = P_vals .* dVdpsi_vals              # p  * dV/dψ
-    hs_dv    = dVdpsi_vals                        # dV/dψ
-    hs_p2dv  = P_vals .^ 2 .* dVdpsi_vals         # p² * dV/dψ
 
-    dpsi_vec = diff(profiles.xs)
-    fsi_pdv  = sum((hs_pdv[1:(end-1)]  .+ hs_pdv[2:end])  .* dpsi_vec) / 2
-    fsi_dv   = sum((hs_dv[1:(end-1)]   .+ hs_dv[2:end])   .* dpsi_vec) / 2
-    fsi_p2dv = sum((hs_p2dv[1:(end-1)] .+ hs_p2dv[2:end]) .* dpsi_vec) / 2
-
-    volume = sum((dVdpsi_vals[1:(end-1)] .+ dVdpsi_vals[2:end]) .* dpsi_vec) / 2
+    fsi_pdv  = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
+    fsi_dv   = fsi(dVdpsi_vals)                   # ∫ dV/dψ
+    fsi_p2dv = fsi(P_vals .^ 2 .* dVdpsi_vals)    # ∫ p² dV/dψ
+    volume   = fsi_dv                             # same integrand as hs col 2 in Fortran
 
     # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J).
     # This is Fortran equil_out.f's hs%fs(:,3) and is the correct integrand for
@@ -309,7 +347,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
         # pattern used for the edge-surface integrals above.
         hs_bp2[ipsi+1] = (acc / (mtheta + 1)) * psio^2
     end
-    fsi_bp2 = sum((hs_bp2[1:(end-1)] .+ hs_bp2[2:end]) .* dpsi_vec) / 2
+    fsi_bp2 = fsi(hs_bp2)
 
     p0 = P_vals[1] - profiles.P_deriv(profiles.xs[1]; hint=Ref(1)) * profiles.xs[1]  # linear extrapolation
     betat  = 2 * (fsi_pdv / fsi_dv) / bt0^2

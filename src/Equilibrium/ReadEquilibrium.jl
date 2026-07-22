@@ -118,8 +118,11 @@ function read_efit(config::EquilibriumConfig)
     psi_in_ys = collect(z_grid)
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; extrap=ExtendExtrap())
 
-    # --- Bundle everything for the solver ---
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign)
+    # Capture the raw arrays that reconstruct sq_in and psi_in, so the rerun path
+    # (gpec.h5 → setup_equilibrium) can skip the g-file parse entirely.
+    ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, psi_proc, rmin, rmax, zmin, zmax, psio, fpol_sign)
+
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign, ingest)
 end
 
 
@@ -213,8 +216,11 @@ function read_chease_binary(config::EquilibriumConfig)
         rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
         rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
+        # Capture the raw arrays that reconstruct sq_in, rz_in_R, rz_in_Z.
+        ingest = InverseIngest(collect(xs), fs_copy, collect(rz_in_xs), collect(rz_in_ys), fs_2d[:, :, 1], fs_2d[:, :, 2], ro, zo, psio)
+
         @info "Finished reading CHEASE equilibrium (Binary)"
-        return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
+        return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, ingest)
     end
 end
 
@@ -379,8 +385,43 @@ function read_chease_ascii(config::EquilibriumConfig)
     opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; opts2d...)
+    # Capture the raw arrays that reconstruct sq_in, rz_in_R, rz_in_Z.
+    ingest = InverseIngest(collect(xs), fs_copy, collect(rz_in_xs), collect(rz_in_ys), Matrix(R_data), Matrix(Z_data), ro, zo, psio)
+
     @info "Finished reading CHEASE equilibrium. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
-    return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
+    return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, ingest)
+end
+
+
+"""
+    build_direct_from_ingest(config::EquilibriumConfig, ingest::DirectIngest) -> DirectRunInput
+
+Rebuild a `DirectRunInput` from a [`DirectIngest`](@ref) captured by `read_efit`/`read_imas`
+(or restored from `input/raw_inputs/equilibrium/` inside `gpec.h5`). Inverse of that capture:
+reconstructs the splines so the rerun path skips the g-file/IMAS parse, reusing the existing
+solver dispatch.
+"""
+function build_direct_from_ingest(config::EquilibriumConfig, ingest::DirectIngest)
+    sq_in = cubic_interp(ingest.sq_xs, Series(ingest.sq_fs); extrap=ExtendExtrap())
+    psi_in = cubic_interp((ingest.psi_xs, ingest.psi_ys), ingest.psi_rz; extrap=ExtendExtrap())
+    return DirectRunInput(config, sq_in, psi_in, ingest.psi_xs, ingest.psi_ys,
+        ingest.rmin, ingest.rmax, ingest.zmin, ingest.zmax, ingest.psio, ingest.bt_sign, ingest)
+end
+
+"""
+    build_inverse_from_ingest(config::EquilibriumConfig, ingest::InverseIngest) -> InverseRunInput
+
+Rebuild an `InverseRunInput` from an [`InverseIngest`](@ref) captured by
+`read_chease_ascii`/`read_chease_binary`. Inverse of that capture; used by the rerun path to
+skip the CHEASE parse.
+"""
+function build_inverse_from_ingest(config::EquilibriumConfig, ingest::InverseIngest)
+    sq_in = cubic_interp(ingest.sq_xs, Series(ingest.sq_fs); extrap=ExtendExtrap())
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    rz_in_R = cubic_interp((ingest.rz_xs, ingest.rz_ys), ingest.R_nodes; opts2d...)
+    rz_in_Z = cubic_interp((ingest.rz_xs, ingest.rz_ys), ingest.Z_nodes; opts2d...)
+    return InverseRunInput(config, sq_in, ingest.rz_xs, ingest.rz_ys, rz_in_R, rz_in_Z,
+        ingest.ro, ingest.zo, ingest.psio, ingest)
 end
 
 """
@@ -486,5 +527,8 @@ function read_imas(config::EquilibriumConfig, dd)
           "\n    R ∈ [$(round(rmin; sigdigits=4)), $(round(rmax; sigdigits=4))] m" *
           "\n    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m"
 
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign)
+    # Capture the raw arrays so an IMAS run can be replayed from gpec.h5 without the dd source.
+    ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, Matrix(psi_proc), rmin, rmax, zmin, zmax, psio, bt_sign)
+
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign, ingest)
 end

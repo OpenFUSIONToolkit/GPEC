@@ -1,0 +1,81 @@
+[Equilibrium]
+eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
+eq_type = "efit"               # Type of the input 2D equilibrium file
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
+psilow = 1e-4                  # Lower limit of normalized flux coordinate
+psihigh = 0.993                # Upper limit of normalized flux coordinate (0.993 stays clear of the separatrix; truncating at ≳0.998 is numerically unreasonable here)
+mpsi = 128                     # Number of radial grid points (0 = auto-compute from psi_accuracy)
+psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
+mtheta = 256                   # Number of poloidal grid points
+newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+etol = 1e-10                   # Error tolerance for equilibrium solver
+force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
+
+[Wall]
+shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.2415                     # Distance from plasma (conformal) or shape parameter
+aw = 0.05                      # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                       # Elongation parameter for wall shapes
+cw = 0                         # Offset of wall center from major radius
+dw = 0.5                       # Triangularity parameter for wall shapes
+tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true          # Equal arc length distribution of nodes on wall
+
+[ForceFreeStates]
+local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+mat_flag = true                # Construct coefficient matrices for diagnostic purposes (required by gal_flag)
+ode_flag = true                # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
+vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
+
+psiedge = 0.99                 # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
+qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
+qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
+sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
+
+nn_low = 1                     # Smallest toroidal mode number to include
+nn_high = 1                    # Largest toroidal mode number to include
+delta_mlow = 8                 # Expands lower bound of Fourier harmonics
+delta_mhigh = 4                # Expands upper bound of Fourier harmonics
+mthvac = 512                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+
+kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" kinetic response)
+kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
+eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
+save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
+singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
+ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
+
+# Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
+use_parallel        = true     # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
+parallel_threads    = 2        # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
+populate_dense_xi   = false    # Dense axis-basis ξ for the FFS HDF5 output. Not needed here: no [PerturbedEquilibrium] section, and the gal-matched path builds its own dense ξ. Set true only for a shooting-fed PE run.
+set_psilim_via_dmlim = false   # Keep psilim at psihigh (do not truncate at last_rational_q + dmlim)
+dmlim               = 0.2      # Truncate integration at (last_rational_q + dmlim) / n (only used when set_psilim_via_dmlim = true)
+
+# Outer-region singular Galerkin Δ′ solver with rpec coil columns.
+# This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
+gal_flag               = true  # Enable the outer-region singular Galerkin Δ′ solve (requires mat_flag = true)
+gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
+gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
+gal_nq                 = 6     # Gauss-Lobatto quadrature order per element
+gal_pfac               = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)
+gal_dx0                = 5e-4  # Resonant-element integration truncation distance from the rational (× 1/|n q'|)
+gal_dx1                = 1e-3  # Resonant-element size (× 1/|n q'|)
+gal_dx2                = 1e-3  # Extension-element size (× 1/|n q'|)
+gal_cutoff             = 10    # Number of elements carrying the large (driving) solution as a source term
+gal_tol                = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tolerance
+gal_gnstep             = 5000  # Maximum resonant-integration steps
+gal_dx1dx2_flag        = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
+gal_sing_order         = 6     # Base power-series order for the Galerkin singular asymptotics
+gal_sing_order_ceiling = true  # Auto-raise the series order by ceil(2·Re(α)) on high-Mercier-index surfaces
+gal_rpec_flag          = true  # Append mpert coil-response columns (unit edge sources) to the solve → delta_coil block
+
+# DRIVEN (RPEC) outer↔inner matching. Per-surface resistive inputs (core→edge) for a DIII-D-like case:
+# η=8e-8, ρ=3.3e-7 kg/m³ (ni≈1e20 m^-3), rotation=1 Hz, Γ=5/3. 4 surfaces.
+gal_match_flag         = true  # Solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag = true.
+gal_ideal_flag         = false # true → build the IDEAL solution (skip the inner layer, bare coil columns). false → the resistive matching below.
+gal_eta                = [8e-8, 8e-8, 8e-8, 8e-8]          # Per-surface resistivity η (core→edge)
+gal_rho                = [3.3e-7, 3.3e-7, 3.3e-7, 3.3e-7]  # Per-surface mass density ρ [kg/m³] (core→edge)
+gal_rotation           = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation frequency f [Hz] (core→edge); forced eigenvalue γ_s = 2πi·n·f
+gal_gamma              = 1.6666666666666667               # Ratio of specific heats Γ for the resistive-layer coefficients (5/3)

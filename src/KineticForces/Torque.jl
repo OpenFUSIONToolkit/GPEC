@@ -37,12 +37,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               imx_override::Union{Nothing,Float64}=nothing,
               atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
-    if intr.verbose
-        println("torque - tpsi function, psi = ", psi)
-        println("  electron ", electron)
-        println("  ell ", l)
-    end
-
     # Enforce bounds
     if psi > 1
         tpsi_var[] = 0.0
@@ -196,15 +190,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
     nueff = nu_s / (2 * epsr)
 
-    if intr.verbose
-        @printf("   eq values = %.1e %.1e %.1e %.1e %.1e %.1e %.1f %d\n",
-               wdian, wdiat, welec, wdhat, wbhat, nueff, q, 0)
-    end
-
-    if intr.verbose
-        println("  method = ", method)
-    end
-
     # Method selection — route on the registry dispatch tag (errors on unknown method)
     kind = method_kind(method)
     if kind == :fcgl
@@ -246,10 +231,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
                                    pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
                                    rex_override=rex_override, imx_override=imx_override)
-    end
-
-    if intr.verbose
-        println("torque - end function, psi = ", psi)
     end
 
     return nothing
@@ -917,6 +898,7 @@ function compute_kinetic_matrices_at_psi!(
     zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
     electron::Bool, equil, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
+    nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
     # Bypass ψ > 1 (no kinetic contribution outside plasma)
@@ -931,6 +913,7 @@ function compute_kinetic_matrices_at_psi!(
 
     kinetic_energy_matrices_for_euler_lagrange!(
         kwmat, ktmat, state, psi, n, l, wdfac, intr;
+        nutype, f0type, nufac,
         energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
         pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
 
