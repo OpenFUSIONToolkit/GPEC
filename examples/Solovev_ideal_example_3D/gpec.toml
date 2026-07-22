@@ -37,7 +37,6 @@ kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Column-norm threshold that triggers solution renormalization
-force_wv_symmetry = true      # Enforce symmetry of the vacuum energy matrix
 save_interval = 3             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
 # Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
