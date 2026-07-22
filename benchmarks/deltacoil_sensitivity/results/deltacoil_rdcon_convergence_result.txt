@@ -1,0 +1,11 @@
+  STRIDE delta_coil: self-convergence vs correlation with RDCON (inner surfaces)
+======================================================================
+  order  | (a) self-conv vs ord 8 | (b) corr with RDCON   
+         | q2         q3         | q2         q3        
+  --------------------------------------------------------------
+  4      | 1.71e-08   3.35e-08   | 0.920      0.574     
+  6      | 0.00e+00   0.00e+00   | 0.920      0.574     
+  8      | 0.00e+00   0.00e+00   | 0.920      0.574     
+
+interpretation: if (a) → 0 while (b) stays flat below 1, the STRIDE↔RDCON gap is representational
+(weak-form vs strong-form), NOT STRIDE resolution — so refining STRIDE will not close it.
