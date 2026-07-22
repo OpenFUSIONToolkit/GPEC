@@ -8,6 +8,46 @@ relevant.
 
 ---
 
+## 2026-07-22 — Extraction diagnostic (user: Lx=20w is unphysical): the moment is ill-conditioned on physical domains; g_far-subtraction ruled out; neither far-field BC localizes
+
+- **User correction (decisive)**: `Lx=20w=1.0` reaches the magnetic axis (`x=−1`) — it
+  is the whole inner plasma, not a "far field", and scaling `Lx∝w` breaks the w-scan
+  (small→large islands). The huge-domain "convergence" was **over-optimization**: it
+  *masked* the non-localization, didn't fix it. **Physics target confirmed (user)**:
+  `Δ_neo` should stay **finite** as `w→0` (finite-ion-orbit `ρ̂_θi` regularizes the
+  classical `∝1/w` bootstrap divergence; threshold `w_c~O(ρ̂_θi)`; recover `∝1/w` at
+  `w≫ρ̂_θi`), NOT zero and NOT divergent — the L23 §6.2 story.
+- **Analytic finding (verified by hand + numerically)**: subtracting the `∝x` far
+  field `g_far` is an **exact no-op** for `Δ_neo`. `J̄_∥` is a **σ-odd** moment
+  (`W=v̂_∥=σ√E√(1−yb)`), and `g_far = x·L̂_{n0}⁻¹[1+(E−3/2)η_i]` is **σ-even** and
+  **ξ-independent** ⇒ contributes 0 to `J̄_∥`. Numerics: `Δ−Δpert = 3.6e−14`. So Q7
+  option (a) [subtract the background] is **OUT**; the 99% "far-field" is genuine
+  **m=1, σ-odd** current that doesn't decay.
+- **Extraction diagnostic (read-only, modest FIXED domains `Lx=3–8 ρ̂_θi` × far-field
+  mode `:dirichlet`/`:analytic`, w=0.05)**: the result is **negative/sobering** —
+  **none converged** (resmax 2e−4…2e−3), and `Δ_neo` is **domain- and mode-dependent
+  with sign flips** (dirichlet `+13.5/+8.1/−17.3`; analytic `−27/−4.1/−6.2`). The
+  cumulative-moment fractions expose the mechanism: the wild values (`cum<3w = 15.77`,
+  `−0.17`) mean `∫m1 dx` is a **tiny residual of large cancelling ± regions** — the
+  volume moment is **ill-conditioned** (small difference of large numbers), so those
+  `Δ_neo` are numerically meaningless. One case looked localized (`5ρ :dirichlet`,
+  97% in 3w) but is **not representative**. `:analytic` does **not** rescue it (more
+  erratic).
+- **Net (honest)**: on *physical* domains the **m=1 perturbed current does not cleanly
+  localize**, and **neither existing far-field BC** gives a converged,
+  domain-independent, well-conditioned `Δ_neo`. The far-field domination on huge
+  domains and the non-convergence on physical ones are the **same** non-decaying-m=1
+  pathology. **Q7 remains the blocker, now sharply characterized**: the fix must make
+  the m=1 perturbation genuinely **decay** (a proper far-field BC — bare `:neumann`
+  `∂ĝ/∂p=0` failed the winged null mode, so it needs the null-mode anchor; **or** the
+  `Δ`-extraction must be a **matched-asymptotic jump** (`Δ'`-style), not a volume
+  moment sensitive to the cut). Both are signed-off-physics Q7 decisions — do NOT
+  guess. Q7 updated. Diagnostics are scratch (`/tmp`); LOG + QUESTIONS committed.
+- **Next (Q7-gated, human decision)**: choose the far-field/extraction reformulation
+  (localized-decaying BC with null-mode anchor, vs matched-asymptotic `Δ'`). The solver
+  stack + band grid are done; the remaining work is this one physics/numerics decision
+  on `docs/01 §4` / `numerics.md §7`.
+
 ## 2026-07-21 (cont.) — Converged-solve scan: CONVERGENCE IS SOLVED; Δ_neo is ~99% far-field-dominated (Q7 extraction, now proven on converged solves)
 
 - **Moved**: 2nd Slurm array on the ADEQUATE domain (Lx≥16w, where the solve

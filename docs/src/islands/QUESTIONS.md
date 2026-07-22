@@ -578,6 +578,38 @@ directly testable (e.g. does subtracting `g_far` give a domain-stable, island-
 localized `Δ_neo`?). **Gated work: the resolution/domain-convergent `Δ_neo(w)`, B2,
 B5b — all now sit ONLY on this extraction decision; the solve is done.**
 
+### Update (2026-07-22) — `Lx=20w` is unphysical (user); background-subtraction ruled out; the moment is ILL-CONDITIONED on physical domains
+
+The user flagged that `Lx=20w=1.0` reaches the magnetic axis — the "convergence" was
+a plasma-sized box masking the non-localization, and `Lx∝w` cannot support a w-scan.
+Physics target confirmed: `Δ_neo` **finite** as `w→0` (`ρ̂_θi`-regularized, threshold
+`w_c~O(ρ̂_θi)`, recover `∝1/w` at large `w`). A read-only extraction diagnostic on
+**modest fixed physical domains** (`3–8 ρ̂_θi`) × `{:dirichlet, :analytic}` established:
+
+- **Option (a) [subtract the `∝x` far-field background] is OUT** — `g_far` is σ-even +
+  ξ-independent, so it contributes **exactly zero** to the σ-odd `J̄_∥` (verified
+  `Δ−Δpert=3.6e−14`). The far-field domination is genuine **m=1 σ-odd** current.
+- **Neither existing far-field BC works on physical domains**: none of the 6 solves
+  converged, `Δ_neo` is domain/mode-dependent and sign-flipping, and the volume moment
+  is a **tiny residual of large cancelling ± regions** (cumulative fractions blow up to
+  15.77 / go negative) — **ill-conditioned**, numerically meaningless. `:analytic` is
+  no better.
+
+**So the remaining two options are (b) and (c), and the decision is sharper:**
+- **(b) a genuinely decaying far-field BC** so the m=1 perturbation reaches its own
+  asymptote — the York `∂ĝ/∂p=0` localized form, but with the **null-mode anchor** bare
+  `:neumann` lacked (winged branch);
+- **(c) a matched-asymptotic (`Δ'`-style) extraction** — the jump in the outer-solution
+  log-derivative across the layer, which is *insensitive to the domain cut*, replacing
+  the ill-conditioned volume moment.
+- **Recommendation**: (c) is the most robust against the demonstrated ill-conditioning
+  and domain-sensitivity, and matches the tearing-`Δ` definition; (b) is the
+  York-faithful localization fix and is needed regardless for a decaying response.
+  Likely **both** (a decaying BC so the field converges on a physical box, *and* a
+  matched-jump extraction so `Δ_neo` is cut-independent). **Signed-off-physics decision
+  on `docs/01 §4` — human sign-off + physics-verifier before implementation; do NOT
+  guess.**
+
 ## Q8 — Clear the drift-island shift structure `x_D = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2, `[CHECKED]` → sign-off) — OPEN
 
 - **Context (2026-07-20)**: the drift-island **band grid** (`04 §1`; `LOG 2026-07-20`)
