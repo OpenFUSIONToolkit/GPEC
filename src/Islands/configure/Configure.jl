@@ -199,8 +199,8 @@ The half-width `R = max_passing |x_D^island|` of the drift-island shift envelope
 not yet human-signed-off (QUESTIONS Q8; the I19-Eq.-33 lineage is erratum-prone,
 CLAUDE.md rule 6). It enters here only to **size** the grid (a numerics use,
 margin-protected by the `+w` band + far tails), never as a physics value in an
-output. Reuses the cleared `ω̂_D` via [`drift_coefficient_table`] (`c_D = ω̂_D`;
-`L̂_q = 1/phys.inv_Lq`); the max is over **passing** nodes only
+output. Reuses the cleared `ω̂_D` via `drift_coefficient_table` — with
+`c_D = ω̂_D` and `L̂_q = 1/phys.inv_Lq`. The max is over **passing** nodes only
 (`y < grid.y_c` — trapped particles have no shifted island, `01 §2.2`), and
 forbidden / near-`y_c`-miss nodes carry `ω̂_D ≡ 0` there (as in
 `drift_coefficient_table`). The radial grid must resolve `[-(R+w), R+w]`, not merely
@@ -508,7 +508,7 @@ same parity as the drift shift `x_D ∝ σ` (`01 §2.2`). Depends on `(y, E, σ)
 broadcast over `(x, ξ)`. Trapped nodes, the forbidden pitch region, and the
 near-separatrix `y_c` layer (where `B₁` diverges and the quadrature cannot reach
 tolerance) all carry `c_E = 0` — the same gated-placeholder-at-the-layer
-treatment as [`drift_coefficient_table`] (`04 §3`, ladder A8, QUESTIONS Q5). The
+treatment as `drift_coefficient_table` — `04 §3`, ladder A8, QUESTIONS Q5. The
 `−m ρ̂_θi` normalization cancels `ρ̂_θi` exactly, so `c_E` introduces **no new
 physics parameter** beyond the already-cleared `ε` (derivation §3).
 """

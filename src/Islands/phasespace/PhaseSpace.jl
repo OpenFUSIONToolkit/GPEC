@@ -242,7 +242,7 @@ vector — the general (non-analytic-map) grid used by the drift-island band gri
 band plus geometric tails (`04 §1`) rather than a single-`sinh` cluster.
 
 `D1`, `D2` are the Fornberg finite-difference matrices for the given nodes (the
-same [`_fd_matrix`](@ref) machinery as the analytic-map path; `order`-th order on
+same `_fd_matrix` machinery as the analytic-map path; `order`-th order on
 smoothly-varying spacing, degrading locally where the spacing jumps). `wq` is the
 composite-**trapezoidal** rule on `nodes` — the radial-`x` quadrature weights are
 not used for physics outputs (velocity moments use the `y`/`E` weights; the `Δ`
@@ -503,7 +503,7 @@ the island-resolution spacing; require `Lx > R` (the far field must lie beyond t
 drift-island envelope, not merely beyond the magnetic island).
 
 **Smoothness is essential**: the `(x, ξ)` plane-block preconditioner
-([`PlaneJacobi`](@ref)) anti-preconditions on a grid with an abrupt spacing jump.
+(`Solvers.PlaneJacobi`) anti-preconditions on a grid with an abrupt spacing jump.
 The tail therefore grows **geometrically with a single ratio `r ≤ max_ratio`**,
 solved (bisection) so the geometric sum lands *exactly* on `Lx` — every adjacent
 interval ratio is then `r` (including the band→tail join), with no truncated

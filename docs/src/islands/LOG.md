@@ -8,6 +8,23 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont. 2) — Fix the failing Documentation CI (Documenter cross-references broken by the band-grid docstrings)
+
+- **The Documentation workflow had been red for several commits** — my band-grid
+  docstrings introduced three Documenter `:cross_references` errors on `islands.md`
+  (the `@autodocs` API page): (1) `[`_fd_matrix`](@ref)` — `@ref` to an internal
+  (undocumented) symbol; (2) `[`PlaneJacobi`](@ref)` — cross-module `@ref` that does
+  not resolve from the PhaseSpace autodocs; (3) `[`drift_coefficient_table`] (…)` —
+  a shortcut-ref code span immediately followed by a parenthetical, which Documenter
+  parsed as `[text](dest)` with the parenthetical as an invalid local file link.
+- **Fixed** (repro'd + verified with a local `docs/make.jl` build → `EXIT=0`, no
+  errors): the two bad `@ref`s → plain code spans (`` `_fd_matrix` ``,
+  `` `Solvers.PlaneJacobi` ``); the two `[`drift_coefficient_table`] (…)` links →
+  plain code spans (an *explicit* `[`name`](@ref)` also failed to resolve for this
+  symbol, so plain code is the safe form). Lesson (already in root CLAUDE.md): build
+  docs locally before pushing — `[`code`]`/`(@ref)` patterns in docstrings are CI-hard.
+- Docstring-only; no behavior change. Suite unaffected; docs build green.
+
 ## 2026-07-23 (cont.) — No src box larger than the plasma: physics boxes made physical; the one MMS box is proven-irreducibly-abstract and now documented as such
 
 - **User: "don't leave any boxes larger than the plasma in the src code."** Surveyed
