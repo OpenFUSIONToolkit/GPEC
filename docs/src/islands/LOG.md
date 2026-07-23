@@ -8,6 +8,32 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont. 7) — York ground-truth on the far-field BC + Δ extraction: Q7 fork collapses to (b)
+
+User chose "pin York ground-truth first." Read L23 (§2.3.6/§2.4/§2.5–2.6/§7.1) and
+Diss19 (§4.2) directly from the in-repo PDFs and wrote a cited side-by-side:
+`notes/york-farfield-extraction-ground-truth.md`. Decisive outcome:
+
+- **(c) [matched-jump extraction] is RULED OUT.** York's `Δ_loc` (L23 Eq.
+  2.5.10→2.5.13) is a **volume moment** — *identical to our `delta_moments`*; the
+  jump `Δ'` is the OUTER parameter York **neglects**. Our extraction operator is
+  correct as-is (L23 footnote 8 even confirms our σ-even/ξ-independent cancellation).
+- **The non-localization is (b): BC + coordinate + globalization**, with a cited recipe:
+  (1) `:neumann` `∂ĝ/∂p=0` **+ an analytic large-`p` anchor** to kill the winged
+  null-mode — L23 §7.1 explicitly says the bare BC has "multiple numerically-valid
+  solutions" (the winged branch) and names the analytic large-p form as the fix
+  (**physics sign-off item**); (2) carry the **drift-island shift in the radial
+  coordinate** `p̂_ϕ` (Diss19 §4.2 / L23 Eq. 7.1.1) — this is **Q8**, a prerequisite;
+  (3) **warm-start / continuation** globalization — L23 §7.1 says `kokuchou` itself
+  does NOT converge from `Φ̂=0` and warm-starts from a stable run — the **same**
+  "crawls from any init" symptom we've been fighting. (3) is unblocked numerics.
+- **Q7/QUESTIONS updated** with the same finding; the milestone's critical path is now
+  concrete: (3) now, (1)+(2) to sign-off. No `src/` change and no coefficient cleared
+  — read-only ground-truth.
+- **Next**: recommend implementing (3) (warm-start/natural-continuation globalization
+  of the physical solve) since it needs no sign-off and directly targets the stall;
+  in parallel, bring the analytic large-p far-field form (1) to human sign-off.
+
 ## 2026-07-23 (cont. 6) — B5 config is now DERIVED from the physical scenario (task #5); benchmark still gated on Q5+Q7
 
 - **Wired (task #5)**: `benchmark_B5_york_thresholds.jl` `_b5_phys` no longer hand-sets

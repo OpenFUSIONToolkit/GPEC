@@ -610,6 +610,38 @@ Physics target confirmed: `Δ_neo` **finite** as `w→0` (`ρ̂_θi`-regularized
   on `docs/01 §4` — human sign-off + physics-verifier before implementation; do NOT
   guess.**
 
+### Update (2026-07-23) — York ground-truth read: (c) is OUT, the fork collapses to (b)+Q8+globalization
+
+Read L23 §2.3.6/§2.4/§2.5–2.6/§7.1 and Diss19 §4.2 directly (side-by-side in
+`notes/york-farfield-extraction-ground-truth.md`, with equation cites). Findings:
+
+- **The extraction is settled — ours already matches York.** York's `Δ_loc`
+  (L23 Eq. 2.5.10 → 2.5.13) is a **volume moment** `−μ₀R ∫dΩ∮dξ ⟨J_∥⟩_θ cos nξ`,
+  i.e. **exactly our `delta_moments`**; the tearing **jump `Δ'` is the OUTER
+  parameter York neglects** (`Δ'(w→0)→0`). L23 footnote 8 confirms the cos ξ
+  projection kills the ξ-independent far field — the same cancellation we verified.
+  **⇒ option (c) [reformulate `Δ_neo` as a matched-asymptotic jump] is ruled OUT.**
+  The moment operator needs no change.
+- **Non-localization = the BC + coordinate + globalization, i.e. option (b), now
+  with a cited recipe:**
+  1. `:neumann` (`∂ĝ/∂p=0` on `ĝ=g−g_far`, L23 Eq. 2.3.51) **+ an analytic large-`p`
+     asymptotic anchor** to remove the winged null-mode. L23 §7.1 states the bare
+     BC admits "**multiple numerically-valid solutions for `ĝ` satisfying
+     `∂ĝ/∂p=0`**" (the winged branch) and names the analytic large-p form as the fix.
+     This analytic form + its normalization is the remaining **physics sign-off**.
+  2. Carry the **drift-island shift in the radial coordinate** (`p̂_ϕ = x −
+     ρ̂_θi V̂_∥√(1−λB)`, Diss19 §4.2; mapped `p̃`, L23 Eq. 7.1.1) so the response
+     localizes on a bounded, `w`-independent box. **This is Q8** — a prerequisite.
+  3. **Globalize the solve** (warm-start `Φ̂` / continuation). L23 §7.1: `kokuchou`
+     itself does **not** converge from `Φ̂=0` at low `ν_★`/high `ŵ` and warm-starts
+     from a stable run — the **same** "crawls from any init" symptom we see. This is
+     numerics (no physics sign-off needed) and is the immediately-actionable item.
+
+**So Q7 is no longer "which operator" (settled) but "make the response localize."**
+(1) and (2) are the physics sign-offs; (3) is unblocked numerics. Recommend: pursue
+(3) now (warm-start/continuation), and bring (1)'s analytic large-p form to
+sign-off + physics-verifier before implementing.
+
 ## Q8 — Clear the drift-island shift structure `x_D = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2, `[CHECKED]` → sign-off) — OPEN
 
 - **Context (2026-07-20)**: the drift-island **band grid** (`04 §1`; `LOG 2026-07-20`)
