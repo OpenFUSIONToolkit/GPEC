@@ -8,6 +8,43 @@ relevant.
 
 ---
 
+## 2026-07-22 (cont.) — Far-field DECAY measurement: the response does NOT localize (falsifies the "match the decaying tail" BC premise) — reframes Q7 to a physics fork
+
+- **Measured** (read-only, converged `Lx=20w` solve, `resmax=9e-11`): the perturbation
+  amplitude `gpert_rms(x)` (RMS of the ξ-varying `g` over velocity) is **constant
+  ~0.091 across the whole domain** (island → `x/w=16`; ratio to island 1.00/1.01/1.02/
+  1.04 at `x/w=2/5/10/15`), even slightly **growing**, snapping to 0 only at the pinned
+  boundary. **There is no decaying tail.** The moment integrand `m1(x)=∮J̄cosξ` is
+  **small + sign-oscillatory** in the island region (~1e-4) **plus a growing boundary
+  spike** (`|m1|` at `x/w=15.95` is 12× the island value, →0 at the wall) — the
+  `g_far∝x` Dirichlet-pin boundary layer.
+- **Consequence (falsifies my (b) recommendation's premise)**: "match the decaying
+  far field" has **nothing to match** — the ξ-structured response is non-localizing
+  (constant amplitude), and the σ-odd current carries a BC-induced boundary spike.
+  So the ill-conditioned, domain-dependent moment is driven by BOTH a **non-localizing
+  response** AND a **BC artifact**, not a matchable decay. Stopped implementing —
+  choosing any BC now would be guessing *against* the data.
+- **Reframed Q7 (a physics fork, not a BC menu)**: why doesn't the response localize?
+  (i) **BC artifact** — the `g_far∝x` Dirichlet pin injects the boundary spike; a
+  genuinely non-reflecting/asymptotic-matching outer condition might localize it
+  (but there's no clean decay to match, so this is not obviously sufficient);
+  (ii) **physical passing-particle tail** — collisionless passing ions stream the
+  ξ-structure radially without damping over the domain (LOG 2026-07-15 hypothesis,
+  now with direct evidence: constant `gpert`), in which case a volume moment cannot
+  converge and the extraction MUST be reformulated (a boundary/jump term), OR the
+  collision damping length `~√ν` must enter (is our `ν_★=0.01` / collision operator
+  giving the York localization? York's converged results are `ν_★≥5e-3`, comparable —
+  so if theirs localizes and ours doesn't, a **term/normalization is missing**);
+  (iii) a **spurious weakly-constrained mode** (the constant `gpert` may be an
+  under-damped near-null structure, kin to the winged branch).
+- **This needs physics judgment / a careful York-formulation comparison, not
+  autonomous implementation** — escalated to Q7. The disciplined next step is to
+  establish, from York's equations (does THEIR `m=1` response decay, and by what
+  mechanism — collisional layer `√ν`, the `S`-streamline boundedness, or a damping
+  term we lack?), whether our non-localization is a bug or a genuine model feature —
+  then the extraction/BC follows. **Do NOT guess.** Solver/grid stack remains done;
+  the blocker is this physics question. Diagnostics scratch; LOG + QUESTIONS committed.
+
 ## 2026-07-22 — Extraction diagnostic (user: Lx=20w is unphysical): the moment is ill-conditioned on physical domains; g_far-subtraction ruled out; neither far-field BC localizes
 
 - **User correction (decisive)**: `Lx=20w=1.0` reaches the magnetic axis (`x=−1`) — it
