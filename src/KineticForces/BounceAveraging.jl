@@ -279,6 +279,8 @@ partially are `fill!`-reset per λ.
 - `g_wd::Vector{Float64}`: length `ntheta` — drift integrand samples
 - `cum_wb_arr::Vector{Float64}`: length `ntheta` — cumulative bounce-action integral
 - `jvtheta::Vector{ComplexF64}`: length `ntheta` — action integrand
+- `bj_samples::Vector{ComplexF64}`: length `ntheta` — action bounce-integral samples
+- `wsamp::Vector{ComplexF64}`: length `ntheta` — per-mode W bounce-integral samples
 - `wmu_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_μ per θ
 - `wen_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_E per θ
 - `expm::Vector{ComplexF64}`: length `mpert` — Fourier basis at a θ
@@ -287,14 +289,17 @@ partially are `fill!`-reset per λ.
 - `wen_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_E
 - `wmats_lmda::Vector{ComplexF64}`: length `nqty_matrix(mpert)` — packed W outer products
 - `tspl_f::Vector{Float64}`: length 5 — in-place tspl(θ) evaluation
-- `itp_r::TR`, `itp_c::TC`: real/complex fit-and-integrate interpolants on the unit
-  θ-quadrature grid (`CubicFit` endpoints); see `_refit!`
+- `int_w::Vector{Float64}`, `cumint_W::Matrix{Float64}`: precomputed exact-cubic
+  quadrature weights on the fixed unit θ-grid (`∫ = int_w·y`, `cumulative = cumint_W·y`);
+  shared read-only across surfaces, see `_quadrature_weights`
 """
-struct BounceScratch{TR, TC}
+struct BounceScratch
     g_wb::Vector{Float64}
     g_wd::Vector{Float64}
     cum_wb_arr::Vector{Float64}
     jvtheta::Vector{ComplexF64}
+    bj_samples::Vector{ComplexF64}
+    wsamp::Vector{ComplexF64}
     wmu_mt::Matrix{ComplexF64}
     wen_mt::Matrix{ComplexF64}
     expm::Vector{ComplexF64}
@@ -303,20 +308,18 @@ struct BounceScratch{TR, TC}
     wen_ba::Vector{ComplexF64}
     wmats_lmda::Vector{ComplexF64}
     tspl_f::Vector{Float64}
-    itp_r::TR
-    itp_c::TC
+    int_w::Vector{Float64}
+    cumint_W::Matrix{Float64}
 end
 
 function BounceScratch(ntheta::Int, mpert::Int)
-    # Reusable fit-and-integrate interpolants on the unit θ-quadrature grid;
-    # per λ their y contents are overwritten and z refit in place.
-    xs = range(0.0, 1.0, length=ntheta)
-    itp_r = cubic_interp(xs, zeros(Float64, ntheta); bc=CubicFit())
-    itp_c = cubic_interp(xs, zeros(ComplexF64, ntheta); bc=CubicFit())
+    int_w, cumint_W = _quadrature_weights(ntheta)
     return BounceScratch(
         Vector{Float64}(undef, ntheta),
         Vector{Float64}(undef, ntheta),
         Vector{Float64}(undef, ntheta),
+        Vector{ComplexF64}(undef, ntheta),
+        Vector{ComplexF64}(undef, ntheta),
         Vector{ComplexF64}(undef, ntheta),
         Matrix{ComplexF64}(undef, mpert, ntheta),
         Matrix{ComplexF64}(undef, mpert, ntheta),
@@ -326,19 +329,44 @@ function BounceScratch(ntheta::Int, mpert::Int)
         Vector{ComplexF64}(undef, mpert),
         Vector{ComplexF64}(undef, nqty_matrix(mpert)),
         Vector{Float64}(undef, 5),
-        itp_r,
-        itp_c,
+        int_w,
+        cumint_W,
     )
 end
 
+# Exact-cubic θ-quadrature weights on the fixed unit grid, cached by ntheta.
+const _QUAD_WEIGHTS = Dict{Int,Tuple{Vector{Float64},Matrix{Float64}}}()
+const _QUAD_WEIGHTS_LOCK = ReentrantLock()
+
 """
-Refit `itp` in place to its current `y` contents, reusing the cached tridiagonal
-factorization. Uses the package-internal `_solve_system!` because no exported API
-refits an interpolant without allocating; this keeps the per-λ hot loop allocation-free.
+    _quadrature_weights(ntheta) → (int_w, cumint_W)
+
+Exact integral of the `CubicFit`-endpoint spline on the fixed grid `range(0,1,ntheta)`
+is a constant linear functional of the node samples, so `∫ = int_w·y` and the cumulative
+integral is `cumint_W·y`. The weights are obtained once per `ntheta` by evaluating the
+public `integrate` / `cumulative_integrate!` on the unit basis vectors — bit-faithful to
+fitting and integrating each sample vector directly, but reducing the per-λ hot loop to a
+`dot`/`mul!`. Cached (build guarded by a lock); the returned arrays are read-only.
 """
-@inline function _refit!(itp)
-    FastInterpolations._solve_system!(itp.z, itp.cache, itp.y, itp.bc)
-    return itp
+function _quadrature_weights(ntheta::Int)
+    lock(_QUAD_WEIGHTS_LOCK) do
+        get!(_QUAD_WEIGHTS, ntheta) do
+            xs = collect(range(0.0, 1.0, length=ntheta))
+            int_w = zeros(Float64, ntheta)
+            cumint_W = zeros(Float64, ntheta, ntheta)
+            ej = zeros(Float64, ntheta)
+            cbuf = zeros(Float64, ntheta)
+            for j in 1:ntheta
+                ej[j] = 1.0
+                itp = cubic_interp(xs, ej; bc=CubicFit())
+                int_w[j] = FastInterpolations.integrate(itp)
+                FastInterpolations.cumulative_integrate!(cbuf, itp)
+                @views cumint_W[:, j] .= cbuf
+                ej[j] = 0.0
+            end
+            (int_w, cumint_W)
+        end
+    end
 end
 
 
@@ -589,19 +617,15 @@ function _bounce_integrate(
         end
     end
 
-    # Total bounce integrals: fit an endpoint-fit cubic on the unit x-grid (the tdt
-    # weights contain dθ/dx) and integrate it exactly. With the 1/√v_par endpoint
-    # singularities the quadrature scheme is a leading-order effect, so this matches
-    # the exact-cubic integration of the Fortran spline package (not a trapezoid sum).
-    itp_r = scr.itp_r
-    copyto!(itp_r.y, g_wb)
-    _refit!(itp_r)
+    # Total bounce integrals: the samples live on the fixed unit x-grid (the tdt weights
+    # carry dθ/dx), so the exact integral of the endpoint-fit cubic is a fixed linear
+    # combination of them (precomputed weights, see `_quadrature_weights`). With the
+    # 1/√v_par endpoint singularities the quadrature scheme is a leading-order effect, so
+    # this reproduces exact-cubic integration (not a trapezoid sum).
     fsi_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten
-    FastInterpolations.cumulative_integrate!(fsi_wb, itp_r)
+    mul!(fsi_wb, scr.cumint_W, g_wb)
     total_wb = fsi_wb[ntheta]
-    copyto!(itp_r.y, g_wd)
-    _refit!(itp_r)
-    total_wd = FastInterpolations.integrate(itp_r)
+    total_wd = dot(scr.int_w, g_wd)
 
     if total_wb ≈ 0.0
         # Degenerate case — return zeros
@@ -622,13 +646,11 @@ function _bounce_integrate(
     end
 
     # Action bounce integral (exact-cubic quadrature, as for the totals above).
-    itp_c = scr.itp_c
-    bj_samples = itp_c.y
+    bj_samples = scr.bj_samples
     @inbounds for i in 1:ntheta
         bj_samples[i] = conj(jvtheta[i]) * (pl[i] + one_minus_sigma / pl[i])
     end
-    _refit!(itp_c)
-    bj_integral = FastInterpolations.integrate(itp_c)
+    bj_integral = dot(scr.int_w, bj_samples)
 
     # |δJ|² — division by 2 corrects the quadratic form
     dJdJ_val = wbbar * abs(bj_integral)^2 / 2.0 / ro^2
@@ -640,18 +662,16 @@ function _bounce_integrate(
         # matching the action bounce integral above.
         wmu_ba = scr.wmu_ba
         wen_ba = scr.wen_ba
-        wsamp = itp_c.y
+        wsamp = scr.wsamp
         @inbounds for mi in 1:mpert
             for i in 1:ntheta
                 wsamp[i] = conj(wmu_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
             end
-            _refit!(itp_c)
-            wmu_ba[mi] = FastInterpolations.integrate(itp_c)
+            wmu_ba[mi] = dot(scr.int_w, wsamp)
             for i in 1:ntheta
                 wsamp[i] = conj(wen_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
             end
-            _refit!(itp_c)
-            wen_ba[mi] = FastInterpolations.integrate(itp_c)
+            wen_ba[mi] = dot(scr.int_w, wsamp)
         end
 
         # Reshape as 1×mpert for matrix multiply (Fortran lines 771-772)
