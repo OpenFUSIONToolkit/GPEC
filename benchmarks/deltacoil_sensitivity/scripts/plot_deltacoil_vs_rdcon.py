@@ -15,9 +15,8 @@ def load(fn, key):
 
 R = load("gpec.h5", "galerkin/delta_coil")        # RDCON weak-form reference
 variants = {"strong-form (driven)":"gpec_driven.h5",
-            "weak-form projection":"gpec_project.h5",
-            "energy projection":"gpec_project_energy.h5"}
-cols = {"strong-form (driven)":"#2E86C1","weak-form projection":"#B9770E","energy projection":"#28B463"}
+            "weak-form projection":"gpec_project.h5"}
+cols = {"strong-form (driven)":"#2E86C1","weak-form projection":"#B9770E"}
 sides = ["q2L","q2R","q3L","q3R","q4L","q4R","q5L","q5R"]
 def corr(a,b): a,b=np.abs(a),np.abs(b); return np.corrcoef(a,b)[0,1]
 
@@ -28,9 +27,9 @@ fig, ax = plt.subplots(figsize=(10.5,5.4), constrained_layout=True)
 ax.axvspan(-0.5,3.5,color="#2E86C1",alpha=0.05); ax.axvspan(3.5,7.5,color="#C0392B",alpha=0.06)
 ax.text(1.5,1.06,"inner surfaces (RDCON reliable)",ha="center",fontsize=9,color="#20507f")
 ax.text(5.5,1.06,"outer / edge (RDCON degrades)",ha="center",fontsize=9,color="#7a2420")
-x=np.arange(8); w=0.26
+x=np.arange(8); w=0.38; n=len(C)
 for i,(name,cs) in enumerate(C.items()):
-    ax.bar(x+(i-1)*w, cs, w, color=cols[name], label=name)
+    ax.bar(x+(i-(n-1)/2)*w, cs, w, color=cols[name], label=name)
 ax.axhline(0,color="k",lw=0.7); ax.set_xticks(x); ax.set_xticklabels(sides)
 ax.set_ylabel("correlation of |delta_coil| with RDCON"); ax.set_ylim(-0.6,1.15)
 ax.set_title("STRIDE delta_coil vs RDCON, per surface-side\n"

@@ -38,7 +38,13 @@ function run_one(tag, patches)
     for (r, s) in patches; toml = replace(toml, r => s); end
     toml = replace(toml, r"gal_match_flag\s*=\s*\w+" => "gal_match_flag = false")   # delta_coil only
     toml = replace(toml, r"eq_filename\s*=\s*\"[^\"]+\"" => "eq_filename = \"$(basename(eqfile))\"")
-    toml = replace(toml, r"HDF5_filename\s*=\s*\"[^\"]+\"" => "HDF5_filename = \"$tag.h5\"")
+    # delta_coil is written by ForceFreeStates; terminate there (skip PE, which would otherwise send the
+    # consolidated output to the default gpec.h5) and pin the FFS output file we read back. Strip any
+    # pre-existing copies first to avoid TOML duplicate-key errors across example variants.
+    for key in ("force_termination", "HDF5_filename")
+        toml = replace(toml, Regex("(?m)^[ \\t]*$key[ \\t]*=.*\\n") => "")
+    end
+    toml = replace(toml, "[ForceFreeStates]" => "[ForceFreeStates]\nforce_termination = true\nHDF5_filename = \"$tag.h5\""; count=1)
     write(joinpath(dir, "gpec.toml"), toml)
     @info ">>> $tag"
     GeneralizedPerturbedEquilibrium.main([dir])
