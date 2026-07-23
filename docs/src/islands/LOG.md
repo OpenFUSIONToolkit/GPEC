@@ -8,6 +8,26 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont. 6) — B5 config is now DERIVED from the physical scenario (task #5); benchmark still gated on Q5+Q7
+
+- **Wired (task #5)**: `benchmark_B5_york_thresholds.jl` `_b5_phys` no longer hand-sets
+  York-regime numbers — it calls `Configure.scenario_from_equilibrium` on
+  `examples/DIIID-like_ideal_example` (cached load) at the q=2 surface, so the B5
+  config is the same DERIVED physical vector (ε=0.265, ρ̂_θi=0.075, ν_★=0.012,
+  η_i=2.16). `_assemble_b5` now takes the matching radius from `physical_domain(phys)`
+  (fixed physical fraction, NOT scaled with w) and y_max from `(1+ε)/(1−ε)`.
+- **Verified end-to-end** (clean env): both `_assemble_b5(:original)` and
+  `(:improved)` build via `configure_level0` (returns the term NamedTuple). Benchmark
+  stays SKIPPED as designed — `const UNGATED=false`.
+- **Still gated** on **Q5** (uncleared coefficient families → `configure_level0` runs
+  structurally only) AND **Q7** (far-field extraction does not localize). Flipping
+  UNGATED before both clear asserts-out. So B5 is now *physical* but the York
+  threshold NUMBER remains blocked — the remaining work is the Q7 non-localization,
+  a strategic decision (see the cont.-3 close and QUESTIONS Q7).
+- **Env note**: this repo's Julia must be run with `LD_LIBRARY_PATH` cleared
+  (`env -u LD_LIBRARY_PATH julia …`) — the omfit conda env on this box leaks
+  SuiteSparse 5, breaking CHOLMOD init when the equilibrium/vacuum sparse solvers load.
+
 ## 2026-07-23 (cont. 5) — DIII-D-like ingest → a PHYSICAL banana-regime scenario; `scenario_from_equilibrium` wired + tested (and the a10 "edge-cold" was my unit bug)
 
 - **Moved (user: use the DIII-D-like example)**: `examples/DIIID-like_ideal_example`

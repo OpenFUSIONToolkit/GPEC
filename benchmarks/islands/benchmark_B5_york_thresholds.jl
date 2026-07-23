@@ -21,46 +21,68 @@
 #     B5c  w_c ~= 0.440 rho_hat_theta_i + 0.0178 v_star - 7.54e-5 [CHECKED: L23 Eq. 6.3.2]
 #          (best T4 candidate — a thesis documents its numerics most fully)
 #
-# STATUS: SKIPPED. The scaffold below is wired to the M2c Level-0 assembly
-# (`Islands.Configure.configure_level0`): un-skipping is the ONE-LINE change
-# `const UNGATED = true`. It stays gated because the assembly's remaining
+# STATUS: SKIPPED. The scaffold is wired to the M2c Level-0 assembly
+# (`Islands.Configure.configure_level0`) with a PHYSICAL, DERIVED parameter vector —
+# `scenario_from_equilibrium` on examples/DIIID-like_ideal_example at its q=2 surface
+# (design 10), no longer hand-set. Un-skipping is the ONE-LINE change
+# `const UNGATED = true`. It stays gated because (a) the assembly's remaining
 # coefficient families are uncleared — parallel streaming, E×B, gradient drive,
 # the quasineutrality (x-h) field source, the collision magnitude, the
-# orbit-averaged pitch measure, and the neoclassical far field (QUESTIONS Q5).
-# Until Q5 clears, `configure_level0` runs only STRUCTURALLY (placeholders), so
-# no physics w_c can be extracted; flipping UNGATED before Q5 clears asserts-out.
+# orbit-averaged pitch measure, and the neoclassical far field (QUESTIONS Q5) — and
+# (b) the far-field extraction does not localize (QUESTIONS Q7). Until both clear,
+# `configure_level0` runs only STRUCTURALLY (placeholders), so no physics w_c can be
+# extracted; flipping UNGATED before then asserts-out.
 
 using GeneralizedPerturbedEquilibrium
 const Isl = GeneralizedPerturbedEquilibrium.Islands
+const Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+import TOML
 
 """
 Flip to `true` only when QUESTIONS Q5 clears the remaining L0 coefficient families.
 """
 const UNGATED = false
 
-# The B5 physics parameter set (eps=0.1, m/n=2/1, tau=1). PROVISIONAL: these
-# normalized values are hand-set in York's regime (ε=0.1, ν_★=0.01 low-collisionality,
-# ρ̂_θi=ŵ=0.05 ⇒ the threshold regime ŵ/ρ̂_θi=1, η_i=1). They MUST be replaced by the
-# DERIVED, self-consistent vector from the pinned physical scenario (design 10, from
-# the a10 large-aspect example) before this is a trusted York-replication number.
-_b5_phys(variant) = Isl.Configure.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=1.0,
-    q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0, rho_hat_theta_i=0.05,
-    eta_i=1.0, nu_star=0.01, m=2.0, tau=1.0, variant=variant)
+# The pinned physical scenario is DERIVED from a solved equilibrium (design 10),
+# not hand-set: examples/DIIID-like_ideal_example at its q=2 H-mode surface yields a
+# self-consistent, low-collisionality banana vector (ε≈0.265, ρ̂_θi≈0.075, ν_★≈0.012,
+# η_i≈2.16). Loaded once and cached; `w_psi` (island half-width) is the scan variable.
+const _B5_EXAMPLE = joinpath(@__DIR__, "..", "..", "examples", "DIIID-like_ideal_example")
+const _B5_EQUIL = Ref{Any}(nothing)
+const _B5_KP = Ref{Any}(nothing)
+
+function _b5_load_equilibrium()
+    if _B5_EQUIL[] === nothing
+        inputs = TOML.parsefile(joinpath(_B5_EXAMPLE, "gpec.toml"))
+        _B5_EQUIL[] = Eq.setup_equilibrium(Eq.EquilibriumConfig(inputs["Equilibrium"], _B5_EXAMPLE))
+        _B5_KP[] = Eq.load_kinetic_profiles(joinpath(_B5_EXAMPLE, "TkMkr_D3Dlike_Hmode_kinetic.h5"); zi=1, mi=2)
+    end
+    return _B5_EQUIL[], _B5_KP[]
+end
+
+# The DERIVED, self-consistent Level-0 vector at the physical q=2 surface (design 10).
+function _b5_phys(variant; w_psi::Real=0.05)
+    equil, kp = _b5_load_equilibrium()
+    return Isl.Configure.scenario_from_equilibrium(equil, kp; m=2, n=1, w_psi=w_psi,
+        Z=1.0, mass_amu=2.0, tau=1.0, variant=variant)
+end
 
 # Assemble the :original and :improved configurations that the T2 toggle compares.
 # Every Level-0 operator coefficient is now cleared (QUESTIONS Q5); the momentum-
 # restoring collision term (F) remains a pending operator addition.
-function _assemble_b5(variant)
-    # PHYSICAL local domain: x=(ψ−ψ_s)/ψ_s, so the axis is at x=−1 — the far field must
-    # be a LOCAL matching radius (|x|≲0.3, a few island widths), never |x|=8 (8× the
-    # plasma, the old value). Pending design-10's physical_domain(scenario), a bounded
-    # |x|<0.25 with the island (ŵ=0.05) resolved. y_max spans the full trapped+forbidden
-    # pitch range (1/b_min=(1+ε)/(1−ε)≈1.22).
-    grid = Isl.PhaseSpace.resolved_island_grid(; w=0.05, nx=41, K=6, Lx_over_w=5.0,
-        nxi=16, ny=17, nE=6, y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+function _assemble_b5(variant; w_psi::Real=0.05)
+    phys = _b5_phys(variant; w_psi=w_psi)
+    # PHYSICAL local domain: x=(ψ−ψ_s)/ψ_s, so the axis is at x=−1. The matching radius
+    # is a fixed physical fraction of the surface (design 10's physical_domain), NOT
+    # scaled with w — Δ_neo must stay finite as w→0. y_max spans the full trapped+
+    # forbidden pitch range (1/b_min=(1+ε)/(1−ε)).
+    Lx = Isl.Configure.physical_domain(phys; x_match=0.2)
+    y_max = (1 + phys.epsilon) / (1 - phys.epsilon)
+    grid = Isl.PhaseSpace.resolved_island_grid(; w=w_psi, nx=41, K=6, Lx_over_w=Lx / w_psi,
+        nxi=16, ny=17, nE=6, y_max=y_max, y_c=1.0, clustering_y=0.8, order=4)
     species = [Isl.SpeciesLists.Species(; name=:i, Z=1.0, m=1.0,
         background=Isl.SpeciesLists.Maxwellian(; n=1.0, T=1.0), role=Isl.SpeciesLists.Bulk)]
-    return Isl.Configure.configure_level0(grid, _b5_phys(variant), species)
+    return Isl.Configure.configure_level0(grid, phys, species)
 end
 
 # threshold_width(cfg) — the marginal-island w_c from the MRE root dw/dt=0. GATED:
