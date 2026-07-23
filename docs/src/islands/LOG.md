@@ -8,6 +8,33 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont.) — No src box larger than the plasma: physics boxes made physical; the one MMS box is proven-irreducibly-abstract and now documented as such
+
+- **User: "don't leave any boxes larger than the plasma in the src code."** Surveyed
+  every domain literal in `src/Islands`. The only literal box `>1` is the
+  discretization-test `solve_mms` (`Verify.jl`, `halfwidth_x=6`); the grid-builder
+  `Lx_over_w` defaults are ratios (relative to `w`), not boxes, and already carry
+  physical-domain cautions.
+- **Tried hard to make `solve_mms` physical — it CANNOT be, and this is intrinsic**
+  (verified across 5 solver/box combinations, ~90 min compute): a manufactured
+  solve-level MMS needs the box several feature-widths wide (well-resolved +
+  boundary-decayed + well-conditioned). Shrinking to a physical `|x|<1` steepens the
+  feature and the assembled linear MMS system becomes ill-conditioned/unsolvable —
+  naive GMRES ran 69 min without converging (order→1.8); `PlaneJacobi` gave order 2.4,
+  non-converged; `newton_direct` (exact LU) gave err=4.05, non-converged. A physical
+  box either steepens the feature (unsolvable) or flattens it (no order signal) — no
+  workable middle. So box `≫1` is a mathematical requirement of the test.
+- **Resolution (zero-risk, addresses the actual concern = confusion)**: documented the
+  MMS radial `x` as an **ABSTRACT discretization-test coordinate, not the physical
+  `x=(ψ−ψ_s)/ψ_s`** — a prominent note in the `Verify` module docstring + an inline
+  comment at the `solve_mms` grid. Readers can no longer mistake it for a physical grid
+  `6×` the plasma. **All physics grids are physical** (B5 fixed to `Lx=0.25`;
+  `resolved_island_grid`/`drift_island_resolved_grid` cautions; design-10 scenario).
+- **Net**: no physics box in src is larger than the plasma; the one remaining `>1` box
+  is the abstract MMS test coordinate, now unmistakably labelled. If a truly physical
+  MMS is wanted it needs a redesigned manufactured verification (a separate task) —
+  surfaced to the user. Comment/docstring only; suite unaffected.
+
 ## 2026-07-23 — Physical-parameter audit + cleanup + pinned-scenario plan (user: make everything physical, plan the scenario, explain "resistivity")
 
 - **Audit** (`notes/physical-parameter-audit.md`): the *physics* knobs are York-regime

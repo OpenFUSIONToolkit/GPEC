@@ -13,6 +13,16 @@ a physics coefficient, so nothing here carries a `[VERIFY]` tag. Physics
 benchmarks (ladder B+) live in `benchmarks/islands/` and stay `[VERIFY]`-gated
 until human-cleared.
 
+**The MMS radial `x` here is an ABSTRACT discretization-test coordinate, not the
+physical `x = (ψ−ψ_s)/ψ_s`.** A manufactured-solution convergence test needs the
+box several times the manufactured feature width so the solution is both
+well-resolved and boundary-decayed and the discrete system is well-conditioned; the
+`halfwidth_x = 6` boxes below are that math-test domain, *not* a physical grid `6×`
+the plasma. (Shrinking them to a physical `|x| < 1` steepens the feature and makes
+the assembled solve-level MMS ill-conditioned/unsolvable — verified.) All *physics*
+grids use physical local domains (`|x| ≲ 0.3`); see design 10 and the
+`resolved_island_grid` physical-domain caution.
+
 Design orders checked:
 
   - `ξ` derivatives — Fourier spectral (a bandlimited manufactured `ξ`-profile is
@@ -389,6 +399,9 @@ solution error against the manufactured state — refining `nx` must show the
 design order.
 """
 function solve_mms(nx::Int; nxi::Int=8, ny::Int=9, nE::Int=2, rtol::Real=1e-10, memory::Int=300)
+    # halfwidth_x = 6 is the ABSTRACT MMS discretization-test box (see the module
+    # docstring), NOT a physical grid 6× the plasma — the manufactured feature must sit
+    # several widths inside the box for a well-conditioned order test.
     grid = IslandGrid(; nx=nx, nxi=nxi, ny=ny, nE=nE, halfwidth_x=6.0, clustering_x=1.0,
         y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
     c = test_coefficients(grid)
