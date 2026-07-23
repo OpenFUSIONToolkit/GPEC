@@ -48,6 +48,7 @@ import ..Moments: parallel_current!, delta_moments, channel_decomposition
 import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species, bulk_species
 
 export Level0Physics, configure_level0, delta_outputs, physical_scenario, physical_domain
+export scenario_from_equilibrium
 export drift_coefficient_table, drift_island_shift_envelope, drift_island_resolved_grid
 export pitch_diffusivity_profile, pitch_collision_coefficient
 export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
@@ -196,6 +197,56 @@ function physical_domain(phys::Level0Physics; x_match::Real=0.2)
         throw(ArgumentError("physical_domain: x_match ($x_match) must exceed the island half-width w ($(phys.w_psi))"))
     x_match < 1 || throw(ArgumentError("physical_domain: x_match ($x_match) must be < 1 (inside the plasma; axis at x=−1)"))
     return Float64(x_match)
+end
+
+"""
+    scenario_from_equilibrium(equil, kp; m=2, n=1, w_psi, Z=1.0, mass_amu=2.0,
+                              tau=1.0, variant=:original, ntheta=64) -> Level0Physics
+
+Ingest a solved `equil` (`Equilibrium.PlasmaEquilibrium`) and its kinetic profiles
+`kp` (`Equilibrium.KineticProfileSplines`) into a physical [`Level0Physics`](@ref) at
+the `q = m/n` rational surface (design 10; validated on
+`examples/DIIID-like_ideal_example`). Reads only **fields** off the passed objects
+(`equil.profiles.q_spline`, `equil.rzphi_rsquared`, `equil.eqfun_B`, `equil.ro`,
+`kp.Ti_spline`, `kp.ni_spline`) — no `Equilibrium`-module dependency. The caller loads
+them (`setup_equilibrium` + `load_kinetic_profiles`).
+
+Extracts, at `ψ_s` (root of `q(ψ)=m/n`): the minor radius
+`r_s = ⟨√(rzphi_rsquared(ψ_s,θ))⟩_θ` (`rzphi_rsquared = (R−R₀)²+(Z−Z₀)²`, distance²
+from the axis), `R₀ = equil.ro`, the flux-surface-averaged `|B|`, and `T_i`, `n_i`
+with their `ψ`-log-gradients (finite differenced). **`kp.Ti_spline` is in Joules** —
+converted to eV here. Forwards to [`physical_scenario`](@ref) (which guards the
+cold-surface degeneracy). `w_psi` is the island half-width (the scan variable).
+"""
+function scenario_from_equilibrium(equil, kp; m::Real=2, n::Real=1, w_psi::Real,
+    Z::Real=1.0, mass_amu::Real=2.0, tau::Real=1.0, variant::Symbol=:original,
+    ntheta::Integer=64)
+    qtar = m / n
+    xs = equil.profiles.xs
+    ψlo, ψhi = xs[2], xs[end-1]                                # avoid the exact edges
+    qf(ψ) = equil.profiles.q_spline(ψ)
+    (qf(ψlo) - qtar) * (qf(ψhi) - qtar) <= 0 ||
+        throw(ArgumentError("scenario_from_equilibrium: no q=$qtar surface in [$ψlo, $ψhi] (q spans $(qf(ψlo))–$(qf(ψhi)))"))
+    a, b = ψlo, ψhi                                            # bisection
+    for _ in 1:100
+        mid = (a + b) / 2
+        (qf(mid) - qtar) * (qf(a) - qtar) <= 0 ? (b = mid) : (a = mid)
+    end
+    ψs = (a + b) / 2
+    θs = range(0, 2π; length=ntheta)
+    r_s = sum(sqrt(max(equil.rzphi_rsquared((ψs, θ)), 0.0)) for θ in θs) / ntheta
+    B_s = sum(equil.eqfun_B((ψs, θ)) for θ in θs) / ntheta
+    h = 1e-3
+    Ti_eV = kp.Ti_spline(ψs) / _E_CHARGE                      # Ti_spline is in Joules
+    n_i = kp.ni_spline(ψs)
+    dlnTi = (log(kp.Ti_spline(ψs + h)) - log(kp.Ti_spline(ψs - h))) / (2h)  # J vs eV cancels
+    dlnni = (log(kp.ni_spline(ψs + h)) - log(kp.ni_spline(ψs - h))) / (2h)
+    Bavg(ψ) = sum(equil.eqfun_B((ψ, θ)) for θ in θs) / ntheta
+    dlnB = (log(Bavg(ψs + h)) - log(Bavg(ψs - h))) / (2h)
+    return physical_scenario(; R0=equil.ro, r_s=r_s, B=B_s, T_i_eV=Ti_eV, n_i=n_i,
+        q_s=qf(ψs), dq_dpsi=equil.profiles.q_deriv(ψs), psi_s=ψs, dlnTi_dpsi=dlnTi,
+        dlnni_dpsi=dlnni, dlnB_dpsi=dlnB, w_psi=w_psi, Z=Z, mass_amu=mass_amu, m=m,
+        tau=tau, variant=variant)
 end
 
 # ---------------------------------------------------------------------------

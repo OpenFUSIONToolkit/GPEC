@@ -529,5 +529,22 @@ end
         @test_throws ArgumentError Cfg.physical_scenario(; R0=2.0, r_s=0.17, B=1.0,
             T_i_eV=0.001, n_i=8e17, q_s=2.0, dq_dpsi=2.7, psi_s=0.79, dlnTi_dpsi=-9.0,
             dlnni_dpsi=-4.0, dlnB_dpsi=0.0, w_psi=0.05)
+
+        # scenario_from_equilibrium: field-access ingest (mock equil + kp; no
+        # Equilibrium solver in the fast suite — the real DIII-D H-mode ingest is a
+        # benchmark). q=2 at ψ=0.5, r=0.6ψ ⇒ r_s=0.3, R0=3 ⇒ ε=0.1; Ti in JOULES.
+        equil = (profiles=(q_spline=(ψ -> 1 + 2ψ), q_deriv=(ψ -> 2.0),
+                xs=collect(0.0:0.1:1.0)),
+            rzphi_rsquared=(t -> (0.6 * t[1])^2), eqfun_B=(t -> 2.0), ro=3.0)
+        kp = (Ti_spline=(ψ -> 1000 * exp(-ψ) * 1.602176634e-19),   # Joules
+            ni_spline=(ψ -> 5e19 * exp(-0.5ψ)))
+        ps = Cfg.scenario_from_equilibrium(equil, kp; m=2, n=1, w_psi=0.05)
+        @test ps.epsilon ≈ 0.1 rtol = 1e-6                          # r_s/R0 = 0.3/3
+        @test ps.q_s ≈ 2.0
+        @test ps.inv_Lq ≈ 0.5 rtol = 1e-6                           # ψ_s·dq/q = 0.5·2/2
+        @test ps.inv_Ln0 ≈ -0.25 rtol = 1e-4                        # ψ_s·dln n = 0.5·(−0.5)
+        @test ps.eta_i ≈ 2.0 rtol = 1e-4                            # dlnT/dln n = −1/−0.5
+        @test ps.rho_hat_theta_i > 0 && ps.nu_star > 0 && isfinite(ps.nu_star)
+        @test_throws ArgumentError Cfg.scenario_from_equilibrium(equil, kp; m=9, n=1, w_psi=0.05)  # no q=9 surface
     end
 end

@@ -8,6 +8,33 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont. 5) — DIII-D-like ingest → a PHYSICAL banana-regime scenario; `scenario_from_equilibrium` wired + tested (and the a10 "edge-cold" was my unit bug)
+
+- **Moved (user: use the DIII-D-like example)**: `examples/DIIID-like_ideal_example`
+  (H-mode g-file + kinetic `.h5` with `/T_i,/n_i,/psi`) → `scenario_from_equilibrium`
+  → a **fully physical, self-consistent** Level-0 vector at the **mid-radius q=2**
+  surface (`ψ_s=0.518`): **ε=0.265, ρ̂_θi=0.075, ν_★=0.0124 (low-collisionality
+  banana — York's regime!), η_i=2.16**, inv_Lq=0.716, inv_Ln0=−0.337, from
+  `R₀=1.74 m, B=2.04 T, T_i=2.08 keV, n_i=3.3e19` — every quantity from the SAME
+  equilibrium + `T_i(ψ)/n_i(ψ)`. Assembles into a runnable config. Compare the
+  arbitrary hand-set `_b5_phys` (ε=0.1, ρ̂_θi=0.05, ν_★=0.01, η_i=1): the derived
+  values are genuinely different and physical.
+- **CORRECTION to (cont. 4)**: the a10 "edge-cold T_i→0" was **my unit bug**, not
+  physics — `load_kinetic_profiles` stores `Ti_spline` in **Joules** (`.*eV_to_J`),
+  and I passed that (~3e-16) to `physical_scenario` as if eV, so `T_i_eV≈0`. Fixed
+  (÷e). The a10 profile is warm too; the cold-surface guard (cont. 4) correctly caught
+  the degenerate output either way (defense in depth, kept).
+- **Wired + tested**: `Configure.scenario_from_equilibrium(equil, kp; m, n, w_psi)` —
+  reads only fields off the passed objects (`q_spline`, `rzphi_rsquared`, `eqfun_B`,
+  `ro`, `Ti_spline`, `ni_spline`), so **no Islands→Equilibrium module dependency**;
+  finds `q=m/n`, computes `r_s=⟨√(rzphi_rsquared)⟩_θ`, converts `Ti` J→eV, FD gradients,
+  forwards to `physical_scenario`. Fast **mock-based** unit test (no equilibrium solver
+  in the suite; the real DIII-D ingest is a benchmark). Also found+worked-around a
+  `Ti_deriv` accessor returning 0 (FD gradients used instead).
+- **Next (task #5)**: un-gate B5 on `scenario_from_equilibrium` (physical DIII-D params
+  + `physical_domain`). Producing the actual York threshold number is still Q7-gated
+  (the extraction non-localization), but B5 can now be made physical. Scratch `/tmp`.
+
 ## 2026-07-23 (cont. 4) — Equilibrium ingest works (r_s from the flux surface); it reveals the a10 q=2 surface is EDGE-COLD
 
 - **Moved (user: use the equilibrium code to find r_s)**: validated the full a10 ingest
