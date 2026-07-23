@@ -8,6 +8,31 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont. 4) — Equilibrium ingest works (r_s from the flux surface); it reveals the a10 q=2 surface is EDGE-COLD
+
+- **Moved (user: use the equilibrium code to find r_s)**: validated the full a10 ingest
+  (scratch `/tmp/a10_ingest.jl`): `EquilibriumConfig(inputs["Equilibrium"], dir)` +
+  `setup_equilibrium` + `load_kinetic_profiles`, root-find `q=2`, and **r_s from the
+  flux-surface geometry** — `r_s = ⟨√(rzphi_rsquared(ψ_s,θ))⟩_θ` (`rzphi_rsquared =
+  (R−ro)²+(Z−zo)²`, the distance² from the axis). Result: `R₀=2.005 m`, `B₀=1.0 T`,
+  `q=2` at `ψ_s=0.788`, **`r_s=0.167 m`, `ε=0.083`**; gradients `inv_Lq=1.07`,
+  `inv_Ln0=−3.19`, `η_i=2.29`, `lnΛ=15.96` (cross-checked vs `kp.nui_spline`). The
+  geometry/gradient extraction is **correct and physical**.
+- **BUT the ingest revealed a real problem**: the a10 `q=2` surface is at `ψ=0.79`
+  (near the edge), where `T_i` has dropped to `≲10⁻³` eV (the profile → 0 at the edge;
+  the cubic spline even undershoots slightly negative). So `ρ̂_θi→0` and `ν_★→−∞`
+  (lnΛ goes negative below `~3×10⁻³` eV). **The a10 example's rational surface is
+  edge-cold — not a usable NTM/York scenario as-is** (NTMs are warm core/mid-radius).
+- **Added**: a **cold-surface degeneracy guard** in `physical_scenario` (throws with a
+  clear message if `ν_★`/`ρ̂_θi` come out non-finite/≤0), + a test. configure suite +
+  the new guard test green.
+- **Next (needs a steer)**: the ingest MACHINE is done and validated; the a10 profile
+  is unsuitable at `q=2`. Options: (i) a different LAR/example with a **warm q=2
+  surface** (mid-radius); (ii) scale/replace the a10 kinetic profile; (iii) pick a
+  lower-`q` rational (e.g. `q=3/2` if warmer). Then wire `scenario_from_equilibrium`
+  into the module and un-gate B5. Surfaced to the user. Scratch `/tmp`; guard + LOG
+  committed.
+
 ## 2026-07-23 (cont. 3) — Built the pinned physical scenario (design 10): SI equilibrium/profiles → self-consistent normalized Level-0 vector
 
 - **Moved (user: build the scenario)**: `Configure.physical_scenario(...)` +

@@ -524,5 +524,10 @@ end
         @test_throws ArgumentError Cfg.physical_scenario(; R0=-1.0, r_s=1.0, B=2.0,
             T_i_eV=480.0, n_i=2e18, q_s=2.0, dq_dpsi=4.0, psi_s=0.5, dlnTi_dpsi=-3.0,
             dlnni_dpsi=-2.0, dlnB_dpsi=-0.2, w_psi=0.05)
+        # cold-surface degeneracy guard (T_i→0 at an edge rational, as in the a10 q=2
+        # surface at ψ=0.79): ν_★ blows up ⇒ fail loudly instead of emitting garbage
+        @test_throws ArgumentError Cfg.physical_scenario(; R0=2.0, r_s=0.17, B=1.0,
+            T_i_eV=0.001, n_i=8e17, q_s=2.0, dq_dpsi=2.7, psi_s=0.79, dlnTi_dpsi=-9.0,
+            dlnni_dpsi=-4.0, dlnB_dpsi=0.0, w_psi=0.05)
     end
 end

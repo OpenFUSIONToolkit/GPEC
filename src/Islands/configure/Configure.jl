@@ -171,6 +171,10 @@ function physical_scenario(; R0::Real, r_s::Real, B::Real, T_i_eV::Real, n_i::Re
     inv_Ln0 = psi_s * dlnni_dpsi
     inv_LB = psi_s * dlnB_dpsi
     eta_i = dlnTi_dpsi / dlnni_dpsi
+    # Guard the cold-surface degeneracy: a spline that undershoots to T_i→0 at an
+    # edge rational makes ρ_i→0 and ν_★→∞. Fail loudly rather than emit garbage.
+    (isfinite(nu_star) && nu_star > 0 && isfinite(rho_hat_theta_i) && rho_hat_theta_i > 0) ||
+        throw(ArgumentError("physical_scenario: degenerate output (ρ̂_θi=$rho_hat_theta_i, ν_★=$nu_star) — check T_i (a cold/edge rational surface?) and n_i at ψ_s"))
     return Level0Physics(; epsilon=ε, inv_Lq=inv_Lq, inv_LB=inv_LB, q_s=q_s,
         dq_dpsi=dq_dpsi, w_psi=w_psi, mu0_R=_MU0 * R0, inv_Ln0=inv_Ln0,
         rho_hat_theta_i=rho_hat_theta_i, eta_i=eta_i, nu_star=nu_star, m=m, tau=tau,
