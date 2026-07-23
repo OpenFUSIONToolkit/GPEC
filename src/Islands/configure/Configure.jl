@@ -236,6 +236,12 @@ Because the envelope grows with `nE` (through `ω̂_D ∝ v̂ = √E`), `R` is m
 the same `(y, E)` grid the final grid uses. Use for the resolution-convergence
 `Δ_neo` sweep in place of [`PhaseSpace.resolved_island_grid`], which packs only the
 magnetic island at `x=0`.
+
+**Physical-domain caution**: `Lx = Lx_over_w · w` must stay a **local** matching
+radius `|x| ≲ 0.2–0.3` (`x=(ψ−ψ_s)/ψ_s`, axis at `x=−1`); the default `Lx_over_w=12`
+is only local for a small physical island (`w ≪ 0.05`). Never enlarge `Lx` toward the
+plasma scale to force convergence — fix it at the physical matching radius,
+independent of `w` (design 10, `physical_domain`).
 """
 function drift_island_resolved_grid(phys::Level0Physics; K::Real=8, Lx_over_w::Real=12.0,
     max_ratio::Real=1.3, margin::Real=1.0, nxi::Integer, ny::Integer, nE::Integer,

@@ -460,6 +460,14 @@ Build an [`IslandGrid`](@ref) that resolves an island of **half-width** `w`
 `Δx(0) ≤ w/K`. All other coordinates pass through to the `IslandGrid`
 constructor. Pair with [`is_island_resolved`](@ref) and run every Δ-output at
 `≥ 2` resolutions (vary `nx`/`K`) to confirm convergence.
+
+**Physical-domain caution** (`x = (ψ−ψ_s)/ψ_s`, so the magnetic axis is at
+`x = −1`): this is a **local** layer model, so `Lx = Lx_over_w · w` must stay a
+local matching radius, `|x| ≲ 0.2–0.3` — i.e. `Lx_over_w · w ≪ 1`. A domain with
+`Lx > 1` extends past the plasma (nonexistent flux); "converging" a physics run by
+enlarging `Lx` toward the plasma scale is unphysical (design 10). For a physics
+scan, fix `Lx` at the physical matching radius, independent of `w` — do not scale
+the far field to plasma size.
 """
 function resolved_island_grid(; w::Real, nx::Integer, K::Real=8, Lx_over_w::Real=6.0,
     nxi::Integer, ny::Integer, nE::Integer, y_max::Real, y_c::Real=1.0,

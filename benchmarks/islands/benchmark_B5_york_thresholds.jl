@@ -38,7 +38,11 @@ Flip to `true` only when QUESTIONS Q5 clears the remaining L0 coefficient famili
 """
 const UNGATED = false
 
-# The B5 physics parameter set (eps=0.1, m/n=2/1, tau=1; docs/09 I19/D21 manifest).
+# The B5 physics parameter set (eps=0.1, m/n=2/1, tau=1). PROVISIONAL: these
+# normalized values are hand-set in York's regime (ε=0.1, ν_★=0.01 low-collisionality,
+# ρ̂_θi=ŵ=0.05 ⇒ the threshold regime ŵ/ρ̂_θi=1, η_i=1). They MUST be replaced by the
+# DERIVED, self-consistent vector from the pinned physical scenario (design 10, from
+# the a10 large-aspect example) before this is a trusted York-replication number.
 _b5_phys(variant) = Isl.Configure.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=1.0,
     q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0, rho_hat_theta_i=0.05,
     eta_i=1.0, nu_star=0.01, m=2.0, tau=1.0, variant=variant)
@@ -47,8 +51,13 @@ _b5_phys(variant) = Isl.Configure.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_L
 # Every Level-0 operator coefficient is now cleared (QUESTIONS Q5); the momentum-
 # restoring collision term (F) remains a pending operator addition.
 function _assemble_b5(variant)
-    grid = Isl.PhaseSpace.IslandGrid(; nx=41, nxi=16, ny=17, nE=6, halfwidth_x=8.0,
-        clustering_x=1.2, y_max=1.2, y_c=1.0, clustering_y=0.8, order=4)
+    # PHYSICAL local domain: x=(ψ−ψ_s)/ψ_s, so the axis is at x=−1 — the far field must
+    # be a LOCAL matching radius (|x|≲0.3, a few island widths), never |x|=8 (8× the
+    # plasma, the old value). Pending design-10's physical_domain(scenario), a bounded
+    # |x|<0.25 with the island (ŵ=0.05) resolved. y_max spans the full trapped+forbidden
+    # pitch range (1/b_min=(1+ε)/(1−ε)≈1.22).
+    grid = Isl.PhaseSpace.resolved_island_grid(; w=0.05, nx=41, K=6, Lx_over_w=5.0,
+        nxi=16, ny=17, nE=6, y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
     species = [Isl.SpeciesLists.Species(; name=:i, Z=1.0, m=1.0,
         background=Isl.SpeciesLists.Maxwellian(; n=1.0, T=1.0), role=Isl.SpeciesLists.Bulk)]
     return Isl.Configure.configure_level0(grid, _b5_phys(variant), species)

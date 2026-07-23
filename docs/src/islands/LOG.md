@@ -8,6 +8,41 @@ relevant.
 
 ---
 
+## 2026-07-23 — Physical-parameter audit + cleanup + pinned-scenario plan (user: make everything physical, plan the scenario, explain "resistivity")
+
+- **Audit** (`notes/physical-parameter-audit.md`): the *physics* knobs are York-regime
+  (ε=0.1, q=2, m/n=2/1, τ=1, ν_★=0.01 low-collisionality/banana, ρ̂_θi=0.05 ⇒
+  ρ_i≈2.5e-3 r_s) but the **domains are unphysical everywhere** (`halfwidth_x=6–8` in
+  `x=(ψ−ψ_s)/ψ_s`, i.e. 6–8× the plasma; axis at `x=−1`), there is **no physical-input
+  layer** (ρ̂_θi/ν_★/inv_Ln0/η_i are independent hand-set knobs, not from T_i/B/R/a;
+  `Species` T/n/gradients inert), and **York replication is NOT demonstrated** (B5 is a
+  gated stub).
+- **"Resistivity η" clarified**: `Level0Physics.eta_i` is **η_i = L_n/L_{T_i}** (the ion
+  temperature-gradient ratio, dimensionless, naturally O(1)) — used only in the
+  gradient-drive temperature factor `[1+(E−3/2)η_i]`. It is **not** resistivity; there
+  is **zero resistivity** in the Islands Level-0 drift-kinetic model
+  (`grep resistiv|ohm|spitzer src/Islands` is empty). Resistivity (η~1e-8 Ω·m) lives in
+  the *outer* resistive-MHD region / the classical Δ′ (a separate GPEC path), not here.
+- **Cleanups (committed)**: B5 benchmark domain fixed `halfwidth_x=8` → a physical local
+  `resolved_island_grid` (`Lx=5w=0.25`, `y_max=4.0`), config annotated PROVISIONAL
+  pending the derived scenario; physical-domain **cautions** added to
+  `resolved_island_grid` and `drift_island_resolved_grid` docstrings (`Lx` must stay a
+  local matching radius `|x|≲0.3`, never plasma-scale). Structural/MMS **unit** tests
+  keep their abstract boxes by design (they verify discretization/wiring, not physics;
+  forcing physical values would need the preconditioner throughout and churn 1563
+  coefficient assertions for no gain) — flagged as such, not silently physical.
+- **Pinned-scenario PLAN** (`design/10-physical-scenario.md`): reuse the inbuilt
+  `examples/a10_kinetic_example` (large aspect, q=2, β_N=0.10; EFIT g-file + kinetic
+  profile a10_prof1.txt, n_i=2e18, T_i≈0.5 keV) via `setup_equilibrium`; at the q=2
+  surface derive the **self-consistent** normalized vector (ε, ρ̂_θi=ρ_i q/(ε r_s),
+  ν_★ Braginskii, inv_Ln0, η_i, inv_Lq, ψ̃) from the SAME T_i/n_i/B; a
+  `physical_domain` fixed at a matching radius independent of `w`; then un-gate B5 as
+  the York-replication gate. Reuse existing GPEC kinetic/equilibrium helpers; one
+  `[DERIVED]`+sign-off item (the ρ_θi=ρ_i q/ε LAR relation + ν_★ prefactor).
+- **Next**: build the scenario (design 10) — the missing foundation that makes the
+  `w`-scan and the Q7 far-field/extraction questions physically well-posed. All
+  committed + pushed; grids 63/63 green.
+
 ## 2026-07-22 (cont.) — Far-field DECAY measurement: the response does NOT localize (falsifies the "match the decaying tail" BC premise) — reframes Q7 to a physics fork
 
 - **Measured** (read-only, converged `Lx=20w` solve, `resmax=9e-11`): the perturbation
