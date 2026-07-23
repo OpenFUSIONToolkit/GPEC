@@ -8,6 +8,33 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont. 3) — Built the pinned physical scenario (design 10): SI equilibrium/profiles → self-consistent normalized Level-0 vector
+
+- **Moved (user: build the scenario)**: `Configure.physical_scenario(...)` +
+  `Configure.physical_domain(...)`, with `derivations/physical-scenario.md`
+  (`[DERIVED: 2026-07-23]`). Turns SI quantities at the rational surface
+  (`R₀, r_s, B, T_i, n_i, q, dq/dψ, ψ_s`, log-gradients) into the normalized
+  `Level0Physics` — **every input derived from the SAME `T_i`/`n_i`/`B`/geometry**,
+  closing the audit gap (ρ̂_θi/ν_★/inv_Ln0/η_i were independent hand-set knobs).
+  `physical_domain` = a fixed local matching radius (`|x|≲0.2`, independent of `w`).
+- **Formulas** (standard textbook, NOT the disputed island coefficients): ε=r_s/R₀;
+  v_th=√(2T/m); ρ_i=m_i v_th/(ZeB); ρ_θi=ρ_i q/ε (LAR); ρ̂_θi=ρ_θi/r_s; NRL ν_ii + lnΛ;
+  ν_★=ν_ii R₀q/(ε^{3/2}v_th) (docs/01 §2.3); the ψ-ratio normalizations (inv_Lq,
+  inv_Ln0, η_i, inv_LB) exact per docs/01 §5. Validated: a10-like inputs give ε=0.100,
+  ρ̂_θi=0.045, ν_★=0.34 (the **real** physical value for 0.48 keV/2e18 — honestly more
+  collisional than the artificial 0.01; note inv_Ln0<0, the physical sign the hand-set
+  +1.0 had wrong).
+- **physics-verifier PASS**: every formula a faithful standard relation (NRL ν_ii to
+  0.08%; ν_★ matches L23 Eq. 2.3.40; gradient ratios match docs/01 §5; SI constants
+  correct); the two convention items (v_th factor, ν_ii-vs-ν_jj prefactor) honestly
+  flagged as `[DERIVED]` sign-off targets; no tag cleared, no disputed coefficient
+  hardcoded. Tests: configure 1563/1563 + a new `physical_scenario` testset (14) green.
+- **Next (task #5)**: the real a10 equilibrium ingest (`setup_equilibrium` +
+  `read_kinetic_file` → find q=2 surface → extract the SI inputs) and un-gate B5 as
+  the York-replication gate. The pure `physical_scenario` is ready to receive those
+  numbers; the equilibrium-geometry extraction (`r_s`, gradients at ψ_s) is the
+  remaining API work.
+
 ## 2026-07-23 (cont. 2) — Fix the failing Documentation CI (Documenter cross-references broken by the band-grid docstrings)
 
 - **The Documentation workflow had been red for several commits** — my band-grid

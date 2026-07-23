@@ -47,7 +47,7 @@ import ..Fields: h_profile
 import ..Moments: parallel_current!, delta_moments, channel_decomposition
 import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species, bulk_species
 
-export Level0Physics, configure_level0, delta_outputs
+export Level0Physics, configure_level0, delta_outputs, physical_scenario, physical_domain
 export drift_coefficient_table, drift_island_shift_envelope, drift_island_resolved_grid
 export pitch_diffusivity_profile, pitch_collision_coefficient
 export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
@@ -113,6 +113,85 @@ Base.@kwdef struct Level0Physics
     tau::Float64 = 1.0
     variant::Symbol = :original
     collision_model::Symbol = :chandrasekhar
+end
+
+# ---------------------------------------------------------------------------
+# Physical scenario: derive the normalized Level-0 vector from SI equilibrium +
+# profile quantities at the rational surface (design 10; derivations/physical-scenario.md,
+# [DERIVED]). Standard textbook relations (Larmor radius, banana ν_★) — NOT the
+# disputed island coefficients. The two convention-sensitive items (the v_th factor
+# and the ν_ii prefactor vs L23's ν_jj) are the physics-verifier + sign-off targets.
+# ---------------------------------------------------------------------------
+const _E_CHARGE = 1.602176634e-19      # C
+const _EPS0 = 8.8541878128e-12         # F/m
+const _M_PROTON = 1.67262192369e-27    # kg
+const _MU0 = 1.25663706212e-6          # H/m
+
+"""
+    physical_scenario(; R0, r_s, B, T_i_eV, n_i, q_s, dq_dpsi, psi_s,
+                      dlnTi_dpsi, dlnni_dpsi, dlnB_dpsi, w_psi,
+                      Z=1.0, mass_amu=2.0, m=2.0, tau=1.0, variant=:original,
+                      collision_model=:chandrasekhar) -> Level0Physics
+
+Build a **physically self-consistent** [`Level0Physics`](@ref) from SI equilibrium +
+profile quantities at the rational surface `ψ_s` (`q = q_s`), per
+`derivations/physical-scenario.md` (`[DERIVED]`, design 10). Every normalized input
+is derived from the *same* `T_i`, `n_i`, `B`, geometry — closing the audit gap where
+`ρ̂_θi`/`ν_★`/`inv_Ln0`/`η_i` were independent hand-set knobs. `w_psi` is the island
+half-width (the scan variable). Inputs: `R0`, `r_s`, `B` [T], `T_i_eV` [eV], `n_i`
+[m⁻³], `q_s`, `dq_dpsi`, `psi_s` [Wb/rad], the log-gradients `dln{Ti,ni,B}/dψ`, the
+ion charge `Z` and mass `mass_amu` (proton masses).
+
+The geometry/gradient normalizations (`ε`, `inv_Lq`, `inv_Ln0`, `η_i`) are exact
+ψ-ratios; `ρ̂_θi = ρ_θi/r_s` (`ρ_θi = ρ_i q/ε`) and `ν_★ = ν_ii R₀ q/(ε^{3/2} v_th)`
+use the standard prefactors. `mu0_R = μ₀ R₀` feeds only the absolute `Δ` (a T4
+audit-gated quantity; the `∝1/w` scalings are prefactor-independent).
+"""
+function physical_scenario(; R0::Real, r_s::Real, B::Real, T_i_eV::Real, n_i::Real,
+    q_s::Real, dq_dpsi::Real, psi_s::Real, dlnTi_dpsi::Real, dlnni_dpsi::Real,
+    dlnB_dpsi::Real, w_psi::Real, Z::Real=1.0, mass_amu::Real=2.0, m::Real=2.0,
+    tau::Real=1.0, variant::Symbol=:original, collision_model::Symbol=:chandrasekhar)
+    (R0 > 0 && r_s > 0 && B > 0 && T_i_eV > 0 && n_i > 0) ||
+        throw(ArgumentError("physical_scenario: R0, r_s, B, T_i_eV, n_i must be positive"))
+    m_i = mass_amu * _M_PROTON
+    T_i = T_i_eV * _E_CHARGE                                   # J
+    ε = r_s / R0
+    v_th = sqrt(2 * T_i / m_i)                                 # √(2T/m), matches v̂=v/v_th, F_M=e^{-E}
+    ρ_i = m_i * v_th / (Z * _E_CHARGE * B)                     # thermal Larmor radius
+    ρ_θi = ρ_i * q_s / ε                                       # poloidal (B_θ/B ≈ ε/q, LAR)
+    rho_hat_theta_i = ρ_θi / r_s
+    # NRL ion self-collision frequency (T in eV, n in m⁻³)
+    n_cm3 = n_i * 1e-6
+    lnΛ = 23 - log(Z^3 * sqrt(2 * n_cm3) / T_i_eV^1.5)
+    ν_ii = n_i * Z^4 * _E_CHARGE^4 * lnΛ /
+           (12 * π^1.5 * _EPS0^2 * sqrt(m_i) * T_i^1.5)        # s⁻¹
+    nu_star = ν_ii * R0 * q_s / (ε^1.5 * v_th)                 # banana ν_★ (docs/01 §2.3)
+    # ψ-based gradient normalizations (exact ratios)
+    inv_Lq = psi_s * dq_dpsi / q_s
+    inv_Ln0 = psi_s * dlnni_dpsi
+    inv_LB = psi_s * dlnB_dpsi
+    eta_i = dlnTi_dpsi / dlnni_dpsi
+    return Level0Physics(; epsilon=ε, inv_Lq=inv_Lq, inv_LB=inv_LB, q_s=q_s,
+        dq_dpsi=dq_dpsi, w_psi=w_psi, mu0_R=_MU0 * R0, inv_Ln0=inv_Ln0,
+        rho_hat_theta_i=rho_hat_theta_i, eta_i=eta_i, nu_star=nu_star, m=m, tau=tau,
+        variant=variant, collision_model=collision_model)
+end
+
+"""
+    physical_domain(phys; x_match=0.2) -> Float64
+
+The **fixed physical** far-field matching radius `Lx` (in `x=(ψ−ψ_s)/ψ_s` units) for
+Level-0 physics grids — a local fraction of `r_s` (`|x| ≲ x_match`, well inside the
+plasma `|x|<1`), **independent of the island width `w`** (design 10). Use it for the
+`halfwidth_x`/`Lx` of every physics grid so a `w`-scan is at fixed physical matching
+radius, never a domain scaled to plasma size. Asserts the domain contains the island
+(`x_match > phys.w_psi`).
+"""
+function physical_domain(phys::Level0Physics; x_match::Real=0.2)
+    x_match > phys.w_psi ||
+        throw(ArgumentError("physical_domain: x_match ($x_match) must exceed the island half-width w ($(phys.w_psi))"))
+    x_match < 1 || throw(ArgumentError("physical_domain: x_match ($x_match) must be < 1 (inside the plasma; axis at x=−1)"))
+    return Float64(x_match)
 end
 
 # ---------------------------------------------------------------------------

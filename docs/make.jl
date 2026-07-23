@@ -59,7 +59,8 @@ makedocs(;
                 "Parallel streaming" => "islands/derivations/parallel-streaming.md",
                 "E×B coupling" => "islands/derivations/exb-coupling.md",
                 "Gradient drive" => "islands/derivations/gradient-drive.md",
-                "Passing fraction" => "islands/derivations/passing-fraction.md"
+                "Passing fraction" => "islands/derivations/passing-fraction.md",
+                "Physical scenario" => "islands/derivations/physical-scenario.md"
             ],
             "Paper I — figure contract" => "islands/papers/paper-1/OUTLINE.md",
             "Design documents" => [

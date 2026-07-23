@@ -492,4 +492,37 @@ end
         # the drift islands (near ±Rp) now fall inside the fine band, not the coarse tail
         @test any(x -> abs(abs(x) - Rp) < w, dg.x.nodes)
     end
+
+    @testset "physical_scenario: SI → self-consistent normalized vector (design 10)" begin
+        # a10-like inputs at the q=2 surface (R0/r_s = 10 ⇒ ε=0.1)
+        p = Cfg.physical_scenario(; R0=10.0, r_s=1.0, B=2.0, T_i_eV=480.0, n_i=2e18,
+            q_s=2.0, dq_dpsi=4.0, psi_s=0.5, dlnTi_dpsi=-3.0, dlnni_dpsi=-2.0,
+            dlnB_dpsi=-0.2, w_psi=0.05, Z=1.0, mass_amu=2.0, m=2.0)
+        # exact ψ-ratios and geometry
+        @test p.epsilon ≈ 0.1
+        @test p.q_s == 2.0 && p.dq_dpsi == 4.0
+        @test p.inv_Lq ≈ 0.5 * 4.0 / 2.0                             # (ψ_s/q)dq/dψ
+        @test p.inv_Ln0 ≈ 0.5 * (-2.0)                               # ψ_s·dln n/dψ (negative: decreasing outward)
+        @test p.inv_LB ≈ 0.5 * (-0.2)
+        @test p.eta_i ≈ 1.5                                          # (dlnT/dψ)/(dln n/dψ)
+        @test p.mu0_R ≈ 1.25663706212e-6 * 10.0                      # μ₀R₀
+        # standard physics prefactors: derived from T_i, n_i, B — not hand-set
+        m_i = 2 * 1.67262192369e-27                                  # 2 proton masses
+        v_th = sqrt(2 * 480.0 * 1.602176634e-19 / m_i)
+        ρ_i = m_i * v_th / (1.0 * 1.602176634e-19 * 2.0)            # m_i v_th/(ZeB)
+        @test p.rho_hat_theta_i ≈ (ρ_i * 2.0 / 0.1) / 1.0 rtol = 1e-6   # ρ_i q/ε / r_s
+        @test 0.2 < p.nu_star < 0.5                                  # physical banana ν_★ for 0.48 keV/2e18
+        # it assembles into a runnable Level-0 config
+        sp = _ion()
+        g = PSc.resolved_island_grid(; w=p.w_psi, nx=13, K=5, Lx_over_w=4.0, nxi=8, ny=9,
+            nE=3, y_max=4.0, clustering_y=0.8)
+        @test Cfg.configure_level0(g, p, sp).stack isa Opc.IslandStack
+        # physical_domain: fixed local matching radius, independent of w
+        @test Cfg.physical_domain(p; x_match=0.2) == 0.2
+        @test_throws ArgumentError Cfg.physical_domain(p; x_match=0.03)   # ≤ w
+        @test_throws ArgumentError Cfg.physical_domain(p; x_match=1.5)    # ≥ 1 (past the plasma)
+        @test_throws ArgumentError Cfg.physical_scenario(; R0=-1.0, r_s=1.0, B=2.0,
+            T_i_eV=480.0, n_i=2e18, q_s=2.0, dq_dpsi=4.0, psi_s=0.5, dlnTi_dpsi=-3.0,
+            dlnni_dpsi=-2.0, dlnB_dpsi=-0.2, w_psi=0.05)
+    end
 end
