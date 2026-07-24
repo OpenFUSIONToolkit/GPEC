@@ -1,6 +1,17 @@
 # Derivation — the analytic (drift-orbit-shifted) far-field boundary condition
 
-**Status:** `[DERIVED: 2026-07-17]` — awaiting human sign-off.
+**Status:** `[CLEARED: 2026-07-24]` — human sign-off given on the analytic large-p
+far-field form (the restored `O(ρ̂_θi)` orbit shift and the
+`⟨x_D⟩_θ = ρ̂_θi(σ√E/(1+ε))A(y)` anchor value). Previously `[DERIVED: 2026-07-17]`.
+
+**Note on imposition (numerics, not physics):** the sign-off is on the anchor
+*value* `⟨x_D⟩_θ` and the restored orbit shift. How that value is imposed as a
+boundary condition — a full Dirichlet *value*-pin `(x−⟨x_D⟩)·slope` at both ends
+(the original `:analytic`) vs. a **slope condition with the constant anchored** to
+`⟨x_D⟩` (the L23 `∂ĝ/∂p=0` form, well-posed once the null constant is fixed) — is a
+numerics choice. The value-pin over-constrains the boundary and was observed to stall
+the low-`ν̂` solve (LOG cont. 8); the slope+anchor form is the L23-faithful imposition
+and is being evaluated. Both use the same signed-off `⟨x_D⟩` value.
 
 **Clears / revisits:** the far-field boundary state built by
 `Configure.gradient_far_field` for the `:analytic` mode. It **restores a term the
