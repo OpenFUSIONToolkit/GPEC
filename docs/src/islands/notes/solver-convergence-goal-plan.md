@@ -125,7 +125,7 @@ uncommitted work or without a LOG line.
 - [x] A2 grid-prolongation warm start tried — prolonged nE=3 still fails (1.8e-3), no better than cold ⇒ init-independent
 - [x] Gate A decision recorded — Option A ruled out (not a basin problem); advance to B
 - [x] B1 `y_c` smoothness diagnosed — CONFIRMED non-smooth: trapped brackets MISS→0 erratically (quadrature bug on the integrable turning-point singularity) + genuine T(y) log-divergence at y_c=1. Evidence in LOG cont. 11.
-- [ ] B2a half-angle-substitution bounce quadrature (fixes MISSES; numerics; physics-verifier before commit) — prototyping
+- [x] B2a half-angle-substitution bounce quadrature — IMPLEMENTED; misses 6→1, matches old quadgk to 1e-10, configure suite 1563/1563 green. Improves nE=3 ~10× (1e-4→1e-5) but NOT sufficient alone (nE≥3 still stalls). physics-verifier auditing.
 - [ ] B2b genuine y_c=1 divergence treatment (only if B2a insufficient; physics-adjacent)
 - [ ] Gate B decision recorded
 - [ ] C1 trust-region corrector implemented

@@ -36,6 +36,28 @@ export delta_moment_prefactors
 # b(θ) = B/B_max = (1 − ε cos θ)/(1 + ε); b ∈ [b_min, 1], b_min = b(0), b(π)=1.
 @inline _b(θ, ε) = (1 - ε * cos(θ)) / (1 + ε)
 
+# Trapped bounce integral ∫_{-θb}^{θb} via the half-angle substitution
+# sin(θ/2) = sin(θb/2)·sinφ (φ ∈ [−π/2, π/2]): this removes the integrable
+# 1/√(1−yb) turning-point singularity **analytically**, so adaptive quadrature is
+# robust (no misses) instead of failing on the endpoint singularity. Using
+# 1−yb = yε(cosθ−cosθb)/(1+ε) = (2yε/(1+ε))·k²cos²φ (k = sin(θb/2)):
+#   √(1−yb) = k cosφ·√(2yε/(1+ε)),  dθ/dφ = 2k cosφ/√(1−k²sin²φ),
+# so √(1−yb)·(dθ/dφ) and (dθ/dφ)/√(1−yb) are both bounded (the cosφ cancels).
+# Returns closures `(bφ, sqjac, josv)`: `bφ(φ)=b(θ(φ))`, `sqjac(φ)=√(1−yb)·dθ/dφ`
+# (multiply a bounded integrand's non-`√(1−yb)` part), `josv(φ)=(dθ/dφ)/√(1−yb)`
+# (multiply a `1/√(1−yb)`-singular integrand's regular part). Integrate over
+# [−π/2, π/2] (split at 0) — equal to the θ-integral over [−θb, θb].
+function _bounce_primitives(y::Real, ε::Real)
+    k = sin(acos(clamp((1 - (1 + ε) / y) / ε, -1.0, 1.0)) / 2)
+    c_sq = sqrt(2 * y * ε / (1 + ε))
+    c_jos = sqrt(2 * (1 + ε) / (y * ε))
+    bφ(φ) = _b(2 * asin(clamp(k * sin(φ), -1.0, 1.0)), ε)
+    den(φ) = sqrt(max(1 - k^2 * sin(φ)^2, 0.0))
+    sqjac(φ) = 2 * (k * cos(φ))^2 * c_sq / den(φ)
+    josv(φ) = c_jos / den(φ)
+    return bφ, sqjac, josv
+end
+
 """
     orbit_average_drift_brackets(; y, epsilon, rtol=1e-8)
 
@@ -53,8 +75,10 @@ with `b(θ) = (1−ε cos θ)/(1+ε)`. Returns `(A, G)`.
 **Passing** particles (`y < y_c = 1`): the full poloidal circuit, ``\\tfrac1{2\\pi} \\int_0^{2\\pi}``. **Trapped** particles (`1 < y < (1+ε)/(1−ε)`): the bounce
 integral ``\\tfrac1{2\\pi}\\sum_\\sigma\\int_{-\\theta_b}^{\\theta_b}`` between the
 turning points ``\\cos\\theta_b = [1-(1+ε)/y]/ε``. `G`'s integrand has an
-integrable ``1/\\sqrt{1-yb}`` singularity at the turning points, handled by the
-adaptive quadrature. The signed-off derivation covers the passing drift-island
+integrable ``1/\\sqrt{1-yb}`` singularity at the turning points, removed
+analytically by the half-angle substitution (`_bounce_primitives`) so the
+quadrature is robust (the direct `∫_{-θb}^{θb}` form fails erratically on the
+endpoint singularity). The signed-off derivation covers the passing drift-island
 mechanism; the trapped brackets follow I19's stated ``\\langle\\cdot\\rangle_\\theta``.
 """
 function orbit_average_drift_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
@@ -73,12 +97,14 @@ function orbit_average_drift_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
         A, _ = QuadGK.quadgk(fA, 0.0, 2π; rtol=rtol)
         G, _ = QuadGK.quadgk(fG, 0.0, 2π; rtol=rtol)
         return (A / (2π), G / (2π))
-    else                                      # trapped: bounce integral between turning points
-        cosθb = (1 - (1 + ε) / y) / ε
-        θb = acos(clamp(cosθb, -1.0, 1.0))
-        # (1/2π) Σ_σ ∫_{-θb}^{θb} = (1/π) ∫_{-θb}^{θb} for σ-even integrands; split at 0
-        A, _ = QuadGK.quadgk(fA, -θb, 0.0, θb; rtol=rtol)
-        G, _ = QuadGK.quadgk(fG, -θb, 0.0, θb; rtol=rtol)
+    else                                      # trapped: bounce integral via half-angle substitution
+        # (1/2π) Σ_σ ∫_{-θb}^{θb} = (1/π) ∫_{-θb}^{θb} for σ-even integrands; the
+        # substitution (_bounce_primitives) removes G's turning-point singularity.
+        bφ, sqjac, josv = _bounce_primitives(y, ε)
+        fAφ(φ) = sqjac(φ) / bφ(φ)                         # (√(1−yb)/b)·dθ/dφ
+        fGφ(φ) = ((2 - y * bφ(φ)) / bφ(φ)) * josv(φ)      # ((2−yb)/b)·(dθ/dφ)/√(1−yb)
+        A, _ = QuadGK.quadgk(fAφ, -π / 2, 0.0, π / 2; rtol=rtol)
+        G, _ = QuadGK.quadgk(fGφ, -π / 2, 0.0, π / 2; rtol=rtol)
         return (A / π, G / π)
     end
 end
@@ -131,8 +157,9 @@ diffusivity `P_oa = y·S(y)` (terms D+E); `T` feeds the neoclassical `∂²_p` t
 ``\\tfrac1{2\\pi}\\sum_\\sigma\\int_{-\\theta_b}^{\\theta_b}`` between turning points
 ``\\cos\\theta_b = [1-(1+ε)/y]/ε`` (σ-even integrands ⇒ `/π`). `S`'s integrand is
 **bounded** (no singularity — the mimetic divergence form of D+E never forms `S'`);
-`T` carries the integrable `1/√(1−yb)` turning-point singularity, as the drift
-`G` bracket, handled by the adaptive quadrature.
+`T` carries the integrable `1/√(1−yb)` turning-point singularity, removed
+analytically by the half-angle substitution (`_bounce_primitives`), as the drift
+`G` bracket.
 """
 function orbit_average_pitch_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
     ε = float(epsilon)
@@ -146,11 +173,14 @@ function orbit_average_pitch_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
         S, _ = QuadGK.quadgk(fS, 0.0, 2π; rtol=rtol)
         T, _ = QuadGK.quadgk(fT, 0.0, 2π; rtol=rtol)
         return (S / (2π), T / (2π))
-    else                                      # trapped: bounce integral between turning points
-        cosθb = (1 - (1 + ε) / y) / ε
-        θb = acos(clamp(cosθb, -1.0, 1.0))
-        S, _ = QuadGK.quadgk(fS, -θb, 0.0, θb; rtol=rtol)
-        T, _ = QuadGK.quadgk(fT, -θb, 0.0, θb; rtol=rtol)
+    else                                      # trapped: bounce integral via half-angle substitution
+        # substitution (_bounce_primitives) removes T's turning-point singularity;
+        # S's integrand is bounded. σ-even ⇒ /π.
+        bφ, sqjac, josv = _bounce_primitives(y, ε)
+        fSφ(φ) = sqjac(φ)                                 # √(1−yb)·dθ/dφ
+        fTφ(φ) = josv(φ)                                  # (dθ/dφ)/√(1−yb)
+        S, _ = QuadGK.quadgk(fSφ, -π / 2, 0.0, π / 2; rtol=rtol)
+        T, _ = QuadGK.quadgk(fTφ, -π / 2, 0.0, π / 2; rtol=rtol)
         return (S / π, T / π)
     end
 end

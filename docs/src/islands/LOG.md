@@ -8,6 +8,24 @@ relevant.
 
 ---
 
+## 2026-07-24 (cont. 12) — GOAL LOOP B2a: bounce-substitution implemented — fixes the erratic misses (6→1) and improves nE=3 ~10×, but NOT sufficient alone
+
+Implemented B2a in `Coefficients.jl`: a shared `_bounce_primitives(y,ε)` helper + both
+trapped branches (`orbit_average_drift_brackets`, `orbit_average_pitch_brackets`) now
+use the half-angle substitution `sin(θ/2)=sin(θb/2)sinφ`, removing the integrable
+`1/√(1−yb)` turning-point singularity analytically. Prototype-validated: matches the old
+`quadgk` to ~1e-10 where quadgk converged; smooth, no misses.
+- **Result**: trapped-region misses **6→1** (only `y=1.000`, the genuine `y_c`
+  log-divergence, remains). Cold solve: nE=2 converges (1.1e-11); **nE=3 improves ~10×
+  (1.0e-4→1.01e-5) but still fails**; nE=4/6 unchanged (~4e-3, ~1e-2).
+- **⇒ B2a is a correct fix (removes a real quadrature bug) but NOT sufficient** — the
+  stall persists at nE≥3. Remaining non-smoothness: the genuine `y_c=1` divergence (B2b)
+  and/or the conditioning growth with nE. Committing B2a on its own merit (correctness);
+  physics-verifier auditing concurrently — **revert if it flags an error**.
+- **Next**: evaluate physics-verifier + configure-suite regression; then Gate B: pursue
+  B2b (genuine `y_c` layer treatment — physics-adjacent, York matching/TSVD) or jump to
+  Option C (trust-region), given B2a alone doesn't converge nE≥3.
+
 ## 2026-07-24 (cont. 11) — GOAL LOOP Option B: root cause FOUND — the trapped-region orbit-average brackets are non-smooth (erratic quadrature misses + genuine y_c divergence)
 
 B1 evaluated `orbit_average_drift_brackets` (A,G) and `orbit_average_pitch_brackets`
