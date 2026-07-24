@@ -17,6 +17,7 @@ function power_norm_matrix!(Nmat::AbstractMatrix{ComplexF64}, jmat::AbstractVect
     fill!(Nmat, 0.0 + 0.0im)
     for ipert_n in 1:npert
         off = (ipert_n - 1) * mpert
+        # Toeplitz band index: harmonic difference (m'−m) ∈ [−(mpert−1), mpert−1] maps to 1…2·mpert−1, midpoint mpert = the m=0 Jacobian coefficient
         for ipert_m in 1:mpert, jpert_m in 1:mpert
             Nmat[off+jpert_m, off+ipert_m] = jmat[jpert_m-ipert_m+mpert] / dV_dpsi
         end
