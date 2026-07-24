@@ -8,6 +8,27 @@ relevant.
 
 ---
 
+## 2026-07-24 (cont. 13) — GOAL LOOP Gate B: B2b ruled out (stall not at y_c), and the residual stall is Newton-globalization FRAGILITY → advance to Option C
+
+Routing + Gate-B verification after B2a:
+- **Residual localizes at y=0 (deeply-passing endpoint), NOT y_c** (nE=3 stalled state);
+  the y-nodes straddle y_c (0.977, 1.098) with none on it. ⇒ **B2b (genuine y_c
+  divergence) is NOT the remaining problem** — take it off the table.
+- **Convergence is fragile and config/resolution-dependent (non-monotonic)** even with
+  B2a: hand-set ρ̂_θi=0.05, ny=9 → nE=3 converges (2.2e-9) but nE=4,6 fail (4.5e-3,
+  6.1e-3); DIII-D ε=0.265 ρ̂_θi=0.074 ν_★=0.012, ny=9 → nE=3 fails (4.9e-4) but nE=4
+  converges (2.5e-11). Converges to machine precision for *some* (nE, config) pairs,
+  stalls at ~1e-3 for others — no clean axis.
+- ⇒ this is **Newton globalization robustness** ("sometimes in the basin, sometimes
+  not"), consistent with the whole cont.-9→12 chain (not BC, not collisionality, not
+  the linear preconditioner [exact Newton fails too], not y_c). **Gate B decision:
+  advance to Option C (trust-region / Levenberg–Marquardt damping).**
+- B2a stands as a correct, committed sub-fix (removed the erratic bracket misses); it
+  raised the floor but did not make the solve robust.
+- **Next**: Option C — add a trust-region (LM-damped) corrector to `Solvers.jl` (a new
+  solver option, numerics-only, no physics), test it converges the stalling (nE,config)
+  pairs above to ≤1e-9, then the Closeout (test + both configs + suite).
+
 ## 2026-07-24 (cont. 12) — GOAL LOOP B2a: bounce-substitution implemented — fixes the erratic misses (6→1) and improves nE=3 ~10×, but NOT sufficient alone
 
 Implemented B2a in `Coefficients.jl`: a shared `_bounce_primitives(y,ε)` helper + both
