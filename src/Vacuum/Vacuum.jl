@@ -23,6 +23,35 @@ export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
+# Relative anti-Hermitian residual above which we warn that the vacuum grid should be refined.
+const _WV_HERMITICITY_WARN_TOL = 1e-4
+
+"""
+    _symmetrize_vacuum_energy!(wv)
+
+Enforce Hermiticity of the vacuum energy matrix Wᵛ in place.
+
+Wᵛ is the generator of the vacuum magnetic energy, δW_v = ξ† Wᵛ ξ. Because that energy is a real
+number for every perturbation ξ, the exact operator is Hermitian. The finite-resolution
+boundary-integral quadrature (finite `mtheta`/`nzeta`) breaks exact Hermiticity, leaving a small
+anti-Hermitian residual that is a pure discretization artifact and vanishes as the grid is refined.
+We replace Wᵛ by its Hermitian part to restore this physical property, warning when the residual
+is large enough that the vacuum grid should be refined.
+"""
+function _symmetrize_vacuum_energy!(wv::AbstractMatrix)
+
+    herm_norm = norm(wv + wv')
+    if herm_norm > 0
+        # Relative anti-Hermitian residual ‖½(W−W†)‖/‖½(W+W†)‖
+        rel_residual = norm(wv - wv') / herm_norm
+        if rel_residual > _WV_HERMITICITY_WARN_TOL
+            @warn "Vacuum energy matrix Wᵛ is non-Hermitian above tolerance $(rel_residual) > $(_WV_HERMITICITY_WARN_TOL) before " *
+                  "symmetrization. Increase vacuum grid resolution to reduce it."
+        end
+    end
+    hermitianpart!(wv)
+end
+
 """
     compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
@@ -152,7 +181,9 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
     # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
     wv .= complex.(arr .+ aii, air .- ari)
-    inputs.force_wv_symmetry && hermitianpart!(wv)
+
+    # δW_v = ξ† Wᵛ ξ is real, so Wᵛ must be Hermitian; remove any residual from discretization
+    _symmetrize_vacuum_energy!(wv)
 
     # Fill coordinate arrays
     if inputs.nzeta > 1 # 3D
