@@ -84,8 +84,9 @@ field magnitude, ``B`` is the total field magnitude, ``R`` is the major radius, 
 
 The powers are set automatically from `jac_type` (`EquilibriumConfig` in
 `src/Equilibrium/EquilibriumTypes.jl`) and applied in the field-line Jacobian
-(`direct_fieldline_der!` in `src/Equilibrium/DirectEquilibrium.jl`). Setting `jac_type = "other"`
-lets you specify the four exponents manually.
+(`direct_fieldline_der!` in `src/Equilibrium/DirectEquilibrium.jl`). Setting `jac_type = "custom"`
+lets you specify the four exponents manually via `jac_custom_power_bp`, `jac_custom_power_b`,
+`jac_custom_power_r`, and `jac_custom_power_rc`.
 
 ## Helicity and Handedness
 

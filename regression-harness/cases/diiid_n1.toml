@@ -347,6 +347,19 @@ label = "PE toroidal torque"
 noise_threshold = 1e-12
 order = 94
 
+# NTV (neoclassical toroidal viscosity) torque from the [KineticForces] block —
+# FGAR method, pressure moment. Diagnostic computed on top of the ideal FFS + PE
+# result. Complex total torque stored as [Re, Im]; tracked as a 2-element vector.
+# Absent (N/A) for refs without a [KineticForces] section. Threshold is a noise
+# floor for the adaptive-quadrature result; tune if run-to-run jitter appears.
+[quantities.ntv_torque_fgar]
+h5path = "kinetic_forces/fgar/total_torque"
+type = "real_vector"
+extract = "all_real"
+label = "NTV torque FGAR (Re,Im) [N·m]"
+noise_threshold = 1e-2
+order = 95
+
 # Profiles (checksums)
 [quantities.q_profile]
 h5path = "splines/profiles/q"

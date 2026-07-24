@@ -1,9 +1,11 @@
+# Solovev analytical equilibrium — n=1 ideal stability with calculated kinetic matrices.
+# Exercises the real KineticForces (NTV) physics path at full strength; kinetic regression
+# fixture (et[1]≈1.894-1.525i). The equilibrium is generated analytically from the embedded
+# [SOL_INPUT] section, with n·T tied to the Solovev P₀≈4.27e4 Pa via the local kinetic.dat.
+
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                            # Poloidal field power exponent for Jacobian
-power_b = 0                             # Toroidal field power exponent for Jacobian
-power_r = 0                             # Major radius power exponent for Jacobian
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
 psihigh = 0.9995                        # Upper limit of normalized flux coordinate
@@ -48,6 +50,7 @@ ucrit = 1e3                   # Maximum fraction of solutions allowed before re-
 write_outputs_to_HDF5 = true
 verbose = false
 
+# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
 [SOL_INPUT]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones

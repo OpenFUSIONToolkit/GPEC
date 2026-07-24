@@ -63,8 +63,7 @@ inputs = GeneralizedPerturbedEquilibrium.Vacuum.VacuumInput(
     mpert = 10,               # Number of poloidal modes
     n = 1,                    # Toroidal mode number
     mtheta = 256,             # Number of poloidal grid points
-    kernelsign = 1.0,         # Kernel sign (+1 or -1)
-    force_wv_symmetry = true  # Enforce vacuum matrix symmetry
+    kernelsign = 1.0          # Kernel sign (+1 or -1)
 )
 
 # Define wall settings

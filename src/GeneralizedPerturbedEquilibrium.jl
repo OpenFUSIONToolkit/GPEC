@@ -59,14 +59,15 @@ using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag")
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry")
+const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
-# Drop deprecated [ForceFreeStates] keys so legacy gpec.toml files
-# keep parsing instead of throwing an unknown-keyword error.
-function _drop_deprecated_ffs_keys!(table)
-    for k in _DEPRECATED_FFS_KEYS
+# Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
+# instead of throwing an unknown-keyword error; warn so the removal is not silent.
+function _drop_deprecated_keys!(table, deprecated_keys, section::String)
+    for k in deprecated_keys
         if haskey(table, k)
-            @warn "`$k` in [ForceFreeStates] is deprecated and ignored please remove it from gpec.toml."
+            @warn "`$k` in [$section] is deprecated and ignored; please remove it from gpec.toml."
             delete!(table, k)
         end
     end
@@ -111,6 +112,7 @@ function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothi
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
 
     haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
+    _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
 
     # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
@@ -169,7 +171,7 @@ function main_from_inputs(
     # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
-    _drop_deprecated_ffs_keys!(ffs_table)
+    _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
