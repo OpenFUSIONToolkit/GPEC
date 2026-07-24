@@ -37,7 +37,8 @@ import ..PhaseSpace: IslandGrid, nnodes, MappedFDGrid, resolved_island_grid, dri
 import ..Operators: IslandStack, IslandState, FarFieldConditions,
     ParallelStreaming, MagneticDrift, ExBDrift, PitchAngleDiffusion,
     GradientDrive, Quasineutrality, conservative_pitch_operator,
-    CollisionalDrag, NeoclassicalDiffusion, CollisionalCross, MomentumRestoring
+    CollisionalDrag, NeoclassicalDiffusion, CollisionalCross, MomentumRestoring, statelength
+import ..Solvers: flat_residual, PlaneJacobi, newton_krylov, natural_continuation
 import ..Coefficients:
     magnetic_drift_frequency, orbit_average_drift_brackets, orbit_average_exb_bracket,
     orbit_average_pitch_brackets,
@@ -48,7 +49,7 @@ import ..Moments: parallel_current!, delta_moments, channel_decomposition
 import ..SpeciesLists: Species, Maxwellian, Bulk, validate_species, bulk_species
 
 export Level0Physics, configure_level0, delta_outputs, physical_scenario, physical_domain
-export scenario_from_equilibrium
+export scenario_from_equilibrium, globalized_level0_solve
 export drift_coefficient_table, drift_island_shift_envelope, drift_island_resolved_grid
 export pitch_diffusivity_profile, pitch_collision_coefficient
 export collisional_drag_coefficient, neoclassical_diffusion_coefficient, collisional_cross_coefficient
@@ -972,6 +973,61 @@ function configure_level0(grid::IslandGrid, phys::Level0Physics, species::Abstra
             :neoclassical_diffusion, :collisional_cross, :momentum_restoring, :collision_magnitude,
             :delta_prefactors, :quasineutrality, :gradient_drive, :far_field),
         gated=())
+end
+
+# Reconstruct a Level0Physics with one field replaced (nu_star, for the homotopy).
+_with_nu_star(p::Level0Physics, nu::Real) = Level0Physics(; epsilon=p.epsilon, inv_Lq=p.inv_Lq,
+    inv_LB=p.inv_LB, q_s=p.q_s, dq_dpsi=p.dq_dpsi, w_psi=p.w_psi, mu0_R=p.mu0_R,
+    inv_Ln0=p.inv_Ln0, rho_hat_theta_i=p.rho_hat_theta_i, eta_i=p.eta_i, nu_star=Float64(nu),
+    m=p.m, tau=p.tau, variant=p.variant, collision_model=p.collision_model)
+
+"""
+    globalized_level0_solve(grid, phys, species; farfield_mode=:analytic, nu_boost=100.0,
+                            nsteps=8, u0=nothing, verbose=false, newton_kwargs...)
+
+Solve the Level-0 fixed point at the physical `phys` by **collisionality-homotopy
+globalization** — the warm-start strategy L23 §7.1 uses for `kokuchou` (`kokuchou`
+does not converge from a cold `Φ̂ = 0` start at low `ν_★`/high `ŵ`; it reuses a
+converged state from a nearby, better-conditioned run). The physical solve stalls
+"from any init" for the same reason: at low `ν_★` the `∂ĝ/∂p = 0` far field is
+weakly regularized and the `(x, ξ)`-plane conditioning is severe.
+
+The ramp is over collisionality: at high `ν_star` the `ν̂_ii ρ̂_θi ∂ĝ/∂p` term
+(L23 §2.6 amendment) regularizes the far-field null mode and the problem is
+well-conditioned, so a cold solve converges; the schedule then steps `ν_star`
+**geometrically down** to the physical value, **warm-starting each solve from the
+last converged one** through [`natural_continuation`](@ref). Only `ν_star` is varied
+— every intermediate point is itself a valid (more collisional) physical config, so
+no coefficient is guessed. Pair with `farfield_mode=:analytic` (the drift-shifted,
+well-posed localizing form, QUESTIONS Q7/Q8): globalization is what a cold `:analytic`
+solve on a physical domain lacked.
+
+Returns `(u, converged, nu_path, cont)`: the state at the physical `phys`, whether it
+was reached, the collisionalities actually converged through, and the raw
+[`natural_continuation`](@ref) result. `newton_kwargs` pass through to
+[`newton_krylov`](@ref) (e.g. `rtol`, `atol`, `max_iter`, `memory`).
+"""
+function globalized_level0_solve(grid::IslandGrid, phys::Level0Physics, species::AbstractVector{<:Species};
+    farfield_mode::Symbol=:analytic, nu_boost::Real=100.0, nsteps::Integer=8,
+    u0::Union{Nothing,AbstractVector{Float64}}=nothing, verbose::Bool=false, newton_kwargs...)
+    nu_boost > 1 || throw(ArgumentError("globalized_level0_solve: nu_boost must be > 1 (ramp starts collisional)"))
+    nsteps >= 2 || throw(ArgumentError("globalized_level0_solve: need nsteps ≥ 2"))
+    N = statelength(grid)
+    nu_easy = phys.nu_star * nu_boost
+    nu_of(λ) = nu_easy * (phys.nu_star / nu_easy)^λ             # λ=0 → collisional, λ=1 → physical
+    function solve_at(λ, u_warm)
+        p = _with_nu_star(phys, nu_of(λ))
+        cfg = configure_level0(grid, p, species; farfield_mode=farfield_mode)
+        f! = flat_residual(cfg.stack, grid; bc=cfg.bc)
+        α = 1 / quasineutrality_coefficient(p.tau)
+        pc = PlaneJacobi(cfg.stack, grid, u_warm; bc=cfg.bc, phi_scale=-α)
+        return newton_krylov(f!, u_warm; precond=pc, newton_kwargs...)
+    end
+    ws = collect(range(0.0, 1.0; length=nsteps))
+    uinit = u0 === nothing ? zeros(N) : collect(u0)
+    cont = natural_continuation(ws, solve_at, uinit; verbose=verbose)
+    u = isempty(cont.us) ? uinit : cont.us[end]
+    return (u=u, converged=cont.converged, nu_path=nu_of.(cont.ws), cont=cont)
 end
 
 # ---------------------------------------------------------------------------

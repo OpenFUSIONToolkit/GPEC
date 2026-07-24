@@ -642,6 +642,19 @@ Read L23 §2.3.6/§2.4/§2.5–2.6/§7.1 and Diss19 §4.2 directly (side-by-side
 (3) now (warm-start/continuation), and bring (1)'s analytic large-p form to
 sign-off + physics-verifier before implementing.
 
+**Update (2026-07-23, later) — (3) implemented + tested: it extends the basin but does
+NOT reach the physical target; (1)/(b) is still required.** Built
+`Configure.globalized_level0_solve` (collisionality homotopy warm-start via
+`natural_continuation`; LOG cont. 8). On the DIII-D physical scenario with the
+`:analytic` BC, the cold solve stalls (resmax=2.8e-3) and globalization warm-steps
+`ν̂` down only to **≈0.078** (~16× basin extension) before hitting a **hard wall** —
+it cannot cross `ν̂≈0.07` to the physical `ν̂=0.0124`. So the low-collisionality
+non-convergence is a genuine obstruction, not an init problem: even the drift-shifted
+`:analytic` BC stalls, confirming the **analytic large-p far-field null-mode anchor
+(1)** is the real remaining blocker (the finite-`ν̂` term only partially regularizes
+the winged mode; below `ν̂≈0.07` it is too weak). (3) is now a reusable tool but not
+sufficient alone. Critical path unchanged: (1) [sign-off] + (2)=Q8.
+
 ## Q8 — Clear the drift-island shift structure `x_D = ρ̂_θi ω̂_D L̂_q` (docs/01 §2.2, `[CHECKED]` → sign-off) — OPEN
 
 - **Context (2026-07-20)**: the drift-island **band grid** (`04 §1`; `LOG 2026-07-20`)

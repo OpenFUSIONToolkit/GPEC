@@ -8,6 +8,40 @@ relevant.
 
 ---
 
+## 2026-07-23 (cont. 8) — Globalization (3) implemented + tested: it EXTENDS the basin but does NOT reach the physical target — the low-ν̂ wall confirms (1)/(b) is still required
+
+Implemented the unblocked numerics item (3) from the York ground-truth:
+`Configure.globalized_level0_solve(grid, phys, species; farfield_mode=:analytic,
+nu_boost, nsteps, ...)` — **collisionality-homotopy warm-start** driven through the
+existing `Solvers.natural_continuation`. Ramps `ν_star` geometrically from a
+collisional (well-conditioned) start down to the physical value, warm-starting each
+solve; only `ν_star` varies (every intermediate point is a valid, more-collisional
+physical config — no coefficient guessed). This is exactly L23 §7.1's remedy
+(`kokuchou` warm-starts `Φ̂` from a stable run because it will not converge from
+`Φ̂=0` at low ν_★).
+
+**Empirical result (DIII-D physical scenario, ε=0.265, ρ̂_θi=0.075, ν_★=0.0124,
+`:analytic` BC, bounded box Lx=0.2=4w):**
+- COLD `:analytic`: **not** converged, resmax=2.8e-3 (the familiar stall).
+- GLOBALIZED: converges the collisional end and warm-steps **down to ν̂≈0.078**
+  (~16× extension of the convergent range) then **hits a wall** — sub-step halving
+  cannot cross ν̂≈0.07 to reach ν̂=0.0124.
+- **So (3) helps but does NOT solve the physical target.** The obstruction is a
+  genuine low-collisionality convergence wall, not an init problem — even the
+  `:analytic` (drift-shifted, "well-posed + localizing" by design) BC stalls there.
+  This **confirms the ground-truth**: the remaining blocker is the **(1)/(b)
+  far-field null-mode anchor** (L23 §7.1's analytic large-p form), which the finite-ν̂
+  term was only partially standing in for. Below ν̂≈0.07 that regularization is too
+  weak and the winged/null-mode obstruction returns.
+- **Tests green**: solve suite gains a fast globalization integration test (small
+  known-converging config: reaches the target ν_star, warm-started from collisional;
+  arg guards; `_with_nu_star`) — passes. Configure suite `1563/1563` + physical
+  scenario testset still green with the new `import ..Solvers` (no regression).
+- **Next**: (3) is a reusable tool now in place and will be needed once (1)+(2) land,
+  but it is NOT sufficient alone. The critical path is unchanged: bring the **analytic
+  large-p far-field form** (1) to human sign-off + physics-verifier, and the
+  **drift-shifted radial coordinate** (2 = Q8). Recommend that as the next work.
+
 ## 2026-07-23 (cont. 7) — York ground-truth on the far-field BC + Δ extraction: Q7 fork collapses to (b)
 
 User chose "pin York ground-truth first." Read L23 (§2.3.6/§2.4/§2.5–2.6/§7.1) and

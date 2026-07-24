@@ -233,6 +233,31 @@ _sgrid(n; ny=n) = PS2.IslandGrid(; nx=n, nxi=8, ny=ny, nE=2, halfwidth_x=6.0, cl
         @test_throws ArgumentError So2.PlaneJacobi(g, (iy, iE, iσ) -> zeros(3, 3))   # wrong block size
     end
 
+    @testset "globalized_level0_solve: collisionality homotopy warm-starts to the target ν_star" begin
+        _phys() = Cfg2.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=0.7, q_s=2.0, dq_dpsi=0.8,
+            w_psi=0.5, mu0_R=3.0, inv_Ln0=1.0, rho_hat_theta_i=0.05, eta_i=0.5,
+            nu_star=0.01, m=2.0, tau=1.0, variant=:original)
+        ion = Sp2.Species(; name=:D, Z=1.0, m=1.0, background=Sp2.Maxwellian(; n=1.0, T=1.0, dlnn_dr=-1.0), role=Sp2.Bulk)
+        g = PS2.IslandGrid(; nx=9, nxi=6, ny=11, nE=1, halfwidth_x=6.0, clustering_x=1.0,
+            y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+        phys = _phys()
+
+        # _with_nu_star copies every other field and replaces only nu_star
+        p2 = Cfg2._with_nu_star(phys, 0.5)
+        @test p2.nu_star == 0.5
+        @test p2.epsilon == phys.epsilon && p2.rho_hat_theta_i == phys.rho_hat_theta_i && p2.variant == phys.variant
+
+        @test_throws ArgumentError Cfg2.globalized_level0_solve(g, phys, [ion]; nu_boost=1.0)
+        @test_throws ArgumentError Cfg2.globalized_level0_solve(g, phys, [ion]; nsteps=1)
+
+        # the ramp starts collisional and warm-starts down to the physical nu_star
+        res = Cfg2.globalized_level0_solve(g, phys, [ion]; farfield_mode=:dirichlet,
+            nu_boost=50.0, nsteps=5, rtol=1e-9, atol=1e-12, max_iter=30, memory=150)
+        @test res.converged
+        @test isapprox(last(res.nu_path), phys.nu_star; rtol=1e-6)   # ended at the physical target
+        @test first(res.nu_path) > phys.nu_star                       # started more collisional
+    end
+
     @testset "far-field BCs replace the boundary residual rows (01 §3)" begin
         g = _sgrid(7; ny=7)
         nx, nξ, ny, nE, nσ = PS2.nnodes(g)
