@@ -347,28 +347,26 @@ label = "PE toroidal torque"
 noise_threshold = 1e-12
 order = 94
 
-# NTV (neoclassical toroidal viscosity) torque from the [KineticForces] block —
-# FGAR method, pressure moment. Diagnostic computed on top of the ideal FFS + PE
-# result. Complex total torque stored as [Re, Im]; tracked as a 2-element vector.
-# Absent (N/A) for refs without a [KineticForces] section. Threshold is a noise
-# floor for the adaptive-quadrature result; tune if run-to-run jitter appears.
+# NTV (neoclassical toroidal viscosity) toroidal torque T_φ [N·m] from the
+# [KineticForces] FGAR method (pressure moment) — a diagnostic computed on top of
+# the ideal FFS + PE result. Absent (N/A) for refs without a [KineticForces]
+# section. Threshold is a noise floor for the adaptive-quadrature result; tune if
+# run-to-run jitter appears.
 [quantities.ntv_torque_fgar]
 h5path = "kinetic_forces/fgar/total_torque"
-type = "real_vector"
-extract = "all_real"
-label = "NTV torque FGAR (Re,Im) [N·m]"
+type = "real_scalar"
+extract = "value"
+label = "NTV torque FGAR [N·m]"
 noise_threshold = 1e-2
 order = 95
 
-# NTV kinetic energy δW = Im(T)/(2n) through the same post-PE FGAR path. Stored
-# on disk as [δW, 0] (the imaginary slot is always zero), so only the first
-# element carries information. Derivable from the torque above, but tracked
-# explicitly at a tighter threshold to guard Im(T), which is the component the
+# NTV kinetic energy δW_k = Im(T)/(2n) [J] through the same post-PE FGAR path.
+# Tracked at a tighter threshold — it isolates the energy component the
 # bounce-averaging chain moves most.
 [quantities.ntv_energy_fgar]
 h5path = "kinetic_forces/fgar/total_energy"
-type = "real_vector"
-extract = "real_first"
+type = "real_scalar"
+extract = "value"
 label = "NTV kinetic energy dW FGAR [J]"
 noise_threshold = 1e-3
 order = 96

@@ -462,8 +462,8 @@ Results for one NTV computation method across all flux surfaces.
     method::String = ""
     nn::Int = 0
     torque_profile::Any = nothing     # Interpolant of dT/dψ(ψ) from ψ integration
-    total_torque::ComplexF64 = 0.0 + 0.0im
-    total_energy::ComplexF64 = 0.0 + 0.0im
+    total_torque::ComplexF64 = 0.0 + 0.0im  # complex T: Re = torque T_φ [N·m], Im = 2n·δW_k (Logan 2013 Eq. 19)
+    total_energy::Float64 = 0.0              # real kinetic energy δW_k = Im(T)/(2n) [J]
     records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
     # Per-step ψ profile from outer quadrature
     psi_grid::Vector{Float64} = Float64[]

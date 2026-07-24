@@ -341,7 +341,7 @@ function run_benchmark(fortran_dir::String=DEFAULT_FORTRAN_DIR)
         if haskey(kf_state.method_results, method_key)
             mr = kf_state.method_results[method_key]
             T_julia = real(mr.total_torque)
-            dW_julia = real(mr.total_energy)
+            dW_julia = mr.total_energy
             T_err = abs(T_julia - ref_T) / abs(ref_T) * 100
             dW_err = abs(dW_julia - ref_dW) / abs(ref_dW) * 100
 
