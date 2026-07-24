@@ -8,6 +8,36 @@ relevant.
 
 ---
 
+## 2026-07-24 (cont. 11) — GOAL LOOP Option B: root cause FOUND — the trapped-region orbit-average brackets are non-smooth (erratic quadrature misses + genuine y_c divergence)
+
+B1 evaluated `orbit_average_drift_brackets` (A,G) and `orbit_average_pitch_brackets`
+(S,T) across `y_c=1.0` (`Coefficients.jl`). Findings:
+- **Passing (y<1.0): perfectly smooth**, monotonic A,S,T.
+- **At y_c=1.0/1.02: MISS→0** (a hole at the trapped-passing boundary).
+- **Trapped (y>1.04): erratic + sporadic MISSES→0** at y=1.08, 1.16, 1.20, 1.22, with
+  T(y) spiking non-monotonically (3.68→6.53→5.97→…). The "graceful miss"
+  (`_try_*`→`nothing`→coeff 0) then zeros scattered trapped-region nodes ⇒ a
+  **non-smooth coefficient field** exactly where the physics is stiffest. More `(y,E)`
+  nodes ⇒ more nodes in this zone ⇒ worse Newton convergence — **explains the
+  resolution-dependent stall precisely** (cont. 9/10).
+- **Mechanism** (read `Coefficients.jl:60-156`): both brackets correctly branch
+  passing (`∫₀^{2π}`) / trapped (bounce `∫_{-θb}^{θb}`). Two distinct failures:
+  1. **Quadrature-robustness bug (numerics, fixable):** the trapped `1/√(1−yb)`
+     integrands (G, T) have an **integrable turning-point singularity** at `±θb`;
+     `QuadGK.quadgk(f, -θb, 0, θb)` fails to converge for some `y` → the `try` wrapper
+     returns `nothing`→0 (the scattered MISSES at *finite*-integral `y`). Fix: the
+     standard **half-angle substitution** `sin(θ/2)=sin(θb/2)·sinφ` maps the bounce
+     integral to `∫_{-π/2}^{π/2} …/√(1−k²sin²φ) dφ` with the `1/√` singularity
+     **removed analytically** (same integral, computed robustly). Pure numerics.
+  2. **Genuine `y_c=1` log-divergence (physics):** `T(y)=⟨1/√(1−yb)⟩ → ∞` as `y→1`
+     (near-separatrix layer) — a real singularity the York codes treat specially
+     (I19 y_c matching Eqs A.7–A.10; L23 §4.2 TSVD). Not a quadrature artifact.
+- **Plan**: B2a — implement the half-angle-substitution bounce quadrature (fixes the
+  MISSES; pure numerics, but coefficient-valued ⇒ **physics-verifier before commit**).
+  B2b — the genuine `y_c` divergence, only if B2a is insufficient (physics-adjacent →
+  QUESTIONS/derivation if the treatment is uncertain). Prototyping B2a now in scratch
+  (confirm smooth + matches quadgk where quadgk works) before touching `src`.
+
 ## 2026-07-24 (cont. 10) — GOAL LOOP: Option A ruled out (the stall is init-independent) → advancing to B (y_c smoothness)
 
 Goal-mode loop on `notes/solver-convergence-goal-plan.md` (converge the physical

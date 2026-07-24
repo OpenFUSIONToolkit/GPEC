@@ -124,8 +124,9 @@ uncommitted work or without a LOG line.
 - [~] A1 same-grid coefficient homotopy — SKIPPED (A2 showed init-independence; A1 would hit the same λ=1 wall). Revisit only if B+C fail.
 - [x] A2 grid-prolongation warm start tried — prolonged nE=3 still fails (1.8e-3), no better than cold ⇒ init-independent
 - [x] Gate A decision recorded — Option A ruled out (not a basin problem); advance to B
-- [ ] B1 `y_c` smoothness diagnosed (jump confirmed/denied, with evidence)
-- [ ] B2 `y_c` treatment fix derived + physics-verifier PASS + implemented
+- [x] B1 `y_c` smoothness diagnosed — CONFIRMED non-smooth: trapped brackets MISS→0 erratically (quadrature bug on the integrable turning-point singularity) + genuine T(y) log-divergence at y_c=1. Evidence in LOG cont. 11.
+- [ ] B2a half-angle-substitution bounce quadrature (fixes MISSES; numerics; physics-verifier before commit) — prototyping
+- [ ] B2b genuine y_c=1 divergence treatment (only if B2a insufficient; physics-adjacent)
 - [ ] Gate B decision recorded
 - [ ] C1 trust-region corrector implemented
 - [ ] C2 tested on nE=3,4,6 + both physical scenarios
