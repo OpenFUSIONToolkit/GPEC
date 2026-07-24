@@ -21,8 +21,10 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
     for (method_name, result) in state.method_results
         mg = create_group(g, method_name)
         mg["nn"] = result.nn
-        mg["total_torque"] = [real(result.total_torque), imag(result.total_torque)]
-        mg["total_energy"] = [real(result.total_energy), imag(result.total_energy)]
+        # Torque and kinetic energy are the two real physical quantities packed into the
+        # complex T (Re = T_φ, Im = 2n·δW_k); store each once as a real scalar.
+        mg["total_torque"] = real(result.total_torque)
+        mg["total_energy"] = result.total_energy
         mg["psi_nsteps"] = result.psi_nsteps
 
         # Per-ψ torque profiles from quadrature evaluation points.

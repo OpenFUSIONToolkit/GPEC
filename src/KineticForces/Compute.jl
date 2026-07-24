@@ -216,9 +216,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             end
         end
 
-        # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k, both real quantities.
-        # Store δW in Re slot so downstream code uses real(total_energy).
-        total_energy = complex(imag(total_torque) / (2 * ctrl.nn), 0.0)
+        # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k. δW_k is real.
+        total_energy = imag(total_torque) / (2 * ctrl.nn)
 
         result_entry = MethodResult(;
             method=method,
