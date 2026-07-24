@@ -8,6 +8,25 @@ relevant.
 
 ---
 
+## 2026-07-24 (cont. 10) — GOAL LOOP: Option A ruled out (the stall is init-independent) → advancing to B (y_c smoothness)
+
+Goal-mode loop on `notes/solver-convergence-goal-plan.md` (converge the physical
+`nE≥3` solve). **Option A — resolution/continuation — is ruled out:**
+- **A2 grid-prolongation** (the decisive diagnostic): solve `nE=2` (converges,
+  resmax 2.3e-12), interpolate that state onto the `nE=3` energy grid, warm-start the
+  `nE=3` Newton. Result: **prolonged `nE=3` still fails (resmax 1.8e-3) — no better
+  than cold (1.0e-4), slightly worse.** A near-optimal init does not cross the wall.
+- ⇒ **the stall is initialization-independent** → not a basin problem → no
+  continuation path (A1 coefficient-homotopy included — it hits the same intrinsic
+  `nE=3` problem at λ=1) will cross it. Gate A: **advance to Option B.** (A1 not
+  separately run; revisit only if B and C both fail.)
+- This *reinforces* the cont.-9 conclusion (nonlinear-iteration wall, not linear/init):
+  the prolonged init sits at resmax~1e-3 and Newton cannot descend below the ~1e-3
+  plateau from a good starting point — the fingerprint of a **non-smooth residual**,
+  which is exactly Option B (`y_c`-layer coefficient discontinuity).
+- Next: B1 — diagnose `y_c` smoothness (evaluate the orbit-average brackets +
+  coefficients across `y_c`; confirm/deny a jump). No physics change yet.
+
 ## 2026-07-24 (cont. 9) — REFRAME: the resmax~1e-3 stall is a SOLVER/preconditioner robustness problem, NOT the far-field BC — sign-off recorded, then isolated the real axis
 
 - **Recorded the human sign-off** on the analytic large-p far-field

@@ -121,9 +121,9 @@ uncommitted work or without a LOG line.
 
 ## Progress checklist (update every iteration)
 
-- [ ] A1 same-grid coefficient homotopy implemented + tested
-- [ ] A2 grid-prolongation warm start tried (if A1 insufficient)
-- [ ] Gate A decision recorded
+- [~] A1 same-grid coefficient homotopy — SKIPPED (A2 showed init-independence; A1 would hit the same λ=1 wall). Revisit only if B+C fail.
+- [x] A2 grid-prolongation warm start tried — prolonged nE=3 still fails (1.8e-3), no better than cold ⇒ init-independent
+- [x] Gate A decision recorded — Option A ruled out (not a basin problem); advance to B
 - [ ] B1 `y_c` smoothness diagnosed (jump confirmed/denied, with evidence)
 - [ ] B2 `y_c` treatment fix derived + physics-verifier PASS + implemented
 - [ ] Gate B decision recorded
