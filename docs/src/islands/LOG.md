@@ -35,13 +35,40 @@ relevant.
   drift coordinate (item 2 = Q8) remain correct localization physics, but they cannot
   make the solve converge because the convergence wall is upstream, in the
   nonlinear-solver/preconditioner.
-- **Next (recommended)**: attack solver robustness directly — (a) strengthen the
-  preconditioner (the `PlaneJacobi` (x,ξ)-plane blocks may need the y/E coupling or a
-  better `svd_cutoff`; measure `cond(M⁻¹J)` across the stalling configs), and/or
-  (b) use `newton_direct` (exact-Jacobian, already in `Solvers.jl`) as the solve on
-  small physical grids where it's affordable — the LOG noted it also crawls, so (a)
-  is the likelier fix. QUESTIONS Q7 updated: the localization items are downgraded
-  from "the blocker" to "needed but not sufficient"; the blocker is the solver.
+- **SHARPENED (same day, conditioning + solver diagnostics) — it is a NONLINEAR
+  Newton-convergence wall, NOT the preconditioner:**
+  - `cond(J)` at the stalling config is only **~1e5** (σ_min~2e-4, **not**
+    near-singular → no null mode) — and is **the same for stall and converge** (w=0.05
+    stalls, w=0.03 converges, both cond(J)~2e5). Raw conditioning does not explain it.
+  - **`PlaneJacobi` is nearly inert on physical resolved grids** — `cond(M⁻¹J)`
+    reduction is **≤2.3×** (sometimes <1×, i.e. it makes it worse), vs the advertised
+    >1000× it gives only in the special high-`ρ̂_θi`/`w=0.5` regime it was tuned on.
+  - **`cond(J)` grows ~4× per energy node** (nE sweep: 8.9e3→3.1e4→1.2e5→4.6e5 for
+    nE=1,2,3,4); cold convergence flips at **nE=3** (cond crosses ~1e5).
+  - **DECISIVE**: `newton_direct` (exact ForwardDiff Jacobian + exact dense LU solve —
+    `dense_jacobian` is exact duals, not FD) **also fails, and worse** — it fails even
+    at nE=2 where inexact `newton_krylov` converges to 1e-12 (nE=2/3/4/6 resmax
+    1.1e-2/6.7e-2/2.3/5.7). An *exact* linear solve does no better ⇒ **the blocker is
+    not the linear preconditioner/conditioning at all; it is the nonlinear Newton
+    iteration**, which stalls at resmax~1e-2–1e-3 from the cold init and worsens with
+    resolution (nE, ny). (This contradicts the `newton_direct` docstring claim that the
+    exact solve converges "regardless of conditioning" — true only in the `cond~1e9`
+    high-`ρ̂_θi` regime, false on physical resolved grids — flag to fix.)
+  - **Most likely cause** (worsens with resolution near the `y_c` layer): a **non-smooth
+    residual** from the `y_c`-layer "graceful miss" coefficient discontinuities
+    (`_try_drift_brackets`/`_try_pitch_brackets` return `nothing`→coeff 0 as a node
+    crosses `y_c`) and/or the boundary/forbidden-row replacements — Newton's quadratic
+    convergence breaks on a kinked residual, and more `(y,E)` nodes near `y_c` ⇒ more
+    kinks ⇒ worse. Inexact Krylov's truncated GMRES acts as implicit damping, which is
+    why it sometimes beats the exact step.
+- **Next (recommended)**: (a) test whether **resolution/parameter continuation**
+  (warm-start nE=3 from the nE=2 solution — reuse the `globalized_level0_solve`
+  machinery but continue in resolution, not `ν̂`) crosses the wall → distinguishes a
+  basin/init problem from a fundamental non-smoothness; (b) audit the `y_c`-layer
+  coefficient handling for smoothness (a `C⁰`/`C¹` blend across `y_c` instead of the
+  hard `nothing`→0 drop); (c) consider a trust-region globalization instead of Armijo
+  line search. NOT more preconditioner or far-field work. QUESTIONS Q7: localization
+  items are "needed but not sufficient"; the blocker is the nonlinear solve.
 - Scratch diagnostics under `/tmp` (not committed); the reusable
   `globalized_level0_solve` + its test stay (they're correct machinery, just aimed at
   the wrong axis — a `w`- or exact-Jacobian-continuation variant is the likely reuse).

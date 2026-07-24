@@ -647,13 +647,18 @@ NOT the far-field.** Cold-solve diagnostics (LOG cont. 9) show the resmax~1e-3 s
 **BC-independent** (`:analytic` and `:dirichlet` both stall), **grid-independent** (band
 and plain both), **collisionality-independent** (stalls even at the easy `ν̂=0.5`), and
 **not a clean `w` axis** (`w=0.5…0.05` stall, `w=0.03` converges to 1e-11 —
-non-monotonic). The system is solvable (1e-11 when it works), so this is
-**matrix-free Newton–Krylov + `PlaneJacobi` robustness**, upstream of localization.
-⇒ items (1) [signed off] and (2) [Q8 drift coord] are **needed but not sufficient**:
-they are the correct localization physics but cannot make the solve converge. The
-milestone blocker is now the **nonlinear solver/preconditioner**, not this Q7 far-field
-decision. Next: strengthen `PlaneJacobi` (measure `cond(M⁻¹J)` across stalling configs)
-and/or use `newton_direct` where affordable.
+non-monotonic). The system is solvable (1e-11 when it works), so this is a **nonlinear
+Newton-convergence** problem, upstream of localization. Sharpened by conditioning +
+solver diagnostics: `cond(J)~1e5` (not near-singular, same for stall and converge);
+`PlaneJacobi` reduces it only ≤2.3× on physical grids; and **`newton_direct` (exact
+Jacobian + exact LU) also fails, worse, even at nE=2 where inexact Krylov converges** —
+so it is **not** the linear preconditioner/conditioning, it is the **nonlinear Newton
+iteration** stalling at resmax~1e-2–1e-3 and worsening with resolution (likely `y_c`-layer
+residual non-smoothness). ⇒ items (1) [signed off] and (2) [Q8 drift coord] are
+**needed but not sufficient**: correct localization physics, but they cannot make the
+solve converge. The milestone blocker is the **nonlinear solve** (globalization /
+`y_c` smoothness / trust-region), not this Q7 far-field decision. Next: resolution
+continuation (warm-start nE=3 from nE=2), audit `y_c` coefficient smoothness.
 
 **Update (2026-07-23, later) — (3) implemented + tested: it extends the basin but does
 NOT reach the physical target; (1)/(b) is still required.** Built
