@@ -642,6 +642,19 @@ Read L23 §2.3.6/§2.4/§2.5–2.6/§7.1 and Diss19 §4.2 directly (side-by-side
 (3) now (warm-start/continuation), and bring (1)'s analytic large-p form to
 sign-off + physics-verifier before implementing.
 
+**Update (2026-07-24) — REFRAME: the solve stall is a preconditioner-robustness problem,
+NOT the far-field.** Cold-solve diagnostics (LOG cont. 9) show the resmax~1e-3 stall is
+**BC-independent** (`:analytic` and `:dirichlet` both stall), **grid-independent** (band
+and plain both), **collisionality-independent** (stalls even at the easy `ν̂=0.5`), and
+**not a clean `w` axis** (`w=0.5…0.05` stall, `w=0.03` converges to 1e-11 —
+non-monotonic). The system is solvable (1e-11 when it works), so this is
+**matrix-free Newton–Krylov + `PlaneJacobi` robustness**, upstream of localization.
+⇒ items (1) [signed off] and (2) [Q8 drift coord] are **needed but not sufficient**:
+they are the correct localization physics but cannot make the solve converge. The
+milestone blocker is now the **nonlinear solver/preconditioner**, not this Q7 far-field
+decision. Next: strengthen `PlaneJacobi` (measure `cond(M⁻¹J)` across stalling configs)
+and/or use `newton_direct` where affordable.
+
 **Update (2026-07-23, later) — (3) implemented + tested: it extends the basin but does
 NOT reach the physical target; (1)/(b) is still required.** Built
 `Configure.globalized_level0_solve` (collisionality homotopy warm-start via

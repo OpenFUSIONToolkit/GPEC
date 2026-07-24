@@ -8,6 +8,44 @@ relevant.
 
 ---
 
+## 2026-07-24 (cont. 9) — REFRAME: the resmax~1e-3 stall is a SOLVER/preconditioner robustness problem, NOT the far-field BC — sign-off recorded, then isolated the real axis
+
+- **Recorded the human sign-off** on the analytic large-p far-field
+  (`analytic-far-field.md` → `[CLEARED: 2026-07-24]`; distinguished the signed-off
+  anchor *value* `⟨x_D⟩` from the numerics of *how* it's imposed).
+- **Then isolated the actual blocker with cold-solve diagnostics** (node freed up):
+  - **BC- and grid-independent**: at a *collisional* `ν̂=0.5` (the easy regime),
+    cold Newton–Krylov stalls at resmax~1e-3 for **all four** of
+    {band, plain} × {`:analytic`, `:dirichlet`} — none converge. So the stall is
+    **not** the far-field form and **not** the band grid.
+  - **Not a clean `w` axis either**: holding everything fixed and sweeping `w`
+    (identical grids in `w`-normalized units), `w=0.5,0.3,0.2,0.1,0.05` all stall
+    (resmax 1e-3–1e-4) but `w=0.03` converges to **1.06e-11**. Non-monotonic,
+    config-sensitive — rules out `w`, collisionality, BC, grid-type, box-size as the
+    axis.
+  - **Conclusion**: the persistent "crawls to resmax~1e-3 from any init" (LOG cont.
+    2–3, e69b7b65) is a **matrix-free Newton–Krylov + `PlaneJacobi` preconditioner
+    robustness problem** — the preconditioned operator stays too ill-conditioned for
+    GMRES to push most configs below ~1e-3 (the Newton line search then stagnates),
+    while a lucky config reaches machine precision. The system is **solvable** (1e-11
+    when it works), so it is not inconsistent — it is solver robustness.
+- **This reframes the milestone blocker.** Several sessions (and my collisionality
+  homotopy, cont. 8) targeted the far-field/localization; the diagnostics say that is
+  *not* what's stalling the solve. The far-field anchor (item 1, signed off) and the
+  drift coordinate (item 2 = Q8) remain correct localization physics, but they cannot
+  make the solve converge because the convergence wall is upstream, in the
+  nonlinear-solver/preconditioner.
+- **Next (recommended)**: attack solver robustness directly — (a) strengthen the
+  preconditioner (the `PlaneJacobi` (x,ξ)-plane blocks may need the y/E coupling or a
+  better `svd_cutoff`; measure `cond(M⁻¹J)` across the stalling configs), and/or
+  (b) use `newton_direct` (exact-Jacobian, already in `Solvers.jl`) as the solve on
+  small physical grids where it's affordable — the LOG noted it also crawls, so (a)
+  is the likelier fix. QUESTIONS Q7 updated: the localization items are downgraded
+  from "the blocker" to "needed but not sufficient"; the blocker is the solver.
+- Scratch diagnostics under `/tmp` (not committed); the reusable
+  `globalized_level0_solve` + its test stay (they're correct machinery, just aimed at
+  the wrong axis — a `w`- or exact-Jacobian-continuation variant is the likely reuse).
+
 ## 2026-07-23 (cont. 8) — Globalization (3) implemented + tested: it EXTENDS the basin but does NOT reach the physical target — the low-ν̂ wall confirms (1)/(b) is still required
 
 Implemented the unblocked numerics item (3) from the York ground-truth:
