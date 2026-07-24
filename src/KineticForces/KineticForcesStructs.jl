@@ -95,13 +95,10 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     nn::Int = 1                     # Toroidal mode number
     nl::Int = 1                     # Bounce harmonic number
 
-    # Tolerances — debug defaults looser than Fortran PENTRC.
-    # *_xlmda: shared tolerances for inner λ (pitch) and x (energy) integrations
-    # *_psi:   tolerances for outer ψ quadrature
+    # Integration tolerances (loose debug defaults). _xlmda: inner λ (pitch) + x (energy); _psi: outer ψ.
     atol_xlmda::Float64 = 1e-8     # Absolute tolerance for inner pitch + energy integrations
     rtol_xlmda::Float64 = 1e-5     # Relative tolerance for inner pitch + energy integrations
-    # atol_psi=1e-2 N·m is small compared to typical tokamak torques (1-10 N·m) — one
-    # of the main benefits of QuadGK over ODE is that tolerances are physically intuitive.
+    # atol_psi is in N·m (QuadGK tolerances are physically intuitive, unlike the ODE path).
     atol_psi::Float64 = 1e-2       # Absolute tolerance for outer ψ quadrature
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
 
@@ -209,9 +206,8 @@ this struct.
     hint2d_eqfun_B::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
     hint2d_rzphi_jac::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 
-    # Upper ψ bound set by DCON/FFS (from ForceFreeStatesInternal.psilim).
-    # The perturbation interpolants are only valid on [0, psilim]; extrapolation
-    # beyond diverges. The outer ψ quadrature clips to this to match Fortran PENTRC.
+    # Upper ψ bound (FFS psilim); the perturbation interpolants are invalid beyond it,
+    # so the outer ψ quadrature clips here.
     psilim::Float64 = 1.0
 
     # Pre-allocated θ-grid buffers for `tpsi!` — length mthsurf+1, reused per evaluation.
@@ -254,10 +250,7 @@ the equilibrium geometry parameters needed for NTV calculations.
 function KineticForcesInternal(equil; verbose::Bool=false)
     mthsurf = length(equil.rzphi_ys) - 1
     nth = mthsurf + 1
-    # Toroidal field at the magnetic axis, which normalizes λ = μ·bo/E: F_spline
-    # stores 2πF (F = R·B_t), so |F_spline(0)|/(2π·ro) = F(0)/ro, the same
-    # normalization as Fortran PENTRC. params.b0 is the edge-extrapolated vacuum
-    # field and differs by ~2%.
+    # Axis toroidal field F(0)/ro that normalizes λ = μ·bo/E; F_spline stores 2πF.
     bo_axis = abs(equil.profiles.F_spline(0.0)) / (2π * equil.ro)
     KineticForcesInternal(;
         ro      = equil.ro,
@@ -374,11 +367,8 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
         ymat = reshape(ymat_flat, mpert, mpert)
         zmat = reshape(zmat_flat, mpert, mpert)
 
-        # Apply geometric matrices in m-space (Fortran set_peq lines 854-857).
-        # Fortran xs_m(1)=∂ξ^ψ/∂ψ (xmp1), xs_m(2)=ξ^ψ (xsp), xs_m(3)=ξ^α (xms).
-        #   jbb_kapx = smat · xs_m(2) + tmat · xs_m(3) = smat·xsp + tmat·xms
-        #   jbb_divx = xmat · xs_m(1) + ymat · xs_m(2) + zmat · xs_m(3)
-        #            = xmat·xmp1 + ymat·xsp + zmat·xms
+        # Apply geometric matrices in m-space. xs_m ordering: (1)=∂ξ^ψ/∂ψ, (2)=ξ^ψ, (3)=ξ^α.
+        #   jbb_kapx = smat·xsp + tmat·xms;  jbb_divx = xmat·xmp1 + ymat·xsp + zmat·xms
         mul!(jbb_kapx, smat, xsp)
         mul!(jbb_kapx, tmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)   # += tmat * xms
         mul!(jbb_divx, xmat, xmp1)
