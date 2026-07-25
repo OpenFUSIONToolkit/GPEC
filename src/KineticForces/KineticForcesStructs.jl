@@ -221,9 +221,8 @@ this struct.
     hint2d_eqfun_B::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
     hint2d_rzphi_jac::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 
-    # Upper ψ bound set by DCON/FFS (from ForceFreeStatesInternal.psilim).
-    # The perturbation interpolants are only valid on [0, psilim]; extrapolation
-    # beyond diverges. The outer ψ quadrature clips to this to match Fortran PENTRC.
+    # Upper ψ bound (FFS psilim); the perturbation interpolants are invalid beyond it,
+    # so the outer ψ quadrature clips here.
     psilim::Float64 = 1.0
 
     # Rational-surface ψ locations for ψ-quadrature paneling (see docstring).
@@ -269,9 +268,11 @@ the equilibrium geometry parameters needed for NTV calculations.
 function KineticForcesInternal(equil; verbose::Bool=false)
     mthsurf = length(equil.rzphi_ys) - 1
     nth = mthsurf + 1
+    # Axis toroidal field F(0)/ro that normalizes λ = μ·bo/E; F_spline stores 2πF.
+    bo_axis = abs(equil.profiles.F_spline(0.0)) / (2π * equil.ro)
     KineticForcesInternal(;
         ro      = equil.ro,
-        bo      = equil.params.b0,
+        bo      = bo_axis,
         chi1    = 2π * equil.psio,
         mthsurf,
         tpsi_xs       = collect(range(0.0, 1.0, length=nth)),
@@ -328,16 +329,15 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     psi_grid = pe_state.psi_grid
     npsi = length(psi_grid)
     mpert = ffs_intr.mpert
-    chi1 = kf_intr.chi1
 
     # Build xs_m: 3 CubicSeriesInterpolants from Clebsch displacement matrices
     # xs_m[1] = ξ^ψ (unregularized), xs_m[2] = ∂ξ^ψ/∂ψ (regularized), xs_m[3] = ξ^α
-    # Note: clebsch_alpha is stored as ξ^α/χ₁, multiply by chi1 to get ξ^α
     itp_opts = (; extrap=ExtendExtrap())
+    # clebsch_alpha is already the physical ξ^α = xms/χ₁ (as Fortran gpout_xclebsch writes it); use directly.
+    clebsch_alpha_mat = xi_modes.clebsch_alpha
     xs_m_1 = cubic_interp(psi_grid, Series(xi_modes.clebsch_psi); itp_opts...)
     xs_m_2 = cubic_interp(psi_grid, Series(xi_modes.clebsch_psi1); itp_opts...)
-    clebsch_alpha_raw = xi_modes.clebsch_alpha .* chi1
-    xs_m_3 = cubic_interp(psi_grid, Series(clebsch_alpha_raw); itp_opts...)
+    xs_m_3 = cubic_interp(psi_grid, Series(clebsch_alpha_mat); itp_opts...)
     kf_intr.xs_m = [xs_m_1, xs_m_2, xs_m_3]
 
     # Build geometric matrices (S,T,X,Y,Z) for JBB deweighting
@@ -374,7 +374,7 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
         # Get Clebsch displacement vectors at this ψ
         xsp  = view(xi_modes.clebsch_psi,  ipsi, :)       # ξ^ψ [mpert]
         xmp1 = view(xi_modes.clebsch_psi1, ipsi, :)       # ∂ξ^ψ/∂ψ [mpert]
-        xms  = view(clebsch_alpha_raw, ipsi, :)            # ξ^α [mpert]
+        xms  = view(clebsch_alpha_mat, ipsi, :)            # ξ^α [mpert]
 
         # Evaluate geometric matrices at ψ → mpert² flat vectors, reshape to mpert×mpert
         geom_mats.smats(smat_flat, psi; hint=hint_s)
@@ -389,11 +389,8 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
         ymat = reshape(ymat_flat, mpert, mpert)
         zmat = reshape(zmat_flat, mpert, mpert)
 
-        # Apply geometric matrices in m-space (Fortran set_peq lines 854-857).
-        # Fortran xs_m(1)=∂ξ^ψ/∂ψ (xmp1), xs_m(2)=ξ^ψ (xsp), xs_m(3)=ξ^α (xms).
-        #   jbb_kapx = smat · xs_m(2) + tmat · xs_m(3) = smat·xsp + tmat·xms
-        #   jbb_divx = xmat · xs_m(1) + ymat · xs_m(2) + zmat · xs_m(3)
-        #            = xmat·xmp1 + ymat·xsp + zmat·xms
+        # Apply geometric matrices in m-space. xs_m ordering: (1)=∂ξ^ψ/∂ψ, (2)=ξ^ψ, (3)=ξ^α.
+        #   jbb_kapx = smat·xsp + tmat·xms;  jbb_divx = xmat·xmp1 + ymat·xsp + zmat·xms
         mul!(jbb_kapx, smat, xsp)
         mul!(jbb_kapx, tmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)   # += tmat * xms
         mul!(jbb_divx, xmat, xmp1)
@@ -477,8 +474,8 @@ Results for one NTV computation method across all flux surfaces.
     method::String = ""
     nn::Int = 0
     torque_profile::Any = nothing     # Interpolant of dT/dψ(ψ) from ψ integration
-    total_torque::ComplexF64 = 0.0 + 0.0im
-    total_energy::ComplexF64 = 0.0 + 0.0im
+    total_torque::ComplexF64 = 0.0 + 0.0im  # complex T: Re = torque T_φ [N·m], Im = 2n·δW_k (Logan 2013 Eq. 19)
+    total_energy::Float64 = 0.0              # real kinetic energy δW_k = Im(T)/(2n) [J]
     records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
     # Per-step ψ profile from outer quadrature
     psi_grid::Vector{Float64} = Float64[]

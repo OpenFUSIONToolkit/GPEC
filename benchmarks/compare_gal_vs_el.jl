@@ -3,7 +3,7 @@
 #
 # EL :  ξ_EL(ψ)  = U_EL(ψ) · (U_EL_edge \ w)          (fundamental matrix, integration/xi_psi)
 # gal:  ξ_gal(ψ) = U_gal(ψ) · w                       (identity-at-edge ⇒ coefficient is w itself)
-# w = eigenvector of the total energy operator W = W_plasma + W_vacuum (FreeBoundaryStability/XiNorm).
+# w = eigenvector of the total energy operator W = W_plasma + W_vacuum (FreeBoundaryStability).
 #
 # Needs ONE gpec.h5 from a run with populate_dense_xi=true (EL dense u_store), gal_match_flag=true,
 # gal_ideal_flag=true (gal ideal matched), vac_flag=true (energy operator).
@@ -19,8 +19,8 @@ ksel = length(ARGS) >= 3 ? ARGS[3] : "highest"
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
 et, wt, u1, psiE, gxi, psiG, issing, mlow, sing_psi = h5open(h5path) do f
-    (to_c(read(f["FreeBoundaryStability/XiNorm/eigenmode_energies"])),
-        to_c(read(f["FreeBoundaryStability/XiNorm/W_freeboundary_eigenmodes"])),
+    (to_c(read(f["FreeBoundaryStability/eigenmode_energies"])),
+        to_c(read(f["FreeBoundaryStability/W_freeboundary_eigenmodes"])),
         to_c(read(f["integration/xi_psi"])), read(f["integration/psi"]),
         to_c(read(f["galerkin/match/xi"])), read(f["galerkin/solution/psi"]),
         Bool.(read(f["galerkin/solution/issing"])), read(f["info/mlow"]),
