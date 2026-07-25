@@ -642,6 +642,20 @@ Read L23 §2.3.6/§2.4/§2.5–2.6/§7.1 and Diss19 §4.2 directly (side-by-side
 (3) now (warm-start/continuation), and bring (1)'s analytic large-p form to
 sign-off + physics-verifier before implementing.
 
+**Update (2026-07-24, goal-loop close) — the blocker is likely a DISCRETIZATION
+INCONSISTENCY for the hard configs, not a solver problem.** After exhausting the solver
+options (LOG cont. 14): B2a bounce-substitution (committed) fixed the erratic trapped-
+bracket misses; but 3 of 5 physical `nE≥3, ny=9` configs still plateau at resmax ~1e-3,
+hit by `newton_krylov`, `newton_direct` (exact Jacobian + LU), AND `newton_lm` (proper
+`‖F‖²`-descent LM) alike — and NOT iteration-limited (max_iter=120). Three independent
+solvers hitting the same floor ⇒ the discretized system is probably slightly
+**inconsistent** for those configs (no exact root below ~1e-3) — a formulation/BC issue
+(candidate: over-determined interaction of the far-field row replacement + forbidden-`y`
+pinning + the operator for certain grids), NOT solver convergence. `newton_psitc`/`newton_lm`
+were tried and dropped (inferior to krylov). **Next investigator**: measure `min_u ‖F(u)‖`
+for a stalling config (LM least-squares floor) — if bounded away from 0 with a structured
+residual, it confirms inconsistency and localizes the offending rows.
+
 **Update (2026-07-24) — REFRAME: the solve stall is a preconditioner-robustness problem,
 NOT the far-field.** Cold-solve diagnostics (LOG cont. 9) show the resmax~1e-3 stall is
 **BC-independent** (`:analytic` and `:dirichlet` both stall), **grid-independent** (band

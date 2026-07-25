@@ -128,7 +128,7 @@ uncommitted work or without a LOG line.
 - [x] B2a half-angle-substitution bounce quadrature — IMPLEMENTED; misses 6→1, matches old quadgk to 1e-10, configure suite 1563/1563 green. Improves nE=3 ~10× (1e-4→1e-5) but NOT sufficient alone (nE≥3 still stalls). physics-verifier auditing.
 - [~] B2b genuine y_c=1 divergence treatment — RULED OUT: the nE=3 stall residual localizes at y=0 (passing endpoint), not y_c; convergence is config/resolution-fragile, not a y_c artifact.
 - [x] Gate B decision recorded — B2a is a correct sub-fix but not sufficient; the residual stall is Newton-globalization fragility ⇒ advance to Option C (trust-region).
-- [ ] C1 trust-region corrector implemented
-- [ ] C2 tested on nE=3,4,6 + both physical scenarios
-- [ ] Gate C decision recorded
-- [ ] Closeout: test added, suite green, both configs, LOG/QUESTIONS/push done
+- [x] C1 trust-region correctors implemented — newton_psitc (pseudo-transient) AND newton_lm (dense Levenberg–Marquardt), both tested.
+- [x] C2 tested on nE=3,4,6 + both scenarios — psitc fails (−F not a descent dir); LM stalls 1.5e-4 (worse than krylov). Both dropped (inferior dead-ends).
+- [x] Gate C decision recorded — Option C exhausted; well-resourced krylov (max_iter=120) still stalls 3/5 goal configs at a ~1e-3 floor (NOT iteration-limited).
+- [~] Closeout: GOAL NOT MET. B2a landed + committed (real bug fix). Loop stopped per Gate C with an evidence-backed hand-off (LOG cont. 14). NEW lead: the ~1e-3 floor hit by krylov+direct+LM alike suggests a discretization INCONSISTENCY for the hard configs (formulation/BC), not a solver issue — the next investigator should measure whether min‖F‖ is bounded away from 0 for a stalling config.

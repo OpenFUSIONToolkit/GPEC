@@ -8,6 +8,45 @@ relevant.
 
 ---
 
+## 2026-07-24 (cont. 14) — GOAL LOOP CLOSED: Option C exhausted; the hard configs plateau at ~1e-3 (likely a discretization inconsistency, not a solver problem) → stop with evidence
+
+Ran the full plan. **Goal NOT met** (3 of 5 physical `nE≥3, ny=9` configs still stall);
+loop stopped per Gate C ("problem deeper than the three options → record evidence, stop").
+
+- **Option C (trust-region) tried in two forms, both inferior to `newton_krylov`:**
+  - `newton_psitc` (pseudo-transient, `(I/Δτ+J)δ=−F`): **fails** — `−F` is not a `‖F‖`
+    descent direction, so the naive full step diverges (resmax→1e3) and the
+    step-rejecting/monotone form exhausts damping to `dtau_min` and stalls (1.3).
+  - `newton_lm` (dense Levenberg–Marquardt, `(JᵀJ+μI)δ=−JᵀF`, a genuine `‖F‖²`
+    descent): **stalls at 1.5e-4** — *worse* than krylov, which converges the same
+    config (ny=7 nE=3) to 3e-12.
+  - Both `newton_psitc`/`newton_lm` were implemented + tested, then **dropped** (not
+    committed — inferior dead-ends; recoverable from this session's transcript if a
+    future need arises). Numerics-only, so no physics touched.
+- **Well-resourced `newton_krylov` (max_iter=120, memory=400) is the best solver, but
+  does NOT meet the goal:** hand-set nE=3 ✓ (2.2e-9) but nE=4 ✗ (1.4e-3, hit 120),
+  nE=6 ✗ (3.6e-3); DIII-D nE=3 ✗ (2.6e-4) but nE=4 ✓ (2.5e-11, 34 iters). The failing
+  configs **plateau at ~1e-3 after hitting the 120-iter cap — NOT iteration-limited**
+  (some configs, e.g. ny=7 nE=3, WERE iteration-limited and converge at max_iter=40;
+  these are not). Convergence flips between the two physics configs with **no clean
+  predictor** (not N, not nE).
+- **Leading hypothesis for future work (NEW):** the same ~1e-3 residual floor is hit by
+  `newton_krylov`, `newton_direct` (exact Jacobian + exact LU), AND `newton_lm` (proper
+  descent) — three independent solvers cannot all be "not converging" the same way. This
+  strongly suggests the **discretized system is slightly INCONSISTENT for the hard
+  configs** (no exact root below ~1e-3), i.e. a **formulation/BC issue**, not a solver
+  issue — e.g. an over-determined interaction between the far-field row replacement,
+  the forbidden-`y` pinning, and the operator for certain `(config, nE)` grids. Next
+  investigator should check the residual *floor* directly: is `min_u ‖F(u)‖` bounded
+  away from 0 for a stalling config (inconsistent), or is it a basin issue? A least-
+  squares (`newton_lm`) minimum that is O(1e-3) with a structured residual would
+  confirm inconsistency and localize the offending rows.
+- **Net gains this loop (kept, committed, pushed):** B2a bounce-substitution
+  (real quadrature bug fix, physics-verifier PASS); a thorough elimination of far-field,
+  collisionality, preconditioner, `y_c`, and continuation as the cause; and the sharp
+  reframe that the blocker is a config-dependent nonlinear-convergence floor likely
+  rooted in discretization consistency. Milestone plan checklist closed.
+
 ## 2026-07-24 (cont. 13) — GOAL LOOP Gate B: B2b ruled out (stall not at y_c), and the residual stall is Newton-globalization FRAGILITY → advance to Option C
 
 Routing + Gate-B verification after B2a:
