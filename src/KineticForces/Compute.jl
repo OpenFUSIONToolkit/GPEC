@@ -69,6 +69,8 @@ NamedTuple with:
 - `matrix_integrated`: Trapezoidal-integrated mpert×mpert×6 matrix (if matrix method)
 - `psi_nsteps::Int`: Number of integrand evaluations
 - `psi_quad_error::Float64`: Quadrature error estimate for the total torque
+- `panel_psis::Vector{Float64}`: Quadrature panel boundaries actually used (bounds + interior resonant surfaces)
+- `resonance_psis::Vector{Float64}`: Located kinetic-resonance ψ surfaces (Ω_ℓ(x=1)=0), for diagnostics/plotting
 
 The integral is paneled at the rational-surface ψ locations (`intr.sing_psis`) and capped
 at `ctrl.maxevals_psi` evaluations; a warning is emitted if the quadrature fails to reach
@@ -113,9 +115,8 @@ function integrate_psi_quadgk(
         for k in eachindex(x)
             psi = Float64(x[k])
 
-            if is_matrix_method && !isnothing(wtw_l)
-                wtw_l .= 0
-            end
+            # wtw_l is re-zeroed per bounce harmonic below (before every tpsi! fill), so no
+            # per-ψ reset is needed here; elems_accum accumulates those fills for this ψ node.
             elems_accum = is_matrix_method ? zeros(ComplexF64, mpert, mpert, 6) : nothing
 
             total = ComplexF64(0.0)

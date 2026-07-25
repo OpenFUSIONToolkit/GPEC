@@ -48,6 +48,11 @@ const NODE_NOISE_REL = 1e-8
 # Per-quantity target spacing clamp (ψ_N units)
 const H_TARGET_MIN = 1e-4
 const H_TARGET_MAX = 0.2
+# Model-region splits (ψ_N): below CORE the analytic axis power-law model *replaces* measured
+# curvature (smallest-surface nodal data is integration/extrapolation noise); above EDGE the
+# separatrix log model *floors* it. Values also referenced in the module and _knot_density docstrings.
+const CORE_MODEL_PSI_MAX = 0.03
+const EDGE_MODEL_PSI_MIN = 0.9
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
 # Local density elevation around mandatory (rational) surfaces: knot spacing h_s = coef·τ^(1/3)
@@ -135,7 +140,7 @@ function _density_from_curvature!(rho::Vector{Float64}, d4::Vector{Float64}, f_s
 end
 
 """
-    _knot_density(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[]) -> Vector{Float64}
+    _knot_density(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[], sing_pack_coef=SING_PACK_COEF) -> Vector{Float64}
 
 Knot density ρ(ψ) (knots per unit ψ_N) at the pass-1 nodes `equil.profiles.xs`, combining
 by max:
@@ -214,9 +219,9 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
     # extrapolation error, so measured curvature is not trusted below the core split.
     dlog = (4.0 * tau)^(1 / 3)
     @inbounds for i in 1:n
-        if xs[i] <= 0.03
+        if xs[i] <= CORE_MODEL_PSI_MAX
             rho_s[i] = 1.0 / (dlog * xs[i])
-        elseif xs[i] >= 0.9
+        elseif xs[i] >= EDGE_MODEL_PSI_MIN
             rho_s[i] = max(rho_s[i], 1.0 / (dlog * (1.0 - xs[i])))
         end
         rho_s[i] = max(rho_s[i], 1.0 / H_TARGET_MAX)
