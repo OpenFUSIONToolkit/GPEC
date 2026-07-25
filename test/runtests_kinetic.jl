@@ -385,22 +385,22 @@
     end
 
     @testset "kinetic resonance node scan" begin
-        # Synthetic frequency closures with analytically known Ω_ℓ(x=1) = 0 locations:
-        # constant ω_b, ω_d and linear ω_E(ψ) = a − b·ψ give ψ_ℓ = (a + ω_d + ℓ·ω_b/n)/b.
-        # Constants chosen so no zero falls exactly on a grid node (strict sign change).
+        # Synthetic frequency closures with analytically known Ω_ℓ(x=1) = 0 locations (evaluated
+        # at xeval=1 to keep the closed form): constant ω_b, ω_d and linear ω_E(ψ) = a − b·ψ give
+        # ψ_ℓ = (a + ω_d + ℓ·ω_b/n)/b. Constants chosen so no zero falls exactly on a grid node.
         grid = collect(range(0.0, 1.0; length=101))
         wb0, wd0, a, b = 0.1, 0.05, 0.5037, 1.0
         wbhat_f = _ -> wb0
         wdhat_f = _ -> wd0
         welec_f = psi -> a - b * psi
-        nodes = sort(KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=2))
+        nodes = sort(KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=2, xeval=1.0))
         @test length(nodes) == 5
         @test isapprox(nodes, [0.3537, 0.4537, 0.5537, 0.6537, 0.7537]; atol=1e-10)
         # nl = 0 reduces to the ω_d-shifted ExB resonance alone
-        nodes0 = KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=0)
+        nodes0 = KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=0, xeval=1.0)
         @test isapprox(nodes0, [0.5537]; atol=1e-10)
         # No crossings when ω_E never approaches the resonance condition
-        @test isempty(KF._resonance_nodes_from_frequencies(wbhat_f, _ -> 10.0, wdhat_f, grid; n=1, nl=2))
+        @test isempty(KF._resonance_nodes_from_frequencies(wbhat_f, _ -> 10.0, wdhat_f, grid; n=1, nl=2, xeval=1.0))
     end
 
     @testset "check_psi_quadrature_convergence" begin
