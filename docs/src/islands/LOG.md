@@ -27,8 +27,24 @@ Executing `notes/a1-a5-structural-diagnostic-plan.md` on the pinned stalling con
   Jacobian and `b` the drive; the homogeneous case (`b=0`) is fine, so the question is
   narrowed to: **is the drive `b ∈ range(A)`?** (A `b` with a component in `coker(A)`
   makes `A u = b` inconsistent — the floor). Step 3 (coker(J)/least-squares projection at
-  N=6570) is running to settle it. Verdict pending Step 3; A5 already rules out the
-  homogeneous-assembly bug branch.
+  N=6570) settles it below.
+- **Step 3 (coker/consistency) — the inconsistency hypothesis is REFUTED.** At the stall
+  config: `J` is **full rank** (nkept 6570/6570 down to σ/σmax>1e-12; σmin=3.7e-4,
+  cond=5.3e5), and the drive `b` is **entirely in `range(J)`: ‖b_out‖/‖b‖ = 4e-15**
+  (machine zero) at every rank cutoff ⇒ `A u = b` is **consistent**, NOT inconsistent
+  (the LOG cont. 14 hypothesis is wrong). BUT the linearity check
+  `‖(F(2u)−F0)−2(F(u)−F0)‖/‖F(u)−F0‖ = 2.0e-3` (at u~1e-3) shows the system is **weakly
+  nonlinear** — an O(1) quadratic coupling (the self-consistent E×B: Φ-from-`g` advecting
+  `g`) — and that magnitude **matches the ~1e-3 stall floor**. ⇒ **VERDICT N (not
+  structural): the floor is a genuine NONLINEAR-convergence problem at the O(1)
+  driven-solution scale, not a discretization inconsistency.** The discretization is
+  sound (A5 clean, full-rank, consistent).
+- **Concrete lead this surfaces (untried):** continue in the **drive amplitude
+  `inv_Ln0`: 0→1**, warm-starting from the trivial homogeneous `u=0` (converges in 6
+  iters). Option A earlier tried continuation in `ν̂` and grid-prolongation, NOT in the
+  drive strength — yet the drive is exactly what turns the trivial problem into the hard
+  one. This is the plan's decision-tree branch "discretization sound ⇒ a proper physics
+  continuation is justified." Testing now.
 
 ## 2026-07-24 (cont. 14) — GOAL LOOP CLOSED: Option C exhausted; the hard configs plateau at ~1e-3 (likely a discretization inconsistency, not a solver problem) → stop with evidence
 
