@@ -91,9 +91,5 @@ f0type = "maxwellian"                   # Equilibrium distribution
 moment = "pressure"                     # Pressure-moment NTV torque
 atol_xlmda = 1e-9                       # Inner pitch/energy integration tolerances
 rtol_xlmda = 1e-5
-atol_psi = 1e-2                         # Outer psi quadrature tolerances (relaxed from 1e-3:
-rtol_psi = 1e-2                         # NTV torque integrand has sharp resonant peaks at rational
-                                        # surfaces; tight tol over-refines. Proper fix = panel the
-                                        # psi-integral at rationals (deferred follow-up).
 write_outputs_to_HDF5 = true
 verbose = true
