@@ -8,6 +8,28 @@ relevant.
 
 ---
 
+## 2026-07-25 — A1/A5 STRUCTURAL DIAGNOSTIC (step back to the ladder): A5 PASSES — the stall is DRIVE-specific, not a homogeneous-operator bug
+
+Executing `notes/a1-a5-structural-diagnostic-plan.md` on the pinned stalling config
+(hand-set ρ̂_θi=0.05, ny=9, nE=4, N=6570) + converging control (nE=3, N=4950).
+
+- **A5 (zero-drive null) PASSES on the stalling config.** Setting `inv_Ln0=0` zeros both
+  the far field (`g_far ∝ inv_Ln0`) and the quasineutrality source (`S_Φ ∝ inv_Ln0`) ⇒ a
+  purely homogeneous system (exact solution `U≡0`). Results (stall nE=4):
+  full-drive `residual(0)`max=1.48 (the drive, expected); **A5.1 zero-drive
+  `residual(0)`max = 0.00e+00** (machine zero — no spurious source term); **A5.2
+  homogeneous solve → resmax 1.85e-11, ‖u‖ 1.6e-8, in 6 iters** (converges cleanly to 0).
+  Same on the nE=3 control. ⇒ **the operator+BC assembly is consistent & non-singular
+  for the homogeneous problem** even where the driven solve stalls.
+- **Consequence**: the ~1e-3 floor is introduced **only by the physical drive**
+  (`inv_Ln0=1`: `g_far ∝ x`, `S_Φ ∝ (x−ĥ)`), not by the operator/BC machinery. Since the
+  kinetic operators are ~linear in `g`, `F(u) = A u − b` with `A` the (near-constant)
+  Jacobian and `b` the drive; the homogeneous case (`b=0`) is fine, so the question is
+  narrowed to: **is the drive `b ∈ range(A)`?** (A `b` with a component in `coker(A)`
+  makes `A u = b` inconsistent — the floor). Step 3 (coker(J)/least-squares projection at
+  N=6570) is running to settle it. Verdict pending Step 3; A5 already rules out the
+  homogeneous-assembly bug branch.
+
 ## 2026-07-24 (cont. 14) — GOAL LOOP CLOSED: Option C exhausted; the hard configs plateau at ~1e-3 (likely a discretization inconsistency, not a solver problem) → stop with evidence
 
 Ran the full plan. **Goal NOT met** (3 of 5 physical `nE≥3, ny=9` configs still stall);
