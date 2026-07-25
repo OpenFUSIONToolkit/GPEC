@@ -45,6 +45,8 @@ const CUBIC_DERIV_ERR_CONST = 24.0
 # (a-priori floors carry those regions instead).
 const D4_NOISE_FLOOR = 1e3
 const NODE_NOISE_REL = 1e-8
+# Floor on a channel's value-scale, so an all-zero profile/geometry channel cannot divide by zero
+const F_SCALE_FLOOR = 1e-12
 # Per-quantity target spacing clamp (ψ_N units)
 const H_TARGET_MIN = 1e-4
 const H_TARGET_MAX = 0.2
@@ -175,14 +177,14 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
     # 1D profiles
     for spl in (equil.profiles.F_spline, equil.profiles.P_spline, equil.profiles.dVdpsi_spline, equil.profiles.q_spline)
         vals = spl.y
-        f_scale = max(maximum(abs, vals), 1e-12)
+        f_scale = max(maximum(abs, vals), F_SCALE_FLOOR)
         _density_from_curvature!(rho_r, _fourth_derivative_nodes(rs, vals), f_scale, tau; xs=rs)
     end
 
     # 2D geometry channels: per-θ-line curvature along ρ, max over θ, plane-wide scale
     for interp in (equil.rzphi_rsquared, equil.rzphi_offset, equil.rzphi_nu, equil.rzphi_jac)
         vals2d = @view interp.nodal_derivs.partials[1, :, :]
-        f_scale = max(maximum(abs, vals2d), 1e-12)
+        f_scale = max(maximum(abs, vals2d), F_SCALE_FLOOR)
         for itheta in 1:THETA_STRIDE:size(vals2d, 2)
             _density_from_curvature!(rho_r, _fourth_derivative_nodes(rs, @view(vals2d[:, itheta])), f_scale, tau; xs=rs)
         end
@@ -194,7 +196,7 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
         rho_kin = zeros(Float64, length(kin.xs))
         for spl in (kin.ni_spline, kin.ne_spline, kin.Ti_spline, kin.Te_spline, kin.omegaE_spline)
             vals = spl.y
-            f_scale = max(maximum(abs, vals), 1e-12)
+            f_scale = max(maximum(abs, vals), F_SCALE_FLOOR)
             _density_from_curvature!(rho_kin, _fourth_derivative_nodes(rs_kin, vals), f_scale, tau; xs=rs_kin)
         end
         kin_itp = cubic_interp(rs_kin, rho_kin; extrap=ExtendExtrap())
