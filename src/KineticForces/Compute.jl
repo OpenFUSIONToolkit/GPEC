@@ -10,21 +10,26 @@ using adaptive Gauss-Kronrod quadrature at all levels (ψ, λ, energy).
 # Adaptive Gauss-Kronrod ψ integration via QuadGK.BatchIntegrand
 # ============================================================================
 
+# Minimum ψ separation for quadrature panel boundaries: interior points closer than this to
+# each other or to a domain bound are merged/dropped, so coincident rational and kinetic-
+# resonance surfaces do not create degenerate (near-zero-width) Gauss-Kronrod panels.
+const PANEL_MERGE_ATOL = 1e-8
+
 """
     psi_panel_points(interior, x0, xout) → Vector{Float64}
 
 Build the ψ-quadrature node list `[x0, interior points strictly inside (x0, xout), xout]`.
 `interior` is the raw union of resonant-surface locations (rational surfaces ∪ kinetic
-resonances); this function owns the ordering: sort, drop near-duplicates (< 1e-8 apart,
-e.g. a kinetic resonance coinciding with a rational), and drop points within 1e-8 of a
-bound to avoid degenerate panels. Paneling the integral at these surfaces puts the
-resonant torque-density peaks (reg_spot/collisionally broadened, but narrow in ψ) on
-Gauss-Kronrod interval endpoints, which the rule handles natively instead of hunting them
-by adaptive bisection.
+resonances); this function owns the ordering: sort, drop near-duplicates (closer than
+`PANEL_MERGE_ATOL`, e.g. a kinetic resonance coinciding with a rational), and drop points
+within `PANEL_MERGE_ATOL` of a bound to avoid degenerate panels. Paneling the integral at
+these surfaces puts the resonant torque-density peaks (reg_spot/collisionally broadened, but
+narrow in ψ) on Gauss-Kronrod interval endpoints, which the rule handles natively instead of
+hunting them by adaptive bisection.
 """
 function psi_panel_points(interior::Vector{Float64}, x0::Float64, xout::Float64)
-    pts = sort(filter(p -> x0 + 1e-8 < p < xout - 1e-8, interior))
-    deduped = [p for (i, p) in enumerate(pts) if i == 1 || p - pts[i-1] > 1e-8]
+    pts = sort(filter(p -> x0 + PANEL_MERGE_ATOL < p < xout - PANEL_MERGE_ATOL, interior))
+    deduped = [p for (i, p) in enumerate(pts) if i == 1 || p - pts[i-1] > PANEL_MERGE_ATOL]
     return [x0; deduped; xout]
 end
 
@@ -180,8 +185,9 @@ function integrate_psi_quadgk(
         end
     end
 
-    n_rational = count(p -> x0 + 1e-8 < p < xout - 1e-8, intr.sing_psis)
-    n_resonance = count(p -> x0 + 1e-8 < p < xout - 1e-8, resonance_psis)
+    in_span(p) = x0 + PANEL_MERGE_ATOL < p < xout - PANEL_MERGE_ATOL
+    n_rational = count(in_span, intr.sing_psis)
+    n_resonance = count(in_span, resonance_psis)
     @info "ψ torque quadrature ($method): T=$total N·m, error estimate $quad_err, $npts integrand evaluations over " *
           "$(length(pts) - 1) panels ($n_rational rational + $n_resonance kinetic resonance surfaces)"
 
