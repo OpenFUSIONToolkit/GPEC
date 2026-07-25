@@ -290,11 +290,11 @@ using TOML
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             # Apply the two-pass auto grid exactly as the main driver does (the example ships
-            # grid_type="auto", mpsi=0): singular-layer knot ladder + measured-curvature
-            # refinement, re-formed from the captured ingest. The pinned values below are for
-            # this grid, which is the production default.
+            # grid_type="auto", mpsi=0): measured-curvature refinement with rational surfaces
+            # pinned as mandatory knots, re-formed from the captured ingest. The pinned values
+            # below are for this grid, which is the production default.
             if GeneralizedPerturbedEquilibrium.Equilibrium.wants_two_pass(eq_config)
-                mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_ladder(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high, singfac_min=ctrl.singfac_min)
+                mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
                 psi_nodes = GeneralizedPerturbedEquilibrium.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
                 rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
                 equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
@@ -497,11 +497,11 @@ using TOML
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        # Apply the two-pass auto grid (singular-layer knot ladder + curvature refinement)
-        # exactly as the main driver does (see the FM testset above); the pinned values below
-        # are for this grid, the production default.
+        # Apply the two-pass auto grid (measured-curvature refinement, rational surfaces pinned
+        # as mandatory knots) exactly as the main driver does (see the FM testset above); the
+        # pinned values below are for this grid, the production default.
         if GeneralizedPerturbedEquilibrium.Equilibrium.wants_two_pass(eq_config)
-            mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_ladder(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high, singfac_min=ctrl.singfac_min)
+            mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
             psi_nodes = GeneralizedPerturbedEquilibrium.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
             rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
@@ -544,20 +544,20 @@ using TOML
         end
 
         # Pinned diagonal `delta_prime_matrix` REAL parts, PEST3-convention self-response Δ' from
-        # the STRIDE BVP with vacuum coupling, on the two-pass auto grid with the singular-layer
-        # knot ladder (`rational_psi_ladder`). The ladder pins a τ-invariant stencil straddling
-        # each rational, which makes Δ' grid-robust: a psi_accuracy scan (2e-3→2.5e-4) holds
-        # dpm[1,1] to ~4% and dpm[2,2]/dpm[3,3] to <1%, versus ~30% swings without it. These
-        # values match the finer ldp mpsi=512 grid (dpm[1,1]≈8.48); ldp mpsi=256 undershoots
-        # (≈7.28) because it under-resolves the rationals. Only real parts are pinned — the
-        # imaginary parts are dominated by the PEST3 four-term cancellation and are FP/platform-
-        # sensitive — at rtol=0.1, which covers the residual grid dependence and that cancellation.
-        # Near-separatrix surfaces q=5,6 keep only the finiteness/non-zero checks above (their real
-        # part and sign still fluctuate O(1) with grid). Values use this testset's mode range
-        # (mpert=27, vs full-pipeline mpert=35, so they differ slightly).
-        @test isapprox(real(dpm[1, 1]), +8.402503e+00; rtol=1e-1)   # q=2
-        @test isapprox(real(dpm[2, 2]), -5.802715e+00; rtol=1e-1)   # q=3
-        @test isapprox(real(dpm[3, 3]), -1.597267e+01; rtol=1e-1)   # q=4
+        # the STRIDE BVP with vacuum coupling, on the two-pass auto grid (rational surfaces pinned
+        # as mandatory knots). These pin the value at the default psi_accuracy on a fixed grid so
+        # the test catches unintended changes; they are NOT converged Δ'. The ideal-MHD Δ'
+        # extraction is intrinsically grid-sensitive: a psi_accuracy scan (2e-3→2.5e-4) swings
+        # dpm[1,1] by ~50% (6.2–9.9), and a finer ldp mpsi=512 grid gives ≈8.5, so treat the
+        # diagonal as an order-of-magnitude/sign diagnostic pending the resistive-layer Δ' work.
+        # (et[1], NTV torque, and ‖resonant flux‖ stay grid-robust to <1% — the sensitivity is
+        # local to the singular-layer matching, not the global response.) Only real parts are
+        # pinned; the imaginary parts are dominated by the PEST3 four-term cancellation and are
+        # FP/platform-sensitive. Near-separatrix surfaces q=5,6 keep only the finiteness/non-zero
+        # checks above. Values use this testset's mode range (mpert=27, vs full-pipeline mpert=35).
+        @test isapprox(real(dpm[1, 1]), +6.188700e+00; rtol=1e-1)   # q=2
+        @test isapprox(real(dpm[2, 2]), -5.554900e+00; rtol=1e-1)   # q=3
+        @test isapprox(real(dpm[3, 3]), -1.578700e+01; rtol=1e-1)   # q=4
     end
 
 end

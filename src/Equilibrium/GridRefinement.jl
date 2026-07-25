@@ -37,8 +37,8 @@ const H_TARGET_MAX = 0.2
 const THETA_STRIDE = 8
 # Local density elevation around mandatory (rational) surfaces: knot spacing h_s = coef·τ^(1/3)
 # at the surface, geometric growth away from it, applied within the given radius. This keeps the
-# equidistributed base grid from starving the approach to each rational; the explicit ladder
-# (ForceFreeStates.rational_psi_ladder) then owns the fine, τ-invariant layer resolution.
+# equidistributed base grid from starving the approach to each rational, where the ideal-MHD
+# Δ′ extraction is most sensitive to the local equilibrium-spline resolution.
 const SING_PACK_COEF = 0.06
 const SING_PACK_RADIUS = 0.05
 
@@ -251,16 +251,16 @@ end
 """
     merge_mandatory_nodes(grid, mandatory; delta_frac=0.25, collapse_atol=1e-7) -> Vector{Float64}
 
-Insert mandatory knots (e.g. rational surfaces, or a geometric ladder straddling them) into
-a base grid with a minimum-spacing guard: for each mandatory node, δ_min = `delta_frac` ×
-(containing base-grid interval), and any pre-existing non-mandatory node within δ_min is
-dropped (snap — the mandatory node is never moved). Endpoints always win: mandatory nodes
-outside the open span or within δ_min of an endpoint are discarded. Mandatory nodes within
-`collapse_atol` of an earlier mandatory node are collapsed onto it — the same physical
-surface can be found through several (m, n) pairs differing only by root-finder noise, and a
-near-zero interval would ring the reconstructed splines. Collapse uses an absolute tolerance,
-not δ_min, so intentionally fine mandatory clusters (a singular-layer ladder whose spacing is
-far below the base interval) survive while true duplicates still merge.
+Insert mandatory knots (e.g. rational surfaces) into a base grid with a minimum-spacing
+guard: for each mandatory node, δ_min = `delta_frac` × (containing base-grid interval), and
+any pre-existing non-mandatory node within δ_min is dropped (snap — the mandatory node is
+never moved). Endpoints always win: mandatory nodes outside the open span or within δ_min of
+an endpoint are discarded. Mandatory nodes within `collapse_atol` of an earlier mandatory
+node are collapsed onto it — the same physical surface can be found through several (m, n)
+pairs differing only by root-finder noise, and a near-zero interval would ring the
+reconstructed splines. Collapse uses an absolute tolerance, not δ_min, so genuinely close but
+distinct mandatory nodes (e.g. a kinetic-resonance surface near a rational) survive while
+true duplicates still merge.
 
 The function is agnostic to node provenance, so future mandatory sources (e.g. kinetic
 resonance surfaces) plug in without change.

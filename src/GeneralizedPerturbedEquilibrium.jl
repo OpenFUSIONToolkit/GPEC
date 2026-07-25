@@ -235,7 +235,7 @@ function main_from_inputs(
     # kinetic profiles), pin knots on rational surfaces, and re-form on the refined grid
     # from the in-memory input — no file re-read.
     if Equilibrium.wants_two_pass(eq_config)
-        mandatory = ForceFreeStates.rational_psi_ladder(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high, singfac_min=ctrl.singfac_min)
+        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
         psi_nodes = Equilibrium.refined_psi_grid(equil;
             tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory)
         rerun_input = if additional_input !== nothing

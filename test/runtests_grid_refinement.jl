@@ -126,18 +126,11 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         @test grid[1] == eq_config.psilow && grid[end] == eq_config.psihigh
         @test all(p -> p in grid, rat)
 
-        # Singular-layer knot ladder: each rational is straddled, and no interval falls below
-        # the native-resolution floor h0 — even when multi-n (n=1,2) rationals cluster and their
-        # ladders overlap, the min-spacing thinning prevents sub-h0 intervals that would ring the
-        # re-splined equilibrium (and blow up Δ').
-        h0 = GeneralizedPerturbedEquilibrium.ForceFreeStates.SING_LADDER_H0
-        ladder = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_ladder(equil1; nlow=1, nhigh=2, singfac_min=1e-4)
-        @test issorted(ladder) && allunique(ladder)
-        @test length(ladder) > length(rat)                                    # ladder adds straddling knots
-        @test minimum(diff(ladder)) >= h0 - 1e-12                             # thinning: no sub-h0 intervals
-        @test all(r -> any(k -> abs(k - r) <= h0 + 1e-12, ladder), rat)       # every rational straddled
-        # singfac_min <= 0 disables crossing → falls back to the bare rationals (no ladder)
-        @test GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_ladder(equil1; nlow=1, nhigh=2, singfac_min=0.0) == rat
+        # Every rational surface appears as a mandatory knot in the refined grid, and the
+        # min-spacing snap in merge_mandatory_nodes keeps the grid strictly increasing even
+        # when multi-n (n=1,2) rationals cluster.
+        @test all(p -> any(g -> abs(g - p) < 1e-12, grid), rat)
+        @test minimum(diff(grid)) > 0
 
         # Pass 2 honors the refined grid exactly
         equil2 = GridRef.setup_equilibrium(eq_config, sol_config; override_psi_nodes=grid)
