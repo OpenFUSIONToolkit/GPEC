@@ -61,10 +61,25 @@ Executing `notes/a1-a5-structural-diagnostic-plan.md` on the pinned stalling con
      feature above threshold the grid can't represent). **Discriminator (running):** at a
      fixed super-threshold `inv_Ln0=0.4`, refine `nx/ny` — floor drops ⇒ under-resolution
      (refine, done); floor stays ⇒ fold (arc-length, or it's physical).
-- **Diagnostic assessment:** the A1/A5 step-back *worked* — it converted "the solve
-  mysteriously stalls" into a sharp, physical statement (critical drive `inv_Ln0≈0.3`,
-  discretization sound, consistent, not a basin issue). This is exactly the foundational
-  understanding the milestone lacked before jumping to B5.
+- **RESOLVED — it is RADIAL UNDER-RESOLUTION, not a fold or a solver wall.** Discriminator
+  at fixed super-threshold `inv_Ln0=0.4` (warm-started from 0.2), refining the grid:
+  baseline `nx=15,K=4` fails (2.3e-4); **`nx=25,K=4` converges (1.4e-12); `nx=15,K=8`
+  converges (1.6e-9); `nx=25,ny=15,nE=6,K=6` converges (1.8e-12).** The ~1e-3 floor
+  **drops to machine precision when the RADIAL grid is refined** (`nx` or the island
+  clustering `K`) — so above the critical drive the driven solution develops a **sharp
+  radial feature** (boundary layer near the island/separatrix) that the baseline grid
+  under-resolves, flooring the discrete residual. (Refining **pitch** `ny` alone made it
+  *worse* — the culprit is specifically radial.) **So the entire multi-session stall =
+  B2a bracket bug (fixed) + radial under-resolution of a drive-induced sharp feature.**
+  Not a fold, not inconsistency, not a fundamental solver limit.
+- **VERDICT (A1/A5 diagnostic complete): the physical solve is convergible** — it just
+  needs (a) the B2a bracket fix (landed) and (b) **adequate radial resolution** (`nx`/`K`)
+  that scales with the drive. The goal (`resmax≤1e-9` on physical `nE≥3`) is reachable;
+  the earlier "goal not met" was a coarse-grid artifact, not a wall. Next: confirm the
+  goal configs (hand-set + DIII-D) converge at adequate radial resolution, then set the
+  `resolved_island_grid` defaults / a resolution guide accordingly, and add a regression
+  test. The A1/A5 step-back **worked** — it converted "mysteriously stalls" into a
+  concrete, fixable radial-resolution requirement.
 
 ## 2026-07-24 (cont. 14) — GOAL LOOP CLOSED: Option C exhausted; the hard configs plateau at ~1e-3 (likely a discretization inconsistency, not a solver problem) → stop with evidence
 
