@@ -72,14 +72,35 @@ Executing `notes/a1-a5-structural-diagnostic-plan.md` on the pinned stalling con
   *worse* — the culprit is specifically radial.) **So the entire multi-session stall =
   B2a bracket bug (fixed) + radial under-resolution of a drive-induced sharp feature.**
   Not a fold, not inconsistency, not a fundamental solver limit.
-- **VERDICT (A1/A5 diagnostic complete): the physical solve is convergible** — it just
-  needs (a) the B2a bracket fix (landed) and (b) **adequate radial resolution** (`nx`/`K`)
-  that scales with the drive. The goal (`resmax≤1e-9` on physical `nE≥3`) is reachable;
-  the earlier "goal not met" was a coarse-grid artifact, not a wall. Next: confirm the
-  goal configs (hand-set + DIII-D) converge at adequate radial resolution, then set the
-  `resolved_island_grid` defaults / a resolution guide accordingly, and add a regression
-  test. The A1/A5 step-back **worked** — it converted "mysteriously stalls" into a
-  concrete, fixable radial-resolution requirement.
+- **CORRECTION — the clean "radial under-resolution" story holds for the hand-set but
+  BREAKS on the physical DIII-D case.** Confirmation on the DIII-D
+  `scenario_from_equilibrium` (inv_Ln0=−0.337) at the *higher* resolution nx=27/K=8:
+  nE=3,4,6 all **fail** (7.4e-4, 5.0e-3, 5.0e-3). Worse, DIII-D nE=4 had **converged** at
+  the *coarse* nx=15/K=4 (2.5e-11, LOG cont.13) — so **refinement HURT** the physical
+  case, the opposite of the hand-set discriminator. ⇒ convergence is **non-monotonic in
+  resolution** and config-dependent; "just refine radially" is NOT a general fix.
+- **Honest verdict of the A1/A5 diagnostic:**
+  - **SOLID:** (1) the homogeneous operator/BC is clean (A5); (2) the driven system is
+    **consistent and full-rank — a solution EXISTS** (Step 3, b∈range to 4e-15) — the
+    cont.-14 inconsistency hypothesis is refuted; (3) there is a sharp critical-drive
+    threshold (~inv_Ln0 0.3, hand-set); (4) radial refinement fixes the hand-set at
+    moderate drive.
+  - **UNRESOLVED:** the physical DIII-D solve is a **fragile nonlinear solve** whose
+    basin shifts non-monotonically with (config, resolution) — refinement does not
+    reliably converge it, and it got *worse* at higher res. This is the same fragility
+    seen across the goal loop, now *proven not to be inconsistency*.
+  - **⇒ the right tool is a ROBUST solver for a system we now KNOW has a solution.** Since
+    it's consistent + full-rank, Gauss–Newton/LM (μ→0) *should* reach it — the earlier
+    `newton_lm` stall (1.5e-4) is suspect (bad μ-schedule or a different config), worth
+    revisiting now that inconsistency is ruled out. Also: PlaneJacobi's config-dependent
+    weakness (≤2.3×) likely explains the non-monotonicity (GMRES stalls at some grids).
+- **Overall:** the A1/A5 step-back delivered its core value — it **refuted the
+  inconsistency hypothesis and proved a solution exists**, redirecting from "formulation
+  is broken" back to "we need a robust solver." But it did NOT hand us a working physical
+  solve; do not claim the goal met. Next: (a) A1 physical-MMS (still unrun) to confirm
+  design-order on physical grids; (b) re-examine `newton_lm`/Gauss–Newton now that the
+  system is known-consistent; (c) B1 (no-island neoclassical) as the physics reproduction
+  that likely sidesteps the driven-solve fragility entirely.
 
 ## 2026-07-24 (cont. 14) — GOAL LOOP CLOSED: Option C exhausted; the hard configs plateau at ~1e-3 (likely a discretization inconsistency, not a solver problem) → stop with evidence
 
