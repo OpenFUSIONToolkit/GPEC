@@ -44,7 +44,27 @@ Executing `notes/a1-a5-structural-diagnostic-plan.md` on the pinned stalling con
   iters). Option A earlier tried continuation in `ν̂` and grid-prolongation, NOT in the
   drive strength — yet the drive is exactly what turns the trivial problem into the hard
   one. This is the plan's decision-tree branch "discretization sound ⇒ a proper physics
-  continuation is justified." Testing now.
+  continuation is justified."
+- **Drive continuation (`inv_Ln0` 0.1→1.0, warm-started) — a SHARP critical-drive
+  transition.** `inv_Ln0 = 0.10, 0.20` converge to machine precision (3e-12, 11/18 iters);
+  **`inv_Ln0 ≥ 0.30` stalls at ~1e-3** (0.3→3.3e-4, then ~2.5–6.8e-3 up to 1.0), *even
+  warm-started from the previous converged solution*. So the stall is a **critical drive
+  amplitude at `inv_Ln0 ≈ 0.25–0.3`**, not a basin/init issue — warm-starting does not
+  cross it. Two implications:
+  1. **We've partly been over-driving.** The hand-set test uses `inv_Ln0 = 1.0`, but the
+     **physical** value (DIII-D `scenario_from_equilibrium`) is `≈ 0.34` — right at the
+     threshold (and DIII-D nE=4 DID converge to 2.5e-11 at that drive; nE=3 was marginal).
+     The goal should center the **physical** drive regime, not `inv_Ln0=1`.
+  2. A sharp, warm-start-independent threshold ⇒ either a **fold/bifurcation** (no steady
+     solution above the critical drive — possibly real physics, cf. the design's
+     penetration fold + `pseudo_arclength`) or **under-resolution** (a sharp solution
+     feature above threshold the grid can't represent). **Discriminator (running):** at a
+     fixed super-threshold `inv_Ln0=0.4`, refine `nx/ny` — floor drops ⇒ under-resolution
+     (refine, done); floor stays ⇒ fold (arc-length, or it's physical).
+- **Diagnostic assessment:** the A1/A5 step-back *worked* — it converted "the solve
+  mysteriously stalls" into a sharp, physical statement (critical drive `inv_Ln0≈0.3`,
+  discretization sound, consistent, not a basin issue). This is exactly the foundational
+  understanding the milestone lacked before jumping to B5.
 
 ## 2026-07-24 (cont. 14) — GOAL LOOP CLOSED: Option C exhausted; the hard configs plateau at ~1e-3 (likely a discretization inconsistency, not a solver problem) → stop with evidence
 
