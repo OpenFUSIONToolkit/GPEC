@@ -63,20 +63,33 @@ built by a **two-pass measured-curvature refinement** driven by the single accur
 
 1. **Pass 1** forms the equilibrium on a coarse three-region layout (geometric in
    log(ψ) at the core, uniform in the middle, geometric in log(1−ψ) at the edge).
-2. A knot density is derived from the *measured* pass-1 data using the cubic-spline
-   derivative error model err(f′) ≈ h³|f''''|/24 ≤ τ·|f|. Fourth derivatives are
-   estimated by divided differences on the pass-1 nodes only — nodal values come from
-   independent field-line integrations, so the estimate is immune to inter-knot spline
-   ringing. The density combines, by max:
-   - the 1D profiles F, P, dV/dψ, and q;
-   - the 2D geometry channels (r², η-offset, ν, Jacobian) along sampled θ-lines, since
-     the bicubic ψ-axis shares the same knots;
-   - the kinetic profiles (n, T, ω_E) when loaded, so steep pedestal gradients attract
-     knots;
-   - a-priori geometric floors at the core and edge (uniform relative q′ error against
-     the separatrix asymptote q ~ −A·ln(1−ψ), independent of A);
-   - local packing around every rational surface q = m/n in the requested n range,
-     which the main driver pins as mandatory knots.
+2. A knot density is derived from **one sizing rule** — the cubic-spline derivative
+   error model err(f′) ≈ h³|f''''|/24 ≤ τ·|f| — applied to three sources of
+   curvature |f''''|:
+   - **Measured** (mid-radius and edge): divided differences on the pass-1 nodes of the
+     1D profiles (F, P, dV/dψ, q), the 2D geometry channels (r², η-offset, ν, Jacobian)
+     along sampled θ-lines (the bicubic ψ-axis shares the same knots), and the kinetic
+     profiles (n, T, ω_E) when loaded, so steep pedestal gradients attract knots. Nodal
+     values come from independent field-line integrations, so the estimate is immune to
+     inter-knot spline ringing. Curvature is measured against ρ = √ψ, in which the
+     equilibrium is regular at the magnetic axis — in ψ itself the geometry channels
+     behave as ψ^(k/2) (R−R₀ ~ √ψ), so their ψ-curvature diverges under refinement while
+     their ρ-curvature converges; the ρ-spacing maps back through dψ/dρ = 2√ψ, which by
+     itself packs √ψ-tight toward the axis.
+   - **Separatrix model** (edge floor, ψ ≥ 0.9): the same rule on q ≈ −A·ln(1−ψ) gives
+     geometric-in-log(1−ψ) packing with uniform relative q′ error, independent of A.
+     Normally inactive — the pass-1 layout is already log-packed at the edge, so the
+     measured density dominates — it only guards a pass-1 that under-sampled the
+     divergence.
+   - **Axis model** (core, ψ ≤ 0.03): the same rule on the power-law axis form gives
+     geometric-in-log(ψ) packing (constant-ratio spacing ∝ ψ down to `psilow`). Here the
+     model *replaces* measurement: nodal data from the smallest flux surfaces is
+     dominated by integration and axis-extrapolation noise, which grid refinement
+     amplifies rather than resolves.
+   - **Rational surfaces**: local packing around every q = m/n in the requested n range
+     (pinned as mandatory knots by the main driver), at any ψ including inside the
+     modeled core region. This local resolution of the ψ-splined Euler-Lagrange
+     coefficient matrices is what converges the Δ′ boundary-value problem.
 3. The density integral is equidistributed into the knot vector, mandatory
    rational-surface knots are inserted with a minimum-spacing snap guard, and
    **pass 2** re-forms the equilibrium on the refined grid from the in-memory input
@@ -95,6 +108,15 @@ and the core/pedestal/edge packing (`benchmarks/plot_grid_knot_placement.jl` reg
 this figure):
 
 ![Radial knot packing: auto two-pass vs ldp](assets/grid_knot_placement.png)
+
+Decomposing the density by source on the same example shows the pedestal band
+(ψ_N ≈ 0.85–0.98) is driven by *measured* curvature, not the edge floor: the pressure,
+q, and dV/dψ profiles contribute comparably, and the rzphi geometry channels — the
+Grad-Shafranov response to the same pedestal p′ (Shafranov-shift / angle-offset
+steepening) — contribute the most at every node in the band. Because the density is
+measured from the formed solution, the packing follows the pedestal wherever it sits:
+
+![Knot-density decomposition by source](assets/density_decomposition.png)
 
 ## API Reference
 
