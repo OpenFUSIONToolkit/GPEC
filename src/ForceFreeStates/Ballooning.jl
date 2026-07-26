@@ -8,6 +8,13 @@ using StaticArrays: SVector
 const BALLOONING_THETA_MAX_CAP = 16.5
 const BALLOONING_THETA_SCALE_MULTIPLIER = 10.0
 const MATCHING_POINT = 1e-3
+# Default ψ_N window for the α-boundary scan drivers: ballooning boundaries matter in the
+# mid-radius and pedestal; the packed axis and far-edge surfaces only add scan cost.
+const BALLOONING_SCAN_PSI_WINDOW = (0.1, 0.99)
+
+# Effective window [0.1, min(0.99, ψ_edge)]; the grid never extends past psihigh/psi_edge.
+_in_ballooning_scan_window(psi::Float64, psi_edge::Float64) =
+    BALLOONING_SCAN_PSI_WINDOW[1] <= psi <= min(BALLOONING_SCAN_PSI_WINDOW[2], psi_edge)
 
 """
     compute_ballooning_stability!(ctrl, locstab_fs, plasma_eq)
@@ -835,7 +842,10 @@ Use this (not [`ballooning_alpha_boundaries`](@ref)) when only the 1st boundary 
 needed, e.g. a pedestal-stability constraint. `n_scan` sets the scan resolution; raise
 it (e.g. 64) on edge surfaces where Δ' poles can shift a coarse first crossing.
 
-Per-surface failures and surfaces with no boundary within range are returned as `NaN`.
+The scan is evaluated only inside `BALLOONING_SCAN_PSI_WINDOW` — ballooning boundaries
+are physically relevant in the mid-radius and pedestal, and the tightly packed axis and
+far-edge surfaces dominate the scan cost. Per-surface failures, skipped surfaces, and
+surfaces with no boundary within range are returned as `NaN`.
 """
 function ballooning_alpha_boundary(
     ctrl::ForceFreeStatesControl,
@@ -850,7 +860,7 @@ function ballooning_alpha_boundary(
     alpha_critical = fill(NaN, npsi)
 
     Threads.@threads :greedy for i in 1:npsi
-        xs[i] > 1.0 && continue
+        _in_ballooning_scan_window(xs[i], xs[end]) || continue
         try
             alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
             alpha_critical[i] = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k, n_scan=n_scan).alpha_crit
@@ -897,7 +907,8 @@ boundary exists.
 
 `n_scan` sets the scan resolution of the crossing search; crossings closer together
 than the scan step can be missed, which shows up as isolated outliers on otherwise
-smooth boundary curves.
+smooth boundary curves. Surfaces outside `BALLOONING_SCAN_PSI_WINDOW` are skipped
+(returned as `NaN`), like per-surface failures.
 """
 function ballooning_alpha_boundaries(
     ctrl::ForceFreeStatesControl,
@@ -914,7 +925,7 @@ function ballooning_alpha_boundaries(
     alpha_critical2 = fill(NaN, npsi)
 
     Threads.@threads :greedy for i in 1:npsi
-        xs[i] > 1.0 && continue
+        _in_ballooning_scan_window(xs[i], xs[end]) || continue
         try
             cr = ballooning_alpha_crossings(i, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan)
             alpha[i] = cr.reference.alpha_ref

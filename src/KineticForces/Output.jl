@@ -27,6 +27,14 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
         mg["total_energy"] = result.total_energy
         mg["psi_nsteps"] = result.psi_nsteps
 
+        # ψ-quadrature panel boundaries and located kinetic-resonance surfaces (first n)
+        if !isempty(result.panel_psis)
+            mg["panel_psi"] = result.panel_psis
+        end
+        if !isempty(result.resonance_psis)
+            mg["resonance_psi"] = result.resonance_psis
+        end
+
         # Per-ψ torque profiles from quadrature evaluation points.
         # dT/dψ integrand values and cumulative T(ψ) via trapezoidal integration.
         if !isempty(result.psi_grid)

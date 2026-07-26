@@ -12,6 +12,7 @@ import ..Utilities
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
+include("GridRefinement.jl")
 include("FluxSurfaceMetrics.jl")
 include("CoordinateInvariant.jl")
 include("ReadEquilibrium.jl")
@@ -29,6 +30,7 @@ export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParam
     KineticProfileSplines, load_kinetic_profiles,
     KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
+export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, implied_knot_count
 export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
 
 # --- Constants ---
@@ -68,15 +70,20 @@ const ANALYTIC_EQ = Dict(
 )
 
 """
-    setup_equilibrium(eq_config::EquilibriumConfig)
+    setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing; override_psi_nodes=nothing)
 
 Read an equilibrium file, run the appropriate solver, and return the processed
 `PlasmaEquilibrium` with global parameters, q-profile, and GSE diagnostics.
+
+`override_psi_nodes` bypasses the config-driven radial grid (`grid_type`/`mpsi`) and forms
+the equilibrium on the given strictly increasing ψ_N node vector, whose endpoints must match
+`psilow`/`psihigh`. Used by the two-pass auto-grid refinement in the main driver; standalone
+callers with `mpsi=0` get the coarse first-pass grid unless they refine and re-form.
 """
 function setup_equilibrium(path::String="equil.toml")
     return setup_equilibrium(EquilibriumConfig(path))
 end
-function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
+function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
 
     eq_type = eq_config.eq_type
 
@@ -131,11 +138,11 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     end
 
     if eq_type == "efit_by_inversion"
-        plasma_equilibrium = equilibrium_solver_by_inversion(eq_input)
+        plasma_equilibrium = equilibrium_solver_by_inversion(eq_input; override_psi_nodes)
     elseif eq_type == "efit_arclength"
-        plasma_equilibrium = equilibrium_solver(eq_input, arclength_fieldline_int)
+        plasma_equilibrium = equilibrium_solver(eq_input, arclength_fieldline_int; override_psi_nodes)
     else
-        plasma_equilibrium = equilibrium_solver(eq_input)
+        plasma_equilibrium = equilibrium_solver(eq_input; override_psi_nodes)
     end
 
     # Forward the captured ingest so the gpec.h5 writer can snapshot it (nothing for analytic).

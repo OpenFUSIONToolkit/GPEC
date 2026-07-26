@@ -95,12 +95,24 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     nn::Int = 1                     # Toroidal mode number
     nl::Int = 1                     # Bounce harmonic number
 
-    # Integration tolerances (loose debug defaults). _xlmda: inner λ (pitch) + x (energy); _psi: outer ψ.
+    # Tolerances.
+    # *_xlmda: shared tolerances for inner λ (pitch) and x (energy) integrations
+    # *_psi:   tolerances for outer ψ quadrature
     atol_xlmda::Float64 = 1e-8     # Absolute tolerance for inner pitch + energy integrations
     rtol_xlmda::Float64 = 1e-5     # Relative tolerance for inner pitch + energy integrations
-    # atol_psi is in N·m (QuadGK tolerances are physically intuitive, unlike the ODE path).
-    atol_psi::Float64 = 1e-2       # Absolute tolerance for outer ψ quadrature
+    # rtol_psi is the primary convergence knob: ~2 significant figures matches the validity
+    # of the NTV model approximations. Do not set it tighter than the noise floor of the
+    # inner integrals (keep rtol_psi ≳ 10 × rtol_xlmda).
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
+    # atol_psi is in N·m and therefore amplitude-sensitive: NTV scales as δB², so a 10×
+    # weaker applied field gives a 100× smaller torque and any fixed absolute tolerance can
+    # silently dominate termination with O(1) relative error. Default 0 (rtol-only); a
+    # nonzero value is an expert opt-out for near-net-zero-torque cases and triggers a
+    # warning when it dominates.
+    atol_psi::Float64 = 0.0        # Absolute tolerance for outer ψ quadrature [N·m]
+    # Runaway guard for the outer quadrature (e.g. sign-cancelling torque density with tiny
+    # net torque under rtol-only control); a convergence warning fires when hit.
+    maxevals_psi::Int = 2000       # Max integrand evaluations for outer ψ quadrature
 
     # Scaling factors
     density_factor::Float64 = 1.0            # Density scaling (ni, ne)
@@ -167,6 +179,9 @@ Fields replacing former module-level globals:
 - `ro`, `bo`, `chi1`: Equilibrium geometry parameters
 - `mthsurf`, `mfac`: Poloidal grid info
 - `dbob_m`, `divx_m`: Perturbation mode interpolants
+- `sing_psis`: Rational-surface ψ locations (sorted, from the stability analysis), used as
+  panel boundaries for the outer ψ torque quadrature so the resonant peaks fall on
+  Gauss-Kronrod interval endpoints instead of driving deep adaptive bisection
 
 Equilibrium and kinetic profile data are read directly from the
 `PlasmaEquilibrium` (`equil.profiles`, `equil.geometry`) and the
@@ -209,6 +224,9 @@ this struct.
     # Upper ψ bound (FFS psilim); the perturbation interpolants are invalid beyond it,
     # so the outer ψ quadrature clips here.
     psilim::Float64 = 1.0
+
+    # Rational-surface ψ locations for ψ-quadrature paneling (see docstring).
+    sing_psis::Vector{Float64} = Float64[]
 
     # Pre-allocated θ-grid buffers for `tpsi!` — length mthsurf+1, reused per evaluation.
     tpsi_xs::Vector{Float64} = Float64[]
@@ -296,6 +314,10 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     kf_intr.numpert_total = ffs_intr.numpert_total
     kf_intr.mfac = collect(ffs_intr.mlow:ffs_intr.mhigh)
     kf_intr.psilim = ffs_intr.psilim
+
+    # Rational-surface ψ locations (ideal + kinetic EL) become panel boundaries for the
+    # outer ψ torque quadrature; dedupe against coincident points happens in psi_panel_points.
+    kf_intr.sing_psis = sort!(vcat([s.psifac for s in ffs_intr.sing], [s.psifac for s in ffs_intr.kinsing]))
 
     # Bail if no xi_modes available (PE didn't run or failed)
     if pe_state.xi_modes === nothing || isempty(pe_state.psi_grid)
@@ -460,6 +482,9 @@ Results for one NTV computation method across all flux surfaces.
     dtdpsi::Vector{ComplexF64} = ComplexF64[]
     t_cumulative::Vector{ComplexF64} = ComplexF64[]
     psi_nsteps::Int = 0
+    # ψ-quadrature panel boundaries and the located kinetic-resonance surfaces (first n)
+    panel_psis::Vector{Float64} = Float64[]
+    resonance_psis::Vector{Float64} = Float64[]
 end
 
 """

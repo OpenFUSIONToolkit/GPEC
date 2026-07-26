@@ -125,14 +125,9 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     theta_bmin = xs[ibmin]
     theta_bmax = xs[ibmax]
 
-    # Find roots of dB/dθ = 0 (extrema) using Roots.jl
+    # Find roots of dB/dθ = 0 (extrema)
     dBdtheta_interp = cubic_interp(xs, dBdtheta_vals; bc=PeriodicBC())
-    extrema_roots = Float64[]
-    for i in 1:length(xs)-1
-        if dBdtheta_vals[i] * dBdtheta_vals[i+1] < 0
-            push!(extrema_roots, find_zero(dBdtheta_interp, (xs[i], xs[i+1]), Roots.Brent()))
-        end
-    end
+    extrema_roots = find_sign_change_roots(dBdtheta_interp, xs)
     for θ in extrema_roots
         θn = mod(θ, 1.0)
         Bθ = tspl(θn)[1]
@@ -644,20 +639,17 @@ function _setup_surface_state(
     theta_bmax = xs[ibmax]
 
     dBdtheta_interp = cubic_interp(xs, dBdtheta_vals; bc=PeriodicBC())
-    for i in 1:length(xs)-1
-        if dBdtheta_vals[i] * dBdtheta_vals[i+1] < 0
-            θ = find_zero(dBdtheta_interp, (xs[i], xs[i+1]), Roots.Brent())
-            θn = mod(θ, 1.0)
-            Bθ = tspl(θn)[1]
-            if Bθ < bmin
-                bmin = Bθ
-                theta_bmin = θn
-            end
-            if Bθ > bmax
-                bmax = Bθ
-                # theta_bmax stays at the nodal knot xs[ibmax]: the transit starts at
-                # the knot (as in Fortran), not at the refined extremum.
-            end
+    for θ in find_sign_change_roots(dBdtheta_interp, xs)
+        θn = mod(θ, 1.0)
+        Bθ = tspl(θn)[1]
+        if Bθ < bmin
+            bmin = Bθ
+            theta_bmin = θn
+        end
+        if Bθ > bmax
+            bmax = Bθ
+            # theta_bmax stays at the nodal knot xs[ibmax]: the transit starts at
+            # the knot (as in Fortran), not at the refined extremum.
         end
     end
 

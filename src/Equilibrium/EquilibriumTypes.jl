@@ -23,11 +23,17 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `jac_custom_power_rc::Int` - Minor-radius (rfac) exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp", "pow1")
+  - `grid_type::String` - Grid type for flux surface discretization ("auto" — two-pass measured-curvature
+    refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
+    "log_asymptotic" is a legacy alias for "auto")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
-  - `mpsi::Int` - Number of radial grid points (0 = auto-compute from psi_accuracy)
-  - `psi_accuracy::Float64` - Target absolute error in q for auto-mpsi (used when mpsi=0 and grid_type="log_asymptotic")
+  - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
+    two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
+    pins knots on rational surfaces, and re-forms on the refined grid. Standalone `setup_equilibrium`
+    callers get the coarse pass-1 grid unless they refine via `refined_psi_grid` + `override_psi_nodes`.
+  - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
+    two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
@@ -51,7 +57,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     jac_custom_power_r::Int = 0
     jac_custom_power_rc::Int = 0
 
-    grid_type::String = "log_asymptotic"
+    grid_type::String = "auto"
     psilow::Float64 = 1e-2
     psihigh::Float64 = 0.9995
     mpsi::Int = 0
