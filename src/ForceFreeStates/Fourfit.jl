@@ -361,6 +361,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     g12 = Vector{ComplexF64}(undef, 2 * intr.mpert - 1)
     jmat = Vector{ComplexF64}(undef, 2 * intr.mpert - 1)
     jmat1 = Vector{ComplexF64}(undef, 2 * intr.mpert - 1)
+    jmats_flat = zeros(ComplexF64, mpsi, 2 * intr.mpert - 1)
     a_inv_dmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
     a_inv_cmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
 
@@ -409,6 +410,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             jmat[k+intr.mpert] = conj(jmat[intr.mpert-k])
             jmat1[k+intr.mpert] = conj(jmat1[intr.mpert-k])
         end
+        # Save the Jacobian Fourier band at every surface for the power-normalization spline
+        @views jmats_flat[ipsi, :] .= jmat
 
         # TODO: for 3D, would need an additional nlow:nhigh loop here for n/n' coupling
         for n in intr.nlow:intr.nhigh
@@ -508,8 +511,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
 
-    # This is used in free_run
-    ffit.jmat = jmat
+    # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
+    ffit.jmats = cubic_interp(metric.xs, Series(jmats_flat); ffit.itp_opts...)
 
     return ffit
 end

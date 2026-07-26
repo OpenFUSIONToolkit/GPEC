@@ -21,7 +21,6 @@ nzeta > 1 for 3D vacuum calculation.
   - `npert::Int`: Number of toroidal modes
   - `mtheta::Int`: Number of vacuum calculation poloidal grid points
   - `nzeta::Int`: Number of vacuum calculation toroidal grid points (1 for 2D vacuum calculation, > 1 for 3D vacuum calculation)
-  - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
 """
 @kwdef struct VacuumInput
     x::Vector{Float64} = Float64[]
@@ -36,7 +35,6 @@ nzeta > 1 for 3D vacuum calculation.
     npert::Int = 1
     mtheta::Int = 1
     nzeta::Int = 1
-    force_wv_symmetry::Bool = true
 end
 
 """
@@ -46,8 +44,7 @@ end
         mtheta::Int,
         mpert::Int,
         mlow::Int,
-        n::Int,
-        force_wv_symmetry::Bool = true
+        n::Int
     ) -> VacuumInput
 
 Constructor to create a VacuumInput struct for computing Green's functions at arbitrary flux surface.
@@ -61,7 +58,6 @@ Extracts plasma geometry from equilibrium at the given flux surface and packages
   - `mpert`: Number of perturbing poloidal modes
   - `mlow`: Lowest poloidal mode number
   - `n`: Toroidal mode number
-  - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (default: true)
 
 ## Returns
 
@@ -75,8 +71,7 @@ function VacuumInput(
     mpert::Int,
     mlow::Int,
     npert::Int,
-    nlow::Int;
-    force_wv_symmetry::Bool=true
+    nlow::Int
 )
     # Extract plasma surface geometry at this psi
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
@@ -91,8 +86,7 @@ function VacuumInput(
         nlow=nlow,
         npert=npert,
         mtheta=mtheta,
-        nzeta=nzeta,
-        force_wv_symmetry=force_wv_symmetry
+        nzeta=nzeta
     )
 end
 

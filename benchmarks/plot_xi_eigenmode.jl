@@ -17,8 +17,8 @@ outpng = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "xi_eigenmode.png")
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
 et, wt, u1, psi, mlow, sing_psi = h5open(h5path) do f
-    (to_c(read(f["FreeBoundaryStability/XiNorm/eigenmode_energies"])),
-        to_c(read(f["FreeBoundaryStability/XiNorm/W_freeboundary_eigenmodes"])),
+    (to_c(read(f["FreeBoundaryStability/eigenmode_energies"])),
+        to_c(read(f["FreeBoundaryStability/W_freeboundary_eigenmodes"])),
         to_c(read(f["integration/xi_psi"])),
         read(f["integration/psi"]),
         read(f["info/mlow"]),

@@ -10,6 +10,49 @@ using adaptive Gauss-Kronrod quadrature at all levels (ψ, λ, energy).
 # Adaptive Gauss-Kronrod ψ integration via QuadGK.BatchIntegrand
 # ============================================================================
 
+# Minimum ψ separation for quadrature panel boundaries: interior points closer than this to
+# each other or to a domain bound are merged/dropped, so coincident rational and kinetic-
+# resonance surfaces do not create degenerate (near-zero-width) Gauss-Kronrod panels.
+const PANEL_MERGE_ATOL = 1e-8
+
+"""
+    psi_panel_points(interior, x0, xout) → Vector{Float64}
+
+Build the ψ-quadrature node list `[x0, interior points strictly inside (x0, xout), xout]`.
+`interior` is the raw union of resonant-surface locations (rational surfaces ∪ kinetic
+resonances); this function owns the ordering: sort, drop near-duplicates (closer than
+`PANEL_MERGE_ATOL`, e.g. a kinetic resonance coinciding with a rational), and drop points
+within `PANEL_MERGE_ATOL` of a bound to avoid degenerate panels. Paneling the integral at
+these surfaces puts the resonant torque-density peaks (reg_spot/collisionally broadened, but
+narrow in ψ) on Gauss-Kronrod interval endpoints, which the rule handles natively instead of
+hunting them by adaptive bisection.
+"""
+function psi_panel_points(interior::Vector{Float64}, x0::Float64, xout::Float64)
+    pts = sort(filter(p -> x0 + PANEL_MERGE_ATOL < p < xout - PANEL_MERGE_ATOL, interior))
+    deduped = [p for (i, p) in enumerate(pts) if i == 1 || p - pts[i-1] > PANEL_MERGE_ATOL]
+    return [x0; deduped; xout]
+end
+
+"""
+    check_psi_quadrature_convergence(total, quad_err, ctrl, method)
+
+Warn when the ψ torque quadrature terminated without satisfying the requested tolerances
+(hit `maxevals_psi`), or when a nonzero user-set `atol_psi` dominated termination — the
+silent-garbage scenario for weak applied fields, since NTV scales as δB².
+"""
+function check_psi_quadrature_convergence(total::ComplexF64, quad_err::Float64,
+                                          ctrl::KineticForcesControl, method::String)
+    if quad_err > max(ctrl.atol_psi, ctrl.rtol_psi * abs(total))
+        @warn "ψ torque quadrature ($method) did not converge within maxevals_psi=$(ctrl.maxevals_psi): " *
+              "error estimate $quad_err vs |T|=$(abs(total)) N·m. Raise maxevals_psi or loosen rtol_psi."
+    elseif ctrl.atol_psi > ctrl.rtol_psi * abs(total)
+        @warn "atol_psi=$(ctrl.atol_psi) N·m dominated ψ quadrature termination ($method): " *
+              "|T|=$(abs(total)) N·m is small relative to atol_psi, so the relative error is uncontrolled. " *
+              "NTV scales as δB², so weak applied fields shrink the torque quadratically — recommend atol_psi=0 (rtol-only)."
+    end
+    return nothing
+end
+
 """
     integrate_psi_quadgk(n, nl, zi, mi, wdfac, divxfac, electron, method,
                           equil, intr, ctrl, kinetic_profiles; psi_min, psi_max) → NamedTuple
@@ -25,6 +68,13 @@ NamedTuple with:
 - `torque_profile`: NamedTuple of (psi, dtdpsi, t_cumulative) from evaluation points
 - `matrix_integrated`: Trapezoidal-integrated mpert×mpert×6 matrix (if matrix method)
 - `psi_nsteps::Int`: Number of integrand evaluations
+- `psi_quad_error::Float64`: Quadrature error estimate for the total torque
+- `panel_psis::Vector{Float64}`: Quadrature panel boundaries actually used (bounds + interior resonant surfaces)
+- `resonance_psis::Vector{Float64}`: Located kinetic-resonance ψ surfaces (Ω_ℓ(x=1)=0), for diagnostics/plotting
+
+The integral is paneled at the rational-surface ψ locations (`intr.sing_psis`) and capped
+at `ctrl.maxevals_psi` evaluations; a warning is emitted if the quadrature fails to reach
+`ctrl.rtol_psi`/`ctrl.atol_psi` or if a nonzero `atol_psi` dominates termination.
 """
 function integrate_psi_quadgk(
     n::Int, nl::Int, zi::Int, mi::Int,
@@ -44,7 +94,8 @@ function integrate_psi_quadgk(
     xout = min(psi_max, intr.psilim, 1.0 - 1e-6)
 
     if x0 >= xout
-        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0)
+        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0,
+                panel_psis=Float64[], resonance_psis=Float64[])
     end
 
     # The outer ψ-integral (the QuadGK batch / ψ-node loop) stays serial: QuadGK's refine
@@ -108,8 +159,15 @@ function integrate_psi_quadgk(
         end
     end
 
+    # Panels at the rational surfaces the run resolved plus the kinetic-resonance
+    # surfaces (thermal-energy Ω_ℓ = 0 for ℓ ∈ -nl:nl) — both are torque-density peaks.
+    resonance_psis = kinetic_resonance_psi_nodes(kinetic_profiles, equil; n, nl, zi, mi, electron, wdfac)
+    pts = psi_panel_points(vcat(intr.sing_psis, resonance_psis), x0, xout)
+
     bi = QuadGK.BatchIntegrand(psi_batch!, ComplexF64[], Float64[])
-    total, _ = quadgk(bi, x0, xout; atol=ctrl.atol_psi, rtol=ctrl.rtol_psi)
+    total, quad_err = quadgk(bi, pts...; atol=ctrl.atol_psi, rtol=ctrl.rtol_psi, maxevals=ctrl.maxevals_psi)
+
+    check_psi_quadrature_convergence(total, quad_err, ctrl, method)
 
     # Sort logs by ψ for the diagnostic torque profile.
     perm = sortperm(logged_psi)
@@ -140,7 +198,14 @@ function integrate_psi_quadgk(
         end
     end
 
-    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts)
+    in_span(p) = x0 + PANEL_MERGE_ATOL < p < xout - PANEL_MERGE_ATOL
+    n_rational = count(in_span, intr.sing_psis)
+    n_resonance = count(in_span, resonance_psis)
+    @info "ψ torque quadrature ($method): T=$total N·m, error estimate $quad_err, $npts integrand evaluations over " *
+          "$(length(pts) - 1) panels ($n_rational rational + $n_resonance kinetic resonance surfaces)"
+
+    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts, psi_quad_error=quad_err,
+            panel_psis=pts, resonance_psis=sort(resonance_psis))
 end
 
 
@@ -196,6 +261,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         dtdpsi_out = ComplexF64[]
         t_cum_out = ComplexF64[]
         psi_nsteps_total = 0
+        panel_psis_out = Float64[]
+        resonance_psis_out = Float64[]
 
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
@@ -213,10 +280,14 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             total_torque += result.total
             psi_nsteps_total += result.psi_nsteps
 
-            if n_idx == 1 && !isnothing(result.torque_profile)
-                psi_grid_out = result.torque_profile.psi
-                dtdpsi_out = result.torque_profile.dtdpsi
-                t_cum_out = result.torque_profile.t_cumulative
+            if n_idx == 1
+                panel_psis_out = result.panel_psis
+                resonance_psis_out = result.resonance_psis
+                if !isnothing(result.torque_profile)
+                    psi_grid_out = result.torque_profile.psi
+                    dtdpsi_out = result.torque_profile.dtdpsi
+                    t_cum_out = result.torque_profile.t_cumulative
+                end
             end
 
             # Insert n-block into full matrix
@@ -227,9 +298,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             end
         end
 
-        # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k, both real quantities.
-        # Store δW in Re slot so downstream code uses real(total_energy).
-        total_energy = complex(imag(total_torque) / (2 * ctrl.nn), 0.0)
+        # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k. δW_k is real.
+        total_energy = imag(total_torque) / (2 * ctrl.nn)
 
         result_entry = MethodResult(;
             method=method,
@@ -240,6 +310,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             dtdpsi=dtdpsi_out,
             t_cumulative=t_cum_out,
             psi_nsteps=psi_nsteps_total,
+            panel_psis=panel_psis_out,
+            resonance_psis=resonance_psis_out,
         )
         state.method_results[method] = result_entry
 
