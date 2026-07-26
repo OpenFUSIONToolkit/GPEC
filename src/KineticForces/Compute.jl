@@ -54,7 +54,10 @@ function integrate_psi_quadgk(
     # spline hints, so each thread gets its own `deepcopy(intr)` (the same per-thread-scratch
     # pattern the self-consistent kinetic matrix build uses). Per-harmonic results are stored
     # by index and reduced in fixed ℓ order, so the sum is identical to the serial reduction
-    # and independent of thread count.
+    # and independent of thread count. The threadid()-indexed buffers require this to be a
+    # top-level @threads (the caller loops n serially); never nest it inside another @threads.
+    # The deepcopy set is sized by thread count and rebuilt once per call (per n), so multi-n
+    # runs with many threads scale memory as nthreads×sizeof(intr).
     nharm = 1 + 2 * nl
     nth = Threads.maxthreadid()
     thread_intrs = [deepcopy(intr) for _ in 1:nth]
@@ -257,5 +260,3 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
 
     state.completed = true
 end
-
-

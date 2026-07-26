@@ -83,124 +83,127 @@ function reconstruct_physical_fields(
     # Pin BLAS to a single thread for the per-surface reconstruction below. Each threaded
     # loop over ψ calls only small BLAS kernels (per-surface mpert×mpert solves and mode
     # DFTs), so leaving BLAS multi-threaded oversubscribes the cores against the Julia
-    # `@threads` over ψ and destroys thread scaling. Restored before returning.
+    # `@threads` over ψ and destroys thread scaling. Restored in a `finally` so an exception
+    # in any of the threaded loops cannot leak the pinned count into the rest of the session.
     _blas_nthreads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
+    try
+        # Sum weighted eigenmode contributions to get ξ_ψ, dξ_ψ/dψ, and ξ_s in mode space
+        xi_psi_modes, xi_psi1_modes, xi_s_modes = sum_eigenmode_contributions(
+            response_vector,
+            flux_matrix,
+            ForceFreeStates_results,
+            ffs_intr
+        )
 
-    # Sum weighted eigenmode contributions to get ξ_ψ, dξ_ψ/dψ, and ξ_s in mode space
-    xi_psi_modes, xi_psi1_modes, xi_s_modes = sum_eigenmode_contributions(
-        response_vector,
-        flux_matrix,
-        ForceFreeStates_results,
-        ffs_intr
-    )
+        # Compute perturbed field in mode space using ideal MHD relations
+        # [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10]
+        b_psi_modes, b_theta_modes, b_zeta_modes = compute_perturbed_field_modes(
+            xi_psi_modes, xi_psi1_modes, xi_s_modes,
+            psi_grid, equil, ffs_intr
+        )
 
-    # Compute perturbed field in mode space using ideal MHD relations
-    # [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10]
-    b_psi_modes, b_theta_modes, b_zeta_modes = compute_perturbed_field_modes(
-        xi_psi_modes, xi_psi1_modes, xi_s_modes,
-        psi_grid, equil, ffs_intr
-    )
+        # Compute Clebsch displacements with regularization (matches Fortran gpeq_sol + gpout_xclebsch)
+        clebsch_psi, clebsch_psi1, clebsch_alpha = compute_clebsch_displacements(
+            xi_psi_modes, xi_psi1_modes, xi_s_modes,
+            psi_grid, equil, ffs_intr, ffit, ctrl
+        )
 
-    # Compute Clebsch displacements with regularization (matches Fortran gpeq_sol + gpout_xclebsch)
-    clebsch_psi, clebsch_psi1, clebsch_alpha = compute_clebsch_displacements(
-        xi_psi_modes, xi_psi1_modes, xi_s_modes,
-        psi_grid, equil, ffs_intr, ffit, ctrl
-    )
+        # Compute regularized (modified) b-field components (matches Fortran gpeq_sol bmt/bmz)
+        b_theta_reg, b_zeta_reg = compute_modified_field_modes(
+            xi_psi_modes, clebsch_psi1, clebsch_alpha,
+            psi_grid, equil, ffs_intr
+        )
 
-    # Compute regularized (modified) b-field components (matches Fortran gpeq_sol bmt/bmz)
-    b_theta_reg, b_zeta_reg = compute_modified_field_modes(
-        xi_psi_modes, clebsch_psi1, clebsch_alpha,
-        psi_grid, equil, ffs_intr
-    )
+        # Compute contravariant displacement via Jacobian convolution (matches Fortran gpeq_contra)
+        xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes = compute_contra_displacements(
+            xi_psi_modes, clebsch_psi1, clebsch_alpha,
+            psi_grid, equil, ffs_intr, metric, ctrl
+        )
 
-    # Compute contravariant displacement via Jacobian convolution (matches Fortran gpeq_contra)
-    xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes = compute_contra_displacements(
-        xi_psi_modes, clebsch_psi1, clebsch_alpha,
-        psi_grid, equil, ffs_intr, metric, ctrl
-    )
+        # Compute covariant components via metric tensor contraction (matches Fortran gpeq_cova)
+        xvp_modes, xvt_modes, xvz_modes,
+        bvp_modes, bvt_modes, bvz_modes = compute_cova_components(
+            xwp_modes, xmt_modes, xmz_modes,
+            b_psi_modes, b_theta_reg, b_zeta_reg,
+            psi_grid, ffs_intr, metric
+        )
 
-    # Compute covariant components via metric tensor contraction (matches Fortran gpeq_cova)
-    xvp_modes, xvt_modes, xvz_modes,
-    bvp_modes, bvt_modes, bvz_modes = compute_cova_components(
-        xwp_modes, xmt_modes, xmz_modes,
-        b_psi_modes, b_theta_reg, b_zeta_reg,
-        psi_grid, ffs_intr, metric
-    )
-
-    # Compute b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path
-    # area = <J·|∇ψ|>_θ (Hamada: J is const over θ)
-    ro = equil.ro
-    mthsurf = length(equil.rzphi_ys) - 1
-    thetas_for_avg = [(k - 1) / mthsurf for k in 1:mthsurf]
-    Jb_psi_modes = similar(b_psi_modes)
-    # Surfaces are independent; :static keeps threadid() stable for any per-thread state.
-    Threads.@threads :static for ipsi in 1:npsi
-        psi = psi_grid[ipsi]
-        hint2d = (Ref(1), Ref(1))
-        area = 0.0
-        for k in 1:mthsurf
-            theta = thetas_for_avg[k]
-            r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
-            deta = equil.rzphi_offset((psi, theta); hint=hint2d)
-            jac = equil.rzphi_jac((psi, theta); hint=hint2d)
-            r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-            deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-            rfac = sqrt(abs(r2))
-            eta = 2π * (theta + deta)
-            r = ro + rfac * cos(eta)
-            w11 = (1.0 + deta_y) * 4π^2 * rfac * r / jac
-            w12 = -r2_y * π * r / (rfac * jac)
-            delpsi = sqrt(w11^2 + w12^2)
-            area += jac * delpsi
+        # Compute b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path
+        # area = <J·|∇ψ|>_θ (Hamada: J is const over θ)
+        ro = equil.ro
+        mthsurf = length(equil.rzphi_ys) - 1
+        thetas_for_avg = [(k - 1) / mthsurf for k in 1:mthsurf]
+        Jb_psi_modes = similar(b_psi_modes)
+        # Surfaces are independent; :static keeps threadid() stable for any per-thread state.
+        Threads.@threads :static for ipsi in 1:npsi
+            psi = psi_grid[ipsi]
+            hint2d = (Ref(1), Ref(1))
+            area = 0.0
+            for k in 1:mthsurf
+                theta = thetas_for_avg[k]
+                r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
+                deta = equil.rzphi_offset((psi, theta); hint=hint2d)
+                jac = equil.rzphi_jac((psi, theta); hint=hint2d)
+                r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
+                deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
+                rfac = sqrt(abs(r2))
+                eta = 2π * (theta + deta)
+                r = ro + rfac * cos(eta)
+                w11 = (1.0 + deta_y) * 4π^2 * rfac * r / jac
+                w12 = -r2_y * π * r / (rfac * jac)
+                delpsi = sqrt(w11^2 + w12^2)
+                area += jac * delpsi
+            end
+            area /= mthsurf
+            Jb_psi_modes[ipsi, :] = b_psi_modes[ipsi, :] ./ area
         end
-        area /= mthsurf
-        Jb_psi_modes[ipsi, :] = b_psi_modes[ipsi, :] ./ area
+
+        # R,Z,φ cylindrical components (Fortran gpeq_rzphi)
+        # ξ: uses J-weighted psi (xwp from gpeq_contra) and regularized theta (xmt)
+        # b: uses raw psi (bwp from gpeq_sol, no Jacobian convolution) and regularized theta (bmt)
+        # Build the (ψ,θ) flux→cylindrical geometry once and reuse it for both ξ and b: the
+        # transform matrices depend only on equilibrium geometry, not on the perturbed field.
+        mlow = ffs_intr.mlow
+        mpert_rz = size(xi_psi_modes, 2)
+        mtheta_rz = max(2 * (abs(mlow) + mpert_rz), 512)
+        ft_rz = Utilities.FourierTransforms.FourierTransform(mtheta_rz, mpert_rz, mlow)
+        rzphi_geom = _build_rzphi_geometry(equil, psi_grid, mtheta_rz)
+        xi_R, xi_Z, xi_phi = _apply_rzphi_transform(rzphi_geom, ft_rz, mtheta_rz, xwp_modes, xmt_modes, xvz_modes)
+        b_R, b_Z, b_phi = _apply_rzphi_transform(rzphi_geom, ft_rz, mtheta_rz, b_psi_modes, b_theta_reg, bvz_modes)
+
+        xi_modes = (
+            psi=xi_psi_modes,
+            psi_J=xwp_modes,     # J·ξ^ψ (Jacobian-weighted, from gpeq_contra)
+            theta=xwt_modes,     # ξ^θ contravariant (from gpeq_contra)
+            zeta=xwz_modes,     # ξ^ζ contravariant (from gpeq_contra)
+            theta_reg=xmt_modes, # ξ^θ regularized (from gpeq_contra, smoothed by reg_spot)
+            zeta_reg=xmz_modes, # ξ^ζ regularized (from gpeq_contra, smoothed by reg_spot)
+            clebsch_psi=clebsch_psi,    # ξ^ψ for PENTRC
+            clebsch_psi1=clebsch_psi1,   # ∂ξ^ψ/∂ψ regularized for PENTRC
+            clebsch_alpha=clebsch_alpha,  # ξ^α/χ₁ regularized for PENTRC
+            cova_psi=xvp_modes,   # covariant ξ_ψ (from gpeq_cova)
+            cova_theta=xvt_modes,   # covariant ξ_θ (from gpeq_cova)
+            cova_zeta=xvz_modes,   # covariant ξ_ζ (from gpeq_cova)
+            R=xi_R, Z=xi_Z, phi=xi_phi
+        )
+        b_modes = (
+            psi=b_psi_modes,      # b^ψ (no Jacobian) — used for b_n normal projection
+            b_psi_area_weighted=Jb_psi_modes,     # b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
+            theta=b_theta_modes,    # b^θ unregularized
+            zeta=b_zeta_modes,     # b^ζ unregularized
+            theta_reg=b_theta_reg,      # b^θ regularized (from gpeq_sol with reg_spot)
+            zeta_reg=b_zeta_reg,       # b^ζ regularized
+            cova_psi=bvp_modes,       # covariant b_ψ (from gpeq_cova)
+            cova_theta=bvt_modes,       # covariant b_θ (from gpeq_cova)
+            cova_zeta=bvz_modes,       # covariant b_ζ (from gpeq_cova)
+            R=b_R, Z=b_Z, phi=b_phi
+        )
+
+        return xi_modes, b_modes
+    finally
+        BLAS.set_num_threads(_blas_nthreads)
     end
-
-    # R,Z,φ cylindrical components (Fortran gpeq_rzphi)
-    # ξ: uses J-weighted psi (xwp from gpeq_contra) and regularized theta (xmt)
-    # b: uses raw psi (bwp from gpeq_sol, no Jacobian convolution) and regularized theta (bmt)
-    # Build the (ψ,θ) flux→cylindrical geometry once and reuse it for both ξ and b: the
-    # transform matrices depend only on equilibrium geometry, not on the perturbed field.
-    mlow = ffs_intr.mlow
-    mpert_rz = size(xi_psi_modes, 2)
-    mtheta_rz = max(2 * (abs(mlow) + mpert_rz), 512)
-    ft_rz = Utilities.FourierTransforms.FourierTransform(mtheta_rz, mpert_rz, mlow)
-    rzphi_geom = _build_rzphi_geometry(equil, psi_grid, mtheta_rz)
-    xi_R, xi_Z, xi_phi = _apply_rzphi_transform(rzphi_geom, ft_rz, mtheta_rz, xwp_modes, xmt_modes, xvz_modes)
-    b_R, b_Z, b_phi = _apply_rzphi_transform(rzphi_geom, ft_rz, mtheta_rz, b_psi_modes, b_theta_reg, bvz_modes)
-
-    xi_modes = (
-        psi=xi_psi_modes,
-        psi_J=xwp_modes,     # J·ξ^ψ (Jacobian-weighted, from gpeq_contra)
-        theta=xwt_modes,     # ξ^θ contravariant (from gpeq_contra)
-        zeta=xwz_modes,     # ξ^ζ contravariant (from gpeq_contra)
-        theta_reg=xmt_modes, # ξ^θ regularized (from gpeq_contra, smoothed by reg_spot)
-        zeta_reg=xmz_modes, # ξ^ζ regularized (from gpeq_contra, smoothed by reg_spot)
-        clebsch_psi=clebsch_psi,    # ξ^ψ for PENTRC
-        clebsch_psi1=clebsch_psi1,   # ∂ξ^ψ/∂ψ regularized for PENTRC
-        clebsch_alpha=clebsch_alpha,  # ξ^α/χ₁ regularized for PENTRC
-        cova_psi=xvp_modes,   # covariant ξ_ψ (from gpeq_cova)
-        cova_theta=xvt_modes,   # covariant ξ_θ (from gpeq_cova)
-        cova_zeta=xvz_modes,   # covariant ξ_ζ (from gpeq_cova)
-        R=xi_R, Z=xi_Z, phi=xi_phi
-    )
-    b_modes = (
-        psi=b_psi_modes,      # b^ψ (no Jacobian) — used for b_n normal projection
-        b_psi_area_weighted=Jb_psi_modes,     # b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
-        theta=b_theta_modes,    # b^θ unregularized
-        zeta=b_zeta_modes,     # b^ζ unregularized
-        theta_reg=b_theta_reg,      # b^θ regularized (from gpeq_sol with reg_spot)
-        zeta_reg=b_zeta_reg,       # b^ζ regularized
-        cova_psi=bvp_modes,       # covariant b_ψ (from gpeq_cova)
-        cova_theta=bvt_modes,       # covariant b_θ (from gpeq_cova)
-        cova_zeta=bvz_modes,       # covariant b_ζ (from gpeq_cova)
-        R=b_R, Z=b_Z, phi=b_phi
-    )
-
-    BLAS.set_num_threads(_blas_nthreads)
-    return xi_modes, b_modes
 end
 
 """
