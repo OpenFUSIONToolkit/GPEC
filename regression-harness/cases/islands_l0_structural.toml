@@ -1,0 +1,60 @@
+# Regression case: Islands L0 solve machinery, structural (pre-physics) quantities.
+# A "computed" case (kind = "computed", no example_dir) tracking the M2 structural
+# gates: the solve-level MMS error and solver iteration counts (Newton-Krylov on the
+# manufactured advective stack at nx = 17), the coefficient-free flattened-electron
+# closure identity |<d2h/dx2>_Omega| at Omega = 2, and the y_c-block smallest singular
+# value (the L23 SS4.2 silent-noise tripwire). The physics B-ladder stays skipped until
+# [VERIFY] clearance (docs/src/islands/QUESTIONS.md Q2-Q4); these are the numbers that
+# silently move if the discretization, solver, or quadratures drift.
+[case]
+name = "islands_l0_structural"
+description = "Islands L0 structural: solve-MMS error, solver iterations, A7 identity, y_c sigma_min"
+kind = "computed"
+
+[quantities.solve_mms_err]
+h5path = "islands/solve_mms_err"
+type = "real_scalar"
+extract = "value"
+label = "solve-MMS max error (nx=17)"
+noise_threshold = 1e-8
+order = 10
+
+[quantities.newton_iters]
+h5path = "islands/newton_iters"
+type = "real_scalar"
+extract = "value"
+label = "Newton iterations"
+noise_threshold = 0.0
+order = 11
+
+[quantities.gmres_iters]
+h5path = "islands/gmres_iters"
+type = "real_scalar"
+extract = "value"
+label = "GMRES iterations (total)"
+noise_threshold = 0.0
+order = 12
+
+[quantities.a7_identity]
+h5path = "islands/a7_identity"
+type = "real_scalar"
+extract = "value"
+label = "|<d2h/dx2>_Omega| (A7)"
+noise_threshold = 1e-12
+order = 13
+
+[quantities.yc_sigma_min]
+h5path = "islands/yc_sigma_min"
+type = "real_scalar"
+extract = "value"
+label = "y_c block sigma_min (A8)"
+noise_threshold = 1e-10
+order = 14
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 90

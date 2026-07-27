@@ -1,0 +1,459 @@
+# 01 — Level 0 physics formulation
+
+Scope: the equation set for the benchmark configuration (roadmap O1–O9).
+
+**Tag semantics (updated 2026-07-07).** The full source set now lives in-repo at
+`docs/resources/Drift_Kinetic_Island_References/` (see docs/08 for the library
+map). Expressions below were transcribed from the PDFs and checked against them
+by AI extraction; these carry **[CHECKED: source, Eq./p.]** and still require
+one human sign-off before the corresponding [VERIFY] discipline is considered
+cleared (CLAUDE.md policy). Anything still uncertain carries **[VERIFY: ...]**
+with the specific question stated.
+
+Primary sources: Imada et al. NF 59, 046016 (2019) — **I19** (complete DK-NTM
+reference; the 2018 PRL 121, 175001 and JPCS 1125, 012013 are its compact
+antecedents); Dudkovskaia PhD dissertation, York 2019 — **Diss19** (full RDK
+derivation chain, Appendices C–E); Dudkovskaia et al. PPCF 63, 054001 (2021) —
+**D21**; Dudkovskaia et al. NF 63, 016020 (2023) — **D23a** (finite-β, shaped
+geometry); NF 63, 126040 (2023) — **D23b** (separatrix layer, polarization,
+ω-dependence); Leigh PhD thesis, York Dec 2023 — **L23** (the `kokuchou` code:
+amended DK-NTM equations, finite-ν★ thresholds, numerics forensics); Wilson,
+Connor, Hastie & Hegna, PoP 3, 248 (1996) — **WCHH96** (analytic electron
+closure and large-w limits).
+
+> **Load-bearing warning.** L23 §2.6 (pp. 59–60) documents concrete errors in
+> the *published* I19 equation set (Eq. A.1): a missing ρ̂_θi factor on the
+> ∂²ĝ/∂p̂² diffusion term (making it ∝ ρ̂²_θi), a missing ν̂_ii ρ̂_θi coefficient
+> on ∂ĝ/∂p̂, missing factors on the Maxwellian-gradient drive terms, a corrected
+> momentum-conserving term Û_∥i(ĝ + p̂F̂′_Ms), and a sign fix in the Δ_loc
+> relation. **Islands must implement from an independently re-derived equation
+> set benchmarked against L23's amended form, never from I19 Eq. (A.1) as
+> printed.** This is the empirical justification for the whole [VERIFY]
+> policy: the literature's O(1) coefficients are demonstrably not to be
+> trusted without re-derivation. [CHECKED: L23 §2.6]
+
+---
+
+## 1. Geometry and coordinates
+
+Local region around the rational surface ψ_s (minor radius r_s) of an m/n mode
+in a large-aspect-ratio circular tokamak, B₀ = I(ψ)∇φ + ∇φ×∇ψ, I = RB_φ,
+B ≈ B₀(1 − ε cos θ), ε = r_s/R₀ ≪ 1 [CHECKED: I19 Eq. (3)].
+
+- Radial coordinate: x ∝ ψ − ψ_s. **Pin one normalization and write the map to
+  the others**: I19 uses x = (ψ−ψ_s)/ψ_s with ŵ = w/r_s, ρ̂_θi = ρ_θi/r_s;
+  D21/D23b normalize radial quantities to the island width w_ψ
+  (ρ̂_θj = I V_Tj/(ω_cj w_ψ)); the 2018 PRL normalizes to ψ_s. These
+  inconsistent conventions across the same lineage are a transcription hazard —
+  Islands' own normalization (§5) is r_s-based, with conversion factors in one
+  place. [CHECKED: I19 p. 6; D21 Eq. 19; PRL Eq. (4) note]
+- Helical angle: ξ = m(θ − φ/q_s) (I19 Eq. (6)); Diss19/D21 use ξ = φ − q_s θ
+  with the cos nξ harmonic — same island, different angle multiplicity. Pin
+  Islands' ξ to the I19 form and document the map. **Island rest frame:** all
+  Level-0 solves are steady in this frame.
+- Poloidal angle θ is eliminated at leading order by orbit averaging at fixed
+  p_φ (O5); it reappears at Level 2.
+
+Perturbation (prescribed at Level 0, O3), single-helicity, constant-ψ:
+
+    A_∥ = −(ψ̃/R) cos ξ,      ψ̃ = (w_ψ²/4)(q_s′/q_s),   q_s′ = dq/dψ|_s
+                              [CLEARED: human sign-off 2026-07-11 —
+                              derivation docs/src/islands/derivations/psi-tilde-amplitude.md;
+                              matches Diss19 p. 30, L23 Eq. (2.1.4), and I19's own Ω (I19 Eq. 7)]
+
+where **w_ψ is the island HALF-width in ψ-space**, w = w_ψ/(RB_θ) the
+half-width in minor radius. **[VERIFY] RESOLVED (2026-07-11):** first-hand check
+confirmed I19 as printed (print p. 3, text after Eq. 6) shows (w_ψ²/4)(q_s/q_s′)
+— a **published typo**. I19 is internally inconsistent: its own Ω convention
+(Eq. 7) requires q_s′/q_s, as do dimensional analysis and Diss19/D21/L23. The
+cleared form is **q_s′/q_s** (independent re-derivation, Decision D7; triage:
+their published-equation error, the docs/05 York-lineage standing rule).
+
+Island label and convention (pinned, matches every source in the lineage):
+
+    Ω(x, ξ) = 2(ψ−ψ_s)²/w_ψ² − cos ξ,   Ω = −1 at O-point, Ω = +1 at separatrix
+                              [CHECKED: I19 Eq. (7); Diss19 Eq. 2.7; L23 Eq. (2.1.8)]
+
+**All York threshold numbers are HALF-widths** (D23a abstract states
+"threshold magnetic island half-width"; L23 footnote p. 130 notes La Haye's
+experimental fits quote the *full* width w_marg = 2w_c). This half/full-width
+bookkeeping is pinned here and in docs/05.
+
+Even at Level 0, the *stored representation* of the field is A_∥(x, ξ) on the
+(x, ξ) grid (decision D1); Ω is computed, never fundamental.
+
+## 2. Kinetic equation
+
+Per species j, phase space (x, ξ, λ, v, σ) with pitch λ = μ/E (grid variable
+y = λB_max, trapped–passing boundary y_c = 1), v the speed, σ = sgn(v_∥). Split
+
+    f_j = (1 − e_j Φ/T_j) F_Mj(ψ_s) + g_j,       [CHECKED: I19 Eq. (28) form; Diss19 Eq. 2.15]
+
+with F_M a Maxwellian carrying background gradients at r_s (strictly local,
+O2). The steady drift-kinetic equation in the island frame [CHECKED: I19 Eq. (8)]:
+
+    v_∥∇_∥f + v_E·∇f + v_b·∇f − (e_j/m_j v)(v_∥∇_∥Φ + v_b·∇Φ) ∂f/∂v = C_j(f)
+
+with v_E = B×∇Φ/B², v_b = −v_∥ b×∇(v_∥/ω_cj). Orderings: Δ = w/r ≪ 1;
+e_jΦ/T_j ~ g_j/F_M ~ Δ; B₁/B₀ ~ εΔ²; collisions O(Δ) below free streaming;
+ions retain ρ_θi ~ w (finite orbit width — the key relaxation), electrons have
+ρ_θe ≪ w. [CHECKED: I19 §1, §4; Diss19 p. 33]
+
+The radial coordinate is traded for the canonical momentum
+
+    p_φ = (ψ − ψ_s) − I v_∥/ω_cj        [CHECKED: I19 Eq. (2)]
+
+and θ is annihilated by orbit averaging at fixed p_φ (passing: (1/2π)∮dθ;
+trapped: (1/2π)Σ_σ∫_{−θ_b}^{θ_b}dθ, a signed sum over the two banana legs — so a
+σ-even integrand gives ×2 while a σ-odd one like 1/v̂_∥ cancels to 0, §2.1/§2)
+[CHECKED: I19 Eq. (31); Diss19 Eq. 2.24].
+The master 4D equation for the orbit-averaged distribution Ḡ₀(p̂, ξ, y; v̂, σ)
+is **I19 Eq. (32)** (structure confirmed; coefficients subject to the L23 §2.6
+amendments — implement from re-derivation):
+
+    −m[ (p̂/L̂_q)Θ(y_c−y) + ρ̂_θi ω̂_D − (ρ̂_θi/2)⟨(1/v̂_∥)∂Φ̂/∂x⟩_θ ] ∂Ḡ₀/∂ξ|_p̂
+    + m[ (ŵ²/4L̂_q) sin ξ Θ(y_c−y) − (ρ̂_θi/2)⟨(1/v̂_∥)∂Φ̂/∂ξ⟩_θ ] ∂Ḡ₀/∂p̂
+    = ⟨(1/v̂_∥)Ĉ_ii(Ḡ₀)⟩_θ
+
+The three transport channels of the design (island-induced streaming, magnetic
+drift, E×B) are the three bracketed frequencies above; they map one-to-one onto
+the operator stack (docs/03 §2).
+
+**Island-streaming [CLEARED: human sign-off 2026-07-11 — derivation
+docs/src/islands/derivations/parallel-streaming.md]:** the streaming braces
+`(x/L̂_q)Θ(y_c−y) ∂_ξ` and `(ŵ²/4L̂_q) sinξ Θ(y_c−y) ∂_p̂` give, in the
+`c_D = ω̂_D` normalization (divide by −m ρ̂_θi), `a_ξ = (L̂_q⁻¹/ρ̂_θi) x Θ` and
+`a_x = −(L̂_q⁻¹ŵ²/4ρ̂_θi) sinξ Θ` — which factor exactly into
+`(L̂_q⁻¹ŵ²/4ρ̂_θi)Θ·{Ω, ·}`, advection along the island flux surfaces (a
+coefficient-free structural check). Implemented as
+`Configure.streaming_coefficients` → `Operators.ParallelStreaming`, passing-only
+(`Θ`), leaving the cleared `c_D` unchanged.
+
+**E×B coupling [CLEARED: human sign-off 2026-07-12 — derivation
+docs/src/islands/derivations/exb-coupling.md]:** the two E×B braces
+`−(ρ̂_θi/2)⟨(1/v̂_∥)∂_xΦ̂⟩_θ ∂_ξ` and `−(ρ̂_θi/2)⟨(1/v̂_∥)∂_ξΦ̂⟩_θ ∂_p̂` give, in the
+`c_D = ω̂_D` normalization (÷ −m ρ̂_θi, `ρ̂_θi` cancels), the coefficient of the
+`Operators.ExBDrift` Poisson bracket `c_E[(∂_ξΦ̂)(∂_x g)−(∂_xΦ̂)(∂_ξ g)]`:
+`c_E = ½⟨1/v̂_∥⟩_θ` with `1/v̂_∥ = σ/(v̂√(1−yb))`. **σ-parity:** passing
+(`y < y_c`) is σ-odd, `c_E = (σ/2√E)·B₁(y)` with the new orbit bracket
+`B₁(y) = ⟨1/√(1−yb)⟩_θ`; trapped (`y > y_c`) is **identically zero** — the σ-odd
+`1/v̂_∥` cancels between the two banana legs under `Σ_σ`, which the drift-island
+label requires (trapped `S ∝ p̂`, §2.2). So E×B is a **passing-particle** effect,
+like island-streaming. Implemented as `Configure.exb_coupling_table` (from
+`Coefficients.orbit_average_exb_bracket`) → `Operators.ExBDrift` (now a
+velocity-dependent array coefficient). No new physics parameter (only `ε`).
+
+**Gradient drive [CLEARED: human sign-off 2026-07-11 — derivation
+gradient-drive.md]:** the master equation (Eq. 32) is **homogeneous** — I19's
+`Ḡ₀ = p_φ(ω_si^T/ω_si)(n'/n)F_Mi + h̄₀` (Eq. 29, `ω_si^T/ω_si = 1+(v̂²−3/2)η_i`
+a temperature factor, *not* a frequency ratio) is the standard neoclassical drive
+`p_φ F'_Mi`, imposed as the **far-field boundary condition**, not an interior
+source. So `Operators.GradientDrive = 0` and the far field is
+`g_far = x L̂_{n0}⁻¹[1+(E−3/2)η_i]` (`Φ̂_far = 0` at `ω_E = 0`), built by
+`Configure.gradient_far_field`. No frame convention enters (Level-0, `ω_E = 0`).
+
+### 2.1 Magnetic drift frequency: the original/improved toggle (now precise)
+
+Orbit-averaged precession [CLEARED: human sign-off 2026-07-11 — derivation
+docs/src/islands/derivations/omega-D-drift-frequency.md; first-hand agreement
+with I19 Eq. (32), D21 Eqs. (B1), (A2), Diss19; no discrepancy]:
+
+    ω̂_D = [σv̂/(1+ε)] [ (1/L̂_q)⟨√(1−yb)/b⟩_θ − (1/2)(1/L̂_B)⟨(2−yb)/(b√(1−yb))⟩_θ ]
+
+The two terms are the shear-coupled drift-orbit-width precession (1/L̂_q, from the
+finite orbit width x_D = ρ̂_θi(σv̂/(1+ε))√(1−yb)/b) and the grad-B drift (1/L̂_B).
+
+- **:original** (I19/DK-NTM): finite constant L̂_B⁻¹ = (ψ_s/B)∂B/∂ψ — retains a
+  non-vanishing ∇B term after orbit averaging.
+- **:improved** (D21/RDK-NTM): Appendix A of D21 shows (from
+  ∂B/∂ψ = I′/R − (I/R²)∂R/∂ψ, low-β) ∂B/∂ψ = −(B_φ/(R₀²B_θ)) cos θ + O(ε²) — the
+  cos θ modulation makes ⟨cos θ·even⟩_θ = O(ε), so the term is ε-small after
+  orbit averaging; **L̂_B⁻¹ = 0 is the documented proxy** (D21 footnote 10, Fig. 8
+  compares proxy vs full cos θ form directly). [CLEARED 2026-07-11, same
+  derivation; the toggle is carried by MagneticDrift.variant.]
+
+This single toggle is what moved the threshold half-width 8.73 ρ_bi → 1.46 ρ_bi
+(D23a abstract). It is the archetype of the toggle-impact studies (docs/05 E1).
+
+### 2.2 The drift-island structure (must emerge from the solve, not be assumed)
+
+The exact drift-surface label [CHECKED: I19 Eq. (33); D21 Eq. 21; Diss19 Eq. 2.37]:
+
+    S = (ŵ²/4L̂_q)[ 2(p̂ − ρ̂_θi ω̂_D L̂_q)²/ŵ² − cos ξ ] Θ(y_c−y)
+        − p̂ ρ̂_θi ω̂_D Θ(y−y_c) − (1/2)⟨(ρ̂_θi/v̂_∥) Φ̂⟩_θ
+
+Passing particles: constant-S surfaces are the magnetic island **radially
+shifted by x_D = ρ̂_θi ω̂_D(y, v̂; σ) L̂_q** — σ-dependent, equal and opposite
+for v_∥ ≷ 0, pitch/energy-dependent through ω̂_D. (There is no separate
+"h(λ,E)" shift function in the sources; the shift *is* ρ̂_θi ω̂_D L̂_q. The
+symbol h(Ω) is reserved for the electron profile function, §2.4.) Flattening
+of f on drift islands rather than the magnetic island sustains pressure
+gradients across small islands (w ~ ρ_θi) and weakens the bootstrap drive —
+the kinetic threshold mechanism, carried by **passing** particles (D21 §7:
+passing-particle physics, not banana-orbit physics; ρ_bi is merely the natural
+unit at ε = 0.1). Trapped particles: S ∝ p̂ (no island structure); response
+tied to the magnetic island.
+
+In DK (4D direct) mode Islands does **not** impose S-structure; it must *emerge*.
+The RDK reduction — solve the 1D collisional constraint ⟨Ĉ/𝒜⟩_ξ^S g^(0,0) = 0
+per S-contour [CHECKED: D21 Eqs. 23–24; explicit coefficient forms Diss19
+Eqs. D.60–D.62 and D23b Eq. 19 + Appendix A] — is retained as a cross-check
+mode valid for δ_j = ν_j/(εω_b) ≪ 1.
+
+### 2.3 Collision operator (Level 0)
+
+Momentum-conserving pitch-angle (Lorentz) model [CLEARED: human sign-off
+2026-07-11 — derivation docs/src/islands/derivations/collision-operator.md;
+operator structure, deflection frequency, and ν_★ normalization agree first-hand
+with I19 Eqs. (9)–(12), L23 Eq. (2.3.40); no discrepancy]:
+
+    C_jj(f) = 2ν_jj(v)[ (√(1−λB)/B) ∂_λ( λ√(1−λB) ∂_λ f ) + v_∥ ū_∥j f /v²_thj · F_Mj-normalized ]
+    ū_∥j(f) = (1/(n⟨ν_jj⟩_v)) ∫d³v ν_jj v_∥ f          (momentum restoring)
+    C_ei drags on the ION flow u_∥i (species coupling)
+
+The pitch-angle bracket is the Lorentz operator in self-adjoint form
+w⁻¹∂_λ(P∂_λ) with diffusivity P(λ) = λ√(1−λB) and measure w = B/√(1−λB) (the
+change of variables from the pitch cosine fixes the 2ν_jj prefactor exactly).
+λ-derivatives at **fixed ψ**, not fixed p_φ (a classic transcription trap).
+Energy dependence: two variants exist in the lineage and become a documented
+sub-toggle — I19/L23 use the full ν_jj(v) = ν̃_jj[φ(v̂) − G(v̂)]/v̂³ (Chandrasekhar
+G; needed for neoclassical fidelity), while Diss19/D21 use the simpler
+ν(V) ∝ V⁻³. Both diverge as v̂ → 0 (φ − G → (4/3√π)v̂ linear ⟹ ν̃ ~ v̂⁻² for the
+Chandrasekhar form, v̂⁻³ for the reduced), motivating the analytic velocity
+average L23 additionally derives:
+⟨ν̂_ii⟩_u = (4ε^{3/2}ν_★/3√π)(√2 − ln(1+√2)) **[CLEARED: human sign-off 2026-07-12
+— derivation docs/src/islands/derivations/collision-magnitude.md; first-hand from
+L23 Eqs. 4.1.4–4.1.6, p. 87–88, reproducing L23's unit-test 1.267537×10⁻⁴ to 7
+digits]**. It is the normalized Maxwellian speed average ⟨·⟩_u = (8/3√π)∫₀^∞
+u⁴e^{−u²}(·)du of ν̂_ii = ε^{3/2}ν_★[φ−G]/u³; the `√2` from the ion self-collision
+integral, `ln(1+√2) = arcsinh(1)` from ∫u⁻¹e^{−u²}erf du. It carries the
+momentum-restoring flow's magnitude (I19 Eq. 12); implemented as
+`Coefficients.momentum_restoring_average` (the restoring *operator term* is a
+separate future addition — this clears its constant).
+
+Collisionality normalization [CLEARED 2026-07-11, same derivation]:
+ν_★ = ν_jj Rq/(ε^{3/2} v_th) (banana regime
+ν_★ ≪ 1); ν̂_jj = ε^{3/2}ν_★ ν̃_jj(u). [CHECKED: L23 Eq. (2.3.40); Diss19
+footnote 26]. The collision **magnitude** `nu_tilde = ε^{3/2}ν_★` is thus cleared
+(`collision-magnitude.md`): `Configure.Level0Physics` carries `ν_★` as a scenario
+scan input (Decision D7) and `configure_level0` builds `nu_tilde = ε^{3/2}ν_★`,
+un-gating the collision operator's magnitude.
+
+**Full orbit-averaged collision operator [CLEARED: human sign-off 2026-07-12 —
+derivation orbit-averaged-collision.md; first-hand from L23 Eqs. 2.3.34–2.3.35,
+2.3.47, appendix 8.3.2].** The `⟨(1/v̂_∥)Ĉ_ii⟩_θ` collision side of I19 Eq. (32)
+orbit-averages to six terms (L23 Eq. 2.3.47), each put in the code normalization
+÷(−m ρ̂_θi) — note the collision terms carry an explicit `1/(m ρ̂_θi)` (unlike the
+drift, `m` does *not* cancel). The five **differential** terms are now cleared and
+wired: the σ-**odd** mimetic **pitch diffusion** D+E — an exact `y`-divergence
+`∂_y(P_oa ∂_y)` with `P_oa = y⟨√(1−yb)⟩_θ` (orbit-averaged, replacing the
+local single-`B` placeholder) and **flat measure** (L23: the `⟨√(1−yb)⟩` term
+vanishes at `y=0,1/b`, natural BC); the σ-even `∂_x` **drag** (A); the σ-odd `∂²_x`
+**neoclassical** diffusion (B, the only cross-`pφ` transport, using
+`⟨1/√(1−yb)⟩_θ`); and the σ-even `∂²_{xy}` **cross** term (C). The **σ-parity
+correction** (the pitch diffusion is σ-odd via the `1/v̂_∥` weight, like `ω̂_D`/`c_E`
+— not σ-even) is the key fidelity fix. Implemented as `Operators.PitchAngleDiffusion`
+(rebuilt) + `CollisionalDrag`/`NeoclassicalDiffusion`/`CollisionalCross`, from
+`Configure`'s cleared builders; the forbidden pitch region (`y ≥ 1/b_min`, no
+particles) is pinned `g=0` (a domain BC). `m` (poloidal mode number) is a new
+`Level0Physics` scenario input. **The sixth term — the momentum-restoring
+field-particle integral (F) — is now cleared [human sign-off 2026-07-14]:** the
+one **nonlocal** Level-0 term, `Ū(x,ξ) = (1/√π⟨ν̂_ii⟩_u){ν̂_ii v̂_∥ g}_v` (the
+physical `∫d³v` moment, `velocity-moment-measure.md`) redistributed as
+`+2ν̂_ii(1+ε)Ū/(m ρ̂_θi)` (σ-even, positive; `F̂_M=e^{−E}` cancels in the `g=shape`
+convention), using the cleared `⟨ν̂_ii⟩_u`. Linear in `g`, allocation-free
+(`Operators.MomentumRestoring`, `Configure.momentum_restoring_term`). **The full
+Level-0 collision operator (all six terms) is now complete.**
+
+Replaced wholesale at Level 1 by the multi-species Fokker–Planck operator.
+
+### 2.4 Electrons at Level 0 (O7) — closure now exact
+
+ρ_θe ≪ w ⇒ electron drift islands coincide with the magnetic island. The
+analytic closure is WCHH96's, as used by I19/L23. The h(Ω) profile and its
+amplitude are [CLEARED: human sign-off 2026-07-11 — derivation
+docs/src/islands/derivations/electron-closure.md; the closure constraint
+⟨∂²h/∂x²⟩_Ω = 0 gives h′ = C/Q, far-field matching h → x gives C = w_ψ/2√2,
+matching I19 Eq. 18]:
+
+    f_e = (1 − e_eΦ/T_e) F_Mes + h(Ω) F′_Mes − (Iv_∥/ω_ce) F′_Mes ∂h/∂ψ + h̄_e
+    h(Ω) = Θ(Ω−1) (w_ψ/2√2) ∫₁^Ω dΩ′/Q(Ω′),   Q(Ω) = (1/2π)∮√(Ω+cos ξ) dξ
+
+h(Ω) is exactly flat inside the separatrix, → x far away, and satisfies
+⟨∂²h/∂x²⟩_Ω = 0 (the closure constraint itself; unit-test target, L23 Eq. 4.1.1,
+green as ladder A7). Flux-surface-averaged electron flow — **structure**
+[CLEARED 2026-07-11], **constants k, f_p deferred** [CHECKED: I19 Eq. (22);
+L23 Eqs. 2.5.5–2.5.8]:
+
+    ⟨⟨Bu_∥e⟩_θ⟩_Ω/(B₀v_the) = −[f_t/(1+f_t)](Iv_the/ω_ce)(n′/n)(1 + η_e + ½ k f_c η_e)⟨∂h/∂ψ⟩_Ω
+                              + [f_c/(1+f_t)] ⟨⟨Bu_∥i⟩_θ⟩_Ω/(B₀v_thi)
+
+with k ≃ −1.173 (Hirshman–Sigmar; **[CHECKED, uncleared — deferred, own
+derivation]**; unit-test: L23 reproduces −1.1730) and f_p ≃ 1 − 1.46√ε
+**[CLEARED: human sign-off 2026-07-11 — derivation passing-fraction.md;
+`Coefficients.passing_fraction(ε) = 1 − 1.4624√ε`, the effective trapped-fraction
+coefficient, = 1.46 to 3 s.f.]**. Note the electron current depends on the
+*numerically computed ion flow* (momentum conservation) — the closure is coupled, not
+one-way. Toggle `electrons = :flattened | :kinetic`: the `:kinetic` option is
+exactly RDK-NTM's defining feature (electrons solved with the same drift-island
+machinery as ions, Diss19 Eq. D.61 / D21 §5) and is *required* at Level 3
+(shielding); running it at Level 0 against `:flattened` is toggle study E4.
+
+## 3. Field equation (Level 0: quasineutrality only)
+
+    n_i[Φ; g_i] = n_e[Φ; closure]   →   Φ(x, ξ)
+
+Exact Level-0 closed form with flattened electrons [CLEARED: human sign-off
+2026-07-11 — derivation docs/src/islands/derivations/quasineutrality-closure.md;
+derived from the ion/electron density moments, matches I19 Eq. (A.11) exactly at
+τ=1; the general-τ form is the new result]:
+
+    e_iΦ̂/T_i = (τ/(τ+1)) [ δn̄_i/n₀ + L̂_{n0}⁻¹ (x − ĥ(Ω)) ]      (arbitrary τ)
+             = [ δn̄_i/n₀·L̂_{n0} + x − ĥ(Ω) ] / (2 L̂_{n0})       (τ=1, I19 A.11 form)
+
+(T_e = T_i assumed in the sources; Islands keeps τ = T_e/T_i general — the
+τ/(τ+1) closure coefficient is the sum of ion+electron adiabatic responses. The
+code uses the raw-moment form with δn̄_i = ∫g_i d³v the actual velocity moment,
+so I19's δn_i normalization convention is a cross-check nuance only, not a code
+dependency. **The `∫d³v` is the physical measure [CLEARED: human sign-off
+2026-07-13 — derivation velocity-moment-measure.md]: the `√E/2` speed Jacobian
+and the `1/√(1−y b_min)` pitch Jacobian (flux-surface `b_min=(1−ε)/(1+ε)`, exact
+singular-weight quadrature), via `Configure.physical_velocity_weights` wired into
+`Operators.Quasineutrality`. This revised the earlier flat-measure `δn̄_i`
+(`max|Φ|` shifted ≈5.7→4.5); the closure algebra `α`/`S` is unchanged.**) With kinetic electrons, the Picard form δΦ̂ = (δn̂_i − δn̂_e)/2
+[CHECKED: Diss19 Eq. 2.45]. In Islands both reduce to one quasineutrality
+residual inside the global Newton system (docs/03) — the sources' nested
+Picard loops (Φ outer, ū_∥i inner; I19 fig. A1) are precisely the fragile
+iteration structure Newton–Krylov replaces; L23 §6.1.1 reports the Picard
+convergence criterion was *never met* in production (Φ̂ array-max residuals
+> 100%/iteration at large ŵ) even as Δ stabilized — treat that as the
+cautionary tale motivating D2.
+
+**Implemented (2026-07-11):** `Operators.Quasineutrality` carries the full closure
+— the residual is `R_Φ = M[g] − α Φ̂ + S`, with `α = (τ+1)/τ` (the reciprocal of
+the `τ/(τ+1)` closure coefficient, from `Coefficients.quasineutrality_coefficient`)
+and the field source `S = L̂_{n0}⁻¹(x − ĥ(Ω))` built by
+`Configure.quasineutrality_source` from the cleared `ĥ` profile
+(`Coefficients.h_amplitude`, `Fields.h_profile`). This closes the earlier gap
+where the operator carried only `M[g] − α Φ`: without the `(x − ĥ)` source the
+Level-0 potential was trivially zero (QUESTIONS Q5, field term now resolved).
+
+Boundary conditions: g → neoclassical (no-island) solution and Φ̂ → background
+E_r potential as |x| → L_x; periodic in ξ. **Do not use bare Neumann
+∂ĝ/∂p̂ = 0**: L23 §5.3/§7.1 traces its non-physical "winged" solution branch
+(flows extending 8–10 island widths, disagreeing with neoclassical theory) to
+the Neumann condition admitting multiple numerically-valid solutions, and
+recommends matching to the analytic far-field limit — which is exactly Islands'
+neoclassical-matching BC. [CHECKED: L23 pp. 113–115, 141]
+
+Ampère is **not** solved at Level 0 (O3). The Ampère residual is evaluated as
+a diagnostic from day one; its resonant moments are the Δ outputs:
+
+## 4. Output moments and MRE assembly (normalization now exact)
+
+Parallel current J̄_∥ = θ-average of Σ_j e_j n_j u_∥j = Σ_j Z_j ∫ W_j g_j, with the
+**parallel-flow weight W = v̂_∥ = σ√E√(1−y b_min) [CLEARED: human sign-off
+2026-07-13 — velocity-moment-measure.md; `Configure.parallel_flow_weight`]**: in
+the physical `∫d³v` measure its `√(1−y b_min)` cancels the pitch Jacobian, so J̄_∥
+is regular (`∝ Σ_σ σ ∫dy∫dE (E/2) g`). This un-gates `Moments.parallel_current!`
+→ the Δ outputs. The two projections of parallel Ampère through the island
+[CHECKED: Diss19 Eqs. 2.9–2.10; D21 Eqs. 7–8, 32]:
+
+    (1/μ₀R) Δ′ ψ̃ = ∫_ℝ dψ ∮ dξ J̄_∥ cos ξ        (growth: matching to Δ′)
+    0            = ∫_ℝ dψ ∮ dξ J̄_∥ sin ξ        (torque balance / rotation)
+
+so the kinetic drive and torque moments are
+
+    Δ_cos ≡ Δ_neo = −(μ₀R/2ψ̃) ∫ dψ ∮ dξ J̄_∥ cos ξ,     stationarity: Δ′ + Δ_neo = 0
+    Δ_sin          =  (μ₀R/2ψ̃) ∫ dψ ∮ dξ J̄_∥ sin ξ     [CLEARED: human sign-off 2026-07-11 —
+                                                          derivation docs/src/islands/derivations/delta-moment-prefactors.md;
+                                                          Δ_cos matches Diss19 Eq. 4.12, ψ̃ cleared (§1), μ₀R geometry;
+                                                          sin-normalization pinned symmetric ([DERIVED: 2026-07-11])]
+
+with ψ̃ = (w_ψ²/4)(q_s′/q_s), and the Rutherford LHS (2τ_R/r_s²) dw/dt (w =
+half-width). Decomposition diagnostics [CHECKED: Diss19 Eqs. 4.13–4.15; D21
+Eqs. 33–34; D23b §4]:
+
+- **Bootstrap+curvature part**: the Ω-flux-surface-constant part of J̄_∥,
+  ⟨J̄_∥⟩_Ω with ⟨·⟩_Ω = ∮·(Ω+cosξ)^{−1/2}dξ / ∮(Ω+cosξ)^{−1/2}dξ.
+- **Polarization part**: Δ_pol = Δ_neo − (Δ_bs+Δ_cur) — the piece that
+  flux-surface-averages to zero. (L23 Eq. 2.5.3 flags this split as
+  approximate bookkeeping — "could comprise similar contributions from other
+  sources" — which is the design's position: partition is diagnostic, the
+  solve never separates channels.)
+- Species partition (ion vs electron) alongside: L23 finds the *electron*
+  channel dominates both Δ_bs and (unexpectedly, at ω_E = 0) the stabilizing
+  Δ_pol — an open physics question Islands can settle with the ω_E scan.
+
+**Analytic large-w limits to recover** (ladder B2): Δ_bs+Δ_cur ∝ 1/w matching
+WCHH96 Eq. (85) — with the caveat that Eq. (85) is derived in the E_r = 0
+frame while the island-frame calculation must be mapped before comparison
+(Diss19 p. 86) — generic scaling Δ_bs ~ ε^{1/2}(L_q/L_p)(β_θ/w); and
+Δ_pol ∝ 1/w³ at large w. [CHECKED: Diss19 pp. 84–86; D21 p. 2]
+
+In the linear limit, (Δ_cos + iΔ_sin) ↔ the complex layer Δ(Q) (SLAYER
+convention map still [VERIFY: Park PoP 29 (2022) — paper not yet in the
+reference library; acquire]).
+
+## 5. Nondimensionalization and frames (the input parameter vector p)
+
+Normalizations (r_s-based, following I19): x = (ψ−ψ_s)/ψ_s, ŵ = w/r_s,
+ρ̂_θj = ρ_θj/r_s, v̂ = v/v_thj, y = λB_max, b = B/B_max, L̂_q⁻¹ = (ψ_s/q)dq/dψ,
+L̂_n⁻¹ = (ψ_s/n)dn/dψ, Φ̂ = e_jΦ/T_j, ν̂ = ε^{3/2}ν_★ν̃(v̂). Conversion maps to
+the D21 (w_ψ-based) and PRL (ψ_s-based) conventions live in `src/frames/`
+alongside the frequency maps. [CHECKED: I19 p. 6; L23 Eqs. 2.3.40–2.3.46]
+
+**Frame identities (now source-confirmed, the frames-module spec):**
+
+- ω_dia,e = m T_e n₀′/(−e q_s n₀); ω_E ≡ m Φ′_eqm/q_s; ω̂_E = ω_E/ω_dia,e.
+  [CHECKED: Diss19 p. 46]
+- The combination **ω − ω_E is frame-independent**; with ω₀ the island
+  propagation frequency in the frame where E_r → 0 far from the island,
+  **ω₀ = −ω_E** (island-rest-frame calculation at equilibrium-potential
+  gradient ω_E ⇔ island rotating at −ω_E in the zero-E_r frame).
+  [CHECKED: Diss19 pp. 47–48]
+- The effective density gradient shifts with frame:
+  L_n⁻¹ = L_{n0}⁻¹(1 + Z_j ω_E/ω_dia,e). [CHECKED: Diss19 p. 46]
+- Level-0 sources' published thresholds are at ω_E = 0 (no equilibrium E_r);
+  D23b treats ω_E as an input parameter — exactly Islands' O4. Torque-balance
+  roots (Δ_sin = 0) exist at discrete ω̂_E (Diss19 benchmark: ω₀ = −0.93
+  ω_dia,e selected among ±0.93, ±1.28); Δ_pol ∝ ω_E² away from zero and
+  **reverses sign at ω_E ≈ −0.89 ω_dia,e** (D23b Fig. 8) — the modern, frame-
+  pinned statement of the polarization sign controversy. These are ladder-B4
+  targets.
+
+Level-0 input vector:
+
+    p = ( ŵ = w/ρ_θi  (half-width),
+          ω̂_E = ω_E/ω_dia,e   (≡ −ω₀/ω_dia,e; SLAYER Q-map [VERIFY: Park 2022]),
+          ν̂_j = ν_★j  per species,
+          ε, ŝ (via L̂_q), q_s, τ = T_e/T_i,
+          η_j = L_n/L_Tj,
+          species list: {Z_j, m_j/m_i, n_j/n_e, T_j/T_i, gradients, F0 type, role} )
+
+Frequency bookkeeping owns its own unit tests; the polarization-sign disputes
+in the literature are largely frame disputes, and the identities above make
+the conversions mechanical. One module (`src/frames/`) owns them.
+
+## 6. Symmetries and conserved checks (unit-test targets)
+
+- Parity: Δ_cos even / Δ_sin odd under the appropriate (ξ, σ, ω_E) reflection
+  [derive at implementation and record as [DERIVED]; consistency targets:
+  Δ_pol(ω_E) parabolic/even to leading order away from the linear-in-ω_E
+  region near zero, D23b Fig. 8].
+- Zero-gradient, zero-Φ̃ Maxwellian: g = 0 exactly; residual = machine zero.
+- No island (ψ̃ → 0), gradients on: recover standard local neoclassics
+  (bootstrap J_∥ vs. Sauter/NEO) — the most powerful global check (docs/05 B1).
+- Electron-closure identities: ⟨∂²h/∂x²⟩_Ω = 0; k → −1.173; f_p → 1 − 1.46√ε;
+  ⟨ν̂_ii⟩_u analytic value (§2.3). [CHECKED: L23 Ch. 4]
+- Collision operator: particle conservation (L0); +momentum/energy per pair
+  (L1); discrete entropy sign ∫ g C[g]/F_M ≤ 0.
+
+## 7. Explicitly out of Level-0 scope (recorded to prevent creep)
+
+Ampère & multi-harmonic (L3); torque-balance closure of ω_E (L4 — but ω_E is
+an input *parameter scan* from day one; publishing single-ω_E Δ values is
+forbidden per the risk register); χ_⊥/w_d (L4); general geometry & 5D (L2);
+slowing-down F₀ (L2); radiation (L4); gyroaveraging beyond drift order (out of
+program scope — documented limitation vs. gyrokinetic island studies; L23
+p. 142 draws the same boundary: ŵ approaching ρ_i needs gyrokinetics).

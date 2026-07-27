@@ -1,0 +1,550 @@
+# runtests_islands_configure.jl
+#
+# Islands M2c — the Level-0 configuration-assembly gates
+# (docs/src/islands/design/03 §2; M2c milestone contract, deliverable #1):
+#   - configure_level0 builds a well-formed IslandStack + far-field BCs + Δ prefactors;
+#   - the CLEARED coefficients are wired faithfully onto the operator stack
+#     (c_D ≡ Coefficients.magnetic_drift_frequency node-for-node; the :improved
+#     toggle; the pitch diffusivity/deflection shapes; the Δ prefactors);
+#   - QUESTIONS Q5 is now fully cleared: every Level-0 operator coefficient is
+#     built from `phys` via a cleared `Coefficients.*` builder (no gated inputs),
+#     including the full orbit-averaged collision operator (orbit-averaged-collision.md);
+#   - the assembled residual runs and Newton–Krylov converges.
+
+using LinearAlgebra
+using Test
+
+const IslC = GeneralizedPerturbedEquilibrium.Islands
+const PSc = IslC.PhaseSpace
+const Opc = IslC.Operators
+const Soc = IslC.Solvers
+const Coc = IslC.Coefficients
+const Spc = IslC.SpeciesLists
+const Cfg = IslC.Configure
+const Mo = IslC.Moments
+
+# small physical grid: y_max spans the full pitch domain (forbidden region +
+# y_c layer) so the assembly's robustness there is exercised.
+_grid() = PSc.IslandGrid(; nx=9, nxi=8, ny=9, nE=3, halfwidth_x=6.0, clustering_x=1.0,
+    y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+
+# ρ̂_θi is order-unity here so the island-streaming a_xi = (inv_Lq/ρ̂_θi)·x stays
+# commensurate with the (structural, non-physics) test domain and the naive
+# Newton–Krylov converges without the physics preconditioner; the cleared
+# coefficient *structure* (the {Ω,g} advection) is ρ̂_θi-independent in form.
+_phys(; variant=:original, model=:chandrasekhar) = Cfg.Level0Physics(; epsilon=0.1,
+    inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0,
+    rho_hat_theta_i=1.0, eta_i=0.5, nu_star=0.01, m=2.0, tau=1.0, variant=variant, collision_model=model)
+
+_ion() = [Spc.Species(; name=:i, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0, T=1.0), role=Spc.Bulk)]
+
+@testset "Islands Configure — Level-0 assembly (M2c)" begin
+    grid = _grid()
+    phys = _phys()
+    species = _ion()
+    cfg = Cfg.configure_level0(grid, phys, species)
+
+    @testset "well-formed stack + provenance" begin
+        @test cfg.stack isa Opc.IslandStack
+        # streaming, drift, E×B, pitch D+E, drag A, neoclassical B, cross C,
+        # momentum F, drive
+        @test length(cfg.stack.kinetic) == 9
+        @test cfg.stack.field isa Opc.Quasineutrality
+        @test cfg.bc isa Opc.FarFieldConditions
+        # provenance tuples name exactly which coefficients are cleared vs gated
+        @test :magnetic_drift in cfg.cleared
+        @test :delta_prefactors in cfg.cleared
+        @test :quasineutrality in cfg.cleared            # closure now wired (01 §3)
+        @test !(:quasineutrality_alpha in cfg.gated)     # no longer a structural gap
+        @test :streaming in cfg.cleared                  # island streaming now wired (01 §2)
+        @test :gradient_drive in cfg.cleared             # far-field drive, zero source (01 §2)
+        @test :far_field in cfg.cleared
+        @test :exb in cfg.cleared                        # E×B now wired (01 §2, exb-coupling.md)
+        # the full orbit-averaged collision operator (orbit-averaged-collision.md)
+        @test :pitch_diffusion in cfg.cleared            # D+E (σ-odd, orbit-averaged P_oa)
+        @test :collisional_drag in cfg.cleared           # A (∂_x)
+        @test :neoclassical_diffusion in cfg.cleared     # B (∂²_x)
+        @test :collisional_cross in cfg.cleared          # C (∂²_xy)
+        @test :momentum_restoring in cfg.cleared         # F (nonlocal, velocity-moment-measure.md)
+        @test :collision_magnitude in cfg.cleared        # ε^{3/2}ν_★
+        @test cfg.gated == ()                            # every L0 operator coefficient is cleared
+    end
+
+    @testset "gradient drive = zero source + diamagnetic far field (01 §2)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        # I19 Formulation A: the interior GradientDrive source is zero
+        gd = cfg.stack.kinetic[9]
+        @test gd isa Opc.GradientDrive
+        @test all(iszero, gd.drive)
+        # far field g_far = x·L̂_n0⁻¹·[1+(E−3/2)η_i] at the boundaries, Φ_far = 0
+        bc = Cfg.gradient_far_field(grid, phys)
+        xL, xR = grid.x.nodes[1], grid.x.nodes[nx]
+        for iE in 1:nE
+            temp = 1 + (grid.E.nodes[iE] - 1.5) * phys.eta_i
+            @test bc.g_left[2, 3, iE, 1] ≈ xL * phys.inv_Ln0 * temp atol = 1e-12
+            @test bc.g_right[2, 3, iE, 1] ≈ xR * phys.inv_Ln0 * temp atol = 1e-12
+        end
+        @test all(iszero, bc.Φ_left) && all(iszero, bc.Φ_right)   # ω_E = 0
+        # isotropic in ξ, y, σ (leading order)
+        @test bc.g_left[1, 1, 2, 1] == bc.g_left[nξ, ny, 2, nσ]
+    end
+
+    @testset ":analytic far field restores the drift-orbit shift ⟨x_D⟩ (analytic-far-field.md)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        bcD = Cfg.gradient_far_field(grid, phys; mode=:dirichlet)
+        bcA = Cfg.gradient_far_field(grid, phys; mode=:analytic)
+        @test bcA.mode == :dirichlet                              # :analytic applies as a value (Dirichlet) condition
+        @test_throws ArgumentError Cfg.gradient_far_field(grid, phys; mode=:bogus)
+        xL, xR = grid.x.nodes[1], grid.x.nodes[nx]
+        # at the deeply-passing endpoint y=0 the cleared bracket A(y)=⟨√(1−yb)/b⟩_θ is
+        # well-defined; g_far = (x − ⟨x_D⟩)·slope with ⟨x_D⟩ = ρ̂_θi(σ√E/(1+ε))A(y)
+        iy = 1
+        A0 = Coc.orbit_average_drift_brackets(; y=grid.y.nodes[iy], epsilon=phys.epsilon)[1]
+        for iσ in 1:nσ, iE in 1:nE
+            xD = phys.rho_hat_theta_i * (grid.σ[iσ] * sqrt(grid.E.nodes[iE]) / (1 + phys.epsilon)) * A0
+            temp = 1 + (grid.E.nodes[iE] - 1.5) * phys.eta_i
+            slope = phys.inv_Ln0 * temp
+            @test bcA.g_left[1, iy, iE, iσ] ≈ (xL - xD) * slope atol = 1e-12
+            @test bcA.g_right[1, iy, iE, iσ] ≈ (xR - xD) * slope atol = 1e-12
+            # differs from :dirichlet by exactly the −⟨x_D⟩·slope shift
+            @test bcA.g_left[1, iy, iE, iσ] - bcD.g_left[1, iy, iE, iσ] ≈ -xD * slope atol = 1e-12
+        end
+        # the shift is σ-odd (∝ σ), so the σ=+1 and σ=−1 far fields differ
+        @test bcA.g_left[1, iy, 2, 1] != bcA.g_left[1, iy, 2, 2]
+        # forbidden-y nodes carry no shift (no particles, pinned g=0): far field = :dirichlet
+        fy = findfirst(bcA.forbidden_y)
+        @test fy !== nothing
+        @test bcA.g_left[1, fy, 2, 1] ≈ bcD.g_left[1, fy, 2, 1] atol = 1e-12
+    end
+
+    @testset "CLEARED c_D wired faithfully vs magnetic_drift_frequency" begin
+        cD = Cfg.drift_coefficient_table(grid, phys)
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        y_forbidden = (1 + 0.1) / (1 - 0.1)
+        # every well-defined node equals the direct cleared call, node-for-node
+        for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+            y = grid.y.nodes[iy]
+            (y >= y_forbidden) && continue                # forbidden region ⇒ 0 (no particles)
+            (abs(y - 1.0) < 5e-2) && continue             # skip the gated y_c layer
+            v̂ = sqrt(grid.E.nodes[iE])
+            σ = grid.σ[iσ]
+            direct = Coc.magnetic_drift_frequency(; y=y, v_hat=v̂, sigma=σ, epsilon=0.1,
+                inv_Lq=1.0, inv_LB=1.0, variant=:original)
+            @test cD[4, 3, iy, iE, iσ] ≈ direct atol = 1e-12
+        end
+        # forbidden region carries no particles ⇒ c_D ≡ 0
+        for iy in 1:ny
+            if grid.y.nodes[iy] >= y_forbidden
+                @test all(iszero, @view cD[:, :, iy, :, :])
+            end
+        end
+        # σ-odd: reversing the sign of v_∥ flips the drift
+        @test cD[4, 3, 2, 2, 1] ≈ -cD[4, 3, 2, 2, 2] atol = 1e-12
+    end
+
+    @testset ":improved drift toggle zeroes the ∇B term" begin
+        cD_orig = Cfg.drift_coefficient_table(grid, _phys(; variant=:original))
+        cD_imp = Cfg.drift_coefficient_table(grid, _phys(; variant=:improved))
+        iy, iE, iσ = 2, 2, 1
+        y = grid.y.nodes[iy]
+        v̂ = sqrt(grid.E.nodes[iE])
+        σ = grid.σ[iσ]
+        A, G = Coc.orbit_average_drift_brackets(; y=y, epsilon=0.1)
+        @test cD_imp[4, 3, iy, iE, iσ] ≈ (σ * v̂ / 1.1) * (1.0 * A) atol = 1e-10   # LB → 0
+        @test cD_orig[4, 3, iy, iE, iσ] ≈ (σ * v̂ / 1.1) * (1.0 * A - 0.5 * 1.0 * G) atol = 1e-10
+        @test cD_imp[4, 3, iy, iE, iσ] != cD_orig[4, 3, iy, iE, iσ]               # the toggle bites
+    end
+
+    @testset "CLEARED orbit-averaged pitch diffusion D+E (σ-odd, P_oa=y⟨√(1−yb)⟩)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        # P_oa = y·S(y), flat measure (wmeas ≡ 1); node-for-node vs the cleared bracket
+        P_oa, wmeas = Cfg.pitch_diffusivity_profile(grid, phys)
+        @test all(>=(0), P_oa)
+        @test all(==(1.0), wmeas)                         # flat measure (divergence form)
+        # A4 for the shipped orbit-averaged P_oa: the mimetic K conserves ∫g dy and
+        # has the correct entropy sign (dissipative) — for any test g
+        K, Wq = Opc.conservative_pitch_operator(grid.y, P_oa, wmeas)
+        gtest = sin.(range(0.3, 2.7; length=grid.y.n))
+        @test abs(dot(Wq, K * gtest)) < 1e-10             # particle conservation
+        @test dot(gtest, Diagonal(Wq) * (K * gtest)) <= 1e-12   # entropy sign ≤ 0
+        y_forbidden = (1 + 0.1) / (1 - 0.1)
+        for iy in 1:ny
+            y = grid.y.nodes[iy]
+            (y >= y_forbidden || abs(y - 1.0) < 5e-2) && continue   # forbidden / y_c layer → 0
+            S, _ = Coc.orbit_average_pitch_brackets(; y=y, epsilon=0.1)
+            @test P_oa[iy] ≈ y * S atol = 1e-10
+        end
+        # the σ-odd pitch coefficient = −2ν̂ii(1+ε)/(m ρ̂_θ σ√E); reversing σ flips sign
+        cp = cfg.stack.kinetic[4].c
+        nu_tilde = phys.epsilon^1.5 * phys.nu_star
+        for iE in 1:nE
+            v̂ = sqrt(grid.E.nodes[iE])
+            ν̂ii = Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model)
+            want = 2 * ν̂ii * (1 + 0.1) / (phys.m * phys.rho_hat_theta_i * (1) * v̂)  # σ=+1 (+: ÷−mρ̂θ flip)
+            @test cp[3, 2, iE, 1] ≈ want atol = 1e-12
+            @test cp[3, 2, iE, 1] ≈ -cp[3, 2, iE, 2] atol = 1e-14   # σ-odd
+        end
+    end
+
+    @testset "CLEARED collision drag / neoclassical / cross (A/B/C)" begin
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        nu_tilde = phys.epsilon^1.5 * phys.nu_star
+        a_drag = cfg.stack.kinetic[5].a_x                 # A: −ν̂ii/m, passing-only, σ-even
+        c_neo = cfg.stack.kinetic[6].c                    # B: σ-odd, uses T=⟨1/√(1−yb)⟩
+        c_cross = cfg.stack.kinetic[7].c                  # C: −2ν̂ii y/m, passing-only, σ-even
+        @test cfg.stack.kinetic[5] isa Opc.CollisionalDrag
+        @test cfg.stack.kinetic[6] isa Opc.NeoclassicalDiffusion
+        @test cfg.stack.kinetic[7] isa Opc.CollisionalCross
+        ip = findfirst(y -> 0 < y < 0.9, grid.y.nodes)    # a passing node
+        v̂ = sqrt(grid.E.nodes[1]); ν̂ii = Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model)
+        @test a_drag[4, 3, ip, 1, 1] ≈ ν̂ii / phys.m atol = 1e-12     # +: ÷−mρ̂θ flip of L23's leading −
+        @test a_drag[4, 3, ip, 1, 1] == a_drag[4, 3, ip, 1, 2]        # σ-even
+        @test c_cross[4, 3, ip, 1, 1] ≈ 2 * ν̂ii * grid.y.nodes[ip] / phys.m atol = 1e-12
+        @test c_cross[4, 3, ip, 1, 1] == c_cross[4, 3, ip, 1, 2]      # σ-even
+        # B: neoclassical σ-odd, node-for-node vs the T bracket
+        _, T = Coc.orbit_average_pitch_brackets(; y=grid.y.nodes[ip], epsilon=0.1)
+        wantB = ν̂ii * (1 * v̂) * phys.rho_hat_theta_i / (2 * phys.m * (1 + 0.1)) * grid.y.nodes[ip] * T
+        @test c_neo[4, 3, ip, 1, 1] ≈ wantB atol = 1e-12
+        @test c_neo[4, 3, ip, 1, 1] ≈ -c_neo[4, 3, ip, 1, 2] atol = 1e-14   # σ-odd
+        # passing-only masks: A, C vanish for trapped
+        itrap = findfirst(>=(grid.y_c), grid.y.nodes)
+        if itrap !== nothing
+            @test all(iszero, @view a_drag[:, :, itrap, :, :])
+            @test all(iszero, @view c_cross[:, :, itrap, :, :])
+        end
+    end
+
+    @testset "CLEARED momentum-restoring term F (nonlocal, velocity-moment-measure.md)" begin
+        mr = cfg.stack.kinetic[8]
+        @test mr isa Opc.MomentumRestoring
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        β = (1 - 0.1) / (1 + 0.1)
+        nu_tilde = phys.epsilon^1.5 * phys.nu_star
+        # W = ν̂_ii·v̂_∥ = ν̂_ii·σ√E√(1−y b_min), σ-odd
+        for iE in 1:nE
+            v̂ = sqrt(grid.E.nodes[iE]); ν̂ii = Coc.deflection_frequency(v̂; nu_tilde=nu_tilde, model=phys.collision_model)
+            iy = findfirst(y -> 0 < y < 0.9, grid.y.nodes)
+            @test mr.W[iy, iE, 1] ≈ ν̂ii * v̂ * sqrt(1 - grid.y.nodes[iy] * β) atol = 1e-12
+            @test mr.W[iy, iE, 1] ≈ -mr.W[iy, iE, 2] atol = 1e-14   # σ-odd
+            # redistribute = 2ν̂_ii(1+ε)/(m ρ̂_θi), positive, E-dependent, σ-even
+            @test mr.redistribute[iE] ≈ 2 * ν̂ii * (1 + 0.1) / (phys.m * phys.rho_hat_theta_i) atol = 1e-12
+            @test mr.redistribute[iE] > 0
+        end
+        # inv_norm = 1/(√π⟨ν̂_ii⟩_u)
+        @test mr.inv_norm ≈ 1 / (sqrt(π) * Coc.momentum_restoring_average(; epsilon=0.1, nu_star=phys.nu_star)) atol = 1e-12
+        # nonlocal but LINEAR in g: F(2g) = 2 F(g)
+        cache = Opc.IslandCache(grid)
+        U = Opc.IslandState(grid); Opc.fill_state!(U, 0.3); R1 = Opc.IslandState(grid); Opc.fill_state!(R1, 0.0)
+        Opc.apply!(R1, mr, U, grid, cache)
+        U2 = Opc.IslandState(grid); Opc.fill_state!(U2, 0.6); R2 = Opc.IslandState(grid); Opc.fill_state!(R2, 0.0)
+        Opc.apply!(R2, mr, U2, grid, cache)
+        @test maximum(abs, R2.g .- 2 .* R1.g) < 1e-12
+        @test any(!iszero, R1.g)                         # it actually contributes
+        # zero collisionality ⇒ no restoring term to build (⟨ν̂_ii⟩_u = 0)
+        @test_throws ArgumentError Cfg.momentum_restoring_term(grid, Cfg.Level0Physics(; epsilon=0.1,
+            inv_Lq=1.0, inv_LB=1.0, q_s=2.0, dq_dpsi=0.5, w_psi=0.05, mu0_R=1.0, inv_Ln0=1.0,
+            rho_hat_theta_i=1.0, nu_star=0.0, m=2.0))
+    end
+
+    @testset "CLEARED collision magnitude nu_tilde = ε^{3/2}ν_★ (collision-magnitude.md)" begin
+        # the momentum-restoring average reproduces L23 Eq. 4.1.6 to its quoted digits
+        nu_avg = Coc.momentum_restoring_average(; epsilon=0.1, nu_star=0.01)
+        @test nu_avg ≈ 1.267537e-4 rtol = 1e-5            # L23 p. 88 unit-test value
+        @test nu_avg ≈ (4 * 0.1^1.5 * 0.01 / (3 * sqrt(π))) * (sqrt(2) - log(1 + sqrt(2))) atol = 1e-15
+        # scales linearly in ν_★ and as ε^{3/2}
+        @test Coc.momentum_restoring_average(; epsilon=0.1, nu_star=0.02) ≈ 2 * nu_avg atol = 1e-14
+        @test Coc.momentum_restoring_average(; epsilon=0.4, nu_star=0.01) ≈ nu_avg * (0.4 / 0.1)^1.5 atol = 1e-14
+        @test Coc.momentum_restoring_average(; epsilon=0.0, nu_star=0.01) == 0.0
+    end
+
+    @testset "CLEARED Δ prefactors (symmetric, from delta_moment_prefactors)" begin
+        direct = Coc.delta_moment_prefactors(; mu0_R=1.0, w_psi=0.05, dq_dpsi=0.5, q_s=2.0)
+        @test cfg.delta_prefactors.cos ≈ direct.cos atol = 1e-9
+        @test cfg.delta_prefactors.sin ≈ direct.sin atol = 1e-9
+        @test cfg.delta_prefactors.cos ≈ -cfg.delta_prefactors.sin atol = 1e-9   # symmetric pin
+    end
+
+    @testset "structural solve converges on the fully-cleared config" begin
+        # every operator coefficient is now physical (incl. the full orbit-averaged
+        # collision operator); assert the grid-independent per-equation max-norm
+        # (04 §5), the √N-scaled L2 floors slightly higher across ~N unknowns.
+        f! = Soc.flat_residual(cfg.stack, grid; bc=cfg.bc)
+        N = Opc.statelength(grid)
+        sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-9, atol=1e-13, max_iter=40, memory=200)
+        @test sol.converged
+        @test sol.residual_max < 1e-7
+        # residual is finite everywhere at a nonzero state
+        U = Opc.IslandState(grid)
+        Opc.fill_state!(U, 0.3)
+        R = Opc.IslandState(grid)
+        cache = Opc.IslandCache(grid)
+        Opc.residual!(R, U, cfg.stack, grid, cache, cfg.bc)
+        @test all(isfinite, R.g) && all(isfinite, R.Φ)
+        # allocation regression: the full stack (incl. the new collision operators
+        # CollisionalDrag/NeoclassicalDiffusion/CollisionalCross) is allocation-free.
+        # Measure through a function barrier so testset-scope boxing isn't counted.
+        _ralloc(R, U, st, g, c, b) = (Opc.residual!(R, U, st, g, c, b); @allocated Opc.residual!(R, U, st, g, c, b))
+        @test _ralloc(R, U, cfg.stack, grid, cache, cfg.bc) == 0
+    end
+
+    @testset "island streaming = advection along Ω (the {Ω,g} structure)" begin
+        a_xi, a_x = Cfg.streaming_coefficients(grid, phys)
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        w = phys.w_psi
+        pref = phys.inv_Lq * w^2 / (4 * phys.rho_hat_theta_i)
+        for iy in 1:ny
+            Θ = grid.y.nodes[iy] < grid.y_c ? 1.0 : 0.0
+            for iξ in 1:nξ, ix in 1:nx
+                x = grid.x.nodes[ix]
+                ξ = grid.ξ.nodes[iξ]
+                # a_xi must equal pref·Θ·∂ₓΩ = pref·Θ·(4x/w²); a_x = pref·Θ·(−∂_ξΩ) = pref·Θ·(−sinξ)
+                @test a_xi[ix, iξ, iy, 1, 1] ≈ pref * Θ * (4 * x / w^2) atol = 1e-12
+                @test a_x[ix, iξ, iy, 1, 1] ≈ pref * Θ * (-sin(ξ)) atol = 1e-12
+            end
+        end
+        # passing-only: trapped nodes (y ≥ y_c) carry zero streaming
+        itrap = findfirst(>=(grid.y_c), grid.y.nodes)
+        if itrap !== nothing
+            @test all(iszero, @view a_xi[:, :, itrap, :, :])
+            @test all(iszero, @view a_x[:, :, itrap, :, :])
+        end
+        # E, σ independence (broadcast)
+        @test a_xi[3, 2, 2, 1, 1] == a_xi[3, 2, 2, nE, nσ]
+    end
+
+    @testset "CLEARED E×B coupling c_E = ½⟨1/v̂_∥⟩ (passing σ-odd, trapped ≡ 0)" begin
+        cE = Cfg.exb_coupling_table(grid, phys)
+        nx, nξ, ny, nE, nσ = PSc.nnodes(grid)
+        # passing nodes (y < y_c, away from the y_c layer): c_E = (σ/2√E)·B₁(y),
+        # node-for-node vs the cleared bracket
+        for iσ in 1:nσ, iE in 1:nE, iy in 1:ny
+            y = grid.y.nodes[iy]
+            (y >= grid.y_c) && continue                   # passing-only
+            (abs(y - 1.0) < 5e-2) && continue             # skip the gated y_c layer
+            v̂ = sqrt(grid.E.nodes[iE])
+            σ = grid.σ[iσ]
+            B1 = Coc.orbit_average_exb_bracket(; y=y, epsilon=0.1)
+            @test cE[4, 3, iy, iE, iσ] ≈ (σ / (2 * v̂)) * B1 atol = 1e-10
+        end
+        # trapped nodes (y ≥ y_c): c_E ≡ 0 exactly (σ-odd banana-leg cancellation)
+        for iy in 1:ny
+            if grid.y.nodes[iy] >= grid.y_c
+                @test all(iszero, @view cE[:, :, iy, :, :])
+            end
+        end
+        # σ-odd: reversing v_∥ flips the coupling (like the drift x_D ∝ σ)
+        ipass = findfirst(y -> 0 < y < 0.9, grid.y.nodes)
+        @test ipass !== nothing
+        @test cE[4, 3, ipass, 2, 1] ≈ -cE[4, 3, ipass, 2, 2] atol = 1e-12
+        @test cE[4, 3, ipass, 2, 1] != 0.0                # nonzero for passing
+        # x, ξ independence (broadcast over the solve plane)
+        @test cE[2, 5, ipass, 2, 1] == cE[7, 1, ipass, 2, 1]
+        # the coupling is the velocity-dependent (array) ExBDrift coefficient in the stack
+        @test cfg.stack.kinetic[3] isa Opc.ExBDrift
+        @test cfg.stack.kinetic[3].c_E isa AbstractArray  # array, not scalar (velocity-dependent)
+        @test cfg.stack.kinetic[3].c_E == cE
+    end
+
+    @testset "quasineutrality drive makes Φ nonzero (the Q5 field fix)" begin
+        # the cleared L̂_{n0}⁻¹(x−ĥ) source drives Φ; without it Φ collapses to 0.
+        S = Cfg.quasineutrality_source(grid, phys)
+        @test any(!iszero, S)                            # the drive is nontrivial
+        @test cfg.stack.field.source !== nothing         # wired into the operator
+        @test cfg.stack.field.α ≈ (phys.tau + 1) / phys.tau  # α = (τ+1)/τ, not τ/(τ+1)
+        # solved Φ is nonzero in the interior (boundaries pinned by the far field)
+        f! = Soc.flat_residual(cfg.stack, grid; bc=cfg.bc)
+        N = Opc.statelength(grid)
+        sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-9, atol=1e-13, max_iter=40, memory=200)
+        Usol = Opc.IslandState(grid)
+        Opc.unflatten!(Usol, sol.u)
+        @test maximum(abs, Usol.Φ) > 1e-6                # Φ no longer trivially zero
+    end
+
+    @testset "CLEARED physical ∫d³v moment measure + parallel-flow weight (velocity-moment-measure.md)" begin
+        wy, wE = Cfg.physical_velocity_weights(grid, phys)
+        β = (1 - 0.1) / (1 + 0.1)                          # b_min
+        yedge = 1 / β
+        # the pitch-Jacobian weights integrate ∫dy/√(1−βy) = 2/β exactly, forbidden y zeroed
+        @test sum(wy) ≈ 2 / β atol = 1e-10
+        for iy in 1:grid.y.n
+            (grid.y.nodes[iy] >= yedge) && @test wy[iy] == 0.0
+            @test wy[iy] >= 0.0
+        end
+        # the speed Jacobian: wE_phys = wE·√E/2
+        for iE in 1:grid.E.n
+            @test wE[iE] ≈ grid.E.weights[iE] * sqrt(grid.E.nodes[iE]) / 2 atol = 1e-14
+        end
+        # the physical moment machinery is wired into the QN operator
+        @test cfg.stack.field.wy !== nothing && cfg.stack.field.wE !== nothing
+        @test cfg.stack.field.wy == wy
+        # the parallel-flow weight W = v̂_∥ = σ√E√(1−y b_min), σ-odd, forbidden zeroed
+        W = Cfg.parallel_flow_weight(grid, phys)
+        @test size(W) == (grid.y.n, grid.E.n, 2)
+        for iy in 1:grid.y.n, iE in 1:grid.E.n
+            v̂ = sqrt(grid.E.nodes[iE])
+            @test W[iy, iE, 1] ≈ v̂ * sqrt(max(1 - grid.y.nodes[iy] * β, 0.0)) atol = 1e-12
+            @test W[iy, iE, 1] ≈ -W[iy, iE, 2] atol = 1e-14   # σ-odd
+        end
+        # the pitch Jacobian cancels for the flow: wy·W_σ=+1 is regular (finite) everywhere
+        @test all(isfinite, [wy[iy] * W[iy, 2, 1] for iy in 1:grid.y.n])
+    end
+
+    @testset "delta_outputs: solved state → Δ moments (01 §4, first physics deliverable)" begin
+        # converge the fully-cleared config, then assemble the Δ outputs.
+        f! = Soc.flat_residual(cfg.stack, grid; bc=cfg.bc)
+        N = Opc.statelength(grid)
+        sol = Soc.newton_krylov(f!, zeros(N); rtol=1e-9, atol=1e-13, max_iter=40, memory=200)
+        @test sol.converged
+        Usol = Opc.IslandState(grid)
+        Opc.unflatten!(Usol, sol.u)
+
+        out = Cfg.delta_outputs(grid, phys, species, Usol, cfg)
+        # everything is finite and the primary moments are real numbers
+        @test all(isfinite, out.Jpar)
+        @test isfinite(out.Δ_neo) && isfinite(out.Δsin)
+        @test out.Δcos == out.Δ_neo                              # Δ_cos ≡ Δ_neo alias
+        # J̄_∥ carries the physical measure: rebuild it explicitly and match
+        W = Cfg.parallel_flow_weight(grid, phys)
+        wy, wE = Cfg.physical_velocity_weights(grid, phys)
+        Jref = zeros(grid.x.n, grid.ξ.n)
+        Mo.parallel_current!(Jref, [Usol.g], species, [W], grid; wy=wy, wE=wE)
+        @test out.Jpar ≈ Jref
+        # the growth moment uses the cleared prefactor and the decomposition is additive
+        Δref = Mo.delta_moments(out.Jpar, grid; prefactor_cos=cfg.delta_prefactors.cos, prefactor_sin=cfg.delta_prefactors.sin)
+        @test out.Δ_neo ≈ Δref.Δcos && out.Δsin ≈ Δref.Δsin
+        @test out.bootstrap_curvature + out.polarization ≈ out.Δ_neo
+        # the Ω-average profile is finite where it is defined (NaN only at the
+        # excluded O-point/separatrix samples)
+        @test any(isfinite, out.omega_average_profile.value)
+        for v in out.omega_average_profile.value
+            @test isnan(v) || isfinite(v)
+        end
+        # single-bulk-ion contract: two bulk species is rejected
+        anti = Spc.Species(; name=:i2, Z=1.0, m=1.0, background=Spc.Maxwellian(; n=1.0, T=1.0), role=Spc.Bulk)
+        @test_throws ArgumentError Cfg.delta_outputs(grid, phys, [species[1], anti], Usol, cfg)
+    end
+
+    @testset "assembly validates the species list" begin
+        @test_throws ArgumentError Cfg.configure_level0(grid, phys, Spc.Species[])
+    end
+end
+
+@testset "Islands anchor-sync (docs/07 §1.1)" begin
+    Vfy = IslC.Verify
+    ops_file = normpath(joinpath(@__DIR__, "..", "src", "Islands", "operators", "Operators.jl"))
+
+    @testset "the operator stack and the as-implemented docs are in sync" begin
+        r = Vfy.check_anchor_sync()
+        @test isempty(r.undocumented)      # every AbstractTerm operator is documented
+        @test isempty(r.dangling)          # every `Implemented by:` symbol resolves
+    end
+
+    @testset "the check CATCHES drift (negative controls)" begin
+        # a doc missing an operator ⇒ that operator is flagged undocumented
+        missing_doc = tempname() * ".md"
+        write(missing_doc, "Implemented by: `Operators.MagneticDrift`.\n")
+        r1 = Vfy.check_anchor_sync(; docfiles=[missing_doc])
+        @test "ParallelStreaming" in r1.undocumented
+        @test isempty(r1.dangling)         # the one symbol it names does resolve
+        rm(missing_doc; force=true)
+
+        # a doc naming a nonexistent symbol ⇒ that symbol is flagged dangling
+        bogus_doc = tempname() * ".md"
+        write(bogus_doc, "Implemented by: `Operators.NotARealOperator`.\n")
+        r2 = Vfy.check_anchor_sync(; docfiles=[bogus_doc])
+        @test "Operators.NotARealOperator" in r2.dangling
+        rm(bogus_doc; force=true)
+    end
+
+    @testset "drift-island shift envelope reuses the cleared ω̂_D (01 §2.2, 04 §1)" begin
+        grid = _grid()
+        phys = _phys()
+        # the envelope is max over PASSING (y<y_c) nodes of |ρ̂_θi ω̂_D L̂_q|, built
+        # from the cleared drift table — no new coefficient.
+        cD = Cfg.drift_coefficient_table(grid, phys)
+        Lq = 1 / phys.inv_Lq
+        expect = 0.0
+        for iy in 1:grid.y.n
+            grid.y.nodes[iy] < grid.y_c || continue          # passing only
+            for iE in 1:grid.E.n, iσ in 1:length(grid.σ)
+                expect = max(expect, abs(phys.rho_hat_theta_i * Lq * cD[1, 1, iy, iE, iσ]))
+            end
+        end
+        R = Cfg.drift_island_shift_envelope(grid, phys)
+        @test R ≈ expect                                     # exact reuse, node-for-node
+        @test R > 0                                          # nontrivial shift
+        # deterministic (passing-only; trapped/forbidden carry no shifted island)
+        @test Cfg.drift_island_shift_envelope(grid, phys) == R
+
+        # drift_island_resolved_grid: use a PHYSICAL point (ρ̂_θi ~ w) so the envelope
+        # is a few w and the far field Lx=12w lies beyond it (at ρ̂_θi=1 the test _phys
+        # is unphysical — envelope ≫ w — and the builder correctly refuses Lx ≤ R).
+        physp = Cfg.Level0Physics(; epsilon=0.1, inv_Lq=1.0, inv_LB=0.7, q_s=2.0,
+            dq_dpsi=0.8, w_psi=0.05, mu0_R=3.0, inv_Ln0=1.0, rho_hat_theta_i=0.05,
+            eta_i=0.5, nu_star=0.01, m=2.0, tau=1.0)
+        w = physp.w_psi
+        dg = Cfg.drift_island_resolved_grid(physp; K=6, Lx_over_w=12.0, nxi=8, ny=15,
+            nE=6, y_max=4.0, y_c=1.0, clustering_y=0.8, order=4)
+        Rp = Cfg.drift_island_shift_envelope(dg, physp)
+        @test Rp > 0.5 * w                                           # physical envelope is several w
+        @test PSc.central_x_spacing(dg) <= w / 6 * (1 + 1e-9)         # resolves w/K
+        @test dg.x.nodes[end] ≈ 12.0 * w                             # far field beyond the envelope
+        # the drift islands (near ±Rp) now fall inside the fine band, not the coarse tail
+        @test any(x -> abs(abs(x) - Rp) < w, dg.x.nodes)
+    end
+
+    @testset "physical_scenario: SI → self-consistent normalized vector (design 10)" begin
+        # a10-like inputs at the q=2 surface (R0/r_s = 10 ⇒ ε=0.1)
+        p = Cfg.physical_scenario(; R0=10.0, r_s=1.0, B=2.0, T_i_eV=480.0, n_i=2e18,
+            q_s=2.0, dq_dpsi=4.0, psi_s=0.5, dlnTi_dpsi=-3.0, dlnni_dpsi=-2.0,
+            dlnB_dpsi=-0.2, w_psi=0.05, Z=1.0, mass_amu=2.0, m=2.0)
+        # exact ψ-ratios and geometry
+        @test p.epsilon ≈ 0.1
+        @test p.q_s == 2.0 && p.dq_dpsi == 4.0
+        @test p.inv_Lq ≈ 0.5 * 4.0 / 2.0                             # (ψ_s/q)dq/dψ
+        @test p.inv_Ln0 ≈ 0.5 * (-2.0)                               # ψ_s·dln n/dψ (negative: decreasing outward)
+        @test p.inv_LB ≈ 0.5 * (-0.2)
+        @test p.eta_i ≈ 1.5                                          # (dlnT/dψ)/(dln n/dψ)
+        @test p.mu0_R ≈ 1.25663706212e-6 * 10.0                      # μ₀R₀
+        # standard physics prefactors: derived from T_i, n_i, B — not hand-set
+        m_i = 2 * 1.67262192369e-27                                  # 2 proton masses
+        v_th = sqrt(2 * 480.0 * 1.602176634e-19 / m_i)
+        ρ_i = m_i * v_th / (1.0 * 1.602176634e-19 * 2.0)            # m_i v_th/(ZeB)
+        @test p.rho_hat_theta_i ≈ (ρ_i * 2.0 / 0.1) / 1.0 rtol = 1e-6   # ρ_i q/ε / r_s
+        @test 0.2 < p.nu_star < 0.5                                  # physical banana ν_★ for 0.48 keV/2e18
+        # it assembles into a runnable Level-0 config
+        sp = _ion()
+        g = PSc.resolved_island_grid(; w=p.w_psi, nx=13, K=5, Lx_over_w=4.0, nxi=8, ny=9,
+            nE=3, y_max=4.0, clustering_y=0.8)
+        @test Cfg.configure_level0(g, p, sp).stack isa Opc.IslandStack
+        # physical_domain: fixed local matching radius, independent of w
+        @test Cfg.physical_domain(p; x_match=0.2) == 0.2
+        @test_throws ArgumentError Cfg.physical_domain(p; x_match=0.03)   # ≤ w
+        @test_throws ArgumentError Cfg.physical_domain(p; x_match=1.5)    # ≥ 1 (past the plasma)
+        @test_throws ArgumentError Cfg.physical_scenario(; R0=-1.0, r_s=1.0, B=2.0,
+            T_i_eV=480.0, n_i=2e18, q_s=2.0, dq_dpsi=4.0, psi_s=0.5, dlnTi_dpsi=-3.0,
+            dlnni_dpsi=-2.0, dlnB_dpsi=-0.2, w_psi=0.05)
+        # cold-surface degeneracy guard (T_i→0 at an edge rational, as in the a10 q=2
+        # surface at ψ=0.79): ν_★ blows up ⇒ fail loudly instead of emitting garbage
+        @test_throws ArgumentError Cfg.physical_scenario(; R0=2.0, r_s=0.17, B=1.0,
+            T_i_eV=0.001, n_i=8e17, q_s=2.0, dq_dpsi=2.7, psi_s=0.79, dlnTi_dpsi=-9.0,
+            dlnni_dpsi=-4.0, dlnB_dpsi=0.0, w_psi=0.05)
+
+        # scenario_from_equilibrium: field-access ingest (mock equil + kp; no
+        # Equilibrium solver in the fast suite — the real DIII-D H-mode ingest is a
+        # benchmark). q=2 at ψ=0.5, r=0.6ψ ⇒ r_s=0.3, R0=3 ⇒ ε=0.1; Ti in JOULES.
+        equil = (profiles=(q_spline=(ψ -> 1 + 2ψ), q_deriv=(ψ -> 2.0),
+                xs=collect(0.0:0.1:1.0)),
+            rzphi_rsquared=(t -> (0.6 * t[1])^2), eqfun_B=(t -> 2.0), ro=3.0)
+        kp = (Ti_spline=(ψ -> 1000 * exp(-ψ) * 1.602176634e-19),   # Joules
+            ni_spline=(ψ -> 5e19 * exp(-0.5ψ)))
+        ps = Cfg.scenario_from_equilibrium(equil, kp; m=2, n=1, w_psi=0.05)
+        @test ps.epsilon ≈ 0.1 rtol = 1e-6                          # r_s/R0 = 0.3/3
+        @test ps.q_s ≈ 2.0
+        @test ps.inv_Lq ≈ 0.5 rtol = 1e-6                           # ψ_s·dq/q = 0.5·2/2
+        @test ps.inv_Ln0 ≈ -0.25 rtol = 1e-4                        # ψ_s·dln n = 0.5·(−0.5)
+        @test ps.eta_i ≈ 2.0 rtol = 1e-4                            # dlnT/dln n = −1/−0.5
+        @test ps.rho_hat_theta_i > 0 && ps.nu_star > 0 && isfinite(ps.nu_star)
+        @test_throws ArgumentError Cfg.scenario_from_equilibrium(equil, kp; m=9, n=1, w_psi=0.05)  # no q=9 surface
+    end
+end

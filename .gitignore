@@ -14,8 +14,10 @@
 *.DS_Store
 *.pdf
 !docs/resources/*.pdf
+!docs/resources/**/*.pdf
 *.png
 !docs/src/assets/**/*.png
+!docs/src/islands/figures/*.png
 *.jld2
 .gitattributes
 Manifest.toml

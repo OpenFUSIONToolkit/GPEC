@@ -1,0 +1,65 @@
+{
+  "$comment": "Project-scoped Claude Code settings for GPEC. The permissions.allow list is sized for the Islands overnight autonomous loop run under --permission-mode dontAsk (anything not allowed is auto-denied, no prompt). permissions.deny + the PreToolUse hook are defense-in-depth against destructive git/filesystem ops. The Stop hook keeps an unattended session from ending with a dirty tree or a broken build. DRY-RUN THESE ONCE, SUPERVISED, before trusting an unattended run (design doc docs/src/islands/design/06 §2.3).",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "TodoWrite",
+      "Task",
+      "Bash(julia:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git branch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git stash:*)",
+      "Bash(git pull --ff-only:*)",
+      "Bash(git push origin feature/islands:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh run:*)",
+      "Bash(gh api:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin develop:*)",
+      "Bash(git push* main)",
+      "Bash(git push* develop)",
+      "Read(./.env)",
+      "Read(~/.ssh/**)",
+      "Read(~/.claude.json)",
+      "Read(~/.config/gh/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.sh\"" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-check.sh\"" }
+        ]
+      }
+    ]
+  }
+}

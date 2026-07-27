@@ -48,6 +48,10 @@ include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
 
+include("Islands/Islands.jl")
+import .Islands as Islands
+export Islands
+
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main

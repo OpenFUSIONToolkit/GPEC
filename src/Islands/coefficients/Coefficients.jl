@@ -1,0 +1,383 @@
+"""
+    Coefficients
+
+Home for the **human-cleared** Level-0 physics coefficient builders (the M2b
+derivation-lane fill-ins). Every function here computes a coefficient whose form
+was independently re-derived (Decision D7) and signed off by a human, with the
+clearance recorded in `docs/01` and the derivation in
+`docs/src/islands/derivations/`. Uncleared coefficients stay gated in their home
+modules (`Frames`, `Fields`, `Operators`, `Moments`); nothing is promoted here
+without that paper trail.
+
+Cleared so far:
+
+  - [`magnetic_drift_frequency`](@ref) — the orbit-averaged drift frequency
+    ``\\hat\\omega_D`` and the `:original`/`:improved` ``\\hat L_B^{-1}`` toggle
+    (sign-off 2026-07-11; derivation `omega-D-drift-frequency.md`, docs/01 §2.1).
+  - [`pitch_diffusivity`](@ref), [`deflection_frequency`](@ref) — the Lorentz
+    collision operator's self-adjoint diffusivity ``P(\\lambda)=\\lambda\\sqrt{1-\\lambda B}``
+    and the velocity dependence ``\\nu_{jj}(\\hat v)=\\tilde\\nu[\\phi-G]/\\hat v^3``
+    (sign-off 2026-07-11; derivation `collision-operator.md`, docs/01 §2.3). The
+    ``\\langle\\hat\\nu_{ii}\\rangle_u`` momentum-restoring constant is a deferred
+    sub-item and stays gated.
+"""
+module Coefficients
+
+import QuadGK
+
+export magnetic_drift_frequency, orbit_average_drift_brackets
+export orbit_average_exb_bracket, orbit_average_pitch_brackets
+export pitch_diffusivity, deflection_frequency, momentum_restoring_average
+export h_amplitude, passing_fraction
+export quasineutrality_coefficient
+export delta_moment_prefactors
+
+# Model circular equilibrium field modulation (docs/01 §1, I19 p. 6):
+# b(θ) = B/B_max = (1 − ε cos θ)/(1 + ε); b ∈ [b_min, 1], b_min = b(0), b(π)=1.
+@inline _b(θ, ε) = (1 - ε * cos(θ)) / (1 + ε)
+
+# Trapped bounce integral ∫_{-θb}^{θb} via the half-angle substitution
+# sin(θ/2) = sin(θb/2)·sinφ (φ ∈ [−π/2, π/2]): this removes the integrable
+# 1/√(1−yb) turning-point singularity **analytically**, so adaptive quadrature is
+# robust (no misses) instead of failing on the endpoint singularity. Using
+# 1−yb = yε(cosθ−cosθb)/(1+ε) = (2yε/(1+ε))·k²cos²φ (k = sin(θb/2)):
+#   √(1−yb) = k cosφ·√(2yε/(1+ε)),  dθ/dφ = 2k cosφ/√(1−k²sin²φ),
+# so √(1−yb)·(dθ/dφ) and (dθ/dφ)/√(1−yb) are both bounded (the cosφ cancels).
+# Returns closures `(bφ, sqjac, josv)`: `bφ(φ)=b(θ(φ))`, `sqjac(φ)=√(1−yb)·dθ/dφ`
+# (multiply a bounded integrand's non-`√(1−yb)` part), `josv(φ)=(dθ/dφ)/√(1−yb)`
+# (multiply a `1/√(1−yb)`-singular integrand's regular part). Integrate over
+# [−π/2, π/2] (split at 0) — equal to the θ-integral over [−θb, θb].
+function _bounce_primitives(y::Real, ε::Real)
+    k = sin(acos(clamp((1 - (1 + ε) / y) / ε, -1.0, 1.0)) / 2)
+    c_sq = sqrt(2 * y * ε / (1 + ε))
+    c_jos = sqrt(2 * (1 + ε) / (y * ε))
+    bφ(φ) = _b(2 * asin(clamp(k * sin(φ), -1.0, 1.0)), ε)
+    den(φ) = sqrt(max(1 - k^2 * sin(φ)^2, 0.0))
+    sqjac(φ) = 2 * (k * cos(φ))^2 * c_sq / den(φ)
+    josv(φ) = c_jos / den(φ)
+    return bφ, sqjac, josv
+end
+
+"""
+    orbit_average_drift_brackets(; y, epsilon, rtol=1e-8)
+
+The two poloidal-orbit integrals that appear in ``\\hat\\omega_D`` (docs/01 §2.1;
+derivation `omega-D-drift-frequency.md` §5), in I19's ``\\langle\\cdot\\rangle_\\theta = \\tfrac{1}{2\\pi}\\oint`` form:
+
+```math
+A(y) = \\Big\\langle \\frac{\\sqrt{1-yb}}{b} \\Big\\rangle_\\theta,
+\\qquad
+G(y) = \\Big\\langle \\frac{2-yb}{b\\sqrt{1-yb}} \\Big\\rangle_\\theta ,
+```
+
+with `b(θ) = (1−ε cos θ)/(1+ε)`. Returns `(A, G)`.
+
+**Passing** particles (`y < y_c = 1`): the full poloidal circuit, ``\\tfrac1{2\\pi} \\int_0^{2\\pi}``. **Trapped** particles (`1 < y < (1+ε)/(1−ε)`): the bounce
+integral ``\\tfrac1{2\\pi}\\sum_\\sigma\\int_{-\\theta_b}^{\\theta_b}`` between the
+turning points ``\\cos\\theta_b = [1-(1+ε)/y]/ε``. `G`'s integrand has an
+integrable ``1/\\sqrt{1-yb}`` singularity at the turning points, removed
+analytically by the half-angle substitution (`_bounce_primitives`) so the
+quadrature is robust (the direct `∫_{-θb}^{θb}` form fails erratically on the
+endpoint singularity). The signed-off derivation covers the passing drift-island
+mechanism; the trapped brackets follow I19's stated ``\\langle\\cdot\\rangle_\\theta``.
+"""
+function orbit_average_drift_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
+    ε = float(epsilon)
+    0 < ε < 1 || throw(ArgumentError("epsilon must be in (0, 1) (got $epsilon)"))
+    # y = 0 (deeply-passing endpoint) is physical: A=⟨1/b⟩, G=⟨2/b⟩ are finite; the
+    # guard admits the closed pitch domain [0, 1/b_min) the grid samples.
+    y >= 0 || throw(ArgumentError("y must be nonnegative"))
+    y_forbidden = (1 + ε) / (1 - ε)          # 1/b_min: no particle beyond this
+    y < y_forbidden || throw(ArgumentError("y = $y exceeds 1/b_min = $y_forbidden (forbidden region)"))
+
+    fA(θ) = sqrt(max(1 - y * _b(θ, ε), 0.0)) / _b(θ, ε)
+    fG(θ) = (2 - y * _b(θ, ε)) / (_b(θ, ε) * sqrt(max(1 - y * _b(θ, ε), 0.0)))
+
+    if y < 1                                  # passing: full circuit
+        A, _ = QuadGK.quadgk(fA, 0.0, 2π; rtol=rtol)
+        G, _ = QuadGK.quadgk(fG, 0.0, 2π; rtol=rtol)
+        return (A / (2π), G / (2π))
+    else                                      # trapped: bounce integral via half-angle substitution
+        # (1/2π) Σ_σ ∫_{-θb}^{θb} = (1/π) ∫_{-θb}^{θb} for σ-even integrands; the
+        # substitution (_bounce_primitives) removes G's turning-point singularity.
+        bφ, sqjac, josv = _bounce_primitives(y, ε)
+        fAφ(φ) = sqjac(φ) / bφ(φ)                         # (√(1−yb)/b)·dθ/dφ
+        fGφ(φ) = ((2 - y * bφ(φ)) / bφ(φ)) * josv(φ)      # ((2−yb)/b)·(dθ/dφ)/√(1−yb)
+        A, _ = QuadGK.quadgk(fAφ, -π / 2, 0.0, π / 2; rtol=rtol)
+        G, _ = QuadGK.quadgk(fGφ, -π / 2, 0.0, π / 2; rtol=rtol)
+        return (A / π, G / π)
+    end
+end
+
+"""
+    orbit_average_exb_bracket(; y, epsilon, rtol=1e-8)
+
+The passing-orbit poloidal integral ``B_1(y)`` of the ``E×B`` coupling
+``c_E = \\tfrac12\\langle 1/\\hat v_\\parallel\\rangle_\\theta`` (docs/01 §2;
+derivation `exb-coupling.md` §5):
+
+```math
+B_1(y) = \\Big\\langle \\frac1{\\sqrt{1-yb}} \\Big\\rangle_\\theta
+       = \\frac1{2\\pi}\\int_0^{2\\pi}\\frac{d\\theta}{\\sqrt{1-yb(\\theta)}},
+```
+
+with `b(θ) = (1−ε cos θ)/(1+ε)`, on the **passing** interval `0 ≤ y < y_c = 1`.
+Trapped particles are excluded by construction: there the σ-odd `1/v̂_∥` cancels
+between the two banana legs, so `c_E ≡ 0` (derivation §4) and this bracket is not
+evaluated (`y ≥ 1` throws). `B₁` shares the drift ``G``-bracket's integrable
+`1/√(1−yb)` turning-point structure and diverges **logarithmically** as `y → 1⁻`
+(the near-separatrix `y_c` layer), where the caller supplies the gated placeholder.
+"""
+function orbit_average_exb_bracket(; y::Real, epsilon::Real, rtol::Real=1e-8)
+    ε = float(epsilon)
+    0 < ε < 1 || throw(ArgumentError("epsilon must be in (0, 1) (got $epsilon)"))
+    0 <= y < 1 || throw(ArgumentError("orbit_average_exb_bracket is passing-only (0 ≤ y < 1); got y = $y (trapped c_E ≡ 0)"))
+    fB(θ) = 1 / sqrt(max(1 - y * _b(θ, ε), 0.0))
+    B1, _ = QuadGK.quadgk(fB, 0.0, 2π; rtol=rtol)
+    return B1 / (2π)
+end
+
+"""
+    orbit_average_pitch_brackets(; y, epsilon, rtol=1e-8)
+
+The two poloidal-orbit integrals of the **orbit-averaged collision operator**
+(docs/01 §2.3; derivation `orbit-averaged-collision.md` §5), in I19's
+``\\langle\\cdot\\rangle_\\theta`` form:
+
+```math
+S(y) = \\big\\langle \\sqrt{1-yb} \\big\\rangle_\\theta,
+\\qquad
+T(y) = \\Big\\langle \\frac1{\\sqrt{1-yb}} \\Big\\rangle_\\theta ,
+```
+
+with `b(θ) = (1−ε cos θ)/(1+ε)`. Returns `(S, T)`. `S` feeds the pitch-diffusion
+diffusivity `P_oa = y·S(y)` (terms D+E); `T` feeds the neoclassical `∂²_p` term
+(term B). **Passing** (`y < y_c = 1`): the full circuit ``\\tfrac1{2\\pi}\\int_0^{2\\pi}``.
+**Trapped** (`1 < y < (1+ε)/(1−ε)`): the bounce integral
+``\\tfrac1{2\\pi}\\sum_\\sigma\\int_{-\\theta_b}^{\\theta_b}`` between turning points
+``\\cos\\theta_b = [1-(1+ε)/y]/ε`` (σ-even integrands ⇒ `/π`). `S`'s integrand is
+**bounded** (no singularity — the mimetic divergence form of D+E never forms `S'`);
+`T` carries the integrable `1/√(1−yb)` turning-point singularity, removed
+analytically by the half-angle substitution (`_bounce_primitives`), as the drift
+`G` bracket.
+"""
+function orbit_average_pitch_brackets(; y::Real, epsilon::Real, rtol::Real=1e-8)
+    ε = float(epsilon)
+    0 < ε < 1 || throw(ArgumentError("epsilon must be in (0, 1) (got $epsilon)"))
+    y >= 0 || throw(ArgumentError("y must be nonnegative"))
+    y_forbidden = (1 + ε) / (1 - ε)
+    y < y_forbidden || throw(ArgumentError("y = $y exceeds 1/b_min = $y_forbidden (forbidden region)"))
+    fS(θ) = sqrt(max(1 - y * _b(θ, ε), 0.0))
+    fT(θ) = 1 / sqrt(max(1 - y * _b(θ, ε), 0.0))
+    if y < 1                                  # passing: full circuit
+        S, _ = QuadGK.quadgk(fS, 0.0, 2π; rtol=rtol)
+        T, _ = QuadGK.quadgk(fT, 0.0, 2π; rtol=rtol)
+        return (S / (2π), T / (2π))
+    else                                      # trapped: bounce integral via half-angle substitution
+        # substitution (_bounce_primitives) removes T's turning-point singularity;
+        # S's integrand is bounded. σ-even ⇒ /π.
+        bφ, sqjac, josv = _bounce_primitives(y, ε)
+        fSφ(φ) = sqjac(φ)                                 # √(1−yb)·dθ/dφ
+        fTφ(φ) = josv(φ)                                  # (dθ/dφ)/√(1−yb)
+        S, _ = QuadGK.quadgk(fSφ, -π / 2, 0.0, π / 2; rtol=rtol)
+        T, _ = QuadGK.quadgk(fTφ, -π / 2, 0.0, π / 2; rtol=rtol)
+        return (S / π, T / π)
+    end
+end
+
+"""
+    magnetic_drift_frequency(; y, v_hat, sigma, epsilon, inv_Lq, inv_LB, variant=:original, rtol=1e-8)
+
+The cleared orbit-averaged magnetic drift frequency (docs/01 §2.1; derivation
+`omega-D-drift-frequency.md`, sign-off 2026-07-11):
+
+```math
+\\hat\\omega_D = \\frac{\\sigma\\hat v}{1+\\varepsilon}
+   \\Big[\\; \\hat L_q^{-1}\\,A(y) \\;-\\; \\tfrac12\\,\\hat L_B^{-1}\\,G(y) \\;\\Big],
+```
+
+with `A(y)`, `G(y)` the orbit brackets of
+[`orbit_average_drift_brackets`](@ref). The **drift-model toggle** is `variant`:
+
+  - `:original` — finite `inv_LB` (the I19/DK-NTM ∇B term is retained);
+  - `:improved` — `inv_LB` is forced to `0` (the D21/RDK-NTM proxy: ∂B/∂ψ ∝ cos θ
+    orbit-averages to O(ε); derivation §6). This is the ~×6 threshold-width
+    toggle (measured as the internal `:original`/`:improved` ratio — the D9 T2
+    gate; the absolute 8.73→1.46 ρ_bi pair is T4/audit-gated).
+
+`inv_Lq = L̂_q⁻¹`, `inv_LB = L̂_B⁻¹`, `epsilon = ε`, `v_hat = v/v_thi`,
+`sigma = ±1`, `y = λ B_max`.
+"""
+function magnetic_drift_frequency(; y::Real, v_hat::Real, sigma::Real, epsilon::Real,
+    inv_Lq::Real, inv_LB::Real, variant::Symbol=:original, rtol::Real=1e-8)
+    variant in (:original, :improved) || throw(ArgumentError("variant must be :original or :improved (got $variant)"))
+    LB = variant === :improved ? zero(float(inv_LB)) : float(inv_LB)
+    A, G = orbit_average_drift_brackets(; y=y, epsilon=epsilon, rtol=rtol)
+    return (sigma * v_hat / (1 + epsilon)) * (inv_Lq * A - 0.5 * LB * G)
+end
+
+# ---------------------------------------------------------------------------
+# Collision operator (cleared 2026-07-11; derivation collision-operator.md)
+# ---------------------------------------------------------------------------
+"""
+    pitch_diffusivity(λ, B)
+
+The Lorentz pitch-angle operator's self-adjoint **diffusivity**
+``P(\\lambda) = \\lambda\\sqrt{1-\\lambda B} \\ge 0`` (docs/01 §2.3; derivation
+`collision-operator.md` §2), for the operator ``w^{-1}\\partial_\\lambda(P \\partial_\\lambda)`` with measure ``w = B/\\sqrt{1-\\lambda B}``. `P` vanishes at
+`λ=0` and the trapped–passing edge `λ=1/B` (zero-flux endpoints), so it feeds
+`conservative_pitch_operator` directly and preserves the A4 conservation gate.
+"""
+function pitch_diffusivity(λ::Real, B::Real)
+    B > 0 || throw(ArgumentError("B must be positive"))
+    (0 <= λ <= 1 / B) || throw(ArgumentError("λ must be in [0, 1/B]"))
+    return λ * sqrt(max(1 - λ * B, 0.0))
+end
+
+# error function φ(X) = (2/√π)∫₀ˣ e^{−t²}dt and its derivative φ'(X) = (2/√π)e^{−X²}
+_phi(X; rtol=1e-10) = (2 / sqrt(π)) * first(QuadGK.quadgk(t -> exp(-t^2), 0.0, X; rtol=rtol))
+_dphi(X) = (2 / sqrt(π)) * exp(-X^2)
+# Chandrasekhar function G(X) = [φ − Xφ']/(2X²)
+_chandrasekhar_G(X; rtol=1e-10) = (_phi(X; rtol=rtol) - X * _dphi(X)) / (2 * X^2)
+
+"""
+    deflection_frequency(v_hat; nu_tilde=1.0, model=:chandrasekhar, rtol=1e-10)
+
+The velocity dependence of the deflection frequency (docs/01 §2.3; derivation
+`collision-operator.md` §3):
+
+```math
+\\nu_{jj}(\\hat v) = \\tilde\\nu\\,\\frac{\\phi(\\hat v) - G(\\hat v)}{\\hat v^3}
+\\quad(\\texttt{:chandrasekhar}),
+\\qquad
+\\nu_{jj}(\\hat v) = \\tilde\\nu\\,\\hat v^{-3}\\quad(\\texttt{:vcubed}),
+```
+
+with ``\\phi`` the error function and ``G`` the Chandrasekhar function. The
+`:chandrasekhar` form ``\\to \\tfrac{4\\tilde\\nu}{3\\sqrt\\pi}\\hat v^{-2}`` at low
+speed (the derived linear ``\\phi-G`` limit) and ``\\to \\tilde\\nu\\hat v^{-3}`` at
+high speed; the `:vcubed` form is the reduced Diss19/D21 model. The energy-
+dependence sub-toggle (ladder E3).
+"""
+function deflection_frequency(v_hat::Real; nu_tilde::Real=1.0, model::Symbol=:chandrasekhar, rtol::Real=1e-10)
+    v_hat > 0 || throw(ArgumentError("v_hat must be positive"))
+    if model === :vcubed
+        return nu_tilde / v_hat^3
+    elseif model === :chandrasekhar
+        return nu_tilde * (_phi(v_hat; rtol=rtol) - _chandrasekhar_G(v_hat; rtol=rtol)) / v_hat^3
+    else
+        throw(ArgumentError("model must be :chandrasekhar or :vcubed (got $model)"))
+    end
+end
+
+"""
+    momentum_restoring_average(; epsilon, nu_star)
+
+The **momentum-restoring** velocity-averaged collision frequency
+``\\langle\\hat\\nu_{ii}\\rangle_u`` (docs/01 §2.3; derivation
+`collision-magnitude.md`, human sign-off 2026-07-12):
+
+```math
+\\langle\\hat\\nu_{ii}\\rangle_u
+ = \\frac{4\\,\\varepsilon^{3/2}\\nu_\\star}{3\\sqrt\\pi}\\big(\\sqrt2-\\ln(1+\\sqrt2)\\big)
+ \\approx 0.40083\\,\\varepsilon^{3/2}\\nu_\\star ,
+```
+
+the normalized Maxwellian speed average ``\\langle\\cdots\\rangle_u=(8/3\\sqrt\\pi)
+\\int_0^\\infty u^4 e^{-u^2}(\\cdots)du`` of ``\\hat\\nu_{ii}(u)=\\varepsilon^{3/2}
+\\nu_\\star[\\phi-G]/u^3`` (the cleared [`deflection_frequency`](@ref) shape). L23
+evaluates it analytically (L23 Eq. 4.1.6, p. 88) because ``\\tilde\\nu`` diverges
+as ``u\\to0``, spoiling coarse speed quadrature; the pure number
+``(4/3\\sqrt\\pi)(\\sqrt2-\\ln(1+\\sqrt2))=0.400830\\ldots`` reproduces L23's own
+unit-test value ``1.267537\\times10^{-4}`` at ``\\varepsilon=0.1,\\nu_\\star=0.01``.
+This magnitude enters the momentum-restoring flow ``\\bar u_{\\parallel i}``
+(I19 Eq. 12); ``\\nu_\\star`` is a scenario scan input (banana regime
+``\\nu_\\star\\ll1``, Decision D7).
+"""
+function momentum_restoring_average(; epsilon::Real, nu_star::Real)
+    epsilon >= 0 || throw(ArgumentError("epsilon must be nonnegative"))
+    nu_star >= 0 || throw(ArgumentError("nu_star must be nonnegative (banana regime ν_★ ≪ 1)"))
+    return (4 * epsilon^1.5 * nu_star / (3 * sqrt(π))) * (sqrt(2) - log(1 + sqrt(2)))
+end
+
+# ---------------------------------------------------------------------------
+# Flattened-electron closure (cleared 2026-07-11; derivation electron-closure.md)
+# ---------------------------------------------------------------------------
+"""
+    h_amplitude(w_psi)
+
+The flattened-electron profile amplitude ``C = w_\\psi/(2\\sqrt2)`` (docs/01 §2.4;
+derivation `electron-closure.md` §3), i.e. the prefactor of
+``h(\\Omega)=\\Theta(\\Omega-1)\\,C\\int_1^\\Omega d\\Omega'/Q(\\Omega')``. Derived
+from the flattening constraint ``\\langle\\partial^2 h/\\partial x^2\\rangle_\\Omega=0``
+(``\\Rightarrow h'=C/Q``) plus far-field matching ``h\\to x``. Feeds
+`Fields.h_profile`'s `prefactor` (and `Fields.ElectronClosure.h_prefactor`); the
+closure constants ``k`` and ``f_p`` remain gated.
+"""
+h_amplitude(w_psi::Real) = w_psi / (2 * sqrt(2))
+
+"""
+    passing_fraction(epsilon)
+
+The flattened-electron closure **passing (circulating) particle fraction**
+``f_p = 1 - f_t \\simeq 1 - 1.4624\\,\\sqrt\\varepsilon`` (docs/01 §2.4; derivation
+`passing-fraction.md`, human sign-off 2026-07-11). The leading coefficient
+`1.4624` is the ``\\varepsilon\\to0`` limit of the effective trapped-fraction
+integral (Lin-Liu–Miller / Wesson) derived and numerically confirmed in the
+derivation; it matches the sources' quoted ``1.46`` (I19 Eq. 22) to three
+significant figures. Clears `Fields.ElectronClosure.f_p`; the Hirshman–Sigmar
+`k` constant of the same closure remains gated (QUESTIONS Q3/Q5).
+"""
+function passing_fraction(epsilon::Real)
+    epsilon >= 0 || throw(ArgumentError("epsilon must be nonnegative"))
+    return 1 - 1.4624 * sqrt(epsilon)
+end
+
+# ---------------------------------------------------------------------------
+# Quasineutrality closure (cleared 2026-07-11; derivation quasineutrality-closure.md)
+# ---------------------------------------------------------------------------
+"""
+    quasineutrality_coefficient(tau)
+
+The Level-0 quasineutrality closure coefficient ``\\tau/(\\tau+1)`` (docs/01 §3;
+derivation `quasineutrality-closure.md`), where ``\\tau=T_e/T_i``:
+
+```math
+\\hat\\Phi = \\frac{\\tau}{\\tau+1}\\Big[\\frac{\\delta\\bar n_i}{n_0}
+   + \\hat L_{n0}^{-1}\\,(x-\\hat h)\\Big].
+```
+
+The ``\\tau/(\\tau+1)`` factor is the sum of the ion and electron adiabatic
+shielding responses (``\\to 1/2`` at ``\\tau=1``, the sources' ``T_e=T_i``). The
+raw ion-density moment ``\\delta\\bar n_i=M[g_i]`` (`velocity_moment!`) enters
+directly — no ``\\delta n_i`` normalization convention — so this coefficient plus
+the ``\\hat L_{n0}^{-1}(x-\\hat h)`` drive populate `Operators.Quasineutrality`.
+"""
+function quasineutrality_coefficient(tau::Real)
+    tau > 0 || throw(ArgumentError("tau = T_e/T_i must be positive"))
+    return tau / (tau + 1)
+end
+
+# ---------------------------------------------------------------------------
+# Δ-moment prefactors (cleared 2026-07-11; derivation delta-moment-prefactors.md)
+# ---------------------------------------------------------------------------
+"""
+    delta_moment_prefactors(; mu0_R, w_psi, dq_dpsi, q_s)
+
+The ``\\Delta_{\\cos}``/``\\Delta_{\\sin}`` output-moment prefactors (docs/01 §4;
+derivation `delta-moment-prefactors.md`): returns
+`(cos=-\\mu_0 R/(2\\tilde\\psi), sin=+\\mu_0 R/(2\\tilde\\psi))` for
+`Moments.delta_moments`, with ``\\tilde\\psi`` the cleared island flux
+amplitude `Moments.island_flux_amplitude`. ``\\Delta_{\\cos}=\\Delta_{\\rm neo}``
+matches Diss19 Eq. 4.12 (stationarity ``\\Delta'+\\Delta_{\\rm neo}=0``); the sin
+normalization is the symmetric `[DERIVED]` pin so that
+``\\Delta_{\\cos}+i\\Delta_{\\sin}`` maps onto the linear-layer ``\\Delta(Q)``.
+"""
+function delta_moment_prefactors(; mu0_R::Real, w_psi::Real, dq_dpsi::Real, q_s::Real)
+    ψ̃ = (w_psi^2 / 4) * (dq_dpsi / q_s)     # = island_flux_amplitude (docs/01 §1)
+    ψ̃ != 0 || throw(ArgumentError("ψ̃ must be nonzero (check w_psi, dq_dpsi)"))
+    pref = mu0_R / (2 * ψ̃)
+    return (cos=-pref, sin=+pref)
+end
+
+end # module Coefficients
