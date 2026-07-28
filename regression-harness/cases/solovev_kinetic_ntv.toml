@@ -1,0 +1,69 @@
+# Regression case: Solovev n=1 ideal stability + perturbed equilibrium + post-PE NTV torque.
+# The only case exercising the KineticForces outer ψ torque quadrature (fgar method):
+# rational-surface paneling, maxevals_psi cap, and the atol_psi/rtol_psi defaults.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
+# noise floor below which a difference is treated as zero.
+[case]
+name = "solovev_kinetic_ntv"
+description = "Solovev analytical equilibrium, n=1, ideal + PE + NTV torque quadrature"
+example_dir = "examples/Solovev_kinetic_NTV_example"
+
+# NTV torque — the primary tracked quantity of this case. [Re, Im] pair; the ψ quadrature
+# converges to rtol_psi=1e-2, but the result is deterministic for fixed code + inputs, so
+# the noise floor is set near FP noise and any real movement is surfaced.
+[quantities.ntv_torque]
+h5path = "kinetic_forces/fgar/total_torque"
+type = "real_vector"
+extract = "all_real"
+label = "NTV torque fgar [Re, Im]"
+noise_threshold = 1e-8
+order = 10
+
+[quantities.ntv_psi_nsteps]
+h5path = "kinetic_forces/fgar/psi_nsteps"
+type = "int_scalar"
+extract = "value"
+label = "NTV ψ quadrature evaluations"
+noise_threshold = 0
+order = 11
+
+# Stability anchors — confirm the upstream FFS/PE stages feeding the NTV diagnostic.
+[quantities.et_real]
+h5path = "FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "root-area-weighted total energy Re(et[1])"
+noise_threshold = 1e-10
+order = 20
+
+[quantities.msing]
+h5path = "singular/msing"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+order = 21
+
+[quantities.sing_psi]
+h5path = "singular/psi"
+type = "real_vector"
+extract = "all_real"
+label = "singular psi locations"
+noise_threshold = 1e-8
+order = 22
+
+[quantities.q0]
+h5path = "equil/q0"
+type = "real_scalar"
+extract = "value"
+label = "q0"
+noise_threshold = 0
+order = 23
+
+# Runtime (special: not from H5)
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0

@@ -15,7 +15,6 @@
                 @test vac.n_modes == [1]
                 @test vac.mtheta == 1
                 @test vac.nzeta == 1
-                @test vac.force_wv_symmetry == true
             end
 
             @testset "keyword constructor" begin
@@ -385,7 +384,7 @@
                 @test all(isfinite, plasma_pts)
                 @test size(wall_pts) == (numpoints, 3)
 
-                # With force_wv_symmetry (default), wv should be Hermitian
+                # wv is always Hermitian-symmetrized
                 @test isapprox(wv, wv', rtol=1e-12)
             end
 

@@ -335,6 +335,10 @@
         @test ctrl.nutype == "harmonic"
         @test ctrl.f0type == "maxwellian"
         @test ctrl.psilims == [0.0, 1.0]
+        # ψ quadrature is rtol-primary: atol_psi is amplitude-sensitive (NTV ∝ δB²)
+        @test ctrl.atol_psi == 0.0
+        @test ctrl.rtol_psi == 1e-2
+        @test ctrl.maxevals_psi == 2000
     end
 
     @testset "KineticForcesInternal defaults" begin
@@ -343,6 +347,72 @@
         @test intr.bo == 0.0
         @test intr.mpert == 0
         @test intr.chi1 == 0.0
+        @test isempty(intr.sing_psis)
+    end
+
+    @testset "psi_panel_points" begin
+        sing_psis = [0.2, 0.5, 0.8]
+        # Interior surfaces become panel boundaries, in order
+        @test KF.psi_panel_points(sing_psis, 0.1, 0.9) == [0.1, 0.2, 0.5, 0.8, 0.9]
+        # Surfaces outside the integration bounds are dropped
+        @test KF.psi_panel_points(sing_psis, 0.3, 0.7) == [0.3, 0.5, 0.7]
+        # Surfaces at (or within 1e-8 of) a bound would create a degenerate panel — dropped
+        @test KF.psi_panel_points(sing_psis, 0.2, 0.8) == [0.2, 0.5, 0.8]
+        @test KF.psi_panel_points([0.2 + 5e-9], 0.2, 0.9) == [0.2, 0.9]
+        # No surfaces: plain two-point interval
+        @test KF.psi_panel_points(Float64[], 0.0, 1.0) == [0.0, 1.0]
+        # Unsorted union input (rationals ∪ kinetic resonances) is sorted
+        @test KF.psi_panel_points([0.8, 0.2, 0.5], 0.1, 0.9) == [0.1, 0.2, 0.5, 0.8, 0.9]
+        # Near-coincident points (kinetic resonance on a rational) collapse to one
+        @test KF.psi_panel_points([0.5, 0.5 + 5e-9, 0.2], 0.1, 0.9) == [0.1, 0.2, 0.5, 0.9]
+    end
+
+    @testset "find_sign_change_roots" begin
+        xs = collect(range(0.0, 1.0; length=101))
+        # Two known zeros of a smooth profile
+        spl = KF.cubic_interp(xs, @. sin(2π * xs) + 0.5)
+        roots = KF.find_sign_change_roots(spl, xs)
+        @test length(roots) == 2
+        expected = [(π - asin(-0.5)) / (2π), (2π + asin(-0.5)) / (2π)]
+        @test isapprox(roots, expected; atol=1e-6)
+        # Monotone positive profile: no crossings
+        @test isempty(KF.find_sign_change_roots(KF.cubic_interp(xs, 1.0 .+ xs), xs))
+        # Exact zero at a node is not a strict sign change — no crash, no root from that pair
+        vals = collect(1.0 .- 2 .* xs)
+        vals[51] = 0.0  # xs[51] = 0.5 is the true zero
+        spl0 = KF.cubic_interp(xs, vals)
+        @test length(KF.find_sign_change_roots(spl0, xs)) <= 1
+    end
+
+    @testset "kinetic resonance node scan" begin
+        # Synthetic frequency closures with analytically known Ω_ℓ(x=1) = 0 locations (evaluated
+        # at xeval=1 to keep the closed form): constant ω_b, ω_d and linear ω_E(ψ) = a − b·ψ give
+        # ψ_ℓ = (a + ω_d + ℓ·ω_b/n)/b. Constants chosen so no zero falls exactly on a grid node.
+        grid = collect(range(0.0, 1.0; length=101))
+        wb0, wd0, a, b = 0.1, 0.05, 0.5037, 1.0
+        wbhat_f = _ -> wb0
+        wdhat_f = _ -> wd0
+        welec_f = psi -> a - b * psi
+        nodes = sort(KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=2, xeval=1.0))
+        @test length(nodes) == 5
+        @test isapprox(nodes, [0.3537, 0.4537, 0.5537, 0.6537, 0.7537]; atol=1e-10)
+        # nl = 0 reduces to the ω_d-shifted ExB resonance alone
+        nodes0 = KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=0, xeval=1.0)
+        @test isapprox(nodes0, [0.5537]; atol=1e-10)
+        # No crossings when ω_E never approaches the resonance condition
+        @test isempty(KF._resonance_nodes_from_frequencies(wbhat_f, _ -> 10.0, wdhat_f, grid; n=1, nl=2, xeval=1.0))
+    end
+
+    @testset "check_psi_quadrature_convergence" begin
+        ctrl = KF.KineticForcesControl()  # atol_psi=0, rtol_psi=1e-2
+        total = 1.0 + 0.0im
+        # Converged: error below rtol*|T|, no warning
+        @test_logs KF.check_psi_quadrature_convergence(total, 1e-3, ctrl, "fgar")
+        # Hit maxevals: error above tolerance
+        @test_logs (:warn, r"maxevals_psi") KF.check_psi_quadrature_convergence(total, 0.5, ctrl, "fgar")
+        # Nonzero atol_psi dominating a small torque: the silent-garbage scenario
+        ctrl.atol_psi = 1e-2
+        @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl, "fgar")
     end
 
     @testset "METHOD_REGISTRY" begin
@@ -368,7 +438,62 @@
     @testset "MethodResult defaults" begin
         mr = KF.MethodResult(method="fgar", nn=1)
         @test mr.total_torque == 0.0 + 0.0im
-        @test mr.total_energy == 0.0 + 0.0im
+        @test mr.total_energy == 0.0
         @test isempty(mr.records)
+    end
+
+    # =========================================================================
+    # Kinetic profile I/O: HDF5 schema, ASCII back-compat, writer round-trip
+    # =========================================================================
+    @testset "kinetic profile I/O" begin
+        E = GeneralizedPerturbedEquilibrium.Equilibrium
+        exdir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+        gpeckf = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.gpeckf")
+        h5 = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.h5")
+
+        @testset "extension dispatch + raw read" begin
+            da = E.read_kinetic_file(gpeckf)
+            db = E.read_kinetic_file(h5)
+            # legacy ASCII carries no optional fields; the example .h5 carries chi
+            @test da.chi_e === nothing && da.chi_phi === nothing
+            @test db.chi_e !== nothing && db.chi_phi !== nothing
+            # core columns identical (the .h5 was generated from the .gpeckf)
+            @test da.psi == db.psi
+            @test da.n_e == db.n_e
+            @test da.T_i == db.T_i
+            @test da.omega_E == db.omega_E
+        end
+
+        @testset "NTV splines identical: ASCII vs HDF5" begin
+            ka = E.load_kinetic_profiles(gpeckf)
+            kb = E.load_kinetic_profiles(h5)
+            for p in 0.0:0.1:1.0
+                @test ka.ne_spline(p) == kb.ne_spline(p)
+                @test ka.Ti_spline(p) == kb.Ti_spline(p)
+                @test ka.omegaE_spline(p) == kb.omegaE_spline(p)
+                @test ka.zeff_spline(p) == kb.zeff_spline(p)
+            end
+        end
+
+        @testset "writer round-trip" begin
+            db = E.read_kinetic_file(h5)
+            tmp = tempname() * ".h5"
+            E.write_kinetic_h5(tmp, db; provenance="roundtrip")
+            dc = E.read_kinetic_file(tmp)
+            @test dc.chi_e ≈ db.chi_e
+            @test dc.chi_phi ≈ db.chi_phi
+            @test dc.n_e ≈ db.n_e
+            @test dc.provenance == "roundtrip"
+            rm(tmp; force=true)
+        end
+
+        @testset "missing required field errors" begin
+            # HDF5 with only psi + n_e: NTV load must error on the missing T_i
+            tmp = tempname() * ".h5"
+            d = E.KineticProfileData(; psi=[0.0, 0.5, 1.0], n_e=[1e19, 9e18, 8e18])
+            E.write_kinetic_h5(tmp, d)
+            @test_throws ErrorException E.load_kinetic_profiles(tmp)
+            rm(tmp; force=true)
+        end
     end
 end

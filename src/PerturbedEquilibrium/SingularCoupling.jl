@@ -147,133 +147,147 @@ function compute_singular_coupling_metrics!(
     edge_mn = intr.plasma_response ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
     C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
 
-    # Phase 3: Compute full coupling matrix rows
+    # Phase 3: Compute full coupling matrix rows. Each rational surface is independent -- it
+    # builds its own Green's functions (a fresh, allocation-local vacuum solve) and writes its
+    # own disjoint coupling-matrix row (state.C_*[row,:] / state.rational_*[row]) -- so thread
+    # the loop over surfaces. Note a single surface `s` can appear on multiple rows in a
+    # multi-n run (integer q resonates at several n), so per-row work must not write shared
+    # sing[s] state. BLAS is pinned to one thread across the loop (each surface's solve is
+    # small; multi-threaded BLAS would oversubscribe against the Julia threads) and restored in
+    # a `finally` so an exception in the loop cannot leak the pinned count into the session. The
+    # loop is top-level: its threadid()-indexed state must never be nested inside another
+    # @threads region.
     psi_store_all = ForceFreeStates_results.psi_store
     nstep = ForceFreeStates_results.step
-    for (row, (s, nn)) in enumerate(resonant_pairs)
-        sing_surf = ffs_intr.sing[s]
-        m_res = round(Int, sing_surf.q * nn)
+    _blas_nthreads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    try
+        Threads.@threads :static for row in 1:length(resonant_pairs)
+            (s, nn) = resonant_pairs[row]
+            sing_surf = ffs_intr.sing[s]
+            m_res = round(Int, sing_surf.q * nn)
 
-        resnum = findfirst(j -> intr.m_modes[j] == m_res && intr.n_modes[j] == nn, 1:numpert_total)
-        if resnum === nothing
-            @warn "Could not find index for resonant mode (m=$m_res, n=$nn)" maxlog=1
-            continue
+            resnum = findfirst(j -> intr.m_modes[j] == m_res && intr.n_modes[j] == nn, 1:numpert_total)
+            if resnum === nothing
+                @warn "Could not find index for resonant mode (m=$m_res, n=$nn)" maxlog=1
+                continue
+            end
+
+            # Compute Green's functions at this surface for this n (once per pair)
+            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
+            _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
+            grri = Matrix{ComplexF64}(grri_raw)
+            grre = Matrix{ComplexF64}(grre_raw)
+
+            # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
+            ν_vac = Vacuum.PlasmaGeometry(vac_input).ν
+
+            # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
+            L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, nn, ν_vac)
+            m_idx = m_res - mlow + 1
+            L_mm = L_surf[m_idx, m_idx]
+
+            j_c = compute_current_density(equil, sing_surf.psifac)
+            area = compute_surface_area(equil, sing_surf.psifac)
+            # Matches Fortran gpout_resp: shear = m*dq/dψ / q² = n*dq/dψ / q (since m=n*q).
+            # Uses abs(nn) because island_half_width = sqrt(abs(island_width_sq)), so the sign
+            # of shear only affects the sign of C_island_width_sq, not the physical island width.
+            shear = abs(nn) * sing_surf.q1 / sing_surf.q
+
+            # Evaluate bwp1_mn = ∂b^ψ/∂ψ at lpsi and rpsi using permeability-weighted eigenstates.
+            # Matches Fortran gpout_resp: evaluate bwp1_mn at lpsi/rpsi via gpeq_sol
+            # spot = 5e-4 matches Fortran default singfac_min
+            spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
+            lpsi = sing_surf.psifac - spot_psi
+            rpsi = sing_surf.psifac + spot_psi
+
+            # Interpolate u and du/dψ at lpsi and rpsi using stored ODE solution.
+            # Value (u): Hermite cubic using ud_store for smoother interpolation than linear.
+            # Derivative (ud): chord slope from u_store only — see comment below.
+            il_l, ir_l, _ = _psi_bracket(psi_store_all, lpsi, nstep)
+            il_r, ir_r, _ = _psi_bracket(psi_store_all, rpsi, nstep)
+
+            u_node = ForceFreeStates_results.u_store
+            ud_node = ForceFreeStates_results.ud_store
+            ua_l = u_node[resnum, :, 1, il_l]
+            ub_l = u_node[resnum, :, 1, ir_l]
+            ua_r = u_node[resnum, :, 1, il_r]
+            ub_r = u_node[resnum, :, 1, ir_r]
+            dua_l = ud_node[resnum, :, 1, il_l]
+            dub_l = ud_node[resnum, :, 1, ir_l]
+            dua_r = ud_node[resnum, :, 1, il_r]
+            dub_r = ud_node[resnum, :, 1, ir_r]
+
+            psi_il_l = psi_store_all[il_l]
+            psi_ir_l = psi_store_all[ir_l]
+            psi_il_r = psi_store_all[il_r]
+            psi_ir_r = psi_store_all[ir_r]
+
+            u_l = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
+            u_r = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
+            # Derivative (ud): chord slope from u_store only — ud_store can be systematically off near
+            # outer surfaces (q=4/5) where the ODE solution varies rapidly; near-cancellation in bwp1
+            # then amplifies even a ~10% ud_store error into a large Delta' error. Chord slope avoids
+            # this by using only u values, which are accurately stored by the ODE integrator.
+            ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
+            ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
+
+            q_l = equil.profiles.q_spline(lpsi)
+            q1_l = equil.profiles.q_deriv(lpsi)
+            q_r = equil.profiles.q_spline(rpsi)
+            q1_r = equil.profiles.q_deriv(rpsi)
+            singfac_l = m_res - nn * q_l
+            singfac_r = m_res - nn * q_r
+
+            jump_vec = Vector{ComplexF64}(undef, numpert_total)
+            for k in 1:numpert_total
+                ck = @view C_coeffs[:, k]
+                xsp_l = dot(u_l, ck)
+                xsp1_l = dot(ud_l, ck)
+                xsp_r = dot(u_r, ck)
+                xsp1_r = dot(ud_r, ck)
+                bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
+                bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
+                jump_vec[k] = bwp1_r - bwp1_l
+                # C_penetrated_area_weighted_field: midpoint of b^ψ at lpsi/rpsi divided by the scalar surface area.
+                # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi.
+                # LHS normalization audit (#233): the resonant flux Φ^r divided by the scalar area A^r
+                # is a genuine field amplitude in tesla and is coordinate-invariant [Pharr 2026; cf.
+                # the resonant-field definition in the Conventions Reference].
+                b_l = chi1 * singfac_l * 2π * im * xsp_l
+                b_r = chi1 * singfac_r * 2π * im * xsp_r
+                state.C_penetrated_area_weighted_field[row, k] = (b_l + b_r) / 2 / area
+            end
+
+            # LHS normalization audit (#233) — output scalar coordinate-invariance per row:
+            #  - Δ' (1/length): the resonant-surface jump in ∂b^ψ/∂ψ over 2π·χ₁; the tearing index is
+            #    coordinate-invariant (its sign/zero-crossing set the stability boundary) [Glasser 2016].
+            #  - resonant (shielding) current: j_c already integrates jac·|∇ψ| over the surface, so the
+            #    Jacobian weighting is carried inside j_c — no separate area factor needed.
+            #  - resonant flux → field: Φ^r/A^r [T], invariant [Park 2008; Pharr 2026].
+            state.C_delta_prime[row, :] = jump_vec ./ (twopi * chi1)
+            state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
+            # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant area-weighted field = singflx/area,
+            # islandhwids = 4·singflx/(2π·shear·q·chi1)
+            singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
+            state.C_resonant_area_weighted_field[row, :] = singflx_pre ./ area
+            if abs(shear) > 1e-10
+                state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
+            end
+
+            state.rational_psi[row] = sing_surf.psifac
+            state.rational_q[row] = sing_surf.q
+            state.rational_m_res[row] = m_res
+            state.rational_n[row] = nn
+            state.rational_surface_idx[row] = s
+
+            if ctrl.verbose
+                dp_diag = real(state.C_delta_prime[row, resnum])
+                @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ'(diag)=$(@sprintf("%.3e", dp_diag))"
+            end
         end
-
-        # Compute Green's functions at this surface for this n (once per pair)
-        vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
-        _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
-        grri = Matrix{ComplexF64}(grri_raw)
-        grre = Matrix{ComplexF64}(grre_raw)
-        ffs_intr.sing[s].grri = grri
-        ffs_intr.sing[s].grre = grre
-
-        # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
-        ν_vac = Vacuum.PlasmaGeometry(vac_input).ν
-
-        # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
-        L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, nn, ν_vac)
-        m_idx = m_res - mlow + 1
-        L_mm = L_surf[m_idx, m_idx]
-
-        j_c = compute_current_density(equil, sing_surf.psifac)
-        area = compute_surface_area(equil, sing_surf.psifac)
-        # Matches Fortran gpout_resp: shear = m*dq/dψ / q² = n*dq/dψ / q (since m=n*q).
-        # Uses abs(nn) because island_half_width = sqrt(abs(island_width_sq)), so the sign
-        # of shear only affects the sign of C_island_width_sq, not the physical island width.
-        shear = abs(nn) * sing_surf.q1 / sing_surf.q
-
-        # Evaluate bwp1_mn = ∂b^ψ/∂ψ at lpsi and rpsi using permeability-weighted eigenstates.
-        # Matches Fortran gpout_resp: evaluate bwp1_mn at lpsi/rpsi via gpeq_sol
-        # spot = 5e-4 matches Fortran default singfac_min
-        spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
-        lpsi = sing_surf.psifac - spot_psi
-        rpsi = sing_surf.psifac + spot_psi
-
-        # Interpolate u and du/dψ at lpsi and rpsi using stored ODE solution.
-        # Value (u): Hermite cubic using ud_store for smoother interpolation than linear.
-        # Derivative (ud): chord slope from u_store only — see comment below.
-        il_l, ir_l, _ = _psi_bracket(psi_store_all, lpsi, nstep)
-        il_r, ir_r, _ = _psi_bracket(psi_store_all, rpsi, nstep)
-
-        u_node = ForceFreeStates_results.u_store
-        ud_node = ForceFreeStates_results.ud_store
-        ua_l = u_node[resnum, :, 1, il_l]
-        ub_l = u_node[resnum, :, 1, ir_l]
-        ua_r = u_node[resnum, :, 1, il_r]
-        ub_r = u_node[resnum, :, 1, ir_r]
-        dua_l = ud_node[resnum, :, 1, il_l]
-        dub_l = ud_node[resnum, :, 1, ir_l]
-        dua_r = ud_node[resnum, :, 1, il_r]
-        dub_r = ud_node[resnum, :, 1, ir_r]
-
-        psi_il_l = psi_store_all[il_l]
-        psi_ir_l = psi_store_all[ir_l]
-        psi_il_r = psi_store_all[il_r]
-        psi_ir_r = psi_store_all[ir_r]
-
-        u_l = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
-        u_r = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
-        # Derivative (ud): chord slope from u_store only — ud_store can be systematically off near
-        # outer surfaces (q=4/5) where the ODE solution varies rapidly; near-cancellation in bwp1
-        # then amplifies even a ~10% ud_store error into a large Delta' error. Chord slope avoids
-        # this by using only u values, which are accurately stored by the ODE integrator.
-        ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
-        ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
-
-        q_l = equil.profiles.q_spline(lpsi)
-        q1_l = equil.profiles.q_deriv(lpsi)
-        q_r = equil.profiles.q_spline(rpsi)
-        q1_r = equil.profiles.q_deriv(rpsi)
-        singfac_l = m_res - nn * q_l
-        singfac_r = m_res - nn * q_r
-
-        jump_vec = Vector{ComplexF64}(undef, numpert_total)
-        for k in 1:numpert_total
-            ck = @view C_coeffs[:, k]
-            xsp_l = dot(u_l, ck)
-            xsp1_l = dot(ud_l, ck)
-            xsp_r = dot(u_r, ck)
-            xsp1_r = dot(ud_r, ck)
-            bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
-            bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
-            jump_vec[k] = bwp1_r - bwp1_l
-            # C_penetrated_area_weighted_field: midpoint of b^ψ at lpsi/rpsi divided by the scalar surface area.
-            # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi.
-            # LHS normalization audit (#233): the resonant flux Φ^r divided by the scalar area A^r
-            # is a genuine field amplitude in tesla and is coordinate-invariant [Pharr 2026; cf.
-            # the resonant-field definition in the Conventions Reference].
-            b_l = chi1 * singfac_l * 2π * im * xsp_l
-            b_r = chi1 * singfac_r * 2π * im * xsp_r
-            state.C_penetrated_area_weighted_field[row, k] = (b_l + b_r) / 2 / area
-        end
-
-        # LHS normalization audit (#233) — output scalar coordinate-invariance per row:
-        #  - Δ' (1/length): the resonant-surface jump in ∂b^ψ/∂ψ over 2π·χ₁; the tearing index is
-        #    coordinate-invariant (its sign/zero-crossing set the stability boundary) [Glasser 2016].
-        #  - resonant (shielding) current: j_c already integrates jac·|∇ψ| over the surface, so the
-        #    Jacobian weighting is carried inside j_c — no separate area factor needed.
-        #  - resonant flux → field: Φ^r/A^r [T], invariant [Park 2008; Pharr 2026].
-        state.C_delta_prime[row, :] = jump_vec ./ (twopi * chi1)
-        state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
-        # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant area-weighted field = singflx/area,
-        # islandhwids = 4·singflx/(2π·shear·q·chi1)
-        singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
-        state.C_resonant_area_weighted_field[row, :] = singflx_pre ./ area
-        if abs(shear) > 1e-10
-            state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
-        end
-
-        state.rational_psi[row] = sing_surf.psifac
-        state.rational_q[row] = sing_surf.q
-        state.rational_m_res[row] = m_res
-        state.rational_n[row] = nn
-        state.rational_surface_idx[row] = s
-
-        if ctrl.verbose
-            dp_diag = real(state.C_delta_prime[row, resnum])
-            @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ'(diag)=$(@sprintf("%.3e", dp_diag))"
-        end
+    finally
+        BLAS.set_num_threads(_blas_nthreads)
     end
 
     # Phase 4: Apply forcing amplitudes → R = C · Φ_x. The applied resonant scalars are
