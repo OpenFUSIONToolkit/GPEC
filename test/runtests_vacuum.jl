@@ -671,7 +671,7 @@
                 mtheta_in=mtheta, nzeta_in=nzeta_p,
                 m_modes=m_modes, n_modes=n_modes,
                 mtheta=mtheta, nzeta=nzeta_p,
-                force_wv_symmetry=false, nfp=nfp
+                nfp=nfp
             )
             wall_settings = WallShapeSettings(shape="nowall")
 
@@ -705,16 +705,8 @@
                 end
             end
 
-            # Hermitian symmetrization still works through the reduced path
-            inputs_sym = VacuumInput(
-                x=Xp, y=Yp, z=Zp,
-                mtheta_in=mtheta, nzeta_in=nzeta_p,
-                m_modes=m_modes, n_modes=n_modes,
-                mtheta=mtheta, nzeta=nzeta_p,
-                force_wv_symmetry=true, nfp=nfp
-            )
-            wv_sym, _, _, _, _ = compute_vacuum_response(inputs_sym, wall_settings)
-            @test isapprox(wv_sym, wv_sym', rtol=1e-12)
+            # Hermitian part is enforced after assembly on both paths
+            @test isapprox(wv_red, wv_red', rtol=1e-12)
         end
 
         @testset "Kernel3D laplace_kernel" begin
