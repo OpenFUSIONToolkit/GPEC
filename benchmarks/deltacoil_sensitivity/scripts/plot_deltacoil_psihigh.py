@@ -12,7 +12,18 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 here = os.path.dirname(os.path.abspath(__file__))
-csv_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, '..', 'results', 'deltacoil_psihigh_result.csv')
+# optional --psi_s="2:0.518,3:0.770,..." gives the TRUE rational-surface psi locations (from the
+# equilibrium's singular/psi), annotated alongside the grid-entry proxy. Non-flag arg = csv path.
+TRUE_PSIS = {}
+_pos = []
+for a in sys.argv[1:]:
+    if a.startswith('--psi_s='):
+        for kv in a.split('=', 1)[1].split(','):
+            if ':' in kv:
+                k, v = kv.split(':'); TRUE_PSIS[float(k)] = float(v)
+    else:
+        _pos.append(a)
+csv_path = _pos[0] if _pos else os.path.join(here, '..', 'results', 'deltacoil_psihigh_result.csv')
 csv_path = os.path.abspath(csv_path)
 
 # --- read CSV ---
@@ -65,15 +76,22 @@ for q, c in zip(qvals, colors):
     ax.plot(psihigh[m], y[m], 'o-', color=c, lw=1.8, ms=6, label=f'q = {q:g}')
 for q, c in zip(qvals, colors):                        # vlines after data so ylim is settled on the log scale
     if q in PSI_S and np.isfinite(PSI_S[q]):
-        ax.axvline(PSI_S[q], ls=':', color=c, lw=1.0, alpha=0.7)
-        ax.text(PSI_S[q], ax.get_ylim()[1], f' q={q:g} enters ≈{PSI_S[q]:.3f}', color=c,
+        ax.axvline(PSI_S[q], ls=':', color=c, lw=1.0, alpha=0.7)          # grid-entry (first psihigh with data)
+        lbl = f' q={q:g} enters ≈{PSI_S[q]:.3f}'
+        if q in TRUE_PSIS:                                                # true rational-surface location
+            ax.axvline(TRUE_PSIS[q], ls='--', color=c, lw=1.0, alpha=0.55)
+            lbl += f'  (ψ$_s$≈{TRUE_PSIS[q]:.3f})'
+        ax.text(PSI_S[q], ax.get_ylim()[1], lbl, color=c,
                 fontsize=7.5, rotation=90, va='top', ha='left')
 
 edge_log_x(ax)
 ax.set_xlabel('outer truncation  ψ$_{high}$   (log distance from edge, 1 - ψ$_{high}$; edge at right)', fontsize=11)
 ax.set_ylabel('|delta_coil|  per surface  (log)', fontsize=11)
+_sub = 'each curve begins where ψ$_{high}$ passes that surface'
+if TRUE_PSIS:
+    _sub += '  ·  dotted = grid entry, dashed = true rational surface ψ$_s$'
 ax.set_title('delta_coil vs outer truncation ψ$_{high}$ (log-packed toward edge)\n'
-             f'{CASE}, n=1  ·  each curve begins where ψ$_{{high}}$ passes that surface', fontsize=11)
+             f'{CASE}, n=1  ·  {_sub}', fontsize=10.5)
 ax.grid(alpha=0.25)
 ax.legend(title='rational surface', fontsize=9, title_fontsize=9)
 fig.subplots_adjust(left=0.12, bottom=0.13, right=0.97, top=0.88)
