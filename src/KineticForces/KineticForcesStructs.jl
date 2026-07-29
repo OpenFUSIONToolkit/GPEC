@@ -72,7 +72,10 @@ end
 IonSpecies(; z::Integer, m::Integer, fraction=NaN, density="") =
     IonSpecies(Int(z), Int(m), Float64(fraction), String(density))
 IonSpecies(d::AbstractDict) = IonSpecies(; (Symbol(k) => v for (k, v) in d)...)
-Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector{<:AbstractDict}) = IonSpecies.(v)
+# TOML.jl parses [[KineticForces.ion_species]] as a Vector{Any} of Dicts, so accept any
+# AbstractVector and build each element (pass IonSpecies through unchanged).
+Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector) =
+    IonSpecies[x isa IonSpecies ? x : IonSpecies(x) for x in v]
 
 """
     KineticForcesControl
