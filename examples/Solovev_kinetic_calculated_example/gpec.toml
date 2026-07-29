@@ -1,10 +1,11 @@
+# Solovev analytical equilibrium — n=1 ideal stability with calculated kinetic matrices.
+# Exercises the real KineticForces (NTV) physics path at full strength; kinetic regression
+# fixture (et[1]≈1.894-1.525i). The equilibrium is generated analytically from the embedded
+# [SOL_INPUT] section, with n·T tied to the Solovev P₀≈4.27e4 Pa via the local kinetic.dat.
+
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
-eq_filename = "sol.toml"                # Path to equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                            # Poloidal field power exponent for Jacobian
-power_b = 0                             # Toroidal field power exponent for Jacobian
-power_r = 0                             # Major radius power exponent for Jacobian
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
 psihigh = 0.9995                        # Upper limit of normalized flux coordinate
@@ -40,7 +41,6 @@ nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 mthvac = 64                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
-thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "calculated" # Kinetic matrix source — exercises KineticForces.compute_calculated_kinetic_matrices callback with real physics
 kinetic_factor = 1.0          # Full-strength kinetic matrices (the "calculated" path is the real physics; no perturbation scaling)
@@ -49,3 +49,16 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 write_outputs_to_HDF5 = true
 verbose = false
+
+# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
+[SOL_INPUT]
+mr = 128       # Number of radial grid zones
+mz = 128       # Number of axial grid zones
+ma = 128       # Number of flux grid zones
+e = 1.6        # Elongation
+a = 0.33       # Minor radius
+r0 = 1.0       # Major radius
+q0 = 1.9       # Safety factor at the magnetic axis (O-point)
+p0fac = 1      # Scale on-axis pressure (β changes; Φ, q fixed)
+b0fac = 1      # Scale toroidal field at constant β (Bt changes; shape, β fixed)
+f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p, Bp fixed)

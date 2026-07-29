@@ -182,6 +182,7 @@ A mutable struct holding internal state variables for stability calculations.
     kinsing_scan_cond::Vector{Float64} = Float64[]
     kinsing_scan_threshold::Float64 = 0.0
     psilim::Float64 = 0.0
+    psilow::Float64 = 0.0   # lower integration bound; raised above the axis by sing_min! when qlow > qmin (RDCON gal)
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), Series(zeros(5, 5)); bc=ZeroCurvBC())
@@ -232,7 +233,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
@@ -255,7 +255,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
-  - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
@@ -277,7 +276,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-8
@@ -301,13 +299,37 @@ A mutable struct containing control parameters for stability analysis, set by th
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
-    force_wv_symmetry::Bool = true
     save_interval::Int = 3
     force_termination::Bool = false
     use_riccati::Bool = false
     use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
     populate_dense_xi::Bool = false  # When use_parallel=true, set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× parallel-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
+
+    # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port) ---
+    gal_flag::Bool = false          # enable outer-region Galerkin Δ′ solve
+    gal_solver::String = "LU"       # "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs)
+    gal_nx::Int = 256               # elements per interval between singular surfaces
+    gal_nq::Int = 6                 # Gauss-Lobatto quadrature order per element
+    gal_pfac::Float64 = 0.001       # grid packing ratio near singular surfaces
+    gal_dx0::Float64 = 5e-4         # resonant-element integration truncation distance (×1/|n q'|)
+    gal_dx1::Float64 = 1e-3         # resonant-element size (×1/|n q'|)
+    gal_dx2::Float64 = 1e-3         # extension-element size (×1/|n q'|)
+    gal_cutoff::Int = 10            # # of elements carrying the large solution as driving term
+    gal_tol::Float64 = 1e-10        # resonant-quadrature (QuadGK) tolerance
+    gal_gnstep::Int = 20000         # max resonant-quadrature evaluations (QuadGK maxevals in gal_resonant!)
+    gal_dx1dx2_flag::Bool = true    # enable special dx1/dx2 treatment for resonant/extension elements
+    gal_sing_order::Int = 6         # base power-series order for the Galerkin singular asymptotics
+    gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
+    gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
+    gal_edge_onesided::Bool = false # pack the two end intervals one-sided toward their single rational end (vs the Fortran symmetric "both" pack); avoids the fine edge cell that inflates cond(A). Default false = faithful to gal.f.
+    # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
+    gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
+    gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
+    gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
+    gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
+    gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
+    gal_gamma::Float64 = 5 / 3       # ratio of specific heats Γ for the resistive-layer coefficients (resist_eval G term)
     fixed_axis::Bool = false
 end
 
@@ -334,6 +356,7 @@ end
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
+    fmats_gal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)   # reduced Hermitian F̄ (un-factored) for the Galerkin solver
     kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
@@ -364,8 +387,9 @@ end
     # Shared hint for sequential evaluation (all splines evaluated at same psi)
     _hint::Base.RefValue{Int} = Ref(1)
 
-    # Used in Free.jl
-    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mpert - 1)
+    # Jacobian Fourier band ψ-spline (2·mpert−1 conjugate-symmetric coefficients per surface),
+    # used to assemble the power-normalization matrix N in Free.jl
+    jmats::S = _empty_series_interp_complex(2 * mpert - 1, itp_opts)
 end
 
 # Helper to create empty complex series interpolant for default initialization
@@ -395,17 +419,15 @@ Populated in `Free.jl`.
   - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)
   - `numpert_total::Int` - Total number of modes (mpert × npert)
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput) - only needed for GPEC functionality currently
-  - `wt::Array{ComplexF64, 2}` - Free-boundary eigenvector matrix after diagonalising W (numpert_total × numpert_total). Columns are the eigenmodes sorted most-unstable first. **ξ-space.**
-  - `wt0::Array{ComplexF64, 2}` - Free-boundary total-energy matrix W = wp + wv before diagonalisation (numpert_total × numpert_total). **ξ-space.**
-  - `wp::Array{ComplexF64, 2}` - Plasma energy matrix (numpert_total × numpert_total). **ξ-space.**
-  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total). **ξ-space.**
-  - `rootA_wt0, rootA_wp, rootA_wv::Array{ComplexF64,2}` - Root-area-weighted flux (Φ-space) counterparts of `wt0`, `wp`, `wv` at the plasma edge (see RootAreaWeighted.jl). Jacobian-invariant up to the M†·W·M transform.
-  - `rootA_wt::Array{ComplexF64,2}` - Φ-space eigenvector matrix of `rootA_wt0` (columns sorted most-unstable first, phase-normalized so each column's largest-magnitude entry is real-positive).
-  - `ep::Vector{ComplexF64}` - Plasma eigenvalues
-  - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
-  - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+  - `wt::Array{ComplexF64, 2}` - Free-boundary eigenvector matrix of the generalized eigenproblem W·v = λ·N·v (numpert_total × numpert_total). Columns are the eigenmodes sorted most-unstable first, normalized to unit power norm v†·N·v = 1.
+  - `wt0::Array{ComplexF64, 2}` - Free-boundary total-energy matrix W = wp + wv before diagonalisation (numpert_total × numpert_total). ξ Fourier basis.
+  - `wp::Array{ComplexF64, 2}` - Plasma energy matrix (numpert_total × numpert_total). ξ Fourier basis.
+  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total). ξ Fourier basis.
+  - `ep::Vector{ComplexF64}` - Plasma energy per eigenmode (power quotient v†·wp·v with v†·N·v = 1)
+  - `ev::Vector{ComplexF64}` - Vacuum energy per eigenmode (power quotient v†·wv·v with v†·N·v = 1)
+  - `et::Vector{ComplexF64}` - Total energy eigenvalues of the pencil (W, N): power-normalized and invariant to the working (Jacobian) coordinate; et = ep + ev per mode
   - `n_tor_idx::Vector{Int}` -  0-based toroidal mode number index of each sorted eigenvalue (numpert_total). Needed in `write_imas`
-  - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the vacuum matrix wv, clamped to zero
+  - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the pencil (wv, N), clamped to zero
   - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points, shape (mthvac * nzvac) × 3 for (x, y, z)
@@ -426,17 +448,6 @@ Populated in `Free.jl`.
     n_tor_idx::Vector{Int} = zeros(Int, numpert_total)
     vacuum_eigenvalue::Float64 = NaN
 
-    # Root-area-weighted flux eigenvalues (Jacobian-invariant)
-    rootA_et::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
-    rootA_ep::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
-    rootA_ev::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
-
-    # Root-area-weighted flux matrices at the plasma edge (Jacobian-invariant).
-    rootA_wt0::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
-    rootA_wp::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
-    rootA_wv::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
-    rootA_wt::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
-
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
@@ -449,18 +460,16 @@ VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpo
 EdgeScanState
 
 Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
-Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`
-(root-area-weighted values) and `EdgeScan/XiNorm/` (ξ-space values, for benchmarking).
+Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`.
+The energies are generalized (W, N) pencil values: power-normalized and invariant to the
+working (Jacobian) coordinate (see `power_norm_matrix!`).
 
 ## Fields
 
   - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
   - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
-  - `sqrtamat_spline` - Precomputed √A convolution matrix + surface area spline for root-area-weighted eigenvalues.
-  - `sqrtamat_hint::Base.RefValue{Int}` - Search hint for sqrtamat spline.
   - `psi, q` - ψ and q values at each edge scan step.
-  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - ξ-space energy components at each step (NaN for failed steps). Kept for Fortran benchmarking.
-  - `rootA_total_eigenvalue, rootA_plasma_energy, rootA_vacuum_energy, rootA_vacuum_eigenvalue` - Root-area-weighted flux (Φ-space) energies (Jacobian-invariant; NaN for failed/singular steps). These are the values written to `EdgeScan/` by default.
+  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Power-normalized energy components at each step (NaN for steps where the wp solve was singular). These drive the truncation choice and are written to `EdgeScan/`.
 """
 @kwdef mutable struct EdgeScanState
     numpert_total::Int
@@ -470,10 +479,6 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     wv_hint::Base.RefValue{Int} = Ref(1)
 
-    # Root-area-weighted sqrtamat + jarea spline (mpert^2 + 1 series: flattened sqrtamat then jarea)
-    sqrtamat_spline::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2 + 1)
-    sqrtamat_hint::Base.RefValue{Int} = Ref(1)
-
     # Scan results (written to HDF5 under EdgeScan/; NaN where free_compute_total raised SingularException)
     psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
     q::Vector{Float64} = Vector{Float64}(undef, N_edge)
@@ -481,12 +486,6 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
-
-    # Root-area-weighted flux eigenvalues (Jacobian-invariant)
-    rootA_total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
-    rootA_plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
-    rootA_vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
-    rootA_vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
 end
 
 EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)

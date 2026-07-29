@@ -4,11 +4,11 @@
 
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
 psihigh = 0.9995                        # Upper limit of normalized poloidal flux
-mpsi = 16                               # Number of radial grid points (0 = auto-compute from psi_accuracy)
+mpsi = 16                               # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
@@ -40,7 +40,6 @@ nn_high = 2                   # Largest toroidal mode number to include
 delta_mlow = 0                # Expands lower bound of Fourier harmonics
 delta_mhigh = 0               # Expands upper bound of Fourier harmonics
 mthvac = 64                  # Number of points used in splines over poloidal angle at the plasma-vacuum interface
-thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)

@@ -77,11 +77,13 @@ Read `T_total_*` and `dW_total_*` scalar reference values from the Fortran
 function read_pentrc_reference(pentrc_nc::String)
     NCDatasets.Dataset(pentrc_nc, "r") do ds
         gatt = ds.attrib
+        # Reference runs may enable only a subset of methods (e.g. fgar only); missing attributes → NaN.
+        att(k) = haskey(gatt, k) ? Float64(gatt[k]) : NaN
         return (
-            T_total_fgar=Float64(gatt["T_total_fgar"]),
-            T_total_tgar=Float64(gatt["T_total_tgar"]),
-            dW_total_fgar=Float64(gatt["dW_total_fgar"]),
-            dW_total_tgar=Float64(gatt["dW_total_tgar"])
+            T_total_fgar=att("T_total_fgar"),
+            T_total_tgar=att("T_total_tgar"),
+            dW_total_fgar=att("dW_total_fgar"),
+            dW_total_tgar=att("dW_total_tgar")
         )
     end
 end
@@ -126,11 +128,10 @@ etol = 1e-7
 shape = "nowall"
 
 [ForceFreeStates]
-bal_flag = false
+local_stability_flag = true
 mat_flag = true
 ode_flag = true
 vac_flag = true
-mer_flag = true
 force_termination = false
 
 psiedge = 1.00                # No edge-scan truncation (dmlim mechanism removed in develop)
@@ -143,7 +144,6 @@ nn_high = 1
 delta_mlow = 8
 delta_mhigh = 8
 mthvac = 512
-thmax0 = 1
 
 kinetic_source = "fixed"
 kinetic_factor = 0.0
@@ -265,15 +265,14 @@ function run_benchmark(fortran_dir::String=DEFAULT_FORTRAN_DIR)
     _p("\n--- Build PE state (Fortran Clebsch → dbob_m/divx_m) ---")
     t1 = time()
 
-    # Construct PerturbedEquilibriumState with Fortran Clebsch data
-    # Fortran xclebsch stores ξ^α directly; PE convention is ξ^α/χ₁
-    chi1 = 2π * equil.psio
+    # Construct PerturbedEquilibriumState with Fortran Clebsch data.
+    # Fortran gpec_xclebsch already writes ξ^α = xms/χ₁, exactly what the KF operator consumes — feed directly.
     pe_state = PE.PerturbedEquilibriumState(;
         psi_grid=psi_grid_f,
         xi_modes=(
             clebsch_psi=clebsch_psi,
             clebsch_psi1=clebsch_psi1,
-            clebsch_alpha=clebsch_alpha ./ chi1  # Store as ξ^α/χ₁ per PE convention
+            clebsch_alpha=clebsch_alpha
         )
     )
 
@@ -342,7 +341,7 @@ function run_benchmark(fortran_dir::String=DEFAULT_FORTRAN_DIR)
         if haskey(kf_state.method_results, method_key)
             mr = kf_state.method_results[method_key]
             T_julia = real(mr.total_torque)
-            dW_julia = real(mr.total_energy)
+            dW_julia = mr.total_energy
             T_err = abs(T_julia - ref_T) / abs(ref_T) * 100
             dW_err = abs(dW_julia - ref_dW) / abs(ref_dW) * 100
 

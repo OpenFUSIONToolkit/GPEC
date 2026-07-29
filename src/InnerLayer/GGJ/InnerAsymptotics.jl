@@ -2,18 +2,20 @@
 #
 # Wasow asymptotic basis ("inps" basis) for the GGJ inner-layer system.
 #
-# Reference: A. H. Glasser & Z. R. Wang, Phys. Plasmas 27, 012506 (2020),
-# Sections II.A–II.G (Eqs. 4–53). Notation map:
+# Reference: A. H. Glasser & Z. R. Wang, Phys. Plasmas 27, 012506 (2020)
+# ("GW2020"), Sections II.A–II.G (Eqs. 3–55). Notation map (all equation
+# numbers are GW2020):
 #
-#   A0/A1/A2  -> Eqs. 4–5      (physical-system coefficient matrices)
-#   T, Tinv   -> Eqs. 7–8      (eigenvector basis of A_0)
-#   J0/J1/J2  -> Eqs. 9–10     (J_i = T^{-1} A_i T)
-#   P_k, B_k  -> Eqs. 16, 22   (splitting transformation; Lyapunov solve)
-#   Q_k, C_k  -> Eqs. 32–39    (2×2 inner sub-block diagonalization)
-#   D_k       -> Eq. 43        (shearing transformation)
-#   Y0, R     -> Eq. 49        (lowest-order solution and Frobenius exponents)
-#   Z_k       -> Eq. 52        (Y-series in shifted-exponent form)
-#   U(x)      -> Eq. 53        (final asymptotic solution at large x)
+#   A0/A1/A2  -> Eqs. 3–5      (physical-system coefficient matrices A = A₀+x⁻²A₁+x⁻⁴A₂)
+#   T, Tinv   -> Eqs. 6–8      (Jordan basis of A₀; u = Tv, v' = xJv, λ = Q^{-1/2})
+#   J0/J1/J2  -> Eqs. 9–10     (Jₖ = T^{-1} Aₖ T)
+#   P_k, B_k  -> Eqs. 11–24    (splitting transformation V = PW; Lyapunov solve Eq. 22)
+#   Q_k, C_k  -> Eqs. 25–39    (2×2 inner-block diagonalization W = QX)
+#   D_k       -> Eqs. 40–43    (shearing transformation X = SY)
+#   Y0, R     -> Eqs. 48–49    (lowest-order solution; Mercier Frobenius exponents r±)
+#   Y_k, Z_k  -> Eqs. 50–52    (Y-series Y = Y₀Z in shifted-exponent form)
+#   U(x)      -> Eq. 53        (final asymptotic solution U = TPQSY at large x)
+#   residual  -> Eq. 54        (convergence measure Δ± used to pick x_max)
 
 using LinearAlgebra
 using StaticArrays
@@ -46,7 +48,7 @@ Fields:
   - `K2` — 2×2 inner working matrices, k = 0..kmax+2 (Eq. 32; entry k=0 unused).
   - `Qmat, Cmat` — 2×2 inner-block transformation matrices, k = 0..kmax+2 (Eqs. 32–39).
   - `Dmat` — 2×2 shearing matrices, k = 0..kmax (Eq. 43).
-  - `Y0, Y0inv` — lowest-order Y matrix and its inverse (Eq. 49).
+  - `Y0, Y0inv` — lowest-order Y matrix and its inverse (Eq. 48; exponents from Eq. 49).
   - `Y, Z` — 2×2 series matrices, k = 0..kmax (Eq. 52).
 """
 struct InnerAsymptoticsCache
@@ -74,7 +76,9 @@ end
 @inline _at(v::Vector, k::Int) = v[k+1]
 
 # -----------------------------------------------------------------------
-# Step 1: build T, Tinv, A_0..A_2, J_0..J_2.
+# Build T, Tinv, A_0..A_2, J_0..J_2. The coefficient matrices A₀,A₁,A₂ are
+# GW2020 Eqs. (3)–(5); the Jordan basis T, T⁻¹ are Eqs. (7)–(8); λ = Q^{-1/2}
+# (Eq. 6); and J_i = T⁻¹A_iT are Eqs. (9)–(10).
 # -----------------------------------------------------------------------
 
 function _build_tjmat(p::GGJParameters, Q::ComplexF64)
@@ -107,7 +111,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
         0 λ/2 0 0 1/2 0
     ]
 
-    # A_0, A_1, A_2 — physical-system coefficient matrices. Build mutable then freeze.
+    # A_0, A_1, A_2 — GW2020 Eqs. (4), (5), and the A₂ matrix of Eq. (3). Build mutable then freeze.
     A0 = zeros(ComplexF64, 6, 6)
     A1 = zeros(ComplexF64, 6, 6)
     A2 = zeros(ComplexF64, 6, 6)
@@ -152,7 +156,9 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
 end
 
 # -----------------------------------------------------------------------
-# Step 2: closed-form Lyapunov solve for the splitting transformation.
+# Closed-form Lyapunov solve for the splitting transformation — GW2020 Eq. (22),
+# J₀²² P_k²¹ − P_k²¹ J₀¹¹ = −K_k²¹ and J₀¹¹ P_k¹² − P_k¹² J₀²² = −K_k¹², with the
+# block-diagonal part B_k = K_k from Eq. (21).
 #
 # Given a 6×6 K, returns (B, P) such that:
 #   - B is block-diagonal with B[r1,r1] = K[r1,r1] and B[r2,r2] = K[r2,r2]
@@ -202,8 +208,10 @@ function _lyap_solve(K::SMatrix{6,6,ComplexF64}, λ::ComplexF64)
 end
 
 # -----------------------------------------------------------------------
-# Step 3: split recurrence.
-# Builds B_k, P_k, K6_k for k = 0..kmax+2.
+# Split recurrence — GW2020 Eqs. (14)–(19). Seeks descending power series
+# J,P,B = Σ (·)_k x^{-2k} (Eq. 14) with B₀ = J₀, P₀ = I (Eq. 17), and solves the
+# order-by-order recurrence Eq. (16)/(18) with K_k of Eq. (19) via the Lyapunov
+# solve above. Builds B_k, P_k, K6_k for k = 0..kmax+2.
 # -----------------------------------------------------------------------
 
 function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64, kmax::Int)
@@ -242,8 +250,11 @@ function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64,
 end
 
 # -----------------------------------------------------------------------
-# Step 4: coefs recurrence.
-# Builds K2_k, Q_k, C_k for k = 0..kmax+2 and D_k, E_k, Y_k, Z_k.
+# Coefs recurrence — the 2×2 reduced-equation construction, GW2020 Eqs. (25)–(52).
+# Builds the inner-block diagonalization Q_k, C_k via K2_k (Eqs. 31–32, 36),
+# the shearing matrices D_k (Eqs. 42–43), the lowest-order Y₀ and Mercier
+# exponents r± (Eqs. 48–49), and the shifted-exponent series Y_k = Y₀Z_k with
+# Z_k from Eqs. (50)–(52).
 # -----------------------------------------------------------------------
 
 function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
@@ -280,11 +291,11 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         # C_k = [[0, 0], [K2[2,1], K2[1,1] + K2[2,2]]]
         Cm[k+1] = @SMatrix ComplexF64[
             0 0
-            K2acc[2, 1] K2acc[1, 1]+K2acc[2, 2]
+            K2acc[2, 1] K2acc[1, 1] + K2acc[2, 2]
         ]
     end
 
-    # Build D_k for k = 0..kmax.
+    # Build D_k for k = 0..kmax — GW2020 Eq. (43); c_2^21 = −(E+F+H+2) is Eq. (39).
     D = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
     # D_0 = [[0, 1], [C_2[2,1], 3]]
     D[1] = @SMatrix ComplexF64[
@@ -298,7 +309,7 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         ]
     end
 
-    # Lowest-order Y solution and inverse (Eq. 49).
+    # Lowest-order Y solution and inverse — GW2020 Eq. (48), with exponents r± from Eq. (49).
     r1 = ComplexF64(R[1])
     r2 = ComplexF64(R[2])
     Y0 = @SMatrix ComplexF64[
@@ -310,7 +321,8 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         r1 -1
     ]
 
-    # E_k, Z_k, Y_k recurrence.
+    # E_k, Z_k, Y_k recurrence — GW2020 Eqs. (50)–(52): E_k = Y₀⁻¹D_kY₀ (Eq. 51),
+    # Z_k(R−2kI) − RZ_k = Σ E_l Z_{k−l} (Eq. 52), Y_k = Y₀Z_k (Eq. 50).
     Y = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
     Z = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
     Z[1] = I2
@@ -351,6 +363,7 @@ Reference: Glasser & Wang, Phys. Plasmas **27**, 012506 (2020), Eqs. 7–53.
 """
 function build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8)
     p1v = p1(params)
+    # Mercier Frobenius exponents r± = 3/2 ± √(−D_I) — GW2020 Eq. (49).
     R = SVector{2,Float64}(p1v + 1.5, -p1v + 1.5)
 
     T, Tinv, J, λ = _build_tjmat(params, Q)
@@ -367,7 +380,9 @@ build_asymptotics(params::GGJParameters, Q::Number; kmax::Int=8) =
     build_asymptotics(params, ComplexF64(Q); kmax=kmax)
 
 # -----------------------------------------------------------------------
-# Horner evaluator with optional fractional-power prefactor.
+# Horner evaluator with optional fractional-power prefactor. Sums the
+# descending power series in x^{-2k} (GW2020 Eq. 14 form) for the Y, Q, and
+# P[r2,r1] coefficient blocks, with the x^{R/2} Mercier prefactor.
 #
 # Computes y[i] = (Σ_{k=0..n} c[i,k] * x^k) * x^rvec[i]
 # and       dy[i] = d/dx of the above.
@@ -438,7 +453,7 @@ function _pack_y_coefs(cache::InnerAsymptoticsCache)
     cc = Matrix{ComplexF64}(undef, 4, kmax + 1)
     @inbounds for k in 0:kmax
         Yk = cache.Y[k+1]
-        # column-major reshape of (2,2) → 4 entries:
+        # Column-major reshape of (2,2) → 4 entries:
         # (Y[1,1], Y[2,1], Y[1,2], Y[2,2])
         cc[1, k+1] = Yk[1, 1]
         cc[2, k+1] = Yk[2, 1]
@@ -454,7 +469,7 @@ function _pack_qp_coefs(cache::InnerAsymptoticsCache)
     @inbounds for k in 0:kmax
         Qk = cache.Qmat[k+1]
         Pk = cache.P[k+1]
-        # dd[1:4] from Q (column-major reshape of 2×2 block)
+        # dd[1:4] from Q (column-major reshape of 2×2)
         dd[1, k+1] = Qk[1, 1]
         dd[2, k+1] = Qk[2, 1]
         dd[3, k+1] = Qk[1, 2]
@@ -473,7 +488,9 @@ function _pack_qp_coefs(cache::InnerAsymptoticsCache)
 end
 
 # -----------------------------------------------------------------------
-# Step 5: evaluator.
+# Evaluator — back-substitution U = TPQSY of GW2020 Eq. (53), assembled from
+# the cached Y-series (Eq. 50), Q and the P[r2,r1] block, the shearing matrix
+# S of Eq. (41), and the Jordan basis T of Eq. (7).
 # -----------------------------------------------------------------------
 
 """
@@ -518,8 +535,10 @@ function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
     end
     pp = SMatrix{6,2,ComplexF64}(pp_m)
 
+    # Shearing matrix S = diag(1, 1/x²) — GW2020 Eq. (41); here 1/x² = xfac.
     smat = @SMatrix ComplexF64[1 0; 0 xfac]
 
+    # U = T·P·Q·S·Y, the asymptotic solution of GW2020 Eq. (53) (T applied below).
     qsy = q * smat * y
     U = pp * qsy
 
@@ -559,17 +578,19 @@ function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
 end
 
 # -----------------------------------------------------------------------
-# Step 6: residual `delta` and adaptive xmax.
+# Residual `delta` and adaptive xmax — the convergence measure Δ± of GW2020
+# Eq. (54), ‖u' − xJu‖/max(‖u'‖,‖xJu‖) in the J-rotated basis, used to choose
+# x_max (GW2020 Sec. III, Fig. 3).
 # -----------------------------------------------------------------------
 
 """
     asymptotic_residual(cache::InnerAsymptoticsCache, x::Real) -> SVector{2,Float64}
 
-Compute the residual `D₆(x)` of the asymptotic basis at `x` for each of
-the two algebraic columns:
-returns `‖dU − x·matrix·U‖∞ / max(‖dU‖∞, ‖x·matrix·U‖∞)` per column,
-where `matrix = J₀ + xfac·J₁ + xfac²·J₂` is the J-rotated coefficient
-matrix.
+Compute the convergence measure `Δ±` of the asymptotic basis at `x` for each
+of the two algebraic columns (GW2020 Eq. 54). Returns
+`‖dU − x·matrix·U‖∞ / max(‖dU‖∞, ‖x·matrix·U‖∞)` per column, where
+`matrix = J₀ + xfac·J₁ + xfac²·J₂` is the J-rotated coefficient matrix (the
+residual of `v' = xJv`, GW2020 Eq. 6).
 """
 function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
     U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=false)
@@ -612,8 +633,10 @@ end
               dxlog::Float64=0.01) -> (Float64, InnerAsymptoticsCache)
 
 Sweep `x` log-uniformly upward from `10^xlogmin` and return the smallest
-`x` at which `max(asymptotic_residual(cache, x)) < eps`. Also returns the
-`InnerAsymptoticsCache` it built so callers can reuse it.
+`x` at which `max(asymptotic_residual(cache, x)) < eps` — the cutoff `x_max`
+where the GW2020 Eq. (54) convergence measure drops below tolerance
+(GW2020 Sec. III, Fig. 3). Also returns the `InnerAsymptoticsCache` it built
+so callers can reuse it.
 
 Throws an `ErrorException` if no `x` in the sweep range achieves the
 target tolerance.

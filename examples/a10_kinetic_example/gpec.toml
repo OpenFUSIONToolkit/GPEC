@@ -9,7 +9,7 @@
 [Equilibrium]
 eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
-jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"              # Radial grid packing type
 psilow = 1e-3                  # Lower limit of normalized poloidal flux
 psihigh = 0.99                 # Upper limit of normalized poloidal flux
@@ -38,7 +38,6 @@ nn_high = 1                    # Largest toroidal mode number to include
 delta_mlow = 6                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 6                # Expands upper bound of Fourier harmonics
 mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
-thmax0 = 1                     # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "calculated"  # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 1.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode; 1.0 = full strength)
@@ -61,5 +60,3 @@ nutype = "harmonic"            # Collision operator (zero, small, krook, harmoni
 f0type = "maxwellian"          # Distribution function (maxwellian, jkp, cgl)
 atol_xlmda = 1e-9              # Absolute tolerance for inner pitch + energy integrations
 rtol_xlmda = 1e-5              # Relative tolerance for inner pitch + energy integrations
-atol_psi = 1e-9                # Absolute tolerance for the outer ψ quadrature
-rtol_psi = 1e-4                # Relative tolerance for the outer ψ quadrature

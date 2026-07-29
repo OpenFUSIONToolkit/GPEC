@@ -34,8 +34,9 @@ using ...Equilibrium: read_kinetic_file, KineticProfileData
 using ..InnerLayer
 using ..InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
-    GGJModel, GGJParameters, build_ggj_inputs,
+    GGJModel, GGJParameters,
     LayerWidths, slayer_layer_thickness
+import ..build_ggj_inputs   # defined at the Tearing level (needs ForceFreeStates)
 using ..Dispersion
 using ..Dispersion: SurfaceCoupling, surface_coupling,
     MultiSurfaceCoupling, multi_surface_coupling,

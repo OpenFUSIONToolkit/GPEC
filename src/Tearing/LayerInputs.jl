@@ -13,13 +13,14 @@
 # bit-identical plasma inputs when both are driven by the same
 # `KineticProfiles`.
 
-using ...Utilities: KineticProfiles
-using ....Utilities.PhysicalConstants: MU_0, M_E, M_P, E_CHG, EPS_0
-using ....Utilities.NeoclassicalResistivity
-using ....Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
+using ..Utilities: KineticProfiles
+using ..Utilities.PhysicalConstants: MU_0, M_E, M_P, E_CHG, EPS_0
+using ..Utilities.NeoclassicalResistivity
+using ..Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
     SauterNeoModel, RedlNeoModel,
     coulomb_log_e, eta_spitzer, nu_star_e, eta_neoclassical
-using ....ForceFreeStates: ResistGeometry
+using ..ForceFreeStates: ResistGeometry
+using ..InnerLayer.GGJ: GGJParameters
 
 """
     build_ggj_inputs(equil, sings, profiles; mu_i=2.0, zeff=1.0,

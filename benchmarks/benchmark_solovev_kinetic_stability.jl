@@ -14,7 +14,7 @@ band (`delta_mlow=delta_mhigh=0`), same `nl`, collision operator, grid, and
 edge truncation (`sas_flag`/`dmlim`).
 
 The comparison is the least-stable total-energy eigenvalue:
-  - Julia:   `FreeBoundaryStability/XiNorm/eigenmode_energies[1]` in `gpec.h5`
+  - Julia:   `FreeBoundaryStability/eigenmode_energies[1]` in `gpec.h5`
   - Fortran: the "Energies: ... real = …, imaginary = …" line printed by `dcon`
              (== `W_t_eigenvalue[1]`; parsing the log avoids a NetCDF dependency).
 
@@ -157,7 +157,7 @@ function run_julia_reference()
     GPE.main([rundir])
     wall = time() - t0
     et = h5open(joinpath(rundir, "gpec.h5"), "r") do h5
-        read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
+        read(h5["FreeBoundaryStability/eigenmode_energies"])
     end
     return real(et[1]), imag(et[1]), wall
 end

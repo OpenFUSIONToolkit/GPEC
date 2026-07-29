@@ -18,7 +18,8 @@ include("SLAYER/SLAYER.jl")
 
 import .GGJ: GGJModel, GGJParameters, build_asymptotics, evaluate_asymptotics, pick_xmax
 import .GGJ: InnerAsymptoticsCache, mercier_di, mercier_dr, inner_Q, rescale_delta
-import .GGJ: glasser_wang_2020_eq55, build_ggj_inputs
+import .GGJ: glasser_wang_2020_eq55
+import .GGJ: solve_inner_converged  # experimental, not exported (reachable as a qualified call only)
 
 import .SLAYER: SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 import .SLAYER: riccati_del_s, slayer_layer_thickness, LayerWidths
@@ -28,7 +29,7 @@ export InnerLayerModel, InnerLayerParameters, InnerLayerResponse, solve_inner
 export GGJ, GGJModel, GGJParameters
 export build_asymptotics, evaluate_asymptotics, pick_xmax, InnerAsymptoticsCache
 export mercier_di, mercier_dr, inner_Q, rescale_delta
-export glasser_wang_2020_eq55, build_ggj_inputs
+export glasser_wang_2020_eq55
 
 export SLAYER, SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 export riccati_del_s, slayer_layer_thickness, LayerWidths

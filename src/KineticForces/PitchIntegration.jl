@@ -22,7 +22,7 @@ Parameters for the GAR pitch-angle integrand.
 Uses a unified fbnce interpolant that returns [ωb, ωd, f₁, f₂, ...] at each λ,
 matching Fortran `lambdaintgrl_lsode`.
 """
-struct PitchGARParams
+struct PitchGARParams{F}
     wn::Float64        # density gradient diamagnetic drift frequency
     wt::Float64        # temperature gradient diamagnetic drift frequency
     we::Float64        # electric precession frequency
@@ -44,9 +44,11 @@ struct PitchGARParams
     rex::Float64       # real part multiplier for resonance operator
     imx::Float64       # imaginary part multiplier for resonance operator
     nqty::Int          # number of flux quantities to integrate
-    fbnce::Any         # CubicSeriesInterpolant: fbnce(λ) → [wb, wd, f₁, ...]
+    fbnce::F           # CubicSeriesInterpolant: fbnce(λ) → [wb, wd, f₁, ...] (typed for stability)
     fbnce_norm::Vector{Float64}  # normalization factors (1/median)
     fbnce_hint::Base.RefValue{Int}  # sticky bracket-search hint for fbnce(λ)
+    fvals::Vector{ComplexF64}    # reusable buffer for the in-place fbnce(fvals, λ) evaluation; must be complex — the wt-path fbnce carries complex op_wmats data
+    esegbuf::Vector{QuadGK.Segment{Float64,ComplexF64,Float64}}  # reusable energy-integral QuadGK segment buffer
 end
 
 
@@ -84,7 +86,9 @@ function integrate_pitch_gar_quadgk(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
         nutype, f0type, nufac, ximag, qt,
         energy_atol, energy_rtol,
-        rex, imx, nqty, fbnce, fbnce_norm, Ref(1))
+        rex, imx, nqty, fbnce, fbnce_norm, Ref(1),
+        Vector{ComplexF64}(undef, 2 + nqty),
+        QuadGK.alloc_segbuf(Float64, ComplexF64, Float64))
 
     lambda_min = first(fbnce.cache.x)
     lambda_max = last(fbnce.cache.x)
@@ -114,7 +118,8 @@ In-place complex-valued kernel for `quadgk!`. Writes `out[i] = fvals[i+2] * xint
 for i in 1..nqty. QuadGK natively handles ComplexF64.
 """
 function _pitch_gar_kernel_quadgk!(out::Vector{ComplexF64}, lambda, p::PitchGARParams)
-    fvals = p.fbnce(lambda; hint=p.fbnce_hint)
+    p.fbnce(p.fvals, lambda; hint=p.fbnce_hint)
+    fvals = p.fvals
     wb = real(fvals[1])
     wd = real(fvals[2])
 
@@ -127,12 +132,12 @@ function _pitch_gar_kernel_quadgk!(out::Vector{ComplexF64}, lambda, p::PitchGARP
                                         p.ell, leff, p.n, p.psi, lambda, p.method;
                                         nutype=p.nutype, f0type=p.f0type,
                                         nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-                                        atol=p.energy_atol, rtol=p.energy_rtol)
+                                        atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint_counter = integrate_energy(p.wn, p.wt, p.we, wd, -wb, nueff,
                                              p.ell, leff, p.n, p.psi, lambda, p.method;
                                              nutype=p.nutype, f0type=p.f0type,
                                              nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-                                             atol=p.energy_atol, rtol=p.energy_rtol)
+                                             atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint = xint_co + xint_counter
     else
         xint = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
@@ -182,7 +187,9 @@ function integrate_pitch_gar_quadgk_wt(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
         nutype, f0type, nufac, ximag, qt,
         energy_atol, energy_rtol,
-        1.0, 1.0, nqty, fbnce, fbnce_norm, Ref(1))
+        1.0, 1.0, nqty, fbnce, fbnce_norm, Ref(1),
+        Vector{ComplexF64}(undef, 2 + nqty),
+        QuadGK.alloc_segbuf(Float64, ComplexF64, Float64))
 
     lambda_min = first(fbnce.cache.x)
     lambda_max = last(fbnce.cache.x)
@@ -211,7 +218,8 @@ Dual-output pitch kernel. Fills a length-`2*nqty` buffer:
 One energy integration per λ; both halves share it.
 """
 function _pitch_gar_kernel_quadgk_wt!(out::Vector{ComplexF64}, lambda, p::PitchGARParams)
-    fvals = p.fbnce(lambda; hint=p.fbnce_hint)
+    p.fbnce(p.fvals, lambda; hint=p.fbnce_hint)
+    fvals = p.fvals
     wb = real(fvals[1])
     wd = real(fvals[2])
 
@@ -224,12 +232,12 @@ function _pitch_gar_kernel_quadgk_wt!(out::Vector{ComplexF64}, lambda, p::PitchG
                                         p.ell, leff, p.n, p.psi, lambda, p.method;
                                         nutype=p.nutype, f0type=p.f0type,
                                         nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-                                        atol=p.energy_atol, rtol=p.energy_rtol)
+                                        atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint_counter = integrate_energy(p.wn, p.wt, p.we, wd, -wb, nueff,
                                              p.ell, leff, p.n, p.psi, lambda, p.method;
                                              nutype=p.nutype, f0type=p.f0type,
                                              nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-                                             atol=p.energy_atol, rtol=p.energy_rtol)
+                                             atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint = xint_co + xint_counter
     else
         xint = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,

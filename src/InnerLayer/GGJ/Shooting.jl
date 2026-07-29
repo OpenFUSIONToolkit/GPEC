@@ -1,15 +1,25 @@
 # Shooting.jl
 #
-# Stable backward shooting solver for the GGJ inner-layer model. Integrates
-# the 4×4 origin-diagonalized resistive-layer ODE from `tmax` (large-x
-# asymptotic regime) backward to a small `tmin` (origin Frobenius regime),
-# then projects onto the local Frobenius basis at the origin and reads off
-# the parity-projected matching data.
+# NOTE: This solver is NOT used in production and is not to be used. It was a
+# porting exercise retained for reference only. The Galerkin solver
+# (Galerkin.jl) is the sole supported GGJ inner-layer solver; shooting underflows
+# at large |γ| and shares none of the production matching path. Do not call it.
 #
-# The 4 origin Frobenius exponents are `al0 = (p1, 1/2, −p1, −1/2)` where
-# `p1 = √(−D_I)` (Mercier-stable required). The two "small" (singular)
-# modes are columns 3 and 4 (`x^{−p1}` and `x^{−1/2}`); the two "large"
-# (smooth) modes are columns 1 and 2 (`x^{p1}` and `x^{1/2}`).
+# Stable backward shooting solver for the GGJ inner-layer model.
+# Integrates the 4×4 origin-diagonalized
+# resistive-layer ODE from `tmax` (large-x asymptotic regime) backward to
+# a small `tmin` (origin Frobenius regime), then projects onto the local
+# Frobenius basis at the origin and reads off the parity-projected
+# matching data.
+#
+# This solves the same inner-region equations as the production Galerkin path
+# (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) but by a different numerical method: a
+# backward shoot in the origin-diagonalized basis rather than the matched
+# singular-Galerkin weak form. The 4 origin Frobenius exponents are
+# `al0 = (p1, 1/2, −p1, −1/2)` where `p1 = √(−D_I)` (Mercier-stable required;
+# D_I = E+F+H−1/4, GWP2016 Eq. A9). The two "small" (singular) modes are
+# columns 3 and 4 (`x^{−p1}` and `x^{−1/2}`); the two "large" (smooth) modes
+# are columns 1 and 2 (`x^{p1}` and `x^{1/2}`).
 #
 # Reference: A. H. Glasser, Phys. Plasmas **23**, 072505 (2016).
 

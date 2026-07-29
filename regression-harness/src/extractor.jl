@@ -153,6 +153,12 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         return (NaN, NaN, "N/A")
     end
 
+    # Storage type differs between refs (e.g. a quantity whose schema changed from a
+    # vector to a scalar across the two commits); the values are not directly comparable.
+    if vtype != q2.value_type
+        return (NaN, NaN, "N/A (type changed)")
+    end
+
     threshold = q1.noise_threshold
 
     if vtype == "real"

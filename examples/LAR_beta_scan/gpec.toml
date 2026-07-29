@@ -9,11 +9,11 @@
 
 [Equilibrium]
 eq_type   = "tj_analytic"      # TJ-analytic model (inverse pipeline; Fitzpatrick https://github.com/rfitzp/TJ)
-jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"              # Radial grid packing type
 psilow    = 0.01               # Lower limit of normalized poloidal flux
 psihigh   = 0.995              # Upper limit of normalized poloidal flux
-mpsi      = 128                # Number of radial grid points (0 = auto-compute from psi_accuracy)
+mpsi      = 128                # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 mtheta    = 512                # Number of poloidal grid points
 
 # TJ-analytic equilibrium parameters (cf. R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ).
@@ -48,7 +48,6 @@ nn_high      = 1               # Largest toroidal mode number to include
 delta_mlow   = 8               # Expands lower bound of Fourier harmonics
 delta_mhigh  = 8               # Expands upper bound of Fourier harmonics
 mthvac       = 960             # Number of points used in splines over poloidal angle at the plasma-vacuum interface
-thmax0       = 1               # Linear multiplier on the automatic choice of theta integration bounds
 
 eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min             = 1e-4 # Fractional distance from rational q at which ideal jump enforced

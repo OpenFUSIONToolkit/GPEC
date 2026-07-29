@@ -5,6 +5,7 @@
     using GeneralizedPerturbedEquilibrium.ForceFreeStates: SingType, ResistGeometry
     using GeneralizedPerturbedEquilibrium.Utilities
     using GeneralizedPerturbedEquilibrium.InnerLayer
+    using GeneralizedPerturbedEquilibrium.Tearing: build_ggj_inputs
     using FastInterpolations
     using TOML
 

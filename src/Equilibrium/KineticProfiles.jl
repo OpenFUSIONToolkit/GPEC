@@ -136,20 +136,21 @@ end
                           chi1::Union{Nothing,Float64}=nothing)
         → KineticProfileSplines
 
-Parse an ASCII kinetic profile file, interpolate onto a regular 101-point ψ
-grid, optionally apply profile scaling knobs, derive collisional / Z_eff
-diagnostics, and return a `KineticProfileSplines` with independent named cubic
-splines.
+Parse a kinetic profile file (ASCII or HDF5, dispatched by `read_kinetic_file`),
+interpolate onto a regular 101-point ψ grid, optionally apply profile scaling
+knobs, derive collisional / Z_eff diagnostics, and return a
+`KineticProfileSplines` with independent named cubic splines.
 
 # Expected file format
 
-Six whitespace-separated columns (header rows are filtered out):
+An HDF5 file following the GPEC kinetic schema (fields read by name), or a legacy
+six-column whitespace-separated ASCII table (header rows are filtered out):
 
     psi_n  n_i[m^-3]  n_e[m^-3]  T_i[eV]  T_e[eV]  omega_E[rad/s]
 
 # Arguments
 
-  - `kinetic_file`: Path to the ASCII kinetic profile file
+  - `kinetic_file`: Path to the ASCII or HDF5 kinetic profile file (see `read_kinetic_file`)
   - `zi`, `zimp`: Main ion and impurity charge numbers
   - `mi`, `mimp`: Main ion and impurity mass numbers (in proton masses)
   - `density_factor`: Density scaling factor (applied to ni, ne)
