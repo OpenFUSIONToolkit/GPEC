@@ -246,7 +246,10 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     end
 
     # Per-species collision frequency ν_s (shared zpitch/n_main/Zeff/lnΛ; species z², m, T_i) and a
-    # KineticProfileSplines view carrying that species' density as `ni_spline`.
+    # KineticProfileSplines view carrying that species' density as `ni_spline`. NB: `zpitch` is
+    # strictly a main-ion momentum-restoring closure; applying it to the impurity/electron test
+    # species is an approximation beyond the single-ion theory (acceptable since the impurity NTV
+    # scales with its small resonant density n_imp).
     _nu(zsp, msp) = [Ti[i] > 0 ? (zpitch[i] / 3.5e17) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * (Ti[i] / 1.602e-16)^1.5) : 0.0 for i in 1:npts]
     _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
 
@@ -261,7 +264,8 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
             electron=false, label="impurity_z$(zimp)_m$(mimp)"))
     end
     if electron
-        push!(species, (z=-1, m=1, profiles=_view(ns[1], nue), electron=true, label="electron"))
+        # The electron view's `ni_spline` is unused (the electron path reads `ne_spline`); carry ne.
+        push!(species, (z=-1, m=1, profiles=_view(ne, nue), electron=true, label="electron"))
     end
     return species
 end
