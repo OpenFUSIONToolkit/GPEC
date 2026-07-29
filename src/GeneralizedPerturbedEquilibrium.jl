@@ -218,6 +218,10 @@ function main_from_inputs(
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
+    # Multi-species NTV set (main ions + neutrality impurity + electrons), resolved once and
+    # summed by BOTH the self-consistent kinetic-matrix build and the KineticForces quadrature.
+    # `nothing` ⇒ single-species from kf_ctrl.zi/mi (unchanged behaviour).
+    kf_species = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
                              (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
@@ -229,6 +233,12 @@ function main_from_inputs(
             density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
             ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
             chi1=2π * equil.psio)
+        if !isempty(kf_ctrl.ion_species)
+            kf_species = Equilibrium.resolve_ntv_species(kinetic_file, kf_ctrl.ion_species;
+                electron=kf_ctrl.electron, zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp,
+                density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+                ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
+        end
     end
 
     # Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry,
@@ -418,7 +428,7 @@ function main_from_inputs(
             calculated_cb = (c, e, i, m, f) ->
                 KineticForces.compute_calculated_kinetic_matrices(
                     c, e, i, m, f;
-                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
+                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=kf_species)
             make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
                 calculated_source=calculated_cb)
 
@@ -615,28 +625,19 @@ function main_from_inputs(
                     end
                 end
             else
-                # Multi main-ion: NTV per species on one shared full-composition Zeff, then summed.
-                kfile = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
-                species_profs = Equilibrium.build_species_profiles(kfile, kf_ctrl.ion_species;
-                    zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp)
+                # Multi-species: summed over main ions + neutrality impurity + electrons
+                # (kf_species, resolved once above and shared with the kinetic-matrix build).
                 states = KineticForces.KineticForcesState[]
                 labels = String[]
-                for (si, sp) in enumerate(kf_ctrl.ion_species)
+                for sp in kf_species
                     sctrl = deepcopy(kf_ctrl)
-                    sctrl.zi = sp.z; sctrl.mi = sp.m; sctrl.electron = false
+                    sctrl.zi = sp.z; sctrl.mi = sp.m; sctrl.electron = sp.electron
                     sctrl.ion_species = KineticForces.IonSpecies[]
                     st = KineticForces.KineticForcesState()
-                    KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, equil, species_profs[si])
-                    push!(states, st); push!(labels, "ion$(si)_z$(sp.z)_m$(sp.m)")
+                    KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, equil, sp.profiles)
+                    push!(states, st); push!(labels, sp.label)
                 end
-                if kf_ctrl.electron
-                    ectrl = deepcopy(kf_ctrl)
-                    ectrl.electron = true; ectrl.ion_species = KineticForces.IonSpecies[]
-                    st = KineticForces.KineticForcesState()
-                    KineticForces.compute_torque_all_methods!(st, kf_intr, ectrl, equil, species_profs[1])
-                    push!(states, st); push!(labels, "electron")
-                end
-                @info "Multi-ion NTV: summed $(length(kf_ctrl.ion_species)) ion species$(kf_ctrl.electron ? " + electrons" : "")"
+                @info "Multi-species NTV: summed $(length(kf_species)) species ($(join((s.label for s in kf_species), ", ")))"
                 kf_state = KineticForces.combine_species_states(states)
                 if kf_ctrl.write_outputs_to_HDF5
                     h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file

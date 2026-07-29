@@ -56,6 +56,7 @@ function compute_calculated_kinetic_matrices(
     ffit;
     kf_ctrl::KineticForcesControl = KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
+    species::Union{Nothing,AbstractVector} = nothing,
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -101,38 +102,47 @@ function compute_calculated_kinetic_matrices(
     thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_block_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
 
-    Threads.@threads for ipsi in 1:mpsi
-        tid     = Threads.threadid()
-        intr_t  = thread_intrs[tid]
-        full_w  = thread_full_w[tid]
-        full_t  = thread_full_t[tid]
-        block_w = thread_block_w[tid]
-        block_t = thread_block_t[tid]
-        psi     = xs[ipsi]
-        for in_idx in 1:npert
-            n = ffs_intr.nlow + in_idx - 1
-            fill!(full_w, 0)
-            fill!(full_t, 0)
-            for ell in -nl:nl
-                fill!(block_w, 0)
-                fill!(block_t, 0)
-                compute_kinetic_matrices_at_psi!(
-                    block_w, block_t, psi, n, ell,
-                    kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.wdfac, kf_ctrl.divxfac,
-                    kf_ctrl.electron, equil, intr_t, kinetic_profiles;
-                    nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
-                    atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
-                )
-                full_w .+= block_w
-                full_t .+= block_t
-            end
+    # Species set summed into the kinetic matrices: the resolved multi-species set
+    # (main ions + neutrality impurity + electrons) when provided, else a single species
+    # from kf_ctrl. The kinetic W/torque matrices are additive over species, so we
+    # accumulate (+=) each species' block-diagonal contribution.
+    splist = species === nothing ?
+        [(z=kf_ctrl.zi, m=kf_ctrl.mi, electron=kf_ctrl.electron, profiles=kinetic_profiles)] : species
 
-            # Place the n-block on the diagonal of the full np×np matrix and flatten.
-            row_offset = (in_idx - 1) * mpert
-            for k in 1:6, j in 1:mpert, i in 1:mpert
-                idx = (row_offset + j - 1) * np + (row_offset + i)
-                kw_flat[ipsi, idx, k] = full_w[i, j, k]
-                kt_flat[ipsi, idx, k] = full_t[i, j, k]
+    for sp in splist
+        Threads.@threads for ipsi in 1:mpsi
+            tid     = Threads.threadid()
+            intr_t  = thread_intrs[tid]
+            full_w  = thread_full_w[tid]
+            full_t  = thread_full_t[tid]
+            block_w = thread_block_w[tid]
+            block_t = thread_block_t[tid]
+            psi     = xs[ipsi]
+            for in_idx in 1:npert
+                n = ffs_intr.nlow + in_idx - 1
+                fill!(full_w, 0)
+                fill!(full_t, 0)
+                for ell in -nl:nl
+                    fill!(block_w, 0)
+                    fill!(block_t, 0)
+                    compute_kinetic_matrices_at_psi!(
+                        block_w, block_t, psi, n, ell,
+                        sp.z, sp.m, kf_ctrl.wdfac, kf_ctrl.divxfac,
+                        sp.electron, equil, intr_t, sp.profiles;
+                        nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
+                        atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
+                    )
+                    full_w .+= block_w
+                    full_t .+= block_t
+                end
+
+                # Place the n-block on the diagonal of the full np×np matrix and accumulate.
+                row_offset = (in_idx - 1) * mpert
+                for k in 1:6, j in 1:mpert, i in 1:mpert
+                    idx = (row_offset + j - 1) * np + (row_offset + i)
+                    kw_flat[ipsi, idx, k] += full_w[i, j, k]
+                    kt_flat[ipsi, idx, k] += full_t[i, j, k]
+                end
             end
         end
     end

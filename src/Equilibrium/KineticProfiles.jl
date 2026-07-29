@@ -161,22 +161,24 @@ function multi_ion_composition(zs::AbstractVector, ns::AbstractVector, ne::Real;
 end
 
 """
-    build_species_profiles(kinetic_file, ion_species; zimp, mimp, ...) -> Vector{KineticProfileSplines}
+    resolve_ntv_species(kinetic_file, ion_species; electron, zimp, mimp, ...) -> Vector{NamedTuple}
 
-Build one [`KineticProfileSplines`](@ref) per main-ion species for a multi-ion NTV run. Each
-returned view carries **this species' resonant density** `n_s` (as `ni_spline`) and its
-**full-composition collision frequency** `ν_s` (as `nui_spline`), while `ne/Te/ωE/Zeff/lnΛ`
-(and the electron `nue`) are shared across all species. Downstream `tpsi!` uses each view
-unchanged; the driver loops over the returned vector and sums the torques.
+Resolve the **full NTV species set** for a multi-ion run: the main ions, the neutrality-closing
+impurity, and (if `electron`) the electrons. Returns a vector of descriptors
+`(z, m, profiles::KineticProfileSplines, electron::Bool, label)` — the single set that BOTH NTV
+paths (the KineticForces quadrature and the self-consistent kinetic-matrix build) loop over and sum.
 
-Species density is resolved from `IonSpecies`: `fraction` ⇒ `n_s = fraction · n_i` (the kinetic
-file's `n_i` = total main-ion density); explicit per-species profiles (`density`) are not yet
-wired here. Composition (Zeff, zpitch) comes from [`multi_ion_composition`]; the per-species
-collisionality is `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s·(T_i)^{3/2})`. Reduces to the
-single-ion `load_kinetic_profiles` result for one z=1 species with `fraction=1`.
+Each descriptor's `profiles` view carries **that species' resonant density** `n_s` (as `ni_spline`)
+and its **full-composition collision frequency** `ν_s` (as `nui_spline`); `ne/Te/ωE/Zeff/lnΛ` (and
+the electron `nue`) are shared. Main-ion density is resolved from `IonSpecies`: `fraction` ⇒
+`n_s = fraction · n_i` (the kinetic file's `n_i` = total main-ion density); explicit per-species
+profiles (`density`) are not yet wired. Composition (Zeff, zpitch, `n_imp`) comes from
+[`multi_ion_composition`]; per-species `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s·(T_i)^{3/2})`.
+The impurity (`zimp`,`mimp`, density = the quasineutrality `n_imp`) is included as its own resonant
+species. Reduces to `load_kinetic_profiles` for one z=1 main ion with `fraction=1`.
 """
-function build_species_profiles(kinetic_file::AbstractString, ion_species::AbstractVector;
-    zimp::Integer=6, mimp::Integer=12,
+function resolve_ntv_species(kinetic_file::AbstractString, ion_species::AbstractVector;
+    electron::Bool=false, zimp::Integer=6, mimp::Integer=12,
     density_factor::Float64=1.0, temperature_factor::Float64=1.0,
     ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0)
 
@@ -213,21 +215,34 @@ function build_species_profiles(kinetic_file::AbstractString, ion_species::Abstr
 
     # Shared composition + collisionality (natural-log Coulomb log), per grid point.
     npts = length(psi_reg)
-    zeff = zeros(npts); zpitch = zeros(npts); loglam = zeros(npts); n_main = zeros(npts); nue = zeros(npts)
+    zeff = zeros(npts); zpitch = zeros(npts); loglam = zeros(npts)
+    n_main = zeros(npts); n_imp = zeros(npts); nue = zeros(npts)
     for i in 1:npts
-        z, zp, nm, _ = multi_ion_composition(zs, [ns[si][i] for si in eachindex(ion_species)], ne[i]; zimp=zimp, mimp=mimp)
-        zeff[i] = z; zpitch[i] = zp; n_main[i] = nm
+        z, zp, nm, nimp = multi_ion_composition(zs, [ns[si][i] for si in eachindex(ion_species)], ne[i]; zimp=zimp, mimp=mimp)
+        zeff[i] = z; zpitch[i] = zp; n_main[i] = nm; n_imp[i] = max(nimp, 0.0)
         loglam[i] = (ne[i] > 0 && Te[i] > 0) ? 17.3 - 0.5 * log(ne[i] / 1.0e20) + 1.5 * log(Te[i] / 1.602e-16) : 0.0
         nue[i] = Te[i] > 0 ? (zp / 3.5e17) * ne[i] * loglam[i] / (sqrt(me / mp) * (Te[i] / 1.602e-16)^1.5) : 0.0
     end
 
-    # One KineticProfileSplines per species: ni = n_s, nui = ν_s, everything else shared.
-    profs = Vector{KineticProfileSplines}(undef, length(ion_species))
+    # Per-species collision frequency ν_s (shared zpitch/n_main/Zeff/lnΛ; species z², m, T_i) and a
+    # KineticProfileSplines view carrying that species' density as `ni_spline`.
+    _nu(zsp, msp) = [Ti[i] > 0 ? (zpitch[i] / 3.5e17) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * (Ti[i] / 1.602e-16)^1.5) : 0.0 for i in 1:npts]
+    _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
+
+    # Full NTV species set: main ions, the neutrality-closing impurity, and (optionally) electrons.
+    species = NamedTuple[]
     for (si, s) in enumerate(ion_species)
-        nu_s = [Ti[i] > 0 ? (zpitch[i] / 3.5e17) * s.z^2 * n_main[i] * loglam[i] / (sqrt(Float64(s.m)) * (Ti[i] / 1.602e-16)^1.5) : 0.0 for i in 1:npts]
-        profs[si] = KineticProfileSplines(psi_reg, ns[si], ne, Ti, Te, omegaE, loglam, nu_s, nue, zeff)
+        push!(species, (z=Int(s.z), m=Int(s.m), profiles=_view(ns[si], _nu(s.z, s.m)),
+            electron=false, label="ion$(si)_z$(s.z)_m$(s.m)"))
     end
-    return profs
+    if any(>(0), n_imp)
+        push!(species, (z=Int(zimp), m=Int(mimp), profiles=_view(n_imp, _nu(zimp, mimp)),
+            electron=false, label="impurity_z$(zimp)_m$(mimp)"))
+    end
+    if electron
+        push!(species, (z=-1, m=1, profiles=_view(ns[1], nue), electron=true, label="electron"))
+    end
+    return species
 end
 
 """
