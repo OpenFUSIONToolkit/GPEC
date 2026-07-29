@@ -84,4 +84,21 @@
         @test_throws ErrorException EQ.resolve_ntv_species(h5, [KF.IonSpecies(z=1, m=2, density="n_He")]; zimp=6, mimp=12)
         rm(h5)
     end
+
+    @testset "combine_species_states" begin
+        # Combined profile = Σ species dT/dψ interpolated onto the union grid; total = Σ total.
+        mk(psi, dt) = (st = KF.KineticForcesState();
+            st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
+                total_torque=ComplexF64(sum(dt)), psi_grid=collect(Float64, psi),
+                dtdpsi=ComplexF64.(dt), t_cumulative=zeros(ComplexF64, length(dt)));
+            st)
+        s1 = mk(0.0:0.1:1.0, fill(1.0, 11))
+        s2 = mk(0.05:0.1:0.95, fill(2.0, 10))     # different (offset) grid
+        c = KF.combine_species_states([s1, s2])
+        r = c.method_results["fgar"]
+        @test real(r.total_torque) ≈ 31.0         # 11·1 + 10·2
+        @test maximum(abs.(r.dtdpsi)) > 0          # not the all-zeros regression
+        overlap = [real(d) for (p, d) in zip(r.psi_grid, r.dtdpsi) if 0.1 <= p <= 0.9]
+        @test all(x -> isapprox(x, 3.0; atol=1e-9), overlap)   # 1 + 2 on the overlap
+    end
 end

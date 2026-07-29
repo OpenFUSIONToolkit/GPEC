@@ -230,8 +230,24 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
         results = [s.method_results[mname] for s in states if haskey(s.method_results, mname)]
         isempty(results) && continue
         grid = sort(unique(reduce(vcat, (r.psi_grid for r in results); init=Float64[])))
-        _eval(r, ψ) = r.torque_profile === nothing ? zero(ComplexF64) : ComplexF64(r.torque_profile(ψ))
-        dtdpsi = ComplexF64[sum(_eval(r, ψ) for r in results) for ψ in grid]
+        # Sum each species' dT/dψ onto the union grid by linear interpolation of its own
+        # (psi_grid, dtdpsi) arrays (torque_profile interpolants are not populated here); zero
+        # outside a species' ψ range.
+        dtdpsi = zeros(ComplexF64, length(grid))
+        for r in results
+            length(r.psi_grid) >= 2 || continue
+            o = sortperm(r.psi_grid); xs = r.psi_grid[o]; ys = r.dtdpsi[o]
+            for (k, ψ) in enumerate(grid)
+                (ψ < xs[1] || ψ > xs[end]) && continue
+                j = searchsortedlast(xs, ψ)
+                if j == length(xs)
+                    dtdpsi[k] += ys[end]
+                else
+                    t = (ψ - xs[j]) / (xs[j+1] - xs[j])
+                    dtdpsi[k] += (1 - t) * ys[j] + t * ys[j+1]
+                end
+            end
+        end
         tcum = zeros(ComplexF64, length(grid))
         for j in 2:length(grid)
             tcum[j] = tcum[j-1] + 0.5 * (dtdpsi[j] + dtdpsi[j-1]) * (grid[j] - grid[j-1])
