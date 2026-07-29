@@ -41,14 +41,18 @@ struct KineticProfileData
     omega_tor::Union{Nothing,Vector{Float64}}
     chi_e::Union{Nothing,Vector{Float64}}
     chi_phi::Union{Nothing,Vector{Float64}}
+    # Named per-species density profiles (e.g. "n_D", "n_T") for explicit multi-ion input,
+    # read from non-standard datasets in the HDF5 kinetic file. `nothing` for ASCII / no extras.
+    species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
     provenance::String
 end
 
 function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
-    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing, provenance="")
+    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing,
+    species_densities=nothing, provenance="")
     _v(x) = x === nothing ? nothing : Float64.(collect(x))
     return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
-        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), String(provenance))
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), species_densities, String(provenance))
 end
 
 const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
@@ -89,10 +93,20 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
         prov = ""
         ats = attributes(g)
         haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
+        # Any dataset outside the standard schema is treated as a named per-species density
+        # profile (e.g. "n_D", "n_T") for explicit multi-ion input.
+        standard = ("psi", "n_i", "n_e", "T_i", "T_e", "omega_E", "omega_tor", "chi_e", "chi_phi")
+        extras = Dict{String,Vector{Float64}}()
+        for k in keys(g)
+            k in standard && continue
+            v = read(g[k])
+            v isa AbstractArray && (extras[k] = Float64.(vec(v)))
+        end
         return KineticProfileData(; psi=Float64.(vec(read(g["psi"]))),
             n_i=rd("n_i"), n_e=rd("n_e"), T_i=rd("T_i"), T_e=rd("T_e"),
             omega_E=rd("omega_E"), omega_tor=rd("omega_tor"),
-            chi_e=rd("chi_e"), chi_phi=rd("chi_phi"), provenance=prov)
+            chi_e=rd("chi_e"), chi_phi=rd("chi_phi"),
+            species_densities=(isempty(extras) ? nothing : extras), provenance=prov)
     end
 end
 
@@ -202,15 +216,22 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     Te = _cubic_resample(psi_in, Te_in, psi_reg) .* eV_to_J
     omegaE = _cubic_resample(psi_in, omE_in, psi_reg)
 
-    # Resolve each species' resonant density (fraction path).
+    # Resolve each species' resonant density: `fraction` ⇒ share of the total n_i; `density` ⇒
+    # an explicit named profile from the HDF5 kinetic file (resampled to the working grid).
     zs = [Int(s.z) for s in ion_species]
     ns = Vector{Vector{Float64}}(undef, length(ion_species))
     for (si, s) in enumerate(ion_species)
         has_frac = !isnan(s.fraction)
         has_dens = !isempty(s.density)
         (has_frac ⊻ has_dens) || error("ion_species[$si]: specify exactly one of `fraction` or `density`")
-        has_dens && error("ion_species[$si]: explicit per-species density `$(s.density)` not yet wired; use `fraction`")
-        ns[si] = s.fraction .* ni_total
+        if has_dens
+            (data.species_densities !== nothing && haskey(data.species_densities, s.density)) ||
+                error("ion_species[$si]: density profile `$(s.density)` not found in kinetic file " *
+                      "(available: $(data.species_densities === nothing ? "none — ASCII files carry only n_i" : join(keys(data.species_densities), ", ")))")
+            ns[si] = _cubic_resample(psi_in, data.species_densities[s.density], psi_reg)
+        else
+            ns[si] = s.fraction .* ni_total
+        end
     end
 
     # Shared composition + collisionality (natural-log Coulomb log), per grid point.
