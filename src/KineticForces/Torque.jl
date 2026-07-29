@@ -35,6 +35,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
               rex_override::Union{Nothing,Float64}=nothing,
               imx_override::Union{Nothing,Float64}=nothing,
+              ion_fraction::Float64=1.0,
               atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
     # Enforce bounds
@@ -153,9 +154,12 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         dT_s_dpsi = kinetic_profiles.Te_deriv(psi)
         nu_s      = kinetic_profiles.nue_spline(psi)
     else
-        n_s       = kinetic_profiles.ni_spline(psi)
+        # ion_fraction scales this species' resonant density out of the total main-ion n_i
+        # (e.g. 0.5 for each of D/T). It cancels in wdian/wdiat (T·(dn/dψ)/n) and does NOT
+        # scale nu_s, which is the full-composition collisionality.
+        n_s       = ion_fraction * kinetic_profiles.ni_spline(psi)
         T_s       = kinetic_profiles.Ti_spline(psi)
-        dn_s_dpsi = kinetic_profiles.ni_deriv(psi)
+        dn_s_dpsi = ion_fraction * kinetic_profiles.ni_deriv(psi)
         dT_s_dpsi = kinetic_profiles.Ti_deriv(psi)
         nu_s      = kinetic_profiles.nui_spline(psi)
     end

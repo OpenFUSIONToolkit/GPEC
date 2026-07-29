@@ -90,6 +90,12 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     zimp::Int = 6                   # Impurity charge
     mimp::Int = 12                  # Impurity mass
     electron::Bool = false          # Include electron contribution
+    # Fraction of the main-ion density carried by THIS ion species, for a multi-main-ion
+    # plasma (e.g. 50/50 D-T: run D and T each with ion_fraction=0.5). Scales only the
+    # resonant density prefactor (n_s = ion_fraction·n_i); the Coulomb collisionality and
+    # Zeff use the full n_i, so the kinetic file's n_i column must be the TOTAL main-ion
+    # density for a multi-ion run. Default 1.0 reproduces the single-main-ion behaviour.
+    ion_fraction::Float64 = 1.0
 
     # Mode numbers
     nn::Int = 1                     # Toroidal mode number
