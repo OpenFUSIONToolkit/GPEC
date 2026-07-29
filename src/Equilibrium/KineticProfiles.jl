@@ -409,9 +409,7 @@ function load_kinetic_profiles(kinetic_file::AbstractString;
         z = n_e > 0 ? zimp - (n_i / n_e) * zi * (zimp - zi) : Float64(zimp)
         zpitch = 1.0 + (1.0 + mimp) / (2.0 * mimp) * zimp * (z - 1.0) / (zimp - z)
 
-        # Coulomb logarithm — natural log, matching Fortran PENTRC inputs.f90:238 (the
-        # coefficients 17.3/-0.5/+1.5 are calibrated for ln, not log10; n_e in units of 1e20 m^-3,
-        # T_e in units of 1 keV = 1.602e-16 J).
+        # Coulomb logarithm (NRL formulary form), natural log; n_e in 1e20 m^-3, T_e in keV.
         ll = 17.3 - 0.5 * log(n_e / 1.0e20) + 1.5 * log(T_e / 1.602e-16)
         loglam[i] = ll
 
