@@ -676,7 +676,7 @@ function cross_kinetic_singular_surf!(
     ksurf = intr.kinsing[ising]
     dpsi = ksurf.psifac - odet.psifac
 
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, 0))
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, 0, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
