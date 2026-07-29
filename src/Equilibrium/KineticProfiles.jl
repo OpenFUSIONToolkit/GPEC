@@ -129,6 +129,38 @@ function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
 end
 
 """
+    multi_ion_composition(zs, ns, ne; zimp, mimp) -> (zeff, zpitch, n_main, n_imp)
+
+Full-composition effective charge and pitch-angle enhancement for a plasma with an
+arbitrary number of main-ion species. Inputs are per-point (scalars or broadcast arrays):
+
+  - `zs`, `ns`: main-ion charges and number densities (one entry per species)
+  - `ne`: electron density
+  - `zimp`, `mimp`: single trailing impurity charge / mass; its density closes quasineutrality
+
+Composition (per point):
+
+    n_main = Σ_s n_s                       total main-ion number density
+    n_imp  = (n_e − Σ_s z_s n_s) / z_imp   impurity density from quasineutrality
+    Zeff   = (Σ_s z_s² n_s + z_imp² n_imp) / n_e
+    zpitch = 1 + (1+m_imp)/(2 m_imp)·z_imp·(Zeff−1)/(z_imp−Zeff)   momentum-restoring closure
+
+Reduces **exactly** to the single-ion form `Zeff = z_imp − (n_i/n_e)·z_i·(z_imp−z_i)` for one
+z-species (verified algebraically). The per-species pitch-angle collision frequency built from
+this is `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s · (T_s)^{3/2})` — shared `zpitch`, `n_main`,
+`Zeff`, `lnΛ`; the test species contributes only its own `z_s²`, `m_s`, `T_s`.
+"""
+function multi_ion_composition(zs::AbstractVector, ns::AbstractVector, ne::Real;
+                               zimp::Real, mimp::Real)
+    n_main = sum(ns)
+    charge_density = sum(z * n for (z, n) in zip(zs, ns))   # Σ z_s n_s
+    n_imp = ne > 0 ? (ne - charge_density) / zimp : 0.0
+    zeff = ne > 0 ? (sum(z^2 * n for (z, n) in zip(zs, ns)) + zimp^2 * n_imp) / ne : Float64(zimp)
+    zpitch = 1.0 + (1.0 + mimp) / (2.0 * mimp) * zimp * (zeff - 1.0) / (zimp - zeff)
+    return (zeff, zpitch, n_main, n_imp)
+end
+
+"""
     load_kinetic_profiles(kinetic_file::AbstractString;
                           zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
                           density_factor::Float64=1.0, temperature_factor::Float64=1.0,
