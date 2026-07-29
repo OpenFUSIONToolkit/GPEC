@@ -161,6 +161,76 @@ function multi_ion_composition(zs::AbstractVector, ns::AbstractVector, ne::Real;
 end
 
 """
+    build_species_profiles(kinetic_file, ion_species; zimp, mimp, ...) -> Vector{KineticProfileSplines}
+
+Build one [`KineticProfileSplines`](@ref) per main-ion species for a multi-ion NTV run. Each
+returned view carries **this species' resonant density** `n_s` (as `ni_spline`) and its
+**full-composition collision frequency** `ν_s` (as `nui_spline`), while `ne/Te/ωE/Zeff/lnΛ`
+(and the electron `nue`) are shared across all species. Downstream `tpsi!` uses each view
+unchanged; the driver loops over the returned vector and sums the torques.
+
+Species density is resolved from `IonSpecies`: `fraction` ⇒ `n_s = fraction · n_i` (the kinetic
+file's `n_i` = total main-ion density); explicit per-species profiles (`density`) are not yet
+wired here. Composition (Zeff, zpitch) comes from [`multi_ion_composition`]; the per-species
+collisionality is `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s·(T_i)^{3/2})`. Reduces to the
+single-ion `load_kinetic_profiles` result for one z=1 species with `fraction=1`.
+"""
+function build_species_profiles(kinetic_file::AbstractString, ion_species::AbstractVector;
+    zimp::Integer=6, mimp::Integer=12,
+    density_factor::Float64=1.0, temperature_factor::Float64=1.0,
+    ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0)
+
+    (density_factor == 1.0 && temperature_factor == 1.0 && ExB_rotation_factor == 1.0 &&
+     toroidal_rotation_factor == 1.0) ||
+        error("profile scaling factors are not yet supported together with a multi-ion ion_species list")
+
+    data = read_kinetic_file(kinetic_file)
+    _need(f, n) = f === nothing ? error("kinetic file '$kinetic_file' missing required '$n'") : f
+    psi_in = data.psi
+    ne_in = _need(data.n_e, "n_e"); Ti_in = _need(data.T_i, "T_i")
+    Te_in = _need(data.T_e, "T_e"); omE_in = _need(data.omega_E, "omega_E")
+    ni_in = data.n_i === nothing ? copy(ne_in) : data.n_i   # TOTAL main-ion density
+
+    eV_to_J = 1.602e-19
+    mp = 1.672_614e-27; me = 9.109_1e-31
+    nkin = 100; psi_reg = collect(0:nkin) ./ nkin
+    ne = _cubic_resample(psi_in, ne_in, psi_reg)
+    ni_total = _cubic_resample(psi_in, ni_in, psi_reg)
+    Ti = _cubic_resample(psi_in, Ti_in, psi_reg) .* eV_to_J
+    Te = _cubic_resample(psi_in, Te_in, psi_reg) .* eV_to_J
+    omegaE = _cubic_resample(psi_in, omE_in, psi_reg)
+
+    # Resolve each species' resonant density (fraction path).
+    zs = [Int(s.z) for s in ion_species]
+    ns = Vector{Vector{Float64}}(undef, length(ion_species))
+    for (si, s) in enumerate(ion_species)
+        has_frac = !isnan(s.fraction)
+        has_dens = !isempty(s.density)
+        (has_frac ⊻ has_dens) || error("ion_species[$si]: specify exactly one of `fraction` or `density`")
+        has_dens && error("ion_species[$si]: explicit per-species density `$(s.density)` not yet wired; use `fraction`")
+        ns[si] = s.fraction .* ni_total
+    end
+
+    # Shared composition + collisionality (natural-log Coulomb log), per grid point.
+    npts = length(psi_reg)
+    zeff = zeros(npts); zpitch = zeros(npts); loglam = zeros(npts); n_main = zeros(npts); nue = zeros(npts)
+    for i in 1:npts
+        z, zp, nm, _ = multi_ion_composition(zs, [ns[si][i] for si in eachindex(ion_species)], ne[i]; zimp=zimp, mimp=mimp)
+        zeff[i] = z; zpitch[i] = zp; n_main[i] = nm
+        loglam[i] = (ne[i] > 0 && Te[i] > 0) ? 17.3 - 0.5 * log(ne[i] / 1.0e20) + 1.5 * log(Te[i] / 1.602e-16) : 0.0
+        nue[i] = Te[i] > 0 ? (zp / 3.5e17) * ne[i] * loglam[i] / (sqrt(me / mp) * (Te[i] / 1.602e-16)^1.5) : 0.0
+    end
+
+    # One KineticProfileSplines per species: ni = n_s, nui = ν_s, everything else shared.
+    profs = Vector{KineticProfileSplines}(undef, length(ion_species))
+    for (si, s) in enumerate(ion_species)
+        nu_s = [Ti[i] > 0 ? (zpitch[i] / 3.5e17) * s.z^2 * n_main[i] * loglam[i] / (sqrt(Float64(s.m)) * (Ti[i] / 1.602e-16)^1.5) : 0.0 for i in 1:npts]
+        profs[si] = KineticProfileSplines(psi_reg, ns[si], ne, Ti, Te, omegaE, loglam, nu_s, nue, zeff)
+    end
+    return profs
+end
+
+"""
     load_kinetic_profiles(kinetic_file::AbstractString;
                           zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
                           density_factor::Float64=1.0, temperature_factor::Float64=1.0,

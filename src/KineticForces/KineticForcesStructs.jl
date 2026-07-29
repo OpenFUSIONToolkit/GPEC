@@ -50,6 +50,31 @@ end
 
 
 """
+    IonSpecies(; z, m, fraction=NaN, density="")
+
+One main-ion species in a multi-ion NTV run. `z`/`m` are the charge (e) and mass (proton
+masses). The density is given by **exactly one** of:
+
+  - `fraction`: this species' share of the total main-ion density (the kinetic file's `n_i`
+    column), e.g. 0.5 for each of 50/50 D-T. Convenient when species share a profile shape.
+  - `density`: the name of an explicit per-species density profile in the (HDF5) kinetic file,
+    for measured profiles with distinct shapes.
+
+Both resolve to a per-species density profile `n_s(ψ)` at load time (one downstream path).
+Constructed from a TOML `[[KineticForces.ion_species]]` table via [`convert`].
+"""
+struct IonSpecies
+    z::Int
+    m::Int
+    fraction::Float64
+    density::String
+end
+IonSpecies(; z::Integer, m::Integer, fraction=NaN, density="") =
+    IonSpecies(Int(z), Int(m), Float64(fraction), String(density))
+IonSpecies(d::AbstractDict) = IonSpecies(; (Symbol(k) => v for (k, v) in d)...)
+Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector{<:AbstractDict}) = IonSpecies.(v)
+
+"""
     KineticForcesControl
 
 User-facing control parameters from the TOML `[KineticForces]` section.
@@ -90,12 +115,12 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     zimp::Int = 6                   # Impurity charge
     mimp::Int = 12                  # Impurity mass
     electron::Bool = false          # Include electron contribution
-    # Fraction of the main-ion density carried by THIS ion species, for a multi-main-ion
-    # plasma (e.g. 50/50 D-T: run D and T each with ion_fraction=0.5). Scales only the
-    # resonant density prefactor (n_s = ion_fraction·n_i); the Coulomb collisionality and
-    # Zeff use the full n_i, so the kinetic file's n_i column must be the TOTAL main-ion
-    # density for a multi-ion run. Default 1.0 reproduces the single-main-ion behaviour.
-    ion_fraction::Float64 = 1.0
+    # Multi-main-ion plasma: list of IonSpecies, each with its own z, m, and density
+    # (fraction of the total main-ion n_i, or an explicit per-species profile). When
+    # non-empty the NTV is computed per species with one shared full-composition Zeff and
+    # summed. Empty (default) ⇒ single main ion from zi/mi (unchanged behaviour). The
+    # kinetic file's n_i column is the TOTAL main-ion density for a multi-ion run.
+    ion_species::Vector{IonSpecies} = IonSpecies[]
 
     # Mode numbers
     nn::Int = 1                     # Toroidal mode number
