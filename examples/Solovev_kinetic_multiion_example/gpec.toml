@@ -1,0 +1,109 @@
+# Solovev analytical equilibrium — n=1 ideal stability + perturbed equilibrium + NTV torque.
+# Extends the Solovev ideal example with a [KineticForces] section, so after the plasma
+# response is computed the neoclassical toroidal viscosity torque is integrated over ψ as a
+# post-processing diagnostic (adaptive quadrature paneled at the rational surfaces).
+# The kinetic profiles (kinetic.dat) are constructed to be consistent with this equilibrium's
+# pressure; the equilibrium is generated analytically from the embedded [SOL_INPUT] section.
+
+[Equilibrium]
+eq_type = "sol"                         # Type of the input 2D equilibrium file
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+grid_type = "ldp"                       # Radial grid packing type
+psilow = 1e-4                           # Lower limit of normalized poloidal flux
+psihigh = 0.9995                        # Upper limit of normalized poloidal flux
+mpsi = 128                              # Number of radial grid points (0 = auto-compute from psi_accuracy)
+mtheta = 256                            # Number of poloidal grid points
+newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
+etol = 1e-7                             # Error tolerance for equilibrium solver
+force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
+
+[Wall]
+# Close conformal wall is required to stabilize this Solovev fixture's n=1 external kink:
+# with nowall, et[1] = -6.8 (strongly unstable); with this wall, et[1] = +0.24 (barely stable).
+# The plasma is near marginal stability, so the BVP Δ' matrix values are pathological
+# (dpm magnitudes ~ 10¹¹, |Im/Re| ≫ 1). This fixture's role is integration-pipeline
+# smoke testing + et[1] regression, NOT BVP Δ' regression — DIIID-like is the canonical
+# Δ'-matrix fixture (stable et[1] = +1.6, clean BVP Δ').
+shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.2415                              # Distance from plasma (conformal) or shape parameter
+aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                                # Elongation parameter for wall shapes
+cw = 0                                  # Offset of wall center from major radius
+dw = 0.5                                # Triangularity parameter for wall shapes
+tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
+
+[ForcingTerms]
+forcing_data_file = "forcing.dat"       # Manual mode table (n, m, amplitude_real, amplitude_imag)
+forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
+
+[PerturbedEquilibrium]
+fixed_boundary = false                  # Use fixed boundary conditions
+output_eigenmodes = true                # Output eigenmode fields as b-fields
+compute_response = true                 # Compute plasma response to forcing
+compute_singular_coupling = true        # Compute singular layer coupling metrics
+verbose = true                          # Enable verbose logging
+write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
+reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
+
+[ForceFreeStates]
+local_stability_flag = true   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+mat_flag = true               # Construct coefficient matrices for diagnostic purposes
+ode_flag = true               # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
+vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
+
+psiedge = 0.99                # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
+sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
+
+nn_low = 1                    # Smallest toroidal mode number to include
+nn_high = 1                   # Largest toroidal mode number to include
+delta_mlow = 8                # Expands lower bound of Fourier harmonics
+delta_mhigh = 8               # Expands upper bound of Fourier harmonics
+mthvac = 960                  # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+
+kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
+kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
+ucrit = 1e3                   # Column-norm threshold that triggers solution renormalization
+force_wv_symmetry = true      # Enforce symmetry of the vacuum energy matrix
+save_interval = 3             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+
+# Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
+use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
+parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
+populate_dense_xi     = true   # Append serial-EL pass so dense ξ is stored — REQUIRED with a [PerturbedEquilibrium] section
+set_psilim_via_dmlim  = false  # FALSE for limited/analytical equilibria — rationals sparse, dmlim would chop too much edge
+dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
+# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
+[SOL_INPUT]
+mr = 128       # Number of radial grid zones
+mz = 128       # Number of axial grid zones
+ma = 128       # Number of flux grid zones
+e = 1.6        # Elongation
+a = 0.33       # Minor radius
+r0 = 1.0       # Major radius
+q0 = 1.9       # Safety factor at the magnetic axis (O-point)
+p0fac = 1      # Scale on-axis pressure (β changes; Φ, q fixed)
+b0fac = 1      # Scale toroidal field at constant β (Bt changes; shape, β fixed)
+f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p, Bp fixed)
+
+[KineticForces]
+# Multi-ion NTV: the analytic Solovev main ion is modelled as a 50/50 D-T mix (n_i = total),
+# so the summed NTV runs over D + T + the neutrality-closing impurity + electrons.
+kinetic_file = "kinetic.dat"
+electron = true
+zimp = 6
+mimp = 12
+
+[[KineticForces.ion_species]]
+z = 1
+m = 2
+fraction = 0.5
+
+[[KineticForces.ion_species]]
+z = 1
+m = 3
+fraction = 0.5
