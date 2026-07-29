@@ -214,6 +214,40 @@ end
 # ============================================================================
 
 """
+    combine_species_states(states) -> KineticForcesState
+
+Sum per-species [`KineticForcesState`](@ref) results into a single total (τ = Σ_s τ_s). Per
+method: the scalar `total_torque`/`total_energy` are summed exactly; the dT/dψ profile is summed
+by evaluating each species' `torque_profile` interpolant on the sorted union of the species ψ
+grids, and the cumulative T(ψ) is re-integrated (trapezoid) from that summed profile. All species
+share the same ψ-integration range (`ctrl.psilims`), so the grids differ only in adaptive nodes.
+"""
+function combine_species_states(states::AbstractVector{KineticForcesState})
+    combined = KineticForcesState()
+    isempty(states) && return combined
+    method_names = collect(keys(first(states).method_results))
+    for mname in method_names
+        results = [s.method_results[mname] for s in states if haskey(s.method_results, mname)]
+        isempty(results) && continue
+        grid = sort(unique(reduce(vcat, (r.psi_grid for r in results); init=Float64[])))
+        _eval(r, ψ) = r.torque_profile === nothing ? zero(ComplexF64) : ComplexF64(r.torque_profile(ψ))
+        dtdpsi = ComplexF64[sum(_eval(r, ψ) for r in results) for ψ in grid]
+        tcum = zeros(ComplexF64, length(grid))
+        for j in 2:length(grid)
+            tcum[j] = tcum[j-1] + 0.5 * (dtdpsi[j] + dtdpsi[j-1]) * (grid[j] - grid[j-1])
+        end
+        combined.method_results[mname] = MethodResult(;
+            method=mname, nn=first(results).nn,
+            total_torque=sum(r.total_torque for r in results),
+            total_energy=sum(r.total_energy for r in results),
+            psi_grid=grid, dtdpsi=dtdpsi, t_cumulative=tcum,
+            psi_nsteps=sum(r.psi_nsteps for r in results))
+    end
+    combined.completed = true
+    return combined
+end
+
+"""
     compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
                                 ctrl::KineticForcesControl, equil, kinetic_profiles)
 

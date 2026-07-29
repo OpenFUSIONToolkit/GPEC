@@ -605,12 +605,46 @@ function main_from_inputs(
             kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
             KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
 
-            kf_state = KineticForces.KineticForcesState()
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
-
-            if kf_ctrl.write_outputs_to_HDF5
-                h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                    KineticForces.write_to_hdf5!(h5file, kf_state)
+            if isempty(kf_ctrl.ion_species)
+                # Single main ion (from zi/mi) — unchanged path.
+                kf_state = KineticForces.KineticForcesState()
+                KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
+                if kf_ctrl.write_outputs_to_HDF5
+                    h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                        KineticForces.write_to_hdf5!(h5file, kf_state)
+                    end
+                end
+            else
+                # Multi main-ion: NTV per species on one shared full-composition Zeff, then summed.
+                kfile = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
+                species_profs = Equilibrium.build_species_profiles(kfile, kf_ctrl.ion_species;
+                    zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp)
+                states = KineticForces.KineticForcesState[]
+                labels = String[]
+                for (si, sp) in enumerate(kf_ctrl.ion_species)
+                    sctrl = deepcopy(kf_ctrl)
+                    sctrl.zi = sp.z; sctrl.mi = sp.m; sctrl.electron = false
+                    sctrl.ion_species = KineticForces.IonSpecies[]
+                    st = KineticForces.KineticForcesState()
+                    KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, equil, species_profs[si])
+                    push!(states, st); push!(labels, "ion$(si)_z$(sp.z)_m$(sp.m)")
+                end
+                if kf_ctrl.electron
+                    ectrl = deepcopy(kf_ctrl)
+                    ectrl.electron = true; ectrl.ion_species = KineticForces.IonSpecies[]
+                    st = KineticForces.KineticForcesState()
+                    KineticForces.compute_torque_all_methods!(st, kf_intr, ectrl, equil, species_profs[1])
+                    push!(states, st); push!(labels, "electron")
+                end
+                @info "Multi-ion NTV: summed $(length(kf_ctrl.ion_species)) ion species$(kf_ctrl.electron ? " + electrons" : "")"
+                kf_state = KineticForces.combine_species_states(states)
+                if kf_ctrl.write_outputs_to_HDF5
+                    h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                        for (st, lbl) in zip(states, labels)
+                            KineticForces.write_to_hdf5!(h5file, st; group_name="kinetic_forces_$lbl")
+                        end
+                        KineticForces.write_to_hdf5!(h5file, kf_state)  # "kinetic_forces" = total
+                    end
                 end
             end
         end

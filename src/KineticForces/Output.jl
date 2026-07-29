@@ -15,8 +15,8 @@ Write all KineticForces results to the "kinetic_forces" group in gpec.h5.
 - `h5file::HDF5.File`: Open HDF5 file handle
 - `state::KineticForcesState`: Accumulated computation results
 """
-function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
-    g = create_group(h5file, "kinetic_forces")
+function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; group_name::AbstractString="kinetic_forces")
+    g = create_group(h5file, group_name)
 
     for (method_name, result) in state.method_results
         mg = create_group(g, method_name)
