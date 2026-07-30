@@ -39,8 +39,43 @@ single sample. Where a plateau exists it is a property of the physics rather tha
 of the discretization, so it would survive grid changes and would be a genuine
 convergence statement.
 
+A `psi_accuracy` scan on the DIII-D-like SLAYER deck (2e-3 down to 3.125e-5, a
+64x range) shows what a plateau search is up against:
+
+| psi_accuracy | knots | implied | dpm[1,1] | dpm[2,2] | dpm[3,3] | gamma 2/1 (Hz) |
+|---|---|---|---|---|---|---|
+| 2.0e-3   | 172 | –    | 6.850 | -5.783 | -16.308 | 165.3 |
+| 1.0e-3   | 205 | –    | 6.387 | -5.873 | -16.867 | 154.3 |
+| 5.0e-4   | 252 | –    | 8.003 | -6.105 | -16.413 | 192.9 |
+| 2.5e-4   | 307 | 522  | 8.567 | -6.235 | -16.529 | 206.2 |
+| 1.25e-4  | 372 | 666  | 8.146 | -6.285 | -16.649 | 196.2 |
+| 6.25e-5  | 457 | 916  | 8.911 | -6.477 | -16.510 | 214.4 |
+| 3.125e-5 | 559 | 1226 | 9.514 | -6.260 | -16.485 | 228.7 |
+
+Three things follow. First, the outer surface `dpm[3,3]` (q=4) *does* plateau —
+the last four points agree to about 1% — while `dpm[2,2]` is marginal and
+`dpm[1,1]` (q=2) never settles, still moving ~7% between the two tightest grids.
+A plateau criterion would therefore succeed per-surface and correctly report
+failure for q=2, which is more informative than a single pin that hides it.
+
+Second, the growth rate is linear in Δ′: `gamma/dpm[1,1]` is 24.1 to within 0.5%
+across the whole scan, so a converged Δ′ is both necessary and sufficient for a
+converged SLAYER growth rate on this surface.
+
+Third — and this is the blocker — the `implied` column (what
+`implied_knot_count` requests after the refined solve) grows monotonically
+relative to the grid actually used, from 1.7x to 2.2x. The two-pass scheme stops
+after pass 2, so tightening `psi_accuracy` moves it *further* from
+self-consistency rather than closer, and the warning's advice to "consider
+tightening psi_accuracy" is counterproductive in this regime. Until knot
+refinement iterates to a fixed point, a plateau search is scanning a moving
+target.
+
 This is not implemented. Doing it properly needs:
 
+  - knot refinement iterated to a fixed point (repeat the measure-and-re-form
+    step until `implied_knot_count` stops exceeding the grid in use), since
+    without it the scan target keeps moving;
   - a scan driver over `psi_accuracy` × truncation (`psihigh`, `dmlim`, `qhigh`)
     that records the Δ′ diagonal per configuration;
   - a plateau/mode detector with an explicit stationarity tolerance, plus a
