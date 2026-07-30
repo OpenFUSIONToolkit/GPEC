@@ -58,12 +58,12 @@ for q, c in zip(qvals, colors):
     ax.plot(psihigh[mg], yg[mg], 's--', color=c, lw=1.5, ms=5, mfc='white', label=f'q = {q:g}, galerkin')
 edge_log_x(ax)
 ax.set_xlabel('outer truncation  ψ$_{high}$   (log distance from edge, 1 - ψ$_{high}$; edge at right)', fontsize=11)
-ax.set_ylabel('matched resonant coupling  ||cout||  per surface  (log)', fontsize=11)
+ax.set_ylabel('matched resonant coupling\n||cout|| per surface  (log)', fontsize=11)
 ax.set_title('Matched resonant coupling vs psihigh truncation: STRIDE (solid) vs galerkin (dashed)\n'
              f'{CASE}, n=1  ·  cout from Wang 2020 Eq. 11 match', fontsize=11)
 ax.grid(alpha=0.25, which='both')
 ax.legend(fontsize=7.6, ncol=2, loc='best')
-fig.subplots_adjust(left=0.12, bottom=0.13, right=0.97, top=0.88)
+fig.subplots_adjust(left=0.13, bottom=0.13, right=0.97, top=0.88)
 
 stem = os.path.splitext(os.path.basename(csv_path))[0].replace('resonant_coupling', 'rescoup')
 out = os.path.abspath(os.path.join(here, '..', 'figures', stem + '.png'))

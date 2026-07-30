@@ -77,22 +77,22 @@ def edge_log_x(ax, x0, xmax):
     ax.set_xticks(tk); ax.set_xticklabels([f"{t:g}" for t in tk]); ax.minorticks_off()
     ax.set_xlim(x0 - (1 - x0) * 0.06, xmax + (1 - xmax) * 0.4)
 
-def method_legend(ax):
+def method_legend(ax, loc="lower left", bbox=(1.015, 0.0)):
     # representative mid-palette swatches so the cool=Riccati / warm=Galerkin mapping is explicit;
-    # placed OUTSIDE the axes (lower right) so it never covers data points
+    # default placement is OUTSIDE the axes (lower right) so it never covers data points
     handles = [Line2D([0], [0], color=plt.cm.viridis(0.45), ls="-", marker="o", ms=5, lw=2, label="Riccati (STRIDE), cool"),
                Line2D([0], [0], color=plt.cm.YlOrRd(0.75), ls="--", marker="s", ms=5, lw=2, label="Galerkin (RDCON), warm")]
-    leg = ax.legend(handles=handles, fontsize=8.5, loc="lower left", bbox_to_anchor=(1.015, 0.0),
+    leg = ax.legend(handles=handles, fontsize=8.5, loc=loc, bbox_to_anchor=bbox,
                     framealpha=0.95, title="method (color family)", title_fontsize=8.5)
     ax.add_artist(leg)
 
-def surface_legend(ax):
+def surface_legend(ax, loc="upper left", bbox=(1.015, 1.0)):
     # each surface shows BOTH its Riccati (cool) and Galerkin (warm) swatch as a paired handle;
-    # placed OUTSIDE the axes (upper right) so all points stay visible
+    # default placement is OUTSIDE the axes (upper right) so all points stay visible
     handles = [(Line2D([0], [0], color=colors_ric[k], ls="-", marker="o", ms=5, lw=2),
                 Line2D([0], [0], color=colors_gal[k], ls="--", marker="s", ms=5, lw=2)) for k in range(len(qs))]
     labels = [f"q = {q}" for q in qs]
-    ax.legend(handles=handles, labels=labels, fontsize=8.5, loc="upper left", bbox_to_anchor=(1.015, 1.0),
+    ax.legend(handles=handles, labels=labels, fontsize=8.5, loc=loc, bbox_to_anchor=bbox,
               title="rational surface  (Riccati | Galerkin)", title_fontsize=8.5, framealpha=0.95,
               handler_map={tuple: HandlerTuple(ndivide=None)}, handlelength=3.0)
 
@@ -119,8 +119,10 @@ ax.set_xlabel(r"outer truncation  $\psi_{high}$   (log distance from edge, 1 - $
 ax.set_ylabel(r"|delta_coil|  per surface  (log)", fontsize=11)
 ax.set_title(f"delta_coil vs outer truncation: Riccati (STRIDE) vs Galerkin (RDCON)\n{CASE}, n=1", fontsize=11)
 ax.grid(alpha=0.25, which="both")
-method_legend(ax); surface_legend(ax)
-fig.subplots_adjust(left=0.08, bottom=0.13, right=0.76, top=0.9)
+# legends INSIDE the upper-left empty region (curves stay in a flat band until Galerkin blows up on the right)
+method_legend(ax, loc="upper left", bbox=(0.012, 0.52))
+surface_legend(ax, loc="upper left", bbox=(0.012, 0.985))
+fig.subplots_adjust(left=0.08, bottom=0.13, right=0.97, top=0.9)
 p1 = os.path.join(figdir, stem + "_norm.png"); fig.savefig(p1, dpi=150); print("wrote:", p1)
 
 # ---------- (2) relchange vs outermost psihigh ----------
@@ -140,8 +142,10 @@ ax.set_xlabel(r"outer truncation  $\psi_{high}$   (log distance from edge, 1 - $
 ax.set_ylabel(r"|$\Delta$ delta_coil| / |delta_coil($\psi_{high}$=max)|", fontsize=11)
 ax.set_title(f"Relative sensitivity of delta_coil to the truncation boundary\n{CASE}: Riccati vs Galerkin (lower = more converged)", fontsize=11)
 ax.grid(alpha=0.25, which="both")
-method_legend(ax); surface_legend(ax)
-fig.subplots_adjust(left=0.09, bottom=0.13, right=0.76, top=0.9)
+# legends INSIDE the lower-left empty region (curves live in the upper-left / lower-right)
+method_legend(ax, loc="lower left", bbox=(0.012, 0.30))
+surface_legend(ax, loc="lower left", bbox=(0.012, 0.015))
+fig.subplots_adjust(left=0.09, bottom=0.13, right=0.97, top=0.9)
 p2 = os.path.join(figdir, stem + "_relchange.png"); fig.savefig(p2, dpi=150); print("wrote:", p2)
 
 # ---------- (3) cosine shape metric ----------
