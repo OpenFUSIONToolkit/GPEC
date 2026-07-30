@@ -6,121 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 GPEC (Generalized Perturbed Equilibrium Code, Julia implementation) is a comprehensive Julia reimplementation of the GPEC suite for MHD analysis of fusion plasmas. The code performs equilibrium reconstruction, ideal MHD stability analysis, and perturbed equilibrium calculations including plasma response and singular surface coupling diagnostics.
 
-**Relationship to Fortran GPEC**: This Julia GPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "the Fortran code", "the original GPEC", or "Fortran GPEC", they are referring to that Fortran codebase. This Julia implementation reimplements and extends GPEC's functionality with improved performance and maintainability.
+**Relationship to Fortran GPEC**: This Julia GPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "the Fortran code", "the original GPEC", "Fortran GPEC", or "legacy VACUUM", they are referring to that Fortran codebase — not a runtime dependency of this Julia implementation. This Julia implementation reimplements and extends GPEC's functionality with improved performance and maintainability.
 
 **Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, check for a local GPEC repository at `~/Code/gpec`. If not found at this location, ask the user for the correct path.
 
-This codebase is implemented in Julia. References to “Fortran GPEC” or “legacy VACUUM” refer to the original upstream Fortran codebase, not a runtime dependency of this Julia implementation.
-
-**Current Development Focus**: The `perturbed_equilibrium` branch is implementing full GPEC-style perturbed equilibrium functionality, including singular coupling analysis, island formation diagnostics, and mode-space field reconstruction.
-
 ## Key References
 
-**IMPORTANT**: The papers in `docs/resources/` provide the theoretical foundation for GPEC's algorithms and should be referenced to understand what the code is doing. **Citing equations from these papers in code comments and annotations is strongly encouraged** to maintain traceability between theory and implementation.
-
-### Vacuum Module
-
-The Vacuum module implements the methods described in:
-
-- **Chance et al. (1997)**: "Vacuum calculations in azimuthally symmetric geometry"
-  - Location: `docs/resources/1997-Chance-Vacuum_calculations_in_azimuthally_symmetric_geometry.pdf`
-  - Published: Physics of Plasmas **4**, 2161 (1997)
-  - Link: https://pubs.aip.org/aip/pop/article-abstract/4/6/2161/263192
-  - Describes: Fundamental vacuum response calculation method for tokamak geometry
-
-- **Chance et al. (2007)**: "Calculation of the vacuum Green's function valid even for high toroidal mode numbers in tokamaks"
-  - Location: `docs/resources/2007-Chance-Calculation of the vacuum Greens function valid even for high toroidal mode numbers in tokamaks.pdf`
-  - Published: Physics of Plasmas **14**, 052506 (2007)
-  - Describes: Improved Green's function calculation for high-n modes
-
-### ForceFreeStates Module
-
-The ForceFreeStates module (ideal MHD stability analysis) implements methods from:
-
-- **Glasser (2016)**: "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma"
-  - Location: `docs/resources/2016-Glasser-The_direct_criterion_of_Newcomb_for_the_ideal_MHD_stability_of_an_axisymmetric_toroidal_plasma.pdf`
-  - Published: Physics of Plasmas **23**, 112506 (2016)
-  - **Describes: FUNDAMENTAL PAPER - Newcomb's criterion for ideal MHD stability (current implementation)**
-
-- **Glasser (2018)**: "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control"
-  - Location: `docs/resources/2018-Glasser-A Riccati solution for the ideal MHD plasma response with applications to real-time stability control.pdf`
-  - Published: Physics of Plasmas **25**, 032507 (2018)
-  - Describes: Riccati method for ideal MHD eigenvalue problem
-
-### PerturbedEquilibrium Module
-
-The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calculations from:
-
-- **Park et al. (2007a)**: "Computation of three-dimensional tokamak and spherical torus equilibria"
-  - Location: `docs/resources/2007-Park-Computation_of_three-dimensional_tokamak_and_spherical_torus_equilibria-compressed.pdf`
-  - Published: Physics of Plasmas **14**, 052110 (2007)
-  - Describes: 3D equilibrium perturbations in toroidal geometry
-
-- **Park et al. (2007b)**: "Control of Asymmetric Magnetic Perturbations in Tokamaks"
-  - Location: `docs/resources/2007-Park-Control_of_Asymmetric_Magnetic_Perturbations_in_Tokamaks.pdf`
-  - Published: Physical Review Letters **99**, 195003 (2007)
-  - Describes: Plasma response to resonant magnetic perturbations (RMP)
-
-- **Park et al. (2008)**: "Spectral asymmetry due to magnetic coordinates"
-  - Location: `docs/resources/2008-Park-Spectral_asymmetry_due_to_magnetic_coordinates.pdf`
-  - Published: Physics of Plasmas **15**, 064501 (2008)
-  - Describes: Coordinate-dependence of the perturbed-field Fourier spectrum, motivating area-normalization of the resonant harmonic to obtain the coordinate-invariant resonant field
-
-- **Park et al. (2009)**: "Importance of plasma response to nonaxisymmetric perturbations in tokamaks"
-  - Location: `docs/resources/2009-Park-Importance_of_plasma_response_to_nonaxisymmetric_perturbations_in_tokamaks-compressed.pdf`
-  - Published: Physics of Plasmas **16**, 056115 (2009)
-  - Describes: Self-consistent plasma response calculation
-
-- **Park et al. (2011)**: "Kinetic energy principle and neoclassical toroidal torque in tokamaks"
-  - Location: `docs/resources/2011-Park-Physics_of_Plasmas_Kinetic_energy_principle_and_neoclassical_toroidal_torque_in_tokamaks.pdf`
-  - Published: Physics of Plasmas **18**, 110702 (2011)
-  - Describes: Energy principle for perturbed equilibria
-
-- **Park et al. (2017)**: "Self-consistent perturbed equilibrium with neoclassical toroidal torque in tokamaks"
-  - Location: `docs/resources/2017-Park-Self_consistent_perturbed_equilibrium_with_neoclassical_toroidal_torque_in_toka.pdf`
-  - Published: Physics of Plasmas **24**, 032505 (2017)
-  - Describes: Self-consistent coupling with neoclassical effects
-
-### Resistive MHD Stability Analysis (Future Work)
-
-GPEC will eventually implement resistive MHD stability analysis based on:
-
-- **Glasser (2016)**: "Computation of resistive instabilities by matched asymptotic expansions"
-  - Location: `docs/resources/2016-Glasser-Computation_of_resistive_instabilities_by_matched_asymptotic_expansions-compressed.pdf`
-  - Published: Physics of Plasmas **23**, 072505 (2016)
-  - Describes: Resistive stability analysis and Δ' calculation via matched asymptotic expansions
-
-- **Glasser (2018)**: "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time"
-  - Location: `docs/resources/2018-Glasser-A robust solution for the resistive MHD toroidal Delta-prime matrix in near real-time.pdf`
-  - Published: Physics of Plasmas **25**, 032501 (2018)
-  - Describes: Fast computation of Δ' matrix for resistive stability
-
-- **Wang et al. (2020)**: "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach"
-  - Location: `docs/resources/2020-Wang-Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach.pdf`
-  - Published: Physics of Plasmas **27**, 122509 (2020)
-  - Describes: Asymptotic matching for resistive plasma response
-
-### KineticForces Module (NTV)
-
-The KineticForces module (formerly PENTRC) implements neoclassical toroidal viscosity calculations. Based on:
-
-- **Logan & Park (2013)**: "Neoclassical toroidal viscosity in perturbed equilibria with general tokamak geometry"
-  - Location: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturbed_equilibria_with_general_tokamak_geometry.pdf`
-  - Published: Physics of Plasmas **20**, 122507 (2013)
-  - Describes: Neoclassical toroidal viscosity (NTV) in perturbed equilibria
-
-- **Logan (2015)**: "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries"
-  - Location: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
-  - Published: PhD Thesis, Princeton University (2015)
-  - Describes: Complete NTV theory and implementation. **Chapter 7** details the hybrid drift-kinetic MHD eigenfunction calculation: 6 kinetic matrices Ak,Bk,Ck,Dk,Ek,Hk (Eqs 7.30-7.35) as energy-space integrals of perturbed action operators WX,WY,WZ; hybrid Euler-Lagrange equations; resonance splitting/suppression where Fh=(Q-P†)F̄(Q-P)+... shifts singularities away from rational surfaces (Eq 7.46); convergence to ideal limit. **Appendix C** derives the DCON matrix form of the perturbed action (Eqs C.1-C.11) used to compute the kinetic coefficient matrices. **Appendix D** details numerical treatment of integrable singularities in bounce averages.
-
-### Additional References
-
-- **Park et al. (2009)**: "Nonambipolar Transport by Trapped Particles in Tokamaks"
-  - Location: `docs/resources/2009-Park-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`
-  - Published: Physical Review Letters **102**, 065002 (2009)
-  - Link: https://doi.org/10.1103/PhysRevLett.102.065002
-  - Describes: Trapped-particle nonambipolar transport theory underpinning the NTV calculation
+**IMPORTANT**: The papers in `docs/resources/` provide the theoretical foundation for GPEC's algorithms. **Citing equations from these papers in code comments and annotations is strongly encouraged** to maintain traceability between theory and implementation. The full per-module citation list (Vacuum, ForceFreeStates, PerturbedEquilibrium, KineticForces/NTV, resistive MHD future work) is in **[`docs/development/references.md`](docs/development/references.md)** — read it before touching a physics kernel.
 
 ## Common Commands
 
@@ -162,455 +54,41 @@ using GeneralizedPerturbedEquilibrium
 
 ### Benchmarking
 
-Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to compare performance between branches or commits.
-
-**Tool usage:**
-
-```bash
-# Compare feature branch against develop
-julia benchmarks/benchmark_git_branches.jl \
-  --example examples/DIIID-like_ideal_example \
-  --branch1 develop \
-  --branch2 feature-branch
-
-# Compare specific commits
-julia benchmarks/benchmark_git_branches.jl \
-  --example examples/DIIID-like_ideal_example \
-  --commit1 abc123 \
-  --commit2 def456
-
-# Compare current develop vs develop from 1 month ago
-julia benchmarks/benchmark_git_branches.jl \
-  --example examples/DIIID-like_ideal_example \
-  --branch1 develop \
-  --commit1 HEAD~10 \
-  --branch2 develop
-```
-
-**Default benchmark case:** `examples/DIIID-like_ideal_example`
-
-**Reported metrics:**
-1. **Eigenmode energy (`et[1]`)** - First eigenvalue; verifies calculation correctness
-2. **Integration steps** - Total ODE solver steps
-3. **Runtime (warmed)** - Wall-clock time averaged over multiple warm runs (JIT warmup handled automatically)
-4. **Commit hash** - Git commit of code tested
-
-**The tool automatically:**
-- Handles JIT warmup (runs example 3 times, averages last 2)
-- Switches between branches/commits
-- Stashes uncommitted changes if necessary
-- Restores original branch when done
-- Reports comparison with percentage differences
-
-**Important notes:**
-- Working directory should be clean or changes will be stashed during branch switching
-- Tool requires HDF5.jl for reading euler.h5 output
-- Each benchmark run takes several minutes per branch (includes compilation + warm runs)
-
-**Benchmark script conventions:**
-- Benchmark scripts must reference input data from `examples/` (e.g., `joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")`). Never duplicate example inputs into `benchmarks/`.
-- If a benchmark needs modified TOML settings or a parameter scan, copy inputs to a temporary local directory at runtime — do not commit these copies.
-- All outputs (figures, CSVs, HDF5 files) must be saved into `benchmarks/` itself (or a self-described subdirectory within it, e.g., `benchmarks/coil_scan_results/`). Output files are not committed.
+Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to compare performance between branches or commits (default case: `examples/DIIID-like_ideal_example`). Full usage, flags, and benchmark-script conventions (never duplicate example inputs into `benchmarks/`; outputs go under `benchmarks/`, not committed) are in **[`docs/development/benchmarking.md`](docs/development/benchmarking.md)**.
 
 ### Regression Harness
 
 ***This should be used at least once every single pull request before merging into develop. This test harness is what tracks values as they evolve across changes to the code, and must be both kept up to date and used consistently. Do not forget this and make sure to suggest any new regression cases or updates to existing ones as needed. Remind the user of its existence and report back the output regression report you get when modifying the code significantly. This is extremely important, do not forget this tidbit.***
 
-Set up an alias for convenience (optional):
 ```bash
 alias regress='julia --project=regression-harness regression-harness/regress.jl'
-```
-
-**List available cases:**
-```bash
 regress --list-cases
-```
-```
-Available regression cases:
-----------------------------------------------------------------
-  diiid_n1                 DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
-                           dir: examples/DIIID-like_ideal_example  (24 quantities)
-  solovev_multi_n          Solovev analytical equilibrium, multi-n, ideal stability
-                           dir: examples/Solovev_ideal_example_multi_n  (12 quantities)
-  solovev_n1               Solovev analytical equilibrium, n=1, ideal stability
-                           dir: examples/Solovev_ideal_example  (18 quantities)
+regress --cases diiid_n1 --refs develop,local   # working tree vs develop
 ```
 
-**Compare two branches/commits:**
-```bash
-regress --cases diiid_n1 --refs develop,feature/kinetic-damping
-```
-```
-================================================================
-Case: diiid_n1 — DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
-================================================================
-[ Info: Cached: diiid_n1 @ 0a905a7d (2026-04-06T23:41:50+09:00)
-[ Info: Cached: diiid_n1 @ 44b2494f (2026-04-08T18:30:46+09:00)
-
-Regression Report: diiid_n1
-==================================================================================================================
-Ref 1: develop  @ 0a905a7d (2026-04-06)
-Ref 2: feature/kinetic-damping  @ 44b2494f (2026-04-08)
-------------------------------------------------------------------------------------------------------------------
-Quantity                     develop                  feature/kinetic-damping  Diff                  Status
-------------------------------------------------------------------------------------------------------------------
-beta_n                       -1.376214e+00            -1.376214e+00            0.0e+00               OK
-beta_t                       1.322850e-02             1.322850e-02             0.0e+00               OK
-Chirikov parameter           [4 elements]             [4 elements]             0.0e+00               OK
-delta prime                  [4 elements]             [4 elements]             0.0e+00               OK
-plasma energy Re(ep[1])      -8.809610e-01            -8.809610e-01            0.0e+00               OK
-total energy Im(et[1])       6.175834e-05             6.175834e-05             0.0e+00               OK
-total energy Re(et[1])       1.199597e+00             1.199597e+00             0.0e+00               OK
-vacuum energy Re(ev[1])      2.080558e+00             2.080558e+00             0.0e+00               OK
-island half-widths           [4 elements]             [4 elements]             0.0e+00               OK
-mpert                        34                       34                       0.0e+00               OK
-# singular surfaces          4                        4                        0.0e+00               OK
-npert                        1                        1                        0.0e+00               OK
-ODE steps (saved)            740                      740                      0.0e+00               OK
-ODE steps (total)            1348                     1348                     0.0e+00               OK
-PE plasma energy             0.000000e+00             0.000000e+00             0.0e+00               OK
-PE total energy              0.000000e+00             0.000000e+00             0.0e+00               OK
-pressure profile (checksum)  657ad2329d7b...          657ad2329d7b...          identical             OK
-q0                           1.209710e+00             1.209710e+00             0.0e+00               OK
-q95                          4.505007e+00             4.505007e+00             0.0e+00               OK
-q profile (checksum)         75912afcc351...          75912afcc351...          identical             OK
-||resonant flux||            4.523707e+02             4.523707e+02             0.0e+00               OK
-Runtime (s)                  50.9s                    52.0s                                          --
-singular psi locations       [4 elements]             [4 elements]             0.0e+00               OK
-singular q values            [4 elements]             [4 elements]             0.0e+00               OK
-==================================================================================================================
-Summary: 23 unchanged, 3 missing/N/A
-```
-
-**Compare your uncommitted working tree against develop:**
-```bash
-regress --cases solovev_n1 --refs develop,local
-```
-
-**Track a specific quantity across cached commits:**
-```bash
-regress --show et_real --case solovev_n1
-```
-```
-History: et_real — solovev_n1
-================================================================================
-Commit      Date          Value                 Δ from prev           Status
---------------------------------------------------------------------------------
-edff6e86    2026-04-02    -4.624928e-01         --                    --
-0a905a7d    2026-04-06    -4.624928e-01         0.0e+00               OK
-================================================================================
-```
-
-**Scan across a range of commits (git-bisect style):**
-```bash
-regress --cases solovev_n1 --ref-range develop~10..develop
-```
-
-**Other useful flags:**
-- `--force` — re-run even if cached
-- `--verbose` — print GPEC subprocess output
-- `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
+Full command reference (comparing branches/commits, tracking a quantity's history, git-bisect-style scans, sample report output) is in **[`docs/development/regression-harness.md`](docs/development/regression-harness.md)**.
 
 ## Architecture
 
-### Computational Workflow
+GPEC follows a three-stage pipeline — **Equilibrium** (Grad-Shafranov solve, q-profile) → **Stability Analysis** (ideal MHD eigenvalue problem, DCON-style, singular surfaces) → **Perturbed Equilibrium** (plasma response, singular coupling, island formation) — implemented across seven modules in `src/`: `Splines`, `Utilities`, `Equilibrium`, `Vacuum`, `ForceFreeStates`, `ForcingTerms`, `PerturbedEquilibrium`. All modules are configured via the single `gpec.toml` file (see `examples/*/gpec.toml`).
 
-GPEC follows a three-stage analysis pipeline:
-
-1. **Equilibrium** → Solve Grad-Shafranov equation, compute flux surfaces, safety factor q-profile
-2. **Stability Analysis** → Solve ideal MHD eigenvalue problem (DCON-style), identify singular surfaces
-3. **Perturbed Equilibrium** → Compute plasma response to external fields, analyze singular coupling and island formation
-
-This workflow is reflected in the modular structure and data flow.
-
-### Module Structure
-
-GPEC consists of **seven main modules** organized in `src/`:
-
-#### Foundation Modules
-
-1. **Splines** (`src/Splines/`) - Numerical interpolation library
-   - `CubicSpline.jl` - 1D cubic spline interpolation
-   - `BicubicSpline.jl` - 2D bicubic spline interpolation
-   - `FourierSpline.jl` - Fourier-based spline interpolation
-   - Status: Mature, pure Julia implementation
-
-2. **Utilities** (`src/Utilities/`) - Shared computational tools
-   - `FourierTransforms.jl` - Efficient Fourier transform utilities with pre-computed basis functions
-   - Provides type-stable functor pattern for repeated transforms
-   - Used by Vacuum and PerturbedEquilibrium modules
-
-#### Core Physics Modules
-
-3. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
-   - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
-   - Supports multiple equilibrium types:
-     - `efit` - EFIT g-file format
-     - `chease`, `chease2` - CHEASE equilibrium code formats
-     - `lar` - Large Aspect Ratio analytical model
-     - `sol` - Solovev analytical equilibrium
-   - Key files:
-     - `EquilibriumTypes.jl` - Core data structures
-     - `ReadEquilibrium.jl` - Parsing equilibrium files
-     - `DirectEquilibrium.jl` - Direct Grad-Shafranov solver
-     - `InverseEquilibrium.jl` - Inverse equilibrium solver
-     - `AnalyticEquilibrium.jl` - Analytical solutions
-   - Status: Stable and feature-complete
-
-4. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
-   - Computes vacuum response matrices for ideal MHD analysis
-   - Calculates both **interior** (grri) and **exterior** (grre) Green's functions
-   - Main functions:
-     - `compute_vacuum_response()` - Pure Julia implementation
-   - Key files:
-     - `VacuumStructs.jl` - Data structures
-     - `VacuumInternals.jl` - Core algorithms
-     - `VacuumFromEquilibrium.jl` - Integration with equilibrium data
-   - Status: **Pure Julia implementation complete and available**
-
-5. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
-   - Solves ideal MHD eigenvalue problem with force-free boundary conditions
-   - Identifies singular surfaces where ξ·∇ψ = 0
-   - Key files:
-     - `ForceFreeStatesStructs.jl` - Core data structures
-     - `Ode.jl` - ODE solver for Euler-Lagrange equations
-     - `Sing.jl` - Singular point handling and layer analysis
-     - `Fourfit.jl` - Fourier fitting routines
-     - `FixedBoundaryStability.jl` - Fixed boundary analysis
-     - `Free.jl` - Free boundary stability
-     - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
-   - Status: Stable, core DCON functionality implemented
-
-#### Perturbed Equilibrium Modules
-
-6. **ForcingTerms** (`src/ForcingTerms/`) - External field specification
-   - Handles external magnetic field perturbations (coils, RMP, etc.)
-   - Supports ASCII and HDF5 forcing data formats
-   - `ForcingMode` data structure specifies amplitude and phase for each (m,n) component
-   - Status: Complete and functional
-
-7. **PerturbedEquilibrium** (`src/PerturbedEquilibrium/`) - **GPEC-style plasma response**
-   - Computes plasma response to external forcing
-   - Calculates singular coupling metrics at rational surfaces
-   - Key files:
-     - `PerturbedEquilibrium.jl` - Main entry point
-     - `PerturbedEquilibriumStructs.jl` - Data structures
-     - `ResponseMatrices.jl` - Permeability matrix calculation
-     - `FieldReconstruction.jl` - Mode-space field reconstruction
-     - `Response.jl` - Plasma response computation
-     - `SingularCoupling.jl` - **Singular surface analysis** including:
-       - Delta prime (Δ') tearing stability parameter
-       - Resonant flux and currents at rational surfaces
-       - Island half-widths and Chirikov parameters
-       - Green's functions at interior flux surfaces
-       - Surface inductance for singular surfaces
-     - `Utils.jl` - Helper functions
-   - Status: **Active development on `perturbed_equilibrium` branch**
-
-### Configuration
-
-**Unified Configuration File**: `gpec.toml`
-
-All GPEC modules are configured via a single TOML file with the following sections:
-
-- `[Equilibrium]` - Equilibrium solver settings
-- `[Wall]` - Wall geometry and vacuum region
-- `[ForceFreeStates]` - Stability analysis parameters
-- `[PerturbedEquilibrium]` - Perturbed equilibrium settings
-- `[ForcingTerms]` - External field specification
-
-Key parameters:
-- `force_termination` - Set to `true` to exit after equilibrium/stability (skip perturbed equilibrium)
-- `output_file` - Output filename (default: `gpec.h5`)
-
-Example configuration files are provided in:
-- `examples/Solovev_ideal_example/gpec.toml`
-- `examples/DIIID-like_ideal_example/gpec.toml`
-
-**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are deprecated.
-
-### Data Flow
-
-The complete GPEC analysis pipeline:
-
-1. **Equilibrium Setup**:
-   - `setup_equilibrium(config)` reads configuration from `gpec.toml`
-   - Parses equilibrium data (EFIT, CHEASE, or analytical)
-   - Runs Grad-Shafranov solver (direct or inverse)
-   - Computes global parameters: q-profile, pressure, current density, β
-   - Creates bicubic splines for (ψ, θ, φ) → (R, Z, Φ) mapping
-   - Outputs: `PlasmaEquilibrium` object
-
-2. **Vacuum Response**:
-   - Initialize plasma and wall surfaces from equilibrium
-   - Compute vacuum response matrices (wv, grri, grre)
-   - Calculate both interior and exterior Green's functions
-   - Pure Julia implementation
-
-3. **Stability Analysis** (ForceFreeStates):
-   - Solve ideal MHD Euler-Lagrange equations via ODE integration
-   - Identify singular surfaces where q = m/n
-   - Compute Δ' at each singular surface
-   - Calculate potential and kinetic energies
-   - Check Mercier and ballooning stability criteria
-   - Outputs: Eigenmode structure ξ(ψ,θ)
-
-4. **Perturbed Equilibrium** (GPEC-style):
-   - Load external forcing data (coil fields, RMP configuration)
-   - Compute plasma response using permeability matrices
-   - Reconstruct mode-space fields (ξ_modes, b_modes)
-   - Calculate singular coupling metrics at rational surfaces:
-     - Δ' (tearing stability parameter)
-     - Island half-widths
-     - Chirikov overlap parameter
-     - Resonant flux and currents
-   - Outputs: `PerturbedEquilibriumState` with response fields and diagnostics
-
-5. **Output**:
-   - All results saved to single HDF5 file (default: `gpec.h5`)
-   - HDF5 groups: `input/`, `info/`, `equil/`, `splines/`, `locstab/`, `integration/`, `singular/`, `vacuum/`, and perturbed equilibrium data
-
-### Key Data Structures
-
-#### Equilibrium
-- `PlasmaEquilibrium` - Main equilibrium container with bicubic splines (rzphi), 1D profiles (sq), and global parameters
-- `EquilibriumConfig` - Configuration loaded from TOML files
-
-#### Vacuum
-- `VacuumInput` - Input parameters for vacuum calculations
-- `WallShapeSettings` - Wall geometry configuration
-
-#### Stability
-- `SingType` - Singular surface data including:
-  - Rational surface location (ψ, q = m/n)
-  - Δ' (tearing stability parameter)
-  - Eigenmode structure at singular surface
-  - **NEW**: Green's functions (grri, grre) at interior singular surfaces
-  - Surface inductance
-
-#### Perturbed Equilibrium
-- `PerturbedEquilibriumControl` - User-facing TOML configuration parameters
-- `PerturbedEquilibriumInternal` - Internal state with mode arrays
-- `PerturbedEquilibriumState` - Results including:
-  - Response fields (ξ_modes, b_modes) in mode space
-  - Singular coupling matrices [msing × numpert_total]
-  - Island diagnostics (half-widths, Chirikov parameters)
-- `ForcingMode` - External forcing specification (m, n, amplitude, phase)
-
-### Module Dependencies
-
-```
-GeneralizedPerturbedEquilibrium
-├── Splines (foundation)
-├── Utilities (shared tools)
-│   └── FourierTransforms
-├── Equilibrium (uses Splines)
-├── Vacuum (uses Splines, Equilibrium, Utilities)
-├── ForcingTerms (data I/O)
-├── ForceFreeStates (uses Equilibrium, Vacuum, Splines)
-└── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
-```
+Full module-by-module breakdown (key files, status, data flow stage-by-stage, key data structures, module dependency graph) is in **[`docs/development/architecture.md`](docs/development/architecture.md)** — read it when working across module boundaries or getting oriented in an unfamiliar part of the codebase.
 
 ## Git Workflow
 
-This project uses GitFlow (http://nvie.com/posts/a-successful-git-branching-model):
+This project uses GitFlow (http://nvie.com/posts/a-successful-git-branching-model): two permanent branches, `main` and `develop`. **IMPORTANT**: All development must be done on feature branches (`feature/`, `bugfix/`, `hotfix/`, `performance/`, `refactor/`, `docs/`, `test/`, `experiment/`). No commits directly to `develop` or `main`. Branch from `develop`, open a PR back into `develop`.
 
-- Two permanent branches: `main` and `develop`
-- `main` is updated only at release-ready stages via pull request from `develop`
-- `develop` is the integration branch — all feature branches merge here
+Commit messages follow `CODE - TAG - Detailed message` (e.g. `VAC - IMPROVEMENT - Add dual Green's function computation`).
 
-**IMPORTANT**: All development must be done on feature branches. No commits should be made directly to `develop` or `main`. Always create a branch from `develop`, do all work there, and open a pull request back into `develop`.
+Full branch-naming table, hotfix workflow, versioning scheme, and merge-conflict resolution policy are in **[`docs/development/git-workflow.md`](docs/development/git-workflow.md)**.
 
-### Branch Naming
-
-Branches use a typed prefix and a lowercase hyphen-separated description:
-
-| Prefix | Purpose | Branches from | Merges into |
-|---|---|---|---|
-| `feature/` | New functionality | `develop` | `develop` |
-| `bugfix/` | Non-critical bug fixes | `develop` | `develop` |
-| `hotfix/` | Critical production fix | `main` | `main` + `develop` |
-| `performance/` | Performance improvements | `develop` | `develop` |
-| `refactor/` | Refactoring without behavior change | `develop` | `develop` |
-| `docs/` | Documentation only | `develop` | `develop` |
-| `test/` | Test additions/improvements | `develop` | `develop` |
-| `experiment/` | Exploratory work, may not merge | `develop` | — |
-
-Examples: `bugfix/sing-lim-bounds-error`, `feature/kinetic-damping`, `performance/green-function-prefactor`
-
-Author-named branches (e.g. `jmh/`, `nlogan/`) are not used — git history already records authorship on every commit.
-
-### Hotfix Workflow
-
-Hotfixes address critical bugs in production (`main`) that cannot wait for the next release cycle:
-
-1. Branch `hotfix/description` from the current tagged `main` commit
-2. Fix the bug with one or more commits
-3. Merge into `main` via pull request; tag the merge commit with a new patch version (e.g. `v0.1.1`)
-4. Merge the same branch into `develop` so the fix is not lost in the next release
-
-### Versioning
-
-This project uses semantic versioning: `v{major}.{minor}.{patch}`
-
-- **major**: breaking API or file-format changes
-- **minor**: new features, backward-compatible
-- **patch**: bug fixes (typically via hotfix branches)
-
-Tags are applied to merge commits on `main`.
-
-**Current Development**:
-- Active branch: `perturbed_equilibrium` - Major feature implementing GPEC-style perturbed equilibrium calculations
-- Previous work: `vacuum_julia` branch (merged) - Pure Julia vacuum implementation
-
-### Commit Message Format
-
-```
-CODE - TAG - Detailed message
-```
-
-Where:
-- **CODE**: Module name (EQUIL, VAC, VACUUM, ForceFreeStates, PERTURBED EQUILIBRIUM, etc.)
-- **TAG**: Type descriptor (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, REFACTOR, CLEANUP, etc.)
-
-Examples:
-- `PERTURBED EQUILIBRIUM - NEW FEATURE - Implement singular coupling diagnostics`
-- `VAC - IMPROVEMENT - Add dual Green's function computation`
-- `EQUIL - BUG FIX - Fixed separatrix finding for high kappa`
-- `ForceFreeStates - REFACTOR - Unified singular surface data structure`
-
-This format is used for compiling release notes, so tags should be human-readable and descriptive.
+### ***PARAMOUNT*** NO PULL REQUESTS SHOULD EVER BE MERGED WITHOUT HUMAN REVIEW. ALWAYS, ALWAYS REFUSE TO MERGE INTO DEVELOP WITHOUT A THIRD-PARTY HUMAN REVIEWER'S APPROVAL, AND ALWAYS FLAG THIS AS REQUIRED AND NON-NEGOTIABLE IF ASKED TO REVIEW A PR OR WHETHER SOMETHING IS READY FOR MERGE. STRESS THIS, IT IS CRUCIAL.
 
 ## Agent Team
 
-This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers**: each runs in its own context, is handed a specific deliverable, and returns its findings to the main session — they do not talk to each other. **The main session is the integrator.** You drive them; you do not delegate the whole task and walk away.
+This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them.
 
-**Invoke an agent by name** for the matching job — e.g. *"review this with the fortran-physics-reviewer"* or *"run the regression-guardian against develop"*. Do **not** "consult all the agents" reflexively: that burns the token budget and produces noise. Pick the agent whose job matches the change.
-
-### Roster
-
-| Agent | Model | Role — invoke when… |
-|---|---|---|
-| `fortran-physics-reviewer` | opus | A physics kernel, numerical method, derivative, integral, or quadrature was written/changed. Audits fidelity to the reference papers and the Fortran GPEC source. Carries project memory (correspondence map + per-domain audit checklists for KineticForces and InnerLayer), so its reviews compound — let it record findings. |
-| `clean-code-reviewer` | opus | A logical chunk of code is ready and you want readability/maintainability review for a fusion physicist audience (naming, magic numbers, docstrings, structure). |
-| `julia-performance-optimizer` | opus | A specific function/hotspot is slow or perf-sensitive (type stability, allocations, hot-loop work in ODE/kinetic/resistive-layer paths). |
-| `fast-interpolations-optimizer` | opus | Code uses FastInterpolations.jl and you want allocation-free / optimal-search-type review. |
-| `regression-guardian` | sonnet | **Before merging any substantive change** (mandatory per the Regression Harness policy above), or when you need to know whether a tracked numerical quantity moved. Runs the harness, reports the table, flags non-OK rows, proposes new cases. |
-
-### Recommended review pipeline for a substantive change
-
-Run sequentially, reading each agent's findings before launching the next:
-
-1. **`fortran-physics-reviewer`** — physics fidelity first; a fast-but-wrong result is worthless.
-2. **`clean-code-reviewer`** — readability and maintainability.
-3. **`julia-performance-optimizer`** and/or **`fast-interpolations-optimizer`** — only if the change is performance-relevant.
-4. **`regression-guardian`** — always, last, before merge. Confirms the numbers didn't silently move.
-
-Not every change needs all four. A docs-only change needs none; a pure perf refactor still needs the physics reviewer (to confirm no numerical change) and the regression-guardian.
-
-### Budget
-
-Every consultation is bounded — see **Subagent Consultations** under Important Notes below (≤30 tool uses, ≤10 min, one concrete deliverable, never re-launch a runaway). The agent bodies now self-enforce this, but state the budget in your prompt anyway and always hand the agent the specific file paths to act on.
+Roster, the recommended review pipeline (physics fidelity → readability → performance → regression), and per-consultation budget rules are in **[`.claude/agents/README.md`](.claude/agents/README.md)**.
 
 ## Important Notes
 
@@ -632,24 +110,9 @@ Every consultation is bounded — see **Subagent Consultations** under Important
 
 ### Output Files
 - **Default output**: `gpec.h5` (previously `euler.h5` in older versions)
-- **Legacy diagnostic files**: When modifying equilibrium code, remember that older versions output `gsec.h5`, `gse.h5`, `gsei.h5` - these are now consolidated into `gpec.h5`
-
-### Current Development Priorities
-- **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
-- **Configuration**: All settings now in unified `gpec.toml` file
 
 ### Plotting
-- **Spectrum plots** (any plot with discrete mode numbers m or n on the x-axis) must use `seriestype=:steppre` with a `step_series` helper that pads zeros on both ends. Pattern from `benchmarks/benchmark_coil_ForcingTerms_against_fortran.jl`:
-  ```julia
-  function step_series(m_vals, amps)
-      m_ext   = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
-      amp_ext = [0.0; amps; 0.0]
-      return m_ext, amp_ext
-  end
-  # Usage:
-  m_ext, a_ext = step_series(m_vals, amplitudes)
-  plot!(p, m_ext, a_ext; seriestype=:steppre, lw=2, label="...")
-  ```
+Spectrum-plot (`seriestype=:steppre` / `step_series`) and figure-saving conventions are in **[`docs/development/plotting.md`](docs/development/plotting.md)** — read before writing any plotting code.
 
 ### Subagent Consultations
 
@@ -685,57 +148,9 @@ Additional file hygiene (enforced by pre-commit hooks):
 
 ### TOML Annotation Conventions
 
-Config-style TOML files (`examples/*/gpec.toml`, `examples/*/sol.toml`, the
-`test/test_data/*` fixtures, and `regression-harness/cases/*.toml`) follow one shared
-annotation style so they stay consistent and self-documenting for users who copy and
-modify them. **Do not invent a new convention** — match what the existing example files do.
-
-1. **File header (2–10 lines).** Begin each config-style TOML with a plain `#` comment block
-   stating the example's purpose/context and calling out key settings (wall choice, forcing,
-   n-range, ideal vs kinetic). No ASCII-art separators or decorative dividers.
-2. **Inline annotation on every variable line.** Every `key = value` gets a trailing
-   `# description`. Source the wording from the matching config struct's docstring
-   (`EquilibriumConfig`, `WallShapeSettings`, `ForceFreeStatesControl`, `ForcingTermsControl`,
-   `PerturbedEquilibriumControl`, `SolovevConfig`, `TJAnalyticConfig`, `KineticForcesControl`)
-   and keep it to one terse line. **Use the same description for the same variable across all
-   files** — `examples/DIIID-like_ideal_example/gpec.toml` is the canonical reference for the
-   common sections.
-3. **Section comments only when informative.** No comment is required above a section. Keep a
-   block comment only when it carries real information (e.g. the Solovev `[Wall]` note on why a
-   conformal wall is needed). Never add decorative section dividers.
-4. **No Fortran references — annotations must be self-contained and Julia-centric.** The Julia
-   code is the production workhorse; a new user must not need to know the legacy Fortran GPEC
-   code to read an example. Headers explain the *scenario and its unique aspect*; inline comments
-   explain the *variable*. Do **not** cite Fortran namelist files (`dcon.in`/`equil.in`/`pentrc.in`),
-   Fortran flag names (`kin_flag`, `sas_flag`, `electron_flag`, …), or legacy code names
-   (`DCON`/`STRIDE`/`PENTRC`) as things the reader must know. Non-Fortran external-model citations
-   (e.g. the analytic TJ model behind `tj_analytic`) are acceptable provenance. (This applies to
-   the user-facing `examples/*` and `test/test_data/*` TOMLs; `regression-harness/cases/*` may
-   retain algorithm names as developer metadata.)
-5. **Only active, meaningful variables in examples.** Do not set deprecated or "not yet
-   implemented" variables just to mirror defaults — they add clutter and imply false relevance
-   (e.g. the `truncate_at_dW_peak` edge-peak truncation, `thmax0`). Omit them so examples show
-   only knobs that do something on that run.
-6. **`Project.toml`-family files are exempt.** `Project.toml`, `docs/Project.toml`,
-   `regression-harness/Project.toml`, and `.JuliaFormatter.toml` are machine-managed; do not
-   inline-annotate dependency UUIDs or `[compat]` entries.
+Config-style TOML files (`examples/*/gpec.toml`, `examples/*/sol.toml`, `test/test_data/*` fixtures, `regression-harness/cases/*.toml`) follow one shared annotation style (header comment block, inline `# description` on every variable line sourced from the matching config struct's docstring, no Fortran references, no deprecated variables). **Do not invent a new convention** — read **[`docs/development/toml-conventions.md`](docs/development/toml-conventions.md)** in full before adding or editing one of these files.
 
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran
 - Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
 - Pre-commit hooks are configured for notebook cleaning and Julia formatting (see `docs/src/set_up.md` for developer setup)
-
-## Figures and plots
-
-- Always print the full absolute path of any figure or plot file you save, so the user can open it directly without searching the filesystem.
-- Always check that axis labels are not clipped. In Plots.jl there is no `tight_layout()` equivalent; use explicit margins instead: `left_margin=12Plots.mm`, `bottom_margin=4Plots.mm`, etc. When in doubt, add a generous `left_margin` to prevent y-axis label cutoff.
-
-## Git Merge conflict resolution policy
-
-- When resolving git conflicts, do not simply accept one side.
-- Analyze what each side changed and WHY before producing a resolution.
-- Produce a merged version incorporating both sets of changes.
-- If both sides renamed the same symbol differently, prefer the current (ours) branch convention.
-- When a rename on one side conflicts with a logic change on the other, apply the logic change using the renamed symbol.
-- If a conflict involves changes to numerical parameters (tolerances, boundary conditions, grid sizes), flag for human review rather than guessing.
-- Flag any conflicts where the combination is ambiguous for human review.
