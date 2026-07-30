@@ -6,15 +6,16 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/copilot-setup-steps.yml
+      - .github/workflows/copilot-setup-steps.yaml
   pull_request:
     paths:
-      - . github/workflows/copilot-setup-steps.yml
+      - .github/workflows/copilot-setup-steps.yaml
 
 jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot
   copilot-setup-steps:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     # Set the permissions to the lowest permissions possible needed for your steps
     permissions:
@@ -22,20 +23,20 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
-          version:  '1.11'
+          version: '1.11'
 
       - name: Cache Julia packages
-        uses: julia-actions/cache@v2
+        uses: julia-actions/cache@v3
         with:
           cache-name: julia-cache
           cache-packages: true
           cache-artifacts: true
           cache-registries: true
 
-      - name:  Instantiate Julia environment
+      - name: Instantiate Julia environment
         run: julia --project="." -e "using Pkg; Pkg.instantiate()"

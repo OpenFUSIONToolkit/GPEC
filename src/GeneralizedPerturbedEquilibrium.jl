@@ -59,7 +59,7 @@ using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry")
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -172,7 +172,91 @@ function main_from_inputs(
     ffs_table = inputs["ForceFreeStates"]
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
+
+    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified").
+    # Validated before equilibrium formation: the two-pass grid refinement needs the
+    # n range to pin rational-surface knots.
+    if ctrl.nn_low == 0 && ctrl.nn_high == 0
+        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
+    elseif ctrl.nn_low == 0
+        ctrl.nn_low = ctrl.nn_high
+    elseif ctrl.nn_high == 0
+        ctrl.nn_high = ctrl.nn_low
+    end
+    if ctrl.nn_low > ctrl.nn_high
+        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
+    end
+    # checks for negative n
+    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
+    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
+    if ctrl.nn_high < 1
+        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
+              "n < 1 modes are not supported")
+    end
+    if ctrl.nn_low < 1
+        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
+        ctrl.nn_low = 1
+    end
+    intr.nlow = ctrl.nn_low
+    intr.nhigh = ctrl.nn_high
+    intr.npert = intr.nhigh - intr.nlow + 1
+    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
+
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
+
+    # Build KineticForces control and load kinetic profiles once — reused by the grid
+    # refinement below, the stability kinetic callback (via `calculated_cb`), and the
+    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in stability
+    # does not need kinetic_profiles, but the post-PE block always does, so we load
+    # whenever a [KineticForces] section is present or the stability path requests the
+    # calculated source. psio is invariant across grid re-formation.
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
+        KineticForces.KineticForcesControl(;
+            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
+        KineticForces.KineticForcesControl()
+
+    kinetic_profiles = nothing
+    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+    if needs_kinetic_profiles
+        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
+        kinetic_profiles = Equilibrium.load_kinetic_profiles(
+            kinetic_file;
+            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
+            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+            chi1=2π * equil.psio)
+    end
+
+    # Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry,
+    # kinetic profiles), pin knots on rational surfaces, and re-form on the refined grid
+    # from the in-memory input — no file re-read.
+    if Equilibrium.wants_two_pass(eq_config)
+        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
+        psi_nodes = Equilibrium.refined_psi_grid(equil;
+            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory)
+        rerun_input = if additional_input !== nothing
+            # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
+            # path re-runs read_imas, which must resolve the same psihigh both passes;
+            # _validate_psi_nodes errors loudly if it does not.
+            additional_input
+        elseif equil.ingest isa Equilibrium.DirectIngest
+            Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
+        elseif equil.ingest isa Equilibrium.InverseIngest
+            Equilibrium.build_inverse_from_ingest(eq_config, equil.ingest)
+        else
+            nothing  # fall back to re-reading the input file
+        end
+        equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory)
+        if implied > 1.5 * (length(psi_nodes) - 1)
+            @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
+                  "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
+        end
+        @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$nstring)"
+    end
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -254,33 +338,6 @@ function main_from_inputs(
     # Fit data to splines
     intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
 
-    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
-    if ctrl.nn_low == 0 && ctrl.nn_high == 0
-        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
-    elseif ctrl.nn_low == 0
-        ctrl.nn_low = ctrl.nn_high
-    elseif ctrl.nn_high == 0
-        ctrl.nn_high = ctrl.nn_low
-    end
-    if ctrl.nn_low > ctrl.nn_high
-        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
-    end
-    # checks for negative n
-    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
-    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
-    if ctrl.nn_high < 1
-        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
-              "n < 1 modes are not supported")
-    end
-    if ctrl.nn_low < 1
-        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
-        ctrl.nn_low = 1
-    end
-    intr.nlow = ctrl.nn_low
-    intr.nhigh = ctrl.nn_high
-    intr.npert = intr.nhigh - intr.nlow + 1
-    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
-
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
@@ -312,10 +369,7 @@ function main_from_inputs(
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
-    if ctrl.cyl_flag
-        intr.mlow = ctrl.delta_mlow
-        intr.mhigh = ctrl.delta_mhigh
-    elseif ctrl.sing_start == 0
+    if ctrl.sing_start == 0
         intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
@@ -329,91 +383,55 @@ function main_from_inputs(
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
 
-    # Build KineticForces control and load kinetic profiles once — reused by
-    # both the stability kinetic callback (via `calculated_cb` below) and the
-    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in
-    # stability does not need kinetic_profiles, but the post-PE block always
-    # does, so we load whenever a [KineticForces] section is present or the
-    # stability path requests the calculated source.
-    kf_ctrl =
-        haskey(inputs, "KineticForces") ?
-        KineticForces.KineticForcesControl(;
-            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
-        KineticForces.KineticForcesControl()
-
-    kinetic_profiles = nothing
-    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
-    if needs_kinetic_profiles
-        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
-        kinetic_profiles = Equilibrium.load_kinetic_profiles(
-            kinetic_file;
-            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
-            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
-            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
-            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
-            chi1=2π * equil.psio)
+    # Fit equilibrium quantities to Fourier-spline functions.
+    if ctrl.verbose
+        @info "Run parameters:\n" *
+              "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
+              "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+              "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+              "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
+              "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
     end
 
-    # Fit equilibrium quantities to Fourier-spline functions.
-    if ctrl.mat_flag || ctrl.ode_flag
+    # Compute metric tensor
+    metric = make_metric(equil, intr.mpert)
+
+    if ctrl.verbose
+        @info "Computing F, G, and K matrices"
+    end
+
+    # Compute matrices and populate FourFitVars struct
+    ffit = make_matrix(equil, intr, metric)
+
+    if ctrl.kinetic_factor > 0
         if ctrl.verbose
-            @info "Run parameters:\n" *
-                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
-                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
-                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
-                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
+            @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
         end
+        # Inject the KineticForces callback so the "calculated" source can
+        # invoke compute_calculated_kinetic_matrices without ForceFreeStates
+        # importing KineticForces (which would invert the load order).
+        calculated_cb = (c, e, i, m, f) ->
+            KineticForces.compute_calculated_kinetic_matrices(
+                c, e, i, m, f;
+                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
+        make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+            calculated_source=calculated_cb)
 
-        # Compute metric tensor
-        metric = make_metric(equil, intr.mpert)
-
-        if ctrl.verbose
-            @info "Computing F, G, and K matrices"
+        # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
+        # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
+        # singfac_min == 0 preserves single-chunk behavior.
+        if ctrl.singfac_min > 0
+            find_kinetic_singular_surfaces!(ffit, equil, intr)
         end
-
-        # Compute matrices and populate FourFitVars struct
-        ffit = make_matrix(equil, intr, metric)
-
-        if ctrl.kinetic_factor > 0
-            if ctrl.verbose
-                @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
-            end
-            # Inject the KineticForces callback so the "calculated" source can
-            # invoke compute_calculated_kinetic_matrices without ForceFreeStates
-            # importing KineticForces (which would invert the load order).
-            calculated_cb = (c, e, i, m, f) ->
-                KineticForces.compute_calculated_kinetic_matrices(
-                    c, e, i, m, f;
-                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
-            make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
-                calculated_source=calculated_cb)
-
-            # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
-            # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
-            # singfac_min == 0 preserves single-chunk behavior.
-            if ctrl.ode_flag && ctrl.singfac_min > 0
-                find_kinetic_singular_surfaces!(ffit, equil, intr)
-            end
-        end
-
-        # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during
-        # singular surface crossings in cross_ideal_singular_surf!. This makes it clear that
-        # asymptotics are only needed for ideal ForceFreeStates and are not inherent properties of
-        # the singular surface.
-
     end
 
     # Integrate Euler-Lagrange Equation
-    if ctrl.ode_flag
-        if ctrl.verbose
-            @info "Integrating Euler-Lagrange equation"
-        end
-        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
-        if odet.nzero > 0 && ctrl.verbose
-            @warn "Fixed-boundary mode unstable for n = $nstring"
-        end
+    if ctrl.verbose
+        @info "Integrating Euler-Lagrange equation"
+    end
+    odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
+    if odet.nzero > 0 && ctrl.verbose
+        @warn "Fixed-boundary mode unstable for n = $nstring"
     end
 
     # Compute free boundary energies
@@ -450,7 +468,6 @@ function main_from_inputs(
     gal_data = nothing
     if ctrl.gal_flag
         gal_start = time()
-        ctrl.mat_flag || error("gal_flag=true requires mat_flag=true (needs the F/G/K matrix splines)")
         gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
         @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     end
@@ -717,7 +734,6 @@ function write_outputs_to_HDF5(
         out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
 
         # Write integration data
-        # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
         out_h5["integration/nstep"] = odet.step            # Number of saved solution snapshots
         out_h5["integration/nstep_total"] = odet.total_steps  # Total ODE solver steps taken
         out_h5["integration/psi"] = odet.psi_store
@@ -729,21 +745,16 @@ function write_outputs_to_HDF5(
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
-        # Root-area-weighted (Φ-space) energies are the default — they are Jacobian-
-        # invariant. The ξ-space values sit under EdgeScan/XiNorm/ and are retained for
-        # benchmarking against the Fortran GPEC lineage.
+        # Generalized (W, N) pencil energies — power-normalized, Jacobian-invariant; these are
+        # the values findmax_dW_edge! uses to choose the truncation point.
         if !isempty(odet.edge_scan.psi)
             es = odet.edge_scan
             out_h5["EdgeScan/psi"] = es.psi
             out_h5["EdgeScan/q"] = es.q
-            out_h5["EdgeScan/total_energy"] = es.rootA_total_eigenvalue
-            out_h5["EdgeScan/plasma_energy"] = es.rootA_plasma_energy
-            out_h5["EdgeScan/vacuum_energy"] = es.rootA_vacuum_energy
-            out_h5["EdgeScan/vacuum_eigenvalue"] = es.rootA_vacuum_eigenvalue
-            out_h5["EdgeScan/XiNorm/total_energy"] = es.total_eigenvalue
-            out_h5["EdgeScan/XiNorm/plasma_energy"] = es.plasma_energy
-            out_h5["EdgeScan/XiNorm/vacuum_energy"] = es.vacuum_energy
-            out_h5["EdgeScan/XiNorm/vacuum_eigenvalue"] = es.vacuum_eigenvalue
+            out_h5["EdgeScan/total_energy"] = es.total_eigenvalue
+            out_h5["EdgeScan/plasma_energy"] = es.plasma_energy
+            out_h5["EdgeScan/vacuum_energy"] = es.vacuum_energy
+            out_h5["EdgeScan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
         end
 
         # Write singular surface data
@@ -795,27 +806,20 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
 
-        # Write free-boundary stability data. Root-area-weighted (Φ-space) is the
-        # default — Jacobian-invariant. ξ-space counterparts sit under
-        # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
-        # W_freeboundary_eigenmodes holds the eigenvector matrix of W_freeboundary with
-        # columns sorted most-unstable first; the same phase normalization is applied in
-        # both spaces (largest-magnitude entry made real-positive).
-        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.rootA_wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.rootA_wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.rootA_wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.rootA_wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.rootA_et : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.rootA_ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.rootA_ev : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
-        out_h5["FreeBoundaryStability/XiNorm/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
+        # Write free-boundary stability data. The eigenmode energies are the generalized
+        # eigenvalues of the pencil (W, N) with N the power-normalization (surface-norm) matrix:
+        # power-normalized mode energies (⟨|ξ|²⟩ = 1 metric) that are invariant to the choice of
+        # working (Jacobian) coordinate. W_freeboundary_eigenmodes holds the generalized
+        # eigenvectors, columns sorted most-unstable first, normalized to unit power norm with
+        # the largest-magnitude entry made real-positive.
+        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
+        out_h5["FreeBoundaryStability/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
 
         # Cartesian surface point clouds used downstream for visualisation and
         # perturbed-equilibrium plotting.
@@ -832,8 +836,8 @@ function write_outputs_to_HDF5(
             out_h5["kinetic/kinetic_factor"] = ctrl.kinetic_factor
         end
 
-        # Write fundamental matrices on the ψ grid when mat_flag is enabled
-        if ctrl.mat_flag && ffit !== nothing
+        # Write fundamental matrices on the ψ grid
+        if ffit !== nothing
             xs = equil.rzphi_xs
             npsi = length(xs)
             np = intr.numpert_total

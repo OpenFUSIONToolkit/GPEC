@@ -41,6 +41,7 @@ import ..Utilities
 
 # Supporting data structures and utilities
 include("KineticForcesStructs.jl")
+include("Utils.jl")
 include("Output.jl")
 
 # Core library functions

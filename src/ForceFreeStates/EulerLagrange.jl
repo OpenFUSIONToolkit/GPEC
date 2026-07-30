@@ -678,7 +678,7 @@ function cross_kinetic_singular_surf!(
     ksurf = intr.kinsing[ising]
     dpsi = ksurf.psifac - odet.psifac
 
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, 0))
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
@@ -941,9 +941,6 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
-    # Pre-compute sqrtamat + jarea spline for root-area-weighted eigenvalues
-    es.sqrtamat_spline = free_compute_sqrtamat_spline(ctrl, equil, intr)
-
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
     # Steps where free_compute_total hits a singular wp solve are left as NaN per the EdgeScanState contract.
     for j in 1:N_edge
@@ -956,10 +953,6 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
             es.plasma_energy[j] = result.plasma_energy
             es.vacuum_energy[j] = result.vacuum_energy
             es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
-            es.rootA_total_eigenvalue[j] = result.rootA_total_eigenvalue
-            es.rootA_plasma_energy[j] = result.rootA_plasma_energy
-            es.rootA_vacuum_energy[j] = result.rootA_vacuum_energy
-            es.rootA_vacuum_eigenvalue[j] = result.rootA_vacuum_eigenvalue
         catch e
             e isa LinearAlgebra.SingularException || rethrow()
         end
