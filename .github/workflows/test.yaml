@@ -15,10 +15,74 @@ permissions:
   actions: write
   contents: read
 
+concurrency:
+  # One in-flight run per branch/PR. Superseded pull request runs are cancelled;
+  # runs on main/develop are allowed to finish so every merged commit is verified.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Detect Julia changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      julia: ${{ steps.filter.outputs.julia }}
+    steps:
+      - name: Check whether the pull request touches Julia code
+        id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Pushes to main/develop always run: every merged commit gets verified.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "julia=true" >> "$GITHUB_OUTPUT"
+            echo "Not a pull request — running the full test suite." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          files=$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
+
+          # Directories whose Julia sources are not exercised by test/runtests.jl.
+          not_tested='^(docs|benchmarks|regression-harness)/'
+          # Everything the test suite actually reads: sources, tests and their
+          # fixtures, the example decks the tests run end-to-end, and this workflow.
+          tested='(\.jl$|^Project\.toml$|^test/|^examples/|^\.github/workflows/test\.yaml$)'
+
+          relevant=$(printf '%s\n' "$files" | grep -Ev "$not_tested" | grep -E "$tested" || true)
+
+          {
+            echo "### Julia change detection"
+            echo
+            if [ -n "$relevant" ]; then
+              echo "Running the test suite. Matched files:"
+              echo '```'
+              echo "$relevant"
+              echo '```'
+            else
+              echo "No Julia code, test data or example decks changed — skipping the test suite."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$relevant" ]; then
+            echo "julia=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "julia=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.julia == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -45,3 +109,25 @@ jobs:
 
       - name: Run tests
         uses: julia-actions/julia-runtest@v1
+
+  # Stable check that is present on every pull request, whether or not the suite
+  # ran. Point branch protection at this job so skipped runs do not block merges.
+  test-status:
+    name: Tests
+    needs: [changes, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report suite result
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Change detection failed; cannot tell whether tests were needed."
+            exit 1
+          fi
+          case "${{ needs.test.result }}" in
+            success) echo "Test suite passed." ;;
+            skipped) echo "No Julia code changed; test suite intentionally skipped." ;;
+            *)       echo "Test suite result: ${{ needs.test.result }}"; exit 1 ;;
+          esac
