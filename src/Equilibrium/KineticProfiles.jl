@@ -267,7 +267,8 @@ function load_kinetic_profiles(kinetic_file::AbstractString;
         z = n_e > 0 ? zimp - (n_i / n_e) * zi * (zimp - zi) : Float64(zimp)
         zpitch = 1.0 + (1.0 + mimp) / (2.0 * mimp) * zimp * (z - 1.0) / (zimp - z)
 
-        ll = 17.3 - 0.5 * log10(n_e / 1.0e20) + 1.5 * log10(T_e / 1.602e-16)
+        # Coulomb logarithm (NRL formulary form), natural log; n_e in 1e20 m^-3, T_e in keV.
+        ll = 17.3 - 0.5 * log(n_e / 1.0e20) + 1.5 * log(T_e / 1.602e-16)
         loglam[i] = ll
 
         nui[i] = T_i > 0 ?
