@@ -55,9 +55,9 @@ import GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibriumModes
 # ─── Argument parsing ────────────────────────────────────────────────────────
 
 function parse_args(args)
-    fortran_dir     = ""
-    do_plot         = false
-    skip_run        = false
+    fortran_dir = ""
+    do_plot = false
+    skip_run = false
     use_file_forcing = false
     i = 1
     while i <= length(args)
@@ -78,7 +78,7 @@ function parse_args(args)
     isempty(fortran_dir) && error(
         "Usage: benchmark_fortran.jl <fortran_dir> [--plot] [--skip-run] [--use-file-forcing]")
     return (fortran_dir=abspath(fortran_dir), do_plot=do_plot,
-            skip_run=skip_run, use_file_forcing=use_file_forcing)
+        skip_run=skip_run, use_file_forcing=use_file_forcing)
 end
 
 # ─── Fortran namelist parsing ─────────────────────────────────────────────────
@@ -109,7 +109,7 @@ end
 
 function _find_indexed2_float(text::String, name::String, i::Int, j::Int; default=nothing)
     m = match(Regex(
-        "\\b$(name)\\s*\\(\\s*$(i)\\s*,\\s*$(j)\\s*\\)\\s*=\\s*([+-]?[\\d.]+(?:[eE][+-]?\\d+)?)", "i"),
+            "\\b$(name)\\s*\\(\\s*$(i)\\s*,\\s*$(j)\\s*\\)\\s*=\\s*([+-]?[\\d.]+(?:[eE][+-]?\\d+)?)", "i"),
         text)
     isnothing(m) ? default : parse(Float64, m.captures[1])
 end
@@ -140,34 +140,34 @@ struct FortranRunParams
 end
 
 function parse_fortran_run(dir::String)
-    eq_text   = _strip_fortran_comments(read(joinpath(dir, "equil.in"), String))
-    dcon_text = _strip_fortran_comments(read(joinpath(dir, "dcon.in"),  String))
+    eq_text = _strip_fortran_comments(read(joinpath(dir, "equil.in"), String))
+    dcon_text = _strip_fortran_comments(read(joinpath(dir, "dcon.in"), String))
     coil_text = isfile(joinpath(dir, "coil.in")) ?
-        _strip_fortran_comments(read(joinpath(dir, "coil.in"), String)) : ""
+                _strip_fortran_comments(read(joinpath(dir, "coil.in"), String)) : ""
 
-    eq_type   = _find_string(eq_text, "eq_type";   default="efit")
-    eq_file   = _find_string(eq_text, "eq_filename"; default="")
-    jac_type  = _find_string(eq_text, "jac_type";  default="hamada")
+    eq_type = _find_string(eq_text, "eq_type"; default="efit")
+    eq_file = _find_string(eq_text, "eq_filename"; default="")
+    jac_type = _find_string(eq_text, "jac_type"; default="hamada")
     grid_type = _find_string(eq_text, "grid_type"; default="ldp")
-    psilow    = _find_scalar(eq_text, "psilow";    default=1e-4)
-    psihigh   = _find_scalar(eq_text, "psihigh";   default=0.993)
-    mpsi      = _find_int(eq_text,    "mpsi";      default=128)
-    mtheta_eq = _find_int(eq_text,    "mtheta";    default=256)
+    psilow = _find_scalar(eq_text, "psilow"; default=1e-4)
+    psihigh = _find_scalar(eq_text, "psihigh"; default=0.993)
+    mpsi = _find_int(eq_text, "mpsi"; default=128)
+    mtheta_eq = _find_int(eq_text, "mtheta"; default=256)
 
-    nn          = _find_int(dcon_text, "nn";           default=1)
-    delta_mlow  = _find_int(dcon_text, "delta_mlow";  default=8)
+    nn = _find_int(dcon_text, "nn"; default=1)
+    delta_mlow = _find_int(dcon_text, "delta_mlow"; default=8)
     delta_mhigh = _find_int(dcon_text, "delta_mhigh"; default=8)
-    dmlim       = _find_scalar(dcon_text, "dmlim";    default=0.2)
-    qlow        = _find_scalar(dcon_text, "qlow";     default=1.02)
-    psiedge     = _find_scalar(dcon_text, "psiedge";  default=1.0)
+    dmlim = _find_scalar(dcon_text, "dmlim"; default=0.2)
+    qlow = _find_scalar(dcon_text, "qlow"; default=1.02)
+    psiedge = _find_scalar(dcon_text, "psiedge"; default=1.0)
     euler_stride = _find_int(dcon_text, "euler_stride"; default=1)
 
-    mtheta_coil = _find_int(coil_text, "cmtheta";  default=480)
-    nzeta_coil  = _find_int(coil_text, "cmzeta";   default=40)
-    machine     = _find_string(coil_text, "machine"; default="d3d")
-    coil_num    = _find_int(coil_text, "coil_num"; default=0)
+    mtheta_coil = _find_int(coil_text, "cmtheta"; default=480)
+    nzeta_coil = _find_int(coil_text, "cmzeta"; default=40)
+    machine = _find_string(coil_text, "machine"; default="d3d")
+    coil_num = _find_int(coil_text, "coil_num"; default=0)
 
-    coil_names    = String[]
+    coil_names = String[]
     coil_currents = Vector{Float64}[]
     for ci in 1:coil_num
         name = _find_indexed_string(coil_text, "coil_name", ci; default="coil$ci")
@@ -189,11 +189,11 @@ end
 # ─── Load Fortran NC outputs ─────────────────────────────────────────────────
 
 function load_fortran_outputs(fortran_dir::String, nn::Int)
-    dcon_file    = joinpath(fortran_dir, "dcon_output_n$(nn).nc")
+    dcon_file = joinpath(fortran_dir, "dcon_output_n$(nn).nc")
     profile_file = joinpath(fortran_dir, "gpec_profile_output_n$(nn).nc")
     control_file = joinpath(fortran_dir, "gpec_control_output_n$(nn).nc")
 
-    isfile(dcon_file)    || error("Not found: $dcon_file")
+    isfile(dcon_file) || error("Not found: $dcon_file")
     isfile(profile_file) || error("Not found: $profile_file")
     isfile(control_file) || error("Not found: $control_file")
 
@@ -201,16 +201,16 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
 
     NCDataset(dcon_file, "r") do ds
         fort["psilim"] = Float64(ds.attrib["psilim"])
-        fort["qlim"]   = Float64(ds.attrib["qlim"])
-        fort["mlow"]   = Int(ds.attrib["mlow"])
-        fort["mhigh"]  = Int(ds.attrib["mhigh"])
-        fort["mpert"]  = Int(ds.attrib["mpert"])
+        fort["qlim"] = Float64(ds.attrib["qlim"])
+        fort["mlow"] = Int(ds.attrib["mlow"])
+        fort["mhigh"] = Int(ds.attrib["mhigh"])
+        fort["mpert"] = Int(ds.attrib["mpert"])
 
         fort["psi_n_dcon"] = Float64.(ds["psi_n"][:])
-        fort["q_dcon"]     = Float64.(ds["q"][:])
-        fort["di"]         = Float64.(ds["di"][:])
-        fort["dr"]         = Float64.(ds["dr"][:])
-        fort["m_vals"]     = Int.(ds["m"][:])
+        fort["q_dcon"] = Float64.(ds["q"][:])
+        fort["di"] = Float64.(ds["di"][:])
+        fort["dr"] = Float64.(ds["dr"][:])
+        fort["m_vals"] = Int.(ds["m"][:])
 
         wt_ev = Float64.(ds["W_t_eigenvalue"][:, :])
         fort["W_t_eigenvalue"] = complex.(wt_ev[:, 1], wt_ev[:, 2])
@@ -218,7 +218,7 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
 
     NCDataset(profile_file, "r") do ds
         fort["psi_n_rational"] = Float64.(ds["psi_n_rational"][:])
-        fort["q_rational"]     = Float64.(ds["q_rational"][:])
+        fort["q_rational"] = Float64.(ds["q_rational"][:])
 
         phi_res = Float64.(ds["Phi_res"][:, :])
         fort["Phi_res"] = complex.(phi_res[:, 1], phi_res[:, 2])
@@ -237,7 +237,7 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
 
         # radial profiles vs psi for all modes
         fort["psi_n_prof"] = Float64.(ds["psi_n"][:])
-        fort["m_out"]      = Int.(ds["m_out"][:])
+        fort["m_out"] = Int.(ds["m_out"][:])
         b_n_raw = Float64.(ds["b_n"][:, :, :])
         fort["b_n"] = complex.(b_n_raw[:, :, 1], b_n_raw[:, :, 2])
         jbgp_raw = Float64.(ds["Jbgradpsi"][:, :, :])
@@ -265,13 +265,13 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
     NCDataset(control_file, "r") do ds
         # Phi_coil: NC dim (i=2, coil_index=ncoil, m=mpert)
         phi_coil = Float64.(ds["Phi_coil"][:, :, :])
-        amp_real = dropdims(sum(phi_coil[:, :, 1], dims=2), dims=2)
-        amp_imag = dropdims(sum(phi_coil[:, :, 2], dims=2), dims=2)
+        amp_real = dropdims(sum(phi_coil[:, :, 1]; dims=2); dims=2)
+        amp_imag = dropdims(sum(phi_coil[:, :, 2]; dims=2); dims=2)
         fort["Phi_coil_amp"] = complex.(amp_real, amp_imag)
 
         phi_x = Float64.(ds["Phi_x"][:, :])
         fort["Phi_x_amp"] = abs.(complex.(phi_x[:, 1], phi_x[:, 2]))
-        fort["Phi_x"]     = complex.(phi_x[:, 1], phi_x[:, 2])
+        fort["Phi_x"] = complex.(phi_x[:, 1], phi_x[:, 2])
 
         phi_tot = Float64.(ds["Phi"][:, :])
         fort["Phi_tot"] = complex.(phi_tot[:, 1], phi_tot[:, 2])
@@ -295,7 +295,7 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
         if haskey(ds, "xi_r")
             ntheta = length(ds["theta_dcon"]) - 1  # drop duplicate endpoint
             for (key, nc_var) in [("xi_r_fun", "xi_r"), ("xi_z_fun", "xi_z"), ("xi_phi_fun", "xi_phi"),
-                                  ("b_r_fun",  "b_r"),  ("b_z_fun",  "b_z"),  ("b_phi_fun",  "b_phi")]
+                ("b_r_fun", "b_r"), ("b_z_fun", "b_z"), ("b_phi_fun", "b_phi")]
                 raw = Float64.(ds[nc_var][:, :, :])  # (psi, theta+1, 2)
                 fort[key] = complex.(raw[:, 1:ntheta, 1], raw[:, 1:ntheta, 2])
             end
@@ -313,50 +313,50 @@ function load_julia_outputs(h5_path::String)
     julia = Dict{String,Any}()
     h5open(h5_path, "r") do f
         julia["psilim"] = read(f, "info/psilim")
-        julia["qlim"]   = read(f, "info/qlim")
-        julia["et"]     = read(f, "vacuum/et")
-        julia["psi_q"]  = read(f, "splines/profiles/xs")
-        julia["q"]      = read(f, "splines/profiles/q")
-        julia["di"]     = haskey(f, "locstab/di") ? read(f, "locstab/di") : Float64[]
-        julia["dr"]     = haskey(f, "locstab/dr") ? read(f, "locstab/dr") : Float64[]
+        julia["qlim"] = read(f, "info/qlim")
+        julia["et"] = read(f, "vacuum/et")
+        julia["psi_q"] = read(f, "splines/profiles/xs")
+        julia["q"] = read(f, "splines/profiles/q")
+        julia["di"] = haskey(f, "locstab/di") ? read(f, "locstab/di") : Float64[]
+        julia["dr"] = haskey(f, "locstab/dr") ? read(f, "locstab/dr") : Float64[]
 
         julia["psio"] = haskey(f, "equil/psio") ? read(f, "equil/psio") : NaN
 
         sc = "perturbed_equilibrium/singular_coupling"
-        julia["rational_psi"]       = haskey(f, "$sc/rational_psi")       ? read(f, "$sc/rational_psi")       : Float64[]
-        julia["rational_q"]         = haskey(f, "$sc/rational_q")         ? read(f, "$sc/rational_q")         : Float64[]
-        julia["rational_n"]         = haskey(f, "$sc/rational_n")         ? read(f, "$sc/rational_n")         : Int[]
-        julia["rational_m_res"]     = haskey(f, "$sc/rational_m_res")     ? read(f, "$sc/rational_m_res")     : Int[]
-        julia["resonant_area_weighted_field"]     = haskey(f, "$sc/resonant_area_weighted_field")     ? read(f, "$sc/resonant_area_weighted_field")     : ComplexF64[]
-        julia["resonant_current"]   = haskey(f, "$sc/resonant_current")   ? read(f, "$sc/resonant_current")   : ComplexF64[]
-        julia["island_half_width"]  = haskey(f, "$sc/island_half_width")  ? read(f, "$sc/island_half_width")  : Float64[]
+        julia["rational_psi"] = haskey(f, "$sc/rational_psi") ? read(f, "$sc/rational_psi") : Float64[]
+        julia["rational_q"] = haskey(f, "$sc/rational_q") ? read(f, "$sc/rational_q") : Float64[]
+        julia["rational_n"] = haskey(f, "$sc/rational_n") ? read(f, "$sc/rational_n") : Int[]
+        julia["rational_m_res"] = haskey(f, "$sc/rational_m_res") ? read(f, "$sc/rational_m_res") : Int[]
+        julia["resonant_area_weighted_field"] = haskey(f, "$sc/resonant_area_weighted_field") ? read(f, "$sc/resonant_area_weighted_field") : ComplexF64[]
+        julia["resonant_current"] = haskey(f, "$sc/resonant_current") ? read(f, "$sc/resonant_current") : ComplexF64[]
+        julia["island_half_width"] = haskey(f, "$sc/island_half_width") ? read(f, "$sc/island_half_width") : Float64[]
         julia["chirikov_parameter"] = haskey(f, "$sc/chirikov_parameter") ? read(f, "$sc/chirikov_parameter") : Float64[]
-        julia["delta_prime"]        = haskey(f, "$sc/delta_prime")        ? read(f, "$sc/delta_prime")        : ComplexF64[]
+        julia["delta_prime"] = haskey(f, "$sc/delta_prime") ? read(f, "$sc/delta_prime") : ComplexF64[]
 
         pe = "perturbed_equilibrium"
         # Fortran Phi_x/Phi_tot are the area-weighted field b̄ (tesla), matching forcing/response_b_area directly.
-        julia["forcing_vec"]  = haskey(f, "$pe/forcing_b_area")  ? read(f, "$pe/forcing_b_area")  : ComplexF64[]   # Phi_x   = b̄_x
+        julia["forcing_vec"] = haskey(f, "$pe/forcing_b_area") ? read(f, "$pe/forcing_b_area") : ComplexF64[]   # Phi_x   = b̄_x
         julia["response_vec"] = haskey(f, "$pe/response_b_area") ? read(f, "$pe/response_b_area") : ComplexF64[]   # Phi_tot = b̄_tot
-        julia["b_n"]          = haskey(f, "$pe/response/b_n")        ? read(f, "$pe/response/b_n")        : Matrix{ComplexF64}(undef, 0, 0)
-        julia["Jbgradpsi"]    = haskey(f, "$pe/response/b_psi_area_weighted") ? read(f, "$pe/response/b_psi_area_weighted") : Matrix{ComplexF64}(undef, 0, 0)
-        julia["xi_psi"]       = haskey(f, "$pe/response/xi_psi")     ? read(f, "$pe/response/xi_psi")     : Matrix{ComplexF64}(undef, 0, 0)
-        julia["xi_n"]         = haskey(f, "$pe/response/xi_n")       ? read(f, "$pe/response/xi_n")       : Matrix{ComplexF64}(undef, 0, 0)
-        julia["clebsch_psi1"] = haskey(f, "$pe/response/clebsch_psi1")  ? read(f, "$pe/response/clebsch_psi1")  : Matrix{ComplexF64}(undef, 0, 0)
-        julia["clebsch_alpha"]= haskey(f, "$pe/response/clebsch_alpha") ? read(f, "$pe/response/clebsch_alpha") : Matrix{ComplexF64}(undef, 0, 0)
-        julia["psi_grid"]     = haskey(f, "integration/psi")    ? read(f, "integration/psi")    : Float64[]
+        julia["b_n"] = haskey(f, "$pe/response/b_n") ? read(f, "$pe/response/b_n") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["Jbgradpsi"] = haskey(f, "$pe/response/b_psi_area_weighted") ? read(f, "$pe/response/b_psi_area_weighted") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["xi_psi"] = haskey(f, "$pe/response/xi_psi") ? read(f, "$pe/response/xi_psi") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["xi_n"] = haskey(f, "$pe/response/xi_n") ? read(f, "$pe/response/xi_n") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_psi1"] = haskey(f, "$pe/response/clebsch_psi1") ? read(f, "$pe/response/clebsch_psi1") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_alpha"] = haskey(f, "$pe/response/clebsch_alpha") ? read(f, "$pe/response/clebsch_alpha") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["psi_grid"] = haskey(f, "integration/psi") ? read(f, "integration/psi") : Float64[]
 
         # R,Z,φ: loaded via modes_to_theta helper below (not raw modes)
         julia["h5_path"] = h5_path  # stash for modes_to_theta
         # mn_index[:, 1] = m values, mn_index[:, 2] = n values for each mode index
-        julia["m_modes"]      = haskey(f, "info/mn_index") ? Int.(read(f, "info/mn_index")[:, 1]) : Int[]
+        julia["m_modes"] = haskey(f, "info/mn_index") ? Int.(read(f, "info/mn_index")[:, 1]) : Int[]
 
         # Control surface matrices
         rm = "$pe/response_matrices"
-        julia["permeability"]       = haskey(f, "$rm/permeability")       ? read(f, "$rm/permeability")       : Matrix{ComplexF64}(undef, 0, 0)
-        julia["plasma_inductance"]  = haskey(f, "$rm/plasma_inductance")  ? read(f, "$rm/plasma_inductance")  : Matrix{ComplexF64}(undef, 0, 0)
+        julia["permeability"] = haskey(f, "$rm/permeability") ? read(f, "$rm/permeability") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["plasma_inductance"] = haskey(f, "$rm/plasma_inductance") ? read(f, "$rm/plasma_inductance") : Matrix{ComplexF64}(undef, 0, 0)
         julia["surface_inductance"] = haskey(f, "$rm/surface_inductance") ? read(f, "$rm/surface_inductance") : Matrix{ComplexF64}(undef, 0, 0)
-        julia["reluctance"]         = haskey(f, "$rm/reluctance")         ? read(f, "$rm/reluctance")         : Matrix{ComplexF64}(undef, 0, 0)
-        julia["wt0"]                = haskey(f, "vacuum/wt0")             ? read(f, "vacuum/wt0")             : Matrix{ComplexF64}(undef, 0, 0)
+        julia["reluctance"] = haskey(f, "$rm/reluctance") ? read(f, "$rm/reluctance") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["wt0"] = haskey(f, "vacuum/wt0") ? read(f, "vacuum/wt0") : Matrix{ComplexF64}(undef, 0, 0)
     end
     return julia
 end
@@ -410,8 +410,6 @@ function write_gpec_toml_coil(
         println(io)
         println(io, "[ForceFreeStates]")
         println(io, "local_stability_flag = true")
-        println(io, "mat_flag = true")
-        println(io, "ode_flag = true")
         println(io, "vac_flag = true")
         @printf(io, "qlow     = %.4f\n", p.qlow)
         # Match the Fortran sas_flag truncation: integration stops at q = qhigh
@@ -475,8 +473,6 @@ function write_gpec_toml_file(
         println(io)
         println(io, "[ForceFreeStates]")
         println(io, "local_stability_flag = true")
-        println(io, "mat_flag = true")
-        println(io, "ode_flag = true")
         println(io, "vac_flag = true")
         @printf(io, "qlow     = %.4f\n", p.qlow)
         @printf(io, "psiedge  = %.4f\n", p.psiedge)
@@ -506,15 +502,15 @@ end
 
 function setup_equil(p::FortranRunParams, fortran_dir::String)
     eq_dict = Dict{String,Any}(
-        "eq_type"      => p.eq_type,
-        "eq_filename"  => p.eq_filename,
-        "jac_type"     => p.jac_type,
-        "psilow"       => p.psilow,
-        "psihigh"      => p.psihigh,
-        "mpsi"         => p.mpsi,
-        "mtheta"       => p.mtheta_equil,
-        "grid_type"    => p.grid_type,
-        "etol"         => 1e-7,
+        "eq_type" => p.eq_type,
+        "eq_filename" => p.eq_filename,
+        "jac_type" => p.jac_type,
+        "psilow" => p.psilow,
+        "psihigh" => p.psihigh,
+        "mpsi" => p.mpsi,
+        "mtheta" => p.mtheta_equil,
+        "grid_type" => p.grid_type,
+        "etol" => 1e-7
     )
     eq_config = Equilibrium.EquilibriumConfig(eq_dict, fortran_dir)
     return Equilibrium.setup_equilibrium(eq_config)
@@ -537,8 +533,8 @@ function compare_phix(
 
     psilim = fort["psilim"]
     m_vals = fort["m_vals"]
-    mlow   = minimum(m_vals)
-    mhigh  = maximum(m_vals)
+    mlow = minimum(m_vals)
+    mhigh = maximum(m_vals)
 
     coil_sets = ForcingTerms.CoilSet[]
     for (name, currents) in zip(p.coil_names, p.coil_currents)
@@ -551,21 +547,25 @@ function compare_phix(
 
     grid = ForcingTerms.sample_boundary_grid(equil, p.mtheta_coil, p.nzeta_coil; psi=psilim)
     nobs = p.mtheta_coil * p.nzeta_coil
-    obs_R   = zeros(nobs); obs_phi = zeros(nobs); obs_Z = zeros(nobs)
+    obs_R = zeros(nobs);
+    obs_phi = zeros(nobs);
+    obs_Z = zeros(nobs)
     for j in 1:p.nzeta_coil, i in 1:p.mtheta_coil
         idx = i + (j - 1) * p.mtheta_coil
-        obs_R[idx]   = grid.R[i]
+        obs_R[idx] = grid.R[i]
         obs_phi[idx] = grid.phi_grid[j] + grid.phi_offset[i]
-        obs_Z[idx]   = grid.Z[i]
+        obs_Z[idx] = grid.Z[i]
     end
-    B_R = zeros(nobs); B_phi = zeros(nobs); B_Z = zeros(nobs)
+    B_R = zeros(nobs);
+    B_phi = zeros(nobs);
+    B_Z = zeros(nobs)
     ForcingTerms.compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
     bn = zeros(p.mtheta_coil, p.nzeta_coil)
     ForcingTerms.project_normal_flux!(bn, B_R, B_Z, grid)
     julia_modes = ForcingTerms.fourier_decompose_bn(bn, grid, p.nn, mlow, mhigh)
 
     julia_amps = Dict(md.m => abs(md.amplitude) for md in julia_modes)
-    fort_amps  = Dict(m => fort["Phi_x_amp"][k] for (k, m) in enumerate(m_vals))
+    fort_amps = Dict(m => fort["Phi_x_amp"][k] for (k, m) in enumerate(m_vals))
 
     return julia_amps, fort_amps, m_vals, equil
 end
@@ -575,7 +575,7 @@ end
 rel_pct(a, b) = abs(b) > 1e-30 ? @sprintf("%.1f%%", 100 * abs(a - b) / abs(b)) : "N/A"
 
 function step_series(m_vals, amps)
-    m_ext   = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
+    m_ext = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
     amp_ext = [0.0; amps; 0.0]
     return m_ext, amp_ext
 end
@@ -605,7 +605,7 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
     push!(lines, @sprintf("%-12s  %10s  %10s  %10s  %6s", "", "Fortran", "Julia", "AbsDiff", "Rel%"))
     for (label, fv, jv) in [
         ("psilim", fort["psilim"], julia["psilim"]),
-        ("qlim",   fort["qlim"],   julia["qlim"]),
+        ("qlim", fort["qlim"], julia["qlim"])
     ]
         push!(lines, @sprintf("%-12s  %10.6f  %10.6f  %10.6f  %6s",
             label, fv, jv, abs(fv - jv), rel_pct(fv, jv)))
@@ -624,12 +624,12 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
 
     push!(lines, "--- q Profile (RMS on common grid) ---")
     fq_psi = fort["psi_n_dcon"]
-    fq     = fort["q_dcon"]
+    fq = fort["q_dcon"]
     jq_psi = julia["psi_q"]
-    jq     = julia["q"]
+    jq = julia["q"]
     if !isempty(jq) && !isempty(fq)
         jq_on_fgrid = [_interp1(jq_psi, jq, p) for p in fq_psi]
-        rms = sqrt(mean((fq .- jq_on_fgrid).^2))
+        rms = sqrt(mean((fq .- jq_on_fgrid) .^ 2))
         push!(lines, @sprintf("RMS(q_fort - q_julia) = %.5f  (%.2f%% relative)",
             rms, rms / mean(abs.(fq)) * 100))
     else
@@ -638,42 +638,47 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
     push!(lines, "")
 
     push!(lines, "--- Mercier Criterion ---")
-    fdi = fort["di"]; fdr = fort["dr"]
-    jdi = julia["di"]; jdr = julia["dr"]
+    fdi = fort["di"];
+    fdr = fort["dr"]
+    jdi = julia["di"];
+    jdr = julia["dr"]
     if !isempty(jdi) && !isempty(fdi)
         jdi_on_fg = [_interp1(jq_psi, jdi, p) for p in fq_psi]
         jdr_on_fg = !isempty(jdr) ?
-            [_interp1(jq_psi, jdr, p) for p in fq_psi] : fill(NaN, length(fq_psi))
-        push!(lines, @sprintf("RMS(di_fort - di_julia) = %.5e", sqrt(mean((fdi .- jdi_on_fg).^2))))
-        push!(lines, @sprintf("RMS(dr_fort - dr_julia) = %.5e", sqrt(mean((fdr .- jdr_on_fg).^2))))
+                    [_interp1(jq_psi, jdr, p) for p in fq_psi] : fill(NaN, length(fq_psi))
+        push!(lines, @sprintf("RMS(di_fort - di_julia) = %.5e", sqrt(mean((fdi .- jdi_on_fg) .^ 2))))
+        push!(lines, @sprintf("RMS(dr_fort - dr_julia) = %.5e", sqrt(mean((fdr .- jdr_on_fg) .^ 2))))
     else
         push!(lines, "Mercier data unavailable")
     end
     push!(lines, "")
 
     push!(lines, "--- Phi_x and Phi_tot Spectrum (n=$nn) ---")
-    m_ctrl   = fort["m_vals_ctrl"]
-    f_phi_x  = fort["Phi_x"]
+    m_ctrl = fort["m_vals_ctrl"]
+    f_phi_x = fort["Phi_x"]
     f_phi_tot = fort["Phi_tot"]
-    j_fvec   = julia["forcing_vec"]
-    j_rvec   = julia["response_vec"]
+    j_fvec = julia["forcing_vec"]
+    j_rvec = julia["response_vec"]
     j_mmodes = julia["m_modes"]
     if !isempty(j_fvec) && !isempty(f_phi_x)
         push!(lines, @sprintf("%-5s  %-14s  %-14s  %-6s  %-14s  %-14s  %-6s",
             "m", "|Phi_x_fort|", "|Phi_x_julia|", "Rel%", "|Phi_tot_fort|", "|Phi_tot_julia|", "Rel%"))
         for (k, m) in enumerate(m_ctrl)
             j_idx = findfirst(==(m), j_mmodes)
-            j_fx  = isnothing(j_idx) ? NaN : abs(j_fvec[j_idx])
-            j_ft  = isnothing(j_idx) ? NaN : abs(j_rvec[j_idx])
-            f_fx  = abs(f_phi_x[k])
-            f_ft  = abs(f_phi_tot[k])
-            push!(lines, @sprintf("%-5d  %14.4e  %14s  %-6s  %14.4e  %14s  %-6s",
-                m, f_fx,
-                isnan(j_fx) ? "N/A" : @sprintf("%.4e", j_fx),
-                isnan(j_fx) ? "N/A" : rel_pct(f_fx, j_fx),
-                f_ft,
-                isnan(j_ft) ? "N/A" : @sprintf("%.4e", j_ft),
-                isnan(j_ft) ? "N/A" : rel_pct(f_ft, j_ft)))
+            j_fx = isnothing(j_idx) ? NaN : abs(j_fvec[j_idx])
+            j_ft = isnothing(j_idx) ? NaN : abs(j_rvec[j_idx])
+            f_fx = abs(f_phi_x[k])
+            f_ft = abs(f_phi_tot[k])
+            push!(
+                lines,
+                @sprintf("%-5d  %14.4e  %14s  %-6s  %14.4e  %14s  %-6s",
+                    m, f_fx,
+                    isnan(j_fx) ? "N/A" : @sprintf("%.4e", j_fx),
+                    isnan(j_fx) ? "N/A" : rel_pct(f_fx, j_fx),
+                    f_ft,
+                    isnan(j_ft) ? "N/A" : @sprintf("%.4e", j_ft),
+                    isnan(j_ft) ? "N/A" : rel_pct(f_ft, j_ft))
+            )
         end
     else
         push!(lines, "Phi_tot data unavailable")
@@ -737,40 +742,46 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
     push!(lines, "")
 
     push!(lines, "--- Resonant Surface Comparison (n=$nn) ---")
-    push!(lines, @sprintf(
-        "%-4s  %-8s  %-8s  %-14s  %-14s  %-6s  %-10s  %-10s  %-6s  %-7s  %-7s  %-6s",
-        "q", "psi_fort", "psi_julia", "|Phi_res_fort|", "|Phi_res_julia|", "Rel%",
-        "w_isl_fort", "w_isl_julia", "Rel%", "K_fort", "K_julia", "Rel%"))
+    push!(
+        lines,
+        @sprintf(
+            "%-4s  %-8s  %-8s  %-14s  %-14s  %-6s  %-10s  %-10s  %-6s  %-7s  %-7s  %-6s",
+            "q", "psi_fort", "psi_julia", "|Phi_res_fort|", "|Phi_res_julia|", "Rel%",
+            "w_isl_fort", "w_isl_julia", "Rel%", "K_fort", "K_julia", "Rel%")
+    )
 
     f_psi_rat = fort["psi_n_rational"]
-    f_q_rat   = fort["q_rational"]
+    f_q_rat = fort["q_rational"]
     f_phi_res = fort["Phi_res"]
-    f_w_isl   = fort["w_isl"]
-    f_K_isl   = fort["K_isl"]
+    f_w_isl = fort["w_isl"]
+    f_K_isl = fort["K_isl"]
 
     for (i, (fq_r, fp_r)) in enumerate(zip(f_q_rat, f_psi_rat))
         q_int = round(Int, fq_r)
-        row   = find_julia_row(julia, q_int, nn)
+        row = find_julia_row(julia, q_int, nn)
 
-        jp_r  = (row > 0 && !isempty(julia["rational_psi"]))     ? julia["rational_psi"][row]        : NaN
-        j_phi = (row > 0 && !isempty(julia["resonant_area_weighted_field"]))   ? abs(julia["resonant_area_weighted_field"][row])  : NaN
-        j_wisl= (row > 0 && !isempty(julia["island_half_width"])) ? 2*julia["island_half_width"][row] : NaN
-        j_kch = (row > 0 && !isempty(julia["chirikov_parameter"])) ? julia["chirikov_parameter"][row]  : NaN
+        jp_r = (row > 0 && !isempty(julia["rational_psi"])) ? julia["rational_psi"][row] : NaN
+        j_phi = (row > 0 && !isempty(julia["resonant_area_weighted_field"])) ? abs(julia["resonant_area_weighted_field"][row]) : NaN
+        j_wisl = (row > 0 && !isempty(julia["island_half_width"])) ? 2*julia["island_half_width"][row] : NaN
+        j_kch = (row > 0 && !isempty(julia["chirikov_parameter"])) ? julia["chirikov_parameter"][row] : NaN
 
-        push!(lines, @sprintf(
-            "%-4d  %8.4f  %8s  %14.4e  %14s  %-6s  %10.4e  %10s  %-6s  %7.4f  %7s  %-6s",
-            q_int, fp_r,
-            isnan(jp_r)   ? "N/A" : @sprintf("%.4f", jp_r),
-            abs(f_phi_res[i]),
-            isnan(j_phi)  ? "N/A" : @sprintf("%.4e", j_phi),
-            isnan(j_phi)  ? "N/A" : rel_pct(abs(f_phi_res[i]), j_phi),
-            f_w_isl[i],
-            isnan(j_wisl) ? "N/A" : @sprintf("%.4e", j_wisl),
-            isnan(j_wisl) ? "N/A" : rel_pct(f_w_isl[i], j_wisl),
-            f_K_isl[i],
-            isnan(j_kch)  ? "N/A" : @sprintf("%.4f", j_kch),
-            isnan(j_kch)  ? "N/A" : rel_pct(f_K_isl[i], j_kch),
-        ))
+        push!(
+            lines,
+            @sprintf(
+                "%-4d  %8.4f  %8s  %14.4e  %14s  %-6s  %10.4e  %10s  %-6s  %7.4f  %7s  %-6s",
+                q_int, fp_r,
+                isnan(jp_r) ? "N/A" : @sprintf("%.4f", jp_r),
+                abs(f_phi_res[i]),
+                isnan(j_phi) ? "N/A" : @sprintf("%.4e", j_phi),
+                isnan(j_phi) ? "N/A" : rel_pct(abs(f_phi_res[i]), j_phi),
+                f_w_isl[i],
+                isnan(j_wisl) ? "N/A" : @sprintf("%.4e", j_wisl),
+                isnan(j_wisl) ? "N/A" : rel_pct(f_w_isl[i], j_wisl),
+                f_K_isl[i],
+                isnan(j_kch) ? "N/A" : @sprintf("%.4f", j_kch),
+                isnan(j_kch) ? "N/A" : rel_pct(f_K_isl[i], j_kch),
+            )
+        )
     end
 
     push!(lines, "")
@@ -783,32 +794,36 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
     push!(lines, @sprintf("%-4s  %-8s  %-14s  %-14s  %-8s",
         "q", "psi_fort", "j_c_fort", "j_c_julia", "ratio j/f"))
 
-    f_delta  = fort["Delta"]
-    f_i_res  = fort["I_res"]
-    j_delta  = julia["delta_prime"]
-    j_i_res  = julia["resonant_current"]
-    j_m_res  = julia["rational_m_res"]
+    f_delta = fort["Delta"]
+    f_i_res = fort["I_res"]
+    j_delta = julia["delta_prime"]
+    j_i_res = julia["resonant_current"]
+    j_m_res = julia["rational_m_res"]
 
     for (i, (fq_r, fp_r)) in enumerate(zip(f_q_rat, f_psi_rat))
-        q_int  = round(Int, fq_r)
+        q_int = round(Int, fq_r)
         m_res_fort = q_int * nn  # m_res = q * n at rational surface
         row = find_julia_row(julia, q_int, nn)
 
         jc_fort = (i <= length(f_delta) && i <= length(f_i_res) &&
                    abs(f_delta[i]) > 1e-30 && chi1 > 0) ?
-            abs(f_i_res[i]) * abs(m_res_fort) / (abs(f_delta[i]) * chi1) : NaN
+                  abs(f_i_res[i]) * abs(m_res_fort) / (abs(f_delta[i]) * chi1) : NaN
 
-        jc_julia = (row > 0 && row <= length(j_delta) && row <= length(j_i_res) &&
-                    row <= length(j_m_res) && abs(j_delta[row]) > 1e-30 && chi1 > 0) ?
+        jc_julia =
+            (row > 0 && row <= length(j_delta) && row <= length(j_i_res) &&
+             row <= length(j_m_res) && abs(j_delta[row]) > 1e-30 && chi1 > 0) ?
             abs(j_i_res[row]) * abs(j_m_res[row]) / (abs(j_delta[row]) * chi1) : NaN
 
         ratio = (!isnan(jc_fort) && !isnan(jc_julia) && jc_fort > 0) ? jc_julia / jc_fort : NaN
 
-        push!(lines, @sprintf("%-4d  %8.4f  %14s  %14s  %8s",
-            q_int, fp_r,
-            isnan(jc_fort)  ? "N/A" : @sprintf("%.4e", jc_fort),
-            isnan(jc_julia) ? "N/A" : @sprintf("%.4e", jc_julia),
-            isnan(ratio)    ? "N/A" : @sprintf("%.4f", ratio)))
+        push!(
+            lines,
+            @sprintf("%-4d  %8.4f  %14s  %14s  %8s",
+                q_int, fp_r,
+                isnan(jc_fort) ? "N/A" : @sprintf("%.4e", jc_fort),
+                isnan(jc_julia) ? "N/A" : @sprintf("%.4e", jc_julia),
+                isnan(ratio) ? "N/A" : @sprintf("%.4f", ratio))
+        )
     end
 
     push!(lines, "")
@@ -818,19 +833,22 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
         "|I_res_fort|", "|I_res_julia|", "Rel%"))
     for (i, (fq_r, fp_r)) in enumerate(zip(f_q_rat, f_psi_rat))
         q_int = round(Int, fq_r)
-        row   = find_julia_row(julia, q_int, nn)
+        row = find_julia_row(julia, q_int, nn)
         fd = (i <= length(f_delta)) ? abs(f_delta[i]) : NaN
         jd = (row > 0 && row <= length(j_delta)) ? abs(j_delta[row]) : NaN
         fi = (!isempty(f_i_res) && i <= length(f_i_res)) ? abs(f_i_res[i]) : NaN
         ji = (row > 0 && row <= length(j_i_res)) ? abs(j_i_res[row]) : NaN
-        push!(lines, @sprintf("%-4d  %8.4f  %14s  %14s  %8s  %14s  %14s  %8s",
-            q_int, fp_r,
-            isnan(fd) ? "N/A" : @sprintf("%.4e", fd),
-            isnan(jd) ? "N/A" : @sprintf("%.4e", jd),
-            (isnan(fd) || isnan(jd)) ? "N/A" : rel_pct(fd, jd),
-            isnan(fi) ? "N/A" : @sprintf("%.4e", fi),
-            isnan(ji) ? "N/A" : @sprintf("%.4e", ji),
-            (isnan(fi) || isnan(ji)) ? "N/A" : rel_pct(fi, ji)))
+        push!(
+            lines,
+            @sprintf("%-4d  %8.4f  %14s  %14s  %8s  %14s  %14s  %8s",
+                q_int, fp_r,
+                isnan(fd) ? "N/A" : @sprintf("%.4e", fd),
+                isnan(jd) ? "N/A" : @sprintf("%.4e", jd),
+                (isnan(fd) || isnan(jd)) ? "N/A" : rel_pct(fd, jd),
+                isnan(fi) ? "N/A" : @sprintf("%.4e", fi),
+                isnan(ji) ? "N/A" : @sprintf("%.4e", ji),
+                (isnan(fi) || isnan(ji)) ? "N/A" : rel_pct(fi, ji))
+        )
     end
 
     push!(lines, "=" ^ 72)
@@ -838,8 +856,9 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
 end
 
 function _interp1(x::AbstractVector, y::AbstractVector, xi::Real)
-    n = length(x); n < 2 && return y[1]
-    xi <= x[1]   && return y[1]
+    n = length(x);
+    n < 2 && return y[1]
+    xi <= x[1] && return y[1]
     xi >= x[end] && return y[end]
     i = clamp(searchsortedlast(x, xi), 1, n-1)
     t = (xi - x[i]) / (x[i+1] - x[i])
@@ -849,38 +868,38 @@ end
 # ─── Plot generation ─────────────────────────────────────────────────────────
 
 function generate_plots(fort, julia, bench_dir, nn)
-    f_q_rat  = fort["q_rational"]
-    n_surf   = length(f_q_rat)
+    f_q_rat = fort["q_rational"]
+    n_surf = length(f_q_rat)
 
     # --- Row 1: q profile, Mercier, W_t scatter, |P| diagonal ---
-    p1 = plot(fort["psi_n_dcon"], fort["q_dcon"],
+    p1 = plot(fort["psi_n_dcon"], fort["q_dcon"];
         label="Fortran", xlabel="ψ_n", ylabel="q", title="q profile", lw=2)
-    plot!(p1, julia["psi_q"], julia["q"], label="Julia", linestyle=:dash, lw=2)
+    plot!(p1, julia["psi_q"], julia["q"]; label="Julia", linestyle=:dash, lw=2)
 
-    p2 = plot(fort["psi_n_dcon"], fort["di"],
+    p2 = plot(fort["psi_n_dcon"], fort["di"];
         label="Fortran", xlabel="ψ_n", ylabel="D_I", title="Mercier D_I", lw=2)
-    !isempty(julia["di"]) && plot!(p2, julia["psi_q"], julia["di"], label="Julia", linestyle=:dash, lw=2)
-    hline!(p2, [0.0], color=:black, linestyle=:dot, label="")
+    !isempty(julia["di"]) && plot!(p2, julia["psi_q"], julia["di"]; label="Julia", linestyle=:dash, lw=2)
+    hline!(p2, [0.0]; color=:black, linestyle=:dot, label="")
 
-    p3 = plot(fort["psi_n_dcon"], fort["dr"],
+    p3 = plot(fort["psi_n_dcon"], fort["dr"];
         label="Fortran", xlabel="ψ_n", ylabel="D_R", title="Mercier D_R", lw=2)
-    !isempty(julia["dr"]) && plot!(p3, julia["psi_q"], julia["dr"], label="Julia", linestyle=:dash, lw=2)
-    hline!(p3, [0.0], color=:black, linestyle=:dot, label="")
+    !isempty(julia["dr"]) && plot!(p3, julia["psi_q"], julia["dr"]; label="Julia", linestyle=:dash, lw=2)
+    hline!(p3, [0.0]; color=:black, linestyle=:dot, label="")
 
     # W_t eigenvalue scatter (log y), all eigenvalues vs index
     f_wt = fort["W_t_eigenvalue"]
     j_et = julia["et"]
     p4 = plot(; xlabel="mode index", ylabel="|W_t|", title="|W_t| eigenvalues",
-               yscale=:log10, legend=:topright)
+        yscale=:log10, legend=:topright)
     if !isempty(f_wt)
         f_sorted = sort(abs.(f_wt))
         scatter!(p4, 1:length(f_sorted), f_sorted; color=:steelblue, markersize=5,
-                 markershape=:circle, label="Fortran")
+            markershape=:circle, label="Fortran")
     end
     if !isempty(j_et)
         j_sorted = sort(abs.(j_et))
         scatter!(p4, 1:length(j_sorted), j_sorted; color=:orange, markersize=5,
-                 markershape=:circle, label="Julia", markerstrokewidth=0)
+            markershape=:circle, label="Julia", markerstrokewidth=0)
     end
 
     # |P| diagonal comparison
@@ -888,12 +907,12 @@ function generate_plots(fort, julia, bench_dir, nn)
     j_P = julia["permeability"]
     m_ctrl = fort["m_vals_ctrl"]
     p5 = plot(; xlabel="Poloidal mode m", ylabel="|P[i,i]|",
-               title="|P| diagonal  (n=$nn)", legend=:topright)
+        title="|P| diagonal  (n=$nn)", legend=:topright)
     if !isempty(f_P) && !isempty(j_P)
         mpert_p = min(size(f_P, 1), size(j_P, 1), length(m_ctrl))
         ms = m_ctrl[1:mpert_p]
-        fp_diag = [abs(f_P[i,i]) for i in 1:mpert_p]
-        jp_diag = [abs(j_P[i,i]) for i in 1:mpert_p]
+        fp_diag = [abs(f_P[i, i]) for i in 1:mpert_p]
+        jp_diag = [abs(j_P[i, i]) for i in 1:mpert_p]
         me_f, fe = step_series(ms, fp_diag)
         me_j, je = step_series(ms, jp_diag)
         plot!(p5, me_f, fe; seriestype=:steppre, lw=2, color=:steelblue, label="Fortran")
@@ -905,35 +924,35 @@ function generate_plots(fort, julia, bench_dir, nn)
     # --- Row 2: Phi_x/tot spectrum and singular coupling vs psi ---
 
     # Phi_x & Phi_tot spectrum
-    m_ctrl   = fort["m_vals_ctrl"]
-    f_phi_x  = fort["Phi_x"]
+    m_ctrl = fort["m_vals_ctrl"]
+    f_phi_x = fort["Phi_x"]
     f_phi_tot = fort["Phi_tot"]
-    j_fvec   = julia["forcing_vec"]
-    j_rvec   = julia["response_vec"]
+    j_fvec = julia["forcing_vec"]
+    j_rvec = julia["response_vec"]
     j_mmodes = julia["m_modes"]
     p6 = plot(; xlabel="m", ylabel="|b̄| [T]", title="Phi_x & Phi_tot spectrum (n=$nn)",
-              legend=:topright)
+        legend=:topright)
     if !isempty(j_fvec) && !isempty(f_phi_x)
         jfx_amps = [abs(get(Dict(zip(j_mmodes, j_fvec)), m, NaN+0im)) for m in m_ctrl]
         jft_amps = [abs(get(Dict(zip(j_mmodes, j_rvec)), m, NaN+0im)) for m in m_ctrl]
         ffx_amps = abs.(f_phi_x)
         fft_amps = abs.(f_phi_tot)
         me, jfe = step_series(m_ctrl, replace(jfx_amps, NaN=>0.0))
-        _,  jte = step_series(m_ctrl, replace(jft_amps, NaN=>0.0))
-        _,  ffe = step_series(m_ctrl, ffx_amps)
-        _,  fte = step_series(m_ctrl, fft_amps)
+        _, jte = step_series(m_ctrl, replace(jft_amps, NaN=>0.0))
+        _, ffe = step_series(m_ctrl, ffx_amps)
+        _, fte = step_series(m_ctrl, fft_amps)
         plot!(p6, me, ffe; seriestype=:steppre, lw=2, color=:steelblue, label="Φ_x Fortran")
         plot!(p6, me, jfe; seriestype=:steppre, lw=2, color=:steelblue, linestyle=:dash, label="Φ_x Julia")
-        plot!(p6, me, fte; seriestype=:steppre, lw=2, color=:orange,    label="Φ_tot Fortran")
-        plot!(p6, me, jte; seriestype=:steppre, lw=2, color=:orange,    linestyle=:dash, label="Φ_tot Julia")
+        plot!(p6, me, fte; seriestype=:steppre, lw=2, color=:orange, label="Φ_tot Fortran")
+        plot!(p6, me, jte; seriestype=:steppre, lw=2, color=:orange, linestyle=:dash, label="Φ_tot Julia")
     else
         annotate!(p6, 0.5, 0.5, text("data unavailable", 10, :center))
     end
 
     # Helper: singular coupling vs psi scatter with q-value labels
     function _singcoup_panel(ylabel_str, title_str,
-                              f_psi, f_vals, f_q_labels,
-                              j_psi, j_vals)
+        f_psi, f_vals, f_q_labels,
+        j_psi, j_vals)
         p = plot(; xlabel="ψ_n", ylabel=ylabel_str, title=title_str, legend=:topright)
         if !isempty(f_psi) && !isempty(f_vals)
             scatter!(p, f_psi, f_vals; color=:steelblue, markersize=7, markershape=:circle, label="Fortran")
@@ -944,7 +963,7 @@ function generate_plots(fort, julia, bench_dir, nn)
         end
         if !isempty(j_psi) && !isempty(j_vals)
             scatter!(p, j_psi, j_vals; color=:orange, markersize=5, markershape=:circle,
-                     label="Julia", markerstrokewidth=0)
+                label="Julia", markerstrokewidth=0)
             plot!(p, j_psi, j_vals; color=:orange, lw=1, linestyle=:dot, label="")
         end
         return p
@@ -956,35 +975,35 @@ function generate_plots(fort, julia, bench_dir, nn)
 
     # Delta (Δ')
     f_delta_vals = isempty(fort["Delta"]) ? Float64[] : real.(fort["Delta"])
-    j_delta_psi  = julia["rational_psi"]
+    j_delta_psi = julia["rational_psi"]
     j_delta_vals = isempty(julia["delta_prime"]) ? Float64[] : real.(julia["delta_prime"])
     p7 = _singcoup_panel("Re(Δ')", "Δ' vs ψ  (n=$nn)",
-                          f_psi_rat, f_delta_vals, f_q_labels,
-                          j_delta_psi, j_delta_vals)
+        f_psi_rat, f_delta_vals, f_q_labels,
+        j_delta_psi, j_delta_vals)
 
     # I_res (resonant current)
     f_ires_vals = isempty(fort["I_res"]) ? Float64[] : abs.(fort["I_res"])
-    j_ires_psi  = julia["rational_psi"]
+    j_ires_psi = julia["rational_psi"]
     j_ires_vals = isempty(julia["resonant_current"]) ? Float64[] : abs.(julia["resonant_current"])
     p8 = _singcoup_panel("|I_res| [A]", "|I_res| vs ψ  (n=$nn)",
-                          f_psi_rat, f_ires_vals, f_q_labels,
-                          j_ires_psi, j_ires_vals)
+        f_psi_rat, f_ires_vals, f_q_labels,
+        j_ires_psi, j_ires_vals)
 
     # Phi_res (resonant flux / area)
     f_phires_vals = isempty(fort["Phi_res"]) ? Float64[] : abs.(fort["Phi_res"])
-    j_phires_psi  = julia["rational_psi"]
+    j_phires_psi = julia["rational_psi"]
     j_phires_vals = isempty(julia["resonant_area_weighted_field"]) ? Float64[] : abs.(julia["resonant_area_weighted_field"])
     p9 = _singcoup_panel("|Φ_res| [T]", "|Φ_res| vs ψ  (n=$nn)",
-                          f_psi_rat, f_phires_vals, f_q_labels,
-                          j_phires_psi, j_phires_vals)
+        f_psi_rat, f_phires_vals, f_q_labels,
+        j_phires_psi, j_phires_vals)
 
     # w_isl (island full width)
     f_wisl_vals = fort["w_isl"]
-    j_wisl_psi  = julia["rational_psi"]
+    j_wisl_psi = julia["rational_psi"]
     j_wisl_vals = isempty(julia["island_half_width"]) ? Float64[] : 2 .* julia["island_half_width"]
     p10 = _singcoup_panel("w_isl [ψ_n]", "Island width vs ψ  (n=$nn)",
-                           f_psi_rat, f_wisl_vals, f_q_labels,
-                           j_wisl_psi, j_wisl_vals)
+        f_psi_rat, f_wisl_vals, f_q_labels,
+        j_wisl_psi, j_wisl_vals)
 
     # --- Row 3: b_psi profiles for resonant m harmonics ---
     # Identify resonant m values from rational surfaces
@@ -994,23 +1013,23 @@ function generate_plots(fort, julia, bench_dir, nn)
 
     # Helper: build a normalised radial profile panel for one mode
     function _profile_panel(ylabel_str, title_str,
-                             f_psi, f_prof_complex, f_label,
-                             j_psi, j_prof_complex, j_label)
+        f_psi, f_prof_complex, f_label,
+        j_psi, j_prof_complex, j_label)
         pb = plot(; xlabel="ψ_n", ylabel=ylabel_str, title=title_str, legend=:topright)
         f_prof = abs.(f_prof_complex)
         j_prof = abs.(j_prof_complex)
-        f_max  = isempty(f_prof) ? 0.0 : maximum(f_prof)
-        j_max  = isempty(j_prof) ? 0.0 : maximum(j_prof)
+        f_max = isempty(f_prof) ? 0.0 : maximum(f_prof)
+        j_max = isempty(j_prof) ? 0.0 : maximum(j_prof)
         f_max > 0 && plot!(pb, f_psi, f_prof ./ f_max;
             lw=1.5, color=:steelblue, label=f_label,
             markershape=:x, markersize=2, markerstrokewidth=1, markeralpha=0.6)
         rms_diff = NaN
         if j_max > 0 && f_max > 0 && !isempty(j_psi)
-            j_on_fg  = [_interp1(j_psi, j_prof, p) for p in f_psi]
+            j_on_fg = [_interp1(j_psi, j_prof, p) for p in f_psi]
             j_max_on = maximum(j_on_fg)
-            f_norm   = f_prof ./ f_max
+            f_norm = f_prof ./ f_max
             if j_max_on > 0
-                rms_diff = sqrt(mean((j_on_fg ./ j_max_on .- f_norm).^2))
+                rms_diff = sqrt(mean((j_on_fg ./ j_max_on .- f_norm) .^ 2))
             end
             plot!(pb, j_psi, j_prof ./ j_max;
                 lw=1.5, color=:orange, linestyle=:dash, label=j_label,
@@ -1022,7 +1041,7 @@ function generate_plots(fort, julia, bench_dir, nn)
 
     j_psi_grid = julia["psi_grid"]
     f_psi_prof = fort["psi_n_prof"]
-    f_m_out    = fort["m_out"]
+    f_m_out = fort["m_out"]
 
     # Row 3: Jbgradpsi profiles — direct apples-to-apples (both = chi1*singfac*2πi*ξ_ψ in mode space)
     jbgp_panels = []
@@ -1033,10 +1052,13 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_midx = findfirst(==(m_res), j_mmodes)
         fp = (!isnothing(f_midx) && !isempty(f_jbgp)) ? f_jbgp[:, f_midx] : ComplexF64[]
         jp = (!isnothing(j_midx) && !isempty(j_jbgp)) ? j_jbgp[:, j_midx] : ComplexF64[]
-        push!(jbgp_panels, _profile_panel(
-            "|Jbgradpsi| (norm.)", "Jbgradpsi  m=$m_res (n=$nn)",
-            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
-            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+        push!(
+            jbgp_panels,
+            _profile_panel(
+                "|Jbgradpsi| (norm.)", "Jbgradpsi  m=$m_res (n=$nn)",
+                isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+                isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia")
+        )
     end
     while length(jbgp_panels) < 4
         push!(jbgp_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
@@ -1051,10 +1073,13 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_midx = findfirst(==(m_res), j_mmodes)
         fp = (!isnothing(f_midx) && !isempty(f_bn)) ? f_bn[:, f_midx] : ComplexF64[]
         jp = (!isnothing(j_midx) && !isempty(j_bn)) ? j_bn[:, j_midx] : ComplexF64[]
-        push!(bn_panels, _profile_panel(
-            "|b_n| (norm.)", "b_n  m=$m_res (n=$nn)",
-            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
-            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+        push!(
+            bn_panels,
+            _profile_panel(
+                "|b_n| (norm.)", "b_n  m=$m_res (n=$nn)",
+                isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+                isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia")
+        )
     end
     while length(bn_panels) < 4
         push!(bn_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
@@ -1069,10 +1094,13 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_midx = findfirst(==(m_res), j_mmodes)
         fp = (!isnothing(f_midx) && !isempty(f_xigp)) ? f_xigp[:, f_midx] : ComplexF64[]
         jp = (!isnothing(j_midx) && !isempty(j_xigp)) ? j_xigp[:, j_midx] : ComplexF64[]
-        push!(xigp_panels, _profile_panel(
-            "|ξ_ψ| (norm.)", "xigradpsi  m=$m_res (n=$nn)",
-            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
-            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+        push!(
+            xigp_panels,
+            _profile_panel(
+                "|ξ_ψ| (norm.)", "xigradpsi  m=$m_res (n=$nn)",
+                isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+                isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia")
+        )
     end
     while length(xigp_panels) < 4
         push!(xigp_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
@@ -1087,10 +1115,13 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_midx = findfirst(==(m_res), j_mmodes)
         fp = (!isnothing(f_midx) && !isempty(f_xin)) ? f_xin[:, f_midx] : ComplexF64[]
         jp = (!isnothing(j_midx) && !isempty(j_xin)) ? j_xin[:, j_midx] : ComplexF64[]
-        push!(xin_panels, _profile_panel(
-            "|ξ_n| (norm.)", "xi_n  m=$m_res (n=$nn)",
-            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
-            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+        push!(
+            xin_panels,
+            _profile_panel(
+                "|ξ_n| (norm.)", "xi_n  m=$m_res (n=$nn)",
+                isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+                isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia")
+        )
     end
     while length(xin_panels) < 4
         push!(xin_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
@@ -1105,10 +1136,13 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_midx = findfirst(==(m_res), j_mmodes)
         fp = (!isnothing(f_midx) && !isempty(f_xigp1)) ? f_xigp1[:, f_midx] : ComplexF64[]
         jp = (!isnothing(j_midx) && !isempty(j_xigp1)) ? j_xigp1[:, j_midx] : ComplexF64[]
-        push!(xigp1_panels, _profile_panel(
-            "|∂ξ^ψ/∂ψ| (norm.)", "xigradpsi_dpsi  m=$m_res (n=$nn)",
-            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
-            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+        push!(
+            xigp1_panels,
+            _profile_panel(
+                "|∂ξ^ψ/∂ψ| (norm.)", "xigradpsi_dpsi  m=$m_res (n=$nn)",
+                isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+                isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia")
+        )
     end
     while length(xigp1_panels) < 4
         push!(xigp1_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
@@ -1123,10 +1157,13 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_midx = findfirst(==(m_res), j_mmodes)
         fp = (!isnothing(f_midx) && !isempty(f_xiga)) ? f_xiga[:, f_midx] : ComplexF64[]
         jp = (!isnothing(j_midx) && !isempty(j_xiga)) ? j_xiga[:, j_midx] : ComplexF64[]
-        push!(xiga_panels, _profile_panel(
-            "|ξ^α| (norm.)", "xigradalpha  m=$m_res (n=$nn)",
-            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
-            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+        push!(
+            xiga_panels,
+            _profile_panel(
+                "|ξ^α| (norm.)", "xigradalpha  m=$m_res (n=$nn)",
+                isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+                isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia")
+        )
     end
     while length(xiga_panels) < 4
         push!(xiga_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
@@ -1157,12 +1194,12 @@ function generate_plots(fort, julia, bench_dir, nn)
     h5_path = julia["h5_path"]
     rzphi_panels = []
     for (comp_label, f_key, h5_var) in [
-            ("ξ_R",  "xi_r_fun",   "perturbed_equilibrium/response/xi_R"),
-            ("ξ_Z",  "xi_z_fun",   "perturbed_equilibrium/response/xi_Z"),
-            ("ξ_φ",  "xi_phi_fun", "perturbed_equilibrium/response/xi_phi"),
-            ("b_R",  "b_r_fun",    "perturbed_equilibrium/response/b_R"),
-            ("b_Z",  "b_z_fun",    "perturbed_equilibrium/response/b_Z"),
-            ("b_φ",  "b_phi_fun",  "perturbed_equilibrium/response/b_phi")]
+        ("ξ_R", "xi_r_fun", "perturbed_equilibrium/response/xi_R"),
+        ("ξ_Z", "xi_z_fun", "perturbed_equilibrium/response/xi_Z"),
+        ("ξ_φ", "xi_phi_fun", "perturbed_equilibrium/response/xi_phi"),
+        ("b_R", "b_r_fun", "perturbed_equilibrium/response/b_R"),
+        ("b_Z", "b_z_fun", "perturbed_equilibrium/response/b_Z"),
+        ("b_φ", "b_phi_fun", "perturbed_equilibrium/response/b_phi")]
         f_fun = get(fort, f_key, Matrix{ComplexF64}(undef, 0, 0))
 
         # Reconstruct theta-space from mode-space via modes_to_theta (applies ν phase + helicity)
@@ -1195,7 +1232,7 @@ function generate_plots(fort, julia, bench_dir, nn)
         # Real part panel
         yl_re = _percentile_ylims(f_re, j_re)
         p_re = plot(; xlabel="ψ_n", ylabel="Re($comp_label)", title="Re($comp_label) θ=0 (n=$nn)",
-                      legend=:topright, ylims=yl_re)
+            legend=:topright, ylims=yl_re)
         !isempty(f_re) && plot!(p_re, f_psi_prof, f_re; lw=2.5, color=:steelblue, label="Fortran")
         !isempty(j_re) && plot!(p_re, j_psi_grid, j_re; lw=1.0, color=:orange, label="Julia")
         push!(rzphi_panels, p_re)
@@ -1203,7 +1240,7 @@ function generate_plots(fort, julia, bench_dir, nn)
         # Imaginary part panel
         yl_im = _percentile_ylims(f_im, j_im)
         p_im = plot(; xlabel="ψ_n", ylabel="Im($comp_label)", title="Im($comp_label) θ=0 (n=$nn)",
-                      legend=:topright, ylims=yl_im)
+            legend=:topright, ylims=yl_im)
         !isempty(f_im) && plot!(p_im, f_psi_prof, f_im; lw=2.5, color=:steelblue, label="Fortran")
         !isempty(j_im) && plot!(p_im, j_psi_grid, j_im; lw=1.0, color=:orange, label="Julia")
         push!(rzphi_panels, p_im)
@@ -1228,7 +1265,7 @@ that orders-of-magnitude variation is visible.  When `rel_err=true` the colour
 scale is labelled as log₁₀(rel error).
 """
 function _mat_heatmap(M::AbstractMatrix, title_str::String, m_vals;
-                      rel_err::Bool=false, clims=nothing)
+    rel_err::Bool=false, clims=nothing)
     vals = log10.(max.(abs.(M), 1e-30))   # floor at 1e-30 to avoid -Inf
     label = rel_err ? "log₁₀(|ΔM/M|)" : "log₁₀|M|"
     kw = isnothing(clims) ? () : (clims=clims,)
@@ -1251,32 +1288,32 @@ Save `matrix_comparison_plots.png` showing element-wise |M| heatmaps for the
 fundamental response matrices L, Λ, P and the vacuum energy matrix wt0.
 
 Layout (rows × 3 columns):
-  • Col 1: |M| Fortran   Col 2: |M| Julia   Col 3: relative error |ΔM/M_fort|
-  • Row 4 (wt0): Julia only — no Fortran reference available in NetCDF outputs.
+• Col 1: |M| Fortran   Col 2: |M| Julia   Col 3: relative error |ΔM/M_fort|
+• Row 4 (wt0): Julia only — no Fortran reference available in NetCDF outputs.
 """
 function generate_matrix_plots(fort, julia, bench_dir, _nn)
     m_ctrl = fort["m_vals_ctrl"]
 
-    f_L   = fort["L_surf"]
-    f_La  = fort["Lambda"]
-    f_P   = fort["P"]
-    j_L   = julia["surface_inductance"]
-    j_La  = julia["plasma_inductance"]
-    j_P   = julia["permeability"]
+    f_L = fort["L_surf"]
+    f_La = fort["Lambda"]
+    f_P = fort["P"]
+    j_L = julia["surface_inductance"]
+    j_La = julia["plasma_inductance"]
+    j_P = julia["permeability"]
     j_wt0 = julia["wt0"]
 
     panels = Any[]
 
     for (name, f_M, j_M) in [("L  (surface inductance)", f_L, j_L),
-                               ("Λ  (plasma inductance)",  f_La, j_La),
-                               ("P  (permeability)",        f_P, j_P)]
+        ("Λ  (plasma inductance)", f_La, j_La),
+        ("P  (permeability)", f_P, j_P)]
         ok = !isempty(f_M) && !isempty(j_M) && size(f_M) == size(j_M)
         if ok
             # Use a common colour range for the first two panels
             all_vals = log10.(max.(abs.([f_M; j_M]), 1e-30))
             clims_mat = (minimum(all_vals), maximum(all_vals))
-            push!(panels, _mat_heatmap(f_M, "|$name| — Fortran",  m_ctrl; clims=clims_mat))
-            push!(panels, _mat_heatmap(j_M, "|$name| — Julia",    m_ctrl; clims=clims_mat))
+            push!(panels, _mat_heatmap(f_M, "|$name| — Fortran", m_ctrl; clims=clims_mat))
+            push!(panels, _mat_heatmap(j_M, "|$name| — Julia", m_ctrl; clims=clims_mat))
             rel_err = abs.(j_M .- f_M) ./ (abs.(f_M) .+ 1e-30)
             push!(panels, _mat_heatmap(rel_err, "Rel. error |$name|", m_ctrl; rel_err=true))
         else
@@ -1309,14 +1346,14 @@ end
 
 function main(argv=ARGS)
     opts = parse_args(argv)
-    fortran_dir      = opts.fortran_dir
-    do_plot          = opts.do_plot
-    skip_run         = opts.skip_run
+    fortran_dir = opts.fortran_dir
+    do_plot = opts.do_plot
+    skip_run = opts.skip_run
     use_file_forcing = opts.use_file_forcing
 
     isdir(fortran_dir) || error("Fortran directory not found: $fortran_dir")
     isfile(joinpath(fortran_dir, "equil.in")) || error("equil.in not found in $fortran_dir")
-    isfile(joinpath(fortran_dir, "dcon.in"))  || error("dcon.in not found in $fortran_dir")
+    isfile(joinpath(fortran_dir, "dcon.in")) || error("dcon.in not found in $fortran_dir")
 
     coil_dat_dir = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries")
 
@@ -1344,7 +1381,7 @@ function main(argv=ARGS)
     @printf "  m range: %d:%d\n" fort["mlow"] fort["mhigh"]
 
     bench_name = "fortran_vs_julia_" * basename(fortran_dir)
-    bench_dir  = joinpath(@__DIR__, bench_name)
+    bench_dir = joinpath(@__DIR__, bench_name)
     mkpath(bench_dir)
     println("\nBenchmark directory: $bench_dir")
 
@@ -1371,7 +1408,7 @@ function main(argv=ARGS)
         ratios = Float64[]
         for m in sort(m_vals)
             ja = get(julia_amps, m, NaN)
-            fa = get(fort_amps,  m, NaN)
+            fa = get(fort_amps, m, NaN)
             ratio = (!isnan(ja) && ja > 1e-40) ? fa / ja : NaN
             isnan(ratio) || push!(ratios, ratio)
             @printf "  %4d   %14.4e         %14.4e       %.4f\n" m ja fa (isnan(ratio) ? 0.0 : ratio)
@@ -1399,8 +1436,8 @@ function main(argv=ARGS)
     else
         println("  Running Julia GPEC (subprocess)...")
         isfile(h5_path) && rm(h5_path)
-        gpec_root  = joinpath(@__DIR__, "..")
-        julia_cmd  = Base.julia_cmd()
+        gpec_root = joinpath(@__DIR__, "..")
+        julia_cmd = Base.julia_cmd()
         cmd = `$julia_cmd --project=$gpec_root -e "using GeneralizedPerturbedEquilibrium; GeneralizedPerturbedEquilibrium.main([\"$bench_dir\"])"`
         run(cmd)
     end
@@ -1412,11 +1449,17 @@ function main(argv=ARGS)
 
     println()
     table_lines = build_comparison_table(fort, julia, fortran_dir, bench_dir, p.nn)
-    for line in table_lines; println(line); end
+    for line in table_lines
+        ;
+        println(line);
+    end
 
     table_path = joinpath(bench_dir, "comparison_table.txt")
     open(table_path, "w") do io
-        for line in table_lines; println(io, line); end
+        for line in table_lines
+            ;
+            println(io, line);
+        end
     end
     println("\nComparison table saved to: ", abspath(table_path))
 

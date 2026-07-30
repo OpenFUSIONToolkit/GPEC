@@ -370,10 +370,7 @@ function main_from_inputs(
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
-    if ctrl.cyl_flag
-        intr.mlow = ctrl.delta_mlow
-        intr.mhigh = ctrl.delta_mhigh
-    elseif ctrl.sing_start == 0
+    if ctrl.sing_start == 0
         intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
@@ -388,64 +385,54 @@ function main_from_inputs(
     intr.numpert_total = intr.mpert * intr.npert
 
     # Fit equilibrium quantities to Fourier-spline functions.
-    if ctrl.mat_flag || ctrl.ode_flag
+    if ctrl.verbose
+        @info "Run parameters:\n" *
+              "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
+              "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+              "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+              "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
+              "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
+    end
+
+    # Compute metric tensor
+    metric = make_metric(equil, intr.mpert)
+
+    if ctrl.verbose
+        @info "Computing F, G, and K matrices"
+    end
+
+    # Compute matrices and populate FourFitVars struct
+    ffit = make_matrix(equil, intr, metric)
+
+    if ctrl.kinetic_factor > 0
         if ctrl.verbose
-            @info "Run parameters:\n" *
-                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
-                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
-                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
-                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
+            @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
         end
+        # Inject the KineticForces callback so the "calculated" source can
+        # invoke compute_calculated_kinetic_matrices without ForceFreeStates
+        # importing KineticForces (which would invert the load order).
+        calculated_cb = (c, e, i, m, f) ->
+            KineticForces.compute_calculated_kinetic_matrices(
+                c, e, i, m, f;
+                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
+        make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+            calculated_source=calculated_cb)
 
-        # Compute metric tensor
-        metric = make_metric(equil, intr.mpert)
-
-        if ctrl.verbose
-            @info "Computing F, G, and K matrices"
+        # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
+        # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
+        # singfac_min == 0 preserves single-chunk behavior.
+        if ctrl.singfac_min > 0
+            find_kinetic_singular_surfaces!(ffit, equil, intr)
         end
-
-        # Compute matrices and populate FourFitVars struct
-        ffit = make_matrix(equil, intr, metric)
-
-        if ctrl.kinetic_factor > 0
-            if ctrl.verbose
-                @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
-            end
-            # Inject the KineticForces callback so the "calculated" source can
-            # invoke compute_calculated_kinetic_matrices without ForceFreeStates
-            # importing KineticForces (which would invert the load order).
-            calculated_cb = (c, e, i, m, f) ->
-                KineticForces.compute_calculated_kinetic_matrices(
-                    c, e, i, m, f;
-                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
-            make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
-                calculated_source=calculated_cb)
-
-            # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
-            # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
-            # singfac_min == 0 preserves single-chunk behavior.
-            if ctrl.ode_flag && ctrl.singfac_min > 0
-                find_kinetic_singular_surfaces!(ffit, equil, intr)
-            end
-        end
-
-        # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during
-        # singular surface crossings in cross_ideal_singular_surf!. This makes it clear that
-        # asymptotics are only needed for ideal ForceFreeStates and are not inherent properties of
-        # the singular surface.
-
     end
 
     # Integrate Euler-Lagrange Equation
-    if ctrl.ode_flag
-        if ctrl.verbose
-            @info "Integrating Euler-Lagrange equation"
-        end
-        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
-        if odet.nzero > 0 && ctrl.verbose
-            @warn "Fixed-boundary mode unstable for n = $nstring"
-        end
+    if ctrl.verbose
+        @info "Integrating Euler-Lagrange equation"
+    end
+    odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
+    if odet.nzero > 0 && ctrl.verbose
+        @warn "Fixed-boundary mode unstable for n = $nstring"
     end
 
     # Compute free boundary energies
@@ -482,7 +469,6 @@ function main_from_inputs(
     gal_data = nothing
     if ctrl.gal_flag
         gal_start = time()
-        ctrl.mat_flag || error("gal_flag=true requires mat_flag=true (needs the F/G/K matrix splines)")
         gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
         @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     end
@@ -745,7 +731,6 @@ function write_outputs_to_HDF5(
         out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
 
         # Write integration data
-        # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
         out_h5["integration/nstep"] = odet.step            # Number of saved solution snapshots
         out_h5["integration/nstep_total"] = odet.total_steps  # Total ODE solver steps taken
         out_h5["integration/psi"] = odet.psi_store
@@ -840,8 +825,8 @@ function write_outputs_to_HDF5(
             out_h5["kinetic/kinetic_factor"] = ctrl.kinetic_factor
         end
 
-        # Write fundamental matrices on the ψ grid when mat_flag is enabled
-        if ctrl.mat_flag && ffit !== nothing
+        # Write fundamental matrices on the ψ grid
+        if ffit !== nothing
             xs = equil.rzphi_xs
             npsi = length(xs)
             np = intr.numpert_total

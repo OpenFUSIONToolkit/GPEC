@@ -26,7 +26,7 @@ function make_kinetic_matrix(
     ffit::FourFitVars,
     intr::ForceFreeStatesInternal,
     metric::MetricData;
-    calculated_source::Union{Nothing,Function}=nothing,
+    calculated_source::Union{Nothing,Function}=nothing
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -248,7 +248,7 @@ function _compute_fkg_matrices!(
     ffit.r3mats = cubic_interp(xs, Series(r3_flat); ffit.itp_opts...)
     ffit.gaats = cubic_interp(xs, Series(ga_flat); ffit.itp_opts...)
 
-    # Preserve ideal A/B/C splines before overwrite (for mat_flag output)
+    # Preserve ideal A/B/C splines before overwrite
     ffit.amats_ideal = ffit.amats
     ffit.bmats_ideal = ffit.bmats
     ffit.cmats_ideal = ffit.cmats
