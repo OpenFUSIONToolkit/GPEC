@@ -272,11 +272,6 @@ function compute_singular_coupling_metrics!(
             bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
             bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
             jump_vec[k] = bwp1_r - bwp1_l
-            # Kinetic fallback for penetrated field:
-            # if kinetic (where to get this variable???)
-            #     b_l = chi1 * singfac_l * 2π * im * xsp_l
-            #     b_r = chi1 * singfac_r * 2π * im * xsp_r
-            #     state.C_penetrated_area_weighted_field[row, k] = (b_l + b_r) / 2 / area
         end
 
         # Inner-layer (cusp-free) penetrated field: bpen[s, j] is linear in the same identity-at-edge

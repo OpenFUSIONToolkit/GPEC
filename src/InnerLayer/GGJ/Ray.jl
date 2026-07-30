@@ -942,6 +942,8 @@ end
                         npc=8, certify_rtol=1e-3, kwargs...)
         -> (; Δ, x, Ψ, Ξ, dψdx, rescale, certΔ)
 
+Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. The
+certified `Δ` comes from the optimal-contour solve at θ = arg(Q)/4 (robust for
 |Q| ≳ 1, where real-axis methods drift); the profiles come from a θ = 0
 re-solve on the real axis, valid at physical (RPEC) |Q| since the on-axis
 pseudo-resonance is a regular point resolved by the BVP refinement. The
