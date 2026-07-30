@@ -23,16 +23,17 @@ const NZETA_POINTS_PER_PERIOD = 32
 Pre-computed plasma boundary grid for evaluating coil fields.
 
 ## Fields
-- `mtheta`, `nzeta`: grid dimensions
-- `R`, `Z`: cylindrical coordinates `[mtheta]` (same for all ζ, axisymmetric)
-- `phi_grid`: base toroidal angle grid `[nzeta]` in radians = `-helicity × 2π × j/nzeta`
-- `phi_offset`: per-θ toroidal angle correction `[mtheta]` from SFL coordinates:
-  `ν(ψ, θ)` scaled by `-helicity`, so the physical toroidal angle at `(i, j)` is
-  `phi_grid[j] + phi_offset[i]`. Matches Fortran's `phi = -helicity*(2π*ζ + dphi(ψ,θ))`.
-  Zero for axisymmetric equilibria on-axis; non-zero off-axis due to SFL coordinate
-  transform (Hamada/SFL θ ≠ geometric θ introduces a toroidal offset).
-- `dR_dtheta`, `dZ_dtheta`: poloidal derivatives w.r.t. unit-norm angle θ_norm ∈ [0,1]
-  `dR_dtheta[i] = dR/dθ_norm = 2π × dR/dθ_phys`
+
+  - `mtheta`, `nzeta`: grid dimensions
+  - `R`, `Z`: cylindrical coordinates `[mtheta]` (same for all ζ, axisymmetric)
+  - `phi_grid`: base toroidal angle grid `[nzeta]` in radians = `-helicity × 2π × j/nzeta`
+  - `phi_offset`: per-θ toroidal angle correction `[mtheta]` from SFL coordinates:
+    `ν(ψ, θ)` scaled by `-helicity`, so the physical toroidal angle at `(i, j)` is
+    `phi_grid[j] + phi_offset[i]`. Matches Fortran's `phi = -helicity*(2π*ζ + dphi(ψ,θ))`.
+    Zero for axisymmetric equilibria on-axis; non-zero off-axis due to SFL coordinate
+    transform (Hamada/SFL θ ≠ geometric θ introduces a toroidal offset).
+  - `dR_dtheta`, `dZ_dtheta`: poloidal derivatives w.r.t. unit-norm angle θ_norm ∈ [0,1]
+    `dR_dtheta[i] = dR/dθ_norm = 2π × dR/dθ_phys`
 """
 struct BoundaryGrid
     mtheta::Int
@@ -57,13 +58,13 @@ Poloidal derivatives dR/dθ_norm and dZ/dθ_norm (unit-norm θ_norm ∈ [0,1]) a
 via periodic cubic splines on the resulting R(θ_norm), Z(θ_norm) data.
 
 The toroidal grid direction follows the Fortran GPEC convention:
-  `phi_j = -helicity × 2π × j/nzeta`   where `helicity = sign(Bt) × sign(Ip)`.
+`phi_j = -helicity × 2π × j/nzeta`   where `helicity = sign(Bt) × sign(Ip)`.
 This is derived from `equil.params.bt_sign` and `equil.params.crnt`.
 For DIII-D (Bt < 0, Ip > 0 → helicity = -1): phi increases with j (standard direction).
 For positive-helicity machines (Bt > 0, Ip > 0 → helicity = +1): phi decreases with j.
 """
 function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int, nzeta::Int;
-                               psi::Float64=1.0)
+    psi::Float64=1.0)
     # Build uniform theta grid (same convention as equil.rzphi_ys, but potentially finer)
     theta_grid = range(0; length=mtheta, step=1.0/mtheta)
 
@@ -73,7 +74,7 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
 
     for (i, θ_sfl) in enumerate(theta_grid)
         r_minor = sqrt(equil.rzphi_rsquared((psi, θ_sfl); hint=hint2d))
-        θ_cyl   = 2π * (θ_sfl + equil.rzphi_offset((psi, θ_sfl); hint=hint2d))
+        θ_cyl = 2π * (θ_sfl + equil.rzphi_offset((psi, θ_sfl); hint=hint2d))
         R_arr[i] = equil.ro + r_minor * cos(θ_cyl)
         Z_arr[i] = equil.zo + r_minor * sin(θ_cyl)
     end
@@ -97,7 +98,7 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
     bt_sign = !isnothing(equil.params.bt_sign) ? equil.params.bt_sign : 1
     ip_sign = !isnothing(equil.params.crnt) ? Int(sign(equil.params.crnt)) : 1
     helicity = bt_sign * ip_sign
-    phi_grid = collect(range(0; length=nzeta, step=-helicity * 2π/nzeta))
+    phi_grid = collect(range(0; length=nzeta, step=(-helicity * 2π/nzeta)))
 
     # Toroidal angle offset ν(ψ, θ_SFL): in SFL coordinates the physical toroidal angle at
     # grid point (θ_SFL, ζ_SFL) is  φ_phys = -helicity*(2π*ζ_SFL + ν(ψ,θ_SFL)).
@@ -119,7 +120,7 @@ Project the cylindrical magnetic field (B_R, B_Z) onto the plasma boundary norma
 direction ∇ψ and store in `bn[mtheta, nzeta]`.
 
 Computes the unit-norm flux element Phi_x per (θ_norm, ζ_norm) cell [T·m²]:
-  bn(θ_norm, ζ_norm) = 2π × R(θ_norm) × (B_R × ∂Z/∂θ_norm - B_Z × ∂R/∂θ_norm)
+bn(θ_norm, ζ_norm) = 2π × R(θ_norm) × (B_R × ∂Z/∂θ_norm - B_Z × ∂R/∂θ_norm)
 
 The `2π` factor comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ in the
 cross-product ∂r/∂θ_norm × ∂r/∂ζ_norm. The derivatives dR/dθ_norm and dZ/dθ_norm
@@ -129,9 +130,10 @@ are stored in `grid.dR_dtheta` and `grid.dZ_dtheta` (unit-norm convention from
 The output matches Fortran GPEC's `Phi_x` convention directly (no extra factor needed).
 
 ## Arguments
-- `bn`: output array `[mtheta, nzeta]`; overwritten in-place
-- `B_R`, `B_Z`: cylindrical field components, length `mtheta × nzeta` (flat, θ-major)
-- `grid`: pre-computed boundary geometry from `sample_boundary_grid`
+
+  - `bn`: output array `[mtheta, nzeta]`; overwritten in-place
+  - `B_R`, `B_Z`: cylindrical field components, length `mtheta × nzeta` (flat, θ-major)
+  - `grid`: pre-computed boundary geometry from `sample_boundary_grid`
 """
 function project_normal_flux!(
     bn::Matrix{Float64},
@@ -140,7 +142,7 @@ function project_normal_flux!(
     grid::BoundaryGrid
 )
     mtheta = grid.mtheta
-    nzeta  = grid.nzeta
+    nzeta = grid.nzeta
     @assert size(bn) == (mtheta, nzeta)
     @assert length(B_R) == mtheta * nzeta
     @assert length(B_Z) == mtheta * nzeta
@@ -160,7 +162,7 @@ end
 mode number `n` and poloidal range `m_low:m_high`.
 
 Coefficients are computed as:
-  bmn = (2 / (mtheta × nzeta)) × Σ_{i,j} bn[i,j] × exp(-i(m×θᵢ - n×ζⱼ))
+bmn = (2 / (mtheta × nzeta)) × Σ_{i,j} bn[i,j] × exp(-i(m×θᵢ - n×ζⱼ))
 
 The factor 2 matches the GPEC/DCON convention for real signals where positive
 and negative m modes are related by conjugation.
@@ -169,7 +171,7 @@ When called after `project_normal_flux!`, the returned amplitudes are in unit-no
 convention equal to Fortran `Phi_x` (T·m² per unit-norm cell).
 
 Uses `compute_fourier_coefficients` from `Utilities.FourierTransforms` with the
-3D (mtheta×nzeta, mpert) basis matrix (npert=1, nlow=n).
+3D (mpert, mtheta×nzeta) basis matrix (npert=1, nlow=n).
 """
 function fourier_decompose_bn(
     bn::Matrix{Float64},
@@ -179,23 +181,20 @@ function fourier_decompose_bn(
     m_high::Int
 )
     mtheta = grid.mtheta
-    nzeta  = grid.nzeta
-    mpert  = m_high - m_low + 1
+    nzeta = grid.nzeta
 
-    # Build 2D basis: cos(m*θ - n*ζ) and sin(m*θ - n*ζ)
-    # Using 3D call with npert=1, nlow=n gives shape (mtheta*nzeta, mpert)
-    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, mpert, m_low, nzeta, 1, n)
+    # Build Fourier basis: exp(-i*(m*θ - n*ζ))
+    # Using 3D call with npert=1, nlow=n gives shape (mpert, mtheta*nzeta)
+    basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
     bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j] ✓
     scale = 2.0 / (mtheta * nzeta)
 
-    bmn_real = scale .* (cos_basis'  * bn_flat)
-    bmn_imag = scale .* (-sin_basis' * bn_flat)
+    bmn = scale .* (basis * bn_flat)
 
     modes = ForcingMode[]
     for (idx, m) in enumerate(m_low:m_high)
-        push!(modes, ForcingMode(; n=n, m=m,
-            amplitude=complex(bmn_real[idx], bmn_imag[idx])))
+        push!(modes, ForcingMode(; n=n, m=m, amplitude=bmn[idx]))
     end
     return modes
 end
@@ -207,11 +206,12 @@ Top-level entry point: compute Fourier mode amplitudes of the normal magnetic
 flux from all coil sets on the plasma boundary.
 
 ## Pipeline
-- Build boundary grid at (mtheta × nzeta) resolution, with helicity from `equil.params`
-- Lay out observation points in (R, φ, Z) for all (θ, ζ) combinations
-- Run threaded Biot-Savart summation over all coil sets (matches Fortran `field_bs_psi`)
-- Project B field onto plasma boundary normal flux (`project_normal_flux!`)
-- 2D Fourier decompose to get bmn amplitudes for mode range
+
+  - Build boundary grid at (mtheta × nzeta) resolution, with helicity from `equil.params`
+  - Lay out observation points in (R, φ, Z) for all (θ, ζ) combinations
+  - Run threaded Biot-Savart summation over all coil sets (matches Fortran `field_bs_psi`)
+  - Project B field onto plasma boundary normal flux (`project_normal_flux!`)
+  - 2D Fourier decompose to get bmn amplitudes for mode range
 
 Output amplitudes are in unit-norm convention (= Fortran `Phi_x`).
 No normalization conversion is needed when using these modes with `compute_plasma_response!`.
@@ -226,8 +226,8 @@ function compute_coil_forcing_modes!(
     n::Int,
     m_low::Int,
     m_high::Int;
-    psi::Float64 = 1.0,
-    verbose::Bool = false
+    psi::Float64=1.0,
+    verbose::Bool=false
 )
     nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * max(1, abs(n))
     mtheta = cfg.mtheta_coil
@@ -237,23 +237,23 @@ function compute_coil_forcing_modes!(
     grid = sample_boundary_grid(equil, mtheta, nzeta; psi)
 
     # Lay out observation points: (theta_i, zeta_j) → cylindrical (R, phi, Z)
-    nobs  = mtheta * nzeta
-    obs_R   = zeros(nobs)
+    nobs = mtheta * nzeta
+    obs_R = zeros(nobs)
     obs_phi = zeros(nobs)
-    obs_Z   = zeros(nobs)
+    obs_Z = zeros(nobs)
 
     for j in 1:nzeta
         for i in 1:mtheta
             idx = i + (j - 1) * mtheta
-            obs_R[idx]   = grid.R[i]
+            obs_R[idx] = grid.R[i]
             obs_phi[idx] = grid.phi_grid[j] + grid.phi_offset[i]
-            obs_Z[idx]   = grid.Z[i]
+            obs_Z[idx] = grid.Z[i]
         end
     end
 
-    B_R   = zeros(nobs)
+    B_R = zeros(nobs)
     B_phi = zeros(nobs)
-    B_Z   = zeros(nobs)
+    B_Z = zeros(nobs)
     compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
 
     verbose && @info "  Max |B_R| = $(maximum(abs, B_R)) T, Max |B_Z| = $(maximum(abs, B_Z)) T"
@@ -282,6 +282,7 @@ SFL-flux convention. These are scaled by (2π)² to reach unit-norm.
 
 If `from_tag == "normal_field_T"`, the amplitudes represent Fourier modes of B·n̂
 in Tesla (2π-angle convention). Conversion to unit-norm Phi_x:
+
   - Inverse-Fourier reconstruct B·n̂(θ, ζ) from the input modes
   - Multiply pointwise by 2π × R(θ) × |dr/dθ_norm(θ)|
   - Re-Fourier transform to get unit-norm mode amplitudes
@@ -290,13 +291,14 @@ The 2π factor comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ.
 This conversion is a mode-mixing operation because R and |dr/dθ| vary poloidally.
 
 ## Arguments
-- `modes`: `Vector{ForcingMode}` with amplitudes to convert (modified in place)
-- `from_tag`: source normalization — `"normal_field_T"` or `"sfl_flux_Wb"`
-- `equil`: `PlasmaEquilibrium` providing boundary geometry
-- `n`: toroidal mode number
-- `m_low`, `m_high`: poloidal mode range (must cover all modes in `modes`)
-- `psi`: flux surface for boundary geometry (default 1.0)
-- `mtheta`, `nzeta`: grid resolution for the conversion (defaults: 256, 64)
+
+  - `modes`: `Vector{ForcingMode}` with amplitudes to convert (modified in place)
+  - `from_tag`: source normalization — `"normal_field_T"` or `"sfl_flux_Wb"`
+  - `equil`: `PlasmaEquilibrium` providing boundary geometry
+  - `n`: toroidal mode number
+  - `m_low`, `m_high`: poloidal mode range (must cover all modes in `modes`)
+  - `psi`: flux surface for boundary geometry (default 1.0)
+  - `mtheta`, `nzeta`: grid resolution for the conversion (defaults: 256, 64)
 """
 function convert_forcing_normalization!(
     modes::Vector{ForcingMode},
@@ -305,9 +307,9 @@ function convert_forcing_normalization!(
     n::Int,
     m_low::Int,
     m_high::Int;
-    psi::Float64 = 1.0,
-    mtheta::Int = 256,
-    nzeta::Int = 64
+    psi::Float64=1.0,
+    mtheta::Int=256,
+    nzeta::Int=64
 )
     if from_tag == "sfl_flux_Wb"
         # User provided 2π-angle SFL flux; scale by (2π)² to reach unit-norm (= Phi_x)
@@ -325,20 +327,18 @@ function convert_forcing_normalization!(
     grid = sample_boundary_grid(equil, mtheta, nzeta; psi=psi)
 
     # Reconstruct real-space B·n̂(θ, ζ) from input Fourier modes
-    cos_basis, sin_basis = compute_fourier_coefficients(mtheta, mpert, m_low, nzeta, 1, n)
+    basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
-    # Build amplitude vectors (real, imag) ordered m_low:m_high
-    amp_real = zeros(mpert)
-    amp_imag = zeros(mpert)
+    # Build amplitude vector ordered m_low:m_high
+    amp = zeros(ComplexF64, mpert)
     for mode in modes
         idx = mode.m - m_low + 1
         1 <= idx <= mpert || continue
-        amp_real[idx] = real(mode.amplitude)
-        amp_imag[idx] = imag(mode.amplitude)
+        amp[idx] = mode.amplitude
     end
 
     # Inverse DFT: reconstruct B·n̂(θ, ζ) at grid points
-    bn_hat = (cos_basis * amp_real .- sin_basis * amp_imag)  # length mtheta*nzeta
+    bn_hat = real.(adjoint(basis) * amp)  # length mtheta*nzeta
     bn_field = reshape(bn_hat, mtheta, nzeta)
 
     # Multiply by 2π × R × |dr/dθ_norm| to convert B·n̂ → unit-norm Phi_x integrand.
@@ -354,14 +354,13 @@ function convert_forcing_normalization!(
     # Re-Fourier transform bn_field → unit-norm (Phi_x) mode amplitudes
     bn_flat = vec(bn_field)
     scale = 2.0 / (mtheta * nzeta)
-    new_real = scale .* (cos_basis'  * bn_flat)
-    new_imag = scale .* (-sin_basis' * bn_flat)
+    bmn = scale .* (basis * bn_flat)
 
     # Write back into modes vector (in place, same ordering)
     for mode in modes
         idx = mode.m - m_low + 1
         1 <= idx <= mpert || continue
-        mode.amplitude = complex(new_real[idx], new_imag[idx])
+        mode.amplitude = bmn[idx]
     end
 end
 

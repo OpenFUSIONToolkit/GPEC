@@ -135,8 +135,6 @@ shape = "nowall"
 
 [ForceFreeStates]
 local_stability_flag = true
-mat_flag = true
-ode_flag = true
 vac_flag = true
 force_termination = true       # Skip PE+KF post-processing — we only need FFS eigenvalues
 

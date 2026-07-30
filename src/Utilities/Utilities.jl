@@ -25,8 +25,6 @@ include("GridUtilities.jl")
 
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients
-export transform!, inverse_transform!
-export fourier_transform!, fourier_inverse_transform!
 
 export FourierCoefficients, empty_FourierCoefficients, get_complex_coeff, get_complex_coeffs!
 

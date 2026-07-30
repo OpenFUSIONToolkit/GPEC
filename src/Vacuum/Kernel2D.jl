@@ -17,7 +17,7 @@ end
     )
 end
 
-# Precomputed Gauss-Legendre rule used in the hot path (`kernel!`).
+# Precomputed Gauss-Legendre rule
 const GL8 = gausslegendre_rule(Val(8))
 
 """
@@ -59,7 +59,7 @@ const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 # and per-n sinh/cosh cache are defined in PnQuadCache.jl.
 
 """
-    kernel!(grad_greenfunction, greenfunction, observer, source, n)
+    compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, n)
 
 Compute kernels of integral equation for Laplace's equation in a torus.
 **WARNING: This kernel only supports closed toroidal walls currently.
@@ -76,8 +76,8 @@ The residue calculation needs to be updated for open walls.**
 # Returns
 
 Modifies `grad_greenfunction` and `greenfunction` in place.
-Note that greenfunction is zeroed each time this function is called,
-but grad_greenfunction is not since it fills a different block of the
+Note that greenfunction is zeroed only when the source is plasma;
+grad_greenfunction is not zeroed since it fills a different block of the
 (2 * mtheta, 2 * mtheta) depending on the source/observer.
 
 # Notes
@@ -107,10 +107,9 @@ but grad_greenfunction is not since it fills a different block of the
         ((col_index-1)*mtheta+1):(col_index*mtheta)
     )
 
-    # Zero out greenfunction at start of each kernel call
-    fill!(greenfunction, 0.0)
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry
+    populate_greenfunction && fill!(greenfunction, 0.0)
 
     # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
@@ -231,17 +230,6 @@ but grad_greenfunction is not since it fills a different block of the
     if populate_greenfunction
         greenfunction ./= 2π
     end
-end
-
-# Dispatch wrapper for unified 2D/3D vacuum: forwards to 5-arg compute_2D_kernel_matrices! with params.n
-function kernel!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
-    observer::Union{PlasmaGeometry,WallGeometry},
-    source::Union{PlasmaGeometry,WallGeometry},
-    params::KernelParams2D
-)
-    return compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, params.n)
 end
 
 #############################################################

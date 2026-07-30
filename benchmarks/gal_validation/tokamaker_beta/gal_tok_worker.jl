@@ -24,7 +24,7 @@ function base_inputs(dir)
             "etol" => 1e-10, "force_termination" => false),
         "Wall" => Dict("shape" => "nowall", "a" => 0.2415),
         "ForceFreeStates" => Dict(
-            "local_stability_flag" => true, "mat_flag" => true, "ode_flag" => true,
+            "local_stability_flag" => true,
             "vac_flag" => true,
             "qlow" => 1.02, "qhigh" => 1e3, "sing_start" => 0,
             "nn_low" => 1, "nn_high" => 1, "delta_mlow" => 8, "delta_mhigh" => 8,
@@ -49,9 +49,13 @@ function run_pipeline(psihigh)
     eq_config = EQ.EquilibriumConfig(inputs["Equilibrium"], dir)
     equil = EQ.setup_equilibrium(eq_config, nothing)
     FFS.sing_lim!(intr, ctrl, equil)
-    xs = equil.profiles.xs; ls = zeros(length(xs), 5); FFS.compute_ballooning_stability!(ctrl, ls, equil)
+    xs = equil.profiles.xs;
+    ls = zeros(length(xs), 5);
+    FFS.compute_ballooning_stability!(ctrl, ls, equil)
     intr.locstab = cubic_interp(xs, Series(ls); extrap=ExtendExtrap())
-    intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+    intr.nlow = ctrl.nn_low;
+    intr.nhigh = ctrl.nn_high;
+    intr.npert = 1
     FFS.sing_find!(intr, equil)
     # Replicate main()'s post-find surface filter: drop surfaces outside [qlow, qlim].
     # Without this the worker keeps the q=1 internal-kink surface (and mis-aligns the STRIDE
@@ -81,13 +85,19 @@ end
 P = nothing
 for ph in (0.999, 0.99, 0.98, 0.97, 0.95)
     try
-        global P = run_pipeline(ph); break
+        global P = run_pipeline(ph);
+        break
     catch e
         @warn "pipeline failed at psihigh=$ph for $(basename(GEQDSK)); retrying lower" exception=e
     end
 end
 P === nothing && error("all psihigh retries failed for $(basename(GEQDSK))")
-ctrl = P.ctrl; equil = P.equil; ffit = P.ffit; intr = P.intr; vac_data = P.vac_data; dir = P.dir
+ctrl = P.ctrl;
+equil = P.equil;
+ffit = P.ffit;
+intr = P.intr;
+vac_data = P.vac_data;
+dir = P.dir
 @printf("  using psihigh=%.3f for %s\n", P.psihigh, basename(GEQDSK))
 dpm = intr.delta_prime_matrix
 m_s = [s.m[1] for s in intr.sing if s.psifac < intr.psilim]
@@ -100,7 +110,8 @@ stride_diag = [i <= ndpm ? real(dpm[i, i]) : NaN for i in 1:length(m_s)]
 open(OUTCSV, "a") do io
     for pfac in PFACS
         ctrl.gal_pfac = pfac
-        gdiag = fill(NaN, length(m_s)); gm = Int[]
+        gdiag = fill(NaN, length(m_s));
+        gm = Int[]
         try
             res = FFS.galerkin_solve(ctrl, equil, ffit, intr; vac_data=vac_data)
             gm = res.sing_m
