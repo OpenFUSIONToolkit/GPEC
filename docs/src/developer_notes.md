@@ -20,6 +20,38 @@ Where CODE is the module name (EQUIL, ForceFreeStates, VAC, PERTURBED EQUILIBRIU
 
 The regression harness **must be run on every pull request before merging into `develop`**. It is the project's primary safeguard for tracking how numerical results evolve across changes, so it is only useful if every PR exercises it. When you open a PR, paste the regression report into the PR thread so reviewers can see what moved (and what did not). If your change touches a quantity that is not yet tracked, add a new regression case — or extend an existing one — in the same PR.
 
+### Open problem: pinning grid-sensitive Δ′ robustly
+
+The ideal-MHD Δ′ values pinned in `test/runtests_parallel_integration.jl`
+(`delta_prime_matrix` diagonal) and tracked by the harness are **single-point
+snapshots**: one value at one `psi_accuracy` on one grid. They exist to catch
+unintended changes, and are explicitly *not* converged Δ′. The extraction is
+intrinsically grid-sensitive — a `psi_accuracy` scan from 2e-3 to 2.5e-4 swings
+the DIII-D-like `dpm[1,1]` by roughly 50% (about 6.2 to 9.9), and switching the
+grid generator moves it again. Any such pin therefore encodes an arbitrary point
+on a varying curve, and re-pinning is required whenever the grid changes, which
+weakens it as a regression signal.
+
+A more defensible criterion is to pin the **plateau**: scan Δ′ across
+`psi_accuracy` and the integration-truncation controls, and take the value where
+the result is stationary — the mode of the resulting distribution rather than any
+single sample. Where a plateau exists it is a property of the physics rather than
+of the discretization, so it would survive grid changes and would be a genuine
+convergence statement.
+
+This is not implemented. Doing it properly needs:
+
+  - a scan driver over `psi_accuracy` × truncation (`psihigh`, `dmlim`, `qhigh`)
+    that records the Δ′ diagonal per configuration;
+  - a plateau/mode detector with an explicit stationarity tolerance, plus a
+    defined failure mode for surfaces where no plateau exists (the
+    near-separatrix surfaces are expected to fall in this class);
+  - a harness case that pins plateau values and their scan width, replacing the
+    single-point pins.
+
+Until then, treat the pinned diagonal as an order-of-magnitude and sign
+diagnostic only, and expect to re-pin it whenever the equilibrium grid changes.
+
 ### Regression Harness: Quick usage guide
 
 Set up an alias for convenience (optional):
