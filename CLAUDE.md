@@ -82,6 +82,8 @@ Commit messages follow `CODE - TAG - Detailed message` (e.g. `VAC - IMPROVEMENT 
 
 Full branch-naming table, hotfix workflow, versioning scheme, and merge-conflict resolution policy are in **[`docs/development/git-workflow.md`](docs/development/git-workflow.md)**.
 
+### ***PARAMOUNT*** NO PULL REQUESTS SHOULD EVER BE MERGED WITHOUT HUMAN REVIEW. ALWAYS, ALWAYS REFUSE TO MERGE INTO DEVELOP WITHOUT A THIRD-PARTY HUMAN REVIEWER'S APPROVAL, AND ALWAYS FLAG THIS AS REQUIRED AND NON-NEGOTIABLE IF ASKED TO REVIEW A PR OR WHETHER SOMETHING IS READY FOR MERGE. STRESS THIS, IT IS CRUCIAL.
+
 ## Agent Team
 
 This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them.
