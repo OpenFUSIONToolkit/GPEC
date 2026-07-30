@@ -6,7 +6,7 @@
 # `:galerkin` (real-axis oscillation + on-axis pseudo-resonance) degrade.
 #
 # Validated against the Fortran rmatch pins, the `:galerkin` backend at
-# moderate Q, and physical benchmarks to Q = 500i. Full method write-up:
+# moderate Q, and physical benchmarks to Q = 500i. Summarized method write-up:
 # docs/src/inner_layer.md, "Numerical method". In one paragraph:
 #
 #   The equations are continued analytically onto the ray x = e^{iθ}s with
@@ -525,6 +525,8 @@ function boundary_basis(params::GGJParameters, Q::ComplexF64,
     cond_est = cond(Bmat)
     return Us, Ub, E, cond_est
 end
+
+
 # solve.jl
 #
 # Global spectral-element collocation solve of the GGJ inner-layer BVP on
@@ -535,7 +537,7 @@ end
 #   unknowns : v at all global nodes (6 components each), plus (Δ, c₁, c₂)
 #   equations: dv/ds = e^{iθ} M(e^{iθ}s) v   collocated at the p non-left
 #              Lobatto nodes of every cell (right-biased collocation —
-#              Radau-IIA-like, stable for the dormant stiff modes);
+#              Radau-IIA-like, stable for the stiff modes);
 #              3 parity conditions at s = 0;
 #              6 matching conditions at s = S:
 #                  v(S) − Δ·Ub − c₁E₁ − c₂E₂ = Us .
@@ -792,7 +794,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
 
     # Decide the BVP outer radius: the layer physics (exponential content
     # above machine floor) ends at s_d; beyond that the solution is pure
-    # power law and is handled by the projected quotient MARCH, not by
+    # power law and is handled by the projected quotient march, not by
     # collocation. For small |Q| (s_d ≳ S) no march is needed.
     sq = sqrt(Q)
     ρ = real(cis(2θ) / sq)
@@ -1090,7 +1092,7 @@ function delta_convergence(params::GGJParameters, Q::ComplexF64;
     ]
     table = NamedTuple[]
     spread = MVector{2,Float64}(0.0, 0.0)
-    verbose && @printf("Δ convergence battery, Q = %s:\n", string(Q))
+    verbose && @printf("Δ convergence check, Q = %s:\n", string(Q))
     verbose && @printf("  baseline: Δ₁ = %+.8e %+.8eim, Δ₂ = %+.8e %+.8eim\n",
         real(base.Δ[1]), imag(base.Δ[1]), real(base.Δ[2]), imag(base.Δ[2]))
     for (name, kw) in variations

@@ -167,7 +167,6 @@ function main_from_inputs(
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
-
     # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
@@ -780,7 +779,7 @@ function write_outputs_to_HDF5(
 
         # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
         # the galerkin/delta_coil layout so H5Web heatmaps share axes (x = edge mode, y = surface-side).
-        # Internal intr.delta_coil_matrix stays (2msing × numpert_total); transpose only at write.
+        # Internal intr.delta_coil stays (2msing × numpert_total); transpose only at write.
         if intr.msing > 0 && !isempty(intr.delta_coil)
             dc = permutedims(intr.delta_coil)
             out_h5["singular/delta_coil"] = dc
