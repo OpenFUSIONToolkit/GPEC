@@ -763,7 +763,7 @@ end
               smax_tol=1e-9, refine_tol=1e-8, max_rounds=8, max_cells=6000,
               verbose=false, kwargs...) -> RaySolveResult
 
-Solve the GGJ inner-layer matching problem on the rotated ray x = e^{iθ}s.
+Solve the GGJ inner-layer problem on the rotated ray x = e^{iθ}s.
 `Δ` follows the deltac output convention (swap + `rescale_delta`), directly
 comparable to the `:galerkin` backend. θ = 0 reproduces a real-axis solve;
 `S` defaults to the inps series-residual radius (`pick_smax`); `p` is the
