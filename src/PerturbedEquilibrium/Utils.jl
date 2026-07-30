@@ -200,16 +200,14 @@ function write_outputs_to_HDF5(
         !isempty(state.C_island_width_sq)  && (coupling_group["C_island_width_sq"]  = state.C_island_width_sq)
         !isempty(state.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = state.C_penetrated_area_weighted_field)
         !isempty(state.C_delta_prime)      && (coupling_group["C_delta_prime"]      = state.C_delta_prime)
-        !isempty(state.C_penetrated_field_inner) && (coupling_group["C_penetrated_field_inner"] = state.C_penetrated_field_inner)
 
         # Applied resonant vectors [n_rational]
         !isempty(state.resonant_area_weighted_field)     && (coupling_group["resonant_area_weighted_field"]     = state.resonant_area_weighted_field)
         !isempty(state.resonant_current)   && (coupling_group["resonant_current"]   = state.resonant_current)
         !isempty(state.island_width_sq)    && (coupling_group["island_width_sq"]    = state.island_width_sq)
-        !isempty(state.penetrated_area_weighted_field)   && (coupling_group["penetrated_area_weighted_field"]   = state.penetrated_area_weighted_field)
+        !isempty(state.penetrated_area_weighted_field)   && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
         !isempty(state.delta_prime)        && (coupling_group["delta_prime"]        = state.delta_prime)
-        !isempty(state.penetrated_field_inner) && (coupling_group["penetrated_field_inner"] = state.penetrated_field_inner)
-        !isempty(state.forcing_solution_weights) && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
+        !isempty(state.forcing_solution_weights)         && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
         !isempty(state.rational_area) && (coupling_group["rational_area"] = state.rational_area)
         !isempty(state.island_half_width)  && (coupling_group["island_half_width"]  = state.island_half_width)
         !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)

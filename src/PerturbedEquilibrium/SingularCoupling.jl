@@ -146,13 +146,14 @@ function compute_singular_coupling_metrics!(
     state.C_resonant_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     state.C_resonant_current = zeros(ComplexF64, n_rational, numpert_total)
     state.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
-    state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
+    have_inner_bpen = !isempty(intr.inner_bpen)
+    if have_inner_bpen
+        state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
+    else
+        state.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
+        @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog=1
+    end
     state.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
-    # B_pen dispatch: a ForceFreeStates-provided layer-center penetrated field (identically zero in
-    # ideal mode) becomes the OFFICIAL C_penetrated_area_weighted_field; the pointwise midpoint
-    # evaluation below is only the fallback.
-    use_inner_bpen = !isempty(intr.inner_bpen)
-    use_inner_bpen && (state.C_penetrated_field_inner = zeros(ComplexF64, n_rational, numpert_total))
     state.rational_psi = zeros(Float64, n_rational)
     state.rational_q = zeros(Float64, n_rational)
     state.rational_m_res = zeros(Int, n_rational)
@@ -240,9 +241,8 @@ function compute_singular_coupling_metrics!(
         u_l = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
         u_r = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
         # Derivative (ud): two paths.
-        #  - gal-matched OdeState (intr.odet_from_gal): ud_store is the ANALYTIC ξ′ from the gal basis,
-        #    including the resonant Frobenius series — use the Hermite-cubic derivative built from
-        #    (u, ud), which is exact where the representation is.
+        #  - gal-matched OdeState (intr.odet_from_gal): ud_store is the analytic ξ′ from the gal basis,
+        #    use the analytic Hermite-cubic derivative built from (u, ud).
         #  - shooting OdeState: chord slope from u_store only — ud_store can be systematically off near
         #    outer surfaces (q=4/5) where the ODE solution varies rapidly; near-cancellation in bwp1
         #    then amplifies even a ~10% ud_store error into a large Delta' error. Chord slope avoids
@@ -272,28 +272,22 @@ function compute_singular_coupling_metrics!(
             bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
             bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
             jump_vec[k] = bwp1_r - bwp1_l
-            # C_penetrated_area_weighted_field: midpoint of b^ψ at lpsi/rpsi divided by the scalar surface area.
-            # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi.
-            # LHS normalization audit (#233): the resonant flux Φ^r divided by the scalar area A^r
-            # is a genuine field amplitude in tesla and is coordinate-invariant [Pharr 2026; cf.
-            # the resonant-field definition in the Conventions Reference].
-            b_l = chi1 * singfac_l * 2π * im * xsp_l
-            b_r = chi1 * singfac_r * 2π * im * xsp_r
-            state.C_penetrated_area_weighted_field[row, k] = (b_l + b_r) / 2 / area
+            # Kinetic fallback for penetrated field:
+            # if kinetic (where to get this variable???)
+            #     b_l = chi1 * singfac_l * 2π * im * xsp_l
+            #     b_r = chi1 * singfac_r * 2π * im * xsp_r
+            #     state.C_penetrated_area_weighted_field[row, k] = (b_l + b_r) / 2 / area
         end
 
         # Inner-layer (cusp-free) penetrated field: bpen[s, j] is linear in the same identity-at-edge
         # coil-drive columns as the OdeState solutions, so it contracts with C_coeffs exactly like
         # the outer solution values above (xsp = dot(u, ck)); /area matches the area-weighted
-        # convention of the pointwise row. No bracket points involved — the value is the matched GGJ
-        # inner solution's Ψ(0), finite at the rational where the outer large solution blows up.
-        # When present it IS the official penetrated field (the midpoint value above is overwritten);
-        # ideal mode passes zeros ⇒ penetrated field exactly 0 (perfect shielding).
-        if use_inner_bpen && s <= size(intr.inner_bpen, 1)
+        # convention of the pointwise row. 
+        if have_inner_bpen && s <= size(intr.inner_bpen, 1)
             pen_row = (transpose(C_coeffs) * @view(intr.inner_bpen[s, :])) ./ area
-            state.C_penetrated_field_inner[row, :] = pen_row
             state.C_penetrated_area_weighted_field[row, :] = pen_row
         end
+
 
         # LHS normalization audit (#233) — output scalar coordinate-invariance per row:
         #  - Δ' (1/length): the resonant-surface jump in ∂b^ψ/∂ψ over 2π·χ₁; the tearing index is
@@ -336,9 +330,8 @@ function compute_singular_coupling_metrics!(
     state.resonant_area_weighted_field = state.C_resonant_area_weighted_field * forcing_flux
     state.resonant_current = state.C_resonant_current * forcing_flux
     state.island_width_sq = state.C_island_width_sq * forcing_flux
-    state.penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * forcing_flux
     state.delta_prime = state.C_delta_prime * forcing_flux
-    use_inner_bpen && (state.penetrated_field_inner = state.C_penetrated_field_inner * forcing_flux)
+    have_inner_bpen && (state.penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * forcing_flux)
     state.forcing_solution_weights = C_coeffs * forcing_flux
 
     # Conform the stored coupling-matrix input basis to the coordinate-invariant root-area-weighted
@@ -352,9 +345,8 @@ function compute_singular_coupling_metrics!(
     state.C_resonant_area_weighted_field = state.C_resonant_area_weighted_field * flux_conform
     state.C_resonant_current = state.C_resonant_current * flux_conform
     state.C_island_width_sq = state.C_island_width_sq * flux_conform
-    state.C_penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * flux_conform
     state.C_delta_prime = state.C_delta_prime * flux_conform
-    use_inner_bpen && (state.C_penetrated_field_inner = state.C_penetrated_field_inner * flux_conform)
+    have_inner_bpen && (state.C_penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * flux_conform)
 
     # Phase 5: Island diagnostics from applied resonant vectors
     compute_island_diagnostics!(state, n_rational)

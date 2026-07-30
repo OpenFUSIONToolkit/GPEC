@@ -74,15 +74,8 @@ Internal state variables for perturbed equilibrium calculations.
     singular_coupling_metrics::Dict{String,Float64} = Dict{String,Float64}()
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
-    # ForceFreeStates-provided B_pen per (match surface × coil-drive column), read off the GGJ inner
-    # solution at the layer center (GalMatchResult.bpen). Cusp-free: the outer large solution blows
-    # up at the rational, so the pointwise C_penetrated evaluation is bracket-offset dependent; the
-    # layer-center Ψ(0) is finite and grid-independent. Columns are the same identity-at-edge
-    # coil-drive basis as the matched OdeState solutions, so PE's C_coeffs contraction applies.
-    # DISPATCH: when non-empty, this is the OFFICIAL penetrated field (C_penetrated_area_weighted_field);
-    # the pointwise surface interpolation is only the fallback. Ideal mode (gal OR shooting) passes
-    # identically zero — perfect shielding. Empty → pointwise fallback, which after the main.jl wiring
-    # only happens for KINETIC shooting runs (outstanding).
+    # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer. Needs
+    # fallback for kinetic mode, TODO. Zero if not provided (ideal mode). 
     inner_bpen::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     # True when the PE OdeState is the gal(-matched) solution: ud_store then carries the analytic ξ′
     # (incl. resonant series), enabling the exact-derivative path in SingularCoupling.
@@ -171,10 +164,6 @@ well-conditioned flux-space inductances L, Λ:
     C_island_width_sq::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_penetrated_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_delta_prime::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
-    # Inner-layer (cusp-free) penetrated field coupling: layer-center Ψ(0) of the matched GGJ inner
-    # solution, contracted with the same C_coeffs as the outer rows. Populated only for RPEC-matched
-    # gal runs (intr.inner_bpen non-empty).
-    C_penetrated_field_inner::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
 
     # Applied resonant vectors [n_rational] = C · amp_vec
     resonant_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
@@ -182,9 +171,6 @@ well-conditioned flux-space inductances L, Λ:
     island_width_sq::Vector{ComplexF64} = ComplexF64[]
     penetrated_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
     delta_prime::Vector{ComplexF64} = ComplexF64[]
-    penetrated_field_inner::Vector{ComplexF64} = ComplexF64[]
-    # Applied-drive weights over the OdeState solution columns (C_coeffs·forcing_flux) and per-row
-    # surface area — exposed so inner-layer per-coil profiles can be contracted/normalized offline.
     forcing_solution_weights::Vector{ComplexF64} = ComplexF64[]
     rational_area::Vector{Float64} = Float64[]
 
