@@ -11,8 +11,8 @@
 # data, the GW2020 Eq. (54) residual along the ray, and the series-radius
 # selector `pick_smax` (the ray analog of `pick_xmax`).
 #
-# Ported from GGJRay (~/Projects/GGJ_test, docs/METHOD.md §6); the real-x
-# methods of InnerAsymptotics.jl are untouched.
+# "Far-field boundary and the inward
+# march"; the real-x methods of InnerAsymptotics.jl are untouched.
 
 # Complex-argument Horner evaluator: same contract as _horner(x::Real, ...)
 # in InnerAsymptotics.jl, with x^rvec on the principal branch.

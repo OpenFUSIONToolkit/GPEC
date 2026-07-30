@@ -15,13 +15,12 @@
 #   Δ_coil = the push from the external coil (this is what drives everything)
 #   C      = the matched coefficients we solve for
 #
-# This is the same calculation the previous Fortran code does (RDCON's gal_match_rpec in match.f). Here, I'm
-# just doing it in Julia on the STRIDE path.
+# This is the same calculation the Fortran code performs in RDCON's gal_match_rpec (match.f), done here in
+# Julia on the STRIDE path.
 #
-# Δ_out and Δ_coil have to be in the SAME units before you can subtract them, so I use STRIDE's RAW coefficients
-# for both (no extra scaling). There is a factor  called snorm (= |n·q'|^α) that appears elsewhere for 
-# comparing to the Galerkin code, but that's only a unit conversion for plotting; 
-# it's not part of the real physics, so I leave it out here.
+# Δ_out and Δ_coil have to be in the SAME units before they can be subtracted, so both use STRIDE's RAW
+# coefficients (no extra scaling). A factor called snorm (= |n·q'|^α) appears elsewhere when comparing to the
+# Galerkin code, but that is only a unit conversion for plotting, not part of the physics, so it is omitted here.
 
 "What comes out of the match (Wang 2020 Eq. 11)."
 struct ResonantMatchResult
@@ -103,7 +102,7 @@ function resonant_match_rpec(delta_out_raw::AbstractMatrix, delta_coil_raw::Abst
     cout = cof[1:2msing, :]
     cin = cof[2msing+1:4msing, :]
     # The reconnected flux is the coil drive plus the plasma's own outer response to the matched cout.
-    # (A reviewer pointed out this also equals -Δ_in·cin, i.e. the inner-layer side agrees, good sanity check.)
+    # It also equals -Δ_in·cin, so the inner-layer side agrees — a useful sanity check.
     reconnected_flux = delta_coil_raw .+ transpose(delta_out_raw) * cout
     return ResonantMatchResult(cout, cin, deltar, rpec_eig, reconnected_flux, residual)
 end

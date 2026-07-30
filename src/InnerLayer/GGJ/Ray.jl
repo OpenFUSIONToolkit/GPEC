@@ -5,10 +5,9 @@
 # the imaginary axis, where both `:shooting` (exponential dichotomy) and
 # `:galerkin` (real-axis oscillation + on-axis pseudo-resonance) degrade.
 #
-# Ported 2026-07-08 from the standalone GGJRay package (~/Projects/GGJ_test),
-# validated there against the Fortran rmatch pins, the `:galerkin` backend at
-# moderate Q, and physical benchmarks to Q = 500i. Complete methods paper:
-# GGJ_test/docs/METHOD.md. In one paragraph:
+# Validated against the Fortran rmatch pins, the `:galerkin` backend at
+# moderate Q, and physical benchmarks to Q = 500i. Full method write-up:
+# docs/src/inner_layer.md, "Numerical method". In one paragraph:
 #
 #   The equations are continued analytically onto the ray x = e^{iθ}s with
 #   θ = arg(Q)/4 (parabolic-cylinder exponent exactly real; pseudo-resonance
@@ -24,28 +23,14 @@
 #   arithmetic runs in Complex{Double64}: at large S the near-parallel
 #   power-pair geometry amplifies the structured backward error of the
 #   ill-conditioned implicit solves (Σ eps·z ≈ eps·ρS²/2) into Δ-mixing
-#   ~1e-4 at |Q| = 500 in Float64 (METHOD.md §8).
+#   ~1e-4 at |Q| = 500 in Float64 (docs/src/inner_layer.md, "Far-field
+#   boundary and the inward march").
 #
-# Sections below mirror the GGJRay source layout:
+# File layout:
 #   1. system   — plain-variable first-order ODE matrix, parity sets
 #   2. mesh     — Chebyshev cells, barycentric interpolation, WKB grading
 #   3. boundary — decaying pair, Radau IIA quotient march
 #   4. solve    — assembly, bordered solve, refinement, driver, diagnostics
-
-"""
-    q4_surface_benchmark() -> GGJParameters
-
-Physical q = 4 rational-surface benchmark point (S = τ_R/τ_A ≈ 4.58×10⁶,
-D_I ≈ −0.31166, α = √(−D_I) ≈ 0.5583). Primary validation point for the
-rotated-ray backend on the imaginary-Q axis (pinned at Q = 100i, 500i in
-the test suite).
-"""
-function q4_surface_benchmark()
-    return GGJParameters(;
-        E=-0.13733, F=0.022202, G=7.60633, H=0.053468, K=14.66987,
-        M=30.26883, taua=2.11226e-7, taur=0.968219, v1=1.55009
-    )
-end
 
 # system.jl
 #
@@ -371,8 +356,6 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     rtol::Float64=1e-9, growth::Float64=30.0, seed::Int=20260707,
     ztrk::Float64=0.3, purge_budget::Float64=2.5, dp_res::Float64=20.0)
     ph = cis(θ)
-    sq = sqrt(Q)
-    ρ = real(cis(2θ) / sq)
     𝔐(s) = ph * ode_matrix(params, Q, ph * s)
 
     W = hcat(copy(Us), copy(Ub))
@@ -401,7 +384,7 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     # The near-parallel power-pair geometry at large S turns that into
     # u_small/u_big coefficient mixing β ~ eps·ρS²/2 · (‖u_big‖/‖u_small‖)(S)
     # ~ 1e-4 at |Q| = 500 — saturating Δ of the near-pole parity at ~1/β and
-    # flooring the other at |Δ|·β (the ε_mix defect; docs/BUGHUNT_epsmix.md).
+    # flooring the other at |Δ|·β — the Δ-mixing defect extended precision removes.
     # Double64 arithmetic (eps ~ 5e-33) removes it outright; the resolved
     # band stays Float64 (z ≤ ztrk there, solves well-conditioned).
     CTd = Complex{Double64}
@@ -665,7 +648,7 @@ function _assemble_base(params::GGJParameters, Q::ComplexF64, θ::Float64,
 end
 
 """
-    _solve_parities(Ic, Jc, Vc, rhs, ndof, Ng, N, p) -> (sol_odd, sol_even)
+    _solve_parities(Ic, Jc, Vc, rhs, ndof, N, p) -> (sol_odd, sol_even)
 
 Solve BOTH parity systems from one factorization. The two matrices differ
 only in the 3 parity rows at s = 0 (odd: unit entries at components (4,2,3);
@@ -675,7 +658,7 @@ Woodbury correction (3 extra triangular solves + a 3×3 solve) replaces the
 second factorization, which dominates the linear-algebra cost.
 """
 function _solve_parities(Ic::Vector{Int}, Jc::Vector{Int}, Vc::Vector{ComplexF64},
-    rhs::Vector{ComplexF64}, ndof::Int, Ng::Int, N::Int, p::Int)
+    rhs::Vector{ComplexF64}, ndof::Int, N::Int, p::Int)
     rowp0 = 6 * N * p + 6
     c1 = parity_rows(1)
     c2 = parity_rows(2)
@@ -689,8 +672,7 @@ function _solve_parities(Ic::Vector{Int}, Jc::Vector{Int}, Vc::Vector{ComplexF64
     end
     A = sparse(I2, J2, V2, ndof, ndof)
 
-    # Row equilibration (as in _solve_parity; the parity rows have unit
-    # entries in both variants, so one scaling serves both systems).
+    # Row equilibration.
     rmax = zeros(Float64, ndof)
     rows = rowvals(A)
     vals = nonzeros(A)
@@ -716,55 +698,17 @@ function _solve_parities(Ic::Vector{Int}, Jc::Vector{Int}, Vc::Vector{ComplexF64
     end
     AinvU = F \ U
     Vx1 = ComplexF64[x1[c2[k]] - x1[c1[k]] for k in 1:3]
-    S = Matrix{ComplexF64}(I, 3, 3)
+    Smat = Matrix{ComplexF64}(I, 3, 3)
     for k in 1:3, j in 1:3
-        S[k, j] += AinvU[c2[k], j] - AinvU[c1[k], j]
+        Smat[k, j] += AinvU[c2[k], j] - AinvU[c1[k], j]
     end
-    x2 = x1 - AinvU * (S \ Vx1)
+    x2 = x1 - AinvU * (Smat \ Vx1)
     # UMFPACK numeric factorizations live in C malloc, invisible to the GC's
     # heap accounting — under the refinement loop, lazily-finalized multi-GB
     # factorizations pile up (observed: tens of GB on 24k-cell meshes). Free
     # eagerly now that both solutions are extracted.
     finalize(F)
     return x1, x2
-end
-
-function _solve_parity(Ic::Vector{Int}, Jc::Vector{Int}, Vc::Vector{ComplexF64},
-    rhs::Vector{ComplexF64}, ndof::Int, Ng::Int, N::Int, p::Int, isol::Int;
-    leftcomps::AbstractVector{Int}=parity_rows(isol),
-    leftvals::AbstractVector{ComplexF64}=zeros(ComplexF64, 3))
-    rowp0 = 6 * N * p + 6
-    I2 = copy(Ic)
-    J2 = copy(Jc)
-    V2 = copy(Vc)
-    rhs = copy(rhs)
-    for k in eachindex(leftcomps)
-        push!(I2, rowp0 + k)
-        push!(J2, leftcomps[k])      # node 1 → columns 1..6
-        push!(V2, one(ComplexF64))
-        rhs[rowp0+k] = leftvals[k]
-    end
-    A = sparse(I2, J2, V2, ndof, ndof)
-
-    # Row equilibration.
-    rmax = zeros(Float64, ndof)
-    rows = rowvals(A)  # CSC: iterate columns
-    vals = nonzeros(A)
-    for col in 1:ndof
-        for idx in nzrange(A, col)
-            r = rows[idx]
-            a = abs(vals[idx])
-            a > rmax[r] && (rmax[r] = a)
-        end
-    end
-    @inbounds for i in 1:ndof
-        rmax[i] = rmax[i] > 0 ? 1 / rmax[i] : 1.0
-    end
-    Dr = Diagonal(rmax)
-    F = lu(Dr * A)
-    x = F \ (Dr * rhs)
-    finalize(F)   # eager UMFPACK free — see _solve_parities
-    return x
 end
 
 # -----------------------------------------------------------------------
@@ -938,7 +882,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
         Ic, Jc, Vc, rhs, βb, ndof, Ng = _assemble_base(params, Q, θ, breaks, p, t, D, Us, Ub, E)
         sols = Matrix{ComplexF64}(undef, ndof, 2)
         errs = zeros(Float64, N)
-        sol_odd, sol_even = _solve_parities(Ic, Jc, Vc, rhs, ndof, Ng, N, p)
+        sol_odd, sol_even = _solve_parities(Ic, Jc, Vc, rhs, ndof, N, p)
         for (isol, sol) in ((1, sol_odd), (2, sol_even))
             sols[:, isol] = sol
             Δraw[isol] = sol[6*Ng+1] / βb
@@ -1179,5 +1123,3 @@ end
 delta_convergence(params::GGJParameters, Q::Number; kwargs...) =
     delta_convergence(params, ComplexF64(Q); kwargs...)
 
-export solve_inner_ray, evaluate_solution, delta_convergence,
-    solution_profile, asymptotic_profile

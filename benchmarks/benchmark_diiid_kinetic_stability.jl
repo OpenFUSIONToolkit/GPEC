@@ -24,8 +24,8 @@ the non-Hermitian FKG reduction and the inner kinetic-matrix tolerances.
 Usage:
     julia --project=. benchmarks/benchmark_diiid_kinetic_stability.jl [fortran_dir]
 
-    fortran_dir defaults to \$GPEC_FORTRAN_DIIID_DCON or
-    ~/Code/gpec/docs/examples/DIIID_kinetic_example.
+    fortran_dir is a Fortran GPEC DIII-D kinetic example run directory, taken from
+    the command line or from \$GPEC_FORTRAN_DIIID_DCON. One of the two is required.
 """
 
 using Printf
@@ -36,7 +36,9 @@ using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 const AnalysisFFS = GPE.Analysis.ForceFreeStates
 
-const DEFAULT_FORTRAN_DIR = expanduser("~/Code/gpec/docs/examples/DIIID_kinetic_example")
+"Fortran GPEC DIII-D kinetic example run directory, from the environment (no on-disk default)."
+default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID_DCON, or pass the Fortran run directory as the first argument"),
+    ENV, "GPEC_FORTRAN_DIIID_DCON")
 
 """
     discover_inputs(fortran_dir) → (; eq_file, kin_file, dcon_nc)
@@ -176,7 +178,7 @@ end
 _p(args...) = (println(stderr, args...); flush(stderr))
 _pf(fmt, args...) = (print(stderr, Printf.format(Printf.Format(fmt), args...)); flush(stderr))
 
-function run_benchmark(fortran_dir::String=DEFAULT_FORTRAN_DIR)
+function run_benchmark(fortran_dir::String=default_fortran_dir())
     _p("=" ^ 70)
     _p("  DIIID Kinetic-DCON Benchmark: Julia KF→FFS vs Fortran DCON")
     _p("  Fortran example: $fortran_dir")
@@ -255,7 +257,6 @@ end
 
 # Run only when invoked as a script.
 if abspath(PROGRAM_FILE) == @__FILE__
-    fortran_dir = length(ARGS) >= 1 ? ARGS[1] :
-                  get(ENV, "GPEC_FORTRAN_DIIID_DCON", DEFAULT_FORTRAN_DIR)
+    fortran_dir = length(ARGS) >= 1 ? ARGS[1] : default_fortran_dir()
     run_benchmark(fortran_dir)
 end

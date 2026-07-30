@@ -11,9 +11,7 @@
 #   - `:ray`       – rotated-contour spectral-element collocation (Ray.jl);
 #                    robust to |Q| ~ 500 on/near the imaginary axis
 #
-# All solvers share the same `inps` Wasow asymptotic-basis kernel
-# (`InnerAsymptotics.jl`, complex-x extension in `RayAsymptotics.jl`) for the
-# large-x boundary condition. They return the parity-projected matching data
+# They return the parity-projected matching data
 # `(Δ_odd, Δ_even)` of GWP2016 Eqs. (34)–(35) in the same (deltac) convention.
 #
 # Equation references throughout this module use two source papers:
@@ -52,11 +50,8 @@ solver (robust at large |Q| on/near the imaginary axis; agrees with
 `:galerkin` within its error bar at moderate Q), `:galerkin` for the
 Hermite-cubic finite element solver (real-axis method; degrades for
 |Q| ≳ 1), and `:shooting` for the backward stable-shoot solver (|Q| ≪ 1
-only). All implementations consume the same `inps` asymptotic-basis kernel
-and return the parity-projected matching data in the same convention.
-Note the backends take different numerical-knob keywords: pass
-`GGJModel(solver=:galerkin)` explicitly when using `nx`/`xfac`-style
-Galerkin knobs.
+only). 
+Note the backends take different numerical-knob keywords.
 """
 struct GGJModel{S} <: InnerLayerModel end
 

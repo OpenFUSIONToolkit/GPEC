@@ -20,8 +20,8 @@ the Fortran example directory.
 Usage:
     julia --project=. benchmarks/benchmark_diiid_ideal_ntv_torque.jl [fortran_dir]
 
-    fortran_dir defaults to \$GPEC_FORTRAN_DIIID or
-    ~/Code/gpec/docs/examples/DIIID_ideal_example.
+    fortran_dir is a Fortran GPEC DIII-D ideal example run directory, taken from
+    the command line or from \$GPEC_FORTRAN_DIIID. One of the two is required.
 """
 
 using Printf
@@ -36,7 +36,9 @@ const KF = GPE.KineticForces
 const Eq = GPE.Equilibrium
 const PE = GPE.PerturbedEquilibrium
 
-const DEFAULT_FORTRAN_DIR = expanduser("~/Code/gpec/docs/examples/DIIID_ideal_example")
+"Fortran GPEC DIII-D ideal example run directory, from the environment (no on-disk default)."
+default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID, or pass the Fortran run directory as the first argument"),
+    ENV, "GPEC_FORTRAN_DIIID")
 
 """
     discover_inputs(fortran_dir) → (; eq_file, kin_file, xclebsch, pentrc_nc)
@@ -219,7 +221,7 @@ end
 _p(args...) = (println(stderr, args...); flush(stderr))
 _pf(fmt, args...) = (print(stderr, Printf.format(Printf.Format(fmt), args...)); flush(stderr))
 
-function run_benchmark(fortran_dir::String=DEFAULT_FORTRAN_DIR)
+function run_benchmark(fortran_dir::String=default_fortran_dir())
     _p("=" ^ 70)
     _p("  DIIID Kinetic Benchmark: Julia KineticForces vs Fortran PENTRC")
     _p("  Fortran example: $fortran_dir")
@@ -481,6 +483,6 @@ end
 # Run only when invoked as a script (so other benchmarks can `include()` this
 # file to reuse `load_fortran_xclebsch` without triggering the full run).
 if abspath(PROGRAM_FILE) == @__FILE__
-    fortran_dir = length(ARGS) >= 1 ? ARGS[1] : get(ENV, "GPEC_FORTRAN_DIIID", DEFAULT_FORTRAN_DIR)
+    fortran_dir = length(ARGS) >= 1 ? ARGS[1] : default_fortran_dir()
     results = run_benchmark(fortran_dir)
 end

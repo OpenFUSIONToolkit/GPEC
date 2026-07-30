@@ -51,9 +51,9 @@ const GGJ = IL.GGJ
 end
 
 @testset "InnerLayer GGJ :ray backend (rotated-contour collocation)" begin
-    # Ported 2026-07-08 from the standalone GGJRay package (validated there:
-    # manufactured Δ* to 3e-14, Fortran rmatch pins, 96-equilibrium robustness
-    # scans to Q = 500i). These tests pin the port, not the method.
+    # The method was validated before landing here: manufactured Δ* to 3e-14,
+    # Fortran rmatch pins, 96-equilibrium robustness scans to Q = 500i. These
+    # tests pin the implementation, not the method.
     p = IL.glasser_wang_2020_eq55()
 
     @testset "agrees with :galerkin at the paper point Q = 0.1234" begin
@@ -72,8 +72,8 @@ end
         q4 = IL.q4_surface_benchmark()
         γ = 500.0im * GGJ.q0(q4)
         Δ = IL.solve_inner(IL.GGJModel(), q4, γ)
-        # Pins from the standalone GGJRay validation (post ε_mix fix;
-        # S-invariant to 3e-4 / 7e-9 and θ-stable there).
+        # Pins from the pre-port validation suite (post extended-precision
+        # march fix; S-invariant to 3e-4 / 7e-9 and θ-stable there).
         @test Δ[1] ≈ 2.4720608737 + 13.354123514im rtol = 1e-4
         @test Δ[2] ≈ 0.13749694953 + 0.74275468725im rtol = 1e-4
 
