@@ -35,8 +35,6 @@ a     = 20                     # Distance from plasma (conformal) or shape param
 
 [ForceFreeStates]
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
-mat_flag = true                # Construct coefficient matrices for diagnostic purposes
-ode_flag = true                # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
 qlow         = 1.02            # Integration initiated at q determined by min(q0, qlow)

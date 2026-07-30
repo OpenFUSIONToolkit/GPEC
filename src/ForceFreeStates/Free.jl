@@ -49,9 +49,7 @@ and data dumping.
     dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
-    if ctrl.ode_flag
-        @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
-    end
+    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
     # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
     vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh)
