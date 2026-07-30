@@ -83,10 +83,11 @@ function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
     #   row 1 (Ψ): (Q,            −Q x,          0)
     #   row 2 (Ξ): (−Q x,          Q x²,        −(E+F))
     #   row 3 (Υ): (−x,           −Q²(G−KE),     x²+Q²(G+KF))
+    #! format: off
     U = @SMatrix ComplexF64[
-        q (-q * x) 0
-        (-x / q) * q2 (x2 / q) * q2 (-(e + f) / q2) * q2
-        (-x / q) * q (-(g - k * e) * q) * q (x2 / q + (g + k * f) * q) * q
+        q                     (-q * x)                       0
+        (-x / q) * q2         (x2 / q) * q2                  (-(e + f) / q2) * q2
+        (-x / q) * q          (-(g - k * e) * q) * q         (x2 / q + (g + k * f) * q) * q
     ]
 
     # V = −B of GWP2016 Eq. (14): coefficients of −u' in each equation (same row scaling as U):
@@ -94,10 +95,11 @@ function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
     #   row 2 (Ξ): (−H,     0,  0)   ⇒ +H Ψ_x
     #   row 3 (Υ): (K Q² H, 0,  0)   ⇒ −K Q² H Ψ_x
     V = @SMatrix ComplexF64[
-        0 0 h
-        (-h / q2) * q2 0 0
-        (h * k * q) * q 0 0
+        0                       0         h
+        (-h / q2) * q2          0         0
+        (h * k * q) * q         0         0
     ]
+    #! format: on
 
     return Imat, U, V
 end
