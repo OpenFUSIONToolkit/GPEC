@@ -33,13 +33,9 @@ const _R2 = SVector(3, 4, 5, 6)
 """
     InnerAsymptoticsCache
 
-Frozen state of the `inps` Wasow asymptotic-basis construction for a single
-`(GGJParameters, Q)` pair. All matrices are stored as `SMatrix`/`SVector`
-so the evaluator can run allocation-free on a hot path.
-
-Index convention: `P[k+1]` holds the k-th-order matrix `P_k`, `B[k+1]`
-holds `B_k`, etc., for k = 0, 1, …, the upper bound documented in each
-field.
+Frozen `inps` Wasow asymptotic-basis construction for one `(GGJParameters, Q)`
+pair, stored as `SMatrix`/`SVector` for allocation-free evaluation. Index
+convention: `P[k+1]` holds the k-th-order matrix `P_k`, etc.
 
 Fields:
 
@@ -357,13 +353,9 @@ end
 """
     build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8) -> InnerAsymptoticsCache
 
-Construct the `inps` Wasow asymptotic basis for the given GGJ parameters
-and dimensionless growth rate `Q`. Truncates each power series at order
-`kmax` (default `8`). The returned cache can be evaluated at any `x > 0`
-via [`evaluate_asymptotics`](@ref) and queried for an adaptive `X_max`
-via [`pick_xmax`](@ref).
-
-Reference: Glasser & Wang, Phys. Plasmas **27**, 012506 (2020), Eqs. 7–53.
+Construct the `inps` Wasow asymptotic basis (GW2020 Eqs. 7–53), truncating
+each power series at order `kmax`. Evaluate with [`evaluate_asymptotics`](@ref);
+pick a cutoff with [`pick_xmax`](@ref).
 """
 function build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8)
     p1v = p1(params)
@@ -498,19 +490,12 @@ end
 # -----------------------------------------------------------------------
 
 """
-    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
-                        derivative::Bool=true, apply_T::Bool=true)
-        -> (U, dU)
+    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real; derivative=true, apply_T=true) -> (U, dU)
 
-Evaluate the inps asymptotic basis at `x > 0`. Returns the 6×2 complex
-matrix `U` whose two columns are the algebraically-decaying ("small")
-asymptotic solutions of the GGJ system, and (if `derivative=true`) the
-6×2 matrix `dU` of their derivatives `dU/dx`.
-
-If `apply_T=false`, the result is left in the J-rotated coordinate basis
-(used by `inps_delta` for residual checks). The default `apply_T=true`
-returns the solutions in the original 6-component first-order-system
-basis used by `inpso_get_uv` and the shooting / Galerkin solvers.
+Evaluate the inps basis at `x > 0`: `U` is 6×2 with columns the two power-like
+solutions (GW2020 Eq. 53), `dU` their x-derivatives (`nothing` unless
+`derivative=true`). `apply_T=false` leaves the result in the J-rotated basis
+used by the residual check.
 """
 function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
     derivative::Bool=true, apply_T::Bool=true)
@@ -590,11 +575,8 @@ end
 """
     asymptotic_residual(cache::InnerAsymptoticsCache, x::Real) -> SVector{2,Float64}
 
-Compute the convergence measure `Δ±` of the asymptotic basis at `x` for each
-of the two algebraic columns (GW2020 Eq. 54). Mirrors `inps_delta`: returns
-`‖dU − x·matrix·U‖∞ / max(‖dU‖∞, ‖x·matrix·U‖∞)` per column, where
-`matrix = J₀ + xfac·J₁ + xfac²·J₂` is the J-rotated coefficient matrix (the
-residual of `v' = xJv`, GW2020 Eq. 6).
+Convergence measure Δ± of the two series columns at `x` (GW2020 Eq. 54):
+`‖dU − x·J(x)·U‖∞ / max(‖dU‖∞, ‖x·J(x)·U‖∞)` per column. Mirrors `inps_delta`.
 """
 function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
     U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=false)
@@ -631,19 +613,11 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
 end
 
 """
-    pick_xmax(params::GGJParameters, Q::ComplexF64;
-              eps::Float64=1e-7, kmax::Int=8,
-              xlogmin::Float64=-1.0, xlogmax::Float64=4.0,
-              dxlog::Float64=0.01) -> (Float64, InnerAsymptoticsCache)
+    pick_xmax(params, Q; eps=1e-7, kmax=8, xlogmin=-1.0, xlogmax=4.0, dxlog=0.01) -> (x_max, cache)
 
-Sweep `x` log-uniformly upward from `10^xlogmin` and return the smallest
-`x` at which `max(asymptotic_residual(cache, x)) < eps` — the cutoff `x_max`
-where the GW2020 Eq. (54) convergence measure drops below tolerance
-(GW2020 Sec. III, Fig. 3). Also returns the `InnerAsymptoticsCache` it built
-so callers can reuse it. Mirrors `inps_xmax`.
-
-Throws an `ErrorException` if no `x` in the sweep range achieves the
-target tolerance.
+Sweep `x` log-uniformly and return the smallest `x` where the GW2020 Eq. (54)
+residual drops below `eps`, plus the cache built along the way. Throws if the
+tolerance is never reached in the sweep range. Mirrors `inps_xmax`.
 """
 function pick_xmax(params::GGJParameters, Q::ComplexF64;
     eps::Float64=1e-7, kmax::Int=8,

@@ -343,17 +343,10 @@ end
                 rtol_origin::Float64=1e-6, nps::Int=8,
                 fmax::Float64=1.0, solver=Tsit5()) -> SVector{2,ComplexF64}
 
-Solve the GGJ inner-layer matching problem by stable backward shooting in
-the origin-diagonalized 4×4 basis. Direct port of the rmatch `deltar.f`
-algorithm.
-
-Returns the parity-projected matching data `(Δ₁, Δ₂)` (already rescaled
-back to physical units via `rescale_delta`). Index ordering matches the
-Fortran `deltar` output.
-
-Tolerances `reltol`/`abstol` are the integrator tolerances; `rtol_origin`
-controls the truncation error of the origin Frobenius series and the
-choice of `tmin`.
+Backward shoot in the origin-diagonalized 4×4 basis; direct port of rmatch
+`deltar.f`. Returns `(Δ₁, Δ₂)` rescaled to physical units, index ordering as
+the Fortran `deltar` output. `rtol_origin` sets the origin-series truncation
+and `tmin`. Not for production use — see the file header.
 """
 function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
     reltol::Float64=1e-6, abstol::Float64=1e-6,

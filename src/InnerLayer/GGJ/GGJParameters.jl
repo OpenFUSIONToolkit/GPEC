@@ -8,13 +8,10 @@
 """
     GGJParameters
 
-Dimensionless parameters of the Glasser–Greene–Johnson inner-layer model
-at a single rational surface, plus the local Alfvén/resistive timescales
-needed to scale the matching data back to physical Δ. The equilibrium
-coefficients `E, F, G, H, K, M` are the flux-surface averages defined in
-GWP2016 Eq. (A8); they enter the inner-region equations (Eq. 11).
-
-Fields are the same as the Fortran `resist_type`:
+Glasser–Greene–Johnson inner-layer parameters at one rational surface: the
+flux-surface-averaged equilibrium coefficients of GWP2016 Eq. (A8) plus the
+local timescales that scale the matching data back to physical Δ. Same
+fields as the Fortran `resist_type`:
 
 | field   | meaning                                                        |
 |:------- |:-------------------------------------------------------------- |
@@ -29,8 +26,7 @@ Fields are the same as the Fortran `resist_type`:
 | `v1`    | Linear scale factor used in the V₁ rescaling                   |
 | `ising` | Index of the singular surface (traceability only)              |
 
-The complex growth rate `γ` is **not** stored here; it is passed as a
-separate argument to `solve_inner`.
+The growth rate `γ` is not stored here; it is a separate argument to `solve_inner`.
 """
 Base.@kwdef struct GGJParameters
     E::Float64
@@ -48,26 +44,22 @@ end
 """
     mercier_di(p::GGJParameters) -> Float64
 
-Mercier interchange index `D_I = E + F + H − 1/4` (GWP2016 Eq. A9; also the
-quantity under the root in the GW2020 Eq. 49 power exponents). `D_I > 0`
-indicates local ideal interchange instability.
+Mercier interchange index `D_I = E + F + H − 1/4` (GWP2016 Eq. A9); `D_I > 0` means local ideal interchange instability.
 """
 mercier_di(p::GGJParameters) = p.E + p.F + p.H - 0.25
 
 """
     mercier_dr(p::GGJParameters) -> Float64
 
-Resistive interchange index `D_R = E + F + H² = D_I + (H − 1/2)²`
-(GWP2016 Eq. A10). `D_R > 0` indicates local resistive interchange instability.
+Resistive interchange index `D_R = E + F + H²` (GWP2016 Eq. A10); `D_R > 0` means local resistive interchange instability.
 """
 mercier_dr(p::GGJParameters) = p.E + p.F + p.H * p.H
 
 """
     p1(p::GGJParameters) -> Float64
 
-`p₁ = √(−D_I)`, the Mercier power that sets the large-x Frobenius exponents
-`r± = 3/2 ± √(−D_I)` (GW2020 Eq. 49; μ = −1/2 ± √(−D_I) in GWP2016 Eq. 26).
-The Mercier-stable branch requires `D_I < 0`; this function asserts it.
+`p₁ = √(−D_I)`, setting the large-x Frobenius exponents `r± = 3/2 ± p₁`
+(GW2020 Eq. 49). Throws unless `D_I < 0` (Mercier-stable required).
 """
 function p1(p::GGJParameters)
     di = mercier_di(p)
@@ -78,43 +70,36 @@ end
 """
     sfac(p::GGJParameters) -> Float64
 
-Lundquist number `S = τ_R / τ_A` (GWP2016 Sec. I) that sets the inner-layer
-length and time scales `X₀ ∝ S^(−1/3)`, `Q₀ ∝ S^(−1/3)/τ_A`.
+Lundquist number `S = τ_R / τ_A`.
 """
 sfac(p::GGJParameters) = p.taur / p.taua
 
 """
     x0(p::GGJParameters) -> Float64
 
-Inner-layer displacement scale factor `X₀ = S^(−1/3)` (GWP2016 Eq. A14),
-relating scaled `X` to physical `x = ψ − ψ₀` via `x = X₀ X`.
+Inner-layer length scale `X₀ = S^(−1/3)` (GWP2016 Eq. A14); physical `x = X₀ X`.
 """
 x0(p::GGJParameters) = sfac(p)^(-1.0 / 3.0)
 
 """
     q0(p::GGJParameters) -> Float64
 
-Inner-layer growth-rate scale factor `Q₀ = X₀ / τ_A` (GWP2016 Eq. A15),
-relating the scaled growth rate `Q` to the physical rate `s` via `s = Q₀ Q`.
+Growth-rate scale `Q₀ = X₀ / τ_A` (GWP2016 Eq. A15); physical rate `= Q₀ Q`.
 """
 q0(p::GGJParameters) = x0(p) / p.taua
 
 """
     inner_Q(p::GGJParameters, γ::Number) -> ComplexF64
 
-Dimensionless scaled inner-layer growth rate `Q = γ / Q₀` (GWP2016 Eq. A15),
-the eigenvalue appearing in the inner-region equations (Eq. 11) and the inps
-Wasow basis. The argument `γ` may be real or complex; the result is always complex.
+Scaled inner-layer growth rate `Q = γ / Q₀` (GWP2016 Eq. A15).
 """
 inner_Q(p::GGJParameters, γ::Number) = ComplexF64(γ) / q0(p)
 
 """
     rescale_delta(Δ, p::GGJParameters) -> SVector{2,ComplexF64}
 
-Map the scaled inner-layer matching data back to physical Δ at the rational
-surface by the `X₀^(−2√(−D_I)) = S^(2√(−D_I)/3)` rescaling, together with the
-`v₁^(2√(−D_I))` linear-scale factor, (GWP2016 Sec. IV).
-Operates element-wise on a 2-vector of `(Δ_odd, Δ_even)`.
+Rescale the matching data to physical Δ by `S^(2√(−D_I)/3) · v₁^(2√(−D_I))`
+(GWP2016 Sec. IV), element-wise on `(Δ_odd, Δ_even)`.
 """
 function rescale_delta(Δ::AbstractVector, p::GGJParameters)
     s = sfac(p)

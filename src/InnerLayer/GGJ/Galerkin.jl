@@ -38,12 +38,9 @@ using QuadGK: quadgk
 # -----------------------------------------------------------------------
 
 """
-Convert the inps 6×2 output U_inps (the Wasow asymptotic basis U = TPQSY of
-GW2020 Eq. 53) at coordinate `x` to the physical (Ψ, Ξ, Υ) and (Ψ', Ξ', Υ')
-representation used by deltac/inpso. The 6-component first-order state packs
-(Ψ, Ξ, Υ, Ψ', Ξ', Υ') with the GW2020 Eq. (2) scaling 𝚿 ≡ (xΨ, Ξ, Υ), hence
-the /x and ·x factors below. Returns `(ua, dua)` each 3×2 complex, where columns
-are the two power-like (Mercier) solutions and rows are the components (Ψ, Ξ, Υ).
+Convert the inps 6×2 basis (GW2020 Eq. 53) at `x` to physical `(Ψ, Ξ, Υ)`
+values and derivatives, each 3×2 (columns = the two power-like solutions).
+The /x and ·x factors undo the GW2020 Eq. (2) scaling 𝚿 ≡ (xΨ, Ξ, Υ).
 """
 function _physical_ua_dua(cache::InnerAsymptoticsCache, x::Real)
     U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=true)
@@ -61,23 +58,11 @@ function _physical_ua_dua(cache::InnerAsymptoticsCache, x::Real)
 end
 
 """
-Build the (I, U, V) coefficient matrices of the second-order system
-`I·u'' − V·u' − U·u = 0` for u = (Ψ, Ξ, Υ) at coordinate `x`. Port of
-inpso_get_uv. All matrices are 3×3 complex.
-
-These are the matrices A, B, C of GWP2016 Eq. (12), `A Ψ'' + B Ψ' + C Ψ = 0`,
-with A given in Eq. (14), B in Eq. (14), and C in Eq. (15). The code's weak-form
-layout flips the off-diagonal signs: (I, V, U) = (A, −B, −C).
-
-Each matrix row is one GGJ inner-region equation (GWP2016 Eq. 11 ≡ GW2020 Eq. 1);
-reading `I u'' − V u' − U u` across a row reproduces the corresponding equation:
-
-row 1 (Ψ): Ψ_xx − H Υ_x − Q(Ψ − x Ξ) = 0
-⇒ I=(1,0,0)  V=(0,0,H)        U=(Q, −Qx, 0)
-row 2 (Ξ): Q² Ξ_xx − Q x² Ξ + Q x Ψ + (E+F) Υ + H Ψ_x = 0
-⇒ I=(0,Q²,0) V=(−H,0,0)       U=(−Qx, Q x², −(E+F))
-row 3 (Υ): Q Υ_xx − x² Υ + x Ψ + Q²[G(Ξ−Υ) − K(E Ξ + F Υ + H Ψ_x)] = 0
-⇒ I=(0,0,Q)  V=(K Q² H,0,0)   U=(−x, −Q²(G−KE), x²+Q²(G+KF))
+Coefficient matrices of the second-order system `I·u'' − V·u' − U·u = 0` for
+u = (Ψ, Ξ, Υ) at `x`; port of inpso_get_uv, 3×3 complex. These are A, B, C of
+GWP2016 Eqs. (12)–(15) with `(I, V, U) = (A, −B, −C)` and rows scaled by
+(1, Q², Q). The inline comments below give the row-by-row map to the inner
+equations.
 """
 function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
     e = ComplexF64(params.E);
@@ -893,20 +878,15 @@ end
 # ISSUES AND IS NOT RELIABLE IN BROAD SCANS. IT IS LEFT HERE FOR REFERENCE AND MAY BE REWORKED LATER.
 """
     solve_inner_converged(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
-                          rtol=1e-2, kmax0=12, xfac0=1.5, cells_per_unit=3.0,
-                          nx_min=1024, nx_max=8192, kmax_step=2, kmax_max=28,
-                          xfac_growth=1.5, max_levels=6, nq=6, pfac=1.0, cutoff=8, tol_res=1e-4)
+                          rtol=1e-2, max_levels=6, kwargs...)
         -> (; delta, converged, err, kmax, xfac, nx, nlevels)
 
-Convergence-guarded GGJ inner-layer solve: only returns a Δ once it is stable under joint refinement of
-the three coupled accuracy knobs — series order `kmax`, asymptotic reach `xfac`, and grid resolution `nx`.
-Successively refines all three (raising `kmax` clears the high-|Q| series floor; raising `xfac` clears the
-reach floor; `nx` is scaled with `xmax` to hold cells-per-unit-x ≈ `cells_per_unit`, which prevents the
-grid-starvation breakup that otherwise corrupts Δ at large `xfac`/high |Q|) until the per-component
-relative change of (Δ₁, Δ₂) drops below `rtol`, or `max_levels` is hit (then `converged=false`).
-
-The metric is per real/imag component with a significance floor (5% of |Δᵢ|), so a converged norm cannot
-mask a wrong reactive part Re(Δ₁) — the failure mode under-reach produces (Im dominates |Δ₁|).
+Convergence-guarded Galerkin solve: jointly refines the three coupled accuracy
+knobs (series order `kmax`, asymptotic reach `xfac`, grid `nx` scaled to hold
+cells-per-unit-x ≈ `cells_per_unit`) until the per-component relative change
+of (Δ₁, Δ₂) drops below `rtol`, or `max_levels` is hit (`converged=false`).
+The metric is per real/imag component with a 5% significance floor, so a
+converged norm cannot mask a wrong small component.
 """
 function solve_inner_converged(model::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     rtol::Float64=1e-2, kmax0::Int=12, xfac0::Float64=1.5,

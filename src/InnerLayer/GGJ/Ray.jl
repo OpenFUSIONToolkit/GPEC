@@ -51,10 +51,9 @@
 """
     ode_matrix([CT,] p::GGJParameters, Q, x) -> SMatrix{6,6,CT}
 
-Coefficient matrix `M(x)` of `dv/dx = M v`, `v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ')`,
-valid for real or complex `x`. The optional leading type argument selects
-the element type (e.g. `Complex{Double64}` for the extended-precision
-damped-zone march); default `ComplexF64`.
+Coefficient matrix `M(x)` of `dv/dx = M v`, `v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ')`, for
+real or complex `x`. `CT` selects the element type (default `ComplexF64`;
+`Complex{Double64}` for the extended-precision march).
 """
 ode_matrix(p::GGJParameters, Q::ComplexF64, x::Number) =
     ode_matrix(ComplexF64, p, Q, x)
@@ -276,13 +275,11 @@ end
 #     of u_small/u_big are exact up to integrator tolerance.
 
 """
-    decaying_pair(params, Q, θ, S; growth=30.0, seed=20260707) -> E::Matrix{ComplexF64} (6×2)
+    decaying_pair(params, Q, θ, S; growth=30.0, seed=20260707, dp_res=20.0) -> E (6×2)
 
-Orthonormal basis of the forward-decaying pair at s = S on the ray, via a
-SHORT backward RK4 integration over [S, S+ΔS], with ΔS chosen so the pair is
-amplified by ≈ e^growth relative to everything else (backward-attracting
-purification of random seeds). The integration is fully resolved
-(h·rate ≈ 0.05), so plain RK4 is stable over this short stretch.
+Orthonormal basis of the forward-decaying pair at s = S on the ray: random
+seeds integrated backward over [S, S+ΔS] with fully-resolved RK4, ΔS sized so
+the pair separates from everything else by ≈ `growth` e-folds.
 """
 function decaying_pair(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Float64;
     growth::Float64=30.0, seed::Int=20260707, dp_res::Float64=20.0)
@@ -346,10 +343,9 @@ end
 
 Transport the power-pair boundary data from the series radius `S` inward to
 `s_m` along the ray, modulo the decaying exponential pair (the quotient in
-which the matching data Δ is defined). Adaptive 2-stage Radau IIA (L-stable,
-stiffly accurate) on the raw linear system, with Φ-budgeted purges against
-locally-extracted decaying frames; see the file header for why explicit
-(including projected-QR) marchers cannot do this job at large S.
+which Δ is defined). 2-stage Radau IIA (L-stable) with Φ-budgeted purges
+against a carried decaying frame; explicit marchers cannot do this at large S
+(see file header).
 """
 function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     S::Float64, s_m::Float64, Us::Vector{ComplexF64}, Ub::Vector{ComplexF64};
@@ -650,12 +646,10 @@ end
 """
     _solve_parities(Ic, Jc, Vc, rhs, ndof, N, p) -> (sol_odd, sol_even)
 
-Solve BOTH parity systems from one factorization. The two matrices differ
-only in the 3 parity rows at s = 0 (odd: unit entries at components (4,2,3);
-even: at (1,5,6)), i.e. A_even = A_odd + Σₖ e_{rₖ}(e_{c2ₖ} − e_{c1ₖ})ᵀ — a
-rank-3 update. One sparse LU (of the row-equilibrated odd system) plus a
-Woodbury correction (3 extra triangular solves + a 3×3 solve) replaces the
-second factorization, which dominates the linear-algebra cost.
+Solve both parity systems from one factorization: the two matrices differ only
+in the 3 parity rows at s = 0 (a rank-3 update), so one sparse LU of the
+row-equilibrated odd system plus a Woodbury correction replaces the second
+factorization, which dominates the linear-algebra cost.
 """
 function _solve_parities(Ic::Vector{Int}, Jc::Vector{Int}, Vc::Vector{ComplexF64},
     rhs::Vector{ComplexF64}, ndof::Int, N::Int, p::Int)
@@ -765,23 +759,16 @@ end
 # -----------------------------------------------------------------------
 
 """
-    solve_ray(params::GGJParameters, Q; θ=angle(Q)/4, kmax=12, p=12,
-              S=nothing, smax_tol=1e-9, growth=30.0,
-              refine_tol=1e-8, max_rounds=8, max_cells=6000,
-              verbose=false) -> RaySolveResult
+    solve_ray(params::GGJParameters, Q; θ=angle(Q)/4, kmax=12, p=12, S=nothing,
+              smax_tol=1e-9, refine_tol=1e-8, max_rounds=8, max_cells=6000,
+              verbose=false, kwargs...) -> RaySolveResult
 
-Solve the GGJ inner-layer matching problem on the rotated ray x = e^{iθ}s
-and return the parity matching data. `Δ` follows the deltac output
-convention (swap + `rescale_delta`) so it is directly comparable to the
-GPEC_julia Galerkin solver.
-
-Keyword highlights:
-  - `θ`     : contour angle; default arg(Q)/4 makes the parabolic exponent
-              exactly real. θ = 0 reproduces a real-axis solve.
-  - `S`     : matching radius; default from the inps series residual
-              criterion along the ray (`pick_smax`).
-  - `p`     : polynomial order per spectral element.
-  - `refine_tol`/`max_rounds`: residual-driven bisection refinement control.
+Solve the GGJ inner-layer matching problem on the rotated ray x = e^{iθ}s.
+`Δ` follows the deltac output convention (swap + `rescale_delta`), directly
+comparable to the `:galerkin` backend. θ = 0 reproduces a real-axis solve;
+`S` defaults to the inps series-residual radius (`pick_smax`); `p` is the
+polynomial order per spectral element; remaining keywords are march/mesh
+knobs (see `march_boundary`, `initial_breaks`, `decaying_pair`).
 """
 function solve_ray(params::GGJParameters, Q::ComplexF64;
     θ::Float64=angle(Q) / 4, kmax::Int=12, p::Int=12,
@@ -937,19 +924,11 @@ solve_ray(params::GGJParameters, Q::Number; kwargs...) =
     solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs...)
         -> SVector{2,ComplexF64}
 
-Solve the GGJ inner-layer matching problem with the rotated-ray collocation
-backend and return the parity-projected matching data `(Δ₁, Δ₂)` in the same
-convention as the `:shooting` and `:galerkin` backends (deltac output swap +
-`X₀^{2√(−D_I)}` physical rescale applied), directly interchangeable with
-them. Converts γ via `inner_Q` and forwards all keywords to
-[`solve_ray`](@ref); use `solve_ray` directly when the full
-[`RaySolveResult`](@ref) (raw Δ, contour, mesh, nodal solution, residuals)
-is wanted.
-
-Preferred backend for |Q| ≳ 1 and for Q near the imaginary axis (rotation /
-resistivity scans): validated to |Q| = 500 on the imaginary axis, where the
-other backends fail. At |Q| ≪ 1 all three backends agree; `:ray` remains
-accurate but `:galerkin` may be faster for very small |Q| real Q.
+Rotated-ray backend: converts γ via `inner_Q`, forwards keywords to
+[`solve_ray`](@ref), and returns `(Δ₁, Δ₂)` in the shared backend convention
+(deltac swap + physical rescale). Preferred for |Q| ≳ 1 and near the
+imaginary axis; use `solve_ray` directly when the full
+[`RaySolveResult`](@ref) is wanted.
 """
 function solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs...)
     res = solve_ray(params, inner_Q(params, γ); kwargs...)
@@ -984,13 +963,10 @@ end
 """
     solution_profile(res::RaySolveResult; npc=8) -> (; s, x, Ψ, Ξ, Υ)
 
-Reconstruct the physical inner-layer fields (Ψ, Ξ, Υ) on the solution
-contour, `npc` points per cell over the collocation domain [0, s_m].
-Output layout mirrors the legacy `solve_inner_profile`: each field is an
-`npts × 2` matrix with columns (isol=1 "odd", isol=2 "even"); `x = e^{iθ}s`
-is the (complex) layer coordinate. For real Q (θ = 0) this is the real-axis
-profile directly; for rotated solves the fields live on the ray — analytic
-continuation back to real x is a separate (unstable) problem, by design.
+Reconstruct (Ψ, Ξ, Υ) on the solution contour, `npc` points per cell; each
+field is `npts × 2` with columns (odd, even) and `x = e^{iθ}s`. For rotated
+solves the fields live on the ray — continuation back to real x is a
+separate (unstable) problem, by design.
 """
 function solution_profile(res::RaySolveResult; npc::Int=8)
     breaks = res.breaks
@@ -1037,11 +1013,9 @@ end
 """
     asymptotic_profile(params, res::RaySolveResult, srange) -> (; s, x, Ψ, Ξ, Υ)
 
-Evaluate the ANALYTIC representation `u_small + Δ·u_big` on the ray for
-`s ≥ res.S` (where the inps series is trusted; decaying-exponential content
-is machine-dead there). Concatenating with [`solution_profile`](@ref)
-demonstrates the seamless numeric ↔ asymptotic match — the same overlap the
-outer-region matching relies on.
+Evaluate the analytic representation `u_small + Δ·u_big` on the ray for
+`s ≥ res.S`; concatenated with [`solution_profile`](@ref) it should join
+the numeric solution seamlessly across the march zone.
 """
 function asymptotic_profile(params::GGJParameters, res::RaySolveResult,
     srange::AbstractVector{<:Real})
@@ -1067,25 +1041,13 @@ end
                       max_rounds=16, max_cells=12000, kwargs...)
         -> (; Δ, spread, base, table)
 
-Convergence battery for the matching data: solve at a trusted baseline, then
-re-solve with every numerical knob perturbed on an INDEPENDENT axis, and
-report the relative change of (Δ₁, Δ₂) per knob. The knobs probe orthogonal
-error sources, so the worst-case `spread` is an honest error bar on Δ:
-
-  - `θ → 1.2θ`       : contour angle — Δ is an analytic invariant of the ray,
-                       so any drift is pure numerical error (sharpest test).
-                       OUTWARD: the natural angle maximizes clearance from the
-                       x² ≈ −Q²(G+KF) pseudo-resonance, so inward checks
-                       measure their own degraded solve, not the baseline;
-  - `p → p+4`        : spectral-element order (interior discretization);
-  - `kmax+4, smax_tol/10` : series order and matching radius S (far-field BC);
-  - `refine_tol/10`  : mesh refinement depth;
-  - `march_rtol/100` : outer-region quotient-march tolerance;
-  - `sm_fac 1→1.4`   : BVP/march handoff radius;
-  - `growth 30→45`   : decaying-pair purification e-folds.
-
-Returns the baseline `Δ`, the per-parity worst-case relative `spread`, the
-baseline result struct, and the per-knob table `(name, δΔ₁, δΔ₂)`.
+Error bar for the matching data: solve at a strict baseline, then re-solve
+with each numerical knob perturbed on an independent axis (contour angle θ,
+element order p, series order/radius, refinement depth, march tolerance,
+handoff radius, purification e-folds — see `variations` below) and report the
+relative change of (Δ₁, Δ₂) per knob. θ is perturbed outward only: inward
+moves toward the x² ≈ −Q²(G+KF) pseudo-resonance and measures the perturbed
+solve, not the baseline. `spread` is the per-parity worst case over all knobs.
 """
 function delta_convergence(params::GGJParameters, Q::ComplexF64;
     verbose::Bool=true, refine_tol::Float64=1e-9,

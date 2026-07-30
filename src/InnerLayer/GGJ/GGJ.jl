@@ -44,14 +44,10 @@ import ..InnerLayerModel, ..solve_inner
 """
     GGJModel{S} <: InnerLayerModel
 
-Glasser–Greene–Johnson resistive inner-layer model. The type parameter `S`
-selects the solver: `:ray` (default) for the rotated-contour collocation
-solver (robust at large |Q| on/near the imaginary axis; agrees with
-`:galerkin` within its error bar at moderate Q), `:galerkin` for the
-Hermite-cubic finite element solver (real-axis method; degrades for
-|Q| ≳ 1), and `:shooting` for the backward stable-shoot solver (|Q| ≪ 1
-only). 
-Note the backends take different numerical-knob keywords.
+Glasser–Greene–Johnson resistive inner-layer model. `S` selects the solver
+backend: `:ray` (default; robust at large |Q| on/near the imaginary axis),
+`:galerkin` (real-axis Hermite FEM; degrades for |Q| ≳ 1), or `:shooting`
+(|Q| ≪ 1 only). The backends take different numerical-knob keywords.
 """
 struct GGJModel{S} <: InnerLayerModel end
 

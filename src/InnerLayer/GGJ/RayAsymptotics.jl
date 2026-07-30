@@ -11,8 +11,7 @@
 # data, the GW2020 Eq. (54) residual along the ray, and the series-radius
 # selector `pick_smax` (the ray analog of `pick_xmax`).
 #
-# "Far-field boundary and the inward
-# march"; the real-x methods of InnerAsymptotics.jl are untouched.
+# The real-x methods of InnerAsymptotics.jl are untouched.
 
 # Complex-argument Horner evaluator: same contract as _horner(x::Real, ...)
 # in InnerAsymptotics.jl, with x^rvec on the principal branch.
@@ -74,12 +73,10 @@ end
 """
     evaluate_asymptotics(cache, x::Complex; derivative=true, apply_T=true) -> (U, dU)
 
-Evaluate the inps asymptotic basis at complex `x` (GW2020 Eq. 53; principal
-branch, |arg x| < π). Returns the 6×2 matrix `U` whose columns are the two
-power-like asymptotic solutions in the GW2020 Eq. (2) state convention
-`u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x)`, and their x-derivatives `dU` if
-requested. `apply_T=false` returns the pre-Jordan-basis representation used
-by the residual measure.
+Complex-x version of [`evaluate_asymptotics`](@ref) (GW2020 Eq. 53; principal
+branch of `x^r`, valid for |arg x| < π). Columns of the 6×2 `U` are the two
+power-like solutions in the GW2020 Eq. (2) state convention
+`u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x)`.
 """
 function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Complex;
     derivative::Bool=true, apply_T::Bool=true)
@@ -148,9 +145,8 @@ end
     physical_ua_dua(cache, x::Number) -> (ua, dua)
 
 Convert the inps 6×2 basis at (possibly complex) `x` to physical `(Ψ, Ξ, Υ)`
-values and x-derivatives (each 3×2; column 1 = large power solution,
-column 2 = small). Same map as the deltac `inpso_get_ua/dua` convention and
-the Galerkin backend's `_physical_ua_dua`, generalized to complex x.
+values and x-derivatives, each 3×2 (column 1 = large power solution, 2 = small).
+Same map as the deltac `inpso_get_ua/dua` convention.
 """
 function physical_ua_dua(cache::InnerAsymptoticsCache, x::Number)
     xc = ComplexF64(x)
@@ -171,8 +167,7 @@ end
 """
     asymptotic_residual(cache, x::Complex) -> SVector{2,Float64}
 
-GW2020 Eq. (54) convergence measure of the two power-like series columns at
-complex `x`: ‖dU − x·J(x)·U‖∞ / max(‖dU‖∞, ‖x·J(x)·U‖∞), per column.
+GW2020 Eq. (54) residual of the two series columns at complex `x`.
 """
 function asymptotic_residual(cache::InnerAsymptoticsCache, x::Complex)
     U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=false)
@@ -210,11 +205,9 @@ end
     pick_smax(params, Q; θ=angle(Q)/4, eps=1e-9, kmax=12, cache=nothing,
               slogmin=-1.0, slogmax=6.5, dslog=0.01) -> (S, cache, achieved)
 
-Ray analog of `pick_xmax`: sweep the ray parameter `s` log-uniformly and
-return the smallest `s` at which the series residual along `x = e^{iθ}s`
-drops below `eps`. If the target is never reached, returns the residual-
-minimizing `s` with `achieved = false` (caller should warn). Also returns
-the asymptotics cache for reuse.
+Ray analog of [`pick_xmax`](@ref): the smallest `s` at which the series
+residual along `x = e^{iθ}s` drops below `eps`. If never reached, returns the
+residual-minimizing `s` with `achieved = false`.
 """
 function pick_smax(params::GGJParameters, Q::ComplexF64;
     θ::Float64=angle(Q) / 4, eps::Float64=1e-9, kmax::Int=12,
