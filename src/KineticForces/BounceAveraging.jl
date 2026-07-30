@@ -168,8 +168,8 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 - `bmax, bmin`: Max/min of B(θ) at this ψ
 - `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
 - `tspl`: Periodic poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
-- `B_extrap`: Endpoint-fit (non-periodic) cubic of B(θ) used for v_par and the
-  bounce-point roots (the Fortran `vspl` equivalent)
+- `B_extrap`: Periodic cubic of B(θ) used for v_par and the bounce-point roots
+  (the Fortran `vspl` equivalent)
 - `mfac`: Poloidal mode numbers [mlow:mhigh]
 - `chi1`: 2π·ψ₀ flux normalization
 - `ro`: Major radius [m]
@@ -409,12 +409,33 @@ end
 
 
 """
-Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` from the endpoint-fit cubic of B
+Fit the periodic magnetic-field spline used by both the parallel-velocity
+factor and its bounce-point roots.
+
+The sampled field closes at θ=0/1. A wrapped non-periodic endpoint fit is only
+C⁰ at that seam and can create false near-seam extrema and root pairs.
+"""
+@inline _fit_vpar_B_spline(xs, B_vals) =
+    cubic_interp(xs, B_vals; bc=PeriodicBC())
+
+
+"""
+Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` from the periodic cubic of B
 (`B_extrap`, built where the surface interpolants are constructed), keeping v_par
 consistent with the bounce-point roots as in Fortran's `vspl`.
 """
 @inline _vpar_from_extrap(B_extrap, lmda::Float64, bo::Float64, θ::Float64) =
     1.0 - (lmda / bo) * B_extrap(mod(θ, 1.0))
+
+
+"""
+Return every bounce root on one closed poloidal turn, ordered as Fortran's
+`spline_roots` (descending θ).
+"""
+@inline function _find_bounce_roots(B_extrap, lmda::Float64, bo::Float64)
+    vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
+    return sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
+end
 
 
 """
@@ -430,8 +451,7 @@ function _find_bounce_points_and_grid(
         # Bounce points: all roots of v_par(θ) = 1 − (λ/bo)·B_extrap(θ) in (0,1),
         # sorted descending — the same order as Fortran spline_roots, which the
         # marginally-trapped and deepest-well wrap logic below assume.
-        vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
-        bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
+        bpts = _find_bounce_roots(B_extrap, lmda, bo)
 
         nbpts = length(bpts)
         if nbpts < 1
@@ -550,7 +570,7 @@ function _bounce_integrate(
         jac = tspl_f[4]
         djdpsi = tspl_f[5]
 
-        # v_par from the endpoint-fit cubic (consistent with the bounce points);
+        # v_par from the periodic cubic (consistent with the bounce points);
         # the periodic tspl B_val remains the numerator field in the integrands.
         vpar = 1.0 - (lmda / bo) * B_extrap(θmod)
 

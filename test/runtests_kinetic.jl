@@ -4,6 +4,39 @@
     KF = GeneralizedPerturbedEquilibrium.KineticForces
 
     # =========================================================================
+    # Periodic parallel-velocity spline
+    # =========================================================================
+    @testset "periodic parallel-velocity spline" begin
+        xs = collect(range(0.0, 1.0; length=13))
+        B_exact(θ) = 2.0 + 0.25cos(2π * θ) + 0.1sin(4π * θ)
+        B_vals = B_exact.(xs)
+        B_vpar = KF._fit_vpar_B_spline(xs, B_vals)
+
+        # The physical θ=0/1 seam is C². An endpoint-fit cubic has independent
+        # one-sided derivatives here, even when it is wrapped before evaluation.
+        @test B_vpar(0.0) ≈ B_vpar(1.0) atol=10eps()
+        @test B_vpar(0.0; deriv=DerivOp(1)) ≈
+              B_vpar(1.0; deriv=DerivOp(1)) atol=100eps()
+        @test B_vpar(0.0; deriv=DerivOp(2)) ≈
+              B_vpar(1.0; deriv=DerivOp(2)) atol=1000eps()
+
+        # This level lies above the analytic field maximum. A wrapped endpoint
+        # fit creates a false near-seam maximum and two spurious bounce roots.
+        artifact_level = 2.3038
+        dense_Bmax = maximum(B_exact, range(0.0, 1.0; length=100_001))
+        @test dense_Bmax < artifact_level
+        @test isempty(KF._find_bounce_roots(B_vpar, 1 / artifact_level, 1.0))
+
+        # Retain PR #310's complete descending root semantics for a physical
+        # level that crosses the field twice.
+        roots = KF._find_bounce_roots(B_vpar, 1 / 2.2, 1.0)
+        @test length(roots) == 2
+        @test issorted(roots; rev=true)
+        @test all(abs(KF._vpar_from_extrap(B_vpar, 1 / 2.2, 1.0, θ)) < 1e-12
+                  for θ in roots)
+    end
+
+    # =========================================================================
     # powspace grid generation
     # =========================================================================
     @testset "powspace" begin

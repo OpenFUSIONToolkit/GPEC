@@ -92,12 +92,12 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0), hint=hJ) / intr.chi1^2
     end
 
-    # Create periodic interpolant for poloidal quantities
+    # Create periodic interpolants for poloidal quantities. v_par and its
+    # bounce-point roots must use the same periodic fit of B: wrapping a
+    # non-periodic endpoint fit preserves B(0)=B(1), but leaves derivative
+    # jumps at the physical seam.
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
-    # v_par and the bounce points use a separate endpoint-fit (non-periodic) cubic
-    # of B, like Fortran's vspl. The endpoint fit of 1−(λ/bo)B equals 1−(λ/bo)
-    # times the fit of B, so one B_extrap per surface serves every λ.
-    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
+    B_extrap = _fit_vpar_B_spline(xs, B_vals)
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -615,8 +615,7 @@ function _setup_surface_state(
     end
 
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
-    # Endpoint-fit (non-periodic) cubic of B for v_par and bounce points (Fortran vspl equivalent).
-    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
+    B_extrap = _fit_vpar_B_spline(xs, B_vals)
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -912,5 +911,3 @@ function compute_kinetic_matrices_at_psi!(
 
     return nothing
 end
-
-
