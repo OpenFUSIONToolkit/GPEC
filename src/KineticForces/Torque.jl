@@ -37,12 +37,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               imx_override::Union{Nothing,Float64}=nothing,
               atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
-    if intr.verbose
-        println("torque - tpsi function, psi = ", psi)
-        println("  electron ", electron)
-        println("  ell ", l)
-    end
-
     # Enforce bounds
     if psi > 1
         tpsi_var[] = 0.0
@@ -100,6 +94,10 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
 
     # Create periodic interpolant for poloidal quantities
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
+    # v_par and the bounce points use a separate endpoint-fit (non-periodic) cubic
+    # of B, like Fortran's vspl. The endpoint fit of 1−(λ/bo)B equals 1−(λ/bo)
+    # times the fit of B, so one B_extrap per surface serves every λ.
+    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -107,7 +105,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         error("ERROR: tpsi! - Equilibrium field maximum not consistent with index")
     end
 
-    # "4th smallest" heuristic for initial bmin like Fortran
+    # "4th smallest" heuristic for the initial bmin
     bmin = minimum(B_vals)
     for _ in 2:4
         mask = B_vals .> bmin
@@ -116,7 +114,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         end
         bmin = minimum(B_vals[mask])
     end
-    # Use >= like Fortran mask for ibmin
+    # Use >= for the ibmin mask
     inds = findall(B_vals .>= bmin)
     isempty(inds) && error("ERROR: tpsi! - could not find ibmin")
     ibmin = inds[argmin(B_vals[inds])]
@@ -127,14 +125,9 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     theta_bmin = xs[ibmin]
     theta_bmax = xs[ibmax]
 
-    # Find roots of dB/dθ = 0 (extrema) using Roots.jl
+    # Find roots of dB/dθ = 0 (extrema)
     dBdtheta_interp = cubic_interp(xs, dBdtheta_vals; bc=PeriodicBC())
-    extrema_roots = Float64[]
-    for i in 1:length(xs)-1
-        if dBdtheta_vals[i] * dBdtheta_vals[i+1] < 0
-            push!(extrema_roots, find_zero(dBdtheta_interp, (xs[i], xs[i+1]), Roots.Brent()))
-        end
-    end
+    extrema_roots = find_sign_change_roots(dBdtheta_interp, xs)
     for θ in extrema_roots
         θn = mod(θ, 1.0)
         Bθ = tspl(θn)[1]
@@ -144,7 +137,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         end
         if Bθ > bmax
             bmax = Bθ
-            theta_bmax = θn
+            # theta_bmax stays at the nodal knot xs[ibmax]: the transit starts at
+            # the knot (as in Fortran), not at the refined extremum.
         end
     end
 
@@ -196,15 +190,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
     nueff = nu_s / (2 * epsr)
 
-    if intr.verbose
-        @printf("   eq values = %.1e %.1e %.1e %.1e %.1e %.1e %.1f %d\n",
-               wdian, wdiat, welec, wdhat, wbhat, nueff, q, 0)
-    end
-
-    if intr.verbose
-        println("  method = ", method)
-    end
-
     # Method selection — route on the registry dispatch tag (errors on unknown method)
     kind = method_kind(method)
     if kind == :fcgl
@@ -240,16 +225,13 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    tspl, dbob_m_f, divx_m_f, divxfac, wdfac,
                                    method, op_wmats;
                                    chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
-                                   mpert=intr.mpert, ibmax=ibmax, theta_bmax=theta_bmax,
+                                   mpert=intr.mpert, theta_bmax=theta_bmax,
+                                   B_extrap=B_extrap,
                                    smat=smat_f, tmat=tmat_f, xmat=xmat_f,
                                    ymat=ymat_f, zmat=zmat_f,
                                    energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
                                    pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
                                    rex_override=rex_override, imx_override=imx_override)
-    end
-
-    if intr.verbose
-        println("torque - end function, psi = ", psi)
     end
 
     return nothing
@@ -419,10 +401,10 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
                        dbob_m_f, divx_m_f, divxfac, wdfac, method, op_wmats;
                        chi1::Float64, ro::Float64, mfac::Vector{Int}, mpert::Int,
-                       ibmax::Int, theta_bmax::Float64,
+                       theta_bmax::Float64, B_extrap,
                        smat=nothing, tmat=nothing, xmat=nothing,
                        ymat=nothing, zmat=nothing,
-                       nlmda::Int=64, ntheta::Int=128,
+                       nlmda::Int=128, ntheta::Int=128,
                        nutype::String="harmonic", f0type::String="maxwellian",
                        nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
                        energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
@@ -430,10 +412,10 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        rex_override::Union{Nothing,Float64}=nothing,
                        imx_override::Union{Nothing,Float64}=nothing)::ComplexF64
 
-    # 1. Compute bounce-averaged quantities
+    # Bounce-averaged quantities per pitch angle
     bounce = compute_bounce_data(
-        psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
-        tspl, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
+        psi, n, l, q, bo, bmax, bmin, theta_bmax,
+        tspl, B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
         mass, chrg, T_s, method;
         nlmda, ntheta, smat, tmat, xmat, ymat, zmat)
 
@@ -441,7 +423,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         return ComplexF64(0.0, 0.0)
     end
 
-    # 2. Build fbnce interpolant: [wb, wd, f₁, f₂, ...]
+    # Build fbnce interpolant: [wb, wd, f₁, f₂, ...]
     # Number of flux quantities: 1 (scalar dJdJ) + optional packed matrix storage
     # (Hermitian-triangle for A/D/H + full blocks for B/C/E; see `nqty_matrix`).
     do_matrices = !isnothing(op_wmats) && !isnothing(bounce.wmats_vs_lambda)
@@ -463,10 +445,8 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # Normalize flux quantities by 1/median for numerical stability (Fortran lines 819-823).
-    # Compute medians from the unscaled data and rescale in place BEFORE building
-    # the interpolant — the pre-normalization build was dead work (allocates a
-    # CubicSeriesInterpolant that was immediately overwritten).
+    # Normalize flux quantities by 1/median for numerical stability; rescale in place
+    # before building the interpolant.
     fbnce_norm = ones(Float64, nqty)
     for i in 1:nqty
         col = view(fbnce_data, :, i + 2)
@@ -477,10 +457,10 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # Build CubicSeriesInterpolant on normalized data (single build)
-    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
+    # CubicFit endpoint BC matches the extrap fit.
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=CubicFit())
 
-    # 3. Set rex/imx multipliers (Fortran lines 839-847)
+    # rex/imx multipliers select torque-only, energy-only, or full complex output.
     method_suffix = length(method) >= 4 ? method[2:4] : ""
     if !isnothing(rex_override) && !isnothing(imx_override)
         rex = rex_override
@@ -495,20 +475,19 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # 4. Pitch angle integration (adaptive Gauss-Kronrod over λ)
+    # Pitch angle integration (adaptive Gauss-Kronrod over λ)
     lxint = integrate_pitch_gar_quadgk(
         wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
         fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
         nutype, f0type, nufac, ximag, qt,
         energy_atol, energy_rtol, pitch_atol, pitch_rtol)
 
-    # 5. Compute scalar torque (Fortran lines 852-854)
-    # Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013)
+    # Scalar torque, Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013).
     tnorm = (-2 * n^2 / sqrt(π)) * (ro / bo) * n_s * T_s *
             (chi1 / twopi)  # unit conversion from ψ to ψ_n, θ_n to θ
     tpsi_val = tnorm * (lxint[1] / fbnce_norm[1])
 
-    # 6. Kinetic matrix assembly (Fortran lines 858-923)
+    # Kinetic matrix assembly (A,B,C,D,E,H)
     if do_matrices
         op_wmats .= 0
         energy_factor = tnorm * (1 / (2 * im * n))  # convert torque → energy
@@ -561,14 +540,14 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
             op_wmats[i, j, 5] = elem(off + _full_idx(i, j, mpert))
         end
 
-        # DCON normalization (Fortran lines 874-876)
+        # DCON normalization
         op_wmats .*= 2 * μ₀
         op_wmats[:, :, 1:3] ./= chi1
         op_wmats[:, :, 1] ./= chi1
 
         # Method-specific output
         if method_suffix in ["kmm", "rmm"]
-            # Matrix norms independent of ξ (Fortran lines 878-897)
+            # Matrix norms independent of ξ
             tpsi_val = ComplexF64(0.0)
             for k in 1:6
                 # Spectral norm via SVD
@@ -579,7 +558,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
             tpsi_val = complex(rex + imx * im) * sqrt(abs(tpsi_val))
 
         elseif method_suffix in ["wmm", "tmm", "pmm"]
-            # Mode-coupled dW contraction with displacement vectors (Fortran lines 898-914)
+            # Mode-coupled dW contraction with displacement vectors
             # TODO: Requires xs_m displacement interpolants from PerturbedEquilibriumState
             # For now, store matrices and return scalar torque
         end
@@ -636,6 +615,8 @@ function _setup_surface_state(
     end
 
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
+    # Endpoint-fit (non-periodic) cubic of B for v_par and bounce points (Fortran vspl equivalent).
+    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -658,19 +639,17 @@ function _setup_surface_state(
     theta_bmax = xs[ibmax]
 
     dBdtheta_interp = cubic_interp(xs, dBdtheta_vals; bc=PeriodicBC())
-    for i in 1:length(xs)-1
-        if dBdtheta_vals[i] * dBdtheta_vals[i+1] < 0
-            θ = find_zero(dBdtheta_interp, (xs[i], xs[i+1]), Roots.Brent())
-            θn = mod(θ, 1.0)
-            Bθ = tspl(θn)[1]
-            if Bθ < bmin
-                bmin = Bθ
-                theta_bmin = θn
-            end
-            if Bθ > bmax
-                bmax = Bθ
-                theta_bmax = θn
-            end
+    for θ in find_sign_change_roots(dBdtheta_interp, xs)
+        θn = mod(θ, 1.0)
+        Bθ = tspl(θn)[1]
+        if Bθ < bmin
+            bmin = Bθ
+            theta_bmin = θn
+        end
+        if Bθ > bmax
+            bmax = Bθ
+            # theta_bmax stays at the nodal knot xs[ibmax]: the transit starts at
+            # the knot (as in Fortran), not at the refined extremum.
         end
     end
 
@@ -706,7 +685,7 @@ function _setup_surface_state(
 
     return (;
         chrg, mass,
-        tspl, bmax, bmin, ibmax, theta_bmax,
+        tspl, B_extrap, bmax, bmin, theta_bmax,
         q, n_s, T_s, welec,
         wdian, wdiat, wtran, wgyro, nuk,
         epsr,
@@ -757,7 +736,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     ro   = intr.ro
     bo   = intr.bo
 
-    # Geometric matrices at this ψ (Fortran torque.F90 block matrices)
+    # Geometric matrices at this ψ
     smat_f = reshape(intr.smats(psi), mpert, mpert)
     tmat_f = reshape(intr.tmats(psi), mpert, mpert)
     xmat_f = reshape(intr.xmats(psi), mpert, mpert)
@@ -770,8 +749,8 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     divx_m_f = zeros(ComplexF64, mpert)
 
     bounce = compute_bounce_data(
-        psi, n, l, state.q, bo, state.bmax, state.bmin, state.ibmax, state.theta_bmax,
-        state.tspl, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
+        psi, n, l, state.q, bo, state.bmax, state.bmin, state.theta_bmax,
+        state.tspl, state.B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
         state.mass, state.chrg, state.T_s, "fwmm";
         nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
 
@@ -781,14 +760,10 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         return nothing
     end
 
-    # Pack wb, wd, and packed matrix block into fbnce — NO scalar slot.
-    # fbnce is COMPLEX on this path to carry the full op_wmats phase (Fortran
-    # torque.F90:789 writes `wbbar*op_wmats(i,j,k)/ro**2` into a complex cspline;
-    # dropping the imag part zeros out off-Hermitian matrix structure — in
-    # particular op_B = W_Z†W_X, op_C = W_Z†W_Y, op_E = W_X†W_Y whose
-    # diagonals carry genuine phase. wb/wd slots are stored with zero imag.
-    # Matrix block is packed as 3 Hermitian upper-triangles + 3 full blocks;
-    # see `nqty_matrix` in BounceAveraging.jl.
+    # Pack wb, wd, and the matrix block into fbnce (no scalar slot). fbnce is COMPLEX
+    # here to carry the op_wmats phase: the off-Hermitian blocks (op_B = W_Z†W_X,
+    # op_C = W_Z†W_Y, op_E = W_X†W_Y) carry genuine phase that dropping imag would zero.
+    # Packed as 3 Hermitian upper-triangles + 3 full blocks; see `nqty_matrix`.
     nqty = nqty_matrix(mpert)
     fbnce_data = zeros(ComplexF64, bounce.nlmda, 2 + nqty)
     fbnce_data[:, 1] .= bounce.wb
@@ -797,7 +772,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     # so the matrix block is a direct copy.
     fbnce_data[:, 3:end] .= bounce.wmats_vs_lambda
 
-    # Column-wise median normalization for numerical stability (Fortran lines 819-823).
+    # Column-wise median normalization for numerical stability.
     fbnce_norm = ones(Float64, nqty)
     for i in 1:nqty
         col = view(fbnce_data, :, i + 2)
@@ -808,7 +783,8 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         end
     end
 
-    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
+    # CubicFit endpoint BC matches the extrap fit.
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=CubicFit())
 
     # Dual-output pitch integration: one energy sweep per (λ, E) produces both
     # halves. Packed return is [wmm | tmm], each length nqty.
@@ -819,8 +795,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         nutype, f0type, nufac, ximag, qt=false,
         energy_atol, energy_rtol, pitch_atol, pitch_rtol)
 
-    # Torque → energy normalization (Fortran torque.F90 lines 860-876).
-    # Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013).
+    # Torque → energy normalization, Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013).
     tnorm = (-2 * n^2 / sqrt(π)) * (ro / bo) * state.n_s * state.T_s *
             (chi1 / twopi)
     energy_factor = tnorm * (1 / (2 * im * n))
@@ -834,7 +809,6 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     # lower-triangle reconstruction uses different mirrors per half:
     #   kwmat[j,i] =  conj(kwmat[i,j])  (Hermitian; S_w pure imaginary)
     #   ktmat[j,i] = -conj(ktmat[i,j])  (anti-Hermitian; S_t pure real)
-    # This matches Fortran's independently-computed slots at (j,i).
     @inline function _assemble_hermitian!(dest, k, off, half, mirror_sign)
         @inbounds for j in 1:mpert, i in 1:j
             v = elem(off + _tri_idx(i, j), half)
@@ -861,7 +835,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         _assemble_full!(dest, 5, off, half)                                      # E (k=5)
     end
 
-    # DCON normalization (Fortran torque.F90 lines 874-876)
+    # DCON normalization
     for mat in (kwmat, ktmat)
         mat .*= 2 * μ₀
         mat[:, :, 1:3] ./= chi1

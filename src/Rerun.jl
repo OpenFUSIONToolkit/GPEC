@@ -266,6 +266,7 @@ function build_inputs_from_h5(args::Vector{String})
           "  source: $(abspath(source_h5))\n" *
           "  output: $(abspath(joinpath(output_dir, output_name)))\n$_BANNER"
 
+    _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], output_dir)
     # Clear eq_filename: unused on replay, and a stale absolute path could mislead downstream code.
     eq_config.eq_filename = ""
