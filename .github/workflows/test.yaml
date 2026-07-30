@@ -54,13 +54,15 @@ jobs:
 
           files=$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
 
-          # Directories whose Julia sources are not exercised by test/runtests.jl.
-          not_tested='^(docs|benchmarks|regression-harness)/'
-          # Everything the test suite actually reads: sources, tests and their
-          # fixtures, the example decks the tests run end-to-end, and this workflow.
-          tested='(\.jl$|^Project\.toml$|^test/|^examples/|^\.github/workflows/test\.yaml$)'
+          # Allowlist of what test/runtests.jl actually exercises: the package
+          # itself, the tests and their fixtures, the example decks the tests run
+          # end-to-end, the dependency set, and this workflow. Anything not listed
+          # here does not trigger a run, so new untested Julia (benchmarks, docs
+          # scripts, a future tools/ directory) is excluded by default rather than
+          # by remembering to exclude it.
+          tested='(^src/|^test/|^examples/|^Project\.toml$|^\.github/workflows/test\.yaml$)'
 
-          relevant=$(printf '%s\n' "$files" | grep -Ev "$not_tested" | grep -E "$tested" || true)
+          relevant=$(printf '%s\n' "$files" | grep -E "$tested" || true)
 
           say "### Julia change detection"
           say ""
