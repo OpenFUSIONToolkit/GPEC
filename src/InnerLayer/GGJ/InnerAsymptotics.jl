@@ -93,6 +93,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
 
     # T (Eq. 7) — Fortran constructs this with column-major RESHAPE; the
     # listing below is row-major Julia order matching that layout.
+    #! format: off
     T = @SMatrix ComplexF64[
         1   0           h*q             q2/λ        h*q          -q2/λ
         0   0           0              -1/λ          0            1/λ
@@ -110,6 +111,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
         0    0      λ/2        0     0           1/2
         0    λ/2    0          0     1/2         0
     ]
+    #! format: on
 
     # A_0, A_1, A_2 — GW2020 Eqs. (4), (5), and the A₂ matrix of Eq. (3). Build mutable then freeze.
     A0 = zeros(ComplexF64, 6, 6)
