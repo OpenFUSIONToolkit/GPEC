@@ -148,12 +148,10 @@ function compute_singular_coupling_metrics!(
     state.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
     state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     state.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
-    # Dispatch flags: ForceFreeStates-provided objects take precedence over the bracket evaluations.
-    #  - inner_bpen: layer-center penetrated field (identically zero in ideal mode) → becomes the
-    #    OFFICIAL C_penetrated_area_weighted_field; pointwise midpoint is only the fallback.
-    #  - ffs_delta_mn: coefficient-based Δ_mn → replaces the finite-jump C_delta_prime when present.
+    # B_pen dispatch: a ForceFreeStates-provided layer-center penetrated field (identically zero in
+    # ideal mode) becomes the OFFICIAL C_penetrated_area_weighted_field; the pointwise midpoint
+    # evaluation below is only the fallback.
     use_inner_bpen = !isempty(intr.inner_bpen)
-    use_ffs_delta = !isempty(intr.ffs_delta_mn)
     use_inner_bpen && (state.C_penetrated_field_inner = zeros(ComplexF64, n_rational, numpert_total))
     state.rational_psi = zeros(Float64, n_rational)
     state.rational_q = zeros(Float64, n_rational)
@@ -295,12 +293,6 @@ function compute_singular_coupling_metrics!(
             pen_row = (transpose(C_coeffs) * @view(intr.inner_bpen[s, :])) ./ area
             state.C_penetrated_field_inner[row, :] = pen_row
             state.C_penetrated_area_weighted_field[row, :] = pen_row
-        end
-
-        # Δ_mn: prefer the ForceFreeStates coefficient-based object (same contraction); the
-        # finite-jump value assigned above remains only as the fallback.
-        if use_ffs_delta && s <= size(intr.ffs_delta_mn, 1)
-            state.C_delta_prime[row, :] = transpose(C_coeffs) * @view(intr.ffs_delta_mn[s, :])
         end
 
         # LHS normalization audit (#233) — output scalar coordinate-invariance per row:

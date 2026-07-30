@@ -196,7 +196,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
         "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
         "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
     )
-    match = gal_match_rpec(ctrl, equil, intr, result, asymps)
+    match = gal_match_rpec(ctrl, equil, intr, result)
     ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(match.residual)")
     return GalerkinResult(delta, Ap, Bp, Gammap, Deltap, msing,
         sing_psi, sing_q, sing_m, sing_n, di, alpha, delta_coil, solution, match)
@@ -265,7 +265,6 @@ function write_galerkin!(out_h5, result::GalerkinResult)
         out_h5["galerkin/match/xi_deriv"] = m.xi_deriv
         out_h5["galerkin/match/deltar"] = m.deltar
         out_h5["galerkin/match/bpen"] = m.bpen
-        out_h5["galerkin/match/delta_mn"] = m.delta_mn
         out_h5["galerkin/match/rpec_eig"] = m.rpec_eig
         # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
         for i in eachindex(m.inner_psi)
