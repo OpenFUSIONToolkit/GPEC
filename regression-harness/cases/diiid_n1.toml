@@ -8,12 +8,12 @@ name = "diiid_n1"
 description = "DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium"
 example_dir = "examples/DIIID-like_ideal_example"
 
-# Energies — leading eigenvalues at the final truncation (psilim). eigenmode_* are now root-area-weighted (Φ-space, Jacobian-invariant); ξ-space counterparts live under FreeBoundaryStability/XiNorm/ and are not tracked.
+# Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
 [quantities.et_real]
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "root-area-weighted total energy Re(et[1])"
+label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
 
@@ -21,7 +21,7 @@ order = 10
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "imag_first"
-label = "root-area-weighted total energy Im(et[1])"
+label = "total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
 
@@ -29,7 +29,7 @@ order = 11
 h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "root-area-weighted plasma energy Re(ep[1])"
+label = "plasma energy Re(ep[1])"
 noise_threshold = 1e-10
 order = 12
 
@@ -37,15 +37,15 @@ order = 12
 h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "root-area-weighted vacuum energy Re(ev[1])"
+label = "vacuum energy Re(ev[1])"
 noise_threshold = 1e-10
 order = 13
 
 [quantities.vacuum_eigenvalue]
-h5path = "FreeBoundaryStability/XiNorm/vacuum_eigenvalue"
+h5path = "FreeBoundaryStability/vacuum_eigenvalue"
 type = "real_scalar"
 extract = "value"
-label = "vacuum matrix min eigenvalue (XiNorm)"
+label = "vacuum matrix min eigenvalue"
 noise_threshold = 1e-10
 order = 14
 
@@ -54,7 +54,7 @@ order = 14
 h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "root-area-weighted plasma energy (all)"
+label = "plasma energy (all)"
 noise_threshold = 1e-10
 order = 20
 
@@ -62,7 +62,7 @@ order = 20
 h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "root-area-weighted vacuum energy (all)"
+label = "vacuum energy (all)"
 noise_threshold = 1e-10
 order = 21
 
@@ -70,7 +70,7 @@ order = 21
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "root-area-weighted total energy (all)"
+label = "total energy (all)"
 noise_threshold = 1e-10
 order = 22
 
@@ -346,6 +346,30 @@ extract = "value"
 label = "PE toroidal torque"
 noise_threshold = 1e-12
 order = 94
+
+# NTV (neoclassical toroidal viscosity) toroidal torque T_φ [N·m] from the
+# [KineticForces] FGAR method (pressure moment) — a diagnostic computed on top of
+# the ideal FFS + PE result. Absent (N/A) for refs without a [KineticForces]
+# section. Threshold is a noise floor for the adaptive-quadrature result; tune if
+# run-to-run jitter appears.
+[quantities.ntv_torque_fgar]
+h5path = "kinetic_forces/fgar/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "NTV torque FGAR [N·m]"
+noise_threshold = 1e-2
+order = 95
+
+# NTV kinetic energy δW_k = Im(T)/(2n) [J] through the same post-PE FGAR path.
+# Tracked at a tighter threshold — it isolates the energy component the
+# bounce-averaging chain moves most.
+[quantities.ntv_energy_fgar]
+h5path = "kinetic_forces/fgar/total_energy"
+type = "real_scalar"
+extract = "value"
+label = "NTV kinetic energy dW FGAR [J]"
+noise_threshold = 1e-3
+order = 96
 
 # Profiles (checksums)
 [quantities.q_profile]

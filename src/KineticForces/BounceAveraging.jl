@@ -146,10 +146,10 @@ end
 # ============================================================================
 
 """
-    compute_bounce_data(psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
-                        tspl, mfac, chi1, ro, dbob_m_f, divx_m_f,
+    compute_bounce_data(psi, n, l, q, bo, bmax, bmin, theta_bmax,
+                        tspl, B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f,
                         divxfac, wdfac, mass, chrg, T_s, method;
-                        nlmda=64, ntheta=128,
+                        nlmda=128, ntheta=128,
                         smat=nothing, tmat=nothing, xmat=nothing,
                         ymat=nothing, zmat=nothing) → BounceData
 
@@ -166,9 +166,10 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 - `q`: Safety factor at this ψ
 - `bo`: On-axis toroidal field [T]
 - `bmax, bmin`: Max/min of B(θ) at this ψ
-- `ibmax`: Index of Bmax in poloidal grid
-- `theta_bmax`: θ location of Bmax
-- `tspl`: Poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
+- `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
+- `tspl`: Periodic poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
+- `B_extrap`: Endpoint-fit (non-periodic) cubic of B(θ) used for v_par and the
+  bounce-point roots (the Fortran `vspl` equivalent)
 - `mfac`: Poloidal mode numbers [mlow:mhigh]
 - `chi1`: 2π·ψ₀ flux normalization
 - `ro`: Major radius [m]
@@ -181,20 +182,20 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 - `method`: Method string (first char: f/t/p determines λ range)
 
 # Keyword Arguments
-- `nlmda`: Number of pitch angle grid points (default 64)
+- `nlmda`: Number of pitch angle grid points (default 128, matching Fortran pentrc nlmda)
 - `ntheta`: Number of poloidal grid points per bounce (default 128)
 - `smat, tmat, xmat, ymat, zmat`: Geometric matrices (mpert×mpert) for kinetic matrix path
 """
 function compute_bounce_data(
     psi::Float64, n::Int, l::Int, q::Float64,
     bo::Float64, bmax::Float64, bmin::Float64,
-    ibmax::Int, theta_bmax::Float64,
-    tspl, mfac::Vector{Int}, chi1::Float64, ro::Float64,
+    theta_bmax::Float64,
+    tspl, B_extrap, mfac::Vector{Int}, chi1::Float64, ro::Float64,
     dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     mass::Float64, chrg::Float64,
     T_s::Float64, method::String;
-    nlmda::Int=64, ntheta::Int=128,
+    nlmda::Int=128, ntheta::Int=128,
     smat::Union{Nothing,Matrix{ComplexF64}}=nothing,
     tmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
     xmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
@@ -203,6 +204,9 @@ function compute_bounce_data(
 )
     mpert = length(mfac)
     do_matrices = !isnothing(smat)
+
+    # Per-surface scratch, reused across all λ.
+    scr = BounceScratch(ntheta, mpert)
 
     # Trapped-passing boundary and λ range
     lmdatpb = bo / bmax
@@ -237,14 +241,13 @@ function compute_bounce_data(
 
         # Find bounce points and build θ sub-grid
         _, _, tdt_pts, tdt_wts = _find_bounce_points_and_grid(
-            lmda, bo, sigma, tspl, ibmax, theta_bmax,
-            lmdatpb, lmdamax, psi, ntheta)
+            lmda, bo, sigma, B_extrap, theta_bmax, psi, ntheta)
 
         # Bounce integrals over θ (Fortran lines 674-735)
         wbbar, wdbar, dJdJ_val, wmats_lmda = _bounce_integrate(
             tdt_pts, tdt_wts, lmda, lnq, sigma, n, q, bo,
-            tspl, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
-            do_matrices, mpert, smat, tmat, xmat, ymat, zmat)
+            tspl, B_extrap, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
+            do_matrices, mpert, smat, tmat, xmat, ymat, zmat, scr)
 
         # Physical frequencies (Fortran lines 744-745)
         wb_arr[ilmda] = wbbar * bhat
@@ -252,14 +255,118 @@ function compute_bounce_data(
         dJdJ_arr[ilmda] = dJdJ_val
 
         if do_matrices && !isnothing(wmats_lmda)
-            @inbounds for q in 1:length(wmats_lmda)
-                wmats_arr[ilmda, q] = wmats_lmda[q]
+            @inbounds for iq in eachindex(wmats_lmda)
+                wmats_arr[ilmda, iq] = wmats_lmda[iq]
             end
         end
     end
 
     return BounceData(nlmda, lambda, dlambda, sigma_arr,
                       wb_arr, wd_arr, dJdJ_arr, wmats_arr)
+end
+
+
+"""
+    BounceScratch(ntheta, mpert)
+
+Per-surface scratch for the bounce-averaging inner loops, allocated once in
+`compute_bounce_data` and reused across every λ. Sizes are fixed for a flux surface
+(`ntheta` sub-grid points, `mpert` Fourier modes). Buffers the loops populate only
+partially are `fill!`-reset per λ.
+
+## Fields
+- `g_wb::Vector{Float64}`: length `ntheta` — bounce-action integrand samples
+- `g_wd::Vector{Float64}`: length `ntheta` — drift integrand samples
+- `cum_wb_arr::Vector{Float64}`: length `ntheta` — cumulative bounce-action integral
+- `jvtheta::Vector{ComplexF64}`: length `ntheta` — action integrand
+- `bj_samples::Vector{ComplexF64}`: length `ntheta` — action bounce-integral samples
+- `wsamp::Vector{ComplexF64}`: length `ntheta` — per-mode W bounce-integral samples
+- `wmu_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_μ per θ
+- `wen_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_E per θ
+- `expm::Vector{ComplexF64}`: length `mpert` — Fourier basis at a θ
+- `pl::Vector{ComplexF64}`: length `ntheta` — bounce phase factor
+- `wmu_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_μ
+- `wen_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_E
+- `wmats_lmda::Vector{ComplexF64}`: length `nqty_matrix(mpert)` — packed W outer products
+- `tspl_f::Vector{Float64}`: length 5 — in-place tspl(θ) evaluation
+- `int_w::Vector{Float64}`, `cumint_W::Matrix{Float64}`: precomputed exact-cubic
+  quadrature weights on the fixed unit θ-grid (`∫ = int_w·y`, `cumulative = cumint_W·y`);
+  shared read-only across surfaces, see `_quadrature_weights`
+"""
+struct BounceScratch
+    g_wb::Vector{Float64}
+    g_wd::Vector{Float64}
+    cum_wb_arr::Vector{Float64}
+    jvtheta::Vector{ComplexF64}
+    bj_samples::Vector{ComplexF64}
+    wsamp::Vector{ComplexF64}
+    wmu_mt::Matrix{ComplexF64}
+    wen_mt::Matrix{ComplexF64}
+    expm::Vector{ComplexF64}
+    pl::Vector{ComplexF64}
+    wmu_ba::Vector{ComplexF64}
+    wen_ba::Vector{ComplexF64}
+    wmats_lmda::Vector{ComplexF64}
+    tspl_f::Vector{Float64}
+    int_w::Vector{Float64}
+    cumint_W::Matrix{Float64}
+end
+
+function BounceScratch(ntheta::Int, mpert::Int)
+    int_w, cumint_W = _quadrature_weights(ntheta)
+    return BounceScratch(
+        Vector{Float64}(undef, ntheta),
+        Vector{Float64}(undef, ntheta),
+        Vector{Float64}(undef, ntheta),
+        Vector{ComplexF64}(undef, ntheta),
+        Vector{ComplexF64}(undef, ntheta),
+        Vector{ComplexF64}(undef, ntheta),
+        Matrix{ComplexF64}(undef, mpert, ntheta),
+        Matrix{ComplexF64}(undef, mpert, ntheta),
+        Vector{ComplexF64}(undef, mpert),
+        Vector{ComplexF64}(undef, ntheta),
+        Vector{ComplexF64}(undef, mpert),
+        Vector{ComplexF64}(undef, mpert),
+        Vector{ComplexF64}(undef, nqty_matrix(mpert)),
+        Vector{Float64}(undef, 5),
+        int_w,
+        cumint_W,
+    )
+end
+
+# Exact-cubic θ-quadrature weights on the fixed unit grid, cached by ntheta.
+const _QUAD_WEIGHTS = Dict{Int,Tuple{Vector{Float64},Matrix{Float64}}}()
+const _QUAD_WEIGHTS_LOCK = ReentrantLock()
+
+"""
+    _quadrature_weights(ntheta) → (int_w, cumint_W)
+
+Exact integral of the `CubicFit`-endpoint spline on the fixed grid `range(0,1,ntheta)`
+is a constant linear functional of the node samples, so `∫ = int_w·y` and the cumulative
+integral is `cumint_W·y`. The weights are obtained once per `ntheta` by evaluating the
+public `integrate` / `cumulative_integrate!` on the unit basis vectors — bit-faithful to
+fitting and integrating each sample vector directly, but reducing the per-λ hot loop to a
+`dot`/`mul!`. Cached (build guarded by a lock); the returned arrays are read-only.
+"""
+function _quadrature_weights(ntheta::Int)
+    lock(_QUAD_WEIGHTS_LOCK) do
+        get!(_QUAD_WEIGHTS, ntheta) do
+            xs = collect(range(0.0, 1.0, length=ntheta))
+            int_w = zeros(Float64, ntheta)
+            cumint_W = zeros(Float64, ntheta, ntheta)
+            ej = zeros(Float64, ntheta)
+            cbuf = zeros(Float64, ntheta)
+            for j in 1:ntheta
+                ej[j] = 1.0
+                itp = cubic_interp(xs, ej; bc=CubicFit())
+                int_w[j] = FastInterpolations.integrate(itp)
+                FastInterpolations.cumulative_integrate!(cbuf, itp)
+                @views cumint_W[:, j] .= cbuf
+                ej[j] = 0.0
+            end
+            (int_w, cumint_W)
+        end
+    end
 end
 
 
@@ -302,31 +409,29 @@ end
 
 
 """
+Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` from the endpoint-fit cubic of B
+(`B_extrap`, built where the surface interpolants are constructed), keeping v_par
+consistent with the bounce-point roots as in Fortran's `vspl`.
+"""
+@inline _vpar_from_extrap(B_extrap, lmda::Float64, bo::Float64, θ::Float64) =
+    1.0 - (lmda / bo) * B_extrap(mod(θ, 1.0))
+
+
+"""
 Find bounce points for trapped/passing particles and build θ sub-grid.
 Returns (t1, t2, theta_points, theta_weights).
 """
 function _find_bounce_points_and_grid(
     lmda::Float64, bo::Float64, sigma::Int,
-    tspl, ::Int, theta_bmax::Float64,
-    ::Float64, ::Float64, psi::Float64,
+    B_extrap, theta_bmax::Float64, psi::Float64,
     ntheta::Int
 )
     if sigma == 0  # trapped
-        # Build v_par(θ) = 1 - (λ/bo)*B(θ) and find roots
-        # Use a dense θ grid to find zero crossings
-        nfine = 256
-        theta_fine = range(0.0, 1.0, length=nfine+1)
-        vpar_fine = [1.0 - (lmda / bo) * tspl(mod(θ, 1.0))[1] for θ in theta_fine]
-
-        # Find zero crossings
-        bpts = Float64[]
-        for i in 1:nfine
-            if vpar_fine[i] * vpar_fine[i+1] < 0
-                # Bisect for better accuracy
-                θ_root = _bisect_vpar(tspl, lmda, bo, theta_fine[i], theta_fine[i+1])
-                push!(bpts, θ_root)
-            end
-        end
+        # Bounce points: all roots of v_par(θ) = 1 − (λ/bo)·B_extrap(θ) in (0,1),
+        # sorted descending — the same order as Fortran spline_roots, which the
+        # marginally-trapped and deepest-well wrap logic below assume.
+        vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
+        bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
 
         nbpts = length(bpts)
         if nbpts < 1
@@ -338,8 +443,7 @@ function _find_bounce_points_and_grid(
             t1 = bpts[1]
             t2 = bpts[1] + 1.0
         else
-            # Find deepest potential well (Fortran lines 616-639)
-            t1, t2 = _find_deepest_well(bpts, tspl, lmda, bo)
+            t1, t2 = _find_deepest_well(bpts, B_extrap, lmda, bo)
         end
 
         # Power-law grid refined near bounce points
@@ -356,55 +460,10 @@ end
 
 
 """
-    _bisect_vpar(tspl, lmda, bo, θa, θb; tol=1e-12, maxiter=50) → θ
-
-Bisect on `θ ∈ [θa, θb]` to find a bounce point — the angle where the parallel
-velocity vanishes, `v_par(θ) = 1 - (λ/bo) · B(θ) = 0`. The caller is responsible
-for supplying a bracket where `v_par(θa)` and `v_par(θb)` have opposite signs;
-this routine does not check, it just halves toward the sign change.
-
-# Arguments
-- `tspl`: 1D θ-interpolant returning at least `[B(θ), …]` at first index;
-  `tspl(mod(θ, 1.0))[1]` extracts the local field magnitude.
-- `lmda`: pitch-angle parameter λ = μ·bo / E.
-- `bo`: on-axis toroidal field used to normalise λ.
-- `θa, θb`: bracket endpoints (normalised θ ∈ [0,1)); typically straddling a B-peak.
-
-# Keyword arguments
-- `tol`: termination tolerance — exits when either `|v_par(θ_mid)| < tol` or the
-  bracket width `θb − θa < tol`. Default `1e-12` is tight enough that the
-  residual `v_par` is dominated by the spline-evaluation roundoff of `tspl`.
-- `maxiter`: hard iteration cap. Default `50` halves the bracket by ~10⁻¹⁵, well
-  past `tol` on a unit-scale bracket; the cap is a runaway guard rather than the
-  expected exit. On exhaustion the midpoint of the final bracket is returned.
-
-# Returns
-- `θ::Float64`: the converged (or capped) bounce-point angle.
+Find the deepest potential well (largest midpoint v_par) among bounce-point pairs,
+handling pairs that wrap through θ = 0/1.
 """
-function _bisect_vpar(tspl, lmda::Float64, bo::Float64, θa::Float64, θb::Float64; tol=1e-12, maxiter=50)
-    va = 1.0 - (lmda / bo) * tspl(mod(θa, 1.0))[1]
-    for _ in 1:maxiter
-        θm = 0.5 * (θa + θb)
-        vm = 1.0 - (lmda / bo) * tspl(mod(θm, 1.0))[1]
-        if abs(vm) < tol || (θb - θa) < tol
-            return θm
-        end
-        if va * vm < 0
-            θb = θm
-        else
-            θa = θm
-            va = vm
-        end
-    end
-    return 0.5 * (θa + θb)
-end
-
-
-"""
-Find deepest potential well among bounce point pairs.
-Ports Fortran lines 616-639.
-"""
-function _find_deepest_well(bpts::Vector{Float64}, tspl, lmda::Float64, bo::Float64)
+function _find_deepest_well(bpts::Vector{Float64}, B_extrap, lmda::Float64, bo::Float64)
     nbpts = length(bpts)
     best_vpar = 0.0
     best_t1 = 0.0
@@ -418,7 +477,7 @@ function _find_deepest_well(bpts::Vector{Float64}, tspl, lmda::Float64, bo::Floa
         else
             θmid = 0.5 * (bpts[i] + bpts[j])
         end
-        vpar_mid = 1.0 - (lmda / bo) * tspl(mod(θmid, 1.0))[1]
+        vpar_mid = _vpar_from_extrap(B_extrap, lmda, bo, θmid)
         if vpar_mid > best_vpar
             best_t1 = bpts[i]
             best_t2 = bpts[j]
@@ -447,36 +506,37 @@ Ports Fortran torque.F90 lines 674-793.
 function _bounce_integrate(
     tdt_pts::Vector{Float64}, tdt_wts::Vector{Float64},
     lmda::Float64, lnq::Float64, sigma::Int, n::Int, q::Float64, bo::Float64,
-    tspl, chi1::Float64, ro::Float64,
+    tspl, B_extrap, chi1::Float64, ro::Float64,
     mfac::Vector{Int}, dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     do_matrices::Bool, mpert::Int,
-    smat, tmat, xmat, ymat, zmat
+    smat, tmat, xmat, ymat, zmat, scr::BounceScratch
 )
     ntheta = length(tdt_pts)
     theta0 = tdt_pts[1]
 
-    # Cumulative bounce integrals
-    cum_wb = 0.0
-    cum_wd = 0.0
-
-    # θ-scratch array allocated fresh each call. Pool-based reuse was tried
-    # (AdaptiveArrayPools) but showed no speedup and introduced severe slowdowns
-    # at 2+ threads; plain allocations match Fortran baseline behavior.
-    cum_wb_arr = zeros(Float64, ntheta)
+    # θ-sample integrands (zero-reset per λ: the loop populates 2:ntheta-1 with
+    # continue/break paths that rely on unwritten entries staying 0)
+    g_wb = scr.g_wb    # J·B/√v_par · dθ/dx
+    g_wd = scr.g_wd    # drift integrand · dθ/dx
+    fill!(g_wb, 0.0)
+    fill!(g_wd, 0.0)
 
     # Action integrand
-    jvtheta = zeros(ComplexF64, ntheta)
+    jvtheta = scr.jvtheta
+    fill!(jvtheta, ComplexF64(0.0))
 
     # W vectors for matrix path
-    wmu_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
-    wen_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
+    wmu_mt = scr.wmu_mt
+    wen_mt = scr.wen_mt
+    if do_matrices
+        fill!(wmu_mt, ComplexF64(0.0))
+        fill!(wen_mt, ComplexF64(0.0))
+    end
 
-    # Pre-allocated scratch for hot-loop tspl evaluation + Fourier-basis buffer
-    # (avoids Vector{Float64}(5) + Vector{ComplexF64}(mpert) allocation per θ
-    # sub-grid point — previously ~256 allocs × 126 inner iters per call).
-    tspl_f = Vector{Float64}(undef, 5)
-    expm = Vector{ComplexF64}(undef, mpert)
+    # Scratch for hot-loop tspl evaluation + Fourier-basis buffer (fully written per use).
+    tspl_f = scr.tspl_f
+    expm = scr.expm
 
     for i in 2:ntheta-1  # Edge weights are 0 from powspace
         θ = tdt_pts[i]
@@ -490,39 +550,40 @@ function _bounce_integrate(
         jac = tspl_f[4]
         djdpsi = tspl_f[5]
 
-        vpar = 1.0 - (lmda / bo) * B_val
+        # v_par from the endpoint-fit cubic (consistent with the bounce points);
+        # the periodic tspl B_val remains the numerator field in the integrands.
+        vpar = 1.0 - (lmda / bo) * B_extrap(θmod)
 
         if vpar <= 0
-            # Zero crossing near bounce points — handle like Fortran lines 678-697
+            # Negative v_par near a bounce point: same fill rules as the Fortran bounce loop.
             if i < ntheta ÷ 2
-                # Before midpoint: zero out previous entries
+                # Before midpoint: restart — zero everything up to this sample.
+                fill!(view(g_wb, 1:i), 0.0)
+                fill!(view(g_wd, 1:i), 0.0)
+                fill!(view(jvtheta, 1:i), ComplexF64(0.0))
                 continue
             else
-                # After midpoint: clamp remaining entries
+                # After midpoint: hold the previous sample to the end of the grid.
+                # The wd slot is deliberately held from the wb integrand (g_wb),
+                # reproducing the Fortran behavior for parity.
+                fill!(view(g_wb, i:ntheta), g_wb[i-1])
+                fill!(view(g_wd, i:ntheta), g_wb[i-1])
+                fill!(view(jvtheta, i:ntheta), jvtheta[i-1])
                 break
             end
         end
 
         sqrt_vpar = sqrt(vpar)
 
-        # Bounce integrands (Fortran lines 698-701)
-        wb_integrand = dt * jac * B_val / sqrt_vpar
-        wd_integrand = dt * jac * dBdpsi * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar +
-                       dt * djdpsi * B_val * sqrt_vpar
+        # Bounce integrands
+        g_wb[i] = dt * jac * B_val / sqrt_vpar
+        g_wd[i] = dt * jac * dBdpsi * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar +
+                  dt * djdpsi * B_val * sqrt_vpar
 
-        cum_wb += wb_integrand
-        cum_wd += wd_integrand
-        # Trapezoidal cumulative (matches Fortran spline_int semantics on linear fn):
-        # bspl%fsi(j)/Δx = g_1 + ... + g_{j-1} + g_j/2, so subtract half the current sample.
-        cum_wb_arr[i] = cum_wb - wb_integrand / 2
-
-        # Fourier modes at this θ (Fortran lines 702-708) — write into pre-allocated
-        # expm buffer using the ORIGINAL expression order to preserve bit-level parity.
+        # Fourier modes at this θ
         @inbounds for mi in 1:mpert
             expm[mi] = cis(twopi * mfac[mi] * θ)
         end
-        # Replaces `sum(dbob_m_f .* expm)` / `sum(divx_m_f .* expm) * divxfac`
-        # with direct accumulators; same evaluation order as the broadcast + sum.
         dbob = ComplexF64(0.0)
         divx = ComplexF64(0.0)
         @inbounds for mi in 1:mpert
@@ -531,15 +592,13 @@ function _bounce_integrate(
         end
         divx *= divxfac
 
-        # Action integrand (Fortran line 706-708)
+        # Action integrand
         phase = cis(-twopi * n * q * (θ - theta0))
         jvtheta[i] = dt * jac * B_val *
             (divx * sqrt_vpar + dbob * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar) *
             phase
 
-        # W vectors for matrix path (Fortran lines 722-727). Element-by-element
-        # write preserving original broadcast evaluation order exactly to keep
-        # bit-level parity (matters because downstream quadrature is tolerance-sensitive).
+        # W vectors for matrix path
         if do_matrices
             wmu_pre = dt * (lmda / bo)
             wen_pre = dt
@@ -548,76 +607,72 @@ function _bounce_integrate(
                 wen_mt[mi, i] = wen_pre * expm[mi] / (B_val * sqrt_vpar) * phase / (2 * chi1)
             end
         end
+
+        # Smooth backfill for points zeroed before a restart. Exact equality with
+        # 0.0 is safe: the restart branch set these entries with fill!(…, 0.0).
+        if i >= 3 && g_wb[i-1] == 0.0
+            fill!(view(g_wb, 3:i-1), g_wb[i])
+            fill!(view(g_wd, 3:i-1), g_wd[i])
+            fill!(view(jvtheta, 2:i-1), jvtheta[i])
+        end
     end
 
-    # Total bounce integrals — Fortran splines over bspl%xs = linspace(0,1,ntheta)
-    # and integrates via spline_int, which is ≈ (1/(ntheta-1)) × Σ f_i. The tdt(2,i)
-    # weights contain dθ/dx so Σ tdt·f is raw Riemann; divide by (ntheta-1) to get
-    # the integral over the unit linear space [0,1] that Fortran produces.
-    nrm = 1.0 / (ntheta - 1)
-    total_wb = cum_wb * nrm
-    total_wd = cum_wd * nrm
+    # Total bounce integrals: the samples live on the fixed unit x-grid (the tdt weights
+    # carry dθ/dx), so the exact integral of the endpoint-fit cubic is a fixed linear
+    # combination of them (precomputed weights, see `_quadrature_weights`). With the
+    # 1/√v_par endpoint singularities the quadrature scheme is a leading-order effect, so
+    # this reproduces exact-cubic integration (not a trapezoid sum).
+    fsi_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten
+    mul!(fsi_wb, scr.cumint_W, g_wb)
+    total_wb = fsi_wb[ntheta]
+    total_wd = dot(scr.int_w, g_wd)
 
     if total_wb ≈ 0.0
         # Degenerate case — return zeros
         return 0.0, 0.0, 0.0, nothing
     end
 
-    # Bounce-averaged frequencies (Fortran lines 740-741)
+    # Bounce-averaged frequencies
     wbbar = ro * twopi / ((2 - sigma) * total_wb)
     wdbar = ro^2 * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
 
-    # Phase factor (Fortran line 750). Ratio cum_wb_arr[i]/total_wb is dimensionless —
-    # (ntheta-1) cancels, no scaling. For do_matrices we keep `pl` as a Vector because
-    # it is referenced below; otherwise we fuse pl + bjspl → bj_integral in a single
-    # pass, avoiding two Vector{ComplexF64}(ntheta) allocations.
-    # Trapezoidal quadrature: boundary samples weighted by 0.5. jvtheta is zero at
-    # i=1 and i=ntheta (loop above runs 2:ntheta-1) so the boundary terms contribute
-    # nothing in practice, but writing the weights explicitly keeps the integration
-    # self-correct if the boundary handling ever changes.
+    # Phase factor pl_i = exp(-2πi·lnq·fsi_wb(θ_i)/((2-σ)·total_wb)), using the
+    # cumulative spline integral of the bounce action.
     pl_denom = (2 - sigma) * total_wb
     one_minus_sigma = 1 - sigma
-    bj_integral = ComplexF64(0.0)
-    if do_matrices
-        pl = Vector{ComplexF64}(undef, ntheta)
-        @inbounds for i in 1:ntheta
-            pl[i] = cis(-twopi * lnq * cum_wb_arr[i] * nrm / pl_denom)
-        end
-        @inbounds for i in 1:ntheta
-            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
-            bj_integral += w * conj(jvtheta[i]) * (pl[i] + one_minus_sigma / (pl[i] + SINGULAR_EPS))
-        end
-    else
-        pl = nothing
-        @inbounds for i in 1:ntheta
-            pli = cis(-twopi * lnq * cum_wb_arr[i] * nrm / pl_denom)
-            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
-            bj_integral += w * conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + SINGULAR_EPS))
-        end
+    pl = scr.pl  # per-surface scratch; fully overwritten
+    @inbounds for i in 1:ntheta
+        pl[i] = cis(-twopi * lnq * fsi_wb[i] / pl_denom)
     end
-    bj_integral *= nrm
 
-    # |δJ|² (Fortran line 756) — division by 2 corrects quadratic form
+    # Action bounce integral (exact-cubic quadrature, as for the totals above).
+    bj_samples = scr.bj_samples
+    @inbounds for i in 1:ntheta
+        bj_samples[i] = conj(jvtheta[i]) * (pl[i] + one_minus_sigma / pl[i])
+    end
+    bj_integral = dot(scr.int_w, bj_samples)
+
+    # |δJ|² — division by 2 corrects the quadratic form
     dJdJ_val = wbbar * abs(bj_integral)^2 / 2.0 / ro^2
 
-    # Matrix path: bounce-average W vectors and form outer products (Fortran lines 759-793)
+    # Matrix path: bounce-average W vectors and form outer products
     wmats_lmda = nothing
     if do_matrices
-        # Bounce-average W_μ and W_E vectors (Fortran lines 762-767).
-        # Trapezoidal quadrature: boundary samples weighted by 0.5 (wmu_mt and wen_mt
-        # are zero at i=1 and i=ntheta from the 2:ntheta-1 population loop above).
-        wmu_ba = zeros(ComplexF64, mpert)
-        wen_ba = zeros(ComplexF64, mpert)
-        @inbounds for i in 1:ntheta
-            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
-            factor = w * (pl[i] + one_minus_sigma / (pl[i] + SINGULAR_EPS))
-            for mi in 1:mpert
-                wmu_ba[mi] += conj(wmu_mt[mi, i]) * factor
-                wen_ba[mi] += conj(wen_mt[mi, i]) * factor
+        # Per mode, exact-cubic quadrature of conj(W_m(θ))·(pl + (1-σ)/pl),
+        # matching the action bounce integral above.
+        wmu_ba = scr.wmu_ba
+        wen_ba = scr.wen_ba
+        wsamp = scr.wsamp
+        @inbounds for mi in 1:mpert
+            for i in 1:ntheta
+                wsamp[i] = conj(wmu_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
             end
+            wmu_ba[mi] = dot(scr.int_w, wsamp)
+            for i in 1:ntheta
+                wsamp[i] = conj(wen_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
+            end
+            wen_ba[mi] = dot(scr.int_w, wsamp)
         end
-        wmu_ba .*= nrm
-        wen_ba .*= nrm
 
         # Reshape as 1×mpert for matrix multiply (Fortran lines 771-772)
         wmmt = reshape(wmu_ba, 1, mpert)
@@ -636,7 +691,9 @@ function _bounce_integrate(
         # Scale by wbbar/ro² (Fortran line 789)
         scale = wbbar / ro^2
         Mu = (mpert * (mpert + 1)) ÷ 2
-        wmats_lmda = Vector{ComplexF64}(undef, nqty_matrix(mpert))
+        wmats_lmda = scr.wmats_lmda
+        # Fill with NaN to catch uninitialized entries
+        fill!(wmats_lmda, ComplexF64(NaN, NaN))
 
         # A (Hermitian): upper triangle of W_Z†W_Z, rank-1 → conj(wz[i])·wz[j].
         off = 0

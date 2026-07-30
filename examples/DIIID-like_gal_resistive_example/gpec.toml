@@ -1,15 +1,12 @@
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
-jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                   # Poloidal field power exponent for Jacobian
-power_b = 0                    # Toroidal field power exponent for Jacobian
-power_r = 0                    # Major radius power exponent for Jacobian
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
 psilow = 1e-4                  # Lower limit of normalized flux coordinate
 psihigh = 0.993                # Upper limit of normalized flux coordinate (0.993 stays clear of the separatrix; truncating at ≳0.998 is numerically unreasonable here)
-mpsi = 128                     # Number of radial grid points (0 = auto-compute from psi_accuracy)
-psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
+mpsi = 128                     # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
 etol = 1e-10                   # Error tolerance for equilibrium solver
@@ -27,8 +24,6 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
-mat_flag = true                # Construct coefficient matrices for diagnostic purposes (required by gal_flag)
-ode_flag = true                # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
 psiedge = 0.99                 # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
@@ -58,7 +53,7 @@ dmlim               = 0.2      # Truncate integration at (last_rational_q + dmli
 
 # Outer-region singular Galerkin Δ′ solver with rpec coil columns.
 # This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
-gal_flag               = true  # Enable the outer-region singular Galerkin Δ′ solve (requires mat_flag = true)
+gal_flag               = true  # Enable the outer-region singular Galerkin Δ′ solve
 gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element

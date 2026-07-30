@@ -6,12 +6,12 @@
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
-jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
-grid_type = "log_asymptotic"   # Radial grid packing type
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "auto"             # Radial grid packing type ("auto" = two-pass measured-curvature grid)
 psilow = 1e-4                  # Lower limit of normalized poloidal flux
-psihigh = 0.9995               # Upper limit of normalized poloidal flux
-mpsi = 0                       # Number of radial grid points (0 = auto-compute from psi_accuracy)
-psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
+psihigh = 0.995                # Upper limit of normalized poloidal flux (captures q=6 at this Ip)
+mpsi = 0                       # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
 etol = 1e-10                   # Error tolerance for equilibrium solver
@@ -29,8 +29,6 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
-mat_flag = true                # Construct coefficient matrices for diagnostic purposes
-ode_flag = true                # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
 psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
@@ -76,3 +74,20 @@ compute_singular_coupling = true        # Compute singular layer coupling metric
 verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
+
+[KineticForces]
+kinetic_file = "TkMkr_D3Dlike_Hmode_kinetic.h5"  # GPEC HDF5 kinetic schema (psi,n_i,n_e,T_i,T_e,omega_E,+chi_e,chi_phi). Legacy .gpeckf/.kin still readable.
+nn = 1                                  # Toroidal mode number (matches nn_low/nn_high)
+nl = 6                                  # Bounce harmonics retained
+zi = 1                                  # Main-ion charge (deuterium)
+mi = 2                                  # Main-ion mass [proton masses]
+zimp = 6                                # Impurity charge (carbon)
+mimp = 12                               # Impurity mass [proton masses]
+electron = false                        # Ion-only NTV
+nutype = "harmonic"                     # Collision operator
+f0type = "maxwellian"                   # Equilibrium distribution
+moment = "pressure"                     # Pressure-moment NTV torque
+atol_xlmda = 1e-9                       # Inner pitch/energy integration tolerances
+rtol_xlmda = 1e-5
+write_outputs_to_HDF5 = true
+verbose = true

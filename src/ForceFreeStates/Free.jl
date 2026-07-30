@@ -1,4 +1,31 @@
 """
+    power_norm_matrix!(Nmat, jmat, mpert, npert, dV_dpsi) -> Nmat
+
+Assemble the power-normalization (surface-norm) matrix N from the conjugate-symmetric Jacobian
+Fourier band `jmat` (length 2·mpert−1, evaluated from the `ffit.jmats` spline), such that
+
+    ξ†·N·ξ = ∮ J |ξ(θ)|² dθ / (dV/dψ) = ⟨|ξ|²⟩
+
+is the flux-surface average of the squared boundary displacement — the DCON power normalization
+as a quadratic form. N is Hermitian Toeplitz within each n-block (block-diagonal over n since the
+Jacobian is axisymmetric) and positive definite (J > 0). It is the metric of the generalized
+eigenproblem W·v = λ·N·v solved in `free_run!` and `free_compute_total`: because W and N
+transform by the same congruence under a change of working (Jacobian) coordinate, the pencil
+eigenvalues are power-normalized mode energies that are invariant to that coordinate choice.
+"""
+function power_norm_matrix!(Nmat::AbstractMatrix{ComplexF64}, jmat::AbstractVector{ComplexF64}, mpert::Int, npert::Int, dV_dpsi::Float64)
+    fill!(Nmat, 0.0 + 0.0im)
+    for ipert_n in 1:npert
+        off = (ipert_n - 1) * mpert
+        # Toeplitz band index: harmonic difference (m'−m) ∈ [−(mpert−1), mpert−1] maps to 1…2·mpert−1, midpoint mpert = the m=0 Jacobian coefficient
+        for ipert_m in 1:mpert, jpert_m in 1:mpert
+            Nmat[off+jpert_m, off+ipert_m] = jmat[jpert_m-ipert_m+mpert] / dV_dpsi
+        end
+    end
+    return Nmat
+end
+
+"""
     free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> VacuumData
 
 Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
@@ -22,28 +49,37 @@ and data dumping.
     dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
-    if ctrl.ode_flag
-        @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
-    end
+    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
     # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
-    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh; force_wv_symmetry=ctrl.force_wv_symmetry)
+    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh)
     Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
     vac_data.wv .*= singfac .* singfac'
 
-    # Least stable eigenvalue of the vacuum matrix alone (should be PSD; clamp numerical noise to zero)
-    vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv)))))
+    # Power-normalization matrix N at the plasma edge: ξ†·N·ξ = ⟨|ξ|²⟩ (see power_norm_matrix!).
+    # The Jacobian band is evaluated at psilim (same surface as W), not at the last grid surface.
+    Nmat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
+    jmat_edge = zeros!(pool, ComplexF64, 2 * mpert - 1)
+    ffit.jmats(jmat_edge, psilim; hint=ffit._hint)
+    power_norm_matrix!(Nmat, jmat_edge, mpert, npert, dV_dpsi)
+
+    # Least stable eigenvalue of the vacuum matrix alone, power-normalized via the pencil
+    # (wv, N) so it shares the units of the mode energies (should be PSD; clamp noise to zero)
+    vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv), Hermitian(Nmat)))))
 
     # Preserve wp in vac_data so it can be written to HDF5 as W_plasma
     vac_data.wp .= wp
 
-    # Compute complex energy eigenvalues and vectors
+    # Complex energy eigenvalues and vectors of the generalized eigenproblem W·v = λ·N·v.
+    # The eigenvalues are stationary values of the power quotient ξ†Wξ/ξ†Nξ — power-normalized
+    # mode energies invariant to the working (Jacobian) coordinate, since W and N transform by
+    # the same congruence under a poloidal coordinate change.
     vac_data.wt .= wp .+ vac_data.wv
     vac_data.wt0 .= vac_data.wt
-    Ev = eigen(vac_data.wt)
+    Ev = eigen(vac_data.wt, Nmat)
     vac_data.et .= Ev.values
     eindex = sortperm(real.(vac_data.et); rev=true)
 
@@ -59,17 +95,11 @@ and data dumping.
         vac_data.n_tor_idx[ipert] = (imax - 1) ÷ mpert
     end
 
-    # Normalize eigenfunction and energy.
+    # Normalize eigenvectors to unit power norm v†·N·v = 1. The generalized eigenvalues are
+    # already the power-normalized energies, so et is not rescaled here.
     for isol in 1:numpert_total
-        norm = 0.0 + 0.0im
-        for ipert_n in 1:npert, ipert_m in 1:mpert, jpert_m in 1:mpert
-            ipert = (ipert_n - 1) * mpert + ipert_m
-            jpert = (ipert_n - 1) * mpert + jpert_m
-            norm += ffit.jmat[jpert_m-ipert_m+mpert] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
-        end
-        norm /= dV_dpsi
-        vac_data.wt[:, isol] ./= sqrt(norm)
-        vac_data.et[isol] /= norm
+        v = @view vac_data.wt[:, isol]
+        v ./= sqrt(real(dot(v, Nmat, v)))
     end
 
     # Normalize phase
@@ -88,21 +118,6 @@ and data dumping.
     mul!(wvt, vac_data.wt', tmp_mat)
     vac_data.ep .= diag(wpt)
     vac_data.ev .= diag(wvt)
-
-    # Eigenspectrum of W_Φ at psilim — Jacobian-invariant energy values; see RootAreaWeighted.jl.
-    # Computed directly here (no spline); spline is used by the edge scan.
-    mtheta_eq = length(equil.rzphi_ys)
-    ft_rootA = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, mlow)
-    sqrtamat_rootA = Equilibrium.compute_sqrtamat(equil, psilim, ft_rootA)
-    jarea_rootA = Equilibrium.flux_surface_area(equil, psilim, mtheta_eq)
-    rootA_result = compute_rootarea_eigenvalues(vac_data.wt0, wp, vac_data.wv, sqrtamat_rootA, jarea_rootA, equil, psilim, intr; all_eigenvalues=true)
-    vac_data.rootA_et .= rootA_result.rootA_et_all
-    vac_data.rootA_ep .= rootA_result.rootA_ep_all
-    vac_data.rootA_ev .= rootA_result.rootA_ev_all
-    vac_data.rootA_wt0 .= rootA_result.wt_rootA
-    vac_data.rootA_wp .= rootA_result.wp_rootA
-    vac_data.rootA_wv .= rootA_result.wv_rootA
-    vac_data.rootA_wt .= rootA_result.rootA_eigenvectors
 
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
@@ -159,7 +174,7 @@ q-window minimum.
         )
 
         # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
-        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh; force_wv_symmetry=ctrl.force_wv_symmetry)
+        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh)
         wv, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
         @views wv_array[i, :, :] .= wv
     end
@@ -190,6 +205,8 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     eigenvalues = zeros!(pool, ComplexF64, Npert)
     wt = zeros!(pool, ComplexF64, Npert, Npert)
     wv = zeros!(pool, ComplexF64, Npert, Npert)
+    Nmat = zeros!(pool, ComplexF64, Npert, Npert)
+    jmat_local = zeros!(pool, ComplexF64, 2 * intr.mpert - 1)
     eindex = zeros!(pool, Int, Npert)
     evals_real = zeros!(pool, Float64, Npert)
     tmp_v = zeros!(pool, ComplexF64, Npert)
@@ -209,13 +226,15 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     singfac = vec((intr.mlow:intr.mhigh) .- q_at_psifac .* (intr.nlow:intr.nhigh)')
     wv .*= singfac .* singfac'
 
-    # Compute total energy matrix and eigen-decomposition
+    # Local power-normalization matrix N(ψ) from the Jacobian Fourier band spline, so the
+    # power quotient uses the same surface as W (see power_norm_matrix!)
+    ffit.jmats(jmat_local, odet.psifac; hint=ffit._hint)
+    power_norm_matrix!(Nmat, jmat_local, intr.mpert, intr.npert, dV_dpsi)
+
+    # Total energy matrix and generalized eigen-decomposition of the pencil (W, N) — the
+    # eigenvalues are power-normalized, Jacobian-invariant mode energies (see free_run!)
     wt .= wp .+ wv
-
-    # Save wt before eigen (which overwrites the input) for root-area-weighted computation
-    wt_saved = copy(wt)
-
-    Ev = eigen(wt)
+    Ev = eigen(wt, Nmat)
 
     # Sort eigenvalues by descending real part
     @inbounds for i in 1:Npert
@@ -227,43 +246,19 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
         eigenvalues[ipert] = Ev.values[eindex[Npert+1-ipert]]
     end
 
-    # Compute kinetic norm xi'*J(psi)*xi / dV_dpsi for the leading eigenvector.
-    # This normalizes total_eigenvalue, plasma_energy, vacuum_energy to be dimensionally consistent with free_run!.
-    isol = 1
-    v = @view wt[:, isol]
-    norm = 0.0 + 0.0im
-    for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
-        ipert = (ipert_n - 1) * intr.mpert + ipert_m
-        jpert = (ipert_n - 1) * intr.mpert + jpert_m
-        norm += ffit.jmat[jpert_m-ipert_m+intr.mpert] * v[ipert] * conj(v[jpert])
-    end
-    norm /= dV_dpsi
-    eigenvalues[isol] /= norm
-
-    # Plasma and vacuum energy components for the leading eigenvector, normalized by the same norm.
-    # plasma_energy + vacuum_energy = total_eigenvalue by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
+    # Plasma and vacuum energy components for the leading eigenvector via power quotients:
+    # plasma_energy + vacuum_energy = total_eigenvalue (wt = wp + wv; λ = v'*wt*v / v'*N*v).
+    v = @view wt[:, 1]
+    vnorm = real(dot(v, Nmat, v))
     mul!(tmp_v, wp, v)
-    plasma_energy = ComplexF64(dot(v, tmp_v)) / norm
+    plasma_energy = ComplexF64(dot(v, tmp_v)) / vnorm
     mul!(tmp_v, wv, v)
-    vacuum_energy = ComplexF64(dot(v, tmp_v)) / norm
+    vacuum_energy = ComplexF64(dot(v, tmp_v)) / vnorm
 
-    # Smallest eigenvalue of the vacuum matrix alone, normalized by the same kinetic norm as the other energies
-    # so all four outputs are directly comparable. The singfac-scaled wv should be PSD by
-    # construction (congruence of PSD wv_raw), but numerical noise can make eigenvalues slightly
-    # negative. Clamp to zero to enforce the physical constraint.
-    vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / norm)
+    # Smallest eigenvalue of the vacuum matrix alone via the pencil (wv, N), so all four outputs
+    # share the power-normalized units. The singfac-scaled wv should be PSD by construction
+    # (congruence of PSD wv_raw); clamp numerical noise to zero.
+    vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(wv), Hermitian(Nmat)))))
 
-    # Eigenspectrum of W_Φ — Jacobian-invariant energy values; see RootAreaWeighted.jl.
-    # Evaluate sqrtamat + jarea from the pre-computed spline.
-    mpert = intr.mpert
-    sqrtamat_flat = Vector{ComplexF64}(undef, mpert^2 + 1)
-    es.sqrtamat_spline(sqrtamat_flat, odet.psifac; hint=es.sqrtamat_hint)
-    sqrtamat_local = reshape(@view(sqrtamat_flat[1:(mpert^2)]), mpert, mpert)
-    jarea_local = real(sqrtamat_flat[end])
-
-    rootA_result = compute_rootarea_eigenvalues(wt_saved, wp, wv, sqrtamat_local, jarea_local, equil, odet.psifac, intr)
-
-    return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue,
-        rootA_total_eigenvalue=rootA_result.rootA_total_eigenvalue, rootA_plasma_energy=rootA_result.rootA_plasma_energy, rootA_vacuum_energy=rootA_result.rootA_vacuum_energy,
-        rootA_vacuum_eigenvalue=rootA_result.rootA_vacuum_eigenvalue)
+    return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue)
 end

@@ -15,7 +15,6 @@
                 @test vac.n_modes == [1]
                 @test vac.mtheta == 1
                 @test vac.nzeta == 1
-                @test vac.force_wv_symmetry == true
             end
 
             @testset "keyword constructor" begin
@@ -383,7 +382,7 @@
                 @test all(isfinite, plasma_pts)
                 @test size(wall_pts) == (numpoints, 3)
 
-                # With force_wv_symmetry (default), wv should be Hermitian
+                # wv is always Hermitian-symmetrized
                 @test isapprox(wv, wv', rtol=1e-12)
             end
 
@@ -680,7 +679,7 @@
                 mtheta_in=mtheta, nzeta_in=nzeta_p,
                 m_modes=m_modes, n_modes=n_modes,
                 mtheta=mtheta, nzeta=nzeta_p,
-                force_wv_symmetry=false, nfp=nfp
+                nfp=nfp
             )
             wall_settings = WallShapeSettings(shape="nowall")
 
@@ -714,16 +713,8 @@
                 end
             end
 
-            # Hermitian symmetrization still works through the reduced path
-            inputs_sym = VacuumInput(
-                x=Xp, y=Yp, z=Zp,
-                mtheta_in=mtheta, nzeta_in=nzeta_p,
-                m_modes=m_modes, n_modes=n_modes,
-                mtheta=mtheta, nzeta=nzeta_p,
-                force_wv_symmetry=true, nfp=nfp
-            )
-            wv_sym, _, _, _ = compute_vacuum_response(inputs_sym, wall_settings)
-            @test isapprox(wv_sym, wv_sym', rtol=1e-12)
+            # Hermitian part is enforced after assembly on both paths
+            @test isapprox(wv_red, wv_red', rtol=1e-12)
         end
 
         @testset "Kernel3D laplace_kernel" begin

@@ -41,7 +41,7 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     mhigh = mlow + mpert - 1
     dW = isempty(et) ? nothing : et[1]
     title_str = isnothing(dW) ? "Least stable mode" :
-        "Least stable mode, δW = $(round(real(dW), sigdigits=4))"
+                "Least stable mode, δW = $(round(real(dW), sigdigits=4))"
 
     p = plot(;
         xlims=(0, 1),
@@ -425,7 +425,7 @@ end
 
 Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan stored in
 `singular/kinetic/` (populated when ForceFreeStates runs with
-`kinetic_factor > 0`, `ode_flag = true`, `singfac_min > 0`).
+`kinetic_factor > 0`, `singfac_min > 0`).
 
 `F̄` is the kinetic Euler-Lagrange matrix formed by Schur-reducing the six
 kinetic matrices against the ideal A/B/C/D/E/H blocks (Logan 2015 Appendix
@@ -471,7 +471,7 @@ function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
     end
 
     if isempty(scan_psi)
-        @warn "No kinetic-singular-surface scan in $h5path — rerun with kinetic_factor>0, ode_flag=true, singfac_min>0"
+        @warn "No kinetic-singular-surface scan in $h5path — rerun with kinetic_factor>0, singfac_min>0"
         return nothing
     end
 

@@ -1,16 +1,17 @@
 """
-    sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int, nhigh::Int)
 
-Locate singular rational q-surfaces (q = m/nn) using a bisection method
-between extrema of the q-profile, and store their properties in `intr.sing`.
-Performs the same function as `sing_find` in the Fortran code.
+Locate all rational q-surfaces q = m/n for n in `nlow:nhigh` by Brent bisection between
+consecutive extrema of the q-profile (reverse shear gives one root per monotone segment).
+Returns a vector of `(m, n, psifac)` named tuples in discovery order (n outer, ψ-interval
+inner). Requires `equilibrium_qfind!` to have populated `equil.params.qextrema_*`.
 """
-function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
-
+function _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int, nhigh::Int)
     profiles = equil.profiles
+    surfaces = @NamedTuple{m::Int, n::Int, psifac::Float64}[]
 
     # Loop over all toroidal mode numbers
-    for n in intr.nlow:intr.nhigh
+    for n in nlow:nhigh
         hint = Ref(1)
         # Loop over extrema of q, find all rational values in between
         for iex in 2:equil.params.mextrema
@@ -25,28 +26,64 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
             while (m - n * equil.params.qextrema_q[iex-1]) * (m - n * equil.params.qextrema_q[iex]) <= 0
                 psi0 = equil.params.qextrema_psi[iex-1]
                 psi1 = equil.params.qextrema_psi[iex]
-                psifac = (psi0 + psi1) / 2 # initial guess for bisection
 
                 psifac = find_zero(psi -> m - n * profiles.q_spline(psi; hint=hint), (psi0, psi1), Roots.Brent())
-
-                if any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
-                    # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
-                    # Technically only need m or n, but simplifies some later code and cheap to store both
-                    push!(intr.sing[findfirst(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)].m, m)
-                    push!(intr.sing[findfirst(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)].n, n)
-                else
-                    push!(intr.sing, SingType(;
-                        m=[m],
-                        n=[n],
-                        psifac=psifac,
-                        rho=sqrt(psifac),
-                        q=m / n,
-                        q1=profiles.q_deriv(psifac; hint=hint)
-                    ))
-                    intr.msing += 1
-                end
+                push!(surfaces, (m=m, n=n, psifac=psifac))
                 m += dm
             end
+        end
+    end
+    return surfaces
+end
+
+"""
+    rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
+
+Unique ψ_N locations of all rational surfaces q = m/n for n in `nlow:nhigh`, sorted
+increasing. Used as mandatory knots for the two-pass equilibrium grid refinement (the
+same physical surface reached through several (m, n) pairs is deduplicated by q value).
+"""
+function rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
+    surfaces = _find_rational_surfaces(equil, nlow, nhigh)
+    nodes = Float64[]
+    qs = Float64[]
+    for s in surfaces
+        any(q -> isapprox(q, s.m / s.n; atol=1e-8), qs) && continue
+        push!(qs, s.m / s.n)
+        push!(nodes, s.psifac)
+    end
+    return sort!(nodes)
+end
+
+"""
+    sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+
+Locate singular rational q-surfaces (q = m/nn) using a bisection method
+between extrema of the q-profile, and store their properties in `intr.sing`.
+Performs the same function as `sing_find` in the Fortran code.
+"""
+function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    profiles = equil.profiles
+    hint = Ref(1)
+
+    for s in _find_rational_surfaces(equil, intr.nlow, intr.nhigh)
+        m, n, psifac = s.m, s.n, s.psifac
+        if any(sg -> isapprox(sg.q, m / n; atol=1e-8), intr.sing)
+            # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
+            # Technically only need m or n, but simplifies some later code and cheap to store both
+            idx = findfirst(sg -> isapprox(sg.q, m / n; atol=1e-8), intr.sing)
+            push!(intr.sing[idx].m, m)
+            push!(intr.sing[idx].n, n)
+        else
+            push!(intr.sing, SingType(;
+                m=[m],
+                n=[n],
+                psifac=psifac,
+                rho=sqrt(psifac),
+                q=m / n,
+                q1=profiles.q_deriv(psifac; hint=hint)
+            ))
+            intr.msing += 1
         end
     end
     # Sort singular surfaces by increasing ψ

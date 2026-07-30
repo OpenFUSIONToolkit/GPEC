@@ -10,7 +10,7 @@ module FourierTransforms
 
 using LinearAlgebra
 
-export FourierTransform, inverse
+export FourierTransform, inverse, inverse_transform!, transform!
 export compute_fourier_coefficients
 
 """
@@ -182,6 +182,30 @@ function inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
     end
 
     return adjoint(ft.basis) * modes
+end
+
+"""
+    inverse_transform!(output, ft, modes)
+
+In-place inverse transform (mode → θ-space) writing into `output`: `output .= adjoint(basis) * modes`.
+
+Allocation-free wrapper over [`inverse`](@ref) for reuse in hot loops. `output` must have first
+dimension `mtheta` and match the column count of `modes` (whose first dimension is `mpert`).
+"""
+inverse_transform!(output::AbstractVecOrMat{<:Complex}, ft::FourierTransform, modes::AbstractVecOrMat{<:Complex}) = mul!(output, adjoint(ft.basis), modes)
+
+"""
+    transform!(output, ft, data)
+
+In-place forward transform (θ-space → mode) writing into `output`: `output .= (basis * data) / mtheta`.
+
+Allocation-free wrapper over the [`FourierTransform`](@ref) functor for reuse in hot loops. `output`
+must have first dimension `mpert` and match the column count of `data` (whose first dimension is `mtheta`).
+"""
+function transform!(output::AbstractVecOrMat{<:Complex}, ft::FourierTransform, data::AbstractVecOrMat{<:Number})
+    mul!(output, ft.basis, data)
+    output ./= ft.mtheta
+    return output
 end
 
 end # module FourierTransforms

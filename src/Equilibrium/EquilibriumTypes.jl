@@ -12,18 +12,28 @@ Bundles all necessary settings originally specified in the equil fortran namelis
 
   - `eq_type::String` - Type of equilibrium file ("efit", "solovev", "lar", etc.)
   - `eq_filename::String` - Path to equilibrium input file
-  - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "other")
-  - `power_bp::Int` - Poloidal field power exponent for Jacobian
-  - `power_b::Int` - Total field power exponent for Jacobian
-  - `power_r::Int` - Major radius power exponent for Jacobian
-  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
+  - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "custom")
+  - `power_bp::Int` - Poloidal field power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
+  - `power_b::Int` - Total field power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
+  - `power_r::Int` - Major radius power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
+  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
+  - `jac_custom_power_bp::Int` - Poloidal-field exponent for a custom Jacobian `J = Bp^bp · B^b / (R^r · rfac^rc)`; read only when `jac_type = "custom"`, ignored for named types
+  - `jac_custom_power_b::Int` - Total-field exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
+  - `jac_custom_power_r::Int` - Major-radius exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
+  - `jac_custom_power_rc::Int` - Minor-radius (rfac) exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp", "pow1")
+  - `grid_type::String` - Grid type for flux surface discretization ("auto" — two-pass measured-curvature
+    refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
+    "log_asymptotic" is a legacy alias for "auto")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
-  - `mpsi::Int` - Number of radial grid points (0 = auto-compute from psi_accuracy)
-  - `psi_accuracy::Float64` - Target absolute error in q for auto-mpsi (used when mpsi=0 and grid_type="log_asymptotic")
+  - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
+    two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
+    pins knots on rational surfaces, and re-forms on the refined grid. Standalone `setup_equilibrium`
+    callers get the coarse pass-1 grid unless they refine via `refined_psi_grid` + `override_psi_nodes`.
+  - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
+    two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
@@ -42,7 +52,12 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     power_r::Int = 0
     power_rc::Int = 0
 
-    grid_type::String = "log_asymptotic"
+    jac_custom_power_bp::Int = 0
+    jac_custom_power_b::Int = 0
+    jac_custom_power_r::Int = 0
+    jac_custom_power_rc::Int = 0
+
+    grid_type::String = "auto"
     psilow::Float64 = 1e-2
     psihigh::Float64 = 0.9995
     mpsi::Int = 0
@@ -61,7 +76,11 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+    # The four `_` slots are the `power_bp/power_b/power_r/power_rc` struct fields, which @kwdef
+    # forwards positionally. They are always derived below from `jac_type` (or `jac_custom_power_*`),
+    # so their incoming values are ignored (hence `_`).
+    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, _, _, _, _,
+        jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
         force_termination, use_galgrid, imas_cocos)
         if jac_type == "hamada"
@@ -94,7 +113,12 @@ Bundles all necessary settings originally specified in the equil fortran namelis
             power_bp = 0
             power_r = 0
             power_rc = 0
-        elseif jac_type == "other"
+        elseif jac_type == "custom"
+            # Custom Jacobian: the user-facing knobs define the exponents.
+            power_bp = jac_custom_power_bp
+            power_b = jac_custom_power_b
+            power_r = jac_custom_power_r
+            power_rc = jac_custom_power_rc
             # Normalize to a named type when the powers match, so fast paths are taken.
             if power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
                 jac_type = "hamada"
@@ -122,6 +146,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         end
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+            jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
             force_termination, use_galgrid, imas_cocos)
     end
