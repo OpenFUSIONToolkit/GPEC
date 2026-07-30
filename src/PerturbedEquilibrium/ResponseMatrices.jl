@@ -72,6 +72,7 @@ function calc_plasma_inductance(ffs_intr::ForceFreeStatesInternal, wt0::Matrix{C
     wt0_norm = wt0 .* (psio^2 / (μ0 * 2))
 
     # Convert from displacement to flux space using 1 / (singfac * chi1 * 2π) factor
+    # The factor of 2 comes from the 1/2 + inverse in eq. 31 of Park Phys. Plasmas 2007
     chi1 = 2π * psio
     wt0_norm .*= 2 ./ (2π * chi1)^2 ./ (singfac' .* singfac)
 
