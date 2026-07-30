@@ -27,13 +27,37 @@
         @test dense_Bmax < artifact_level
         @test isempty(KF._find_bounce_roots(B_vpar, 1 / artifact_level, 1.0))
 
-        # Retain PR #310's complete descending root semantics for a physical
-        # level that crosses the field twice.
+        # Retain complete descending root semantics for a physical level that
+        # crosses the field twice.
         roots = KF._find_bounce_roots(B_vpar, 1 / 2.2, 1.0)
         @test length(roots) == 2
         @test issorted(roots; rev=true)
         @test all(abs(KF._vpar_from_extrap(B_vpar, 1 / 2.2, 1.0, θ)) < 1e-12
                   for θ in roots)
+
+        # An isolated knot maximum has one crossing on either side by the
+        # intermediate value theorem, even when the pair is much narrower than
+        # a global heuristic root scan.
+        narrow_xs = collect(range(0.0, 1.0; length=257))
+        narrow_B = fill(2.0, length(narrow_xs))
+        narrow_B[101] = 2.1
+        narrow_spline = KF._fit_vpar_B_spline(narrow_xs, narrow_B)
+        narrow_level = 2.099
+        close_roots = KF._find_bounce_roots(narrow_spline, 1 / narrow_level, 1.0)
+        @test length(close_roots) == 2
+        @test close_roots[2] < narrow_xs[101] < close_roots[1]
+        @test all(abs(KF._vpar_from_extrap(
+                      narrow_spline, 1 / narrow_level, 1.0, θ
+                  )) < 1e-12 for θ in close_roots)
+
+        # Inclusive endpoints are the same physical point. A seam crossing
+        # therefore contributes one root, not separate roots at θ=0 and θ=1.
+        seam_roots = KF._find_bounce_roots(B_vpar, 1.0, B_vpar(0.0))
+        @test length(seam_roots) == 2
+        @test seam_roots[end] == 0.0
+        @test all(θ -> θ < 1.0, seam_roots)
+        @test all(abs(KF._vpar_from_extrap(B_vpar, 1.0, B_vpar(0.0), θ)) < 1e-12
+                  for θ in seam_roots)
     end
 
     # =========================================================================

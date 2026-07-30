@@ -429,12 +429,83 @@ consistent with the bounce-point roots as in Fortran's `vspl`.
 
 
 """
-Return every bounce root on one closed poloidal turn, ordered as Fortran's
-`spline_roots` (descending θ).
+Return every distinct bounce root on one closed poloidal turn in the descending
+order expected by the well-selection logic.
+
+Each knot interval is a cubic polynomial. Splitting it at its analytically
+computed stationary points makes every resulting interval monotone, so close
+root pairs cannot be skipped by a coarse heuristic scan. The inclusive
+endpoints represent one physical point, so a seam root is retained only at
+θ=0.
 """
 @inline function _find_bounce_roots(B_extrap, lmda::Float64, bo::Float64)
     vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
-    return sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
+    roots = Float64[]
+    xs = B_extrap.cache.x
+    ys = B_extrap.y
+    zs = B_extrap.z
+    value_tol = 64eps(Float64) * max(1.0, abs(lmda / bo) * maximum(abs, ys))
+    root_tol = 64eps(Float64)
+
+    function push_distinct!(root)
+        if isempty(roots) || abs(root - last(roots)) > root_tol
+            push!(roots, root)
+        end
+    end
+
+    function scan_monotone_interval(left, right)
+        fleft = vpar_fn(left)
+        fright = vpar_fn(right)
+        if abs(fleft) <= value_tol
+            push_distinct!(left)
+        elseif abs(fright) > value_tol && signbit(fleft) != signbit(fright)
+            push_distinct!(Roots.find_zero(vpar_fn, (left, right), Roots.Brent()))
+        end
+    end
+
+    for i in firstindex(xs):(lastindex(xs)-1)
+        left = xs[i]
+        right = xs[i+1]
+        h = right - left
+        zleft = zs[i]
+        zright = zs[i+1]
+        c1 = (ys[i+1] - ys[i]) / h - h * (2zleft + zright) / 6
+        c2 = zleft / 2
+        c3 = (zright - zleft) / (6h)
+
+        stationary = Float64[]
+        qa = 3c3
+        qb = 2c2
+        qc = c1
+        if iszero(qa)
+            if !iszero(qb)
+                push!(stationary, -qc / qb)
+            end
+        else
+            discriminant = muladd(-4qa, qc, qb^2)
+            if discriminant >= 0
+                sqrt_discriminant = sqrt(discriminant)
+                q = -0.5 * (qb + copysign(sqrt_discriminant, qb))
+                if iszero(q)
+                    push!(stationary, -qb / (2qa))
+                else
+                    push!(stationary, q / qa, qc / q)
+                end
+            end
+        end
+        filter!(u -> 0 < u < h, stationary)
+        sort!(unique!(stationary))
+
+        subleft = left
+        for u in stationary
+            subright = left + u
+            scan_monotone_interval(subleft, subright)
+            subleft = subright
+        end
+        scan_monotone_interval(subleft, right)
+    end
+
+    return sort!(roots; rev=true)
 end
 
 
