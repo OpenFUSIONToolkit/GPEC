@@ -62,11 +62,11 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     p1v = p1(p)
     pplus = -0.5 + p1v
 
-    e = ComplexF64(p.E);
-    f = ComplexF64(p.F);
+    e = ComplexF64(p.E)
+    f = ComplexF64(p.F)
     h = ComplexF64(p.H)
-    g = ComplexF64(p.G);
-    k = ComplexF64(p.K);
+    g = ComplexF64(p.G)
+    k = ComplexF64(p.K)
     q = Q
 
     q3 = q^3
@@ -158,11 +158,11 @@ end
 function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
     d0inv::SMatrix{4,4,ComplexF64};
     rtol::Float64=1e-6, fmax::Float64=1.0)
-    e = ComplexF64(p.E);
-    f = ComplexF64(p.F);
+    e = ComplexF64(p.E)
+    f = ComplexF64(p.F)
     h = ComplexF64(p.H)
-    g = ComplexF64(p.G);
-    k = ComplexF64(p.K);
+    g = ComplexF64(p.G)
+    k = ComplexF64(p.K)
     q = Q
     dr = mercier_dr(p)
 

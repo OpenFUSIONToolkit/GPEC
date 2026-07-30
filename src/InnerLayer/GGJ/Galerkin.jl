@@ -65,11 +65,11 @@ GWP2016 Eqs. (12)–(15) with `(I, V, U) = (A, −B, −C)` and rows scaled by
 equations.
 """
 function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
-    e = ComplexF64(params.E);
+    e = ComplexF64(params.E)
     f = ComplexF64(params.F)
-    h = ComplexF64(params.H);
+    h = ComplexF64(params.H)
     g = ComplexF64(params.G)
-    k = ComplexF64(params.K);
+    k = ComplexF64(params.K)
     q = Q
     q2 = q * q
     x2 = x * x
@@ -112,7 +112,7 @@ function _hermite(x::Real, x0::Real, x1::Real)
     dx = x1 - x0
     t0 = (x - x0) / dx
     t1 = 1 - t0
-    t02 = t0 * t0;
+    t02 = t0 * t0
     t12 = t1 * t1
     pb = SVector{4,Float64}(
         t12 * (1 + 2t0),
@@ -211,7 +211,7 @@ function _xmax_3level(params::GGJParameters, Q::ComplexF64;
         if !any(set)
             break
         end
-        x_prev = x;
+        x_prev = x
         delta_prev = dmax
         x *= dxfac
     end
@@ -295,9 +295,9 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     x_nodes[nx-1] = xmax - (dx1 + dx2)
     ixmax = nx - 2  # packed region is 0..ixmax
 
-    x0 = x_nodes[1];
+    x0 = x_nodes[1]
     x1_packed = x_nodes[ixmax+1]
-    xm = (x1_packed + x0) / 2;
+    xm = (x1_packed + x0) / 2
     dxp = (x1_packed - x0) / 2
     mx = ixmax ÷ 2
     packed = xm .+ dxp .* _pack(mx, pfac, side)
@@ -312,7 +312,7 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     imap = 1
     for ix in 1:nx
         et = etypes[ix]
-        xl = x_nodes[ix];
+        xl = x_nodes[ix]
         xr = x_nodes[ix+1]
 
         cell_np = if et == CT_NONE || et == CT_EXT1 || et == CT_EXT2
@@ -537,7 +537,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
     function integrand_11(x)
         ua, dua = _physical_ua_dua(cache, x)
         Imat, Umat, Vmat = _physical_uv(params, Q, x)
-        ua1 = ua[:, 1];
+        ua1 = ua[:, 1]
         dua1 = dua[:, 1]
         return transpose(dua1) * Imat * dua1 + transpose(ua1) * Vmat * dua1 + transpose(ua1) * Umat * ua1
     end
@@ -546,8 +546,8 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
         ua, dua = _physical_ua_dua(cache, x)
         Imat, Umat, Vmat = _physical_uv(params, Q, x)
         dua1 = dua[:, 1]
-        ua1 = ua[:, 1];
-        ua2 = ua[:, 2];
+        ua1 = ua[:, 1]
+        ua2 = ua[:, 2]
         dua2 = dua[:, 2]
         return transpose(dua1) * Imat * dua2 + transpose(ua1) * Vmat * dua2 + transpose(ua1) * Umat * ua2
     end
@@ -566,7 +566,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     params::GGJParameters, Q::ComplexF64,
     cache::InnerAsymptoticsCache;
     nq::Int=4, tol_res::Float64=1e-5)
-    mpert = 3;
+    mpert = 3
     np = 3
     quad_nodes, quad_weights = gausslobatto(nq + 1)
     offset = ws.kl + ws.kl + 1  # kl + ku + 1 since ku = kl
@@ -588,14 +588,14 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
             for ip in 0:np_eff, ipert in 1:mpert
                 i = cell.map[ipert, ip+1]
                 if i > ws.ndim
-                    ;
-                    continue;
+
+                    continue
                 end
                 for jp in 0:np_eff, jpert in 1:mpert
                     j = cell.map[jpert, jp+1]
                     if j > ws.ndim
-                        ;
-                        continue;
+
+                        continue
                     end
                     ws.mat[offset+i-j, j, 1] += cell_mat[ipert, jpert, ip+1, jp+1]
                 end
@@ -626,8 +626,8 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
                     continue
                 end
                 if i > ws.ndim
-                    ;
-                    continue;
+
+                    continue
                 end
                 for jp in 0:npp, jpert in 1:mpert
                     j = jp < size(cell.map, 2) ? cell.map[jpert, jp+1] : cell.emap[1]
@@ -635,8 +635,8 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
                         continue
                     end
                     if j > ws.ndim
-                        ;
-                        continue;
+
+                        continue
                     end
                     ws.mat[offset+i-j, j, 1] += cell_mat_ext[ipert, jpert, ip+1, jp+1]
                 end
@@ -703,8 +703,8 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         for ipert in 1:mpert
             i = cell1.map[ipert, 1]  # ip=0 DOFs
             if i > ws.ndim
-                ;
-                continue;
+
+                continue
             end
             for jj in max(1, i-ws.kl):min(ws.ndim, i+ws.kl)
                 ws.mat[offset+i-jj, jj, isol] = 0
@@ -719,20 +719,20 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         # → row=Ξ(ip=0), col=Ξ(ip=1): A[map[2,1], map[2,2]] = 1
         # → row=Υ(ip=0), col=Υ(ip=1): A[map[3,1], map[3,2]] = 1
         if isol == 1
-            i = cell1.map[1, 1];
+            i = cell1.map[1, 1]
             j = cell1.map[1, 2]
             ws.mat[offset+i-j, j, isol] = 1
             for ipert in 2:3
-                i = cell1.map[ipert, 1];
+                i = cell1.map[ipert, 1]
                 j = cell1.map[ipert, 1]
                 ws.mat[offset+i-j, j, isol] = 1
             end
         else
-            i = cell1.map[1, 1];
+            i = cell1.map[1, 1]
             j = cell1.map[1, 1]
             ws.mat[offset+i-j, j, isol] = 1
             for ipert in 2:3
-                i = cell1.map[ipert, 1];
+                i = cell1.map[ipert, 1]
                 j = cell1.map[ipert, 2]
                 ws.mat[offset+i-j, j, isol] = 1
             end
@@ -746,8 +746,8 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     end
 
     # Solve for each parity using LAPACK banded LU (gbtrf! + gbtrs!)
-    n = ws.ndim;
-    kl = ws.kl;
+    n = ws.ndim
+    kl = ws.kl
     ku = kl
     for isol in 1:2
         ab = copy(ws.mat[:, :, isol])
@@ -800,9 +800,12 @@ function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
             end
             k += 1
             xs[k] = x
-            Ψ[k, 1] = vals[1, 1]; Ψ[k, 2] = vals[1, 2]
-            Ξ[k, 1] = vals[2, 1]; Ξ[k, 2] = vals[2, 2]
-            Υ[k, 1] = vals[3, 1]; Υ[k, 2] = vals[3, 2]
+            Ψ[k, 1] = vals[1, 1]
+            Ψ[k, 2] = vals[1, 2]
+            Ξ[k, 1] = vals[2, 1]
+            Ξ[k, 2] = vals[2, 2]
+            Υ[k, 1] = vals[3, 1]
+            Υ[k, 2] = vals[3, 2]
         end
     end
     p = sortperm(xs)

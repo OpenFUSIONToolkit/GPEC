@@ -638,7 +638,7 @@ function _assemble_base(params::GGJParameters, Q::ComplexF64, θ::Float64,
     end
 
     rhs = zeros(ComplexF64, ndof)
-    rhs[rowm0.+(1:6)] .= Us
+    rhs[rowm0 .+ (1:6)] .= Us
 
     return Ic, Jc, Vc, rhs, βb, ndof, Ng
 end
@@ -802,7 +802,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     # origin for extreme-coefficient surfaces, where the Υ-family rate
     # √|Q(G+KF)| dominates and kills exponential content within s ~ O(1)).
     s_m = let acc = 0.0, sprev = 0.0, out = Sv
-        for sk in exp10.(range(-2, log10(Sv), length=400))
+        for sk in exp10.(range(-2, log10(Sv); length=400))
             gdec = Inf
             for λ in eigvals(Matrix(cis(θ) * ode_matrix(params, Q, cis(θ) * sk)))
                 g = -real(λ)                    # backward-growth = forward-decay rate
@@ -940,8 +940,6 @@ end
                         npc=8, certify_rtol=1e-3, kwargs...)
         -> (; Δ, x, Ψ, Ξ, dψdx, rescale, certΔ)
 
-Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. The
-certified `Δ` comes from the optimal-contour solve at θ = arg(Q)/4 (robust for
 |Q| ≳ 1, where real-axis methods drift); the profiles come from a θ = 0
 re-solve on the real axis, valid at physical (RPEC) |Q| since the on-axis
 pseudo-resonance is a regular point resolved by the BVP refinement. The
@@ -1088,7 +1086,7 @@ function delta_convergence(params::GGJParameters, Q::ComplexF64;
         ("refine_tol/10", (; refine_tol=refine_tol / 10)),
         ("march_rtol/100", (; march_rtol=1e-11)),
         ("sm_fac 1→1.4", (; sm_fac=1.4)),
-        ("growth 30→45", (; growth=45.0)),
+        ("growth 30→45", (; growth=45.0))
     ]
     table = NamedTuple[]
     spread = MVector{2,Float64}(0.0, 0.0)
@@ -1111,4 +1109,3 @@ end
 
 delta_convergence(params::GGJParameters, Q::Number; kwargs...) =
     delta_convergence(params, ComplexF64(Q); kwargs...)
-

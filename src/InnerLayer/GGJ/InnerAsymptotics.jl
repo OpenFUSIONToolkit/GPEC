@@ -174,9 +174,9 @@ function _lyap_solve(K::SMatrix{6,6,ComplexF64}, λ::ComplexF64)
     Pm = zeros(ComplexF64, 6, 6)
 
     # B is block-diagonal in the (r1, r2) split.
-    Bm[1, 1] = K[1, 1];
+    Bm[1, 1] = K[1, 1]
     Bm[1, 2] = K[1, 2]
-    Bm[2, 1] = K[2, 1];
+    Bm[2, 1] = K[2, 1]
     Bm[2, 2] = K[2, 2]
     for i in 3:6, j in 3:6
         Bm[i, j] = K[i, j]
@@ -312,7 +312,7 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
     end
 
     # Lowest-order Y solution and inverse — GW2020 Eq. (48), with exponents r± from Eq. (49).
-    r1 = ComplexF64(R[1]);
+    r1 = ComplexF64(R[1])
     r2 = ComplexF64(R[2])
     Y0 = @SMatrix ComplexF64[
         1 1
@@ -519,7 +519,7 @@ function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
 
     # Splitting matrix pp (6×2): top 2×2 = I, bottom 4×2 = p21.
     pp_m = zeros(ComplexF64, 6, 2)
-    pp_m[1, 1] = 1;
+    pp_m[1, 1] = 1
     pp_m[2, 2] = 1
     @inbounds for i in 1:4, j in 1:2
         pp_m[i+2, j] = p21[i, j]
@@ -600,8 +600,8 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
 
     delta = MVector{2,Float64}(0.0, 0.0)
     @inbounds for j in 1:2
-        n0 = 0.0;
-        n1 = 0.0;
+        n0 = 0.0
+        n1 = 0.0
         n2 = 0.0
         for i in 1:6
             n0 = max(n0, abs(matvec0[i, j]))
