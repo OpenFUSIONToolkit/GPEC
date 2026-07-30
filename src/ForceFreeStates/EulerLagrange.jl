@@ -310,8 +310,10 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
         m22 =  sf * kd * fi
 
         # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
+        #! format: off
         F_eig = eigen([psi_low*m11  psi_low*m12;
                        psi_low*m21  psi_low*m22])
+        #! format: on
         eig_vals = F_eig.values
         eig_vecs = F_eig.vectors
 
