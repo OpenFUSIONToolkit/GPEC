@@ -34,8 +34,6 @@ a     = 20                     # Distance from plasma (conformal) or shape param
 [ForceFreeStates]
 HDF5_filename        = "gpec_lar_resistive.h5"  # Output filename for the stability-stage results
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the psi profile
-mat_flag             = true    # Construct coefficient matrices for diagnostic purposes (required by gal_flag)
-ode_flag             = true    # Integrate ODE's for determining stability of internal long-wavelength mode
 vac_flag             = true    # Compute plasma, vacuum, and total energies for free-boundary modes
 
 qlow        = 1.02             # Integration initiated at q determined by min(q0, qlow)
@@ -62,7 +60,7 @@ force_termination     = true   # Terminate after the stability stage (no perturb
 write_outputs_to_HDF5 = true   # Write stability outputs to HDF5
 
 # Outer-region singular Galerkin Delta-prime solver with rpec coil columns.
-gal_flag               = true  # Enable the outer-region singular Galerkin Delta-prime solve (requires mat_flag = true)
+gal_flag               = true  # Enable the outer-region singular Galerkin Delta-prime solve
 gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element
