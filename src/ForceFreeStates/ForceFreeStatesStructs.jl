@@ -11,8 +11,8 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
-  - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
+  - `grri::Array{ComplexF64,2}` - Interior Green's function at this surface [mthvac, mpert]
+  - `grre::Array{ComplexF64,2}` - Exterior Green's function at this surface [mthvac, mpert]
   - `delta_prime::Vector{ComplexF64}` - **STUB (not physically valid)**. Per-surface ca-based Δ' estimate retained for future work / debugging only. The physically valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`, computed via the STRIDE global BVP (Glasser 2018 PoP 25, 032501). Do not use this field for tearing-stability analysis; do not expect agreement with `delta_prime_matrix`.
   - `delta_prime_col::Matrix{ComplexF64}` - **STUB (not physically valid)**. Per-surface ca-based Δ' column retained for future work / debugging only. Shape (numpert_total × n_res_modes); `delta_prime_col[j, i] = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio)`. The diagonal element matches the (also stubbed) `delta_prime[i]`. Only populated for the Riccati/parallel FM paths. The physically valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`; this field exists for future development on intra-surface coupling diagnostics, not for production use.
 """
@@ -23,8 +23,8 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
-    grri::Array{Float64,2} = Array{Float64}(undef, 0, 0)
-    grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
+    grri::Array{ComplexF64,2} = Array{ComplexF64}(undef, 0, 0)
+    grre::Array{ComplexF64,2} = Array{ComplexF64}(undef, 0, 0)
     delta_prime::Vector{ComplexF64} = ComplexF64[]
     delta_prime_col::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
     ua_left::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)   # asymptotic basis at left inner-layer boundary
@@ -410,8 +410,8 @@ Populated in `Free.jl`.
   - `et::Vector{ComplexF64}` - Total energy eigenvalues of the pencil (W, N): power-normalized and invariant to the working (Jacobian) coordinate; et = ep + ev per mode
   - `n_tor_idx::Vector{Int}` -  0-based toroidal mode number index of each sorted eigenvalue (numpert_total). Needed in `write_imas`
   - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the pencil (wv, N), clamped to zero
-  - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
-  - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
+  - `grri::Array{ComplexF64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × numpert_total)
+  - `grre::Array{ComplexF64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × numpert_total)
   - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points, shape (mthvac * nzvac) × 3 for (x, y, z)
   - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points, shape (mthvac * nzvac) × 3 for (x, y, z)
 """
@@ -429,9 +429,8 @@ Populated in `Free.jl`.
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     n_tor_idx::Vector{Int} = zeros(Int, numpert_total)
     vacuum_eigenvalue::Float64 = NaN
-
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
-    grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
+    grri::Array{ComplexF64,2} = Array{ComplexF64}(undef, 2 * numpoints, numpert_total)
+    grre::Array{ComplexF64,2} = Array{ComplexF64}(undef, 2 * numpoints, numpert_total)
     plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
     wall_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
 end

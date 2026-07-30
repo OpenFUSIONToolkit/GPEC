@@ -54,7 +54,7 @@ w(θ) = √(J·|∇ψ|).
 
 Operationally, sqrtamat is the mode-space √weight operator: for a field b with
 Fourier coefficients b_fft, it satisfies the identity
-  `‖sqrtamat·b_fft‖² = N² · ∫ |b|² · J|∇ψ| dθ`
+`‖sqrtamat·b_fft‖² = N² · ∫ |b|² · J|∇ψ| dθ`
 which is Jacobian-invariant on a given flux surface (see
 `scripts/test_power_norm_invariance.jl`).
 
@@ -78,13 +78,8 @@ function compute_sqrtamat(
         e_k .= 0.0
         e_k[k] = 1.0 + 0.0im
 
-        # Standard backward FT: f(θ_j) = (1/N) Σ_m c_m exp(-imθ_j)
-        # exp(-imθ) = cos(mθ) - i·sin(mθ), so:
-        #   Re(f) = (1/N)(cslth·Re(c) + snlth·Im(c))
-        #   Im(f) = (1/N)(cslth·Im(c) - snlth·Re(c))
-        real_part = (ft.cslth * real.(e_k) .+ ft.snlth * imag.(e_k)) ./ mtheta
-        imag_part = (ft.cslth * imag.(e_k) .- ft.snlth * real.(e_k)) ./ mtheta
-        theta_vec = complex.(real_part, imag_part)
+        # Standard backward FT: f(θ_j) = (1/N) Σ_m c_m exp(-imθ_j) = (transpose(basis) * c) / N
+        theta_vec = (transpose(ft.basis) * e_k) ./ mtheta
 
         # Multiply pointwise by √(J·|∇ψ|) in theta-space
         theta_vec .*= sqrt_jdp
