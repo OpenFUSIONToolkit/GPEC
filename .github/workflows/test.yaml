@@ -41,10 +41,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Report the decision to the job log as well as the run summary, so
+          # `why did/didn't this run?` is answerable from either one.
+          say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+
           # Pushes to main/develop always run: every merged commit gets verified.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "julia=true" >> "$GITHUB_OUTPUT"
-            echo "Not a pull request — running the full test suite." >> "$GITHUB_STEP_SUMMARY"
+            say "Not a pull request — running the full test suite."
             exit 0
           fi
 
@@ -58,18 +62,21 @@ jobs:
 
           relevant=$(printf '%s\n' "$files" | grep -Ev "$not_tested" | grep -E "$tested" || true)
 
-          {
-            echo "### Julia change detection"
-            echo
-            if [ -n "$relevant" ]; then
-              echo "Running the test suite. Matched files:"
-              echo '```'
-              echo "$relevant"
-              echo '```'
-            else
-              echo "No Julia code, test data or example decks changed — skipping the test suite."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          say "### Julia change detection"
+          say ""
+          if [ -n "$relevant" ]; then
+            say "Running the test suite. Matched files:"
+            say '```'
+            say "$relevant"
+            say '```'
+          else
+            say "No Julia code, test data or example decks changed — skipping the test suite."
+            say ""
+            say "Files considered:"
+            say '```'
+            say "$files"
+            say '```'
+          fi
 
           if [ -n "$relevant" ]; then
             echo "julia=true" >> "$GITHUB_OUTPUT"
