@@ -52,11 +52,13 @@ A `psi_accuracy` scan on the DIII-D-like SLAYER deck (2e-3 down to 3.125e-5, a
 | 6.25e-5  | 457 | 916  | 8.911 | -6.477 | -16.510 | 214.4 |
 | 3.125e-5 | 559 | 1226 | 9.514 | -6.260 | -16.485 | 228.7 |
 
-Three things follow. First, the outer surface `dpm[3,3]` (q=4) *does* plateau —
-the last four points agree to about 1% — while `dpm[2,2]` is marginal and
-`dpm[1,1]` (q=2) never settles, still moving ~7% between the two tightest grids.
-A plateau criterion would therefore succeed per-surface and correctly report
-failure for q=2, which is more informative than a single pin that hides it.
+Three things follow. First, convergence is per-surface: the outer surface
+`dpm[3,3]` (q=4) *does* plateau under the auto grid — the last four points agree
+to about 1% — while `dpm[2,2]` is marginal and `dpm[1,1]` (q=2) never settles,
+still moving ~7% between the two tightest grids. A plateau detector must
+therefore report per-surface rather than pass/fail for the whole diagonal.
+(As the `ldp` scan below shows, q=2 is not inherently unconvergeable — it is the
+auto grid that prevents it from settling.)
 
 Second, the growth rate is linear in Δ′: `gamma/dpm[1,1]` is 24.1 to within 0.5%
 across the whole scan, so a converged Δ′ is both necessary and sufficient for a
@@ -67,13 +69,36 @@ Third — and this is the blocker — the `implied` column (what
 relative to the grid actually used, from 1.7x to 2.2x. The two-pass scheme stops
 after pass 2, so tightening `psi_accuracy` moves it *further* from
 self-consistency rather than closer, and the warning's advice to "consider
-tightening psi_accuracy" is counterproductive in this regime. Until knot
-refinement iterates to a fixed point, a plateau search is scanning a moving
-target.
+tightening psi_accuracy" is counterproductive in this regime.
+
+The same deck on a deterministic `ldp` grid, which skips the measure-and-re-form
+step entirely, converges:
+
+| mpsi | dpm[1,1] | dpm[2,2] | dpm[3,3] | gamma 2/1 (Hz) |
+|---|---|---|---|---|
+| 128  | 5.208 | -8.666 | -19.157 | 126.2 |
+| 256  | 7.097 | -5.187 | -15.729 | 171.2 |
+| 512  | 8.489 | -6.217 | -16.517 | 204.4 |
+| 1024 | 8.932 | -6.298 | -16.529 | 214.9 |
+| 2048 | 8.914 | -6.385 | -16.468 | 214.5 |
+
+Successive `dpm[1,1]` increments are +1.889, +1.392, +0.443, -0.018: the last
+doubling moves both Δ′ and the growth rate by 0.2%. So the q=2 Δ′ is **not**
+intrinsically ill-conditioned — it converges to ≈8.91, with gamma ≈214.5 Hz, and
+`dpm[3,3]` converges to ≈-16.5 on *both* grid families, which is what a physical
+value should do. The non-convergence under the auto grid is an artifact of the
+generator, not of the Δ′ extraction.
+
+Two consequences. A plateau criterion is implementable today against a fixed
+`ldp` grid, without waiting on the auto-grid work. And the auto grid's answers
+are biased in both directions relative to the converged value: at its default
+`psi_accuracy` it gave 6.39 (28% low), at its tightest 9.51 (7% high). Anything
+pinned on the auto grid should be read with that in mind.
 
 This is not implemented. Doing it properly needs:
 
-  - knot refinement iterated to a fixed point (repeat the measure-and-re-form
+  - either a fixed `ldp` grid (which already converges, see above) or knot
+    refinement iterated to a fixed point (repeat the measure-and-re-form
     step until `implied_knot_count` stops exceeding the grid in use), since
     without it the scan target keeps moving;
   - a scan driver over `psi_accuracy` × truncation (`psihigh`, `dmlim`, `qhigh`)
