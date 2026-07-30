@@ -174,8 +174,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         # Matched inner-layer ξ_ψ(ψ) per surface, per coil drive (match.f intotsol): odd parity weighted by
         # cin[2i] (cofin(2·ising)), even parity by cin[2i-1] (cofin(2·ising-1)).
         inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
-        # Matched inner-layer b^ψ(ψ) per surface, per coil drive — the overlap-validation companion of
-        # inner_xi: in the matching region it must lie on the outer b^ψ eigenfunction.
+        # Matched inner-layer b^ψ(ψ) per surface, per coil drive.
         inner_b = [inner_bodd[i] * transpose(cin[2i, :]) .+ inner_beven[i] * transpose(cin[2i-1, :]) for i in 1:msing]
     end
 
@@ -192,6 +191,56 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         for isol in 1:2msing
             @views xi[:, :, j] .+= cout[isol, j] .* sols[:, :, isol]
             @views xi_deriv[:, :, j] .+= cout[isol, j] .* sols_deriv[:, :, isol]
+        end
+    end
+
+    # --- composite inner-region solution: cut outer background + layer (match.f intotsol/intotsol_b) ---
+    # The layer solution alone carries only the resonant content it resolves; the smooth background
+    # removed by the cut has to be added back for the inner and outer solutions to overlap in the
+    # matching region. Without this the inner profile does not graft onto the outer eigenfunction.
+    if !isempty(inner_psi)
+        sols_cut = gal_result.solution.xi_cut
+        isempty(sols_cut) && error("gal_match_rpec: solution.xi_cut is empty — the cut solution is " *
+                                   "required to build the composite inner-region solution")
+        cut_range = gal_result.solution.cut_range
+        keep = .!gal_result.solution.issing
+        psi_keep = gal_result.solution.psi[keep]
+        chi1_c = 2π * equil.psio
+        for i in 1:msing
+            m_res = round(Int, nn * sings[i].q)
+            ires = m_res - intr.mlow + 1
+            # Clip the layer to the window where the cut is active; outside it the cut removes
+            # nothing and the composite is undefined (Fortran writes no points there).
+            lo, hi = cut_range[i, 1], cut_range[i, 2]
+            inside = findall(p -> lo <= p <= hi, inner_psi[i])
+            if isempty(inside)
+                @warn "gal_match_rpec: inner layer at ψ=$(round(sings[i].psifac, digits=5)) lies outside the " *
+                      "resonant/extension cells (ψ ∈ [$lo, $hi]); raise gal_dx1/gal_dx2 to overlap the layer" surface = i
+                continue
+            end
+            length(inside) < length(inner_psi[i]) && @info "gal_match_rpec: surface $i inner region clipped to the " *
+                  "cut window ($(length(inside)) of $(length(inner_psi[i])) points)"
+            inner_psi[i] = inner_psi[i][inside]
+            inner_xi[i] = inner_xi[i][inside, :]
+            inner_b[i] = inner_b[i][inside, :]
+
+            # cut outer background for this surface's resonant harmonic, per coil drive
+            cutmn = Matrix{ComplexF64}(undef, length(psi_keep), mcoil)
+            for j in 1:mcoil
+                @views cutmn[:, j] .= sols_cut[ires, keep, 2msing+j]
+                for isol in 1:2msing
+                    @views cutmn[:, j] .+= cout[isol, j] .* sols_cut[ires, keep, isol]
+                end
+            end
+            itp = cubic_interp(psi_keep, Series(cutmn); extrap=ExtendExtrap())
+            buf = Vector{ComplexF64}(undef, mcoil)
+            hint = Ref(1)
+            for (ip, psi_p) in enumerate(inner_psi[i])
+                itp(buf, psi_p; hint=hint)
+                singfac = m_res - nn * equil.profiles.q_spline(psi_p)
+                @views inner_xi[i][ip, :] .+= buf
+                @views inner_b[i][ip, :] .+= (2π * im * chi1_c * singfac) .* buf
+            end
         end
     end
 

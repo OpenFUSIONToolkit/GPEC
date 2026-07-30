@@ -179,7 +179,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
 
     # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
-    solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh)
+    solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
+        delta=(ctrl.gal_match_flag ? delta : nothing))
 
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]
@@ -256,6 +257,8 @@ function write_galerkin!(out_h5, result::GalerkinResult)
         out_h5["galerkin/solution/issing"] = collect(sol.issing)
         out_h5["galerkin/solution/xi"] = sol.xi
         out_h5["galerkin/solution/xi_deriv"] = sol.xi_deriv
+        isempty(sol.xi_cut) || (out_h5["galerkin/solution/xi_cut"] = sol.xi_cut)
+        isempty(sol.cut_range) || (out_h5["galerkin/solution/cut_range"] = sol.cut_range)
     end
     if result.match !== nothing
         m = result.match
