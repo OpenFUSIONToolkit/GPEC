@@ -52,7 +52,7 @@ and data dumping.
     @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
     # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
-    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mpert, mlow, npert, nlow)
+    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh)
     Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
@@ -174,7 +174,7 @@ q-window minimum.
         )
 
         # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
-        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow)
+        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh)
         wv, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
         @views wv_array[i, :, :] .= wv
     end

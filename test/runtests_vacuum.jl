@@ -11,21 +11,19 @@
                 @test vac.ν == Float64[]
                 @test vac.mtheta_in == 0
                 @test vac.nzeta_in == 1
-                @test vac.mlow == 1
-                @test vac.mpert == 1
-                @test vac.nlow == 1
-                @test vac.npert == 1
+                @test vac.m_modes == [1]
+                @test vac.n_modes == [1]
                 @test vac.mtheta == 1
                 @test vac.nzeta == 1
             end
 
             @testset "keyword constructor" begin
-                vac = VacuumInput(mtheta=32, mpert=3, mlow=1, nlow=2, npert=2, nzeta=1)
+                vac = VacuumInput(mtheta=32, m_modes=[1, 2, 3], n_modes=[2, 3], nzeta=1)
                 @test vac.mtheta == 32
-                @test vac.mpert == 3
-                @test vac.mlow == 1
-                @test vac.nlow == 2
-                @test vac.npert == 2
+                @test length(vac.m_modes) == 3
+                @test vac.m_modes[1] == 1
+                @test vac.n_modes[1] == 2
+                @test length(vac.n_modes) == 2
                 @test vac.nzeta == 1
             end
         end
@@ -55,10 +53,8 @@
                     z=[0.0, 0.1, 0.0, -0.1, 0.0],
                     ν=zeros(5),
                     mtheta=5,
-                    mpert=1,
-                    mlow=1,
-                    nlow=1,
-                    npert=1,
+                    m_modes=[1],
+                    n_modes=[1],
                     nzeta=1
                 )
                 surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
@@ -79,10 +75,8 @@
                     nzeta_in=1,
                     ν=zeros(5),
                     mtheta=8,
-                    mpert=1,
-                    mlow=0,
-                    nlow=0,
-                    npert=1,
+                    m_modes=[0],
+                    n_modes=[0],
                     nzeta=1
                 )
                 surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
@@ -359,16 +353,14 @@
         end
 
         @testset "compute_vacuum_response" begin
-            _make_inputs(; mtheta=128, mtheta_eq=17, mpert=2, nlow=1, npert=1) = VacuumInput(
+            _make_inputs(; mtheta=128, mtheta_eq=17, m_modes=1:2, n_modes=[1]) = VacuumInput(
                 mtheta_in=mtheta_eq,
                 nzeta_in=1,
                 x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
                 z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
                 ν=zeros(mtheta_eq),
-                mlow=1,
-                mpert=mpert,
-                nlow=nlow,
-                npert=npert,
+                m_modes=collect(Int, m_modes),
+                n_modes=collect(Int, n_modes),
                 nzeta=1,
                 mtheta=mtheta
             )
@@ -379,13 +371,13 @@
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
                 numpoints = inputs.mtheta * inputs.nzeta
-                num_modes = inputs.mpert * inputs.npert
+                num_modes = length(inputs.m_modes) * length(inputs.n_modes)
 
                 @test size(wv) == (num_modes, num_modes)
                 @test eltype(wv) == ComplexF64
                 @test all(isfinite, wv)
-                @test size(grri) == (2 * numpoints, 2 * num_modes)
-                @test size(grre) == (2 * numpoints, 2 * num_modes)
+                @test size(grri) == (2 * numpoints, num_modes)
+                @test size(grre) == (2 * numpoints, num_modes)
                 @test all(isfinite, grri)
                 @test all(isfinite, grre)
                 @test size(plasma_pts) == (numpoints, 3)
@@ -402,9 +394,9 @@
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
                 numpoints = inputs.mtheta * inputs.nzeta
-                num_modes = inputs.mpert * inputs.npert
+                num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                 @test size(wv) == (num_modes, num_modes)
-                @test size(grri) == (2 * numpoints, 2 * num_modes)
+                @test size(grri) == (2 * numpoints, num_modes)
                 @test all(isfinite, plasma_pts)
                 @test all(isfinite, wall_pts)
                 # plasma_pts layout: col1=R, col2=0, col3=Z
@@ -414,12 +406,12 @@
             end
 
             @testset "edge: single poloidal mode mpert=1" begin
-                inputs = _make_inputs(mpert=1, npert=1)
+                inputs = _make_inputs(m_modes=[1], n_modes=[1])
                 wall_settings = WallShapeSettings(shape="nowall")
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (1, 1)
                 @test all(isfinite, wv)
-                @test size(grri, 2) == 2  # 2 * num_modes with num_modes=1
+                @test size(grri, 2) == 1
             end
 
             @testset "edge: small mtheta" begin
@@ -428,7 +420,7 @@
                 wall_settings = WallShapeSettings(shape="nowall")
                 wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (2, 2)
-                @test size(grri) == (32, 4)  # 2*16, 2*2
+                @test size(grri) == (32, 2)  # 2*mtheta, num_modes=2
                 @test size(plasma_pts) == (16, 3)
             end
 
@@ -440,8 +432,8 @@
                     wv, grri, grre, pp, wp = compute_vacuum_response(inputs, wall_settings)
 
                     numpoints = inputs.mtheta * inputs.nzeta
-                    num_modes = inputs.mpert * inputs.npert
-                    vac = (wv=zeros(ComplexF64, num_modes, num_modes), grri=zeros(2 * numpoints, 2 * num_modes), grre=zeros(2 * numpoints, 2 * num_modes),
+                    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
+                    vac = (wv=zeros(ComplexF64, num_modes, num_modes), grri=zeros(ComplexF64, 2 * numpoints, num_modes), grre=zeros(ComplexF64, 2 * numpoints, num_modes),
                         plasma_pts=zeros(numpoints, 3), wall_pts=zeros(numpoints, 3))
                     compute_vacuum_response!(vac, inputs, wall_settings)
 
@@ -475,18 +467,16 @@
     end
 
     # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
-    # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
+    # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default PATCH_RAD=11)
     @testset "Vacuum.jl (3D)" begin
-        _make_3d_inputs(; mtheta=32, mtheta_eq=17, mpert=2, nlow=0, npert=2, nzeta=32) = VacuumInput(
+        _make_3d_inputs(; mtheta=32, mtheta_eq=17, m_modes=1:2, n_modes=0:1, nzeta=32) = VacuumInput(
             mtheta_in=mtheta_eq,
             nzeta_in=1,
             x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
             z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
             ν=zeros(mtheta_eq),
-            mlow=1,
-            mpert=mpert,
-            nlow=nlow,
-            npert=npert,
+            m_modes=collect(Int, m_modes),
+            n_modes=collect(Int, n_modes),
             nzeta=nzeta,
             mtheta=mtheta
         )
@@ -519,26 +509,17 @@
                 z=vec(Z),
                 mtheta_in=mtheta_in,
                 nzeta_in=nzeta_in,
-                mlow=1,
-                mpert=mpert,
-                nlow=nlow,
-                npert=npert,
+                m_modes=collect(1:mpert),
+                n_modes=collect(nlow:(nlow+npert-1)),
                 mtheta=mtheta,
                 nzeta=nzeta
             )
         end
 
         @testset "VacuumInput nzeta > 1" begin
-            vac = VacuumInput(mtheta=32, nzeta=24, mpert=2, npert=2)
+            vac = VacuumInput(mtheta=32, nzeta=24, m_modes=[1, 2], n_modes=[1, 2])
             @test vac.nzeta == 24
             @test vac.mtheta == 32
-        end
-
-        @testset "KernelParams3D" begin
-            params = GeneralizedPerturbedEquilibrium.Vacuum.KernelParams3D(11, 20, 5)
-            @test params.PATCH_RAD == 11
-            @test params.RAD_DIM == 20
-            @test params.INTERP_ORDER == 5
         end
 
         @testset "PlasmaGeometry3D" begin
@@ -603,12 +584,12 @@
             wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
-            num_modes = inputs.mpert * inputs.npert
+            num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
             @test all(isfinite, wv)
-            @test size(grri) == (2 * numpoints, 2 * num_modes)
-            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test size(grri) == (2 * numpoints, num_modes)
+            @test size(grre) == (2 * numpoints, num_modes)
             @test all(isfinite, grri)
             @test all(isfinite, grre)
             @test size(plasma_pts) == (numpoints, 3)
@@ -626,13 +607,13 @@
             wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
-            num_modes = inputs.mpert * inputs.npert
+            num_modes = length(inputs.m_modes) * length(inputs.n_modes)
 
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
             @test all(isfinite, wv)
-            @test size(grri) == (2 * numpoints, 2 * num_modes)
-            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test size(grri) == (2 * numpoints, num_modes)
+            @test size(grre) == (2 * numpoints, num_modes)
             @test all(isfinite, grri)
             @test all(isfinite, grre)
             @test size(plasma_pts) == (numpoints, 3)
@@ -647,14 +628,85 @@
             wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
-            num_modes = inputs.mpert * inputs.npert
+            num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
-            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test size(grri) == (2 * numpoints, num_modes)
             @test all(isfinite, plasma_pts)
             @test all(isfinite, wall_pts)
             # Wall and plasma should differ (conformal wall offset from plasma)
             @test !isapprox(plasma_pts, wall_pts)
             @test isapprox(wv, wv', rtol=1e-12)
+        end
+
+        # Field-periodic (layer-2) reduction: an nfp-periodic boundary makes the boundary-integral
+        # operators block-circulant, so the reduced per-residue-class solve must reproduce the full
+        # torus result (the n_stride=1 bridge case spans several residue classes mod nfp).
+        @testset "compute_vacuum_response 3D field-periodic reduction" begin
+            # Build one field period of a 3D boundary on the full-torus ζ spacing; expand_field_periods
+            # tiles it by rigid rotation, so reduced and full paths share an identical full-torus surface.
+            _make_periodic_period(; mtheta, nzeta_p, nfp, R0=1.7, a=0.3, b=0.3, ε=0.04) = begin
+                θ = range(; start=0, length=mtheta, step=2π/mtheta)
+                X = zeros(mtheta, nzeta_p)
+                Y = zeros(mtheta, nzeta_p)
+                Z = zeros(mtheta, nzeta_p)
+                for j in 1:nzeta_p
+                    ζ = (j - 1) * 2π / (nzeta_p * nfp)   # period 0 of the full-torus grid
+                    for (i, θi) in enumerate(θ)
+                        R = R0 + a * cos(θi) + ε * cos(θi + nfp * ζ)
+                        X[i, j] = R * cos(ζ)
+                        Y[i, j] = R * sin(ζ)
+                        Z[i, j] = b * sin(θi) + ε * sin(θi + nfp * ζ)
+                    end
+                end
+                return vec(X), vec(Y), vec(Z)
+            end
+
+            mtheta, nzeta_p, nfp = 24, 8, 3        # full torus nzeta = 24 ≥ PATCH_DIM (23)
+            m_modes = collect(-1:1)
+            n_modes = [1, 2, 3, 4]                 # residues {1, 2, 0, 1} mod nfp exercise grouping
+            Xp, Yp, Zp = _make_periodic_period(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp)
+
+            inputs_red = VacuumInput(
+                x=Xp, y=Yp, z=Zp,
+                mtheta_in=mtheta, nzeta_in=nzeta_p,
+                m_modes=m_modes, n_modes=n_modes,
+                mtheta=mtheta, nzeta=nzeta_p,
+                nfp=nfp
+            )
+            wall_settings = WallShapeSettings(shape="nowall")
+
+            # Reduced (block-circulant) path
+            wv_red, _, _, plasma_pts_red, _ = compute_vacuum_response(inputs_red, wall_settings)
+
+            # Full-torus reference: pre-expand so nfp=1 forces the dense path
+            inputs_full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inputs_red)
+            @test inputs_full.nfp == 1
+            @test inputs_full.nzeta == nzeta_p * nfp
+            wv_full, _, _, _, _ = compute_vacuum_response(inputs_full, wall_settings)
+
+            num_modes = length(m_modes) * length(n_modes)
+            @test size(wv_red) == (num_modes, num_modes)
+            @test eltype(wv_red) == ComplexF64
+            @test all(isfinite, wv_red)
+            # plasma points are the full torus
+            @test size(plasma_pts_red, 1) == mtheta * nzeta_p * nfp
+
+            # Reduced == dense full-torus result (block-circulant solve is an exact reorganization)
+            @test isapprox(wv_red, wv_full; rtol=1e-6, atol=1e-7)
+
+            # Modes in different residue classes mod nfp do not couple in the reduced result
+            classes = mod.(n_modes, nfp)
+            mpert = length(m_modes)
+            for in1 in eachindex(n_modes), in2 in eachindex(n_modes)
+                if classes[in1] != classes[in2]
+                    rows = ((in1-1)*mpert+1):(in1*mpert)
+                    cols = ((in2-1)*mpert+1):(in2*mpert)
+                    @test all(iszero, wv_red[rows, cols])
+                end
+            end
+
+            # Hermitian part is enforced after assembly on both paths
+            @test isapprox(wv_red, wv_red', rtol=1e-12)
         end
 
         @testset "Kernel3D laplace_kernel" begin

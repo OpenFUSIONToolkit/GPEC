@@ -24,30 +24,36 @@ plasma surface from ForceFreeStates eigenmode solutions.
 
 ## What's extracted:
 
-1. **Boundary displacement**: ξ_ψ from `u_store[:, :, 1, end]`
-   - This is the radial (normal) component of the eigenmode displacement
-   - At the last radial integration point (plasma edge)
-   - Dimensions: [numpert_total, numpert_total]
+ 1. **Boundary displacement**: ξ_ψ from `u_store[:, :, 1, end]`
 
-2. **Flux surface spacing**: dΨ/dρ at boundary
-   - From equilibrium bicubic spline evaluation
-   - Needed to convert displacement to magnetic field
+      + This is the radial (normal) component of the eigenmode displacement
+      + At the last radial integration point (plasma edge)
+      + Dimensions: [numpert_total, numpert_total]
 
-3. **Safety factor**: q at boundary
-   - Used to compute singular factors (m - n*q)
-   - Identifies resonant surfaces
+ 2. **Flux surface spacing**: dΨ/dρ at boundary
+
+      + From equilibrium bicubic spline evaluation
+      + Needed to convert displacement to magnetic field
+
+ 3. **Safety factor**: q at boundary
+
+      + Used to compute singular factors (m - n*q)
+      + Identifies resonant surfaces
 
 ## Arguments
-- `equil`: Equilibrium solution containing flux surfaces and q-profile
-- `ForceFreeStates_results`: ODE integration results containing u_store with eigenmodes
-- `intr`: ForceFreeStates internal state with boundary location (psilim)
+
+  - `equil`: Equilibrium solution containing flux surfaces and q-profile
+  - `ForceFreeStates_results`: ODE integration results containing u_store with eigenmodes
+  - `intr`: ForceFreeStates internal state with boundary location (psilim)
 
 ## Returns
+
 Named tuple with:
-- `ξ_psi_boundary`: Boundary displacement [numpert_total, numpert_total]
-- `dPsi_drho`: Flux surface spacing at boundary (scalar)
-- `q_boundary`: Safety factor at boundary (scalar)
-- `psi_boundary`: Normalized flux at boundary (scalar)
+
+  - `ξ_psi_boundary`: Boundary displacement [numpert_total, numpert_total]
+  - `dPsi_drho`: Flux surface spacing at boundary (scalar)
+  - `q_boundary`: Safety factor at boundary (scalar)
+  - `psi_boundary`: Normalized flux at boundary (scalar)
 """
 function extract_boundary_displacements(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -73,10 +79,10 @@ function extract_boundary_displacements(
     dPsi_drho = (2π)^2 * equil.psio
 
     return (
-        ξ_psi_boundary = ξ_psi_boundary,
-        dPsi_drho = dPsi_drho,
-        q_boundary = q_boundary,
-        psi_boundary = psi_boundary
+        ξ_psi_boundary=ξ_psi_boundary,
+        dPsi_drho=dPsi_drho,
+        q_boundary=q_boundary,
+        psi_boundary=psi_boundary
     )
 end
 
@@ -96,22 +102,25 @@ at the plasma surface. From the ideal MHD constraint [Park Phys. Plasmas 2009 05
 where ξ_ψ is the radial displacement eigenfunction.
 
 ## Physical Interpretation [Park Phys. Plasmas 2007 052110 Section II]:
-- ξ_ψ[i,j]: Displacement of mode i due to eigenmode j
-- singfac[i] = m[i] - n*q: Singular factor measuring distance from rational surface
-- dΨ/dρ: Converts displacement to flux perturbation (poloidal flux gradient)
-- Factor of i: Phase relationship for oscillating fields in complex representation
+
+  - ξ_ψ[i,j]: Displacement of mode i due to eigenmode j
+  - singfac[i] = m[i] - n*q: Singular factor measuring distance from rational surface
+  - dΨ/dρ: Converts displacement to flux perturbation (poloidal flux gradient)
+  - Factor of i: Phase relationship for oscillating fields in complex representation
 
 ## Arguments
-- `boundary_data`: Output from extract_boundary_displacements()
-  - ξ_psi_boundary: Boundary displacement [numpert_total, numpert_total]
-  - dPsi_drho: Flux surface spacing at boundary (scalar)
-  - q_boundary: Safety factor at boundary (scalar)
-  - psi_boundary: Normalized flux at boundary (scalar)
-- `intr`: ForceFreeStates internal state with mode arrays (mlow, mhigh, nlow, etc.)
+
+  - `boundary_data`: Output from extract_boundary_displacements()
+      + ξ_psi_boundary: Boundary displacement [numpert_total, numpert_total]
+      + dPsi_drho: Flux surface spacing at boundary (scalar)
+      + q_boundary: Safety factor at boundary (scalar)
+      + psi_boundary: Normalized flux at boundary (scalar)
+  - `intr`: ForceFreeStates internal state with mode arrays (mlow, mhigh, nlow, etc.)
 
 ## Returns
-- `bwp_mn[numpert_total, numpert_total]`: Normal magnetic field matrix where bwp_mn[i,j]
-  is the normal field of Fourier mode i in response to eigenmode j
+
+  - `bwp_mn[numpert_total, numpert_total]`: Normal magnetic field matrix where bwp_mn[i,j]
+    is the normal field of Fourier mode i in response to eigenmode j
 """
 function compute_normal_magnetic_field(
     boundary_data::NamedTuple,
@@ -163,19 +172,22 @@ In GPEC, this comes from `bwp_mn` (boundary normal field) computed from eigenmod
 displacements.
 
 The flux matrix relates eigenmode displacements to vacuum poloidal flux:
-1. Extract eigenmode displacement at plasma boundary from u_store
-2. Compute normal magnetic field: B_ψ = i×(dΨ/dρ)×(m - n×q)×ξ_ψ
-3. Result is flux[mode_i, eigenmode_j] = bwp_mn[i,j]
+
+ 1. Extract eigenmode displacement at plasma boundary from u_store
+ 2. Compute normal magnetic field: B_ψ = i×(dΨ/dρ)×(m - n×q)×ξ_ψ
+ 3. Result is flux[mode_i, eigenmode_j] = bwp_mn[i,j]
 
 ## Arguments
-- `equil`: Equilibrium solution containing flux surfaces and q-profile
-- `ForceFreeStates_results`: ForceFreeStates ODE integration results containing eigenmodes
-- `vac_data`: Vacuum response data from free boundary calculation
-- `intr`: ForceFreeStates internal state with mode information
+
+  - `equil`: Equilibrium solution containing flux surfaces and q-profile
+  - `ForceFreeStates_results`: ForceFreeStates ODE integration results containing eigenmodes
+  - `vac_data`: Vacuum response data from free boundary calculation
+  - `intr`: ForceFreeStates internal state with mode information
 
 ## Returns
-- `flxmats[numpert_total, numpert_total]`: Complex flux matrix where flxmats[i,j] is the
-  vacuum flux of mode i in response to eigenmode j
+
+  - `flxmats[numpert_total, numpert_total]`: Complex flux matrix where flxmats[i,j] is the
+    vacuum flux of mode i in response to eigenmode j
 """
 function build_flux_matrix(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -214,12 +226,14 @@ vacuum term via the scaling in `free_run!`. The t₁/t₂ factors divide by s_i�
 correctly recovering the properly-normalized inductance.
 
 ## Arguments
-- `vac_data`: Vacuum data containing wt0 (total energy matrix before eigenvector sorting)
-- `ffs_intr`: ForceFreeStates internal state with mode info (mlow, mpert, nlow, qlim)
-- `psio`: Total toroidal flux [Wb/rad] from equilibrium (equil.psio)
+
+  - `vac_data`: Vacuum data containing wt0 (total energy matrix before eigenvector sorting)
+  - `ffs_intr`: ForceFreeStates internal state with mode info (mlow, mpert, nlow, qlim)
+  - `psio`: Total toroidal flux [Wb/rad] from equilibrium (equil.psio)
 
 ## Returns
-- Plasma inductance matrix Lambda [numpert_total × numpert_total]
+
+  - Plasma inductance matrix Lambda [numpert_total × numpert_total]
 """
 function calc_plasma_inductance(
     vac_data::VacuumData,
@@ -228,9 +242,9 @@ function calc_plasma_inductance(
 )::Matrix{ComplexF64}
 
     mpert = ffs_intr.numpert_total
-    chi1  = 2π * psio          # = Fortran's chi1 = twopi*psio
-    n     = ffs_intr.nlow
-    qlim  = ffs_intr.qlim      # q at psilim
+    chi1 = 2π * psio          # = Fortran's chi1 = twopi*psio
+    n = ffs_intr.nlow
+    qlim = ffs_intr.qlim      # q at psilim
 
     # Singular factors s_i = m_i - n*qlim  (same as Fortran: mfac(i) - nn*qlim)
     s = [((i-1) % ffs_intr.mpert + ffs_intr.mlow) - n * qlim for i in 1:mpert]
@@ -245,34 +259,10 @@ function calc_plasma_inductance(
     for i in 1:mpert, j in 1:mpert
         t1 = im / (chi1 * s[i] * 2π)
         t2 = -im / (chi1 * s[j] * 2π)
-        temp2[i,j] = 2 * t1 * wt0_norm[i,j] * t2
+        temp2[i, j] = 2 * t1 * wt0_norm[i, j] * t2
     end
 
     return inv(temp2)
-end
-
-"""
-    pack_complex_grouped!(packed, modes)
-
-Pack complex mode coefficients into grouped real/imaginary format for Green's function application.
-
-Converts [a+bi, c+di, ...] to [a, c, ..., b, d, ...] (real block first, then imaginary block).
-
-This matches the column layout of Julia's Vacuum grri/grre matrices, which store
-cos-response columns (1:mpert) followed by sin-response columns (mpert+1:2mpert).
-[Vacuum.jl: fourier_transform!(grre, cos_mn_basis) then fourier_transform!(grre, sin_mn_basis; col_offset=mpert)]
-
-## Arguments
-- `packed`: Output array [2*mpert]
-- `modes`: Complex Fourier mode coefficients [mpert]
-"""
-function pack_complex_grouped!(packed::AbstractVector{Float64}, modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
-    mpert = length(modes)
-    for i in 1:mpert
-        packed[i]       = real(modes[i])
-        packed[i+mpert] = imag(modes[i])
-    end
-    return packed
 end
 
 """
@@ -284,11 +274,13 @@ end
 Calculate permeability matrix P = Λ·L⁻¹ (matches Fortran `gpresp_permeab`).
 
 ## Arguments
-- `plasma_inductance`: Plasma inductance matrix Lambda
-- `surface_inductance`: Surface inductance matrix L
+
+  - `plasma_inductance`: Plasma inductance matrix Lambda
+  - `surface_inductance`: Surface inductance matrix L
 
 ## Returns
-- Permeability matrix P = Lambda * L^{-1} [mpert, mpert]
+
+  - Permeability matrix P = Lambda * L^{-1} [mpert, mpert]
 """
 function calc_permeability(
     plasma_inductance::Matrix{ComplexF64},
@@ -319,7 +311,7 @@ coordinate-invariant (b̃) matrices in the area-weighted field or recover flux �
 function build_control_surface_rootarea_to_area_weight(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs_intr::ForceFreeStatesInternal
-)::Tuple{Matrix{ComplexF64}, Float64}
+)::Tuple{Matrix{ComplexF64},Float64}
     mpert = ffs_intr.mpert
     npert = ffs_intr.npert
     Npert = ffs_intr.numpert_total
@@ -333,7 +325,7 @@ function build_control_surface_rootarea_to_area_weight(
 
     S_full = zeros(ComplexF64, Npert, Npert)
     for in in 1:npert
-        r = ((in - 1) * mpert + 1):(in * mpert)
+        r = ((in-1)*mpert+1):(in*mpert)
         S_full[r, r] .= S_block
     end
     return (S_full, jarea)
@@ -351,6 +343,7 @@ and the scalar surface area `jarea`. The brief internal flux-conform operator is
 (`Φ = R·b̃`); poloidal flux never leaves this function.
 
 The matrices fall into two algebraic classes:
+
   - **Operators** (map flux → flux): permeability `P` (Φ_tot = P·Φ_x) transforms by similarity
     `P̃ = R⁻¹·P·R`. Its singular values are coordinate-invariant.
   - **Quadratic generators** (energy = Φ†·G⁻¹·Φ): inductances `Λ`, `L` transform by congruence
@@ -395,11 +388,13 @@ T·m² per unit-norm cell). Files loaded in `normal_field_T` or `sfl_flux_Wb` co
 are automatically converted to unit-norm on load (see `ForcingMode` docstring).
 
 ## Arguments
-- `forcing_modes`: External forcing modes (amplitudes in unit-norm / Phi_x convention)
-- `intr`: ForceFreeStates internal state with mode arrays
+
+  - `forcing_modes`: External forcing modes (amplitudes in unit-norm / Phi_x convention)
+  - `intr`: ForceFreeStates internal state with mode arrays
 
 ## Returns
-- Forcing vector in eigenmode basis [mpert]
+
+  - Forcing vector in eigenmode basis [mpert]
 """
 function map_forcing_to_eigenmodes(
     forcing_modes::Vector{ForcingMode},
@@ -441,11 +436,13 @@ Compute plasma response to external forcing.
 Response = Permeability * Forcing
 
 ## Arguments
-- `permeability`: Permeability matrix
-- `forcing_vector`: External forcing in eigenmode basis
+
+  - `permeability`: Permeability matrix
+  - `forcing_vector`: External forcing in eigenmode basis
 
 ## Returns
-- Plasma response vector in eigenmode basis
+
+  - Plasma response vector in eigenmode basis
 """
 function compute_plasma_response_vector(
     permeability::Matrix{ComplexF64},
