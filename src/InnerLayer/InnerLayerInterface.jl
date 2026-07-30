@@ -27,3 +27,27 @@ imposed at the rational surface, X = 0). They are the Δ_{j,±}(γ) of
 Glasser, Wang & Park, Phys. Plasmas **23**, 112506 (2016), Eqs. (34)–(35).
 """
 function solve_inner end
+
+"""
+    solve_inner_profile(model::InnerLayerModel, params, γ::Number; kwargs...)
+        -> (; Δ, x, Ψ, Ξ, dψdx, rescale, ...)
+
+Compute the inner-layer matching data **and** the reconstructed layer field
+profiles for the given `model` — everything an outer↔inner matching driver
+needs from the layer, so drivers never touch model internals. Returns a named
+tuple with at least:
+
+  - `Δ`       — the same `(Δ_odd, Δ_even)` matching data as [`solve_inner`](@ref)
+  - `x`       — real ascending grid in the model's stretched inner coordinate,
+                `x ≥ 0` with the rational surface at `x = 0`
+  - `Ψ`, `Ξ`  — `length(x) × 2` profiles, columns (odd, even) parity, in the
+                model's inner normalization: `Ψ` the normal-field
+                (reconnected-flux) variable, `Ξ` the displacement
+  - `dψdx`    — conversion to poloidal-flux distance, `δψ = dψdx · x`
+  - `rescale` — amplitude factor converting the inner-normalized profiles to
+                the outer δψ-normalized convention (companion of the Δ rescale)
+
+Concrete models may return additional diagnostic fields (e.g. a solve-quality
+certificate). Solver-knob keywords are model-specific.
+"""
+function solve_inner_profile end

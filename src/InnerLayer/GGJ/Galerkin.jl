@@ -831,6 +831,19 @@ function solve_inner_profile(params::GGJParameters, γ::Number;
 end
 
 """
+    solve_inner_profile(::GGJModel{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
+        -> (; Δ, x, Ψ, Ξ, dψdx, rescale)
+
+Hermite-FEM implementation of the [`solve_inner_profile`](@ref) interface:
+real-axis solve, so `Δ` and the profiles come from the same solution. Same
+numerics/kwargs as `solve_inner(GGJModel(; solver=:galerkin), ...)`.
+"""
+function solve_inner_profile(::GGJModel{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
+    Δ, _, prof, _ = solve_inner_profile(params, γ; kwargs...)
+    return (; Δ=Δ, x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
+end
+
+"""
     solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
                 kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
                 cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)

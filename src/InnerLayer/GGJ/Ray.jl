@@ -936,6 +936,33 @@ function solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs
 end
 
 """
+    solve_inner_profile(::GGJModel{:ray}, params::GGJParameters, γ::Number;
+                        npc=8, certify_rtol=1e-3, kwargs...)
+        -> (; Δ, x, Ψ, Ξ, dψdx, rescale, certΔ)
+
+Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. The
+certified `Δ` comes from the optimal-contour solve at θ = arg(Q)/4 (robust for
+|Q| ≳ 1, where real-axis methods drift); the profiles come from a θ = 0
+re-solve on the real axis, valid at physical (RPEC) |Q| since the on-axis
+pseudo-resonance is a regular point resolved by the BVP refinement. The
+θ=0-vs-optimal-θ Δ agreement doubles as a runtime certificate (two maximally
+different contours through the same entire solutions): the relative mismatch
+is returned as `certΔ` and warns above `certify_rtol`. `npc` sets the profile
+points per mesh cell; extra keywords forward to both [`solve_ray`](@ref) calls
+(θ is fixed by the method — do not pass it).
+"""
+function solve_inner_profile(::GGJModel{:ray}, params::GGJParameters, γ::Number;
+    npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
+    Q = inner_Q(params, γ)
+    rr = solve_ray(params, Q; kwargs...)             # certified Δ (optimal θ)
+    r0 = solve_ray(params, Q; θ=0.0, kwargs...)      # real-axis profile solve
+    certΔ = abs(r0.Δ[1] - rr.Δ[1]) / max(abs(rr.Δ[1]), 1e-300)
+    certΔ > certify_rtol && @warn "GGJ ray: θ=0 profile solve disagrees with certified Δ" ising = params.ising Q certΔ
+    prof = solution_profile(r0; npc=npc)
+    return (; Δ=rr.Δ, x=prof.s, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)..., certΔ=certΔ)
+end
+
+"""
     evaluate_solution(res::RaySolveResult, s::Real; isol=1) -> SVector{6,ComplexF64}
 
 Evaluate the solved state v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ') at ray parameter `s`

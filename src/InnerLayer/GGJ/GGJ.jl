@@ -39,7 +39,7 @@ using Random
 using Printf
 using DoubleFloats: Double64
 
-import ..InnerLayerModel, ..solve_inner
+import ..InnerLayerModel, ..solve_inner, ..solve_inner_profile
 
 """
     GGJModel{S} <: InnerLayerModel

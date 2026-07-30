@@ -141,3 +141,26 @@ end
         @test maximum(conv.spread) < 1e-4         # honest error bar is small here
     end
 end
+
+@testset "solve_inner_profile interface (matching-driver contract)" begin
+    p = IL.glasser_wang_2020_eq55()
+    γ = 0.1234 * GGJ.q0(p)
+    for model in (IL.GGJModel(; solver=:ray), IL.GGJModel(; solver=:galerkin))
+        prof = IL.solve_inner_profile(model, p, γ)
+        # Δ agrees with the plain matching solve of the same backend (identical solve path).
+        @test prof.Δ ≈ IL.solve_inner(model, p, γ) rtol = 1e-12
+        # Real ascending inner-coordinate grid from the rational surface, profiles npts × 2.
+        @test issorted(prof.x)
+        @test prof.x[1] ≈ 0 atol = 1e-12
+        @test size(prof.Ψ) == (length(prof.x), 2) && size(prof.Ξ) == (length(prof.x), 2)
+        @test all(isfinite, prof.Ψ) && all(isfinite, prof.Ξ)
+        # Parity at the layer center: Ψ(0) ≠ 0 odd-parity column, Ψ(0) = 0 even-parity column.
+        @test abs(prof.Ψ[1, 2]) < 1e-6 * abs(prof.Ψ[1, 1])
+        # Conversion factors match their GGJ definitions.
+        @test prof.dψdx ≈ GGJ.x0(p) / p.v1
+        @test prof.rescale ≈ (p.v1 / GGJ.x0(p))^(0.5 + GGJ.p1(p))
+    end
+    # Ray backend certificate: at real Q the optimal contour is θ = 0, so the two solves coincide.
+    ray = IL.solve_inner_profile(IL.GGJModel(; solver=:ray), p, γ)
+    @test ray.certΔ < 1e-12
+end

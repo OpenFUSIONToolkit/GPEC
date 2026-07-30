@@ -322,6 +322,13 @@ A mutable struct containing control parameters for stability analysis, set by th
     gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
     gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
     gal_inner_solver::String = "ray" # inner-layer Δ backend for the match: "ray" (rotated-contour collocation, certified Δ at the optimal θ = arg(Q)/4; robust for |Q| ≳ 1) or "galerkin" (Hermite-cubic inps; drifts for |Q| ≳ 1)
+    # Inner-layer "galerkin" backend knobs (used only when gal_inner_solver = "galerkin"; the "ray"
+    # backend is self-tuning). Defaults match the Fortran rmatch deltac/inps reference (DELTAC_LIST).
+    gal_inner_xfac::Float64 = 10.0  # asymptotic-matching radius multiplier (inps_xfac: xmax × 10)
+    gal_inner_nx::Int = 1280        # inner-layer grid cells (128 · xfac in the reference)
+    gal_inner_nq::Int = 5           # quadrature order per cell
+    gal_inner_cutoff::Int = 5       # cells carrying the large solution as driving term
+    gal_inner_kmax::Int = 8         # large-x asymptotic series order (↔ order_pow)
     gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
     gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
     gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`

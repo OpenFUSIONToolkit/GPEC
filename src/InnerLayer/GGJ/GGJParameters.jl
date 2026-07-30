@@ -107,3 +107,9 @@ function rescale_delta(Δ::AbstractVector, p::GGJParameters)
     fac = s^(2.0 * pp / 3.0) * p.v1^(2.0 * pp)
     return SVector{2,ComplexF64}(Δ[1] * fac, Δ[2] * fac)
 end
+
+# Profile conversions shared by the solve_inner_profile backends: δψ per unit inner
+# coordinate X = v₁·δψ/X₀, and the big-branch (μ₋ = −1/2−p₁) amplitude rescale to the
+# outer δψ-normalization, resc = (v₁/X₀)^(−μ₋) — the companion of rescale_delta's
+# (v₁/X₀)^(2p₁) = (v₁/X₀)^(μ₊−μ₋).
+_profile_conversions(p::GGJParameters) = (; dψdx=x0(p) / p.v1, rescale=(p.v1 / x0(p))^(0.5 + p1(p)))

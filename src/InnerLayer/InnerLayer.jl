@@ -21,7 +21,7 @@ import .GGJ: solve_ray, RaySolveResult, pick_smax, physical_ua_dua
 import .GGJ: delta_convergence, solution_profile, asymptotic_profile, q4_surface_benchmark
 # SLAYER imports go here
 
-export InnerLayerModel, solve_inner
+export InnerLayerModel, solve_inner, solve_inner_profile
 export GGJ, GGJModel, GGJParameters
 export build_asymptotics, evaluate_asymptotics, pick_xmax, InnerAsymptoticsCache
 export mercier_di, mercier_dr, inner_Q, rescale_delta
