@@ -803,6 +803,10 @@ function write_outputs_to_HDF5(
             g["rpec_eig"] = intr.resonant_match_rpec_eig   # (msing)  forced eigenvalue γ_s = 2πi·n·f
             g["reconnected_flux"] = intr.resonant_match_flux       # (2msing × ncoil)  matched small-solution (reconnected) amplitude
             g["reconnected_flux_abs"] = abs.(intr.resonant_match_flux)  # |.| for H5Web heatmap view
+            if !isempty(intr.resonant_match_bpen)
+                g["bpen"] = intr.resonant_match_bpen               # (msing × ncoil)  area-weighted penetrated b-field (like galerkin/match/bpen)
+                g["bpen_abs"] = abs.(intr.resonant_match_bpen)
+            end
             g["residual"] = intr.resonant_match_residual
         end
 

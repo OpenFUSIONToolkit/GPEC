@@ -338,20 +338,8 @@ function compute_delta_prime_matrix!(
     # S-axis row layout that `loop_edge_boundary_conditions` assumes for its edge-BC rows.
     # (The edge BC / RHS formulation itself is chosen inside that function via ENV["DELTACOIL_MODE"].)
     if use_S_axis && wv !== nothing                        #only run the coil loop on the S-axis path with a vacuum edge (real W_V present)
-        #KNOB — Q1 per-surface normalization. snorm = |n·q'|^α (derived: sing_get_ua small basis ~ dpsi^α at
-        #dpsi ∝ 1/(n·q'), α = Mercier exponent). To test a different normalization, change `alpha`/the power below.
-        nq = [abs(Float64(minimum(sing[j].n)) * Float64(sing[j].q1)) for j in 1:msing]   #per surface: |n·q'| (n = toroidal mode, q' = dq/dψ at the surface)
-        alpha = (ctrl !== nothing && equil !== nothing && ffit !== nothing) ?            #if we have the inputs to rebuild the asymptotics...
-                [real(compute_sing_asymptotics(sing[j], ctrl, equil, ffit, intr; sig=1.0).alpha[1]) for j in 1:msing] :   #...compute α = Mercier exponent per surface (√−D_I)
-                fill(0.55, msing)                                                        #...otherwise fall back to a typical α ≈ 0.55
-        snorm = nq .^ alpha                                                              #the derived per-surface factor: snorm[j] = |n·q'|^α_j  (EDIT exponent to retune)
-        # DELTACOIL_COMP tests the ξ-vs-ξ' basis convention: multiply the small coeff by dpsi^p per surface
-        # (dpsi = singfac_min/|n·q'|; reading ξ' vs ξ differs by one dpsi). "xi"(default)=p0, "xip"=+1, "xip_half"=+0.5, "xi_neg"=-1.
-        comp = get(ENV, "DELTACOIL_COMP", "xi")
-        pcomp = comp == "xip" ? 1.0 : comp == "xip_half" ? 0.5 : comp == "xi_neg" ? -1.0 : 0.0
-        if pcomp != 0.0 && ctrl !== nothing
-            snorm = snorm .* (ctrl.singfac_min ./ nq) .^ pcomp                            #apply dpsi^p (ξ→ξ' relative scaling)
-        end
+        # Q1 per-surface normalization REMOVED: delta_coil normalization is hardcoded to 1 (raw, unnormalized).
+        nq = [abs(Float64(minimum(sing[j].n)) * Float64(sing[j].q1)) for j in 1:msing]   #per surface: |n·q'| (still needed by DELTACOIL_PROJECT below)
         #DELTACOIL_PROJECT (experimental): build weak-form projection weights so the readout is the
         #cell-integrated projection Σ_m W_m·x_m/W[small] (mode-mixing) instead of a single coefficient.
         Wl = Wr = nothing
@@ -366,24 +354,25 @@ function compute_delta_prime_matrix!(
                 Wl[j] = _projection_weight(aL, ipert_all[j] + N, dlo, dhi)
             end
         end
-        intr.delta_coil_matrix = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all, snorm; Wl, Wr)   #run the coil loop
+        intr.delta_coil_matrix = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all; Wl, Wr)   #run the coil loop (edge harmonic read raw, normalization = 1)
     end
 
     intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
         M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
 
     # Resistive inner-layer matching (Wang 2020 Eq. 11): feed the RAW outer Δ' block (dp_raw) and the
-    # RAW edge-driven Δ_coil (snorm = 1, so both share one normalization — Step-1 result) into the
+    # RAW edge-driven Δ_coil (normalization = 1, so both share one normalization — Step-1 result) into the
     # coil-driven outer↔inner match. Gated on ctrl.gal_match_flag; needs the S-axis vacuum-edge BVP.
     if use_S_axis && wv !== nothing && ctrl !== nothing && ctrl.gal_match_flag && equil !== nothing
         delta_out_raw = loop_boundary_conditions(M, msing, N, ipert_all)                       #raw Δ_out (2msing×2msing)
-        delta_coil_raw = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all, ones(Float64, msing))  #raw Δ_coil (snorm=1)
+        delta_coil_raw = loop_edge_boundary_conditions(M, col_edge, msing, N, ipert_all)  #raw Δ_coil (normalization = 1)
         mres = resonant_match_rpec(delta_out_raw, delta_coil_raw, sing, equil, intr, ctrl)
         intr.resonant_match_cout = mres.cout
         intr.resonant_match_cin = mres.cin
         intr.resonant_match_deltar = mres.deltar
         intr.resonant_match_rpec_eig = mres.rpec_eig
         intr.resonant_match_flux = mres.reconnected_flux
+        intr.resonant_match_bpen = mres.bpen
         intr.resonant_match_residual = mres.residual
         @info @sprintf("Resistive inner-layer match: residual=%.2e, ‖cout‖=%.3e, ‖cin‖=%.3e (%d surfaces, %d coil modes)",
             mres.residual, norm(mres.cout), norm(mres.cin), msing, size(mres.cout, 2))
@@ -728,11 +717,11 @@ function _projection_weight(asymp::SingAsymptotics, small_col::Int, dpsi_lo::Flo
 end
 
 # Coil-response loop for the Eq. (37) edge block [Glasser-Kolemen 2018 PoP 25 082502]: for each edge poloidal
-# mode k, copy the full BVP matrix, impose the Eq. (38) edge BC via `bc!`, solve, and read the snorm-scaled
-# small-solution coeff (+N slot) at every surface → delta_coil (2·msing × N). If Wl/Wr are given (weak-form
-# projection weights), read the cell-integrated projection Σ_m W_m·x_m / W[small] instead of the single coeff.
+# mode k, copy the full BVP matrix, impose the Eq. (38) edge BC via `bc!`, solve, and read the raw
+# small-solution coeff (+N slot, normalization = 1) at every surface → delta_coil (2·msing × N). If Wl/Wr are
+# given (weak-form projection weights), read the cell-integrated projection Σ_m W_m·x_m / W[small] instead.
 function loop_edge_boundary_conditions(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int,
-    ipert_all::Vector{Int}, snorm::Vector{Float64}; Wl=nothing, Wr=nothing)
+    ipert_all::Vector{Int}; Wl=nothing, Wr=nothing)
     nMat = size(M, 1)
     top = (nMat-2msing-2N+1):(nMat-2msing-N)        #Eq.38 top rows (1_M identity)
     bot = (nMat-2msing-N+1):(nMat-2msing)           #Eq.38 bottom rows (-W_V)
@@ -764,11 +753,11 @@ function loop_edge_boundary_conditions(M::Matrix{ComplexF64}, col_edge, msing::I
             ipert_j = ipert_all[j]
             cl = _col_left(j, N); cr = _col_right(j, N)
             if Wl === nothing
-                delta_coil[2j-1, k] = snorm[j] * x[cl[ipert_j+N]]
-                delta_coil[2j, k] = snorm[j] * x[cr[ipert_j+N]]
+                delta_coil[2j-1, k] = x[cl[ipert_j+N]]
+                delta_coil[2j, k] = x[cr[ipert_j+N]]
             else                                    #weak-form cell-integrated projection (experimental)
-                delta_coil[2j-1, k] = snorm[j] * (sum(Wl[j] .* @view x[cl]) / Wl[j][ipert_j+N])
-                delta_coil[2j, k] = snorm[j] * (sum(Wr[j] .* @view x[cr]) / Wr[j][ipert_j+N])
+                delta_coil[2j-1, k] = sum(Wl[j] .* @view x[cl]) / Wl[j][ipert_j+N]
+                delta_coil[2j, k] = sum(Wr[j] .* @view x[cr]) / Wr[j][ipert_j+N]
             end
         end
     end

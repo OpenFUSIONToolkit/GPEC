@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""plot_deltacoil_dmlim_fine.py — fine dmlim sweep (0.30-0.50) through the q5-drop threshold (0.426).
+"""plot_deltacoil_dmlim_fine.py - fine dmlim sweep (0.30-0.50) through the q5-drop threshold (0.426).
 Shows the delta_coil pattern collapse is a STEP at the threshold, not a smooth rotation.
 Values from deltacoil_metrics.jl (SKIP_SINGFAC=1) on the DIII-D-like case, qmax=5.426."""
 import numpy as np, matplotlib
@@ -36,7 +36,7 @@ ax.annotate("q4 pattern nearly orthogonal\nto nominal (cos ≈ 0.10)",
 ax.set_xlabel("dmlim  (outer truncation, set_psilim_via_dmlim=true)")
 ax.set_ylabel("cosine similarity of delta_coil with nominal")
 ax.set_title("Fine dmlim sweep through the q5-drop threshold\n"
-             "solid = q5 present;  dashed = q5 dropped — the pattern collapses as a STEP at 0.426",
+             "solid = q5 present;  dashed = q5 dropped - the pattern collapses as a STEP at 0.426",
              fontsize=11.5, fontweight="bold")
 ax.set_ylim(0, 1.03); ax.set_xlim(0.29, 0.51)
 ax.legend(fontsize=9, loc="center right"); ax.grid(alpha=0.25)

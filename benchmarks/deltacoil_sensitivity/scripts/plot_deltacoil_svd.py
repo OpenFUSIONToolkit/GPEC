@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""plot_deltacoil_svd.py — SVD robustness of the delta_coil matrix vs the truncation dmlim.
-LEFT: singular-value spectrum. RIGHT: condition number per run (this is what varies — the flat
+"""plot_deltacoil_svd.py - SVD robustness of the delta_coil matrix vs the truncation dmlim.
+LEFT: singular-value spectrum. RIGHT: condition number per run (this is what varies - the flat
 tolerance-bar panel was removed because it carried no information: the tolerance scan is bit-identical
 and is stated in the caption instead). Values from deltacoil_svd_tol.jl on the DIII-D-like case."""
 import numpy as np, matplotlib
@@ -13,13 +13,13 @@ sigma = {
  "dmlim=0.50 (q5 dropped)": [15.73, 10.62, 6.220, 4.523, 2.437, 1.395],
 }
 cols = {"nominal":"#111111","dmlim=0.30":"#2E86C1","dmlim=0.42":"#28B463","dmlim=0.50 (q5 dropped)":"#C0392B"}
-# condition number (σ1/σ_min) per run — this genuinely varies
+# condition number (σ1/σ_min) per run - this genuinely varies
 cond_runs  = ["nominal","dmlim=0.30","dmlim=0.42","dmlim=0.50"]
 cond_vals  = [26.2, 27.2, 26.2, 11.3]
 cond_cols  = ["#111111","#2E86C1","#28B463","#C0392B"]
 
 fig,(ax1,ax2)=plt.subplots(1,2,figsize=(13,5.3),constrained_layout=True)
-fig.suptitle("delta_coil matrix — SVD robustness (DIII-D-like)",fontsize=13,fontweight="bold")
+fig.suptitle("delta_coil matrix - SVD robustness (DIII-D-like)",fontsize=13,fontweight="bold")
 
 x=np.arange(1,7)
 for k,v in sigma.items():
@@ -36,7 +36,7 @@ ax2.set_title("Conditioning per run\n(well-conditioned ≈ 26; drops to 11 when 
               fontsize=10.5,fontweight="bold")
 ax2.grid(alpha=0.2,axis="y")
 ax2.text(0.5,0.93,"Integration-tolerance scan (1e-8…1e-12): the σ-spectrum,\n"
-         "norms and cosine are all BIT-IDENTICAL — omitted from the plot\n"
+         "norms and cosine are all BIT-IDENTICAL - omitted from the plot\n"
          "because there is nothing to show (delta_coil is tolerance-independent).",
          transform=ax2.transAxes,ha="center",fontsize=8,style="italic",
          bbox=dict(boxstyle="round",fc="#F4F6FA",ec="#B4BED2"))

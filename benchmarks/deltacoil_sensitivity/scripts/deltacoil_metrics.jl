@@ -35,9 +35,15 @@ function run_one(tag, patches)
     dst = joinpath(dir, basename(eqfile)); islink(dst) || symlink(realpath(eqsrc), dst)
     toml = base_toml
     for (r, s) in patches; toml = replace(toml, r => s); end
-    toml = replace(toml, r"gal_match_flag\s*=\s*\w+" => "gal_match_flag = false")
     toml = replace(toml, r"eq_filename\s*=\s*\"[^\"]+\"" => "eq_filename = \"$(basename(eqfile))\"")
-    toml = replace(toml, r"HDF5_filename\s*=\s*\"[^\"]+\"" => "HDF5_filename = \"$tag.h5\"")
+    # Inject FFS controls after the section header: examples may omit these keys, so a plain regex
+    # replace is not enough — strip any existing, then inject (force_termination stops after stability;
+    # per-tag HDF5_filename is the file we read back). set_psilim_via_dmlim/dmlim/singfac stay in `patches`.
+    for key in ("force_termination", "HDF5_filename", "gal_match_flag")
+        toml = replace(toml, Regex("(?m)^[ \\t]*$key[ \\t]*=.*\\n") => "")
+    end
+    toml = replace(toml, "[ForceFreeStates]" =>
+        "[ForceFreeStates]\nforce_termination = true\nHDF5_filename = \"$tag.h5\"\ngal_match_flag = false"; count=1)
     write(joinpath(dir, "gpec.toml"), toml)
     @info ">>> $tag"
     GeneralizedPerturbedEquilibrium.main([dir])

@@ -206,6 +206,7 @@ A mutable struct holding internal state variables for stability calculations.
     resonant_match_deltar::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0) # per-surface inner-layer Δ (msing × 2)
     resonant_match_rpec_eig::Vector{ComplexF64} = ComplexF64[]                  # forced eigenvalue γ_s = 2πi·n·f
     resonant_match_flux::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)   # reconnected resonant flux (2msing × ncoil)
+    resonant_match_bpen::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)   # area-weighted penetrated b-field (msing × ncoil), like-for-like with galerkin/match/bpen
     resonant_match_residual::Float64 = NaN
 end
 

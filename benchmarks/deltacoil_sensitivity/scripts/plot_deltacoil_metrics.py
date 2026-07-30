@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""plot_deltacoil_metrics.py — cosine similarity of delta_coil with the nominal case, per surface.
+"""plot_deltacoil_metrics.py - cosine similarity of delta_coil with the nominal case, per surface.
 The dot-product metric that the norm hides: shows the response PATTERN rotating under truncation."""
 import numpy as np, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
@@ -28,7 +28,7 @@ for k, v in cosA.items():
 ax1.axvline(thresh, color="grey", ls="--", lw=1.3)
 ax1.text(thresh + 0.012, 0.30, f"q5 dropped\n(dmlim > {thresh:.3f})", fontsize=8.5, color="grey")
 ax1.set_xlabel("dmlim  (outer truncation)"); ax1.set_ylabel("cosine similarity with nominal")
-ax1.set_title("Sweep A — truncation: pattern rotates hard once q5 drops", fontsize=10.5, fontweight="bold")
+ax1.set_title("Sweep A - truncation: pattern rotates hard once q5 drops", fontsize=10.5, fontweight="bold")
 ax1.set_ylim(0, 1.03); ax1.legend(fontsize=9, loc="lower right"); ax1.grid(alpha=0.25)
 
 for k, v in cosB.items():
@@ -36,7 +36,7 @@ for k, v in cosB.items():
 ax2.set_xscale("log"); ax2.set_ylim(0, 1.03)
 ax2.set_xlabel("singfac_min  (rational-surface approach distance)")
 ax2.set_ylabel("cosine similarity with nominal")
-ax2.set_title("Sweep B — approach distance: perfectly flat (no effect)", fontsize=10.5, fontweight="bold")
+ax2.set_title("Sweep B - approach distance: perfectly flat (no effect)", fontsize=10.5, fontweight="bold")
 ax2.legend(fontsize=9, loc="lower left"); ax2.grid(alpha=0.25)
 ax2.text(0.5, 0.55, "cosine identical to 6 decimals across 2 decades of singfac_min\n"
          "(offset from 1.0 is the truncation-flag on/off, not singfac)",

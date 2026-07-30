@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""plot_deltacoil_vs_rdcon.py — per-surface correlation of STRIDE delta_coil with the RDCON reference,
+"""plot_deltacoil_vs_rdcon.py - per-surface correlation of STRIDE delta_coil with the RDCON reference,
 for the strong-form (driven) and two projected (weak-form, energy-weighted) readouts.
 Shows the match is good on the inner surfaces and fails at the edge, and that projecting the readout
-does not close the gap — the residual is weak-form-vs-strong-form representation plus RDCON edge
+does not close the gap - the residual is weak-form-vs-strong-form representation plus RDCON edge
 degradation, not a fixable reweighting. Reads the example HDF5 files directly."""
 import os, numpy as np, h5py, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
