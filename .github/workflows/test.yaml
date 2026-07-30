@@ -107,8 +107,14 @@ jobs:
       - name: Build Julia packages
         uses: julia-actions/julia-buildpkg@v1
 
+      # Coverage instrumentation is off: nothing consumes the .cov files (they are
+      # gitignored and never uploaded), and instrumenting slows compute-heavy
+      # numerical code noticeably. Set coverage: true and add a Codecov upload
+      # step together if coverage reporting is ever wanted.
       - name: Run tests
         uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
 
   # Stable check that is present on every pull request, whether or not the suite
   # ran. Point branch protection at this job so skipped runs do not block merges.
