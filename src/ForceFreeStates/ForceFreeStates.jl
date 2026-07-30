@@ -36,7 +36,6 @@ include("Utils.jl")
 include("RootAreaWeighted.jl")
 include("Free.jl")
 include("Riccati.jl")
-include("ResistiveMatch.jl")
 
 # RDCON outer-region singular Galerkin Δ′ solver (gal_solve port)
 include("Galerkin/GalerkinStructs.jl")

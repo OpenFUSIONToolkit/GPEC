@@ -74,11 +74,8 @@ Internal state variables for perturbed equilibrium calculations.
     singular_coupling_metrics::Dict{String,Float64} = Dict{String,Float64}()
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
-    # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer. Needs
-    # fallback for kinetic mode, TODO. Zero if not provided (ideal mode). 
+    # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer.
     inner_bpen::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
-    # True when the PE OdeState is the gal(-matched) solution: ud_store then carries the analytic ξ′
-    # (incl. resonant series), enabling the exact-derivative path in SingularCoupling.
     odet_from_gal::Bool = false
 end
 

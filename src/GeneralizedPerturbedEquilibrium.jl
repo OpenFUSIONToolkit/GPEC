@@ -167,6 +167,7 @@ function main_from_inputs(
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
+
     # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
@@ -517,14 +518,8 @@ function main_from_inputs(
             @info "PerturbedEquilibrium: using the RPEC-matched gal solution"
             pe_odet = gal_matched_odestate(gal_data, ffit, intr)
             pe_intr.odet_from_gal = true
-            # Inner-layer penetrated field per coil-drive column, same basis as the matched OdeState
-            # columns; SingularCoupling uses it as the official penetrated field (pointwise midpoint
-            # is only the fallback). Ideal mode: match.bpen is identically zero ⇒ B_pen ≡ 0.
             pe_intr.inner_bpen = gal_data.match.bpen
-        elseif ctrl.kinetic_factor == 0
-            # Ideal shooting run: perfect shielding — the penetrated field is exactly zero, same
-            # dispatch as the gal-ideal path. Only KINETIC shooting remains on the pointwise
-            # surface-interpolation fallback (outstanding).
+        else
             pe_intr.inner_bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
         end
 
@@ -786,28 +781,9 @@ function write_outputs_to_HDF5(
         # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
         # the galerkin/delta_coil layout so H5Web heatmaps share axes (x = edge mode, y = surface-side).
         # Internal intr.delta_coil_matrix stays (2msing × numpert_total); transpose only at write.
-        if intr.msing > 0 && !isempty(intr.delta_coil_matrix)
-            dc = permutedims(intr.delta_coil_matrix)
-            out_h5["singular/delta_coil_matrix"] = dc
-            out_h5["singular/delta_coil_abs"] = abs.(dc)  # real |.| for H5Web heatmap view
-        end
-
-        # Resistive inner-layer-matched coil response (Wang et al. PoP 27, 122509 (2020), Eq. 11:
-        # C = -(Δ_out - Δ_in(i2πf))^{-1} Δ_coil). Computed in ResistiveMatch.jl via the STRIDE/Riccati
-        # outer Δ' + the GGJ inner layer (resist_eval → InnerLayer.solve_inner).
-        if intr.msing > 0 && !isempty(intr.resonant_match_deltar)
-            g = create_group(out_h5, "singular/resonant_match")
-            g["deltar"]   = intr.resonant_match_deltar    # (msing × 2)  per-surface inner-layer Δ(Q)
-            g["cout"]     = intr.resonant_match_cout       # (2msing × ncoil)  matched outer coefficients
-            g["cin"]      = intr.resonant_match_cin        # (2msing × ncoil)  matched inner coefficients
-            g["rpec_eig"] = intr.resonant_match_rpec_eig   # (msing)  forced eigenvalue γ_s = 2πi·n·f
-            g["reconnected_flux"] = intr.resonant_match_flux       # (2msing × ncoil)  matched small-solution (reconnected) amplitude
-            g["reconnected_flux_abs"] = abs.(intr.resonant_match_flux)  # |.| for H5Web heatmap view
-            if !isempty(intr.resonant_match_bpen)
-                g["bpen"] = intr.resonant_match_bpen               # (msing × ncoil)  area-weighted penetrated b-field (like galerkin/match/bpen)
-                g["bpen_abs"] = abs.(intr.resonant_match_bpen)
-            end
-            g["residual"] = intr.resonant_match_residual
+        if intr.msing > 0 && !isempty(intr.delta_coil)
+            dc = permutedims(intr.delta_coil)
+            out_h5["singular/delta_coil"] = dc
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
