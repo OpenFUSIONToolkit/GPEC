@@ -399,8 +399,7 @@ Populated in `Free.jl`.
   - `ev::Vector{ComplexF64}` - Vacuum energy per eigenmode (power quotient v†·wv·v with v†·N·v = 1)
   - `et::Vector{ComplexF64}` - Total energy eigenvalues of the pencil (W, N): power-normalized and invariant to the working (Jacobian) coordinate; et = ep + ev per mode
   - `n_tor_idx::Vector{Int}` -  0-based toroidal mode number index of each sorted eigenvalue (numpert_total). Needed in `write_imas`
-  - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the vacuum matrix wv, clamped to zero
-  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points, shape (mthvac * nzvac) × 3 for (x, y, z)
+  - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the pencil (wv, N), clamped to zero  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points, shape (mthvac * nzvac) × 3 for (x, y, z)
   - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points, shape (mthvac * nzvac) × 3 for (x, y, z)
 """
 @kwdef mutable struct VacuumData
