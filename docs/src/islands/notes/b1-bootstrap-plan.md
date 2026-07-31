@@ -148,10 +148,10 @@ Read with `docs/05 §B1`, `QUESTIONS.md` Q3, `docs/01 §2.3–2.5`, and the A1/A
   no new machinery. Recommend doing Phase 0–2 first, reporting, then deciding on Phase 3+.
 
 ## Progress checklist
-- [ ] 0.1 Redl/Sauter formulas transcribed from TokaMaker source (`redl-sauter-bootstrap-reference.md`) + Julia port
-- [ ] 0.2 `ν_★` convention map Redl/TokaMaker↔Islands pinned + spot-checked
-- [ ] 1.1 `f_p`, `f_t`, `k_neo` confirmed green vs Sauter/HS
-- [ ] 2.1–2.2 analytic electron `L31` assembled + compared vs Sauter (Gate 2)
+- [x] 0.1 Redl formulas transcribed from TokaMaker `bootstrap.py:576-795` + Julia port (`redl-sauter-bootstrap-reference.md`)
+- [x] 0.2 `ν_★` map pinned: Islands ion ν_★ ≈ 0.77·Redl ν_i★; ν_e★/ν_i★ ≈ 1.41 (lnΛ-match for precision)
+- [x] 1.1 `f_T = 1.4624√ε` confirmed vs Sauter circular `1.46√ε` (3–4 digits); `k_HS≃−1.173` present in Fields
+- [ ] 2.1–2.2 analytic electron `L31` — needs the York→L31 normalization `[DERIVED]` map (ref §10) + physics-verifier, THEN compare vs Redl `F31(f_T)` (Gate 2)
 - [ ] 3.1–3.3 no-island ion neoclassical solve built + confirmed well-conditioned across `ν_★`
 - [ ] 3.4 ion flow vs L23 Eq. 5.2.1 internal check
 - [ ] 4.1–4.2 full `J_bs(ν_★)` + `L31(f_t)` vs Sauter (single species)

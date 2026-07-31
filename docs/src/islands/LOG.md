@@ -8,6 +8,26 @@ relevant.
 
 ---
 
+## 2026-07-31 — B1 Phase 0-1 executed (Redl/TokaMaker reference): constants + ν_★ map green; Phase 2 needs the York→L31 map
+
+Executing `notes/b1-bootstrap-plan.md` with the user-provided reference: OpenFUSIONToolkit
+TokaMaker's `redl_bootstrap` (Redl 2021, the NEO-validated Sauter update). NEO/NCLASS dropped.
+- **Phase 0.1 done**: transcribed the full Redl coefficient set (ν_e★/ν_i★, L31=F31(X31), L32,
+  L34, α, j_bs assembly) from `bootstrap.py:576-795` into
+  `derivations/redl-sauter-bootstrap-reference.md` [CHECKED], + a Julia port.
+- **Phase 1.1 green**: Islands `f_T=1.4624√ε` matches Sauter circular `1.46√ε` to 3-4 digits
+  (ε=0.05→0.3). `k_HS≃−1.173` present.
+- **Phase 0.2 (ν_★ map) pinned**: at a DIII-D point, Islands ion ν_★=1.25e-2 vs Redl
+  ν_i★=1.62e-2 ⇒ Islands/Redl_i≈0.77 (clean O(1) convention factor); ν_e★/ν_i★≈1.41.
+  (lnΛ must be matched on both sides for >2-digit precision.)
+- **Phase 2 target**: Redl banana L31=F31(f_T)=0.42→0.83 over ε=0.05→0.3 (0.79 at DIII-D).
+- **Phase 2 status (honest)**: comparing the Islands (York) electron bootstrap to Redl L31
+  needs the York-flow→dimensionless-L31 **normalization derivation** (ref §10) — a raw
+  coefficient comparison shows a spurious ~1.5× offset that IS the normalization. This is a
+  bounded `[DERIVED]` physics step (physics-verifier required); NOT guessed. Expected:
+  agreement at small ε (banana/large-aspect), divergence at larger ε (Redl all-aspect NEO
+  fit vs York large-aspect expansion) — the divergence is physics. Next session: do the map.
+
 ## 2026-07-25 — A1/A5 STRUCTURAL DIAGNOSTIC (step back to the ladder): A5 PASSES — the stall is DRIVE-specific, not a homogeneous-operator bug
 
 Executing `notes/a1-a5-structural-diagnostic-plan.md` on the pinned stalling config

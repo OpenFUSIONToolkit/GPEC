@@ -90,5 +90,34 @@ Alt `'jboot1'` form: `j_bs = −I·pe·(L31·(dp/dψ)/pe + L32·(dTe/dψ)/Te + L
   (`benchmarks/islands/redl_reference.jl`, not committed to `src/`) and diff vs the
   TokaMaker Python on shared `(fT, ν★, Zeff)` grids to confirm the transcription.
 
+## 9. Phase 1 results (2026-07-31) — constants confirmed, `ν_★` map pinned
+Ported §§1–2 to Julia (scratch) and ran against the Islands code:
+- **`f_T` ✓ (Phase 1.1):** Islands `1−passing_fraction(ε)=1.4624√ε` matches Sauter's
+  circular `1.46√ε` to 3–4 digits (ε=0.05→0.3: 0.327/0.3265 … 0.801/0.800). The Islands
+  circular trapped fraction agrees with the Redl/Sauter `fT` in the large-aspect limit;
+  finite-aspect `fT` (Sauter `sauter_fc`) will diverge at larger ε — expected.
+- **`ν_★` map (Phase 0.2), DIII-D point (Te=Ti=2080 eV, ne=ni=3.3e19, Zeff=1, lnΛ=17):**
+  Islands ion `ν_★=1.25e-2`; Redl `ν_i★=1.62e-2` ⇒ **Islands/Redl_i ≈ 0.77** (a clean O(1)
+  convention factor from `v_th=√(2T/m)` + lnΛ + the `4.90e-18` constant); `ν_e★/ν_i★=1.41`.
+  ⚠ Precision caveat: the Islands `ν_ii` uses its own internal lnΛ (NRL), not the fixed 17
+  passed to Redl — pin lnΛ equal on both sides before quoting the factor to >2 digits.
+- **Phase 2 target curve** `L31_banana = F31(f_T)` (Zeff=1, ν_e★→0): 0.419, 0.552, 0.715,
+  0.793, 0.832 at ε=0.05/0.1/0.2/0.265/0.3. This is the reference the Islands electron
+  bootstrap must reproduce in the small-ε (banana, large-aspect) limit where both are valid.
+
+## 10. Phase 2 — the York→L31 normalization map (the next physics step, NOT yet done)
+The Islands electron bootstrap comes from the flattened-electron parallel flow (L23
+Eqs. 2.5.5–2.5.8): in the no-island limit (`h→x`, `∂h/∂x→1`, `ω_E=0`),
+`u_∥e/v_th ∝ −f_t/(1+f_t)·(ρ̂_θe/L_n)·(1+η(1+½ k_neo f_p))/ω_★e + (f_p/(1+f_t))·u_∥i/v_th`.
+To compare to Redl's dimensionless `L31` we must express `⟨J_∥⟩ = ⟨e(Zn_i u_∥i − n_e u_∥e)⟩`
+in the standard transport form `j_bs = −I·p·L31·(1/n_e)·dn_e/dψ + …` and read off the
+**dimensionless density-gradient coefficient**. This requires the York normalization chain
+(docs/01 §5: `ω_★e`, `ρ̂_θ`, `v_th`, `I(ψ)`) — a raw coefficient comparison shows a spurious
+~1.5× offset that is exactly this normalization. **Do this as a `[DERIVED]` derivation with
+physics-verifier — do NOT guess the factor.** Expected outcome: agreement with Redl at
+small ε (banana/large-aspect, where the York HS-closure and Redl overlap), divergence at
+larger ε (Redl's all-aspect NEO fit vs the York large-aspect expansion) — that divergence
+is physics, not a bug, and is itself a useful B1 statement.
+
 Provenance: transcribed verbatim from TokaMaker `bootstrap.py:576–795` (Redl 2021) on
 2026-07-31. No Islands physics here; this is the B1 comparison target.
