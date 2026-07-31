@@ -266,20 +266,16 @@ function calc_plasma_inductance(
 end
 
 """
-    calc_surface_inductance(I_v::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
+    calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
 
-Invert the vacuum surface-current matrix into surface inductance `L`.
-
-Vacuum returns `I_v` from the Green’s functions, this helper applies GPEC normalization,
-regularization, inversion, and Hermitianization.
+Surface inductance from the vacuum surface-current matrix, Park 2007 eq. 7: `Φ_x = L·I_v`.
+Columns of `I_v` are driven by unit flux harmonics which are consistent since the eq. 3
+weight `1/(J|∇ψ|)` cancels the Jacobian in the vacuum solver's source density — so `Φ_x = 𝕀`
+and `L = I_v⁻¹`. `I_v` is normalized in place by `μ₀(2π)²`.
 """
 function calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
-
     μ₀ = 4π * 1e-7
-    I_v ./= μ₀ * (2π)^2
-    # L = flux * inv(Iᵛ) with flux = I
-
-    return inv(I_v)
+    return inv(I_v) .* μ₀ * (2π)^2
 end
 
 """
