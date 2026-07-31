@@ -23,7 +23,8 @@ Read with `docs/05 §B1`, `QUESTIONS.md` Q3, `docs/01 §2.3–2.5`, and the A1/A
    (Islands is multi-species-first, D3).
 4. Captured durably: a **regression case** (`J_bs`, `L31` at a few `ν_★`), a **Physics
    Book B1 section**, and a **regenerable figure** (`J_bs` vs `ν_★` with Sauter overlay).
-5. (If NEO is available) an independent cross-check on one equilibrium.
+5. An **executable cross-check against the TokaMaker (Redl) bootstrap** on the same
+   `(f_t, ν_★, Z)` inputs — a code-to-code diff, not just a paper comparison.
 
 ## Guardrails
 - **Ground truth is Sauter's analytic formulas** (a validated fit to accurate
@@ -57,19 +58,27 @@ Read with `docs/05 §B1`, `QUESTIONS.md` Q3, `docs/01 §2.3–2.5`, and the A1/A
   oriented; B1 needs the **equilibrium/no-island** neoclassical response (the Q3
   "neoclassical no-island" solution referenced in `Operators.jl:650,659`).
 
-## Phase 0 — References, `ν_★` convention, scope (orientation + acquisition)
-- **0.1 Acquire Sauter (1999)** — BLOCKER. Ask the user for the PDF (or the specific
-  equations); add to `docs/resources/` + docs/08. Transcribe into a new
-  `derivations/sauter-bootstrap-reference.md` with `[CHECKED: Sauter 1999, Eq. N]`:
-  `L31(f_t, ν_★, Z)`, `L32`, `L34`+`α`, neoclassical conductivity `σ_neo/σ_Spitzer`, and
-  the trapped fraction `f_t`. (Sauter has a known 2002 erratum — get the corrected forms.)
-- **0.2 NEO/NCLASS availability** — ask the user. If present, note how to run/compare on a
-  chosen equilibrium; if not, proceed with Sauter analytic (sufficient for B1's pass/fail).
-- **0.3 `ν_★` convention alignment (CRITICAL).** Sauter's `ν_★e`/`ν_★i` and the Islands
-  `ν_★ = ν_jj Rq/(ε^{3/2} v_th)` (L23 Eq. 2.3.40) may differ by O(1) factors and
+## Phase 0 — References, `ν_★` convention, scope (acquisition RESOLVED via TokaMaker)
+- **Reference = OpenFUSIONToolkit / TokaMaker bootstrap code (Sauter + Redl).** The user
+  (2026-07-31) pointed to the open-source **TokaMaker** (same GitHub org as this repo,
+  `OpenFUSIONToolkit`), which implements the bootstrap current including the **Redl
+  formula** update to Sauter — **Redl, Angioni, Belli, Sauter et al., "A new set of
+  analytical formulae for the bootstrap current and neoclassical conductivity", PoP 28,
+  022502 (2021)**. Redl (2021) *is* the modern, corrected Sauter model (fixes the known
+  Sauter-Angioni issues) — **use Redl as the primary ground truth**, Sauter as the
+  historical cross-reference. NEO/NCLASS: **dropped** (user has neither).
+- **0.1** Get the exact formulas **from the TokaMaker source** (open source — no PDF
+  blocker): the `L31/L32/L34`, `α`, neoclassical conductivity `σ_neo`, trapped fraction
+  `f_t`, and the collisionality definitions as coded. Transcribe into a new
+  `derivations/redl-sauter-bootstrap-reference.md` with `[CHECKED: Redl 2021 Eq. N /
+  TokaMaker <file>:<lines>]`; machine-check against the Redl (2021) paper if obtainable.
+  Because it is *code*, we get an executable reference (port the formulas to Julia and
+  diff against TokaMaker's outputs where feasible).
+- **0.2 `ν_★` convention alignment (CRITICAL).** Redl/TokaMaker `ν_★e`/`ν_★i` vs the
+  Islands `ν_★ = ν_jj Rq/(ε^{3/2} v_th)` (L23 Eq. 2.3.40) may differ by O(1) factors and
   species/√2 conventions. Pin the exact map **before** any `ν_★`-axis comparison — a
-  mismatch here silently ruins the whole benchmark. Document it in the reference doc.
-- **0.4 Pin the primary comparable:** `L31` and `J_bs(ν_★)` (density-gradient bootstrap)
+  mismatch here silently ruins the benchmark. Document it in the reference doc.
+- **0.3 Pin the primary comparable:** `L31` and `J_bs(ν_★)` (density-gradient bootstrap)
   single-species first; `L32`/`L34`/`α` and multi-species as extensions.
 
 ## Phase 1 — Analytic neoclassical constants (cheapest; foundational; likely near-green)
@@ -126,10 +135,12 @@ Read with `docs/05 §B1`, `QUESTIONS.md` Q3, `docs/01 §2.3–2.5`, and the A1/A
   `J_bs`/`L31` vs `ν_★` with Sauter overlay. `regression-guardian`. LOG + push + PR.
 
 ## Risks / decisions to flag to the user
-- **Sauter PDF acquisition** (Phase 0.1) — I can't fetch it; the user must provide it or
-  the equations. Hard prerequisite for the reference.
-- **`ν_★` convention** (0.3) — the single biggest silent-error risk; pin it explicitly.
-- **NEO availability** — nice-to-have, not required.
+- ~~Sauter PDF acquisition~~ **RESOLVED** — reference is the open-source TokaMaker (Redl)
+  bootstrap code (user, 2026-07-31); get formulas from source, no PDF needed.
+- ~~NEO availability~~ **DROPPED** — user has neither NEO nor NCLASS; TokaMaker/Redl is the
+  reference.
+- **`ν_★` convention** (0.2) — now the single biggest silent-error risk; pin it explicitly
+  against TokaMaker's coded definition.
 - **Realization of the no-island solve** (3.2) — reduce Level-0 vs dedicated solver; a
   design choice worth a quick check of whether a clean `w→0` path exists.
 - **Scope sizing:** the minimal, high-value first deliverable is **Phase 2 (analytic
@@ -137,9 +148,8 @@ Read with `docs/05 §B1`, `QUESTIONS.md` Q3, `docs/01 §2.3–2.5`, and the A1/A
   no new machinery. Recommend doing Phase 0–2 first, reporting, then deciding on Phase 3+.
 
 ## Progress checklist
-- [ ] 0.1 Sauter acquired + `[CHECKED]` transcription (`sauter-bootstrap-reference.md`)
-- [ ] 0.2 NEO/NCLASS availability determined
-- [ ] 0.3 `ν_★` convention map Sauter↔Islands pinned + spot-checked
+- [ ] 0.1 Redl/Sauter formulas transcribed from TokaMaker source (`redl-sauter-bootstrap-reference.md`) + Julia port
+- [ ] 0.2 `ν_★` convention map Redl/TokaMaker↔Islands pinned + spot-checked
 - [ ] 1.1 `f_p`, `f_t`, `k_neo` confirmed green vs Sauter/HS
 - [ ] 2.1–2.2 analytic electron `L31` assembled + compared vs Sauter (Gate 2)
 - [ ] 3.1–3.3 no-island ion neoclassical solve built + confirmed well-conditioned across `ν_★`
