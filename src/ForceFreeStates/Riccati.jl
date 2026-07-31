@@ -99,6 +99,14 @@ This is compatible with downstream code (which uses U₁/U₂ ratio):
 const SAVE_NEAR_END_FRAC = 0.05
 const SAVE_NEAR_END_PSI  = 1e-4
 
+# Absolute error tolerance for the Euler-Lagrange / Riccati solves. The solver's per-component
+# criterion is abstol + reltol*|u|, so leaving abstol at the OrdinaryDiffEq default (1e-6)
+# makes it dominate for every component below abstol/reltol, and the resonant response lives
+# in components of order 1e-6 down to 1e-11 -- those would be integrated with no effective
+# error control at all. Kept far below the smallest physically meaningful component so the
+# configured `eulerlagrange_tolerance` governs the whole solution matrix.
+const EL_ABSTOL = 1e-20
+
 """
     assemble_fm_matrix(propagators, idx_range; condition=false) -> Matrix{ComplexF64}
 
@@ -985,7 +993,7 @@ function riccati_integrate_chunk!(
     rtol = ctrl.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
                       (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, callback=cb, save_everystep=false, save_end=true)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
     # Renormalize end state to (S, I) convention for the next chunk.
@@ -1352,7 +1360,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
     prop.block_upper_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept  # thread-local; summed into odet after the BVP barrier
 
@@ -1364,7 +1372,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
     prop.block_lower_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept
 end
@@ -1424,7 +1432,7 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
     result[1:N, 1:N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, 1:N]  .= sol.u[end][:, :, 2]
 
@@ -1434,7 +1442,7 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
     result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, N+1:2N]  .= sol.u[end][:, :, 2]
 
