@@ -645,6 +645,7 @@ function cross_ideal_singular_surf!(
     odet.q_store[odet.step] = odet.q
     odet.u_store[:, :, :, odet.step] = odet.u
     odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.du_store[:, :, :, odet.step] = du1
     odet.step += 1
 end
 
@@ -696,6 +697,7 @@ function cross_kinetic_singular_surf!(
     odet.q_store[odet.step] = odet.q
     odet.u_store[:, :, :, odet.step] = odet.u
     odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.du_store[:, :, :, odet.step] = du1
     odet.step += 1
 end
 
@@ -757,12 +759,6 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
-        # If Gaussian reduction modified u, recompute ud to keep it consistent.
-        # Matches Fortran ode_output.f which calls sing_der before writing euler.bin.
-        if odet.new
-            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
-        end
-
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
@@ -775,11 +771,15 @@ function integrate_el_region!(
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end
+            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
             odet.psi_store[odet.step] = integrator.t
             @views odet.u_store[:, :, :, odet.step] .= integrator.u
             odet.q_store[odet.step] = odet.q
             @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+            @views odet.du_store[:, :, :, odet.step] .= du_buffer
             odet.step += 1
+        elseif odet.new
+            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
         end
     end
 
@@ -794,10 +794,12 @@ function integrate_el_region!(
         if odet.step >= size(odet.u_store, 4)
             resize_storage!(odet)
         end
+        sing_der!(du_buffer, sol.u[end], (ctrl, equil, ffit, intr, odet, chunk), sol.t[end])
         odet.psi_store[odet.step] = sol.t[end]
         @views odet.u_store[:, :, :, odet.step] .= sol.u[end]
         odet.q_store[odet.step] = odet.q
         @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+        @views odet.du_store[:, :, :, odet.step] .= du_buffer
         odet.step += 1
     end
 
@@ -1035,6 +1037,10 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             odet.ud_store[:, :, 1, istep] .= gauss_buffer
             mul!(gauss_buffer, odet.ud_store[:, :, 2, istep], transforms[:, :, ifix])
             odet.ud_store[:, :, 2, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.du_store[:, :, 1, istep], transforms[:, :, ifix])
+            odet.du_store[:, :, 1, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.du_store[:, :, 2, istep], transforms[:, :, ifix])
+            odet.du_store[:, :, 2, istep] .= gauss_buffer
         end
         jfix = kfix + 1
     end

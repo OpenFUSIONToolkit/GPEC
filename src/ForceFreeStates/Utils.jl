@@ -12,18 +12,21 @@ function resize_storage!(odet::OdeState)
     # Allocate new arrays
     u_new = Array{ComplexF64,4}(undef, odet.numpert_total, odet.numpert_total, 2, newlen)
     ud_new = Array{ComplexF64,4}(undef, odet.numpert_total, odet.numpert_total, 2, newlen)
+    du_new = zeros(ComplexF64, odet.numpert_total, odet.numpert_total, 2, newlen)
     psi_new = Vector{Float64}(undef, newlen)
     q_new = Vector{Float64}(undef, newlen)
 
     # Copy old data
     u_new[:, :, :, 1:odet.step] = odet.u_store[:, :, :, 1:odet.step]
     ud_new[:, :, :, 1:odet.step] = odet.ud_store[:, :, :, 1:odet.step]
+    du_new[:, :, :, 1:odet.step] = odet.du_store[:, :, :, 1:odet.step]
     psi_new[1:odet.step] = odet.psi_store[1:odet.step]
     q_new[1:odet.step] = odet.q_store[1:odet.step]
 
     # Replace old arrays
     odet.u_store = u_new
     odet.ud_store = ud_new
+    odet.du_store = du_new
     odet.psi_store = psi_new
     odet.q_store = q_new
 end
@@ -40,4 +43,5 @@ function trim_storage!(odet::OdeState)
     resize!(odet.q_store, odet.step)
     odet.u_store = odet.u_store[:, :, :, 1:odet.step]
     odet.ud_store = odet.ud_store[:, :, :, 1:odet.step]
+    odet.du_store = odet.du_store[:, :, :, 1:odet.step]
 end

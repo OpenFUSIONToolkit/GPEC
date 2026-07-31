@@ -130,6 +130,10 @@ and data dumping.
         odet.ud_store[:, :, 1, istep] .= tmp_mat
         mul!(tmp_mat, odet.ud_store[:, :, 2, istep], coeffs)
         odet.ud_store[:, :, 2, istep] .= tmp_mat
+        mul!(tmp_mat, odet.du_store[:, :, 1, istep], coeffs)
+        odet.du_store[:, :, 1, istep] .= tmp_mat
+        mul!(tmp_mat, odet.du_store[:, :, 2, istep], coeffs)
+        odet.du_store[:, :, 2, istep] .= tmp_mat
     end
 
     # Write energies to screen

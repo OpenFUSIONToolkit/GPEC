@@ -346,6 +346,8 @@ end
     # Kinetic torque matrix splines: 6 components
     ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
 
+    kinetic_populated::Bool = false  # set by make_kinetic_matrix; fmats_lower/kmats are then not the EL operators
+
     # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
     f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
@@ -492,7 +494,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
 
-  - `ud_store::Array{ComplexF64,4}` - Stored derivatives of the solution at each saved step with same shape as `u_store`.
+  - `ud_store::Array{ComplexF64,4}` - Stored derivatives of the solution at each saved step with same shape as `u_store`; slot 2 holds the Clebsch Ξ_s, not du₂/dψ.
+
+  - `du_store::Array{ComplexF64,4}` - du₁/dψ and du₂/dψ at the accepted point of each saved step, populated only by the serial EL path.
 
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
 
@@ -560,6 +564,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
     ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    du_store::Array{ComplexF64,4} = zeros(ComplexF64, numpert_total, numpert_total, 2, numsteps_init)
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
