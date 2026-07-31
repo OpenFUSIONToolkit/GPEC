@@ -127,28 +127,26 @@ Green's functions are internal scratch only.
             ldiv!(lu!(grad_green_interior), grri)
 
             # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = grri - grre
-            # The minus is because VACUUM builds the operators in its CW-θ frame while GPEC uses CCW-θ,
-            # flipping the outward-normal sign.
+            # They are flipped because VACUUM builds the operators in its CW-θ frame while GPEC
+            # uses CCW-θ, flipping the outward-normal sign.
             I_v_block = @view vac_data.I_v[block_idx, block_idx]
-            @views g_sum = -(grri[1:num_points_surf, :] .- grre[1:num_points_surf, :])
+            @views g_sum = grre[1:num_points_surf, :] .- grri[1:num_points_surf, :]
             mul!(I_v_block, ft.basis, g_sum)
             I_v_block ./= num_points_surf
 
             # Iᵛ becomes the surface inductance L (Φ = L·Iᵛ), a one-sided operator that
             # multiplies GPEC-convention mode vectors. Kernels are real, so conj rotates B·A·B† into
-            # the GPEC (CCW-θ, conjugate-of-RH) basis. Unlike wv this is not an invariant scalar.
+            # the GPEC (CCW-θ, conjugate-of-RH) basis. Wv is Hermitian so no conjugation is needed
             I_v_block .= conj.(I_v_block)
         else
             # Only need exterior system for wv
             ldiv!(lu!(grad_green), grre)
         end
 
-        # wv = B·(D_ext⁻¹𝒢)·B† is a Hermitian energy generator (Chance 1997 eqs. 125-126); it is
-        # contracted on both sides to the real, convention-invariant vacuum energy, so no conjugation.
+        # Project exterior kernel onto observer basis exp(-i*(mθ - nν)) and scale to get the response matrix
         mul!(wv_block, ft.basis, @view(grre[1:num_points_surf, :]))
         wv_block .*= 4π^2 / num_points_surf
     end
-
 
     # δW_v = ξ† Wᵛ ξ is real, so Wᵛ must be Hermitian; remove any residual from discretization
     _symmetrize_vacuum_energy!(vac_data.wv)
@@ -268,6 +266,7 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
         end
     end
 
+    # δW_v = ξ† Wᵛ ξ is real, so Wᵛ must be Hermitian; remove any residual from discretization
     _symmetrize_vacuum_energy!(vac_data.wv)
 
     # Populate coordinate arrays

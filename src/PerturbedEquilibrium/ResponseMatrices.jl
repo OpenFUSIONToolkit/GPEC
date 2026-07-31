@@ -266,6 +266,25 @@ function calc_plasma_inductance(
 end
 
 """
+    calc_surface_inductance(I_v::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
+
+Invert the vacuum surface-current matrix into surface inductance `L`.
+
+Vacuum returns `I_v` from the Green’s functions, this helper applies GPEC normalization,
+regularization, inversion, and Hermitianization.
+"""
+function calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
+
+    μ₀ = 4π * 1e-7
+    I_v ./= μ₀ * (2π)^2
+    # L = flux * inv(Iᵛ) with flux = I
+    L_surf = inv(I_v)
+    hermitianpart!(L_surf)
+
+    return L_surf
+end
+
+"""
     calc_permeability(
         plasma_inductance::Matrix{ComplexF64},
         surface_inductance::Matrix{ComplexF64}

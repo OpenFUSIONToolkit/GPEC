@@ -425,46 +425,6 @@ function compute_current_density(
 end
 
 """
-    calc_surface_inductance(I_v::AbstractMatrix{ComplexF64})::Matrix{ComplexF64}
-
-Invert the vacuum surface-current matrix into surface inductance `L`.
-
-Vacuum returns `I_v` from the Green’s functions, this helper applies GPEC normalization,
-regularization, inversion, and Hermitianization.
-"""
-function calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
-
-    mpert = size(I_v, 1)
-    μ₀ = 4π * 1e-7
-    L_surf = zeros(ComplexF64, mpert, mpert)
-
-    current_mag = maximum(abs.(I_v))
-
-    if current_mag < 1e-15
-        @warn "Current matrix is all zeros! Cannot compute surface inductance." maxlog=1
-        for i in 1:mpert
-            L_surf[i, i] = μ₀ * 1e-6
-        end
-    else
-        try
-            I_v ./= μ₀ * (2π)^2
-            I_v += 1e-12 * current_mag * I
-            # L = flux * inv(Iᵛ) with flux = I
-            L_surf = inv(I_v)
-            # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
-            L_surf = 0.5 * (L_surf + L_surf')
-        catch e
-            @warn "Surface inductance inversion failed: $e" maxlog=1
-            for i in 1:mpert
-                L_surf[i, i] = μ₀ * 1e-6
-            end
-        end
-    end
-
-    return L_surf
-end
-
-"""
     compute_surface_area(
         equil::Equilibrium.PlasmaEquilibrium,
         psi::Float64
