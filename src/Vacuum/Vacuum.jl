@@ -24,32 +24,25 @@ export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
 # Relative anti-Hermitian residual above which we warn that the vacuum grid should be refined.
-const _WV_HERMITICITY_WARN_TOL = 1e-4
+const _HERMITICITY_WARN_TOL = 1e-4
 
 """
-    _symmetrize_vacuum_energy!(wv)
+    _warn_and_symmetrize!(mat, name)
 
-Enforce Hermiticity of the vacuum energy matrix Wᵛ in place.
-
-Wᵛ is the generator of the vacuum magnetic energy, δW_v = ξ† Wᵛ ξ. Because that energy is a real
-number for every perturbation ξ, the exact operator is Hermitian. The finite-resolution
-boundary-integral quadrature (finite `mtheta`/`nzeta`) breaks exact Hermiticity, leaving a small
-anti-Hermitian residual that is a pure discretization artifact and vanishes as the grid is refined.
-We replace Wᵛ by its Hermitian part to restore this physical property, warning when the residual
-is large enough that the vacuum grid should be refined.
+Replace `mat` by its Hermitian part in place, warning first if the anti-Hermitian residual exceeds
+`_HERMITICITY_WARN_TOL`.
 """
-function _symmetrize_vacuum_energy!(wv::AbstractMatrix)
-
-    herm_norm = norm(wv + wv')
+function _warn_and_symmetrize!(mat::AbstractMatrix, name::String)
+    herm_norm = norm(mat + mat')
     if herm_norm > 0
-        # Relative anti-Hermitian residual ‖½(W−W†)‖/‖½(W+W†)‖
-        rel_residual = norm(wv - wv') / herm_norm
-        if rel_residual > _WV_HERMITICITY_WARN_TOL
-            @warn "Vacuum energy matrix Wᵛ is non-Hermitian above tolerance $(rel_residual) > $(_WV_HERMITICITY_WARN_TOL) before " *
+        # Relative anti-Hermitian residual ‖½(M−M†)‖/‖½(M+M†)‖
+        rel_residual = norm(mat - mat') / herm_norm
+        if rel_residual > _HERMITICITY_WARN_TOL
+            @warn "$name is non-Hermitian above tolerance $(rel_residual) > $(_HERMITICITY_WARN_TOL) before " *
                   "symmetrization. Increase vacuum grid resolution to reduce it."
         end
     end
-    hermitianpart!(wv)
+    hermitianpart!(mat)
 end
 
 """
@@ -133,11 +126,6 @@ Green's functions are internal scratch only.
             @views g_sum = grre[1:num_points_surf, :] .- grri[1:num_points_surf, :]
             mul!(I_v_block, ft.basis, g_sum)
             I_v_block ./= num_points_surf
-
-            # Iᵛ becomes the surface inductance L (Φ = L·Iᵛ), a one-sided operator that
-            # multiplies GPEC-convention mode vectors. Kernels are real, so conj rotates B·A·B† into
-            # the GPEC (CCW-θ, conjugate-of-RH) basis. Wv is Hermitian so no conjugation is needed
-            I_v_block .= conj.(I_v_block)
         else
             # Only need exterior system for wv
             ldiv!(lu!(grad_green), grre)
@@ -148,8 +136,9 @@ Green's functions are internal scratch only.
         wv_block .*= 4π^2 / num_points_surf
     end
 
-    # δW_v = ξ† Wᵛ ξ is real, so Wᵛ must be Hermitian; remove any residual from discretization
-    _symmetrize_vacuum_energy!(vac_data.wv)
+    # Remove any non-Hermitian residual from Hermitian matrices due to discretization
+    _warn_and_symmetrize!(vac_data.wv, "Wᵛ")
+    compute_L && _warn_and_symmetrize!(vac_data.I_v, "Iᵛ")
 
     # Populate coordinate arrays
     @views begin
@@ -191,9 +180,8 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
     fill!(vac_data.I_v, 0)
-    if compute_L
-        @warn "compute_L=true is not supported for 3D vacuum response; I_v left as zeros" maxlog=1
-    end
+
+    compute_L && @warn "compute_L=true is not supported for 3D vacuum response; I_v left as zeros" maxlog=1
 
     # Full-torus geometry for source surface; observers are restricted to one field period
     full = expand_field_periods(inputs)
@@ -266,8 +254,9 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
         end
     end
 
-    # δW_v = ξ† Wᵛ ξ is real, so Wᵛ must be Hermitian; remove any residual from discretization
-    _symmetrize_vacuum_energy!(vac_data.wv)
+    # Remove any non-Hermitian residual from Hermitian matrices due to discretization
+    _warn_and_symmetrize!(vac_data.wv, "Wᵛ")
+    compute_L && _warn_and_symmetrize!(vac_data.I_v, "Iᵛ")
 
     # Populate coordinate arrays
     vac_data.plasma_pts .= plasma_surf.r

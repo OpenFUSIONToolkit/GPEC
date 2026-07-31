@@ -278,10 +278,8 @@ function calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
     μ₀ = 4π * 1e-7
     I_v ./= μ₀ * (2π)^2
     # L = flux * inv(Iᵛ) with flux = I
-    L_surf = inv(I_v)
-    hermitianpart!(L_surf)
 
-    return L_surf
+    return inv(I_v)
 end
 
 """
