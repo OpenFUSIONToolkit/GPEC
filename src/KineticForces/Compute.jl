@@ -41,7 +41,7 @@ Warn when the ψ torque quadrature terminated without satisfying the requested t
 silent-garbage scenario for weak applied fields, since NTV scales as δB².
 """
 function check_psi_quadrature_convergence(total::ComplexF64, quad_err::Float64,
-                                          ctrl::KineticForcesControl, method::String)
+    ctrl::KineticForcesControl, method::String)
     if quad_err > max(ctrl.atol_psi, ctrl.rtol_psi * abs(total))
         @warn "ψ torque quadrature ($method) did not converge within maxevals_psi=$(ctrl.maxevals_psi): " *
               "error estimate $quad_err vs |T|=$(abs(total)) N·m. Raise maxevals_psi or loosen rtol_psi."
@@ -63,14 +63,16 @@ diagnostic T(ψ) profile at no extra cost (the values are computed anyway
 — we just keep them).
 
 # Returns
+
 NamedTuple with:
-- `total::ComplexF64`: Total integrated torque
-- `torque_profile`: NamedTuple of (psi, dtdpsi, t_cumulative) from evaluation points
-- `matrix_integrated`: Trapezoidal-integrated mpert×mpert×6 matrix (if matrix method)
-- `psi_nsteps::Int`: Number of integrand evaluations
-- `psi_quad_error::Float64`: Quadrature error estimate for the total torque
-- `panel_psis::Vector{Float64}`: Quadrature panel boundaries actually used (bounds + interior resonant surfaces)
-- `resonance_psis::Vector{Float64}`: Located kinetic-resonance ψ surfaces (Ω_ℓ(x=1)=0), for diagnostics/plotting
+
+  - `total::ComplexF64`: Total integrated torque
+  - `torque_profile`: NamedTuple of (psi, dtdpsi, t_cumulative) from evaluation points
+  - `matrix_integrated`: Trapezoidal-integrated mpert×mpert×6 matrix (if matrix method)
+  - `psi_nsteps::Int`: Number of integrand evaluations
+  - `psi_quad_error::Float64`: Quadrature error estimate for the total torque
+  - `panel_psis::Vector{Float64}`: Quadrature panel boundaries actually used (bounds + interior resonant surfaces)
+  - `resonance_psis::Vector{Float64}`: Located kinetic-resonance ψ surfaces (Ω_ℓ(x=1)=0), for diagnostics/plotting
 
 The integral is paneled at the rational-surface ψ locations (`intr.sing_psis`) and capped
 at `ctrl.maxevals_psi` evaluations; a warning is emitted if the quadrature fails to reach
@@ -95,7 +97,7 @@ function integrate_psi_quadgk(
 
     if x0 >= xout
         return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0,
-                panel_psis=Float64[], resonance_psis=Float64[])
+            panel_psis=Float64[], resonance_psis=Float64[])
     end
 
     # The outer ψ-integral (the QuadGK batch / ψ-node loop) stays serial: QuadGK's refine
@@ -133,9 +135,9 @@ function integrate_psi_quadgk(
                 w = is_matrix_method ? thread_wtw[tid] : nothing
                 is_matrix_method && fill!(w, 0)
                 tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
-                      electron, method, equil, thread_intrs[tid], kinetic_profiles;
-                      op_wmats=w,
-                      atol_xlmda=ctrl.atol_xlmda, rtol_xlmda=ctrl.rtol_xlmda)
+                    electron, method, equil, thread_intrs[tid], kinetic_profiles;
+                    op_wmats=w,
+                    atol_xlmda=ctrl.atol_xlmda, rtol_xlmda=ctrl.rtol_xlmda)
                 harm_vals[ell_idx] = thread_tpsi[tid][]
                 is_matrix_method && (harm_elems[ell_idx] .= w)
             end
@@ -205,7 +207,7 @@ function integrate_psi_quadgk(
           "$(length(pts) - 1) panels ($n_rational rational + $n_resonance kinetic resonance surfaces)"
 
     return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts, psi_quad_error=quad_err,
-            panel_psis=pts, resonance_psis=sort(resonance_psis))
+        panel_psis=pts, resonance_psis=sort(resonance_psis))
 end
 
 
@@ -218,9 +220,12 @@ end
 
 Sum per-species [`KineticForcesState`](@ref) results into a single total (τ = Σ_s τ_s). Per
 method: the scalar `total_torque`/`total_energy` are summed exactly; the dT/dψ profile is summed
-by evaluating each species' `torque_profile` interpolant on the sorted union of the species ψ
-grids, and the cumulative T(ψ) is re-integrated (trapezoid) from that summed profile. All species
-share the same ψ-integration range (`ctrl.psilims`), so the grids differ only in adaptive nodes.
+by linearly interpolating each species' own `(psi_grid, dtdpsi)` arrays onto the sorted union of
+the species ψ grids (zero outside a species' range), and the cumulative T(ψ) is re-integrated
+(trapezoid) from that summed profile. All species share the same ψ-integration range
+(`ctrl.psilims`), so the grids differ only in adaptive nodes. The combined `MethodResult` carries
+only the summed scalars and profile; per-species diagnostics (`torque_profile`, `records`,
+`panel_psis`, `resonance_psis`) are not aggregated and are left at their defaults.
 """
 function combine_species_states(states::AbstractVector{KineticForcesState})
     combined = KineticForcesState()
@@ -236,7 +241,9 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
         dtdpsi = zeros(ComplexF64, length(grid))
         for r in results
             length(r.psi_grid) >= 2 || continue
-            o = sortperm(r.psi_grid); xs = r.psi_grid[o]; ys = r.dtdpsi[o]
+            o = sortperm(r.psi_grid)
+            xs = r.psi_grid[o]
+            ys = r.dtdpsi[o]
             for (k, ψ) in enumerate(grid)
                 (ψ < xs[1] || ψ > xs[end]) && continue
                 j = searchsortedlast(xs, ψ)
@@ -274,15 +281,16 @@ For multi-n calculations, loops over toroidal mode numbers and assembles
 block-diagonal kinetic matrices.
 
 # Arguments
-- `state::KineticForcesState`: Accumulates results for all methods
-- `intr::KineticForcesInternal`: Internal state with equilibrium data
-- `ctrl::KineticForcesControl`: Control parameters specifying which methods to run
-- `equil`: PlasmaEquilibrium with 2D interpolants
-- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
+
+  - `state::KineticForcesState`: Accumulates results for all methods
+  - `intr::KineticForcesInternal`: Internal state with equilibrium data
+  - `ctrl::KineticForcesControl`: Control parameters specifying which methods to run
+  - `equil`: PlasmaEquilibrium with 2D interpolants
+  - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
 """
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
-                                     ctrl::KineticForcesControl, equil,
-                                     kinetic_profiles::Equilibrium.KineticProfileSplines)
+    ctrl::KineticForcesControl, equil,
+    kinetic_profiles::Equilibrium.KineticProfileSplines)
 
     for entry in METHOD_REGISTRY
         getfield(ctrl, entry.flag) || continue
@@ -361,7 +369,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             t_cumulative=t_cum_out,
             psi_nsteps=psi_nsteps_total,
             panel_psis=panel_psis_out,
-            resonance_psis=resonance_psis_out,
+            resonance_psis=resonance_psis_out
         )
         state.method_results[method] = result_entry
 

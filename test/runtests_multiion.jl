@@ -1,9 +1,14 @@
+using HDF5
+
 @testset "Multi-ion NTV" begin
     EQ = GeneralizedPerturbedEquilibrium.Equilibrium
     KF = GeneralizedPerturbedEquilibrium.KineticForces
 
     @testset "multi_ion_composition" begin
-        ne = 1.24e20; ni = 1.13e20; zimp = 6; mimp = 12
+        ne = 1.24e20
+        ni = 1.13e20
+        zimp = 6
+        mimp = 12
         # Reduces exactly to the single-ion formula Zeff = zimp - (ni/ne)*zi*(zimp-zi).
         for zi in (1, 2)
             zeff_old = zimp - (ni / ne) * zi * (zimp - zi)
@@ -31,8 +36,11 @@
     @testset "resolve_ntv_species" begin
         # Synthetic ASCII kinetic profile: psi, n_i(total), n_e, T_i, T_e, omega_E.
         psi = collect(0.0:0.05:1.0)
-        Ni = @. 1.0e20 * (1 - 0.5psi); ne = @. 1.1e20 * (1 - 0.5psi)
-        Ti = @. 2000.0 * (1 - 0.5psi); Te = @. 2500.0 * (1 - 0.5psi); wE = @. 1.0e4 * (1 - psi)
+        Ni = @. 1.0e20 * (1 - 0.5psi)
+        ne = @. 1.1e20 * (1 - 0.5psi)
+        Ti = @. 2000.0 * (1 - 0.5psi)
+        Te = @. 2500.0 * (1 - 0.5psi)
+        wE = @. 1.0e4 * (1 - psi)
         f = tempname() * ".txt"
         open(f, "w") do io
             println(io, "# psi ni ne Ti Te wexb")
@@ -43,7 +51,7 @@
 
         # Single species [z=1,m=2,fraction=1] reproduces load_kinetic_profiles.
         single = EQ.load_kinetic_profiles(f; zi=1, zimp=6, mi=2, mimp=12)
-        sp1 = EQ.resolve_ntv_species(f, [KF.IonSpecies(z=1, m=2, fraction=1.0)]; electron=false, zimp=6, mimp=12)
+        sp1 = EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=false, zimp=6, mimp=12)
         main = sp1[1]
         for ψ in (0.3, 0.6)
             @test main.profiles.ni_spline(ψ) ≈ single.ni_spline(ψ) rtol = 1e-8
@@ -52,46 +60,59 @@
         end
 
         # D-T-e set = {D, T, impurity, electron}; ν scales as 1/√m at fixed z, T.
-        sp = EQ.resolve_ntv_species(f, [KF.IonSpecies(z=1, m=2, fraction=0.5), KF.IonSpecies(z=1, m=3, fraction=0.5)];
+        sp = EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, fraction=0.5)];
             electron=true, zimp=6, mimp=12)
         @test length(sp) == 4
         @test count(s -> !s.electron && s.z == 1, sp) == 2   # D, T
         @test any(s -> s.z == 6 && !s.electron, sp)          # impurity
         @test any(s -> s.electron, sp)                       # electron
-        iD = findfirst(s -> s.m == 2, sp); iT = findfirst(s -> s.m == 3, sp)
+        iD = findfirst(s -> s.m == 2, sp)
+        iT = findfirst(s -> s.m == 3, sp)
         @test sp[iD].profiles.nui_spline(0.5) / sp[iT].profiles.nui_spline(0.5) ≈ sqrt(3 / 2) rtol = 1e-6
 
         # Exactly one of {fraction, density} required.
-        @test_throws ErrorException EQ.resolve_ntv_species(f, [KF.IonSpecies(z=1, m=2)]; zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2)]; zimp=6, mimp=12)
         rm(f)
     end
 
     @testset "explicit per-species profiles (HDF5)" begin
         psi = collect(0.0:0.05:1.0)
-        Ni = @. 1.0e20 * (1 - 0.5psi); ne = @. 1.1e20 * (1 - 0.5psi)
-        Ti = @. 2000.0 * (1 - 0.5psi); Te = @. 2500.0 * (1 - 0.5psi); wE = @. 1.0e4 * (1 - psi)
+        Ni = @. 1.0e20 * (1 - 0.5psi)
+        ne = @. 1.1e20 * (1 - 0.5psi)
+        Ti = @. 2000.0 * (1 - 0.5psi)
+        Te = @. 2500.0 * (1 - 0.5psi)
+        wE = @. 1.0e4 * (1 - psi)
         h5 = tempname() * ".h5"
         HDF5.h5open(h5, "w") do file
-            file["psi"] = psi; file["n_e"] = ne; file["T_i"] = Ti; file["T_e"] = Te; file["omega_E"] = wE
-            file["n_i"] = Ni; file["n_D"] = 0.6 .* Ni; file["n_T"] = 0.4 .* Ni     # unequal explicit shapes
+            file["psi"] = psi
+            file["n_e"] = ne
+            file["T_i"] = Ti
+            file["T_e"] = Te
+            file["omega_E"] = wE
+            file["n_i"] = Ni
+            file["n_D"] = 0.6 .* Ni
+            file["n_T"] = 0.4 .* Ni     # unequal explicit shapes
         end
-        sp = EQ.resolve_ntv_species(h5, [KF.IonSpecies(z=1, m=2, density="n_D"), KF.IonSpecies(z=1, m=3, density="n_T")];
+        sp = EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
             electron=false, zimp=6, mimp=12)
-        iD = findfirst(s -> s.m == 2, sp); iT = findfirst(s -> s.m == 3, sp)
+        iD = findfirst(s -> s.m == 2, sp)
+        iT = findfirst(s -> s.m == 3, sp)
         @test sp[iD].profiles.ni_spline(0.5) ≈ 0.6 * 1.0e20 * (1 - 0.25) rtol = 1e-6
         @test sp[iT].profiles.ni_spline(0.5) ≈ 0.4 * 1.0e20 * (1 - 0.25) rtol = 1e-6
         # A missing named profile errors clearly.
-        @test_throws ErrorException EQ.resolve_ntv_species(h5, [KF.IonSpecies(z=1, m=2, density="n_He")]; zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=1, m=2, density="n_He")]; zimp=6, mimp=12)
         rm(h5)
     end
 
     @testset "combine_species_states" begin
         # Combined profile = Σ species dT/dψ interpolated onto the union grid; total = Σ total.
-        mk(psi, dt) = (st = KF.KineticForcesState();
+        mk(psi, dt) = (
+            st = KF.KineticForcesState();
             st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
                 total_torque=ComplexF64(sum(dt)), psi_grid=collect(Float64, psi),
                 dtdpsi=ComplexF64.(dt), t_cumulative=zeros(ComplexF64, length(dt)));
-            st)
+            st
+        )
         s1 = mk(0.0:0.1:1.0, fill(1.0, 11))
         s2 = mk(0.05:0.1:0.95, fill(2.0, 10))     # different (offset) grid
         c = KF.combine_species_states([s1, s2])
