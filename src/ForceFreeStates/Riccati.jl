@@ -99,13 +99,56 @@ This is compatible with downstream code (which uses U₁/U₂ ratio):
 const SAVE_NEAR_END_FRAC = 0.05
 const SAVE_NEAR_END_PSI  = 1e-4
 
-# Absolute error tolerance for the Euler-Lagrange / Riccati solves. The solver's per-component
-# criterion is abstol + reltol*|u|, so leaving abstol at the OrdinaryDiffEq default (1e-6)
-# makes it dominate for every component below abstol/reltol, and the resonant response lives
-# in components of order 1e-6 down to 1e-11 -- those would be integrated with no effective
-# error control at all. Kept far below the smallest physically meaningful component so the
-# configured `eulerlagrange_tolerance` governs the whole solution matrix.
-const EL_ABSTOL = 1e-20
+"""
+    column_abstol!(atol, u, tol) -> atol
+
+Per-solution-column absolute tolerance, matching Fortran DCON `ode_step` (`dcon/ode.f`):
+
+    atol(:,isol,ieq) = max|u(:,isol,ieq)| * tol
+
+with LSODE's `itol=2` (array-valued `atol`). Scaling each column to its own magnitude gives
+every independent solution genuine *relative* error control. A single scalar `abstol` instead
+measures every column against the largest column's scale, so a solution whose entries sit
+orders of magnitude below the matrix norm is left effectively uncontrolled — which is how the
+singular-surface crossing coefficients, spanning ~12 decades, end up below the error floor.
+A zero column is given `floatmax` (Fortran uses `HUGE`) so it never constrains the step.
+
+Recomputed at every accepted step, as the Fortran recomputes it on entry to `ode_step`.
+"""
+function column_abstol!(atol::AbstractArray{<:Real,3}, u::AbstractArray{<:Number,3}, tol::Real)
+    @inbounds for ieq in axes(u, 3), isol in axes(u, 2)
+        peak = 0.0
+        for ipert in axes(u, 1)
+            peak = max(peak, abs(u[ipert, isol, ieq]))
+        end
+        a = peak == 0 ? floatmax(Float64) : peak * tol
+        for ipert in axes(u, 1)
+            atol[ipert, isol, ieq] = a
+        end
+    end
+    return atol
+end
+
+"""
+    column_abstol(u, tol) -> Array{Float64,3}
+
+Allocate and fill a per-column `abstol` array sized to the ODE state `u`. See
+[`column_abstol!`](@ref).
+"""
+column_abstol(u::AbstractArray{<:Number,3}, tol::Real) = column_abstol!(Array{Float64}(undef, size(u)), u, tol)
+
+# Refresh the per-column abstol each accepted step for solves that carry no other callback.
+# `u_modified!(false)` keeps the integrator from invalidating its stage cache — we only read u.
+function _column_abstol_callback(tol::Real)
+    return DiscreteCallback(
+        (u, t, integrator) -> true,
+        function (integrator)
+            column_abstol!(integrator.opts.abstol, integrator.u, tol)
+            u_modified!(integrator, false)
+            return nothing
+        end
+    )
+end
 
 """
     assemble_fm_matrix(propagators, idx_range; condition=false) -> Matrix{ComplexF64}
@@ -952,6 +995,10 @@ function riccati_integrator_callback!(integrator)
         renormalize_riccati_inplace!(integrator.u, intr.numpert_total)
     end
 
+    # Rescale the per-column abstol to the current state, as Fortran ode_step does on entry.
+    # After any renormalization, so the tolerance tracks the rescaled columns.
+    column_abstol!(integrator.opts.abstol, integrator.u, ctrl.eulerlagrange_tolerance)
+
     # Determine if we should save this step. Always save the first 1-2 steps of a segment
     # and the last few steps near the right endpoint (relative band SAVE_NEAR_END_FRAC of the
     # span, or absolute floor SAVE_NEAR_END_PSI for very short chunks); save every save_interval-th
@@ -993,7 +1040,7 @@ function riccati_integrate_chunk!(
     rtol = ctrl.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
                       (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(odet.u, rtol), callback=cb, save_everystep=false, save_end=true)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
     # Renormalize end state to (S, I) convention for the next chunk.
@@ -1360,7 +1407,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u_upper, rtol), callback=_column_abstol_callback(rtol), save_everystep=false, save_end=true)
     prop.block_upper_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept  # thread-local; summed into odet after the BVP barrier
 
@@ -1372,7 +1419,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u_lower, rtol), callback=_column_abstol_callback(rtol), save_everystep=false, save_end=true)
     prop.block_lower_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept
 end
@@ -1432,7 +1479,7 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u0, rtol), callback=_column_abstol_callback(rtol), save_everystep=false, save_end=true)
     result[1:N, 1:N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, 1:N]  .= sol.u[end][:, :, 2]
 
@@ -1442,7 +1489,7 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=EL_ABSTOL, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u0, rtol), callback=_column_abstol_callback(rtol), save_everystep=false, save_end=true)
     result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, N+1:2N]  .= sol.u[end][:, :, 2]
 

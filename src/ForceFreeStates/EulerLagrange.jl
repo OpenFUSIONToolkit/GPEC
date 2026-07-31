@@ -763,6 +763,10 @@ function integrate_el_region!(
             sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
         end
 
+        # Rescale the per-column abstol to the current state, as Fortran ode_step does on entry.
+        # After any Gaussian reduction, so the tolerance tracks the reduced columns.
+        column_abstol!(integrator.opts.abstol, integrator.u, ctrl.eulerlagrange_tolerance)
+
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
@@ -785,7 +789,7 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, abstol=EL_ABSTOL, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, abstol=column_abstol(odet.u, ctrl.eulerlagrange_tolerance), callback=cb, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
