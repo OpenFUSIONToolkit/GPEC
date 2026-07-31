@@ -39,7 +39,7 @@ function compute_plasma_response!(
     nn = ffs_intr.nlow
     vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, vac_data.mthvac, 1, ffs_intr.mlow:ffs_intr.mhigh, [nn])
     wall_nowall = Vacuum.WallShapeSettings(; shape="nowall")
-    _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall; compute_L=true)
+    _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall; compute_Iv=true)
     surface_inductance = calc_surface_inductance(I_v)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 

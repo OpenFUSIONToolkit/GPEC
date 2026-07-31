@@ -377,7 +377,7 @@
                 @test eltype(wv) == ComplexF64
                 @test all(isfinite, wv)
                 @test size(I_v) == (num_modes, num_modes)
-                @test all(iszero, I_v)  # compute_L=false by default
+                @test all(iszero, I_v)  # compute_Iv=false by default
                 @test size(plasma_pts) == (numpoints, 3)
                 @test all(isfinite, plasma_pts)
                 @test size(wall_pts) == (numpoints, 3)
@@ -386,10 +386,10 @@
                 @test isapprox(wv, wv', rtol=1e-12)
             end
 
-            @testset "nowall compute_L=true" begin
+            @testset "nowall compute_Iv=true" begin
                 inputs = _make_inputs()
                 wall_settings = WallShapeSettings(shape="nowall")
-                wv, I_v, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings; compute_L=true)
+                wv, I_v, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
 
                 num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                 @test size(wv) == (num_modes, num_modes)
@@ -441,14 +441,14 @@
                 # in-place entry populates caller-owned duck-typed (NamedTuple) storage identically.
                 for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.5))
                     inputs = _make_inputs()
-                    wv, I_v, pp, wp = compute_vacuum_response(inputs, wall_settings; compute_L=true)
+                    wv, I_v, pp, wp = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
 
                     numpoints = inputs.mtheta * inputs.nzeta
                     num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                     vac = (wv=zeros(ComplexF64, num_modes, num_modes),
                         I_v=zeros(ComplexF64, num_modes, num_modes),
                         plasma_pts=zeros(numpoints, 3), wall_pts=zeros(numpoints, 3))
-                    compute_vacuum_response!(vac, inputs, wall_settings; compute_L=true)
+                    compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv=true)
 
                     @test vac.wv ≈ wv
                     @test vac.I_v ≈ I_v
