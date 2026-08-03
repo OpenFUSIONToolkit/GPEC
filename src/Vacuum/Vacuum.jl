@@ -125,6 +125,7 @@ Green's functions are internal scratch only.
             I_v_block = @view vac_data.I_v[block_idx, block_idx]
             @views g_sum = grre[1:num_points_surf, :] .- grri[1:num_points_surf, :]
             mul!(I_v_block, ft.basis, g_sum)
+            conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
             I_v_block ./= num_points_surf
         else
             # Only need exterior system for wv
