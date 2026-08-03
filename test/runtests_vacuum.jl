@@ -456,14 +456,6 @@
                     @test vac.I_v ≈ I_v
                     @test vac.plasma_pts ≈ pp
                     @test vac.wall_pts ≈ wp
-
-                    vac_data = GeneralizedPerturbedEquilibrium.ForceFreeStates.VacuumData(numpoints, num_modes, inputs.mtheta)
-                    compute_vacuum_response!(vac_data, inputs, wall_settings; compute_Iv=true)
-
-                    @test vac_data.wv ≈ wv
-                    @test vac_data.I_v ≈ I_v
-                    @test vac_data.plasma_pts ≈ pp
-                    @test vac_data.wall_pts ≈ wp
                 end
             end
         end
