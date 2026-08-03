@@ -175,7 +175,7 @@ function compute_singular_coupling_metrics!(
             _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true)
             L_surf = calc_surface_inductance(I_v)
 
-            # Extract the (m_res, m_res) diagonal element is needed for singflx
+            # Only the (m_res, m_res) diagonal element is needed for singflx
             m_idx = m_res - mlow + 1
             L_mm = L_surf[m_idx, m_idx]
 

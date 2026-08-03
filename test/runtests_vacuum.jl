@@ -438,7 +438,9 @@
 
             @testset "in-place compute_vacuum_response! matches wrapper" begin
                 # The allocating wrapper is a thin caller of the in-place routine; verify the
-                # in-place entry populates caller-owned duck-typed (NamedTuple) storage identically.
+                # in-place entry populates caller-owned storage identically. Both a duck-typed
+                # NamedTuple and the real ForceFreeStates.VacuumData are exercised, so the
+                # struct is kept in sync with the documented field contract.
                 for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.5))
                     inputs = _make_inputs()
                     wv, I_v, pp, wp = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
@@ -454,6 +456,14 @@
                     @test vac.I_v ≈ I_v
                     @test vac.plasma_pts ≈ pp
                     @test vac.wall_pts ≈ wp
+
+                    vac_data = GeneralizedPerturbedEquilibrium.ForceFreeStates.VacuumData(numpoints, num_modes, inputs.mtheta)
+                    compute_vacuum_response!(vac_data, inputs, wall_settings; compute_Iv=true)
+
+                    @test vac_data.wv ≈ wv
+                    @test vac_data.I_v ≈ I_v
+                    @test vac_data.plasma_pts ≈ pp
+                    @test vac_data.wall_pts ≈ wp
                 end
             end
         end

@@ -180,7 +180,7 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
-    fill!(vac_data.I_v, 0)
+    compute_Iv && fill!(vac_data.I_v, 0)
 
     compute_Iv && @warn "compute_Iv=true is not supported for 3D vacuum response; I_v left as zeros" maxlog=1
 
