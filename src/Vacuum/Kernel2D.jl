@@ -215,9 +215,7 @@ grad_greenfunction is not zeroed since it fills a different block of the
     end
 
     # Normals need to point outward from vacuum region. In VACUUM clockwise θ convention, normal points
-    # out of vacuum for wall but inward for plasma, so we multiply by -1 for plasma sources.
-    # This normal orientation sets the sign of the surface current K = n̂×∇χ (Chance 1997 eq. 184),
-    # and is the origin of the leading minus in the current-matrix build.
+    # out of vacuum for wall but inward for plasma, so we multiply by -1 for plasma sources
     if source isa PlasmaGeometry
         grad_greenfunction_block .*= -1
     end
