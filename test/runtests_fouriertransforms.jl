@@ -1,20 +1,13 @@
 # Unit tests for the high-level FourierTransform functor interface in
-# src/Utilities/FourierTransforms.jl. The low-level fourier_transform! /
-# fourier_inverse_transform! matrix kernels are already covered in
-# runtests_utilities.jl; this file targets the functor, inverse, in-place,
-# and compute_fourier_coefficients paths.
-#
-# Expected mode amplitudes follow from grid orthogonality under the module's
-# exp(-imθ), 1/N forward convention (Fortran iscdftf): on the uniform grid
-# θ_i = 2π(i-1)/N, cos(m0θ) → 0.5 at ±m0, sin(m0θ) → ∓0.5im at ±m0.
+# src/Utilities/FourierTransforms.jl.
 
-using GeneralizedPerturbedEquilibrium.Utilities: FourierTransform, inverse, transform!, inverse_transform!, compute_fourier_coefficients
+using GeneralizedPerturbedEquilibrium.Utilities: FourierTransform, inverse, compute_fourier_coefficients
 using GeneralizedPerturbedEquilibrium.Utilities: empty_FourierCoefficients
 
 const ATOL = 1e-10        # analytic-value comparisons
 const ATOL_TIGHT = 1e-12  # in-place vs allocating / formula-vs-formula checks
 
-@testset "FourierTransform functor" begin
+@testset "FourierTransform" begin
     atol = ATOL
 
     # Mode index l for mode number m (m = mlow + l - 1).
@@ -82,92 +75,34 @@ const ATOL_TIGHT = 1e-12  # in-place vs allocating / formula-vs-formula checks
         @test isapprox(modes[midx(5, mlow), 2], -0.5im; atol)
         @test isapprox(modes[midx(-5, mlow), 2], 0.5im; atol)
     end
-
-    @testset "real-mode inverse is a pure cosine expansion" begin
-        N, mlow, mpert = 32, -4, 9
-        ft = FourierTransform(N, mpert, mlow)
-        θ = collect(range(; start=0, length=N, step=2π/N))
-
-        # A single real mode at m reconstructs (2π/N)·cos(mθ).
-        modes = zeros(Float64, mpert)
-        modes[midx(2, mlow)] = 1.0
-        recon = inverse(ft, modes)
-        @test all(isapprox.(recon, (2π / N) .* cos.(2 .* θ); atol))
-    end
-end
-
-@testset "FourierTransform in-place == allocating" begin
-    atol = ATOL_TIGHT
-    N, mlow, mpert = 32, -6, 13
-    ft = FourierTransform(N, mpert, mlow)
-    θ = collect(range(; start=0, length=N, step=2π/N))
-
-    @testset "transform! (vector)" begin
-        data_r = cos.(2 .* θ) .+ 0.3 .* sin.(4 .* θ)
-        out = zeros(ComplexF64, mpert)
-        transform!(out, ft, data_r)
-        @test all(isapprox.(out, ft(data_r); atol))
-
-        data_c = data_r .+ im .* sin.(3 .* θ)
-        transform!(out, ft, data_c)
-        @test all(isapprox.(out, ft(data_c); atol))
-    end
-
-    @testset "transform! (matrix)" begin
-        data = hcat(cos.(2 .* θ), sin.(3 .* θ), cos.(5 .* θ))
-        out = zeros(ComplexF64, mpert, size(data, 2))
-        transform!(out, ft, data)
-        @test all(isapprox.(out, ft(data); atol))
-
-        datac = ComplexF64.(data) .+ im
-        transform!(out, ft, datac)
-        @test all(isapprox.(out, ft(datac); atol))
-    end
-
-    @testset "inverse_transform!" begin
-        modes_v = ComplexF64[Float64(l) - im * l for l in 1:mpert]
-        out_v = zeros(ComplexF64, N)
-        inverse_transform!(out_v, ft, modes_v)
-        @test all(isapprox.(out_v, inverse(ft, modes_v); atol))
-
-        modes_m = reshape(modes_v, mpert, 1) .* [1.0 -2.0im]
-        out_m = zeros(ComplexF64, N, 2)
-        inverse_transform!(out_m, ft, modes_m)
-        @test all(isapprox.(out_m, inverse(ft, modes_m); atol))
-    end
 end
 
 @testset "compute_fourier_coefficients" begin
     atol = ATOL_TIGHT
 
-    @testset "2D basis is cos(mθ - nν)/sin(mθ - nν)" begin
-        # Nonzero n and ν exercise the general phase-shifted form and lock both the
-        # grid convention (start=0, step=2π/N) and the -n·ν sign.
+    @testset "2D basis is exp(-i(mθ - nν))" begin
         N, mlow, mpert = 32, -3, 7
+        m_modes = mlow:(mlow+mpert-1)
         n = 2
         ν = collect(range(; start=0.0, length=N, step=0.05))
-        cosb, sinb = compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=n, ν=ν)
-        @test size(cosb) == (N, mpert)
-        @test size(sinb) == (N, mpert)
+        basis = compute_fourier_coefficients(N, m_modes, n, ν)
+        @test size(basis) == (mpert, N)
 
         θ = collect(range(; start=0, length=N, step=2π/N))
-        for (l, m) in enumerate(mlow:(mlow+mpert-1))
-            @test all(isapprox.(cosb[:, l], cos.(m .* θ .- n .* ν); atol))
-            @test all(isapprox.(sinb[:, l], sin.(m .* θ .- n .* ν); atol))
+        for (l, m) in enumerate(m_modes)
+            expected = exp.(-im .* (m .* θ .- n .* ν))
+            @test all(isapprox.(basis[l, :], expected; atol))
         end
 
-        # The FourierTransform constructor stores exactly the n=0, ν=0 basis.
         ft = FourierTransform(N, mpert, mlow)
-        @test ft.cslth == compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=0, ν=zeros(N))[1]
-        @test ft.snlth == compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=0, ν=zeros(N))[2]
+        @test ft.basis == compute_fourier_coefficients(N, m_modes, 0, zeros(N))
     end
 
     @testset "3D basis shapes" begin
         mtheta, mpert, mlow = 8, 5, -2
         nzeta, npert, nlow = 6, 3, -1
-        cosb, sinb = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow)
-        @test size(cosb) == (mtheta * nzeta, mpert * npert)
-        @test size(sinb) == (mtheta * nzeta, mpert * npert)
+        basis = compute_fourier_coefficients(mtheta, mlow:(mlow+mpert-1), nzeta, nlow:(nlow+npert-1))
+        @test size(basis) == (mpert * npert, mtheta * nzeta)
     end
 end
 
