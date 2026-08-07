@@ -169,6 +169,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+    odet.du_store_populated = true
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
@@ -635,18 +636,10 @@ function cross_ideal_singular_surf!(
     # so the result is in a different convention. The canonical Δ' is the STRIDE BVP matrix
     # (compute_delta_prime_matrix!) populated by the parallel FM path.
 
-    # Recompute ud from the final post-crossing u so ud_store is consistent with u_store.
-    # The earlier sing_der! calls computed du from the pre-trapezoidal, pre-asymptotic u,
-    # leaving odet.ud stale after the u modifications above.
     sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store values after crossing step and advance
-    odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
-    odet.du_store[:, :, :, odet.step] = du1
-    odet.step += 1
+    store_ode_data!(odet, odet.psifac, odet.u)
 end
 
 """
@@ -686,19 +679,11 @@ function cross_kinetic_singular_surf!(
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
 
-    # Recompute ud for storage consistency
+    # re-evaluate at the final post-crossing u so the stored derivatives match u_store
     sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store crossing step
-    if odet.step >= size(odet.u_store, 4)
-        resize_storage!(odet)
-    end
-    odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
-    odet.du_store[:, :, :, odet.step] = du1
-    odet.step += 1
+    store_ode_data!(odet, odet.psifac, odet.u)
 end
 
 
@@ -768,18 +753,8 @@ function integrate_el_region!(
         in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
 
         if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
-            if odet.step >= size(odet.u_store, 4)
-                resize_storage!(odet)
-            end
             sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
-            odet.psi_store[odet.step] = integrator.t
-            @views odet.u_store[:, :, :, odet.step] .= integrator.u
-            odet.q_store[odet.step] = odet.q
-            @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-            @views odet.du_store[:, :, :, odet.step] .= du_buffer
-            odet.step += 1
-        elseif odet.new
-            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+            store_ode_data!(odet, integrator.t, integrator.u)
         end
     end
 
@@ -791,16 +766,8 @@ function integrate_el_region!(
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
     # regardless of where the last accepted step landed relative to the near_end band.
     if odet.step == 1 || odet.psi_store[odet.step-1] != sol.t[end]
-        if odet.step >= size(odet.u_store, 4)
-            resize_storage!(odet)
-        end
         sing_der!(du_buffer, sol.u[end], (ctrl, equil, ffit, intr, odet, chunk), sol.t[end])
-        odet.psi_store[odet.step] = sol.t[end]
-        @views odet.u_store[:, :, :, odet.step] .= sol.u[end]
-        odet.q_store[odet.step] = odet.q
-        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-        @views odet.du_store[:, :, :, odet.step] .= du_buffer
-        odet.step += 1
+        store_ode_data!(odet, sol.t[end], sol.u[end])
     end
 
     odet.u .= sol.u[end]
@@ -1033,14 +1000,12 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             odet.u_store[:, :, 1, istep] .= gauss_buffer
             mul!(gauss_buffer, odet.u_store[:, :, 2, istep], transforms[:, :, ifix])
             odet.u_store[:, :, 2, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.ud_store[:, :, 1, istep], transforms[:, :, ifix])
-            odet.ud_store[:, :, 1, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.ud_store[:, :, 2, istep], transforms[:, :, ifix])
-            odet.ud_store[:, :, 2, istep] .= gauss_buffer
             mul!(gauss_buffer, odet.du_store[:, :, 1, istep], transforms[:, :, ifix])
             odet.du_store[:, :, 1, istep] .= gauss_buffer
             mul!(gauss_buffer, odet.du_store[:, :, 2, istep], transforms[:, :, ifix])
             odet.du_store[:, :, 2, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.xi_s_store[:, :, istep], transforms[:, :, ifix])
+            odet.xi_s_store[:, :, istep] .= gauss_buffer
         end
         jfix = kfix + 1
     end

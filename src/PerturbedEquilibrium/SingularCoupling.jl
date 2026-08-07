@@ -44,31 +44,55 @@ end
 _reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
 
 """
-    _solution_at(psi, psi_surf, odet, equil, ffs_intr, nstep) -> (u1, du1)
+    _chord_solution_at(psi, resnum, odet, nstep) -> (u, du)
 
-Evaluate Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution: cubic Hermite for the value,
-Lagrange cubic through the singfac-weighted `du_store` nodes for the derivative. Works for
-any formulation; ideal runs use the more accurate `_el_solution_at`. The Ξ′ stencil stays
-on `psi`'s side of the singular surface `psi_surf`, where the stored solution is
-discontinuous. Requires a populated `odet.du_store`.
+Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution:
+cubic Hermite for the value, chord slope across the bracketing nodes for the derivative.
+Least accurate method, kept for solution paths outside the serial EL integrator
+(gal-matched, Riccati) whose stored derivatives cover only Ξ′.
+"""
+function _chord_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
+    il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
+    psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
+
+    u_a = odet.u_store[resnum, :, 1, il]
+    u_b = odet.u_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, 1, il]
+    du_b = odet.du_store[resnum, :, 1, ir]
+
+    u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
+    du_e = (u_b .- u_a) ./ (psi_b - psi_a)
+    return u_e, du_e
+end
+
+"""
+    _solution_at(psi, psi_surf, resnum, m_res, nn, odet, equil, nstep) -> (u, du)
+
+Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution:
+cubic Hermite for the value, Lagrange cubic through the singfac-weighted `du_store`
+nodes for the derivative. Works for any formulation; ideal runs use the more accurate
+`_el_solution_at`. The Ξ′ stencil stays on `psi`'s side of the singular surface
+`psi_surf`, where the stored solution is discontinuous.
 """
 function _solution_at(
     psi::Float64,
     psi_surf::Float64,
+    resnum::Int,
+    m_res::Int,
+    nn::Int,
     odet::OdeState,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal,
     nstep::Int
 )
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
 
-    u1_a = @view odet.u_store[:, :, 1, il]
-    u1_b = @view odet.u_store[:, :, 1, ir]
-    du1_a = @view odet.du_store[:, :, 1, il]
-    du1_b = @view odet.du_store[:, :, 1, ir]
+    u_a = odet.u_store[resnum, :, 1, il]
+    u_b = odet.u_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, 1, il]
+    du_b = odet.du_store[resnum, :, 1, ir]
 
-    u1_e = _hermite_cubic_val(u1_a, u1_b, du1_a, du1_b, psi_a, psi_b, psi)
+    u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
 
     # Same-side candidate nodes around the bracket, trimmed to the 4 nearest psi.
     side = sign(psi - psi_surf)
@@ -78,31 +102,32 @@ function _solution_at(
     end
 
     # Interpolate singfac·Ξ′ and divide the ~1/singfac pole back out at psi.
-    singfac_at(p) = vec([m - equil.profiles.q_spline(p) * n for m in ffs_intr.mlow:ffs_intr.mhigh, n in ffs_intr.nlow:ffs_intr.nhigh])
-    du1_e = zeros(ComplexF64, size(odet.du_store, 1), size(odet.du_store, 2))
+    singfac(p) = m_res - nn * equil.profiles.q_spline(p)
+    du_e = zeros(ComplexF64, size(odet.du_store, 2))
     for k in eachindex(idxs)
         w = 1.0
         for j in eachindex(idxs)
             j == k && continue
             w *= (psi - odet.psi_store[idxs[j]]) / (odet.psi_store[idxs[k]] - odet.psi_store[idxs[j]])
         end
-        du1_e .+= (w .* singfac_at(odet.psi_store[idxs[k]])) .* @view(odet.du_store[:, :, 1, idxs[k]])
+        du_e .+= (w * singfac(odet.psi_store[idxs[k]])) .* @view(odet.du_store[resnum, :, 1, idxs[k]])
     end
-    du1_e ./= singfac_at(psi)
+    du_e ./= singfac(psi)
 
-    return u1_e, du1_e
+    return u_e, du_e
 end
 
 """
-    _el_solution_at(psi, odet, ffit, equil, ffs_intr, nstep) -> (u1, du1)
+    _el_solution_at(psi, resnum, odet, ffit, equil, ffs_intr, nstep) -> (u, du)
 
-Evaluate Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution via the ideal Euler-Lagrange
-relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) [Glasser 2016 eqs. 22-24], with u₁, u₂ Hermite-
-interpolated to `psi`. Only valid for ideal runs where `ffit.fmats_lower` and `kmats`
-generated the solution. Requires a populated `odet.du_store`.
+Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution via the
+ideal Euler-Lagrange relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) [Glasser 2016 eqs. 22-24],
+with u₁, u₂ Hermite-interpolated to `psi`. Only valid for ideal runs where
+`ffit.fmats_lower` and `kmats` generated the solution.
 """
 function _el_solution_at(
     psi::Float64,
+    resnum::Int,
     odet::OdeState,
     ffit::FourFitVars,
     equil::Equilibrium.PlasmaEquilibrium,
@@ -140,7 +165,7 @@ function _el_solution_at(
     ldiv!(UpperTriangular(fmat_lower'), du1_e)
     du1_e .*= singfac_inv
 
-    return u1_e, du1_e
+    return u1_e[resnum, :], du1_e[resnum, :]
 end
 
 """
@@ -259,11 +284,10 @@ function compute_singular_coupling_metrics!(
     # a `finally` so an exception in the loop cannot leak the pinned count into the session. The
     # loop is top-level: its threadid()-indexed state must never be nested inside another
     # @threads region.
-    psi_store_all = ForceFreeStates_results.psi_store
     nstep = ForceFreeStates_results.step
     # ξ′ evaluation preference: ideal EL relation, then interpolated stored RHS for kinetic,
-    # then chord slope for paths that never populate du_store like the gal-matched odet.
-    use_du_store = any(!iszero, ForceFreeStates_results.du_store)
+    # then chord slope for solution paths outside the serial EL integrator.
+    use_du_store = ForceFreeStates_results.du_store_populated
     use_el = use_du_store && !ffit.kinetic_populated
     _blas_nthreads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
@@ -309,43 +333,17 @@ function compute_singular_coupling_metrics!(
 
             # Evaluate u and dξ/dψ at lpsi and rpsi from the stored ODE solution
             if !use_du_store
-                il_l, ir_l, _ = _psi_bracket(psi_store_all, lpsi, nstep)
-                il_r, ir_r, _ = _psi_bracket(psi_store_all, rpsi, nstep)
-
-                u_node = ForceFreeStates_results.u_store
-                ud_node = ForceFreeStates_results.ud_store
-                ua_l = u_node[resnum, :, 1, il_l]
-                ub_l = u_node[resnum, :, 1, ir_l]
-                ua_r = u_node[resnum, :, 1, il_r]
-                ub_r = u_node[resnum, :, 1, ir_r]
-                dua_l = ud_node[resnum, :, 1, il_l]
-                dub_l = ud_node[resnum, :, 1, ir_l]
-                dua_r = ud_node[resnum, :, 1, il_r]
-                dub_r = ud_node[resnum, :, 1, ir_r]
-
-                psi_il_l = psi_store_all[il_l]
-                psi_ir_l = psi_store_all[ir_l]
-                psi_il_r = psi_store_all[il_r]
-                psi_ir_r = psi_store_all[ir_r]
-
-                u_l = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
-                u_r = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
-                ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
-                ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
+                # interpolate u and finite-difference dξ/dψ across the bracketing nodes
+                u_l, ud_l = _chord_solution_at(lpsi, resnum, ForceFreeStates_results, nstep)
+                u_r, ud_r = _chord_solution_at(rpsi, resnum, ForceFreeStates_results, nstep)
             elseif use_el
-                u1m_l, du1m_l = _el_solution_at(lpsi, ForceFreeStates_results, ffit, equil, ffs_intr, nstep)
-                u1m_r, du1m_r = _el_solution_at(rpsi, ForceFreeStates_results, ffit, equil, ffs_intr, nstep)
-                u_l = u1m_l[resnum, :]
-                u_r = u1m_r[resnum, :]
-                ud_l = du1m_l[resnum, :]
-                ud_r = du1m_r[resnum, :]
+                # interpolate u and evaluate dξ/dψ from the ideal EL relation
+                u_l, ud_l = _el_solution_at(lpsi, resnum, ForceFreeStates_results, ffit, equil, ffs_intr, nstep)
+                u_r, ud_r = _el_solution_at(rpsi, resnum, ForceFreeStates_results, ffit, equil, ffs_intr, nstep)
             else
-                u1m_l, du1m_l = _solution_at(lpsi, sing_surf.psifac, ForceFreeStates_results, equil, ffs_intr, nstep)
-                u1m_r, du1m_r = _solution_at(rpsi, sing_surf.psifac, ForceFreeStates_results, equil, ffs_intr, nstep)
-                u_l = u1m_l[resnum, :]
-                u_r = u1m_r[resnum, :]
-                ud_l = du1m_l[resnum, :]
-                ud_r = du1m_r[resnum, :]
+                # interpolate u and the stored dξ/dψ, weighted to remove the resonant pole
+                u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, ForceFreeStates_results, equil, nstep)
+                u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, ForceFreeStates_results, equil, nstep)
             end
 
             q_l = equil.profiles.q_spline(lpsi)
@@ -358,7 +356,6 @@ function compute_singular_coupling_metrics!(
             jump_vec = Vector{ComplexF64}(undef, numpert_total)
             for k in 1:numpert_total
                 ck = @view C_coeffs[:, k]
-                # unconjugated contraction, dot would conjugate u
                 xsp_l = transpose(u_l) * ck
                 xsp1_l = transpose(ud_l) * ck
                 xsp_r = transpose(u_r) * ck

@@ -30,7 +30,7 @@ end
 
 Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
 in the Fortran code, except now all data is passed in memory instead of via files. This
-modifies `odet` in place to normalize the eigenfunctions stored in `u_store` and `ud_store`,
+modifies `odet` in place to normalize the eigenfunctions stored in `u_store`, `du_store`, and `xi_s_store`,
 and returns a `VacuumData` struct containing the data needed for perturbed equilibrium calculations
 and data dumping.
 """
@@ -126,14 +126,12 @@ and data dumping.
         odet.u_store[:, :, 1, istep] .= tmp_mat
         mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
         odet.u_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 1, istep], coeffs)
-        odet.ud_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 2, istep], coeffs)
-        odet.ud_store[:, :, 2, istep] .= tmp_mat
         mul!(tmp_mat, odet.du_store[:, :, 1, istep], coeffs)
         odet.du_store[:, :, 1, istep] .= tmp_mat
         mul!(tmp_mat, odet.du_store[:, :, 2, istep], coeffs)
         odet.du_store[:, :, 2, istep] .= tmp_mat
+        mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
+        odet.xi_s_store[:, :, istep] .= tmp_mat
     end
 
     # Write energies to screen

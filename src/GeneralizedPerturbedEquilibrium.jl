@@ -737,8 +737,8 @@ function write_outputs_to_HDF5(
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
         out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
-        out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
+        out_h5["integration/dxi_psi"] = odet.du_store[:, :, 1, :]
+        out_h5["integration/xi_s"] = odet.xi_s_store
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
