@@ -1,8 +1,7 @@
 # Reference.jl
 #
 # Hard-coded benchmark parameter sets for cross-validation of the GGJ
-# inner-layer solvers. Values are taken from published papers and the
-# corresponding Fortran RMATCH test cases.
+# inner-layer solvers. Values are taken from published papers.
 
 """
     glasser_wang_2020_eq55() -> GGJParameters
@@ -15,8 +14,8 @@ only for benchmarking the galerkin solver and comparing to published results.
 The five coefficients below are transcribed verbatim from Eq. 55; the paper's
 companion operating point is the scaled growth rate `Q = 1.234e-1` (their Fig. 1).
 Note Eq. 55 does not tabulate an inner-region matching `Δ(Q)` — its `Δ_±` (Eq. 54)
-is a convergence-error norm — so a quantitative `Δ(Q)` cross-check needs a Fortran
-rmatch/INPS run, not this paper alone.
+is a convergence-error norm — so a quantitative `Δ(Q)` cross-check needs an
+independent inner-layer reference, not this paper alone.
 
 Timescale parameters (taua, taur, v1) are set to canonical normalization;
 callers should override them for physical cases.

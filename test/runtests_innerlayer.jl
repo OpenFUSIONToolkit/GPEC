@@ -40,12 +40,14 @@ const GGJ = IL.GGJ
         γ = Q_paper * GGJ.q0(p)
         @test GGJ.inner_Q(p, γ) ≈ Q_paper rtol = 1e-12
         Δ = IL.solve_inner(gal, p, γ)
-        @test all(isfinite, Δ)
-        # Δ is purely real at this real Q; values cross-checked against Fortran rmatch deltac
-        # (inps basis) — the two independent codes agree to ~1e-8. rtol absorbs cross-platform jitter.
-        @test real(Δ[1]) ≈ 3.698368e4 rtol = 1e-3
-        @test real(Δ[2]) ≈ 14.759721 rtol = 1e-3
-        @test abs(imag(Δ[1])) < 1e-3 * abs(Δ[1])
-        @test abs(imag(Δ[2])) < 1e-3 * abs(Δ[2])
+        @test all(isfinite, (Δ.tearing, Δ.interchange))
+        # Δ is purely real at this real Q; values cross-checked against an independent
+        # inner-layer reference — the two codes agree to ~1e-8. rtol absorbs cross-platform jitter.
+        # `solve_inner` returns the named-field `InnerLayerResponse`; the interchange branch is
+        # the large root, the tearing branch the small one.
+        @test real(Δ.interchange) ≈ 3.698368e4 rtol = 1e-3
+        @test real(Δ.tearing) ≈ 14.759721 rtol = 1e-3
+        @test abs(imag(Δ.interchange)) < 1e-3 * abs(Δ.interchange)
+        @test abs(imag(Δ.tearing)) < 1e-3 * abs(Δ.tearing)
     end
 end
