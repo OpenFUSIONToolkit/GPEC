@@ -6,6 +6,14 @@ SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
 contour-intersection root extraction), and `Runner` (user-facing TOML
 configuration, profile loading, and HDF5 output).
 
+## Layer Inputs
+
+Equilibrium/ForceFreeStates glue that assembles per-surface inner-layer inputs.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing]
+```
+
 ## InnerLayer
 
 ```@autodocs

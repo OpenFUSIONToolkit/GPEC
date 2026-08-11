@@ -135,8 +135,8 @@ is built from, retained as a drift-scale reference.
   - `ising`, `m`, `n` -- surface index and mode numbers (traceability)
   - `dels_db`   -- dimensionless `δ_s / d_β` from [`riccati_del_s`](@ref)
   - `delta_s`   -- complex layer thickness `δ_s = dels_db · d_β` [m]
-  - `delta_s_m` -- `|δ_s|`, the resistive layer thickness [m] (primary)
-  - `d_beta`    -- β-weighted ion scale `c_β·d_i` [m] (drift reference)
+  - `delta_s_m` -- `|δ_s|`, the resistive layer thickness in meters (primary)
+  - `d_beta`    -- β-weighted ion scale `c_β·d_i` in meters (drift reference)
 
 `delta_s_m` should sit within a few orders of magnitude of `d_beta` for a
 well-posed surface (`dels_db` is O(1)); a large gap flags a normalisation

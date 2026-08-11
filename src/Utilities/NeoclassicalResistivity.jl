@@ -156,7 +156,7 @@ Electron-electron collision time per Fitzpatrick TJ LayerParameters.tex Eq. 7:
 τ_ee = 6√2 π^1.5 ε₀² √m_e T_e^1.5 / (lnΛ e^2.5 n_e)
 ```
 
-`n_e` [m⁻³], `T_e` [eV] (the `e^2.5` denominator absorbs the eV→J
+`n_e` in m⁻³, `T_e` in eV (the `e^2.5` denominator absorbs the eV→J
 conversion). `lnLamb` defaults to `coulomb_log_e(n_e, T_e)` (NRL).
 """
 function tau_ee_spitzer_harm(n_e::Real, T_e::Real;
