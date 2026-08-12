@@ -144,10 +144,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `nhigh::Int` - Highest toroidal mode number, resolved from `ctrl.nn_low`/`nn_high`
   - `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
   - `numpert_total::Int` - Total number of modes (mpert × npert)
-  - `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
-  - `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
-  - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
-  - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
   - `kmsing::Int` - Number of kinetic singular surfaces (det(F̄) near-zeros)
   - `sing::Vector{SingType}` - Vector of ideal singular surface data
@@ -169,10 +165,6 @@ A mutable struct holding internal state variables for stability calculations.
     nhigh::Int = 0
     npert::Int = 0
     numpert_total::Int = 0
-    keq_out::Bool = false
-    theta_out::Bool = false
-    xlmda_out::Bool = false
-    sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
     sing::Vector{SingType} = SingType[]
