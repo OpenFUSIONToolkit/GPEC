@@ -44,9 +44,9 @@ end
 """
     store_ode_data!(odet::OdeState, psi::Float64, u)
 
-Save the current integration state at `psi`: `u` plus `odet.q` from the latest `sing_der!`
-call. Derivatives are not stored — `materialize_derivative_stores!` recomputes them from
-`(psi_store, u_store)` after integration, where they are actually consumed.
+Save the current integration state at `psi`: `u` plus `odet.q`, which callers set for the
+accepted point. Derivatives are not stored — `materialize_derivative_stores!` recomputes
+them from `(psi_store, u_store)` after integration, where they are actually consumed.
 """
 function store_ode_data!(odet::OdeState, psi::Float64, u)
     if odet.step >= size(odet.u_store, 4)

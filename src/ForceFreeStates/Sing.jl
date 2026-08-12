@@ -1296,7 +1296,7 @@ end
 
 Evaluate Ξ_s = -A⁻¹(B·Ξ′_ψ + C·Ξ_ψ) [Glasser Phys. Plasmas 2016 112506 eq. 18] at `psieval`,
 writing into `xi_s`. `du1` and `u1` are the Ξ′_ψ and Ξ_ψ blocks at the same ψ, i.e. slices of a
-[`sing_der!`](@ref) result and its input state.
+`el_derivatives!` result and its input state.
 
 Split out of the derivative kernel because Ξ_s is needed only at saved nodes, not at every
 Runge-Kutta stage. Ideal runs factor the Hermitian A by Cholesky; with `kinetic=true` A picks up
