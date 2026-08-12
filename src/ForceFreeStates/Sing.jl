@@ -122,19 +122,19 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # cutoff depends on which n is used, so it isn't well-defined. Single-n with nn_low <= 0
     # (e.g. uninitialized default) is also skipped because the formula divides by nn_low.
     # Both cases fall back to qhigh / psihigh truncation with a warning.
-    if ctrl.set_psilim_via_dmlim && ctrl.nn_low != ctrl.nn_high
-        @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(ctrl.nn_low), nn_high=$(ctrl.nn_high)); falling back to qhigh / psihigh truncation."
-    elseif ctrl.set_psilim_via_dmlim && ctrl.nn_low <= 0
-        @warn "set_psilim_via_dmlim = true requires nn_low > 0; got nn_low=$(ctrl.nn_low). Falling back to qhigh / psihigh truncation."
+    if ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
+        @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
+    elseif ctrl.set_psilim_via_dmlim && intr.nlow <= 0
+        @warn "set_psilim_via_dmlim = true requires nn_low > 0; got nn_low=$(intr.nlow). Falling back to qhigh / psihigh truncation."
     elseif ctrl.set_psilim_via_dmlim
         @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
-        ctrl.dmlim = mod(ctrl.dmlim, 1.0)
-        intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
+        dmlim = mod(ctrl.dmlim, 1.0)
+        intr.qlim = (trunc(Int, intr.nlow * intr.qlim) + dmlim) / intr.nlow
 
         # Reduce qlim if above qmax
         while intr.qlim > equil.params.qmax
-            intr.qlim -= 1.0 / ctrl.nn_low
+            intr.qlim -= 1.0 / intr.nlow
         end
     end
 
