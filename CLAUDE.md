@@ -22,16 +22,22 @@ GPEC (Generalized Perturbed Equilibrium Code, Julia implementation) is a compreh
 # Run all tests
 julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(); include("test/runtests.jl")'
 
-# Run specific test file
-julia --project=. test/runtests.jl test/runtests_solovev.jl
+# Run specific test file — the argument is included relative to test/, so pass the bare
+# filename, not a path prefixed with test/
+julia --project=. test/runtests.jl runtests_sing.jl
 
-# Available test files:
+# Run the suite multi-threaded (the parallel FM/BVP paths reduce to their serial form at one
+# thread, so a single-threaded run never exercises threaded execution)
+julia -t 4 --project=. test/runtests.jl
 
-# - test/runtests_vacuum_julia.jl   # Julia vacuum module
-# - test/runtests_solovev.jl        # Analytical equilibrium
-# - test/runtests_ode.jl            # ODE integration
-# - test/runtests_sing.jl           # Singular surface handling
-# - test/runtests_fullruns.jl       # End-to-end tests
+# A few of the available test files (see test/runtests.jl for the full list):
+
+# - test/runtests_vacuum.jl             # Vacuum module
+# - test/runtests_equil.jl              # Equilibrium reconstruction
+# - test/runtests_sing.jl               # Singular surface handling
+# - test/runtests_parallel_integration.jl  # Parallel FM integration and BVP Delta'
+# - test/runtests_thread_invariance.jl  # Parallel-vs-serial equivalence
+# - test/runtests_fullruns.jl           # End-to-end tests
 ```
 
 ### Building Documentation

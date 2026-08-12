@@ -86,11 +86,17 @@ jobs:
           fi
 
   test:
-    name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    # The job name must stay byte-identical for the single-threaded legs: branch protection
+    # names these contexts as required checks, so renaming them would leave every pull request
+    # waiting forever on a status that never reports. The multi-threaded leg gets a distinct
+    # name and is therefore additive rather than breaking.
+    name: runtests ${{ matrix.version }} - ${{ matrix.os }}${{ matrix.threads != '1' && format(' ({0} threads)', matrix.threads) || '' }}
     needs: changes
     if: needs.changes.outputs.julia == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    env:
+      JULIA_NUM_THREADS: ${{ matrix.threads }}
     strategy:
       fail-fast: false
       matrix:
@@ -99,6 +105,16 @@ jobs:
           - '1.x'  # latest (currently 1.12)
         os:
           - ubuntu-latest
+        threads:
+          - '1'
+        include:
+          # The parallel FM/BVP paths degenerate to their serial form when
+          # effective_threads = min(nthreads, parallel_threads) collapses to 1, so a
+          # single-threaded matrix never exercises threaded execution at all. This leg runs the
+          # suite multi-threaded, which is what makes the thread-invariance tests meaningful.
+          - version: '1.11'
+            os: ubuntu-latest
+            threads: '4'
 
     env:
       DEPOT_PATHS: |
