@@ -639,27 +639,29 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n),
     uselegacygreenfunction::Bool=false
 )
-
     x_obs2 = x_obs^2
     x_source2 = x_source^2
     x_minus2 = (x_obs - x_source)^2
     x_multiple = x_obs * x_source
-    ζ = (z_obs - z_source)
+    ζ = z_obs - z_source
     ζ2 = ζ^2
 
     ρ2 = x_minus2 + ζ2
-
-    # Distance parameter ℛ [Chance Phys. Plasmas 1997 2161 eq. 41]
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
     R2 = sqrt(R4)
     R = sqrt(R2)
     R5 = R4 * R
 
-    # Argument of Legendre function 𝘴 [Chance Phys. Plasmas 1997 2161 eq. 42]
-    s = (x_obs2 + x_source2 + ζ2) / R2
+    S = x_obs2 + x_source2 + ζ2
+    a = x_obs2 - x_source2
+    D = a + ζ2            # x_obs2 - x_source2 + ζ2
+    E = ζ2 - a             # x_source2 - x_obs2 + ζ2
+    fourXmult = 4 * x_multiple
+    twoXobsD  = 2 * x_obs * D
+    xSourceE  = x_source * E
 
-    # Legendre functions for
-    # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
+    s = S / R2
+
     legendre = acquire!(pool, Float64, n + 2)
     if uselegacygreenfunction
         Pn_minus_half_1997!(legendre, s, n)
@@ -667,37 +669,19 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
         Pn_minus_half_2007!(legendre, s, n)
     end
 
-    p0 = legendre[1]
-    p1 = legendre[2]
-    pnp1 = legendre[end]
-    pn = legendre[end-1]
+    p0, p1, pnp1, pn = @inbounds legendre[1], legendre[2], legendre[end], legendre[end-1]
 
-    # Green's function 2π𝒢ⁿ = G_n [Chance Phys. Plasmas 1997 2161 eq. 40]
     gg = gamma_prefactor / R
     G_n = gg * pn
+    grad_gg = gg / (2π * R4)
 
-    # Gradient factor [Chance Phys. Plasmas 1997 2161 eq. 44]
-    # NOTE: Paper has erroneous extra factor of 2π
-    grad_gg = gg / R4 / 2π
+    dG_dX = grad_gg * ( (n * S * D - x_source * xSourceE) * pn / x_source + twoXobsD * pnp1 )
+    dG_dZ = grad_gg * ((2n + 1) * S * pn + fourXmult * pnp1) * ζ
 
-    # Derivatives of Green's function [Chance Phys. Plasmas 1997 2161 eq. 36-38]
-    # ∂Gⁿ/∂X' using chain rule: ∂Gⁿ/∂X' = (∂Gⁿ/∂R)(∂R/∂X') + (∂Gⁿ/∂s)(∂s/∂X')
-    xterm1 = (n * (x_obs2 + x_source2 + ζ2) * (x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
-    xterm2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pnp1
-    dG_dX = grad_gg * (xterm1 + xterm2) / x_source
-
-    # ∂Gⁿ/∂Z' using chain rule
-    zterm1 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
-    zterm2 = 4.0 * x_multiple * pnp1
-    dG_dZ = grad_gg * (zterm1 + zterm2) * ζ
-
-    # Coupling term 𝒥 ∇'𝒢ⁿ∇'ℒ [Chance Phys. Plasmas 1997 2161 eq. 51]
-    # Jacobian factor from coordinate transformation
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
 
-    # Special case for n=0: coupling_0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
-    dG_dX0_R5 = ((2.0 * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source * (x_source2-x_obs2+ζ2) * p0)
-    dG_dZ0_R5 = ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1)
+    dG_dX0_R5 = twoXobsD * p1 - xSourceE * p0
+    dG_dZ0_R5 = ζ * (S * p0 + fourXmult * p1)
     coupling_0 = -x_source * (dz_dtheta * dG_dX0_R5 - dx_dtheta * dG_dZ0_R5) / R5
     return G_n, coupling_n, coupling_0
 end
