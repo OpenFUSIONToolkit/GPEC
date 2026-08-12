@@ -164,8 +164,8 @@ so `PerturbedEquilibrium` consumes it unchanged. Mirrors Fortran `idcon_build`'s
 (idcon.f) and `globalsol.bin` (the on-surface `issing` points are dropped, match.f):
 
   - `u_store[:,:,1,ip] = ξ_ψ`  (matched fundamental matrix, mode×coil-drive, identity-at-edge basis)
-  - `ud_store[:,:,1,ip] = dξ_ψ/dψ`  (analytic)
-  - `ud_store[:,:,2,ip] = ξ_s = −A⁻¹(B·ξ′ + C·ξ)`  via `ffit` (same outer ideal-MHD relation as `sing_der!`)
+  - `du_store[:,:,1,ip] = dξ_ψ/dψ`  (analytic)
+  - `xi_s_store[:,:,ip] = ξ_s = −A⁻¹(B·ξ′ + C·ξ)`  via `ffit` (same outer ideal-MHD relation as `sing_der!`)
   - `u_store[:,:,2] = 0`  (PE never reads it; matches Fortran's unused u2 in the gal path)
 
 The grid is the gal-native grid (inner→edge); `step` indexes the edge so `build_flux_matrix` derives the
@@ -186,7 +186,8 @@ function gal_matched_odestate(gal_result::GalerkinResult, ffit::FourFitVars, int
     ngrid_f = length(psi_f)
 
     u_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
-    ud_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
+    du_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
+    xi_s_store = zeros(ComplexF64, mpert, mpert, ngrid_f)
 
     amat = Matrix{ComplexF64}(undef, mpert, mpert)
     bmat = Matrix{ComplexF64}(undef, mpert, mpert)
@@ -197,7 +198,7 @@ function gal_matched_odestate(gal_result::GalerkinResult, ffit::FourFitVars, int
         ξ = @view xi_f[:, ip, :]
         ξ′ = @view dxi_f[:, ip, :]
         @views u_store[:, :, 1, ip] .= ξ
-        @views ud_store[:, :, 1, ip] .= ξ′
+        @views du_store[:, :, 1, ip] .= ξ′
         # ξ_s = −A⁻¹(B·ξ′ + C·ξ), exactly as the ideal path of sing_der! (Sing.jl:1015-1049)
         ffit.amats(vec(amat), psi_f[ip]; hint=hint)
         ffit.bmats(vec(bmat), psi_f[ip]; hint=hint)
@@ -205,7 +206,7 @@ function gal_matched_odestate(gal_result::GalerkinResult, ffit::FourFitVars, int
         LinearAlgebra.LAPACK.potrf!('U', amat)
         LinearAlgebra.LAPACK.potrs!('U', amat, bmat)   # bmat ← A⁻¹ B
         LinearAlgebra.LAPACK.potrs!('U', amat, cmat)   # cmat ← A⁻¹ C
-        xs = @view ud_store[:, :, 2, ip]
+        xs = @view xi_s_store[:, :, ip]
         mul!(tmp, bmat, ξ′)
         xs .= .-tmp
         mul!(tmp, cmat, ξ)
@@ -213,5 +214,5 @@ function gal_matched_odestate(gal_result::GalerkinResult, ffit::FourFitVars, int
     end
 
     return OdeState(; numpert_total=mpert, numunorms_init=1, msing=gal_result.msing, numsteps_init=ngrid_f,
-        step=ngrid_f, total_steps=ngrid_f, psi_store=psi_f, q_store=q_f, u_store=u_store, ud_store=ud_store)
+        step=ngrid_f, total_steps=ngrid_f, psi_store=psi_f, q_store=q_f, u_store=u_store, du_store=du_store, xi_s_store=xi_s_store)
 end
