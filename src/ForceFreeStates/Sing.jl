@@ -1143,14 +1143,43 @@ more simplistic code with similar performance.
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
   - `params::Tuple{ForceFreeStatesControl, PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
+
+The unpacked-argument method carries the arithmetic; this tuple method is the thin adapter the
+integrator calls. Ξ_s is *not* computed here — it is a save-point quantity, obtained from
+[`compute_node_xi_s!`](@ref) only where it is actually consumed.
 """
-@with_pool pool function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
         FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
-
-    # Unpack structs
     ctrl, equil, ffit, intr, odet, _ = params
+    return sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+end
+
+"""
+    sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+
+Unpacked-argument form of the Euler-Lagrange derivative, using `odet`'s spline hints and
+recording q at `psieval` in `odet.q`. Not safe to call concurrently on a shared `odet`;
+multi-threaded callers should use [`el_derivatives!`](@ref) with their own hints.
+"""
+function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    intr::ForceFreeStatesInternal, odet::OdeState, psieval::Float64)
+    odet.q = el_derivatives!(du, u, ctrl.kinetic_factor > 0, equil, ffit, intr, psieval, odet.spline_hint, odet.ffit_hint)
+    return nothing
+end
+
+"""
+    el_derivatives!(du, u, kinetic, equil, ffit, intr, psieval, spline_hint, ffit_hint) -> q
+
+Euler-Lagrange (or, when `kinetic` is true, FKG) derivative kernel: writes du₁/dψ and du₂/dψ at
+`psieval` into `du` and returns q there. Holds no state of its own — the two hints are the
+caller's interval-search accelerators, so concurrent callers just pass their own.
+"""
+@with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+    kinetic::Bool, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    intr::ForceFreeStatesInternal, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
 
     # Allocate temporary arrays from the pool
     Npert = intr.numpert_total
@@ -1158,13 +1187,10 @@ more simplistic code with similar performance.
     singfac_vec = acquire!(pool, Float64, Npert)
     singfac_mat = reshape(singfac_vec, intr.mpert, intr.npert)
 
-    amat = acquire!(pool, ComplexF64, Npert, Npert)
-    bmat = similar!(pool, amat)
-    cmat = similar!(pool, amat)
-    fmat_lower = similar!(pool, amat)
-    kmat = similar!(pool, amat)
-    gmat = similar!(pool, amat)
-    tmp_mat = similar!(pool, amat)
+    fmat_lower = acquire!(pool, ComplexF64, Npert, Npert)
+    kmat = similar!(pool, fmat_lower)
+    gmat = similar!(pool, fmat_lower)
+    tmp_mat = similar!(pool, fmat_lower)
 
     fill!(tmp_mat, zero(ComplexF64))
     u1 = @view(u[:, :, 1])
@@ -1173,45 +1199,33 @@ more simplistic code with similar performance.
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    # Use shared hint for O(1) interval lookup during sequential ODE integration
-    odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
-    singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
+    # Use caller-supplied hint for O(1) interval lookup during sequential ODE integration
+    q = equil.profiles.q_spline(psieval; hint=spline_hint)
+    singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
 
-    if ctrl.kinetic_factor > 0
+    if kinetic
         # ---- Kinetic path with pre-computed FKG matrices ----
-        # Load pre-computed kinetic matrices from splines
-        # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
-        # Use odet.ffit_hint (per-thread) instead of ffit._hint (shared, racy in parallel BVP)
-        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
-        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
-        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
-
+        # Use the caller's hint, not ffit._hint (shared, racy in the parallel BVP)
         # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
-        f0mat = similar!(pool, amat)
-        pmat_kin = similar!(pool, amat)
-        paat_kin = similar!(pool, amat)
-        kkmat_kin = similar!(pool, amat)
-        kkaat_kin = similar!(pool, amat)
-        r1mat_kin = similar!(pool, amat)
-        r2mat_kin = similar!(pool, amat)
-        r3mat_kin = similar!(pool, amat)
-        gaat_kin = similar!(pool, amat)
+        f0mat = similar!(pool, fmat_lower)
+        pmat_kin = similar!(pool, fmat_lower)
+        paat_kin = similar!(pool, fmat_lower)
+        kkmat_kin = similar!(pool, fmat_lower)
+        kkaat_kin = similar!(pool, fmat_lower)
+        r1mat_kin = similar!(pool, fmat_lower)
+        r2mat_kin = similar!(pool, fmat_lower)
+        r3mat_kin = similar!(pool, fmat_lower)
+        gaat_kin = similar!(pool, fmat_lower)
 
-        ffit.f0mats(vec(f0mat), psieval; hint=odet.ffit_hint)
-        ffit.pmats(vec(pmat_kin), psieval; hint=odet.ffit_hint)
-        ffit.paats(vec(paat_kin), psieval; hint=odet.ffit_hint)
-        ffit.kkmats(vec(kkmat_kin), psieval; hint=odet.ffit_hint)
-        ffit.kkaats(vec(kkaat_kin), psieval; hint=odet.ffit_hint)
-        ffit.r1mats(vec(r1mat_kin), psieval; hint=odet.ffit_hint)
-        ffit.r2mats(vec(r2mat_kin), psieval; hint=odet.ffit_hint)
-        ffit.r3mats(vec(r3mat_kin), psieval; hint=odet.ffit_hint)
-        ffit.gaats(vec(gaat_kin), psieval; hint=odet.ffit_hint)
-
-        # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
-        # Direct LAPACK to avoid the ipiv allocation that lu!/ldiv! would do in this hot loop
-        _, ipiv, _ = LAPACK.getrf!(amat)
-        LAPACK.getrs!('N', amat, ipiv, bmat)
-        LAPACK.getrs!('N', amat, ipiv, cmat)
+        ffit.f0mats(vec(f0mat), psieval; hint=ffit_hint)
+        ffit.pmats(vec(pmat_kin), psieval; hint=ffit_hint)
+        ffit.paats(vec(paat_kin), psieval; hint=ffit_hint)
+        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit_hint)
+        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit_hint)
+        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit_hint)
+        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit_hint)
+        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit_hint)
+        ffit.gaats(vec(gaat_kin), psieval; hint=ffit_hint)
 
         # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11):
         # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1
@@ -1220,10 +1234,10 @@ more simplistic code with similar performance.
         # where q1 = (m₁ - n*q), q2 = (m₂ - n*q) — direct singfac, NOT 1/(m-nq) as in ideal path
         singfac_direct = acquire!(pool, Float64, Npert)
         singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
-        singfac_direct_mat .= (intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'
+        singfac_direct_mat .= (intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)'
 
         # Build F, K, K† with singfac (using fmat_lower, kmat, gmat as workspace for F, K, K†)
-        kaat_kin = similar!(pool, amat)  # K† matrix
+        kaat_kin = similar!(pool, fmat_lower)  # K† matrix
         for j in 1:Npert
             q2 = singfac_direct[j]
             for i in 1:Npert
@@ -1254,18 +1268,10 @@ more simplistic code with similar performance.
 
     else
         # ---- Ideal path ----
-        # Evaluate matrix splines at the current psi (odet.ffit_hint is per-thread)
-        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
-        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
-        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
-        ffit.fmats_lower(vec(fmat_lower), psieval; hint=odet.ffit_hint)
-        ffit.kmats(vec(kmat), psieval; hint=odet.ffit_hint)
-        ffit.gmats(vec(gmat), psieval; hint=odet.ffit_hint)
-
-        # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
-        LAPACK.potrf!('U', amat)
-        LAPACK.potrs!('U', amat, bmat)
-        LAPACK.potrs!('U', amat, cmat)
+        # Evaluate matrix splines at the current psi (hint is the caller's, never shared)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit_hint)
+        ffit.kmats(vec(kmat), psieval; hint=ffit_hint)
+        ffit.gmats(vec(gmat), psieval; hint=ffit_hint)
 
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
@@ -1282,13 +1288,49 @@ more simplistic code with similar performance.
         # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
         du1 .*= singfac_vec
     end
+    return q
+end
 
-    odet.du .= du
-    # Ξ_s = - A⁻¹(B * Ξ'_Ψ + C * Ξ_Ψ), eq. 18 of Glasser 2016
+"""
+    compute_node_xi_s!(xi_s, du1, u1, ffit, psieval; kinetic=false, hint=Ref(1))
+
+Evaluate Ξ_s = -A⁻¹(B·Ξ′_ψ + C·Ξ_ψ) [Glasser Phys. Plasmas 2016 112506 eq. 18] at `psieval`,
+writing into `xi_s`. `du1` and `u1` are the Ξ′_ψ and Ξ_ψ blocks at the same ψ, i.e. slices of a
+[`sing_der!`](@ref) result and its input state.
+
+Split out of the derivative kernel because Ξ_s is needed only at saved nodes, not at every
+Runge-Kutta stage. Ideal runs factor the Hermitian A by Cholesky; with `kinetic=true` A picks up
+non-Hermitian contributions and needs an LU.
+"""
+@with_pool pool function compute_node_xi_s!(xi_s::AbstractMatrix{ComplexF64}, du1::AbstractMatrix{ComplexF64},
+    u1::AbstractMatrix{ComplexF64}, ffit::FourFitVars, psieval::Float64; kinetic::Bool=false, hint::Base.RefValue{Int}=Ref(1))
+
+    Npert = size(u1, 1)
+    amat = acquire!(pool, ComplexF64, Npert, Npert)
+    bmat = similar!(pool, amat)
+    cmat = similar!(pool, amat)
+    tmp_mat = similar!(pool, amat)
+
+    ffit.amats(vec(amat), psieval; hint=hint)
+    ffit.bmats(vec(bmat), psieval; hint=hint)
+    ffit.cmats(vec(cmat), psieval; hint=hint)
+
+    # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place
+    if kinetic
+        _, ipiv, _ = LAPACK.getrf!(amat)
+        LAPACK.getrs!('N', amat, ipiv, bmat)
+        LAPACK.getrs!('N', amat, ipiv, cmat)
+    else
+        LAPACK.potrf!('U', amat)
+        LAPACK.potrs!('U', amat, bmat)
+        LAPACK.potrs!('U', amat, cmat)
+    end
+
     mul!(tmp_mat, bmat, du1)
-    odet.xi_s .= .-tmp_mat
+    xi_s .= .-tmp_mat
     mul!(tmp_mat, cmat, u1)
-    odet.xi_s .-= tmp_mat
+    xi_s .-= tmp_mat
+    return xi_s
 end
 
 """

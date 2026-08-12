@@ -30,9 +30,9 @@ end
 
 Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
 in the Fortran code, except now all data is passed in memory instead of via files. This
-modifies `odet` in place to normalize the eigenfunctions stored in `u_store`, `du_store`, and `xi_s_store`,
-and returns a `VacuumData` struct containing the data needed for perturbed equilibrium calculations
-and data dumping.
+modifies `odet` in place to normalize the eigenfunctions stored in `u_store` (and `du_store`/`xi_s_store`
+when a path has already filled them), and returns a `VacuumData` struct containing the data needed for
+perturbed equilibrium calculations and data dumping.
 """
 @with_pool pool function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
@@ -126,12 +126,14 @@ and data dumping.
         odet.u_store[:, :, 1, istep] .= tmp_mat
         mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
         odet.u_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.du_store[:, :, 1, istep], coeffs)
-        odet.du_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.du_store[:, :, 2, istep], coeffs)
-        odet.du_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
-        odet.xi_s_store[:, :, istep] .= tmp_mat
+        # Only the galerkin path carries derivative stores this early; materialized ones
+        # are built from the normalized u_store afterwards.
+        if !isempty(odet.du_store)
+            mul!(tmp_mat, odet.du_store[:, :, istep], coeffs)
+            odet.du_store[:, :, istep] .= tmp_mat
+            mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
+            odet.xi_s_store[:, :, istep] .= tmp_mat
+        end
     end
 
     # Write energies to screen
