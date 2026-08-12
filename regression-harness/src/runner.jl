@@ -57,6 +57,9 @@ end
 # Runs the Galerkin solver on the Glasser & Wang 2020 Eq. 55 parameter set
 # at γ = 1 + i and writes (Δ_odd, Δ_even) into a small HDF5 file at ARGS[1].
 # Runtime is written to ARGS[2] for parity with the GPEC runner.
+# `solve_inner` returns the named-field `InnerLayerResponse`; the historical
+# delta_odd / delta_even slots map to interchange / tearing respectively, which
+# preserves the numeric identity of each tracked quantity.
 const COMPUTED_GGJ_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -69,10 +72,10 @@ t_start = time()
 Δ = solve_inner(GGJModel(solver=:galerkin), p, γ)
 elapsed = time() - t_start
 h5open(ARGS[1], "w") do fid
-    fid["ggj/delta_odd_real"]  = real(Δ[1])
-    fid["ggj/delta_odd_imag"]  = imag(Δ[1])
-    fid["ggj/delta_even_real"] = real(Δ[2])
-    fid["ggj/delta_even_imag"] = imag(Δ[2])
+    fid["ggj/delta_odd_real"]  = real(Δ.interchange)
+    fid["ggj/delta_odd_imag"]  = imag(Δ.interchange)
+    fid["ggj/delta_even_real"] = real(Δ.tearing)
+    fid["ggj/delta_even_imag"] = imag(Δ.tearing)
 end
 open(ARGS[2], "w") do f
     println(f, elapsed)

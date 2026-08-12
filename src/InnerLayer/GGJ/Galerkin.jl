@@ -1,12 +1,12 @@
 # Galerkin.jl
 #
 # Hermite-cubic finite element (Galerkin) solver for the GGJ inner-layer
-# model. Direct port of rmatch/deltac.f in the "resonant + noexp + inps"
-# configuration. The half-domain problem (x ∈ [0, xmax]) is solved with
-# parity boundary conditions at x = 0 and asymptotic matching at x = xmax.
+# model, in the "resonant + noexp + inps" configuration. The half-domain
+# problem (x ∈ [0, xmax]) is solved with parity boundary conditions at
+# x = 0 and asymptotic matching at x = xmax.
 #
 # The solved field is the 3-component inner-layer solution u = (Ψ, Ξ, Υ)
-# (Fortran psi/si/ups), obeying the GGJ inner-region equations
+# obeying the GGJ inner-region equations
 # GWP2016 Eq. (11) ≡ GW2020 Eq. (1):
 #
 #   Ψ_xx − H Υ_x − Q(Ψ − x Ξ) = 0,
@@ -21,7 +21,7 @@
 # the half-domain weak form (Eq. 32) on a packed Hermite-cubic grid (Eq. 33),
 # with resonant/extension cells (Fig. 1) supplying the matching data (Eqs. 34–35).
 #
-# Configuration assumed (matches deltac.f defaults when called with inps):
+# Configuration assumed:
 #   gal_method = "resonant"    method = true     noexp = true
 #   basis_type = 0 (Hermite)   fulldomain = 0    inps_type = "inps"
 #   mpert = 3 (Ψ, Ξ, Υ)        np = 3 (Hermite cubic → 4 DOFs/node)
@@ -34,13 +34,13 @@ using FastGaussQuadrature: gausslobatto
 using QuadGK: quadgk
 
 # -----------------------------------------------------------------------
-# Physical-variable helpers (replacements for inpso_get_ua/dua/uv).
+# Physical-variable helpers.
 # -----------------------------------------------------------------------
 
 """
 Convert the inps 6×2 output U_inps (the Wasow asymptotic basis U = TPQSY of
 GW2020 Eq. 53) at coordinate `x` to the physical (Ψ, Ξ, Υ) and (Ψ', Ξ', Υ')
-representation used by deltac/inpso. The 6-component first-order state packs
+representation. The 6-component first-order state packs
 (Ψ, Ξ, Υ, Ψ', Ξ', Υ') with the GW2020 Eq. (2) scaling 𝚿 ≡ (xΨ, Ξ, Υ), hence
 the /x and ·x factors below. Returns `(ua, dua)` each 3×2 complex, where columns
 are the two power-like (Mercier) solutions and rows are the components (Ψ, Ξ, Υ).
@@ -62,8 +62,8 @@ end
 
 """
 Build the (I, U, V) coefficient matrices of the second-order system
-`I·u'' − V·u' − U·u = 0` for u = (Ψ, Ξ, Υ) at coordinate `x`. Port of
-inpso_get_uv. All matrices are 3×3 complex.
+`I·u'' − V·u' − U·u = 0` for u = (Ψ, Ξ, Υ) at coordinate `x`.
+All matrices are 3×3 complex.
 
 These are the matrices A, B, C of GWP2016 Eq. (12), `A Ψ'' + B Ψ' + C Ψ = 0`,
 with A given in Eq. (14), B in Eq. (14), and C in Eq. (15). The code's weak-form
@@ -93,7 +93,7 @@ function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
     Imat = @SMatrix ComplexF64[1 0 0; 0 q2 0; 0 0 q]
 
     # U = −C of GWP2016 Eq. (15): coefficients of −u in each equation
-    # (inpso_get_uv stores them pre-scaled: row 2 ×Q², row 3 ×Q, matching
+    # (stored pre-scaled: row 2 ×Q², row 3 ×Q, matching
     # the I-row normalization).
     #   row 1 (Ψ): (Q,            −Q x,          0)
     #   row 2 (Ξ): (−Q x,          Q x²,        −(E+F))
@@ -118,16 +118,16 @@ function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
 end
 
 # -----------------------------------------------------------------------
-# Hermite cubic basis functions — port of deltac_hermite.
+# Hermite cubic basis functions.
 # Returns (pb[1:4], qb[1:4]) where pb = values, qb = derivatives,
-# indexed 1:4 → Fortran 0:3.
+# indexed 1:4 → physical 0:3.
 # -----------------------------------------------------------------------
 
 function _hermite(x::Real, x0::Real, x1::Real)
     dx = x1 - x0
     t0 = (x - x0) / dx
     t1 = 1 - t0
-    t02 = t0 * t0;
+    t02 = t0 * t0
     t12 = t1 * t1
     pb = SVector{4,Float64}(
         t12 * (1 + 2t0),
@@ -145,7 +145,7 @@ function _hermite(x::Real, x0::Real, x1::Real)
 end
 
 # -----------------------------------------------------------------------
-# Grid packing — port of deltac_pack. The pfac > 1 branch is the GWP2016
+# Grid packing. The pfac > 1 branch is the GWP2016
 # inner-region packing X(ξ,λ) = ln[(1+λξ)/(1−λξ)] / ln[(1+λ)/(1−λ)]
 # (Eq. 33), which concentrates nodes near X = 0; pfac = 1 gives a uniform
 # grid, and pfac in (0,1) the complementary edge-packed map. The grid-density
@@ -191,7 +191,7 @@ function _pack(nx::Int, pfac::Float64, side::String)
 end
 
 # -----------------------------------------------------------------------
-# Three-level xmax sweep — replaces inpso_xmax for inps mode. The cutoff
+# Three-level xmax sweep. The cutoff
 # x_max is the position where the asymptotic-basis residual Δ (GW2020 Eq. 54,
 # computed by `asymptotic_residual`) drops below a target tolerance — the
 # choice studied in GW2020 Sec. III and Fig. 3, where x_max is taken where the
@@ -226,7 +226,7 @@ function _xmax_3level(params::GGJParameters, Q::ComplexF64;
         if !any(set)
             break
         end
-        x_prev = x;
+        x_prev = x
         delta_prev = dmax
         x *= dxfac
     end
@@ -282,9 +282,17 @@ struct GalerkinWorkspace
     ndim::Int
     nx::Int
     kl::Int
-    mat::Array{ComplexF64,3}   # (ldab, ndim, 2) banded storage
-    rhs::Matrix{ComplexF64}    # (ndim, 2)
-    sol::Matrix{ComplexF64}    # (ndim, 2)
+    mat::Array{ComplexF64,3}              # (ldab, ndim, 2) banded storage
+    rhs::Matrix{ComplexF64}               # (ndim, 2)
+    sol::Matrix{ComplexF64}               # (ndim, 2)
+    # Reusable scratch buffers, zeroed per-cell via `fill!`. Eliminates the
+    # per-cell `zeros(...)` that otherwise allocates thousands of MiB over a
+    # full dispersion scan.
+    cell_mat_buf::Array{ComplexF64,4}     # (mpert=3, mpert, np+1=4, np+1=4)
+    cell_mat_ext_buf::Array{ComplexF64,4} # (3, 3, 4, 4)  max over CT_EXT/EXT1/EXT2
+    cell_rhs_ext_buf::Matrix{ComplexF64}  # (3, 4)
+    ab_buf::Matrix{ComplexF64}            # (ldab, ndim) scratch for banded LU
+    rhs_buf::Vector{ComplexF64}           # (ndim,) scratch for banded solve
 end
 
 function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Float64,
@@ -310,9 +318,9 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     x_nodes[nx-1] = xmax - (dx1 + dx2)
     ixmax = nx - 2  # packed region is 0..ixmax
 
-    x0 = x_nodes[1];
+    x0 = x_nodes[1]
     x1_packed = x_nodes[ixmax+1]
-    xm = (x1_packed + x0) / 2;
+    xm = (x1_packed + x0) / 2
     dxp = (x1_packed - x0) / 2
     mx = ixmax ÷ 2
     packed = xm .+ dxp .* _pack(mx, pfac, side)
@@ -327,7 +335,7 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     imap = 1
     for ix in 1:nx
         et = etypes[ix]
-        xl = x_nodes[ix];
+        xl = x_nodes[ix]
         xr = x_nodes[ix+1]
 
         cell_np = if et == CT_NONE || et == CT_EXT1 || et == CT_EXT2
@@ -340,7 +348,7 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
 
         x_lsode = (et == CT_RES) ? xr : 0.0
 
-        # Build map (matching deltac_make_map_hermite logic)
+        # Build local-to-global Hermite DOF map.
         if et == CT_RES
             # Will be set after the loop
             map_local = zeros(Int, mpert, 1)  # map(:, 0:0)
@@ -365,7 +373,7 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
         if et == CT_EXT
             # Extra asymptotic DOFs: emap = (imap, imap+1, imap+2).
             # With noexp, ndim = imap so only emap[1] is active; emap[2,3] > ndim
-            # and are skipped during assembly. This matches Fortran convention.
+            # and are skipped during assembly.
             emap_local = [imap, imap + 1, imap + 2]
             map_extra = [imap; imap + 1; imap + 2]  # 3-element column
             map_local = hcat(map_local, map_extra)
@@ -384,19 +392,29 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     ndim = imap  # noexp → ndim = imap (only emap[1] ≤ ndim)
 
     # Bandwidth
-    kl = mpert * (np + 1) + 1 - 1  # resonant method with noexp; +1-1 kept for agreement with Fortran indexing
+    kl = mpert * (np + 1) + 1 - 1  # resonant method with noexp; +1-1 kept for indexing agreement
     ku = kl
     ldab = 2kl + ku + 1
 
     mat = zeros(ComplexF64, ldab, ndim, 2)
     rhs = zeros(ComplexF64, ndim, 2)
     sol = zeros(ComplexF64, ndim, 2)
+    # Preallocate per-cell scratch buffers sized to the max case (np+1=4).
+    # Smaller cells (e.g. CT_EXT with cell.np=1) use a (2×2) sub-slice and
+    # rely on fill!(buf, 0) to keep the remainder zero.
+    cell_mat_buf = zeros(ComplexF64, mpert, mpert, np + 1, np + 1)
+    cell_mat_ext_buf = zeros(ComplexF64, mpert, mpert, np + 1, np + 1)
+    cell_rhs_ext_buf = zeros(ComplexF64, mpert, np + 1)
+    ab_buf = zeros(ComplexF64, ldab, ndim)
+    rhs_buf = zeros(ComplexF64, ndim)
 
-    return GalerkinWorkspace(cells, ndim, nx, kl, mat, rhs, sol)
+    return GalerkinWorkspace(cells, ndim, nx, kl, mat, rhs, sol,
+        cell_mat_buf, cell_mat_ext_buf, cell_rhs_ext_buf,
+        ab_buf, rhs_buf)
 end
 
 # -----------------------------------------------------------------------
-# Local assembly: Gauss quadrature for "none" cells. Port of deltac_gauss_quad.
+# Local assembly: Gauss quadrature for "none" cells.
 # Evaluates the GWP2016 Eq. (32) bilinear form on one cell. After integrating
 # the A-term by parts, the symmetric weak form is
 #   Σⱼ [−(αᵢ', A αⱼ') + (αᵢ, B αⱼ') + (αᵢ, C αⱼ)] uⱼ ,
@@ -435,7 +453,7 @@ function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
 end
 
 # -----------------------------------------------------------------------
-# Extension assembly — port of deltac_extension. Handles ext, ext1, ext2 cell
+# Extension assembly. Handles ext, ext1, ext2 cell
 # types: the GWP2016 extension cells (Fig. 1) where the small resonant power
 # series (column 2 of the asymptotic basis) drives the response and the large
 # resonant solution (column 1) is blended into the Hermite cubics with
@@ -530,7 +548,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
 end
 
 # -----------------------------------------------------------------------
-# Resonant integral — replaces deltac_lsode_int with QuadGK. Evaluates the
+# Resonant integral, evaluated with QuadGK. Evaluates the
 # GWP2016 Eq. (32) bilinear form over the resonant cell using the asymptotic
 # (power-series) solutions as both test and trial functions — the scalar
 # products that GWP2016 notes "are non-analytic and therefore require an
@@ -552,7 +570,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
     function integrand_11(x)
         ua, dua = _physical_ua_dua(cache, x)
         Imat, Umat, Vmat = _physical_uv(params, Q, x)
-        ua1 = ua[:, 1];
+        ua1 = ua[:, 1]
         dua1 = dua[:, 1]
         return transpose(dua1) * Imat * dua1 + transpose(ua1) * Vmat * dua1 + transpose(ua1) * Umat * ua1
     end
@@ -561,8 +579,8 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
         ua, dua = _physical_ua_dua(cache, x)
         Imat, Umat, Vmat = _physical_uv(params, Q, x)
         dua1 = dua[:, 1]
-        ua1 = ua[:, 1];
-        ua2 = ua[:, 2];
+        ua1 = ua[:, 1]
+        ua2 = ua[:, 2]
         dua2 = dua[:, 2]
         return transpose(dua1) * Imat * dua2 + transpose(ua1) * Vmat * dua2 + transpose(ua1) * Umat * ua2
     end
@@ -581,7 +599,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     params::GGJParameters, Q::ComplexF64,
     cache::InnerAsymptoticsCache;
     nq::Int=4, tol_res::Float64=1e-5)
-    mpert = 3;
+    mpert = 3
     np = 3
     quad_nodes, quad_weights = gausslobatto(nq + 1)
     offset = ws.kl + ws.kl + 1  # kl + ku + 1 since ku = kl
@@ -589,28 +607,30 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     fill!(ws.mat, 0)
     fill!(ws.rhs, 0)
 
-    # Per-cell assembly
+    # Per-cell assembly — reuse the preallocated scratch buffers, zeroing
+    # only the sub-slice actually used by this cell's np_eff.
+    cell_mat = ws.cell_mat_buf
+    cell_mat_ext = ws.cell_mat_ext_buf
+    cell_rhs_ext = ws.cell_rhs_ext_buf
     for ix in 1:ws.nx
         cell = ws.cells[ix]
 
         # Gauss quadrature for Hermite contribution (all cell types)
         if cell.np >= 0
             np_eff = cell.np
-            cell_mat = zeros(ComplexF64, mpert, mpert, np_eff + 1, np_eff + 1)
+            fill!(cell_mat, 0)
             _gauss_quad!(cell_mat, cell, quad_nodes, quad_weights, params, Q)
 
             # Assemble into global banded matrix (both parities use same base matrix)
             for ip in 0:np_eff, ipert in 1:mpert
                 i = cell.map[ipert, ip+1]
                 if i > ws.ndim
-                    ;
-                    continue;
+                    continue
                 end
                 for jp in 0:np_eff, jpert in 1:mpert
                     j = cell.map[jpert, jp+1]
                     if j > ws.ndim
-                        ;
-                        continue;
+                        continue
                     end
                     ws.mat[offset+i-j, j, 1] += cell_mat[ipert, jpert, ip+1, jp+1]
                 end
@@ -619,21 +639,18 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
 
         # Extension terms
         if cell.etype in (CT_EXT, CT_EXT1, CT_EXT2)
+            # np_eff matches the semantic size: CT_EXT has cell.np=1 → ext slot
+            # at index cell.np+1=2 (using 0-based; +1 in Julia), so the array
+            # used by the current code is (3,3,cell.np+2,cell.np+2)=(3,3,3,3).
+            # For CT_EXT1/EXT2 it's (3,3,cell.np+1,cell.np+1)=(3,3,4,4).
+            # Either way npp = cell.etype == CT_EXT ? cell.np + 1 : cell.np.
             np_eff = cell.etype == CT_EXT ? cell.np + 1 : cell.np
-            cell_mat_ext = zeros(ComplexF64, mpert, mpert, np_eff + 1, np_eff + 1)
-            cell_rhs_ext = zeros(ComplexF64, mpert, np_eff + 1)
-            # For ext, we need to create a temporary cell_mat that includes the extra DOF
-            if cell.etype == CT_EXT
-                cell_mat_ext = zeros(ComplexF64, mpert, mpert, cell.np + 2, cell.np + 2)
-                cell_rhs_ext = zeros(ComplexF64, mpert, cell.np + 2)
-            else
-                cell_mat_ext = zeros(ComplexF64, mpert, mpert, cell.np + 1, cell.np + 1)
-                cell_rhs_ext = zeros(ComplexF64, mpert, cell.np + 1)
-            end
+            fill!(cell_mat_ext, 0)
+            fill!(cell_rhs_ext, 0)
             _extension!(cell_mat_ext, cell_rhs_ext, cell, quad_nodes, quad_weights, params, Q, cache)
 
             # Assemble ext contributions
-            npp = size(cell_mat_ext, 3) - 1
+            npp = np_eff
             for ip in 0:npp, ipert in 1:mpert
                 i = ip < size(cell.map, 2) ? cell.map[ipert, ip+1] : cell.emap[1]
                 # For the extra DOF, only ipert=1 is meaningful (noexp)
@@ -641,8 +658,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
                     continue
                 end
                 if i > ws.ndim
-                    ;
-                    continue;
+                    continue
                 end
                 for jp in 0:npp, jpert in 1:mpert
                     j = jp < size(cell.map, 2) ? cell.map[jpert, jp+1] : cell.emap[1]
@@ -650,8 +666,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
                         continue
                     end
                     if j > ws.ndim
-                        ;
-                        continue;
+                        continue
                     end
                     ws.mat[offset+i-j, j, 1] += cell_mat_ext[ipert, jpert, ip+1, jp+1]
                 end
@@ -711,7 +726,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     # one solution has even Ξ, Υ and odd Ψ, the other odd Ξ, Υ and even Ψ.
     # Imposing both at X=0 gives the two parities that each contribute a Δ for
     # outer-region matching (the Δ_odd, Δ_even of GWP2016 Eqs. 34–35).
-    # Mirrors deltac_set_boundary: for each isol, build a modified local
+    # For each isol, build a modified local
     # matrix for ip=0..1 of cell 1, then write it into the global matrix.
     for isol in 1:2
         # Zero out ip=0 rows in the global matrix
@@ -743,11 +758,11 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
                 ws.mat[offset+i-j, j, isol] = 1
             end
         else
-            i = cell1.map[1, 1];
+            i = cell1.map[1, 1]
             j = cell1.map[1, 1]
             ws.mat[offset+i-j, j, isol] = 1
             for ipert in 2:3
-                i = cell1.map[ipert, 1];
+                i = cell1.map[ipert, 1]
                 j = cell1.map[ipert, 2]
                 ws.mat[offset+i-j, j, isol] = 1
             end
@@ -765,11 +780,11 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     kl = ws.kl;
     ku = kl
     for isol in 1:2
-        ab = copy(ws.mat[:, :, isol])
-        rhs_col = copy(ws.rhs[:, isol])
-        ab, ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, n, ab)
-        LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, n, ab, ipiv, rhs_col)
-        ws.sol[:, isol] .= rhs_col
+        copyto!(ws.ab_buf, @view(ws.mat[:, :, isol]))
+        copyto!(ws.rhs_buf, @view(ws.rhs[:, isol]))
+        _, ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, n, ws.ab_buf)
+        LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, n, ws.ab_buf, ipiv, ws.rhs_buf)
+        ws.sol[:, isol] .= ws.rhs_buf
     end
 end
 
@@ -849,15 +864,17 @@ end
     solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
                 kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
                 cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
-                -> SVector{2,ComplexF64}
+                -> InnerLayerResponse
 
 Solve the GGJ inner-layer matching problem using the Hermite-cubic finite
-element (Galerkin) method (GWP2016 Sec. III). Direct port of rmatch/deltac.f in
-the "resonant + noexp + inps" configuration.
+element (Galerkin) method (GWP2016 Sec. III), in the "resonant + noexp + inps"
+configuration.
 
-Returns the parity-projected matching data `(Δ₁, Δ₂)` (GWP2016 Eqs. 34–35) with
-the `X₀^{2√(−D_I)}` physical rescaling applied. The ordering matches deltac.f's
-output convention (swapped relative to deltar.f).
+Returns the parity-projected matching data (GWP2016 Eqs. 34–35) with the
+`X₀^{2√(−D_I)}` physical rescaling applied, as an `InnerLayerResponse` whose
+`tearing`/`interchange` fields are the isol=1/isol=2 element solutions
+respectively — no parity swap (see the boundary-condition block above for the
+parity derivation).
 """
 function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
@@ -882,10 +899,11 @@ function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     emap1 = res_cell.emap[1]
     Δ_raw = SVector{2,ComplexF64}(ws.sol[emap1, 1], ws.sol[emap1, 2])
 
-    # Apply deltac.f's swap convention (deltac_solve)
-    Δ_swapped = SVector{2,ComplexF64}(Δ_raw[2], Δ_raw[1])
+    # Rescaling is linear & diagonal; apply to the (tearing, interchange)
+    # pair directly, no parity swap.
+    Δ_rescaled = rescale_delta(Δ_raw, params)
 
-    return rescale_delta(Δ_swapped, params)
+    return InnerLayerResponse(Δ_rescaled[1], Δ_rescaled[2])
 end
 
 

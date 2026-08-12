@@ -1,9 +1,18 @@
-# Inner Layer Module
+# Tearing Module
 
-The InnerLayer module provides abstract scaffolding for resistive inner-layer
-models used in matched asymptotic expansions for resistive MHD stability
-analysis. It currently includes the GGJ (Glasser–Greene–Johnson) shooting
-method for computing the inner-layer response.
+The `Tearing` module groups the resistive tearing-mode analysis stack:
+`InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
+SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
+contour-intersection root extraction), and `Runner` (user-facing TOML
+configuration, profile loading, and HDF5 output).
+
+## Layer Inputs
+
+Equilibrium/ForceFreeStates glue that assembles per-surface inner-layer inputs.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing]
+```
 
 ## InnerLayer
 
@@ -15,4 +24,22 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.GGJ]
+```
+
+## SLAYER
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
+```
+
+## Dispersion
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Dispersion]
+```
+
+## Runner
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Runner]
 ```
