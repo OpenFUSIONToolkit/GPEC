@@ -1925,7 +1925,7 @@ and does NOT populate `delta_prime`; we keep the parallel pass's values
 which `compute_delta_prime_matrix!` uses).
 
 Called from `parallel_eulerlagrange_integration` when
-`ctrl.populate_dense_xi = true` (default).  Approximate cost: one serial
+`ctrl.populate_dense_xi = true`.  Approximate cost: one serial
 EL integration on top of the parallel BVP phase.  Required to make
 `use_parallel = true` produce DCON eigenfunctions usable by the
 PerturbedEquilibrium downstream pipeline.
