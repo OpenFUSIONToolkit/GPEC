@@ -33,11 +33,11 @@ function compute_plasma_response!(
     # Compute plasma inductance
     plasma_inductance = calc_plasma_inductance(ffs_intr, vac_data.wt0, equil.psio)
 
-    # Surface inductance L from Green's functions
+    # Surface inductance L from vacuum surface-current matrix at psilim
     nn = ffs_intr.nlow
     vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, vac_data.mthvac, 1, ffs_intr.mlow:ffs_intr.mhigh, [nn])
-    ν_vac = Vacuum.PlasmaGeometry(vac_input_2d).ν
-    surface_inductance = compute_surface_inductance_from_greens(vac_data.grri, vac_data.grre, ffs_intr, nn, ν_vac)
+    _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall; compute_Iv=true)
+    surface_inductance = calc_surface_inductance(I_v)
 
     # Compute permeability P = Λ·L⁻¹ and store in internal state for singular coupling / field reconstruction.
     permeability = plasma_inductance / surface_inductance

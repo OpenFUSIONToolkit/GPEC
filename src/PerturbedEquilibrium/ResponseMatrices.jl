@@ -80,6 +80,19 @@ function calc_plasma_inductance(ffs_intr::ForceFreeStatesInternal, wt0::Matrix{C
 end
 
 """
+    calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
+
+Surface inductance from the vacuum surface-current matrix, Park 2007 eq. 7: `Φ_x = L·I_v`.
+Columns of `I_v` are driven by unit flux harmonics which are consistent since the eq. 3
+weight `1/(J|∇ψ|)` cancels the Jacobian in the vacuum solver's source density — so `Φ_x = 𝕀`
+and `L = I_v⁻¹`, carrying the `μ₀(2π)²` normalization.
+"""
+function calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
+    μ₀ = 4π * 1e-7
+    return inv(I_v) .* (μ₀ * (2π)^2)
+end
+
+"""
     build_control_surface_rootarea_to_area_weight(
         equil::Equilibrium.PlasmaEquilibrium,
         ffs_intr::ForceFreeStatesInternal
