@@ -342,8 +342,15 @@ function compute_delta_prime_matrix!(
         intr.delta_coil = _solve_bvp_edge_coil(M, col_edge, msing, N, ipert_all)
     end
 
-    intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
+    deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
         M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+
+    # Persist both the PEST3 tearing projection (msing × msing) and the raw 2msing × 2msing
+    # D' matrix (side-major ordering, byte-compatible with Fortran rdcon/gal.f::gal_write_delta).
+    # The raw matrix is consumed by `pest3_decompose` to recover (A', B', Γ', Δ') for the full
+    # det(D' − D(γ)) = 0 eigenvalue problem; see ForceFreeStatesStructs.jl docstring.
+    intr.delta_prime_matrix = deltap
+    intr.delta_prime_raw    = dp_raw_persisted
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -759,7 +766,9 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     deltap = ComplexF64.(deltap_ext)
 
     debug && _log_bvp_pest3(dp_raw, deltap, s2, msing, Tc)
-    return deltap
+    # Return the PEST3-combined matrix AND the raw 2msing×2msing D' matrix (ComplexF64
+    # for compatibility with downstream pest3_decompose / HDF5 writer).
+    return deltap, ComplexF64.(dp_raw)
 end
 
 # Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
@@ -869,6 +878,69 @@ function _log_bvp_pest3(dp_raw, deltap, s2, msing, Tc)
 end
 
 """
+    pest3_decompose(dp_raw::AbstractMatrix) -> (A', B', Γ', Δ')
+
+Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
+ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
+blocks. Given rows and columns paired by surface (odd index = left, even
+index = right), the Fortran RDCON parity combination is
+
+```
+A'(i,j) = RR + RL + LR + LL    (even-i, even-j)   — interchange↔interchange
+B'(i,j) = RR − RL + LR − LL    (even-i, odd-j)    — interchange↔tearing
+Γ'(i,j) = RR + RL − LR − LL    (odd-i,  even-j)   — tearing↔interchange
+Δ'(i,j) = RR − RL − LR + LL    (odd-i,  odd-j)    — tearing↔tearing
+```
+
+where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
+`LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
+
+Matches Fortran exactly — no ½ prefactor (Pletzer–Dewar multiply by ½, but
+the Fortran RDCON code leaves it commented out and our Julia port follows
+Fortran to keep the benchmark bit-identical; the prefactor cancels in
+`det(D' − D(γ)) = 0`).
+
+The Δ' block returned here equals `intr.delta_prime_matrix` (the m×m PEST3
+tearing projection computed inside `compute_delta_prime_matrix!`).
+
+# Arguments
+
+  - `dp_raw` — 2m×2m complex matrix (typically `intr.delta_prime_raw`).
+
+# Returns
+
+Named tuple `(A=A', B=B', Γ=Gp, Δ=Dp)` of four m×m complex matrices. In the
+full `det(D' − D(γ)) = 0` eigenvalue problem, these fill the 2m×2m outer
+matrix as `D' = [[A' B'] [Γ' Δ']]` with the interchange channel (Glasser
+stabilization) in the upper-left block and the tearing channel in the
+lower-right.
+"""
+function pest3_decompose(dp_raw::AbstractMatrix)
+    s2 = size(dp_raw, 1)
+    size(dp_raw, 2) == s2 ||
+        throw(ArgumentError("pest3_decompose: dp_raw must be square, got $(size(dp_raw))"))
+    iseven(s2) ||
+        throw(ArgumentError("pest3_decompose: dp_raw side must be 2m for integer m, got $s2"))
+    m = s2 ÷ 2
+    Tc = eltype(dp_raw)
+    Ap = zeros(Tc, m, m)
+    Bp = zeros(Tc, m, m)
+    Gp = zeros(Tc, m, m)
+    Dp = zeros(Tc, m, m)
+    for i in 1:m, j in 1:m
+        LL = dp_raw[2i-1, 2j-1]
+        LR = dp_raw[2i-1, 2j]
+        RL = dp_raw[2i,   2j-1]
+        RR = dp_raw[2i,   2j]
+        Ap[i, j] = RR + RL + LR + LL
+        Bp[i, j] = RR - RL + LR - LL
+        Gp[i, j] = RR + RL - LR - LL
+        Dp[i, j] = RR - RL - LR + LL
+    end
+    return (A=Ap, B=Bp, Γ=Gp, Δ=Dp)
+end
+
+"""
     riccati_der!(du, u, params, psieval)
 
 Evaluate the explicit dual Riccati ODE right-hand side:
@@ -937,10 +1009,11 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     # dS = w†·v - S·Ḡ·S  [Glasser 2018 eq. 19, dual Riccati]
     mul!(dS, adjoint(w), v)   # dS = w†·v
 
-    # Store du1/dψ = Q·v for ud diagnostic before v is reused
+    # Store du1/dψ = Q·v as a diagnostic before v is reused
     # Q·v = diag(singfac_vec)·v = Ξ'_Ψ (displacement gradient, with U₂ = I)
-    @. odet.ud[:, :, 1] = singfac_vec * v
-    @view(odet.ud[:, :, 2]) .= 0
+    @. odet.du[:, :, 1] = singfac_vec * v
+    @view(odet.du[:, :, 2]) .= 0
+    odet.xi_s .= 0
 
     # Subtract S·Ḡ·S (reuse v and tmp to avoid extra allocation)
     mul!(tmp, gmat, S)        # tmp = Ḡ·S
@@ -988,14 +1061,7 @@ function riccati_integrator_callback!(integrator)
     should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
 
     if should_save
-        if odet.step >= size(odet.u_store, 4)
-            resize_storage!(odet)
-        end
-        odet.psi_store[odet.step] = integrator.t
-        @views odet.u_store[:, :, :, odet.step] .= integrator.u
-        odet.q_store[odet.step] = odet.q
-        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-        odet.step += 1
+        store_ode_data!(odet, integrator.t, integrator.u)
     end
 end
 
@@ -1229,11 +1295,7 @@ end
 # Store (U₁_new, U₂_new) into u_store before renormalization so that
 # evaluate_stability_criterion! can recover S_new = U₁_new / U₂_new via compute_smallest_eigenvalue.
 function _store_crossing_step!(odet::OdeState)
-    odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
-    odet.step += 1
+    store_ode_data!(odet, odet.psifac, odet.u)
 end
 
 """
@@ -1573,7 +1635,7 @@ Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml, or by sett
 - `transform_u!` is called on the parallel odet but is a no-op (ifix=0)
 - Outer plasma uses serial Riccati integration for numerical stability
 - A serial Euler-Lagrange **dense pass** is appended at the end and
-  replaces the parallel `odet` so that `u_store` / `ud_store` are dense and
+  replaces the parallel `odet` so that `u_store` / `du_store` are dense and
   in axis basis — the only convention the PerturbedEquilibrium downstream
   code consumes correctly.  Δ' (`singular/delta_prime_matrix`) is computed
   from the parallel BVP and is bit-identical with vs. without this pass.
@@ -1675,7 +1737,7 @@ function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
 end
 
 # Integrate each chunk's FM propagator from identity IC. Serial when bvp_threads == 1
-# (bit-deterministic; ~20% slower than 2-thread on DIII-D 147131 but immune to thread-
+# (bit-deterministic; ~20% slower than 2-thread but immune to thread-
 # schedule sensitivity). Parallel uses :static scheduler so Threads.threadid() returns a
 # stable index into odet_proxies. If a parallel run ever diverges on a delicate equilibrium,
 # drop to parallel_threads = 1 rather than use_parallel = false — the latter is silently wrong.
@@ -1734,7 +1796,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
             last_crossing_step = odet.step - 1
         else
-            # Save non-crossing end-of-chunk state. ud_store stays zero here — when
+            # Save non-crossing end-of-chunk state. du_store is not meaningful here — when
             # ctrl.populate_dense_xi=true the entire odet is replaced by a serial-EL pass
             # at the end of parallel_eulerlagrange_integration.
             if odet.step >= size(odet.u_store, 4)
@@ -1845,7 +1907,7 @@ end
     _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr) -> fresh_odet
 
 Replace the propagator-BVP's `odet` with a fresh serial-EL `odet` that has
-dense `u_store` / `ud_store` populated in axis basis (the PerturbedEquilibrium
+dense `u_store` / `du_store` populated in axis basis (the PerturbedEquilibrium
 convention).  The caller's `odet` is fully replaced by the fresh one because
 `free_run!` downstream uses `odet.u[:,:,1,end]` to normalize `odet.u_store`,
 so both must be in the same basis.  The parallel BVP results that survive

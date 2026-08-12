@@ -40,13 +40,15 @@ const GGJ = IL.GGJ
         γ = Q_paper * GGJ.q0(p)
         @test GGJ.inner_Q(p, γ) ≈ Q_paper rtol = 1e-12
         Δ = IL.solve_inner(gal, p, γ)
-        @test all(isfinite, Δ)
-        # Δ is purely real at this real Q; values cross-checked against Fortran rmatch deltac
-        # (inps basis) — the two independent codes agree to ~1e-8. rtol absorbs cross-platform jitter.
-        @test real(Δ[1]) ≈ 3.698368e4 rtol = 1e-3
-        @test real(Δ[2]) ≈ 14.759721 rtol = 1e-3
-        @test abs(imag(Δ[1])) < 1e-3 * abs(Δ[1])
-        @test abs(imag(Δ[2])) < 1e-3 * abs(Δ[2])
+        @test all(isfinite, (Δ.tearing, Δ.interchange))
+        # Δ is purely real at this real Q; values cross-checked against an independent
+        # inner-layer reference — the two codes agree to ~1e-8. rtol absorbs cross-platform jitter.
+        # `solve_inner` returns the named-field `InnerLayerResponse`; the interchange branch is
+        # the large root, the tearing branch the small one.
+        @test real(Δ.interchange) ≈ 3.698368e4 rtol = 1e-3
+        @test real(Δ.tearing) ≈ 14.759721 rtol = 1e-3
+        @test abs(imag(Δ.interchange)) < 1e-3 * abs(Δ.interchange)
+        @test abs(imag(Δ.tearing)) < 1e-3 * abs(Δ.tearing)
     end
 end
 
@@ -60,10 +62,10 @@ end
         γ = 0.1234 * GGJ.q0(p)
         Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, γ)
         # Same Fortran-cross-checked pins as the Galerkin testset above.
-        @test real(Δ[1]) ≈ 3.698368e4 rtol = 1e-3
-        @test real(Δ[2]) ≈ 14.759721 rtol = 1e-3
-        @test abs(imag(Δ[1])) < 1e-3 * abs(Δ[1])
-        @test abs(imag(Δ[2])) < 1e-3 * abs(Δ[2])
+        @test real(Δ.interchange) ≈ 3.698368e4 rtol = 1e-3
+        @test real(Δ.tearing) ≈ 14.759721 rtol = 1e-3
+        @test abs(imag(Δ.interchange)) < 1e-3 * abs(Δ.interchange)
+        @test abs(imag(Δ.tearing)) < 1e-3 * abs(Δ.tearing)
         # :ray is the default backend.
         @test IL.GGJModel() === IL.GGJModel{:ray}()
     end
@@ -74,15 +76,16 @@ end
         Δ = IL.solve_inner(IL.GGJModel(), q4, γ)
         # Pins from the pre-port validation suite (post extended-precision
         # march fix; S-invariant to 3e-4 / 7e-9 and θ-stable there).
-        @test Δ[1] ≈ 2.4720608737 + 13.354123514im rtol = 1e-4
-        @test Δ[2] ≈ 0.13749694953 + 0.74275468725im rtol = 1e-4
+        @test Δ.interchange ≈ 2.4720608737 + 13.354123514im rtol = 1e-4
+        @test Δ.tearing ≈ 0.13749694953 + 0.74275468725im rtol = 1e-4
 
         # Δ is an analytic invariant of the contour angle: the outward
-        # θ-check drift is a direct numerical error measurement.
+        # θ-check drift is a direct numerical error measurement. `solve_ray`
+        # returns the raw pair (Δ₁, Δ₂) = (interchange, tearing).
         Q = GGJ.inner_Q(q4, γ)
         r2 = IL.solve_ray(q4, Q; θ=1.2 * angle(Q) / 4)
-        @test abs(r2.Δ[2] - Δ[2]) / abs(Δ[2]) < 1e-5
-        @test abs(r2.Δ[1] - Δ[1]) / abs(Δ[1]) < 1e-3
+        @test abs(r2.Δ[2] - Δ.tearing) / abs(Δ.tearing) < 1e-5
+        @test abs(r2.Δ[1] - Δ.interchange) / abs(Δ.interchange) < 1e-3
     end
 end
 
@@ -137,7 +140,9 @@ end
         Q = 5.0im
         conv = IL.delta_convergence(p, Q; verbose=false)
         Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, Q * GGJ.q0(p))
-        @test conv.Δ ≈ Δ rtol = 1e-6              # baseline == the plain solve
+        # conv.Δ is the raw solve_ray pair (Δ₁, Δ₂) = (interchange, tearing).
+        @test conv.Δ[1] ≈ Δ.interchange rtol = 1e-6   # baseline == the plain solve
+        @test conv.Δ[2] ≈ Δ.tearing rtol = 1e-6
         @test maximum(conv.spread) < 1e-4         # honest error bar is small here
     end
 end
@@ -148,7 +153,10 @@ end
     for model in (IL.GGJModel(; solver=:ray), IL.GGJModel(; solver=:galerkin))
         prof = IL.solve_inner_profile(model, p, γ)
         # Δ agrees with the plain matching solve of the same backend (identical solve path).
-        @test prof.Δ ≈ IL.solve_inner(model, p, γ) rtol = 1e-12
+        # prof.Δ stays the positional pair (Δ₁, Δ₂) = (interchange, tearing) that feeds deltar.
+        Δ_plain = IL.solve_inner(model, p, γ)
+        @test prof.Δ[1] ≈ Δ_plain.interchange rtol = 1e-12
+        @test prof.Δ[2] ≈ Δ_plain.tearing rtol = 1e-12
         # Real ascending inner-coordinate grid from the rational surface, profiles npts × 2.
         @test issorted(prof.x)
         @test prof.x[1] ≈ 0 atol = 1e-12

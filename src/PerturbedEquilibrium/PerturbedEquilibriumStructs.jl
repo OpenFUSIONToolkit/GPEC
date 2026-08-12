@@ -76,6 +76,8 @@ Internal state variables for perturbed equilibrium calculations.
     n_modes::Vector{Int} = Int[]
     # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer.
     inner_bpen::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    # True when the consumed OdeState came from gal matching, whose du_store carries the
+    # analytic galerkin Ξ′; selects the gal branch of the singular-coupling Ξ′ evaluation.
     odet_from_gal::Bool = false
 end
 

@@ -924,17 +924,18 @@ solve_ray(params::GGJParameters, Q::Number; kwargs...) =
 
 """
     solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs...)
-        -> SVector{2,ComplexF64}
+        -> InnerLayerResponse
 
 Rotated-ray backend: converts γ via `inner_Q`, forwards keywords to
-[`solve_ray`](@ref), and returns `(Δ₁, Δ₂)` in the shared backend convention
-(deltac swap + physical rescale). Preferred for |Q| ≳ 1 and near the
-imaginary axis; use `solve_ray` directly when the full
-[`RaySolveResult`](@ref) is wanted.
+[`solve_ray`](@ref), and returns the parity-projected matching data. The
+`solve_ray` pair is ordered `(Δ₁, Δ₂) = (interchange, tearing)`, so the two
+channels are swapped into the named fields of [`InnerLayerResponse`](@ref).
+Preferred for |Q| ≳ 1 and near the imaginary axis; use `solve_ray` directly
+when the full [`RaySolveResult`](@ref) is wanted.
 """
 function solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs...)
     res = solve_ray(params, inner_Q(params, γ); kwargs...)
-    return res.Δ
+    return InnerLayerResponse(res.Δ[2], res.Δ[1])
 end
 
 """

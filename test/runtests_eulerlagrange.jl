@@ -35,7 +35,8 @@ end
             odet.psi_store[i] = Float64(i)
             odet.q_store[i] = Float64(i * 2)
             odet.u_store[:, :, :, i] .= ComplexF64(i)
-            odet.ud_store[:, :, :, i] .= ComplexF64(i + 0.5)
+            odet.du_store[:, :, :, i] .= ComplexF64(i + 0.5)
+            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.25)
         end
 
         # Resize storage
@@ -45,14 +46,16 @@ end
         @test length(odet.psi_store) == 2 * numsteps_init
         @test length(odet.q_store) == 2 * numsteps_init
         @test size(odet.u_store, 4) == 2 * numsteps_init
-        @test size(odet.ud_store, 4) == 2 * numsteps_init
+        @test size(odet.du_store, 4) == 2 * numsteps_init
+        @test size(odet.xi_s_store, 3) == 2 * numsteps_init
 
         # Check data is preserved
         @test all(odet.psi_store[1:odet.step] .== Float64.(1:odet.step))
         @test all(odet.q_store[1:odet.step] .== Float64.(2:2:(2*odet.step)))
         for i in 1:odet.step
             @test all(odet.u_store[:, :, :, i] .== ComplexF64(i))
-            @test all(odet.ud_store[:, :, :, i] .== ComplexF64(i + 0.5))
+            @test all(odet.du_store[:, :, :, i] .== ComplexF64(i + 0.5))
+            @test all(odet.xi_s_store[:, :, i] .== ComplexF64(i + 0.25))
         end
 
         # Check that you can resize again
@@ -60,7 +63,8 @@ end
         @test length(odet.psi_store) == 4 * numsteps_init
         @test length(odet.q_store) == 4 * numsteps_init
         @test size(odet.u_store, 4) == 4 * numsteps_init
-        @test size(odet.ud_store, 4) == 4 * numsteps_init
+        @test size(odet.du_store, 4) == 4 * numsteps_init
+        @test size(odet.xi_s_store, 3) == 4 * numsteps_init
     end
 
     @testset "trim_storage!" begin
@@ -75,7 +79,8 @@ end
             odet.psi_store[i] = Float64(i)
             odet.q_store[i] = Float64(i * 2)
             odet.u_store[:, :, :, i] .= ComplexF64(i)
-            odet.ud_store[:, :, :, i] .= ComplexF64(i + 0.5)
+            odet.du_store[:, :, :, i] .= ComplexF64(i + 0.5)
+            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.25)
         end
 
         # Trim storage
@@ -85,7 +90,8 @@ end
         @test length(odet.psi_store) == odet.step
         @test length(odet.q_store) == odet.step
         @test size(odet.u_store, 4) == odet.step
-        @test size(odet.ud_store, 4) == odet.step
+        @test size(odet.du_store, 4) == odet.step
+        @test size(odet.xi_s_store, 3) == odet.step
 
         # Check all data is preserved
         @test all(odet.psi_store .== Float64.(1:odet.step))
@@ -114,12 +120,13 @@ end
         # Initialize index (sorted by unorm)
         odet.index[:, 1] = [1, 2]
 
-        # Set up some u_store and ud_store data
+        # Set up some u_store, du_store, and xi_s_store data
         for i in 1:odet.step
             odet.u_store[:, :, 1, i] .= ComplexF64(i)
             odet.u_store[:, :, 2, i] .= ComplexF64(i + 0.1)
-            odet.ud_store[:, :, 1, i] .= ComplexF64(i + 0.2)
-            odet.ud_store[:, :, 2, i] .= ComplexF64(i + 0.3)
+            odet.du_store[:, :, 1, i] .= ComplexF64(i + 0.2)
+            odet.du_store[:, :, 2, i] .= ComplexF64(i + 0.3)
+            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.4)
         end
 
         u_orig = copy(odet.u_store)
@@ -276,9 +283,11 @@ end
 
         # Check array dimensions
         @test size(odet.u) == (numpert_total, numpert_total, 2)
-        @test size(odet.ud) == (numpert_total, numpert_total, 2)
+        @test size(odet.du) == (numpert_total, numpert_total, 2)
+        @test size(odet.xi_s) == (numpert_total, numpert_total)
         @test size(odet.u_store) == (numpert_total, numpert_total, 2, numsteps_init)
-        @test size(odet.ud_store) == (numpert_total, numpert_total, 2, numsteps_init)
+        @test size(odet.du_store) == (numpert_total, numpert_total, 2, numsteps_init)
+        @test size(odet.xi_s_store) == (numpert_total, numpert_total, numsteps_init)
         @test length(odet.psi_store) == numsteps_init
         @test length(odet.q_store) == numsteps_init
         @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)

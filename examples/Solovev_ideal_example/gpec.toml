@@ -44,6 +44,11 @@ verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
 
+# Note: SLAYER tearing analysis is not run on the Solovev analytic equilibrium
+# — its Δ' / inner-layer dispersion does not yield meaningful tearing roots.
+# The SLAYER example and regression case use the DIII-D-like geqdsk instead
+# (see examples/DIIID-like_SLAYER_example).
+
 [ForceFreeStates]
 local_stability_flag = true   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes

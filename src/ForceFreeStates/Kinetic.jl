@@ -257,6 +257,7 @@ function _compute_fkg_matrices!(
     ffit.amats = cubic_interp(xs, Series(ak_flat); ffit.itp_opts...)
     ffit.bmats = cubic_interp(xs, Series(bk_flat); ffit.itp_opts...)
     ffit.cmats = cubic_interp(xs, Series(ck_flat); ffit.itp_opts...)
+    ffit.kinetic_populated = true
 
     return nothing
 end

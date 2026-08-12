@@ -1,17 +1,23 @@
-# Inner Layer Module
+# Tearing Module
 
-The `InnerLayer` module solves the **resistive inner-region problem** of
-matched-asymptotic resistive-MHD stability: the thin layer around a rational
-surface where resistivity, inertia and the ideal singularity balance. Its
-output is the pair of parity-projected matching data ``(\Delta_\mathrm{odd},
-\Delta_\mathrm{even})`` that the outer ideal region (DCON/GPEC) matches to in
-order to obtain resistive growth rates, tearing ``\Delta'``, and resistive
-interchange stability.
+The `Tearing` module groups the resistive tearing-mode analysis stack:
+`InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
+SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
+contour-intersection root extraction), and `Runner` (user-facing TOML
+configuration, profile loading, and HDF5 output).
 
-The module provides an abstract [`InnerLayerModel`](@ref InnerLayer.InnerLayerModel) interface and one
-concrete model so far, the **GGJ (Glasser–Greene–Johnson)** layer, with three
-interchangeable solver backends. Future inner-layer models (SLAYER, kinetic
-layers) plug in through the same interface.
+## Layer Inputs
+
+Equilibrium/ForceFreeStates glue that assembles per-surface inner-layer inputs.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing]
+```
+
+The module provides an abstract [`InnerLayerModel`](@ref InnerLayer.InnerLayerModel) interface and two
+concrete models: the **GGJ (Glasser–Greene–Johnson)** layer documented below, with three
+interchangeable solver backends, and the pressureless **SLAYER** Fitzpatrick Riccati layer.
+Further inner-layer models (kinetic layers) plug in through the same interface.
 
 Two source papers define the equations and the asymptotic construction, and are
 cited by their equation numbers throughout the code and below:
@@ -284,4 +290,22 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.GGJ]
+```
+
+## SLAYER
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
+```
+
+## Dispersion
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Dispersion]
+```
+
+## Runner
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Runner]
 ```

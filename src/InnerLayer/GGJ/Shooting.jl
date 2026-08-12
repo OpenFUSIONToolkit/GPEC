@@ -1,16 +1,16 @@
 # Shooting.jl
 #
 # NOTE: This solver is NOT used in production and is not to be used. It was a
-# porting exercise (deltar.f) retained for reference only. The Galerkin solver
+# porting exercise retained for reference only. The Galerkin solver
 # (Galerkin.jl) is the sole supported GGJ inner-layer solver; shooting underflows
 # at large |γ| and shares none of the production matching path. Do not call it.
 #
-# Stable backward shooting solver for the GGJ inner-layer model. Direct
-# Julia port of rmatch/deltar.f. Integrates the 4×4 origin-diagonalized
+# Stable backward shooting solver for the GGJ inner-layer model.
+# Integrates the 4×4 origin-diagonalized
 # resistive-layer ODE from `tmax` (large-x asymptotic regime) backward to
 # a small `tmin` (origin Frobenius regime), then projects onto the local
 # Frobenius basis at the origin and reads off the parity-projected
-# matching data via `deltar_ratio`.
+# matching data.
 #
 # This solves the same inner-region equations as the production Galerkin path
 # (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) but by a different numerical method: a
@@ -21,8 +21,7 @@
 # columns 3 and 4 (`x^{−p1}` and `x^{−1/2}`); the two "large" (smooth) modes
 # are columns 1 and 2 (`x^{p1}` and `x^{1/2}`).
 #
-# Reference: A. H. Glasser, Phys. Plasmas **23**, 072505 (2016) and the
-# Fortran rmatch/deltar.f.
+# Reference: A. H. Glasser, Phys. Plasmas **23**, 072505 (2016).
 
 using LinearAlgebra
 using SpecialFunctions: gamma
@@ -31,8 +30,8 @@ using OrdinaryDiffEq
 """
     GGJShootingSystem
 
-Precomputed origin- and infinity-side arrays for the deltar.f-style
-backward shoot. Construct via [`_build_shooting_system`](@ref).
+Precomputed origin- and infinity-side arrays for the backward shoot.
+Construct via [`_build_shooting_system`](@ref).
 """
 struct GGJShootingSystem
     params::GGJParameters
@@ -55,7 +54,7 @@ struct GGJShootingSystem
 end
 
 # -----------------------------------------------------------------------
-# Origin arrays — port of deltar_origin (deltar.f lines 333–482).
+# Origin arrays for the origin-diagonalized Frobenius basis.
 # -----------------------------------------------------------------------
 
 function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol::Float64=1e-6)
@@ -76,7 +75,7 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     aplus = h - 0.5 + p1v
     aminus = h - 0.5 - p1v
 
-    # d0 — see deltar_origin lines 361–376.
+    # d0 — diagonalizing matrix at the origin.
     d0_m = zeros(ComplexF64, 4, 4)
     d0_m[1, 1] = q * a2
     d0_m[1, 2] = 1
@@ -90,7 +89,7 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     d0_m[4, 3] = aminus * a2
     d0_m[4, 4] = 1
 
-    # d0inv — same explicit antisymmetry pattern as deltar_origin lines 380–395.
+    # d0inv — explicit antisymmetry pattern of the origin diagonalizer inverse.
     d0inv_m = zeros(ComplexF64, 4, 4)
     d0inv_m[1, 1] = d0_m[3, 3]
     d0inv_m[2, 2] = d0_m[4, 4]
@@ -123,7 +122,7 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     d0inv_s = SMatrix{4,4,ComplexF64}(d0inv_m)
     al1_s = d0inv_s * SMatrix{4,4,ComplexF64}(al1_m) * d0_s
 
-    # ups[i, j, k] — origin power-series coefficients (deltar_origin lines 440–460).
+    # ups[i, j, k] — origin power-series coefficients.
     # ups(:,:,1) = I; higher orders from the al1 recurrence.
     ups = zeros(ComplexF64, 4, 4, nps)
     @inbounds for i in 1:4
@@ -139,7 +138,7 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
         end
     end
 
-    # tmin from the truncation-error bound on the origin series (line 470).
+    # tmin from the truncation-error bound on the origin series.
     unmax = 0.0
     @inbounds for j in 1:4, i in 1:4
         unmax = max(unmax, abs(ups[i, j, nps]))
@@ -151,7 +150,7 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
 end
 
 # -----------------------------------------------------------------------
-# Infinity arrays — port of deltar_infinity (deltar.f lines 490–666).
+# Infinity arrays — large-t asymptotic basis.
 # With nxps = 1 the higher-order vps recurrence is dead code; vps[:,:,1] = I.
 # -----------------------------------------------------------------------
 
@@ -176,7 +175,7 @@ function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
     ddsq = bb * bb - cc
     dd = sqrt(ddsq)
 
-    # m matrix (2×2) — deltar_infinity lines 521–524.
+    # m matrix (2×2) — large-t asymptotic coupling.
     m11 = -lamdaq + dr / lamdaq
     m12 = h - dr / lamdaq
     m21 = kk1 * (h + dr / lamdaq)
@@ -218,7 +217,7 @@ function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
     d1 = SMatrix{4,4,ComplexF64}(d1_m)
     bl1 = SVector{4,ComplexF64}(-lamda, -lamda, lamda, lamda)
 
-    # tmax (deltar_infinity lines 644–650, ntmax = 1 default).
+    # tmax (ntmax = 1 default).
     p1v = sqrt(-mercier_di(p))
     tmax_inner = sqrt((max(0.5, p1v)^2 - log(rtol)) / abs(lamda))
     tmax_outer = 6.0 / abs(q)
@@ -246,7 +245,7 @@ function _build_shooting_system(p::GGJParameters, Q::ComplexF64;
 end
 
 # -----------------------------------------------------------------------
-# Origin Frobenius basis evaluator — port of deltar_upsfit (lines 233–267).
+# Origin Frobenius basis evaluator.
 # Returns the 4×4 matrix `u(t)` whose columns are the 4 fundamental
 # origin solutions evaluated at `t`. Solving `u * c0 = y` then projects a
 # 4-component integrated state onto the origin basis.
@@ -274,8 +273,8 @@ function _origin_basis(sys::GGJShootingSystem, t::Real)
 end
 
 # -----------------------------------------------------------------------
-# Initial condition at tmax — see deltar_run lines 121–126.
-# With nxps = 1 in deltar.f, vps[:,:,1] = I, so the asymptotic-basis
+# Initial condition at tmax.
+# With nxps = 1, vps[:,:,1] = I, so the asymptotic-basis
 # evaluator returns a diagonal v. The IC is then
 #   y(tmax) = d1 * v(:, 1:2)
 # which extracts the first two columns of d1 scaled by the algebraic-mode
@@ -296,7 +295,7 @@ function _initial_condition(sys::GGJShootingSystem)
 end
 
 # -----------------------------------------------------------------------
-# ODE right-hand side — port of deltar_der (lines 185–224).
+# ODE right-hand side.
 #   dy/dt = al1 * y * t + diag(al0) * y / t
 # -----------------------------------------------------------------------
 
@@ -310,7 +309,7 @@ function _ggj_der!(dy::AbstractMatrix{ComplexF64}, y::AbstractMatrix{ComplexF64}
 end
 
 # -----------------------------------------------------------------------
-# Parity-projected matching ratio — port of deltar_ratio (lines 674–716).
+# Parity-projected matching ratio.
 # c0 is a 4×2 complex matrix whose rows are the four origin-mode
 # coefficients of the two integrated solutions (modes 1: x^{p1},
 # 2: x^{1/2}, 3: x^{−p1}, 4: x^{−1/2}).
@@ -341,12 +340,22 @@ end
     solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
                 reltol::Float64=1e-6, abstol::Float64=1e-6,
                 rtol_origin::Float64=1e-6, nps::Int=8,
-                fmax::Float64=1.0, solver=Tsit5()) -> SVector{2,ComplexF64}
+                fmax::Float64=1.0, solver=Tsit5()) -> InnerLayerResponse
 
-Backward shoot in the origin-diagonalized 4×4 basis; direct port of rmatch
-`deltar.f`. Returns `(Δ₁, Δ₂)` rescaled to physical units, index ordering as
-the Fortran `deltar` output. `rtol_origin` sets the origin-series truncation
-and `tmin`. Not for production use — see the file header.
+Solve the GGJ inner-layer matching problem by stable backward shooting in
+the origin-diagonalized 4×4 basis.
+
+Returns an `InnerLayerResponse(tearing, interchange)` with rescaling
+applied. `_delta_from_c0` returns a `(Δ₁, Δ₂)` pair where `Δ₁` is the
+**interchange** (anti-symmetric / W-odd) channel and `Δ₂` is the
+**tearing** (symmetric / W-even) channel. We therefore map
+`Δ₂ → tearing` and `Δ₁ → interchange` into the named fields, matching the
+physics channel labels used by the Galerkin solver and by the
+`InnerLayerResponse` docstring.
+
+Tolerances `reltol`/`abstol` are the integrator tolerances; `rtol_origin`
+controls the truncation error of the origin Frobenius series and the
+choice of `tmin`.
 """
 function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
     reltol::Float64=1e-6, abstol::Float64=1e-6,
@@ -367,7 +376,9 @@ function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
     c0 = Matrix(u) \ Matrix(y_end)
 
     Δ_raw = _delta_from_c0(c0, sys)
-    return rescale_delta(Δ_raw, params)
+    Δ_rescaled = rescale_delta(Δ_raw, params)
+    # Δ_rescaled ≡ (Δ₁, Δ₂) = (interchange, tearing).
+    return InnerLayerResponse(Δ_rescaled[2], Δ_rescaled[1])
 end
 
 solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Real; kwargs...) =

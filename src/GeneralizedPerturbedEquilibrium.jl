@@ -24,6 +24,8 @@ include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
 
+# InnerLayer holds the pure inner-region solvers and must load before
+# ForceFreeStates, which calls them for the matched-Δ′ Galerkin solve.
 include("InnerLayer/InnerLayer.jl")
 import .InnerLayer as InnerLayer
 export InnerLayer
@@ -31,6 +33,15 @@ export InnerLayer
 include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates
 export ForceFreeStates
+
+include("Tearing/Tearing.jl")
+import .Tearing as Tearing
+export Tearing
+# Backward-compat top-level aliases so callers can still reach these
+# directly; the canonical nested path is `Tearing.{Dispersion,Runner}`.
+import .Tearing.Dispersion as Dispersion
+import .Tearing.Runner as Runner
+export Dispersion, Runner
 
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
@@ -52,7 +63,7 @@ include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
@@ -365,6 +376,14 @@ function main_from_inputs(
         sing_min!(intr, ctrl, equil)
     end
 
+    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H,
+    # K, M) for each surviving singular surface. Needed by the Julia GGJ
+    # inner-layer analysis; kinetic timescales (τ_A, τ_R) are layered on
+    # top by `build_ggj_inputs` using the same kinetic profiles as SLAYER.
+    if intr.msing > 0
+        ForceFreeStates.resist_eval_all!(intr, equil)
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
@@ -491,10 +510,47 @@ function main_from_inputs(
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
-    # Early exit if user only requested force-free states
+    # SLAYER tearing-mode analysis stage. Needs only equil + intr, so it runs in
+    # both the force_termination=true path and the full pipeline. `pe_file` is the
+    # HDF5 file PE wrote (to append into), or `nothing` if PE did not run.
+    function _run_slayer_stage(pe_file::Union{String,Nothing})
+        ("SLAYER" in keys(inputs)) || return nothing
+        # SLAYER is a post-processing diagnostic. A failure here must not
+        # discard the equilibrium / stability / PE results already computed,
+        # so the whole stage is guarded: on error we log loudly and return
+        # `nothing` for the `slayer` field rather than propagating.
+        try
+            slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+            slayer_ctrl.enabled || return nothing
+            @info "\n  SLAYER\n$_SECTION"
+            slayer_start = time()
+            result = Runner.run_slayer(equil, intr, slayer_ctrl;
+                dir_path=intr.dir_path)
+            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+            h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
+            h5_path = joinpath(intr.dir_path, h5_filename)
+            # Append the slayer/ group; create the file if no prior stage wrote
+            # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+            HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+                Runner.write_slayer_hdf5!(f, result)
+            end
+            @info "SLAYER results written to $h5_filename"
+            return result
+        catch err
+            @error "SLAYER stage failed; continuing without tearing results. " *
+                   "Equilibrium / stability / PE outputs are unaffected." exception =
+                (err, catch_backtrace())
+            return nothing
+        end
+    end
+
+    # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
+        slayer_result = _run_slayer_stage(nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return
+        return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+            vac_data=ctrl.vac_flag ? vac_data : nothing,
+            slayer=slayer_result)
     end
 
     # ----------------------------------------------------------------
@@ -608,13 +664,27 @@ function main_from_inputs(
     end
 
     # ----------------------------------------------------------------
+    # SLAYER tearing-mode analysis (after PE so it appends to the PE output
+    # file; falls back to the ForceFreeStates file when PE did not run).
+    # ----------------------------------------------------------------
+    pe_file = if "PerturbedEquilibrium" in keys(inputs)
+        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
+        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
+    else
+        ctrl.HDF5_filename
+    end
+    slayer_result = _run_slayer_stage(pe_file)
+
+    # ----------------------------------------------------------------
     # Done
     # ----------------------------------------------------------------
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
+    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+        vac_data=ctrl.vac_flag ? vac_data : nothing,
+        slayer=slayer_result)
 
 end
 
@@ -740,8 +810,8 @@ function write_outputs_to_HDF5(
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
         out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
-        out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
+        out_h5["integration/dxi_psi"] = odet.du_store[:, :, 1, :]
+        out_h5["integration/xi_s"] = odet.xi_s_store
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
@@ -778,6 +848,26 @@ function write_outputs_to_HDF5(
             end
             out_h5["singular/m"] = m_matrix
             out_h5["singular/n"] = n_matrix
+
+            # Glasser-Greene-Johnson geometric coefficients + surface averages
+            # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
+            # Both kinetic-free (E, F, G, H, K, M) and geometry-only
+            # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
+            # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
+            # can reconstruct τ_A / τ_R from any kinetic-profile source.
+            if all(s -> s.restype !== nothing, intr.sing)
+                out_h5["singular/E"] = [s.restype.E for s in intr.sing]
+                out_h5["singular/F"] = [s.restype.F for s in intr.sing]
+                out_h5["singular/G"] = [s.restype.G for s in intr.sing]
+                out_h5["singular/H"] = [s.restype.H for s in intr.sing]
+                out_h5["singular/K"] = [s.restype.K for s in intr.sing]
+                out_h5["singular/M"] = [s.restype.M for s in intr.sing]
+                out_h5["singular/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in intr.sing]
+                out_h5["singular/avg_bsq"] = [s.restype.avg_bsq for s in intr.sing]
+                out_h5["singular/p_local"] = [s.restype.p_local for s in intr.sing]
+                out_h5["singular/p1_local"] = [s.restype.p1_local for s in intr.sing]
+                out_h5["singular/v1_local"] = [s.restype.v1_local for s in intr.sing]
+            end
         end
 
         # Per-surface ca-based Δ' (`sing.delta_prime`) is a stub; only the BVP matrix is emitted (see SingType.delta_prime docstring).
@@ -794,6 +884,15 @@ function write_outputs_to_HDF5(
         if intr.msing > 0 && !isempty(intr.delta_coil)
             dc = permutedims(intr.delta_coil)
             out_h5["singular/delta_coil"] = dc
+        end
+
+        # Write raw 2msing×2msing outer-region D' matrix in side-major ordering
+        # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
+        # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
+        # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
+        # pest3_decompose to recover (A', B', Γ', Δ').
+        if intr.msing > 0 && !isempty(intr.delta_prime_raw)
+            out_h5["singular/delta_prime_raw"] = intr.delta_prime_raw
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan

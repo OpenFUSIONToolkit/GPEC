@@ -31,6 +31,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     ua_right::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)  # asymptotic basis at right inner-layer boundary
     psi_ua_left::Float64 = 0.0   # ψ where ua_left was evaluated (left inner-layer boundary)
     psi_ua_right::Float64 = 0.0  # ψ where ua_right was evaluated (right inner-layer boundary)
+    restype::Any = nothing       # ResistGeometry from ResistEval.jl (populated by resist_eval_all!); typed `Any` to avoid a cross-file type reference
 end
 
 """
@@ -194,6 +195,7 @@ A mutable struct holding internal state variables for stability calculations.
     raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+
     """
     Edge coil-response matrix of shape (2msing × numpert_total). Column k is the resonant
     small-solution response at each surface side to a unit source on edge poloidal mode k,
@@ -201,6 +203,23 @@ A mutable struct holding internal state variables for stability calculations.
     (`_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
     """
     delta_coil::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+
+    """
+    Raw 2msing × 2msing outer-region matching matrix `D'` from the STRIDE global
+    BVP, in the side-major ordering `[L_s1, R_s1, L_s2, R_s2, …, L_sm, R_sm]`
+    (left vs right of each singular surface, interleaved surface-by-surface).
+    This is the Pletzer–Dewar 1991 outer-region matrix before parity rotation,
+    and is stored byte-compatibly with the Fortran `rdcon/gal.f::gal_write_delta`
+    convention (top 2msing×2msing block of `delta_gw.dat`). The PEST3 Δ' matrix
+    stored in `delta_prime_matrix` is the odd-parity tearing projection of this
+    raw matrix; the even-parity A' and off-parity B', Γ' blocks are recovered
+    via `pest3_decompose(dp_raw)` — needed for the full det(D' − D(γ)) = 0
+    eigenvalue problem with Glasser stabilization.
+
+    Empty unless `ctrl.use_parallel` is true. No ½ prefactor is applied (matches
+    Fortran rdcon; Pletzer–Dewar paper multiplies by ½).
+    """
+    delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """
@@ -245,8 +264,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
-  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that historically caused intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). Empirical reliability sweep (5 trials × {1,2,4} on DIII-D 147131 βₚ≈0.07): 15/15 bit-identical Δ′ at every setting; pt=2 ≈ pt=4 ≈ 20 % faster than serial. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
-  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `ud_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices and zeros for `ud_store` (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead (differs by the ~0.12 % Riccati-vs-axis algorithmic gap on DIIID-class cases).  **Default `false`** to avoid paying the dense-pass cost on Δ'/vacuum/ideal-stability-only runs; **PerturbedEquilibrium-using configs must set `populate_dense_xi = true` explicitly** when `use_parallel = true` (otherwise PE silently reads Riccati-basis garbage).  Auto-disabled when `force_termination = true` regardless of the user setting, since the dense pass has no downstream consumer in that case.  Approximate cost when enabled: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
+  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that can cause intermittent BVP divergence on numerically delicate equilibria. The parallel path produces bit-identical Δ′ across thread counts; `parallel_threads = 2` is about 20% faster than serial and saturates the speedup. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
+  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `du_store` / `xi_s_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices with diagnostic derivatives (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead (differs by the ~0.12 % Riccati-vs-axis algorithmic gap on DIIID-class cases).  **Default `false`** to avoid paying the dense-pass cost on Δ'/vacuum/ideal-stability-only runs; **PerturbedEquilibrium-using configs must set `populate_dense_xi = true` explicitly** when `use_parallel = true` (otherwise PE silently reads Riccati-basis garbage).  Auto-disabled when `force_termination = true` regardless of the user setting, since the dense pass has no downstream consumer in that case.  Approximate cost when enabled: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
 @kwdef mutable struct ForceFreeStatesControl
@@ -359,6 +378,8 @@ end
     kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
     # Kinetic torque matrix splines: 6 components
     ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+
+    kinetic_populated::Bool = false  # set by make_kinetic_matrix; the solution then obeys the FKG ODE, not the ideal EL relation
 
     # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
     f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
@@ -506,7 +527,11 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
 
-  - `ud_store::Array{ComplexF64,4}` - Stored derivatives of the solution at each saved step with same shape as `u_store`.
+  - `du_store::Array{ComplexF64,4}` - du₁/dψ and du₂/dψ at the accepted point of each saved step, same shape as `u_store`.
+
+  - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016, shape `(numpert_total, numpert_total, numsteps_init)`.
+
+  - `du_store_populated::Bool` - True once the serial EL path has filled `du_store`/`xi_s_store`; other paths leave it false.
 
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
 
@@ -524,7 +549,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
 
-  - `ud::Array{ComplexF64,3}` - Current working solution derivative (different than du) arrays with shape `(numpert_total, numpert_total, 2)`.
+  - `du::Array{ComplexF64,3}` - du/dψ from the latest `sing_der!` call, shape `(numpert_total, numpert_total, 2)`.
+
+  - `xi_s::Matrix{ComplexF64}` - Ξ_s from the latest `sing_der!` call, shape `(numpert_total, numpert_total)`.
 
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
 
@@ -573,7 +600,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    du_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, numsteps_init)
+    du_store_populated::Bool = false
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
@@ -585,7 +614,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
     psifac::Float64 = 0.0
     q::Float64 = 0.0
     u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
+    du::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
+    xi_s::Matrix{ComplexF64} = zeros(ComplexF64, numpert_total, numpert_total)
     ising_start::Int = 0
     psimax::Float64 = 0.0
     needs_crossing::Bool = false

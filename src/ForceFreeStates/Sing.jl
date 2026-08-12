@@ -1283,13 +1283,12 @@ more simplistic code with similar performance.
         du1 .*= singfac_vec
     end
 
-    # ud[1] = Ξ'_Ψ
-    @views odet.ud[:, :, 1] .= du1
-    # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), eq. 18 of Glasser 2016
+    odet.du .= du
+    # Ξ_s = - A⁻¹(B * Ξ'_Ψ + C * Ξ_Ψ), eq. 18 of Glasser 2016
     mul!(tmp_mat, bmat, du1)
-    odet.ud[:, :, 2] .= .-tmp_mat
+    odet.xi_s .= .-tmp_mat
     mul!(tmp_mat, cmat, u1)
-    @views odet.ud[:, :, 2] .-= tmp_mat
+    odet.xi_s .-= tmp_mat
 end
 
 """
