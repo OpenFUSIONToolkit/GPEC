@@ -32,7 +32,7 @@ module GGJ
 using LinearAlgebra
 using StaticArrays
 
-import ..InnerLayerModel, ..solve_inner
+import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner, ..InnerLayerParameters
 
 """
     GGJModel{S} <: InnerLayerModel

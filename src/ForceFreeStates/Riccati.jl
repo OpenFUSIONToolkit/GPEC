@@ -334,8 +334,15 @@ function compute_delta_prime_matrix!(
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
     end
 
-    intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
+    deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
         M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+
+    # Persist both the PEST3 tearing projection (msing × msing) and the raw 2msing × 2msing
+    # D' matrix (side-major ordering, byte-compatible with Fortran rdcon/gal.f::gal_write_delta).
+    # The raw matrix is consumed by `pest3_decompose` to recover (A', B', Γ', Δ') for the full
+    # det(D' − D(γ)) = 0 eigenvalue problem; see ForceFreeStatesStructs.jl docstring.
+    intr.delta_prime_matrix = deltap
+    intr.delta_prime_raw    = dp_raw_persisted
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -727,7 +734,9 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     deltap = ComplexF64.(deltap_ext)
 
     debug && _log_bvp_pest3(dp_raw, deltap, s2, msing, Tc)
-    return deltap
+    # Return the PEST3-combined matrix AND the raw 2msing×2msing D' matrix (ComplexF64
+    # for compatibility with downstream pest3_decompose / HDF5 writer).
+    return deltap, ComplexF64.(dp_raw)
 end
 
 # Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
@@ -834,6 +843,69 @@ function _log_bvp_pest3(dp_raw, deltap, s2, msing, Tc)
     end
     @info "Δ' BVP: Raw dp diagonal = $([@sprintf("%.4f%+.4fi", Float64(real(dp_raw[i,i])), Float64(imag(dp_raw[i,i]))) for i in 1:s2])"
     @info "Δ' BVP: deltap diagonal = $([@sprintf("%.4f%+.4fi", real(deltap[i,i]), imag(deltap[i,i])) for i in 1:msing])"
+end
+
+"""
+    pest3_decompose(dp_raw::AbstractMatrix) -> (A', B', Γ', Δ')
+
+Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
+ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
+blocks. Given rows and columns paired by surface (odd index = left, even
+index = right), the Fortran RDCON parity combination is
+
+```
+A'(i,j) = RR + RL + LR + LL    (even-i, even-j)   — interchange↔interchange
+B'(i,j) = RR − RL + LR − LL    (even-i, odd-j)    — interchange↔tearing
+Γ'(i,j) = RR + RL − LR − LL    (odd-i,  even-j)   — tearing↔interchange
+Δ'(i,j) = RR − RL − LR + LL    (odd-i,  odd-j)    — tearing↔tearing
+```
+
+where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
+`LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
+
+Matches Fortran exactly — no ½ prefactor (Pletzer–Dewar multiply by ½, but
+the Fortran RDCON code leaves it commented out and our Julia port follows
+Fortran to keep the benchmark bit-identical; the prefactor cancels in
+`det(D' − D(γ)) = 0`).
+
+The Δ' block returned here equals `intr.delta_prime_matrix` (the m×m PEST3
+tearing projection computed inside `compute_delta_prime_matrix!`).
+
+# Arguments
+
+  - `dp_raw` — 2m×2m complex matrix (typically `intr.delta_prime_raw`).
+
+# Returns
+
+Named tuple `(A=A', B=B', Γ=Gp, Δ=Dp)` of four m×m complex matrices. In the
+full `det(D' − D(γ)) = 0` eigenvalue problem, these fill the 2m×2m outer
+matrix as `D' = [[A' B'] [Γ' Δ']]` with the interchange channel (Glasser
+stabilization) in the upper-left block and the tearing channel in the
+lower-right.
+"""
+function pest3_decompose(dp_raw::AbstractMatrix)
+    s2 = size(dp_raw, 1)
+    size(dp_raw, 2) == s2 ||
+        throw(ArgumentError("pest3_decompose: dp_raw must be square, got $(size(dp_raw))"))
+    iseven(s2) ||
+        throw(ArgumentError("pest3_decompose: dp_raw side must be 2m for integer m, got $s2"))
+    m = s2 ÷ 2
+    Tc = eltype(dp_raw)
+    Ap = zeros(Tc, m, m)
+    Bp = zeros(Tc, m, m)
+    Gp = zeros(Tc, m, m)
+    Dp = zeros(Tc, m, m)
+    for i in 1:m, j in 1:m
+        LL = dp_raw[2i-1, 2j-1]
+        LR = dp_raw[2i-1, 2j]
+        RL = dp_raw[2i,   2j-1]
+        RR = dp_raw[2i,   2j]
+        Ap[i, j] = RR + RL + LR + LL
+        Bp[i, j] = RR - RL + LR - LL
+        Gp[i, j] = RR + RL - LR - LL
+        Dp[i, j] = RR - RL - LR + LL
+    end
+    return (A=Ap, B=Bp, Γ=Gp, Δ=Dp)
 end
 
 """
@@ -1641,7 +1713,7 @@ function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
 end
 
 # Integrate each chunk's FM propagator from identity IC. Serial when bvp_threads == 1
-# (bit-deterministic; ~20% slower than 2-thread on DIII-D 147131 but immune to thread-
+# (bit-deterministic; ~20% slower than 2-thread but immune to thread-
 # schedule sensitivity). Parallel uses :static scheduler so Threads.threadid() returns a
 # stable index into odet_proxies. If a parallel run ever diverges on a delicate equilibrium,
 # drop to parallel_threads = 1 rather than use_parallel = false — the latter is silently wrong.

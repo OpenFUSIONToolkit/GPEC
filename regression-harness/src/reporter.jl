@@ -14,7 +14,7 @@ function _short_err(msg)::String
     lines = filter(!isempty, strip.(split(s, '\n')))
     isempty(lines) && return "(empty)"
     pick = something(findfirst(l -> startswith(l, "ERROR:") || occursin("Error", l), lines),
-                     length(lines))
+        length(lines))
     line = lines[pick]
     return length(line) > 200 ? line[1:200] * "..." : line
 end
@@ -36,7 +36,7 @@ function format_value(q::NamedTuple)::String
     elseif q.value_type == "json_array"
         t = q.value_text
         t === nothing && return "N/A"
-        arr = JSON.parse(t)
+        arr = JSON.parse(t; allownan=true)
         return "[$(length(arr)) elem]"
     elseif q.value_type == "checksum"
         t = q.value_text
@@ -66,7 +66,9 @@ function format_diff(abs_diff::Float64, rel_diff::Float64, status::String, value
     return @sprintf("%.3e (%.2f%%)", abs_diff, rel_diff * 100)
 end
 
-"""Helper: print a row of padded columns."""
+"""
+Helper: print a row of padded columns.
+"""
 function _print_row(cols::Vector{String}, widths::Vector{Int})
     parts = [rpad(cols[i], widths[i]) for i in eachindex(cols)]
     println(join(parts, "  "))
@@ -76,7 +78,7 @@ end
 Print a two-ref comparison report for a single case.
 """
 function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
-                                   ref1::ResolvedRef, ref2::ResolvedRef)
+    ref1::ResolvedRef, ref2::ResolvedRef)
     info1 = get_run_info(db, ref1.commit_hash, case_spec.name)
     info2 = get_run_info(db, ref2.commit_hash, case_spec.name)
 
@@ -103,7 +105,9 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     # Pre-compute all rows: (label, v1, v2, diff, status)
     header = ["Quantity", ref1.name, ref2.name, "Diff", "Status"]
     rows = Vector{Vector{String}}()
-    n_ok = 0; n_changed = 0; n_missing = 0
+    n_ok = 0
+    n_changed = 0
+    n_missing = 0
 
     # Helper: pick the value-cell text for one ref/quantity, accounting for
     # whole-ref failure (which should render as "FAILED" rather than "N/A").
@@ -114,7 +118,7 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     runtime_cell = (failed::Bool, qs::Dict, qname::String) -> begin
         failed && return "FAILED"
         (haskey(qs, qname) && qs[qname].value_real !== nothing) ?
-            @sprintf("%.1fs", qs[qname].value_real) : "N/A"
+        @sprintf("%.1fs", qs[qname].value_real) : "N/A"
     end
 
     for spec in case_spec.quantities
@@ -145,15 +149,20 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
             continue
         end
 
-        q1 = q1_all[qname]; q2 = q2_all[qname]
+        q1 = q1_all[qname]
+        q2 = q2_all[qname]
         abs_diff, rel_diff, status = compare_values(q1, q2)
         st = status == "CHANGED" ? "** CHANGED **" : status
         push!(rows, [spec.label, format_value(q1), format_value(q2),
-                     format_diff(abs_diff, rel_diff, status, q1.value_type), st])
+            format_diff(abs_diff, rel_diff, status, q1.value_type), st])
 
-        if status == "OK"; n_ok += 1
-        elseif contains(status, "CHANGED"); n_changed += 1
-        else; n_missing += 1; end
+        if status == "OK"
+            n_ok += 1
+        elseif contains(status, "CHANGED")
+            n_changed += 1
+        else
+            n_missing += 1
+        end
     end
 
     # Derive column widths from header + all row content
@@ -202,13 +211,15 @@ Print a multi-ref tracking report for a single case.
 One row per quantity, one column per ref.
 """
 function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
-                          refs::Vector{ResolvedRef})
+    refs::Vector{ResolvedRef})
     run_infos = [get_run_info(db, ref.commit_hash, case_spec.name) for ref in refs]
     failed_mask = [info === nothing || !info.success for info in run_infos]
-    all_qs = [begin
-        info = run_infos[i]
-        (info !== nothing && info.success) ? get_quantities(db, refs[i].commit_hash, case_spec.name) : Dict{String,NamedTuple}()
-    end for i in eachindex(refs)]
+    all_qs = [
+        begin
+            info = run_infos[i]
+            (info !== nothing && info.success) ? get_quantities(db, refs[i].commit_hash, case_spec.name) : Dict{String,NamedTuple}()
+        end for i in eachindex(refs)
+    ]
 
     show_diff = length(refs) >= 2
     ref_names = [ref.name for ref in refs]
@@ -223,7 +234,9 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
 
     # Pre-compute rows
     rows = Vector{Vector{String}}()
-    n_ok = 0; n_changed = 0; n_missing = 0
+    n_ok = 0
+    n_changed = 0
+    n_missing = 0
 
     for spec in case_spec.quantities
         qname = spec.name
@@ -274,9 +287,13 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
                 st = status == "CHANGED" ? "** CHANGED **" : status
                 push!(row, format_diff(abs_diff, rel_diff, status, q_prev.value_type))
                 push!(row, st)
-                if status == "OK"; n_ok += 1
-                elseif contains(status, "CHANGED"); n_changed += 1
-                else; n_missing += 1; end
+                if status == "OK"
+                    n_ok += 1
+                elseif contains(status, "CHANGED")
+                    n_changed += 1
+                else
+                    n_missing += 1
+                end
             elseif last_failed || prev_failed
                 push!(row, "")
                 push!(row, "FAILED")

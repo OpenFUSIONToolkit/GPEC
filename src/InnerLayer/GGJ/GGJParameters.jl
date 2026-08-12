@@ -2,8 +2,7 @@
 #
 # Physical parameters for the Glasser–Greene–Johnson inner-layer model and
 # the derived scale factors that map between physical and inner-layer
-# (Wasow-normalized) variables. Mirrors the Fortran `resist_type` defined
-# in rmatch/deltar_mod and rmatch/deltac_mod.
+# (Wasow-normalized) variables.
 
 """
     GGJParameters
@@ -14,7 +13,7 @@ needed to scale the matching data back to physical Δ. The equilibrium
 coefficients `E, F, G, H, K, M` are the flux-surface averages defined in
 GWP2016 Eq. (A8); they enter the inner-region equations (Eq. 11).
 
-Fields are the same as the Fortran `resist_type`:
+Fields:
 
 | field   | meaning                                                        |
 |:------- |:-------------------------------------------------------------- |
@@ -32,7 +31,7 @@ Fields are the same as the Fortran `resist_type`:
 The complex growth rate `γ` is **not** stored here; it is passed as a
 separate argument to `solve_inner`.
 """
-Base.@kwdef struct GGJParameters
+Base.@kwdef struct GGJParameters <: InnerLayerParameters
     E::Float64
     F::Float64
     G::Float64

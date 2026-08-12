@@ -15,10 +15,83 @@ permissions:
   actions: write
   contents: read
 
+concurrency:
+  # One in-flight run per branch/PR. Superseded pull request runs are cancelled;
+  # runs on main/develop are allowed to finish so every merged commit is verified.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Detect Julia changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      julia: ${{ steps.filter.outputs.julia }}
+    steps:
+      - name: Check whether the pull request touches Julia code
+        id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Report the decision to the job log as well as the run summary, so
+          # `why did/didn't this run?` is answerable from either one.
+          say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+
+          # Pushes to main/develop always run: every merged commit gets verified.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "julia=true" >> "$GITHUB_OUTPUT"
+            say "Not a pull request — running the full test suite."
+            exit 0
+          fi
+
+          files=$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
+
+          # Allowlist of what test/runtests.jl actually exercises: the package
+          # itself, the tests and their fixtures, the example decks the tests run
+          # end-to-end, the dependency set, and this workflow. Anything not listed
+          # here does not trigger a run, so new untested Julia (benchmarks, docs
+          # scripts, a future tools/ directory) is excluded by default rather than
+          # by remembering to exclude it.
+          tested='(^src/|^test/|^examples/|^Project\.toml$|^\.github/workflows/test\.yaml$)'
+
+          relevant=$(printf '%s\n' "$files" | grep -E "$tested" || true)
+
+          say "### Julia change detection"
+          say ""
+          if [ -n "$relevant" ]; then
+            say "Running the test suite. Matched files:"
+            say '```'
+            say "$relevant"
+            say '```'
+          else
+            say "No Julia code, test data or example decks changed — skipping the test suite."
+            say ""
+            say "Files considered:"
+            say '```'
+            say "$files"
+            say '```'
+          fi
+
+          if [ -n "$relevant" ]; then
+            echo "julia=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "julia=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.julia == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -43,5 +116,33 @@ jobs:
       - name: Build Julia packages
         uses: julia-actions/julia-buildpkg@v1
 
+      # Coverage instrumentation is off: nothing consumes the .cov files (they are
+      # gitignored and never uploaded), and instrumenting slows compute-heavy
+      # numerical code noticeably. Set coverage: true and add a Codecov upload
+      # step together if coverage reporting is ever wanted.
       - name: Run tests
         uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+
+  # Stable check that is present on every pull request, whether or not the suite
+  # ran. Point branch protection at this job so skipped runs do not block merges.
+  test-status:
+    name: Tests
+    needs: [changes, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report suite result
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Change detection failed; cannot tell whether tests were needed."
+            exit 1
+          fi
+          case "${{ needs.test.result }}" in
+            success) echo "Test suite passed." ;;
+            skipped) echo "No Julia code changed; test suite intentionally skipped." ;;
+            *)       echo "Test suite result: ${{ needs.test.result }}"; exit 1 ;;
+          esac

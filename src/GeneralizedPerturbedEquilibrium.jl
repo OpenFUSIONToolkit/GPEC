@@ -24,6 +24,8 @@ include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
 
+# InnerLayer holds the pure inner-region solvers and must load before
+# ForceFreeStates, which calls them for the matched-Δ′ Galerkin solve.
 include("InnerLayer/InnerLayer.jl")
 import .InnerLayer as InnerLayer
 export InnerLayer
@@ -31,6 +33,15 @@ export InnerLayer
 include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates
 export ForceFreeStates
+
+include("Tearing/Tearing.jl")
+import .Tearing as Tearing
+export Tearing
+# Backward-compat top-level aliases so callers can still reach these
+# directly; the canonical nested path is `Tearing.{Dispersion,Runner}`.
+import .Tearing.Dispersion as Dispersion
+import .Tearing.Runner as Runner
+export Dispersion, Runner
 
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
@@ -52,14 +63,14 @@ include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry")
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -366,14 +377,19 @@ function main_from_inputs(
         sing_min!(intr, ctrl, equil)
     end
 
+    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H,
+    # K, M) for each surviving singular surface. Needed by the Julia GGJ
+    # inner-layer analysis; kinetic timescales (τ_A, τ_R) are layered on
+    # top by `build_ggj_inputs` using the same kinetic profiles as SLAYER.
+    if intr.msing > 0
+        ForceFreeStates.resist_eval_all!(intr, equil)
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
-    if ctrl.cyl_flag
-        intr.mlow = ctrl.delta_mlow
-        intr.mhigh = ctrl.delta_mhigh
-    elseif ctrl.sing_start == 0
+    if ctrl.sing_start == 0
         intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
@@ -388,58 +404,54 @@ function main_from_inputs(
     intr.numpert_total = intr.mpert * intr.npert
 
     # Fit equilibrium quantities to Fourier-spline functions.
-    if ctrl.mat_flag || ctrl.ode_flag
+    if ctrl.verbose
+        @info "Run parameters:\n" *
+              "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
+              "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+              "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+              "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
+              "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
+    end
+
+    # Compute metric tensor
+    metric = make_metric(equil, intr.mpert)
+
+    if ctrl.verbose
+        @info "Computing F, G, and K matrices"
+    end
+
+    # Compute matrices and populate FourFitVars struct
+    ffit = make_matrix(equil, intr, metric)
+
+    if ctrl.kinetic_factor > 0
         if ctrl.verbose
-            @info "Run parameters:\n" *
-                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
-                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
-                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
-                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
+            @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
         end
+        # Inject the KineticForces callback so the "calculated" source can
+        # invoke compute_calculated_kinetic_matrices without ForceFreeStates
+        # importing KineticForces (which would invert the load order).
+        calculated_cb = (c, e, i, m, f) ->
+            KineticForces.compute_calculated_kinetic_matrices(
+                c, e, i, m, f;
+                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
+        make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+            calculated_source=calculated_cb)
 
-        # Compute metric tensor
-        metric = make_metric(equil, intr.mpert)
-
-        if ctrl.verbose
-            @info "Computing F, G, and K matrices"
-        end
-
-        # Compute matrices and populate FourFitVars struct
-        ffit = make_matrix(equil, intr, metric)
-
-        if ctrl.kinetic_factor > 0
-            if ctrl.verbose
-                @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
-            end
-            # Inject the KineticForces callback so the "calculated" source can
-            # invoke compute_calculated_kinetic_matrices without ForceFreeStates
-            # importing KineticForces (which would invert the load order).
-            calculated_cb = (c, e, i, m, f) ->
-                KineticForces.compute_calculated_kinetic_matrices(
-                    c, e, i, m, f;
-                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
-            make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
-                calculated_source=calculated_cb)
-
-            # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
-            # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
-            # singfac_min == 0 preserves single-chunk behavior.
-            if ctrl.ode_flag && ctrl.singfac_min > 0
-                find_kinetic_singular_surfaces!(ffit, equil, intr)
-            end
+        # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
+        # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
+        # singfac_min == 0 preserves single-chunk behavior.
+        if ctrl.singfac_min > 0
+            find_kinetic_singular_surfaces!(ffit, equil, intr)
         end
     end
 
     # Integrate Euler-Lagrange Equation
-    if ctrl.ode_flag
-        if ctrl.verbose
-            @info "Integrating Euler-Lagrange equation"
-        end
-        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
-        if odet.nzero > 0 && ctrl.verbose
-            @warn "Fixed-boundary mode unstable for n = $nstring"
-        end
+    if ctrl.verbose
+        @info "Integrating Euler-Lagrange equation"
+    end
+    odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
+    if odet.nzero > 0 && ctrl.verbose
+        @warn "Fixed-boundary mode unstable for n = $nstring"
     end
 
     # Compute free boundary energies
@@ -474,7 +486,6 @@ function main_from_inputs(
     gal_data = nothing
     if ctrl.gal_flag
         gal_start = time()
-        ctrl.mat_flag || error("gal_flag=true requires mat_flag=true (needs the F/G/K matrix splines)")
         gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
         @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     end
@@ -498,10 +509,47 @@ function main_from_inputs(
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
-    # Early exit if user only requested force-free states
+    # SLAYER tearing-mode analysis stage. Needs only equil + intr, so it runs in
+    # both the force_termination=true path and the full pipeline. `pe_file` is the
+    # HDF5 file PE wrote (to append into), or `nothing` if PE did not run.
+    function _run_slayer_stage(pe_file::Union{String,Nothing})
+        ("SLAYER" in keys(inputs)) || return nothing
+        # SLAYER is a post-processing diagnostic. A failure here must not
+        # discard the equilibrium / stability / PE results already computed,
+        # so the whole stage is guarded: on error we log loudly and return
+        # `nothing` for the `slayer` field rather than propagating.
+        try
+            slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+            slayer_ctrl.enabled || return nothing
+            @info "\n  SLAYER\n$_SECTION"
+            slayer_start = time()
+            result = Runner.run_slayer(equil, intr, slayer_ctrl;
+                dir_path=intr.dir_path)
+            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+            h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
+            h5_path = joinpath(intr.dir_path, h5_filename)
+            # Append the slayer/ group; create the file if no prior stage wrote
+            # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+            HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+                Runner.write_slayer_hdf5!(f, result)
+            end
+            @info "SLAYER results written to $h5_filename"
+            return result
+        catch err
+            @error "SLAYER stage failed; continuing without tearing results. " *
+                   "Equilibrium / stability / PE outputs are unaffected." exception =
+                (err, catch_backtrace())
+            return nothing
+        end
+    end
+
+    # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
+        slayer_result = _run_slayer_stage(nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return
+        return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+            vac_data=ctrl.vac_flag ? vac_data : nothing,
+            slayer=slayer_result)
     end
 
     # No perturbed equilibrium calculations if vacuum data is not available
@@ -634,8 +682,23 @@ function main_from_inputs(
         @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
     end
 
+    # ----------------------------------------------------------------
+    # SLAYER tearing-mode analysis (after PE so it appends to the PE output
+    # file; falls back to the ForceFreeStates file when PE did not run).
+    # ----------------------------------------------------------------
+    pe_file = if "PerturbedEquilibrium" in keys(inputs)
+        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
+        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
+    else
+        ctrl.HDF5_filename
+    end
+    slayer_result = _run_slayer_stage(pe_file)
+
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
+    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+        vac_data=ctrl.vac_flag ? vac_data : nothing,
+        slayer=slayer_result)
 end
 
 """
@@ -750,7 +813,6 @@ function write_outputs_to_HDF5(
         out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
 
         # Write integration data
-        # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
         out_h5["integration/nstep"] = odet.step            # Number of saved solution snapshots
         out_h5["integration/nstep_total"] = odet.total_steps  # Total ODE solver steps taken
         out_h5["integration/psi"] = odet.psi_store
@@ -795,6 +857,26 @@ function write_outputs_to_HDF5(
             end
             out_h5["singular/m"] = m_matrix
             out_h5["singular/n"] = n_matrix
+
+            # Glasser-Greene-Johnson geometric coefficients + surface averages
+            # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
+            # Both kinetic-free (E, F, G, H, K, M) and geometry-only
+            # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
+            # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
+            # can reconstruct τ_A / τ_R from any kinetic-profile source.
+            if all(s -> s.restype !== nothing, intr.sing)
+                out_h5["singular/E"] = [s.restype.E for s in intr.sing]
+                out_h5["singular/F"] = [s.restype.F for s in intr.sing]
+                out_h5["singular/G"] = [s.restype.G for s in intr.sing]
+                out_h5["singular/H"] = [s.restype.H for s in intr.sing]
+                out_h5["singular/K"] = [s.restype.K for s in intr.sing]
+                out_h5["singular/M"] = [s.restype.M for s in intr.sing]
+                out_h5["singular/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in intr.sing]
+                out_h5["singular/avg_bsq"] = [s.restype.avg_bsq for s in intr.sing]
+                out_h5["singular/p_local"] = [s.restype.p_local for s in intr.sing]
+                out_h5["singular/p1_local"] = [s.restype.p1_local for s in intr.sing]
+                out_h5["singular/v1_local"] = [s.restype.v1_local for s in intr.sing]
+            end
         end
 
         # Per-surface ca-based Δ' (`sing.delta_prime`) is a stub; only the BVP matrix is emitted (see SingType.delta_prime docstring).
@@ -803,6 +885,15 @@ function write_outputs_to_HDF5(
         # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
         if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
+        end
+
+        # Write raw 2msing×2msing outer-region D' matrix in side-major ordering
+        # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
+        # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
+        # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
+        # pest3_decompose to recover (A', B', Γ', Δ').
+        if intr.msing > 0 && !isempty(intr.delta_prime_raw)
+            out_h5["singular/delta_prime_raw"] = intr.delta_prime_raw
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
@@ -845,8 +936,8 @@ function write_outputs_to_HDF5(
             out_h5["kinetic/kinetic_factor"] = ctrl.kinetic_factor
         end
 
-        # Write fundamental matrices on the ψ grid when mat_flag is enabled
-        if ctrl.mat_flag && ffit !== nothing
+        # Write fundamental matrices on the ψ grid
+        if ffit !== nothing
             xs = equil.rzphi_xs
             npsi = length(xs)
             np = intr.numpert_total
