@@ -28,8 +28,8 @@ end
 """
     normalize_eigenfunctions!(odet::OdeState, wt::AbstractMatrix{ComplexF64}, psio::Float64) -> OdeState
 
-Rescale the stored EL solution vectors in `odet.u_store` / `odet.ud_store` so the edge
-displacement matches the free-boundary eigenvectors `wt` (scaled by `2π·psio·1e-3`).
+Rescale the stored EL solution vectors in `odet.u_store`, `du_store`, and `xi_s_store` so the
+edge displacement matches the free-boundary eigenvectors `wt` (scaled by `2π·psio·1e-3`).
 Modifies `odet` in place. Call after `free_run` when downstream code consumes the stored ξ profiles.
 """
 @with_pool pool function normalize_eigenfunctions!(odet::OdeState, wt::AbstractMatrix{ComplexF64}, psio::Float64)
@@ -41,10 +41,12 @@ Modifies `odet` in place. Call after `free_run` when downstream code consumes th
         odet.u_store[:, :, 1, istep] .= tmp_mat
         mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
         odet.u_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 1, istep], coeffs)
-        odet.ud_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 2, istep], coeffs)
-        odet.ud_store[:, :, 2, istep] .= tmp_mat
+        mul!(tmp_mat, odet.du_store[:, :, 1, istep], coeffs)
+        odet.du_store[:, :, 1, istep] .= tmp_mat
+        mul!(tmp_mat, odet.du_store[:, :, 2, istep], coeffs)
+        odet.du_store[:, :, 2, istep] .= tmp_mat
+        mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
+        odet.xi_s_store[:, :, istep] .= tmp_mat
     end
 end
 

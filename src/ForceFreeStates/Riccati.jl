@@ -977,10 +977,11 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     # dS = w†·v - S·Ḡ·S  [Glasser 2018 eq. 19, dual Riccati]
     mul!(dS, adjoint(w), v)   # dS = w†·v
 
-    # Store du1/dψ = Q·v for ud diagnostic before v is reused
+    # Store du1/dψ = Q·v as a diagnostic before v is reused
     # Q·v = diag(singfac_vec)·v = Ξ'_Ψ (displacement gradient, with U₂ = I)
-    @. odet.ud[:, :, 1] = singfac_vec * v
-    @view(odet.ud[:, :, 2]) .= 0
+    @. odet.du[:, :, 1] = singfac_vec * v
+    @view(odet.du[:, :, 2]) .= 0
+    odet.xi_s .= 0
 
     # Subtract S·Ḡ·S (reuse v and tmp to avoid extra allocation)
     mul!(tmp, gmat, S)        # tmp = Ḡ·S
@@ -1028,14 +1029,7 @@ function riccati_integrator_callback!(integrator)
     should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
 
     if should_save
-        if odet.step >= size(odet.u_store, 4)
-            resize_storage!(odet)
-        end
-        odet.psi_store[odet.step] = integrator.t
-        @views odet.u_store[:, :, :, odet.step] .= integrator.u
-        odet.q_store[odet.step] = odet.q
-        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-        odet.step += 1
+        store_ode_data!(odet, integrator.t, integrator.u)
     end
 end
 
@@ -1269,11 +1263,7 @@ end
 # Store (U₁_new, U₂_new) into u_store before renormalization so that
 # evaluate_stability_criterion! can recover S_new = U₁_new / U₂_new via compute_smallest_eigenvalue.
 function _store_crossing_step!(odet::OdeState)
-    odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
-    odet.step += 1
+    store_ode_data!(odet, odet.psifac, odet.u)
 end
 
 """
@@ -1612,7 +1602,7 @@ Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml. Requires `
 - `transform_u!` is called on the parallel odet but is a no-op (ifix=0)
 - Outer plasma uses serial Riccati integration for numerical stability
 - When `ctrl.populate_dense_xi` is set, a serial EL dense pass is appended and replaces the
-  parallel `odet`, so `u_store` / `ud_store` come back in the axis basis that
+  parallel `odet`, so `u_store` / `du_store` come back in the axis basis that
   PerturbedEquilibrium requires. Δ' is computed from the parallel BVP either way and is
   bit-identical between the two. See the `populate_dense_xi` entry in the
   [`ForceFreeStatesControl`](@ref) docstring for the cost trade-off.
@@ -1770,7 +1760,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
             last_crossing_step = odet.step - 1
         else
-            # Save non-crossing end-of-chunk state. ud_store stays zero here — when
+            # Save non-crossing end-of-chunk state. du_store is not meaningful here — when
             # ctrl.populate_dense_xi=true the entire odet is replaced by a serial-EL pass
             # at the end of parallel_eulerlagrange_integration.
             if odet.step >= size(odet.u_store, 4)
@@ -1881,7 +1871,7 @@ end
     _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr) -> fresh_odet
 
 Replace the propagator-BVP's `odet` with a fresh serial-EL `odet` that has
-dense `u_store` / `ud_store` populated in axis basis (the PerturbedEquilibrium
+dense `u_store` / `du_store` populated in axis basis (the PerturbedEquilibrium
 convention).  The caller's `odet` is fully replaced by the fresh one because
 `free_run` / `normalize_eigenfunctions!` downstream use `odet.u[:,:,1,end]` to
 normalize `odet.u_store`, so both must be in the same basis.  The parallel BVP

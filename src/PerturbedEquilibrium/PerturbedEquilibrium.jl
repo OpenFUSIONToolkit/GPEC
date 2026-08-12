@@ -129,7 +129,7 @@ function compute_perturbed_equilibrium(
         if wt0 === nothing
             @warn "Vacuum data not available. Skipping singular coupling calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
-            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, mthvac, ffs_intr, intr, ctrl)
+            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, mthvac, ffs_intr, intr, ctrl, ffit)
         end
     end
 
