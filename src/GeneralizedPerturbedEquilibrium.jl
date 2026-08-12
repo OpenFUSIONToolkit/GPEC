@@ -178,7 +178,6 @@ function main_from_inputs(
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
-
     # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
@@ -580,6 +579,10 @@ function main_from_inputs(
         if ctrl.gal_flag && ctrl.gal_match_flag && gal_data !== nothing && gal_data.match !== nothing
             @info "PerturbedEquilibrium: using the RPEC-matched gal solution"
             pe_odet = gal_matched_odestate(gal_data, ffit, intr)
+            pe_intr.odet_from_gal = true
+            pe_intr.inner_bpen = gal_data.match.bpen
+        else
+            pe_intr.inner_bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
         end
 
         # Reuse the forcing modes loaded at snapshot time (or injected by
@@ -798,8 +801,8 @@ function write_outputs_to_HDF5(
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
         out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
-        out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
+        out_h5["integration/dxi_psi"] = odet.du_store[:, :, 1, :]
+        out_h5["integration/xi_s"] = odet.xi_s_store
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
@@ -864,6 +867,14 @@ function write_outputs_to_HDF5(
         # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
         if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
+        end
+
+        # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
+        # the galerkin/delta_coil layout so H5Web heatmaps share axes (x = edge mode, y = surface-side).
+        # Internal intr.delta_coil stays (2msing × numpert_total); transpose only at write.
+        if intr.msing > 0 && !isempty(intr.delta_coil)
+            dc = permutedims(intr.delta_coil)
+            out_h5["singular/delta_coil"] = dc
         end
 
         # Write raw 2msing×2msing outer-region D' matrix in side-major ordering

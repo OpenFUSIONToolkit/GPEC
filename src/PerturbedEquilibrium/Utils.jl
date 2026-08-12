@@ -61,6 +61,7 @@ perturbed_equilibrium/
 ├── forcing_b / forcing_b_root_area / forcing_b_area      # control-surface forcing spectrum (b, b̃, b̄) [numpert_total], tesla
 ├── response_b / response_b_root_area / response_b_area   # control-surface response spectrum (b, b̃, b̄) [numpert_total], tesla
 ├── response/
+│   ├── psi_n          # Radial abscissa ψ_N [npsi] shared by every response profile below
 │   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
 │   ├── xi_psi_J       # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
 │   ├── b_psi_area_weighted       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, mpert])
@@ -136,6 +137,7 @@ function write_outputs_to_HDF5(
 
         # Response fields (ComplexF64 directly)
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
+        !isempty(state.psi_grid) && (response_group["psi_n"] = state.psi_grid)
         have_xi = !isnothing(state.xi_modes)
         have_b  = have_xi && !isnothing(state.b_modes)
         response_group["xi_psi"]    = have_xi ? state.xi_modes.psi      : ComplexF64[]
@@ -203,8 +205,10 @@ function write_outputs_to_HDF5(
         !isempty(state.resonant_area_weighted_field)     && (coupling_group["resonant_area_weighted_field"]     = state.resonant_area_weighted_field)
         !isempty(state.resonant_current)   && (coupling_group["resonant_current"]   = state.resonant_current)
         !isempty(state.island_width_sq)    && (coupling_group["island_width_sq"]    = state.island_width_sq)
-        !isempty(state.penetrated_area_weighted_field)   && (coupling_group["penetrated_area_weighted_field"]   = state.penetrated_area_weighted_field)
+        !isempty(state.penetrated_area_weighted_field)   && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
         !isempty(state.delta_prime)        && (coupling_group["delta_prime"]        = state.delta_prime)
+        !isempty(state.forcing_solution_weights)         && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
+        !isempty(state.rational_area) && (coupling_group["rational_area"] = state.rational_area)
         !isempty(state.island_half_width)  && (coupling_group["island_half_width"]  = state.island_half_width)
         !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)
 
