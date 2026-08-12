@@ -461,12 +461,10 @@ function main_from_inputs(
             @info "Computing free boundary energies ($wall_desc)"
         end
         vac_data = free_run!(odet, ctrl, equil, ffit, intr)
-        if real(vac_data.et[1]) < 0
-            if ctrl.verbose
+        if ctrl.verbose
+            if real(vac_data.et[1]) < 0
                 @warn "Free-boundary mode unstable for n = $nstring"
-            end
-        else
-            if ctrl.verbose
+            else
                 @info "All free-boundary modes stable for n = $nstring"
             end
         end
@@ -552,6 +550,30 @@ function main_from_inputs(
         return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
             vac_data=ctrl.vac_flag ? vac_data : nothing,
             slayer=slayer_result)
+    end
+
+    # No perturbed equilibrium calculations if vacuum data is not available
+    if !ctrl.vac_flag
+        @warn "Vacuum data not available. Skipping perturbed equilibrium calculations. Set vac_flag=true in [ForceFreeStates] section."
+        return
+    end
+
+    # No perturbed equilibrium calculations if free-boundary mode is unstable
+    if real(vac_data.et[1]) < 0
+        @warn "Since a free-boundary mode is unstable, perturbed equilibrium calculations will not run."
+        return
+    end
+
+    # No perturbed equilibrium calculations if wall shape is not nowall
+    if intr.wall_settings.shape !== "nowall"
+        @warn "Perturbed equilibrium calculations are only supported for nowall cases - skipping perturbed equilibrium calculations."
+        return
+    end
+
+    # Perturbed equilibrium calculations still need multi-n support added
+    if intr.npert > 1
+        @warn "Perturbed equilibrium calculations are only supported for single-n cases - skipping perturbed equilibrium calculations."
+        return
     end
 
     # ----------------------------------------------------------------
@@ -672,17 +694,11 @@ function main_from_inputs(
     end
     slayer_result = _run_slayer_stage(pe_file)
 
-    # ----------------------------------------------------------------
-    # Done
-    # ----------------------------------------------------------------
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-
-    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
     return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
         vac_data=ctrl.vac_flag ? vac_data : nothing,
         slayer=slayer_result)
-
 end
 
 """
@@ -693,10 +709,6 @@ This combines the functionality of several pieces of the Fortran code in `ode_ou
 primarily `ode_output_open` and the various `bin_euler` writes that occur throughout the
 integration. Some parameters are only dumped in their respective flags are true, e.g.
 vacuum data if `vac_flag` is true.
-
-### TODOs
-
-Combine spline unpacking if possible, too many extra lines
 """
 function write_outputs_to_HDF5(
     ctrl::ForceFreeStatesControl,

@@ -40,9 +40,6 @@ function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
 end
 
-# Reflect a periodic theta-space vector θ → -θ (the theta reversal in gpvacuum_flxsurf).
-_reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
-
 """
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
@@ -99,7 +96,6 @@ function compute_singular_coupling_metrics!(
     end
 
     chi1 = 2π * equil.psio
-    twopi = 2π
     mtheta = vac_data.mthvac
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
@@ -173,26 +169,18 @@ function compute_singular_coupling_metrics!(
                 continue
             end
 
-            # Compute Green's functions at this surface for this n (once per pair)
+            # Surface-current matrix at this surface for this n (once per pair)
             vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
-            _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
-            grri = Matrix{ComplexF64}(grri_raw)
-            grre = Matrix{ComplexF64}(grre_raw)
+            _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true)
+            L_surf = calc_surface_inductance(I_v)
 
-            # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
-            ν_vac = Vacuum.PlasmaGeometry(vac_input).ν
-
-            # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
-            L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, nn, ν_vac)
+            # Only the (m_res, m_res) diagonal element is needed for singflx
             m_idx = m_res - mlow + 1
             L_mm = L_surf[m_idx, m_idx]
 
             j_c = compute_current_density(equil, sing_surf.psifac)
             area = compute_surface_area(equil, sing_surf.psifac)
-            # Matches Fortran gpout_resp: shear = m*dq/dψ / q² = n*dq/dψ / q (since m=n*q).
-            # Uses abs(nn) because island_half_width = sqrt(abs(island_width_sq)), so the sign
-            # of shear only affects the sign of C_island_width_sq, not the physical island width.
-            shear = abs(nn) * sing_surf.q1 / sing_surf.q
+            shear = nn * sing_surf.q1 / sing_surf.q # m*dq/dψ / q² = n*dq/dψ / q (since m=n*q)
 
             # Evaluate bwp1_mn = ∂b^ψ/∂ψ at lpsi and rpsi using permeability-weighted eigenstates.
             # Matches Fortran gpout_resp: evaluate bwp1_mn at lpsi/rpsi via gpeq_sol
@@ -265,14 +253,14 @@ function compute_singular_coupling_metrics!(
             #  - resonant (shielding) current: j_c already integrates jac·|∇ψ| over the surface, so the
             #    Jacobian weighting is carried inside j_c — no separate area factor needed.
             #  - resonant flux → field: Φ^r/A^r [T], invariant [Park 2008; Pharr 2026].
-            state.C_delta_prime[row, :] = jump_vec ./ (twopi * chi1)
-            state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
+            state.C_delta_prime[row, :] = jump_vec ./ (2π * chi1)
+            state.C_resonant_current[row, :] = jump_vec .* (-j_c / (2π * m_res))
             # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant area-weighted field = singflx/area,
             # islandhwids = 4·singflx/(2π·shear·q·chi1)
-            singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
+            singflx_pre = (L_mm / (2π * nn)) .* state.C_resonant_current[row, :]
             state.C_resonant_area_weighted_field[row, :] = singflx_pre ./ area
             if abs(shear) > 1e-10
-                state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
+                state.C_island_width_sq[row, :] = abs.(4.0 / (2π * shear * sing_surf.q * chi1)) .* singflx_pre
             end
 
             state.rational_psi[row] = sing_surf.psifac
@@ -343,24 +331,6 @@ j_c = χ₁² * q / (μ₀ * integral)
 where the integral is computed via flux surface integration:
 integral = ∫ (jac * |∇ψ| * sqreqb / |∇ψ|³) dθ
 
-## GPEC Formula
-
-```fortran
-DO itheta=0,mthsurf
-   CALL bicube_eval(rzphi,respsi,theta(itheta),1)
-   rfac=SQRT(rzphi%f(1))
-   jac=rzphi%f(4)
-   w(1,1)=(1+rzphi%fy(2))*twopi**2*rfac*r(itheta)/jac
-   w(1,2)=-rzphi%fy(1)*pi*r(itheta)/(rfac*jac)
-   delpsi(itheta)=SQRT(w(1,1)**2+w(1,2)**2)
-   sqreqb(itheta)=(sq%f(1)**2+chi1**2*delpsi(itheta)**2)/(twopi*r(itheta))**2
-   jcfun(itheta)=sqreqb(itheta)/(delpsi(itheta)**3)
-   j_c(ising)=j_c(ising)+jac*delpsi(itheta)*jcfun(itheta)/mthsurf
-ENDDO
-j_c(ising)=j_c(ising)-jac*delpsi(mthsurf)*jcfun(mthsurf)/mthsurf  ! trapezoidal rule
-j_c(ising)=1.0/j_c(ising)*chi1**2*sq%f(4)/mu0
-```
-
 ## Implementation
 
 Uses trapezoidal rule integration around the flux surface with metric quantities
@@ -375,15 +345,11 @@ function compute_current_density(
     psi::Float64
 )::Float64
     # Physical constants
-    μ₀ = 4π * 1e-7
     chi1 = 2π * equil.psio
-    twopi = 2π
 
     # Get equilibrium quantities at this surface
     F_tor = equil.profiles.F_spline(psi)  # Toroidal field function (2π·R·B_tor in GPEC convention)
     q = equil.profiles.q_spline(psi)      # Safety factor
-
-    ro = equil.ro
 
     # Number of theta points for integration
     # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
@@ -407,7 +373,7 @@ function compute_current_density(
         delpsi = m.delpsi  # flux gradient magnitude |∇ψ|
 
         # sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²  where F = R·B_tor (Fortran sq%f(1))
-        sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (twopi * m.r)^2
+        sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (2π * m.r)^2
 
         # Integrand function
         jcfun = sqreqb / (delpsi^3)
@@ -426,103 +392,10 @@ function compute_current_density(
     # Trapezoidal rule end correction (subtract half of last point contribution)
     integral -= last_jac * last_delpsi * last_jcfun / mthsurf
 
-    # Final normalization: j_c = (1/integral) * χ₁² * q / μ₀
-    j_c = (1.0 / integral) * chi1^2 * q / μ₀
+    # Final normalization: j_c = (1/integral) * χ₁² * q / μ0
+    j_c = (1.0 / integral) * chi1^2 * q / μ0
 
     return j_c
-end
-
-"""
-    compute_surface_inductance_from_greens(
-        grri::Matrix{ComplexF64},
-        grre::Matrix{ComplexF64},
-        ffs_intr::ForceFreeStatesInternal,
-        nn::Int,
-        ν::Vector{Float64}
-    )::Matrix{ComplexF64}
-
-Compute surface inductance matrix from Green's functions at flux surface.
-
-Implements the GPEC `gpvacuum_flxsurf` algorithm.
-
-The Julia vacuum code uses SFL Fourier basis `cos(m*θ - n*ν)` in the column transform,
-so the row DFT must apply the matching toroidal phase correction `exp(-i*n*ν)` before
-the DFT (matching Fortran `gpvacuum_flxsurf`'s `EXP(-ifac*nn*dphi)` phase correction).
-
-## Arguments
-
-  - `grri`: Interior Green's function [mtheta, mpert]
-  - `grre`: Exterior Green's function [mtheta, mpert]
-  - `ffs_intr`: ForceFreeStates internal state
-  - `nn`: Toroidal mode number
-  - `ν`: Toroidal angle offset on the vacuum theta grid [mtheta]
-
-## Returns
-
-Surface inductance matrix [mpert × mpert]
-"""
-@with_pool pool function compute_surface_inductance_from_greens(
-    grri::Matrix{ComplexF64},
-    grre::Matrix{ComplexF64},
-    ffs_intr::ForceFreeStatesInternal,
-    nn::Int,
-    ν::Vector{Float64}
-)::Matrix{ComplexF64}
-    mpert = ffs_intr.mpert
-    mtheta = length(ν)
-    μ₀ = 4π * 1e-7
-
-    ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
-
-    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
-    current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
-
-    kax = zeros!(pool, ComplexF64, mtheta)
-    grri_surf = @view grri[1:mtheta, :]
-    grre_surf = @view grre[1:mtheta, :]
-
-    # Toroidal phase correction: exp(-i*n*ν)
-    phase = cis.(-nn .* ν)
-
-    for i in 1:mpert
-        flux_matrix[i, i] = 1.0
-
-        # Complex grri/e stores exp(i(mθ-nν)) projection, need conjugate for exp(-i(mθ-nν))
-        kax .= conj.(grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ₀ * (2π)^2)
-
-        # Port of Fortran gpvacuum_flxsurf: apply toroidal phase, reverse theta, forward-DFT.
-        g_phased = kax .* phase
-        current_matrix[:, i] = ft(_reverse_theta(g_phased))
-    end
-
-    # Compute surface inductance: L_surf = flux * inv(current) = inv(current)
-    L_surf = zeros(ComplexF64, mpert, mpert)
-
-    current_mag = maximum(abs.(current_matrix))
-
-    if current_mag < 1e-15
-        @warn "Current matrix is all zeros! Cannot compute surface inductance." maxlog=1
-        for i in 1:mpert
-            L_surf[i, i] = μ₀ * 1e-6
-        end
-    else
-        try
-            regularization = 1e-12 * current_mag
-            current_reg = current_matrix + regularization * I
-
-            L_surf = flux_matrix * inv(current_reg)
-
-            # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
-            L_surf = 0.5 * (L_surf + L_surf')
-        catch e
-            @warn "Surface inductance inversion failed: $e" maxlog=1
-            for i in 1:mpert
-                L_surf[i, i] = μ₀ * 1e-6
-            end
-        end
-    end
-
-    return L_surf
 end
 
 """

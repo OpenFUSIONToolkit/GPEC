@@ -24,50 +24,45 @@ export extract_plasma_surface_at_psi
 export PlasmaGeometry
 
 # Relative anti-Hermitian residual above which we warn that the vacuum grid should be refined.
-const _WV_HERMITICITY_WARN_TOL = 1e-4
+const _HERMITICITY_WARN_TOL = 1e-4
 
 """
-    _symmetrize_vacuum_energy!(wv)
+    _warn_and_symmetrize!(mat, name)
 
-Enforce Hermiticity of the vacuum energy matrix Wᵛ in place.
-
-Wᵛ is the generator of the vacuum magnetic energy, δW_v = ξ† Wᵛ ξ. Because that energy is a real
-number for every perturbation ξ, the exact operator is Hermitian. The finite-resolution
-boundary-integral quadrature (finite `mtheta`/`nzeta`) breaks exact Hermiticity, leaving a small
-anti-Hermitian residual that is a pure discretization artifact and vanishes as the grid is refined.
-We replace Wᵛ by its Hermitian part to restore this physical property, warning when the residual
-is large enough that the vacuum grid should be refined.
+Replace `mat` by its Hermitian part in place, warning first if the anti-Hermitian residual exceeds
+`_HERMITICITY_WARN_TOL`.
 """
-function _symmetrize_vacuum_energy!(wv::AbstractMatrix)
-
-    herm_norm = norm(wv + wv')
+function _warn_and_symmetrize!(mat::AbstractMatrix, name::String)
+    herm_norm = norm(mat + mat')
     if herm_norm > 0
-        # Relative anti-Hermitian residual ‖½(W−W†)‖/‖½(W+W†)‖
-        rel_residual = norm(wv - wv') / herm_norm
-        if rel_residual > _WV_HERMITICITY_WARN_TOL
-            @warn "Vacuum energy matrix Wᵛ is non-Hermitian above tolerance $(rel_residual) > $(_WV_HERMITICITY_WARN_TOL) before " *
+        # Relative anti-Hermitian residual ‖½(M−M†)‖/‖½(M+M†)‖
+        rel_residual = norm(mat - mat') / herm_norm
+        if rel_residual > _HERMITICITY_WARN_TOL
+            @warn "$name is non-Hermitian above tolerance $(rel_residual) > $(_HERMITICITY_WARN_TOL) before " *
                   "symmetrization. Increase vacuum grid resolution to reduce it."
         end
     end
-    hermitianpart!(wv)
+    hermitianpart!(mat)
 end
 
 """
-    _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+    _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
 2D (axisymmetric) vacuum response calculation.
 
 Each toroidal mode `n` decouples in 2D geometry, so the routine loops over `inputs.n_modes`,
-building the double-/single-layer operators, solving the exterior and interior systems, and
-filling the corresponding diagonal block of the response matrix and the matching column block
-of the Green's functions.
+building the double-/single-layer operators, solving the exterior system for `wv`, and
+optionally the interior system to build `I_v` when `compute_Iv=true`.
+Green's functions are internal scratch only.
 """
-@with_pool pool function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+@with_pool pool function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
 
     mpert = length(inputs.m_modes)
+    mlow = inputs.m_modes[1]
     num_points_surf = inputs.mtheta
 
     vac_data.wv .= 0
+    compute_Iv && (vac_data.I_v .= 0)
 
     # Form the plasma and wall geometries
     plasma_surf = PlasmaGeometry(inputs)
@@ -75,13 +70,11 @@ of the Green's functions.
 
     # Loop over all decoupled toroidal modes
     for (idx_n, n) in enumerate(inputs.n_modes)
-        ft = FourierTransform(inputs.mtheta, mpert, inputs.m_modes[1]; n=n, ν=plasma_surf.ν)
+        ft = FourierTransform(inputs.mtheta, mpert, mlow; n=n, ν=plasma_surf.ν)
 
-        # Diagonal block of wv and matching column block of the Green's functions
+        # Diagonal block of wv (and I_v when requested)
         block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
         wv_block = @view vac_data.wv[block_idx, block_idx]
-        grri_block = @view vac_data.grri[:, block_idx]
-        grre_block = @view vac_data.grre[:, block_idx]
 
         # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
         num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
@@ -89,10 +82,7 @@ of the Green's functions.
         # Local work matrices
         grad_green = zeros!(pool, num_points_total, num_points_total)
         green_temp = zeros!(pool, num_points_surf, num_points_surf)
-
-        # Views into output Green's function matrices for the active rows/columns
-        grre = @view grre_block[1:num_points_total, :]
-        grri = @view grri_block[1:num_points_total, :]
+        grre = zeros!(pool, ComplexF64, num_points_total, mpert)
 
         # Plasma–Plasma block
         compute_2D_kernel_matrices!(grad_green, green_temp, plasma_surf, plasma_surf, n)
@@ -111,29 +101,45 @@ of the Green's functions.
             mul!(view(grre, (num_points_surf+1):num_points_total, :), green_temp, ft.basis')
         end
 
-        # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
-        grri .= grre # start from same as exterior
-        grad_green_interior = similar!(pool, grad_green)
-        grad_green_interior .= grad_green
+        if compute_Iv
+            # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
+            grri = similar!(pool, grre)
+            grri .= grre
+            grad_green_interior = similar!(pool, grad_green)
+            grad_green_interior .= grad_green
 
-        # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
-        ldiv!(lu!(grad_green), grre)
+            # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); solve for the physical
+            # vacuum-outside potential grre = χ^(vo). Overwrites grad_green to save memory.
+            ldiv!(lu!(grad_green), grre)
 
-        # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
-        grad_green_interior .*= -1
-        for i in 1:num_points_total
-            grad_green_interior[i, i] += 2.0
+            # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
+            # boundary limits is 2I here, giving the vacuum-inside potential grri = χ^(vi).
+            for i in 1:num_points_total
+                grad_green_interior[i, i] -= 2.0
+            end
+            ldiv!(lu!(grad_green_interior), grri)
+
+            # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = grri - grre
+            # They are flipped because VACUUM builds the operators in its CW-θ frame while GPEC
+            # uses CCW-θ, flipping the outward-normal sign.
+            I_v_block = @view vac_data.I_v[block_idx, block_idx]
+            @views g_sum = grre[1:num_points_surf, :] .- grri[1:num_points_surf, :]
+            mul!(I_v_block, ft.basis, g_sum)
+            conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
+            I_v_block ./= num_points_surf
+        else
+            # Only need exterior system for wv
+            ldiv!(lu!(grad_green), grre)
         end
-        ldiv!(lu!(grad_green_interior), grri)
 
         # Project exterior kernel onto observer basis exp(-i*(mθ - nν)) and scale to get the response matrix
         mul!(wv_block, ft.basis, @view(grre[1:num_points_surf, :]))
         wv_block .*= 4π^2 / num_points_surf
     end
 
-
-    # δW_v = ξ† Wᵛ ξ is real, so Wᵛ must be Hermitian; remove any residual from discretization
-    _symmetrize_vacuum_energy!(vac_data.wv)
+    # Remove any non-Hermitian residual from Hermitian matrices due to discretization
+    _warn_and_symmetrize!(vac_data.wv, "Wᵛ")
+    compute_Iv && _warn_and_symmetrize!(vac_data.I_v, "Iᵛ")
 
     # Populate coordinate arrays
     @views begin
@@ -147,7 +153,7 @@ of the Green's functions.
 end
 
 """
-    _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+    _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
 3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction. For `nfp == 1`
 the block-circulant assembly and residue-class loop are skipped in favour of a more efficient
@@ -165,14 +171,18 @@ class needs one solve `wv[class k] = (4π²/M)·E_localᴴ·(D̂ₖ \\ Ŝₖ)|_p
 block-row of the operators is built, so the kernel cost drops by `nfp` and the dense `O(N³)`
 factorization is replaced by per-class `O(M³)` solves (`M = N/nfp`).
 
-Only `wv` is produced currently; `grri`/`grre` are returned zeroed and are not yet supported in the 3D path.
+Only `wv` is produced currently; `I_v` is left zeroed when `compute_Iv=true`
+(surface-current / inductance not yet supported in 3D).
 Extension point: per residue class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns and the
 interior variant `-D + 2I` for the interior columns, then scatter back into the `[2N × 2·num_modes]` arrays.
 """
-@with_pool pool function _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+@with_pool pool function _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
+    compute_Iv && fill!(vac_data.I_v, 0)
+
+    compute_Iv && @warn "compute_Iv=true is not supported for 3D vacuum response; I_v left as zeros" maxlog=1
 
     # Full-torus geometry for source surface; observers are restricted to one field period
     full = expand_field_periods(inputs)
@@ -245,11 +255,9 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
         end
     end
 
-    _symmetrize_vacuum_energy!(vac_data.wv)
-
-    # Zero out the Green's function matrices (not tested in 3D yet)
-    fill!(vac_data.grri, 0)
-    fill!(vac_data.grre, 0)
+    # Remove any non-Hermitian residual from Hermitian matrices due to discretization
+    _warn_and_symmetrize!(vac_data.wv, "Wᵛ")
+    compute_Iv && _warn_and_symmetrize!(vac_data.I_v, "Iᵛ")
 
     # Populate coordinate arrays
     vac_data.plasma_pts .= plasma_surf.r
@@ -257,10 +265,10 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
 end
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
-Allocate and return the vacuum response matrix and Green's functions for the given vacuum
-inputs. Thin allocating wrapper around the in-place [`compute_vacuum_response!`]: it sizes the
+Allocate and return the vacuum response matrix and optional surface-current matrix for the given
+vacuum inputs. Thin allocating wrapper around the in-place [`compute_vacuum_response!`]: it sizes the
 output arrays for the full torus and forwards to the same 2D/3D workers. For performance-critical
 paths that already own preallocated storage (e.g. `ForceFreeStates.VacuumData`), prefer the
 in-place method to avoid extra heap allocations.
@@ -268,28 +276,27 @@ in-place method to avoid extra heap allocations.
 # Returns
 
   - `wv`: complex vacuum response matrix (`num_modes × num_modes`).
-  - `grri`, `grre`: interior/exterior Green's functions (zeroed on the 3D nowall path).
+  - `I_v`: Vacuum surface-current matrix (`num_modes × num_modes`); zeros unless `compute_Iv=true`.
   - `plasma_pts`, `wall_pts`: surface coordinate arrays.
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
 
     num_points = inputs.mtheta * inputs.nzeta * inputs.nfp # mtheta for 2D
     num_modes = length(inputs.m_modes) * length(inputs.n_modes)
 
     vac = (
         wv=zeros(ComplexF64, num_modes, num_modes),
-        grri=zeros(ComplexF64, 2 * num_points, num_modes),
-        grre=zeros(ComplexF64, 2 * num_points, num_modes),
+        I_v=zeros(ComplexF64, num_modes, num_modes),
         plasma_pts=zeros(num_points, 3),
         wall_pts=zeros(num_points, 3)
     )
-    compute_vacuum_response!(vac, inputs, wall_settings)
+    compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv)
 
-    return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
+    return vac.wv, vac.I_v, vac.plasma_pts, vac.wall_pts
 end
 
 """
-    compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+    compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
 In-place variant that computes the vacuum response and directly populates the arrays stored in
 `vac_data`. Dispatches on dimensionality only: 2D (`inputs.nzeta == 1`) routes to
@@ -299,19 +306,18 @@ The `vac_data` argument is expected to provide the following writable fields wit
 sizes:
 
   - `wv::AbstractMatrix{ComplexF64}`             – vacuum response matrix
-  - `grri::AbstractMatrix{ComplexF64}`           – interior Green's functions
-  - `grre::AbstractMatrix{ComplexF64}`           – exterior Green's functions
   - `plasma_pts::AbstractMatrix{Float64}`        – plasma surface coordinates
   - `wall_pts::AbstractMatrix{Float64}`          – wall surface coordinates
+  - `I_v::AbstractMatrix{ComplexF64}` – required when `compute_Iv=true`
 
 This is designed to work with `ForceFreeStates.VacuumData` but does not depend on its concrete
 type (duck-typed on field names only).
 """
-function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
     if inputs.nzeta == 1
-        _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
+        _compute_vacuum_response_2d!(vac_data, inputs, wall_settings; compute_Iv)
     else
-        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings)
+        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings; compute_Iv)
     end
 end
 

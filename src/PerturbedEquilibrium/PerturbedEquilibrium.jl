@@ -1,5 +1,7 @@
 module PerturbedEquilibrium
 
+const μ0 = 4π * 1e-7
+
 # Imports
 using HDF5
 using Printf
@@ -78,7 +80,7 @@ function compute_perturbed_equilibrium(
 
     state = PerturbedEquilibriumState()
 
-    # Step 0: Initialize mode arrays for convenient indexing
+    # Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs_intr)
 
     # Load forcing data. On the gpec.h5 replay path the caller preloads
@@ -113,26 +115,15 @@ function compute_perturbed_equilibrium(
         end
     end
 
-    # Step 2: Compute plasma response
+    # Compute plasma response
     if ctrl.compute_response
-        if vac_data === nothing
-            @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in [ForceFreeStates] section."
-        else
-            compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, metric, ffit)
-        end
+        compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, metric, ffit)
     end
 
-    # Step 3: Compute singular coupling metrics
+    # Compute singular coupling metrics
     if ctrl.compute_singular_coupling
-        if vac_data === nothing
-            @warn "Vacuum data not available. Skipping singular coupling calculation. Set vac_flag=true in [ForceFreeStates] section."
-        else
-            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
-        end
+        compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
     end
-
-    # Step 4: Output eigenmode fields (integrated into HDF5 output)
-    # This is handled by write_outputs_to_HDF5 in main()
 
     return state
 end
