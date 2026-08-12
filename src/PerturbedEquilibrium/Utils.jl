@@ -53,14 +53,14 @@ Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeS
 ## Output Structure
 
 ```
-perturbed_equilibrium/
-├── forcing_modes/
+PerturbedEquilibrium/
+├── ForcingModes/
 │   ├── n              # Toroidal mode numbers
 │   ├── m              # Poloidal mode numbers
 │   └── amplitude      # ComplexF64 forcing amplitudes
 ├── forcing_b / forcing_b_root_area / forcing_b_area      # control-surface forcing spectrum (b, b̃, b̄) [numpert_total], tesla
 ├── response_b / response_b_root_area / response_b_area   # control-surface response spectrum (b, b̃, b̄) [numpert_total], tesla
-├── response/
+├── Response/
 │   ├── psi_n          # Radial abscissa ψ_N [npsi] shared by every response profile below
 │   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
 │   ├── xi_psi_J       # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
@@ -69,14 +69,14 @@ perturbed_equilibrium/
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
 │   └── b_zeta
-├── response_matrices/        # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
+├── ResponseMatrices/          # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
 │   ├── plasma_inductance     # Λ̃ = R⁻¹·Λ·R⁻†
 │   ├── surface_inductance    # L̃ = R⁻¹·L·R⁻†
 │   ├── permeability          # P̃ = R⁻¹·P·R  (P = Λ·L⁻¹)
 │   ├── reluctance            # ϱ̃ = R†·ϱ·R
 │   ├── rootarea_to_area_weight_operator  # S = Σ/√A at psilim; recover area-weighted field b̄ = S·b̃
 │   └── surface_area          # scalar A = ∫J|∇ψ|dθ; recover flux via Φ = A·b̄
-├── singular_coupling/
+├── SingularCoupling/
 │   ├── C_resonant_area_weighted_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant area-weighted field b^r=Φ^r/A^r [T])
 │   ├── C_resonant_current
 │   ├── C_island_width_sq
@@ -93,7 +93,7 @@ perturbed_equilibrium/
 │   ├── rational_q
 │   ├── rational_m_res
 │   └── rational_n
-└── energies/
+└── Energies/
     ├── vacuum_energy
     ├── surface_energy
     ├── plasma_energy
@@ -106,10 +106,10 @@ function write_outputs_to_HDF5(
     filename::String
 )
     h5open(filename, "cw") do file
-        pe_group = haskey(file, "perturbed_equilibrium") ? file["perturbed_equilibrium"] : create_group(file, "perturbed_equilibrium")
+        pe_group = haskey(file, "PerturbedEquilibrium") ? file["PerturbedEquilibrium"] : create_group(file, "PerturbedEquilibrium")
 
         # Forcing modes
-        forcing_group = haskey(pe_group, "forcing_modes") ? pe_group["forcing_modes"] : create_group(pe_group, "forcing_modes")
+        forcing_group = haskey(pe_group, "ForcingModes") ? pe_group["ForcingModes"] : create_group(pe_group, "ForcingModes")
         forcing_group["n"]         = [mode.n for mode in intr.forcing_modes]
         forcing_group["m"]         = [mode.m for mode in intr.forcing_modes]
         forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
@@ -127,7 +127,7 @@ function write_outputs_to_HDF5(
         # root-area-weighted field (b̃) space. Recover the area-weighted field b̄ with the stored
         # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
         # scalar surface_area A: Φ = A·b̄  (internally R = S·A, Φ = R·b̃). [Pharr 2026]
-        mat_group = haskey(pe_group, "response_matrices") ? pe_group["response_matrices"] : create_group(pe_group, "response_matrices")
+        mat_group = haskey(pe_group, "ResponseMatrices") ? pe_group["ResponseMatrices"] : create_group(pe_group, "ResponseMatrices")
         !isempty(state.plasma_inductance)  && (mat_group["plasma_inductance"]  = state.plasma_inductance)
         !isempty(state.surface_inductance) && (mat_group["surface_inductance"] = state.surface_inductance)
         !isempty(state.permeability)       && (mat_group["permeability"]       = state.permeability)
@@ -136,7 +136,7 @@ function write_outputs_to_HDF5(
         (state.surface_area != 0.0)        && (mat_group["surface_area"]       = state.surface_area)
 
         # Response fields (ComplexF64 directly)
-        response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
+        response_group = haskey(pe_group, "Response") ? pe_group["Response"] : create_group(pe_group, "Response")
         !isempty(state.psi_grid) && (response_group["psi_n"] = state.psi_grid)
         have_xi = !isnothing(state.xi_modes)
         have_b  = have_xi && !isnothing(state.b_modes)
@@ -192,7 +192,7 @@ function write_outputs_to_HDF5(
         end
 
         # Singular coupling
-        coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")
+        coupling_group = haskey(pe_group, "SingularCoupling") ? pe_group["SingularCoupling"] : create_group(pe_group, "SingularCoupling")
 
         # Coupling matrices [n_rational × numpert_total]
         !isempty(state.C_resonant_area_weighted_field)   && (coupling_group["C_resonant_area_weighted_field"]   = state.C_resonant_area_weighted_field)
@@ -219,7 +219,7 @@ function write_outputs_to_HDF5(
         !isempty(state.rational_n)         && (coupling_group["rational_n"]         = state.rational_n)
 
         # Energies
-        energy_group = haskey(pe_group, "energies") ? pe_group["energies"] : create_group(pe_group, "energies")
+        energy_group = haskey(pe_group, "Energies") ? pe_group["Energies"] : create_group(pe_group, "Energies")
         energy_group["vacuum_energy"]   = state.vacuum_energy
         energy_group["surface_energy"]  = state.surface_energy
         energy_group["plasma_energy"]   = state.plasma_energy

@@ -397,7 +397,7 @@ end
     build_direct_from_ingest(config::EquilibriumConfig, ingest::DirectIngest) -> DirectRunInput
 
 Rebuild a `DirectRunInput` from a [`DirectIngest`](@ref) captured by `read_efit`/`read_imas`
-(or restored from `input/raw_inputs/equilibrium/` inside `gpec.h5`). Inverse of that capture:
+(or restored from `Input/RawInputs/Equilibrium/` inside `gpec.h5`). Inverse of that capture:
 reconstructs the splines so the rerun path skips the g-file/IMAS parse, reusing the existing
 solver dispatch.
 """

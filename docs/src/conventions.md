@@ -307,19 +307,19 @@ The internal flux-conform operator is just ``R = \Sigma\sqrt{A} = `` `rootarea_t
 
 - **`forcing_b` / `forcing_b_root_area` / `forcing_b_area`** (and the `response_*` triplet) — the
   control-surface forcing and response spectra in the bare (``b``), root-area-weighted (``\tilde b``) and
-  area-weighted (``\bar b``) representations, under `perturbed_equilibrium/`.
+  area-weighted (``\bar b``) representations, under `PerturbedEquilibrium/`.
 - **`b_n`** — the bare normal field ``\mathbf{b}\cdot\hat{\mathbf n}`` (and the area-weighted radial field
-  `b_psi_area_weighted`), under `perturbed_equilibrium/response/`.
+  `b_psi_area_weighted`), under `PerturbedEquilibrium/Response/`.
 - **`resonant_area_weighted_field`** / **`C_resonant_area_weighted_field`** — the resonant area-weighted
   field ``\bar b^{\,r} = \Phi^r/A^r`` and its coupling matrix, under
-  `perturbed_equilibrium/singular_coupling/`. The sibling `penetrated_area_weighted_field` follows the
+  `PerturbedEquilibrium/SingularCoupling/`. The sibling `penetrated_area_weighted_field` follows the
   same convention.
 - **Root-area-weighted (``\tilde b``) space** — the control-surface response matrices (`permeability`,
   `reluctance`, `plasma_inductance`, `surface_inductance`) are stored in this coordinate-invariant space
-  under `perturbed_equilibrium/response_matrices/`. The stored `rootarea_to_area_weight_operator` ``S``
+  under `PerturbedEquilibrium/ResponseMatrices/`. The stored `rootarea_to_area_weight_operator` ``S``
   recovers the area-weighted field forms (``L_{\bar b} = S\,\tilde L\,S^\dagger``) and the scalar
   `surface_area` ``A`` recovers flux (``\Phi = A\,\bar b``).
-- **Eigenmode energies** (`FreeBoundaryStability/eigenmode_energies`) — the generalized eigenvalues of the
+- **Eigenmode energies** (`ForceFreeStates/FreeBoundaryStability/eigenmode_energies`) — the generalized eigenvalues of the
   pencil ``W\,v = \lambda\,N\,v``, where ``N`` is the power-normalization (surface-norm) matrix built from
   the Jacobian Fourier coefficients: ``\xi^\dagger N\,\xi = \oint J\,|\xi(\theta)|^2\,d\theta\,/\,V' =
   \langle|\xi|^2\rangle``. The eigenvalues are stationary values of the power quotient

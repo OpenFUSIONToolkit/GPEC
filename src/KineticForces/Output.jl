@@ -9,14 +9,14 @@ then write to gpec.h5 in a single pass.
 """
     write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
 
-Write all KineticForces results to the "kinetic_forces" group in gpec.h5.
+Write all KineticForces results to the "KineticForces" group in gpec.h5.
 
 # Arguments
 - `h5file::HDF5.File`: Open HDF5 file handle
 - `state::KineticForcesState`: Accumulated computation results
 """
 function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
-    g = create_group(h5file, "kinetic_forces")
+    g = create_group(h5file, "KineticForces")
 
     for (method_name, result) in state.method_results
         mg = create_group(g, method_name)
@@ -50,9 +50,10 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
         end
     end
 
-    # Write kinetic matrices if present
+    # Write the six drift-kinetic coefficient matrices if present
     for (method_name, mat) in state.kinetic_matrices
-        mat_g = create_group(g, "matrices_$method_name")
+        method_g = haskey(g, method_name) ? g[method_name] : create_group(g, method_name)
+        mat_g = create_group(method_g, "KineticMatrices")
         for k in 1:6
             mat_g["matrix_$k"] = mat[:, :, k]
         end
@@ -70,7 +71,7 @@ This is the standard HDF5 ragged array pattern for storing variable-length data.
 - `records::Vector{EnergyIntegrationResult}`: Integration records to write
 """
 function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
-    rg = create_group(mg, "records")
+    rg = create_group(mg, "EnergyIntegrals")
 
     # Scalar fields per record
     rg["psi"] = [r.psi for r in records]

@@ -155,7 +155,7 @@ The complete GPEC analysis pipeline:
 
 5. **Output**:
    - All results saved to single HDF5 file (default: `gpec.h5`)
-   - HDF5 groups: `input/`, `info/`, `equil/`, `splines/`, `locstab/`, `integration/`, `singular/`, `vacuum/`, and perturbed equilibrium data
+   - Top-level HDF5 groups: `Info/`, `Input/`, `Equilibrium/`, `ForceFreeStates/`, `LocalStability/`, `SingularSurfaces/`, `PerturbedEquilibrium/`, `KineticForces/`, `Tearing/`, `SurfaceGeometries/` (see `docs/development/hdf5-conventions.md`)
 
 ## Key Data Structures
 

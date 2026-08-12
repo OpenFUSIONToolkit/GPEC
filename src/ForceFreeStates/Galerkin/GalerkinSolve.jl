@@ -230,55 +230,60 @@ end
 """
     write_galerkin!(out_h5, result::GalerkinResult)
 
-Write the Galerkin Δ′ outputs into the open HDF5 file under the `galerkin/` group. Replaces the Fortran
-`delta_gw`/`pest3_data` ASCII/binary outputs.
+Write the Galerkin outputs into the open HDF5 file. The integrator's solution functions and
+RPEC matching data go under `ForceFreeStates/Solutions/GalerkinIntegration/`; the per-surface
+Δ′/PEST-3 matching results consolidate with the other rational-surface stability results under
+`SingularSurfaces/GalerkinDeltaPrime/`. Replaces the Fortran `delta_gw`/`pest3_data`
+ASCII/binary outputs.
 """
 function write_galerkin!(out_h5, result::GalerkinResult)
-    out_h5["galerkin/msing"] = result.msing
+    gal = "ForceFreeStates/Solutions/GalerkinIntegration"
+    gdp = "SingularSurfaces/GalerkinDeltaPrime"
+    out_h5["$gal/msing"] = result.msing
     result.msing == 0 && return nothing
-    out_h5["galerkin/delta"] = result.delta
-    out_h5["galerkin/pest3_A"] = result.Ap
-    out_h5["galerkin/pest3_B"] = result.Bp
-    out_h5["galerkin/pest3_Gamma"] = result.Gammap
-    out_h5["galerkin/pest3_Delta"] = result.Deltap
-    out_h5["galerkin/sing_psi"] = result.sing_psi
-    out_h5["galerkin/sing_q"] = result.sing_q
-    out_h5["galerkin/sing_m"] = result.sing_m
-    out_h5["galerkin/sing_n"] = result.sing_n
-    out_h5["galerkin/di"] = result.di
-    out_h5["galerkin/alpha"] = result.alpha
+    out_h5["$gdp/delta"] = result.delta
+    out_h5["$gdp/pest3_A"] = result.Ap
+    out_h5["$gdp/pest3_B"] = result.Bp
+    out_h5["$gdp/pest3_Gamma"] = result.Gammap
+    out_h5["$gdp/pest3_Delta"] = result.Deltap
+    out_h5["$gdp/sing_psi"] = result.sing_psi
+    out_h5["$gdp/sing_q"] = result.sing_q
+    out_h5["$gdp/sing_m"] = result.sing_m
+    out_h5["$gdp/sing_n"] = result.sing_n
+    out_h5["$gdp/di"] = result.di
+    out_h5["$gdp/alpha"] = result.alpha
     if !isempty(result.delta_coil)
-        out_h5["galerkin/delta_coil"] = result.delta_coil
+        out_h5["$gdp/delta_coil"] = result.delta_coil
     end
     if result.solution !== nothing
         sol = result.solution
-        out_h5["galerkin/solution/psi"] = sol.psi
-        out_h5["galerkin/solution/q"] = sol.q
-        out_h5["galerkin/solution/issing"] = collect(sol.issing)
-        out_h5["galerkin/solution/xi"] = sol.xi
-        out_h5["galerkin/solution/xi_deriv"] = sol.xi_deriv
-        isempty(sol.xi_cut) || (out_h5["galerkin/solution/xi_cut"] = sol.xi_cut)
-        isempty(sol.cut_range) || (out_h5["galerkin/solution/cut_range"] = sol.cut_range)
+        out_h5["$gal/Solution/psi"] = sol.psi
+        out_h5["$gal/Solution/q"] = sol.q
+        out_h5["$gal/Solution/issing"] = collect(sol.issing)
+        out_h5["$gal/Solution/xi"] = sol.xi
+        out_h5["$gal/Solution/xi_deriv"] = sol.xi_deriv
+        isempty(sol.xi_cut) || (out_h5["$gal/Solution/xi_cut"] = sol.xi_cut)
+        isempty(sol.cut_range) || (out_h5["$gal/Solution/cut_range"] = sol.cut_range)
     end
     if result.match !== nothing
         m = result.match
-        out_h5["galerkin/match/cout"] = m.cout
-        out_h5["galerkin/match/cin"] = m.cin
-        out_h5["galerkin/match/xi"] = m.xi
-        out_h5["galerkin/match/xi_deriv"] = m.xi_deriv
-        out_h5["galerkin/match/deltar"] = m.deltar
-        out_h5["galerkin/match/bpen"] = m.bpen
-        out_h5["galerkin/match/rpec_eig"] = m.rpec_eig
+        out_h5["$gal/Match/cout"] = m.cout
+        out_h5["$gal/Match/cin"] = m.cin
+        out_h5["$gal/Match/xi"] = m.xi
+        out_h5["$gal/Match/xi_deriv"] = m.xi_deriv
+        out_h5["$gal/Match/deltar"] = m.deltar
+        out_h5["$gal/Match/bpen"] = m.bpen
+        out_h5["$gal/Match/rpec_eig"] = m.rpec_eig
         # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
         for i in eachindex(m.inner_psi)
-            out_h5["galerkin/match/inner/psi_$i"] = m.inner_psi[i]
-            out_h5["galerkin/match/inner/xi_$i"] = m.inner_xi[i]
-            out_h5["galerkin/match/inner/b_$i"] = m.inner_b[i]
+            out_h5["$gal/Match/Inner/psi_$i"] = m.inner_psi[i]
+            out_h5["$gal/Match/Inner/xi_$i"] = m.inner_xi[i]
+            out_h5["$gal/Match/Inner/b_$i"] = m.inner_b[i]
         end
-        out_h5["galerkin/match/residual"] = m.residual
+        out_h5["$gal/Match/residual"] = m.residual
         if !isempty(m.inner_params)
             for f in (:E, :F, :G, :H, :K, :M, :taua, :taur, :v1)
-                out_h5["galerkin/match/inner_params/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
+                out_h5["$gal/Match/InnerParams/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
             end
         end
     end

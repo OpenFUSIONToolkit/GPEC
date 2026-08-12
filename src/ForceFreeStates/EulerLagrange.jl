@@ -141,7 +141,7 @@ end
 
 Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
 Formerly `ode_run`. Has the same functionality as `ode_run` in the Fortran code, with the addition of
-a single dump to the `euler.h5` file at the end of integration instead of multiple dumps
+a single dump to the `gpec.h5` file at the end of integration instead of multiple dumps
 to `euler.bin` throughout the integration. We have made the control logic more clear
 by pre-computing all integration chunks upfront and using a for loop to iterate through them,
 eliminating the while-loop logic and making integration bounds explicit at each step.

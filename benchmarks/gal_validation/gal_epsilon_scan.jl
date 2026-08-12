@@ -1,8 +1,8 @@
 #!/usr/bin/env julia
 # Gal-enabled TJ-analytic beta (pc) scan: at each pc, run the full GPEC pipeline with gal_flag=true
 # and capture three Δ′ measures per resonant surface (m=2 q=2, m=3 q=3):
-#   gal      = galerkin/pest3_Delta diagonal      (RDCON singular-Galerkin, this port)
-#   stride   = singular/delta_prime_matrix diag   (STRIDE BVP)
+#   gal      = SingularSurfaces/GalerkinDeltaPrime/pest3_Delta diagonal      (RDCON singular-Galerkin, this port)
+#   stride   = SingularSurfaces/delta_prime_matrix diag   (STRIDE BVP)
 #   cajump   = (ca_r-ca_l)/((2pi)^2 psio)          (ca-jump primary)
 # Reuses examples/LAR_epsilon_scan/gpec.toml. Writes gal_epsilon_scan_results.h5 + CSV next to this script.
 using Pkg
@@ -19,18 +19,18 @@ const BASE = TOML.parsefile(joinpath(REPO, "examples", "LAR_epsilon_scan", "gpec
 function extract(h5)
     h5open(h5, "r") do f
         out = Dict{String,Any}()
-        out["q0"] = read(f, "equil/q0"); out["qmax"] = read(f, "equil/qmax")
-        out["dW_total"] = real(read(f, "vacuum/et")[1])
-        psio = read(f, "equil/psio"); denom = (2pi)^2 * psio
-        mlow = read(f, "info/mlow"); mpert = read(f, "info/mpert"); nlow = read(f, "info/nlow")
+        out["q0"] = read(f, "Equilibrium/q0"); out["qmax"] = read(f, "Equilibrium/qmax")
+        out["dW_total"] = real(read(f, "ForceFreeStates/FreeBoundaryStability/eigenmode_energies")[1])
+        psio = read(f, "Equilibrium/psio"); denom = (2pi)^2 * psio
+        mlow = read(f, "Info/mlow"); mpert = read(f, "Info/mpert"); nlow = read(f, "Info/nlow")
         # surface m-values (STRIDE side)
-        m_s = vec(read(f, "singular/m")); n_s = vec(read(f, "singular/n")); msing = length(m_s)
+        m_s = vec(read(f, "SingularSurfaces/m")); n_s = vec(read(f, "SingularSurfaces/n")); msing = length(m_s)
         # STRIDE delta_prime_matrix
-        dpm = haskey(f["singular"], "delta_prime_matrix") ? read(f, "singular/delta_prime_matrix") : nothing
-        cal = read(f, "singular/ca_left"); car = read(f, "singular/ca_right")
+        dpm = haskey(f["singular"], "delta_prime_matrix") ? read(f, "SingularSurfaces/delta_prime_matrix") : nothing
+        cal = read(f, "SingularSurfaces/ca_left"); car = read(f, "SingularSurfaces/ca_right")
         # gal
-        gm = haskey(f, "galerkin") && haskey(f["galerkin"], "sing_m") ? vec(read(f, "galerkin/sing_m")) : Int[]
-        gp = haskey(f, "galerkin") && haskey(f["galerkin"], "pest3_Delta") ? read(f, "galerkin/pest3_Delta") : nothing
+        gm = haskey(f, "SingularSurfaces/GalerkinDeltaPrime/sing_m") ? vec(read(f, "SingularSurfaces/GalerkinDeltaPrime/sing_m")) : Int[]
+        gp = haskey(f, "SingularSurfaces/GalerkinDeltaPrime/pest3_Delta") ? read(f, "SingularSurfaces/GalerkinDeltaPrime/pest3_Delta") : nothing
         for (s, m) in enumerate(m_s)
             key = "m$(m)"
             # ca-jump

@@ -6,11 +6,11 @@ using TOML
 # for the direct (EFIT) and inverse (CHEASE) equilibrium kinds and the override flags.
 
 # Collect every leaf dataset path under an open HDF5 file, skipping the groups/paths that
-# legitimately differ between a source run and its replay (`input/` is re-emitted with the
-# rerun's own filename/TOML blob; `info/git_version` reflects the running commit).
+# legitimately differ between a source run and its replay (`Input/` is re-emitted with the
+# rerun's own filename/TOML blob; `Info/git_version` reflects the running commit).
 function _rerun_leaf_paths(h5)
-    skip_toplevel = Set(["input"])
-    skip_paths = Set(["info/git_version"])
+    skip_toplevel = Set(["Input"])
+    skip_paths = Set(["Info/git_version"])
     paths = String[]
     function walk(node, prefix)
         for k in keys(node)
@@ -38,7 +38,7 @@ function _rerun_dataset_mismatches(source_h5, rerun_h5)
             for p in union(src, rer)
                 n_compared += 1
                 # `isequal` (not `!=`) so a faithfully-reproduced NaN counts as a match — some
-                # datasets (e.g. ballooning `locstab/alpha_critical` where no boundary exists) are
+                # datasets (e.g. ballooning `LocalStability/alpha_critical` where no boundary exists) are
                 # legitimately all-NaN, and `NaN != NaN` would otherwise flag them as drift.
                 if !(p in src) || !(p in rer) || !isequal(read(hs, p), read(hr, p))
                     n_mismatched += 1
@@ -102,7 +102,7 @@ end
 
         @testset "--coil-source coils errors when source has no coil snapshot" begin
             # This Solovev source run used ASCII forcing, so there is no
-            # input/raw_inputs/coils group to replay from.
+            # Input/RawInputs/Coils group to replay from.
             mktempdir() do replay_dir
                 @test_throws ErrorException GeneralizedPerturbedEquilibrium.main([
                     source_h5, "--output-dir", replay_dir, "--coil-source", "coils"
@@ -123,7 +123,7 @@ end
 
     read_resfield(path) =
         h5open(path, "r") do h5
-            key = "perturbed_equilibrium/singular_coupling/resonant_area_weighted_field"
+            key = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
             haskey(h5, key) ? read(h5, key) : ComplexF64[]
         end
 
@@ -158,8 +158,8 @@ end
 
         # The coil geometry actually used must be captured in the snapshot.
         h5open(source_h5, "r") do h5
-            @test haskey(h5, "input/raw_inputs/coils")
-            @test haskey(h5, "input/raw_inputs/coils/my_coils")
+            @test haskey(h5, "Input/RawInputs/Coils")
+            @test haskey(h5, "Input/RawInputs/Coils/my_coils")
         end
         src_field = read_resfield(source_h5)
         @test !isempty(src_field)
@@ -197,9 +197,9 @@ function _roundtrip_ingest(ingest, kind)
     mktempdir() do d
         h5path = joinpath(d, "raw.h5")
         h5open(h5path, "w") do f
-            f["input/raw_inputs/equilibrium/ingest_kind"] = kind
+            f["Input/RawInputs/Equilibrium/ingest_kind"] = kind
             for nm in fieldnames(typeof(ingest))
-                f["input/raw_inputs/equilibrium/$nm"] = getfield(ingest, nm)
+                f["Input/RawInputs/Equilibrium/$nm"] = getfield(ingest, nm)
             end
         end
         restored = h5open(GeneralizedPerturbedEquilibrium.read_equilibrium_ingest, h5path, "r")

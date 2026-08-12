@@ -9,10 +9,10 @@ const PFACS = [5e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]
 
 function extract(h5)
     h5open(h5, "r") do f
-        mlow = read(f, "info/mlow"); mpert = read(f, "info/mpert"); nlow = read(f, "info/nlow")
-        m_s = vec(read(f, "singular/m"))
-        dpm = read(f, "singular/delta_prime_matrix")
-        gm = vec(read(f, "galerkin/sing_m")); gp = read(f, "galerkin/pest3_Delta")
+        mlow = read(f, "Info/mlow"); mpert = read(f, "Info/mpert"); nlow = read(f, "Info/nlow")
+        m_s = vec(read(f, "SingularSurfaces/m"))
+        dpm = read(f, "SingularSurfaces/delta_prime_matrix")
+        gm = vec(read(f, "SingularSurfaces/GalerkinDeltaPrime/sing_m")); gp = read(f, "SingularSurfaces/GalerkinDeltaPrime/pest3_Delta")
         g3 = NaN; s3 = NaN; g2 = NaN; s2 = NaN
         for (s, m) in enumerate(m_s)
             gi = findfirst(==(m), gm)
