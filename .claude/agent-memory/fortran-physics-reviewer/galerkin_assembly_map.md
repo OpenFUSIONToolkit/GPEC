@@ -49,7 +49,7 @@ lives only in match_delta (Newton eigenvalue search), NOT the RPEC path. Two iss
 Confirm intended convention vs Fortran before trusting resistive Δ(Q); ideal_flag path (γ unused) is unaffected.
 RESOLUTION 2026-06-20: author confirms the Hz convention is DELIBERATE (gal_rotation is f[Hz], so γ=2πi·n·f);
 the overstated comments were corrected. Δ(Q) now guarded by test/runtests_innerlayer.jl (Julia self-pin on
-glasser_wang_2020_eq55). Remaining follow-up (mpharr): upgrade that guard to a Fortran deltac_run / paper
+glasser_wang_2020_eq55). Remaining follow-up: upgrade that guard to a Fortran deltac_run / paper
 cross-check to fully close the convention question.
 
 ## Verdict: PASS WITH REQUIRED ANNOTATIONS for outer solve; RPEC γ convention is SHOULD-FIX (verify vs match.f).

@@ -945,6 +945,48 @@ sing_get_ua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
     sing_get_ua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
 
 """
+    sing_get_ua_res_cut!(out, sing_asymp, dpsi) -> out
+
+Leading-order ("cut") form of [`sing_get_ua_res!`](@ref): keeps only the `t = 0` term of the
+Frobenius series instead of summing all `2·sing_order` terms, then applies the same unshear.
+
+This is the resonant basis used to build the *cut* outer solution, whose role is to supply the
+regular background that the resistive inner-layer solution is added to when forming the composite
+solution near a rational surface. Because the full and cut series share the same leading term, the
+difference between them is exactly the higher-order content that the layer solution replaces.
+"""
+function sing_get_ua_res_cut!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
+    vmat = sing_asymp.vmat
+    N = size(vmat, 1)
+    sqrtfac = sqrt(dpsi)
+    ρ = sing_asymp.r1[1]
+    cbig = sing_asymp.r2[1]
+    csml = sing_asymp.r2[2]
+
+    @inbounds for k in 1:2, ii in 1:N
+        out[ii, 1, k] = vmat[ii, cbig, k, 1]
+        out[ii, 2, k] = vmat[ii, csml, k, 1]
+    end
+
+    pfac = dpsi^sing_asymp.alpha[1]
+    @inbounds for k in 1:2, ii in 1:N
+        out[ii, 1, k] /= pfac
+        out[ii, 2, k] *= pfac
+    end
+    @inbounds out[ρ, 1, 1] /= sqrtfac
+    @inbounds out[ρ, 2, 1] /= sqrtfac
+    @inbounds out[ρ, 1, 2] *= sqrtfac
+    @inbounds out[ρ, 2, 2] *= sqrtfac
+    return out
+end
+
+"""
+Allocating wrapper for [`sing_get_ua_res_cut!`](@ref); returns the big/small columns as `(N, 2, 2)`.
+"""
+sing_get_ua_res_cut(sing_asymp::SingAsymptotics, dpsi::Float64) =
+    sing_get_ua_res_cut!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
+
+"""
 Allocating wrapper for [`sing_get_dua_res!`](@ref); returns the big/small columns as `(N, 2, 2)`.
 """
 sing_get_dua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
