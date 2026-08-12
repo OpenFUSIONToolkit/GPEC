@@ -1648,7 +1648,7 @@ function parallel_eulerlagrange_integration(
 
     chunks, propagators = _handle_edge_dW_scan!(odet, chunks, propagators, ctrl, equil, ffit, intr)
 
-    # compute_delta_prime_matrix! is called from the main pipeline (after free_run!) so
+    # compute_delta_prime_matrix! is called from the main pipeline (after free_run) so
     # that vacuum response wv is available for the edge BC. With self-consistent truncation,
     # the propagators/chunks returned here match intr.psilim exactly, so Δ' is well-defined
     # for both truncate_at_dW_peak=false (full domain) and =true (peak).
@@ -1883,8 +1883,9 @@ end
 Replace the propagator-BVP's `odet` with a fresh serial-EL `odet` that has
 dense `u_store` / `ud_store` populated in axis basis (the PerturbedEquilibrium
 convention).  The caller's `odet` is fully replaced by the fresh one because
-`free_run!` downstream uses `odet.u[:,:,1,end]` to normalize `odet.u_store`,
-so both must be in the same basis.  The parallel BVP results that survive
+`free_run` / `normalize_eigenfunctions!` downstream use `odet.u[:,:,1,end]` to
+normalize `odet.u_store`, so both must be in the same basis.  The parallel BVP
+results that survive
 downstream are stored in `intr` (psilim/qlim, sing[*].delta_prime, …) and in
 the externally-returned `propagators` / `chunks` / `S_at_surface_left` —
 none of those live on `odet`, so replacing `odet` is safe.

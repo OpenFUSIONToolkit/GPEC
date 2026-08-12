@@ -48,7 +48,7 @@ _reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
         state::PerturbedEquilibriumState,
         equil::Equilibrium.PlasmaEquilibrium,
         ForceFreeStates_results::OdeState,
-        vac_data::VacuumData,
+        mthvac::Int,
         ffs_intr::ForceFreeStatesInternal,
         intr::PerturbedEquilibriumInternal,
         ctrl::PerturbedEquilibriumControl
@@ -79,7 +79,7 @@ function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
     ForceFreeStates_results::OdeState,
-    vac_data::VacuumData,
+    mthvac::Int,
     ffs_intr::ForceFreeStatesInternal,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl
@@ -100,7 +100,7 @@ function compute_singular_coupling_metrics!(
 
     chi1 = 2π * equil.psio
     twopi = 2π
-    mtheta = vac_data.mthvac
+    mtheta = mthvac
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
     # Phase 1: Collect all resonant (surface, n) pairs in psi order
@@ -175,9 +175,9 @@ function compute_singular_coupling_metrics!(
 
             # Compute Green's functions at this surface for this n (once per pair)
             vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
-            _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
-            grri = Matrix{ComplexF64}(grri_raw)
-            grre = Matrix{ComplexF64}(grre_raw)
+            vac = Vacuum.compute_vacuum_response(vac_input, wall_settings)
+            grri = Matrix{ComplexF64}(vac.grri)
+            grre = Matrix{ComplexF64}(vac.grre)
 
             # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
             ν_vac = Vacuum.PlasmaGeometry(vac_input).ν

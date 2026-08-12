@@ -18,7 +18,7 @@ include("Kernel2D.jl")
 include("Kernel3D.jl")
 include("Field.jl")
 
-export VacuumInput, WallShapeSettings
+export VacuumInput, VacuumResponse, WallShapeSettings
 export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
 export PlasmaGeometry
@@ -53,7 +53,7 @@ function _symmetrize_vacuum_energy!(wv::AbstractMatrix)
 end
 
 """
-    _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+    _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 2D (axisymmetric) vacuum response calculation.
 
@@ -62,7 +62,7 @@ building the double-/single-layer operators, solving the exterior and interior s
 filling the corresponding diagonal block of the response matrix and the matching column block
 of the Green's functions.
 """
-@with_pool pool function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+@with_pool pool function _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     mpert = length(inputs.m_modes)
     num_points_surf = inputs.mtheta
@@ -147,7 +147,7 @@ of the Green's functions.
 end
 
 """
-    _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction. For `nfp == 1`
 the block-circulant assembly and residue-class loop are skipped in favour of a more efficient
@@ -169,7 +169,7 @@ Only `wv` is produced currently; `grri`/`grre` are returned zeroed and are not y
 Extension point: per residue class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns and the
 interior variant `-D + 2I` for the interior columns, then scatter back into the `[2N × 2·num_modes]` arrays.
 """
-@with_pool pool function _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+@with_pool pool function _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
@@ -257,57 +257,26 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
 end
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings) -> VacuumResponse
 
-Allocate and return the vacuum response matrix and Green's functions for the given vacuum
-inputs. Thin allocating wrapper around the in-place [`compute_vacuum_response!`]: it sizes the
-output arrays for the full torus and forwards to the same 2D/3D workers. For performance-critical
-paths that already own preallocated storage (e.g. `ForceFreeStates.VacuumData`), prefer the
-in-place method to avoid extra heap allocations.
-
-# Returns
-
-  - `wv`: complex vacuum response matrix (`num_modes × num_modes`).
-  - `grri`, `grre`: interior/exterior Green's functions (zeroed on the 3D nowall path).
-  - `plasma_pts`, `wall_pts`: surface coordinate arrays.
+Compute the vacuum response for the given inputs. Allocating wrapper around
+[`compute_vacuum_response!`](@ref); pass a preallocated [`VacuumResponse`](@ref) to that method
+instead when reusing storage across calls.
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
-
-    num_points = inputs.mtheta * inputs.nzeta * inputs.nfp # mtheta for 2D
-    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
-
-    vac = (
-        wv=zeros(ComplexF64, num_modes, num_modes),
-        grri=zeros(ComplexF64, 2 * num_points, num_modes),
-        grre=zeros(ComplexF64, 2 * num_points, num_modes),
-        plasma_pts=zeros(num_points, 3),
-        wall_pts=zeros(num_points, 3)
-    )
+    vac = VacuumResponse(inputs)
     compute_vacuum_response!(vac, inputs, wall_settings)
-
-    return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
+    return vac
 end
 
 """
-    compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-In-place variant that computes the vacuum response and directly populates the arrays stored in
-`vac_data`. Dispatches on dimensionality only: 2D (`inputs.nzeta == 1`) routes to
-[`_compute_vacuum_response_2d!`], 3D to [`_compute_vacuum_response_3d!`].
-
-The `vac_data` argument is expected to provide the following writable fields with compatible
-sizes:
-
-  - `wv::AbstractMatrix{ComplexF64}`             – vacuum response matrix
-  - `grri::AbstractMatrix{ComplexF64}`           – interior Green's functions
-  - `grre::AbstractMatrix{ComplexF64}`           – exterior Green's functions
-  - `plasma_pts::AbstractMatrix{Float64}`        – plasma surface coordinates
-  - `wall_pts::AbstractMatrix{Float64}`          – wall surface coordinates
-
-This is designed to work with `ForceFreeStates.VacuumData` but does not depend on its concrete
-type (duck-typed on field names only).
+In-place variant that populates the arrays of an existing [`VacuumResponse`](@ref). Dispatches on
+dimensionality only: 2D (`inputs.nzeta == 1`) routes to [`_compute_vacuum_response_2d!`], 3D to
+[`_compute_vacuum_response_3d!`].
 """
-function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
+function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings)
     if inputs.nzeta == 1
         _compute_vacuum_response_2d!(vac_data, inputs, wall_settings)
     else

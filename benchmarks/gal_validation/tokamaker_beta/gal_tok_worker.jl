@@ -73,7 +73,7 @@ function run_pipeline(psihigh)
     metric = FFS.make_metric(equil, intr.mpert)
     ffit = FFS.make_matrix(equil, intr, metric)
     odet, fm_propagators, fm_chunks, fm_S_left = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
-    vac_data = FFS.free_run!(odet, ctrl, equil, ffit, intr)
+    vac_data = FFS.free_run(odet, ctrl, equil, ffit, intr)
     if intr.msing > 0 && fm_propagators !== nothing
         FFS.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
             wv=vac_data.wv, psio=equil.psio, debug=false,
