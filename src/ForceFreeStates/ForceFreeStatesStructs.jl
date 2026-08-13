@@ -187,6 +187,14 @@ A mutable struct holding internal state variables for stability calculations.
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 
     """
+    Edge coil-response matrix of shape (2msing × numpert_total). Column k is the resonant
+    small-solution response at each surface side to a unit source on edge poloidal mode k,
+    built by imposing the Eq. (37) rpec edge boundary condition on the Riccati BVP
+    (`_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
+    """
+    delta_coil::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+
+    """
     Raw 2msing × 2msing outer-region matching matrix `D'` from the STRIDE global
     BVP, in the side-major ordering `[L_s1, R_s1, L_s2, R_s2, …, L_sm, R_sm]`
     (left vs right of each singular surface, interleaved surface-by-surface).
@@ -311,6 +319,13 @@ gpec.toml.
     # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
     gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
     gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
+    gal_inner_solver::String = "ray" # inner-layer Δ backend for the match: "ray" (rotated-contour collocation, certified Δ at the optimal θ = arg(Q)/4; robust for |Q| ≳ 1) or "galerkin" (Hermite-cubic inps; drifts for |Q| ≳ 1)
+    # --- Inner-layer "galerkin" backend knobs (used only when gal_inner_solver = "galerkin") ---
+    gal_inner_xfac::Float64 = 10.0  # asymptotic-matching radius multiplier (inps_xfac: xmax × 10)
+    gal_inner_nx::Int = 1280        # inner-layer grid cells (128 · xfac in the reference)
+    gal_inner_nq::Int = 5           # quadrature order per cell
+    gal_inner_cutoff::Int = 5       # cells carrying the large solution as driving term
+    gal_inner_kmax::Int = 8         # large-x asymptotic series order (↔ order_pow)
     gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
     gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
     gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`

@@ -29,13 +29,9 @@ const _R2 = SVector(3, 4, 5, 6)
 """
     InnerAsymptoticsCache
 
-Frozen state of the `inps` Wasow asymptotic-basis construction for a single
-`(GGJParameters, Q)` pair. All matrices are stored as `SMatrix`/`SVector`
-so the evaluator can run allocation-free on a hot path.
-
-Index convention: `P[k+1]` holds the k-th-order matrix `P_k`, `B[k+1]`
-holds `B_k`, etc., for k = 0, 1, …, the upper bound documented in each
-field.
+Frozen `inps` Wasow asymptotic-basis construction for one `(GGJParameters, Q)`
+pair, stored as `SMatrix`/`SVector` for allocation-free evaluation. Index
+convention: `P[k+1]` holds the k-th-order matrix `P_k`, etc.
 
 Fields:
 
@@ -93,6 +89,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
 
     # T (Eq. 7) — built by column-major reshape; the listing below is
     # row-major Julia order matching that layout.
+    #! format: off
     T = @SMatrix ComplexF64[
         1 0 h*q q2/λ h*q -q2/λ
         0 0 0 -1/λ 0 1/λ
@@ -110,6 +107,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
         0 0 λ/2 0 0 1/2
         0 λ/2 0 0 1/2 0
     ]
+    #! format: on
 
     # A_0, A_1, A_2 — GW2020 Eqs. (4), (5), and the A₂ matrix of Eq. (3). Build mutable then freeze.
     A0 = zeros(ComplexF64, 6, 6)
@@ -353,13 +351,9 @@ end
 """
     build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8) -> InnerAsymptoticsCache
 
-Construct the `inps` Wasow asymptotic basis for the given GGJ parameters
-and dimensionless growth rate `Q`. Truncates each power series at order
-`kmax` (default `8`). The returned cache can be evaluated at any `x > 0`
-via [`evaluate_asymptotics`](@ref) and queried for an adaptive `X_max`
-via [`pick_xmax`](@ref).
-
-Reference: Glasser & Wang, Phys. Plasmas **27**, 012506 (2020), Eqs. 7–53.
+Construct the `inps` Wasow asymptotic basis (GW2020 Eqs. 7–53), truncating
+each power series at order `kmax`. Evaluate with [`evaluate_asymptotics`](@ref);
+pick a cutoff with [`pick_xmax`](@ref).
 """
 function build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8)
     p1v = p1(params)
@@ -494,9 +488,7 @@ end
 # -----------------------------------------------------------------------
 
 """
-    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
-                        derivative::Bool=true, apply_T::Bool=true)
-        -> (U, dU)
+    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real; derivative=true, apply_T=true) -> (U, dU)
 
 Evaluate the inps asymptotic basis at `x > 0`. Returns the 6×2 complex
 matrix `U` whose two columns are the algebraically-decaying ("small")
@@ -627,10 +619,7 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
 end
 
 """
-    pick_xmax(params::GGJParameters, Q::ComplexF64;
-              eps::Float64=1e-7, kmax::Int=8,
-              xlogmin::Float64=-1.0, xlogmax::Float64=4.0,
-              dxlog::Float64=0.01) -> (Float64, InnerAsymptoticsCache)
+    pick_xmax(params, Q; eps=1e-7, kmax=8, xlogmin=-1.0, xlogmax=4.0, dxlog=0.01) -> (x_max, cache)
 
 Sweep `x` log-uniformly upward from `10^xlogmin` and return the smallest
 `x` at which `max(asymptotic_residual(cache, x)) < eps` — the cutoff `x_max`

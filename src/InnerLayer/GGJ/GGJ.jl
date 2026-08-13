@@ -1,15 +1,18 @@
 # GGJ.jl
 #
-# Glasser–Greene–Johnson resistive inner-layer model. Provides two
+# Glasser–Greene–Johnson resistive inner-layer model. Provides three
 # interchangeable solvers selected via the `solver` type-parameter of
 # `GGJModel`:
 #
-#   - `:shooting`  – stable backward shoot from X_max → 0 (Phase 3)
-#   - `:galerkin`  – Hermite-cubic finite element method (Phase 4)
+#   - `:shooting`  – stable backward shoot from X_max → 0;
+#                    numerically stable only for |Q| ≪ 1, should not be used
+#   - `:galerkin`  – Hermite-cubic finite element method;
+#                    real-axis method, degrades for |Q| ≳ 1 off the real axis
+#   - `:ray`       – rotated-contour spectral-element collocation (Ray.jl);
+#                    robust to |Q| ~ 500 on/near the imaginary axis
 #
-# Both solvers share the same `inps` Wasow asymptotic-basis kernel
-# (`InnerAsymptotics.jl`) for the large-x boundary condition. They return
-# the parity-projected matching data `(Δ_odd, Δ_even)` of GWP2016 Eqs. (34)–(35).
+# They return the parity-projected matching data
+# `(Δ_odd, Δ_even)` of GWP2016 Eqs. (34)–(35) in the same (deltac) convention.
 #
 # Equation references throughout this module use two source papers:
 #
@@ -31,32 +34,40 @@ module GGJ
 
 using LinearAlgebra
 using StaticArrays
+using SparseArrays
+using Random
+using Printf
+using DoubleFloats: Double64
 
-import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner, ..InnerLayerParameters
+import ..InnerLayerModel, ..InnerLayerResponse, ..InnerLayerParameters
+import ..solve_inner, ..solve_inner_profile
 
 """
     GGJModel{S} <: InnerLayerModel
 
-Glasser–Greene–Johnson resistive inner-layer model. The type parameter `S`
-selects the solver: `:galerkin` (default) for the Hermite-cubic finite element
-solver and `:shooting` for the backward stable-shoot solver. Both
-implementations consume the same `inps` asymptotic-basis kernel and return
-the parity-projected matching data.
+Glasser–Greene–Johnson resistive inner-layer model. `S` selects the solver
+backend: `:ray` (default; robust at large |Q| on/near the imaginary axis),
+`:galerkin` (real-axis Hermite FEM; degrades for |Q| ≳ 1), or `:shooting`
+(|Q| ≪ 1 only). The backends take different numerical-knob keywords.
 """
 struct GGJModel{S} <: InnerLayerModel end
 
-GGJModel(; solver::Symbol=:galerkin) = GGJModel{solver}()
+GGJModel(; solver::Symbol=:ray) = GGJModel{solver}()
 
 include("GGJParameters.jl")
 include("InnerAsymptotics.jl")
+include("RayAsymptotics.jl")
 include("Reference.jl")
 include("Shooting.jl")
 include("Galerkin.jl")
+include("Ray.jl")
 
 export GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
 export build_asymptotics, evaluate_asymptotics, pick_xmax
 export InnerAsymptoticsCache
 export glasser_wang_2020_eq55
+export solve_ray, RaySolveResult, pick_smax, physical_ua_dua
+export delta_convergence, solution_profile, asymptotic_profile, q4_surface_benchmark
 
 end # module GGJ
