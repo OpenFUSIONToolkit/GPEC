@@ -28,7 +28,7 @@ Coil settings (used when `forcing_data_format = "coil"`):
   - `nzeta_coil::Int` - Toroidal grid resolution; 0 = auto (32 × n)
   - `coil_sets_raw::Vector{Dict{String,Any}}` - Parsed `[[ForcingTerms.coil_set]]` TOML blocks
 """
-Base.@kwdef mutable struct ForcingTermsControl
+@kwdef struct ForcingTermsControl
     # Forcing data file settings (ascii/hdf5 formats)
     forcing_data_file::String = "forcing.dat"
     forcing_data_format::String = "ascii"
