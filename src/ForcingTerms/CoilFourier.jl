@@ -81,13 +81,17 @@ extrapolated distance is a fixed 1 − psihigh while the final spline interval s
 packing, so the error grows with resolution — which is why this surfaced only once the pass-1
 auto grid was refined.
 
-NOTE: strictly faithful is `psilim`, the *integration* limit, not `psihigh`, the *equilibrium
-spline* limit. They are equal unless `dmlim`/`qhigh`/`psiedge` truncation fires, in which case
-`psilim < psihigh`. PPPL shipped a fix for exactly this confusion (`docs/releases.rst:281`:
-"Fixes inappropriate uses of psihigh, which may not be the end of integration psilim if
-sas_flag, qhigh, or peak_flag are used"). `psihigh` is used as the default here because it is
-all a bare `PlasmaEquilibrium` knows; callers holding a ForceFreeStates solve should pass
-`psi = intr.psilim` explicitly, as the benchmarks do.
+NOTE ON THE DEFAULT: the physically correct control surface is `psilim`, the *integration*
+limit, not `psihigh`, the *equilibrium spline* limit. They are equal unless
+`dmlim`/`qhigh`/`psiedge` truncation fires, in which case `psilim < psihigh`. PPPL shipped a fix
+for exactly this confusion (`docs/releases.rst:281`: "Fixes inappropriate uses of psihigh, which
+may not be the end of integration psilim if sas_flag, qhigh, or peak_flag are used").
+
+**Both production paths pass `psi = ffs_intr.psilim` explicitly** (PerturbedEquilibrium.jl, coil
+and forcing-file branches), as do both Fortran-comparison benchmarks. This default of `psihigh`
+therefore applies only to direct callers holding a bare `PlasmaEquilibrium` with no
+ForceFreeStates solve — for which it is the outermost surface that exists, and always a strict
+improvement on extrapolating to ψ_N = 1. Pass `psi` explicitly whenever `psilim` is known.
 
 The coupling surface therefore moves inward by (1 − psihigh): 0.05 % of flux at the default
 psihigh = 0.9995, 0.5 % on the example, which lowers psihigh to 0.995 to capture q=6.
