@@ -32,6 +32,31 @@ function _collect_bad_groups(h5)
     return bad
 end
 
+# Metadata contract (docs/development/hdf5-conventions.md): every dataset carries
+# long_name + units, and rank ≥ 2 datasets carry a dims axis-name attribute. Exempt:
+# the Input/ raw snapshot and the debug-only GalerkinIntegration Match/ group.
+_metadata_exempt(path) = startswith(path, "Input/") || occursin("/Match/", path)
+
+function _collect_metadata_violations(h5)
+    bad = String[]
+    function walk(node, prefix)
+        for k in keys(node)
+            child = node[k]
+            full = isempty(prefix) ? k : prefix * "/" * k
+            if child isa HDF5.Group
+                walk(child, full)
+            elseif !_metadata_exempt(full)
+                a = attrs(child)
+                haskey(a, "long_name") || push!(bad, "$full: missing long_name")
+                haskey(a, "units") || push!(bad, "$full: missing units")
+                ndims(child) >= 2 && !haskey(a, "dims") && push!(bad, "$full: missing dims")
+            end
+        end
+    end
+    walk(h5, "")
+    return bad
+end
+
 @testset "gpec.h5 schema naming" begin
     template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
@@ -61,6 +86,24 @@ end
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")
             @test haskey(h5, "Info/git_version")
+
+            # Metadata contract: long_name/units everywhere, dims on rank ≥ 2 arrays.
+            viol = _collect_metadata_violations(h5)
+            isempty(viol) || @error "metadata contract violations in gpec.h5" viol
+            @test isempty(viol)
+
+            # File-level attributes.
+            ra = attrs(h5)
+            for k in ("schema_version", "Conventions", "title", "date_created")
+                @test haskey(ra, k)
+            end
+            @test ra["schema_version"] == "2.0"
+
+            # Dimension scales: the ψ_N coordinate of the forward integration is a
+            # scale and is attached to its q profile (netCDF-4 pattern).
+            fwd = "ForceFreeStates/Solutions/ForwardIntegration"
+            @test HDF5.API.h5ds_is_scale(h5["$fwd/psi"])
+            @test HDF5.API.h5ds_is_attached(h5["$fwd/q"], h5["$fwd/psi"], 0)
         end
     end
 end

@@ -40,6 +40,19 @@ Top level (10 groups):
 
 Reserved (documented, not yet written): `ForceFreeStates/Solutions/RiccatiIntegration/` — the third integrator backend slot alongside `ForwardIntegration` and `GalerkinIntegration`.
 
+## Metadata contract (self-describing datasets)
+
+Every dataset outside `Input/` (raw snapshot) and `GalerkinIntegration/Match/` (debug-only) must answer "what is this, in what units, plotted against what" without opening the source — enforced by `test/runtests_h5_schema.jl`:
+
+- **`long_name`** — plain-text physics description.
+- **`units`** — SI string (`"T"`, `"Wb/rad"`, `"A"`, `"m"`, `"J"`, `"N*m"`, `"Hz"`, `"Ohm*m"`); `"1"` for dimensionless (CF convention). Normalized quantities state the normalization in `long_name` (e.g. the power-normalized stability energies are per unit ⟨|ξ|²⟩, not joules).
+- **`dims`** — required on rank ≥ 2 datasets: a greppable string like `"(psi, m)"` listing axis names in **Julia (column-major) order, axis 1 first**. Note h5py/HDFView users see file dimensions in the reversed (row-major) order.
+- **HDF5 Dimension Scales** (the netCDF-4 coordinate mechanism): shared coordinate datasets (`psi` grids, rational-surface `psi`, geometry `xs`/`ys`) are marked with `h5ds_set_scale` and attached per-axis with `h5ds_attach_scale`/`h5ds_set_label`, so h5py `.dims`, xarray, and HDFView resolve axes natively. The H5DS C API indexes file (row-major) dimensions: Julia axis `k` of an `N`-d dataset is C index `N - k`.
+
+Root-level file attributes: `schema_version` (currently `"2.0"`; bump on breaking schema changes — readers dispatch on it), `Conventions = "GPEC-HDF5-2.0"`, `references`, `title` (run description), `date_created` (ISO 8601 UTC). The code version stays in `Info/git_version`.
+
+Mechanism: writers stay table-driven — each writer keeps a `path => (; long_name, units, dims)` table next to it (`src/HDF5Schema.jl` for the main writer; alongside `write_galerkin!`, the PerturbedEquilibrium writer, `KineticForces/Output.jl`, and `Tearing/Runner/HDF5Output.jl` for the rest) and applies it post-write via `Utilities.HDF5Annotations.annotate!`. Entries for conditionally-written datasets are simply skipped when absent. When adding a dataset, add its table entry in the same commit — the schema test fails otherwise.
+
 ## File-wide conventions
 
 - Complex numbers are stored as the native HDF5.jl compound type (readable by h5py as a compound dtype).

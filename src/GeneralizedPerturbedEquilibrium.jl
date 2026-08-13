@@ -68,6 +68,7 @@ const H5_RAW_FORCING = "Input/RawInputs/ForcingTerms"
 const H5_RAW_COILS = "Input/RawInputs/Coils"
 const H5_GIT_VERSION = "Info/git_version"
 
+include("HDF5Schema.jl")
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
@@ -726,6 +727,9 @@ function write_outputs_to_HDF5(
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
+        # File-level metadata contract (schema_version, Conventions, title, date).
+        Utilities.HDF5Annotations.write_root_attrs!(out_h5; title="GPEC output: $(basename(abspath(intr.dir_path)))")
+
         # Store git version for reproducibility
         out_h5[H5_GIT_VERSION] = git_version
 
@@ -991,6 +995,9 @@ function write_outputs_to_HDF5(
                 out_h5["$elm/Kinetic/G"] = _eval_mat_spline(ffit.gaats)
             end
         end
+
+        # Self-describing metadata pass (long_name/units/dims + dimension scales).
+        apply_main_h5_metadata!(out_h5, intr)
     end
 end
 
