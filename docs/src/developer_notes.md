@@ -223,4 +223,4 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 
 The full flag list, the environment-pinning behaviour that keeps source code the only variable in
 a comparison, and the exit-status contract are documented in
-[`docs/development/regression-harness.md`](../../development/regression-harness.md).
+[`docs/development/regression-harness.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/development/regression-harness.md).

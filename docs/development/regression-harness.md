@@ -115,9 +115,12 @@ loudly). If a pinned package set turns out to be incompatible with an old commit
 `Project.toml`, instantiate re-resolves it and the harness warns that the pin did not hold.
 
 **Every run records the environment that produced it** — Julia version, host, resolved Manifest
-hash, Julia and BLAS thread counts — and results are cached under that environment. A cached
-result from a different environment is re-run instead of silently reused, and every report prints
-the environment of each ref:
+hash, Julia and BLAS thread counts. The cache still holds a single result per
+`(commit, case)`, so a re-run replaces the stored one rather than keeping a result per
+environment; what the fingerprint adds is that a cached result whose environment differs from
+the current one is re-run instead of silently reused. `--allow-env-mismatch` skips that check
+and reuses whatever is cached, whatever produced it. Every report prints the environment of
+each ref:
 
 ```
 Ref 1: develop  @ a0cad260 (2026-08-12)
