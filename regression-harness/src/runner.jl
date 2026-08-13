@@ -57,6 +57,9 @@ end
 # Runs the Galerkin solver on the Glasser & Wang 2020 Eq. 55 parameter set
 # at γ = 1 + i and writes (Δ_odd, Δ_even) into a small HDF5 file at ARGS[1].
 # Runtime is written to ARGS[2] for parity with the GPEC runner.
+# `solve_inner` returns the named-field `InnerLayerResponse`; the historical
+# delta_odd / delta_even slots map to interchange / tearing respectively, which
+# preserves the numeric identity of each tracked quantity.
 const COMPUTED_GGJ_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -69,10 +72,36 @@ t_start = time()
 Δ = solve_inner(GGJModel(solver=:galerkin), p, γ)
 elapsed = time() - t_start
 h5open(ARGS[1], "w") do fid
-    fid["ggj/delta_odd_real"]  = real(Δ[1])
-    fid["ggj/delta_odd_imag"]  = imag(Δ[1])
-    fid["ggj/delta_even_real"] = real(Δ[2])
-    fid["ggj/delta_even_imag"] = imag(Δ[2])
+    fid["ggj/delta_odd_real"]  = real(Δ.interchange)
+    fid["ggj/delta_odd_imag"]  = imag(Δ.interchange)
+    fid["ggj/delta_even_real"] = real(Δ.tearing)
+    fid["ggj/delta_even_imag"] = imag(Δ.tearing)
+end
+open(ARGS[2], "w") do f
+    println(f, elapsed)
+end
+"""
+
+# GGJ rotated-ray backend at Q = 500i on the q=4 benchmark surface — a regime beyond the
+# :galerkin backend. Builds the physical rate γ = 500i·Q₀ so inner_Q lands exactly on the
+# imaginary axis at 500i, then writes the parity matching data. Runtime to ARGS[2] as usual.
+# As in the galerkin template, the delta_odd / delta_even slots map to interchange / tearing.
+const COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.InnerLayer
+using HDF5
+p = q4_surface_benchmark()
+γ = 500.0im * InnerLayer.GGJ.q0(p)
+t_start = time()
+Δ = solve_inner(GGJModel(solver=:ray), p, γ)
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["ggj/delta_odd_real"]  = real(Δ.interchange)
+    fid["ggj/delta_odd_imag"]  = imag(Δ.interchange)
+    fid["ggj/delta_even_real"] = real(Δ.tearing)
+    fid["ggj/delta_even_imag"] = imag(Δ.tearing)
 end
 open(ARGS[2], "w") do f
     println(f, elapsed)
@@ -139,6 +168,8 @@ Pick the subprocess script template for a `kind="computed"` case.
 function _computed_script_template(case_spec::CaseSpec)
     if case_spec.name == "ggj_reference"
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
+    elseif case_spec.name == "ggj_ray_q500i"
+        return COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE
     elseif case_spec.name == "efit_fixedbdy_separatrix"
         return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
     end

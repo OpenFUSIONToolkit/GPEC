@@ -7,7 +7,7 @@ type: reference
 The InnerLayer module performs matched-asymptotic analysis of resistive MHD stability at
 rational surfaces — solving the resistive inner-layer equations and computing the tearing
 stability parameter Δ via parity-projected splitting (Δ_odd, Δ_even). Fortran counterpart is
-`~/Code/gpec/rmatch/` (file mapping in fortran_correspondence_map.md).
+the Fortran `rmatch/` sources (file mapping in fortran_correspondence_map.md).
 
 ## Governing theory
 - Glasser (2016) PoP 23, 072505: computation of resistive instabilities by matched asymptotic expansions; shooting method, Frobenius exponent splitting.

@@ -380,7 +380,7 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
     end
 
     return find_zero((f, fp), rfac, Roots.Newton();
-        atol=1e-12*abs(psi0), rtol=1e-12, maxevals=50)
+        atol=1e-12 * abs(psi0), rtol=1e-12, maxevals=50)
 end
 
 """
@@ -503,7 +503,7 @@ robustness.
         @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
 
         ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
-        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3])^2
         @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
         @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
         @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
