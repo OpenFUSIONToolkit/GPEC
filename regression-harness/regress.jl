@@ -170,19 +170,20 @@ function main(args=ARGS)
             error("No commits resolved from the given refs")
         end
 
-        # Run each case at each commit
+        # Run every case against each ref, grouped by ref so cases sharing a commit share
+        # one worktree (and one Pkg.instantiate/precompile) instead of paying for it per case.
+        for ref in resolved_refs
+            run_cases_at_ref(db, ref, case_specs, REPO_ROOT;
+                force=opts.force, verbose=opts.verbose,
+                no_instantiate=opts.no_instantiate)
+        end
+
+        # Report, grouped by case as before
         for case_spec in case_specs
             println("\n", "="^64)
             println("Case: $(case_spec.name) — $(case_spec.description)")
             println("="^64)
 
-            for ref in resolved_refs
-                run_commit(db, ref.commit_hash, ref.name, case_spec, REPO_ROOT;
-                           force=opts.force, verbose=opts.verbose,
-                           no_instantiate=opts.no_instantiate)
-            end
-
-            # Report
             if length(resolved_refs) == 1
                 report_multi_ref(db, case_spec, resolved_refs)
             elseif length(resolved_refs) == 2
