@@ -306,7 +306,8 @@ const GALERKIN_H5_ANNOTATIONS = [
         (; long_name="ψ_N derivative of the Galerkin solution functions (arbitrary amplitude)", dims=("mode", "psi", "solution")),
     "ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_cut" =>
         (; long_name="Galerkin solution functions with the leading-order resonant response excised", dims=("mode", "psi", "solution")),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/cut_range" => (; long_name="ψ_N bounds of the excised resonant + extension cells per surface", dims=("surface", "bound")),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/cut_range" =>
+        (; long_name="ψ_N bounds of the excised resonant + extension cells per surface", dims=("surface", "bound")),
     "SingularSurfaces/GalerkinDeltaPrime/delta" =>
         (; long_name="outer-region Δ' matrix (2msing×2msing, side-major [L_s1, R_s1, ...]; RDCON Galerkin)", dims=("surface_side", "surface_side")),
     "SingularSurfaces/GalerkinDeltaPrime/pest3_A" => (; long_name="PEST-3 matching block A' (Galerkin outer region)", dims=("surface", "surface")),
