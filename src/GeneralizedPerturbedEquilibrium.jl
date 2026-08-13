@@ -845,8 +845,10 @@ function write_outputs_to_HDF5(
         out_h5["SingularSurfaces/psi"] = [sing.psifac for sing in intr.sing]
         out_h5["SingularSurfaces/q"] = [sing.q for sing in intr.sing]
         out_h5["SingularSurfaces/q1"] = [sing.q1 for sing in intr.sing]
-        out_h5["SingularSurfaces/ca_left"] = odet.ca_l
-        out_h5["SingularSurfaces/ca_right"] = odet.ca_r
+        # Kinetic and galerkin-matched runs never populate ca_l/ca_r (only ideal surface
+        # crossings do); emit zero-extent sentinels instead of unpopulated arrays.
+        out_h5["SingularSurfaces/ca_left"] = odet.ca_populated ? odet.ca_l : zeros(ComplexF64, 0, 0, 0, 0)
+        out_h5["SingularSurfaces/ca_right"] = odet.ca_populated ? odet.ca_r : zeros(ComplexF64, 0, 0, 0, 0)
 
         if intr.msing > 0
             # Mode numbers at each surface (jagged — pad with 0 to max_modes width)

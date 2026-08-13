@@ -26,7 +26,7 @@ function extract(h5)
         # surface m-values (STRIDE side)
         m_s = vec(read(f, "SingularSurfaces/m")); n_s = vec(read(f, "SingularSurfaces/n")); msing = length(m_s)
         # STRIDE delta_prime_matrix
-        dpm = haskey(f["singular"], "delta_prime_matrix") ? read(f, "SingularSurfaces/delta_prime_matrix") : nothing
+        dpm = haskey(f, "SingularSurfaces/delta_prime_matrix") ? read(f, "SingularSurfaces/delta_prime_matrix") : nothing
         cal = read(f, "SingularSurfaces/ca_left"); car = read(f, "SingularSurfaces/ca_right")
         # gal
         gm = haskey(f, "SingularSurfaces/GalerkinDeltaPrime/sing_m") ? vec(read(f, "SingularSurfaces/GalerkinDeltaPrime/sing_m")) : Int[]
@@ -35,7 +35,7 @@ function extract(h5)
             key = "m$(m)"
             # ca-jump
             ipr = 1 + m - mlow + (n_s[s] - nlow) * mpert
-            out["cajump_$key"] = (car[ipr, ipr, 2, s] - cal[ipr, ipr, 2, s]) / denom
+            out["cajump_$key"] = isempty(cal) ? NaN + NaN * im : (car[ipr, ipr, 2, s] - cal[ipr, ipr, 2, s]) / denom  # zero-extent when not computed
             # stride
             out["stride_$key"] = dpm !== nothing && s <= size(dpm, 1) ? dpm[s, s] : NaN + NaN*im
             # gal (match by m)

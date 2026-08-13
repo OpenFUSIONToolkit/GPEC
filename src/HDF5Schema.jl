@@ -121,9 +121,11 @@ const MAIN_H5_ANNOTATIONS = [
     "SingularSurfaces/n" => (; long_name="resonant toroidal mode numbers per surface (0-padded)", dims=("surface", "mode")),
     "SingularSurfaces/di0" => (; long_name="Mercier D_I evaluated at each rational surface", dims=("surface",)),
     "SingularSurfaces/ca_left" =>
-        (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface", dims=("mode", "solution", "large_small", "surface")),
+        (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface (zero-extent when not computed — ideal crossings only)",
+            dims=("mode", "solution", "large_small", "surface")),
     "SingularSurfaces/ca_right" =>
-        (; long_name="asymptotic large/small-solution coefficient matrices just right of each surface", dims=("mode", "solution", "large_small", "surface")),
+        (; long_name="asymptotic large/small-solution coefficient matrices just right of each surface (zero-extent when not computed — ideal crossings only)",
+            dims=("mode", "solution", "large_small", "surface")),
     "SingularSurfaces/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",)),
     "SingularSurfaces/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",)),
     "SingularSurfaces/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",)),

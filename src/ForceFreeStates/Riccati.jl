@@ -1271,6 +1271,7 @@ function _capture_right_crossing_data!(odet::OdeState, singp::SingType, sing_asy
         end
     end
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+    odet.ca_populated = true
 end
 
 # STUB: per-surface ca-based Δ' (not physically valid; see SingType.delta_prime docstring).
@@ -1947,6 +1948,7 @@ function _populate_dense_xi_via_serial_el!(
         qlim      = intr.qlim,
         ca_l      = copy(odet.ca_l),
         ca_r      = copy(odet.ca_r),
+        ca_populated = odet.ca_populated,
         sing_state = [(
             delta_prime     = copy(intr.sing[s].delta_prime),
             delta_prime_col = copy(intr.sing[s].delta_prime_col),
@@ -1992,6 +1994,7 @@ function _populate_dense_xi_via_serial_el!(
     # written against the (S, I) Riccati convention.
     fresh_odet.ca_l .= saved.ca_l
     fresh_odet.ca_r .= saved.ca_r
+    fresh_odet.ca_populated = saved.ca_populated
 
     # Return the fresh serial-EL odet (self-consistent for ξ-function
     # storage in axis basis; `ca_l`/`ca_r` carry the parallel-BVP
