@@ -34,6 +34,9 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     end
     g = create_group(parent, "Tearing")
     g["enabled"] = Int(result.enabled)
+    # Which inner-layer model produced PerSurface/: the SLAYER and GGJ branches write
+    # disjoint field sets, so readers must not have to infer it from the schema.
+    attrs(g)["layer_model"] = result.enabled ? _layer_model_token(eltype(result.params)) : "none"
 
     if !result.enabled    # nothing else to write
         _annotate_tearing!(g)
@@ -51,6 +54,11 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     return g
 end
 
+# Token recorded in the Tearing group's layer_model attribute; keyed by the
+# per-surface parameter type since the SLAYER and GGJ branches write disjoint fields.
+_layer_model_token(::Type{SLAYERParameters}) = "slayer"
+_layer_model_token(::Type{GGJParameters}) = "ggj"
+
 # Metadata table for the Tearing group (paths relative to it); ragged Diagnostics
 # subgroups and Scan/Surface_<k> groups are annotated by iteration below.
 const TEARING_H5_ANNOTATIONS = [
@@ -67,8 +75,9 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/Q_e" => (; long_name="normalized electron diamagnetic frequency Q_e per surface", dims=("surface",)),
     "PerSurface/Q_i" => (; long_name="normalized ion diamagnetic frequency Q_i per surface", dims=("surface",)),
     "PerSurface/iota_e" => (; long_name="electron fraction ι_e = Q_e/(Q_e − Q_i) per surface", dims=("surface",)),
-    "PerSurface/tauk" => (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = −τ_k·ω)", units="s", dims=("surface",)),
-    "PerSurface/tau_r" => (; long_name="resistive diffusion time τ_R per surface", units="s", dims=("surface",)),
+    "PerSurface/tauk" =>
+        (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = τ_k·ω; diamagnetic inputs Q_e, Q_i carry the opposite sign by convention)", units="s", dims=("surface",)),
+    "PerSurface/tau_r" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface (SLAYER layer parameters)", units="s", dims=("surface",)),
     "PerSurface/delta_n" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
     "PerSurface/rs" => (; long_name="minor radius of each rational surface", units="m", dims=("surface",)),
     "PerSurface/R0" => (; long_name="major radius", units="m", dims=("surface",)),
@@ -80,23 +89,25 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/eta" => (; long_name="parallel resistivity at each surface", units="Ohm*m", dims=("surface",)),
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
     "PerSurface/dc_tmp" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
-    "PerSurface/dc_type" => (; long_name="per-surface D_c prescription label"),
+    "PerSurface/dc_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
     "PerSurface/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",)),
     "PerSurface/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",)),
     "PerSurface/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",)),
     "PerSurface/H" => (; long_name="Glasser-Greene-Johnson coefficient H per surface", dims=("surface",)),
     "PerSurface/K" => (; long_name="Glasser-Greene-Johnson coefficient K per surface", dims=("surface",)),
     "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
-    "PerSurface/taua" => (; long_name="Alfvén time τ_A per surface", units="s", dims=("surface",)),
-    "PerSurface/taur" => (; long_name="resistive diffusion time τ_R per surface", units="s", dims=("surface",)),
+    "PerSurface/taua" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
+    "PerSurface/taur" => (; long_name="resistive diffusion time τ_R per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/v1" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
     "PerSurface/DpMatrix/real" => (; long_name="Re of the full Δ' matrix coupling the rational surfaces", dims=("surface", "surface")),
     "PerSurface/DpMatrix/imag" => (; long_name="Im of the full Δ' matrix coupling the rational surfaces", dims=("surface", "surface")),
-    "Roots/Q_root_real" => (; long_name="Re of the dispersion-root normalized frequency Q (NaN = no root)"),
-    "Roots/Q_root_imag" => (; long_name="Im of the dispersion-root normalized frequency Q (NaN = no root)"),
-    "Roots/omega_Hz" => (; long_name="mode rotation angular frequency of each root", units="rad/s"),
-    "Roots/gamma_Hz" => (; long_name="growth rate of each root", units="1/s"),
-    "Roots/no_root" => (; long_name="flag: no usable dispersion root found (Q_root is NaN, ω/γ are placeholders)"),
+    "Roots/Q_root_real" => (; long_name="Re of the dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
+    "Roots/Q_root_imag" => (; long_name="Im of the dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
+    "Roots/omega_Hz" =>
+        (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root (dataset name is a misnomer: angular, not cycles/s)", units="rad/s", dims=("surface",)),
+    "Roots/gamma_Hz" =>
+        (; long_name="growth rate γ = Im(Q)/τ_k of each root, positive = unstable (an e-folding rate, so no 2π distinction applies)", units="1/s", dims=("surface",)),
+    "Roots/no_root" => (; long_name="flag: no usable dispersion root found (Q_root is NaN, ω/γ are placeholders)", dims=("surface",)),
     "LayerWidths/ising" => (; long_name="rational-surface index of each row", dims=("surface",)),
     "LayerWidths/m" => (; long_name="resonant poloidal mode number m per surface", dims=("surface",)),
     "LayerWidths/n" => (; long_name="resonant toroidal mode number n per surface", dims=("surface",)),

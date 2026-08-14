@@ -48,17 +48,17 @@ end
 
 """
     galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
-                   intr::ForceFreeStatesInternal; vac_data=nothing) -> GalerkinResult
+                   intr::ForceFreeStatesInternal; wv=nothing) -> GalerkinResult
 
 Compute the outer-region Δ′ matching matrix by the singular Galerkin method. Port of `gal_solve`
 (gal.f). Single toroidal mode only (`intr.npert == 1`). Returns a `GalerkinResult`; if there
 are no resonant surfaces in the domain it returns an empty result.
 
-`vac_data` (a `VacuumData` from `free_run!`) supplies the free-boundary edge term
-`wv_edge = vac_data.wv · psio²`; pass `nothing` for a fixed-boundary edge.
+`wv` is the vacuum energy matrix from `free_run`, which supplies the free-boundary edge term
+`wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge.
 """
 function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
-    intr::ForceFreeStatesInternal; vac_data=nothing)
+    intr::ForceFreeStatesInternal; wv=nothing)
 
     intr.npert == 1 || error("galerkin_solve: only single-n (npert == 1) is supported")
     ctrl.gal_solver in ("LU", "cholesky") || error("galerkin_solve: gal_solver must be \"LU\" or \"cholesky\"")
@@ -79,19 +79,18 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     # right = sig=+1, left = sig=-1, no √det normalization. The Mercier exponent α is a
     # property of the surface, so the left series reuses the right's α (alpha_override). The order is
     # raised to gal_sing_order + ceil(2·Re(α)) for high-Mercier-index surfaces (Fortran sing1_vmat).
-    ctrl_gal = deepcopy(ctrl)
     asymps = GalSingAsymp[]
     for s in sings
-        ctrl_gal.sing_order = ctrl.gal_sing_order
-        ar = compute_sing_asymptotics(s, ctrl_gal, equil, ffit, intr; sig=1.0)
+        sing_order = ctrl.gal_sing_order
+        ar = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=1.0, sing_order=sing_order)
         if ctrl.gal_sing_order_ceiling
             order = ctrl.gal_sing_order + ceil(Int, 2 * real(ar.alpha[1]))
             if order > ctrl.gal_sing_order
-                ctrl_gal.sing_order = order
-                ar = compute_sing_asymptotics(s, ctrl_gal, equil, ffit, intr; sig=1.0)
+                sing_order = order
+                ar = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=1.0, sing_order=sing_order)
             end
         end
-        al = compute_sing_asymptotics(s, ctrl_gal, equil, ffit, intr; sig=-1.0, alpha_override=ar.alpha)
+        al = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=ar.alpha, sing_order=sing_order)
         push!(asymps, GalSingAsymp(ar, al))
     end
 
@@ -122,12 +121,12 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     ws.rhs = zeros(ComplexF64, ws.ndim, nsol)
     ws.sol = zeros(ComplexF64, ws.ndim, nsol)
 
-    # Free-boundary edge term wvac·psio² (vac_data.wv is already singfac-scaled at qlim in free_run!).
+    # Free-boundary edge term wvac·psio² (wv is already singfac-scaled at qlim in free_run).
     # rpec passes wv_edge=nothing; gal_set_boundary! then applies the identity edge AND injects the coil
     # unit sources (its three-way branch). The vacuum block is only built for the non-rpec free case.
     wv_edge = nothing
-    if ctrl.vac_flag && vac_data !== nothing && ncoil == 0
-        wv_edge = Matrix{ComplexF64}(vac_data.wv .* equil.psio^2)
+    if ctrl.vac_flag && wv !== nothing && ncoil == 0
+        wv_edge = Matrix{ComplexF64}(wv .* equil.psio^2)
     end
 
     gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)

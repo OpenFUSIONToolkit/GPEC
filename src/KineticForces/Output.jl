@@ -22,7 +22,7 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
         mg = create_group(g, method_name)
         mg["nn"] = result.nn
         # Torque and kinetic energy are the two real physical quantities packed into the
-        # complex T (Re = T_φ, Im = 2n·δW_k); store each once as a real scalar.
+        # complex T (Re = T_φ, Im = 2n·δW_k); total_energy stores δW_k = Im(T)/(2n).
         mg["total_torque"] = real(result.total_torque)
         mg["total_energy"] = result.total_energy
         mg["psi_nsteps"] = result.psi_nsteps
@@ -71,7 +71,7 @@ end
 const KF_METHOD_H5_ANNOTATIONS = [
     "nn" => (; long_name="toroidal mode number n of this torque calculation"),
     "total_torque" => (; long_name="total NTV toroidal torque T_φ", units="N*m"),
-    "total_energy" => (; long_name="total perturbed kinetic energy 2n·δW_k", units="J"),
+    "total_energy" => (; long_name="total perturbed kinetic energy δW_k = Im(T)/(2n) (unlike the T_imag profile, the 2n is divided out)", units="J"),
     "psi_nsteps" => (; long_name="number of ψ_N quadrature evaluations"),
     "panel_psi" => (; long_name="ψ_N panel boundaries of the radial quadrature"),
     "resonance_psi" => (; long_name="ψ_N of located kinetic-resonance surfaces"),
@@ -79,7 +79,7 @@ const KF_METHOD_H5_ANNOTATIONS = [
     "dTdpsi_real" => (; long_name="Re dT_φ/dψ_N torque density at quadrature points", units="N*m", dims=("psi",)),
     "dTdpsi_imag" => (; long_name="Im dT_φ/dψ_N (2n·dδW_k/dψ_N energy density) at quadrature points", units="J", dims=("psi",)),
     "T_real" => (; long_name="cumulative toroidal torque T_φ(ψ_N) (trapezoidal)", units="N*m", dims=("psi",)),
-    "T_imag" => (; long_name="cumulative 2n·δW_k(ψ_N) (trapezoidal)", units="J", dims=("psi",)),
+    "T_imag" => (; long_name="cumulative 2n·δW_k(ψ_N) (trapezoidal; raw Im(T) — not divided by 2n like total_energy)", units="J", dims=("psi",)),
     "EnergyIntegrals/psi" => (; long_name="ψ_N of each energy-integration record"),
     "EnergyIntegrals/lambda" => (; long_name="pitch λ = μB0/E of each record"),
     "EnergyIntegrals/ell" => (; long_name="bounce harmonic ℓ of each record"),
