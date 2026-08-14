@@ -505,11 +505,22 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
 
-  - `du_store::Array{ComplexF64,4}` - du₁/dψ and du₂/dψ at the accepted point of each saved step, same shape as `u_store`.
+  - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
+    `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
+    except on the galerkin-matched path which supplies the analytic derivative at construction.
+    du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
 
-  - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016, shape `(numpert_total, numpert_total, numsteps_init)`.
+  - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
+    shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
 
-  - `du_store_populated::Bool` - True once the serial EL path has filled `du_store`/`xi_s_store`; other paths leave it false.
+  - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
+    derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
+    are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
+
+  - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
+    (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
+    galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
+    sparse parallel path whose solution is in the Riccati basis.
 
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
 
@@ -526,10 +537,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
 
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
-
-  - `du::Array{ComplexF64,3}` - du/dψ from the latest `sing_der!` call, shape `(numpert_total, numpert_total, 2)`.
-
-  - `xi_s::Matrix{ComplexF64}` - Ξ_s from the latest `sing_der!` call, shape `(numpert_total, numpert_total)`.
 
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
 
@@ -578,8 +585,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    du_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, numsteps_init)
+    du_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
+    xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
+    u_store_el_basis::Bool = true
     du_store_populated::Bool = false
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
@@ -592,8 +600,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     psifac::Float64 = 0.0
     q::Float64 = 0.0
     u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    du::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    xi_s::Matrix{ComplexF64} = zeros(ComplexF64, numpert_total, numpert_total)
     ising_start::Int = 0
     psimax::Float64 = 0.0
     needs_crossing::Bool = false
