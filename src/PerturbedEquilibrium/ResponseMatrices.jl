@@ -34,6 +34,7 @@ plasma surface from ForceFreeStates eigenmode solutions.
 
       + From equilibrium bicubic spline evaluation
       + Needed to convert displacement to magnetic field
+
  3. **Safety factor**: q at boundary
 
       + Used to compute singular factors (m - n*q)
@@ -162,7 +163,6 @@ end
     build_flux_matrix(
         equil::Equilibrium.PlasmaEquilibrium,
         ForceFreeStates_results::OdeState,
-        vac_data::VacuumData,
         intr::ForceFreeStatesInternal
     )::Matrix{ComplexF64}
 
@@ -182,7 +182,6 @@ The flux matrix relates eigenmode displacements to vacuum poloidal flux:
 
   - `equil`: Equilibrium solution containing flux surfaces and q-profile
   - `ForceFreeStates_results`: ForceFreeStates ODE integration results containing eigenmodes
-  - `vac_data`: Vacuum response data from free boundary calculation
   - `intr`: ForceFreeStates internal state with mode information
 
 ## Returns
@@ -193,7 +192,6 @@ The flux matrix relates eigenmode displacements to vacuum poloidal flux:
 function build_flux_matrix(
     equil::Equilibrium.PlasmaEquilibrium,
     ForceFreeStates_results::OdeState,
-    vac_data::VacuumData,
     intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
 
@@ -210,7 +208,7 @@ end
 
 """
     calc_plasma_inductance(
-        vac_data::VacuumData,
+        wt0::Matrix{ComplexF64},
         ffs_intr::ForceFreeStatesInternal,
         psio::Float64
     )::Matrix{ComplexF64}
@@ -222,13 +220,13 @@ Calculate plasma inductance matrix Λ using the wt0-based energy formula
 
 where t₁ = im/(χ₁·s_i·2π), t₂ = -im/(χ₁·s_j·2π), s_i = m_i - n·q_lim.
 
-Note: `vac_data.wt0` already contains singfac² factors (s_i·s_j) baked into the
-vacuum term via the scaling in `free_run!`. The t₁/t₂ factors divide by s_i·s_j,
+Note: `wt0` already contains singfac² factors (s_i·s_j) baked into the
+vacuum term via the scaling in `free_run`. The t₁/t₂ factors divide by s_i·s_j,
 correctly recovering the properly-normalized inductance.
 
 ## Arguments
 
-  - `vac_data`: Vacuum data containing wt0 (total energy matrix before eigenvector sorting)
+  - `wt0`: Total energy matrix W = wp + wv, before eigenvector sorting
   - `ffs_intr`: ForceFreeStates internal state with mode info (mlow, mpert, nlow, qlim)
   - `psio`: Total toroidal flux [Wb/rad] from equilibrium (equil.psio)
 
@@ -237,7 +235,7 @@ correctly recovering the properly-normalized inductance.
   - Plasma inductance matrix Lambda [numpert_total × numpert_total]
 """
 function calc_plasma_inductance(
-    vac_data::VacuumData,
+    wt0::Matrix{ComplexF64},
     ffs_intr::ForceFreeStatesInternal,
     psio::Float64
 )::Matrix{ComplexF64}
@@ -251,9 +249,9 @@ function calc_plasma_inductance(
     s = [((i-1) % ffs_intr.mpert + ffs_intr.mlow) - n * qlim for i in 1:mpert]
 
     # Fortran idcon_norm: wt0 = wt0/(mu0*2)*psio^2
-    # Julia's vac_data.wt0 is raw wp+wv; Fortran additionally scales by psio^2/(mu0*2)
+    # Julia's wt0 is raw wp+wv; Fortran additionally scales by psio^2/(mu0*2)
     mu0 = 4π * 1e-7
-    wt0_norm = vac_data.wt0 .* (psio^2 / (mu0 * 2))
+    wt0_norm = wt0 .* (psio^2 / (mu0 * 2))
 
     # Build temp2[i,j] = 2·t1_i·wt0[i,j]·t2_j (matches Fortran gpresp_induct)
     temp2 = Matrix{ComplexF64}(undef, mpert, mpert)
@@ -304,7 +302,7 @@ function calc_surface_inductance(
     wall_settings::Vacuum.WallShapeSettings
 )::Matrix{ComplexF64}
     vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, [nn])
-    _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true)
+    I_v = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true).I_v
     μ₀ = 4π * 1e-7
     return inv(I_v) .* (μ₀ * (2π)^2)
 end

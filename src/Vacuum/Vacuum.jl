@@ -18,7 +18,7 @@ include("Kernel2D.jl")
 include("Kernel3D.jl")
 include("Field.jl")
 
-export VacuumInput, WallShapeSettings
+export VacuumInput, VacuumResponse, WallShapeSettings
 export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
 export PlasmaGeometry
@@ -50,7 +50,7 @@ function _warn_and_symmetrize!(mat::AbstractMatrix, name::String)
 end
 
 """
-    _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
 2D (axisymmetric) vacuum response calculation.
 
@@ -59,14 +59,14 @@ building the double-/single-layer operators, solving the exterior system for `wv
 optionally the interior system to build `I_v` when `compute_Iv=true`.
 Green's functions are internal scratch only.
 """
-@with_pool pool function _compute_vacuum_response_2d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+@with_pool pool function _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
 
     mpert = length(inputs.m_modes)
     mlow = inputs.m_modes[1]
     num_points_surf = inputs.mtheta
 
-    vac_data.wv .= 0
-    compute_Iv && (vac_data.I_v .= 0)
+    fill!(vac_data.wv, 0)
+    fill!(vac_data.I_v, 0) # unconditional so a reused buffer never leaks a stale I_v
 
     # Form the plasma and wall geometries
     plasma_surf = PlasmaGeometry(inputs)
@@ -160,7 +160,7 @@ Green's functions are internal scratch only.
 end
 
 """
-    _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
 3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction. For `nfp == 1`
 the block-circulant assembly and residue-class loop are skipped in favour of a more efficient
@@ -183,11 +183,11 @@ Only `wv` is produced currently; `I_v` is left zeroed when `compute_Iv=true`
 Extension point: per residue class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns and the
 interior variant `-D + 2I` for the interior columns, then scatter back into the `[2N × 2·num_modes]` arrays.
 """
-@with_pool pool function _compute_vacuum_response_3d!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+@with_pool pool function _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
-    compute_Iv && fill!(vac_data.I_v, 0)
+    fill!(vac_data.I_v, 0) # unconditional so a reused buffer never leaks a stale I_v
 
     compute_Iv && @warn "compute_Iv=true is not supported for 3D vacuum response; I_v left as zeros" maxlog=1
 
@@ -272,58 +272,27 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
 end
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false) -> VacuumResponse
 
-Allocate and return the vacuum response matrix and optional surface-current matrix for the given
-vacuum inputs. Thin allocating wrapper around the in-place [`compute_vacuum_response!`]: it sizes the
-output arrays for the full torus and forwards to the same 2D/3D workers. For performance-critical
-paths that already own preallocated storage (e.g. `ForceFreeStates.VacuumData`), prefer the
-in-place method to avoid extra heap allocations.
-
-# Returns
-
-  - `wv`: complex vacuum response matrix (`num_modes × num_modes`).
-  - `I_v`: Vacuum surface-current matrix (`num_modes × num_modes`); zeros unless `compute_Iv=true`.
-    Stored without the `μ₀`/`4π²` normalization: the physical surface inductance is
-    `μ₀(2π)²·I_v⁻¹` (see `PerturbedEquilibrium.calc_surface_inductance`).
-  - `plasma_pts`, `wall_pts`: surface coordinate arrays.
+Compute the vacuum response for the given inputs. Allocating wrapper around
+[`compute_vacuum_response!`](@ref); pass a preallocated [`VacuumResponse`](@ref) to that method
+instead when reusing storage across calls. Pass `compute_Iv=true` to additionally populate the
+surface-current matrix `I_v` (2D only).
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
-
-    num_points = inputs.mtheta * inputs.nzeta * inputs.nfp # mtheta for 2D
-    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
-
-    vac = (
-        wv=zeros(ComplexF64, num_modes, num_modes),
-        I_v=zeros(ComplexF64, num_modes, num_modes),
-        plasma_pts=zeros(num_points, 3),
-        wall_pts=zeros(num_points, 3)
-    )
+    vac = VacuumResponse(inputs)
     compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv)
-
-    return vac.wv, vac.I_v, vac.plasma_pts, vac.wall_pts
+    return vac
 end
 
 """
-    compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
-In-place variant that computes the vacuum response and directly populates the arrays stored in
-`vac_data`. Dispatches on dimensionality only: 2D (`inputs.nzeta == 1`) routes to
-[`_compute_vacuum_response_2d!`], 3D to [`_compute_vacuum_response_3d!`].
-
-The `vac_data` argument is expected to provide the following writable fields with compatible
-sizes:
-
-  - `wv::AbstractMatrix{ComplexF64}`             – vacuum response matrix
-  - `plasma_pts::AbstractMatrix{Float64}`        – plasma surface coordinates
-  - `wall_pts::AbstractMatrix{Float64}`          – wall surface coordinates
-  - `I_v::AbstractMatrix{ComplexF64}`            – only required when `compute_Iv=true`
-
-This is designed to work with `ForceFreeStates.VacuumData` but does not depend on its concrete
-type (duck-typed on field names only). Note `VacuumData` carries no `I_v` field and never opts
-into `compute_Iv=true`.
+In-place variant that populates the arrays of an existing [`VacuumResponse`](@ref). Dispatches on
+dimensionality only: 2D (`inputs.nzeta == 1`) routes to [`_compute_vacuum_response_2d!`], 3D to
+[`_compute_vacuum_response_3d!`].
 """
-function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
     if inputs.nzeta == 1
         _compute_vacuum_response_2d!(vac_data, inputs, wall_settings; compute_Iv)
     else

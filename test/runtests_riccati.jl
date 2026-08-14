@@ -118,14 +118,14 @@ end
     # (which overwrites intr_ric.sing[s].delta_prime)
     delta_prime_inline = [copy(intr_ric.sing[s].delta_prime) for s in 1:intr_ric.msing]
 
-    vac_ric = FFS.free_run!(odet_ric, ctrl, equil, ffit, intr_ric)
+    vac_ric = FFS.free_run(odet_ric, ctrl, equil, ffit, intr_ric)
     et_ric = real(vac_ric.et[1])
 
     # Standard integration (needed only for energy comparison).  eulerlagrange_integration
     # returns (odet, propagators, chunks, S_at_surface_left); only odet is used here.
     intr_std = make_solovev_intr(inputs, ctrl, equil, ex)
     odet_std, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr_std)
-    vac_std = FFS.free_run!(odet_std, ctrl, equil, ffit, intr_std)
+    vac_std = FFS.free_run(odet_std, ctrl, equil, ffit, intr_std)
     et_std = real(vac_std.et[1])
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ end
         # result must be bit-for-bit identical (not just approximately equal).
         #
         # Note: this call overwrites intr_ric.sing[s].delta_prime; delta_prime_inline was
-        # saved before free_run! above so it holds the original inline values.
+        # saved before free_run above so it holds the original inline values.
         #
         # See benchmarks/benchmark_delta_prime_methods.jl for the extended version.
         FFS.compute_delta_prime_from_ca!(odet_ric, intr_ric, equil)

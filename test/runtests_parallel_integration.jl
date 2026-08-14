@@ -254,7 +254,7 @@ using TOML
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
             return real(vac.et[1]), intr
         end
 
@@ -313,7 +313,7 @@ using TOML
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
             return real(vac.et[1]), intr
         end
 
@@ -428,6 +428,8 @@ using TOML
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            # Derivatives are recomputed on demand; materialize so the stores can be compared.
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, ffit, intr)
             return odet
         end
 
@@ -443,6 +445,8 @@ using TOML
             @test length(odet_a.q_store) == length(odet_b.q_store)
             @test size(odet_a.u_store) == size(odet_b.u_store)
             @test size(odet_a.du_store) == size(odet_b.du_store)
+            @test size(odet_a.xi_s_store) == size(odet_b.xi_s_store)
+            @test odet_a.du_store_populated == odet_b.du_store_populated
             @test maximum(abs.(odet_a.psi_store .- odet_b.psi_store)) == 0.0
             @test maximum(abs.(odet_a.q_store .- odet_b.q_store)) == 0.0
             @test maximum(abs.(odet_a.u_store .- odet_b.u_store)) == 0.0
@@ -476,10 +480,13 @@ using TOML
             odet_std = run_and_capture(ex, false)
             odet_sparse = run_and_capture(ex, true; populate_dense_xi=false)
             @test odet_sparse.step < odet_std.step
-            # du_store entries inside FM chunks are left at the @kwdef
-            # `undef` initial value when populate_dense_xi=false; ensure the
-            # array IS smaller (sparse).
             @test length(odet_sparse.psi_store) < length(odet_std.psi_store)
+            # The sparse solution is in the Riccati basis, so the derivative stores cannot be
+            # materialized from it and stay empty rather than holding unusable values.
+            @test !odet_sparse.u_store_el_basis
+            @test !odet_sparse.du_store_populated
+            @test isempty(odet_sparse.du_store)
+            @test isempty(odet_sparse.xi_s_store)
         end
     end
 
@@ -522,7 +529,7 @@ using TOML
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
         odet, fm_propagators, fm_chunks, fm_S_left =
             GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
             intr, fm_propagators, fm_chunks;
             wv=vac.wv, psio=equil.psio,
