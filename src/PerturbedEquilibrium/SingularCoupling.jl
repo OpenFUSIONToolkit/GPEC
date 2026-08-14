@@ -170,10 +170,8 @@ function compute_singular_coupling_metrics!(
                 continue
             end
 
-            # Surface-current matrix at this surface for this n (once per pair)
-            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
-            _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true)
-            L_surf = calc_surface_inductance(I_v)
+            # Surface inductance at this surface for this n (once per pair)
+            L_surf = calc_surface_inductance(equil, sing_surf.psifac, mtheta, mlow:mhigh, nn, wall_settings)
 
             # Only the (m_res, m_res) diagonal element is needed for singflx
             m_idx = m_res - mlow + 1

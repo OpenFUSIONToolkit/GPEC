@@ -37,10 +37,8 @@ function compute_plasma_response!(
 
     # Surface inductance L from vacuum surface-current matrix at psilim.
     nn = ffs_intr.nlow
-    vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, vac_data.mthvac, 1, ffs_intr.mlow:ffs_intr.mhigh, [nn])
     wall_nowall = Vacuum.WallShapeSettings(; shape="nowall")
-    _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall; compute_Iv=true)
-    surface_inductance = calc_surface_inductance(I_v)
+    surface_inductance = calc_surface_inductance(equil, ffs_intr.psilim, vac_data.mthvac, ffs_intr.mlow:ffs_intr.mhigh, nn, wall_nowall)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).

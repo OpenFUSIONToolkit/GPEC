@@ -34,7 +34,6 @@ plasma surface from ForceFreeStates eigenmode solutions.
 
       + From equilibrium bicubic spline evaluation
       + Needed to convert displacement to magnetic field
-
  3. **Safety factor**: q at boundary
 
       + Used to compute singular factors (m - n*q)
@@ -111,10 +110,12 @@ where ξ_ψ is the radial displacement eigenfunction.
 ## Arguments
 
   - `boundary_data`: Output from extract_boundary_displacements()
+
       + ξ_psi_boundary: Boundary displacement [numpert_total, numpert_total]
       + dPsi_drho: Flux surface spacing at boundary (scalar)
       + q_boundary: Safety factor at boundary (scalar)
       + psi_boundary: Normalized flux at boundary (scalar)
+
   - `intr`: ForceFreeStates internal state with mode arrays (mlow, mhigh, nlow, etc.)
 
 ## Returns
@@ -266,14 +267,44 @@ function calc_plasma_inductance(
 end
 
 """
-    calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
+    calc_surface_inductance(
+        equil::Equilibrium.PlasmaEquilibrium,
+        ψ::Float64,
+        mtheta::Int,
+        m_modes::AbstractUnitRange{Int},
+        nn::Int,
+        wall_settings::Vacuum.WallShapeSettings
+    )::Matrix{ComplexF64}
 
-Surface inductance from the vacuum surface-current matrix, Park 2007 eq. 7: `Φ_x = L·I_v`.
-Columns of `I_v` are driven by unit flux harmonics which are consistent since the eq. 3
-weight `1/(J|∇ψ|)` cancels the Jacobian in the vacuum solver's source density — so `Φ_x = 𝕀`
-and `L = I_v⁻¹`, carrying the `μ₀(2π)²` normalization.
+Surface inductance L at the flux surface ψ, from the vacuum surface-current matrix.
+
+Solves the 2D vacuum problem with `compute_Iv=true` and inverts. The driving flux harmonics are
+unit columns (`Φ = 𝕀` by construction, matching Fortran `gpvacuum_flxsurf`'s unit driving
+harmonics), so `Φ = L·I^v` (Park 2007, eq. 7 and following text) gives `L = μ₀(2π)²·I_v⁻¹`.
+
+## Arguments
+
+  - `equil`: Plasma equilibrium
+  - `ψ`: Normalized poloidal flux of the surface
+  - `mtheta`: Number of vacuum poloidal grid points
+  - `m_modes`: Poloidal mode range mlow:mhigh
+  - `nn`: Toroidal mode number
+  - `wall_settings`: Wall shape for the vacuum solve
+
+## Returns
+
+  - Surface inductance matrix in henries [mpert × mpert]
 """
-function calc_surface_inductance(I_v::Matrix{ComplexF64})::Matrix{ComplexF64}
+function calc_surface_inductance(
+    equil::Equilibrium.PlasmaEquilibrium,
+    ψ::Float64,
+    mtheta::Int,
+    m_modes::AbstractUnitRange{Int},
+    nn::Int,
+    wall_settings::Vacuum.WallShapeSettings
+)::Matrix{ComplexF64}
+    vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, [nn])
+    _, I_v, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true)
     μ₀ = 4π * 1e-7
     return inv(I_v) .* (μ₀ * (2π)^2)
 end
