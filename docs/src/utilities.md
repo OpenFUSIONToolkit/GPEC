@@ -14,6 +14,21 @@ The Utilities module currently provides:
 Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms]
 ```
 
+## Physical Constants
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Utilities.PhysicalConstants]
+```
+
+## Neoclassical Resistivity
+
+Parallel-resistivity closures (Spitzer, Spitzer-Härm, and the Sauter and Redl
+neoclassical models) used to set the Lundquist number in the tearing stack.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Utilities.NeoclassicalResistivity]
+```
+
 ## IMAS Output
 
 ```@docs

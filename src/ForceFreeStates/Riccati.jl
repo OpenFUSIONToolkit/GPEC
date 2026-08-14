@@ -142,8 +142,10 @@ function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range;
     isempty(idx_range) && return Phi
     for i in idx_range
         p = propagators[i]
+        #! format: off
         Phi_i = [p.block_upper_ic[:,:,1]  p.block_lower_ic[:,:,1];
                  p.block_upper_ic[:,:,2]  p.block_lower_ic[:,:,2]]
+        #! format: on
         Phi = Phi_i * Phi
         if condition
             condition_propagator!(Phi, N)
@@ -334,8 +336,21 @@ function compute_delta_prime_matrix!(
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
     end
 
-    intr.delta_prime_matrix = _solve_bvp_and_combine_pest3(
+    # rpec coil-response block: needs the S-axis row layout that `_solve_bvp_edge_coil` assumes
+    # for its edge rows, and a vacuum edge in the assembled matrix (col_edge in junc_rows).
+    if use_S_axis && wv !== nothing
+        intr.delta_coil = _solve_bvp_edge_coil(M, col_edge, msing, N, ipert_all)
+    end
+
+    deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
         M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+
+    # Persist both the PEST3 tearing projection (msing × msing) and the raw 2msing × 2msing
+    # D' matrix (side-major ordering, byte-compatible with Fortran rdcon/gal.f::gal_write_delta).
+    # The raw matrix is consumed by `pest3_decompose` to recover (A', B', Γ', Δ') for the full
+    # det(D' − D(γ)) = 0 eigenvalue problem; see ForceFreeStatesStructs.jl docstring.
+    intr.delta_prime_matrix = deltap
+    intr.delta_prime_raw    = dp_raw_persisted
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -628,6 +643,30 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
+# Coil-response block for the Eq. (37) edge [Glasser-Kolemen 2018 PoP 25, 032501]: impose the rpec edge
+# boundary condition — identity edge plus a unit source per poloidal mode, matching RDCON's
+# `gal_set_boundary` rpec branch — then read the small-solution (+N slot) coefficient at every surface.
+# The BC is the same for every edge mode, so the matrix is factorized once and all N modes are solved
+# together as columns of one right-hand side. Returns delta_coil (2·msing × N), rows = surface side.
+function _solve_bvp_edge_coil(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
+    nMat = size(M, 1)
+    bot = (nMat-2msing-N+1):(nMat-2msing)   # Eq. (38) bottom rows, carrying the W_V block
+    Mc = copy(M)
+    Mc[bot, :] .= 0
+    Mc[bot, col_edge] .= I(N)               # Dirichlet edge: the edge coefficients equal the source
+    B = zeros(ComplexF64, nMat, N)
+    B[bot, :] .= I(N)                       # unit drive, one column per edge poloidal mode
+    X = lu(Mc) \ B
+    delta_coil = zeros(ComplexF64, 2msing, N)
+    for j in 1:msing
+        row_left = _col_left(j, N)[ipert_all[j]+N]
+        row_right = _col_right(j, N)[ipert_all[j]+N]
+        @views delta_coil[2j-1, :] .= X[row_left, :]
+        @views delta_coil[2j, :] .= X[row_right, :]
+    end
+    return delta_coil
+end
+
 # Fallback BVP assembly with FM-based axis BC (used when no Riccati S matrices are available).
 # Uses the conditioned axis propagator Phi_R[1][:,N+1:2N] in place of S-axis matching.
 function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
@@ -727,7 +766,9 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     deltap = ComplexF64.(deltap_ext)
 
     debug && _log_bvp_pest3(dp_raw, deltap, s2, msing, Tc)
-    return deltap
+    # Return the PEST3-combined matrix AND the raw 2msing×2msing D' matrix (ComplexF64
+    # for compatibility with downstream pest3_decompose / HDF5 writer).
+    return deltap, ComplexF64.(dp_raw)
 end
 
 # Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
@@ -837,6 +878,69 @@ function _log_bvp_pest3(dp_raw, deltap, s2, msing, Tc)
 end
 
 """
+    pest3_decompose(dp_raw::AbstractMatrix) -> (A', B', Γ', Δ')
+
+Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
+ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
+blocks. Given rows and columns paired by surface (odd index = left, even
+index = right), the Fortran RDCON parity combination is
+
+```
+A'(i,j) = RR + RL + LR + LL    (even-i, even-j)   — interchange↔interchange
+B'(i,j) = RR − RL + LR − LL    (even-i, odd-j)    — interchange↔tearing
+Γ'(i,j) = RR + RL − LR − LL    (odd-i,  even-j)   — tearing↔interchange
+Δ'(i,j) = RR − RL − LR + LL    (odd-i,  odd-j)    — tearing↔tearing
+```
+
+where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
+`LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
+
+Matches Fortran exactly — no ½ prefactor (Pletzer–Dewar multiply by ½, but
+the Fortran RDCON code leaves it commented out and our Julia port follows
+Fortran to keep the benchmark bit-identical; the prefactor cancels in
+`det(D' − D(γ)) = 0`).
+
+The Δ' block returned here equals `intr.delta_prime_matrix` (the m×m PEST3
+tearing projection computed inside `compute_delta_prime_matrix!`).
+
+# Arguments
+
+  - `dp_raw` — 2m×2m complex matrix (typically `intr.delta_prime_raw`).
+
+# Returns
+
+Named tuple `(A=A', B=B', Γ=Gp, Δ=Dp)` of four m×m complex matrices. In the
+full `det(D' − D(γ)) = 0` eigenvalue problem, these fill the 2m×2m outer
+matrix as `D' = [[A' B'] [Γ' Δ']]` with the interchange channel (Glasser
+stabilization) in the upper-left block and the tearing channel in the
+lower-right.
+"""
+function pest3_decompose(dp_raw::AbstractMatrix)
+    s2 = size(dp_raw, 1)
+    size(dp_raw, 2) == s2 ||
+        throw(ArgumentError("pest3_decompose: dp_raw must be square, got $(size(dp_raw))"))
+    iseven(s2) ||
+        throw(ArgumentError("pest3_decompose: dp_raw side must be 2m for integer m, got $s2"))
+    m = s2 ÷ 2
+    Tc = eltype(dp_raw)
+    Ap = zeros(Tc, m, m)
+    Bp = zeros(Tc, m, m)
+    Gp = zeros(Tc, m, m)
+    Dp = zeros(Tc, m, m)
+    for i in 1:m, j in 1:m
+        LL = dp_raw[2i-1, 2j-1]
+        LR = dp_raw[2i-1, 2j]
+        RL = dp_raw[2i,   2j-1]
+        RR = dp_raw[2i,   2j]
+        Ap[i, j] = RR + RL + LR + LL
+        Bp[i, j] = RR - RL + LR - LL
+        Gp[i, j] = RR + RL - LR - LL
+        Dp[i, j] = RR - RL - LR + LL
+    end
+    return (A=Ap, B=Bp, Γ=Gp, Δ=Dp)
+end
+
+"""
     riccati_der!(du, u, params, psieval)
 
 Evaluate the explicit dual Riccati ODE right-hand side:
@@ -905,10 +1009,11 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     # dS = w†·v - S·Ḡ·S  [Glasser 2018 eq. 19, dual Riccati]
     mul!(dS, adjoint(w), v)   # dS = w†·v
 
-    # Store du1/dψ = Q·v for ud diagnostic before v is reused
+    # Store du1/dψ = Q·v as a diagnostic before v is reused
     # Q·v = diag(singfac_vec)·v = Ξ'_Ψ (displacement gradient, with U₂ = I)
-    @. odet.ud[:, :, 1] = singfac_vec * v
-    @view(odet.ud[:, :, 2]) .= 0
+    @. odet.du[:, :, 1] = singfac_vec * v
+    @view(odet.du[:, :, 2]) .= 0
+    odet.xi_s .= 0
 
     # Subtract S·Ḡ·S (reuse v and tmp to avoid extra allocation)
     mul!(tmp, gmat, S)        # tmp = Ḡ·S
@@ -956,14 +1061,7 @@ function riccati_integrator_callback!(integrator)
     should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
 
     if should_save
-        if odet.step >= size(odet.u_store, 4)
-            resize_storage!(odet)
-        end
-        odet.psi_store[odet.step] = integrator.t
-        @views odet.u_store[:, :, :, odet.step] .= integrator.u
-        odet.q_store[odet.step] = odet.q
-        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-        odet.step += 1
+        store_ode_data!(odet, integrator.t, integrator.u)
     end
 end
 
@@ -1197,29 +1295,25 @@ end
 # Store (U₁_new, U₂_new) into u_store before renormalization so that
 # evaluate_stability_criterion! can recover S_new = U₁_new / U₂_new via compute_smallest_eigenvalue.
 function _store_crossing_step!(odet::OdeState)
-    odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
-    odet.step += 1
+    store_ode_data!(odet, odet.psifac, odet.u)
 end
 
 """
     riccati_eulerlagrange_integration(ctrl, equil, ffit, intr) -> OdeState
 
-Main driver for integrating the dual Riccati ODE across the plasma.
-Functionally identical to `eulerlagrange_integration` except:
+Integrate the dual Riccati ODE S = U₁·U₂⁻¹ across the plasma (Glasser 2018 Phys. Plasmas 25,
+032507). Reduces stiffness relative to [`serial_eulerlagrange_integration`](@ref), which it
+otherwise mirrors, differing in three places:
 
-1. Uses `riccati_integrate_chunk!`: drives `sing_der!` with `riccati_integrator_callback!`
-   which applies `renormalize_riccati_inplace!` (instead of Gaussian reduction) when
-   column norms exceed ucrit
-2. Uses `riccati_cross_ideal_singular_surf!` instead of `cross_ideal_singular_surf!`:
-   skips Gaussian reduction (avoids near-zero pivot issues when S is small near axis)
-   and renormalizes to (S_new, I) in one step
-3. Skips `transform_u!` — S is already the true solution, no Gaussian-reduction undo needed
+1. `riccati_integrate_chunk!` drives `sing_der!` with `riccati_integrator_callback!`, which
+   applies `renormalize_riccati_inplace!` rather than Gaussian reduction when column norms
+   exceed `ctrl.ucrit`
+2. `riccati_cross_ideal_singular_surf!` replaces `cross_ideal_singular_surf!`: it skips
+   Gaussian reduction (avoiding near-zero pivots where S is small near the axis) and
+   renormalizes to (S_new, I) in one step
+3. `transform_u!` is skipped — S is already the true solution, so there is no reduction to undo
 
-Enable via `use_riccati = true` in `[ForceFreeStates]` section of gpec.toml, or by
-setting `ctrl.use_riccati = true` programmatically.
+Enable via `use_riccati = true` in the `[ForceFreeStates]` section of gpec.toml.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -1497,8 +1591,10 @@ Glasser-Kolemen (2018) Phys. Plasmas 25, 032501 Eq. 33.
 function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
     N = size(odet.u, 1)
     # Assemble 2N×2N backward FM Φ_bwd
-    Φ = [prop.block_upper_ic[:,:,1] prop.block_lower_ic[:,:,1];
-         prop.block_upper_ic[:,:,2] prop.block_lower_ic[:,:,2]]
+    #! format: off
+    Φ = [prop.block_upper_ic[:,:,1]  prop.block_lower_ic[:,:,1];
+         prop.block_upper_ic[:,:,2]  prop.block_lower_ic[:,:,2]]
+    #! format: on
     # Φ_bwd maps state at psi_end → psi_start (well-conditioned).
     # We want Φ_fwd = Φ_bwd⁻¹ to advance state from psi_start → psi_end.
     # Solving Φ_bwd · x = [U₁_old; U₂_old] gives x = Φ_bwd⁻¹ · [U₁_old; U₂_old].
@@ -1509,12 +1605,14 @@ function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
 end
 
 """
-    parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) -> OdeState
+    parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
 
-Parallel fundamental matrix (propagator) driver for the EL integration.
+Parallel fundamental matrix (propagator) driver for the EL integration. The trailing three
+return values feed the Δ' BVP in `compute_delta_prime_matrix!`; this is the only branch that
+produces them.
 
-Functionally equivalent to `eulerlagrange_integration`, integrating all bulk chunks
-concurrently using `Threads.@threads`, then re-integrating the outer plasma serially:
+Equivalent to [`serial_eulerlagrange_integration`](@ref), but integrates all bulk chunks
+concurrently using `Threads.@threads`, then re-integrates the outer plasma serially:
 
 1. **Chunk generation**: calls `chunk_el_integration_bounds`, then `balance_integration_chunks`
    to sub-divide chunks for load-balanced parallel execution.
@@ -1530,22 +1628,18 @@ concurrently using `Threads.@threads`, then re-integrating the outer plasma seri
    without renormalization); Riccati integration keeps matrices bounded and provides dense
    checkpoints for `findmax_dW_edge!`.
 
-Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml, or by setting
-`ctrl.use_parallel = true` programmatically. Requires `singfac_min != 0`.
+Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml. Requires `singfac_min != 0`.
 
-**Key differences from standard integration:**
+**Key differences from serial integration:**
 - No Gaussian reduction in the propagator BVP phase (crossings use the
   Riccati-style algorithm, parallel `odet.ifix` stays 0)
 - `transform_u!` is called on the parallel odet but is a no-op (ifix=0)
 - Outer plasma uses serial Riccati integration for numerical stability
-- A serial Euler-Lagrange **dense pass** is appended at the end and
-  replaces the parallel `odet` so that `u_store` / `ud_store` are dense and
-  in axis basis — the only convention the PerturbedEquilibrium downstream
-  code consumes correctly.  Δ' (`singular/delta_prime_matrix`) is computed
-  from the parallel BVP and is bit-identical with vs. without this pass.
-  Toggle off with `ctrl.populate_dense_xi = false` if only Δ' / vacuum /
-  energies are needed and the extra serial-EL cost is unwanted (HDF5
-  `integration/xi_*` will then be sparse / zero).
+- When `ctrl.populate_dense_xi` is set, a serial EL dense pass is appended and replaces the
+  parallel `odet`, so `u_store` / `du_store` / `xi_s_store` come back in the axis basis that
+  PerturbedEquilibrium requires. Δ' is computed from the parallel BVP either way and is
+  bit-identical between the two. See the `populate_dense_xi` entry in the
+  [`ForceFreeStatesControl`](@ref) docstring for the cost trade-off.
 
 **Bidirectional integration for large-N accuracy:**
 The crossing chunk (nearest to each rational surface singL[j]) is integrated *backward*
@@ -1641,7 +1735,7 @@ function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
 end
 
 # Integrate each chunk's FM propagator from identity IC. Serial when bvp_threads == 1
-# (bit-deterministic; ~20% slower than 2-thread on DIII-D 147131 but immune to thread-
+# (bit-deterministic; ~20% slower than 2-thread but immune to thread-
 # schedule sensitivity). Parallel uses :static scheduler so Threads.threadid() returns a
 # stable index into odet_proxies. If a parallel run ever diverges on a delicate equilibrium,
 # drop to parallel_threads = 1 rather than use_parallel = false — the latter is silently wrong.
@@ -1700,7 +1794,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
             last_crossing_step = odet.step - 1
         else
-            # Save non-crossing end-of-chunk state. ud_store stays zero here — when
+            # Save non-crossing end-of-chunk state. du_store is not meaningful here — when
             # ctrl.populate_dense_xi=true the entire odet is replaced by a serial-EL pass
             # at the end of parallel_eulerlagrange_integration.
             if odet.step >= size(odet.u_store, 4)
@@ -1811,7 +1905,7 @@ end
     _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr) -> fresh_odet
 
 Replace the propagator-BVP's `odet` with a fresh serial-EL `odet` that has
-dense `u_store` / `ud_store` populated in axis basis (the PerturbedEquilibrium
+dense `u_store` / `du_store` populated in axis basis (the PerturbedEquilibrium
 convention).  The caller's `odet` is fully replaced by the fresh one because
 `free_run!` downstream uses `odet.u[:,:,1,end]` to normalize `odet.u_store`,
 so both must be in the same basis.  The parallel BVP results that survive
@@ -1831,7 +1925,7 @@ and does NOT populate `delta_prime`; we keep the parallel pass's values
 which `compute_delta_prime_matrix!` uses).
 
 Called from `parallel_eulerlagrange_integration` when
-`ctrl.populate_dense_xi = true` (default).  Approximate cost: one serial
+`ctrl.populate_dense_xi = true`.  Approximate cost: one serial
 EL integration on top of the parallel BVP phase.  Required to make
 `use_parallel = true` produce DCON eigenfunctions usable by the
 PerturbedEquilibrium downstream pipeline.
@@ -1859,27 +1953,12 @@ function _populate_dense_xi_via_serial_el!(
         ) for s in 1:msing],
     )
 
-    # Temporarily switch dispatch flags so `eulerlagrange_integration`
-    # follows the serial EL branch (axis-basis u_store) for this call.
-    saved_use_parallel = ctrl.use_parallel
-    saved_use_riccati  = ctrl.use_riccati
-    saved_verbose      = ctrl.verbose
-    ctrl.use_parallel = false
-    ctrl.use_riccati  = false
-    ctrl.verbose      = false  # suppress duplicate per-chunk logging
-
-    if saved_verbose
+    if ctrl.verbose
         @info "   S → ξ: serial EL dense pass for HDF5 integration/xi_*"
     end
 
-    local fresh_odet::OdeState
-    try
-        fresh_odet, _, _, _ = eulerlagrange_integration(ctrl, equil, ffit, intr)
-    finally
-        ctrl.use_parallel = saved_use_parallel
-        ctrl.use_riccati  = saved_use_riccati
-        ctrl.verbose      = saved_verbose
-    end
+    # Run the serial branch but suppress logging
+    fresh_odet, _, _, _ = serial_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=false)
 
     # Restore BVP-result fields on `intr`.
     intr.psilim = saved.psilim

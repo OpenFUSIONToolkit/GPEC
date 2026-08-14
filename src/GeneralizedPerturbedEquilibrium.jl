@@ -24,6 +24,8 @@ include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
 
+# InnerLayer holds the pure inner-region solvers and must load before
+# ForceFreeStates, which calls them for the matched-Δ′ Galerkin solve.
 include("InnerLayer/InnerLayer.jl")
 import .InnerLayer as InnerLayer
 export InnerLayer
@@ -31,6 +33,15 @@ export InnerLayer
 include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates
 export ForceFreeStates
+
+include("Tearing/Tearing.jl")
+import .Tearing as Tearing
+export Tearing
+# Backward-compat top-level aliases so callers can still reach these
+# directly; the canonical nested path is `Tearing.{Dispersion,Runner}`.
+import .Tearing.Dispersion as Dispersion
+import .Tearing.Runner as Runner
+export Dispersion, Runner
 
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
@@ -52,8 +63,8 @@ include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!
-using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
+using .ForceFreeStates: compute_local_stability, compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
@@ -167,39 +178,32 @@ function main_from_inputs(
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
-
     # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
-    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified").
-    # Validated before equilibrium formation: the two-pass grid refinement needs the
-    # n range to pin rational-surface knots.
-    if ctrl.nn_low == 0 && ctrl.nn_high == 0
+    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
+    intr.nlow, intr.nhigh = ctrl.nn_low, ctrl.nn_high
+    if intr.nlow == 0 && intr.nhigh == 0
         error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
-    elseif ctrl.nn_low == 0
-        ctrl.nn_low = ctrl.nn_high
-    elseif ctrl.nn_high == 0
-        ctrl.nn_high = ctrl.nn_low
+    elseif intr.nlow == 0
+        intr.nlow = intr.nhigh
+    elseif intr.nhigh == 0
+        intr.nhigh = intr.nlow
     end
-    if ctrl.nn_low > ctrl.nn_high
-        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
+    if intr.nlow > intr.nhigh
+        error("nn_low=$(intr.nlow) cannot be greater than nn_high=$(intr.nhigh)")
     end
-    # checks for negative n
-    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
-    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
-    if ctrl.nn_high < 1
-        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
+    if intr.nhigh < 1
+        error("All requested toroidal modes (n=$(intr.nlow):$(intr.nhigh)) are below 1; " *
               "n < 1 modes are not supported")
     end
-    if ctrl.nn_low < 1
-        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
-        ctrl.nn_low = 1
+    if intr.nlow < 1
+        @warn "Clamping nn_low from $(intr.nlow) to 1; n < 1 modes are not supported"
+        intr.nlow = 1
     end
-    intr.nlow = ctrl.nn_low
-    intr.nhigh = ctrl.nn_high
     intr.npert = intr.nhigh - intr.nlow + 1
     nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
@@ -235,9 +239,13 @@ function main_from_inputs(
     # kinetic profiles), pin knots on rational surfaces, and re-form on the refined grid
     # from the in-memory input — no file re-read.
     if Equilibrium.wants_two_pass(eq_config)
-        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
+        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+        # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
+        # so the rational-surface brackets clear a zone large enough for every mode.
+        n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
         psi_nodes = Equilibrium.refined_psi_grid(equil;
-            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory)
+            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+            singfac_min=ctrl.singfac_min, n_min=n_min)
         rerun_input = if additional_input !== nothing
             # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
             # path re-runs read_imas, which must resolve the same psihigh both passes;
@@ -251,7 +259,7 @@ function main_from_inputs(
             nothing  # fall back to re-reading the input file
         end
         equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
-        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory)
+        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
         if implied > 1.5 * (length(psi_nodes) - 1)
             @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
                   "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
@@ -310,10 +318,6 @@ function main_from_inputs(
     @info "\n  Force-Free States\n$_SECTION"
     ffs_start = time()
 
-    # Set up variables
-    # TODO: parallel threads logic
-    ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
-
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
 
@@ -326,18 +330,15 @@ function main_from_inputs(
         # equil = set_up_equilibrium(equil.config)
     end
 
-    # Compute local stability (if desired). This holds `D_I` from the
-    # ballooning coefficient system and the local ballooning result.
-    profiles_xs = equil.profiles.xs
-    locstab_fs = zeros(Float64, length(profiles_xs), 5)
+    # Compute local stability (if desired). `locstab` holds `D_I` from the ballooning
+    # coefficient system and the local ballooning result; `nothing` when not computed.
+    locstab = nothing
     ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     if ctrl.local_stability_flag
-        compute_ballooning_stability!(ctrl, locstab_fs, equil)
+        locstab = compute_local_stability(ctrl, equil)
         # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
         ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
     end
-    # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
@@ -366,20 +367,30 @@ function main_from_inputs(
         sing_min!(intr, ctrl, equil)
     end
 
+    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H,
+    # K, M) for each surviving singular surface. Needed by the Julia GGJ
+    # inner-layer analysis; kinetic timescales (τ_A, τ_R) are layered on
+    # top by `build_ggj_inputs` using the same kinetic profiles as SLAYER.
+    if intr.msing > 0
+        ForceFreeStates.resist_eval_all!(intr, equil)
+    end
+
     # Determine poloidal mode numbers
+    # TODO: delta_mhigh is doubled for consistency with Fortran - why is this present in the Fortran?
+    delta_mhigh = 2 * ctrl.delta_mhigh
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
     if ctrl.sing_start == 0
         intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
         for ising in Int(ctrl.sing_start):intr.msing
             intr.mmin = min(intr.mmin, sing[ising].m)
         end
         intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
@@ -485,6 +496,7 @@ function main_from_inputs(
             inputs,
             forcing_modes_snapshot,
             gal_data;
+            locstab=locstab,
             ballooning_boundary=ballooning_boundary
         )
         @info "Results written to $(ctrl.HDF5_filename)"
@@ -492,10 +504,47 @@ function main_from_inputs(
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
-    # Early exit if user only requested force-free states
+    # SLAYER tearing-mode analysis stage. Needs only equil + intr, so it runs in
+    # both the force_termination=true path and the full pipeline. `pe_file` is the
+    # HDF5 file PE wrote (to append into), or `nothing` if PE did not run.
+    function _run_slayer_stage(pe_file::Union{String,Nothing})
+        ("SLAYER" in keys(inputs)) || return nothing
+        # SLAYER is a post-processing diagnostic. A failure here must not
+        # discard the equilibrium / stability / PE results already computed,
+        # so the whole stage is guarded: on error we log loudly and return
+        # `nothing` for the `slayer` field rather than propagating.
+        try
+            slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+            slayer_ctrl.enabled || return nothing
+            @info "\n  SLAYER\n$_SECTION"
+            slayer_start = time()
+            result = Runner.run_slayer(equil, intr, slayer_ctrl;
+                dir_path=intr.dir_path)
+            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+            h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
+            h5_path = joinpath(intr.dir_path, h5_filename)
+            # Append the slayer/ group; create the file if no prior stage wrote
+            # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+            HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+                Runner.write_slayer_hdf5!(f, result)
+            end
+            @info "SLAYER results written to $h5_filename"
+            return result
+        catch err
+            @error "SLAYER stage failed; continuing without tearing results. " *
+                   "Equilibrium / stability / PE outputs are unaffected." exception =
+                (err, catch_backtrace())
+            return nothing
+        end
+    end
+
+    # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
+        slayer_result = _run_slayer_stage(nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return
+        return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+            vac_data=ctrl.vac_flag ? vac_data : nothing,
+            slayer=slayer_result)
     end
 
     # ----------------------------------------------------------------
@@ -534,6 +583,10 @@ function main_from_inputs(
         if ctrl.gal_flag && ctrl.gal_match_flag && gal_data !== nothing && gal_data.match !== nothing
             @info "PerturbedEquilibrium: using the RPEC-matched gal solution"
             pe_odet = gal_matched_odestate(gal_data, ffit, intr)
+            pe_intr.odet_from_gal = true
+            pe_intr.inner_bpen = gal_data.match.bpen
+        else
+            pe_intr.inner_bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
         end
 
         # Reuse the forcing modes loaded at snapshot time (or injected by
@@ -605,13 +658,27 @@ function main_from_inputs(
     end
 
     # ----------------------------------------------------------------
+    # SLAYER tearing-mode analysis (after PE so it appends to the PE output
+    # file; falls back to the ForceFreeStates file when PE did not run).
+    # ----------------------------------------------------------------
+    pe_file = if "PerturbedEquilibrium" in keys(inputs)
+        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
+        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
+    else
+        ctrl.HDF5_filename
+    end
+    slayer_result = _run_slayer_stage(pe_file)
+
+    # ----------------------------------------------------------------
     # Done
     # ----------------------------------------------------------------
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
+    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+        vac_data=ctrl.vac_flag ? vac_data : nothing,
+        slayer=slayer_result)
 
 end
 
@@ -639,6 +706,7 @@ function write_outputs_to_HDF5(
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     gal_data::Union{GalerkinResult,Nothing}=nothing;
+    locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
     ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
@@ -713,17 +781,17 @@ function write_outputs_to_HDF5(
         # locstab/di = Mercier D_I (det(d0bar)); locstab/dr = resistive interchange D_R;
         # locstab/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
         # tearing Δ' under perturbed_equilibrium/singular_coupling/delta_prime).
-        if ctrl.local_stability_flag
-            locstab_xs = intr.locstab.cache.x
-            out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
-            out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
+        if locstab !== nothing
+            locstab_xs = locstab.cache.x
+            out_h5["locstab/di"] = locstab.y[:, 1] ./ locstab_xs
+            out_h5["locstab/dr"] = locstab.y[:, 2] ./ locstab_xs
         else
             out_h5["locstab/di"] = Float64[]
             out_h5["locstab/dr"] = Float64[]
         end
-        out_h5["singular/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
-                                 [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["locstab/ballooning_Delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
+        out_h5["singular/di0"] = (locstab !== nothing && !isempty(intr.sing)) ?
+                                 [locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
+        out_h5["locstab/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
 
         # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
         out_h5["locstab/psi"] = ballooning_boundary.psi
@@ -737,8 +805,8 @@ function write_outputs_to_HDF5(
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
         out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
-        out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
+        out_h5["integration/dxi_psi"] = odet.du_store[:, :, 1, :]
+        out_h5["integration/xi_s"] = odet.xi_s_store
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim).
@@ -775,6 +843,26 @@ function write_outputs_to_HDF5(
             end
             out_h5["singular/m"] = m_matrix
             out_h5["singular/n"] = n_matrix
+
+            # Glasser-Greene-Johnson geometric coefficients + surface averages
+            # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
+            # Both kinetic-free (E, F, G, H, K, M) and geometry-only
+            # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
+            # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
+            # can reconstruct τ_A / τ_R from any kinetic-profile source.
+            if all(s -> s.restype !== nothing, intr.sing)
+                out_h5["singular/E"] = [s.restype.E for s in intr.sing]
+                out_h5["singular/F"] = [s.restype.F for s in intr.sing]
+                out_h5["singular/G"] = [s.restype.G for s in intr.sing]
+                out_h5["singular/H"] = [s.restype.H for s in intr.sing]
+                out_h5["singular/K"] = [s.restype.K for s in intr.sing]
+                out_h5["singular/M"] = [s.restype.M for s in intr.sing]
+                out_h5["singular/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in intr.sing]
+                out_h5["singular/avg_bsq"] = [s.restype.avg_bsq for s in intr.sing]
+                out_h5["singular/p_local"] = [s.restype.p_local for s in intr.sing]
+                out_h5["singular/p1_local"] = [s.restype.p1_local for s in intr.sing]
+                out_h5["singular/v1_local"] = [s.restype.v1_local for s in intr.sing]
+            end
         end
 
         # Per-surface ca-based Δ' (`sing.delta_prime`) is a stub; only the BVP matrix is emitted (see SingType.delta_prime docstring).
@@ -783,6 +871,23 @@ function write_outputs_to_HDF5(
         # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
         if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
+        end
+
+        # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
+        # the galerkin/delta_coil layout so H5Web heatmaps share axes (x = edge mode, y = surface-side).
+        # Internal intr.delta_coil stays (2msing × numpert_total); transpose only at write.
+        if intr.msing > 0 && !isempty(intr.delta_coil)
+            dc = permutedims(intr.delta_coil)
+            out_h5["singular/delta_coil"] = dc
+        end
+
+        # Write raw 2msing×2msing outer-region D' matrix in side-major ordering
+        # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
+        # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
+        # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
+        # pest3_decompose to recover (A', B', Γ', Δ').
+        if intr.msing > 0 && !isempty(intr.delta_prime_raw)
+            out_h5["singular/delta_prime_raw"] = intr.delta_prime_raw
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan

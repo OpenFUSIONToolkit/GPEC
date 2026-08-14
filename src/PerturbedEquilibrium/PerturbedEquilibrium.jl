@@ -107,8 +107,12 @@ function compute_perturbed_equilibrium(
                 modes_n = filter(m -> m.n == n, intr.forcing_modes)
                 isempty(modes_n) && continue
                 m_vals = [m.m for m in modes_n]
+                # Same control surface as the coil branch above: psilim, the integration
+                # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
+                # the normalization was taken on the equilibrium-spline limit, which differs
+                # whenever dmlim/qhigh/psiedge truncation moves psilim inward.
                 convert_forcing_normalization!(modes_n, norm_tag, equil, n,
-                    minimum(m_vals), maximum(m_vals))
+                    minimum(m_vals), maximum(m_vals); psi=ffs_intr.psilim)
             end
         end
     end
@@ -127,7 +131,7 @@ function compute_perturbed_equilibrium(
         if vac_data === nothing
             @warn "Vacuum data not available. Skipping singular coupling calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
-            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
+            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, ffit)
         end
     end
 

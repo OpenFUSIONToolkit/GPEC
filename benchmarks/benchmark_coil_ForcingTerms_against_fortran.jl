@@ -13,7 +13,8 @@ runs the Julia Biot-Savart pipeline, and produces a 4-panel diagnostic figure:
 Usage:
     julia --project=. benchmarks/check_coil_pipeline.jl [/path/to/fortran/run]
 
-Default run directory: ~/Code/gpec/docs/examples/DIIID_ideal_example
+The Fortran run directory (a DIII-D ideal example run) is taken from the command
+line, or from the GPEC_FORTRAN_DIR environment variable if no argument is given.
 """
 
 using GeneralizedPerturbedEquilibrium
@@ -149,7 +150,8 @@ end
 # Main
 # ---------------------------------------------------------------------------
 
-run_dir = length(ARGS) > 0 ? ARGS[1] : expanduser("~/Code/gpec/docs/examples/DIIID_ideal_example")
+run_dir = length(ARGS) > 0 ? ARGS[1] : get(ENV, "GPEC_FORTRAN_DIR", "")
+isempty(run_dir) && error("No Fortran run directory given: pass it as the first argument or set GPEC_FORTRAN_DIR")
 isdir(run_dir) || error("Run directory not found: $run_dir")
 mkpath(OUTPUT_DIR)
 

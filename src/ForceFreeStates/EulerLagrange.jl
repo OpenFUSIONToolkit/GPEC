@@ -137,25 +137,16 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
 end
 
 """
-    eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
 
-Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
-Formerly `ode_run`. Has the same functionality as `ode_run` in the Fortran code, with the addition of
-a single dump to the `euler.h5` file at the end of integration instead of multiple dumps
-to `euler.bin` throughout the integration. We have made the control logic more clear
-by pre-computing all integration chunks upfront and using a for loop to iterate through them,
-eliminating the while-loop logic and making integration bounds explicit at each step.
-We now perform significant post-processing after integration including finding the peak dW
-in the edge region and evaluating the stability criterion over the entire integration,
-which were previously done during integration in the Fortran code.
+Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
+surface on the way (Fortran `ode_run`). Dispatches on `ctrl` to the parallel propagator BVP
+(`use_parallel`), the dual Riccati formulation (`use_riccati`), or
+[`serial_eulerlagrange_integration`](@ref).
 
-### TODOs
-
-restype functionality if we decide to do this
-
-### Returns
-
-An OdeState struct containing the final state of the ODE solver after integration is complete.
+Only the parallel branch populates `propagators` / `chunks` / `S_left`, which
+`compute_delta_prime_matrix!` consumes for the Δ' BVP; the other two return `nothing` for all
+three.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
@@ -166,9 +157,24 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     elseif ctrl.use_riccati
         return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
     end
+    return serial_eulerlagrange_integration(ctrl, equil, ffit, intr)
+end
+
+"""
+    serial_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
+
+Serial shooting branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk,
+applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.ucrit` and undoing it
+via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
+directly to force this branch regardless of `ctrl.use_parallel` / `ctrl.use_riccati`; `verbose`
+overrides `ctrl.verbose` for progress logging.
+"""
+function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal;
+    verbose::Bool=ctrl.verbose)
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+    odet.du_store_populated = true
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
@@ -182,7 +188,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
 
     # Print initial integration condition
-    if ctrl.verbose
+    if verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
@@ -190,7 +196,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     for chunk in chunks
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
-        if ctrl.verbose
+        if verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
@@ -229,20 +235,20 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
             intr.psilim = odet.psi_store[end]
             intr.qlim = odet.q_store[end]
             odet.u .= odet.u_store[:, :, :, end]
-            if ctrl.verbose
+            if verbose
                 @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
             end
         else
             odet.psifac = saved_psifac
             odet.u .= saved_u
-            if ctrl.verbose
+            if verbose
                 @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.3f" odet.psi_store[peak_step])),  q = $((@sprintf "%.3f" odet.q_store[peak_step])); integration domain unchanged"
             end
         end
     end
 
     # Evaluate stability criterion (critical determinant) of saved solutions
-    if ctrl.verbose
+    if verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
@@ -310,8 +316,10 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
         m22 =  sf * kd * fi
 
         # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
+        #! format: off
         F_eig = eigen([psi_low*m11  psi_low*m12;
                        psi_low*m21  psi_low*m22])
+        #! format: on
         eig_vals = F_eig.values
         eig_vecs = F_eig.vectors
 
@@ -635,17 +643,10 @@ function cross_ideal_singular_surf!(
     # so the result is in a different convention. The canonical Δ' is the STRIDE BVP matrix
     # (compute_delta_prime_matrix!) populated by the parallel FM path.
 
-    # Recompute ud from the final post-crossing u so ud_store is consistent with u_store.
-    # The earlier sing_der! calls computed du from the pre-trapezoidal, pre-asymptotic u,
-    # leaving odet.ud stale after the u modifications above.
     sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store values after crossing step and advance
-    odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
-    odet.step += 1
+    store_ode_data!(odet, odet.psifac, odet.u)
 end
 
 """
@@ -685,18 +686,11 @@ function cross_kinetic_singular_surf!(
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
 
-    # Recompute ud for storage consistency
+    # re-evaluate at the final post-crossing u so the stored derivatives match u_store
     sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store crossing step
-    if odet.step >= size(odet.u_store, 4)
-        resize_storage!(odet)
-    end
-    odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
-    odet.step += 1
+    store_ode_data!(odet, odet.psifac, odet.u)
 end
 
 
@@ -757,12 +751,6 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
-        # If Gaussian reduction modified u, recompute ud to keep it consistent.
-        # Matches Fortran ode_output.f which calls sing_der before writing euler.bin.
-        if odet.new
-            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
-        end
-
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
@@ -772,14 +760,8 @@ function integrate_el_region!(
         in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
 
         if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
-            if odet.step >= size(odet.u_store, 4)
-                resize_storage!(odet)
-            end
-            odet.psi_store[odet.step] = integrator.t
-            @views odet.u_store[:, :, :, odet.step] .= integrator.u
-            odet.q_store[odet.step] = odet.q
-            @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-            odet.step += 1
+            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+            store_ode_data!(odet, integrator.t, integrator.u)
         end
     end
 
@@ -791,14 +773,8 @@ function integrate_el_region!(
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
     # regardless of where the last accepted step landed relative to the near_end band.
     if odet.step == 1 || odet.psi_store[odet.step-1] != sol.t[end]
-        if odet.step >= size(odet.u_store, 4)
-            resize_storage!(odet)
-        end
-        odet.psi_store[odet.step] = sol.t[end]
-        @views odet.u_store[:, :, :, odet.step] .= sol.u[end]
-        odet.q_store[odet.step] = odet.q
-        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-        odet.step += 1
+        sing_der!(du_buffer, sol.u[end], (ctrl, equil, ffit, intr, odet, chunk), sol.t[end])
+        store_ode_data!(odet, sol.t[end], sol.u[end])
     end
 
     odet.u .= sol.u[end]
@@ -1031,10 +1007,12 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             odet.u_store[:, :, 1, istep] .= gauss_buffer
             mul!(gauss_buffer, odet.u_store[:, :, 2, istep], transforms[:, :, ifix])
             odet.u_store[:, :, 2, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.ud_store[:, :, 1, istep], transforms[:, :, ifix])
-            odet.ud_store[:, :, 1, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.ud_store[:, :, 2, istep], transforms[:, :, ifix])
-            odet.ud_store[:, :, 2, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.du_store[:, :, 1, istep], transforms[:, :, ifix])
+            odet.du_store[:, :, 1, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.du_store[:, :, 2, istep], transforms[:, :, ifix])
+            odet.du_store[:, :, 2, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.xi_s_store[:, :, istep], transforms[:, :, ifix])
+            odet.xi_s_store[:, :, istep] .= gauss_buffer
         end
         jfix = kfix + 1
     end

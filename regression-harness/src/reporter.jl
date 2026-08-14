@@ -14,7 +14,7 @@ function _short_err(msg)::String
     lines = filter(!isempty, strip.(split(s, '\n')))
     isempty(lines) && return "(empty)"
     pick = something(findfirst(l -> startswith(l, "ERROR:") || occursin("Error", l), lines),
-                     length(lines))
+        length(lines))
     line = lines[pick]
     return length(line) > 200 ? line[1:200] * "..." : line
 end
@@ -36,7 +36,7 @@ function format_value(q::NamedTuple)::String
     elseif q.value_type == "json_array"
         t = q.value_text
         t === nothing && return "N/A"
-        arr = JSON.parse(t)
+        arr = JSON.parse(t; allownan=true)
         return "[$(length(arr)) elem]"
     elseif q.value_type == "checksum"
         t = q.value_text
@@ -45,6 +45,31 @@ function format_value(q::NamedTuple)::String
     else
         return "?"
     end
+end
+
+"""
+Print a banner when two compared runs did not share an environment.
+
+Source code is only the sole variable when Julia, host, package set and thread counts all match.
+Anything else here means part of the reported difference may be the environment, not the code.
+"""
+function _warn_env_difference(fp1::EnvFingerprint, fp2::EnvFingerprint)
+    (fp1 === UNKNOWN_ENV || fp2 === UNKNOWN_ENV) && return
+    (isempty(fp1.julia_version) || isempty(fp2.julia_version)) && return
+    differences = String[]
+    fp1.julia_version != fp2.julia_version && push!(differences, "julia $(fp1.julia_version) vs $(fp2.julia_version)")
+    fp1.os_arch != fp2.os_arch && push!(differences, "host $(fp1.os_arch) vs $(fp2.os_arch)")
+    fp1.manifest_sha != fp2.manifest_sha && push!(differences, "different package sets (Manifest hashes differ)")
+    fp1.nthreads != fp2.nthreads && push!(differences, "$(fp1.nthreads) vs $(fp2.nthreads) Julia threads")
+    fp1.blas_threads != fp2.blas_threads && push!(differences, "$(fp1.blas_threads) vs $(fp2.blas_threads) BLAS threads")
+    isempty(differences) && return
+    println()
+    println("!! ENVIRONMENTS DIFFER — source code is not the only variable in this comparison:")
+    for d in differences
+        println("     - $d")
+    end
+    println("   Differences below may be environment artifacts. Re-run with --force to rebuild")
+    println("   both refs in the current environment.")
 end
 
 """
@@ -66,7 +91,9 @@ function format_diff(abs_diff::Float64, rel_diff::Float64, status::String, value
     return @sprintf("%.3e (%.2f%%)", abs_diff, rel_diff * 100)
 end
 
-"""Helper: print a row of padded columns."""
+"""
+Helper: print a row of padded columns.
+"""
 function _print_row(cols::Vector{String}, widths::Vector{Int})
     parts = [rpad(cols[i], widths[i]) for i in eachindex(cols)]
     println(join(parts, "  "))
@@ -76,7 +103,7 @@ end
 Print a two-ref comparison report for a single case.
 """
 function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
-                                   ref1::ResolvedRef, ref2::ResolvedRef)
+    ref1::ResolvedRef, ref2::ResolvedRef)
     info1 = get_run_info(db, ref1.commit_hash, case_spec.name)
     info2 = get_run_info(db, ref2.commit_hash, case_spec.name)
 
@@ -85,11 +112,11 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
 
     if info1 === nothing
         println("ERROR: No results for ref 1 ($(ref1.name))")
-        return
+        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
     end
     if info2 === nothing
         println("ERROR: No results for ref 2 ($(ref2.name))")
-        return
+        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
     end
 
     failed1 = !info1.success
@@ -103,7 +130,9 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     # Pre-compute all rows: (label, v1, v2, diff, status)
     header = ["Quantity", ref1.name, ref2.name, "Diff", "Status"]
     rows = Vector{Vector{String}}()
-    n_ok = 0; n_changed = 0; n_missing = 0
+    n_ok = 0
+    n_changed = 0
+    n_missing = 0
 
     # Helper: pick the value-cell text for one ref/quantity, accounting for
     # whole-ref failure (which should render as "FAILED" rather than "N/A").
@@ -114,7 +143,7 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     runtime_cell = (failed::Bool, qs::Dict, qname::String) -> begin
         failed && return "FAILED"
         (haskey(qs, qname) && qs[qname].value_real !== nothing) ?
-            @sprintf("%.1fs", qs[qname].value_real) : "N/A"
+        @sprintf("%.1fs", qs[qname].value_real) : "N/A"
     end
 
     for spec in case_spec.quantities
@@ -145,15 +174,20 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
             continue
         end
 
-        q1 = q1_all[qname]; q2 = q2_all[qname]
+        q1 = q1_all[qname]
+        q2 = q2_all[qname]
         abs_diff, rel_diff, status = compare_values(q1, q2)
         st = status == "CHANGED" ? "** CHANGED **" : status
         push!(rows, [spec.label, format_value(q1), format_value(q2),
-                     format_diff(abs_diff, rel_diff, status, q1.value_type), st])
+            format_diff(abs_diff, rel_diff, status, q1.value_type), st])
 
-        if status == "OK"; n_ok += 1
-        elseif contains(status, "CHANGED"); n_changed += 1
-        else; n_missing += 1; end
+        if status == "OK"
+            n_ok += 1
+        elseif contains(status, "CHANGED")
+            n_changed += 1
+        else
+            n_missing += 1
+        end
     end
 
     # Derive column widths from header + all row content
@@ -173,7 +207,10 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     tag1 = failed1 ? " (FAILED)" : ""
     tag2 = failed2 ? " (FAILED)" : ""
     println("Ref 1: $(ref1.name)  @ $(info1.commit_short) ($date1)$tag1")
+    println("       env: $(describe_env(info1.fingerprint))")
     println("Ref 2: $(ref2.name)  @ $(info2.commit_short) ($date2)$tag2")
+    println("       env: $(describe_env(info2.fingerprint))")
+    _warn_env_difference(info1.fingerprint, info2.fingerprint)
     if failed1
         println("  Ref 1 error: $(_short_err(info1.error_msg))")
     end
@@ -195,6 +232,8 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     n_missing > 0 && push!(parts, "$n_missing missing/N/A")
     println("Summary: ", join(parts, ", "))
     println()
+    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
+            n_failed=count(identity, (failed1, failed2)))
 end
 
 """
@@ -202,13 +241,15 @@ Print a multi-ref tracking report for a single case.
 One row per quantity, one column per ref.
 """
 function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
-                          refs::Vector{ResolvedRef})
+    refs::Vector{ResolvedRef})
     run_infos = [get_run_info(db, ref.commit_hash, case_spec.name) for ref in refs]
     failed_mask = [info === nothing || !info.success for info in run_infos]
-    all_qs = [begin
-        info = run_infos[i]
-        (info !== nothing && info.success) ? get_quantities(db, refs[i].commit_hash, case_spec.name) : Dict{String,NamedTuple}()
-    end for i in eachindex(refs)]
+    all_qs = [
+        begin
+            info = run_infos[i]
+            (info !== nothing && info.success) ? get_quantities(db, refs[i].commit_hash, case_spec.name) : Dict{String,NamedTuple}()
+        end for i in eachindex(refs)
+    ]
 
     show_diff = length(refs) >= 2
     ref_names = [ref.name for ref in refs]
@@ -223,7 +264,9 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
 
     # Pre-compute rows
     rows = Vector{Vector{String}}()
-    n_ok = 0; n_changed = 0; n_missing = 0
+    n_ok = 0
+    n_changed = 0
+    n_missing = 0
 
     for spec in case_spec.quantities
         qname = spec.name
@@ -274,9 +317,13 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
                 st = status == "CHANGED" ? "** CHANGED **" : status
                 push!(row, format_diff(abs_diff, rel_diff, status, q_prev.value_type))
                 push!(row, st)
-                if status == "OK"; n_ok += 1
-                elseif contains(status, "CHANGED"); n_changed += 1
-                else; n_missing += 1; end
+                if status == "OK"
+                    n_ok += 1
+                elseif contains(status, "CHANGED")
+                    n_changed += 1
+                else
+                    n_missing += 1
+                end
             elseif last_failed || prev_failed
                 push!(row, "")
                 push!(row, "FAILED")
@@ -310,12 +357,17 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
             date_str = length(info.commit_date) >= 10 ? info.commit_date[1:10] : info.commit_date
             status_str = info.success ? "" : " (FAILED)"
             println("Ref $(i): $(ref.name)  @ $(info.commit_short) ($date_str)$status_str")
+            println("       env: $(describe_env(info.fingerprint))")
             if !info.success
                 println("  Ref $(i) error: $(_short_err(info.error_msg))")
             end
         else
             println("Ref $(i): $(ref.name)  (no data)")
         end
+    end
+    if length(refs) >= 2
+        last_two = filter(!isnothing, run_infos[(end - 1):end])
+        length(last_two) == 2 && _warn_env_difference(last_two[1].fingerprint, last_two[2].fingerprint)
     end
     println("-"^total_w)
 
@@ -334,6 +386,8 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
         println("Summary (last vs prev): ", join(parts, ", "))
     end
     println()
+    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
+            n_failed=count(identity, failed_mask))
 end
 
 """
