@@ -1636,7 +1636,7 @@ Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml. Requires `
 - `transform_u!` is called on the parallel odet but is a no-op (ifix=0)
 - Outer plasma uses serial Riccati integration for numerical stability
 - When `ctrl.populate_dense_xi` is set, a serial EL dense pass is appended and replaces the
-  parallel `odet`, so `u_store` / `du_store` come back in the axis basis that
+  parallel `odet`, so `u_store` / `du_store` / `xi_s_store` come back in the axis basis that
   PerturbedEquilibrium requires. Δ' is computed from the parallel BVP either way and is
   bit-identical between the two. See the `populate_dense_xi` entry in the
   [`ForceFreeStatesControl`](@ref) docstring for the cost trade-off.
@@ -1926,7 +1926,7 @@ and does NOT populate `delta_prime`; we keep the parallel pass's values
 which `compute_delta_prime_matrix!` uses).
 
 Called from `parallel_eulerlagrange_integration` when
-`ctrl.populate_dense_xi = true` (default).  Approximate cost: one serial
+`ctrl.populate_dense_xi = true`.  Approximate cost: one serial
 EL integration on top of the parallel BVP phase.  Required to make
 `use_parallel = true` produce DCON eigenfunctions usable by the
 PerturbedEquilibrium downstream pipeline.

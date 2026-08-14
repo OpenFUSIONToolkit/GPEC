@@ -68,6 +68,48 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         @test all(diff(merged) .> 0)
     end
 
+    @testset "enforce_min_spacing" begin
+        # No-op when already coarser than the floor
+        g = collect(range(0.0, 1.0; length=6))  # spacing 0.2
+        @test GridRef.enforce_min_spacing(g, 0.1) == g
+
+        # Thins to respect the floor, keeping both endpoints
+        g = collect(range(0.0, 1.0; length=11))  # spacing 0.1
+        f = GridRef.enforce_min_spacing(g, 0.25)
+        @test f[1] == 0.0 && f[end] == 1.0
+        @test minimum(diff(f)) >= 0.25 - 1e-12
+
+        # Clips an edge-packed (ldp-like) grid so no interval is below the floor
+        ldp = [sin((i / 100) * (π / 2))^2 for i in 0:100]  # packs both ends ~ (π/2·100)⁻² ≈ 2.5e-4
+        @test minimum(diff(ldp)) < 1e-3
+        f = GridRef.enforce_min_spacing(ldp, 1e-3)
+        @test f[1] == ldp[1] && f[end] == ldp[end]
+        @test minimum(diff(f)) >= 1e-3 - 1e-12
+    end
+
+    @testset "bracket_mandatory_nodes" begin
+        grid = collect(range(0.0, 1.0; length=21))  # spacing 0.05
+
+        # Empty centers is the identity
+        @test GridRef.bracket_mandatory_nodes(grid, Float64[], Float64[], 1e-4) == grid
+
+        # A rational is centered between a bracket pair, never on a knot, in a clean interval.
+        b = GridRef.bracket_mandatory_nodes(grid, [0.5], [0.01], 1e-4)
+        @test all(diff(b) .> 0)
+        @test !any(g -> abs(g - 0.5) < 1e-12, b)          # 0.5 is not a knot
+        k = searchsortedlast(b, 0.5)
+        @test b[k] < 0.5 < b[k+1]                          # interior to one interval
+        # bracket knots straddle the center symmetrically at ~half the local spacing (blended)
+        @test isapprox(0.5 - b[k], b[k+1] - 0.5; rtol=0.2)
+
+        # Two well-separated centers each get a clean interval; grid stays strictly increasing
+        b = GridRef.bracket_mandatory_nodes(grid, [0.3, 0.7], [0.01, 0.01], 1e-4)
+        @test all(diff(b) .> 0)
+        for c in (0.3, 0.7)
+            @test !any(g -> abs(g - c) < 1e-12, b)
+        end
+    end
+
     @testset "_validate_psi_nodes" begin
         grid = collect(range(0.01, 0.99; length=10))
         @test GridRef._validate_psi_nodes(grid, 0.01, 0.99) === grid
@@ -121,15 +163,19 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
             @test isapprox(q, round(2q) / 2; atol=1e-6)  # m/n with n in 1:2 is a half-integer
         end
 
-        grid = GridRef.refined_psi_grid(equil1; tau=eq_config.psi_accuracy, mandatory=rat)
+        grid = GridRef.refined_psi_grid(equil1; tau=eq_config.psi_accuracy, mandatory=rat, singfac_min=1e-4, n_min=1)
         @test all(diff(grid) .> 0)
         @test grid[1] == eq_config.psilow && grid[end] == eq_config.psihigh
-        @test all(p -> p in grid, rat)
 
-        # Every rational surface appears as a mandatory knot in the refined grid, and the
-        # min-spacing snap in merge_mandatory_nodes keeps the grid strictly increasing even
-        # when multi-n (n=1,2) rationals cluster.
-        @test all(p -> any(g -> abs(g - p) < 1e-12, grid), rat)
+        # Rationals are bracketed, not pinned: each sits strictly interior to a clean interval —
+        # never on a knot — with its Δ′ matching stencil [p ± singfac_min/|n·q′|] free of knots, so
+        # the cubic 3rd derivative the singular extraction samples is single-valued across it.
+        for p in rat
+            dpsi = 1e-4 / abs(equil1.profiles.q_deriv(p))
+            @test minimum(abs.(grid .- p)) > dpsi          # no knot inside the matching stencil
+            k = searchsortedlast(grid, p)
+            @test 1 <= k < length(grid)                    # p interior to (grid[k], grid[k+1])
+        end
         @test minimum(diff(grid)) > 0
 
         # Pass 2 honors the refined grid exactly

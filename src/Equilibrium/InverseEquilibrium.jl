@@ -140,10 +140,10 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         mpsi = length(sq_xs) - 1
     elseif grid_type in ("auto", "log_asymptotic")
         if mpsi == 0 && config.psi_accuracy > 0
-            # Two-pass auto grid: coarse pass-1 layout; the driver refines and re-forms
-            # on the measured-curvature grid (GridRefinement.jl).
-            mpsi = 128
-            @info "Auto psi grid: forming pass-1 equilibrium on coarse $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
+            # Two-pass auto grid: pass-1 layout sized to resolve the gradient structure so pass 2
+            # is well-provisioned; the driver refines and re-forms (GridRefinement.jl, PASS1_INTERVALS).
+            mpsi = PASS1_INTERVALS
+            @info "Auto psi grid: forming pass-1 equilibrium on $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
         elseif mpsi == 0
             mpsi = 128
         end
@@ -172,6 +172,13 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         sq_xs = collect(range(psilow, psihigh; length=mpsi + 1))
     else
         error("Unsupported grid_type: $grid_type")
+    end
+    # Floor node spacing on the fixed grids (ldp/pow1 pack the edge below the integration-noise
+    # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, and an
+    # override grid arrives already floored.
+    if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic"))
+        sq_xs = enforce_min_spacing(sq_xs, MIN_KNOT_SPACING)
+        mpsi = length(sq_xs) - 1
     end
     sq_fs = zeros(Float64, mpsi+1, 4)
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())

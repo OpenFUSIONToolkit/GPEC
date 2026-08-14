@@ -415,10 +415,11 @@ solvers.
 function _build_psi_grid(equil_params, psilow, psihigh)
     mpsi = equil_params.mpsi
     if equil_params.grid_type in ("auto", "log_asymptotic") && mpsi == 0 && equil_params.psi_accuracy > 0
-        # Two-pass auto grid: this is the coarse pass-1 layout; the driver measures the
-        # formed equilibrium's curvature and re-forms on a refined grid (GridRefinement.jl).
-        mpsi = 128
-        @info "Auto psi grid: forming pass-1 equilibrium on coarse $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
+        # Two-pass auto grid: this is the pass-1 layout; the driver measures the formed
+        # equilibrium's curvature and re-forms on a refined grid (GridRefinement.jl). Sized to
+        # resolve the gradient structure accurately so pass 2 is well-provisioned (PASS1_INTERVALS).
+        mpsi = PASS1_INTERVALS
+        @info "Auto psi grid: forming pass-1 equilibrium on $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
     elseif mpsi == 0
         mpsi = 128
     end
@@ -444,7 +445,10 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
-    return psi_nodes
+    # Floor node spacing on the fixed grids: ldp/pow1 pack the edge as ~(π/2·mpsi)⁻² and at high
+    # mpsi drive it below the integration-noise scale (garbage curvature). The auto grid floors its
+    # refined pass-2 grid in refined_psi_grid, so it is left untouched here.
+    return equil_params.grid_type in ("auto", "log_asymptotic") ? psi_nodes : enforce_min_spacing(psi_nodes, MIN_KNOT_SPACING)
 end
 
 """

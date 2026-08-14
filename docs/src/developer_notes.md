@@ -220,3 +220,7 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--force` — re-run even if cached
 - `--verbose` — print GPEC subprocess output
 - `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
+
+The full flag list, the environment-pinning behaviour that keeps source code the only variable in
+a comparison, and the exit-status contract are documented in
+[`docs/development/regression-harness.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/development/regression-harness.md).

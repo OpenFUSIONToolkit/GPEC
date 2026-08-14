@@ -1,3 +1,9 @@
+# Regression case: DIII-D-like n=1 outer-region singular Galerkin Δ′ solve.
+# Tracks the resonant-surface inventory, the PEST-3 Δ matching-matrix diagonal
+# (the physics-meaningful tearing Δ′), norms of the full outer Δ′ matrix and the
+# rpec coil-response (Δ_coil) block, and the inner-layer matching outputs.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
 [case]
 name = "gal_resistive_diiid"
 description = "DIII-D-like, n=1, RDCON outer-region Galerkin Δ′ with rpec coil columns (delta_coil)"

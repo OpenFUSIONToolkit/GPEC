@@ -91,7 +91,7 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 end
 
 """
-    sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+    sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
 Compute and set integration ψ, q, and q' limits by handling cases where user truncates
 before the last singular surface. Performs a similar function to `sing_lim`
@@ -117,15 +117,17 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.params.psihigh_resolved
 
-    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent).
-    # Multi-n runs (nn_low != nn_high) are not supported — the "outermost rational + dmlim/n"
-    # cutoff depends on which n is used, so it isn't well-defined. Single-n with nn_low <= 0
-    # (e.g. uninitialized default) is also skipped because the formula divides by nn_low.
-    # Both cases fall back to qhigh / psihigh truncation with a warning.
-    if ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
+    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent). The cutoff reads
+    # the *resolved* toroidal range on `intr`, so callers must assign intr.nlow / intr.nhigh
+    # before calling; an unresolved range is an error rather than a silent change of truncation
+    # strategy. Multi-n runs are not supported — the "outermost rational + dmlim/n" cutoff depends
+    # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
+    if ctrl.set_psilim_via_dmlim && intr.nlow <= 0
+        error("sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+              "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
+              "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead.")
+    elseif ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
         @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
-    elseif ctrl.set_psilim_via_dmlim && intr.nlow <= 0
-        @warn "set_psilim_via_dmlim = true requires nn_low > 0; got nn_low=$(intr.nlow). Falling back to qhigh / psihigh truncation."
     elseif ctrl.set_psilim_via_dmlim
         @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
