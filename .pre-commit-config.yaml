@@ -45,3 +45,29 @@ repos:
     hooks:
       - id: julia-formatter
         name: Format Julia code
+
+  # Config-style TOML annotation conventions (docs/development/toml-conventions.md).
+  # pygrep hooks fail when the pattern matches, so each entry matches a violation.
+  - repo: local
+    hooks:
+      - id: toml-header-block
+        name: 'TOML conventions: file starts with a # header block'
+        language: pygrep
+        entry: '\A(?!#[^\n]*\n#)'
+        args: [--multiline]
+        files: ^(examples/.*\.toml|test/test_data/.*\.toml|regression-harness/cases/.*\.toml)$
+      - id: toml-no-decorative-dividers
+        name: 'TOML conventions: no decorative comment dividers'
+        language: pygrep
+        entry: '^#\s*[-=*_~#]{6,}\s*$'
+        files: ^(examples/.*\.toml|test/test_data/.*\.toml|regression-harness/cases/.*\.toml)$
+      - id: toml-inline-annotations
+        name: 'TOML conventions: every variable line has a # description'
+        language: pygrep
+        entry: '^[A-Za-z0-9_]+\s*=\s*[^#]*$'
+        files: ^(examples/.*\.toml|test/test_data/.*\.toml)$
+      - id: toml-no-deprecated-keys
+        name: 'TOML conventions: no deprecated config keys'
+        language: pygrep
+        entry: '^(mer_flag|force_wv_symmetry|ode_flag|cyl_flag|mat_flag|power_bp|power_b|power_r|power_rc)\s*='
+        files: ^(examples/.*\.toml|test/test_data/.*\.toml)$

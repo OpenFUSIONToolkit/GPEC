@@ -11,7 +11,7 @@ using FastInterpolations
 # Import parent modules
 import ..Equilibrium
 import ..ForceFreeStates
-import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal, FourFitVars, MetricData
+import ..ForceFreeStates: OdeState, ForceFreeStatesInternal, FourFitVars, MetricData
 import ..Vacuum
 import ..ForcingTerms
 import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization!
@@ -39,7 +39,7 @@ export write_outputs_to_HDF5
 
 """
     compute_perturbed_equilibrium(
-        equil, ForceFreeStates_results, vac_data, ffs_intr,
+        equil, ForceFreeStates_results, wt0, mthvac, ffs_intr,
         ft_ctrl, ctrl, intr, metric, ffit
     )::PerturbedEquilibriumState
 
@@ -52,7 +52,8 @@ coupling metrics.
 
   - `equil`: Equilibrium solution from Equilibrium module
   - `ForceFreeStates_results`: Stability calculation results from ForceFreeStates module
-  - `vac_data`: Vacuum response data from ForceFreeStates free boundary calculation
+  - `wt0`: Free-boundary total-energy matrix W = wp + wv from `free_run`, or `nothing` when the free-boundary calculation was not run (response and singular coupling are then skipped)
+  - `mthvac`: Vacuum poloidal grid resolution to reuse for the Green's-function solves
   - `ffs_intr`: ForceFreeStates internal state with mode information
   - `ft_ctrl`: Forcing terms control parameters from [ForcingTerms] section
   - `ctrl`: Control parameters from [PerturbedEquilibrium] section
@@ -67,7 +68,8 @@ coupling metrics.
 function compute_perturbed_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
     ForceFreeStates_results::OdeState,
-    vac_data::Union{VacuumData,Nothing},
+    wt0::Union{Matrix{ComplexF64},Nothing},
+    mthvac::Int,
     ffs_intr::ForceFreeStates.ForceFreeStatesInternal,
     ft_ctrl::ForcingTerms.ForcingTermsControl,
     ctrl::PerturbedEquilibriumControl,
@@ -111,27 +113,31 @@ function compute_perturbed_equilibrium(
                 modes_n = filter(m -> m.n == n, intr.forcing_modes)
                 isempty(modes_n) && continue
                 m_vals = [m.m for m in modes_n]
+                # Same control surface as the coil branch above: psilim, the integration
+                # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
+                # the normalization was taken on the equilibrium-spline limit, which differs
+                # whenever dmlim/qhigh/psiedge truncation moves psilim inward.
                 convert_forcing_normalization!(modes_n, norm_tag, equil, n,
-                    minimum(m_vals), maximum(m_vals))
+                    minimum(m_vals), maximum(m_vals); psi=ffs_intr.psilim)
             end
         end
     end
 
     # Step 2: Compute plasma response
     if ctrl.compute_response
-        if vac_data === nothing
+        if wt0 === nothing
             @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
-            compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, metric, ffit)
+            compute_plasma_response!(state, equil, ForceFreeStates_results, wt0, mthvac, ffs_intr, intr, ctrl, metric, ffit)
         end
     end
 
     # Step 3: Compute singular coupling metrics
     if ctrl.compute_singular_coupling
-        if vac_data === nothing
+        if wt0 === nothing
             @warn "Vacuum data not available. Skipping singular coupling calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
-            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, ffit)
+            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, mthvac, ffs_intr, intr, ctrl, ffit)
         end
     end
 
