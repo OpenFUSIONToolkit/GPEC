@@ -71,12 +71,12 @@ const H5_GIT_VERSION = "Info/git_version"
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
-using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
+using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, FreeBoundaryResult, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: compute_local_stability, compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
-using .ForceFreeStates: eulerlagrange_integration, free_run!
+using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag")
@@ -455,14 +455,16 @@ function main_from_inputs(
         @warn "Fixed-boundary mode unstable for n = $nstring"
     end
 
-    # Compute free boundary energies
+    # Compute free boundary energies.
+    free_energies = nothing
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
         if ctrl.verbose
             wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
             @info "Computing free boundary energies ($wall_desc)"
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
-        if real(vac_data.et[1]) < 0
+        free_energies = free_run(odet, ctrl, equil, ffit, intr)
+        normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
+        if real(free_energies.et[1]) < 0
             if ctrl.verbose
                 @warn "Free-boundary mode unstable for n = $nstring"
             end
@@ -473,13 +475,13 @@ function main_from_inputs(
         end
 
         # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
-        # Requires propagators from parallel FM path and wv from free_run!.
+        # Requires propagators from parallel FM path and wv from free_run.
         if ctrl.kinetic_factor == 0 && intr.msing > 0 && fm_propagators !== nothing
             if ctrl.verbose
                 @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
             end
             ForceFreeStates.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
-                wv=vac_data.wv, psio=equil.psio, debug=ctrl.verbose,
+                wv=free_energies.wv, psio=equil.psio, debug=ctrl.verbose,
                 S_at_surface_left=fm_S_left,
                 ctrl=ctrl, equil=equil, ffit=ffit)
         end
@@ -489,7 +491,7 @@ function main_from_inputs(
     gal_data = nothing
     if ctrl.gal_flag
         gal_start = time()
-        gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
+        gal_data = galerkin_solve(ctrl, equil, ffit, intr; wv=free_energies !== nothing ? free_energies.wv : nothing)
         @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     end
 
@@ -499,7 +501,7 @@ function main_from_inputs(
             equil,
             intr,
             odet,
-            ctrl.vac_flag ? vac_data : nothing,
+            free_energies,
             ffit,
             git_version,
             inputs,
@@ -552,7 +554,7 @@ function main_from_inputs(
         slayer_result = _run_slayer_stage(nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
-            vac_data=ctrl.vac_flag ? vac_data : nothing,
+            free_energies=free_energies,
             slayer=slayer_result)
     end
 
@@ -613,9 +615,9 @@ function main_from_inputs(
         end
 
         # Run perturbed equilibrium calculations
-        # Pass vac_data and intr for response matrix calculations
+        # Free-boundary wt0 drives the plasma inductance; mthvac sizes the Green's-function solves
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, pe_odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
+            equil, pe_odet, free_energies !== nothing ? free_energies.wt0 : nothing, ctrl.mthvac, intr, ft_ctrl, pe_ctrl, pe_intr,
             metric, ffit
         )
 
@@ -686,7 +688,7 @@ function main_from_inputs(
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
     return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
-        vac_data=ctrl.vac_flag ? vac_data : nothing,
+        free_energies=free_energies,
         slayer=slayer_result)
 
 end
@@ -709,7 +711,7 @@ function write_outputs_to_HDF5(
     equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal,
     odet::OdeState,
-    vac_data::Union{VacuumData,Nothing},
+    free_energies::Union{FreeBoundaryResult,Nothing},
     ffit::Union{FourFitVars,Nothing}=nothing,
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
@@ -718,6 +720,10 @@ function write_outputs_to_HDF5(
     locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
     ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
+
+    # Idempotent: already done if a PerturbedEquilibrium stage ran. Leaves the stores empty
+    # (and the datasets below empty) on paths whose solution basis cannot supply them.
+    ForceFreeStates.materialize_derivative_stores!(odet, equil, ffit, intr)
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
@@ -814,7 +820,7 @@ function write_outputs_to_HDF5(
         out_h5["$fwd/q"] = odet.q_store
         out_h5["$fwd/xi_psi"] = odet.u_store[:, :, 1, :]
         out_h5["$fwd/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["$fwd/dxi_psi"] = odet.du_store[:, :, 1, :]
+        out_h5["$fwd/dxi_psi"] = odet.du_store
         out_h5["$fwd/xi_s"] = odet.xi_s_store
         out_h5["$fwd/crit"] = odet.crit_store
 
@@ -917,23 +923,23 @@ function write_outputs_to_HDF5(
         # eigenvectors, columns sorted most-unstable first, normalized to unit power norm with
         # the largest-magnitude entry made real-positive.
         fbs = "ForceFreeStates/FreeBoundaryStability"
-        out_h5["$fbs/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
-        out_h5["$fbs/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
-        out_h5["$fbs/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
-        out_h5["$fbs/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
-        out_h5["$fbs/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
-        out_h5["$fbs/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
-        out_h5["$fbs/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
-        out_h5["$fbs/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
+        out_h5["$fbs/W_freeboundary"] = free_energies !== nothing ? free_energies.wt0 : ComplexF64[]
+        out_h5["$fbs/W_plasma"] = free_energies !== nothing ? free_energies.wp : ComplexF64[]
+        out_h5["$fbs/W_vacuum"] = free_energies !== nothing ? free_energies.wv : ComplexF64[]
+        out_h5["$fbs/W_freeboundary_eigenmodes"] = free_energies !== nothing ? free_energies.wt : ComplexF64[]
+        out_h5["$fbs/eigenmode_energies"] = free_energies !== nothing ? free_energies.et : ComplexF64[]
+        out_h5["$fbs/eigenmode_plasma_energies"] = free_energies !== nothing ? free_energies.ep : ComplexF64[]
+        out_h5["$fbs/eigenmode_vacuum_energies"] = free_energies !== nothing ? free_energies.ev : ComplexF64[]
+        out_h5["$fbs/vacuum_eigenvalue"] = free_energies !== nothing ? free_energies.vacuum_eigenvalue : NaN
 
         # Cartesian surface point clouds used downstream for visualisation and
         # perturbed-equilibrium plotting.
-        out_h5["SurfaceGeometries/Plasma/x"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
-        out_h5["SurfaceGeometries/Plasma/y"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
-        out_h5["SurfaceGeometries/Plasma/z"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
-        out_h5["SurfaceGeometries/Wall/x"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
-        out_h5["SurfaceGeometries/Wall/y"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
-        out_h5["SurfaceGeometries/Wall/z"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/x"] = free_energies !== nothing ? free_energies.plasma_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/y"] = free_energies !== nothing ? free_energies.plasma_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/z"] = free_energies !== nothing ? free_energies.plasma_pts[:, 3] : Float64[]
+        out_h5["SurfaceGeometries/Wall/x"] = free_energies !== nothing ? free_energies.wall_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Wall/y"] = free_energies !== nothing ? free_energies.wall_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Wall/z"] = free_energies !== nothing ? free_energies.wall_pts[:, 3] : Float64[]
 
         # Write fundamental matrices on the ψ grid
         if ffit !== nothing
@@ -1017,9 +1023,9 @@ receives the correct least-stable δW regardless of how modes are interleaved in
 The `result` argument is the named tuple returned by `main`.
 """
 function write_imas(dd, result)
-    result.vac_data === nothing && return
+    result.free_energies === nothing && return
 
-    vac_data = result.vac_data
+    free_energies = result.free_energies
     intr = result.intr
 
     # Top-level metadata
@@ -1034,10 +1040,10 @@ function write_imas(dd, result)
     # n_tor_idx[i] (0-based) identifies which n-block eigenvalue i belongs to.
     resize!(ts.toroidal_mode, intr.npert)
     for j in 0:(intr.npert-1)
-        n_indices = findall(==(j), vac_data.n_tor_idx) # indices of eigenvalues in the j-th n-block
+        n_indices = findall(==(j), free_energies.n_tor_idx) # indices of eigenvalues in the j-th n-block
         mode = ts.toroidal_mode[j+1]
         mode.n_tor = intr.nlow + j
-        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices])) # least-stable energy for this n-toroidal mode
+        mode.energy_perturbed = minimum(real.(free_energies.et[n_indices])) # least-stable energy for this n-toroidal mode
     end
 
     return dd

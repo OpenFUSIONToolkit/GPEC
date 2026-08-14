@@ -256,7 +256,7 @@ gpec.toml.
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
   - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that can cause intermittent BVP divergence on numerically delicate equilibria. The parallel path produces bit-identical Δ′ across thread counts; `parallel_threads = 2` is about 20% faster than serial and saturates the speedup. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
-  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `du_store` / `xi_s_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices with diagnostic derivatives (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead (differs by the ~0.12 % Riccati-vs-axis algorithmic gap on DIIID-class cases).  **Default `false`** to avoid paying the dense-pass cost on Δ'/vacuum/ideal-stability-only runs; **PerturbedEquilibrium-using configs must set `populate_dense_xi = true` explicitly** when `use_parallel = true` (otherwise PE silently reads Riccati-basis garbage).  Auto-disabled when `force_termination = true` regardless of the user setting, since the dense pass has no downstream consumer in that case.  Approximate cost when enabled: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
+  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `du_store` / `xi_s_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices with diagnostic derivatives (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead (differs by the ~0.12 % Riccati-vs-axis algorithmic gap on DIIID-class cases).  **Default `false`** to avoid paying the dense-pass cost on Δ'/vacuum/ideal-stability-only runs; **PerturbedEquilibrium-using configs must set `populate_dense_xi = true` explicitly** when `use_parallel = true` (otherwise PE silently reads Riccati-basis garbage).  Auto-disabled when `force_termination = true` regardless of the user setting, since the dense pass has no downstream consumer in that case.  Approximate cost when enabled: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
 @kwdef struct ForceFreeStatesControl
@@ -411,51 +411,38 @@ end
 FourFitVars(mpert::Int, numpert_total::Int) = FourFitVars(; mpert, numpert_total)
 
 """
-    VacuumData
+    FreeBoundaryResult
 
-A struct containing relevant data from the vacuum calculation.
-Populated in `Free.jl`.
+Result of the free-boundary calculation, returned by `free_run`. All matrices are in the ξ Fourier
+basis and are `numpert_total × numpert_total`; the energies are generalized (W, N) pencil values,
+power-normalized and invariant to the working (Jacobian) coordinate.
 
 ## Fields
 
-  - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)
-  - `numpert_total::Int` - Total number of modes (mpert × npert)
-  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput) - only needed for GPEC functionality currently
-  - `wt::Array{ComplexF64, 2}` - Free-boundary eigenvector matrix of the generalized eigenproblem W·v = λ·N·v (numpert_total × numpert_total). Columns are the eigenmodes sorted most-unstable first, normalized to unit power norm v†·N·v = 1.
-  - `wt0::Array{ComplexF64, 2}` - Free-boundary total-energy matrix W = wp + wv before diagonalisation (numpert_total × numpert_total). ξ Fourier basis.
-  - `wp::Array{ComplexF64, 2}` - Plasma energy matrix (numpert_total × numpert_total). ξ Fourier basis.
-  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total). ξ Fourier basis.
+  - `wt::Matrix{ComplexF64}` - Eigenvector matrix of W·v = λ·N·v. Columns are eigenmodes sorted most-unstable first, normalized to unit power norm v†·N·v = 1.
+  - `wt0::Matrix{ComplexF64}` - Total-energy matrix W = wp + wv before diagonalisation
+  - `wp::Matrix{ComplexF64}` - Plasma energy matrix
+  - `wv::Matrix{ComplexF64}` - Vacuum energy matrix, singfac-scaled at `qlim`
   - `ep::Vector{ComplexF64}` - Plasma energy per eigenmode (power quotient v†·wp·v with v†·N·v = 1)
   - `ev::Vector{ComplexF64}` - Vacuum energy per eigenmode (power quotient v†·wv·v with v†·N·v = 1)
-  - `et::Vector{ComplexF64}` - Total energy eigenvalues of the pencil (W, N): power-normalized and invariant to the working (Jacobian) coordinate; et = ep + ev per mode
-  - `n_tor_idx::Vector{Int}` -  0-based toroidal mode number index of each sorted eigenvalue (numpert_total). Needed in `write_imas`
+  - `et::Vector{ComplexF64}` - Total energy eigenvalues of the pencil (W, N); et = ep + ev per mode
+  - `n_tor_idx::Vector{Int}` - 0-based toroidal mode number index of each sorted eigenvalue
   - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the pencil (wv, N), clamped to zero
-  - `grri::Array{ComplexF64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × numpert_total)
-  - `grre::Array{ComplexF64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × numpert_total)
-  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points, shape (mthvac * nzvac) × 3 for (x, y, z)
-  - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points, shape (mthvac * nzvac) × 3 for (x, y, z)
+  - `plasma_pts`, `wall_pts::Matrix{Float64}` - Cartesian (x, y, z) surface coordinates, `numpoints × 3`, retained for HDF5 output
 """
-@kwdef mutable struct VacuumData
-    numpoints::Int
-    numpert_total::Int
-    mthvac::Int # this is only needed to not break GPEC functionality currently
-
-    wt::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
-    wt0::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
-    wp::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
-    wv::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
-    ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
-    ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
-    et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
-    n_tor_idx::Vector{Int} = zeros(Int, numpert_total)
-    vacuum_eigenvalue::Float64 = NaN
-    grri::Array{ComplexF64,2} = Array{ComplexF64}(undef, 2 * numpoints, numpert_total)
-    grre::Array{ComplexF64,2} = Array{ComplexF64}(undef, 2 * numpoints, numpert_total)
-    plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
-    wall_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
+struct FreeBoundaryResult
+    wt::Matrix{ComplexF64}
+    wt0::Matrix{ComplexF64}
+    wp::Matrix{ComplexF64}
+    wv::Matrix{ComplexF64}
+    ep::Vector{ComplexF64}
+    ev::Vector{ComplexF64}
+    et::Vector{ComplexF64}
+    n_tor_idx::Vector{Int}
+    vacuum_eigenvalue::Float64
+    plasma_pts::Matrix{Float64}
+    wall_pts::Matrix{Float64}
 end
-
-VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpoints, numpert_total, mthvac)
 
 """
 EdgeScanState
@@ -518,11 +505,22 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
 
-  - `du_store::Array{ComplexF64,4}` - du₁/dψ and du₂/dψ at the accepted point of each saved step, same shape as `u_store`.
+  - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
+    `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
+    except on the galerkin-matched path which supplies the analytic derivative at construction.
+    du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
 
-  - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016, shape `(numpert_total, numpert_total, numsteps_init)`.
+  - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
+    shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
 
-  - `du_store_populated::Bool` - True once the serial EL path has filled `du_store`/`xi_s_store`; other paths leave it false.
+  - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
+    derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
+    are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
+
+  - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
+    (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
+    galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
+    sparse parallel path whose solution is in the Riccati basis.
 
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
 
@@ -539,10 +537,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
 
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
-
-  - `du::Array{ComplexF64,3}` - du/dψ from the latest `sing_der!` call, shape `(numpert_total, numpert_total, 2)`.
-
-  - `xi_s::Matrix{ComplexF64}` - Ξ_s from the latest `sing_der!` call, shape `(numpert_total, numpert_total)`.
 
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
 
@@ -591,8 +585,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    du_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, numsteps_init)
+    du_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
+    xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
+    u_store_el_basis::Bool = true
     du_store_populated::Bool = false
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
@@ -605,8 +600,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     psifac::Float64 = 0.0
     q::Float64 = 0.0
     u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    du::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    xi_s::Matrix{ComplexF64} = zeros(ComplexF64, numpert_total, numpert_total)
     ising_start::Int = 0
     psimax::Float64 = 0.0
     needs_crossing::Bool = false

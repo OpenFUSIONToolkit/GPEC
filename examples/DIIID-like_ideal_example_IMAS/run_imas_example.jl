@@ -61,7 +61,7 @@ try
         TOML.print(io, config_imas);
     end
     result_imas = GPEC.main([tmpdir_imas]; dd=dd)
-    global et_imas = real(result_imas.vac_data.et[1])
+    global et_imas = real(result_imas.free_energies.et[1])
     global mpert_imas = result_imas.intr.mpert
     GPEC.write_imas(dd, result_imas)
     @assert dd.mhd_linear.time_slice[1].toroidal_mode[1].energy_perturbed ≈ et_imas
@@ -80,7 +80,7 @@ try
         TOML.print(io, config_gfile);
     end
     result_gfile = GPEC.main([tmpdir_gfile])
-    global et_gfile = real(result_gfile.vac_data.et[1])
+    global et_gfile = real(result_gfile.free_energies.et[1])
     global mpert_gfile = result_gfile.intr.mpert
 finally
     rm(tmpdir_gfile; recursive=true)

@@ -129,7 +129,7 @@ These rules apply to **every** Agent tool invocation, not just performance work.
 
 ### Code Formatting
 
-Pre-commit hooks enforce formatting via JuliaFormatter (v1.0.62) and general file hygiene. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
+Pre-commit hooks enforce formatting via JuliaFormatter and general file hygiene. The hook runs the developer's globally installed JuliaFormatter (the version is not currently pinned), so previously untouched files may normalize wholesale on first edit; this churn is expected and should not be reverted. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
 
 The project's `.JuliaFormatter.toml` settings:
 - **Line width**: 180 characters max (`margin = 180`)
