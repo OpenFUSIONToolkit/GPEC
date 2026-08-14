@@ -126,6 +126,14 @@ PerturbedEquilibrium). Populated by `gal_output_solution` (GalerkinSolution.jl).
   - `psi::Vector{Float64}`, `q::Vector{Float64}` — radial grid (inner→edge) and its safety factor.
   - `issing::Vector{Bool}` — grid points sitting on a singular surface (skipped; left zero).
   - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ and dξ/dψ.
+  - `xi_cut::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` cut solution: ξ with the leading-order
+    resonant content removed. This is the smooth background the resistive inner-layer solution is
+    added to when forming the composite solution at a rational surface, so the inner and outer
+    solutions overlap in the matching region. Sized `(0,0,0)` when the cut path was not requested.
+  - `cut_range::Matrix{Float64}` — `(msing, 2)` ψ bounds of the resonant + extension cells flanking
+    each rational surface. Outside these bounds no resonant content is subtracted, so `xi_cut`
+    equals `xi` there and the composite solution is undefined; the inner-region solution is only
+    meaningful inside this window. Sized `(0,0)` when the cut path was not requested.
 """
 struct GalerkinSolution
     psi::Vector{Float64}
@@ -133,6 +141,8 @@ struct GalerkinSolution
     issing::Vector{Bool}
     xi::Array{ComplexF64,3}
     xi_deriv::Array{ComplexF64,3}
+    xi_cut::Array{ComplexF64,3}
+    cut_range::Matrix{Float64}
 end
 
 """
@@ -169,6 +179,8 @@ struct GalMatchResult
     bpen::Matrix{ComplexF64}
     inner_psi::Vector{Vector{Float64}}
     inner_xi::Vector{Matrix{ComplexF64}}
+    inner_b::Vector{Matrix{ComplexF64}}   # per surface, matched inner-layer b^ψ(ψ) on inner_psi
+    inner_params::Vector{InnerLayer.GGJParameters}  # per-surface layer coefficients from resist_eval
     rpec_eig::Vector{ComplexF64}
     residual::Float64
 end

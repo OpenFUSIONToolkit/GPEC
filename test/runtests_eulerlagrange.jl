@@ -1,6 +1,5 @@
-# TODO: perhaps this isn't the best place for this function?
-# Should I do include("../ForceFreeStates/utils.jl") instead? or maybe save these functions in a separate file?
-# associated TODO: come up with Gaussian reduction test that doesn't rely on external data
+# TODO: this helper may belong in a shared test-utilities file rather than here.
+# TODO: come up with a Gaussian reduction test that doesn't rely on external data.
 
 function load_u_matrix(filename)
     lines = readlines(filename)

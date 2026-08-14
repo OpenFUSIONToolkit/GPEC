@@ -9,7 +9,10 @@
 # derivative (sing_get_dua_gal), never by spline-differentiating ξ at the packed edge.
 #
 # Fortran module flags restore_uh/us/ul default .TRUE. (gal.f); the full reconstruction is always
-# performed. The cut path (gal.f, used only for the matching diagnostic) is NOT ported here.
+# performed. The `cut=true` path swaps the resonant Frobenius series for its leading-order term
+# (`sing_get_ua_gal_cut`); the resulting cut solution supplies the regular background that the
+# resistive inner-layer solution is added to when forming the composite solution at a rational
+# surface (see `gal_match_rpec`).
 
 # Sampling points per cell, matching Fortran interp_np_res / interp_np (gal.f): coarse in regular cells,
 # dense in resonant/extension cells to resolve the near-singular asymptotic series.
@@ -37,16 +40,24 @@ const GAL_INTERP_NP_RES = 60
 end
 
 """
-    gal_get_solution(ws, asymps, sings, intr, x, iintvl, icell, isol; want_d=true)
+    gal_get_solution(ws, asymps, sings, intr, x, iintvl, icell, isol; want_d=true, cut_delta=nothing)
         -> (sol, dsol, iintvl, icell)
 
 Reconstruct the displacement `sol` (length `mpert`) — and, when `want_d`, its analytic radial
 derivative `dsol = d(sol)/dψ` — at flux `x` for solution column `isol`, from the solved Galerkin
-coefficients `ws.sol`. Port of `gal_get_solution` (gal.f, non-cut path). `iintvl`/`icell`
+coefficients `ws.sol`. Port of `gal_get_solution` (gal.f). `iintvl`/`icell`
 are a monotone cell cursor advanced and returned for the next call. `dsol` is `nothing` if `!want_d`.
+
+Passing `cut_delta` (the `(nsol, 2·msing)` small-solution coefficient matrix, i.e. `GalerkinResult.delta`)
+selects the *cut* solution: the leading-order resonant content is subtracted from the reconstruction,
+leaving the smooth background that the resistive inner-layer solution is added to when forming the
+composite solution at a rational surface. `want_d` is forced off in that case.
 """
 function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
-    intr::ForceFreeStatesInternal, x::Float64, iintvl::Int, icell::Int, isol::Int; want_d::Bool=true)
+    intr::ForceFreeStatesInternal, x::Float64, iintvl::Int, icell::Int, isol::Int; want_d::Bool=true,
+    cut_delta::Union{Nothing,AbstractMatrix{ComplexF64}}=nothing)
+
+    cut_delta === nothing || (want_d = false)
 
     msing = length(ws.intvl) - 1
     mpert = intr.numpert_total
@@ -107,8 +118,9 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     end
 
     # large solution (coeff 1) only for the column driving this surface/side (gal.f)
-    if (isol == 2jsing - 1 && cell.extra == GAL_SIDE_LEFT) ||
-       (isol == 2jsing && cell.extra == GAL_SIDE_RIGHT)
+    driving = (isol == 2jsing - 1 && cell.extra == GAL_SIDE_LEFT) ||
+              (isol == 2jsing && cell.extra == GAL_SIDE_RIGHT)
+    if driving
         if cell.etype == GCT_RES || cell.etype == GCT_EXT || cell.etype == GCT_EXT1
             @views sol .+= ua[:, 1, 1]
             want_d && (@views dsol .+= dua[:, 1, 1])
@@ -118,19 +130,34 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
         end
     end
 
+    # Cut solution (gal.f cut_flag block): remove the leading-order resonant content, evaluated at x
+    # for every resonant cell type. The small coefficient comes from the Δ′ matrix rather than
+    # `cell.emap` because ext1/ext2 cells carry no emap.
+    if cut_delta !== nothing
+        jsol = cell.extra == GAL_SIDE_LEFT ? 2jsing - 1 : 2jsing
+        ua_cut = sing_get_ua_gal_cut(asymp, x - psi_s)
+        @views sol .-= cut_delta[isol, jsol] .* ua_cut[:, 2, 1]
+        driving && (@views sol .-= ua_cut[:, 1, 1])
+    end
+
     return sol, dsol, iintvl, icell
 end
 
 """
-    gal_output_solution(ws, asymps, sings, intr, profiles, psihigh) -> GalerkinSolution
+    gal_output_solution(ws, asymps, sings, intr, profiles, psihigh; delta=nothing) -> GalerkinSolution
 
 Build the gal-native packed radial grid (inner→edge; `GAL_INTERP_NP_RES` points per resonant/extension
 cell, `GAL_INTERP_NP` elsewhere, plus the edge point ψ=psihigh) and evaluate ξ AND the analytic ξ′ over
 it for every solution column. Port of `gal_output_solution` (gal.f); the binary/ASCII writes
 and the `b_flag` ξ→b^ψ conversion (off by default) are not ported — we keep ξ itself.
+
+When `delta` (the `(nsol, 2·msing)` small-solution coefficient matrix) is supplied, the cut solution
+`xi_cut` is evaluated on the same grid; it is the background of the composite inner-region solution
+built by `gal_match_rpec`.
 """
 function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
-    intr::ForceFreeStatesInternal, profiles, psihigh::Float64)
+    intr::ForceFreeStatesInternal, profiles, psihigh::Float64;
+    delta::Union{Nothing,AbstractMatrix{ComplexF64}}=nothing)
 
     mpert = intr.numpert_total
     msing = length(ws.intvl) - 1
@@ -160,6 +187,7 @@ function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sin
     ngrid = length(psi)
     xi = zeros(ComplexF64, mpert, ngrid, ws.nsol)
     xi_deriv = zeros(ComplexF64, mpert, ngrid, ws.nsol)
+    xi_cut = delta === nothing ? zeros(ComplexF64, 0, 0, 0) : zeros(ComplexF64, mpert, ngrid, ws.nsol)
     for isol in 1:ws.nsol
         iintvl = 0
         icell = 1
@@ -169,7 +197,31 @@ function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sin
             @views xi[:, ip, isol] .= sol
             @views xi_deriv[:, ip, isol] .= dsol
         end
+        delta === nothing && continue
+        iintvl = 0
+        icell = 1
+        for ip in 1:ngrid
+            issing[ip] && continue
+            solc, _, iintvl, icell = gal_get_solution(ws, asymps, sings, intr, psi[ip], iintvl, icell, isol;
+                cut_delta=delta)
+            @views xi_cut[:, ip, isol] .= solc
+        end
     end
 
-    return GalerkinSolution(psi, q, issing, xi, xi_deriv)
+    # ψ span of the resonant + extension cells flanking each surface: outside it the cut subtracts
+    # nothing, so the composite inner-region solution is only defined within these bounds
+    # (Fortran `outs%xext`).
+    cut_range = zeros(Float64, 0, 0)
+    if delta !== nothing
+        cut_range = hcat(fill(Inf, msing), fill(-Inf, msing))
+        for iintvl in 0:msing, icell in 1:ws.nx
+            cell = ws.intvl[iintvl+1].cells[icell]
+            cell.etype == GCT_NONE && continue
+            js = _cell_jsing(cell, iintvl)
+            cut_range[js, 1] = min(cut_range[js, 1], cell.x[1])
+            cut_range[js, 2] = max(cut_range[js, 2], cell.x[2])
+        end
+    end
+
+    return GalerkinSolution(psi, q, issing, xi, xi_deriv, xi_cut, cut_range)
 end

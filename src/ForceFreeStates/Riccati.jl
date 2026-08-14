@@ -142,8 +142,10 @@ function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range;
     isempty(idx_range) && return Phi
     for i in idx_range
         p = propagators[i]
+        #! format: off
         Phi_i = [p.block_upper_ic[:,:,1]  p.block_lower_ic[:,:,1];
                  p.block_upper_ic[:,:,2]  p.block_lower_ic[:,:,2]]
+        #! format: on
         Phi = Phi_i * Phi
         if condition
             condition_propagator!(Phi, N)
@@ -332,6 +334,12 @@ function compute_delta_prime_matrix!(
 
     if debug
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
+    end
+
+    # rpec coil-response block: needs the S-axis row layout that `_solve_bvp_edge_coil` assumes
+    # for its edge rows, and a vacuum edge in the assembled matrix (col_edge in junc_rows).
+    if use_S_axis && wv !== nothing
+        intr.delta_coil = _solve_bvp_edge_coil(M, col_edge, msing, N, ipert_all)
     end
 
     deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
@@ -633,6 +641,30 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     end
     @assert row_offset == nMat "Row count mismatch: expected $nMat, got $row_offset"
     return M, nMat, col_edge
+end
+
+# Coil-response block for the Eq. (37) edge [Glasser-Kolemen 2018 PoP 25, 032501]: impose the rpec edge
+# boundary condition — identity edge plus a unit source per poloidal mode, matching RDCON's
+# `gal_set_boundary` rpec branch — then read the small-solution (+N slot) coefficient at every surface.
+# The BC is the same for every edge mode, so the matrix is factorized once and all N modes are solved
+# together as columns of one right-hand side. Returns delta_coil (2·msing × N), rows = surface side.
+function _solve_bvp_edge_coil(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
+    nMat = size(M, 1)
+    bot = (nMat-2msing-N+1):(nMat-2msing)   # Eq. (38) bottom rows, carrying the W_V block
+    Mc = copy(M)
+    Mc[bot, :] .= 0
+    Mc[bot, col_edge] .= I(N)               # Dirichlet edge: the edge coefficients equal the source
+    B = zeros(ComplexF64, nMat, N)
+    B[bot, :] .= I(N)                       # unit drive, one column per edge poloidal mode
+    X = lu(Mc) \ B
+    delta_coil = zeros(ComplexF64, 2msing, N)
+    for j in 1:msing
+        row_left = _col_left(j, N)[ipert_all[j]+N]
+        row_right = _col_right(j, N)[ipert_all[j]+N]
+        @views delta_coil[2j-1, :] .= X[row_left, :]
+        @views delta_coil[2j, :] .= X[row_right, :]
+    end
+    return delta_coil
 end
 
 # Fallback BVP assembly with FM-based axis BC (used when no Riccati S matrices are available).
@@ -1559,8 +1591,10 @@ Glasser-Kolemen (2018) Phys. Plasmas 25, 032501 Eq. 33.
 function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
     N = size(odet.u, 1)
     # Assemble 2N×2N backward FM Φ_bwd
-    Φ = [prop.block_upper_ic[:,:,1] prop.block_lower_ic[:,:,1];
-         prop.block_upper_ic[:,:,2] prop.block_lower_ic[:,:,2]]
+    #! format: off
+    Φ = [prop.block_upper_ic[:,:,1]  prop.block_lower_ic[:,:,1];
+         prop.block_upper_ic[:,:,2]  prop.block_lower_ic[:,:,2]]
+    #! format: on
     # Φ_bwd maps state at psi_end → psi_start (well-conditioned).
     # We want Φ_fwd = Φ_bwd⁻¹ to advance state from psi_start → psi_end.
     # Solving Φ_bwd · x = [U₁_old; U₂_old] gives x = Φ_bwd⁻¹ · [U₁_old; U₂_old].
