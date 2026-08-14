@@ -237,8 +237,13 @@ function main_from_inputs(
             density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
             ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
             chi1=2π * equil.psio)
-        if !isempty(kf_ctrl.ion_species)
-            kf_species = Equilibrium.resolve_ntv_species(kinetic_file, kf_ctrl.ion_species;
+        # `electron=true` always means electrons IN ADDITION to the ions (the Fortran PENTRC
+        # either/or was an IO limitation, not physics), so it routes through the species
+        # resolver even with an empty ion_species list (single main ion from zi/mi).
+        if !isempty(kf_ctrl.ion_species) || kf_ctrl.electron
+            speclist = isempty(kf_ctrl.ion_species) ?
+                       [KineticForces.IonSpecies(; z=kf_ctrl.zi, m=kf_ctrl.mi, fraction=1.0)] : kf_ctrl.ion_species
+            kf_species = Equilibrium.resolve_ntv_species(kinetic_file, speclist;
                 electron=kf_ctrl.electron, zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp,
                 density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
                 ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
@@ -656,8 +661,8 @@ function main_from_inputs(
             kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
             KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
 
-            if isempty(kf_ctrl.ion_species)
-                # Single main ion (from zi/mi) — unchanged path.
+            if kf_species === nothing
+                # Single main ion (from zi/mi), no electrons — unchanged path.
                 kf_state = KineticForces.KineticForcesState()
                 KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
                 if kf_ctrl.write_outputs_to_HDF5

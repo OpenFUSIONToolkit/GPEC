@@ -90,6 +90,11 @@ Configures which NTV methods to run, species parameters, tolerances, and output 
 file's `n_i` column is the **total** main-ion density, split across species by their `fraction`
 or explicit `density` profile.
 
+`electron = true` always adds the electron NTV **in addition to** the ion species, on both the
+single-ion and multi-ion paths (a single-ion + electron run resolves as the species pair
+{main ion, electron} plus any quasineutrality impurity, summed). The legacy Fortran PENTRC
+electron-*instead-of*-ions behaviour was an IO limitation and is not reproduced.
+
 Constructed via keyword arguments or from a TOML dict:
 
 ```julia
@@ -125,7 +130,7 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     mi::Int = 2                     # Ion mass (proton masses)
     zimp::Int = 6                   # Impurity charge
     mimp::Int = 12                  # Impurity mass
-    electron::Bool = false          # Include electron contribution
+    electron::Bool = false          # Add electron NTV in addition to the ion species (see docstring)
     ion_species::Vector{IonSpecies} = IonSpecies[]   # multi-main-ion set (see docstring); empty ⇒ single ion
 
     # Mode numbers

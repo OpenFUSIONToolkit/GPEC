@@ -72,6 +72,14 @@ using HDF5
 
         # Exactly one of {fraction, density} required.
         @test_throws ErrorException EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2)]; zimp=6, mimp=12)
+
+        # Unified electron semantics: a single-ion + electron run resolves as
+        # {main ion, impurity, electron} — electrons in ADDITION to the ions.
+        spe = EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=true, zimp=6, mimp=12)
+        @test length(spe) == 3
+        @test !spe[1].electron && spe[1].z == 1                  # main ion unchanged
+        @test spe[1].profiles.ni_spline(0.5) ≈ main.profiles.ni_spline(0.5)
+        @test spe[end].electron                                  # electron appended
         rm(f)
     end
 
