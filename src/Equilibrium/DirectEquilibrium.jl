@@ -434,7 +434,7 @@ function _build_psi_grid(equil_params, psilow, psihigh)
         N_core = round(Int, mpsi * log_core / log_total)
         N_mid = mpsi - N_edge - N_core
         make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
-    elseif equil_params.grid_type == "ldp"
+    elseif equil_params.grid_type == "rational_packed"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
     elseif equil_params.grid_type == "pow1"
         # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
@@ -532,7 +532,7 @@ robustness.
         rewind!(pool, Float64)
     end
 
-    # Temporary splines for q0 extrapolation and optional newq0 revision
+    # Temporary splines for q0 extrapolation and optional q0_override revision
     profiles = ProfileSplines(
         psi_nodes,
         sq_nodes[:, 1],  # F * 2π
@@ -543,17 +543,17 @@ robustness.
     # q(0) by linear extrapolation from innermost surface
     q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
     if q0 <= 0.0
-        @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
+        @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use q0_override to override."
     end
-    if equil_params.newq0 == -1
-        equil_params.newq0 = -q0
+    if equil_params.q0_override == -1
+        equil_params.q0_override = -q0
     end
-    if equil_params.newq0 != 0.0
-        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", equil_params.newq0))"
+    if equil_params.q0_override != 0.0
+        @info "Revising q-profile for q0_override = $(@sprintf("%.3f", equil_params.q0_override))"
         f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
-        f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
+        f0fac = f0^2 * ((equil_params.q0_override / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.newq0)
+            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.q0_override)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac

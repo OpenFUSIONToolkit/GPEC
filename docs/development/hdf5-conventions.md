@@ -38,7 +38,7 @@ Top level (10 groups):
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
 
-Reserved (documented, not yet written): `ForceFreeStates/Solutions/RiccatiIntegration/` — the third integrator backend slot alongside `ForwardIntegration` and `GalerkinIntegration`.
+Reserved (documented, not yet written): `ForceFreeStates/Solutions/RiccatiIntegration/` — the third integrator backend slot alongside `ForwardIntegration` and `GalerkinIntegration`, matching the `[ForceFreeStates]` `integrator = "riccati"` option.
 
 ## Metadata contract (self-describing datasets)
 

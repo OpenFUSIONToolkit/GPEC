@@ -60,7 +60,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     mtheta = config.mtheta
     psilow = config.psilow
     psihigh = config.psihigh
-    newq0 = config.newq0
+    q0_override = config.q0_override
 
     # c-----------------------------------------------------------------------
     # c     allocate and define local arrays.
@@ -155,7 +155,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         N_core = round(Int, mpsi * log_core / log_total)
         N_mid = mpsi - N_edge - N_core
         sq_xs = make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
-    elseif grid_type == "ldp"
+    elseif grid_type == "rational_packed"
         if mpsi == 0
             mpsi = 128
         end
@@ -295,16 +295,16 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     f1_sq_lo = sq_deriv(sq_xs[1])
     f1_sq_hi = sq_deriv(sq_xs[end])
     q0 = f_sq[1, 4] - f1_sq_lo[4] * sq_xs[1]
-    if newq0 == -1
-        newq0 = -q0
+    if q0_override == -1
+        q0_override = -q0
     end
 
-    if newq0 != 0
+    if q0_override != 0
         f0 = f_sq[1, 2] - f1_sq_lo[2] * sq_xs[1]
-        f0fac = f0^2 * ((newq0 / q0)^2 - 1)
-        q0 = newq0
+        f0fac = f0^2 * ((q0_override / q0)^2 - 1)
+        q0 = q0_override
         for ipsi in 0:mpsi
-            ffac = sqrt(1 + f0fac / f_sq[ipsi+1, 1]^2) * sign(newq0)
+            ffac = sqrt(1 + f0fac / f_sq[ipsi+1, 1]^2) * sign(q0_override)
             sq_fs[ipsi+1, 1] *= ffac
             sq_fs[ipsi+1, 4] *= ffac
             rzphi_fs[ipsi+1, :, 3] *= ffac

@@ -40,12 +40,12 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `R0`       | Major radius [m]                                                  |
 | `bt`       | Toroidal field [T]                                                |
 | `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention) |
-| `dr_val`   | Radial width parameter at surface (input to dc_tmp)               |
-| `dgeo_val` | Geometric Δ (Shafranov shift factor)                              |
+| `delta_crit_D_R`   | Radial width parameter at surface (input to dc_tmp)               |
+| `delta_crit_geo_factor` | Geometric Δ (Shafranov shift factor)                              |
 | `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                |
 | `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
 | `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
-| `dc_type`  | Selector for `dc_tmp` formula                                     |
+| `delta_crit_type`  | Selector for `dc_tmp` formula                                     |
 
 The complex normalized growth rate `Q = ω + iγ` is **not** stored here;
 it is passed as a separate argument to `solve_inner`.
@@ -77,19 +77,19 @@ Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     R0::Float64
     bt::Float64
     sval_r::Float64
-    dr_val::Float64 = 0.0
-    dgeo_val::Float64 = 0.0
+    delta_crit_D_R::Float64 = 0.0
+    delta_crit_geo_factor::Float64 = 0.0
     eta::Float64
     d_beta::Float64
 
     # Critical-Δ offset
     dc_tmp::Float64 = 0.0
-    dc_type::Symbol = :none
+    delta_crit_type::Symbol = :none
 end
 
-# Allowed dc_type values for the critical-Δ offset. `:none` is the default
+# Allowed delta_crit_type values for the critical-Δ offset. `:none` is the default
 # `dc_tmp = 0` branch.
-const ALLOWED_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
+const ALLOWED_DELTA_CRIT_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 
 """
     r_based_shear(rs, q, dq_dpsi, da_dpsi) -> Float64
@@ -118,14 +118,14 @@ end
 
 # Internal: solve the Wd self-consistency loop for the chi_parallel-based
 # critical Δ (Connor-Hastie-Helander 2015). Returns dc_tmp as a Float64.
-function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
+function _solve_dc_tmp(; delta_crit_type::Symbol, delta_crit_D_R::Real, delta_crit_geo_factor::Real,
     chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
     rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
     max_iter::Integer=100, tol::Real=1e-10)
-    dc_type in ALLOWED_DC_TYPES ||
-        throw(ArgumentError("SLAYERParameters: unknown dc_type=$dc_type. " *
-                            "Allowed: $(ALLOWED_DC_TYPES)"))
-    (dc_type === :none || dr_val == 0.0) && return 0.0
+    delta_crit_type in ALLOWED_DELTA_CRIT_TYPES ||
+        throw(ArgumentError("SLAYERParameters: unknown delta_crit_type=$delta_crit_type. " *
+                            "Allowed: $(ALLOWED_DELTA_CRIT_TYPES)"))
+    (delta_crit_type === :none || delta_crit_D_R == 0.0) && return 0.0
 
     vte = sqrt(2.0 * t_e * E_CHG / M_E)
     chi_par_smfp = (1.581 * tau_ee * vte^2) / (1.0 + 0.2535 * zeff)
@@ -150,15 +150,15 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * sval_r * Wd)
     chi_par = (chi_par_smfp * chi_par_lmfp) / (chi_par_smfp + chi_par_lmfp)
 
-    if dc_type === :lar
-        return 0.5 * (-dr_val) * π^1.5 *
+    if delta_crit_type === :lar
+        return 0.5 * (-delta_crit_D_R) * π^1.5 *
                (chi_par / chi_perp)^0.25 *
                sqrt((n_tor * sval_r) / (R0 * rs))
-    elseif dc_type === :rfitzp
-        return -(sqrt(2.0) * π^1.5 * dr_val) / Wd
-    elseif dc_type === :toroidal
-        return 0.5 * (-dr_val) * π^1.5 *
-               (chi_par / chi_perp)^0.25 * dgeo_val
+    elseif delta_crit_type === :fitzpatrick
+        return -(sqrt(2.0) * π^1.5 * delta_crit_D_R) / Wd
+    elseif delta_crit_type === :toroidal
+        return 0.5 * (-delta_crit_D_R) * π^1.5 *
+               (chi_par / chi_perp)^0.25 * delta_crit_geo_factor
     end
     return 0.0
 end
@@ -168,8 +168,8 @@ end
                         qval, sval_r, bt, rs, R0, mu_i, zeff,
                         chi_perp, chi_tor,
                         m, n,
-                        dr_val=0.0, dgeo_val=0.0,
-                        dc_type=:none, ising=0,
+                        delta_crit_D_R=0.0, delta_crit_geo_factor=0.0,
+                        delta_crit_type=:none, ising=0,
                         resistivity_model=SauterNeoModel(),
                         f_trap=nothing, nu_e_star=nothing,
                         R_major_eff=nothing,
@@ -199,8 +199,8 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `zeff`    -- effective charge
   - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
-  - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
-  - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
+  - `delta_crit_D_R`, `delta_crit_geo_factor` -- inputs for the critical-Δ formula
+  - `delta_crit_type` -- one of `:none`, `:lar`, `:fitzpatrick`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
 
 # Resistivity kwargs
@@ -246,8 +246,8 @@ function slayer_parameters(;
     rs::Real, R0::Real, mu_i::Real, zeff::Real,
     chi_perp::Real, chi_tor::Real,
     m::Integer, n::Integer,
-    dr_val::Real=0.0, dgeo_val::Real=0.0,
-    dc_type::Symbol=:none, ising::Integer=0,
+    delta_crit_D_R::Real=0.0, delta_crit_geo_factor::Real=0.0,
+    delta_crit_type::Symbol=:none, ising::Integer=0,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     f_trap::Union{Real,Nothing}=nothing,
     nu_e_star::Union{Real,Nothing}=nothing,
@@ -344,7 +344,7 @@ function slayer_parameters(;
     delta_n = lu^(1.0 / 3.0) / rs
 
     # Critical-Δ offset from chi_parallel matching
-    dc_tmp = _solve_dc_tmp(; dc_type=dc_type, dr_val=dr_val, dgeo_val=dgeo_val,
+    dc_tmp = _solve_dc_tmp(; delta_crit_type=delta_crit_type, delta_crit_D_R=delta_crit_D_R, delta_crit_geo_factor=delta_crit_geo_factor,
         chi_perp=chi_perp, t_e=t_e, zeff=zeff,
         tau_ee=tau_ee, rs=rs, R0=R0, sval_r=sval_r,
         n_tor=n)
@@ -356,8 +356,8 @@ function slayer_parameters(;
         Q_e=Q_e, Q_i=Q_i, iota_e=iota_e,
         tauk=tauk, tau_r=tau_r, delta_n=delta_n,
         rs=rs, R0=R0, bt=bt, sval_r=sval_r,
-        dr_val=dr_val, dgeo_val=dgeo_val,
+        delta_crit_D_R=delta_crit_D_R, delta_crit_geo_factor=delta_crit_geo_factor,
         eta=eta, d_beta=d_beta,
-        dc_tmp=dc_tmp, dc_type=dc_type
+        dc_tmp=dc_tmp, delta_crit_type=delta_crit_type
     )
 end

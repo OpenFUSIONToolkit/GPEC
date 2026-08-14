@@ -80,8 +80,13 @@ using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag")
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "nstep", "diagnose_ca")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
+
+# Old→new TOML key spellings, accepted with a warning until removal after v2.0.0.
+const _RENAMED_EQUIL_KEYS = ("newq0" => "q0_override", "use_galgrid" => "use_galerkin_grid")
+const _RENAMED_FFS_KEYS = ("parallel_threads" => "integrator_threads", "psiedge" => "dW_edge_scan_start")
+const _RENAMED_PE_KEYS = ("reg_spot" => "regularization_width",)
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
 # instead of throwing an unknown-keyword error; warn so the removal is not silent.
@@ -91,6 +96,44 @@ function _drop_deprecated_keys!(table, deprecated_keys, section::String)
             @warn "`$k` in [$section] is deprecated and ignored; please remove it from gpec.toml."
             delete!(table, k)
         end
+    end
+    return table
+end
+
+# Remap old→new key spellings in a parsed gpec.toml section so legacy decks keep working;
+# warn on each hit, and let an explicitly set new key win over its old alias.
+function _rename_keys!(table, renames, section::String)
+    for (old, new) in renames
+        haskey(table, old) || continue
+        @warn "`$old` in [$section] was renamed to `$new`; the old key is deprecated and will be removed after v2.0.0."
+        haskey(table, new) || (table[new] = table[old])
+        delete!(table, old)
+    end
+    return table
+end
+
+# Remap a deprecated value of an enum-like key (old → new spelling), warning on each hit.
+function _rename_value!(table, key::String, old, new, section::String)
+    get(table, key, nothing) == old || return table
+    @warn "`$key = \"$old\"` in [$section] is deprecated; use `$key = \"$new\"`. The old value will be removed after v2.0.0."
+    table[key] = new
+    return table
+end
+
+# The use_parallel/use_riccati boolean pair was replaced by the `integrator` enum; map the
+# old flags onto the equivalent algorithm, mirroring the old dispatch order (parallel wins
+# over riccati, both false means serial) including the old use_parallel=true default.
+function _remap_integrator_keys!(table)
+    (haskey(table, "use_parallel") || haskey(table, "use_riccati")) || return table
+    implied = get(table, "use_parallel", true) ? "stride" :
+              (get(table, "use_riccati", false) ? "riccati" : "serial")
+    delete!(table, "use_parallel")
+    delete!(table, "use_riccati")
+    if haskey(table, "integrator")
+        @warn "`use_parallel`/`use_riccati` in [ForceFreeStates] are deprecated and ignored because `integrator` is also set."
+    else
+        @warn "`use_parallel`/`use_riccati` in [ForceFreeStates] were replaced by the `integrator` enum; assuming `integrator = \"$implied\"`. The old keys will be removed after v2.0.0."
+        table["integrator"] = implied
     end
     return table
 end
@@ -133,6 +176,7 @@ function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothi
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
 
     haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
+    _rename_keys!(inputs["Equilibrium"], _RENAMED_EQUIL_KEYS, "Equilibrium")
     _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
 
@@ -191,8 +235,16 @@ function main_from_inputs(
     # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
+    _rename_keys!(ffs_table, _RENAMED_FFS_KEYS, "ForceFreeStates")
+    _remap_integrator_keys!(ffs_table)
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
+    ctrl.integrator in ("stride", "riccati", "serial") ||
+        error("[ForceFreeStates] integrator = \"$(ctrl.integrator)\" is not one of \"stride\", \"riccati\", \"serial\"")
+    # SLAYER consumes the STRIDE Δ' matrix; fail at config time rather than after a long run.
+    if haskey(inputs, "SLAYER") && get(inputs["SLAYER"], "enabled", false) === true && ctrl.integrator != "stride"
+        error("[SLAYER] requires the STRIDE Δ' matrix: set integrator = \"stride\" in [ForceFreeStates] (got \"$(ctrl.integrator)\")")
+    end
 
     # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     intr.nlow, intr.nhigh = ctrl.nn_low, ctrl.nn_high
@@ -225,6 +277,8 @@ function main_from_inputs(
     # does not need kinetic_profiles, but the post-PE block always does, so we load
     # whenever a [KineticForces] section is present or the stability path requests the
     # calculated source. psio is invariant across grid re-formation.
+    haskey(inputs, "KineticForces") &&
+        _rename_value!(inputs["KineticForces"], "f0type", "jkp", "park", "KineticForces")
     kf_ctrl =
         haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(;
@@ -582,6 +636,7 @@ function main_from_inputs(
             ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
         end
 
+        _rename_keys!(inputs["PerturbedEquilibrium"], _RENAMED_PE_KEYS, "PerturbedEquilibrium")
         pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(;
             (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...
         )
@@ -828,7 +883,7 @@ function write_outputs_to_HDF5(
         out_h5["$fwd/xi_s"] = odet.xi_s_store
         out_h5["$fwd/crit"] = odet.crit_store
 
-        # Write edge stability scan data (only present when psiedge < psilim).
+        # Write edge stability scan data (only present when dW_edge_scan_start < psilim).
         # Generalized (W, N) pencil energies — power-normalized, Jacobian-invariant; these are
         # the values findmax_dW_edge! uses to choose the truncation point.
         if !isempty(odet.edge_scan.psi)

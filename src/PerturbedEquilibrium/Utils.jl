@@ -260,7 +260,7 @@ const PE_H5_ANNOTATIONS = [
     "Response/xi_cova_theta" => (; long_name="covariant poloidal displacement ξ_θ", units="m^2", dims=("psi", "mode")),
     "Response/xi_cova_zeta" => (; long_name="covariant toroidal displacement ξ_ζ", units="m^2", dims=("psi", "mode")),
     "Response/clebsch_psi" => (; long_name="Clebsch displacement component ξ^ψ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode")),
-    "Response/clebsch_psi1" => (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+reg_spot²))", dims=("psi", "mode")),
+    "Response/clebsch_psi1" => (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+regularization_width²))", dims=("psi", "mode")),
     "Response/clebsch_alpha" => (; long_name="Clebsch displacement component ξ^α/χ₁ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode")),
     "Response/xi_n" => (; long_name="physical normal displacement ξ_n", units="m", dims=("psi", "mode")),
     "Response/xi_R" => (; long_name="cylindrical displacement component ξ_R (mode space)", units="m", dims=("psi", "mode")),

@@ -162,7 +162,7 @@ end
 Plot the edge stability scan energy components (et, ep, ev, evonly) vs ψ_N.
 
 The edge scan evaluates `δW_total = δW_plasma + δW_vacuum` at each stored integration step
-in the region [psiedge, psilim], with the plasma boundary swept from psiedge to psilim.
+in the region [dW_edge_scan_start, psilim], with the plasma boundary swept from dW_edge_scan_start to psilim.
 A positive et indicates stability; the truncation point is chosen at the peak et.
 
 Four subplots are shown:
@@ -177,7 +177,7 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file produced with `psiedge < psilim`
+  - `h5path`: Path to a GPEC HDF5 output file produced with `dW_edge_scan_start < psilim`
 
 ### Keyword arguments
 
@@ -204,7 +204,7 @@ function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwar
     end
 
     if !has_scan
-        @warn "No edge_scan group in $h5path. Run with psiedge < psilim to generate it."
+        @warn "No edge_scan group in $h5path. Run with dW_edge_scan_start < psilim to generate it."
         return nothing
     end
 

@@ -14,7 +14,7 @@ psihigh = 0.9995               # Upper limit of normalized flux coordinate
 mpsi = 0                       # Number of radial grid points (0 = auto-compute from psi_accuracy)
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
 mtheta = 256                   # Number of poloidal grid points
-newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+q0_override = 0.0                    # Override for on-axis safety factor (0 = use input value)
 etol = 1e-10                   # Error tolerance for equilibrium solver
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
@@ -33,7 +33,7 @@ force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                 # Edge dW scan band: diagnostic dW(ψ) computed for ψ ∈ [psiedge, psilim]; integration domain set by qhigh / psihigh / dmlim
+dW_edge_scan_start = 0.99                 # Edge dW scan band: diagnostic dW(ψ) computed for ψ ∈ [dW_edge_scan_start, psilim]; integration domain set by qhigh / psihigh / dmlim
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
@@ -52,8 +52,8 @@ singfac_min = 1e-4             # Fractional distance from rational q at which id
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
 # Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks SingularSurfaces/delta_prime_matrix)
-parallel_threads      = 1      # serial/bit-deterministic BVP — keeps the regression Δ' (and hence γ) reproducible
+integrator            = "stride"   # Integration algorithm: "stride" FM-propagator BVP (unlocks SingularSurfaces/delta_prime_matrix)
+integrator_threads    = 1      # serial/bit-deterministic BVP — keeps the regression Δ' (and hence γ) reproducible
 populate_dense_xi     = false  # No PerturbedEquilibrium here; the dense EL pass has no consumer (auto-disabled under force_termination anyway). SLAYER needs only delta_prime_matrix from the parallel BVP.
 set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n
@@ -69,7 +69,7 @@ enabled                 = true       # Run the SLAYER tearing-mode analysis
 inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
 scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive refinement) or "brute_force"
 coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
-dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar", "rfitzp", or "toroidal"
+delta_crit_type         = "none"     # Critical-Δ offset selector: "none", "lar", "fitzpatrick", or "toroidal"
 mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
 zeff                    = 1.0        # Effective charge
 chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)

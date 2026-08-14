@@ -6,7 +6,7 @@
 
     # Reference inputs: a simple deuterium plasma case suitable for
     # hand-checking the SLAYER params formulas.
-    function _ref_kwargs(; dr_val=0.0, dc_type=:none)
+    function _ref_kwargs(; delta_crit_D_R=0.0, delta_crit_type=:none)
         return (
             n_e=5.0e19, t_e=1000.0, t_i=1000.0,
             omega=0.0, omega_e=1.0e4, omega_i=5.0e3,
@@ -14,7 +14,7 @@
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
             chi_perp=1.0, chi_tor=1.0,
             m=2, n=1,
-            dr_val=dr_val, dgeo_val=0.5, dc_type=dc_type,
+            delta_crit_D_R=delta_crit_D_R, delta_crit_geo_factor=0.5, delta_crit_type=delta_crit_type,
             ising=3
         )
     end
@@ -31,8 +31,8 @@
         @test p.R0 == 1.7
         @test p.bt == 2.0
         @test p.sval_r == 1.0
-        @test p.dc_tmp == 0.0   # dr_val == 0 ⇒ no offset
-        @test p.dc_type === :none
+        @test p.dc_tmp == 0.0   # delta_crit_D_R == 0 ⇒ no offset
+        @test p.delta_crit_type === :none
 
         # Trivially exact ratios
         @test p.tau ≈ 1.0
@@ -91,34 +91,34 @@
         @test p.delta_n ≈ p.lu^(1 / 3) / p.rs rtol = 1e-12
     end
 
-    @testset "Test 1b: dc_tmp formulas activate when dr_val ≠ 0" begin
-        # All four dc_type branches must produce finite, non-NaN values
+    @testset "Test 1b: dc_tmp formulas activate when delta_crit_D_R ≠ 0" begin
+        # All four delta_crit_type branches must produce finite, non-NaN values
         # and respect the signs/structure of the formulas in
         # the SLAYER params dc_tmp formulas.
-        p_none = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:none)...)
-        @test p_none.dc_tmp == 0.0   # :none ignores dr_val
+        p_none = slayer_parameters(; _ref_kwargs(; delta_crit_D_R=0.01, delta_crit_type=:none)...)
+        @test p_none.dc_tmp == 0.0   # :none ignores delta_crit_D_R
 
-        p_lar = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:lar)...)
-        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:rfitzp)...)
-        p_tor = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:toroidal)...)
+        p_lar = slayer_parameters(; _ref_kwargs(; delta_crit_D_R=0.01, delta_crit_type=:lar)...)
+        p_rf = slayer_parameters(; _ref_kwargs(; delta_crit_D_R=0.01, delta_crit_type=:fitzpatrick)...)
+        p_tor = slayer_parameters(; _ref_kwargs(; delta_crit_D_R=0.01, delta_crit_type=:toroidal)...)
 
         @test isfinite(p_lar.dc_tmp)
         @test isfinite(p_rf.dc_tmp)
         @test isfinite(p_tor.dc_tmp)
-        # dr_val > 0 with the (-dr_val) prefactor ⇒ negative dc_tmp for
-        # :lar, :rfitzp, :toroidal branches.
+        # delta_crit_D_R > 0 with the (-delta_crit_D_R) prefactor ⇒ negative dc_tmp for
+        # :lar, :fitzpatrick, :toroidal branches.
         @test p_lar.dc_tmp < 0
         @test p_rf.dc_tmp < 0
         @test p_tor.dc_tmp < 0
 
-        # Sign flips with sign of dr_val
+        # Sign flips with sign of delta_crit_D_R
         p_lar_neg = slayer_parameters(;
-            _ref_kwargs(; dr_val=-0.01, dc_type=:lar)...)
+            _ref_kwargs(; delta_crit_D_R=-0.01, delta_crit_type=:lar)...)
         @test sign(p_lar_neg.dc_tmp) == -sign(p_lar.dc_tmp)
 
-        # Reject unknown dc_type
+        # Reject unknown delta_crit_type
         @test_throws ArgumentError slayer_parameters(;
-            _ref_kwargs(; dr_val=0.01, dc_type=:bogus)...)
+            _ref_kwargs(; delta_crit_D_R=0.01, delta_crit_type=:bogus)...)
     end
 
     @testset "Test 1c: SLAYERParameters direct kwarg construction" begin
@@ -134,8 +134,8 @@
         )
         @test p.tau == 1.0
         @test p.dc_tmp == 0.0
-        @test p.dc_type === :none
-        @test p.dr_val == 0.0
+        @test p.delta_crit_type === :none
+        @test p.delta_crit_D_R == 0.0
         @test p.ising == 0
     end
 

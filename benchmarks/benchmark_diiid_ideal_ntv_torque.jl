@@ -118,12 +118,12 @@ function build_benchmark_tomldir(eq_file::String)
 eq_filename = "$eq_name"
 eq_type = "efit"
 jac_type = "hamada"
-grid_type = "ldp"
+grid_type = "rational_packed"
 psilow = 1e-4
 psihigh = 0.993
 mpsi = 128
 mtheta = 256
-newq0 = 0
+q0_override = 0.0
 etol = 1e-7
 
 [Wall]
@@ -134,7 +134,7 @@ local_stability_flag = true
 vac_flag = true
 force_termination = false
 
-psiedge = 1.00                # No edge-scan truncation (dmlim mechanism removed in develop)
+dW_edge_scan_start = 1.00                # No edge-scan truncation (dmlim mechanism removed in develop)
 qlow = 1.02
 qhigh = 1e3
 sing_start = 0

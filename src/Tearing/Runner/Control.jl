@@ -21,8 +21,8 @@ constructor.
   - `scan_mode`     -- `:amr` (default) or `:brute_force`
   - `coupling_mode` -- `:uncoupled` (default, per-surface) or `:coupled`
     (multi-surface determinant)
-  - `dc_type`       -- critical-Δ offset selector, one of `:none`, `:lar`,
-    `:rfitzp`, `:toroidal` (χ_‖-matching critical-Δ formulas,
+  - `delta_crit_type`       -- critical-Δ offset selector, one of `:none`, `:lar`,
+    `:fitzpatrick`, `:toroidal` (χ_‖-matching critical-Δ formulas,
     Connor-Hastie-Helander 2015)
   - `msing_max`     -- number of surfaces to include in the coupled
     determinant (default 3; capped at `length(sings)` at runtime)
@@ -36,10 +36,10 @@ constructor.
     diffusivity [m²/s], used only when the kinetic file carries no usable
     `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
     file's χ⊥(ψ)/χ_φ(ψ) take precedence
-  - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
-    auto-derives them from the equilibrium: `dr_val` from the resistive
-    interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
-    toroidal geometric factor (required only by `dc_type=:toroidal`). Supply a
+  - `delta_crit_D_R`, `delta_crit_geo_factor`  -- critical-Δ formula inputs. `nothing` (default)
+    auto-derives them from the equilibrium: `delta_crit_D_R` from the resistive
+    interchange index `D_R = E + F + H²` at each surface, `delta_crit_geo_factor` from the
+    toroidal geometric factor (required only by `delta_crit_type=:toroidal`). Supply a
     scalar only to override the auto-derivation; an explicit `0.0` disables the
     critical-Δ offset (Δ_crit ≡ 0)
   - `theta_sample` -- poloidal angle at which to sample minor radius
@@ -99,7 +99,7 @@ there is one consistent interface for resistive and kinetic profiles.
     inner_model::Symbol = :slayer_fitzpatrick
     scan_mode::Symbol = :amr
     coupling_mode::Symbol = :uncoupled
-    dc_type::Symbol = :none
+    delta_crit_type::Symbol = :none
     msing_max::Int = 3
 
     bt::Union{Float64,Nothing} = nothing
@@ -107,8 +107,8 @@ there is one consistent interface for resistive and kinetic profiles.
     zeff::Float64 = 1.0
     chi_perp::Float64 = 1.0
     chi_tor::Float64 = 1.0
-    dr_val::Union{Float64,Nothing} = nothing
-    dgeo_val::Union{Float64,Nothing} = nothing
+    delta_crit_D_R::Union{Float64,Nothing} = nothing
+    delta_crit_geo_factor::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0
     resistivity_model::Symbol = :sauter
     lnLambda_form::Symbol = :nrl
@@ -158,7 +158,7 @@ end
 const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
-const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
+const _VALID_DELTA_CRIT_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
@@ -172,9 +172,9 @@ function validate(ctrl::SLAYERControl)
     ctrl.coupling_mode in _VALID_COUPLING_MODES ||
         throw(ArgumentError("SLAYERControl: coupling_mode=$(ctrl.coupling_mode) " *
                             "not in $(_VALID_COUPLING_MODES)"))
-    ctrl.dc_type in _VALID_DC_TYPES ||
-        throw(ArgumentError("SLAYERControl: dc_type=$(ctrl.dc_type) " *
-                            "not in $(_VALID_DC_TYPES)"))
+    ctrl.delta_crit_type in _VALID_DELTA_CRIT_TYPES ||
+        throw(ArgumentError("SLAYERControl: delta_crit_type=$(ctrl.delta_crit_type) " *
+                            "not in $(_VALID_DELTA_CRIT_TYPES)"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
         throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
                             "not in $(_VALID_RESISTIVITY_MODELS)"))
@@ -227,6 +227,20 @@ function slayer_control_from_toml(section::AbstractDict)
         end
     end
 
+    # Deprecated [SLAYER] spellings: renamed keys and the :rfitzp value alias, accepted
+    # with a warning until removal after v2.0.0.
+    for (old, new) in ("dc_type" => "delta_crit_type", "dr_val" => "delta_crit_D_R",
+        "dgeo_val" => "delta_crit_geo_factor")
+        haskey(flat, old) || continue
+        @warn "`$old` in [SLAYER] was renamed to `$new`; the old key is deprecated and will be removed after v2.0.0."
+        haskey(flat, new) || (flat[new] = flat[old])
+        delete!(flat, old)
+    end
+    if get(flat, "delta_crit_type", "") in ("rfitzp", :rfitzp)
+        @warn "`delta_crit_type = \"rfitzp\"` in [SLAYER] is deprecated; use `delta_crit_type = \"fitzpatrick\"`. The old value will be removed after v2.0.0."
+        flat["delta_crit_type"] = "fitzpatrick"
+    end
+
     # Validate keys against the struct fields
     field_names = Set(String.(fieldnames(SLAYERControl)))
     unknown = [k for k in keys(flat) if !(k in field_names)]
@@ -239,12 +253,12 @@ function slayer_control_from_toml(section::AbstractDict)
     kwargs = Dict{Symbol,Any}()
     for (k, v) in flat
         sym = Symbol(k)
-        if sym in (:inner_model, :scan_mode, :coupling_mode, :dc_type,
+        if sym in (:inner_model, :scan_mode, :coupling_mode, :delta_crit_type,
             :resistivity_model, :lnLambda_form)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym in (:bt, :dr_val, :dgeo_val)
+        elseif sym in (:bt, :delta_crit_D_R, :delta_crit_geo_factor)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :boxes

@@ -396,9 +396,9 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl;
             zeff=control.zeff,
             chi_perp=chi_perp,
             chi_tor=chi_tor,
-            dr_val=control.dr_val,
-            dgeo_val=control.dgeo_val,
-            dc_type=control.dc_type,
+            delta_crit_D_R=control.delta_crit_D_R,
+            delta_crit_geo_factor=control.delta_crit_geo_factor,
+            delta_crit_type=control.delta_crit_type,
             theta=control.theta_sample,
             resistivity_model=_build_resistivity_model(control.resistivity_model),
             lnLambda_form=control.lnLambda_form)

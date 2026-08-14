@@ -10,7 +10,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="rational_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -25,7 +25,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit_arclength",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="rational_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -49,7 +49,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit_by_inversion",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="rational_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -90,7 +90,7 @@
             eq_filename=joinpath(data_dir, "INP1_binary"),
             eq_type="chease_binary",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="rational_packed",
             psilow=0.01,
             psihigh=0.994,
             r0exp=6.8,
@@ -106,7 +106,7 @@
             eq_filename=joinpath(data_dir, "INP1_ascii"),
             eq_type="chease_ascii",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="rational_packed",
             psilow=0.01,
             psihigh=0.994,
             r0exp=6.8,
@@ -201,7 +201,7 @@
         lar_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_type="lar",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="rational_packed",
             psilow=0.01,
             psihigh=0.99
         )
@@ -367,7 +367,7 @@
                 mpsi=64, mtheta=128)
             eq_config = Eq.EquilibriumConfig(;
                 eq_type="sol", eq_filename="unused",
-                jac_type="pest", grid_type="ldp",
+                jac_type="pest", grid_type="rational_packed",
                 psilow=1e-4, psihigh=0.99999, mpsi=mpsi, mtheta=mtheta)
             sol_config = Eq.SolovevConfig(64, 64, 64, e, a, r0, q0, 1.0, 1.0, 1.0)
             dri = Eq.sol_run(eq_config, sol_config)

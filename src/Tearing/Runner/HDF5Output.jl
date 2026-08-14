@@ -162,12 +162,15 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     for fname in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor,
         :Q_e, :Q_i, :iota_e,
         :tauk, :tau_r, :delta_n,
-        :rs, :R0, :bt, :sval_r, :dr_val, :dgeo_val,
+        :rs, :R0, :bt, :sval_r,
         :eta, :d_beta, :dc_tmp)
         ps[String(fname)] = Float64[getfield(p, fname) for p in params]
     end
-    # Store dc_type per-surface as string array
-    ps["dc_type"] = String[String(p.dc_type) for p in params]
+    # HDF5 leaf names keep the legacy spellings (schema stability); the struct fields were renamed.
+    ps["dr_val"] = Float64[getfield(p, :delta_crit_D_R) for p in params]
+    ps["dgeo_val"] = Float64[getfield(p, :delta_crit_geo_factor) for p in params]
+    # Store the per-surface critical-Δ prescription label as string array
+    ps["dc_type"] = String[String(p.delta_crit_type) for p in params]
 
     # Full Δ' matrix, split real/imag
     dp = create_group(ps, "DpMatrix")

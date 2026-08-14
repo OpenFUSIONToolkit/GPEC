@@ -108,6 +108,7 @@ function parse_fortran_run(dir::String)::FortranRunParams
     psihigh   = _find_scalar(eq_text, "psihigh";   default=0.99)
     mtheta_eq = _find_int(eq_text,    "mtheta";    default=256)
     grid_type = _find_string(eq_text, "grid_type"; default="ldp")
+    grid_type == "ldp" && (grid_type = "rational_packed")  # map the legacy Fortran value to the Julia spelling
 
     # Toroidal mode number and m-range expansion
     nn          = _find_int(dcon_text, "nn";          default=1)

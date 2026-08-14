@@ -126,7 +126,7 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
 
     # Energy integration parameters
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
-    f0type::String = "maxwellian"   # Distribution function: "maxwellian", "jkp", "cgl"
+    f0type::String = "maxwellian"   # Distribution function: "maxwellian", "park", "cgl"
 
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi

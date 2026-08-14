@@ -149,6 +149,7 @@ function parse_fortran_run(dir::String)
     eq_file = _find_string(eq_text, "eq_filename"; default="")
     jac_type = _find_string(eq_text, "jac_type"; default="hamada")
     grid_type = _find_string(eq_text, "grid_type"; default="ldp")
+    grid_type == "ldp" && (grid_type = "rational_packed")  # map the legacy Fortran value to the Julia spelling
     psilow = _find_scalar(eq_text, "psilow"; default=1e-4)
     psihigh = _find_scalar(eq_text, "psihigh"; default=0.993)
     mpsi = _find_int(eq_text, "mpsi"; default=128)
@@ -416,7 +417,7 @@ function write_gpec_toml_coil(
         # Match the Fortran sas_flag truncation: integration stops at q = qhigh
         # (= outermost rational q + dmlim). psiedge from dcon.in (=1.0 → no edge dW scan).
         @printf(io, "qhigh    = %.4f\n", qhigh)
-        @printf(io, "psiedge  = %.4f\n", p.psiedge)
+        @printf(io, "dW_edge_scan_start = %.4f\n", p.psiedge)
         println(io, "nn_low   = $(p.nn)")
         println(io, "nn_high  = $(p.nn)")
         println(io, "delta_mlow  = $(p.delta_mlow)")
@@ -476,7 +477,7 @@ function write_gpec_toml_file(
         println(io, "local_stability_flag = true")
         println(io, "vac_flag = true")
         @printf(io, "qlow     = %.4f\n", p.qlow)
-        @printf(io, "psiedge  = %.4f\n", p.psiedge)
+        @printf(io, "dW_edge_scan_start = %.4f\n", p.psiedge)
         println(io, "nn_low   = $(p.nn)")
         println(io, "nn_high  = $(p.nn)")
         println(io, "delta_mlow  = $(p.delta_mlow)")

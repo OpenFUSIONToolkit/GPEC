@@ -55,12 +55,12 @@ numerical strategies.
 columns of ``U_2`` that correspond to resonant modes are zeroed via Gaussian reduction (GR),
 keeping the solution bounded.  This is the reference path for correctness comparisons.
 
-Enable with (default):
+Enable with:
 ```toml
 [ForceFreeStates]
-use_riccati  = false
-use_parallel = false
+integrator = "serial"
 ```
+(The default is `integrator = "stride"`, the fundamental-matrix path below.)
 
 ### Riccati integration
 
@@ -87,8 +87,7 @@ directly in column `ipert_res` — without Gaussian reduction — and renormaliz
 Enable with:
 ```toml
 [ForceFreeStates]
-use_riccati  = true
-use_parallel = false
+integrator = "riccati"
 ```
 
 **Speedup** (benchmarked on reference examples):
@@ -126,10 +125,10 @@ The implementation uses a `direction` field on `IntegrationChunk`:
 crossing chunk.  `balance_integration_chunks` preserves this: the sub-chunk closest to the
 rational surface inherits `direction`, while the earlier sub-chunk always gets `direction=+1`.
 
-Enable with:
+Enable with (default):
 ```toml
 [ForceFreeStates]
-use_parallel = true
+integrator = "stride"
 ```
 
 **Accuracy** (N=26, DIIID-like example): energy eigenvalue within 2% of standard path.
@@ -240,8 +239,7 @@ All `ForceFreeStates` options are set in the `[ForceFreeStates]` section of `gpe
 ```toml
 [ForceFreeStates]
 # Integration driver
-use_riccati  = false   # true: Riccati path (faster, same accuracy)
-use_parallel = false   # true: parallel FM path (multi-thread, large N)
+integrator = "stride"  # "stride" (default): parallel FM path (multi-thread, Δ' matrix); "riccati": Riccati path; "serial": reference shooting path
 
 # Mode space
 nn_low       = 1       # lowest toroidal mode number
@@ -307,7 +305,7 @@ metric = FFS.make_metric(equil, intr.mpert)
 ffit   = FFS.make_matrix(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
-# to the parallel or Riccati path based on ctrl.use_parallel / ctrl.use_riccati,
+# on ctrl.integrator ("stride", "riccati", or "serial"),
 # and always returns a 4-tuple (odet, propagators, chunks, S_at_surface_left).
 odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
 

@@ -18,7 +18,7 @@ where χ₁ = 2π·Ψ₀ [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10].
 
 Clebsch displacement components for PENTRC (matches Fortran gpout_xclebsch):
     ξ^ψ         = xsp_mn    (unregularized)
-    ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + reg_spot²))
+    ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + regularization_width²))
     ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp), divided by χ₁ in output)
 
 Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contra):
@@ -56,14 +56,14 @@ Tuple of (xi_modes, b_modes) NamedTuples:
   - `xi_modes.clebsch_psi`: ξ^ψ for PENTRC (= xi_psi, unregularized)
   - `xi_modes.clebsch_psi1`: ∂ξ^ψ/∂ψ regularized for PENTRC
   - `xi_modes.clebsch_alpha`: ξ^α/χ₁ regularized for PENTRC (divided by χ₁ per gpout_xclebsch)
-  - `xi_modes.theta_reg`: ξ^θ regularized (= xmt, from gpeq_contra with reg_spot smoothing)
-  - `xi_modes.zeta_reg`: ξ^ζ regularized (= xmz, from gpeq_contra with reg_spot smoothing)
+  - `xi_modes.theta_reg`: ξ^θ regularized (= xmt, from gpeq_contra with regularization_width smoothing)
+  - `xi_modes.zeta_reg`: ξ^ζ regularized (= xmz, from gpeq_contra with regularization_width smoothing)
   - `xi_modes.cova_psi/theta/zeta`: covariant displacement (from gpeq_cova)
   - `b_modes.psi`: b^ψ [npsi, mpert]
   - `b_modes.b_psi_area_weighted`: b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
   - `b_modes.theta`: b^θ [npsi, mpert]
   - `b_modes.zeta`: b^ζ [npsi, mpert]
-  - `b_modes.theta_reg/zeta_reg`: regularized b^θ, b^ζ (from gpeq_sol with reg_spot smoothing)
+  - `b_modes.theta_reg/zeta_reg`: regularized b^θ, b^ζ (from gpeq_sol with regularization_width smoothing)
   - `b_modes.cova_psi/theta/zeta`: covariant field (from gpeq_cova)
 """
 function reconstruct_physical_fields(
@@ -177,8 +177,8 @@ function reconstruct_physical_fields(
             psi_J=xwp_modes,     # J·ξ^ψ (Jacobian-weighted, from gpeq_contra)
             theta=xwt_modes,     # ξ^θ contravariant (from gpeq_contra)
             zeta=xwz_modes,     # ξ^ζ contravariant (from gpeq_contra)
-            theta_reg=xmt_modes, # ξ^θ regularized (from gpeq_contra, smoothed by reg_spot)
-            zeta_reg=xmz_modes, # ξ^ζ regularized (from gpeq_contra, smoothed by reg_spot)
+            theta_reg=xmt_modes, # ξ^θ regularized (from gpeq_contra, smoothed by regularization_width)
+            zeta_reg=xmz_modes, # ξ^ζ regularized (from gpeq_contra, smoothed by regularization_width)
             clebsch_psi=clebsch_psi,    # ξ^ψ for PENTRC
             clebsch_psi1=clebsch_psi1,   # ∂ξ^ψ/∂ψ regularized for PENTRC
             clebsch_alpha=clebsch_alpha,  # ξ^α/χ₁ regularized for PENTRC
@@ -192,7 +192,7 @@ function reconstruct_physical_fields(
             b_psi_area_weighted=Jb_psi_modes,     # b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
             theta=b_theta_modes,    # b^θ unregularized
             zeta=b_zeta_modes,     # b^ζ unregularized
-            theta_reg=b_theta_reg,      # b^θ regularized (from gpeq_sol with reg_spot)
+            theta_reg=b_theta_reg,      # b^θ regularized (from gpeq_sol with regularization_width)
             zeta_reg=b_zeta_reg,       # b^ζ regularized
             cova_psi=bvp_modes,       # covariant b_ψ (from gpeq_cova)
             cova_theta=bvt_modes,       # covariant b_θ (from gpeq_cova)
@@ -329,10 +329,10 @@ Compute Clebsch displacement components for PENTRC output.
 Matches Fortran gpeq_sol regularization + gpout_xclebsch output convention:
 
   - `clebsch_psi` = ξ^ψ (unregularized, same as xi_psi_modes)
-  - `clebsch_psi1` = xmp1 = ∂ξ^ψ/∂ψ × singfac²/(singfac² + reg_spot²)
+  - `clebsch_psi1` = xmp1 = ∂ξ^ψ/∂ψ × singfac²/(singfac² + regularization_width²)
   - `clebsch_alpha` = xms/χ₁ (regularized ξ^α divided by χ₁ per gpout_xclebsch convention)
 
-When reg_spot=0, clebsch_psi1 = xi_psi1 and clebsch_alpha = xi_s/χ₁ (no regularization).
+When regularization_width=0, clebsch_psi1 = xi_psi1 and clebsch_alpha = xi_s/χ₁ (no regularization).
 
 The regularized xms is computed as -A⁻¹(B·xmp1 + C·xsp) matching Fortran gpeq_sol,
 where A, B, C are the stability matrices evaluated at each ψ via ffit interpolants.
@@ -357,10 +357,10 @@ function compute_clebsch_displacements(
     clebsch_psi1 = copy(xi_psi1_modes)        # will be regularized below
     clebsch_alpha = xi_s_modes ./ chi1         # ξ^α/χ₁ (will be regularized below)
 
-    reg_spot = ctrl.reg_spot
-    @assert reg_spot >= 0 "reg_spot must be non-negative (got $reg_spot)"
+    regularization_width = ctrl.regularization_width
+    @assert regularization_width >= 0 "regularization_width must be non-negative (got $regularization_width)"
 
-    if reg_spot == 0
+    if regularization_width == 0
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
 
@@ -390,7 +390,7 @@ function compute_clebsch_displacements(
         for ipert in 1:mpert
             m = mlow + ipert - 1
             singfac = m - nn * q
-            reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
+            reg_factor = singfac^2 / (singfac^2 + regularization_width^2)
             clebsch_psi1[ipsi, ipert] = xi_psi1_modes[ipsi, ipert] * reg_factor
             xmp1_vec[ipert] = clebsch_psi1[ipsi, ipert]
         end
@@ -498,7 +498,7 @@ function compute_contra_displacements(
     mlow = ffs_intr.mlow
     nn = ffs_intr.nlow
     chi1 = 2π * equil.psio
-    reg_spot = ctrl.reg_spot
+    regularization_width = ctrl.regularization_width
     fc = metric.fourier_coeffs
 
     xwp_modes = zeros(ComplexF64, npsi, mpert)
@@ -581,14 +581,14 @@ function compute_contra_displacements(
     # Regularize xwt/xwz → xmt/xmz (matches Fortran gpeq_contra)
     xmt_modes = copy(xwt_modes)
     xmz_modes = copy(xwz_modes)
-    if reg_spot > 0
+    if regularization_width > 0
         Threads.@threads :static for ipsi in 1:npsi
             psi_norm = psi_grid[ipsi]
             q = equil.profiles.q_spline(psi_norm)
             for ipert in 1:mpert
                 m = mlow + ipert - 1
                 singfac = m - nn * q
-                reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
+                reg_factor = singfac^2 / (singfac^2 + regularization_width^2)
                 xmt_modes[ipsi, ipert] = xwt_modes[ipsi, ipert] * reg_factor
                 xmz_modes[ipsi, ipert] = xwz_modes[ipsi, ipert] * reg_factor
             end

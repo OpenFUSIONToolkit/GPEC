@@ -73,12 +73,12 @@ For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n).
     x25 = x * x * sqrt(x)   # x^2.5
     fx = if p.f0type == "maxwellian"
         ComplexF64((p.we + p.wn + p.wt * (x - 1.5)) * x25)
-    elseif p.f0type == "jkp"
+    elseif p.f0type == "park"
         ComplexF64((p.we + p.wn + p.wt * 2) * x25)
     elseif p.f0type == "cgl"
         complex(0.0, -x25 / p.n)   # x^2.5 / (i*n)
     else
-        error("f0type must be maxwellian, jkp, or cgl")
+        error("f0type must be maxwellian, park, or cgl")
     end
     if p.qt
         fx *= (x - 2.5)
@@ -101,12 +101,12 @@ never carries a CGL numerator (CGL has no pole).
         a = p.we + p.wn + p.wt * (x - 1.5)
         nn = ComplexF64(a * x25)
         dn = ComplexF64(p.wt * x25 + a * 2.5 * x15)   # d/dx[(…)·x^2.5]
-    elseif p.f0type == "jkp"
+    elseif p.f0type == "park"
         a = p.we + p.wn + p.wt * 2
         nn = ComplexF64(a * x25)
         dn = ComplexF64(a * 2.5 * x15)
     else
-        error("_energy_numerator_deriv supports maxwellian and jkp")
+        error("_energy_numerator_deriv supports maxwellian and park")
     end
     return p.qt ? dn * (x - 2.5) + nn : dn   # d/dx[N·(x-2.5)] = N′·(x-2.5) + N
 end
@@ -302,7 +302,7 @@ all collisionalities: the collisionless case (ν ≡ 0) is the exact ν→0 limi
 its real-axis pole resolved analytically (see `_integrate_energy_resonant`).
 
 Collision operator types (`nutype`): `"zero"`, `"small"`, `"krook"`, `"harmonic"`.
-Distribution function types (`f0type`): `"maxwellian"`, `"jkp"`, `"cgl"`.
+Distribution function types (`f0type`): `"maxwellian"`, `"park"`, `"cgl"`.
 
 `ximag` is accepted for backward compatibility but no longer used — resonance
 poles are now handled analytically rather than by contour deformation.

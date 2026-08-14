@@ -37,7 +37,7 @@
         @test_throws ArgumentError Runner.validate(
             SLAYERControl(; coupling_mode=:bogus))
         @test_throws ArgumentError Runner.validate(
-            SLAYERControl(; dc_type=:bogus))
+            SLAYERControl(; delta_crit_type=:bogus))
         @test_throws ArgumentError Runner.validate(
             SLAYERControl(; msing_max=0))
         @test_throws ArgumentError Runner.validate(
@@ -50,11 +50,11 @@
             "inner_model" => "slayer_fitzpatrick",
             "scan_mode" => "brute_force",
             "coupling_mode" => "coupled",
-            "dc_type" => "rfitzp",
+            "delta_crit_type" => "fitzpatrick",
             "msing_max" => 2,
             "bt" => 1.8,
             "mu_i" => 2.0,
-            "dr_val" => 0.01,
+            "delta_crit_D_R" => 0.01,
             "scan_grid" => Dict{String,Any}(
                 "Q_re_range" => [-5.0, 5.0],
                 "Q_im_range" => [-1.0, 3.0],
@@ -73,10 +73,10 @@
         @test c.inner_model === :slayer_fitzpatrick
         @test c.scan_mode === :brute_force
         @test c.coupling_mode === :coupled
-        @test c.dc_type === :rfitzp
+        @test c.delta_crit_type === :fitzpatrick
         @test c.msing_max == 2
         @test c.bt === 1.8
-        @test c.dr_val == 0.01
+        @test c.delta_crit_D_R == 0.01
         @test c.Q_re_range == (-5.0, 5.0)
         @test c.Q_im_range == (-1.0, 3.0)
         @test c.nre == 50

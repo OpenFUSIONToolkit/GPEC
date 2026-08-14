@@ -23,7 +23,7 @@ function setup_and_run_solovev()
     ex = joinpath(@__DIR__, "..", "test", "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
-    inputs["ForceFreeStates"]["use_riccati"] = true
+    inputs["ForceFreeStates"]["integrator"] = "riccati"
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
     ctrl = FFS.ForceFreeStatesControl(;
         (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)

@@ -116,7 +116,7 @@ function compute_perturbed_equilibrium(
                 # Same control surface as the coil branch above: psilim, the integration
                 # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
                 # the normalization was taken on the equilibrium-spline limit, which differs
-                # whenever dmlim/qhigh/psiedge truncation moves psilim inward.
+                # whenever dmlim/qhigh/dW_edge_scan_start truncation moves psilim inward.
                 convert_forcing_normalization!(modes_n, norm_tag, equil, n,
                     minimum(m_vals), maximum(m_vals); psi=ffs_intr.psilim)
             end

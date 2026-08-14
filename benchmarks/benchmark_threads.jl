@@ -1,5 +1,5 @@
 # Thread-scaling benchmark for the bidirectional parallel FM integration.
-# Runs the Solovev (N=8) and DIIID-like (N=26) examples with use_parallel=true
+# Runs the Solovev (N=8) and DIIID-like (N=26) examples with integrator="stride"
 # across 1, 2, 4, 8 threads and compares against the serial Riccati path.
 #
 # Usage (from JPEC_main root):
@@ -7,11 +7,10 @@
 
 using GeneralizedPerturbedEquilibrium, TOML, Printf, Statistics
 
-function run_ffs(ex; use_parallel, use_riccati=false)
+function run_ffs(ex; integrator)
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
-    inputs["ForceFreeStates"]["use_parallel"] = use_parallel
-    inputs["ForceFreeStates"]["use_riccati"] = use_riccati
+    inputs["ForceFreeStates"]["integrator"] = integrator
     inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
     intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
     ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
@@ -36,17 +35,17 @@ function run_ffs(ex; use_parallel, use_riccati=false)
     return real(vac.et[1]), intr.numpert_total
 end
 
-function timed_run(ex; use_parallel, use_riccati=false, nwarm=1, nrep=2)
+function timed_run(ex; integrator, nwarm=1, nrep=2)
     # Warmup
     for _ in 1:nwarm
-        run_ffs(ex; use_parallel, use_riccati)
+        run_ffs(ex; integrator)
     end
     # Timed runs
     times = Float64[]
     local et1, N
     for _ in 1:nrep
         t0 = time()
-        et1, N = run_ffs(ex; use_parallel, use_riccati)
+        et1, N = run_ffs(ex; integrator)
         push!(times, time() - t0)
     end
     return mean(times), et1, N
@@ -60,9 +59,9 @@ diiid_ex = joinpath(root, "examples", "DIIID-like_ideal_example")
 println("\n=== Thread-scaling benchmark ($(nthreads) thread(s)) ===\n")
 
 for (label, ex) in [("Solovev", sol_ex), ("DIIID-like", diiid_ex)]
-    t_std, et_std, N = timed_run(ex; use_parallel=false, use_riccati=false)
-    t_ric, et_ric, _ = timed_run(ex; use_parallel=false, use_riccati=true)
-    t_par, et_par, _ = timed_run(ex; use_parallel=true, use_riccati=false)
+    t_std, et_std, N = timed_run(ex; integrator="serial")
+    t_ric, et_ric, _ = timed_run(ex; integrator="riccati")
+    t_par, et_par, _ = timed_run(ex; integrator="stride")
 
     err_ric = abs(et_ric - et_std) / abs(et_std) * 100
     err_par = abs(et_par - et_std) / abs(et_std) * 100

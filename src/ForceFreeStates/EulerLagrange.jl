@@ -84,10 +84,10 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
     # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
     # because single long-span propagators may already have cond ~ 10²⁴.
     min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
-    # Use the effective parallel width (capped by ctrl.parallel_threads) rather than
-    # Threads.nthreads() — otherwise a user on `julia -t 16` who sets parallel_threads=2
+    # Use the effective parallel width (capped by ctrl.integrator_threads) rather than
+    # Threads.nthreads() — otherwise a user on `julia -t 16` who sets integrator_threads=2
     # for determinism still pays for 4× the requested sub-chunk count.
-    effective_threads = min(Threads.nthreads(), max(ctrl.parallel_threads, 1))
+    effective_threads = min(Threads.nthreads(), max(ctrl.integrator_threads, 1))
     target_n = max(min_chunks, 4 * effective_threads, min_bvp_intervals)
 
     result = collect(chunks)
@@ -140,21 +140,21 @@ end
     eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
 
 Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
-surface on the way (Fortran `ode_run`). Dispatches on `ctrl` to the parallel propagator BVP
-(`use_parallel`), the dual Riccati formulation (`use_riccati`), or
-[`serial_eulerlagrange_integration`](@ref).
+surface on the way (Fortran `ode_run`). Dispatches on `ctrl.integrator`: the STRIDE propagator
+BVP (`"stride"`), the dual Riccati formulation (`"riccati"`), or
+[`serial_eulerlagrange_integration`](@ref) (`"serial"`).
 
-Only the parallel branch populates `propagators` / `chunks` / `S_left`, which
+Only the stride branch populates `propagators` / `chunks` / `S_left`, which
 `compute_delta_prime_matrix!` consumes for the Δ' BVP; the other two return `nothing` for all
 three.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Dispatch to parallel or Riccati solver if requested.
-    # Parallel path returns (odet, propagators, chunks, S_at_surface_left) for deferred Δ' BVP.
-    if ctrl.use_parallel
+    # Dispatch on the integrator algorithm.
+    # Stride path returns (odet, propagators, chunks, S_at_surface_left) for deferred Δ' BVP.
+    if ctrl.integrator == "stride"
         return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
-    elseif ctrl.use_riccati
+    elseif ctrl.integrator == "riccati"
         return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
     end
     return serial_eulerlagrange_integration(ctrl, equil, ffit, intr)
@@ -166,7 +166,7 @@ end
 Serial shooting branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk,
 applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.ucrit` and undoing it
 via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
-directly to force this branch regardless of `ctrl.use_parallel` / `ctrl.use_riccati`; `verbose`
+directly to force this branch regardless of `ctrl.integrator`; `verbose`
 overrides `ctrl.verbose` for progress logging.
 """
 function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal;
@@ -214,7 +214,7 @@ function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::E
     odet.step -= 1
     trim_storage!(odet)
 
-    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
+    # Edge-dW scan over [dW_edge_scan_start, psilim] — populates odet.edge_scan for HDF5 output.
     # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
     # findmax_dW_edge! also (re)allocates odet.edge_scan; that field is the diagnostic
     # product and is intentionally NOT restored.
@@ -224,7 +224,7 @@ function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::E
     # location. Legacy path (true) reproduces the ode_record_edge heuristic from Fortran
     # STRIDE — psilim/qlim/u are pulled back to the dW peak. Preserved for experimental
     # work; see docstring in ForceFreeStatesStructs.jl for the reliability caveats.
-    if ctrl.psiedge < intr.psilim
+    if ctrl.dW_edge_scan_start < intr.psilim
         saved_psifac, saved_u = odet.psifac, copy(odet.u)
         peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         if ctrl.truncate_at_dW_peak
@@ -752,7 +752,7 @@ function integrate_el_region!(
         near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
         near_end = abs(odet.q - q_end) < near_q_frac * q_range
         # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
-        in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
+        in_edge_scan = ctrl.dW_edge_scan_start < intr.psilim && integrator.t >= ctrl.dW_edge_scan_start
 
         if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
             # q at the accepted point, not the last internal Runge-Kutta stage
@@ -881,7 +881,7 @@ end
 """
     findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-Records the total dW in the integration region between `ctrl.psiedge` and
+Records the total dW in the integration region between `ctrl.dW_edge_scan_start` and
 `ctrl.psilim`. This performs the same function as `ode_record_edge` in the
 Fortran, but everything is now done post-integration which cleans up the logic,
 i.e. no "_edge" arrays.
@@ -897,8 +897,8 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Find the first ODE step at or past psiedge; all subsequent steps are contiguous edge steps
-    edge_start = findfirst(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
+    # Find the first ODE step at or past dW_edge_scan_start; all subsequent steps are contiguous edge steps
+    edge_start = findfirst(i -> odet.psi_store[i] >= ctrl.dW_edge_scan_start, 1:odet.step)
     N_edge = odet.step - edge_start + 1
 
     # Initialize EdgeScanState sized exactly to the number of edge steps
@@ -908,7 +908,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     es.psi .= odet.psi_store[edge_start:odet.step]
     es.q .= odet.q_store[edge_start:odet.step]
 
-    # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
+    # Create a rough spline for wv matrix between dW_edge_scan_start -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.

@@ -465,7 +465,7 @@
 
         @testset "extract_plasma_surface_at_psi" begin
             # Self-contained analytic Solovev equilibrium (same recipe as runtests_equil.jl).
-            eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", eq_filename="unused", jac_type="pest", grid_type="ldp", psilow=1e-4, psihigh=0.99999, mpsi=64, mtheta=128)
+            eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", eq_filename="unused", jac_type="pest", grid_type="rational_packed", psilow=1e-4, psihigh=0.99999, mpsi=64, mtheta=128)
             sol_config = Equilibrium.SolovevConfig(64, 64, 64, 1.6, 0.33, 1.0, 1.9, 1.0, 1.0, 1.0)
             pe = Equilibrium.equilibrium_solver(Equilibrium.sol_run(eq_config, sol_config))
 

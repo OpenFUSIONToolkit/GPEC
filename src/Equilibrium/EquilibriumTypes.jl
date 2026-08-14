@@ -24,8 +24,8 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
   - `grid_type::String` - Grid type for flux surface discretization ("auto" — two-pass measured-curvature
-    refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
-    "log_asymptotic" is a legacy alias for "auto")
+    refinement when mpsi=0, three-region log layout when mpsi>0; "rational_packed", "pow1", "uniform";
+    "log_asymptotic" is a legacy alias for "auto"; "ldp" is a deprecated alias for "rational_packed")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
   - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
@@ -35,10 +35,10 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
     two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
-  - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
+  - `q0_override::Float64` - Override for the on-axis safety factor q0 (0 = use input value; -1 = flip the sign of the extrapolated q0)
   - `etol::Float64` - Error tolerance for equilibrium solver
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
-  - `use_galgrid::Bool` - Use the same grid as galerkin method
+  - `use_galerkin_grid::Bool` - Use the same grid as galerkin method
 """
 @kwdef mutable struct EquilibriumConfig
     eq_type::String = "efit"
@@ -64,11 +64,11 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     psi_accuracy::Float64 = 0.001
     mtheta::Int = 512
 
-    newq0::Int = 0
+    q0_override::Float64 = 0.0
     etol::Float64 = 1e-10
 
     force_termination::Bool = false
-    use_galgrid::Bool = true
+    use_galerkin_grid::Bool = true
 
     # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
     imas_cocos::Int = 11
@@ -81,8 +81,8 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     # so their incoming values are ignored (hence `_`).
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
-        grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-        force_termination, use_galgrid, imas_cocos)
+        grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, q0_override, etol,
+        force_termination, use_galerkin_grid, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -147,8 +147,8 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
-            grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-            force_termination, use_galgrid, imas_cocos)
+            grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, q0_override, etol,
+            force_termination, use_galerkin_grid, imas_cocos)
     end
 end
 
@@ -174,6 +174,12 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
         else
             @warn "Unknown equilibrium parameter: $k"
         end
+    end
+
+    # Deprecated grid_type value: initials "ldp" renamed to the descriptive spelling.
+    if get(config_data, "grid_type", "") == "ldp"
+        @warn "grid_type = \"ldp\" in [Equilibrium] is deprecated; use grid_type = \"rational_packed\". The old spelling will be removed after v2.0.0."
+        config_data["grid_type"] = "rational_packed"
     end
 
     # Construct validated struct

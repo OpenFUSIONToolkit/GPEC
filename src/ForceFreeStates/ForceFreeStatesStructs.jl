@@ -206,7 +206,7 @@ A mutable struct holding internal state variables for stability calculations.
     via `pest3_decompose(dp_raw)` — needed for the full det(D' − D(γ)) = 0
     eigenvalue problem with Glasser stabilization.
 
-    Empty unless `ctrl.use_parallel` is true. No ½ prefactor is applied (matches
+    Empty unless `ctrl.integrator == "stride"`. No ½ prefactor is applied (matches
     Fortran rdcon; Pletzer–Dewar paper multiplies by ½).
     """
     delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
@@ -230,7 +230,6 @@ gpec.toml.
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
   - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e4` empirically keeps max(|U₁|, |U₂|) in O(1)–O(10⁴) over the integration domain on DIII-D / Solovev sweeps; lower triggers excess renorms without accuracy gain, higher risks overflow before the next renorm.
@@ -245,18 +244,16 @@ gpec.toml.
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
-  - `psiedge::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [psiedge, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
-  - `truncate_at_dW_peak::Bool` - When `true` and `psiedge < psilim`, the edge-dW scan's peak location is adopted as the new physical plasma edge — `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, AND the FM Δ' chunks/propagators are made self-consistent with the new boundary (the chunk that straddles the peak is rebuilt + re-integrated; any chunks past the peak are dropped). This reproduces the spirit of the original ode_record_edge heuristic from Fortran STRIDE while keeping Δ' and δW well-defined at the new boundary. The Δ' metric is still physically dependent on where the peak falls in the edge band, so use this flag deliberately when you mean to scan against the peak-defined edge (e.g. for studying edge-mode regimes); leave at `false` (default) for the full-domain Δ' at `qhigh` / `psihigh` / `dmlim`.
+  - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
+  - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak location is adopted as the new physical plasma edge — `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, AND the FM Δ' chunks/propagators are made self-consistent with the new boundary (the chunk that straddles the peak is rebuilt + re-integrated; any chunks past the peak are dropped). This reproduces the spirit of the original ode_record_edge heuristic from Fortran STRIDE while keeping Δ' and δW well-defined at the new boundary. The Δ' metric is still physically dependent on where the peak falls in the edge band, so use this flag deliberately when you mean to scan against the peak-defined edge (e.g. for studying edge-mode regimes); leave at `false` (default) for the full-domain Δ' at `qhigh` / `psihigh` / `dmlim`.
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
-  - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
-  - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
-  - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
-  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that can cause intermittent BVP divergence on numerically delicate equilibria. The parallel path produces bit-identical Δ′ across thread counts; `parallel_threads = 2` is about 20% faster than serial and saturates the speedup. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
-  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `du_store` / `xi_s_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices with diagnostic derivatives (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead (differs by the ~0.12 % Riccati-vs-axis algorithmic gap on DIIID-class cases).  **Default `false`** to avoid paying the dense-pass cost on Δ'/vacuum/ideal-stability-only runs; **PerturbedEquilibrium-using configs must set `populate_dense_xi = true` explicitly** when `use_parallel = true` (otherwise PE silently reads Riccati-basis garbage).  Auto-disabled when `force_termination = true` regardless of the user setting, since the dense pass has no downstream consumer in that case.  Approximate cost when enabled: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
+  - `integrator::String` - Which Euler-Lagrange integration algorithm to use. `"stride"` (default): fundamental-matrix (propagator) chunk integration following Fortran STRIDE, assembled via a BVP — the only path that produces the Δ' matrix (`SingularSurfaces/delta_prime_matrix`) consumed by SLAYER/GGJ downstream. Each chunk is integrated independently from identity IC using `Threads.@threads` (thread cap `integrator_threads`; `integrator_threads = 1` runs the chunks serially and bit-deterministically). Requires `singfac_min != 0`; crossings use the Riccati-style algorithm (no Gaussian reduction). `"riccati"`: the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE — reduces stiffness for faster integration, see Glasser (2018) Phys. Plasmas 25, 032507. `"serial"`: the serial shooting method with Gaussian reduction (see `serial_eulerlagrange_integration`).
+  - `integrator_threads::Int` - Cap on the number of threads the stride-integrator BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `integrator_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that can cause intermittent BVP divergence on numerically delicate equilibria. The stride path produces bit-identical Δ′ across thread counts; `integrator_threads = 2` is about 20% faster than serial and saturates the speedup. If a stride run diverges, drop to `integrator_threads = 1` rather than switching to `integrator = "serial"` — the latter is silently wrong. Capped at `Threads.nthreads()`.
+  - `populate_dense_xi::Bool` - When `integrator = "stride"`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `du_store` / `xi_s_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the stride path stores only chunk-endpoint Riccati S matrices with diagnostic derivatives (see Riccati.jl docstring caveats), and the HDF5 `ForceFreeStates/Solutions/ForwardIntegration` `xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`SingularSurfaces/delta_prime_matrix`) is computed from the stride BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`ForceFreeStates/FreeBoundaryStability` `eigenmode_*_energies`) are computed by `free_run` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`integrator = "serial"`) would produce; with `populate_dense_xi=false` they use the stride-pass Riccati `odet.u` instead (differs by the ~0.12 % Riccati-vs-axis algorithmic gap on DIIID-class cases).  **Default `false`** to avoid paying the dense-pass cost on Δ'/vacuum/ideal-stability-only runs; **PerturbedEquilibrium-using configs must set `populate_dense_xi = true` explicitly** when `integrator = "stride"` (otherwise PE silently reads Riccati-basis garbage).  Auto-disabled when `force_termination = true` regardless of the user setting, since the dense pass has no downstream consumer in that case.  Approximate cost when enabled: one extra serial EL integration (~1× the stride BVP wall-clock for typical N).
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
 @kwdef struct ForceFreeStatesControl
@@ -270,13 +267,12 @@ gpec.toml.
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    nstep::Int = typemax(Int)
     ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-8
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
-    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for use_parallel path.
+    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the stride integrator path.
     set_psilim_via_dmlim::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
     dmlim::Float64 = 0.2
     sing_order::Int = 6
@@ -285,18 +281,16 @@ gpec.toml.
     kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
-    psiedge::Float64 = 0.99
+    dW_edge_scan_start::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
-    parallel_threads::Int = 2
+    integrator_threads::Int = 2
     diagnose::Bool = false
-    diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
     save_interval::Int = 3
     force_termination::Bool = false
-    use_riccati::Bool = false
-    use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
-    populate_dense_xi::Bool = false  # When use_parallel=true, set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× parallel-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
+    integrator::String = "stride"    # Default stride: unlocks SingularSurfaces/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
+    populate_dense_xi::Bool = false  # When integrator="stride", set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× stride-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
 
     # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port) ---
@@ -447,7 +441,7 @@ end
 """
 EdgeScanState
 
-Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
+Holds the state and results for the edge dW stability scan over ψ ∈ [dW_edge_scan_start, psilim].
 Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`.
 The energies are generalized (W, N) pencil values: power-normalized and invariant to the
 working (Jacobian) coordinate (see `power_norm_matrix!`).
@@ -562,7 +556,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `index::Array{Int,2}` - Index matrix used for sorting solution norms with shape `(numpert_total, numunorms_init)`.
 
-  - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+  - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when dW_edge_scan_start >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
 
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
@@ -593,7 +587,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
 
-    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+    # Edge dW scan state and results (disabled sentinel when dW_edge_scan_start >= psilim, i.e. no edge scan)
     edge_scan::EdgeScanState = EdgeScanState(numpert_total, 0)
 
     # Data for integrator

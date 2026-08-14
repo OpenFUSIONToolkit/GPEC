@@ -62,7 +62,7 @@ Defaults to the **outermost computed surface** `equil.rzphi_xs[end]` (i.e. `psih
 square root: `rfac = SQRT(crzphi_f(1))` (`coil/field.F:170`, where `crzphi_f(1)` is
 `rzphi_rsquared` and `crzphi_f(2)` is `rzphi_offset`); `coil/field.F:133` calls that mesh the
 "control surface mesh". `psilim = psihigh` (`dcon/sing.f:170`) and is only ever moved *inward*
-by `sas_flag`/`qhigh`/`psiedge` truncation. Since `psihigh` is the last knot of the radial
+by `sas_flag`/`qhigh`/`dW_edge_scan_start` truncation. Since `psihigh` is the last knot of the radial
 grid these splines are built on (`equil/inverse.f:142`), Fortran evaluates exactly ON the last
 knot and never extrapolates. The docs state it directly: the external field is specified "on
 the surface of the GPEC plasma boundary defined by the psihigh variable in equil.in"
@@ -83,7 +83,7 @@ auto grid was refined.
 
 NOTE ON THE DEFAULT: the physically correct control surface is `psilim`, the *integration*
 limit, not `psihigh`, the *equilibrium spline* limit. They are equal unless
-`dmlim`/`qhigh`/`psiedge` truncation fires, in which case `psilim < psihigh`. PPPL shipped a fix
+`dmlim`/`qhigh`/`dW_edge_scan_start` truncation fires, in which case `psilim < psihigh`. PPPL shipped a fix
 for exactly this confusion (`docs/releases.rst:281`: "Fixes inappropriate uses of psihigh, which
 may not be the end of integration psilim if sas_flag, qhigh, or peak_flag are used").
 

@@ -1307,7 +1307,7 @@ otherwise mirrors, differing in three places:
    renormalizes to (S_new, I) in one step
 3. `transform_u!` is skipped — S is already the true solution, so there is no reduction to undo
 
-Enable via `use_riccati = true` in the `[ForceFreeStates]` section of gpec.toml.
+Enable via `integrator = "riccati"` in the `[ForceFreeStates]` section of gpec.toml.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -1353,13 +1353,13 @@ function riccati_eulerlagrange_integration(
         end
     end
 
-    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
+    # Edge-dW scan over [dW_edge_scan_start, psilim] — populates odet.edge_scan for HDF5 output.
     # See EulerLagrange.jl counterpart and ForceFreeStatesControl docstring for the
     # diagnostic vs legacy-truncation semantics and reliability caveats on
     # truncate_at_dW_peak=true.
     odet.step -= 1
     trim_storage!(odet)
-    if ctrl.psiedge < intr.psilim
+    if ctrl.dW_edge_scan_start < intr.psilim
         saved_psifac, saved_u = odet.psifac, copy(odet.u)
         peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         if ctrl.truncate_at_dW_peak
@@ -1622,7 +1622,7 @@ concurrently using `Threads.@threads`, then re-integrates the outer plasma seria
    without renormalization); Riccati integration keeps matrices bounded and provides dense
    checkpoints for `findmax_dW_edge!`.
 
-Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml. Requires `singfac_min != 0`.
+Enable via `integrator = "stride"` in `[ForceFreeStates]` of gpec.toml. Requires `singfac_min != 0`.
 
 **Key differences from serial integration:**
 - No Gaussian reduction in the propagator BVP phase (crossings use the
@@ -1650,7 +1650,7 @@ function parallel_eulerlagrange_integration(
 )
     odet = _initialize_parallel_odet(ctrl, equil, ffit, intr)
     chunks, propagators, odet_proxies = _setup_parallel_chunks_and_proxies(odet, ctrl, intr)
-    bvp_threads = max(1, min(Threads.nthreads(), ctrl.parallel_threads))
+    bvp_threads = max(1, min(Threads.nthreads(), ctrl.integrator_threads))
     _log_parallel_start(ctrl, odet, equil, chunks, bvp_threads)
 
     _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, ffit, intr, odet_proxies, bvp_threads)
@@ -1725,14 +1725,14 @@ function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
                              chunks::Vector{IntegrationChunk}, bvp_threads::Int)
     ctrl.verbose || return
     @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
-    @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads BVP thread$(bvp_threads == 1 ? "" : "s") (julia_nthreads=$(Threads.nthreads()), ctrl.parallel_threads=$(ctrl.parallel_threads))"
+    @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads BVP thread$(bvp_threads == 1 ? "" : "s") (julia_nthreads=$(Threads.nthreads()), ctrl.integrator_threads=$(ctrl.integrator_threads))"
 end
 
 # Integrate each chunk's FM propagator from identity IC. Serial when bvp_threads == 1
 # (bit-deterministic; ~20% slower than 2-thread but immune to thread-
 # schedule sensitivity). Parallel uses :static scheduler so Threads.threadid() returns a
 # stable index into odet_proxies. If a parallel run ever diverges on a delicate equilibrium,
-# drop to parallel_threads = 1 rather than use_parallel = false — the latter is silently wrong.
+# drop to integrator_threads = 1 rather than integrator = "serial" — the latter is silently wrong.
 function _run_parallel_bvp_phase!(propagators::Vector{ChunkPropagator},
                                   chunks::Vector{IntegrationChunk},
                                   ctrl::ForceFreeStatesControl,
@@ -1827,7 +1827,7 @@ function _reintegrate_outer_plasma!(odet::OdeState, last_crossing_step::Int,
     # Post: odet.u is in (S, I) form; odet.step points to next empty slot.
 end
 
-# Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5. By default
+# Edge-dW scan over [dW_edge_scan_start, psilim] — populates odet.edge_scan for HDF5. By default
 # (truncate_at_dW_peak=false) it's diagnostic-only: integration domain is unchanged.
 # When truncate_at_dW_peak=true, the dW peak becomes the new physical edge: intr.psilim,
 # odet, propagators, and chunks are made self-consistent (straddling chunk rebuilt with
@@ -1843,7 +1843,7 @@ function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
     N = intr.numpert_total
     odet.step -= 1
     trim_storage!(odet)
-    ctrl.psiedge < intr.psilim || return chunks, propagators
+    ctrl.dW_edge_scan_start < intr.psilim || return chunks, propagators
 
     saved_psifac, saved_u = odet.psifac, copy(odet.u)
     peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
@@ -1924,7 +1924,7 @@ which `compute_delta_prime_matrix!` uses).
 Called from `parallel_eulerlagrange_integration` when
 `ctrl.populate_dense_xi = true`.  Approximate cost: one serial
 EL integration on top of the parallel BVP phase.  Required to make
-`use_parallel = true` produce DCON eigenfunctions usable by the
+`integrator = "stride"` produce DCON eigenfunctions usable by the
 PerturbedEquilibrium downstream pipeline.
 """
 function _populate_dense_xi_via_serial_el!(

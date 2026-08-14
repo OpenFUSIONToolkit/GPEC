@@ -96,18 +96,18 @@ built by a **two-pass measured-curvature refinement** driven by the single accur
    (no file re-read).
 
 Every region's knot count scales as τ^(-1/3), so tightening `psi_accuracy` refines
-the core, pedestal, and edge proportionally. The legacy `grid_type = "ldp"`
+the core, pedestal, and edge proportionally. The legacy `grid_type = "rational_packed"` (formerly `"ldp"`)
 (sin²-spaced), `"pow1"`, `"uniform"`, and explicit `mpsi > 0` (single-pass, fixed
 layout) are still supported. Library users calling `setup_equilibrium` directly with
 `mpsi = 0` receive the coarse pass-1 grid; use `refined_psi_grid` and the
 `override_psi_nodes` keyword to apply the refinement manually.
 
-The packing on the DIII-D-like example (n=1) compared to fixed `ldp` grids — note the
+The packing on the DIII-D-like example (n=1) compared to fixed `rational_packed` grids — note the
 coarse spacing across the smooth mid-radius, the spacing dips at each rational surface,
 and the core/pedestal/edge packing (`benchmarks/plot_grid_knot_placement.jl` regenerates
 this figure):
 
-![Radial knot packing: auto two-pass vs ldp](assets/grid_knot_placement.png)
+![Radial knot packing: auto two-pass vs rational_packed](assets/grid_knot_placement.png)
 
 Decomposing the density by source on the same example shows the pedestal band
 (ψ_N ≈ 0.85–0.98) is driven by *measured* curvature, not the edge floor: the pressure,

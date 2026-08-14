@@ -23,7 +23,7 @@ Build the ψ-quadrature node list `[x0, interior points strictly inside (x0, xou
 resonances); this function owns the ordering: sort, drop near-duplicates (closer than
 `PANEL_MERGE_ATOL`, e.g. a kinetic resonance coinciding with a rational), and drop points
 within `PANEL_MERGE_ATOL` of a bound to avoid degenerate panels. Paneling the integral at
-these surfaces puts the resonant torque-density peaks (reg_spot/collisionally broadened, but
+these surfaces puts the resonant torque-density peaks (regularization_width/collisionally broadened, but
 narrow in ψ) on Gauss-Kronrod interval endpoints, which the rule handles natively instead of
 hunting them by adaptive bisection.
 """

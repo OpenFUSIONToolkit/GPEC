@@ -227,14 +227,14 @@ using TOML
         # The energy eigenvalue et[1] should match to within 2%.
         #
         # Bidirectional FM integration (crossing chunks integrated backward) is the
-        # default for use_parallel=true. It keeps FM propagators well-conditioned for
+        # default for integrator="stride". It keeps FM propagators well-conditioned for
         # both small-N (Solovev N=8, tested here) and large-N (DIIID N=26, tested below).
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
-        function run_solovev(use_parallel)
+        function run_solovev(integrator)
             inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
             inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
+            inputs["ForceFreeStates"]["integrator"] = integrator
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
@@ -258,8 +258,8 @@ using TOML
             return real(vac.et[1]), intr
         end
 
-        et_std, intr_std = run_solovev(false)
-        et_par, intr_par = run_solovev(true)
+        et_std, intr_std = run_solovev("serial")
+        et_par, intr_par = run_solovev("stride")
 
         # Energy eigenvalue matches to 2%
         @test isapprox(et_par, et_std; rtol=0.02)
@@ -279,10 +279,10 @@ using TOML
         # This is the key regression test for the bidirectional parallel FM fix.
         ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
 
-        function run_diiid(use_parallel)
+        function run_diiid(integrator)
             inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
             inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
+            inputs["ForceFreeStates"]["integrator"] = integrator
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
@@ -317,7 +317,7 @@ using TOML
             return real(vac.et[1]), intr
         end
 
-        et_par, intr_par = run_diiid(true)
+        et_par, intr_par = run_diiid("stride")
 
         # Parallel FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
         # equilibrium-sensitive (auto-mpsi gives a spurious value; a wrong grid/Ip shifts it), so
@@ -386,12 +386,12 @@ using TOML
     # physically meaningful. BVP Δ' regression is concentrated on the DIIID-like
     # fixture below (intrinsically stable, well-conditioned BVP Δ').
 
-    @testset "ξ functions bit-identical between use_parallel modes (populate_dense_xi)" begin
-        # When `ctrl.use_parallel = true` and `ctrl.populate_dense_xi = true`
+    @testset "ξ functions bit-identical between integrator modes (populate_dense_xi)" begin
+        # When `ctrl.integrator = "stride"` and `ctrl.populate_dense_xi = true`
         # (default), `parallel_eulerlagrange_integration` appends a serial
         # Euler-Lagrange pass and returns that fresh `odet` instead of the
         # propagator-BVP one.  That dense pass invokes the SAME
-        # `eulerlagrange_integration` code path the serial `use_parallel = false`
+        # `eulerlagrange_integration` code path the serial `integrator = "serial"`
         # benchmark goes through with the SAME `(ctrl, equil, ffit, intr)`
         # inputs (BVP-only state on `intr` saved/restored across the pass), so
         # the resulting `psi_store` / `q_store` / `u_store` / `du_store` /
@@ -403,10 +403,10 @@ using TOML
         # Run on both the small-N Solovev case and the large-N DIIID-like case
         # to catch any (m, IC, ψ)-dependent regression.
 
-        function run_and_capture(example_dir, use_parallel; populate_dense_xi=true)
+        function run_and_capture(example_dir, integrator; populate_dense_xi=true)
             inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
             inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
+            inputs["ForceFreeStates"]["integrator"] = integrator
             inputs["ForceFreeStates"]["populate_dense_xi"] = populate_dense_xi
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_dir)
@@ -457,15 +457,15 @@ using TOML
 
         @testset "Solovev (small N)" begin
             ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true; populate_dense_xi=true)
+            odet_std = run_and_capture(ex, "serial")
+            odet_par = run_and_capture(ex, "stride"; populate_dense_xi=true)
             assert_bit_identical(odet_std, odet_par)
         end
 
         @testset "DIIID-like (large N)" begin
             ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true; populate_dense_xi=true)
+            odet_std = run_and_capture(ex, "serial")
+            odet_par = run_and_capture(ex, "stride"; populate_dense_xi=true)
             assert_bit_identical(odet_std, odet_par)
         end
 
@@ -477,8 +477,8 @@ using TOML
             # test above is meaningful — it's NOT trivially passing because
             # both modes accidentally produce the same sparse data.
             ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_sparse = run_and_capture(ex, true; populate_dense_xi=false)
+            odet_std = run_and_capture(ex, "serial")
+            odet_sparse = run_and_capture(ex, "stride"; populate_dense_xi=false)
             @test odet_sparse.step < odet_std.step
             @test length(odet_sparse.psi_store) < length(odet_std.psi_store)
             # The sparse solution is in the Riccati basis, so the derivative stores cannot be
@@ -498,7 +498,7 @@ using TOML
         ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
-        inputs["ForceFreeStates"]["use_parallel"] = true
+        inputs["ForceFreeStates"]["integrator"] = "stride"
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;

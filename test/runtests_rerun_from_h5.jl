@@ -250,7 +250,7 @@ end
     Equil = GeneralizedPerturbedEquilibrium.Equilibrium
     config = Equil.EquilibriumConfig(;
         eq_filename=joinpath(@__DIR__, "test_data", "CHEASE_test_data", "INP1_ascii"),
-        eq_type="chease_ascii", jac_type="boozer", grid_type="ldp",
+        eq_type="chease_ascii", jac_type="boozer", grid_type="rational_packed",
         psilow=0.01, psihigh=0.994, r0exp=6.8, b0exp=7.4
     )
     src = Equil.read_chease_ascii(config)
