@@ -16,7 +16,10 @@ extension:
     `chi_phi` (toroidal momentum diffusivity ``\chi_\phi``). Each dataset
     carries a `units` attribute; the root carries `schema_version` and
     `provenance`. Densities are m⁻³, temperatures eV, frequencies rad/s,
-    diffusivities m²/s. Write files with `write_kinetic_h5`.
+    diffusivities m²/s. Additional datasets named `n_*` (e.g. `n_D`, `n_T`)
+    are named per-species densities for multi-ion runs; names outside `n_*`
+    are reserved for future schema fields and ignored. Write files with
+    `write_kinetic_h5` (which round-trips the per-species densities).
   - **ASCII (`.gpeckf`/`.kin`/`.dat`)** — legacy six-column whitespace table
     `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`, retained for backward
     compatibility. Header rows are skipped.
@@ -24,6 +27,49 @@ extension:
 The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_phi`,
 when present, are carried for the resistive-layer (SLAYER) analysis and ignored
 here.
+
+## Multi-ion runs
+
+A plasma may declare an arbitrary list of main-ion species; the NTV is computed
+per species under one shared full-composition ``Z_\mathrm{eff}`` and summed
+(``\tau = \sum_s \tau_s``) over the main ions, the quasineutrality-closing
+impurity, and (with `electron = true`) the electrons. This applies to both NTV
+paths: the post-PE ψ-quadrature diagnostic and the self-consistent
+`kinetic_source = "calculated"` matrices.
+
+```toml
+[KineticForces]
+kinetic_file = "kinetic.h5"    # n_i column/dataset = TOTAL main-ion density
+electron = true                # add electron NTV in addition to the ion species
+zimp = 6                       # impurity charge (closes quasineutrality)
+mimp = 12                      # impurity mass
+
+[[KineticForces.ion_species]]
+z = 1
+m = 2
+fraction = 0.5                 # this species' share of the total n_i
+[[KineticForces.ion_species]]
+z = 1
+m = 3
+density = "n_T"                # or: explicit n_* dataset from the HDF5 kinetic file
+```
+
+Each species sets exactly one of `fraction` (share of the file's total `n_i`)
+or `density` (a named `n_*` dataset). An all-fraction list must sum to 1; in a
+mixed list the impurity content is set by the file's `n_i`/`n_e` deficit, not
+by a fraction shortfall, and fractions may sum below (never above) 1. Every
+main-ion charge must satisfy `z < zimp`. An empty `ion_species` list runs the
+single main ion from `zi`/`mi` (with `electron = true` still adding the
+electron species — the electron flag always means *in addition to* the ions).
+
+Per-species results are written to HDF5 groups `kinetic_forces_<label>`
+(e.g. `kinetic_forces_ion1_z1_m2`, `kinetic_forces_impurity_z6_m12`,
+`kinetic_forces_electron`) alongside the summed total in `kinetic_forces`. The
+summed cumulative torque profile is a diagnostic (linear interpolation onto the
+union grid); the summed `total_torque` scalar is the exact Gauss-Kronrod value.
+
+The profile-scaling knobs below are not supported together with a multi-ion
+`ion_species` list (they error).
 
 ## Profile Scaling Knobs
 

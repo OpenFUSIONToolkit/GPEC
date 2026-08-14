@@ -93,17 +93,17 @@ f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p,
 [KineticForces]
 # Multi-ion NTV: the analytic Solovev main ion is modelled as a 50/50 D-T mix (n_i = total),
 # so the summed NTV runs over D + T + the neutrality-closing impurity + electrons.
-kinetic_file = "kinetic.dat"
-electron = true
-zimp = 6
-mimp = 12
+kinetic_file = "kinetic.dat"  # Kinetic profile file: psi_n, n_i, n_e, T_i, T_e, omega_E columns
+electron = true               # Add electron NTV in addition to the ion species
+zimp = 6                      # Impurity charge (fundamental units); closes quasineutrality
+mimp = 12                     # Impurity mass (proton masses)
 
 [[KineticForces.ion_species]]
-z = 1
-m = 2
-fraction = 0.5
+z = 1                         # Species charge (fundamental units)
+m = 2                         # Species mass (proton masses) — Deuterium
+fraction = 0.5                # This species' share of the total main-ion density n_i
 
 [[KineticForces.ion_species]]
-z = 1
-m = 3
-fraction = 0.5
+z = 1                         # Species charge (fundamental units)
+m = 3                         # Species mass (proton masses) — Tritium
+fraction = 0.5                # This species' share of the total main-ion density n_i

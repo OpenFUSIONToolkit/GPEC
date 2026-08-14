@@ -196,7 +196,8 @@ end
     multi_ion_composition(zs, ns, ne; zimp, mimp) -> (zeff, zpitch, n_main, n_imp)
 
 Full-composition effective charge and pitch-angle enhancement for a plasma with an
-arbitrary number of main-ion species. Inputs are per-point (scalars or broadcast arrays):
+arbitrary number of main-ion species. Inputs are per-point scalars (`zs`, `ns` are per-species
+values at one ψ; the caller loops grid points):
 
   - `zs`, `ns`: main-ion charges and number densities (one entry per species)
   - `ne`: electron density
@@ -237,11 +238,15 @@ build) loop over and sum. Errors on any negative density (unphysical input / res
 Each descriptor's `profiles` view carries **that species' resonant density** `n_s` (as `ni_spline`)
 and its **full-composition collision frequency** `ν_s` (as `nui_spline`); `ne/Te/ωE/Zeff/lnΛ` (and
 the electron `nue`) are shared. Main-ion density is resolved from `IonSpecies`: `fraction` ⇒
-`n_s = fraction · n_i` (the kinetic file's `n_i` = total main-ion density); explicit per-species
-profiles (`density`) are not yet wired. Composition (Zeff, zpitch, `n_imp`) comes from
-`multi_ion_composition`; per-species `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s·(T_i)^{3/2})`.
-The impurity (`zimp`,`mimp`, density = the quasineutrality `n_imp`) is included as its own resonant
-species. Reduces to `load_kinetic_profiles` for one z=1 main ion with `fraction=1`.
+`n_s = fraction · n_i` (the kinetic file's `n_i` = total main-ion density); `density` ⇒ an explicit
+`n_*`-named dataset in the HDF5 kinetic file (e.g. `"n_D"`), cubic-resampled to the working grid.
+In a mixed fraction/density list the impurity content is set by the file's n_i/n_e deficit, not by
+a fraction shortfall. Composition (Zeff, zpitch, `n_imp`) comes from `multi_ion_composition`;
+per-species `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s·(T_i)^{3/2})`. The `zpitch·n_main` field
+term is exact for z=1 main ions (D-T, D-H) and approximate otherwise (a z>1 main ion's charge
+enters only through Zeff in the impurity closure). The impurity (`zimp`,`mimp`, density = the
+quasineutrality `n_imp`) is included as its own resonant species. Reduces to
+`load_kinetic_profiles` for one z=1 main ion with `fraction=1`.
 """
 function resolve_ntv_species(kinetic_file::AbstractString, ion_species::AbstractVector;
     electron::Bool=false, zimp::Integer=6, mimp::Integer=12,
@@ -334,9 +339,10 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     maximum(zeff) > 0.9 * zimp &&
         @warn "max(Zeff) = $(maximum(zeff)) is within 10% of zimp = $zimp — zpitch closure near its pole; check ion_species densities/fractions"
 
-    # Per-species ν_s: shared zpitch/n_main/Zeff/lnΛ, species-specific z²/m/T_i (Krook deflection
-    # frequency, test-particle z², Logan & Park 2013 Eq. 6). `zpitch` is a main-ion closure, applied
-    # approximately to the impurity/electron test species.
+    # Per-species Krook ν of Logan & Park (2013) Eq. (6); numerical form ported from Fortran
+    # PENTRC inputs.f90:238-244 with an added test-particle z_s². Shared zpitch/n_main/Zeff/lnΛ,
+    # species-specific z²/m/T_i; `zpitch` is a main-ion closure, applied approximately to the
+    # impurity/electron test species.
     _nu(zsp, msp) = [Ti[i] > 0 ? (zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * (Ti[i] / _KEV_J)^1.5) : 0.0 for i in 1:npts]
     _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
 
@@ -493,8 +499,9 @@ function load_kinetic_profiles(kinetic_file::AbstractString;
         ll = _coulomb_log(n_e, T_e)
         loglam[i] = ll
 
-        # Test-particle z² pitch-angle (Krook deflection) scaling — Logan & Park 2013 Eq. 6;
-        # generalizes the implicit zi=1 form; identical to the single-species limit of resolve_ntv_species.
+        # Krook ν of Logan & Park (2013) Eq. (6); numerical form ported from Fortran PENTRC
+        # inputs.f90:238-244 with an added test-particle z² (generalizes the implicit zi=1 form);
+        # identical to the single-species limit of resolve_ntv_species.
         nui[i] = T_i > 0 ?
                  (zpitch / _NU_PREFAC) * zi^2 * n_i * ll / (sqrt(1.0 * mi) * (T_i / _KEV_J)^1.5) : 0.0
         nue[i] = T_e > 0 ?

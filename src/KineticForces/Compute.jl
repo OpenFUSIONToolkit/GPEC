@@ -223,8 +223,10 @@ method: the scalar `total_torque`/`total_energy` are summed exactly; the dT/dψ 
 by linearly interpolating each species' own `(psi_grid, dtdpsi)` arrays onto the sorted union of
 the species ψ grids (zero outside a species' range), and the cumulative T(ψ) is re-integrated
 (trapezoid) from that summed profile. All species share the same ψ-integration range
-(`ctrl.psilims`), so the grids differ only in adaptive nodes. The combined `MethodResult` carries
-only the summed scalars and profile; per-species diagnostics (`torque_profile`, `records`,
+(`ctrl.psilims`), so the grids differ only in adaptive nodes. The interpolated/trapezoid
+`t_cumulative` is a diagnostic profile — its endpoint need not equal the exactly-summed
+Gauss-Kronrod `total_torque`, especially near sharp resonances. The combined `MethodResult`
+carries only the summed scalars and profile; per-species diagnostics (`torque_profile`, `records`,
 `panel_psis`, `resonance_psis`) are not aggregated and are left at their defaults.
 """
 function combine_species_states(states::AbstractVector{KineticForcesState})
