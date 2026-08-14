@@ -14,6 +14,13 @@ CREATE TABLE IF NOT EXISTS runs (
     runtime_s   REAL,
     success     INTEGER NOT NULL DEFAULT 1,
     error_msg   TEXT,
+    env_key       TEXT,
+    julia_version TEXT,
+    os_arch       TEXT,
+    manifest_sha  TEXT,
+    nthreads      INTEGER,
+    blas_threads  INTEGER,
+    pinned        INTEGER,
     UNIQUE(commit_hash, case_name)
 );
 
@@ -35,6 +42,14 @@ CREATE INDEX IF NOT EXISTS idx_runs_case ON runs(case_name);
 CREATE INDEX IF NOT EXISTS idx_quantities_run ON quantities(run_id);
 """
 
+"""
+Value of a possibly-absent SQLite column, falling back to `default`.
+
+SQLite.jl returns `missing` for NULL while Julia's `something` only skips `nothing`, so columns
+added by a later schema migration (NULL on every pre-existing row) need both cases handled.
+"""
+_column(x, default) = (x === nothing || x === missing) ? default : x
+
 """Materialize SQLite query results as a Vector of NamedTuples."""
 function query_rows(db::SQLite.DB, sql::String, params=())
     result = DBInterface.execute(db, sql, params)
@@ -42,6 +57,29 @@ function query_rows(db::SQLite.DB, sql::String, params=())
     nrows = length(first(ct))
     nrows == 0 && return NamedTuple[]
     return [NamedTuple{keys(ct)}(Tuple(col[i] for col in values(ct))) for i in 1:nrows]
+end
+
+"""
+Environment columns added to `runs` after the original schema shipped. Databases created before
+fingerprinting keep their rows, with NULL in these columns — such rows never match a computed
+`env_key`, so they are re-run rather than silently trusted.
+"""
+const ENV_COLUMNS = [
+    ("env_key", "TEXT"), ("julia_version", "TEXT"), ("os_arch", "TEXT"),
+    ("manifest_sha", "TEXT"), ("nthreads", "INTEGER"), ("blas_threads", "INTEGER"),
+    ("pinned", "INTEGER")
+]
+
+"""Add any `runs` columns missing from a database created by an earlier harness version."""
+function migrate_schema!(db::SQLite.DB)
+    existing = Set(String[])
+    for row in query_rows(db, "PRAGMA table_info(runs)")
+        push!(existing, String(something(row.name, "")))
+    end
+    for (col, sqltype) in ENV_COLUMNS
+        col in existing && continue
+        DBInterface.execute(db, "ALTER TABLE runs ADD COLUMN $col $sqltype")
+    end
 end
 
 function open_database(path::String)::SQLite.DB
@@ -53,6 +91,7 @@ function open_database(path::String)::SQLite.DB
         isempty(s) && continue
         DBInterface.execute(db, s)
     end
+    migrate_schema!(db)
     return db
 end
 
@@ -60,10 +99,37 @@ function close_database(db::SQLite.DB)
     SQLite.close(db)
 end
 
-function is_cached(db::SQLite.DB, commit_hash::String, case_name::String)::Bool
-    rows = query_rows(db, "SELECT id FROM runs WHERE commit_hash = ? AND case_name = ? AND success = 1",
-                      (commit_hash, case_name))
+"""
+Is there a usable cached result for this (commit, case)?
+
+With `expected_key` supplied, a cached run only counts when it was produced in the same
+environment. Rows predating fingerprinting hold NULL and therefore never match — the cache
+entries most likely to be misleading are exactly the ones that get re-run.
+"""
+function is_cached(db::SQLite.DB, commit_hash::String, case_name::String;
+                   expected_key::Union{String,Nothing}=nothing)::Bool
+    if expected_key === nothing
+        rows = query_rows(db, "SELECT id FROM runs WHERE commit_hash = ? AND case_name = ? AND success = 1",
+                          (commit_hash, case_name))
+        return !isempty(rows)
+    end
+    rows = query_rows(db,
+        "SELECT id FROM runs WHERE commit_hash = ? AND case_name = ? AND success = 1 AND env_key = ?",
+        (commit_hash, case_name, expected_key))
     return !isempty(rows)
+end
+
+"""
+Environment key stored for a cached run, or `nothing` when the run is absent or predates
+fingerprinting. Used to explain *why* a cached result was rejected.
+"""
+function cached_env_key(db::SQLite.DB, commit_hash::String, case_name::String)::Union{String,Nothing}
+    rows = query_rows(db, "SELECT env_key FROM runs WHERE commit_hash = ? AND case_name = ?",
+                      (commit_hash, case_name))
+    isempty(rows) && return nothing
+    key = _column(first(rows).env_key, nothing)
+    key === nothing && return nothing
+    return String(key)
 end
 
 function delete_cached(db::SQLite.DB, commit_hash::String, case_name::String)
@@ -76,7 +142,8 @@ function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::Abs
                    commit_date::AbstractString, commit_msg::AbstractString,
                    case_name::AbstractString, runtime_s::Float64,
                    extracted::Vector{ExtractedQuantity};
-                   success::Bool=true, error_msg::AbstractString="")
+                   success::Bool=true, error_msg::AbstractString="",
+                   fingerprint::EnvFingerprint=UNKNOWN_ENV)
     ran_at = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
 
     SQLite.transaction(db) do
@@ -84,10 +151,14 @@ function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::Abs
 
         DBInterface.execute(db,
             """INSERT INTO runs
-               (commit_hash, commit_short, commit_date, commit_msg, case_name, ran_at, runtime_s, success, error_msg)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (commit_hash, commit_short, commit_date, commit_msg, case_name, ran_at, runtime_s, success, error_msg,
+                env_key, julia_version, os_arch, manifest_sha, nthreads, blas_threads, pinned)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (String(commit_hash), String(commit_short), String(commit_date), String(commit_msg),
-             String(case_name), ran_at, runtime_s, success ? 1 : 0, String(error_msg)))
+             String(case_name), ran_at, runtime_s, success ? 1 : 0, String(error_msg),
+             env_key(fingerprint), fingerprint.julia_version, fingerprint.os_arch,
+             fingerprint.manifest_sha, fingerprint.nthreads, fingerprint.blas_threads,
+             fingerprint.pinned ? 1 : 0))
 
         run_id = SQLite.last_insert_rowid(db)
 
@@ -147,11 +218,20 @@ Get run info for a (commit, case) pair. Returns NamedTuple or nothing.
 """
 function get_run_info(db::SQLite.DB, commit_hash::String, case_name::String)
     rows = query_rows(db,
-        """SELECT commit_short, commit_date, commit_msg, runtime_s, success, error_msg
+        """SELECT commit_short, commit_date, commit_msg, runtime_s, success, error_msg,
+                  julia_version, os_arch, manifest_sha, nthreads, blas_threads, pinned
            FROM runs WHERE commit_hash = ? AND case_name = ?""",
         (commit_hash, case_name))
     isempty(rows) && return nothing
     row = first(rows)
+    fingerprint = EnvFingerprint(
+        String(_column(row.julia_version, "")),
+        String(_column(row.os_arch, "")),
+        String(_column(row.manifest_sha, "")),
+        Int(_column(row.nthreads, -1)),
+        Int(_column(row.blas_threads, -1)),
+        _column(row.pinned, 0) == 1
+    )
     return (
         commit_short = something(row.commit_short, ""),
         commit_date = something(row.commit_date, ""),
@@ -159,6 +239,7 @@ function get_run_info(db::SQLite.DB, commit_hash::String, case_name::String)
         runtime_s = something(row.runtime_s, 0.0),
         success = coalesce(row.success, 0) == 1,
         error_msg = something(row.error_msg, ""),
+        fingerprint = fingerprint,
     )
 end
 

@@ -1,3 +1,9 @@
+# Regression case: Solovev n=1 collisionless kinetic run (nutype = "zero").
+# Reuses the Solovev_kinetic_calculated_example deck via [overrides] at a
+# mode-converged band; locks the collisionless real-x-space energy-integral
+# eigenvalue plus equilibrium and singular-surface anchors.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
 [case]
 name = "solovev_kinetic_nuzero"
 description = "Solovev, n=1, kinetic_source=calculated, nutype=zero (collisionless energy integral, issue #281), mode-converged band (delta_m=8, mpert=32). Reuses the calculated example deck via override; et[1]≈2.333-2.174i with the pressure-consistent kinetic.dat."

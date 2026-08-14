@@ -98,5 +98,53 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--force` — re-run even if cached
 - `--verbose` — print GPEC subprocess output
 - `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
+<<<<<<< HEAD
 
-GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, but `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
+GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, and the count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines). Thread count is deliberately not part of the cache key, so `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
+=======
+- `--no-pin-manifest` — let each ref resolve its own package set (see below)
+- `--allow-env-mismatch` — reuse cached results produced in a different environment
+- `--fail-on-change` — exit non-zero when any tracked quantity changed
+
+## Making source code the only variable
+
+`Manifest.toml` is untracked, so a worktree checked out at an old commit used to resolve whatever
+package versions were newest at run time. Machine-epsilon differences in library math then get
+amplified by the adaptive ODE step controller and by ill-conditioned near-resonant diagnostics
+into double-digit-percent "regressions" that no source change caused.
+
+Two mechanisms prevent that:
+
+**The working tree's Manifest is pinned into every worktree** before `Pkg.instantiate()`, so all
+refs in a comparison run against one package set. `--no-pin-manifest` opts out (and says so
+loudly). If a commit declares a direct dependency the pinned Manifest lacks, `Pkg.instantiate()`
+refuses to run: that ref is recorded as a failed run whose error suggests `--no-pin-manifest` to
+let it resolve its own package set.
+
+**Every run records the environment that produced it** — Julia version, host, resolved Manifest
+hash, Julia and BLAS thread counts. The cache still holds a single result per
+`(commit, case)`, so a re-run replaces the stored one rather than keeping a result per
+environment; what the fingerprint adds is that a cached result whose environment differs from
+the current one is re-run instead of silently reused. `--allow-env-mismatch` skips that check
+and reuses whatever is cached, whatever produced it. Every report prints the environment of
+each ref:
+
+```
+Ref 1: develop  @ a0cad260 (2026-08-12)
+       env: julia 1.11.6, arm64-apple-darwin24.0.0, manifest 7e5c34ad (pinned), 1 thread/8 BLAS
+```
+
+When two compared runs did not share an environment, the report says so before the table rather
+than leaving you to infer it from the numbers.
+
+Results cached before environment fingerprinting existed carry no environment and are therefore
+re-run once — those are exactly the entries whose provenance cannot be established.
+
+Thread counts are recorded but **not** forced: the harness does not silently change how your runs
+execute. If the two refs in a comparison ran under different thread counts, the report flags it.
+
+## Exit status
+
+- `0` — every run completed (and, with `--fail-on-change`, nothing changed)
+- `1` — a run failed, or a quantity changed under `--fail-on-change`
+>>>>>>> performance/regression-harness-worktree-reuse

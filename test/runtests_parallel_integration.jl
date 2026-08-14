@@ -115,10 +115,10 @@ using TOML
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -179,10 +179,10 @@ using TOML
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -242,10 +242,10 @@ using TOML
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -301,10 +301,10 @@ using TOML
             end
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -350,10 +350,10 @@ using TOML
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -416,10 +416,10 @@ using TOML
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -509,10 +509,10 @@ using TOML
         end
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
             (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
