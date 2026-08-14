@@ -9,10 +9,10 @@ function make_solovev_intr(inputs, ctrl, equil, ex)
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    FFS.sing_lim!(intr, ctrl, equil)
     intr.nlow = ctrl.nn_low;
     intr.nhigh = ctrl.nn_high;
     intr.npert = 1
+    FFS.sing_lim!(intr, ctrl, equil)
     FFS.sing_find!(intr, equil)
     intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
     intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
