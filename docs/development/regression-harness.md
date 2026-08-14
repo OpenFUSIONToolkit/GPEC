@@ -26,6 +26,8 @@ Available regression cases:
 ```bash
 regress --cases diiid_n1 --refs develop,feature/kinetic-damping
 ```
+
+All cases requested in a single invocation share one git worktree (and one `Pkg.instantiate`/precompile) per commit, so `--cases a,b,c` in one command is substantially faster than three separate runs.
 ```
 ================================================================
 Case: diiid_n1 — DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
@@ -96,3 +98,48 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--force` — re-run even if cached
 - `--verbose` — print GPEC subprocess output
 - `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
+- `--no-pin-manifest` — let each ref resolve its own package set (see below)
+- `--allow-env-mismatch` — reuse cached results produced in a different environment
+- `--fail-on-change` — exit non-zero when any tracked quantity changed
+
+## Making source code the only variable
+
+`Manifest.toml` is untracked, so a worktree checked out at an old commit used to resolve whatever
+package versions were newest at run time. Machine-epsilon differences in library math then get
+amplified by the adaptive ODE step controller and by ill-conditioned near-resonant diagnostics
+into double-digit-percent "regressions" that no source change caused.
+
+Two mechanisms prevent that:
+
+**The working tree's Manifest is pinned into every worktree** before `Pkg.instantiate()`, so all
+refs in a comparison run against one package set. `--no-pin-manifest` opts out (and says so
+loudly). If a commit declares a direct dependency the pinned Manifest lacks, `Pkg.instantiate()`
+refuses to run: that ref is recorded as a failed run whose error suggests `--no-pin-manifest` to
+let it resolve its own package set.
+
+**Every run records the environment that produced it** — Julia version, host, resolved Manifest
+hash, Julia and BLAS thread counts. The cache still holds a single result per
+`(commit, case)`, so a re-run replaces the stored one rather than keeping a result per
+environment; what the fingerprint adds is that a cached result whose environment differs from
+the current one is re-run instead of silently reused. `--allow-env-mismatch` skips that check
+and reuses whatever is cached, whatever produced it. Every report prints the environment of
+each ref:
+
+```
+Ref 1: develop  @ a0cad260 (2026-08-12)
+       env: julia 1.11.6, arm64-apple-darwin24.0.0, manifest 7e5c34ad (pinned), 1 thread/8 BLAS
+```
+
+When two compared runs did not share an environment, the report says so before the table rather
+than leaving you to infer it from the numbers.
+
+Results cached before environment fingerprinting existed carry no environment and are therefore
+re-run once — those are exactly the entries whose provenance cannot be established.
+
+Thread counts are recorded but **not** forced: the harness does not silently change how your runs
+execute. If the two refs in a comparison ran under different thread counts, the report flags it.
+
+## Exit status
+
+- `0` — every run completed (and, with `--fail-on-change`, nothing changed)
+- `1` — a run failed, or a quantity changed under `--fail-on-change`

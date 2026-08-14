@@ -57,6 +57,17 @@ function _collect_metadata_violations(h5)
     return bad
 end
 
+# The full-run walk below only exercises an ideal deck, which never produces the
+# data-driven group names — pin the whitelist rules directly.
+@testset "gpec.h5 schema naming: group-name rule" begin
+    @test _group_name_ok("KineticForces", "fgar")            # method tokens verbatim
+    @test _group_name_ok("Tearing/Scan", "Surface_1")        # scan indices verbatim
+    @test _group_name_ok("Input/RawInputs/Coils", "my_coils") # raw-snapshot names verbatim
+    @test _group_name_ok("", "SingularSurfaces")
+    @test !_group_name_ok("", "singular")
+    @test !_group_name_ok("SingularSurfaces", "kinetic")
+end
+
 @testset "gpec.h5 schema naming" begin
     template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
@@ -76,12 +87,10 @@ end
             isempty(bad) || @error "non-CamelCase group paths in gpec.h5" bad
             @test isempty(bad)
 
-            # Retired/renamed legacy top-level groups must not reappear.
-            for legacy in ("info", "input", "equil", "splines", "integration", "locstab",
-                "singular", "matrices", "kinetic", "galerkin", "slayer", "kinetic_forces",
-                "perturbed_equilibrium", "vacuum", "FreeBoundaryStability", "EdgeScan")
-                @test !haskey(h5, legacy)
-            end
+            # The CamelCase walk above already forbids every lowercase legacy group; these
+            # two moved under ForceFreeStates/ and are CamelCase, so pin them explicitly.
+            @test !haskey(h5, "FreeBoundaryStability")
+            @test !haskey(h5, "EdgeScan")
 
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")

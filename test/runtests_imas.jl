@@ -115,7 +115,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         mock_et      = [0.4+0im, 0.7+0im, 1.1+0im]
         mock_n_idx   = [0, 0, 0]   # all belong to n=1 (j=0)
         mock_result  = (
-            vac_data = (et=mock_et, n_tor_idx=mock_n_idx),
+            free_energies = (et=mock_et, n_tor_idx=mock_n_idx),
             intr     = (numpert_total=3, npert=1, nlow=1),
         )
 
@@ -145,7 +145,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         mock_et    = [0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im]
         mock_n_idx = [0, 1, 0, 1]
         mock_result = (
-            vac_data = (et=mock_et, n_tor_idx=mock_n_idx),
+            free_energies = (et=mock_et, n_tor_idx=mock_n_idx),
             intr     = (numpert_total=4, npert=2, nlow=1),
         )
 
@@ -169,7 +169,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # Single n=1 run
         dd_single = IMASdd.dd()
         result_single = (
-            vac_data = (et=[0.3+0im, 0.6+0im], n_tor_idx=[0, 0]),
+            free_energies = (et=[0.3+0im, 0.6+0im], n_tor_idx=[0, 0]),
             intr     = (numpert_total=2, npert=1, nlow=1),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_single, result_single)
@@ -177,7 +177,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # Single n=2 run
         dd_single2 = IMASdd.dd()
         result_single2 = (
-            vac_data = (et=[0.5+0im, 0.7+0im], n_tor_idx=[0, 0]),
+            free_energies = (et=[0.5+0im, 0.7+0im], n_tor_idx=[0, 0]),
             intr     = (numpert_total=2, npert=1, nlow=2),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_single2, result_single2)
@@ -185,7 +185,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # Combined n=1,2 run (same eigenvalues, now interleaved)
         dd_multi = IMASdd.dd()
         result_multi = (
-            vac_data = (et=[0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im], n_tor_idx=[0, 1, 0, 1]),
+            free_energies = (et=[0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im], n_tor_idx=[0, 1, 0, 1]),
             intr     = (numpert_total=4, npert=2, nlow=1),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_multi, result_multi)

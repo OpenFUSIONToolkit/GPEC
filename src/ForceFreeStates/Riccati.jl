@@ -1009,12 +1009,6 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     # dS = w†·v - S·Ḡ·S  [Glasser 2018 eq. 19, dual Riccati]
     mul!(dS, adjoint(w), v)   # dS = w†·v
 
-    # Store du1/dψ = Q·v as a diagnostic before v is reused
-    # Q·v = diag(singfac_vec)·v = Ξ'_Ψ (displacement gradient, with U₂ = I)
-    @. odet.du[:, :, 1] = singfac_vec * v
-    @view(odet.du[:, :, 2]) .= 0
-    odet.xi_s .= 0
-
     # Subtract S·Ḡ·S (reuse v and tmp to avoid extra allocation)
     mul!(tmp, gmat, S)        # tmp = Ḡ·S
     mul!(v, S, tmp)           # v   = S·Ḡ·S
@@ -1301,19 +1295,19 @@ end
 """
     riccati_eulerlagrange_integration(ctrl, equil, ffit, intr) -> OdeState
 
-Main driver for integrating the dual Riccati ODE across the plasma.
-Functionally identical to `eulerlagrange_integration` except:
+Integrate the dual Riccati ODE S = U₁·U₂⁻¹ across the plasma (Glasser 2018 Phys. Plasmas 25,
+032507). Reduces stiffness relative to [`serial_eulerlagrange_integration`](@ref), which it
+otherwise mirrors, differing in three places:
 
-1. Uses `riccati_integrate_chunk!`: drives `sing_der!` with `riccati_integrator_callback!`
-   which applies `renormalize_riccati_inplace!` (instead of Gaussian reduction) when
-   column norms exceed ucrit
-2. Uses `riccati_cross_ideal_singular_surf!` instead of `cross_ideal_singular_surf!`:
-   skips Gaussian reduction (avoids near-zero pivot issues when S is small near axis)
-   and renormalizes to (S_new, I) in one step
-3. Skips `transform_u!` — S is already the true solution, no Gaussian-reduction undo needed
+1. `riccati_integrate_chunk!` drives `sing_der!` with `riccati_integrator_callback!`, which
+   applies `renormalize_riccati_inplace!` rather than Gaussian reduction when column norms
+   exceed `ctrl.ucrit`
+2. `riccati_cross_ideal_singular_surf!` replaces `cross_ideal_singular_surf!`: it skips
+   Gaussian reduction (avoiding near-zero pivots where S is small near the axis) and
+   renormalizes to (S_new, I) in one step
+3. `transform_u!` is skipped — S is already the true solution, so there is no reduction to undo
 
-Enable via `use_riccati = true` in `[ForceFreeStates]` section of gpec.toml, or by
-setting `ctrl.use_riccati = true` programmatically.
+Enable via `use_riccati = true` in the `[ForceFreeStates]` section of gpec.toml.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -1605,12 +1599,14 @@ function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
 end
 
 """
-    parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) -> OdeState
+    parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
 
-Parallel fundamental matrix (propagator) driver for the EL integration.
+Parallel fundamental matrix (propagator) driver for the EL integration. The trailing three
+return values feed the Δ' BVP in `compute_delta_prime_matrix!`; this is the only branch that
+produces them.
 
-Functionally equivalent to `eulerlagrange_integration`, integrating all bulk chunks
-concurrently using `Threads.@threads`, then re-integrating the outer plasma serially:
+Equivalent to [`serial_eulerlagrange_integration`](@ref), but integrates all bulk chunks
+concurrently using `Threads.@threads`, then re-integrates the outer plasma serially:
 
 1. **Chunk generation**: calls `chunk_el_integration_bounds`, then `balance_integration_chunks`
    to sub-divide chunks for load-balanced parallel execution.
@@ -1626,22 +1622,18 @@ concurrently using `Threads.@threads`, then re-integrating the outer plasma seri
    without renormalization); Riccati integration keeps matrices bounded and provides dense
    checkpoints for `findmax_dW_edge!`.
 
-Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml, or by setting
-`ctrl.use_parallel = true` programmatically. Requires `singfac_min != 0`.
+Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml. Requires `singfac_min != 0`.
 
-**Key differences from standard integration:**
+**Key differences from serial integration:**
 - No Gaussian reduction in the propagator BVP phase (crossings use the
   Riccati-style algorithm, parallel `odet.ifix` stays 0)
 - `transform_u!` is called on the parallel odet but is a no-op (ifix=0)
 - Outer plasma uses serial Riccati integration for numerical stability
-- A serial Euler-Lagrange **dense pass** is appended at the end and
-  replaces the parallel `odet` so that `u_store` / `du_store` are dense and
-  in axis basis — the only convention the PerturbedEquilibrium downstream
-  code consumes correctly.  Δ' (`singular/delta_prime_matrix`) is computed
-  from the parallel BVP and is bit-identical with vs. without this pass.
-  Toggle off with `ctrl.populate_dense_xi = false` if only Δ' / vacuum /
-  energies are needed and the extra serial-EL cost is unwanted (HDF5
-  `integration/xi_*` will then be sparse / zero).
+- When `ctrl.populate_dense_xi` is set, a serial EL dense pass is appended and replaces the
+  parallel `odet`, so `u_store` / `du_store` / `xi_s_store` come back in the axis basis that
+  PerturbedEquilibrium requires. Δ' is computed from the parallel BVP either way and is
+  bit-identical between the two. See the `populate_dense_xi` entry in the
+  [`ForceFreeStatesControl`](@ref) docstring for the cost trade-off.
 
 **Bidirectional integration for large-N accuracy:**
 The crossing chunk (nearest to each rational surface singL[j]) is integrated *backward*
@@ -1674,7 +1666,7 @@ function parallel_eulerlagrange_integration(
 
     chunks, propagators = _handle_edge_dW_scan!(odet, chunks, propagators, ctrl, equil, ffit, intr)
 
-    # compute_delta_prime_matrix! is called from the main pipeline (after free_run!) so
+    # compute_delta_prime_matrix! is called from the main pipeline (after free_run) so
     # that vacuum response wv is available for the edge BC. With self-consistent truncation,
     # the propagators/chunks returned here match intr.psilim exactly, so Δ' is well-defined
     # for both truncate_at_dW_peak=false (full domain) and =true (peak).
@@ -1684,7 +1676,7 @@ function parallel_eulerlagrange_integration(
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
     transform_u!(odet, intr)  # no-op when ifix=0 (no Gaussian reduction)
 
-    # Replace BVP `odet` with a dense serial-EL pass so HDF5 `integration/xi_*` carries
+    # Replace BVP `odet` with a dense serial-EL pass so HDF5 `ForwardIntegration/xi_*` carries
     # valid DCON ξ in axis basis for PerturbedEquilibrium. Skipped when force_termination=true.
     if ctrl.populate_dense_xi && !ctrl.force_termination
         odet = _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr)
@@ -1796,9 +1788,11 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
             last_crossing_step = odet.step - 1
         else
-            # Save non-crossing end-of-chunk state. du_store is not meaningful here — when
-            # ctrl.populate_dense_xi=true the entire odet is replaced by a serial-EL pass
-            # at the end of parallel_eulerlagrange_integration.
+            # Save non-crossing end-of-chunk state. These columns are FM/Riccati chunk
+            # endpoints, not the Euler-Lagrange state — when ctrl.populate_dense_xi=true the
+            # entire odet is replaced by a serial-EL pass at the end of
+            # parallel_eulerlagrange_integration.
+            odet.u_store_el_basis = false
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end
@@ -1909,8 +1903,9 @@ end
 Replace the propagator-BVP's `odet` with a fresh serial-EL `odet` that has
 dense `u_store` / `du_store` populated in axis basis (the PerturbedEquilibrium
 convention).  The caller's `odet` is fully replaced by the fresh one because
-`free_run!` downstream uses `odet.u[:,:,1,end]` to normalize `odet.u_store`,
-so both must be in the same basis.  The parallel BVP results that survive
+`free_run` / `normalize_eigenfunctions!` downstream use `odet.u[:,:,1,end]` to
+normalize `odet.u_store`, so both must be in the same basis.  The parallel BVP
+results that survive
 downstream are stored in `intr` (psilim/qlim, sing[*].delta_prime, …) and in
 the externally-returned `propagators` / `chunks` / `S_at_surface_left` —
 none of those live on `odet`, so replacing `odet` is safe.
@@ -1927,7 +1922,7 @@ and does NOT populate `delta_prime`; we keep the parallel pass's values
 which `compute_delta_prime_matrix!` uses).
 
 Called from `parallel_eulerlagrange_integration` when
-`ctrl.populate_dense_xi = true` (default).  Approximate cost: one serial
+`ctrl.populate_dense_xi = true`.  Approximate cost: one serial
 EL integration on top of the parallel BVP phase.  Required to make
 `use_parallel = true` produce DCON eigenfunctions usable by the
 PerturbedEquilibrium downstream pipeline.
@@ -1955,27 +1950,12 @@ function _populate_dense_xi_via_serial_el!(
         ) for s in 1:msing],
     )
 
-    # Temporarily switch dispatch flags so `eulerlagrange_integration`
-    # follows the serial EL branch (axis-basis u_store) for this call.
-    saved_use_parallel = ctrl.use_parallel
-    saved_use_riccati  = ctrl.use_riccati
-    saved_verbose      = ctrl.verbose
-    ctrl.use_parallel = false
-    ctrl.use_riccati  = false
-    ctrl.verbose      = false  # suppress duplicate per-chunk logging
-
-    if saved_verbose
-        @info "   S → ξ: serial EL dense pass for HDF5 integration/xi_*"
+    if ctrl.verbose
+        @info "   S → ξ: serial EL dense pass for HDF5 ForceFreeStates/Solutions/ForwardIntegration/xi_*"
     end
 
-    local fresh_odet::OdeState
-    try
-        fresh_odet, _, _, _ = eulerlagrange_integration(ctrl, equil, ffit, intr)
-    finally
-        ctrl.use_parallel = saved_use_parallel
-        ctrl.use_riccati  = saved_use_riccati
-        ctrl.verbose      = saved_verbose
-    end
+    # Run the serial branch but suppress logging
+    fresh_odet, _, _, _ = serial_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=false)
 
     # Restore BVP-result fields on `intr`.
     intr.psilim = saved.psilim

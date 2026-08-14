@@ -10,10 +10,6 @@ using HDF5
 using LaTeXStrings
 using Plots
 
-# HDF5 group prefixes shared by every reader in this module.
-const PE_SINGULAR_COUPLING = "PerturbedEquilibrium/SingularCoupling/"
-const PE_RESPONSE = "PerturbedEquilibrium/Response/"
-
 # Check that a PE dataset exists and is non-empty.
 function _has_pe_data(h5path, key)
     h5open(h5path, "r") do fid
@@ -44,7 +40,7 @@ Requires the perturbed equilibrium module to have been run and
 A `Plots.jl` plot object.
 """
 function plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
-    base = PE_SINGULAR_COUPLING
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "resonant_area_weighted_field") ||
         return plot(; title="No resonant area-weighted field data — run with perturbed equilibrium enabled", legend=false)
 
@@ -95,7 +91,7 @@ Requires `SingularCoupling/island_half_width` in the HDF5 file.
 A `Plots.jl` plot object.
 """
 function plot_island_widths(h5path; save_path=nothing)
-    base = PE_SINGULAR_COUPLING
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "island_half_width") ||
         return plot(; title="No island width data — run with perturbed equilibrium enabled", legend=false)
 
@@ -149,7 +145,7 @@ Requires `SingularCoupling/chirikov_parameter` in the HDF5 file.
 A `Plots.jl` plot object.
 """
 function plot_chirikov_parameter(h5path; save_path=nothing)
-    base = PE_SINGULAR_COUPLING
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "chirikov_parameter") ||
         return plot(; title="No Chirikov data — run with perturbed equilibrium enabled", legend=false)
 
@@ -211,7 +207,7 @@ Requires `PerturbedEquilibrium/SingularCoupling/delta_prime` in the HDF5 file.
 A `Plots.jl` plot object.
 """
 function plot_driven_delta_prime(h5path; save_path=nothing)
-    base = PE_SINGULAR_COUPLING
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "delta_prime") ||
         return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
 
@@ -297,7 +293,7 @@ end
 
 # Internal helper — resonant current scatter plot
 function _plot_resonant_current(h5path)
-    base = PE_SINGULAR_COUPLING
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "resonant_current") ||
         return plot(; title="No resonant current data", legend=false)
 
@@ -364,7 +360,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     haskey(comp_map, component) ||
         error("component must be one of :xi_psi, :b_psi, :b_theta, :b_zeta")
 
-    base = PE_RESPONSE
+    base = "PerturbedEquilibrium/Response/"
     dataset_path = base * comp_map[component]
 
     _has_pe_data(h5path, dataset_path) ||
@@ -375,7 +371,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
         read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
         read(fid["Info/mlow"]), read(fid["Info/mhigh"]), read(fid["Info/nhigh"]),
         read(fid["Equilibrium/q95"]),
-        read(fid[PE_SINGULAR_COUPLING * "rational_psi"])
+        read(fid["PerturbedEquilibrium/SingularCoupling/rational_psi"])
     end
 
     mpert = mhigh - mlow + 1
@@ -456,7 +452,7 @@ end
 
 # Internal helper — |b_psi(m)| spectrum at the outermost psi surface
 function _plot_bpsi_edge_spectrum(h5path)
-    base = PE_RESPONSE
+    base = "PerturbedEquilibrium/Response/"
     _has_pe_data(h5path, base * "b_psi_area_weighted") ||
         return plot(; title="No b_psi data — run with perturbed equilibrium enabled", legend=false)
 
