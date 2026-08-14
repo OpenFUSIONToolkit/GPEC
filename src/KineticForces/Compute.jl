@@ -232,7 +232,7 @@ carries only the summed scalars and profile; per-species diagnostics (`torque_pr
 function combine_species_states(states::AbstractVector{KineticForcesState})
     combined = KineticForcesState()
     isempty(states) && return combined
-    method_names = collect(keys(first(states).method_results))
+    method_names = sort(unique(Iterators.flatten(keys(s.method_results) for s in states)))
     for mname in method_names
         results = [s.method_results[mname] for s in states if haskey(s.method_results, mname)]
         isempty(results) && continue

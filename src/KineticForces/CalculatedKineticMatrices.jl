@@ -59,7 +59,7 @@ function compute_calculated_kinetic_matrices(
     ffit;
     kf_ctrl::KineticForcesControl=KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
-    species::Union{Nothing,AbstractVector}=nothing
+    species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -113,7 +113,12 @@ function compute_calculated_kinetic_matrices(
              [Equilibrium.ResolvedNTVSpecies(kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.electron, "single", kinetic_profiles)] : species
 
     for sp in splist
-        Threads.@threads for ipsi in 1:mpsi
+        # Hoisted per-species scalars: the closure then captures concrete values, not a
+        # union-typed `sp` (the ternary above mixes the resolved vector with the fallback).
+        z_s, m_s, el_s, prof_s = sp.z, sp.m, sp.electron, sp.profiles
+        # :static pins one task per thread so the threadid() buffer indexing below is sound
+        # (dynamic scheduling may migrate tasks at yield points, silently sharing buffers).
+        Threads.@threads :static for ipsi in 1:mpsi
             tid = Threads.threadid()
             intr_t = thread_intrs[tid]
             full_w = thread_full_w[tid]
@@ -130,8 +135,8 @@ function compute_calculated_kinetic_matrices(
                     fill!(block_t, 0)
                     compute_kinetic_matrices_at_psi!(
                         block_w, block_t, psi, n, ell,
-                        sp.z, sp.m, kf_ctrl.wdfac, kf_ctrl.divxfac,
-                        sp.electron, equil, intr_t, sp.profiles;
+                        z_s, m_s, kf_ctrl.wdfac, kf_ctrl.divxfac,
+                        el_s, equil, intr_t, prof_s;
                         nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
                         atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
                     )

@@ -15,6 +15,8 @@ using HDF5
 # Physical constants and collisionality normalizations shared by `load_kinetic_profiles` and
 # `resolve_ntv_species` (Krook collision frequency, Logan & Park 2013 Eq. 6).
 const _EV_J = 1.602e-19          # eV → J
+const _E_CHARGE = 1.602e-19      # elementary charge [C] (PENTRC-parity value, not CODATA)
+const _NKIN = 100                # kinetic-profile resample: uniform ψ_n grid of _NKIN+1 points
 const _KEV_J = 1.602e-16         # 1 keV in J (temperature normalization in the collision frequency)
 const _NU_PREFAC = 3.5e17        # Krook collision-frequency prefactor
 const _MP = 1.672_614e-27        # proton mass [kg]
@@ -266,7 +268,7 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     omE_in = _need(data.omega_E, "omega_E")
     ni_in = data.n_i === nothing ? copy(ne_in) : data.n_i   # TOTAL main-ion density
 
-    nkin = 100
+    nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
     ne = _cubic_resample(psi_in, ne_in, psi_reg)
     ni_total = _cubic_resample(psi_in, ni_in, psi_reg)
@@ -426,7 +428,7 @@ function load_kinetic_profiles(kinetic_file::AbstractString;
     omegaE_input = _need(data.omega_E, "omega_E")
     ni_input = data.n_i === nothing ? copy(ne_input) : data.n_i
 
-    nkin = 100
+    nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
 
     # Match Fortran pentrc/inputs.f90:215-232 — cubic-spline-then-resample, NOT
@@ -458,7 +460,7 @@ function load_kinetic_profiles(kinetic_file::AbstractString;
         dTi_dpsi = deriv1(Ti_spl)
 
         # Compute original wdian, wdiat, wphi and reform omegaE at each grid point
-        chrg_ion = zi * _EV_J
+        chrg_ion = zi * _E_CHARGE
         for i in eachindex(omegaE)
             ψ = psi_reg[i]
             wdian_i = ni[i] > 0 ? -2π * Ti[i] * dni_dpsi(ψ) / (chrg_ion * chi1 * ni[i]) : 0.0
