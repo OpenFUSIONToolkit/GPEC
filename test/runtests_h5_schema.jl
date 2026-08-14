@@ -62,12 +62,10 @@ end
             isempty(bad) || @error "non-CamelCase group paths in gpec.h5" bad
             @test isempty(bad)
 
-            # Retired/renamed legacy top-level groups must not reappear.
-            for legacy in ("info", "input", "equil", "splines", "integration", "locstab",
-                "singular", "matrices", "kinetic", "galerkin", "slayer", "kinetic_forces",
-                "perturbed_equilibrium", "vacuum", "FreeBoundaryStability", "EdgeScan")
-                @test !haskey(h5, legacy)
-            end
+            # The CamelCase walk above already forbids every lowercase legacy group; these
+            # two moved under ForceFreeStates/ and are CamelCase, so pin them explicitly.
+            @test !haskey(h5, "FreeBoundaryStability")
+            @test !haskey(h5, "EdgeScan")
 
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")

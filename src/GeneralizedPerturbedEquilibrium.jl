@@ -59,15 +59,6 @@ include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
 
-# HDF5 paths read back by the file-based rerun (Rerun.jl); shared consts keep the
-# writer and rerun reader from drifting apart. Schema conventions:
-# docs/development/hdf5-conventions.md.
-const H5_INPUT_TOML = "Input/gpec_toml_raw"
-const H5_RAW_EQUILIBRIUM = "Input/RawInputs/Equilibrium"
-const H5_RAW_FORCING = "Input/RawInputs/ForcingTerms"
-const H5_RAW_COILS = "Input/RawInputs/Coils"
-const H5_GIT_VERSION = "Info/git_version"
-
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
@@ -728,7 +719,7 @@ function write_outputs_to_HDF5(
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
         # Store git version for reproducibility
-        out_h5[H5_GIT_VERSION] = git_version
+        out_h5["Info/git_version"] = git_version
 
         # Outer-region Galerkin Δ′ matrix (RDCON), if computed
         if gal_data !== nothing
@@ -739,16 +730,17 @@ function write_outputs_to_HDF5(
         # ForceFreeStates/Equilibrium/Wall/PE control struct), plus the equilibrium ingest
         # arrays so a file-based rerun never needs the original g-file / CHEASE / IMAS source.
         if inputs !== nothing
-            out_h5[H5_INPUT_TOML] = sprint(TOML.print, inputs)
+            out_h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
         end
         if equil.ingest !== nothing  # analytic equilibria are regenerated from their TOML section
-            out_h5["$H5_RAW_EQUILIBRIUM/ingest_kind"] = equil.ingest isa Equilibrium.DirectIngest ? "direct" : "inverse"
+            eq_group = "Input/RawInputs/Equilibrium"  # read back by Rerun.read_equilibrium_ingest
+            out_h5["$eq_group/ingest_kind"] = equil.ingest isa Equilibrium.DirectIngest ? "direct" : "inverse"
             for f in fieldnames(typeof(equil.ingest))
-                out_h5["$H5_RAW_EQUILIBRIUM/$f"] = getfield(equil.ingest, f)
+                out_h5["$eq_group/$f"] = getfield(equil.ingest, f)
             end
         end
         if forcing_modes !== nothing
-            forcing_group = create_group(out_h5, H5_RAW_FORCING)
+            forcing_group = create_group(out_h5, "Input/RawInputs/ForcingTerms")
             ForcingTerms.save_forcing_to_h5(forcing_modes, forcing_group)
         end
 
@@ -1005,8 +997,8 @@ One subgroup per coil set; see `ForcingTerms.save_coils_to_h5`.
 function _write_coil_snapshot!(h5_path::String, coil_sets::Vector{ForcingTerms.CoilSet})
     isfile(h5_path) || return nothing
     h5open(h5_path, "r+") do out_h5
-        haskey(out_h5, H5_RAW_COILS) && return nothing
-        ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, H5_RAW_COILS))
+        haskey(out_h5, "Input/RawInputs/Coils") && return nothing
+        ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, "Input/RawInputs/Coils"))
     end
     return nothing
 end

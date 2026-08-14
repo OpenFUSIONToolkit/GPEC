@@ -148,7 +148,7 @@ Additional file hygiene (enforced by pre-commit hooks):
 
 ### HDF5 Output Conventions
 
-The `gpec.h5` schema follows one physics-first convention (CamelCase groups at all levels, snake_case datasets, data-driven tokens verbatim, inputs only under `Input/`, five named top-level physics-topic exceptions). **Do not invent new group names or echo inputs into output groups** — read **[`docs/development/hdf5-conventions.md`](docs/development/hdf5-conventions.md)** before adding or moving any HDF5 output, and keep the regression-harness extractor's legacy map in sync on renames.
+The `gpec.h5` schema follows one physics-first convention (CamelCase groups at all levels, snake_case datasets, data-driven tokens verbatim, inputs only under `Input/`, five named top-level physics-topic exceptions). **Do not invent new group names or echo inputs into output groups** — read **[`docs/development/hdf5-conventions.md`](docs/development/hdf5-conventions.md)** before adding or moving any HDF5 output; renames are clean breaks (update writer, readers, and harness case TOMLs together — there is no legacy-path shim).
 
 ### TOML Annotation Conventions
 
