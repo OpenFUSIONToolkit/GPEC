@@ -546,12 +546,18 @@ using TOML
 
         # Pinned diagonal `delta_prime_matrix` REAL parts, PEST3-convention self-response Δ' from
         # the STRIDE BVP with vacuum coupling, on the two-pass measured-curvature grid (rational
-        # surfaces pinned as mandatory knots). These pin one point at the default psi_accuracy so
-        # the test catches unintended changes; they are NOT converged Δ'. The extraction is
-        # intrinsically grid-sensitive — a psi_accuracy scan (2e-3→2.5e-4) swings dpm[1,1] by ~50%
-        # (6.2–9.9) and a finer ldp mpsi=512 grid gives ≈8.5 — so treat the diagonal as an
-        # order-of-magnitude/sign diagnostic, and expect to re-pin whenever the grid generator
-        # changes (as here). See the "pinning grid-sensitive Δ′ robustly" open problem in
+        # surfaces now *bracketed* rather than pinned on — see `bracket_mandatory_nodes`).
+        #
+        # The q=2 pin is now a CONVERGED value, which closes the "replace this with a converged-Δ′
+        # pin on a fixed ldp grid" item the previous pin carried. Three independent grid families
+        # on this fixture agree to ~1%:
+        #     ldp     mpsi 512 / 1024 / 2048   :  8.478 / 9.142 / 9.244
+        #     uniform mpsi 1024 / 2048         :  9.146 / 9.143
+        #     auto    τ 2e-3/1e-3/5e-4/2.5e-4  :  9.198 / 9.239 / 9.206 / 9.157
+        # i.e. dpm[1,1] → ≈9.2. Before this grid fix the τ-scan swung ~50% (6.2–9.9) and the pin
+        # had to be a mid-spread snapshot; it is now flat in τ to 0.9%, so the default
+        # psi_accuracy lands on the converged value rather than near it by luck.
+        # See the "pinning grid-sensitive Δ′ robustly" open problem in
         # docs/src/developer_notes.md for the plateau criterion meant to replace single-point pins.
         # (et[1], NTV torque, and ‖resonant flux‖ stay grid-robust to <1% — the sensitivity is
         # local to the singular-layer matching, not the global response.) Only real parts are
@@ -559,15 +565,15 @@ using TOML
         # FP/platform-sensitive. Near-separatrix surfaces q=5,6 keep only the finiteness/non-zero
         # checks above. Values use this testset's mode range (mpert=27, vs full-pipeline mpert=35).
         #
-        # q=2 additionally carries a platform spread that the other surfaces do not: the same grid
-        # and inputs give 6.1438 (linux/julia 1.11), 6.6867 (linux/julia 1.x), and 7.7036
-        # (macOS/aarch64) — ~25% end to end. This is the surface with the known Δ' plateau problem,
-        # so its extraction sits on the steepest part of the grid-refinement curve and small
-        # platform differences in knot placement move it. The q=2 pin is therefore centered on the
-        # midpoint of the observed spread with rtol=1.5e-1 to span it; q=3 and q=4 are reproducible
-        # across the same platforms and keep rtol=1e-1. Replacing this with a converged-Δ' pin on a
-        # fixed ldp grid is tracked as an open issue.
-        @test isapprox(real(dpm[1, 1]), +6.923700e+00; rtol=1.5e-1)  # q=2 (platform spread 6.14–7.70)
+        # The q=2 platform spread also collapsed with this fix: because the matching stencil no
+        # longer straddles a knot, q‴ is single-valued across it and the surface no longer sits on
+        # the steepest part of the refinement curve. Same grid and inputs now give 9.239
+        # (macOS/aarch64), 9.333 (linux/julia 1.11) and 9.356 (linux/julia 1.x) — 1.3% end to end,
+        # against ~25% before (6.14 / 6.69 / 7.70). rtol=3e-2 spans that with margin and is a 5×
+        # TIGHTENING of the old 1.5e-1. q=3 and q=4 are unchanged: the same ladder puts them at
+        # −5.716 and −16.033 (ldp 2048), inside their existing tolerances, and they reproduce
+        # across platforms.
+        @test isapprox(real(dpm[1, 1]), +9.300000e+00; rtol=3e-2)   # q=2, converged (ldp2048 9.244)
         @test isapprox(real(dpm[2, 2]), -5.344199e+00; rtol=1e-1)   # q=3
         @test isapprox(real(dpm[3, 3]), -1.590034e+01; rtol=1e-1)   # q=4
     end

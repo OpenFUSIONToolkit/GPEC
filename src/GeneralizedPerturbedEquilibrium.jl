@@ -240,8 +240,12 @@ function main_from_inputs(
     # from the in-memory input — no file re-read.
     if Equilibrium.wants_two_pass(eq_config)
         mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+        # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
+        # so the rational-surface brackets clear a zone large enough for every mode.
+        n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
         psi_nodes = Equilibrium.refined_psi_grid(equil;
-            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory)
+            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+            singfac_min=ctrl.singfac_min, n_min=n_min)
         rerun_input = if additional_input !== nothing
             # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
             # path re-runs read_imas, which must resolve the same psihigh both passes;
@@ -255,7 +259,7 @@ function main_from_inputs(
             nothing  # fall back to re-reading the input file
         end
         equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
-        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory)
+        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
         if implied > 1.5 * (length(psi_nodes) - 1)
             @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
                   "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
