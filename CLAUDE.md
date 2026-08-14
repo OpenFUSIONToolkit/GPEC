@@ -8,7 +8,7 @@ GPEC (Generalized Perturbed Equilibrium Code, Julia implementation) is a compreh
 
 **Relationship to Fortran GPEC**: This Julia GPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "the Fortran code", "the original GPEC", "Fortran GPEC", or "legacy VACUUM", they are referring to that Fortran codebase — not a runtime dependency of this Julia implementation. This Julia implementation reimplements and extends GPEC's functionality with improved performance and maintainability.
 
-**Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, check for a local GPEC repository at `~/Code/gpec`. If not found at this location, ask the user for the correct path.
+**Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, a local clone of the Fortran GPEC repository is needed; ask the user for its path.
 
 ## Key References
 
@@ -129,7 +129,7 @@ These rules apply to **every** Agent tool invocation, not just performance work.
 
 ### Code Formatting
 
-Pre-commit hooks enforce formatting via JuliaFormatter (v1.0.62) and general file hygiene. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
+Pre-commit hooks enforce formatting via JuliaFormatter and general file hygiene. The hook runs the developer's globally installed JuliaFormatter (the version is not currently pinned), so previously untouched files may normalize wholesale on first edit; this churn is expected and should not be reverted. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
 
 The project's `.JuliaFormatter.toml` settings:
 - **Line width**: 180 characters max (`margin = 180`)

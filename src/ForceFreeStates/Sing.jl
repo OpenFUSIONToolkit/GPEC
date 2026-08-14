@@ -91,7 +91,7 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 end
 
 """
-    sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+    sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
 Compute and set integration ψ, q, and q' limits by handling cases where user truncates
 before the last singular surface. Performs a similar function to `sing_lim`
@@ -117,24 +117,26 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.psihigh
 
-    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent).
-    # Multi-n runs (nn_low != nn_high) are not supported — the "outermost rational + dmlim/n"
-    # cutoff depends on which n is used, so it isn't well-defined. Single-n with nn_low <= 0
-    # (e.g. uninitialized default) is also skipped because the formula divides by nn_low.
-    # Both cases fall back to qhigh / psihigh truncation with a warning.
-    if ctrl.set_psilim_via_dmlim && ctrl.nn_low != ctrl.nn_high
-        @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(ctrl.nn_low), nn_high=$(ctrl.nn_high)); falling back to qhigh / psihigh truncation."
-    elseif ctrl.set_psilim_via_dmlim && ctrl.nn_low <= 0
-        @warn "set_psilim_via_dmlim = true requires nn_low > 0; got nn_low=$(ctrl.nn_low). Falling back to qhigh / psihigh truncation."
+    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent). The cutoff reads
+    # the *resolved* toroidal range on `intr`, so callers must assign intr.nlow / intr.nhigh
+    # before calling; an unresolved range is an error rather than a silent change of truncation
+    # strategy. Multi-n runs are not supported — the "outermost rational + dmlim/n" cutoff depends
+    # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
+    if ctrl.set_psilim_via_dmlim && intr.nlow <= 0
+        error("sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+              "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
+              "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead.")
+    elseif ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
+        @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
     elseif ctrl.set_psilim_via_dmlim
         @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
-        ctrl.dmlim = mod(ctrl.dmlim, 1.0)
-        intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
+        dmlim = mod(ctrl.dmlim, 1.0)
+        intr.qlim = (trunc(Int, intr.nlow * intr.qlim) + dmlim) / intr.nlow
 
         # Reduce qlim if above qmax
         while intr.qlim > equil.params.qmax
-            intr.qlim -= 1.0 / ctrl.nn_low
+            intr.qlim -= 1.0 / intr.nlow
         end
     end
 
@@ -203,6 +205,8 @@ See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematica
 ### Arguments
 
   - `singp::SingType`: Singular surface parameters
+  - `sing_order`: Expansion order, defaulting to `ctrl.sing_order`. The Galerkin path overrides it
+    per surface (`gal_sing_order`, raised for high-Mercier-index surfaces).
 
 ### Returns
 
@@ -215,12 +219,13 @@ function compute_sing_asymptotics(
     ffit::FourFitVars,
     intr::ForceFreeStatesInternal;
     sig::Float64=1.0,
-    alpha_override::Union{Nothing,Vector{ComplexF64}}=nothing
+    alpha_override::Union{Nothing,Vector{ComplexF64}}=nothing,
+    sing_order::Int=ctrl.sing_order
 )
 
     # Allocations
-    vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 1)
-    mmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 3)
+    vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * sing_order + 1)
+    mmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * sing_order + 3)
     power = zeros(ComplexF64, 2 * intr.numpert_total)
 
     # Compute the resonant (r) and nonresonant (n) indices of the shearing transformation matrix R
@@ -236,7 +241,7 @@ function compute_sing_asymptotics(
     # Compute mmat Taylor coefficients with direction parameter sig.
     # Fortran computes separate mmatl (sig=-1) and mmatr (sig=+1) — the sig flips
     # odd derivatives of all input quantities (q, F, G, K splines).
-    compute_sing_mmat!(mmat, singp, ctrl, equil.profiles, ffit, intr; sig=sig)
+    compute_sing_mmat!(mmat, singp, ctrl, equil.profiles, ffit, intr; sig=sig, sing_order=sing_order)
 
     # Extract direction-specific m0mat from zeroth-order mmat
     m0mat = if length(r1) == 1
@@ -283,7 +288,7 @@ function compute_sing_asymptotics(
     end
 
     # Higher order solutions — sig propagates through the recursion (Fortran STRIDE sing_solve).
-    for k in 1:(2*ctrl.sing_order)
+    for k in 1:(2*sing_order)
         solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=sig)
     end
 
@@ -303,7 +308,7 @@ function compute_sing_asymptotics(
         msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
         msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0, 2, 1]), imag(vmat[ipert0, ipert0, 2, 1]))
         msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0+N, 2, 1]), imag(vmat[ipert0, ipert0+N, 2, 1]))
-        for k in 0:(2*ctrl.sing_order)
+        for k in 0:(2*sing_order)
             msg *= @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei\n",
                 k, real(vmat[ipert0, ipert0, 1, k+1]), imag(vmat[ipert0, ipert0, 1, k+1]),
                 real(vmat[ipert0, ipert0, 2, k+1]), imag(vmat[ipert0, ipert0, 2, k+1]))
@@ -314,7 +319,7 @@ function compute_sing_asymptotics(
         msg
     end
 
-    return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
+    return SingAsymptotics(sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
 end
 
 """
@@ -355,7 +360,8 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     profiles::Equilibrium.ProfileSplines,
     ffit::FourFitVars,
     intr::ForceFreeStatesInternal;
-    sig::Float64=1.0
+    sig::Float64=1.0,
+    sing_order::Int=ctrl.sing_order
 )
 
     q_spline = profiles.q_spline
@@ -370,13 +376,13 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     f_lower_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
     g_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
     k_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
-    f_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    f_lower = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
     f0_lower = zeros!(pool, ComplexF64, Npert, Npert)
-    ff_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
-    g_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
-    k = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    ff_lower = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
+    g_lower = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
+    k = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
     v = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2)
-    x = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2, ctrl.sing_order + 1)
+    x = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2, sing_order + 1)
     tmp_vec = acquire!(pool, ComplexF64, Npert)
 
     # Evaluate q spline and its derivatives, applying sig to odd derivatives.
@@ -436,34 +442,34 @@ Add a spline for F directly instead of the lower triangular factorization to avo
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
-                if ctrl.sing_order ≥ 1
+                if sing_order ≥ 1
                     f_lower[ipert, jpert, 2] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 2] +
                                                singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
                 end
-                if ctrl.sing_order ≥ 2
+                if sing_order ≥ 2
                     f_lower[ipert, jpert, 3] =
                         singfac[ipert, 1] * f_lower_interp[ipert, jpert, 3] +
                         2 * singfac[ipert, 2] * f_lower_interp[ipert, jpert, 2] +
                         singfac[ipert, 3] * f_lower_interp[ipert, jpert, 1]
                 end
-                if ctrl.sing_order ≥ 3
+                if sing_order ≥ 3
                     f_lower[ipert, jpert, 4] =
                         singfac[ipert, 1] * f_lower_interp[ipert, jpert, 4] +
                         3 * singfac[ipert, 2] * f_lower_interp[ipert, jpert, 3] +
                         3 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 2] +
                         singfac[ipert, 4] * f_lower_interp[ipert, jpert, 1]
                 end
-                if ctrl.sing_order ≥ 4
+                if sing_order ≥ 4
                     f_lower[ipert, jpert, 5] =
                         4 * singfac[ipert, 2] * f_lower_interp[ipert, jpert, 4] +
                         6 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 3] +
                         4 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 2]
                 end
-                if ctrl.sing_order ≥ 5
+                if sing_order ≥ 5
                     f_lower[ipert, jpert, 6] = 10 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 4] +
                                                10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
                 end
-                if ctrl.sing_order ≥ 6
+                if sing_order ≥ 6
                     f_lower[ipert, jpert, 7] = 20 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 4]
                 end
             end
@@ -478,7 +484,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # Julia will handle filling the upper half via the Hermitian property
     # internally, just like LAPACK does in Fortran
     fac0 = 1
-    for n in 0:ctrl.sing_order
+    for n in 0:sing_order
         fac1 = 1
         for j in 0:n
             for ipert_n in 1:intr.npert
@@ -507,34 +513,34 @@ Add a spline for F directly instead of the lower triangular factorization to avo
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
-                if ctrl.sing_order ≥ 1
+                if sing_order ≥ 1
                     k[ipert, jpert, 2] = singfac[ipert, 1] * k_interp[ipert, jpert, 2] +
                                          singfac[ipert, 2] * k_interp[ipert, jpert, 1]
                 end
-                if ctrl.sing_order ≥ 2
+                if sing_order ≥ 2
                     k[ipert, jpert, 3] =
                         singfac[ipert, 1] * k_interp[ipert, jpert, 3] / 2 +
                         singfac[ipert, 2] * k_interp[ipert, jpert, 2] +
                         singfac[ipert, 3] * k_interp[ipert, jpert, 1] / 2
                 end
-                if ctrl.sing_order ≥ 3
+                if sing_order ≥ 3
                     k[ipert, jpert, 4] =
                         singfac[ipert, 1] * k_interp[ipert, jpert, 4] / 6 +
                         singfac[ipert, 2] * k_interp[ipert, jpert, 3] / 2 +
                         singfac[ipert, 3] * k_interp[ipert, jpert, 2] / 2 +
                         singfac[ipert, 4] * k_interp[ipert, jpert, 1] / 6
                 end
-                if ctrl.sing_order ≥ 4
+                if sing_order ≥ 4
                     k[ipert, jpert, 5] =
                         singfac[ipert, 2] * k_interp[ipert, jpert, 4] / 6 +
                         singfac[ipert, 3] * k_interp[ipert, jpert, 3] / 4 +
                         singfac[ipert, 4] * k_interp[ipert, jpert, 2] / 6
                 end
-                if ctrl.sing_order ≥ 5
+                if sing_order ≥ 5
                     k[ipert, jpert, 6] = singfac[ipert, 3] * k_interp[ipert, jpert, 4] / 12 +
                                          singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
                 end
-                if ctrl.sing_order ≥ 6
+                if sing_order ≥ 6
                     k[ipert, jpert, 7] = singfac[ipert, 4] * k_interp[ipert, jpert, 4] / 36
                 end
             end
@@ -549,13 +555,13 @@ Add a spline for F directly instead of the lower triangular factorization to avo
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
-                if ctrl.sing_order ≥ 1
+                if sing_order ≥ 1
                     g_lower[ipert, jpert, 2] = g_interp[ipert, jpert, 2]
                 end
-                if ctrl.sing_order ≥ 2
+                if sing_order ≥ 2
                     g_lower[ipert, jpert, 3] = g_interp[ipert, jpert, 3] / 2
                 end
-                if ctrl.sing_order ≥ 3
+                if sing_order ≥ 3
                     g_lower[ipert, jpert, 4] = g_interp[ipert, jpert, 4] / 6
                 end
             end
@@ -578,7 +584,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
 
     # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
-    for i in 1:ctrl.sing_order
+    for i in 1:sing_order
         for isol in 1:(2*intr.numpert_total)
             for j in 1:i
                 @views mul!(tmp_vec, Hermitian(ff_lower[:, :, j+1], :L), x[:, isol, 1, i-j+1])
@@ -591,7 +597,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     end
 
     # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ + ∑Kⱼ^† x¹ₙ₋ⱼ at each order
-    for i in 0:ctrl.sing_order
+    for i in 0:sing_order
         for isol in 1:(2*intr.numpert_total)
             for j in 0:i
                 @views mul!(tmp_vec, adjoint(k[:, :, j+1]), x[:, isol, 1, i-j+1])
@@ -615,7 +621,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # Start with the S⁻¹LS components
     # Glasser PoP 2023 eq. 39: at each other of L, we get contributions to z^k from RLR,
     # z^k+0.5 from RLA and ALR, and z^k+1 from ALA (where A is the nonresonant part)
-    for i in 0:ctrl.sing_order
+    for i in 0:sing_order
         mmat[r1, r2, :, j+1] .= x[r1, r2, :, i+1]
         mmat[r1, n2, :, j+2] .= x[r1, n2, :, i+1]
         mmat[n1, r2, :, j+2] .= x[n1, r2, :, i+1]
@@ -945,6 +951,48 @@ sing_get_ua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
     sing_get_ua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
 
 """
+    sing_get_ua_res_cut!(out, sing_asymp, dpsi) -> out
+
+Leading-order ("cut") form of [`sing_get_ua_res!`](@ref): keeps only the `t = 0` term of the
+Frobenius series instead of summing all `2·sing_order` terms, then applies the same unshear.
+
+This is the resonant basis used to build the *cut* outer solution, whose role is to supply the
+regular background that the resistive inner-layer solution is added to when forming the composite
+solution near a rational surface. Because the full and cut series share the same leading term, the
+difference between them is exactly the higher-order content that the layer solution replaces.
+"""
+function sing_get_ua_res_cut!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
+    vmat = sing_asymp.vmat
+    N = size(vmat, 1)
+    sqrtfac = sqrt(dpsi)
+    ρ = sing_asymp.r1[1]
+    cbig = sing_asymp.r2[1]
+    csml = sing_asymp.r2[2]
+
+    @inbounds for k in 1:2, ii in 1:N
+        out[ii, 1, k] = vmat[ii, cbig, k, 1]
+        out[ii, 2, k] = vmat[ii, csml, k, 1]
+    end
+
+    pfac = dpsi^sing_asymp.alpha[1]
+    @inbounds for k in 1:2, ii in 1:N
+        out[ii, 1, k] /= pfac
+        out[ii, 2, k] *= pfac
+    end
+    @inbounds out[ρ, 1, 1] /= sqrtfac
+    @inbounds out[ρ, 2, 1] /= sqrtfac
+    @inbounds out[ρ, 1, 2] *= sqrtfac
+    @inbounds out[ρ, 2, 2] *= sqrtfac
+    return out
+end
+
+"""
+Allocating wrapper for [`sing_get_ua_res_cut!`](@ref); returns the big/small columns as `(N, 2, 2)`.
+"""
+sing_get_ua_res_cut(sing_asymp::SingAsymptotics, dpsi::Float64) =
+    sing_get_ua_res_cut!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
+
+"""
 Allocating wrapper for [`sing_get_dua_res!`](@ref); returns the big/small columns as `(N, 2, 2)`.
 """
 sing_get_dua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
@@ -1101,14 +1149,43 @@ more simplistic code with similar performance.
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
   - `params::Tuple{ForceFreeStatesControl, PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
+
+The unpacked-argument method carries the arithmetic; this tuple method is the thin adapter the
+integrator calls. Ξ_s is *not* computed here — it is a save-point quantity, obtained from
+[`compute_node_xi_s!`](@ref) only where it is actually consumed.
 """
-@with_pool pool function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
         FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
-
-    # Unpack structs
     ctrl, equil, ffit, intr, odet, _ = params
+    return sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+end
+
+"""
+    sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+
+Unpacked-argument form of the Euler-Lagrange derivative, using `odet`'s spline hints and
+recording q at `psieval` in `odet.q`. Not safe to call concurrently on a shared `odet`;
+multi-threaded callers should use [`el_derivatives!`](@ref) with their own hints.
+"""
+function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    intr::ForceFreeStatesInternal, odet::OdeState, psieval::Float64)
+    odet.q = el_derivatives!(du, u, ctrl.kinetic_factor > 0, equil, ffit, intr, psieval, odet.spline_hint, odet.ffit_hint)
+    return nothing
+end
+
+"""
+    el_derivatives!(du, u, kinetic, equil, ffit, intr, psieval, spline_hint, ffit_hint) -> q
+
+Euler-Lagrange (or, when `kinetic` is true, FKG) derivative kernel: writes du₁/dψ and du₂/dψ at
+`psieval` into `du` and returns q there. Holds no state of its own — the two hints are the
+caller's interval-search accelerators, so concurrent callers just pass their own.
+"""
+@with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+    kinetic::Bool, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    intr::ForceFreeStatesInternal, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
 
     # Allocate temporary arrays from the pool
     Npert = intr.numpert_total
@@ -1116,13 +1193,10 @@ more simplistic code with similar performance.
     singfac_vec = acquire!(pool, Float64, Npert)
     singfac_mat = reshape(singfac_vec, intr.mpert, intr.npert)
 
-    amat = acquire!(pool, ComplexF64, Npert, Npert)
-    bmat = similar!(pool, amat)
-    cmat = similar!(pool, amat)
-    fmat_lower = similar!(pool, amat)
-    kmat = similar!(pool, amat)
-    gmat = similar!(pool, amat)
-    tmp_mat = similar!(pool, amat)
+    fmat_lower = acquire!(pool, ComplexF64, Npert, Npert)
+    kmat = similar!(pool, fmat_lower)
+    gmat = similar!(pool, fmat_lower)
+    tmp_mat = similar!(pool, fmat_lower)
 
     fill!(tmp_mat, zero(ComplexF64))
     u1 = @view(u[:, :, 1])
@@ -1131,45 +1205,33 @@ more simplistic code with similar performance.
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    # Use shared hint for O(1) interval lookup during sequential ODE integration
-    odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
-    singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
+    # Use caller-supplied hint for O(1) interval lookup during sequential ODE integration
+    q = equil.profiles.q_spline(psieval; hint=spline_hint)
+    singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
 
-    if ctrl.kinetic_factor > 0
+    if kinetic
         # ---- Kinetic path with pre-computed FKG matrices ----
-        # Load pre-computed kinetic matrices from splines
-        # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
-        # Use odet.ffit_hint (per-thread) instead of ffit._hint (shared, racy in parallel BVP)
-        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
-        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
-        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
-
+        # Use the caller's hint, not ffit._hint (shared, racy in the parallel BVP)
         # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
-        f0mat = similar!(pool, amat)
-        pmat_kin = similar!(pool, amat)
-        paat_kin = similar!(pool, amat)
-        kkmat_kin = similar!(pool, amat)
-        kkaat_kin = similar!(pool, amat)
-        r1mat_kin = similar!(pool, amat)
-        r2mat_kin = similar!(pool, amat)
-        r3mat_kin = similar!(pool, amat)
-        gaat_kin = similar!(pool, amat)
+        f0mat = similar!(pool, fmat_lower)
+        pmat_kin = similar!(pool, fmat_lower)
+        paat_kin = similar!(pool, fmat_lower)
+        kkmat_kin = similar!(pool, fmat_lower)
+        kkaat_kin = similar!(pool, fmat_lower)
+        r1mat_kin = similar!(pool, fmat_lower)
+        r2mat_kin = similar!(pool, fmat_lower)
+        r3mat_kin = similar!(pool, fmat_lower)
+        gaat_kin = similar!(pool, fmat_lower)
 
-        ffit.f0mats(vec(f0mat), psieval; hint=odet.ffit_hint)
-        ffit.pmats(vec(pmat_kin), psieval; hint=odet.ffit_hint)
-        ffit.paats(vec(paat_kin), psieval; hint=odet.ffit_hint)
-        ffit.kkmats(vec(kkmat_kin), psieval; hint=odet.ffit_hint)
-        ffit.kkaats(vec(kkaat_kin), psieval; hint=odet.ffit_hint)
-        ffit.r1mats(vec(r1mat_kin), psieval; hint=odet.ffit_hint)
-        ffit.r2mats(vec(r2mat_kin), psieval; hint=odet.ffit_hint)
-        ffit.r3mats(vec(r3mat_kin), psieval; hint=odet.ffit_hint)
-        ffit.gaats(vec(gaat_kin), psieval; hint=odet.ffit_hint)
-
-        # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
-        # Direct LAPACK to avoid the ipiv allocation that lu!/ldiv! would do in this hot loop
-        _, ipiv, _ = LAPACK.getrf!(amat)
-        LAPACK.getrs!('N', amat, ipiv, bmat)
-        LAPACK.getrs!('N', amat, ipiv, cmat)
+        ffit.f0mats(vec(f0mat), psieval; hint=ffit_hint)
+        ffit.pmats(vec(pmat_kin), psieval; hint=ffit_hint)
+        ffit.paats(vec(paat_kin), psieval; hint=ffit_hint)
+        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit_hint)
+        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit_hint)
+        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit_hint)
+        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit_hint)
+        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit_hint)
+        ffit.gaats(vec(gaat_kin), psieval; hint=ffit_hint)
 
         # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11):
         # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1
@@ -1178,10 +1240,10 @@ more simplistic code with similar performance.
         # where q1 = (m₁ - n*q), q2 = (m₂ - n*q) — direct singfac, NOT 1/(m-nq) as in ideal path
         singfac_direct = acquire!(pool, Float64, Npert)
         singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
-        singfac_direct_mat .= (intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'
+        singfac_direct_mat .= (intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)'
 
         # Build F, K, K† with singfac (using fmat_lower, kmat, gmat as workspace for F, K, K†)
-        kaat_kin = similar!(pool, amat)  # K† matrix
+        kaat_kin = similar!(pool, fmat_lower)  # K† matrix
         for j in 1:Npert
             q2 = singfac_direct[j]
             for i in 1:Npert
@@ -1212,18 +1274,10 @@ more simplistic code with similar performance.
 
     else
         # ---- Ideal path ----
-        # Evaluate matrix splines at the current psi (odet.ffit_hint is per-thread)
-        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
-        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
-        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
-        ffit.fmats_lower(vec(fmat_lower), psieval; hint=odet.ffit_hint)
-        ffit.kmats(vec(kmat), psieval; hint=odet.ffit_hint)
-        ffit.gmats(vec(gmat), psieval; hint=odet.ffit_hint)
-
-        # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
-        LAPACK.potrf!('U', amat)
-        LAPACK.potrs!('U', amat, bmat)
-        LAPACK.potrs!('U', amat, cmat)
+        # Evaluate matrix splines at the current psi (hint is the caller's, never shared)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit_hint)
+        ffit.kmats(vec(kmat), psieval; hint=ffit_hint)
+        ffit.gmats(vec(gmat), psieval; hint=ffit_hint)
 
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
@@ -1240,14 +1294,49 @@ more simplistic code with similar performance.
         # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
         du1 .*= singfac_vec
     end
+    return q
+end
 
-    # ud[1] = Ξ'_Ψ
-    @views odet.ud[:, :, 1] .= du1
-    # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), eq. 18 of Glasser 2016
+"""
+    compute_node_xi_s!(xi_s, du1, u1, ffit, psieval; kinetic=false, hint=Ref(1))
+
+Evaluate Ξ_s = -A⁻¹(B·Ξ′_ψ + C·Ξ_ψ) [Glasser Phys. Plasmas 2016 112506 eq. 18] at `psieval`,
+writing into `xi_s`. `du1` and `u1` are the Ξ′_ψ and Ξ_ψ blocks at the same ψ, i.e. slices of a
+`el_derivatives!` result and its input state.
+
+Split out of the derivative kernel because Ξ_s is needed only at saved nodes, not at every
+Runge-Kutta stage. Ideal runs factor the Hermitian A by Cholesky; with `kinetic=true` A picks up
+non-Hermitian contributions and needs an LU.
+"""
+@with_pool pool function compute_node_xi_s!(xi_s::AbstractMatrix{ComplexF64}, du1::AbstractMatrix{ComplexF64},
+    u1::AbstractMatrix{ComplexF64}, ffit::FourFitVars, psieval::Float64; kinetic::Bool=false, hint::Base.RefValue{Int}=Ref(1))
+
+    Npert = size(u1, 1)
+    amat = acquire!(pool, ComplexF64, Npert, Npert)
+    bmat = similar!(pool, amat)
+    cmat = similar!(pool, amat)
+    tmp_mat = similar!(pool, amat)
+
+    ffit.amats(vec(amat), psieval; hint=hint)
+    ffit.bmats(vec(bmat), psieval; hint=hint)
+    ffit.cmats(vec(cmat), psieval; hint=hint)
+
+    # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place
+    if kinetic
+        _, ipiv, _ = LAPACK.getrf!(amat)
+        LAPACK.getrs!('N', amat, ipiv, bmat)
+        LAPACK.getrs!('N', amat, ipiv, cmat)
+    else
+        LAPACK.potrf!('U', amat)
+        LAPACK.potrs!('U', amat, bmat)
+        LAPACK.potrs!('U', amat, cmat)
+    end
+
     mul!(tmp_mat, bmat, du1)
-    odet.ud[:, :, 2] .= .-tmp_mat
+    xi_s .= .-tmp_mat
     mul!(tmp_mat, cmat, u1)
-    @views odet.ud[:, :, 2] .-= tmp_mat
+    xi_s .-= tmp_mat
+    return xi_s
 end
 
 """

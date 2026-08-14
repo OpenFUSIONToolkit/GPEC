@@ -872,7 +872,7 @@ independent integration passes at `torque.F90:842-847`. Per-surface matrix
 dumps confirm element-by-element agreement with Fortran `fourfit.F:1080-1082`
 (`kwmat_l`, `ktmat_l`). This is the Fortran convention required by the
 adjoint combinations `kwmat ± ktmat` in `ForceFreeStates/Kinetic.jl` /
-`~/Code/gpec/dcon/sing.f:967-1075` for non-Hermitian B_k, C_k, E_k.
+Fortran `dcon/sing.f:967-1075` for non-Hermitian B_k, C_k, E_k.
 
 # Arguments
 - `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), fwmm half, zeroed on entry

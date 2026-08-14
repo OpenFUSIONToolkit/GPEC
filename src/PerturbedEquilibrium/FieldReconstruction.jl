@@ -4,10 +4,10 @@ Field reconstruction from eigenmode response.
 Converts eigenmode response coefficients to physical displacement and magnetic
 field perturbations in mode space, following the GPEC gpeq module approach.
 
-Displacement components from ODE integration (u_store/ud_store):
+Displacement components from ODE integration (u_store/du_store/xi_s_store):
 - ξ_ψ: radial displacement (u_store[:,:,1,:])
-- dξ_ψ/dψ: radial derivative (ud_store[:,:,1,:])
-- ξ_s: toroidal displacement (ud_store[:,:,2,:], Glasser 2016 eq. 18)
+- dξ_ψ/dψ: radial derivative (du_store)
+- ξ_s: toroidal displacement (xi_s_store, Glasser 2016 eq. 18)
 
 Contravariant perturbed field from ideal MHD (matches Fortran gpeq_sol):
     b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
@@ -214,13 +214,13 @@ end
 Sum eigenmode contributions weighted by response coefficients.
 
 `response_vector` (= P * Phi_x) is in mode (m,n) basis. To reconstruct physical
-fields from eigenmode solutions in u_store/ud_store, first project to eigenmode amplitudes:
+fields from eigenmode solutions in u_store/du_store/xi_s_store, first project to eigenmode amplitudes:
 alpha = flux_matrix \\ response_vector
 
 Then sum eigenmode contributions at each radial point (matches Fortran gpeq_sol):
 xi_psi[ipsi, :]  = u_store[:, :, 1, ipsi]  * alpha   # Ξ_ψ
-xi_psi1[ipsi, :] = ud_store[:, :, 1, ipsi] * alpha   # dΞ_ψ/dψ
-xi_s[ipsi, :]    = ud_store[:, :, 2, ipsi] * alpha   # Ξ_s (toroidal, Glasser 2016 eq. 18)
+xi_psi1[ipsi, :] = du_store[:, :, ipsi] * alpha   # dΞ_ψ/dψ
+xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (toroidal, Glasser 2016 eq. 18)
 
 # Returns
 
@@ -251,13 +251,13 @@ function sum_eigenmode_contributions(
         mul!(view(xi_psi_modes, ipsi, :),
             @view(ForceFreeStates_results.u_store[:, :, 1, ipsi]),
             alpha)
-        # ud_store[:,:,1] = dΞ_ψ/dψ (radial derivative)
+        # du_store = dΞ_ψ/dψ (radial derivative)
         mul!(view(xi_psi1_modes, ipsi, :),
-            @view(ForceFreeStates_results.ud_store[:, :, 1, ipsi]),
+            @view(ForceFreeStates_results.du_store[:, :, ipsi]),
             alpha)
-        # ud_store[:,:,2] = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
+        # xi_s_store = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
         mul!(view(xi_s_modes, ipsi, :),
-            @view(ForceFreeStates_results.ud_store[:, :, 2, ipsi]),
+            @view(ForceFreeStates_results.xi_s_store[:, :, ipsi]),
             alpha)
     end
 

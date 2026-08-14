@@ -9,7 +9,7 @@ Fourier band `jmat` (length 2·mpert−1, evaluated from the `ffit.jmats` spline
 is the flux-surface average of the squared boundary displacement — the DCON power normalization
 as a quadratic form. N is Hermitian Toeplitz within each n-block (block-diagonal over n since the
 Jacobian is axisymmetric) and positive definite (J > 0). It is the metric of the generalized
-eigenproblem W·v = λ·N·v solved in `free_run!` and `free_compute_total`: because W and N
+eigenproblem W·v = λ·N·v solved in `free_run` and `free_compute_total`: because W and N
 transform by the same congruence under a change of working (Jacobian) coordinate, the pencil
 eigenvalues are power-normalized mode energies that are invariant to that coordinate choice.
 """
@@ -26,21 +26,47 @@ function power_norm_matrix!(Nmat::AbstractMatrix{ComplexF64}, jmat::AbstractVect
 end
 
 """
-    free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> VacuumData
+    normalize_eigenfunctions!(odet::OdeState, wt::AbstractMatrix{ComplexF64}, psio::Float64) -> OdeState
+
+Rescale the stored EL solution vectors in `odet.u_store` (and `du_store`/`xi_s_store` when a
+path has already filled them) so the edge displacement matches the free-boundary eigenvectors
+`wt` (scaled by `2π·psio·1e-3`). Modifies `odet` in place. Call after `free_run` when
+downstream code consumes the stored ξ profiles.
+"""
+@with_pool pool function normalize_eigenfunctions!(odet::OdeState, wt::AbstractMatrix{ComplexF64}, psio::Float64)
+    N = size(wt, 1)
+    tmp_mat = zeros!(pool, ComplexF64, N, N)
+    coeffs = odet.u[:, :, 1, end] \ (wt .* (2π * psio * 1e-3))
+    @views for istep in 1:odet.step
+        mul!(tmp_mat, odet.u_store[:, :, 1, istep], coeffs)
+        odet.u_store[:, :, 1, istep] .= tmp_mat
+        mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
+        odet.u_store[:, :, 2, istep] .= tmp_mat
+        # Only the galerkin path carries derivative stores this early; materialized ones
+        # are built from the normalized u_store afterwards.
+        if !isempty(odet.du_store)
+            mul!(tmp_mat, odet.du_store[:, :, istep], coeffs)
+            odet.du_store[:, :, istep] .= tmp_mat
+            mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
+            odet.xi_s_store[:, :, istep] .= tmp_mat
+        end
+    end
+    return odet
+end
+
+"""
+    free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> FreeBoundaryResult
 
 Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
-in the Fortran code, except now all data is passed in memory instead of via files. This
-modifies `odet` in place to normalize the eigenfunctions stored in `u_store` and `ud_store`,
-and returns a `VacuumData` struct containing the data needed for perturbed equilibrium calculations
-and data dumping.
+in the Fortran code.
+
+Returns a `FreeBoundaryResult` struct containing the data needed for perturbed equilibrium
+calculations and data dumping.
 """
-@with_pool pool function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+@with_pool pool function free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     # Initializations and allocations
     (; mpert, mlow, mhigh, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
-    vac_data = VacuumData(ctrl.mthvac * ctrl.nzvac, intr.numpert_total, ctrl.mthvac)
-    etemp = zeros!(pool, ComplexF64, numpert_total)
-    wp = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     wpt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     wvt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     tmp_mat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
@@ -49,15 +75,17 @@ and data dumping.
     dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
+    wp = zeros(ComplexF64, numpert_total, numpert_total)
     @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
+    # Compute vacuum response (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
     vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh)
-    Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
+    vac = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
+    wv = vac.wv
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
-    vac_data.wv .*= singfac .* singfac'
+    wv .*= singfac .* singfac'
 
     # Power-normalization matrix N at the plasma edge: ξ†·N·ξ = ⟨|ξ|²⟩ (see power_norm_matrix!).
     # The Jacobian band is evaluated at psilim (same surface as W), not at the last grid surface.
@@ -68,79 +96,64 @@ and data dumping.
 
     # Least stable eigenvalue of the vacuum matrix alone, power-normalized via the pencil
     # (wv, N) so it shares the units of the mode energies (should be PSD; clamp noise to zero)
-    vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv), Hermitian(Nmat)))))
-
-    # Preserve wp in vac_data so it can be written to HDF5 as W_plasma
-    vac_data.wp .= wp
+    vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(wv), Hermitian(Nmat)))))
 
     # Complex energy eigenvalues and vectors of the generalized eigenproblem W·v = λ·N·v.
     # The eigenvalues are stationary values of the power quotient ξ†Wξ/ξ†Nξ — power-normalized
     # mode energies invariant to the working (Jacobian) coordinate, since W and N transform by
     # the same congruence under a poloidal coordinate change.
-    vac_data.wt .= wp .+ vac_data.wv
-    vac_data.wt0 .= vac_data.wt
-    Ev = eigen(vac_data.wt, Nmat)
-    vac_data.et .= Ev.values
-    eindex = sortperm(real.(vac_data.et); rev=true)
+    wt = wp .+ wv
+    wt0 = copy(wt)
+    Ev = eigen(wt, Nmat)
+    et = Ev.values
+    eindex = sortperm(real.(et); rev=true)
 
-    etemp .= vac_data.et
     # Rearrange wt columns for ascending real eigenvalues (most unstable first)
+    etemp = copy(et)
+    n_tor_idx = zeros(Int, numpert_total)
     for ipert in 1:numpert_total
         orig = eindex[numpert_total+1-ipert]
-        vac_data.wt[:, ipert] .= Ev.vectors[:, orig]
-        vac_data.et[ipert] = etemp[orig]
+        wt[:, ipert] .= Ev.vectors[:, orig]
+        et[ipert] = etemp[orig]
         # Store which n this eigenvector corresponds to (needed to write IMAS data)
         # This relies on the block diagonal matrix structure due to n decoupling in tokamaks
         imax = argmax(abs.(Ev.vectors[:, orig]))
-        vac_data.n_tor_idx[ipert] = (imax - 1) ÷ mpert
+        n_tor_idx[ipert] = (imax - 1) ÷ mpert
     end
 
     # Normalize eigenvectors to unit power norm v†·N·v = 1. The generalized eigenvalues are
     # already the power-normalized energies, so et is not rescaled here.
     for isol in 1:numpert_total
-        v = @view vac_data.wt[:, isol]
+        v = @view wt[:, isol]
         v ./= sqrt(real(dot(v, Nmat, v)))
     end
 
     # Normalize phase
     imax = 0
     for isol in 1:numpert_total
-        imax = argmax(abs.(vac_data.wt[:, isol]))
-        phase = abs(vac_data.wt[imax, isol]) / vac_data.wt[imax, isol]
-        vac_data.wt[:, isol] .*= phase
+        imax = argmax(abs.(wt[:, isol]))
+        phase = abs(wt[imax, isol]) / wt[imax, isol]
+        wt[:, isol] .*= phase
     end
 
     # Project W_p and W_v into the eigenmode basis. Diagonal entries give
     # the plasma/vacuum energy split for each mode: et[i] = ep[i] + ev[i]
-    mul!(tmp_mat, wp, vac_data.wt)
-    mul!(wpt, vac_data.wt', tmp_mat)
-    mul!(tmp_mat, vac_data.wv, vac_data.wt)
-    mul!(wvt, vac_data.wt', tmp_mat)
-    vac_data.ep .= diag(wpt)
-    vac_data.ev .= diag(wvt)
-
-    # Normalize eigenvectors based on scaled wt
-    coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
-    @views for istep in 1:odet.step
-        mul!(tmp_mat, odet.u_store[:, :, 1, istep], coeffs)
-        odet.u_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
-        odet.u_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 1, istep], coeffs)
-        odet.ud_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 2, istep], coeffs)
-        odet.ud_store[:, :, 2, istep] .= tmp_mat
-    end
+    mul!(tmp_mat, wp, wt)
+    mul!(wpt, wt', tmp_mat)
+    mul!(tmp_mat, wv, wt)
+    mul!(wvt, wt', tmp_mat)
+    ep = diag(wpt)
+    ev = diag(wvt)
 
     # Write energies to screen
     if ctrl.verbose
         @info "Least Stable Eigenmode Energies:\n" *
-              "  Plasma = $((@sprintf "%+.3e %+.3ei" real(vac_data.ep[1]) imag(vac_data.ep[1])))\n" *
-              "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(vac_data.ev[1]) imag(vac_data.ev[1])))\n" *
-              "  Total  = $((@sprintf "%+.3e %+.3ei" real(vac_data.et[1]) imag(vac_data.et[1])))"
+              "  Plasma = $((@sprintf "%+.3e %+.3ei" real(ep[1]) imag(ep[1])))\n" *
+              "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(ev[1]) imag(ev[1])))\n" *
+              "  Total  = $((@sprintf "%+.3e %+.3ei" real(et[1]) imag(et[1])))"
     end
 
-    return vac_data
+    return FreeBoundaryResult(wt, wt0, wp, wv, ep, ev, et, n_tor_idx, vacuum_eigenvalue, vac.plasma_pts, vac.wall_pts)
 end
 
 """
@@ -175,8 +188,8 @@ q-window minimum.
 
         # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
         vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh)
-        wv, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-        @views wv_array[i, :, :] .= wv
+        vac = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+        @views wv_array[i, :, :] .= vac.wv
     end
 
     # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
@@ -232,7 +245,7 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     power_norm_matrix!(Nmat, jmat_local, intr.mpert, intr.npert, dV_dpsi)
 
     # Total energy matrix and generalized eigen-decomposition of the pencil (W, N) — the
-    # eigenvalues are power-normalized, Jacobian-invariant mode energies (see free_run!)
+    # eigenvalues are power-normalized, Jacobian-invariant mode energies
     wt .= wp .+ wv
     Ev = eigen(wt, Nmat)
 

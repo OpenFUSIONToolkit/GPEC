@@ -6,7 +6,7 @@ type: reference
 
 The KineticForces module computes neoclassical toroidal viscosity (NTV) torque and the
 kinetic energy/matrices from trapped-particle nonambipolar transport. Fortran counterpart is
-`~/Code/gpec/pentrc/` (file mapping in fortran_correspondence_map.md).
+the Fortran `pentrc/` sources (file mapping in fortran_correspondence_map.md).
 
 ## Governing theory
 - Logan & Park (2013) PoP 20, 122507: diamagnetic frequency (Eq. 7), energy integrand (Eq. 8), torque normalization Im(T) = 2n·δW_k (Eq. 19).
