@@ -56,11 +56,11 @@ All of the following ran **before** the upstream merge unless noted:
 
 | Check | Result |
 |---|---|
-| `runtests_h5_schema.jl` | 28/28 pass — confirms `Info/Runtimes/*` carries required metadata |
-| `runtests_fullruns.jl` | 19/19 pass (17 before; +2 new runtime assertions) |
+| `runtests_h5_schema.jl` | pass, **re-run after the merge** (14/14 + 6/6 group-name rule) |
+| `runtests_fullruns.jl` | 19/19 pass, **re-run after the merge** (17 before; +2 new runtime assertions) |
 | Manual DIII-D run | all five recorded values match their `completed in` log lines exactly; `units`/`long_name` present; only stages that ran appear |
 | Benchmark dry-check | real read, missing-group fallback, missing-file fallback, shared-key averaging, `total`-last ordering, silent skip on empty/disjoint sides — all correct |
-| Regression harness, `diiid_n1`, `0ece9c4f` vs working tree | every physical quantity agrees to 1e-9–1e-16 (0.00%); see caveat below |
+| Regression harness, `diiid_n1`, `0ece9c4f` vs `e695e890` | **48 unchanged, 0 changed** — zero movement |
 | Package load after merge | clean |
 
 ### Regression-harness caveat — read before rerunning
@@ -71,39 +71,31 @@ quantities**. That was a wrong-baseline artifact: at the time this branch's pare
 convergence fix, on-demand solution derivatives, coil `psilim` fix) — not this work. Rerun against
 the branch's actual merge-base, not the remote branch tip.
 
-Against the correct baseline, 14 quantities were still flagged `** CHANGED **` but every one at
-**0.00%** (1e-9 to 1e-16 — floating-point noise; the harness flags any last-bit difference, and the
-profile "checksum" quantities flag on any bit change at all). Two residuals were being investigated
-when the session ended:
+There is a second, subtler trap: **comparing a ref against `local` compares environments as well as
+code.** Non-`local` refs run in a freshly instantiated harness worktree; `local` runs the working
+tree with its own resolved environment. Run `0ece9c4f` vs `local` and 14 quantities come back
+flagged `** CHANGED **` — all at 0.00% (1e-9 to 1e-16), plus `ODE steps (total)` 1960 → 1968 and
+three profile checksums. That is environment drift, not code.
 
-- `ODE steps (total)` 1960 → 1968 (0.41%); `ODE steps (saved)` identical at 1327.
-- Three profile checksums (Mercier `D_I`, resistive interchange `D_R`, ballooning Δ′) differ.
+This was chased to ground and is now **closed**:
 
-The diff cannot affect numerics — it computes `time()` differences and appends to the h5 *after* all
-computation — so the working hypothesis is run-to-run nondeterminism (threaded BLAS reassociation)
-and/or environment drift between the harness worktree and the local environment. A determinism check
-was running at handoff time: two `--force` runs of the *same* commit `0ece9c4f`, diffed against each
-other. **Its result was never seen.** Re-run it to close this out:
+- *Is the case nondeterministic?* No. Two `--force` runs of the same commit `0ece9c4f` produced
+  byte-identical values for all 49 quantities; only the wall-clock line differed.
+- *Do these commits move any number?* No. Running the parent and the feature tip through the **same**
+  worktree path — `--refs 0ece9c4f,e695e890` — gives **48 unchanged, 0 changed**.
 
-```bash
-julia --project=regression-harness regression-harness/regress.jl --cases diiid_n1 --refs 0ece9c4f --force > a.log 2>&1
-julia --project=regression-harness regression-harness/regress.jl --cases diiid_n1 --refs 0ece9c4f --force > b.log 2>&1
-diff a.log b.log   # differences here ⇒ the case is nondeterministic ⇒ the residuals above are noise
-```
+So: compare worktree-to-worktree (two commit refs), not commit-vs-`local`, whenever the numbers
+need to be trusted at last-bit precision.
 
 ## Outstanding work
 
-1. **Re-run the full test suite on the merged tree.** Only the package load and (in flight at
-   handoff) `runtests_h5_schema.jl` were checked after the merge. `runtests_fullruns.jl` (~23 min)
-   has not been re-run post-merge:
-   ```bash
-   julia --project=. test/runtests.jl runtests_h5_schema.jl runtests_fullruns.jl
-   ```
-2. **Close out the determinism check** above, and post the corrected regression table on the PR.
-3. **Optional:** a real two-branch benchmark run to see the per-stage table print end-to-end. Only a
+1. **Optional:** a real two-branch benchmark run to see the per-stage table print end-to-end. Only a
    dry-check against synthetic and real h5 files was done, by explicit choice — the full run costs
    ~20–40 min of compute.
-4. **Remove this file** (below) and get human review.
+2. **Remove this file** (below) and get human review.
+
+Everything else is done: both test files pass on the merged tree and the regression comparison is
+clean.
 
 ## Environment note
 
