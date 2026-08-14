@@ -8,7 +8,7 @@ GPEC (Generalized Perturbed Equilibrium Code, Julia implementation) is a compreh
 
 **Relationship to Fortran GPEC**: This Julia GPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "the Fortran code", "the original GPEC", "Fortran GPEC", or "legacy VACUUM", they are referring to that Fortran codebase — not a runtime dependency of this Julia implementation. This Julia implementation reimplements and extends GPEC's functionality with improved performance and maintainability.
 
-**Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, check for a local GPEC repository at `~/Code/gpec`. If not found at this location, ask the user for the correct path.
+**Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, a local clone of the Fortran GPEC repository is needed; ask the user for its path.
 
 ## Key References
 

@@ -22,6 +22,11 @@
 @inline sing_get_dua_gal(g::GalSingAsymp, z::Float64) =
     z >= 0 ? sing_get_dua_res(g.right, z) : (-1) .* sing_get_dua_res(g.left, -z)
 
+# Leading-order ("cut") resonant basis, used to build the cut outer solution that the inner-layer
+# solution is added to. Same two-sided convention as `sing_get_ua_gal`.
+@inline sing_get_ua_gal_cut(g::GalSingAsymp, z::Float64) =
+    z >= 0 ? sing_get_ua_res_cut(g.right, z) : sing_get_ua_res_cut(g.left, -z)
+
 @inline sing_get_ua_gal!(out, g::GalSingAsymp, z::Float64) =
     z >= 0 ? sing_get_ua_res!(out, g.right, z) : sing_get_ua_res!(out, g.left, -z)
 @inline function sing_get_dua_gal!(out, g::GalSingAsymp, z::Float64)

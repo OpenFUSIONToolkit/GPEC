@@ -16,6 +16,18 @@ CODE - TAG - Detailed message
 
 Where CODE is the module name (EQUIL, ForceFreeStates, VAC, PERTURBED EQUILIBRIUM, etc.) and TAG describes the type of change (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, REFACTOR, CLEANUP, etc.). This format is used for compiling release notes — tags should be human-readable but are not enforced to a fixed set.
 
+## Documentation standard
+
+Module reference pages follow a shared *Journal of Computational Physics*-style
+structure (governing equations → numerical method → validation figures → API),
+and every documentation figure is committed together with the script that made
+it and a provenance stamp. The full policy — page template, figure
+organization under `docs/src/figures/<module>/`, provenance, and the
+regenerate-only-when-`depends`-change rule — is in
+[`docs/DOC_STANDARD.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/DOC_STANDARD.md).
+The `Ballooning and Mercier Local Stability` and `Inner Layer Module` pages are
+the reference exemplars.
+
 ## Regression Testing
 
 The regression harness **must be run on every pull request before merging into `develop`**. It is the project's primary safeguard for tracking how numerical results evolve across changes, so it is only useful if every PR exercises it. When you open a PR, paste the regression report into the PR thread so reviewers can see what moved (and what did not). If your change touches a quantity that is not yet tracked, add a new regression case — or extend an existing one — in the same PR.
@@ -208,3 +220,7 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--force` — re-run even if cached
 - `--verbose` — print GPEC subprocess output
 - `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
+
+The full flag list, the environment-pinning behaviour that keeps source code the only variable in
+a comparison, and the exit-status contract are documented in
+[`docs/development/regression-harness.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/development/regression-harness.md).

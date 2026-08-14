@@ -137,25 +137,16 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
 end
 
 """
-    eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
 
-Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
-Formerly `ode_run`. Has the same functionality as `ode_run` in the Fortran code, with the addition of
-a single dump to the `euler.h5` file at the end of integration instead of multiple dumps
-to `euler.bin` throughout the integration. We have made the control logic more clear
-by pre-computing all integration chunks upfront and using a for loop to iterate through them,
-eliminating the while-loop logic and making integration bounds explicit at each step.
-We now perform significant post-processing after integration including finding the peak dW
-in the edge region and evaluating the stability criterion over the entire integration,
-which were previously done during integration in the Fortran code.
+Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
+surface on the way (Fortran `ode_run`). Dispatches on `ctrl` to the parallel propagator BVP
+(`use_parallel`), the dual Riccati formulation (`use_riccati`), or
+[`serial_eulerlagrange_integration`](@ref).
 
-### TODOs
-
-restype functionality if we decide to do this
-
-### Returns
-
-An OdeState struct containing the final state of the ODE solver after integration is complete.
+Only the parallel branch populates `propagators` / `chunks` / `S_left`, which
+`compute_delta_prime_matrix!` consumes for the Δ' BVP; the other two return `nothing` for all
+three.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
@@ -166,6 +157,20 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     elseif ctrl.use_riccati
         return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
     end
+    return serial_eulerlagrange_integration(ctrl, equil, ffit, intr)
+end
+
+"""
+    serial_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
+
+Serial shooting branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk,
+applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.ucrit` and undoing it
+via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
+directly to force this branch regardless of `ctrl.use_parallel` / `ctrl.use_riccati`; `verbose`
+overrides `ctrl.verbose` for progress logging.
+"""
+function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal;
+    verbose::Bool=ctrl.verbose)
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -183,7 +188,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
 
     # Print initial integration condition
-    if ctrl.verbose
+    if verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
@@ -191,7 +196,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     for chunk in chunks
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
-        if ctrl.verbose
+        if verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
@@ -230,20 +235,20 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
             intr.psilim = odet.psi_store[end]
             intr.qlim = odet.q_store[end]
             odet.u .= odet.u_store[:, :, :, end]
-            if ctrl.verbose
+            if verbose
                 @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
             end
         else
             odet.psifac = saved_psifac
             odet.u .= saved_u
-            if ctrl.verbose
+            if verbose
                 @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.3f" odet.psi_store[peak_step])),  q = $((@sprintf "%.3f" odet.q_store[peak_step])); integration domain unchanged"
             end
         end
     end
 
     # Evaluate stability criterion (critical determinant) of saved solutions
-    if ctrl.verbose
+    if verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
@@ -311,8 +316,10 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
         m22 =  sf * kd * fi
 
         # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
+        #! format: off
         F_eig = eigen([psi_low*m11  psi_low*m12;
                        psi_low*m21  psi_low*m22])
+        #! format: on
         eig_vals = F_eig.values
         eig_vecs = F_eig.vectors
 

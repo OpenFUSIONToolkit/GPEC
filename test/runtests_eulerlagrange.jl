@@ -1,6 +1,5 @@
-# TODO: perhaps this isn't the best place for this function?
-# Should I do include("../ForceFreeStates/utils.jl") instead? or maybe save these functions in a separate file?
-# associated TODO: come up with Gaussian reduction test that doesn't rely on external data
+# TODO: this helper may belong in a shared test-utilities file rather than here.
+# TODO: come up with a Gaussian reduction test that doesn't rely on external data.
 
 function load_u_matrix(filename)
     lines = readlines(filename)
@@ -221,8 +220,7 @@ end
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.ucrit = 10.0
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; ucrit=10.0)
 
         # Case 1: Basic norm computation
         odet.u = zeros(ComplexF64, 2, 2, 2)
@@ -300,9 +298,7 @@ end
 
     @testset "chunk_el_integration_bounds tests" begin
         # Helper to build a minimal control and internal structs
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.numsteps_init = 10
-        ctrl.numunorms_init = 5
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-4)
 
         # Case 1: No singular surfaces -> single chunk to edge
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
@@ -312,7 +308,6 @@ end
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
 
-        ctrl.singfac_min = 1e-4
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
@@ -332,7 +327,6 @@ end
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl.singfac_min = 1e-4
 
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 2
@@ -352,7 +346,7 @@ end
         intr.mhigh = 1
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl.singfac_min = 1e-6
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-6)
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 3
         @test all(c.needs_crossing == true for c in chunks[1:2])
@@ -365,7 +359,7 @@ end
         intr.psilim = 1.0
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl.singfac_min = 0.0
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=0.0)
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false

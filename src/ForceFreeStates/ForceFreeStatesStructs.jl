@@ -140,14 +140,10 @@ A mutable struct holding internal state variables for stability calculations.
   - `mlow::Int` - Lowest poloidal mode number
   - `mhigh::Int` - Highest poloidal mode number
   - `mpert::Int` - Number of poloidal modes (mhigh - mlow + 1)
-  - `nlow::Int` - Lowest toroidal mode number
-  - `nhigh::Int` - Highest toroidal mode number
+  - `nlow::Int` - Lowest toroidal mode number, resolved from `ctrl.nn_low`/`nn_high`
+  - `nhigh::Int` - Highest toroidal mode number, resolved from `ctrl.nn_low`/`nn_high`
   - `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
   - `numpert_total::Int` - Total number of modes (mpert × npert)
-  - `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
-  - `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
-  - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
-  - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
   - `kmsing::Int` - Number of kinetic singular surfaces (det(F̄) near-zeros)
   - `sing::Vector{SingType}` - Vector of ideal singular surface data
@@ -158,7 +154,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
-  - `locstab::CubicSeriesInterpolant` - Spline for local stability analysis
   - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
 @kwdef mutable struct ForceFreeStatesInternal
@@ -170,10 +165,6 @@ A mutable struct holding internal state variables for stability calculations.
     nhigh::Int = 0
     npert::Int = 0
     numpert_total::Int = 0
-    keq_out::Bool = false
-    theta_out::Bool = false
-    xlmda_out::Bool = false
-    sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
     sing::Vector{SingType} = SingType[]
@@ -185,7 +176,6 @@ A mutable struct holding internal state variables for stability calculations.
     psilow::Float64 = 0.0   # lower integration bound; raised above the axis by sing_min! when qlow > qmin (RDCON gal)
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), Series(zeros(5, 5)); bc=ZeroCurvBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
     """
@@ -195,6 +185,14 @@ A mutable struct holding internal state variables for stability calculations.
     raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+
+    """
+    Edge coil-response matrix of shape (2msing × numpert_total). Column k is the resonant
+    small-solution response at each surface side to a unit source on edge poloidal mode k,
+    built by imposing the Eq. (37) rpec edge boundary condition on the Riccati BVP
+    (`_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
+    """
+    delta_coil::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 
     """
     Raw 2msing × 2msing outer-region matching matrix `D'` from the STRIDE global
@@ -217,7 +215,8 @@ end
 """
     ForceFreeStatesControl
 
-A mutable struct containing control parameters for stability analysis, set by the user in gpec.toml.
+An immutable struct containing 'ForceFreeStates' parameters set by the user in
+gpec.toml.
 
 ## Fields
 
@@ -260,7 +259,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `du_store` / `xi_s_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices with diagnostic derivatives (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead (differs by the ~0.12 % Riccati-vs-axis algorithmic gap on DIIID-class cases).  **Default `false`** to avoid paying the dense-pass cost on Δ'/vacuum/ideal-stability-only runs; **PerturbedEquilibrium-using configs must set `populate_dense_xi = true` explicitly** when `use_parallel = true` (otherwise PE silently reads Riccati-basis garbage).  Auto-disabled when `force_termination = true` regardless of the user setting, since the dense pass has no downstream consumer in that case.  Approximate cost when enabled: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
-@kwdef mutable struct ForceFreeStatesControl
+@kwdef struct ForceFreeStatesControl
     verbose::Bool = true
     local_stability_flag::Bool = false
     vac_flag::Bool = false
@@ -320,6 +319,13 @@ A mutable struct containing control parameters for stability analysis, set by th
     # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
     gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
     gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
+    gal_inner_solver::String = "ray" # inner-layer Δ backend for the match: "ray" (rotated-contour collocation, certified Δ at the optimal θ = arg(Q)/4; robust for |Q| ≳ 1) or "galerkin" (Hermite-cubic inps; drifts for |Q| ≳ 1)
+    # --- Inner-layer "galerkin" backend knobs (used only when gal_inner_solver = "galerkin") ---
+    gal_inner_xfac::Float64 = 10.0  # asymptotic-matching radius multiplier (inps_xfac: xmax × 10)
+    gal_inner_nx::Int = 1280        # inner-layer grid cells (128 · xfac in the reference)
+    gal_inner_nq::Int = 5           # quadrature order per cell
+    gal_inner_cutoff::Int = 5       # cells carrying the large solution as driving term
+    gal_inner_kmax::Int = 8         # large-x asymptotic series order (↔ order_pow)
     gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
     gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
     gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`

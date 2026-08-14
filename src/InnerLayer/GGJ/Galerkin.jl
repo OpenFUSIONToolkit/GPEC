@@ -80,11 +80,11 @@ row 3 (Υ): Q Υ_xx − x² Υ + x Ψ + Q²[G(Ξ−Υ) − K(E Ξ + F Υ + H Ψ_
 ⇒ I=(0,0,Q)  V=(K Q² H,0,0)   U=(−x, −Q²(G−KE), x²+Q²(G+KF))
 """
 function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
-    e = ComplexF64(params.E);
+    e = ComplexF64(params.E)
     f = ComplexF64(params.F)
-    h = ComplexF64(params.H);
+    h = ComplexF64(params.H)
     g = ComplexF64(params.G)
-    k = ComplexF64(params.K);
+    k = ComplexF64(params.K)
     q = Q
     q2 = q * q
     x2 = x * x
@@ -98,10 +98,11 @@ function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
     #   row 1 (Ψ): (Q,            −Q x,          0)
     #   row 2 (Ξ): (−Q x,          Q x²,        −(E+F))
     #   row 3 (Υ): (−x,           −Q²(G−KE),     x²+Q²(G+KF))
+    #! format: off
     U = @SMatrix ComplexF64[
-        q (-q * x) 0
-        (-x / q) * q2 (x2 / q) * q2 (-(e + f) / q2) * q2
-        (-x / q) * q (-(g - k * e) * q) * q (x2 / q + (g + k * f) * q) * q
+        q                     (-q * x)                       0
+        (-x / q) * q2         (x2 / q) * q2                  (-(e + f) / q2) * q2
+        (-x / q) * q          (-(g - k * e) * q) * q         (x2 / q + (g + k * f) * q) * q
     ]
 
     # V = −B of GWP2016 Eq. (14): coefficients of −u' in each equation (same row scaling as U):
@@ -109,10 +110,11 @@ function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
     #   row 2 (Ξ): (−H,     0,  0)   ⇒ +H Ψ_x
     #   row 3 (Υ): (K Q² H, 0,  0)   ⇒ −K Q² H Ψ_x
     V = @SMatrix ComplexF64[
-        0 0 h
-        (-h / q2) * q2 0 0
-        (h * k * q) * q 0 0
+        0                       0         h
+        (-h / q2) * q2          0         0
+        (h * k * q) * q         0         0
     ]
+    #! format: on
 
     return Imat, U, V
 end
@@ -733,8 +735,8 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         for ipert in 1:mpert
             i = cell1.map[ipert, 1]  # ip=0 DOFs
             if i > ws.ndim
-                ;
-                continue;
+
+                continue
             end
             for jj in max(1, i-ws.kl):min(ws.ndim, i+ws.kl)
                 ws.mat[offset+i-jj, jj, isol] = 0
@@ -749,11 +751,11 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         # → row=Ξ(ip=0), col=Ξ(ip=1): A[map[2,1], map[2,2]] = 1
         # → row=Υ(ip=0), col=Υ(ip=1): A[map[3,1], map[3,2]] = 1
         if isol == 1
-            i = cell1.map[1, 1];
+            i = cell1.map[1, 1]
             j = cell1.map[1, 2]
             ws.mat[offset+i-j, j, isol] = 1
             for ipert in 2:3
-                i = cell1.map[ipert, 1];
+                i = cell1.map[ipert, 1]
                 j = cell1.map[ipert, 1]
                 ws.mat[offset+i-j, j, isol] = 1
             end
@@ -776,8 +778,8 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     end
 
     # Solve for each parity using LAPACK banded LU (gbtrf! + gbtrs!)
-    n = ws.ndim;
-    kl = ws.kl;
+    n = ws.ndim
+    kl = ws.kl
     ku = kl
     for isol in 1:2
         copyto!(ws.ab_buf, @view(ws.mat[:, :, isol]))
@@ -830,9 +832,12 @@ function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
             end
             k += 1
             xs[k] = x
-            Ψ[k, 1] = vals[1, 1]; Ψ[k, 2] = vals[1, 2]
-            Ξ[k, 1] = vals[2, 1]; Ξ[k, 2] = vals[2, 2]
-            Υ[k, 1] = vals[3, 1]; Υ[k, 2] = vals[3, 2]
+            Ψ[k, 1] = vals[1, 1]
+            Ψ[k, 2] = vals[1, 2]
+            Ξ[k, 1] = vals[2, 1]
+            Ξ[k, 2] = vals[2, 2]
+            Υ[k, 1] = vals[3, 1]
+            Υ[k, 2] = vals[3, 2]
         end
     end
     p = sortperm(xs)
@@ -858,6 +863,19 @@ function solve_inner_profile(params::GGJParameters, γ::Number;
     emap1 = res_cell.emap[1]
     Δ = rescale_delta(SVector{2,ComplexF64}(ws.sol[emap1, 2], ws.sol[emap1, 1]), params)
     return Δ, Q, _solution_profile(ws), (; xmax=xmax_info.xmax, x0=x0(params), sfac=sfac(params))
+end
+
+"""
+    solve_inner_profile(::GGJModel{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
+        -> (; Δ, x, Ψ, Ξ, dψdx, rescale)
+
+Hermite-FEM implementation of the [`solve_inner_profile`](@ref) interface:
+real-axis solve, so `Δ` and the profiles come from the same solution. Same
+numerics/kwargs as `solve_inner(GGJModel(; solver=:galerkin), ...)`.
+"""
+function solve_inner_profile(::GGJModel{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
+    Δ, _, prof, _ = solve_inner_profile(params, γ; kwargs...)
+    return (; Δ=Δ, x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
 end
 
 """
@@ -911,20 +929,15 @@ end
 # ISSUES AND IS NOT RELIABLE IN BROAD SCANS. IT IS LEFT HERE FOR REFERENCE AND MAY BE REWORKED LATER.
 """
     solve_inner_converged(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
-                          rtol=1e-2, kmax0=12, xfac0=1.5, cells_per_unit=3.0,
-                          nx_min=1024, nx_max=8192, kmax_step=2, kmax_max=28,
-                          xfac_growth=1.5, max_levels=6, nq=6, pfac=1.0, cutoff=8, tol_res=1e-4)
+                          rtol=1e-2, max_levels=6, kwargs...)
         -> (; delta, converged, err, kmax, xfac, nx, nlevels)
 
-Convergence-guarded GGJ inner-layer solve: only returns a Δ once it is stable under joint refinement of
-the three coupled accuracy knobs — series order `kmax`, asymptotic reach `xfac`, and grid resolution `nx`.
-Successively refines all three (raising `kmax` clears the high-|Q| series floor; raising `xfac` clears the
-reach floor; `nx` is scaled with `xmax` to hold cells-per-unit-x ≈ `cells_per_unit`, which prevents the
-grid-starvation breakup that otherwise corrupts Δ at large `xfac`/high |Q|) until the per-component
-relative change of (Δ₁, Δ₂) drops below `rtol`, or `max_levels` is hit (then `converged=false`).
-
-The metric is per real/imag component with a significance floor (5% of |Δᵢ|), so a converged norm cannot
-mask a wrong reactive part Re(Δ₁) — the failure mode under-reach produces (Im dominates |Δ₁|).
+Convergence-guarded Galerkin solve: jointly refines the three coupled accuracy
+knobs (series order `kmax`, asymptotic reach `xfac`, grid `nx` scaled to hold
+cells-per-unit-x ≈ `cells_per_unit`) until the per-component relative change
+of (Δ₁, Δ₂) drops below `rtol`, or `max_levels` is hit (`converged=false`).
+The metric is per real/imag component with a 5% significance floor, so a
+converged norm cannot mask a wrong small component.
 """
 function solve_inner_converged(model::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     rtol::Float64=1e-2, kmax0::Int=12, xfac0::Float64=1.5,

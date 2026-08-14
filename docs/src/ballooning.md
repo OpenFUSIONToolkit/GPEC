@@ -854,7 +854,7 @@ numerically fragile. The comparison below shows that the `Baloo.f` style, which
 sets the displacement to vanish at ``\pm\theta_{\max}`` and computes ``\Delta'``
 from the resulting solution, gives the most stable continuous profile.
 
-![Comparison of numerical stability among methods for extracting ``\Delta'`` and ``c_{a1}``.](assets/ballooning/delta_prime_matching.png)
+![Comparison of numerical stability among methods for extracting ``\Delta'`` and ``c_{a1}``.](figures/ballooning/delta_prime_matching.png)
 
 `Bal.jl` therefore adopts the `Baloo.f`-style boundary replacement for the
 ballooning ``\Delta'`` calculation.
@@ -905,7 +905,7 @@ The previous standalone `Mercier.jl` path can therefore be removed from the loca
 stability calculation. The comparison below shows agreement between the previous
 Mercier calculation and the new `Bal.jl` calculation.
 
-![Comparison of Mercier criterion calculations from `Mercier.jl` and `Bal.jl`.](assets/ballooning/mercier_comparison.png)
+![Comparison of Mercier criterion calculations from `Mercier.jl` and `Bal.jl`.](figures/ballooning/mercier_comparison.png)
 
 The local-stability output now stores ballooning ``\Delta'`` in the fourth
 `locstab_fs` entry. In the HDF5 output this is written as
