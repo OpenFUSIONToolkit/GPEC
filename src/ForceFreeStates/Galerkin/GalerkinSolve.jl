@@ -79,19 +79,18 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     # right = sig=+1, left = sig=-1, no √det normalization. The Mercier exponent α is a
     # property of the surface, so the left series reuses the right's α (alpha_override). The order is
     # raised to gal_sing_order + ceil(2·Re(α)) for high-Mercier-index surfaces (Fortran sing1_vmat).
-    ctrl_gal = deepcopy(ctrl)
     asymps = GalSingAsymp[]
     for s in sings
-        ctrl_gal.sing_order = ctrl.gal_sing_order
-        ar = compute_sing_asymptotics(s, ctrl_gal, equil, ffit, intr; sig=1.0)
+        sing_order = ctrl.gal_sing_order
+        ar = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=1.0, sing_order=sing_order)
         if ctrl.gal_sing_order_ceiling
             order = ctrl.gal_sing_order + ceil(Int, 2 * real(ar.alpha[1]))
             if order > ctrl.gal_sing_order
-                ctrl_gal.sing_order = order
-                ar = compute_sing_asymptotics(s, ctrl_gal, equil, ffit, intr; sig=1.0)
+                sing_order = order
+                ar = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=1.0, sing_order=sing_order)
             end
         end
-        al = compute_sing_asymptotics(s, ctrl_gal, equil, ffit, intr; sig=-1.0, alpha_override=ar.alpha)
+        al = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=ar.alpha, sing_order=sing_order)
         push!(asymps, GalSingAsymp(ar, al))
     end
 
