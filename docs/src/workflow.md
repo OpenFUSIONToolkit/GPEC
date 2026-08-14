@@ -170,16 +170,17 @@ Example configuration files are provided in:
 
 ## Output File: `gpec.h5`
 
-All results are written to a single HDF5 file (default: `gpec.h5`). The file is organized into groups corresponding to pipeline stages:
+All results are written to a single HDF5 file (default: `gpec.h5`). The top-level groups are organized by physics topic (see the schema conventions in `docs/development/hdf5-conventions.md`):
 
 | Group | Contents |
 |---|---|
-| `input/` | Copy of the input configuration and equilibrium data |
-| `info/` | Run metadata (version, timestamp, git hash) |
-| `equil/` | Equilibrium profiles: q(ψ), pressure, current density, β |
-| `splines/` | Spline coefficients for field quantities |
-| `locstab/` | Local stability: Mercier criterion, shear |
-| `integration/` | ODE integration results: energy matrices, eigenvalues |
-| `singular/` | Per-surface data: ψ_s, m/n, Δ', small solution coefficients |
-| `vacuum/` | Vacuum response matrices: wv (and I_v when computed for PE) |
-| `perturbed/` | Perturbed equilibrium: ξ, b in mode space, island diagnostics |
+| `Info/` | Run metadata: git version, mode-number ranges, ψ limit |
+| `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
+| `Equilibrium/` | Equilibrium scalars (β, q₀, q95, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
+| `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |
+| `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ' matrices (`GalerkinDeltaPrime/`), kinetic surfaces (`Kinetic/`) |
+| `PerturbedEquilibrium/` | Plasma response: `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/` |
+| `KineticForces/` | NTV torque per method: energy integrals, kinetic matrices |
+| `Tearing/` | SLAYER/GGJ inner-layer growth rates: `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `Scan/` |
+| `SurfaceGeometries/` | Plasma and wall surface point clouds for visualization |

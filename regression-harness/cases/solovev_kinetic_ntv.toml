@@ -12,7 +12,7 @@ example_dir = "examples/Solovev_kinetic_NTV_example"
 # converges to rtol_psi=1e-2, but the result is deterministic for fixed code + inputs, so
 # the noise floor is set near FP noise and any real movement is surfaced.
 [quantities.ntv_torque]
-h5path = "kinetic_forces/fgar/total_torque"
+h5path = "KineticForces/fgar/total_torque"
 type = "real_vector"
 extract = "all_real"
 label = "NTV torque fgar [Re, Im]"
@@ -20,7 +20,7 @@ noise_threshold = 1e-8
 order = 10
 
 [quantities.ntv_psi_nsteps]
-h5path = "kinetic_forces/fgar/psi_nsteps"
+h5path = "KineticForces/fgar/psi_nsteps"
 type = "int_scalar"
 extract = "value"
 label = "NTV ψ quadrature evaluations"
@@ -29,7 +29,7 @@ order = 11
 
 # Stability anchors — confirm the upstream FFS/PE stages feeding the NTV diagnostic.
 [quantities.et_real]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
 label = "root-area-weighted total energy Re(et[1])"
@@ -37,7 +37,7 @@ noise_threshold = 1e-10
 order = 20
 
 [quantities.msing]
-h5path = "singular/msing"
+h5path = "SingularSurfaces/msing"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -45,7 +45,7 @@ noise_threshold = 0
 order = 21
 
 [quantities.sing_psi]
-h5path = "singular/psi"
+h5path = "SingularSurfaces/psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"
@@ -53,7 +53,7 @@ noise_threshold = 1e-8
 order = 22
 
 [quantities.q0]
-h5path = "equil/q0"
+h5path = "Equilibrium/q0"
 type = "real_scalar"
 extract = "value"
 label = "q0"

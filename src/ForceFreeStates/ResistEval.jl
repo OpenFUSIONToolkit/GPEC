@@ -52,7 +52,7 @@ supporting flux-surface averages.
 | `v1_local`  | dV/dψ at this surface                                |
 
 `H` here is identical to the `H` reported by `mercier_scan!` and stored
-in `locstab/h` — the GGJ routine recomputes it for convenience.
+in `LocalStability/h` — the GGJ routine recomputes it for convenience.
 
 `avg_B`, `B_max`, `B_min`, `f_trap`, `R_major`, and `eps_local` are used
 by `NeoclassicalResistivity.eta_neoclassical` to form the Sauter/Redl

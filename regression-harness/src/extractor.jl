@@ -5,6 +5,10 @@ HDF5 quantity extraction engine.
 """
 Extract all quantities from a gpec.h5 file according to case spec.
 Returns a Vector{ExtractedQuantity}.
+
+Case TOMLs carry current-schema paths only; outputs from refs predating a schema
+rename extract as "missing" unless their quantities are already cached. Re-baseline
+old refs with `--force` after a rename rather than maintaining path translations.
 """
 function extract_quantities(h5path::String, qty_specs::Vector{QuantitySpec}, runtime_s::Float64)::Vector{ExtractedQuantity}
     results = ExtractedQuantity[]
@@ -91,7 +95,7 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
 
     elseif spec.extract == "diagonal_complex"
         # Extract the diagonal of a square matrix as a complex array.
-        # Use for tracking per-surface BVP Δ' from singular/delta_prime_matrix.
+        # Use for tracking per-surface BVP Δ' from SingularSurfaces/delta_prime_matrix.
         ndims(raw) == 2 && size(raw, 1) == size(raw, 2) ||
             error("diagonal_complex requires a square 2-D matrix; got size $(size(raw))")
         diag_vec = [raw[i, i] for i in 1:size(raw, 1)]

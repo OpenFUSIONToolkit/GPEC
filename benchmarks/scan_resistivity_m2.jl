@@ -1,4 +1,4 @@
-# Plot the m=2 area-normalized b^ψ (perturbed_equilibrium/response/psi_area) across a resistivity scan
+# Plot the m=2 area-normalized b^ψ (PerturbedEquilibrium/Response/psi_area) across a resistivity scan
 # of the RESISTIVE gal matched PE runs (gal_match_flag=true, gal_ideal_flag=false), one curve per η.
 # Overlays the shooting (ideal, η→0) reference. The η-scan dirs are produced by the bash loop over
 # /tmp/etascan_<factor> (each a copy of the 0.993 config with gal_eta scaled).
@@ -14,10 +14,10 @@ to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im
 # read m=target area-normalized b^ψ on the run's PE grid
 function read_m2(h5; gal::Bool)
     h5open(h5) do f
-        pa = to_c(read(f["perturbed_equilibrium/response/psi_area"]))   # [npsi, mpert]
-        col = mtarget - read(f["info/mlow"]) + 1
-        psi = gal ? read(f["galerkin/solution/psi"])[.!Bool.(read(f["galerkin/solution/issing"]))] :
-              read(f["integration/psi"])
+        pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))   # [npsi, mpert]
+        col = mtarget - read(f["Info/mlow"]) + 1
+        psi = gal ? read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"])[.!Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/issing"]))] :
+              read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"])
         (psi, pa[:, col])
     end
 end
@@ -34,7 +34,7 @@ eta_ref = 8e-8
 
 # rational surface for m=target
 sing_psi, sing_m = h5open(joinpath(scandirs[1], "gpec.h5")) do f
-    (read(f["galerkin/sing_psi"]), read(f["galerkin/sing_m"]))
+    (read(f["SingularSurfaces/GalerkinDeltaPrime/sing_psi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/sing_m"]))
 end
 psi_res = mtarget in sing_m ? sing_psi[findfirst(==(mtarget), sing_m)] : NaN
 
