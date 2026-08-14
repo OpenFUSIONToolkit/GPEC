@@ -128,13 +128,17 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         odet.u[:, :, 1] .= umat_p1;
         odet.u[:, :, 2] .= umat_p2
 
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, numpert_total=intr.numpert_total)
-        ffit.amats = cubic_interp(psifac_dummy, Series(reshape(amats, points, :)); ffit.itp_opts...)
-        ffit.bmats = cubic_interp(psifac_dummy, Series(reshape(bmats, points, :)); ffit.itp_opts...)
-        ffit.cmats = cubic_interp(psifac_dummy, Series(reshape(cmats, points, :)); ffit.itp_opts...)
-        ffit.fmats_lower = cubic_interp(psifac_dummy, Series(reshape(fmats, points, :)); ffit.itp_opts...)
-        ffit.kmats = cubic_interp(psifac_dummy, Series(reshape(kmats, points, :)); ffit.itp_opts...)
-        ffit.gmats = cubic_interp(psifac_dummy, Series(reshape(gmats, points, :)); ffit.itp_opts...)
+        itp_opts = (; extrap=ExtendExtrap())
+        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(;
+            mpert=intr.numpert_total,
+            numpert_total=intr.numpert_total,
+            itp_opts,
+            amats=cubic_interp(psifac_dummy, Series(reshape(amats, points, :)); itp_opts...),
+            bmats=cubic_interp(psifac_dummy, Series(reshape(bmats, points, :)); itp_opts...),
+            cmats=cubic_interp(psifac_dummy, Series(reshape(cmats, points, :)); itp_opts...),
+            fmats_lower=cubic_interp(psifac_dummy, Series(reshape(fmats, points, :)); itp_opts...),
+            kmats=cubic_interp(psifac_dummy, Series(reshape(kmats, points, :)); itp_opts...),
+            gmats=cubic_interp(psifac_dummy, Series(reshape(gmats, points, :)); itp_opts...))
 
         du = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
         chunk = GeneralizedPerturbedEquilibrium.ForceFreeStates.IntegrationChunk(; psi_start=odet.psifac, psi_end=odet.psifac, needs_crossing=false)

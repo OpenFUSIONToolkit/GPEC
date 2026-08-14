@@ -572,7 +572,7 @@ function prepare_force_free_states!(
             KineticForces.compute_calculated_kinetic_matrices(
                 c, e, i, m, f;
                 kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
-        make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+        ffit = make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
             calculated_source=calculated_cb)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.

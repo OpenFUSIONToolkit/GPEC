@@ -1,4 +1,4 @@
-@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
+@kwdef struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
     mpert::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
 
@@ -47,9 +47,6 @@
     r2mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     r3mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-
-    # Pre-allocated evaluation buffer for matrix output
-    _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
 
     # Shared hint for sequential evaluation (all splines evaluated at same psi)
     _hint::Base.RefValue{Int} = Ref(1)
@@ -569,27 +566,25 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     end
 
     # --- Create Fourier coefficient splines (multi-quantity cubic interpolants) ---
-    ffit = FourFitVars(; mpert=intr.mpert, numpert_total=intr.numpert_total)
-
     # FastInterpolations now natively supports complex values - no need to split real/imag
     # Create complex series interpolants with per-column extrap BC
-    ffit.amats = cubic_interp(metric.xs, Series(amats_flat); ffit.itp_opts...)
-    ffit.bmats = cubic_interp(metric.xs, Series(bmats_flat); ffit.itp_opts...)
-    ffit.cmats = cubic_interp(metric.xs, Series(cmats_flat); ffit.itp_opts...)
-    ffit.dmats_prim = cubic_interp(metric.xs, Series(dmats_flat); ffit.itp_opts...)
-    ffit.emats_prim = cubic_interp(metric.xs, Series(emats_flat); ffit.itp_opts...)
-    ffit.hmats = cubic_interp(metric.xs, Series(hmats_flat); ffit.itp_opts...)
-    ffit.fmats_lower = cubic_interp(metric.xs, Series(fmats_lower_flat); ffit.itp_opts...)
-    ffit.fmats_prim = cubic_interp(metric.xs, Series(fmats_prim_flat); ffit.itp_opts...)
-    ffit.fmats_gal = cubic_interp(metric.xs, Series(fmats_gal_flat); ffit.itp_opts...)
-    ffit.gmats = cubic_interp(metric.xs, Series(gmats_flat); ffit.itp_opts...)
-    ffit.kmats = cubic_interp(metric.xs, Series(kmats_flat); ffit.itp_opts...)
-
-    # TODO: set powers
-    # Do we need this yet? Only called if power_flag = true
-
-    # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
-    ffit.jmats = cubic_interp(metric.xs, Series(jmats_flat); ffit.itp_opts...)
-
-    return ffit
+    # TODO: set powers. Do we need this yet? Only called if power_flag = true
+    itp_opts = (; extrap=ExtendExtrap())
+    return FourFitVars(;
+        mpert=intr.mpert,
+        numpert_total=intr.numpert_total,
+        itp_opts,
+        amats=cubic_interp(metric.xs, Series(amats_flat); itp_opts...),
+        bmats=cubic_interp(metric.xs, Series(bmats_flat); itp_opts...),
+        cmats=cubic_interp(metric.xs, Series(cmats_flat); itp_opts...),
+        dmats_prim=cubic_interp(metric.xs, Series(dmats_flat); itp_opts...),
+        emats_prim=cubic_interp(metric.xs, Series(emats_flat); itp_opts...),
+        hmats=cubic_interp(metric.xs, Series(hmats_flat); itp_opts...),
+        fmats_lower=cubic_interp(metric.xs, Series(fmats_lower_flat); itp_opts...),
+        fmats_prim=cubic_interp(metric.xs, Series(fmats_prim_flat); itp_opts...),
+        fmats_gal=cubic_interp(metric.xs, Series(fmats_gal_flat); itp_opts...),
+        gmats=cubic_interp(metric.xs, Series(gmats_flat); itp_opts...),
+        kmats=cubic_interp(metric.xs, Series(kmats_flat); itp_opts...),
+        # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
+        jmats=cubic_interp(metric.xs, Series(jmats_flat); itp_opts...))
 end

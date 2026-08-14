@@ -15,7 +15,7 @@ injected from `GeneralizedPerturbedEquilibrium.main`).
 
 Drive the KineticForces matrix kernel over the ψ grid stored in `metric.xs` and
 return `(kw_flat, kt_flat)` arrays of shape `(mpsi, np^2, 6)` matching the
-contract that `ForceFreeStates._compute_fkg_matrices!` consumes.
+contract that `ForceFreeStates._compute_fkg_matrices` consumes.
 
 The arrays carry the six bounce-averaged kinetic energy / torque matrices
 (Logan 2015 Eqs 7.30–7.35) for every ψ on the equilibrium grid, packed as
@@ -31,22 +31,25 @@ tracked as follow-up work blocked on PR #196 — see the plan's "Out of scope"
 section.
 
 # Arguments
-- `ffs_ctrl`: ForceFreeStatesControl (carries `kinetic_factor`, `kinetic_source`)
-- `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
-- `ffs_intr`: ForceFreeStatesInternal (mode indexing)
-- `metric`: MetricData (provides ψ grid via `metric.xs`)
-- `ffit`: FourFitVars (used only for `numpert_total` cross-check)
+
+  - `ffs_ctrl`: ForceFreeStatesControl (carries `kinetic_factor`, `kinetic_source`)
+  - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
+  - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
+  - `metric`: MetricData (provides ψ grid via `metric.xs`)
+  - `ffit`: FourFitVars (used only for `numpert_total` cross-check)
 
 # Keyword arguments
-- `kf_ctrl`: KineticForcesControl, defaults to `KineticForcesControl()`. Used to
-  carry NTV-specific knobs (nl, zi, mi, wdfac, divxfac, electron) that the
-  KineticForces kernel needs but ForceFreeStatesControl does not expose.
-- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-
-  profile splines loaded via `Equilibrium.load_kinetic_profiles`.
+
+  - `kf_ctrl`: KineticForcesControl, defaults to `KineticForcesControl()`. Used to
+    carry NTV-specific knobs (nl, zi, mi, wdfac, divxfac, electron) that the
+    KineticForces kernel needs but ForceFreeStatesControl does not expose.
+  - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-
+    profile splines loaded via `Equilibrium.load_kinetic_profiles`.
 
 # Returns
-- `kw_flat::Array{ComplexF64,3}`: Energy matrices, shape `(mpsi, np^2, 6)`
-- `kt_flat::Array{ComplexF64,3}`: Torque matrices, shape `(mpsi, np^2, 6)`
+
+  - `kw_flat::Array{ComplexF64,3}`: Energy matrices, shape `(mpsi, np^2, 6)`
+  - `kt_flat::Array{ComplexF64,3}`: Torque matrices, shape `(mpsi, np^2, 6)`
 """
 function compute_calculated_kinetic_matrices(
     _ffs_ctrl,
@@ -54,8 +57,8 @@ function compute_calculated_kinetic_matrices(
     ffs_intr,
     metric,
     ffit;
-    kf_ctrl::KineticForcesControl = KineticForcesControl(),
-    kinetic_profiles::Equilibrium.KineticProfileSplines,
+    kf_ctrl::KineticForcesControl=KineticForcesControl(),
+    kinetic_profiles::Equilibrium.KineticProfileSplines
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -95,25 +98,25 @@ function compute_calculated_kinetic_matrices(
     # are read-only and safely shared through deepcopy semantics.
     nl = kf_ctrl.nl
     nthreads = Threads.maxthreadid()
-    thread_intrs   = [deepcopy(kf_intr) for _ in 1:nthreads]
-    thread_full_w  = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
-    thread_full_t  = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
+    thread_intrs = [deepcopy(kf_intr) for _ in 1:nthreads]
+    thread_full_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
+    thread_full_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_block_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
 
     Threads.@threads for ipsi in 1:mpsi
-        tid     = Threads.threadid()
-        intr_t  = thread_intrs[tid]
-        full_w  = thread_full_w[tid]
-        full_t  = thread_full_t[tid]
+        tid = Threads.threadid()
+        intr_t = thread_intrs[tid]
+        full_w = thread_full_w[tid]
+        full_t = thread_full_t[tid]
         block_w = thread_block_w[tid]
         block_t = thread_block_t[tid]
-        psi     = xs[ipsi]
+        psi = xs[ipsi]
         for in_idx in 1:npert
             n = ffs_intr.nlow + in_idx - 1
             fill!(full_w, 0)
             fill!(full_t, 0)
-            for ell in -nl:nl
+            for ell in (-nl):nl
                 fill!(block_w, 0)
                 fill!(block_t, 0)
                 compute_kinetic_matrices_at_psi!(

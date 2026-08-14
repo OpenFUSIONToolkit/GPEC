@@ -2,8 +2,9 @@
     make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
                         calculated_source=nothing)
 
-Construct kinetic energy (W) and torque (T) matrices, store as splines in `ffit`,
-and pre-compute the FKG derived matrices used by `sing_der!`.
+Construct kinetic energy (W) and torque (T) matrices and pre-compute the FKG derived
+matrices used by `sing_der!`, returning a new `FourFitVars` carrying both alongside the
+ideal matrices of the input `ffit`.
 
 Dispatches on `ctrl.kinetic_source`:
 
@@ -49,21 +50,18 @@ function make_kinetic_matrix(
     end
 
     # Build splines for each of the 6 components
-    for ic in 1:6
-        ffit.kwmats[ic] = cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); ffit.itp_opts...)
-        ffit.ktmats[ic] = cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...)
-    end
+    kwmats = [cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); ffit.itp_opts...) for ic in 1:6]
+    ktmats = [cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...) for ic in 1:6]
 
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
-    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
-
-    return nothing
+    return _compute_fkg_matrices(ffit, equil, intr, metric, kw_flat, kt_flat, kwmats, ktmats)
 end
 
 """
-    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
+    _compute_fkg_matrices(ffit, equil, intr, metric, kw_flat, kt_flat, kwmats, ktmats) -> FourFitVars
 
-Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and store as splines.
+Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and return a new `FourFitVars`
+holding them, the kinetic-modified A/B/C, and the ideal A/B/C of `ffit` preserved as `*_ideal`.
 This corresponds to `fourfit_kinetic_matrix` method=0 in the Fortran code (Fortran `fourfit.F` lines 1170-1260).
 
 The 9 matrices computed are the Schur complement reductions of ideal (A,B,C,D,E,H) and kinetic (W,T)
@@ -72,13 +70,15 @@ Eqs C.1-C.11). These sub-matrices absorb the singfac dependence so that the ODE 
 can be assembled with explicit (m-nq) factors rather than 1/(m-nq), avoiding numerical blow-up at
 rational surfaces.
 """
-function _compute_fkg_matrices!(
+function _compute_fkg_matrices(
     ffit::FourFitVars,
     equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal,
     metric::MetricData,
     kw_flat::Array{ComplexF64,3},
-    kt_flat::Array{ComplexF64,3}
+    kt_flat::Array{ComplexF64,3},
+    kwmats::Vector,
+    ktmats::Vector
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -237,27 +237,43 @@ function _compute_fkg_matrices!(
         end
     end
 
-    # Build FKG splines
-    ffit.f0mats = cubic_interp(xs, Series(f0_flat); ffit.itp_opts...)
-    ffit.pmats = cubic_interp(xs, Series(p_flat); ffit.itp_opts...)
-    ffit.paats = cubic_interp(xs, Series(pa_flat); ffit.itp_opts...)
-    ffit.kkmats = cubic_interp(xs, Series(kk_flat); ffit.itp_opts...)
-    ffit.kkaats = cubic_interp(xs, Series(kka_flat); ffit.itp_opts...)
-    ffit.r1mats = cubic_interp(xs, Series(r1_flat); ffit.itp_opts...)
-    ffit.r2mats = cubic_interp(xs, Series(r2_flat); ffit.itp_opts...)
-    ffit.r3mats = cubic_interp(xs, Series(r3_flat); ffit.itp_opts...)
-    ffit.gaats = cubic_interp(xs, Series(ga_flat); ffit.itp_opts...)
-
-    # Preserve ideal A/B/C splines before overwrite
-    ffit.amats_ideal = ffit.amats
-    ffit.bmats_ideal = ffit.bmats
-    ffit.cmats_ideal = ffit.cmats
-
-    # Overwrite ideal A/B/C splines with kinetic-modified versions for sing_der!
-    ffit.amats = cubic_interp(xs, Series(ak_flat); ffit.itp_opts...)
-    ffit.bmats = cubic_interp(xs, Series(bk_flat); ffit.itp_opts...)
-    ffit.cmats = cubic_interp(xs, Series(ck_flat); ffit.itp_opts...)
-    ffit.kinetic_populated = true
-
-    return nothing
+    # Rebuild the fit with the kinetic products folded in: A/B/C become the kinetic-modified
+    # versions consumed by sing_der!, and the ideal ones are preserved as `*_ideal`.
+    itp_opts = ffit.itp_opts
+    return FourFitVars(;
+        # carried through from the ideal fit
+        mpert=ffit.mpert,
+        numpert_total=ffit.numpert_total,
+        itp_opts,
+        dmats_prim=ffit.dmats_prim,
+        emats_prim=ffit.emats_prim,
+        hmats=ffit.hmats,
+        fmats_lower=ffit.fmats_lower,
+        fmats_prim=ffit.fmats_prim,
+        fmats_gal=ffit.fmats_gal,
+        kmats=ffit.kmats,
+        gmats=ffit.gmats,
+        jmats=ffit.jmats,
+        _hint=ffit._hint,
+        # ideal A/B/C preserved before the kinetic overwrite
+        amats_ideal=ffit.amats,
+        bmats_ideal=ffit.bmats,
+        cmats_ideal=ffit.cmats,
+        # kinetic-modified A/B/C
+        amats=cubic_interp(xs, Series(ak_flat); itp_opts...),
+        bmats=cubic_interp(xs, Series(bk_flat); itp_opts...),
+        cmats=cubic_interp(xs, Series(ck_flat); itp_opts...),
+        kwmats,
+        ktmats,
+        kinetic_populated=true,
+        # FKG splines
+        f0mats=cubic_interp(xs, Series(f0_flat); itp_opts...),
+        pmats=cubic_interp(xs, Series(p_flat); itp_opts...),
+        paats=cubic_interp(xs, Series(pa_flat); itp_opts...),
+        kkmats=cubic_interp(xs, Series(kk_flat); itp_opts...),
+        kkaats=cubic_interp(xs, Series(kka_flat); itp_opts...),
+        r1mats=cubic_interp(xs, Series(r1_flat); itp_opts...),
+        r2mats=cubic_interp(xs, Series(r2_flat); itp_opts...),
+        r3mats=cubic_interp(xs, Series(r3_flat); itp_opts...),
+        gaats=cubic_interp(xs, Series(ga_flat); itp_opts...))
 end
