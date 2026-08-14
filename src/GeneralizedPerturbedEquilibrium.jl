@@ -67,6 +67,7 @@ const H5_RAW_EQUILIBRIUM = "Input/RawInputs/Equilibrium"
 const H5_RAW_FORCING = "Input/RawInputs/ForcingTerms"
 const H5_RAW_COILS = "Input/RawInputs/Coils"
 const H5_GIT_VERSION = "Info/git_version"
+const H5_RUNTIMES = "Info/Runtimes"
 
 include("HDF5Schema.jl")
 include("Rerun.jl")
@@ -181,6 +182,8 @@ function main_from_inputs(
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing
 )
     total_start = time()
+    # Per-stage wall-clock seconds, written to Info/Runtimes at the end of the run.
+    runtimes = Vector{Pair{String,Float64}}()
 
     # ----------------------------------------------------------------
     # Equilibrium
@@ -279,7 +282,9 @@ function main_from_inputs(
         @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$nstring)"
     end
 
-    @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
+    equil_dt = time() - equil_start
+    push!(runtimes, "equilibrium" => equil_dt)
+    @info "Equilibrium construction completed in $(@sprintf("%.3f", equil_dt)) s"
 
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
@@ -498,7 +503,9 @@ function main_from_inputs(
     if ctrl.gal_flag
         gal_start = time()
         gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
-        @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
+        gal_dt = time() - gal_start
+        push!(runtimes, "galerkin" => gal_dt)
+        @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
     end
 
     if ctrl.write_outputs_to_HDF5
@@ -518,7 +525,9 @@ function main_from_inputs(
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
-    @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
+    ffs_dt = time() - ffs_start
+    push!(runtimes, "force_free_states" => ffs_dt)
+    @info "Force-Free States completed in $(@sprintf("%.3f", ffs_dt)) s"
 
     # SLAYER tearing-mode analysis stage. Needs only equil + intr, so it runs in
     # both the force_termination=true path and the full pipeline. `pe_file` is the
@@ -536,7 +545,9 @@ function main_from_inputs(
             slayer_start = time()
             result = Runner.run_slayer(equil, intr, slayer_ctrl;
                 dir_path=intr.dir_path)
-            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+            slayer_dt = time() - slayer_start
+            push!(runtimes, "slayer" => slayer_dt)
+            @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
             h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
             h5_path = joinpath(intr.dir_path, h5_filename)
             # Append the Tearing/ group; create the file if no prior stage wrote
@@ -557,7 +568,10 @@ function main_from_inputs(
     # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
         slayer_result = _run_slayer_stage(nothing)
-        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        total_dt = time() - total_start
+        push!(runtimes, "total" => total_dt)
+        _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
         return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
             vac_data=ctrl.vac_flag ? vac_data : nothing,
             slayer=slayer_result)
@@ -642,7 +656,9 @@ function main_from_inputs(
         end
     end
 
-    @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
+    pe_dt = time() - pe_start
+    push!(runtimes, "perturbed_equilibrium" => pe_dt)
+    @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", pe_dt)) s"
 
     # ----------------------------------------------------------------
     # KineticForces (Neoclassical Toroidal Viscosity)
@@ -670,7 +686,9 @@ function main_from_inputs(
             end
         end
 
-        @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
+        kf_dt = time() - kf_start
+        push!(runtimes, "kinetic_forces" => kf_dt)
+        @info "KineticForces completed in $(@sprintf("%.3f", kf_dt)) s"
     end
 
     # ----------------------------------------------------------------
@@ -688,7 +706,10 @@ function main_from_inputs(
     # ----------------------------------------------------------------
     # Done
     # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+    total_dt = time() - total_start
+    push!(runtimes, "total" => total_dt)
+    _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
@@ -1013,6 +1034,35 @@ function _write_coil_snapshot!(h5_path::String, coil_sets::Vector{ForcingTerms.C
     h5open(h5_path, "r+") do out_h5
         haskey(out_h5, H5_RAW_COILS) && return nothing
         ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, H5_RAW_COILS))
+    end
+    return nothing
+end
+
+const _RUNTIME_LONG_NAMES = Dict(
+    "equilibrium" => "Wall-clock time of the Equilibrium construction stage",
+    "force_free_states" => "Wall-clock time of the ForceFreeStates stability stage",
+    "galerkin" => "Wall-clock time of the Galerkin outer-region solve",
+    "slayer" => "Wall-clock time of the SLAYER tearing-mode stage",
+    "perturbed_equilibrium" => "Wall-clock time of the PerturbedEquilibrium stage",
+    "kinetic_forces" => "Wall-clock time of the KineticForces (NTV) stage",
+    "total" => "Wall-clock time of the full GPEC run")
+
+"""
+    _write_runtimes!(h5_path::String, runtimes)
+
+Write the per-stage wall-clock seconds collected during a run into `Info/Runtimes/` of an
+existing gpec.h5 file. `runtimes` iterates `stage => seconds` pairs; only the stages that ran
+are recorded. These timings are informational only — machine- and load-dependent, never a
+regression quantity.
+"""
+function _write_runtimes!(h5_path::String, runtimes)
+    isfile(h5_path) || return nothing
+    h5open(h5_path, "r+") do out_h5
+        haskey(out_h5, H5_RUNTIMES) && HDF5.delete_object(out_h5, H5_RUNTIMES)
+        for (stage, dt) in runtimes
+            out_h5["$H5_RUNTIMES/$stage"] = dt
+        end
+        Utilities.HDF5Annotations.annotate!(out_h5, ["$H5_RUNTIMES/$stage" => (; long_name=_RUNTIME_LONG_NAMES[stage], units="s") for (stage, _) in runtimes])
     end
     return nothing
 end

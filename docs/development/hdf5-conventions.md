@@ -27,7 +27,7 @@ Top level (10 groups):
 
 | Group | Contents |
 |---|---|
-| `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim` |
+| `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim`, `Runtimes/` (per-stage wall-clock seconds) |
 | `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
 | `Equilibrium/` | Scalars (β, q₀, q95, …) plus `Profiles/` (1-D: xs, 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D: rcoords, offset, nu, jac) |
 | `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (`Solution/`, `Match/`, `msing`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
