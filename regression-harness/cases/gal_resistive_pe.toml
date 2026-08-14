@@ -40,29 +40,29 @@ label = "Chirikov parameter"
 noise_threshold = 1e-8
 order = 21
 
-# Resonant flux Φ_res per surface (applied) — norm + per-surface complex values
+# Resonant area-weighted field b̄^r = Φ^r/A^r per surface (tesla) — norm + per-surface complex values
 [quantities.pe_resonant_flux_norm]
-h5path = "PerturbedEquilibrium/SingularCoupling/resonant_flux"
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "norm"
-label = "||resonant flux||"
+label = "||resonant b field||"
 noise_threshold = 1e-6
 order = 30
 
 [quantities.pe_resonant_flux_all]
-h5path = "PerturbedEquilibrium/SingularCoupling/resonant_flux"
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "all_complex"
-label = "resonant flux Phi_res"
+label = "resonant b field (all)"
 noise_threshold = 1e-8
 order = 31
 
 # Penetrated (reconnected) resonant field per surface — the resistive shielding signature
 [quantities.pe_penetrated_field]
-h5path = "PerturbedEquilibrium/SingularCoupling/penetrated_field"
+h5path = "PerturbedEquilibrium/SingularCoupling/penetrated_area_weighted_field"
 type = "complex_vector"
 extract = "all_complex"
-label = "penetrated field"
+label = "penetrated b field"
 noise_threshold = 1e-8
 order = 32
 
@@ -75,12 +75,12 @@ label = "PE Δ' per surface"
 noise_threshold = 1e-8
 order = 33
 
-# Resonant-flux coupling matrix (n_rational × numpert_total) — Frobenius norm, catches broader drift
+# Resonant-field coupling matrix (n_rational × numpert_total) — Frobenius norm, catches broader drift
 [quantities.pe_C_resonant_flux_norm]
-h5path = "PerturbedEquilibrium/SingularCoupling/C_resonant_flux"
+h5path = "PerturbedEquilibrium/SingularCoupling/C_resonant_area_weighted_field"
 type = "complex_matrix"
 extract = "norm"
-label = "||C resonant flux||"
+label = "||C resonant b field||"
 noise_threshold = 1e-6
 order = 40
 

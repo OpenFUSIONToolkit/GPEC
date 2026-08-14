@@ -13,6 +13,8 @@ Physics-topic groups elevated to top level (rather than nested under their produ
 
 ## Naming rules
 
+These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness-internal synthetic fixtures (e.g. the `ggj/*` reference files written by `regression-harness/src/runner.jl`) are out of scope.
+
 - **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinDeltaPrime/`).
 - **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root_real`, `pest3_Delta`, `2piF`).
 - **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), scan indices (`Surface_<k>`, `psi_<i>`).

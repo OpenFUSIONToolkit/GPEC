@@ -32,6 +32,17 @@ function _collect_bad_groups(h5)
     return bad
 end
 
+# The full-run walk below only exercises an ideal deck, which never produces the
+# data-driven group names — pin the whitelist rules directly.
+@testset "gpec.h5 schema naming: group-name rule" begin
+    @test _group_name_ok("KineticForces", "fgar")            # method tokens verbatim
+    @test _group_name_ok("Tearing/Scan", "Surface_1")        # scan indices verbatim
+    @test _group_name_ok("Input/RawInputs/Coils", "my_coils") # raw-snapshot names verbatim
+    @test _group_name_ok("", "SingularSurfaces")
+    @test !_group_name_ok("", "singular")
+    @test !_group_name_ok("SingularSurfaces", "kinetic")
+end
+
 @testset "gpec.h5 schema naming" begin
     template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
