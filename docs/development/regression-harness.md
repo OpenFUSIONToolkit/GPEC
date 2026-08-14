@@ -98,3 +98,5 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--force` — re-run even if cached
 - `--verbose` — print GPEC subprocess output
 - `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
+
+GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, but `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.

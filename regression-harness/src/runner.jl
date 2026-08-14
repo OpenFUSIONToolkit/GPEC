@@ -42,6 +42,11 @@ function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
     return (rundir, true)
 end
 
+# Thread count for GPEC subprocesses ("auto" = all cores); GPEC's threaded kernels
+# (Riccati parallel FM, ballooning, field reconstruction, kinetic forces) otherwise
+# run single-threaded. Override with e.g. GPEC_REGRESS_THREADS=1.
+const SUBPROCESS_THREADS = get(ENV, "GPEC_REGRESS_THREADS", "auto")
+
 const RUNNER_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -245,11 +250,11 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
     timingfile = tempname() * ".timing"
     try
         write(tmpscript, script_content)
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $timingfile`
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $timingfile`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $timingfile`;
-                stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
         if !isfile(h5path)
@@ -392,11 +397,11 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         timingfile = tempname() * ".timing"
         write(tmpscript, script_content)
 
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $timingfile`
         if verbose
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`;
-                stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
 
@@ -505,11 +510,11 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         # Run GPEC in subprocess
         project_root = worktree_path
 
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $timingfile`
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`;
-                stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s = _read_timing_file(timingfile)
 

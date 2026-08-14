@@ -98,6 +98,9 @@ Options:
     --no-instantiate       Skip Pkg.instantiate() in subprocess
     --help                 Print this help message
 
+Environment:
+    GPEC_REGRESS_THREADS   Threads for GPEC subprocesses (default "auto" = all cores)
+
 Examples:
     # Compare two refs
     julia --project=regression-harness regression-harness/regress.jl \\
