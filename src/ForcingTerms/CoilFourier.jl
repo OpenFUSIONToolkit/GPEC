@@ -47,13 +47,54 @@ struct BoundaryGrid
 end
 
 """
-    sample_boundary_grid(equil, mtheta, nzeta; psi=1.0) -> BoundaryGrid
+    sample_boundary_grid(equil, mtheta, nzeta; psi=equil.rzphi_xs[end]) -> BoundaryGrid
 
 Evaluate plasma geometry at a uniform (mtheta × nzeta) grid on the flux surface `psi`.
 
 Uses `equil.rzphi_rsquared` and `equil.rzphi_offset` splines at the given `psi`.
-Defaults to `psi=1.0` (true plasma boundary). Use a smaller value (e.g. the
-Fortran `psilim`) to evaluate on an interior truncation surface.
+
+Defaults to the **outermost computed surface** `equil.rzphi_xs[end]` (i.e. `psihigh`), NOT
+ψ_N = 1, matching Fortran GPEC.
+
+**Fortran reference** (PrincetonUniversity/GPEC v1.5.7): the coil field is evaluated at
+`psilim`, never at ψ_N = 1 — `CALL field_bs_psi(psilim, coilmn(:,j), ...)` (`gpec/gpec.f:431`).
+`field_bs_psi` is the direct analog of this function, using the same two splines and the same
+square root: `rfac = SQRT(crzphi_f(1))` (`coil/field.F:170`, where `crzphi_f(1)` is
+`rzphi_rsquared` and `crzphi_f(2)` is `rzphi_offset`); `coil/field.F:133` calls that mesh the
+"control surface mesh". `psilim = psihigh` (`dcon/sing.f:170`) and is only ever moved *inward*
+by `sas_flag`/`qhigh`/`psiedge` truncation. Since `psihigh` is the last knot of the radial
+grid these splines are built on (`equil/inverse.f:142`), Fortran evaluates exactly ON the last
+knot and never extrapolates. The docs state it directly: the external field is specified "on
+the surface of the GPEC plasma boundary defined by the psihigh variable in equil.in"
+(`docs/index.rst:60`). The previous ψ_N = 1 default was a port divergence.
+
+Both Fortran-comparison benchmarks already pass the correct surface explicitly
+(`benchmark_against_fortran_run.jl:548` and `benchmark_coil_ForcingTerms_against_fortran.jl:236`,
+both using Fortran's own `psilim` attribute), so the ψ_N = 1 default was never exercised on any
+Fortran-validated path — only by callers that omitted the keyword.
+
+Why it mattered numerically: the geometry splines are defined only out to `psihigh`, so ψ_N = 1
+extrapolates a cubic past its last knot with no guarantee of remaining physical. On the
+DIII-D-like example (psihigh = 0.995) `rzphi_rsquared` is +0.29 at ψ_N = 0.995 but −22.6 at
+ψ_N = 1, negative over 15 of 96 θ points, so the `sqrt` below throws a DomainError. The
+extrapolated distance is a fixed 1 − psihigh while the final spline interval shrinks with edge
+packing, so the error grows with resolution — which is why this surfaced only once the pass-1
+auto grid was refined.
+
+NOTE ON THE DEFAULT: the physically correct control surface is `psilim`, the *integration*
+limit, not `psihigh`, the *equilibrium spline* limit. They are equal unless
+`dmlim`/`qhigh`/`psiedge` truncation fires, in which case `psilim < psihigh`. PPPL shipped a fix
+for exactly this confusion (`docs/releases.rst:281`: "Fixes inappropriate uses of psihigh, which
+may not be the end of integration psilim if sas_flag, qhigh, or peak_flag are used").
+
+**Both production paths pass `psi = ffs_intr.psilim` explicitly** (PerturbedEquilibrium.jl, coil
+and forcing-file branches), as do both Fortran-comparison benchmarks. This default of `psihigh`
+therefore applies only to direct callers holding a bare `PlasmaEquilibrium` with no
+ForceFreeStates solve — for which it is the outermost surface that exists, and always a strict
+improvement on extrapolating to ψ_N = 1. Pass `psi` explicitly whenever `psilim` is known.
+
+The coupling surface therefore moves inward by (1 − psihigh): 0.05 % of flux at the default
+psihigh = 0.9995, 0.5 % on the example, which lowers psihigh to 0.995 to capture q=6.
 Poloidal derivatives dR/dθ_norm and dZ/dθ_norm (unit-norm θ_norm ∈ [0,1]) are computed
 via periodic cubic splines on the resulting R(θ_norm), Z(θ_norm) data.
 
@@ -64,7 +105,7 @@ For DIII-D (Bt < 0, Ip > 0 → helicity = -1): phi increases with j (standard di
 For positive-helicity machines (Bt > 0, Ip > 0 → helicity = +1): phi decreases with j.
 """
 function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int, nzeta::Int;
-    psi::Float64=1.0)
+    psi::Float64=equil.rzphi_xs[end])
     # Build uniform theta grid (same convention as equil.rzphi_ys, but potentially finer)
     theta_grid = range(0; length=mtheta, step=1.0/mtheta)
 
@@ -226,7 +267,7 @@ function compute_coil_forcing_modes!(
     n::Int,
     m_low::Int,
     m_high::Int;
-    psi::Float64=1.0,
+    psi::Float64=equil.rzphi_xs[end],   # outermost computed surface (psihigh), not ψ_N=1 — see sample_boundary_grid
     verbose::Bool=false
 )
     nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * max(1, abs(n))
@@ -307,7 +348,7 @@ function convert_forcing_normalization!(
     n::Int,
     m_low::Int,
     m_high::Int;
-    psi::Float64=1.0,
+    psi::Float64=equil.rzphi_xs[end],   # outermost computed surface (psihigh), not ψ_N=1 — see sample_boundary_grid
     mtheta::Int=256,
     nzeta::Int=64
 )
