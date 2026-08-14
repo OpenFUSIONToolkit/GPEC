@@ -28,9 +28,10 @@ end
 """
     normalize_eigenfunctions!(odet::OdeState, wt::AbstractMatrix{ComplexF64}, psio::Float64) -> OdeState
 
-Rescale the stored EL solution vectors in `odet.u_store`, `du_store`, and `xi_s_store` so the
-edge displacement matches the free-boundary eigenvectors `wt` (scaled by `2π·psio·1e-3`).
-Modifies `odet` in place. Call after `free_run` when downstream code consumes the stored ξ profiles.
+Rescale the stored EL solution vectors in `odet.u_store` (and `du_store`/`xi_s_store` when a
+path has already filled them) so the edge displacement matches the free-boundary eigenvectors
+`wt` (scaled by `2π·psio·1e-3`). Modifies `odet` in place. Call after `free_run` when
+downstream code consumes the stored ξ profiles.
 """
 @with_pool pool function normalize_eigenfunctions!(odet::OdeState, wt::AbstractMatrix{ComplexF64}, psio::Float64)
     N = size(wt, 1)
@@ -41,12 +42,14 @@ Modifies `odet` in place. Call after `free_run` when downstream code consumes th
         odet.u_store[:, :, 1, istep] .= tmp_mat
         mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
         odet.u_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.du_store[:, :, 1, istep], coeffs)
-        odet.du_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.du_store[:, :, 2, istep], coeffs)
-        odet.du_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
-        odet.xi_s_store[:, :, istep] .= tmp_mat
+        # Only the galerkin path carries derivative stores this early; materialized ones
+        # are built from the normalized u_store afterwards.
+        if !isempty(odet.du_store)
+            mul!(tmp_mat, odet.du_store[:, :, istep], coeffs)
+            odet.du_store[:, :, istep] .= tmp_mat
+            mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
+            odet.xi_s_store[:, :, istep] .= tmp_mat
+        end
     end
     return odet
 end

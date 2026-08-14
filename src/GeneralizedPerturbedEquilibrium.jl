@@ -702,6 +702,10 @@ function write_outputs_to_HDF5(
     ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
+    # Idempotent: already done if a PerturbedEquilibrium stage ran. Leaves the stores empty
+    # (and the datasets below empty) on paths whose solution basis cannot supply them.
+    ForceFreeStates.materialize_derivative_stores!(odet, equil, ffit, intr)
+
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
         # Store git version for reproducibility
@@ -797,7 +801,7 @@ function write_outputs_to_HDF5(
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
         out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["integration/dxi_psi"] = odet.du_store[:, :, 1, :]
+        out_h5["integration/dxi_psi"] = odet.du_store
         out_h5["integration/xi_s"] = odet.xi_s_store
         out_h5["integration/crit"] = odet.crit_store
 

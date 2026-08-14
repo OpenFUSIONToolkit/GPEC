@@ -63,13 +63,18 @@ Least accurate method, kept for solution paths outside the serial EL integrator
 (gal-matched, Riccati) whose stored derivatives cover only Ξ′.
 """
 function _chord_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
+    isempty(odet.du_store) && error(
+        "_chord_solution_at: no derivative store. The solution is in a basis " *
+        "the Euler-Lagrange kernel cannot be re-applied to (sparse parallel path); " *
+        "set populate_dense_xi = true for PerturbedEquilibrium runs."
+    )
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
 
     u_a = odet.u_store[resnum, :, 1, il]
     u_b = odet.u_store[resnum, :, 1, ir]
-    du_a = odet.du_store[resnum, :, 1, il]
-    du_b = odet.du_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, il]
+    du_b = odet.du_store[resnum, :, ir]
 
     u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     du_e = (u_b .- u_a) ./ (psi_b - psi_a)
@@ -93,8 +98,8 @@ function _gal_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
 
     u_a = odet.u_store[resnum, :, 1, il]
     u_b = odet.u_store[resnum, :, 1, ir]
-    du_a = odet.du_store[resnum, :, 1, il]
-    du_b = odet.du_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, il]
+    du_b = odet.du_store[resnum, :, ir]
 
     u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     du_e = _hermite_cubic_deriv(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
@@ -125,8 +130,8 @@ function _solution_at(
 
     u_a = odet.u_store[resnum, :, 1, il]
     u_b = odet.u_store[resnum, :, 1, ir]
-    du_a = odet.du_store[resnum, :, 1, il]
-    du_b = odet.du_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, il]
+    du_b = odet.du_store[resnum, :, ir]
 
     u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
 
@@ -146,7 +151,7 @@ function _solution_at(
             j == k && continue
             w *= (psi - odet.psi_store[idxs[j]]) / (odet.psi_store[idxs[k]] - odet.psi_store[idxs[j]])
         end
-        du_e .+= (w * singfac(odet.psi_store[idxs[k]])) .* @view(odet.du_store[resnum, :, 1, idxs[k]])
+        du_e .+= (w * singfac(odet.psi_store[idxs[k]])) .* @view(odet.du_store[resnum, :, idxs[k]])
     end
     du_e ./= singfac(psi)
 
@@ -160,6 +165,10 @@ Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE sol
 ideal Euler-Lagrange relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) [Glasser 2016 eqs. 22-24],
 with u₁, u₂ Hermite-interpolated to `psi`. Only valid for ideal runs where
 `ffit.fmats_lower` and `kmats` generated the solution.
+
+The Hermite slopes need du₂ as well as du₁, and du₂ is not stored: both are evaluated here
+from the derivative kernel at the two bracketing nodes, which is where the handful of
+resonant evaluation points actually need them.
 """
 function _el_solution_at(
     psi::Float64,
@@ -178,12 +187,19 @@ function _el_solution_at(
     u1_b = @view odet.u_store[:, :, 1, ir]
     u2_a = @view odet.u_store[:, :, 2, il]
     u2_b = @view odet.u_store[:, :, 2, ir]
-    du1_a = @view odet.du_store[:, :, 1, il]
-    du1_b = @view odet.du_store[:, :, 1, ir]
-    du2_a = @view odet.du_store[:, :, 2, il]
-    du2_b = @view odet.du_store[:, :, 2, ir]
 
+    # Own hints: this runs inside a threaded loop over rational surfaces.
     hint = Ref(1)
+    q_hint = Ref(1)
+    du_a = zeros(ComplexF64, npert, npert, 2)
+    du_b = zeros(ComplexF64, npert, npert, 2)
+    ForceFreeStates.el_derivatives!(du_a, odet.u_store[:, :, :, il], false, equil, ffit, ffs_intr, psi_a, q_hint, hint)
+    ForceFreeStates.el_derivatives!(du_b, odet.u_store[:, :, :, ir], false, equil, ffit, ffs_intr, psi_b, q_hint, hint)
+    du1_a = @view du_a[:, :, 1]
+    du1_b = @view du_b[:, :, 1]
+    du2_a = @view du_a[:, :, 2]
+    du2_b = @view du_b[:, :, 2]
+
     kmat = Matrix{ComplexF64}(undef, npert, npert)
 
     u1_e = _hermite_cubic_val(u1_a, u1_b, du1_a, du1_b, psi_a, psi_b, psi)
@@ -416,7 +432,7 @@ function compute_singular_coupling_metrics!(
 
             # Inner-layer (cusp-free) penetrated field: bpen[s, j] is linear in the same identity-at-edge
             # coil-drive columns as the OdeState solutions, so it contracts with C_coeffs exactly like
-            # the outer solution values above (xsp = dot(u, ck)); /area matches the area-weighted
+            # the outer solution values above (xsp = transpose(u) * ck); /area matches the area-weighted
             # convention of the pointwise row.
             if have_inner_bpen && s <= size(intr.inner_bpen, 1)
                 pen_row = (transpose(C_coeffs) * @view(intr.inner_bpen[s, :])) ./ area

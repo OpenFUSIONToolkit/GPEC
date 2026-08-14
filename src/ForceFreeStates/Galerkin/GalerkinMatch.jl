@@ -264,33 +264,21 @@ function gal_matched_odestate(gal_result::GalerkinResult, ffit::FourFitVars, int
     ngrid_f = length(psi_f)
 
     u_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
-    du_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
+    du_store = zeros(ComplexF64, mpert, mpert, ngrid_f)
     xi_s_store = zeros(ComplexF64, mpert, mpert, ngrid_f)
 
-    amat = Matrix{ComplexF64}(undef, mpert, mpert)
-    bmat = Matrix{ComplexF64}(undef, mpert, mpert)
-    cmat = Matrix{ComplexF64}(undef, mpert, mpert)
-    tmp = Matrix{ComplexF64}(undef, mpert, mpert)
     hint = Ref(1)
     for ip in 1:ngrid_f
         ξ = @view xi_f[:, ip, :]
         ξ′ = @view dxi_f[:, ip, :]
         @views u_store[:, :, 1, ip] .= ξ
-        @views du_store[:, :, 1, ip] .= ξ′
-        # ξ_s = −A⁻¹(B·ξ′ + C·ξ), exactly as the ideal path of sing_der! (Sing.jl:1015-1049)
-        ffit.amats(vec(amat), psi_f[ip]; hint=hint)
-        ffit.bmats(vec(bmat), psi_f[ip]; hint=hint)
-        ffit.cmats(vec(cmat), psi_f[ip]; hint=hint)
-        LinearAlgebra.LAPACK.potrf!('U', amat)
-        LinearAlgebra.LAPACK.potrs!('U', amat, bmat)   # bmat ← A⁻¹ B
-        LinearAlgebra.LAPACK.potrs!('U', amat, cmat)   # cmat ← A⁻¹ C
-        xs = @view xi_s_store[:, :, ip]
-        mul!(tmp, bmat, ξ′)
-        xs .= .-tmp
-        mul!(tmp, cmat, ξ)
-        xs .-= tmp
+        @views du_store[:, :, ip] .= ξ′
+        # ξ_s = −A⁻¹(B·ξ′ + C·ξ), the same node quantity the Euler-Lagrange path computes.
+        @views compute_node_xi_s!(xi_s_store[:, :, ip], ξ′, ξ, ffit, psi_f[ip]; hint=hint)
     end
 
+    # Derivatives here are the analytic galerkin ξ′, not recomputable from the ODE kernel.
     return OdeState(; numpert_total=mpert, numunorms_init=1, msing=gal_result.msing, numsteps_init=ngrid_f,
-        step=ngrid_f, total_steps=ngrid_f, psi_store=psi_f, q_store=q_f, u_store=u_store, du_store=du_store, xi_s_store=xi_s_store)
+        step=ngrid_f, total_steps=ngrid_f, psi_store=psi_f, q_store=q_f, u_store=u_store, du_store=du_store,
+        xi_s_store=xi_s_store, du_store_populated=true)
 end

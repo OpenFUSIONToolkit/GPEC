@@ -83,6 +83,10 @@ function compute_perturbed_equilibrium(
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs_intr)
 
+    # Ξ′ and Ξ_s are recomputed from the stored solution here rather than carried through
+    # integration; downstream response and coupling code reads them from the stores.
+    ForceFreeStates.materialize_derivative_stores!(ForceFreeStates_results, equil, ffit, ffs_intr)
+
     # Load forcing data. On the gpec.h5 replay path the caller preloads
     # `intr.forcing_modes` from the snapshot, so skip re-reading the original file.
     if isempty(intr.forcing_modes)
