@@ -441,6 +441,26 @@
                     @test vac.wall_pts ≈ ref.wall_pts
                 end
             end
+
+            @testset "in-place compute_vacuum_response! clears a reused buffer" begin
+                # The nowall path writes only the plasma rows of grri/grre, so a buffer left
+                # over from a wall run must not leak its wall rows into the next result.
+                inputs = _make_inputs()
+                wall_rows = (inputs.mtheta+1):(2*inputs.mtheta)
+
+                vac = VacuumResponse(inputs)
+                compute_vacuum_response!(vac, inputs, WallShapeSettings(; shape="conformal", a=0.5))
+                @test any(!iszero, view(vac.grre, wall_rows, :))
+
+                compute_vacuum_response!(vac, inputs, WallShapeSettings(; shape="nowall"))
+                fresh = compute_vacuum_response(inputs, WallShapeSettings(; shape="nowall"))
+
+                @test all(iszero, view(vac.grri, wall_rows, :))
+                @test all(iszero, view(vac.grre, wall_rows, :))
+                @test vac.wv ≈ fresh.wv
+                @test vac.grri ≈ fresh.grri
+                @test vac.grre ≈ fresh.grre
+            end
         end
 
         @testset "extract_plasma_surface_at_psi" begin

@@ -152,7 +152,7 @@ boundary-integral solve produces along the way.
 ## Fields
 
   - `wv::Matrix{ComplexF64}`: Vacuum energy matrix Wᵛ (`num_modes × num_modes`), block-diagonal in n for 2D
-  - `grri`, `grre::Matrix{ComplexF64}`: Interior/exterior Green's functions (`2·num_points × num_modes`), zeroed on the 3D nowall path
+  - `grri`, `grre::Matrix{ComplexF64}`: Interior/exterior Green's functions (`2·num_points × num_modes`), zeroed on every 3D path
   - `plasma_pts`, `wall_pts::Matrix{Float64}`: Cartesian surface coordinates (`num_points × 3`)
 """
 struct VacuumResponse
