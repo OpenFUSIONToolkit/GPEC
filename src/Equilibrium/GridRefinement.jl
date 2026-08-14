@@ -57,12 +57,42 @@ const CORE_MODEL_PSI_MAX = 0.03
 const EDGE_MODEL_PSI_MIN = 0.9
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
-# Local density elevation around mandatory (rational) surfaces: knot spacing h_s = coef·τ^(1/3)
-# at the surface, geometric growth away from it, applied within the given radius. This keeps the
-# equidistributed base grid from starving the approach to each rational, where the ideal-MHD
-# Δ′ extraction is most sensitive to the local equilibrium-spline resolution.
-const SING_PACK_COEF = 0.06
-const SING_PACK_RADIUS = 0.05
+# Rational-surface bracketing (Δ′ robustness). The ideal-MHD Δ′ asymptotic matching samples the
+# cubic equilibrium splines' 2nd/3rd derivatives across each rational ψ_s over the matching stencil
+# [ψ_s − dpsi, ψ_s + dpsi], dpsi = singfac_min/|n·q′|. A cubic 3rd derivative is piecewise constant
+# and jumps at every knot, so a knot inside that stencil makes q‴ inconsistent across the crossing
+# and Δ′ non-convergent. We keep the stencil inside ONE clean spline interval by bracketing each
+# surface with knots at ψ_s ± w (w = BRACKET_COEF·dpsi) and clearing the zone between them — knots
+# stay near the surface (kinetic-layer resolution) but never on it. BRACKET_COEF > 1 leaves margin
+# for the pass-1→pass-2 shift of ψ_s.
+const BRACKET_COEF = 4.0
+# Global minimum knot spacing. No grid — auto refinement, the near-surface bracket, or a fixed
+# ldp/pow1 grid packing its edge at high mpsi — may place nodes closer than this. Below it, cubic
+# high derivatives are dominated by field-line integration noise rather than curvature (e.g. an
+# ldp grid at mpsi=2048 packs the edge to ~6e-7, deep in noise). Chosen well under the spacing of a
+# converged uniform reference (~5e-4 at mpsi=2048) so it clips only pathological clustering.
+const MIN_KNOT_SPACING = 1.0e-4
+# Near-rational resolution patch. The Δ′ extraction samples the equilibrium splines' 3rd
+# derivatives at each rational surface, which the smooth-q measured-curvature density starves at
+# mid-radius (q looks smooth there, so few knots are placed, yet Δ′ still needs fine local
+# resolution). Within RATIONAL_RES_RADIUS of each rational we floor the density at 1/RATIONAL_RES_SPACING
+# so equidistribution lays a locally-uniform fine patch there — the resolution Δ′ needs — which
+# `bracket_mandatory_nodes` then centers the surface within. The spacing is **fixed** (τ-independent):
+# Δ′ is a property of the rational surface, so its accuracy must not depend on the global accuracy
+# target τ (that only sizes the pedestal/edge grid) — a τ-dependent patch would leave Δ′ far from
+# converged at the default τ. RATIONAL_RES_SPACING is set where the q‴ estimate converges (the ldp
+# mpsi ladder converges the q=2 Δ′ by h ≈ 5e-4).
+const RATIONAL_RES_SPACING = 5.0e-4
+const RATIONAL_RES_RADIUS = 5.0e-3
+# Cap on the refined pass-2 interval count (density integral is clamped to this).
+const REFINED_N_CAP = 1024
+# Pass-1 interval count for the two-pass auto grid: the layout on which the formed equilibrium's
+# curvature is measured to provision the refined pass-2 grid. Pass 1 is equilibrium-only (cheap;
+# the ODE integration that dominates runtime is on pass 2). Sized to measure the gradient structure
+# (pedestal, edge) accurately. NOTE: because the curvature estimate is currently grid-dependent
+# (it grows with the measurement grid — see the dynamic-grid issue), a larger pass 1 measures more
+# curvature and enlarges pass 2; revisit once the density is made grid-invariant.
+const PASS1_INTERVALS = 1024
 
 """
     wants_two_pass(config::EquilibriumConfig) -> Bool
@@ -142,7 +172,7 @@ function _density_from_curvature!(rho::Vector{Float64}, d4::Vector{Float64}, f_s
 end
 
 """
-    _knot_density(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[], sing_pack_coef=SING_PACK_COEF) -> Vector{Float64}
+    _knot_density(equil::PlasmaEquilibrium; tau, kin=nothing) -> Vector{Float64}
 
 Knot density ρ(ψ) (knots per unit ψ_N) at the pass-1 nodes `equil.profiles.xs`, combining
 by max:
@@ -159,14 +189,12 @@ by max:
     from uniform relative q′ error on q ≈ −A·ln(1−ψ), independent of A and normally
     inactive; and the core for ψ ≤ 0.03, geometric-in-log(ψ) from the power-law axis
     form, which replaces the (noise-dominated) measurement there. A global minimum
-    density applies everywhere;
-  - local packing around each `mandatory` (rational) surface: spacing `sing_pack_coef`·τ^(1/3)
-    at the surface with geometric growth away from it, within `SING_PACK_RADIUS`.
+    density applies everywhere.
 
-A running max over ±1 node smooths single-stencil dropouts.
+Rational surfaces are handled by `bracket_mandatory_nodes` after equidistribution, not by
+elevating the density here. A running max over ±1 node smooths single-stencil dropouts.
 """
-function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing,
-    mandatory::Vector{Float64}=Float64[], sing_pack_coef::Float64=SING_PACK_COEF)
+function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing)
     xs = equil.profiles.xs
     n = length(xs)
     # Curvature is measured against ρ = √ψ (regular at the axis); the ρ-space density
@@ -229,15 +257,6 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
         rho_s[i] = max(rho_s[i], 1.0 / H_TARGET_MAX)
     end
 
-    # Local packing around mandatory (rational) surfaces
-    h_s = max(sing_pack_coef * tau^(1 / 3), H_TARGET_MIN)
-    for psi_m in mandatory
-        @inbounds for i in 1:n
-            d = abs(xs[i] - psi_m)
-            d > SING_PACK_RADIUS && continue
-            rho_s[i] = max(rho_s[i], 1.0 / max(dlog * d, h_s))
-        end
-    end
     return rho_s
 end
 
@@ -322,44 +341,128 @@ function merge_mandatory_nodes(grid::Vector{Float64}, mandatory::Vector{Float64}
 end
 
 """
+    enforce_min_spacing(grid, hmin) -> Vector{Float64}
+
+Drop interior nodes so no two kept nodes are closer than `hmin`, preserving both endpoints.
+Guards against noise-level packing from any generator — the auto-grid near-surface bracket, or a
+fixed `ldp`/`pow1` grid whose edge spacing collapses (`~(π/2·mpsi)⁻²` for `ldp`) at high mpsi,
+below which cubic high derivatives are integration noise, not curvature. A no-op when the grid is
+already coarser than `hmin` everywhere (e.g. a converged uniform reference).
+"""
+function enforce_min_spacing(grid::Vector{Float64}, hmin::Float64)
+    n = length(grid)
+    (n < 3 || hmin <= 0) && return copy(grid)
+    kept = Float64[grid[1]]
+    for i in 2:(n-1)
+        grid[i] - kept[end] >= hmin && push!(kept, grid[i])
+    end
+    # Keep the far endpoint; if the last retained interior node crowds it, drop that node instead.
+    length(kept) > 1 && grid[n] - kept[end] < hmin && pop!(kept)
+    push!(kept, grid[n])
+    return kept
+end
+
+"""
+    bracket_mandatory_nodes(grid, centers, min_half_widths, min_spacing; collapse_atol=1e-7) -> Vector{Float64}
+
+Center each rational `centers[i]` inside a single clean spline interval by replacing the knots
+straddling it with a symmetric pair at `centers[i] ± w`. The half-width `w` is the larger of
+`min_half_widths[i]` (the Δ′-stencil floor `BRACKET_COEF·dpsi`) and **half the local grid
+spacing**, so the bracket blends into the surrounding grid rather than punching a narrow interval
+into it: the region stays locally uniform with the center at its midpoint. That local uniformity
+is what keeps the cubic 3rd derivative the Δ′ extraction samples both *consistent across* the
+surface (no knot-on-surface jump) and *stable across* grid refinement — a narrow bracket amid
+wide neighbors would be consistent but noisy. Non-bracket knots within `w` of the center, or
+within `min_spacing` of either new bracket knot, are dropped; endpoints always win; bracket knots
+outside the open domain are dropped, and knots closer than `collapse_atol` are collapsed to keep
+the grid strictly increasing.
+"""
+function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}, min_half_widths::Vector{Float64}, min_spacing::Float64; collapse_atol::Float64=1e-7)
+    isempty(centers) && return copy(grid)
+    length(centers) == length(min_half_widths) || error("bracket_mandatory_nodes: centers and min_half_widths length mismatch")
+    lo, hi = grid[1], grid[end]
+    order = sortperm(centers)
+    kept = Tuple{Float64,Bool}[(g, false) for g in grid]  # (value, is_bracket_knot)
+    last_c = -Inf
+    for idx in order
+        c, hw = centers[idx], min_half_widths[idx]
+        (lo < c < hi) || continue
+        c - last_c < collapse_atol && continue  # duplicate rational (same q via several (m,n))
+        k = clamp(searchsortedlast(grid, c), 1, length(grid) - 1)
+        w = max(hw, 0.5 * (grid[k+1] - grid[k]))  # blend to half the local spacing
+        left, right = c - w, c + w
+        # Drop non-bracket, non-endpoint knots inside the zone or crowding a new bracket knot.
+        filter!(kept) do t
+            t[2] || t[1] == lo || t[1] == hi ||
+                !(left < t[1] < right || abs(t[1] - left) < min_spacing || abs(t[1] - right) < min_spacing)
+        end
+        left > lo && push!(kept, (left, true))
+        right < hi && push!(kept, (right, true))
+        last_c = c
+    end
+    sort!(kept; by=first)
+    merged = Float64[]
+    for (v, _) in kept
+        (isempty(merged) || v - merged[end] > collapse_atol) && push!(merged, v)
+    end
+    all(diff(merged) .> 0) || error("bracket_mandatory_nodes produced a non-increasing grid")
+    return merged
+end
+
+"""
     refined_psi_grid(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[],
-                     delta_frac=0.25, N_cap=1024, sing_pack_coef=SING_PACK_COEF) -> Vector{Float64}
+                     singfac_min=1e-4, n_min=1, bracket_coef=BRACKET_COEF,
+                     min_spacing=MIN_KNOT_SPACING, N_cap=1024) -> Vector{Float64}
 
 Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: measured-curvature knot
-density (`_knot_density`), equidistribution, and mandatory-knot insertion
-(`merge_mandatory_nodes`). `tau` is the target interpolation accuracy (`psi_accuracy`);
-`kin` optionally supplies kinetic profiles whose pedestal gradients attract knots;
-`mandatory` lists ψ values that must appear as knots (e.g. rational surfaces);
-`sing_pack_coef` scales the knot spacing at those surfaces (convergence studies only —
-the default is scan-calibrated).
+density (`_knot_density`), equidistribution, a global minimum-spacing floor
+(`enforce_min_spacing`), and rational-surface bracketing (`bracket_mandatory_nodes`). `tau` is
+the target interpolation accuracy (`psi_accuracy`); `kin` optionally supplies kinetic profiles
+whose pedestal gradients attract knots; `mandatory` lists rational-surface ψ values to bracket;
+`singfac_min` and `n_min` (smallest |n| in the run) set each surface's matching half-stencil
+`dpsi = singfac_min/(n_min·|q′|)`, and the bracket half-width is `bracket_coef·dpsi` (floored at
+`min_spacing`). Rational surfaces are bracketed, not pinned: a knot on the surface would make the
+Δ′ extraction's cubic 3rd derivative jump mid-stencil (see `BRACKET_COEF`).
 """
 function refined_psi_grid(equil::PlasmaEquilibrium;
     tau::Float64,
     kin::Union{Nothing,KineticProfileSplines}=nothing,
     mandatory::Vector{Float64}=Float64[],
-    delta_frac::Float64=0.25,
-    N_cap::Int=1024,
-    sing_pack_coef::Float64=SING_PACK_COEF)
+    singfac_min::Float64=1e-4,
+    n_min::Int=1,
+    bracket_coef::Float64=BRACKET_COEF,
+    min_spacing::Float64=MIN_KNOT_SPACING,
+    N_cap::Int=REFINED_N_CAP)
     xs = equil.profiles.xs
-    rho = _knot_density(equil; tau, kin, mandatory, sing_pack_coef)
+    rho = _knot_density(equil; tau, kin)
+    # Floor the density to a fixed (τ-independent) locally-uniform fine patch around each rational
+    # so Δ′ has the resolution to sample 3rd derivatives there at any accuracy target (see
+    # RATIONAL_RES_SPACING).
+    if !isempty(mandatory)
+        h_rat = max(RATIONAL_RES_SPACING, min_spacing)
+        @inbounds for m in mandatory, i in eachindex(xs)
+            abs(xs[i] - m) <= RATIONAL_RES_RADIUS && (rho[i] = max(rho[i], 1.0 / h_rat))
+        end
+    end
     M_total = sum(0.5 * (rho[i] + rho[i-1]) * (xs[i] - xs[i-1]) for i in 2:length(xs))
     N = clamp(ceil(Int, M_total), 32, N_cap)
     N == N_cap && M_total > N_cap &&
         @warn "refined_psi_grid: knot count capped at $N_cap (density integral wants $(ceil(Int, M_total))); psi_accuracy=$tau may not be attainable"
-    grid = _equidistribute(xs, rho, N)
-    return merge_mandatory_nodes(grid, mandatory; delta_frac)
+    grid = enforce_min_spacing(_equidistribute(xs, rho, N), min_spacing)
+    isempty(mandatory) && return grid
+    min_half_widths = [max(bracket_coef * singfac_min / (n_min * abs(equil.profiles.q_deriv(m))), min_spacing) for m in mandatory]
+    return bracket_mandatory_nodes(grid, mandatory, min_half_widths, min_spacing)
 end
 
 """
-    implied_knot_count(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[]) -> Int
+    implied_knot_count(equil::PlasmaEquilibrium; tau, kin=nothing) -> Int
 
 Knot count the measured-curvature density model implies for a formed equilibrium. Used as
 a post-refinement consistency diagnostic: if this differs substantially from the actual
 grid size, the pass-1 grid under- or over-sampled a feature.
 """
-function implied_knot_count(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing,
-    mandatory::Vector{Float64}=Float64[])
+function implied_knot_count(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing)
     xs = equil.profiles.xs
-    rho = _knot_density(equil; tau, kin, mandatory)
+    rho = _knot_density(equil; tau, kin)
     return ceil(Int, sum(0.5 * (rho[i] + rho[i-1]) * (xs[i] - xs[i-1]) for i in 2:length(xs)))
 end

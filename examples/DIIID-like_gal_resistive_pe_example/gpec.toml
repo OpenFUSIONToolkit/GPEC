@@ -1,3 +1,8 @@
+# DIII-D-like H-mode DRIVEN resistive example: gal Δ′ + inner-layer matching → PerturbedEquilibrium.
+# Extends the sibling DIIID-like_gal_resistive_example with DIII-D C-coil forcing
+# (n=1 cosine phasing): the gal-matched resistive ξ is fed into PerturbedEquilibrium
+# for coil-driven singular coupling — island half-widths, Chirikov overlap, resonant flux.
+# Same equilibrium and Galerkin settings as the sibling; differences start at [ForcingTerms].
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
@@ -26,7 +31,7 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                 # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
+psiedge = 0.99                 # Edge dW scan band: diagnostic dW(ψ) computed for ψ ∈ [psiedge, psilim]; integration domain set by qhigh / psihigh / dmlim
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)

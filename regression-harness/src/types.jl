@@ -48,6 +48,11 @@ end
 
 """
 Parsed CLI options.
+
+`no_pin_manifest` disables copying the working tree's resolved `Manifest.toml` into each
+worktree (pinning is on by default, so that two refs differ only by source code).
+`allow_env_mismatch` lets a cached result from a different environment be reused instead of
+re-run. `fail_on_change` turns any changed quantity into a non-zero exit status, for CI use.
 """
 struct CLIOptions
     cases::Vector{String}
@@ -60,5 +65,8 @@ struct CLIOptions
     db_path::Union{String,Nothing}
     verbose::Bool
     no_instantiate::Bool
+    no_pin_manifest::Bool
+    allow_env_mismatch::Bool
+    fail_on_change::Bool
     help::Bool
 end

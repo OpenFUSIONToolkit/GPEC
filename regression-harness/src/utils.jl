@@ -68,16 +68,78 @@ function get_commit_info(commit_hash::String, repo_root::String)
 end
 
 """
-Create a temporary git worktree for a commit.
-Returns the worktree path.
+How far a ref lags the remote branch it tracks.
+
+Returns `(upstream, behind)` when both the ref and an upstream can be resolved, otherwise
+`nothing` (detached SHAs, tags, and local-only branches have no meaningful upstream). A ref that
+is behind its upstream is a stale baseline: the harness would happily benchmark against
+weeks-old code without saying so.
 """
-function create_worktree(commit_hash::String, repo_root::String)::String
+function upstream_lag(ref::String, repo_root::String)
+    ref == LOCAL_REF && return nothing
+    # `origin/<ref>` is only a meaningful fallback for an actual local branch name. Without this
+    # guard, `HEAD` matches the always-present symbolic ref `origin/HEAD` (→ origin/develop) and
+    # every feature branch gets reported as a stale copy of develop.
+    is_branch = success(`git -C $repo_root rev-parse --verify --quiet refs/heads/$ref`)
+    candidates = is_branch ? ("$(ref)@{upstream}", "origin/$(ref)") : ("$(ref)@{upstream}",)
+    upstream = nothing
+    for candidate in candidates
+        try
+            resolved = strip(read(`git -C $repo_root rev-parse --abbrev-ref --verify --quiet $candidate`, String))
+            if !isempty(resolved)
+                upstream = resolved
+                break
+            end
+        catch
+            continue
+        end
+    end
+    upstream === nothing && return nothing
+    try
+        behind = parse(Int, strip(read(`git -C $repo_root rev-list --count $(ref)..$(upstream)`, String)))
+        return (upstream=upstream, behind=behind)
+    catch
+        return nothing
+    end
+end
+
+"""
+Print a banner for every resolved ref that lags its remote tracking branch.
+
+`resolve_ref` takes the *local* branch pointer, so a local `develop` that has not been fetched
+in weeks silently becomes the baseline. Nothing else in the report says the baseline is old.
+"""
+function warn_stale_refs(refs::Vector{ResolvedRef}, repo_root::String)
+    for ref in refs
+        lag = upstream_lag(ref.name, repo_root)
+        (lag === nothing || lag.behind == 0) && continue
+        println()
+        println("!! STALE BASELINE: '$(ref.name)' is $(lag.behind) commit(s) behind $(lag.upstream).")
+        println("   This comparison is against out-of-date code. Update it with:")
+        println("     git fetch && git checkout $(ref.name) && git merge --ff-only $(lag.upstream)")
+        println()
+    end
+end
+
+"""
+Create a temporary git worktree for a commit. Returns the worktree path.
+
+`pin_manifest_from` copies an already-resolved `Manifest.toml` into the worktree so that the
+subprocess `Pkg.instantiate()` reproduces that exact package set instead of resolving whatever is
+newest. Without it, two refs are compared across two different package sets and library-level
+differences surface as physics regressions.
+"""
+function create_worktree(commit_hash::String, repo_root::String;
+                         pin_manifest_from::Union{String,Nothing}=nothing)::String
     short = commit_hash[1:min(8, length(commit_hash))]
     worktree_path = tempname() * "_gpec_$(short)"
     try
         run(`git -C $repo_root worktree add --detach $worktree_path $commit_hash`)
     catch e
         error("Failed to create worktree for $short: $e")
+    end
+    if pin_manifest_from !== nothing && isfile(pin_manifest_from)
+        cp(pin_manifest_from, joinpath(worktree_path, "Manifest.toml"); force=true)
     end
     return worktree_path
 end

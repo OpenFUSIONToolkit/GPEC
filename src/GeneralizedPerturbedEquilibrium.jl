@@ -73,7 +73,7 @@ include("Rerun.jl")
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
-using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
+using .ForceFreeStates: compute_local_stability, compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
@@ -193,32 +193,26 @@ function main_from_inputs(
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
-    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified").
-    # Validated before equilibrium formation: the two-pass grid refinement needs the
-    # n range to pin rational-surface knots.
-    if ctrl.nn_low == 0 && ctrl.nn_high == 0
+    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
+    intr.nlow, intr.nhigh = ctrl.nn_low, ctrl.nn_high
+    if intr.nlow == 0 && intr.nhigh == 0
         error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
-    elseif ctrl.nn_low == 0
-        ctrl.nn_low = ctrl.nn_high
-    elseif ctrl.nn_high == 0
-        ctrl.nn_high = ctrl.nn_low
+    elseif intr.nlow == 0
+        intr.nlow = intr.nhigh
+    elseif intr.nhigh == 0
+        intr.nhigh = intr.nlow
     end
-    if ctrl.nn_low > ctrl.nn_high
-        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
+    if intr.nlow > intr.nhigh
+        error("nn_low=$(intr.nlow) cannot be greater than nn_high=$(intr.nhigh)")
     end
-    # checks for negative n
-    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
-    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
-    if ctrl.nn_high < 1
-        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
+    if intr.nhigh < 1
+        error("All requested toroidal modes (n=$(intr.nlow):$(intr.nhigh)) are below 1; " *
               "n < 1 modes are not supported")
     end
-    if ctrl.nn_low < 1
-        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
-        ctrl.nn_low = 1
+    if intr.nlow < 1
+        @warn "Clamping nn_low from $(intr.nlow) to 1; n < 1 modes are not supported"
+        intr.nlow = 1
     end
-    intr.nlow = ctrl.nn_low
-    intr.nhigh = ctrl.nn_high
     intr.npert = intr.nhigh - intr.nlow + 1
     nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
@@ -254,9 +248,13 @@ function main_from_inputs(
     # kinetic profiles), pin knots on rational surfaces, and re-form on the refined grid
     # from the in-memory input — no file re-read.
     if Equilibrium.wants_two_pass(eq_config)
-        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
+        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+        # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
+        # so the rational-surface brackets clear a zone large enough for every mode.
+        n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
         psi_nodes = Equilibrium.refined_psi_grid(equil;
-            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory)
+            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+            singfac_min=ctrl.singfac_min, n_min=n_min)
         rerun_input = if additional_input !== nothing
             # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
             # path re-runs read_imas, which must resolve the same psihigh both passes;
@@ -270,7 +268,7 @@ function main_from_inputs(
             nothing  # fall back to re-reading the input file
         end
         equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
-        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory)
+        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
         if implied > 1.5 * (length(psi_nodes) - 1)
             @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
                   "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
@@ -329,10 +327,6 @@ function main_from_inputs(
     @info "\n  Force-Free States\n$_SECTION"
     ffs_start = time()
 
-    # Set up variables
-    # TODO: parallel threads logic
-    ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
-
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
 
@@ -345,18 +339,15 @@ function main_from_inputs(
         # equil = set_up_equilibrium(equil.config)
     end
 
-    # Compute local stability (if desired). This holds `D_I` from the
-    # ballooning coefficient system and the local ballooning result.
-    profiles_xs = equil.profiles.xs
-    locstab_fs = zeros(Float64, length(profiles_xs), 5)
+    # Compute local stability (if desired). `locstab` holds `D_I` from the ballooning
+    # coefficient system and the local ballooning result; `nothing` when not computed.
+    locstab = nothing
     ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     if ctrl.local_stability_flag
-        compute_ballooning_stability!(ctrl, locstab_fs, equil)
+        locstab = compute_local_stability(ctrl, equil)
         # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
         ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
     end
-    # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
@@ -394,19 +385,21 @@ function main_from_inputs(
     end
 
     # Determine poloidal mode numbers
+    # TODO: delta_mhigh is doubled for consistency with Fortran - why is this present in the Fortran?
+    delta_mhigh = 2 * ctrl.delta_mhigh
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
     if ctrl.sing_start == 0
         intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
         for ising in Int(ctrl.sing_start):intr.msing
             intr.mmin = min(intr.mmin, sing[ising].m)
         end
         intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
@@ -512,6 +505,7 @@ function main_from_inputs(
             inputs,
             forcing_modes_snapshot,
             gal_data;
+            locstab=locstab,
             ballooning_boundary=ballooning_boundary
         )
         @info "Results written to $(ctrl.HDF5_filename)"
@@ -721,6 +715,7 @@ function write_outputs_to_HDF5(
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     gal_data::Union{GalerkinResult,Nothing}=nothing;
+    locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
     ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
@@ -794,17 +789,17 @@ function write_outputs_to_HDF5(
         # LocalStability/di = Mercier D_I (det(d0bar)); LocalStability/dr = resistive interchange D_R;
         # LocalStability/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
         # tearing Δ' under PerturbedEquilibrium/SingularCoupling/delta_prime).
-        if ctrl.local_stability_flag
-            locstab_xs = intr.locstab.cache.x
-            out_h5["LocalStability/di"] = intr.locstab.y[:, 1] ./ locstab_xs
-            out_h5["LocalStability/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
+        if locstab !== nothing
+            locstab_xs = locstab.cache.x
+            out_h5["LocalStability/di"] = locstab.y[:, 1] ./ locstab_xs
+            out_h5["LocalStability/dr"] = locstab.y[:, 2] ./ locstab_xs
         else
             out_h5["LocalStability/di"] = Float64[]
             out_h5["LocalStability/dr"] = Float64[]
         end
-        out_h5["SingularSurfaces/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
-                                         [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["LocalStability/ballooning_Delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
+        out_h5["SingularSurfaces/di0"] = (locstab !== nothing && !isempty(intr.sing)) ?
+                                         [locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
+        out_h5["LocalStability/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
 
         # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
         out_h5["LocalStability/psi"] = ballooning_boundary.psi
