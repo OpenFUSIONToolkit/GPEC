@@ -46,13 +46,15 @@ GPEC consists of **seven main modules** organized in `src/`:
 
 4. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
    - Computes vacuum response matrices for ideal MHD analysis
-   - Calculates both **interior** (grri) and **exterior** (grre) Green's functions
+   - Solves the exterior boundary-integral system for the vacuum energy matrix `wv`, and optionally
+     (`compute_Iv=true`) the interior system as well to build the surface-current matrix `I_v`
+     (Park 2007 eq. 21b). The interior/exterior Green's functions themselves are internal scratch.
    - Main functions:
-     - `compute_vacuum_response()` - Pure Julia implementation
+     - `compute_vacuum_response()` / `compute_vacuum_response!()` - allocating and in-place entry points
    - Key files:
-     - `VacuumStructs.jl` - Data structures
-     - `VacuumInternals.jl` - Core algorithms
-     - `VacuumFromEquilibrium.jl` - Integration with equilibrium data
+     - `DataTypes.jl` - Data structures (`VacuumInput`, `PlasmaGeometry`, `WallGeometry`)
+     - `Kernel2D.jl` / `Kernel3D.jl` - Single-/double-layer kernel assembly
+     - `Field.jl` - Vacuum field and potential evaluation off the surface
    - Status: **Pure Julia implementation complete and available**
 
 5. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
@@ -130,8 +132,7 @@ The complete GPEC analysis pipeline:
 
 2. **Vacuum Response**:
    - Initialize plasma and wall surfaces from equilibrium
-   - Compute vacuum response matrices (wv, grri, grre)
-   - Calculate both interior and exterior Green's functions
+   - Compute the vacuum energy matrix `wv` (and `I_v` when `compute_Iv=true`)
    - Pure Julia implementation
 
 3. **Stability Analysis** (ForceFreeStates):
@@ -169,11 +170,9 @@ The complete GPEC analysis pipeline:
 
 ### Stability
 - `SingType` - Singular surface data including:
-  - Rational surface location (ψ, q = m/n)
-  - Δ' (tearing stability parameter)
-  - Eigenmode structure at singular surface
-  - Green's functions (grri, grre) at interior singular surfaces
-  - Surface inductance
+  - Rational surface location (ψ, ρ, q = m/n, dq/dψ)
+  - Δ' (tearing stability parameter) — **stub**; the valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`
+  - Asymptotic solution bases at the inner-layer boundaries
 
 ### Perturbed Equilibrium
 - `PerturbedEquilibriumControl` - User-facing TOML configuration parameters

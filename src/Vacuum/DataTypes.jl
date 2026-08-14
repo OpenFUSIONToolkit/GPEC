@@ -73,7 +73,8 @@ function VacuumInput(
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
 
     # Remove the last point to go from the [0, 2π] grid to VACUUM's [0, 2π) grid
-    # and reverse the arrays for VACUUM's CW θ direction
+    # and reverse the arrays for VACUUM's CW θ direction (θ_VAC = -θ_GPEC). This handedness is why
+    # operators returned to GPEC (e.g. the surface-inductance current matrix) are conjugated.
     return VacuumInput(;
         x=reverse(r)[1:(end-1)],
         z=reverse(z)[1:(end-1)],
@@ -152,13 +153,15 @@ boundary-integral solve produces along the way.
 ## Fields
 
   - `wv::Matrix{ComplexF64}`: Vacuum energy matrix Wᵛ (`num_modes × num_modes`), block-diagonal in n for 2D
-  - `grri`, `grre::Matrix{ComplexF64}`: Interior/exterior Green's functions (`2·num_points × num_modes`), zeroed on every 3D path
+  - `I_v::Matrix{ComplexF64}`: Vacuum surface-current matrix Iᵛ (`num_modes × num_modes`), left zeroed
+    unless `compute_vacuum_response` is called with `compute_Iv=true` (2D only). Stored without the
+    `μ₀`/`4π²` normalization: the physical surface inductance is `μ₀(2π)²·I_v⁻¹`
+    (see `PerturbedEquilibrium.calc_surface_inductance`).
   - `plasma_pts`, `wall_pts::Matrix{Float64}`: Cartesian surface coordinates (`num_points × 3`)
 """
 struct VacuumResponse
     wv::Matrix{ComplexF64}
-    grri::Matrix{ComplexF64}
-    grre::Matrix{ComplexF64}
+    I_v::Matrix{ComplexF64}
     plasma_pts::Matrix{Float64}
     wall_pts::Matrix{Float64}
 end
@@ -173,8 +176,7 @@ function VacuumResponse(inputs::VacuumInput)
     num_modes = length(inputs.m_modes) * length(inputs.n_modes)
     return VacuumResponse(
         zeros(ComplexF64, num_modes, num_modes),
-        zeros(ComplexF64, 2 * num_points, num_modes),
-        zeros(ComplexF64, 2 * num_points, num_modes),
+        zeros(ComplexF64, num_modes, num_modes),
         zeros(num_points, 3),
         zeros(num_points, 3)
     )
