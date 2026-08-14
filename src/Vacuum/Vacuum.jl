@@ -31,6 +31,10 @@ const _HERMITICITY_WARN_TOL = 1e-4
 
 Replace `mat` by its Hermitian part in place, warning first if the anti-Hermitian residual exceeds
 `_HERMITICITY_WARN_TOL`.
+
+The matrices passed here are Hermitian in exact arithmetic — δW_v = ξ†Wᵛξ is a real energy, and Iᵛ
+is the inverse of the Hermitian surface inductance up to a real scalar — so any anti-Hermitian part
+is a discretization artifact that vanishes as the vacuum grid is refined.
 """
 function _warn_and_symmetrize!(mat::AbstractMatrix, name::String)
     herm_norm = norm(mat + mat')
@@ -102,31 +106,32 @@ Green's functions are internal scratch only.
         end
 
         if compute_Iv
+            # Port of Fortran gpvacuum_flxsurf (gpec/gpvacuum.f).
             # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
             grri = similar!(pool, grre)
             grri .= grre
             grad_green_interior = similar!(pool, grad_green)
             grad_green_interior .= grad_green
 
-            # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); solve for the physical
-            # vacuum-outside potential grre = χ^(vo). Overwrites grad_green to save memory.
+            # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); the solve gives
+            # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites grad_green to save memory.
             ldiv!(lu!(grad_green), grre)
 
-            # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
-            # boundary limits is 2I here, giving the vacuum-inside potential grri = χ^(vi).
+            # Interior operator D_ext - 2I, negated relative to Fortran vacuum_vac.f (kernelsign=-1
+            # builds -D_ext + 2I), so grri = -(2π)²χ^(vi) carries the same sign as grre.
             for i in 1:num_points_total
                 grad_green_interior[i, i] -= 2.0
             end
             ldiv!(lu!(grad_green_interior), grri)
 
-            # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = grri - grre
-            # They are flipped because VACUUM builds the operators in its CW-θ frame while GPEC
-            # uses CCW-θ, flipping the outward-normal sign.
+            # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = (grre - grri)/(2π)²
             I_v_block = @view vac_data.I_v[block_idx, block_idx]
             g_diff = @view grri[1:num_points_surf, :]
             g_diff .= @view(grre[1:num_points_surf, :]) .- g_diff
             mul!(I_v_block, ft.basis, g_diff)
-            conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
+            # conj! supplies gpvacuum_flxsurf's conjugation, its θ reversal (θ_VAC = -θ_GPEC), and
+            # its exp(-i*n*ν) phase correction in one operation.
+            conj!(I_v_block)
             I_v_block ./= num_points_surf
         else
             # Only need exterior system for wv
@@ -138,7 +143,8 @@ Green's functions are internal scratch only.
         wv_block .*= 4π^2 / num_points_surf
     end
 
-    # Remove any non-Hermitian residual from Hermitian matrices due to discretization
+    # Remove any non-Hermitian discretization residual. Hermitianizing Iᵛ before inversion (rather
+    # than L after, as Fortran gpvacuum_flxsurf does) agrees to O(ε²) in the residual ε.
     _warn_and_symmetrize!(vac_data.wv, "Wᵛ")
     compute_Iv && _warn_and_symmetrize!(vac_data.I_v, "Iᵛ")
 
@@ -278,6 +284,8 @@ in-place method to avoid extra heap allocations.
 
   - `wv`: complex vacuum response matrix (`num_modes × num_modes`).
   - `I_v`: Vacuum surface-current matrix (`num_modes × num_modes`); zeros unless `compute_Iv=true`.
+    Stored without the `μ₀`/`4π²` normalization: the physical surface inductance is
+    `μ₀(2π)²·I_v⁻¹` (see `PerturbedEquilibrium.calc_surface_inductance`).
   - `plasma_pts`, `wall_pts`: surface coordinate arrays.
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
@@ -309,10 +317,11 @@ sizes:
   - `wv::AbstractMatrix{ComplexF64}`             – vacuum response matrix
   - `plasma_pts::AbstractMatrix{Float64}`        – plasma surface coordinates
   - `wall_pts::AbstractMatrix{Float64}`          – wall surface coordinates
-  - `I_v::AbstractMatrix{ComplexF64}` – required when `compute_Iv=true`
+  - `I_v::AbstractMatrix{ComplexF64}`            – only required when `compute_Iv=true`
 
 This is designed to work with `ForceFreeStates.VacuumData` but does not depend on its concrete
-type (duck-typed on field names only).
+type (duck-typed on field names only). Note `VacuumData` carries no `I_v` field and never opts
+into `compute_Iv=true`.
 """
 function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
     if inputs.nzeta == 1
