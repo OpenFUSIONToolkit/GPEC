@@ -104,6 +104,45 @@ using HDF5
         rm(h5)
     end
 
+    @testset "input-validation guards" begin
+        psi = collect(0.0:0.05:1.0)
+        Ni = @. 1.0e20 * (1 - 0.5psi)
+        ne = @. 1.1e20 * (1 - 0.5psi)
+        Ti = @. 2000.0 * (1 - 0.5psi)
+        Te = @. 2500.0 * (1 - 0.5psi)
+        wE = @. 1.0e4 * (1 - psi)
+        h5 = tempname() * ".h5"
+        HDF5.h5open(h5, "w") do file
+            file["psi"] = psi
+            file["n_i"] = Ni
+            file["n_e"] = ne
+            file["T_i"] = Ti
+            file["T_e"] = Te
+            file["omega_E"] = wE
+            file["n_T"] = 0.4 .* Ni
+            file["n_dilute"] = 0.05 .* Ni
+        end
+        DT(f1, f2) = [KF.IonSpecies(; z=1, m=2, fraction=f1), KF.IonSpecies(; z=1, m=3, fraction=f2)]
+        # An all-fraction list must account for the full n_i (the impurity is set by n_i/n_e, not a shortfall).
+        @test_throws ErrorException EQ.resolve_ntv_species(h5, DT(0.5, 0.4); zimp=6, mimp=12)
+        # Fractions are shares of n_i, so summing above 1 is fatal in any list, mixed included.
+        @test_throws ErrorException EQ.resolve_ntv_species(h5, DT(0.7, 0.5); zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(h5,
+            [KF.IonSpecies(; z=1, m=2, fraction=1.2), KF.IonSpecies(; z=1, m=3, density="n_T")]; zimp=6, mimp=12)
+        # A partial fraction alongside an explicit density is legal — the n_i/n_e deficit is the impurity.
+        sp = EQ.resolve_ntv_species(h5,
+            [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, density="n_T")]; zimp=6, mimp=12)
+        @test count(s -> !s.electron && s.z == 1, sp) == 2
+        # Main-ion z must stay below the impurity charge (zpitch closure pole at Zeff = zimp).
+        @test_throws ErrorException EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=6, m=12, fraction=1.0)]; zimp=6, mimp=12)
+        # A dilute main-ion mix drives Zeff toward zimp and warns about the zpitch pole.
+        @test_logs (:warn, r"zpitch closure near its pole") match_mode = :any EQ.resolve_ntv_species(
+            h5, [KF.IonSpecies(; z=1, m=2, density="n_dilute")]; zimp=6, mimp=12)
+        # Vacuum point: neutral composition, no impurity, finite zpitch.
+        @test EQ.multi_ion_composition([1], [1.0e19], 0.0; zimp=6, mimp=12) == (1.0, 1.0, 1.0e19, 0.0)
+        rm(h5)
+    end
+
     @testset "combine_species_states" begin
         # Combined profile = Σ species dT/dψ interpolated onto the union grid; total = Σ total.
         mk(psi, dt) = (
@@ -121,5 +160,9 @@ using HDF5
         @test maximum(abs.(r.dtdpsi)) > 0          # not the all-zeros regression
         overlap = [real(d) for (p, d) in zip(r.psi_grid, r.dtdpsi) if 0.1 <= p <= 0.9]
         @test all(x -> isapprox(x, 3.0; atol=1e-9), overlap)   # 1 + 2 on the overlap
+        # A duplicate ψ node in one species' grid must not produce NaN (zero-width interpolation guard).
+        s3 = mk([0.0, 0.5, 0.5, 1.0], fill(1.0, 4))
+        c2 = KF.combine_species_states([s1, s3])
+        @test all(isfinite, real.(c2.method_results["fgar"].dtdpsi))
     end
 end

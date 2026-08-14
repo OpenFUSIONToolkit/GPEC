@@ -207,9 +207,11 @@ this is `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s · (T_s)^{3/2})` 
 function multi_ion_composition(zs::AbstractVector, ns::AbstractVector, ne::Real;
     zimp::Real, mimp::Real)
     n_main = sum(ns)
+    # Vacuum point (ne ≤ 0): neutral composition, no impurity — avoids the zpitch pole at Zeff = zimp.
+    ne > 0 || return (1.0, 1.0, n_main, 0.0)
     charge_density = sum(z * n for (z, n) in zip(zs, ns))   # Σ z_s n_s
-    n_imp = ne > 0 ? (ne - charge_density) / zimp : 0.0
-    zeff = ne > 0 ? (sum(z^2 * n for (z, n) in zip(zs, ns)) + zimp^2 * n_imp) / ne : Float64(zimp)
+    n_imp = (ne - charge_density) / zimp
+    zeff = (sum(z^2 * n for (z, n) in zip(zs, ns)) + zimp^2 * n_imp) / ne
     zpitch = 1.0 + (1.0 + mimp) / (2.0 * mimp) * zimp * (zeff - 1.0) / (zimp - zeff)
     return (zeff, zpitch, n_main, n_imp)
 end
@@ -259,6 +261,25 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     _assert_nonneg_density(kinetic_file, "n_e", ne, psi_reg)
     _assert_nonneg_density(kinetic_file, "n_i (total)", ni_total, psi_reg)
 
+    # Fraction bookkeeping: fractions are shares of the total n_i, so they can never sum above 1,
+    # and when every species is fraction-specified they must account for all of n_i. (In a mixed
+    # fraction/density list no full-sum check is possible; the n_imp ≥ 0 quasineutrality check below
+    # still catches over-allocation in physical units.)
+    fracs = [s.fraction for s in ion_species if !isnan(s.fraction)]
+    if !isempty(fracs)
+        fsum = sum(fracs)
+        fsum <= 1.0 + 1e-6 ||
+            error("ion_species fractions sum to $fsum > 1 — fractions are shares of the total main-ion density n_i")
+        length(fracs) == length(ion_species) && abs(fsum - 1.0) > 1e-6 &&
+            error("ion_species fractions sum to $fsum ≠ 1 — with all species fraction-specified the shares must account for the full n_i " *
+                  "(the impurity content is set by the file's n_i/n_e deficit, not by a fraction shortfall)")
+    end
+
+    # The momentum-restoring zpitch closure assumes the declared main ions are lighter/lower-z than
+    # the trailing impurity; z_s ≥ z_imp can drive Zeff to the zpitch pole at Zeff = z_imp.
+    all(s.z < zimp for s in ion_species) ||
+        error("every ion_species charge must satisfy z < zimp = $zimp (declare heavier species as the impurity)")
+
     # Resolve each species' resonant density: `fraction` ⇒ share of the total n_i; `density` ⇒
     # an explicit named profile from the (HDF5) kinetic file (resampled to the working grid).
     zs = [Int(s.z) for s in ion_species]
@@ -299,6 +320,9 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     end
     # A negative impurity density means the main ions over-neutralize (Σ z_s n_s > n_e) — unphysical.
     _assert_nonneg_density(kinetic_file, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
+    # Approaching the zpitch pole at Zeff = zimp signals a dilute main-ion mix taken up by impurity.
+    maximum(zeff) > 0.9 * zimp &&
+        @warn "max(Zeff) = $(maximum(zeff)) is within 10% of zimp = $zimp — zpitch closure near its pole; check ion_species densities/fractions"
 
     # Per-species ν_s: shared zpitch/n_main/Zeff/lnΛ, species-specific z²/m/T_i (Krook deflection
     # frequency, test-particle z², Logan & Park 2013 Eq. 6). `zpitch` is a main-ion closure, applied

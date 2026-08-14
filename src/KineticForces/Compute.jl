@@ -247,8 +247,8 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
             for (k, ψ) in enumerate(grid)
                 (ψ < xs[1] || ψ > xs[end]) && continue
                 j = searchsortedlast(xs, ψ)
-                if j == length(xs)
-                    dtdpsi[k] += ys[end]
+                if j == length(xs) || xs[j+1] == xs[j]   # endpoint or duplicate node: no interpolation
+                    dtdpsi[k] += ys[j]
                 else
                     t = (ψ - xs[j]) / (xs[j+1] - xs[j])
                     dtdpsi[k] += (1 - t) * ys[j] + t * ys[j+1]
