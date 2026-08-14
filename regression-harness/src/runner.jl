@@ -3,14 +3,25 @@ Runner: orchestrates checking out commits, running GPEC, and extracting results.
 """
 
 """
-Read the GPEC-only runtime from the timing file written by the subprocess.
+Epilogue appended to every subprocess script: records the GPEC-only runtime *and* the
+environment that produced it (Julia, host, resolved package set, thread counts) as `key=value`
+lines. Measured inside the subprocess, after `Pkg.instantiate()` has resolved the environment,
+so it describes what actually ran rather than what the harness intended to run.
 """
-function _read_timing_file(path::String)::Float64
-    if isfile(path)
-        return parse(Float64, strip(read(path, String)))
+const RUNINFO_EPILOGUE = """
+using SHA
+using LinearAlgebra: BLAS
+let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml")
+    open(ARGS[2], "w") do f
+        println(f, "runtime_s=", elapsed)
+        println(f, "julia_version=", string(VERSION))
+        println(f, "os_arch=", Sys.MACHINE)
+        println(f, "manifest_sha=", isfile(manifest) ? bytes2hex(SHA.sha256(read(manifest))) : "")
+        println(f, "nthreads=", Threads.nthreads())
+        println(f, "blas_threads=", BLAS.get_num_threads())
     end
-    return NaN
 end
+"""
 
 """
 Materialize the directory GPEC will actually run in.
@@ -49,16 +60,13 @@ using GeneralizedPerturbedEquilibrium
 t_start = time()
 GeneralizedPerturbedEquilibrium.main([ARGS[1]])
 elapsed = time() - t_start
-# Write GPEC-only runtime to a file the harness reads back
-open(ARGS[2], "w") do f
-    println(f, elapsed)
-end
+%RUNINFO%
 """
 
 # Self-contained computation for the GGJ inner-layer reference benchmark.
 # Runs the Galerkin solver on the Glasser & Wang 2020 Eq. 55 parameter set
 # at γ = 1 + i and writes (Δ_odd, Δ_even) into a small HDF5 file at ARGS[1].
-# Runtime is written to ARGS[2] for parity with the GPEC runner.
+# Runtime and environment are written to ARGS[2] by the shared run-info epilogue.
 # `solve_inner` returns the named-field `InnerLayerResponse`; the historical
 # delta_odd / delta_even slots map to interchange / tearing respectively, which
 # preserves the numeric identity of each tracked quantity.
@@ -79,14 +87,13 @@ h5open(ARGS[1], "w") do fid
     fid["ggj/delta_even_real"] = real(Δ.tearing)
     fid["ggj/delta_even_imag"] = imag(Δ.tearing)
 end
-open(ARGS[2], "w") do f
-    println(f, elapsed)
-end
+%RUNINFO%
 """
 
 # GGJ rotated-ray backend at Q = 500i on the q=4 benchmark surface — a regime beyond the
 # :galerkin backend. Builds the physical rate γ = 500i·Q₀ so inner_Q lands exactly on the
-# imaginary axis at 500i, then writes the parity matching data. Runtime to ARGS[2] as usual.
+# imaginary axis at 500i, then writes the parity matching data. Runtime and environment are
+# written to ARGS[2] by the shared run-info epilogue.
 # As in the galerkin template, the delta_odd / delta_even slots map to interchange / tearing.
 const COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE = """
 using Pkg
@@ -105,9 +112,7 @@ h5open(ARGS[1], "w") do fid
     fid["ggj/delta_even_real"] = real(Δ.tearing)
     fid["ggj/delta_even_imag"] = imag(Δ.tearing)
 end
-open(ARGS[2], "w") do f
-    println(f, elapsed)
-end
+%RUNINFO%
 """
 
 # Self-contained separatrix-finder regression (PR #296). Loads a fixed-boundary EFIT whose
@@ -115,7 +120,7 @@ end
 # LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
 # bracketed-Brent separatrix finder could not bracket psi=sibry and equilibrium setup threw. Calls
 # setup_equilibrium directly and writes the leading equilibrium scalars: errors on the buggy code,
-# passes with the Newton finder. Runtime is written to ARGS[2] for parity with the GPEC runner.
+# passes with the Newton finder. Runtime and environment are written to ARGS[2] by the run-info epilogue.
 const COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -135,65 +140,85 @@ h5open(ARGS[1], "w") do fid
     fid["equil/betat"] = pe.params.betat
     fid["equil/betan"] = pe.params.betan
 end
-open(ARGS[2], "w") do f
-    println(f, elapsed)
-end
+%RUNINFO%
 """
+
+"""
+Expand a subprocess script template: the optional `Pkg.instantiate()` call and the run-info
+epilogue that records runtime and environment.
+"""
+function _render_script(template::String; no_instantiate::Bool)::String
+    rendered = replace(template, "%INSTANTIATE%" => (no_instantiate ? "" : "Pkg.instantiate()"))
+    return replace(rendered, "%RUNINFO%" => RUNINFO_EPILOGUE)
+end
 
 """
 Run GPEC for a single commit/ref and case. Dispatches to run_local for
 the working tree or run_at_commit for a git ref.
 
-`worktree_path`, when given, is reused instead of creating/removing a fresh
-worktree for this call — see [`run_cases_at_ref`](@ref), which shares one
-worktree (and thus one `Pkg.instantiate`/precompile) across every case at a commit.
+`pin_manifest` is the path to a resolved `Manifest.toml` copied into each worktree so every ref
+runs against the same package set; `nothing` disables pinning. `expected_key` is the environment
+key a fresh run will carry — a cached run whose key differs is re-run rather than reused.
+`worktree_path`, when given, is reused instead of creating/removing a fresh worktree for this
+call — see [`run_cases_at_ref`](@ref), which shares one worktree (and thus one
+`Pkg.instantiate`/precompile) across every case at a commit.
 """
 function run_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     case_spec::CaseSpec, repo_root::String;
     force::Bool=false, verbose::Bool=false,
     no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing,
     worktree_path::Union{String,Nothing}=nothing)
     if case_spec.kind == "computed"
         if commit_hash == LOCAL_REF
             return run_computed_local(db, case_spec, repo_root;
-                verbose=verbose, no_instantiate=no_instantiate)
+                verbose=verbose, no_instantiate=no_instantiate,
+                pin_manifest=pin_manifest)
         end
         return run_computed_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
             force=force, verbose=verbose, no_instantiate=no_instantiate,
+            pin_manifest=pin_manifest, expected_key=expected_key,
             worktree_path=worktree_path)
     end
     if commit_hash == LOCAL_REF
         return run_local(db, case_spec, repo_root;
-            force=force, verbose=verbose, no_instantiate=no_instantiate)
+            force=force, verbose=verbose, no_instantiate=no_instantiate,
+            pin_manifest=pin_manifest)
     end
     return run_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
         force=force, verbose=verbose, no_instantiate=no_instantiate,
+        pin_manifest=pin_manifest, expected_key=expected_key,
         worktree_path=worktree_path)
 end
 
 """
 Run every case in `case_specs` against `ref`. For a git ref (not `"local"`), a single
 worktree is created and reused across all cases at that commit — each case still spawns
-its own `julia` subprocess, but since they share the same `--project` path, only the
-first subprocess pays for `Pkg.instantiate()`/precompilation; the rest hit Julia's
-on-disk pkgimage cache for that path. Worktree creation is skipped entirely when every
-case is already cached (and `force` is false). If the worktree cannot be created, the
+its own `julia` subprocess, but since they share the same `--project` path (and the same
+pinned Manifest, when pinning is on), only the first subprocess pays for
+`Pkg.instantiate()`/precompilation; the rest hit Julia's on-disk pkgimage cache for that
+path. Worktree creation is skipped entirely when every case is already cached in the
+expected environment (and `force` is false). If the worktree cannot be created, the
 failure is recorded for each case needing a run and the remaining refs still proceed.
 """
 function run_cases_at_ref(db::SQLite.DB, ref::ResolvedRef, case_specs::Vector{CaseSpec}, repo_root::String;
-    force::Bool=false, verbose::Bool=false, no_instantiate::Bool=false)
-    needs_worktree = !is_local_ref(ref) && (force || any(!is_cached(db, ref.commit_hash, cs.name) for cs in case_specs))
+    force::Bool=false, verbose::Bool=false, no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing)
+    needs_worktree = !is_local_ref(ref) &&
+                     (force || any(!is_cached(db, ref.commit_hash, cs.name; expected_key=expected_key) for cs in case_specs))
 
     worktree_path = nothing
     if needs_worktree
         try
-            worktree_path = create_worktree(ref.commit_hash, repo_root)
+            worktree_path = create_worktree(ref.commit_hash, repo_root; pin_manifest_from=pin_manifest)
         catch e
             info = get_commit_info(ref.commit_hash, repo_root)
             @warn "Worktree creation failed for $(info.short): $(sprint(showerror, e))"
             # Record the failure only for cases needing a run; cached results stay intact.
             for case_spec in case_specs
-                if force || !is_cached(db, ref.commit_hash, case_spec.name)
+                if force || !is_cached(db, ref.commit_hash, case_spec.name; expected_key=expected_key)
                     store_failed_run(db, ref.commit_hash, info.short, info.date, info.msg,
                         case_spec.name, "Worktree creation failed: $(sprint(showerror, e))")
                 end
@@ -206,6 +231,7 @@ function run_cases_at_ref(db::SQLite.DB, ref::ResolvedRef, case_specs::Vector{Ca
         for case_spec in case_specs
             run_commit(db, ref.commit_hash, ref.name, case_spec, repo_root;
                 force=force, verbose=verbose, no_instantiate=no_instantiate,
+                pin_manifest=pin_manifest, expected_key=expected_key,
                 worktree_path=worktree_path)
         end
     finally
@@ -236,50 +262,63 @@ so callers can handle store_failed_run uniformly.
 """
 function _execute_computed(case_spec::CaseSpec, project_root::String;
     verbose::Bool, no_instantiate::Bool,
-    stderr_buf::IO)
-    instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"
-    script_content = replace(_computed_script_template(case_spec),
-        "%INSTANTIATE%" => instantiate_line)
+    stderr_buf::IO, pin_manifest::Union{String,Nothing}=nothing)
+    script_content = _render_script(_computed_script_template(case_spec); no_instantiate=no_instantiate)
     tmpscript = tempname() * ".jl"
     h5path = tempname() * ".h5"
-    timingfile = tempname() * ".timing"
+    runinfo_file = tempname() * ".runinfo"
     try
         write(tmpscript, script_content)
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $timingfile`))
+            run(pipeline(`julia --project=$project_root $tmpscript $h5path $runinfo_file`))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $timingfile`;
+            run(pipeline(`julia --project=$project_root $tmpscript $h5path $runinfo_file`;
                 stdout=devnull, stderr=stderr_buf))
         end
-        runtime_s = _read_timing_file(timingfile)
+        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
+        _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
         if !isfile(h5path)
             error("Computed case '$(case_spec.name)' produced no output h5")
         end
         extracted = extract_quantities(h5path, case_spec.quantities, runtime_s)
-        return extracted, runtime_s
+        return extracted, runtime_s, fingerprint
     finally
         rm(tmpscript; force=true)
         rm(h5path; force=true)
-        rm(timingfile; force=true)
+        rm(runinfo_file; force=true)
     end
+end
+
+"""
+Add a remedy hint when a run failed because the pinned Manifest is missing a direct dependency
+declared at the checked-out commit — the one incompatibility `Pkg.instantiate()` refuses to run under.
+Detects on the full error text, since tail-keeping truncation can drop Pkg's ERROR line from `short_err`.
+"""
+function _hint_pin_incompatible(full_err::AbstractString, short_err::AbstractString)::String
+    occursin("is a direct dependency, but does not appear in the manifest", full_err) || return String(short_err)
+    return "Pinned Manifest lacks a direct dependency declared at this commit — re-run with --no-pin-manifest " *
+           "to let this ref resolve its own package set.\n" * short_err
 end
 
 """
 Run a kind="computed" case against the working tree.
 """
 function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
-    verbose::Bool=false, no_instantiate::Bool=false)
+    verbose::Bool=false, no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing)
     delete_cached(db, LOCAL_REF, case_spec.name)
     date = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
     @info "Running: $(case_spec.name) @ local (working tree, computed)"
     stderr_buf = IOBuffer()
     try
-        extracted, runtime_s = _execute_computed(case_spec, repo_root;
+        extracted, runtime_s, fingerprint = _execute_computed(case_spec, repo_root;
             verbose=verbose,
             no_instantiate=no_instantiate,
-            stderr_buf=stderr_buf)
+            stderr_buf=stderr_buf,
+            pin_manifest=pin_manifest)
         store_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-            runtime_s, extracted)
+            runtime_s, extracted; fingerprint=fingerprint)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
         err_msg = if e isa ProcessFailedException
@@ -291,7 +330,7 @@ function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::Strin
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (local computed): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
             err_msg_short)
@@ -300,21 +339,24 @@ end
 
 """
 Run a kind="computed" case at a specific git commit via worktree.
-If `worktree_path` is given, the caller owns the worktree and this function will not
-remove it; otherwise one is created and removed here.
+If `worktree_path` is given, the caller owns the (already pinned) worktree and this
+function will not remove it; otherwise one is created and removed here.
 """
 function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     case_spec::CaseSpec, repo_root::String;
     force::Bool=false, verbose::Bool=false,
     no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing,
     worktree_path::Union{String,Nothing}=nothing)
-    if !force && is_cached(db, commit_hash, case_spec.name)
+    if !force && is_cached(db, commit_hash, case_spec.name; expected_key=expected_key)
         info = get_run_info(db, commit_hash, case_spec.name)
         if info !== nothing
             @info "Cached: $(case_spec.name) @ $(info.commit_short) ($(info.commit_date))"
             return
         end
     end
+    _warn_env_invalidated(db, commit_hash, case_spec.name, expected_key, force)
     if force
         delete_cached(db, commit_hash, case_spec.name)
     end
@@ -326,13 +368,14 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
     own_worktree = worktree_path === nothing
     stderr_buf = IOBuffer()
     try
-        own_worktree && (worktree_path = create_worktree(commit_hash, repo_root))
-        extracted, runtime_s = _execute_computed(case_spec, worktree_path;
+        own_worktree && (worktree_path = create_worktree(commit_hash, repo_root; pin_manifest_from=pin_manifest))
+        extracted, runtime_s, fingerprint = _execute_computed(case_spec, worktree_path;
             verbose=verbose,
             no_instantiate=no_instantiate,
-            stderr_buf=stderr_buf)
+            stderr_buf=stderr_buf,
+            pin_manifest=pin_manifest)
         store_run(db, commit_hash, commit_info.short, commit_info.date,
-            commit_info.msg, case_spec.name, runtime_s, extracted)
+            commit_info.msg, case_spec.name, runtime_s, extracted; fingerprint=fingerprint)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
         err_msg = if e isa ProcessFailedException
@@ -344,7 +387,7 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (computed) for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
             commit_info.msg, case_spec.name, err_msg_short)
@@ -356,12 +399,49 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
 end
 
 """
+Warn if a pinned package set did not survive `Pkg.instantiate()`.
+
+Contingency insurance rather than a description of current behavior: on Julia 1.11/1.12,
+instantiate never rewrites an out-of-sync pinned Manifest — it warns and proceeds, or errors when
+the commit declares a direct dependency the Manifest lacks (which fails the run loudly). Should a
+future Pkg re-resolve in place instead, this catches the pin silently not holding.
+"""
+function _warn_pin_broken(pin_manifest::Union{String,Nothing}, fp::EnvFingerprint, label::AbstractString)
+    pin_manifest === nothing && return
+    isempty(fp.manifest_sha) && return
+    pinned_sha = file_sha256(pin_manifest)
+    (isempty(pinned_sha) || pinned_sha == fp.manifest_sha) && return
+    @warn "Pinned Manifest was re-resolved for $label — its package set differs from the working tree" pinned = pinned_sha[1:8] resolved = fp.manifest_sha[1:8]
+end
+
+"""
+Explain a cache miss caused by the environment rather than by absence.
+
+A cached run exists for this (commit, case) but was produced under a different Julia, host, or
+package set — the exact situation that used to be silently reused and reported as a physics
+regression. Says so, once, before re-running.
+"""
+function _warn_env_invalidated(db::SQLite.DB, commit_hash::String, case_name::String,
+    expected_key::Union{String,Nothing}, force::Bool)
+    (force || expected_key === nothing) && return
+    stored = cached_env_key(db, commit_hash, case_name)
+    stored == expected_key && return
+    if stored === nothing
+        is_cached(db, commit_hash, case_name) || return
+        @warn "Cached result for $case_name predates environment fingerprinting — re-running"
+    else
+        @warn "Cached result for $case_name was produced in a different environment — re-running" stored_key = stored current_key = expected_key
+    end
+end
+
+"""
 Run GPEC in the current working tree (uncommitted changes included).
 Always re-runs (local results are never cached since the working tree is mutable).
 """
 function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     force::Bool=false, verbose::Bool=false,
-    no_instantiate::Bool=false)
+    no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing)
     # Always delete previous local results and re-run
     delete_cached(db, LOCAL_REF, case_spec.name)
 
@@ -377,7 +457,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     end
 
     tmpscript = nothing
-    timingfile = nothing
+    runinfo_file = nothing
     rundir = nothing
     rundir_is_temp = false
     stderr_buf = IOBuffer()
@@ -386,19 +466,20 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
         rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output would mask a failed run
 
-        instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"
-        script_content = replace(RUNNER_SCRIPT_TEMPLATE, "%INSTANTIATE%" => instantiate_line)
+        script_content = _render_script(RUNNER_SCRIPT_TEMPLATE; no_instantiate=no_instantiate)
         tmpscript = tempname() * ".jl"
-        timingfile = tempname() * ".timing"
+        runinfo_file = tempname() * ".runinfo"
         write(tmpscript, script_content)
 
         if verbose
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`))
+            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $runinfo_file`))
         else
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $timingfile`;
+            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $runinfo_file`;
                 stdout=devnull, stderr=stderr_buf))
         end
-        runtime_s = _read_timing_file(timingfile)
+        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
+        _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
 
         h5path = joinpath(rundir, "gpec.h5")
         if !isfile(h5path)
@@ -410,7 +491,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
 
         extracted = extract_quantities(h5path, case_spec.quantities, runtime_s)
         store_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-            runtime_s, extracted)
+            runtime_s, extracted; fingerprint=fingerprint)
 
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
@@ -424,7 +505,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (local): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
             err_msg_short)
@@ -432,8 +513,8 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         if tmpscript !== nothing
             rm(tmpscript; force=true)
         end
-        if timingfile !== nothing
-            rm(timingfile; force=true)
+        if runinfo_file !== nothing
+            rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
             rm(dirname(rundir); recursive=true, force=true)
@@ -443,23 +524,26 @@ end
 
 """
 Run GPEC for a specific git commit via worktree. Stores results in the database.
-Skips if already cached (unless force=true).
-If `worktree_path` is given, the caller owns the worktree and this function will not
-remove it; otherwise one is created and removed here.
+Skips if already cached in the same environment (unless force=true).
+If `worktree_path` is given, the caller owns the (already pinned) worktree and this
+function will not remove it; otherwise one is created and removed here.
 """
 function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     case_spec::CaseSpec, repo_root::String;
     force::Bool=false, verbose::Bool=false,
     no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing,
     worktree_path::Union{String,Nothing}=nothing)
     # Check cache
-    if !force && is_cached(db, commit_hash, case_spec.name)
+    if !force && is_cached(db, commit_hash, case_spec.name; expected_key=expected_key)
         info = get_run_info(db, commit_hash, case_spec.name)
         if info !== nothing
             @info "Cached: $(case_spec.name) @ $(info.commit_short) ($(info.commit_date))"
             return
         end
     end
+    _warn_env_invalidated(db, commit_hash, case_spec.name, expected_key, force)
 
     # Delete existing cached data if force re-running
     if force
@@ -473,14 +557,14 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
 
     own_worktree = worktree_path === nothing
     tmpscript = nothing
-    timingfile = nothing
+    runinfo_file = nothing
     rundir = nothing
     rundir_is_temp = false
     stderr_buf = IOBuffer()
 
     try
-        # Create worktree (unless one was already shared with us for this commit)
-        own_worktree && (worktree_path = create_worktree(commit_hash, repo_root))
+        # Create worktree (unless one was shared with us), pinning the package set when the caller supplied a Manifest
+        own_worktree && (worktree_path = create_worktree(commit_hash, repo_root; pin_manifest_from=pin_manifest))
 
         # Check example directory exists in this commit
         example_path = joinpath(worktree_path, case_spec.example_dir)
@@ -496,22 +580,23 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output (e.g. from an earlier case sharing the worktree) would mask a failed run
 
         # Write temp runner script
-        instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"
-        script_content = replace(RUNNER_SCRIPT_TEMPLATE, "%INSTANTIATE%" => instantiate_line)
+        script_content = _render_script(RUNNER_SCRIPT_TEMPLATE; no_instantiate=no_instantiate)
         tmpscript = tempname() * ".jl"
-        timingfile = tempname() * ".timing"
+        runinfo_file = tempname() * ".runinfo"
         write(tmpscript, script_content)
 
         # Run GPEC in subprocess
         project_root = worktree_path
 
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`))
+            run(pipeline(`julia --project=$project_root $tmpscript $rundir $runinfo_file`))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $timingfile`;
+            run(pipeline(`julia --project=$project_root $tmpscript $rundir $runinfo_file`;
                 stdout=devnull, stderr=stderr_buf))
         end
-        runtime_s = _read_timing_file(timingfile)
+        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
+        _warn_pin_broken(pin_manifest, fingerprint, commit_info.short)
 
         # Check for gpec.h5
         h5path = joinpath(rundir, "gpec.h5")
@@ -528,7 +613,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
 
         # Store in database
         store_run(db, commit_hash, commit_info.short, commit_info.date,
-            commit_info.msg, case_spec.name, runtime_s, extracted)
+            commit_info.msg, case_spec.name, runtime_s, extracted; fingerprint=fingerprint)
 
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
@@ -543,7 +628,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
             commit_info.msg, case_spec.name, err_msg_short)
@@ -552,8 +637,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         if tmpscript !== nothing
             rm(tmpscript; force=true)
         end
-        if timingfile !== nothing
-            rm(timingfile; force=true)
+        if runinfo_file !== nothing
+            rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
             rm(dirname(rundir); recursive=true, force=true)
