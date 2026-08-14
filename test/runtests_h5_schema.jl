@@ -32,30 +32,7 @@ function _collect_bad_groups(h5)
     return bad
 end
 
-# Metadata contract (docs/development/hdf5-conventions.md): every dataset carries
-# long_name + units, and rank ≥ 2 datasets carry a dims axis-name attribute. Exempt:
-# the Input/ raw snapshot and the debug-only GalerkinIntegration Match/ group.
-_metadata_exempt(path) = startswith(path, "Input/") || occursin("/Match/", path)
-
-function _collect_metadata_violations(h5)
-    bad = String[]
-    function walk(node, prefix)
-        for k in keys(node)
-            child = node[k]
-            full = isempty(prefix) ? k : prefix * "/" * k
-            if child isa HDF5.Group
-                walk(child, full)
-            elseif !_metadata_exempt(full)
-                a = attrs(child)
-                haskey(a, "long_name") || push!(bad, "$full: missing long_name")
-                haskey(a, "units") || push!(bad, "$full: missing units")
-                ndims(child) >= 2 && !haskey(a, "dims") && push!(bad, "$full: missing dims")
-            end
-        end
-    end
-    walk(h5, "")
-    return bad
-end
+include("h5_metadata_check.jl")
 
 # The full-run walk below only exercises an ideal deck, which never produces the
 # data-driven group names — pin the whitelist rules directly.
