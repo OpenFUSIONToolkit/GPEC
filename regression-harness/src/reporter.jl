@@ -112,11 +112,11 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
 
     if info1 === nothing
         println("ERROR: No results for ref 1 ($(ref1.name))")
-        return
+        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
     end
     if info2 === nothing
         println("ERROR: No results for ref 2 ($(ref2.name))")
-        return
+        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
     end
 
     failed1 = !info1.success

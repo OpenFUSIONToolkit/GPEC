@@ -111,8 +111,9 @@ Two mechanisms prevent that:
 
 **The working tree's Manifest is pinned into every worktree** before `Pkg.instantiate()`, so all
 refs in a comparison run against one package set. `--no-pin-manifest` opts out (and says so
-loudly). If a pinned package set turns out to be incompatible with an old commit's
-`Project.toml`, instantiate re-resolves it and the harness warns that the pin did not hold.
+loudly). If a commit declares a direct dependency the pinned Manifest lacks, `Pkg.instantiate()`
+refuses to run: that ref is recorded as a failed run whose error suggests `--no-pin-manifest` to
+let it resolve its own package set.
 
 **Every run records the environment that produced it** — Julia version, host, resolved Manifest
 hash, Julia and BLAS thread counts. The cache still holds a single result per

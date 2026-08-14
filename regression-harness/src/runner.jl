@@ -223,6 +223,7 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
                          stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
         if !isfile(h5path)
             error("Computed case '$(case_spec.name)' produced no output h5")
@@ -234,6 +235,17 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
         rm(h5path; force=true)
         rm(runinfo_file; force=true)
     end
+end
+
+"""
+Add a remedy hint when a run failed because the pinned Manifest is missing a direct dependency
+declared at the checked-out commit — the one incompatibility `Pkg.instantiate()` refuses to run under.
+Detects on the full error text, since tail-keeping truncation can drop Pkg's ERROR line from `short_err`.
+"""
+function _hint_pin_incompatible(full_err::AbstractString, short_err::AbstractString)::String
+    occursin("is a direct dependency, but does not appear in the manifest", full_err) || return String(short_err)
+    return "Pinned Manifest lacks a direct dependency declared at this commit — re-run with --no-pin-manifest " *
+           "to let this ref resolve its own package set.\n" * short_err
 end
 
 """
@@ -265,7 +277,7 @@ function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::Strin
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (local computed): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
                          err_msg_short)
@@ -319,7 +331,7 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (computed) for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
                          commit_info.msg, case_spec.name, err_msg_short)
@@ -331,11 +343,12 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
 end
 
 """
-Warn when a pinned package set did not survive `Pkg.instantiate()`.
+Warn if a pinned package set did not survive `Pkg.instantiate()`.
 
-The harness copies its Manifest into a worktree, but if that package set is incompatible with the
-checked-out commit's `Project.toml`, instantiate re-resolves and the pin silently stops holding —
-which is exactly the confound pinning exists to remove.
+Contingency insurance rather than a description of current behavior: on Julia 1.11/1.12,
+instantiate never rewrites an out-of-sync pinned Manifest — it warns and proceeds, or errors when
+the commit declares a direct dependency the Manifest lacks (which fails the run loudly). Should a
+future Pkg re-resolve in place instead, this catches the pin silently not holding.
 """
 function _warn_pin_broken(pin_manifest::Union{String,Nothing}, fp::EnvFingerprint, label::AbstractString)
     pin_manifest === nothing && return
@@ -408,6 +421,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
                          stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
 
         h5path = joinpath(rundir, "gpec.h5")
@@ -434,7 +448,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (local): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
                          err_msg_short)
@@ -520,6 +534,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
                          stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, commit_info.short)
 
         # Check for gpec.h5
@@ -552,7 +567,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         # Keep the tail of the message: Julia errors usually appear at the end
         # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
         # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
-        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
+        err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
                          commit_info.msg, case_spec.name, err_msg_short)
