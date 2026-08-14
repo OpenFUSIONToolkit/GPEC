@@ -19,12 +19,10 @@ yet drafted/posted.
 
 ## Loose ends for the next session
 
-1. **Pending run:** `eulerlagrange_tolerance=1e-8` at mpsi=512 (auto packing) was still running
-   at handoff on the previous machine (scratch dir `…/scratchpad/ladder/run_tol512`). Its output
-   did not make it into this branch. Re-run if needed: copy the DIIID example inputs, set
-   `mpsi=512`, `eulerlagrange_tolerance=1e-8`, and use `run_one.jl <dir>`; read
-   `integration/psi` from the produced `gpec.h5`. Prediction under the knot-slaving mechanism:
-   nstep barely drops vs 3010 despite 100× looser tolerance.
+1. **Tolerance discriminator landed** (see RESULTS.md §5): tol 1e-8 at mpsi=512 → nstep
+   1629 vs 3010, identical et[1]. Both mechanisms confirmed: dψ ∝ knotΔ at fixed tol,
+   dψ ∝ tol^{1/9} at fixed grid. A tolerance-sweep (1e-6 … 1e-12) checking et[1]/Δ′ stability
+   would firm up a recommendation to relax the default `eulerlagrange_tolerance`.
 2. **Draft the issue #376 comment** (do not post without the user's review — user chose
    draft-for-review). Content = RESULTS.md conclusion + tables + ranked follow-ups.
 3. Optional cheap experiment from the ranked list: swap Vern9 → Vern7/Tsit5 in

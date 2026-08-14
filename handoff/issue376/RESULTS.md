@@ -75,8 +75,13 @@ error estimator can't step across cheaply, and (ii) node-noise amplification on 
   3010 → **2237**, EL ≈ 17.7 s. Steps follow knot density, not axis physics. (et[1]=0.993 —
   uniform grid is physically under-resolved near axis; it's a mechanism probe, not a config
   recommendation.)
-- **`eulerlagrange_tolerance = 1e-8`** (100× looser, auto-grid packing at 512): run was still in
-  flight at handoff — see HANDOFF.md. Prediction: if steps are knot-slaved, nstep barely drops.
+- **`eulerlagrange_tolerance = 1e-8`** (100× looser, same packing): nstep 3010 → **1629**
+  (near-axis 1891 → 1057) with **identical physics** (et[1] = 0.78286 at both tolerances).
+  The ~1.85× drop matches the 9th-order expectation (100^{1/9} ≈ 1.7): the step size is genuinely
+  error-controlled, but the error *magnitude* per unit ψ is set by knot-scale roughness in the
+  spline coefficients — so dψ ∝ knotΔ at fixed tolerance (§4) and ∝ tol^{1/9} at fixed grid.
+  Practical corollary: the default 1e-10 tolerance looks overly tight — 1e-8 halves EL cost on
+  this case with no change in et[1].
 
 ## Implications / ranked follow-ups
 
