@@ -79,6 +79,19 @@ function compute_ballooning_stability!(
 end
 
 """
+    compute_local_stability(ctrl, plasma_eq) -> CubicSeriesInterpolant
+
+Local stability profile spline over `plasma_eq.profiles.xs`, with the columns filled by
+[`compute_ballooning_stability!`](@ref): 1 = `D_I·ψ`, 2 = `D_R·ψ`, 4 = ballooning `Δ'`.
+"""
+function compute_local_stability(ctrl::ForceFreeStatesControl, plasma_eq::Equilibrium.PlasmaEquilibrium)
+    xs = plasma_eq.profiles.xs
+    locstab_fs = zeros(Float64, length(xs), 5)
+    compute_ballooning_stability!(ctrl, locstab_fs, plasma_eq)
+    return cubic_interp(xs, Series(locstab_fs); extrap=ExtendExtrap())
+end
+
+"""
     resistive_interchange_h(flux_surface_index, plasma_eq)
 
 Resistive interchange helper for `D_R = D_I + (H - 1/2)²` at a single
