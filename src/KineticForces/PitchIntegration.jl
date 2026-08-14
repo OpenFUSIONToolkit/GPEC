@@ -97,9 +97,9 @@ function integrate_pitch_gar_quadgk(
     # the kink in leff = ell + n*q (circulating) → ell (trapped).
     bobmax_clip = clamp(bobmax, lambda_min, lambda_max)
     segments = if lambda_min < bobmax_clip < lambda_max
-        (lambda_min, bobmax_clip, lambda_max)
+        [lambda_min, bobmax_clip, lambda_max]
     else
-        (lambda_min, lambda_max)
+        [lambda_min, lambda_max]
     end
 
     # In-place quadgk! buffer; copy the result out so the returned vector is
