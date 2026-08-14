@@ -608,7 +608,7 @@ end
 #
 # A coil set is stored as one subgroup per set under a parent group, named by the
 # set's `name`. This mirrors the open-group idiom of `save_forcing_to_h5` so the
-# data can live inside `gpec.h5` (e.g. `input/raw_inputs/coils/`) next to unrelated
+# data can live inside `gpec.h5` (e.g. `Input/RawInputs/Coils/`) next to unrelated
 # content that the reader silently ignores.
 #
 #   <group>/<set_name>/x         Float64[ncoil, s, nsec]  (shape gives ncoil, s, nsec)

@@ -10,7 +10,7 @@ example_dir = "examples/DIIID-like_SLAYER_example"
 
 # Per-surface SLAYER layer parameters (geometry + dimensionless)
 [quantities.slayer_ising]
-h5path = "slayer/per_surface/ising"
+h5path = "Tearing/PerSurface/ising"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER surface indices"
@@ -18,7 +18,7 @@ noise_threshold = 0
 order = 10
 
 [quantities.slayer_m]
-h5path = "slayer/per_surface/m"
+h5path = "Tearing/PerSurface/m"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER poloidal m"
@@ -26,7 +26,7 @@ noise_threshold = 0
 order = 11
 
 [quantities.slayer_n]
-h5path = "slayer/per_surface/n"
+h5path = "Tearing/PerSurface/n"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER toroidal n"
@@ -34,7 +34,7 @@ noise_threshold = 0
 order = 12
 
 [quantities.slayer_rs]
-h5path = "slayer/per_surface/rs"
+h5path = "Tearing/PerSurface/rs"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER minor radius rs"
@@ -42,7 +42,7 @@ noise_threshold = 1e-10
 order = 13
 
 [quantities.slayer_sval_r]
-h5path = "slayer/per_surface/sval_r"
+h5path = "Tearing/PerSurface/sval_r"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER r-based shear"
@@ -50,7 +50,7 @@ noise_threshold = 1e-10
 order = 14
 
 [quantities.slayer_lu]
-h5path = "slayer/per_surface/lu"
+h5path = "Tearing/PerSurface/lu"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER Lundquist S"
@@ -58,7 +58,7 @@ noise_threshold = 1e-8
 order = 15
 
 [quantities.slayer_D_norm]
-h5path = "slayer/per_surface/D_norm"
+h5path = "Tearing/PerSurface/D_norm"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER D_norm"
@@ -66,7 +66,7 @@ noise_threshold = 1e-10
 order = 16
 
 [quantities.slayer_P_perp]
-h5path = "slayer/per_surface/P_perp"
+h5path = "Tearing/PerSurface/P_perp"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER P_perp"
@@ -74,7 +74,7 @@ noise_threshold = 1e-8
 order = 17
 
 [quantities.slayer_tauk]
-h5path = "slayer/per_surface/tauk"
+h5path = "Tearing/PerSurface/tauk"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER tauk"
@@ -82,7 +82,7 @@ noise_threshold = 1e-12
 order = 18
 
 [quantities.slayer_iota_e]
-h5path = "slayer/per_surface/iota_e"
+h5path = "Tearing/PerSurface/iota_e"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER iota_e"
@@ -99,7 +99,7 @@ order = 19
 # numerically unreliable on the outermost surfaces (e.g. 5/1, 6/1, 7/1 near the
 # edge), so those are deliberately not golden-tracked.
 [quantities.slayer_Q_re]
-h5path = "slayer/roots/Q_root_real"
+h5path = "Tearing/Roots/Q_root_real"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER Re(Q_root) [2/1,3/1,4/1]"
@@ -107,7 +107,7 @@ noise_threshold = 1e-4
 order = 30
 
 [quantities.slayer_Q_im]
-h5path = "slayer/roots/Q_root_imag"
+h5path = "Tearing/Roots/Q_root_imag"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER Im(Q_root) [2/1,3/1,4/1]"
@@ -115,7 +115,7 @@ noise_threshold = 1e-4
 order = 31
 
 [quantities.slayer_omega_Hz]
-h5path = "slayer/roots/omega_Hz"
+h5path = "Tearing/Roots/omega_Hz"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER ω_Hz [2/1,3/1,4/1]"
@@ -123,7 +123,7 @@ noise_threshold = 1.0
 order = 32
 
 [quantities.slayer_gamma_Hz]
-h5path = "slayer/roots/gamma_Hz"
+h5path = "Tearing/Roots/gamma_Hz"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER γ_Hz [2/1,3/1,4/1]"
@@ -133,7 +133,7 @@ order = 33
 # no_root flag (1 = extraction failed). Pinned for the inner three surfaces;
 # this case guards that the 2/1, 3/1, 4/1 keep finding a real root.
 [quantities.slayer_no_root]
-h5path = "slayer/roots/no_root"
+h5path = "Tearing/Roots/no_root"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER no_root flags [2/1,3/1,4/1]"
@@ -142,7 +142,7 @@ order = 34
 
 # Settings (catches accidental config drift)
 [quantities.slayer_enabled]
-h5path = "slayer/enabled"
+h5path = "Tearing/enabled"
 type = "int_scalar"
 extract = "value"
 label = "SLAYER enabled flag"

@@ -1,4 +1,4 @@
-# Piece 2 verification: RPEC outer↔inner matched solution (galerkin/match/*).
+# Piece 2 verification: RPEC outer↔inner matched solution (ForceFreeStates/Solutions/GalerkinIntegration/Match/*).
 #   1. linear-solve residual ‖mat·cof − rmat‖/‖rmat‖
 #   2. matched ξ / ξ′ finiteness
 #   3. edge column == identity basis: each coil drive j must give ξ_edge = e_j (the j-th harmonic),
@@ -11,10 +11,10 @@ h5path = length(ARGS) >= 1 ? ARGS[1] : "examples/DIIID-like_gal_resistive_exampl
 @info "Reading $h5path"
 
 xi, dxi, cout, cin, deltar, eig, resid, sing_psi = h5open(h5path) do f
-    (read(f["galerkin/match/xi"]), read(f["galerkin/match/xi_deriv"]),
-        read(f["galerkin/match/cout"]), read(f["galerkin/match/cin"]),
-        read(f["galerkin/match/deltar"]), read(f["galerkin/match/rpec_eig"]),
-        read(f["galerkin/match/residual"]), read(f["galerkin/sing_psi"]))
+    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi_deriv"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cin"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/deltar"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/rpec_eig"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/residual"]), read(f["SingularSurfaces/GalerkinDeltaPrime/sing_psi"]))
 end
 # HDF5 stores ComplexF64 as a compound (re,im); convert if needed
 to_c(a) = eltype(a) <: Complex ? a : map(x -> ComplexF64(x.re, x.im), a)

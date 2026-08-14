@@ -1,0 +1,64 @@
+# HDF5 Output Schema Conventions
+
+Conventions for the structure and naming of the `gpec.h5` output file. Every writer that adds a group or dataset must follow these rules; the naming is enforced by `test/runtests_h5_schema.jl`.
+
+## Governing principle: physics-first organization
+
+**The schema must be intuitive to a plasma physicist who is not a developer of this code.** The top level largely mirrors the TOML sections / major `src/` modules — which are themselves organized along physics lines — but **physics intuition wins whenever the two diverge**. Worked examples of that rule:
+
+- All per-rational-surface stability results consolidate under `SingularSurfaces/`, regardless of which algorithm produced them: the ideal BVP `delta_prime_matrix`, the GGJ coefficients, and the Galerkin outer-region Δ′/PEST-3 results (`GalerkinDeltaPrime/`) live side by side. Provenance is recorded in the subgroup name, not by scattering results across producer-owned groups.
+- `EulerLagrangeMatrices` over a bare `Matrices` — group names must say what the data *is*, not which array it came from. Same reasoning renamed `records/` → `EnergyIntegrals/` and `matrices_<method>/` → `KineticMatrices/`.
+
+Physics-topic groups elevated to top level (rather than nested under their producer): `Info/`, `Input/`, `SingularSurfaces/`, `LocalStability/`, `SurfaceGeometries/`.
+
+## Naming rules
+
+- **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinDeltaPrime/`).
+- **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root_real`, `pest3_Delta`, `2piF`).
+- **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), scan indices (`Surface_<k>`, `psi_<i>`).
+
+## Inputs live only under `Input/`
+
+`Input/gpec_toml_raw` stores the full merged TOML, and `Input/RawInputs/` stores the raw equilibrium/forcing/coil data — together they make `gpec.h5` a self-contained rerun snapshot (`Rerun.jl` reconstructs every control struct from them; the writer/reader path pair is locked by shared `H5_*` consts in `GeneralizedPerturbedEquilibrium.jl`). **Never echo TOML flags or control-struct values into any other group** — every group outside `Input/` is derived output. (The former `kinetic/` and `slayer/settings/` echoes were removed under this rule.)
+
+## Schema
+
+Top level (10 groups):
+
+| Group | Contents |
+|---|---|
+| `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim` |
+| `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
+| `Equilibrium/` | Scalars (β, q₀, q95, …) plus `Profiles/` (1-D: xs, 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D: rcoords, offset, nu, jac) |
+| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (`Solution/`, `Match/`, `msing`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `LocalStability/` | Mercier `di`, resistive interchange `dr`, `ballooning_Delta_prime`, ballooning α boundary |
+| `SingularSurfaces/` | Per-rational-surface data: ψ, q, m/n, GGJ coefficients, `delta_prime_matrix`/`delta_prime_raw`/`delta_coil`, `GalerkinDeltaPrime/`, `Kinetic/` |
+| `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
+| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`) |
+| `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |
+| `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
+
+Reserved (documented, not yet written): `ForceFreeStates/Solutions/RiccatiIntegration/` — the third integrator backend slot alongside `ForwardIntegration` and `GalerkinIntegration`.
+
+## Metadata contract (self-describing datasets)
+
+Every dataset outside `Input/` (raw snapshot) and `GalerkinIntegration/Match/` (debug-only) must answer "what is this, in what units, plotted against what" without opening the source — enforced by `test/runtests_h5_schema.jl`:
+
+- **`long_name`** — plain-text physics description.
+- **`units`** — SI string (`"T"`, `"Wb/rad"`, `"A"`, `"m"`, `"J"`, `"N*m"`, `"Hz"`, `"Ohm*m"`); `"1"` for dimensionless (CF convention). Normalized quantities state the normalization in `long_name` (e.g. the power-normalized stability energies are per unit ⟨|ξ|²⟩, not joules).
+- **`dims`** — required on rank ≥ 2 datasets: a greppable string like `"(psi, m)"` listing axis names in **Julia (column-major) order, axis 1 first**. Note h5py/HDFView users see file dimensions in the reversed (row-major) order.
+- **HDF5 Dimension Scales** (the netCDF-4 coordinate mechanism): shared coordinate datasets (`psi` grids, rational-surface `psi`, geometry `xs`/`ys`) are marked with `h5ds_set_scale` and attached per-axis with `h5ds_attach_scale`/`h5ds_set_label`, so h5py `.dims`, xarray, and HDFView resolve axes natively. The H5DS C API indexes file (row-major) dimensions: Julia axis `k` of an `N`-d dataset is C index `N - k`.
+
+Root-level file attributes: `schema_version` (currently `"2.0"`; bump on breaking schema changes — readers dispatch on it), `Conventions = "GPEC-HDF5-2.0"`, `references`, `title` (run description), `date_created` (ISO 8601 UTC). The code version stays in `Info/git_version`.
+
+Mechanism: writers stay table-driven — each writer keeps a `path => (; long_name, units, dims)` table next to it (`src/HDF5Schema.jl` for the main writer; alongside `write_galerkin!`, the PerturbedEquilibrium writer, `KineticForces/Output.jl`, and `Tearing/Runner/HDF5Output.jl` for the rest) and applies it post-write via `Utilities.HDF5Annotations.annotate!`. Entries for conditionally-written datasets are simply skipped when absent. When adding a dataset, add its table entry in the same commit — the schema test fails otherwise.
+
+## File-wide conventions
+
+- Complex numbers are stored as the native HDF5.jl compound type (readable by h5py as a compound dtype).
+- `NaN` is the not-computed sentinel in numeric datasets (e.g. auto-derived settings, rootless growth-rate entries).
+- Ragged (variable-length) data uses the flat-plus-`offsets` companion pattern (`offsets[k+1] - offsets[k]` = length of row `k`) rather than HDF5 VLEN types, e.g. `KineticForces/<method>/EnergyIntegrals/` and `Tearing/Diagnostics/*`.
+
+## Back-compatibility policy
+
+Schema renames are clean breaks in `src/` readers — no dual-path reads. The **only** legacy fallback lives in the regression harness (`regression-harness/src/extractor.jl`, `LEGACY_PREFIX_MAP`), so cross-commit comparisons and `--ref-range` scans keep working across a rename boundary. When renaming a path, update the writer, all readers, the case TOMLs, and add the new→old pair to that map.

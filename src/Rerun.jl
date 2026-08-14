@@ -28,14 +28,13 @@ end
     read_equilibrium_ingest(in_h5) -> EquilibriumIngest
 
 Reconstruct the [`DirectIngest`](@ref)/[`InverseIngest`](@ref) stored under
-`input/raw_inputs/equilibrium/` (the inverse of the field-by-field write in
+`Input/RawInputs/Equilibrium/` (the inverse of the field-by-field write in
 `write_outputs_to_HDF5`). Returns `nothing` when the group is absent, which marks an
 analytic equilibrium — replayed from its TOML section rather than stored arrays.
 """
 function read_equilibrium_ingest(in_h5)
-    group_path = "input/raw_inputs/equilibrium"
-    haskey(in_h5, group_path) || return nothing
-    group = in_h5[group_path]
+    haskey(in_h5, H5_RAW_EQUILIBRIUM) || return nothing
+    group = in_h5[H5_RAW_EQUILIBRIUM]
     kind = read(group, "ingest_kind")
     T = kind == "direct" ? Equilibrium.DirectIngest :
         kind == "inverse" ? Equilibrium.InverseIngest :
@@ -209,29 +208,29 @@ function build_inputs_from_h5(args::Vector{String})
     # ignores the frozen forcing-mode snapshot.
     use_coils = cli.coil_source == "coils"
     toml_raw, ingest, source_git, preloaded_forcing, preloaded_coils = h5open(source_h5, "r") do in_h5
-        haskey(in_h5, "input/gpec_toml_raw") ||
-            error("Source HDF5 $source_h5 has no input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
-        forcing_modes = if use_coils || !haskey(in_h5, "input/raw_inputs/forcing_terms")
+        haskey(in_h5, H5_INPUT_TOML) ||
+            error("Source HDF5 $source_h5 has no $H5_INPUT_TOML — produced by a pre-rerun version of GPEC")
+        forcing_modes = if use_coils || !haskey(in_h5, H5_RAW_FORCING)
             nothing
         else
             modes = ForcingTerms.ForcingMode[]
-            ForcingTerms.load_forcing_from_h5_group!(modes, in_h5["input/raw_inputs/forcing_terms"])
+            ForcingTerms.load_forcing_from_h5_group!(modes, in_h5[H5_RAW_FORCING])
             modes
         end
         coil_sets = if use_coils
-            haskey(in_h5, "input/raw_inputs/coils") ||
-                error("--coil-source coils requested but $source_h5 has no input/raw_inputs/coils " *
+            haskey(in_h5, H5_RAW_COILS) ||
+                error("--coil-source coils requested but $source_h5 has no $H5_RAW_COILS " *
                     "(the source run did not use coils, or predates coil-snapshot support)")
             sets = ForcingTerms.CoilSet[]
-            ForcingTerms.load_coils_from_h5_group!(sets, in_h5["input/raw_inputs/coils"])
+            ForcingTerms.load_coils_from_h5_group!(sets, in_h5[H5_RAW_COILS])
             sets
         else
             nothing
         end
         (
-            read(in_h5, "input/gpec_toml_raw"),
+            read(in_h5, H5_INPUT_TOML),
             read_equilibrium_ingest(in_h5),
-            haskey(in_h5, "info/git_version") ? read(in_h5, "info/git_version") : "unknown",
+            haskey(in_h5, H5_GIT_VERSION) ? read(in_h5, H5_GIT_VERSION) : "unknown",
             forcing_modes,
             coil_sets
         )

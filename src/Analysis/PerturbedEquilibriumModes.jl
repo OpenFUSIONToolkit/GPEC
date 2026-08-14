@@ -21,7 +21,7 @@ the HDF5 file.
 
 # Arguments
 - `h5_file::String`: Path to gpec.h5 output file
-- `variable::String`: HDF5 dataset path, e.g. `"perturbed_equilibrium/response/xi_R"`
+- `variable::String`: HDF5 dataset path, e.g. `"PerturbedEquilibrium/Response/xi_R"`
 
 # Keyword arguments
 - `mtheta::Int`: theta grid resolution (default: `max(2*(|mlow|+mpert), 512)`)
@@ -45,10 +45,10 @@ function modes_to_theta(h5_file::String, variable::String;
         modes = read(f, variable)  # (npsi, numpert_total)
         npsi, numpert_total = size(modes)
 
-        mlow  = read(f, "info/mlow")
-        nlow  = read(f, "info/nlow")
-        mpert = read(f, "info/mpert")
-        npert = read(f, "info/npert")
+        mlow  = read(f, "Info/mlow")
+        nlow  = read(f, "Info/nlow")
+        mpert = read(f, "Info/mpert")
+        npert = read(f, "Info/npert")
         @assert numpert_total == mpert * npert "Expected numpert_total=$(mpert*npert), got $numpert_total"
 
         n_vals = [nlow + k - 1 for k in 1:npert]
@@ -66,19 +66,19 @@ function modes_to_theta(h5_file::String, variable::String;
 
         if !keep_sfl_phi
             # Reconstruct ν spline from stored grid + nodal values (FastInterpolations v0.4 API)
-            rzphi_xs = read(f, "splines/rzphi/xs")
-            rzphi_ys = read(f, "splines/rzphi/ys")
-            nu_vals  = read(f, "splines/rzphi/nu")
+            rzphi_xs = read(f, "Equilibrium/Geometry/xs")
+            rzphi_ys = read(f, "Equilibrium/Geometry/ys")
+            nu_vals  = read(f, "Equilibrium/Geometry/nu")
             nu_spline = cubic_interp(
                 (rzphi_xs, rzphi_ys), nu_vals;
                 bc=(CubicFit(), PeriodicBC()),
                 extrap=(ExtendExtrap(), WrapExtrap())
             )
 
-            psi_grid = read(f, "integration/psi")
+            psi_grid = read(f, "ForceFreeStates/Solutions/ForwardIntegration/psi")
 
-            bt_sign  = haskey(f, "equil/bt_sign") ? read(f, "equil/bt_sign") : 1
-            crnt     = haskey(f, "equil/crnt")     ? read(f, "equil/crnt")    : 1.0
+            bt_sign  = haskey(f, "Equilibrium/bt_sign") ? read(f, "Equilibrium/bt_sign") : 1
+            crnt     = haskey(f, "Equilibrium/crnt")     ? read(f, "Equilibrium/crnt")    : 1.0
             helicity = bt_sign * Int(sign(crnt))
 
             hint = (Ref(1), Ref(1))

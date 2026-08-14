@@ -53,14 +53,14 @@ Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeS
 ## Output Structure
 
 ```
-perturbed_equilibrium/
-├── forcing_modes/
+PerturbedEquilibrium/
+├── ForcingModes/
 │   ├── n              # Toroidal mode numbers
 │   ├── m              # Poloidal mode numbers
 │   └── amplitude      # ComplexF64 forcing amplitudes
 ├── forcing_b / forcing_b_root_area / forcing_b_area      # control-surface forcing spectrum (b, b̃, b̄) [numpert_total], tesla
 ├── response_b / response_b_root_area / response_b_area   # control-surface response spectrum (b, b̃, b̄) [numpert_total], tesla
-├── response/
+├── Response/
 │   ├── psi_n          # Radial abscissa ψ_N [npsi] shared by every response profile below
 │   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
 │   ├── xi_psi_J       # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
@@ -69,14 +69,14 @@ perturbed_equilibrium/
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
 │   └── b_zeta
-├── response_matrices/        # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
+├── ResponseMatrices/          # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
 │   ├── plasma_inductance     # Λ̃ = R⁻¹·Λ·R⁻†
 │   ├── surface_inductance    # L̃ = R⁻¹·L·R⁻†
 │   ├── permeability          # P̃ = R⁻¹·P·R  (P = Λ·L⁻¹)
 │   ├── reluctance            # ϱ̃ = R†·ϱ·R
 │   ├── rootarea_to_area_weight_operator  # S = Σ/√A at psilim; recover area-weighted field b̄ = S·b̃
 │   └── surface_area          # scalar A = ∫J|∇ψ|dθ; recover flux via Φ = A·b̄
-├── singular_coupling/
+├── SingularCoupling/
 │   ├── C_resonant_area_weighted_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant area-weighted field b^r=Φ^r/A^r [T])
 │   ├── C_resonant_current
 │   ├── C_island_width_sq
@@ -93,7 +93,7 @@ perturbed_equilibrium/
 │   ├── rational_q
 │   ├── rational_m_res
 │   └── rational_n
-└── energies/
+└── Energies/
     ├── vacuum_energy
     ├── surface_energy
     ├── plasma_energy
@@ -106,10 +106,10 @@ function write_outputs_to_HDF5(
     filename::String
 )
     h5open(filename, "cw") do file
-        pe_group = haskey(file, "perturbed_equilibrium") ? file["perturbed_equilibrium"] : create_group(file, "perturbed_equilibrium")
+        pe_group = haskey(file, "PerturbedEquilibrium") ? file["PerturbedEquilibrium"] : create_group(file, "PerturbedEquilibrium")
 
         # Forcing modes
-        forcing_group = haskey(pe_group, "forcing_modes") ? pe_group["forcing_modes"] : create_group(pe_group, "forcing_modes")
+        forcing_group = haskey(pe_group, "ForcingModes") ? pe_group["ForcingModes"] : create_group(pe_group, "ForcingModes")
         forcing_group["n"]         = [mode.n for mode in intr.forcing_modes]
         forcing_group["m"]         = [mode.m for mode in intr.forcing_modes]
         forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
@@ -127,7 +127,7 @@ function write_outputs_to_HDF5(
         # root-area-weighted field (b̃) space. Recover the area-weighted field b̄ with the stored
         # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
         # scalar surface_area A: Φ = A·b̄  (internally R = S·A, Φ = R·b̃). [Pharr 2026]
-        mat_group = haskey(pe_group, "response_matrices") ? pe_group["response_matrices"] : create_group(pe_group, "response_matrices")
+        mat_group = haskey(pe_group, "ResponseMatrices") ? pe_group["ResponseMatrices"] : create_group(pe_group, "ResponseMatrices")
         !isempty(state.plasma_inductance)  && (mat_group["plasma_inductance"]  = state.plasma_inductance)
         !isempty(state.surface_inductance) && (mat_group["surface_inductance"] = state.surface_inductance)
         !isempty(state.permeability)       && (mat_group["permeability"]       = state.permeability)
@@ -136,7 +136,7 @@ function write_outputs_to_HDF5(
         (state.surface_area != 0.0)        && (mat_group["surface_area"]       = state.surface_area)
 
         # Response fields (ComplexF64 directly)
-        response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
+        response_group = haskey(pe_group, "Response") ? pe_group["Response"] : create_group(pe_group, "Response")
         !isempty(state.psi_grid) && (response_group["psi_n"] = state.psi_grid)
         have_xi = !isnothing(state.xi_modes)
         have_b  = have_xi && !isnothing(state.b_modes)
@@ -192,7 +192,7 @@ function write_outputs_to_HDF5(
         end
 
         # Singular coupling
-        coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")
+        coupling_group = haskey(pe_group, "SingularCoupling") ? pe_group["SingularCoupling"] : create_group(pe_group, "SingularCoupling")
 
         # Coupling matrices [n_rational × numpert_total]
         !isempty(state.C_resonant_area_weighted_field)   && (coupling_group["C_resonant_area_weighted_field"]   = state.C_resonant_area_weighted_field)
@@ -219,10 +219,103 @@ function write_outputs_to_HDF5(
         !isempty(state.rational_n)         && (coupling_group["rational_n"]         = state.rational_n)
 
         # Energies
-        energy_group = haskey(pe_group, "energies") ? pe_group["energies"] : create_group(pe_group, "energies")
+        energy_group = haskey(pe_group, "Energies") ? pe_group["Energies"] : create_group(pe_group, "Energies")
         energy_group["vacuum_energy"]   = state.vacuum_energy
         energy_group["surface_energy"]  = state.surface_energy
         energy_group["plasma_energy"]   = state.plasma_energy
         energy_group["toroidal_torque"] = state.toroidal_torque
+
+        annotate_pe!(pe_group)
     end
+end
+
+# Metadata tables for the PerturbedEquilibrium group, applied post-write (paths are
+# relative to the PerturbedEquilibrium group). Field-representation naming follows
+# docs/src/conventions.md (Pharr 2026): b = bare, b̄ = area-weighted, b̃ =
+# root-area-weighted; all in tesla.
+const PE_H5_ANNOTATIONS = [
+    "ForcingModes/n" => (; long_name="toroidal mode number of each forcing mode"),
+    "ForcingModes/m" => (; long_name="poloidal mode number of each forcing mode"),
+    "ForcingModes/amplitude" => (; long_name="complex forcing amplitude of each mode", units="T"),
+    "forcing_b" => (; long_name="control-surface forcing spectrum, bare normal field b", units="T", dims=("mode",)),
+    "forcing_b_root_area" => (; long_name="control-surface forcing spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
+    "forcing_b_area" => (; long_name="control-surface forcing spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),
+    "response_b" => (; long_name="control-surface response spectrum, bare normal field b", units="T", dims=("mode",)),
+    "response_b_root_area" => (; long_name="control-surface response spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
+    "response_b_area" => (; long_name="control-surface response spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),
+    "ResponseMatrices/plasma_inductance" => (; long_name="plasma inductance Λ̃ in root-area-weighted field space", dims=("mode", "mode")),
+    "ResponseMatrices/surface_inductance" => (; long_name="surface inductance L̃ in root-area-weighted field space", dims=("mode", "mode")),
+    "ResponseMatrices/permeability" => (; long_name="permeability P̃ = Λ̃·L̃⁻¹ in root-area-weighted field space", dims=("mode", "mode")),
+    "ResponseMatrices/reluctance" => (; long_name="reluctance ϱ̃ in root-area-weighted field space", dims=("mode", "mode")),
+    "ResponseMatrices/rootarea_to_area_weight_operator" => (; long_name="operator S = Σ/√A at ψ_lim; b̄ = S·b̃", dims=("mode", "mode")),
+    "ResponseMatrices/surface_area" => (; long_name="control-surface scalar area A = ∮J|∇ψ|dθ; Φ = A·b̄", units="m^2"),
+    "Response/psi_n" => (; long_name="normalized poloidal flux ψ_N grid shared by the response profiles"),
+    "Response/xi_psi" => (; long_name="contravariant radial displacement ξ^ψ = ξ·∇ψ_N", dims=("psi", "mode")),
+    "Response/xi_psi_J" => (; long_name="Jacobian-weighted contravariant radial displacement J·ξ^ψ", units="m^3", dims=("psi", "mode")),
+    "Response/xi_theta" => (; long_name="Jacobian-weighted contravariant poloidal displacement J·ξ^θ", units="m^3", dims=("psi", "mode")),
+    "Response/xi_zeta" => (; long_name="Jacobian-weighted contravariant toroidal displacement J·ξ^ζ", units="m^3", dims=("psi", "mode")),
+    "Response/xi_theta_reg" => (; long_name="regularized Jacobian-weighted contravariant poloidal displacement J·ξ^θ", units="m^3", dims=("psi", "mode")),
+    "Response/xi_zeta_reg" => (; long_name="regularized Jacobian-weighted contravariant toroidal displacement J·ξ^ζ", units="m^3", dims=("psi", "mode")),
+    "Response/xi_cova_psi" => (; long_name="covariant radial displacement ξ_ψ", units="m^2", dims=("psi", "mode")),
+    "Response/xi_cova_theta" => (; long_name="covariant poloidal displacement ξ_θ", units="m^2", dims=("psi", "mode")),
+    "Response/xi_cova_zeta" => (; long_name="covariant toroidal displacement ξ_ζ", units="m^2", dims=("psi", "mode")),
+    "Response/clebsch_psi" => (; long_name="Clebsch displacement component ξ^ψ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode")),
+    "Response/clebsch_psi1" => (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+reg_spot²))", dims=("psi", "mode")),
+    "Response/clebsch_alpha" => (; long_name="Clebsch displacement component ξ^α/χ₁ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode")),
+    "Response/xi_n" => (; long_name="physical normal displacement ξ_n", units="m", dims=("psi", "mode")),
+    "Response/xi_R" => (; long_name="cylindrical displacement component ξ_R (mode space)", units="m", dims=("psi", "mode")),
+    "Response/xi_Z" => (; long_name="cylindrical displacement component ξ_Z (mode space)", units="m", dims=("psi", "mode")),
+    "Response/xi_phi" => (; long_name="cylindrical displacement component ξ_φ (mode space)", units="m", dims=("psi", "mode")),
+    "Response/b_psi_area_weighted" => (; long_name="area-normalized radial field b^ψ/⟨J|∇ψ|⟩_θ", units="T", dims=("psi", "mode")),
+    "Response/b_n" => (; long_name="physical normal field b_n", units="T", dims=("psi", "mode")),
+    "Response/b_theta" => (; long_name="Jacobian-weighted contravariant poloidal field J·b^θ", units="T*m^2", dims=("psi", "mode")),
+    "Response/b_zeta" => (; long_name="Jacobian-weighted contravariant toroidal field J·b^ζ", units="T*m^2", dims=("psi", "mode")),
+    "Response/b_theta_reg" => (; long_name="regularized Jacobian-weighted contravariant poloidal field J·b^θ", units="T*m^2", dims=("psi", "mode")),
+    "Response/b_zeta_reg" => (; long_name="regularized Jacobian-weighted contravariant toroidal field J·b^ζ", units="T*m^2", dims=("psi", "mode")),
+    "Response/b_cova_psi" => (; long_name="covariant radial field b_ψ", units="T*m", dims=("psi", "mode")),
+    "Response/b_cova_theta" => (; long_name="covariant poloidal field b_θ", units="T*m", dims=("psi", "mode")),
+    "Response/b_cova_zeta" => (; long_name="covariant toroidal field b_ζ", units="T*m", dims=("psi", "mode")),
+    "Response/b_R" => (; long_name="cylindrical field component b_R (mode space)", units="T", dims=("psi", "mode")),
+    "Response/b_Z" => (; long_name="cylindrical field component b_Z (mode space)", units="T", dims=("psi", "mode")),
+    "Response/b_phi" => (; long_name="cylindrical field component b_φ (mode space)", units="T", dims=("psi", "mode")),
+    "SingularCoupling/C_resonant_area_weighted_field" => (; long_name="coupling matrix: applied b̃ → resonant area-weighted field b̄^r = Φ^r/A^r", dims=("surface", "mode")),
+    "SingularCoupling/C_resonant_current" => (; long_name="coupling matrix: applied b̃ → pitch-resonant current", units="A/T", dims=("surface", "mode")),
+    "SingularCoupling/C_island_width_sq" => (; long_name="coupling matrix: applied b̃ → squared island half-width", units="1/T", dims=("surface", "mode")),
+    "SingularCoupling/C_penetrated_area_weighted_field" => (; long_name="coupling matrix: applied b̃ → penetrated area-weighted field", dims=("surface", "mode")),
+    "SingularCoupling/C_delta_prime" => (; long_name="coupling matrix: applied b̃ → forcing-driven Δ'", units="1/T", dims=("surface", "mode")),
+    "SingularCoupling/resonant_area_weighted_field" =>
+        (; long_name="resonant area-weighted field b̄^r = Φ^r/A^r per rational surface (coordinate-invariant)", units="T", dims=("surface",)),
+    "SingularCoupling/resonant_current" => (; long_name="pitch-resonant current per rational surface", units="A", dims=("surface",)),
+    "SingularCoupling/island_width_sq" => (; long_name="squared island half-width per rational surface (in ψ_N²)", dims=("surface",)),
+    "SingularCoupling/penetrated_area_weighted_field" => (; long_name="penetrated area-weighted field per rational surface", units="T", dims=("surface",)),
+    "SingularCoupling/delta_prime" => (; long_name="forcing-driven tearing Δ' per rational surface (Riccati; response to applied forcing)", dims=("surface",)),
+    "SingularCoupling/forcing_solution_weights" => (; long_name="weights of the forcing solutions in the singular-coupling decomposition", dims=("surface",)),
+    "SingularCoupling/rational_area" => (; long_name="scalar surface area A^r of each rational surface", units="m^2", dims=("surface",)),
+    "SingularCoupling/island_half_width" => (; long_name="island half-width per rational surface (in ψ_N)", dims=("surface",)),
+    "SingularCoupling/chirikov_parameter" => (; long_name="Chirikov overlap parameter: island half-width / half-distance to the neighbouring rational surface", dims=("surface",)),
+    "SingularCoupling/rational_psi" => (; long_name="normalized poloidal flux ψ_N of each rational surface"),
+    "SingularCoupling/rational_q" => (; long_name="safety factor q = m/n at each rational surface", dims=("surface",)),
+    "SingularCoupling/rational_m_res" => (; long_name="resonant poloidal mode number m at each rational surface", dims=("surface",)),
+    "SingularCoupling/rational_n" => (; long_name="resonant toroidal mode number n at each rational surface", dims=("surface",)),
+    "Energies/vacuum_energy" => (; long_name="perturbed vacuum energy", units="J"),
+    "Energies/surface_energy" => (; long_name="perturbed surface energy", units="J"),
+    "Energies/plasma_energy" => (; long_name="perturbed plasma energy", units="J"),
+    "Energies/toroidal_torque" => (; long_name="net toroidal torque on the plasma", units="N*m")
+]
+
+# Attach long_name/units/dims + dimension scales to the PerturbedEquilibrium group.
+function annotate_pe!(pe_group)
+    ann = Utilities.HDF5Annotations
+    ann.annotate!(pe_group, PE_H5_ANNOTATIONS)
+    ann.make_scale!(pe_group, "Response/psi_n", "psi")
+    for (path, _) in PE_H5_ANNOTATIONS
+        startswith(path, "Response/") && path != "Response/psi_n" || continue
+        ann.attach_scale!(pe_group, path, 1, "Response/psi_n", "psi")
+    end
+    ann.make_scale!(pe_group, "SingularCoupling/rational_psi", "psi_rational")
+    for (path, _) in PE_H5_ANNOTATIONS
+        startswith(path, "SingularCoupling/") && path != "SingularCoupling/rational_psi" || continue
+        ann.attach_scale!(pe_group, path, 1, "SingularCoupling/rational_psi", "psi_rational")
+    end
+    return nothing
 end
