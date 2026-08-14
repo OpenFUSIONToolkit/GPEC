@@ -57,9 +57,10 @@ Reviewed `resolve_ntv_species` (KineticProfiles.jl ~214-266) + `compute_calculat
 - ν_s field-density RECONCILIATION (supersedes the earlier "should be n_e·Zeff" note above):
   code uses `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ/(√m_s·T_i^1.5)`, i.e. field density = zpitch·n_main
   (n_main = Σ MAIN-ion densities, no impurity, unweighted). This is CORRECT and MORE faithful to
-  single-ion PENTRC than n_e·Zeff: PENTRC's design is zpitch·n_i, NOT Σ_b n_b Z_b². Numerically
-  zpitch·n_main ≈ n_e·Zeff (e.g. Zeff=1.5,C6 → 1.55 vs 1.5); the gap IS the intended momentum-
-  restoring correction that zpitch(Zeff) carries. So n_main vs n_e·Zeff is immaterial at D-T (z=1).
+  single-ion PENTRC than n_e·Zeff: PENTRC's design is zpitch·n_i, NOT Σ_b n_b Z_b². The two are NOT
+  numerically equal (Zeff=1.5, C6, n_i/n_e=0.9 → zpitch·n_i = 1.225·n_e vs n_e·Zeff = 1.5·n_e, ~18%
+  apart); that gap IS the intended momentum-restoring design difference that zpitch(Zeff) carries.
+  n_main vs n_e·Zeff is a deliberate PENTRC-fidelity choice, exact in the z=1 main-ion domain.
 - z_s² test-particle factor: CORRECT and correctly placed (deflection freq ∝ test charge²). Single-ion
   had no z² only because zi=1. Reduces EXACTLY to single-ion nui for one z=1,fraction=1 ion (verified).
 - Impurity as its own test species: field density zpitch·n_main is NOT undercounting — the impurity's
