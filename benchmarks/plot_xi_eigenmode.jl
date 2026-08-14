@@ -1,6 +1,6 @@
 # Plot the ξ(ψ) profile of the eigenmode with the highest total-energy eigenvalue.
 #
-# The total energy operator W = W_plasma + W_vacuum (free_run!, Free.jl); its eigenvectors are the
+# The total energy operator W = W_plasma + W_vacuum (free_run, Free.jl); its eigenvectors are the
 # free-boundary edge displacement patterns and the eigenvalues are δW. This picks the eigenmode with the
 # largest Re(eigenvalue) and reconstructs its radial profile by projecting the EL fundamental matrix
 # (integration/xi_psi) onto that edge eigenvector:  c = U_edge \ w,  ξ(ψ) = U(ψ)·c.

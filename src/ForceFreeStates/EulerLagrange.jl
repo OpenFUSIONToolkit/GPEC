@@ -253,7 +253,7 @@ function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::E
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
-    # Undo Gaussian reduction to get true solution vectors (for free_run! eigenvector use)
+    # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
 
     return (odet, nothing, nothing, nothing)
