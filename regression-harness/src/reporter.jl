@@ -48,6 +48,31 @@ function format_value(q::NamedTuple)::String
 end
 
 """
+Print a banner when two compared runs did not share an environment.
+
+Source code is only the sole variable when Julia, host, package set and thread counts all match.
+Anything else here means part of the reported difference may be the environment, not the code.
+"""
+function _warn_env_difference(fp1::EnvFingerprint, fp2::EnvFingerprint)
+    (fp1 === UNKNOWN_ENV || fp2 === UNKNOWN_ENV) && return
+    (isempty(fp1.julia_version) || isempty(fp2.julia_version)) && return
+    differences = String[]
+    fp1.julia_version != fp2.julia_version && push!(differences, "julia $(fp1.julia_version) vs $(fp2.julia_version)")
+    fp1.os_arch != fp2.os_arch && push!(differences, "host $(fp1.os_arch) vs $(fp2.os_arch)")
+    fp1.manifest_sha != fp2.manifest_sha && push!(differences, "different package sets (Manifest hashes differ)")
+    fp1.nthreads != fp2.nthreads && push!(differences, "$(fp1.nthreads) vs $(fp2.nthreads) Julia threads")
+    fp1.blas_threads != fp2.blas_threads && push!(differences, "$(fp1.blas_threads) vs $(fp2.blas_threads) BLAS threads")
+    isempty(differences) && return
+    println()
+    println("!! ENVIRONMENTS DIFFER — source code is not the only variable in this comparison:")
+    for d in differences
+        println("     - $d")
+    end
+    println("   Differences below may be environment artifacts. Re-run with --force to rebuild")
+    println("   both refs in the current environment.")
+end
+
+"""
 Format a diff value for display.
 """
 function format_diff(abs_diff::Float64, rel_diff::Float64, status::String, value_type::String)::String
@@ -87,11 +112,11 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
 
     if info1 === nothing
         println("ERROR: No results for ref 1 ($(ref1.name))")
-        return
+        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
     end
     if info2 === nothing
         println("ERROR: No results for ref 2 ($(ref2.name))")
-        return
+        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
     end
 
     failed1 = !info1.success
@@ -182,7 +207,10 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     tag1 = failed1 ? " (FAILED)" : ""
     tag2 = failed2 ? " (FAILED)" : ""
     println("Ref 1: $(ref1.name)  @ $(info1.commit_short) ($date1)$tag1")
+    println("       env: $(describe_env(info1.fingerprint))")
     println("Ref 2: $(ref2.name)  @ $(info2.commit_short) ($date2)$tag2")
+    println("       env: $(describe_env(info2.fingerprint))")
+    _warn_env_difference(info1.fingerprint, info2.fingerprint)
     if failed1
         println("  Ref 1 error: $(_short_err(info1.error_msg))")
     end
@@ -204,6 +232,8 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     n_missing > 0 && push!(parts, "$n_missing missing/N/A")
     println("Summary: ", join(parts, ", "))
     println()
+    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
+            n_failed=count(identity, (failed1, failed2)))
 end
 
 """
@@ -327,12 +357,17 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
             date_str = length(info.commit_date) >= 10 ? info.commit_date[1:10] : info.commit_date
             status_str = info.success ? "" : " (FAILED)"
             println("Ref $(i): $(ref.name)  @ $(info.commit_short) ($date_str)$status_str")
+            println("       env: $(describe_env(info.fingerprint))")
             if !info.success
                 println("  Ref $(i) error: $(_short_err(info.error_msg))")
             end
         else
             println("Ref $(i): $(ref.name)  (no data)")
         end
+    end
+    if length(refs) >= 2
+        last_two = filter(!isnothing, run_infos[(end - 1):end])
+        length(last_two) == 2 && _warn_env_difference(last_two[1].fingerprint, last_two[2].fingerprint)
     end
     println("-"^total_w)
 
@@ -351,6 +386,8 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
         println("Summary (last vs prev): ", join(parts, ", "))
     end
     println()
+    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
+            n_failed=count(identity, failed_mask))
 end
 
 """
