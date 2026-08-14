@@ -26,6 +26,8 @@ Available regression cases:
 ```bash
 regress --cases diiid_n1 --refs develop,feature/kinetic-damping
 ```
+
+All cases requested in a single invocation share one git worktree (and one `Pkg.instantiate`/precompile) per commit, so `--cases a,b,c` in one command is substantially faster than three separate runs.
 ```
 ================================================================
 Case: diiid_n1 — DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium

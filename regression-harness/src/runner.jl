@@ -177,28 +177,31 @@ worktree is created and reused across all cases at that commit — each case sti
 its own `julia` subprocess, but since they share the same `--project` path, only the
 first subprocess pays for `Pkg.instantiate()`/precompilation; the rest hit Julia's
 on-disk pkgimage cache for that path. Worktree creation is skipped entirely when every
-case is already cached (and `force` is false).
+case is already cached (and `force` is false). If the worktree cannot be created, the
+failure is recorded for each case needing a run and the remaining refs still proceed.
 """
 function run_cases_at_ref(db::SQLite.DB, ref::ResolvedRef, case_specs::Vector{CaseSpec}, repo_root::String;
     force::Bool=false, verbose::Bool=false, no_instantiate::Bool=false)
-    if is_local_ref(ref)
-        for case_spec in case_specs
-            run_commit(db, ref.commit_hash, ref.name, case_spec, repo_root;
-                force=force, verbose=verbose, no_instantiate=no_instantiate)
+    needs_worktree = !is_local_ref(ref) && (force || any(!is_cached(db, ref.commit_hash, cs.name) for cs in case_specs))
+
+    worktree_path = nothing
+    if needs_worktree
+        try
+            worktree_path = create_worktree(ref.commit_hash, repo_root)
+        catch e
+            info = get_commit_info(ref.commit_hash, repo_root)
+            @warn "Worktree creation failed for $(info.short): $(sprint(showerror, e))"
+            # Record the failure only for cases needing a run; cached results stay intact.
+            for case_spec in case_specs
+                if force || !is_cached(db, ref.commit_hash, case_spec.name)
+                    store_failed_run(db, ref.commit_hash, info.short, info.date, info.msg,
+                        case_spec.name, "Worktree creation failed: $(sprint(showerror, e))")
+                end
+            end
+            return
         end
-        return
     end
 
-    needs_run = force || any(!is_cached(db, ref.commit_hash, cs.name) for cs in case_specs)
-    if !needs_run
-        for case_spec in case_specs
-            run_commit(db, ref.commit_hash, ref.name, case_spec, repo_root;
-                force=force, verbose=verbose, no_instantiate=no_instantiate)
-        end
-        return
-    end
-
-    worktree_path = create_worktree(ref.commit_hash, repo_root)
     try
         for case_spec in case_specs
             run_commit(db, ref.commit_hash, ref.name, case_spec, repo_root;
@@ -206,7 +209,7 @@ function run_cases_at_ref(db::SQLite.DB, ref::ResolvedRef, case_specs::Vector{Ca
                 worktree_path=worktree_path)
         end
     finally
-        remove_worktree(worktree_path, repo_root)
+        worktree_path === nothing || remove_worktree(worktree_path, repo_root)
     end
 end
 
@@ -297,6 +300,8 @@ end
 
 """
 Run a kind="computed" case at a specific git commit via worktree.
+If `worktree_path` is given, the caller owns the worktree and this function will not
+remove it; otherwise one is created and removed here.
 """
 function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     case_spec::CaseSpec, repo_root::String;
@@ -379,6 +384,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
 
     try
         (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+        rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output would mask a failed run
 
         instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"
         script_content = replace(RUNNER_SCRIPT_TEMPLATE, "%INSTANTIATE%" => instantiate_line)
@@ -438,6 +444,8 @@ end
 """
 Run GPEC for a specific git commit via worktree. Stores results in the database.
 Skips if already cached (unless force=true).
+If `worktree_path` is given, the caller owns the worktree and this function will not
+remove it; otherwise one is created and removed here.
 """
 function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     case_spec::CaseSpec, repo_root::String;
@@ -485,6 +493,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         end
 
         (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+        rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output (e.g. from an earlier case sharing the worktree) would mask a failed run
 
         # Write temp runner script
         instantiate_line = no_instantiate ? "" : "Pkg.instantiate()"

@@ -77,6 +77,9 @@ GPEC Regression Harness
 
 Runs GPEC test cases across multiple git commits and compares numerical outputs
 to detect unintended changes. Results are cached in a local SQLite database.
+All cases in a single invocation share one git worktree (and one instantiate/
+precompile) per commit, so batching cases into one command is substantially
+faster than running them in separate invocations.
 
 Usage:
     julia --project=regression-harness regression-harness/regress.jl [OPTIONS]
