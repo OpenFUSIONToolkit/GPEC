@@ -398,6 +398,8 @@ The repository uses pre-commit hooks to maintain code quality. They run automati
 - Remove trailing whitespace and fix line endings
 - Validate YAML/TOML syntax
 - Prevent accidentally committing large files (>5MB)
+- Check config-style TOML annotation conventions (header block, inline `# description`
+  comments, no deprecated keys — see `docs/development/toml-conventions.md`)
 
 **Installation:**
 
