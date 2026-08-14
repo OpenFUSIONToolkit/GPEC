@@ -1,76 +1,118 @@
-@kwdef struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
-    mpert::Int
-    numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
+"""
+    IdealMatrices
 
-    # Complex-valued CubicSeriesInterpolant for stability matrices
-    # Each matrix is flattened to (npsi × numpert_total^2) series
-    # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
-    # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
-    itp_opts::Opts = (; extrap=ExtendExtrap())
+Ideal-MHD stability matrix ψ-splines assembled by [`make_matrix`](@ref). Each field flattens a
+`numpert_total × numpert_total` matrix to `numpert_total^2` complex series (`jmats` to `2·mpert−1`),
+following the appendix of Glasser Phys. Plasmas 2016 112506.
 
-    amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    # `dmats_prim`, `emats_prim` are the pre-Schur-reduction geometric forms
-    # (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)).
-    # The `_prim` suffix follows `fmats_prim`. Downstream kinetic FKG Schur complements
-    # consume these primitive forms; the alternate singular-layer path that would need
-    # kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
-    dmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    emats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
-    fmats_gal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)   # reduced Hermitian F̄ (un-factored) for the Galerkin solver
-    kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+## Fields
 
-    # Ideal A,B,C splines preserved before kinetic overwrite
-    amats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    bmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    cmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-
-    # Kinetic energy matrix splines: 6 components (A,B,C,D,E,H perturbations)
-    kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
-    # Kinetic torque matrix splines: 6 components
-    ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
-
-    kinetic_populated::Bool = false  # set by make_kinetic_matrix; the solution then obeys the FKG ODE, not the ideal EL relation
-
-    # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
-    f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    paats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    kkmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    kkaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    r1mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    r2mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    r3mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    gaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-
-    # Shared hint for sequential evaluation (all splines evaluated at same psi)
-    _hint::Base.RefValue{Int} = Ref(1)
-
-    # Jacobian Fourier band ψ-spline (2·mpert−1 conjugate-symmetric coefficients per surface),
-    # used to assemble the power-normalization matrix N in Free.jl
-    jmats::S = _empty_series_interp_complex(2 * mpert - 1, itp_opts)
+  - `amats`, `bmats`, `cmats` - the ideal A, B, C matrices. In a kinetic run these are NOT what the
+    ODE integrates; see [`KineticMatrices`](@ref).
+  - `dmats_prim`, `emats_prim` - pre-Schur-reduction geometric forms
+    (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)). Downstream
+    kinetic FKG Schur complements consume these primitive forms; the alternate singular-layer path
+    that would need kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
+  - `fmats_lower` - F in factorized lower-triangular form, F = L·Lᴴ.
+  - `fmats_prim` - primitive F before the Schur complement (for kinetic).
+  - `fmats_gal` - reduced Hermitian F̄, un-factored, for the Galerkin solver.
+  - `jmats` - Jacobian Fourier band (2·mpert−1 conjugate-symmetric coefficients per surface), used
+    to assemble the power-normalization matrix N in Free.jl.
+"""
+@kwdef struct IdealMatrices{S<:CubicSeriesInterpolant}
+    amats::S
+    bmats::S
+    cmats::S
+    dmats_prim::S
+    emats_prim::S
+    hmats::S
+    fmats_lower::S
+    fmats_prim::S
+    fmats_gal::S
+    kmats::S
+    gmats::S
+    jmats::S
 end
 
-# Helper to create empty complex series interpolant for default initialization
+"""
+    KineticMatrices
+
+Kinetic-MHD matrix ψ-splines assembled by [`make_kinetic_matrix`](@ref). Present on a
+[`FourFitVars`](@ref) only for kinetic runs; its presence means the solution obeys the FKG ODE
+rather than the ideal Euler-Lagrange relation.
+
+## Fields
+
+  - `amats`, `bmats`, `cmats` - the kinetic-modified A, B, C consumed by `sing_der!`. Unlike their
+    ideal counterparts, A here is non-Hermitian and requires an LU rather than a Cholesky.
+  - `kwmats`, `ktmats` - kinetic energy (W) and torque (T) matrices, 6 components each
+    (A, B, C, D, E, H perturbations).
+  - `f0mats`, `pmats`, `paats`, `kkmats`, `kkaats`, `r1mats`, `r2mats`, `r3mats`, `gaats` -
+    pre-computed FKG Schur-complement reductions (Logan 2015 Appendix C, Eqs C.1-C.11).
+"""
+@kwdef struct KineticMatrices{S<:CubicSeriesInterpolant}
+    amats::S
+    bmats::S
+    cmats::S
+    kwmats::Vector{S}
+    ktmats::Vector{S}
+    f0mats::S
+    pmats::S
+    paats::S
+    kkmats::S
+    kkaats::S
+    r1mats::S
+    r2mats::S
+    r3mats::S
+    gaats::S
+end
+
+"""
+    FourFitVars
+
+Fourier-fitted stability matrices for one run. `kinetic === nothing` marks an ideal run; otherwise
+the kinetic matrices are authoritative for the ODE and the ideal ones remain available for output
+and for the Galerkin/vacuum paths that are defined only in the ideal basis.
+
+## Fields
+
+  - `numpert_total::Int` - `mpert · npert`; each matrix carries `numpert_total^2` series.
+  - `itp_opts::NamedTuple` - interpolant options applied to every spline built for this fit.
+  - `ideal::IdealMatrices` - always present.
+  - `kinetic::Union{Nothing,KineticMatrices}` - present iff `ctrl.kinetic_factor > 0`.
+  - `_hint::Base.RefValue{Int}` - shared bracket-search hint for sequential (single-threaded)
+    evaluation. Not thread-safe: parallel paths must pass their own hint.
+"""
+@kwdef struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
+    numpert_total::Int
+    itp_opts::Opts = (; extrap=ExtendExtrap())
+    ideal::IdealMatrices{S}
+    kinetic::Union{Nothing,KineticMatrices{S}} = nothing
+    _hint::Base.RefValue{Int} = Ref(1)
+end
+
+"""
+    is_kinetic(ffit) -> Bool
+
+Whether `ffit` carries kinetic matrices, i.e. whether the solution obeys the FKG ODE.
+"""
+is_kinetic(ffit::FourFitVars) = ffit.kinetic !== nothing
+
+"""
+    active_matrices(ffit) -> Union{IdealMatrices,KineticMatrices}
+
+The A/B/C set the ODE is actually integrating: kinetic-modified when a kinetic fit is attached,
+ideal otherwise. Use only where the caller genuinely means "whichever model is active" — prefer
+naming `ffit.ideal` or `ffit.kinetic` explicitly, since the two differ in Hermiticity.
+"""
+active_matrices(ffit::FourFitVars) = ffit.kinetic === nothing ? ffit.ideal : ffit.kinetic
+
+# Helper to create an empty complex series interpolant for default initialization
 function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
     return cubic_interp(xs, Series(Y))
 end
-
-function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
-    xs = collect(range(0.0, 1.0; length=5))
-    Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Series(Y); itp_opts...)
-end
-
-# Convenience constructor
-FourFitVars(mpert::Int, numpert_total::Int) = FourFitVars(; mpert, numpert_total)
 
 """
     MetricData
@@ -570,10 +612,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     # Create complex series interpolants with per-column extrap BC
     # TODO: set powers. Do we need this yet? Only called if power_flag = true
     itp_opts = (; extrap=ExtendExtrap())
-    return FourFitVars(;
-        mpert=intr.mpert,
-        numpert_total=intr.numpert_total,
-        itp_opts,
+    ideal = IdealMatrices(;
         amats=cubic_interp(metric.xs, Series(amats_flat); itp_opts...),
         bmats=cubic_interp(metric.xs, Series(bmats_flat); itp_opts...),
         cmats=cubic_interp(metric.xs, Series(cmats_flat); itp_opts...),
@@ -587,4 +626,5 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         kmats=cubic_interp(metric.xs, Series(kmats_flat); itp_opts...),
         # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
         jmats=cubic_interp(metric.xs, Series(jmats_flat); itp_opts...))
+    return FourFitVars(; numpert_total=intr.numpert_total, itp_opts, ideal)
 end

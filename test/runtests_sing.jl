@@ -129,16 +129,19 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         odet.u[:, :, 2] .= umat_p2
 
         itp_opts = (; extrap=ExtendExtrap())
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(;
-            mpert=intr.numpert_total,
-            numpert_total=intr.numpert_total,
-            itp_opts,
+        # Only the six matrices sing_der! reads are physical here; the rest are unused placeholders.
+        unused = cubic_interp(psifac_dummy, Series(zeros(ComplexF64, points, intr.numpert_total^2)); itp_opts...)
+        ideal = GeneralizedPerturbedEquilibrium.ForceFreeStates.IdealMatrices(;
             amats=cubic_interp(psifac_dummy, Series(reshape(amats, points, :)); itp_opts...),
             bmats=cubic_interp(psifac_dummy, Series(reshape(bmats, points, :)); itp_opts...),
             cmats=cubic_interp(psifac_dummy, Series(reshape(cmats, points, :)); itp_opts...),
             fmats_lower=cubic_interp(psifac_dummy, Series(reshape(fmats, points, :)); itp_opts...),
             kmats=cubic_interp(psifac_dummy, Series(reshape(kmats, points, :)); itp_opts...),
-            gmats=cubic_interp(psifac_dummy, Series(reshape(gmats, points, :)); itp_opts...))
+            gmats=cubic_interp(psifac_dummy, Series(reshape(gmats, points, :)); itp_opts...),
+            dmats_prim=unused, emats_prim=unused, hmats=unused, fmats_prim=unused,
+            fmats_gal=unused, jmats=unused)
+        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(;
+            numpert_total=intr.numpert_total, itp_opts, ideal)
 
         du = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
         chunk = GeneralizedPerturbedEquilibrium.ForceFreeStates.IntegrationChunk(; psi_start=odet.psifac, psi_end=odet.psifac, needs_crossing=false)

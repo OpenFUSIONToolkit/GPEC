@@ -1287,36 +1287,27 @@ function write_outputs_to_HDF5(
         elm = "ForceFreeStates/EulerLagrangeMatrices"
         out_h5["$elm/psi"] = xs
         # Ideal primitive matrices (A, B, C, D, E, H)
-        # When kinetic mode is on, amats/bmats/cmats hold kinetic-modified values,
-        # so we write those as the "effective" matrices and save raw kinetic
-        # components separately below.
-        if ctrl.kinetic_factor > 0
-            # Use preserved ideal copies (before kinetic overwrite)
-            out_h5["$elm/Ideal/A"] = _eval_mat_spline(ffit.amats_ideal)
-            out_h5["$elm/Ideal/B"] = _eval_mat_spline(ffit.bmats_ideal)
-            out_h5["$elm/Ideal/C"] = _eval_mat_spline(ffit.cmats_ideal)
-        else
-            out_h5["$elm/Ideal/A"] = _eval_mat_spline(ffit.amats)
-            out_h5["$elm/Ideal/B"] = _eval_mat_spline(ffit.bmats)
-            out_h5["$elm/Ideal/C"] = _eval_mat_spline(ffit.cmats)
-        end
-        out_h5["$elm/Ideal/D"] = _eval_mat_spline(ffit.dmats_prim)
-        out_h5["$elm/Ideal/E"] = _eval_mat_spline(ffit.emats_prim)
-        out_h5["$elm/Ideal/H"] = _eval_mat_spline(ffit.hmats)
+        out_h5["$elm/Ideal/A"] = _eval_mat_spline(ffit.ideal.amats)
+        out_h5["$elm/Ideal/B"] = _eval_mat_spline(ffit.ideal.bmats)
+        out_h5["$elm/Ideal/C"] = _eval_mat_spline(ffit.ideal.cmats)
+        out_h5["$elm/Ideal/D"] = _eval_mat_spline(ffit.ideal.dmats_prim)
+        out_h5["$elm/Ideal/E"] = _eval_mat_spline(ffit.ideal.emats_prim)
+        out_h5["$elm/Ideal/H"] = _eval_mat_spline(ffit.ideal.hmats)
 
         # Ideal derived matrices (F, K, G)
-        out_h5["$elm/Ideal/F"] = _eval_mat_spline(ffit.fmats_lower)
-        out_h5["$elm/Ideal/K"] = _eval_mat_spline(ffit.kmats)
-        out_h5["$elm/Ideal/G"] = _eval_mat_spline(ffit.gmats)
+        out_h5["$elm/Ideal/F"] = _eval_mat_spline(ffit.ideal.fmats_lower)
+        out_h5["$elm/Ideal/K"] = _eval_mat_spline(ffit.ideal.kmats)
+        out_h5["$elm/Ideal/G"] = _eval_mat_spline(ffit.ideal.gmats)
 
         # Kinetic-modified matrices
-        if ctrl.kinetic_factor > 0
-            out_h5["$elm/Kinetic/A"] = _eval_mat_spline(ffit.amats)
-            out_h5["$elm/Kinetic/B"] = _eval_mat_spline(ffit.bmats)
-            out_h5["$elm/Kinetic/C"] = _eval_mat_spline(ffit.cmats)
-            out_h5["$elm/Kinetic/f0"] = _eval_mat_spline(ffit.f0mats)
-            out_h5["$elm/Kinetic/K"] = _eval_mat_spline(ffit.kkmats)
-            out_h5["$elm/Kinetic/G"] = _eval_mat_spline(ffit.gaats)
+        kin = ffit.kinetic
+        if kin !== nothing
+            out_h5["$elm/Kinetic/A"] = _eval_mat_spline(kin.amats)
+            out_h5["$elm/Kinetic/B"] = _eval_mat_spline(kin.bmats)
+            out_h5["$elm/Kinetic/C"] = _eval_mat_spline(kin.cmats)
+            out_h5["$elm/Kinetic/f0"] = _eval_mat_spline(kin.f0mats)
+            out_h5["$elm/Kinetic/K"] = _eval_mat_spline(kin.kkmats)
+            out_h5["$elm/Kinetic/G"] = _eval_mat_spline(kin.gaats)
         end
 
         # Self-describing metadata pass (long_name/units/dims + dimension scales).

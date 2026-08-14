@@ -85,6 +85,7 @@ function _compute_fkg_matrices(
     np = intr.numpert_total
     mpert = intr.mpert
     npert = intr.npert
+    ideal = ffit.ideal
 
     # Allocate output arrays — kinetic-modified A/B/C stored for sing_der! FKG path
     ak_flat = zeros(ComplexF64, mpsi, np^2)
@@ -110,13 +111,13 @@ function _compute_fkg_matrices(
         psi = xs[ipsi]
 
         # Evaluate ideal and kinetic matrices from splines (full np×np, block-diagonal in n)
-        amat_full = reshape(ffit.amats(psi; hint=hint), np, np)
-        bmat_full = reshape(ffit.bmats(psi; hint=hint), np, np)
-        cmat_full = reshape(ffit.cmats(psi; hint=hint), np, np)
-        dmat_full = reshape(ffit.dmats_prim(psi; hint=hint), np, np)
-        emat_full = reshape(ffit.emats_prim(psi; hint=hint), np, np)
-        hmat_full = reshape(ffit.hmats(psi; hint=hint), np, np)
-        fmat_prim_full = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
+        amat_full = reshape(ideal.amats(psi; hint=hint), np, np)
+        bmat_full = reshape(ideal.bmats(psi; hint=hint), np, np)
+        cmat_full = reshape(ideal.cmats(psi; hint=hint), np, np)
+        dmat_full = reshape(ideal.dmats_prim(psi; hint=hint), np, np)
+        emat_full = reshape(ideal.emats_prim(psi; hint=hint), np, np)
+        hmat_full = reshape(ideal.hmats(psi; hint=hint), np, np)
+        fmat_prim_full = reshape(ideal.fmats_prim(psi; hint=hint), np, np)
 
         kwmat_full = zeros(ComplexF64, np, np, 6)
         ktmat_full = zeros(ComplexF64, np, np, 6)
@@ -237,36 +238,14 @@ function _compute_fkg_matrices(
         end
     end
 
-    # Rebuild the fit with the kinetic products folded in: A/B/C become the kinetic-modified
-    # versions consumed by sing_der!, and the ideal ones are preserved as `*_ideal`.
     itp_opts = ffit.itp_opts
-    return FourFitVars(;
-        # carried through from the ideal fit
-        mpert=ffit.mpert,
-        numpert_total=ffit.numpert_total,
-        itp_opts,
-        dmats_prim=ffit.dmats_prim,
-        emats_prim=ffit.emats_prim,
-        hmats=ffit.hmats,
-        fmats_lower=ffit.fmats_lower,
-        fmats_prim=ffit.fmats_prim,
-        fmats_gal=ffit.fmats_gal,
-        kmats=ffit.kmats,
-        gmats=ffit.gmats,
-        jmats=ffit.jmats,
-        _hint=ffit._hint,
-        # ideal A/B/C preserved before the kinetic overwrite
-        amats_ideal=ffit.amats,
-        bmats_ideal=ffit.bmats,
-        cmats_ideal=ffit.cmats,
-        # kinetic-modified A/B/C
+    kinetic = KineticMatrices(;
+        # kinetic-modified A/B/C consumed by sing_der!; A is non-Hermitian here
         amats=cubic_interp(xs, Series(ak_flat); itp_opts...),
         bmats=cubic_interp(xs, Series(bk_flat); itp_opts...),
         cmats=cubic_interp(xs, Series(ck_flat); itp_opts...),
         kwmats,
         ktmats,
-        kinetic_populated=true,
-        # FKG splines
         f0mats=cubic_interp(xs, Series(f0_flat); itp_opts...),
         pmats=cubic_interp(xs, Series(p_flat); itp_opts...),
         paats=cubic_interp(xs, Series(pa_flat); itp_opts...),
@@ -276,4 +255,6 @@ function _compute_fkg_matrices(
         r2mats=cubic_interp(xs, Series(r2_flat); itp_opts...),
         r3mats=cubic_interp(xs, Series(r3_flat); itp_opts...),
         gaats=cubic_interp(xs, Series(ga_flat); itp_opts...))
+
+    return FourFitVars(ffit.numpert_total, itp_opts, ffit.ideal, kinetic, ffit._hint)
 end

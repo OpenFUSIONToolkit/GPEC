@@ -482,9 +482,9 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
     F_lower = zeros(ComplexF64, N, N)
     kmat    = zeros(ComplexF64, N, N)
     gmat    = zeros(ComplexF64, N, N)
-    ffit.fmats_lower(vec(F_lower), psi_low; hint=hint)
-    ffit.kmats(vec(kmat),          psi_low; hint=hint)
-    ffit.gmats(vec(gmat),          psi_low; hint=hint)
+    ffit.ideal.fmats_lower(vec(F_lower), psi_low; hint=hint)
+    ffit.ideal.kmats(vec(kmat),          psi_low; hint=hint)
+    ffit.ideal.gmats(vec(gmat),          psi_low; hint=hint)
 
     # singfac[j] = 1 / (m_j − n_j · q) for each mode j
     q0      = profiles.q_spline(psi_low; hint=hint)
@@ -1308,7 +1308,9 @@ caller's interval-search accelerators, so concurrent callers just pass their own
     q = equil.profiles.q_spline(psieval; hint=spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
 
+    kin = ffit.kinetic
     if kinetic
+        kin === nothing && error("el_derivatives! called with kinetic=true but ffit carries no kinetic matrices")
         # ---- Kinetic path with pre-computed FKG matrices ----
         # Use the caller's hint, not ffit._hint (shared, racy in the parallel BVP)
         # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
@@ -1322,15 +1324,15 @@ caller's interval-search accelerators, so concurrent callers just pass their own
         r3mat_kin = similar!(pool, fmat_lower)
         gaat_kin = similar!(pool, fmat_lower)
 
-        ffit.f0mats(vec(f0mat), psieval; hint=ffit_hint)
-        ffit.pmats(vec(pmat_kin), psieval; hint=ffit_hint)
-        ffit.paats(vec(paat_kin), psieval; hint=ffit_hint)
-        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit_hint)
-        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit_hint)
-        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit_hint)
-        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit_hint)
-        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit_hint)
-        ffit.gaats(vec(gaat_kin), psieval; hint=ffit_hint)
+        kin.f0mats(vec(f0mat), psieval; hint=ffit_hint)
+        kin.pmats(vec(pmat_kin), psieval; hint=ffit_hint)
+        kin.paats(vec(paat_kin), psieval; hint=ffit_hint)
+        kin.kkmats(vec(kkmat_kin), psieval; hint=ffit_hint)
+        kin.kkaats(vec(kkaat_kin), psieval; hint=ffit_hint)
+        kin.r1mats(vec(r1mat_kin), psieval; hint=ffit_hint)
+        kin.r2mats(vec(r2mat_kin), psieval; hint=ffit_hint)
+        kin.r3mats(vec(r3mat_kin), psieval; hint=ffit_hint)
+        kin.gaats(vec(gaat_kin), psieval; hint=ffit_hint)
 
         # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11):
         # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1
@@ -1374,9 +1376,9 @@ caller's interval-search accelerators, so concurrent callers just pass their own
     else
         # ---- Ideal path ----
         # Evaluate matrix splines at the current psi (hint is the caller's, never shared)
-        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit_hint)
-        ffit.kmats(vec(kmat), psieval; hint=ffit_hint)
-        ffit.gmats(vec(gmat), psieval; hint=ffit_hint)
+        ffit.ideal.fmats_lower(vec(fmat_lower), psieval; hint=ffit_hint)
+        ffit.ideal.kmats(vec(kmat), psieval; hint=ffit_hint)
+        ffit.ideal.gmats(vec(gmat), psieval; hint=ffit_hint)
 
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
@@ -1416,9 +1418,12 @@ non-Hermitian contributions and needs an LU.
     cmat = similar!(pool, amat)
     tmp_mat = similar!(pool, amat)
 
-    ffit.amats(vec(amat), psieval; hint=hint)
-    ffit.bmats(vec(bmat), psieval; hint=hint)
-    ffit.cmats(vec(cmat), psieval; hint=hint)
+    # A/B/C of the active model: the kinetic A is non-Hermitian, hence the factorization split below
+    mats = kinetic ? ffit.kinetic : ffit.ideal
+    mats === nothing && error("compute_node_xi_s! called with kinetic=true but ffit carries no kinetic matrices")
+    mats.amats(vec(amat), psieval; hint=hint)
+    mats.bmats(vec(bmat), psieval; hint=hint)
+    mats.cmats(vec(cmat), psieval; hint=hint)
 
     # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place
     if kinetic

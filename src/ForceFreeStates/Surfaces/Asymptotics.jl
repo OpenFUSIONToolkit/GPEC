@@ -202,26 +202,26 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 
     # Evaluate fmats_lower and derivatives, applying sig to odd derivatives.
     # Fortran sing_mmat multiplies fmats_f1 and fmats_f3 by sig in the Taylor products.
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.ideal.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.ideal.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    ffit.ideal.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    ffit.ideal.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
     @views f_lower_interp[:, :, 2] .*= sig  # 1st derivative
     @views f_lower_interp[:, :, 4] .*= sig  # 3rd derivative
 
     # Evaluate gmats and derivatives, applying sig to odd derivatives
-    ffit.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.ideal.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.ideal.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    ffit.ideal.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    ffit.ideal.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
     @views g_interp[:, :, 2] .*= sig
     @views g_interp[:, :, 4] .*= sig
 
     # Evaluate kmats and derivatives, applying sig to odd derivatives
-    ffit.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.ideal.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.ideal.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    ffit.ideal.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    ffit.ideal.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
     @views k_interp[:, :, 2] .*= sig
     @views k_interp[:, :, 4] .*= sig
 
@@ -813,7 +813,7 @@ Apply the Euler-Lagrange residual operator `L u = -(F u' + K u)' + (K† u' + G 
 solutions. Port of Fortran `sing_matvec` (sing.f). Returns `matvec`, shape
 `(numpert_total, size(ua,2))`.
 
-Uses the reduced (Schur-complemented) `ffit.kmats` (= K̄) and `ffit.gmats` (= Ḡ) directly, with the
+Uses the reduced (Schur-complemented) `ffit.ideal.kmats` (= K̄) and `ffit.ideal.gmats` (= Ḡ) directly, with the
 **direct** singular factor `singfac = m - n q` applied to `u' = dua[:,:,1]`. The second component
 `ua[:,:,2]` is the canonical momentum `F u' + K u`, so `-dua[:,:,2] = -(F u' + K u)'`.
 
@@ -833,8 +833,8 @@ function sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Floa
 
     kmat = Matrix{ComplexF64}(undef, N, N)
     gmat = Matrix{ComplexF64}(undef, N, N)
-    ffit.kmats(vec(kmat), psi; hint=ffit._hint)
-    ffit.gmats(vec(gmat), psi; hint=ffit._hint)
+    ffit.ideal.kmats(vec(kmat), psi; hint=ffit._hint)
+    ffit.ideal.gmats(vec(gmat), psi; hint=ffit._hint)
     kdag = adjoint(kmat)
 
     matvec = zeros(ComplexF64, N, msol)
@@ -872,8 +872,8 @@ function sing_matvec!(matvec::AbstractMatrix{ComplexF64}, kmat::Matrix{ComplexF6
         sfvec[idx] = mm - q * nn
     end
 
-    ffit.kmats(vec(kmat), psi; hint=ffit._hint)
-    ffit.gmats(vec(gmat), psi; hint=ffit._hint)
+    ffit.ideal.kmats(vec(kmat), psi; hint=ffit._hint)
+    ffit.ideal.gmats(vec(gmat), psi; hint=ffit._hint)
     kdag = adjoint(kmat)
 
     for isol in 1:msol

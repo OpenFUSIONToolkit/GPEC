@@ -167,9 +167,9 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     tmp  = similar!(pool, fmat_lower)  # scratch
 
     # Evaluate F̄ (Cholesky factor), K̄, Ḡ splines at current ψ
-    ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
-    ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
-    ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
+    ffit.ideal.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
+    ffit.ideal.kmats(vec(kmat), psieval; hint=ffit._hint)
+    ffit.ideal.gmats(vec(gmat), psieval; hint=ffit._hint)
 
     # w = Q - K̄·S:  w[i,j] = singfac_vec[i]·δ_ij - (K̄·S)[i,j]
     # Q is DIAGONAL (singfac_vec[i] only on i==j), so we cannot broadcast singfac_vec

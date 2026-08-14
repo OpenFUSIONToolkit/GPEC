@@ -36,7 +36,7 @@ end
     power_norm_matrix!(Nmat, jmat, mpert, npert, dV_dpsi) -> Nmat
 
 Assemble the power-normalization (surface-norm) matrix N from the conjugate-symmetric Jacobian
-Fourier band `jmat` (length 2·mpert−1, evaluated from the `ffit.jmats` spline), such that
+Fourier band `jmat` (length 2·mpert−1, evaluated from the `ffit.ideal.jmats` spline), such that
 
     ξ†·N·ξ = ∮ J |ξ(θ)|² dθ / (dV/dψ) = ⟨|ξ|²⟩
 
@@ -140,7 +140,7 @@ calculations and data dumping.
     # The Jacobian band is evaluated at psilim (same surface as W), not at the last grid surface.
     Nmat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     jmat_edge = zeros!(pool, ComplexF64, 2 * mpert - 1)
-    ffit.jmats(jmat_edge, psilim; hint=ffit._hint)
+    ffit.ideal.jmats(jmat_edge, psilim; hint=ffit._hint)
     power_norm_matrix!(Nmat, jmat_edge, mpert, npert, dV_dpsi)
 
     # Least stable eigenvalue of the vacuum matrix alone, power-normalized via the pencil
@@ -290,7 +290,7 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
 
     # Local power-normalization matrix N(ψ) from the Jacobian Fourier band spline, so the
     # power quotient uses the same surface as W (see power_norm_matrix!)
-    ffit.jmats(jmat_local, odet.psifac; hint=ffit._hint)
+    ffit.ideal.jmats(jmat_local, odet.psifac; hint=ffit._hint)
     power_norm_matrix!(Nmat, jmat_local, intr.mpert, intr.npert, dV_dpsi)
 
     # Total energy matrix and generalized eigen-decomposition of the pencil (W, N) — the

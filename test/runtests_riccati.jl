@@ -181,9 +181,9 @@ end
             L = zeros(ComplexF64, N, N)
             Kmat = zeros(ComplexF64, N, N)
             Gmat = zeros(ComplexF64, N, N)
-            ffit.fmats_lower(vec(L), psi; hint=ffit._hint)
-            ffit.kmats(vec(Kmat), psi; hint=ffit._hint)
-            ffit.gmats(vec(Gmat), psi; hint=ffit._hint)
+            ffit.ideal.fmats_lower(vec(L), psi; hint=ffit._hint)
+            ffit.ideal.kmats(vec(Kmat), psi; hint=ffit._hint)
+            ffit.ideal.gmats(vec(Gmat), psi; hint=ffit._hint)
             q = equil.profiles.q_spline(psi)
             singfac = vec(1.0 ./ ((intr_ric.mlow:intr_ric.mhigh) .-
                                   q .* (intr_ric.nlow:intr_ric.nhigh)'))

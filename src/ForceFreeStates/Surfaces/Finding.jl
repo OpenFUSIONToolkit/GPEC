@@ -195,7 +195,7 @@ function sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
-    evaluate_fbar_condition(psi, ffit, equil, intr; hint=Ref(1))
+    evaluate_fbar_condition(psi, kin, equil, intr; hint=Ref(1))
 
 Evaluate the condition number of the kinetic F̄ matrix at a given ψ. Uses cond(F̄)
 as a scale-invariant measure of near-singularity. Mirrors the intent of Fortran
@@ -205,7 +205,7 @@ F̄(i,j) = q₁·f0(i,j)·q₂ - q₁·P(i,j) - conj(P†(j,i))·q₂ + R1(i,j)
 
 where q₁ = m₁ - n·q(ψ), q₂ = m₂ - n·q(ψ) are the direct singularity factors.
 """
-function evaluate_fbar_condition(psi::Float64, ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
+function evaluate_fbar_condition(psi::Float64, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
     np = intr.numpert_total
 
     # Evaluate q(ψ) and compute singfac = m - n*q
@@ -217,10 +217,10 @@ function evaluate_fbar_condition(psi::Float64, ffit::FourFitVars, equil::Equilib
     p_vec = zeros(ComplexF64, np * np)
     pa_vec = zeros(ComplexF64, np * np)
     r1_vec = zeros(ComplexF64, np * np)
-    ffit.f0mats(f0_vec, psi; hint=hint)
-    ffit.pmats(p_vec, psi; hint=hint)
-    ffit.paats(pa_vec, psi; hint=hint)
-    ffit.r1mats(r1_vec, psi; hint=hint)
+    kin.f0mats(f0_vec, psi; hint=hint)
+    kin.pmats(p_vec, psi; hint=hint)
+    kin.paats(pa_vec, psi; hint=hint)
+    kin.r1mats(r1_vec, psi; hint=hint)
     f0mat = reshape(f0_vec, np, np)
     pmat = reshape(p_vec, np, np)
     paat = reshape(pa_vec, np, np)
@@ -258,6 +258,8 @@ Algorithm:
  4. Filter by threshold and resonance condition
 """
 function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; ngrid::Int=2000, cond_threshold::Float64=1e8)
+    kin = ffit.kinetic
+    kin === nothing && error("find_kinetic_singular_surfaces! requires a kinetic fit; call make_kinetic_matrix first")
     psilow = equil.profiles.xs[1]
     psihigh = intr.psilim
 
@@ -267,7 +269,7 @@ function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.P
     hint = Ref(1)
     for i in 1:ngrid
         try
-            cond_vals[i] = evaluate_fbar_condition(psi_grid[i], ffit, equil, intr; hint=hint)
+            cond_vals[i] = evaluate_fbar_condition(psi_grid[i], kin, equil, intr; hint=hint)
         catch
             cond_vals[i] = Inf  # singular matrix — definitely a kinsing surface
         end
@@ -294,7 +296,7 @@ function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.P
         psi_hi = psi_grid[min(idx + 1, ngrid)]
 
         # Golden-section search to maximize cond (minimize -cond)
-        psi_refined = _golden_section_max(psi_lo, psi_hi, psi -> evaluate_fbar_condition(psi, ffit, equil, intr))
+        psi_refined = _golden_section_max(psi_lo, psi_hi, psi -> evaluate_fbar_condition(psi, kin, equil, intr))
 
         # Evaluate q and q' at refined location
         hint_ref = Ref(1)

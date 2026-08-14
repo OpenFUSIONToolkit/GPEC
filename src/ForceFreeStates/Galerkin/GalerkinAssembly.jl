@@ -63,7 +63,7 @@ end
 
 Evaluate the `mpert×mpert` matrices `F = Q F̄ Qᴴ`, `K = Q K̄`, `G = Ḡ` at flux `x` with safety factor
 `q`, where `Q = diag(singfac)` and `singfac = m - n q` (direct). Port of `gal_get_fkg` (gal.f).
-Uses the un-factored reduced `ffit.fmats_gal` (F̄), `ffit.kmats` (K̄), `ffit.gmats` (Ḡ). F/K/G are the
+Uses the un-factored reduced `ffit.ideal.fmats_gal` (F̄), `ffit.ideal.kmats` (K̄), `ffit.ideal.gmats` (Ḡ). F/K/G are the
 ideal-MHD Euler–Lagrange coefficient matrices of the outer-region weak form (Glasser 2016, PoP 23, 112506).
 """
 function gal_get_fkg(ffit::FourFitVars, intr::ForceFreeStatesInternal, x::Float64, q::Float64;
@@ -75,9 +75,9 @@ function gal_get_fkg(ffit::FourFitVars, intr::ForceFreeStatesInternal, x::Float6
     F = Fbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Fbuf
     K = Kbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Kbuf
     G = Gbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Gbuf
-    ffit.fmats_gal(vec(F), x; hint=ffit._hint)
-    ffit.kmats(vec(K), x; hint=ffit._hint)
-    ffit.gmats(vec(G), x; hint=ffit._hint)
+    ffit.ideal.fmats_gal(vec(F), x; hint=ffit._hint)
+    ffit.ideal.kmats(vec(K), x; hint=ffit._hint)
+    ffit.ideal.gmats(vec(G), x; hint=ffit._hint)
 
     # scale F̄→F=Q F̄ Qᴴ and K̄→K=Q K̄ in place (Q = diag(sf))
     @inbounds for j in 1:N, i in 1:N

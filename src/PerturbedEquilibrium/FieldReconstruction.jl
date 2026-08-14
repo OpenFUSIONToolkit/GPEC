@@ -364,6 +364,9 @@ function compute_clebsch_displacements(
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
 
+    # A/B/C of the active model, matching what the ODE integrated.
+    mats = ForceFreeStates.active_matrices(ffit)
+
     # Per-thread workspaces: matrix ops and spline hints are not safe to share across threads.
     # Size by maxthreadid() and index by threadid() under :static scheduling (GPEC convention).
     nt = Threads.maxthreadid()
@@ -397,17 +400,19 @@ function compute_clebsch_displacements(
 
         # Compute regularized xms = -A⁻¹(B·xmp1 + C·xsp) (matches Fortran gpeq_sol)
         # Evaluate stability matrices at this psi
-        ffit.amats(view(amat, :), psi_norm; hint=hint)
-        ffit.bmats(view(bmat, :), psi_norm; hint=hint)
-        ffit.cmats(view(cmat_buf, :), psi_norm; hint=hint)
+        mats.amats(view(amat, :), psi_norm; hint=hint)
+        mats.bmats(view(bmat, :), psi_norm; hint=hint)
+        mats.cmats(view(cmat_buf, :), psi_norm; hint=hint)
 
         # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
-        # amat is positive-definite by construction (Newcomb kinetic-energy form), so cholesky is
-        # safe. cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
-        # ffit.amats each surface), avoiding a fresh factorization allocation per surface.
+        # cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
+        # mats.amats each surface), avoiding a fresh factorization allocation per surface.
+        # NOTE: this assumes the ideal A (positive-definite Newcomb kinetic-energy form). The
+        # kinetic A is non-Hermitian and needs an LU, as compute_node_xi_s! does — see the
+        # `mats` binding above.
         amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
         xms_vec .*= -1                                     # xms = -A\(B*xmp1 + C*xsp)

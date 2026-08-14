@@ -161,7 +161,7 @@ end
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution via the
 ideal Euler-Lagrange relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) [Glasser 2016 eqs. 22-24],
 with u₁, u₂ Hermite-interpolated to `psi`. Only valid for ideal runs where
-`ffit.fmats_lower` and `kmats` generated the solution.
+`ffit.ideal.fmats_lower` and `kmats` generated the solution.
 
 The Hermite slopes need du₂ as well as du₁, and du₂ is not stored: both are evaluated here
 from the derivative kernel at the two bracketing nodes, which is where the handful of
@@ -206,8 +206,8 @@ function _el_solution_at(
     q_e = equil.profiles.q_spline(psi)
     singfac_inv = vec([1.0 / (m - q_e * n) for m in ffs.mlow:ffs.mhigh, n in ffs.nlow:ffs.nhigh])
     fmat_lower = Matrix{ComplexF64}(undef, npert, npert)
-    ffit.fmats_lower(vec(fmat_lower), psi; hint=hint)
-    ffit.kmats(vec(kmat), psi; hint=hint)
+    ffit.ideal.fmats_lower(vec(fmat_lower), psi; hint=hint)
+    ffit.ideal.kmats(vec(kmat), psi; hint=hint)
     du1_e = u2_e .* singfac_inv
     du1_e .-= kmat * u1_e
     ldiv!(LowerTriangular(fmat_lower), du1_e)
@@ -342,7 +342,7 @@ function compute_singular_coupling_metrics!(
     # @threads region.
     nstep = solution.step
     # ξ′ evaluation preference: the ideal EL relation, or the interpolated stored RHS for kinetic runs.
-    use_el = !ffit.kinetic_populated
+    use_el = !ForceFreeStates.is_kinetic(ffit)
     _blas_nthreads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
