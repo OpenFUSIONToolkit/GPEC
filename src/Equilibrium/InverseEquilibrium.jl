@@ -59,7 +59,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     mpsi = config.mpsi
     mtheta = config.mtheta
     psilow = config.psilow
-    psihigh = config.psihigh
+    psihigh = input.psihigh_resolved
     newq0 = config.newq0
 
     # c-----------------------------------------------------------------------
@@ -386,7 +386,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
 
     return PlasmaEquilibrium(
         input.config,
-        EquilibriumParameters(),
+        EquilibriumParameters(; psihigh_resolved=psihigh),
         profiles,
         geometry,
         rzphi_xs, rzphi_ys,

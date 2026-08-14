@@ -68,6 +68,31 @@
         @test all(>(0), B_nodes)
     end
 
+    @testset "Resolved psihigh" begin
+        # The config holds the user's request and is never written to; the value the
+        # equilibrium is actually formed on rides on params.psihigh_resolved.
+        for eq in (plasma_eq_efit, plasma_eq_arclength, plasma_eq_inversion)
+            @test eq.params.psihigh_resolved == eq.rzphi_xs[end]
+            @test eq.params.psihigh_resolved <= eq.config.psihigh
+        end
+        # 0.994 sits inside the closed-flux region, so nothing is clamped
+        @test plasma_eq_efit.params.psihigh_resolved == 0.994
+
+        # Requesting the separatrix itself must leave the request intact on the config
+        edge_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
+            eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
+            eq_type="efit",
+            jac_type="boozer",
+            grid_type="ldp",
+            psilow=0.01,
+            psihigh=1.0
+        )
+        plasma_eq_edge = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(edge_config)
+        @test edge_config.psihigh == 1.0
+        @test plasma_eq_edge.params.psihigh_resolved <= 1.0
+        @test plasma_eq_edge.params.psihigh_resolved == plasma_eq_edge.rzphi_xs[end]
+    end
+
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 10% to allow for method-specific discretisation differences.

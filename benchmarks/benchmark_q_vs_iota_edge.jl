@@ -20,9 +20,9 @@ const EXAMPLE_DIR = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_examp
 
 # Dense ldp reference equilibrium: treat its q(ψ) as ground truth
 function reference_q()
-    _, eq_config, additional_input = GPE.build_inputs_from_toml(EXAMPLE_DIR)
-    eq_config.grid_type = "ldp"
-    eq_config.mpsi = 1024
+    inputs, _, additional_input = GPE.build_inputs_from_toml(EXAMPLE_DIR)
+    equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("grid_type" => "ldp", "mpsi" => 1024))
+    eq_config = GPE.Equilibrium.EquilibriumConfig(equil_dict, EXAMPLE_DIR)
     equil = GPE.Equilibrium.setup_equilibrium(eq_config, additional_input)
     return equil, eq_config
 end

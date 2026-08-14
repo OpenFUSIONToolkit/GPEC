@@ -267,9 +267,10 @@ function build_inputs_from_h5(args::Vector{String})
           "  output: $(abspath(joinpath(output_dir, output_name)))\n$_BANNER"
 
     _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
-    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], output_dir)
-    # Clear eq_filename: unused on replay, and a stale absolute path could mislead downstream code.
-    eq_config.eq_filename = ""
+    # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
+    # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
+    equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))
+    eq_config = Equilibrium.EquilibriumConfig(equil_dict, output_dir)
 
     # Analytic kinds regenerate from their TOML section; file-based kinds rebuild splines from
     # the stored ingest. A file-based run with no ingest can only come from a pre-ingest gpec.h5.

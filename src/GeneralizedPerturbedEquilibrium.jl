@@ -318,12 +318,11 @@ function main_from_inputs(
     sing_lim!(intr, ctrl, equil)
 
     # If truncating before psihigh, reform equilibrium if desired
-    if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
-        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.psihigh)."
+    if intr.psilim != equil.params.psihigh_resolved && ctrl.reform_eq_with_psilim
+        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.params.psihigh_resolved)."
         # JMH - Nik please put the logic we discussed here
         # something like ?
-        # equil.config.psihigh = intr.psilim
-        # equil = set_up_equilibrium(equil.config)
+        # re-form the equilibrium with its outer limit set to intr.psilim
     end
 
     # Compute local stability (if desired). `locstab` holds `D_I` from the ballooning

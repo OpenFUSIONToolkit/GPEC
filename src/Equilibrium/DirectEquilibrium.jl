@@ -474,7 +474,7 @@ robustness.
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
-    psihigh = equil_params.psihigh
+    psihigh = raw_profile.psihigh_resolved
 
     # Locate the magnetic axis and separatrix for the field-line integrations
     ro, zo, _, rs2 = direct_position!(raw_profile)
@@ -647,6 +647,7 @@ robustness.
 
     params = EquilibriumParameters()
     params.bt_sign = raw_profile.bt_sign
+    params.psihigh_resolved = psihigh
 
     return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
         rzphi_xs, rzphi_ys,
