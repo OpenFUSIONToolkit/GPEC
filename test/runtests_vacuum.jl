@@ -405,7 +405,6 @@
                 wall_settings = WallShapeSettings(shape="conformal", a=0.5)
                 wv, I_v, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
-                numpoints = inputs.mtheta * inputs.nzeta
                 num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                 @test size(wv) == (num_modes, num_modes)
                 @test all(iszero, I_v)
@@ -438,9 +437,7 @@
 
             @testset "in-place compute_vacuum_response! matches wrapper" begin
                 # The allocating wrapper is a thin caller of the in-place routine; verify the
-                # in-place entry populates caller-owned storage identically. Both a duck-typed
-                # NamedTuple and the real ForceFreeStates.VacuumData are exercised, so the
-                # struct is kept in sync with the documented field contract.
+                # in-place entry populates caller-owned duck-typed (NamedTuple) storage identically.
                 for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.5))
                     inputs = _make_inputs()
                     wv, I_v, pp, wp = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
@@ -477,6 +474,19 @@
             r_in, z_in, _ = extract_plasma_surface_at_psi(pe, 0.2)
             r_out, z_out, _ = extract_plasma_surface_at_psi(pe, 0.8)
             @test extent(r_out, z_out) > extent(r_in, z_in)   # minor radius grows outward in ψ
+        end
+
+        @testset "calc_surface_inductance" begin
+            # Same Solovev recipe as above; exercises the PerturbedEquilibrium helper end-to-end
+            eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", eq_filename="unused", jac_type="pest", grid_type="ldp", psilow=1e-4, psihigh=0.99999, mpsi=64, mtheta=128)
+            sol_config = Equilibrium.SolovevConfig(64, 64, 64, 1.6, 0.33, 1.0, 1.9, 1.0, 1.0, 1.0)
+            pe = Equilibrium.equilibrium_solver(Equilibrium.sol_run(eq_config, sol_config))
+
+            m_modes = -2:5
+            L = PerturbedEquilibrium.calc_surface_inductance(pe, 0.9, 64, m_modes, 1, WallShapeSettings(shape="nowall"))
+            @test size(L) == (length(m_modes), length(m_modes))
+            @test all(isfinite, L)
+            @test isapprox(L, L', rtol=1e-8)   # Hermitian inductance
         end
     end
 
@@ -637,7 +647,6 @@
             wall_settings = WallShapeSettings(shape="conformal", a=0.3)
             wv, I_v, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
-            numpoints = inputs.mtheta * inputs.nzeta
             num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
             @test size(I_v) == (num_modes, num_modes)
