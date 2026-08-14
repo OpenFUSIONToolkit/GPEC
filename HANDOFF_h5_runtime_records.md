@@ -87,6 +87,12 @@ This was chased to ground and is now **closed**:
 So: compare worktree-to-worktree (two commit refs), not commit-vs-`local`, whenever the numbers
 need to be trusted at last-bit precision.
 
+This is a known class of artifact — see `docs/development/regression-harness.md`, "Making source
+code the only variable": an unpinned `Manifest.toml` lets a worktree resolve different package
+versions, and the adaptive ODE step controller amplifies machine-epsilon library differences into
+apparent regressions. The harness merged in from upstream now pins the working tree's Manifest into
+every worktree; the misleading run above was made with the pre-merge harness, which predates that.
+
 ## Outstanding work
 
 1. **Optional:** a real two-branch benchmark run to see the per-stage table print end-to-end. Only a
