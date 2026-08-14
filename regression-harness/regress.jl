@@ -91,6 +91,9 @@ GPEC Regression Harness
 
 Runs GPEC test cases across multiple git commits and compares numerical outputs
 to detect unintended changes. Results are cached in a local SQLite database.
+All cases in a single invocation share one git worktree (and one instantiate/
+precompile) per commit, so batching cases into one command is substantially
+faster than running them in separate invocations.
 
 Usage:
     julia --project=regression-harness regression-harness/regress.jl [OPTIONS]
@@ -214,20 +217,21 @@ function main(args=ARGS)
         n_failed = 0
         n_changed = 0
 
-        # Run each case at each commit
+        # Run every case against each ref, grouped by ref so cases sharing a commit share
+        # one worktree (and one Pkg.instantiate/precompile) instead of paying for it per case.
+        for ref in resolved_refs
+            run_cases_at_ref(db, ref, case_specs, REPO_ROOT;
+                force=opts.force, verbose=opts.verbose,
+                no_instantiate=opts.no_instantiate,
+                pin_manifest=pin_manifest, expected_key=expected_key)
+        end
+
+        # Report, grouped by case as before
         for case_spec in case_specs
             println("\n", "="^64)
             println("Case: $(case_spec.name) — $(case_spec.description)")
             println("="^64)
 
-            for ref in resolved_refs
-                run_commit(db, ref.commit_hash, ref.name, case_spec, REPO_ROOT;
-                           force=opts.force, verbose=opts.verbose,
-                           no_instantiate=opts.no_instantiate,
-                           pin_manifest=pin_manifest, expected_key=expected_key)
-            end
-
-            # Report
             summary = if length(resolved_refs) == 2
                 report_two_ref_comparison(db, case_spec,
                     resolved_refs[1], resolved_refs[2])
