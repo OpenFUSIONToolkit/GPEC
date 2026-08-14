@@ -69,5 +69,5 @@ repos:
       - id: toml-no-deprecated-keys
         name: 'TOML conventions: no deprecated config keys'
         language: pygrep
-        entry: '^(mer_flag|force_wv_symmetry|ode_flag|cyl_flag|mat_flag|power_bp|power_b|power_r|power_rc|nstep|diagnose_ca|use_parallel|use_riccati|parallel_threads|psiedge|newq0|use_galgrid|reg_spot|dc_type|dr_val|dgeo_val)\s*='
+        entry: '^(mer_flag|force_wv_symmetry|ode_flag|cyl_flag|mat_flag|power_bp|power_b|power_r|power_rc|nstep|diagnose_ca|use_parallel|use_riccati|parallel_threads|psiedge|newq0|use_galgrid|reg_spot|dc_type|dr_val|dgeo_val|xnom|ynom|znom)\s*='
         files: ^(examples/.*\.toml|test/test_data/.*\.toml)$

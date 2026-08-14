@@ -69,7 +69,7 @@ Shifts/tilts apply to every source (the analytic geometry is built first, then t
   - `currents`: current [A] per conductor `[ncoil]`; shorter arrays pad with zeros
   - `shiftx`, `shifty`, `shiftz`: per-conductor translation [m] `[ncoil]`
   - `tiltx`, `tilty`, `tiltz`: per-conductor tilt in degrees (or meters if `tilt_in_meters`)
-  - `xnom`, `ynom`, `znom`: explicit rotation center [m]; defaults to arc-length-weighted center of mass
+  - `rotation_center_x`, `rotation_center_y`, `rotation_center_z`: explicit rotation center [m]; defaults to arc-length-weighted center of mass
   - `n_tilt`: toroidal mode number for tilt/shift modulation; -1 means inherit run's n
   - `tilt_in_meters`: interpret tilt as displacement [m] instead of angle [degrees]
 
@@ -106,9 +106,9 @@ Base.@kwdef struct CoilSetConfig
     tiltx::Vector{Float64} = Float64[]
     tilty::Vector{Float64} = Float64[]
     tiltz::Vector{Float64} = Float64[]
-    xnom::Vector{Float64} = Float64[]
-    ynom::Vector{Float64} = Float64[]
-    znom::Vector{Float64} = Float64[]
+    rotation_center_x::Vector{Float64} = Float64[]
+    rotation_center_y::Vector{Float64} = Float64[]
+    rotation_center_z::Vector{Float64} = Float64[]
     n_tilt::Int = -1
     tilt_in_meters::Bool = false
 
@@ -180,6 +180,13 @@ function CoilConfig(ft_ctrl::ForcingTermsControl)
 end
 
 function _parse_coil_set_config(d::Dict{String,Any})
+    # Deprecated key spellings, accepted with a warning until removal after v2.0.0.
+    for (old, new) in ("xnom" => "rotation_center_x", "ynom" => "rotation_center_y", "znom" => "rotation_center_z")
+        haskey(d, old) || continue
+        @warn "`$old` in [[ForcingTerms.coil_set]] was renamed to `$new`; the old key is deprecated and will be removed after v2.0.0."
+        haskey(d, new) || (d[new] = d[old])
+        delete!(d, old)
+    end
     fvec(key) = Float64.(get(d, key, Float64[]))
     # rz_corners arrives as a Vector of [R, Z] pairs (TOML array of arrays)
     corners = [Float64.(c) for c in get(d, "rz_corners", Vector{Float64}[])]
@@ -195,9 +202,9 @@ function _parse_coil_set_config(d::Dict{String,Any})
         tiltx=fvec("tiltx"),
         tilty=fvec("tilty"),
         tiltz=fvec("tiltz"),
-        xnom=fvec("xnom"),
-        ynom=fvec("ynom"),
-        znom=fvec("znom"),
+        rotation_center_x=fvec("rotation_center_x"),
+        rotation_center_y=fvec("rotation_center_y"),
+        rotation_center_z=fvec("rotation_center_z"),
         n_tilt=get(d, "n_tilt", -1),
         tilt_in_meters=get(d, "tilt_in_meters", false),
         radius=Float64(get(d, "radius", 0.0)),
@@ -777,7 +784,7 @@ Apply per-conductor shifts and tilts to a coil set, returning a modified copy.
 
 Replicates the Fortran `coil_read` shift/tilt logic (coil.F lines 240–340):
 
-  - Tilts are rotations around the arc-length-weighted center of mass (unless `xnom/ynom/znom` specified)
+  - Tilts are rotations around the arc-length-weighted center of mass (unless `rotation_center_x/rotation_center_y/rotation_center_z` specified)
   - `n_tilt` controls the toroidal periodicity of tilt/shift modulation
   - n_tilt = 0: rigid shift only (no tilts applied)
   - n_tilt ≥ 1: n-fold modulated perturbations
@@ -797,9 +804,9 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
     tilty_cfg = _pad(cfg.tilty, ncoil)
     tiltz_cfg = _pad(cfg.tiltz, ncoil)
 
-    xnom_cfg = _pad(isempty(cfg.xnom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.xnom, ncoil)
-    ynom_cfg = _pad(isempty(cfg.ynom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.ynom, ncoil)
-    znom_cfg = _pad(isempty(cfg.znom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.znom, ncoil)
+    rotation_center_x_cfg = _pad(isempty(cfg.rotation_center_x) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_x, ncoil)
+    rotation_center_y_cfg = _pad(isempty(cfg.rotation_center_y) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_y, ncoil)
+    rotation_center_z_cfg = _pad(isempty(cfg.rotation_center_z) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_z, ncoil)
 
     # Check if n_tilt = 0 suppresses tilts (Fortran: "no n=0 component")
     apply_tilt = n_tilt != 0
@@ -827,9 +834,9 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
                     view(cs.x, j, k, :), view(cs.y, j, k, :), view(cs.z, j, k, :)
                 )
                 # Use user-specified center if provided (|nom| < _NOM_THRESHOLD, matching Fortran)
-                x0 = abs(xnom_cfg[j]) < _NOM_THRESHOLD ? xnom_cfg[j] : cx
-                y0 = abs(ynom_cfg[j]) < _NOM_THRESHOLD ? ynom_cfg[j] : cy
-                z0 = abs(znom_cfg[j]) < _NOM_THRESHOLD ? znom_cfg[j] : cz
+                x0 = abs(rotation_center_x_cfg[j]) < _NOM_THRESHOLD ? rotation_center_x_cfg[j] : cx
+                y0 = abs(rotation_center_y_cfg[j]) < _NOM_THRESHOLD ? rotation_center_y_cfg[j] : cy
+                z0 = abs(rotation_center_z_cfg[j]) < _NOM_THRESHOLD ? rotation_center_z_cfg[j] : cz
                 (x0, y0, z0)
             end
 

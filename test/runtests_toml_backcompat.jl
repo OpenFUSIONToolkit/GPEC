@@ -11,8 +11,8 @@ using GeneralizedPerturbedEquilibrium.Runner: slayer_control_from_toml
 
 const GPE = GeneralizedPerturbedEquilibrium
 
-# Field-by-field struct equality (generic == is identity for mutable structs)
-fields_equal(a::T, b::T) where {T} = all(getfield(a, f) == getfield(b, f) for f in fieldnames(T))
+# Field-by-field struct equality (generic == is identity for mutable structs; isequal so NaN sentinels compare equal)
+fields_equal(a::T, b::T) where {T} = all(isequal(getfield(a, f), getfield(b, f)) for f in fieldnames(T))
 
 # Run f while discarding its log output (deprecation warnings are asserted separately)
 quietly(f) = with_logger(f, NullLogger())
@@ -109,6 +109,19 @@ quietly(f) = with_logger(f, NullLogger())
         @test fields_equal(ctrl_old, ctrl_new)
         # The rename warnings actually fire
         @test_logs (:warn, r"`dc_type` in \[SLAYER\] was renamed") match_mode = :any slayer_control_from_toml(Dict{String,Any}("dc_type" => "lar"))
+    end
+
+    @testset "old coil_set keys build an identical CoilSetConfig" begin
+        old = Dict{String,Any}("name" => "c79", "xnom" => [1.0], "ynom" => [2.0], "znom" => [3.0])
+        new = Dict{String,Any}("name" => "c79", "rotation_center_x" => [1.0],
+            "rotation_center_y" => [2.0], "rotation_center_z" => [3.0])
+        cfg_old = quietly() do
+            GPE.ForcingTerms._parse_coil_set_config(old)
+        end
+        cfg_new = GPE.ForcingTerms._parse_coil_set_config(new)
+        @test cfg_old.rotation_center_x == [1.0]
+        @test fields_equal(cfg_old, cfg_new)
+        @test_logs (:warn, r"`xnom` in \[\[ForcingTerms.coil_set\]\] was renamed") match_mode = :any GPE.ForcingTerms._parse_coil_set_config(Dict{String,Any}("xnom" => [1.0]))
     end
 
     @testset "build_inputs_from_toml applies the Equilibrium renames on a real deck" begin
