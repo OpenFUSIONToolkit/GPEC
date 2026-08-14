@@ -104,6 +104,31 @@ using HDF5
         rm(h5)
     end
 
+    @testset "write_kinetic_h5 species-density roundtrip" begin
+        psi = collect(0.0:0.1:1.0)
+        mkprof(a) = a .* (1 .- 0.5 .* psi)
+        data = EQ.KineticProfileData(; psi=psi, n_i=mkprof(1.0e20), n_e=mkprof(1.1e20),
+            T_i=mkprof(2000.0), T_e=mkprof(2500.0), omega_E=mkprof(1.0e4),
+            species_densities=Dict("n_D" => mkprof(0.6e20), "n_T" => mkprof(0.4e20)),
+            provenance="roundtrip test")
+        h5 = tempname() * ".h5"
+        EQ.write_kinetic_h5(h5, data)
+        back = EQ.read_kinetic_file(h5)
+        @test back.species_densities !== nothing
+        @test sort(collect(keys(back.species_densities))) == ["n_D", "n_T"]
+        @test back.species_densities["n_D"] ≈ data.species_densities["n_D"]
+        @test back.species_densities["n_T"] ≈ data.species_densities["n_T"]
+        # The written file feeds the explicit-density multi-ion input directly.
+        sp = EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
+            zimp=6, mimp=12)
+        @test count(s -> !s.electron && s.z == 1, sp) == 2
+        # Non-`n_*` species names are rejected at write time (they would not round-trip).
+        bad = EQ.KineticProfileData(; psi=psi, n_e=mkprof(1.1e20),
+            species_densities=Dict("deuterium" => mkprof(0.6e20)))
+        @test_throws ErrorException EQ.write_kinetic_h5(tempname() * ".h5", bad)
+        rm(h5)
+    end
+
     @testset "input-validation guards" begin
         psi = collect(0.0:0.05:1.0)
         Ni = @. 1.0e20 * (1 - 0.5psi)

@@ -122,8 +122,8 @@ function _read_kinetic_ascii(path::AbstractString)
 end
 
 """
-Read the GPEC HDF5 kinetic schema. Only `psi` is required; other datasets are
-optional and surfaced as-is.
+Read the GPEC HDF5 kinetic schema. Only `psi` is required; other standard datasets are
+optional and surfaced as-is. Non-standard `n_*` datasets become named per-species densities.
 """
 function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
     h5open(path, "r") do f
@@ -133,12 +133,12 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
         prov = ""
         ats = attributes(g)
         haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
-        # Any dataset outside the standard schema is treated as a named per-species density
-        # profile (e.g. "n_D", "n_T") for explicit multi-ion input.
+        # Non-standard datasets named `n_*` (e.g. "n_D", "n_T") are named per-species density
+        # profiles for explicit multi-ion input; other names are reserved for future schema fields.
         standard = ("psi", "n_i", "n_e", "T_i", "T_e", "omega_E", "omega_tor", "chi_e", "chi_phi")
         extras = Dict{String,Vector{Float64}}()
         for k in keys(g)
-            k in standard && continue
+            (k in standard || !startswith(k, "n_")) && continue
             v = read(g[k])
             v isa AbstractArray && (extras[k] = Float64.(vec(v)))
         end
@@ -155,7 +155,8 @@ end
 
 Write a `KineticProfileData` to the GPEC HDF5 kinetic schema. Each present field
 is written as a dataset with a `units` attribute; absent (`nothing`) fields are
-skipped. The group carries `schema_version` and `provenance` attributes.
+skipped. Named per-species densities (`species_densities`, `n_*` datasets) round-trip
+with `read_kinetic_file`. The group carries `schema_version` and `provenance` attributes.
 """
 function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
     group::AbstractString="/", schema_version::AbstractString="1.0",
@@ -176,6 +177,15 @@ function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
         put("omega_tor", data.omega_tor)
         put("chi_e", data.chi_e)
         put("chi_phi", data.chi_phi)
+        # Named per-species densities (multi-ion input); dataset names must be `n_*` to round-trip.
+        if data.species_densities !== nothing
+            for (name, v) in data.species_densities
+                startswith(name, "n_") ||
+                    error("species density dataset `$name` must be named `n_*` to be readable as a per-species profile")
+                g[name] = collect(Float64, v)
+                attributes(g[name])["units"] = "m^-3"
+            end
+        end
         attributes(g)["schema_version"] = schema_version
         attributes(g)["provenance"] = provenance
     end
