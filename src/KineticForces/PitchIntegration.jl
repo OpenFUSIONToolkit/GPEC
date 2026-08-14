@@ -96,17 +96,13 @@ function integrate_pitch_gar_quadgk(
     # Split domain at trapped/passing boundary so Gauss-Kronrod resolves
     # the kink in leff = ell + n*q (circulating) → ell (trapped).
     bobmax_clip = clamp(bobmax, lambda_min, lambda_max)
-    segments = if lambda_min < bobmax_clip < lambda_max
-        [lambda_min, bobmax_clip, lambda_max]
-    else
-        [lambda_min, lambda_max]
-    end
-
-    # In-place quadgk! buffer; copy the result out so the returned vector is
-    # owned by the caller.
     buf = zeros(ComplexF64, nqty)
     kernel! = (out, λ) -> _pitch_gar_kernel_quadgk!(out, λ, params)
-    I, _ = quadgk!(kernel!, buf, segments...; atol=pitch_atol, rtol=pitch_rtol)
+    I, _ = if lambda_min < bobmax_clip < lambda_max
+        quadgk!(kernel!, buf, lambda_min, bobmax_clip, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    else
+        quadgk!(kernel!, buf, lambda_min, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    end
     return copy(I)
 end
 
@@ -195,15 +191,13 @@ function integrate_pitch_gar_quadgk_wt(
     lambda_max = last(fbnce.cache.x)
 
     bobmax_clip = clamp(bobmax, lambda_min, lambda_max)
-    segments = if lambda_min < bobmax_clip < lambda_max
-        (lambda_min, bobmax_clip, lambda_max)
-    else
-        (lambda_min, lambda_max)
-    end
-
     buf = zeros(ComplexF64, 2 * nqty)
     kernel! = (out, λ) -> _pitch_gar_kernel_quadgk_wt!(out, λ, params)
-    I, _ = quadgk!(kernel!, buf, segments...; atol=pitch_atol, rtol=pitch_rtol)
+    I, _ = if lambda_min < bobmax_clip < lambda_max
+        quadgk!(kernel!, buf, lambda_min, bobmax_clip, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    else
+        quadgk!(kernel!, buf, lambda_min, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    end
     return copy(I)
 end
 
