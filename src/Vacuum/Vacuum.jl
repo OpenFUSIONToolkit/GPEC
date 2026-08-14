@@ -123,8 +123,9 @@ Green's functions are internal scratch only.
             # They are flipped because VACUUM builds the operators in its CW-θ frame while GPEC
             # uses CCW-θ, flipping the outward-normal sign.
             I_v_block = @view vac_data.I_v[block_idx, block_idx]
-            @views g_sum = grre[1:num_points_surf, :] .- grri[1:num_points_surf, :]
-            mul!(I_v_block, ft.basis, g_sum)
+            g_diff = @view grri[1:num_points_surf, :]
+            g_diff .= @view(grre[1:num_points_surf, :]) .- g_diff
+            mul!(I_v_block, ft.basis, g_diff)
             conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
             I_v_block ./= num_points_surf
         else
