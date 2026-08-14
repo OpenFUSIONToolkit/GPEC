@@ -25,7 +25,7 @@ using HDF5
             # not numeric regression — the mode-converged physical value is pinned in the
             # regression harness (examples/Solovev_kinetic_calculated_example). Assert only
             # nerfed-grid-robust facts: finite and positive (Solovev is stable).
-            et = read(h5["FreeBoundaryStability/eigenmode_energies"])
+            et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
             @test real(et[1]) > 0
         end
@@ -43,7 +43,7 @@ using HDF5
             # harness on the mode-converged deck, not here — et[1] is a near-marginal,
             # ill-conditioned, FP-reassociation-sensitive quantity on this grid (sign not even
             # robust across platforms), so no value is pinned.
-            et = read(h5["FreeBoundaryStability/eigenmode_energies"])
+            et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
@@ -55,7 +55,7 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex5])
         h5open(joinpath(ex5, "gpec.h5"), "r") do h5
-            et = read(h5["FreeBoundaryStability/eigenmode_energies"])
+            et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             # Smoke test (nerfed mpsi=16, delta_m=0 deck): exercises the full self-consistent
             # KF→FFS kinetic-MHD path end-to-end. NO numeric value is pinned here — the prior
             # imag(et[1]) ≈ -0.711 rtol=0.08 pin was platform-fragile (failed on macOS aarch64
@@ -78,7 +78,7 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex6])
         h5open(joinpath(ex6, "gpec.h5"), "r") do h5
-            et = read(h5["FreeBoundaryStability/eigenmode_energies"])
+            et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             # Smoke test (nerfed mpsi=16, delta_m=0 deck): exercises the collisionless
             # (nutype="zero") real-x-space energy-integral path end-to-end — the #281 fix —
             # without faulting/NaN (the bug this guards against). The precise collisionless

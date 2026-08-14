@@ -1676,7 +1676,7 @@ function parallel_eulerlagrange_integration(
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
     transform_u!(odet, intr)  # no-op when ifix=0 (no Gaussian reduction)
 
-    # Replace BVP `odet` with a dense serial-EL pass so HDF5 `integration/xi_*` carries
+    # Replace BVP `odet` with a dense serial-EL pass so HDF5 `ForwardIntegration/xi_*` carries
     # valid DCON ξ in axis basis for PerturbedEquilibrium. Skipped when force_termination=true.
     if ctrl.populate_dense_xi && !ctrl.force_termination
         odet = _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr)
@@ -1951,7 +1951,7 @@ function _populate_dense_xi_via_serial_el!(
     )
 
     if ctrl.verbose
-        @info "   S → ξ: serial EL dense pass for HDF5 integration/xi_*"
+        @info "   S → ξ: serial EL dense pass for HDF5 ForceFreeStates/Solutions/ForwardIntegration/xi_*"
     end
 
     # Run the serial branch but suppress logging

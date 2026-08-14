@@ -174,45 +174,40 @@
                 write_slayer_hdf5!(f, r)
             end
             h5open(path, "r") do f
-                g = f["slayer"]
+                g = f["Tearing"]
                 @test haskey(g, "enabled") && read(g["enabled"]) == 1
-                @test haskey(g, "settings")
-                @test haskey(g, "per_surface")
-                @test haskey(g, "roots")
-                @test haskey(g, "diagnostics")
-                @test haskey(g, "scan")
-
-                # Settings round-trip
-                @test read(g["settings/inner_model"]) == "slayer_fitzpatrick"
-                @test read(g["settings/scan_mode"]) == "brute_force"
-                @test read(g["settings/coupling_mode"]) == "coupled"
-                @test read(g["settings/nre"]) == 40
+                # Settings are not echoed — inputs live only under Input/ (the merged TOML).
+                @test !haskey(g, "Settings")
+                @test haskey(g, "PerSurface")
+                @test haskey(g, "Roots")
+                @test haskey(g, "Diagnostics")
+                @test haskey(g, "Scan")
 
                 # Per-surface arrays have the right length
-                @test length(read(g["per_surface/ising"])) == 2
-                @test read(g["per_surface/ising"]) == [1, 2]
-                @test read(g["per_surface/lu"])[1] ≈ 1.0e7
-                @test read(g["per_surface/lu"])[2] ≈ 2.0e7
+                @test length(read(g["PerSurface/ising"])) == 2
+                @test read(g["PerSurface/ising"]) == [1, 2]
+                @test read(g["PerSurface/lu"])[1] ≈ 1.0e7
+                @test read(g["PerSurface/lu"])[2] ≈ 2.0e7
 
                 # Roots arrays
-                @test length(read(g["roots/Q_root_real"])) == 1    # coupled
-                @test length(read(g["roots/omega_Hz"])) == 1
+                @test length(read(g["Roots/Q_root_real"])) == 1    # coupled
+                @test length(read(g["Roots/omega_Hz"])) == 1
 
                 # Layer-thickness diagnostic: one entry per surface, with
                 # the physical thickness [m] and the drift scale.
-                @test length(read(g["layer_widths/delta_s_m"])) == 2
-                @test all(read(g["layer_widths/delta_s_m"]) .>= 0)
-                @test haskey(g["layer_widths"], "dels_db_real")
-                @test haskey(g["layer_widths"], "d_beta")
+                @test length(read(g["LayerWidths/delta_s_m"])) == 2
+                @test all(read(g["LayerWidths/delta_s_m"]) .>= 0)
+                @test haskey(g["LayerWidths"], "dels_db_real")
+                @test haskey(g["LayerWidths"], "d_beta")
 
                 # Ragged diagnostics use flat+offsets encoding
-                @test haskey(g["diagnostics/valid_roots"], "flat_real")
-                @test haskey(g["diagnostics/valid_roots"], "flat_imag")
-                @test haskey(g["diagnostics/valid_roots"], "offsets")
+                @test haskey(g["Diagnostics/ValidRoots"], "flat_real")
+                @test haskey(g["Diagnostics/ValidRoots"], "flat_imag")
+                @test haskey(g["Diagnostics/ValidRoots"], "offsets")
 
                 # Scan group present (store_scan=true)
-                @test haskey(g, "scan/surface_1")
-                @test read(g["scan/surface_1/kind"]) == "brute_force"
+                @test haskey(g, "Scan/Surface_1")
+                @test read(g["Scan/Surface_1/kind"]) == "brute_force"
             end
         end
     end
@@ -226,10 +221,10 @@
                 write_slayer_hdf5!(f, r)
             end
             h5open(path, "r") do f
-                g = f["slayer"]
+                g = f["Tearing"]
                 @test read(g["enabled"]) == 0
-                @test !haskey(g, "settings")      # no further groups
-                @test !haskey(g, "per_surface")
+                @test !haskey(g, "PerSurface")    # no further groups
+                @test !haskey(g, "Roots")
             end
         end
     end

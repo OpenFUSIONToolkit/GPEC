@@ -9,7 +9,7 @@ example_dir = "examples/Solovev_ideal_example_multi_n"
 
 # Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
 [quantities.et_real]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
 label = "total energy Re(et[1])"
@@ -17,7 +17,7 @@ noise_threshold = 1e-10
 order = 10
 
 [quantities.et_imag]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "imag_first"
 label = "total energy Im(et[1])"
@@ -25,7 +25,7 @@ noise_threshold = 1e-10
 order = 11
 
 [quantities.vacuum_eigenvalue]
-h5path = "FreeBoundaryStability/vacuum_eigenvalue"
+h5path = "ForceFreeStates/FreeBoundaryStability/vacuum_eigenvalue"
 type = "real_scalar"
 extract = "value"
 label = "vacuum matrix min eigenvalue"
@@ -34,7 +34,7 @@ order = 14
 
 # Energies — full eigenvalue arrays
 [quantities.ep_all]
-h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "plasma energy (all)"
@@ -42,7 +42,7 @@ noise_threshold = 1e-10
 order = 20
 
 [quantities.ev_all]
-h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "vacuum energy (all)"
@@ -50,7 +50,7 @@ noise_threshold = 1e-10
 order = 21
 
 [quantities.et_all]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "total energy (all)"
@@ -59,7 +59,7 @@ order = 22
 
 # Integration
 [quantities.nstep]
-h5path = "integration/nstep"
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep"
 type = "int_scalar"
 extract = "value"
 label = "ODE steps (saved)"
@@ -67,7 +67,7 @@ noise_threshold = 0
 order = 30
 
 [quantities.nstep_total]
-h5path = "integration/nstep_total"
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
 type = "int_scalar"
 extract = "value"
 label = "ODE steps (total)"
@@ -76,7 +76,7 @@ order = 31
 
 # Equilibrium
 [quantities.q0]
-h5path = "equil/q0"
+h5path = "Equilibrium/q0"
 type = "real_scalar"
 extract = "value"
 label = "q0"
@@ -84,7 +84,7 @@ noise_threshold = 1e-12
 order = 40
 
 [quantities.q95]
-h5path = "equil/q95"
+h5path = "Equilibrium/q95"
 type = "real_scalar"
 extract = "value"
 label = "q95"
@@ -93,7 +93,7 @@ order = 41
 
 # Singular surfaces
 [quantities.msing]
-h5path = "singular/msing"
+h5path = "SingularSurfaces/msing"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -101,7 +101,7 @@ noise_threshold = 0
 order = 50
 
 [quantities.sing_psi]
-h5path = "singular/psi"
+h5path = "SingularSurfaces/psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"
@@ -110,7 +110,7 @@ order = 51
 
 # Mode numbers
 [quantities.mpert]
-h5path = "info/mpert"
+h5path = "Info/mpert"
 type = "int_scalar"
 extract = "value"
 label = "mpert"
@@ -118,7 +118,7 @@ noise_threshold = 0
 order = 60
 
 [quantities.npert]
-h5path = "info/npert"
+h5path = "Info/npert"
 type = "int_scalar"
 extract = "value"
 label = "npert"
@@ -127,7 +127,7 @@ order = 61
 
 # Profiles (checksums)
 [quantities.q_profile]
-h5path = "splines/profiles/q"
+h5path = "Equilibrium/Profiles/q"
 type = "real_vector"
 extract = "checksum"
 label = "q profile (checksum)"

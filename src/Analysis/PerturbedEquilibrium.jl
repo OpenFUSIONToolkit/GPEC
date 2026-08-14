@@ -2,7 +2,7 @@
     PerturbedEquilibrium
 
 Post-processing and visualization functions for GPEC perturbed equilibrium results stored
-in the `perturbed_equilibrium/` group of a GPEC HDF5 output file.
+in the `PerturbedEquilibrium/` group of a GPEC HDF5 output file.
 """
 module PerturbedEquilibrium
 
@@ -25,7 +25,7 @@ per toroidal mode n. Integer-valued q rational surfaces are annotated. The reson
 `b^r = Φ^r/A^r` is the resonant flux normalized by the scalar surface area, in tesla [Pharr 2026].
 
 Requires the perturbed equilibrium module to have been run and
-`singular_coupling/resonant_area_weighted_field` to be present in the HDF5 file.
+`SingularCoupling/resonant_area_weighted_field` to be present in the HDF5 file.
 
 ### Arguments
 
@@ -40,7 +40,7 @@ Requires the perturbed equilibrium module to have been run and
 A `Plots.jl` plot object.
 """
 function plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
-    base = "perturbed_equilibrium/singular_coupling/"
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "resonant_area_weighted_field") ||
         return plot(; title="No resonant area-weighted field data — run with perturbed equilibrium enabled", legend=false)
 
@@ -76,7 +76,7 @@ end
 Scatter plot of island half-width `w/2` per rational surface vs ψ_N.
 Integer-valued q rational surfaces are annotated.
 
-Requires `singular_coupling/island_half_width` in the HDF5 file.
+Requires `SingularCoupling/island_half_width` in the HDF5 file.
 
 ### Arguments
 
@@ -91,7 +91,7 @@ Requires `singular_coupling/island_half_width` in the HDF5 file.
 A `Plots.jl` plot object.
 """
 function plot_island_widths(h5path; save_path=nothing)
-    base = "perturbed_equilibrium/singular_coupling/"
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "island_half_width") ||
         return plot(; title="No island width data — run with perturbed equilibrium enabled", legend=false)
 
@@ -130,7 +130,7 @@ Scatter plot of the Chirikov overlap parameter per rational surface vs ψ_N, wit
 horizontal reference line at K = 1 (island overlap threshold). Points are colored red
 when K > 1. Integer-valued q rational surfaces are annotated.
 
-Requires `singular_coupling/chirikov_parameter` in the HDF5 file.
+Requires `SingularCoupling/chirikov_parameter` in the HDF5 file.
 
 ### Arguments
 
@@ -145,7 +145,7 @@ Requires `singular_coupling/chirikov_parameter` in the HDF5 file.
 A `Plots.jl` plot object.
 """
 function plot_chirikov_parameter(h5path; save_path=nothing)
-    base = "perturbed_equilibrium/singular_coupling/"
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "chirikov_parameter") ||
         return plot(; title="No Chirikov data — run with perturbed equilibrium enabled", legend=false)
 
@@ -184,15 +184,15 @@ end
     plot_driven_delta_prime(h5path; save_path=nothing)
 
 Scatter plot of `Re(Δ')` per rational surface vs ψ_N, computed by the perturbed
-equilibrium module (from `perturbed_equilibrium/singular_coupling/delta_prime`).
+equilibrium module (from `PerturbedEquilibrium/SingularCoupling/delta_prime`).
 One marker series per toroidal mode n. Integer-valued q rational surfaces are
 annotated.
 
 This is the forcing-driven Δ' (response to the applied perturbation amplitudes
 in `intr.forcing_modes`); for the equilibrium-intrinsic Δ' from the STRIDE BVP,
-read `singular/delta_prime_matrix` from the HDF5 directly.
+read `SingularSurfaces/delta_prime_matrix` from the HDF5 directly.
 
-Requires `perturbed_equilibrium/singular_coupling/delta_prime` in the HDF5 file.
+Requires `PerturbedEquilibrium/SingularCoupling/delta_prime` in the HDF5 file.
 
 ### Arguments
 
@@ -207,7 +207,7 @@ Requires `perturbed_equilibrium/singular_coupling/delta_prime` in the HDF5 file.
 A `Plots.jl` plot object.
 """
 function plot_driven_delta_prime(h5path; save_path=nothing)
-    base = "perturbed_equilibrium/singular_coupling/"
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "delta_prime") ||
         return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
 
@@ -293,7 +293,7 @@ end
 
 # Internal helper — resonant current scatter plot
 function _plot_resonant_current(h5path)
-    base = "perturbed_equilibrium/singular_coupling/"
+    base = "PerturbedEquilibrium/SingularCoupling/"
     _has_pe_data(h5path, base * "resonant_current") ||
         return plot(; title="No resonant current data", legend=false)
 
@@ -360,7 +360,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     haskey(comp_map, component) ||
         error("component must be one of :xi_psi, :b_psi, :b_theta, :b_zeta")
 
-    base = "perturbed_equilibrium/response/"
+    base = "PerturbedEquilibrium/Response/"
     dataset_path = base * comp_map[component]
 
     _has_pe_data(h5path, dataset_path) ||
@@ -368,10 +368,10 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
 
     data, psi_response, mlow, mhigh, nhigh, q95, rational_psi = h5open(h5path, "r") do fid
         read(fid[dataset_path]),
-        read(fid["integration/psi"]),
-        read(fid["info/mlow"]), read(fid["info/mhigh"]), read(fid["info/nhigh"]),
-        read(fid["equil/q95"]),
-        read(fid["perturbed_equilibrium/singular_coupling/rational_psi"])
+        read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
+        read(fid["Info/mlow"]), read(fid["Info/mhigh"]), read(fid["Info/nhigh"]),
+        read(fid["Equilibrium/q95"]),
+        read(fid["PerturbedEquilibrium/SingularCoupling/rational_psi"])
     end
 
     mpert = mhigh - mlow + 1
@@ -452,13 +452,13 @@ end
 
 # Internal helper — |b_psi(m)| spectrum at the outermost psi surface
 function _plot_bpsi_edge_spectrum(h5path)
-    base = "perturbed_equilibrium/response/"
+    base = "PerturbedEquilibrium/Response/"
     _has_pe_data(h5path, base * "b_psi_area_weighted") ||
         return plot(; title="No b_psi data — run with perturbed equilibrium enabled", legend=false)
 
     data, mlow, mhigh = h5open(h5path, "r") do fid
         read(fid[base * "b_psi_area_weighted"]),
-        read(fid["info/mlow"]), read(fid["info/mhigh"])
+        read(fid["Info/mlow"]), read(fid["Info/mhigh"])
     end
 
     mpert  = mhigh - mlow + 1

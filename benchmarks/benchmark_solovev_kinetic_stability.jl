@@ -155,7 +155,7 @@ function run_julia_reference()
     GPE.main([rundir])
     wall = time() - t0
     et = h5open(joinpath(rundir, "gpec.h5"), "r") do h5
-        read(h5["FreeBoundaryStability/eigenmode_energies"])
+        read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
     end
     return real(et[1]), imag(et[1]), wall
 end
