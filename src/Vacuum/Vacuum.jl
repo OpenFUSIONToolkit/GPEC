@@ -66,7 +66,7 @@ Green's functions are internal scratch only.
     num_points_surf = inputs.mtheta
 
     fill!(vac_data.wv, 0)
-    fill!(vac_data.I_v, 0) # unconditional so a reused buffer never leaks a stale I_v
+    fill!(vac_data.I_v, 0)
 
     # Form the plasma and wall geometries
     plasma_surf = PlasmaGeometry(inputs)
@@ -106,7 +106,6 @@ Green's functions are internal scratch only.
         end
 
         if compute_Iv
-            # Port of Fortran gpvacuum_flxsurf (gpec/gpvacuum.f).
             # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
             grri = similar!(pool, grre)
             grri .= grre
@@ -117,21 +116,21 @@ Green's functions are internal scratch only.
             # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites grad_green to save memory.
             ldiv!(lu!(grad_green), grre)
 
-            # Interior operator D_ext - 2I, negated relative to Fortran vacuum_vac.f (kernelsign=-1
-            # builds -D_ext + 2I), so grri = -(2π)²χ^(vi) carries the same sign as grre.
+            # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
+            # boundary limits is 2I here, giving the vacuum-inside potential grri = χ^(vi).
             for i in 1:num_points_total
                 grad_green_interior[i, i] -= 2.0
             end
             ldiv!(lu!(grad_green_interior), grri)
 
-            # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = (grre - grri)/(2π)²
+            # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = grri - grre
+            # They are flipped because VACUUM builds the operators in its CW-θ frame while GPEC
+            # uses CCW-θ, flipping the outward-normal sign.
             I_v_block = @view vac_data.I_v[block_idx, block_idx]
             g_diff = @view grri[1:num_points_surf, :]
             g_diff .= @view(grre[1:num_points_surf, :]) .- g_diff
             mul!(I_v_block, ft.basis, g_diff)
-            # conj! supplies gpvacuum_flxsurf's conjugation, its θ reversal (θ_VAC = -θ_GPEC), and
-            # its exp(-i*n*ν) phase correction in one operation.
-            conj!(I_v_block)
+            conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
             I_v_block ./= num_points_surf
         else
             # Only need exterior system for wv
@@ -143,8 +142,7 @@ Green's functions are internal scratch only.
         wv_block .*= 4π^2 / num_points_surf
     end
 
-    # Remove any non-Hermitian discretization residual. Hermitianizing Iᵛ before inversion (rather
-    # than L after, as Fortran gpvacuum_flxsurf does) agrees to O(ε²) in the residual ε.
+    # Remove any non-Hermitian residual from Hermitian matrices due to discretization
     _warn_and_symmetrize!(vac_data.wv, "Wᵛ")
     compute_Iv && _warn_and_symmetrize!(vac_data.I_v, "Iᵛ")
 
@@ -187,7 +185,7 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
-    fill!(vac_data.I_v, 0) # unconditional so a reused buffer never leaks a stale I_v
+    fill!(vac_data.I_v, 0)
 
     compute_Iv && @warn "compute_Iv=true is not supported for 3D vacuum response; I_v left as zeros" maxlog=1
 

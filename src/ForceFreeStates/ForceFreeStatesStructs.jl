@@ -536,21 +536,15 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
 
-    # Initialization parameters
-
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
 
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
 
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
 
-    # Saved data throughout integration
-
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
     # Initialization parameters
-
-# Total ODE solver steps taken (all steps, not just saved ones)
 
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
 
@@ -569,8 +563,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
 
-  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape    # Initialization parameters    # Initialization parameters
-    `(numpert_total, numpert_total, numunorms_init)`.
+  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
 
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """

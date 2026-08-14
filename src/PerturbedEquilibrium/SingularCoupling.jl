@@ -277,7 +277,6 @@ function compute_singular_coupling_metrics!(
     chi1 = 2π * equil.psio
     twopi = 2π
     mtheta = mthvac
-    wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
     # Phase 1: Collect all resonant (surface, n) pairs in psi order
     resonant_pairs = Tuple{Int,Int}[]
@@ -360,7 +359,7 @@ function compute_singular_coupling_metrics!(
             end
 
             # Surface inductance at this surface for this n (once per pair)
-            L_surf = calc_surface_inductance(equil, sing_surf.psifac, mtheta, mlow:mhigh, nn, wall_settings)
+            L_surf = calc_surface_inductance(equil, sing_surf.psifac, mtheta, mlow:mhigh, nn)
 
             # Only the (m_res, m_res) diagonal element is needed for singflx
             m_idx = m_res - mlow + 1

@@ -158,9 +158,6 @@ boundary-integral solve produces along the way.
     `μ₀`/`4π²` normalization: the physical surface inductance is `μ₀(2π)²·I_v⁻¹`
     (see `PerturbedEquilibrium.calc_surface_inductance`).
   - `plasma_pts`, `wall_pts::Matrix{Float64}`: Cartesian surface coordinates (`num_points × 3`)
-
-The interior/exterior Green's functions are internal scratch of the boundary-integral solve and are
-not retained; `I_v` is the quantity downstream code needs from them.
 """
 struct VacuumResponse
     wv::Matrix{ComplexF64}

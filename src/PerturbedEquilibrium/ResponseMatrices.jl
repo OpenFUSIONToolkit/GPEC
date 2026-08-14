@@ -270,11 +270,11 @@ end
         ψ::Float64,
         mtheta::Int,
         m_modes::AbstractUnitRange{Int},
-        nn::Int,
-        wall_settings::Vacuum.WallShapeSettings
+        nn::Int
     )::Matrix{ComplexF64}
 
-Surface inductance L at the flux surface ψ, from the vacuum surface-current matrix.
+Surface inductance L at the flux surface ψ, from the vacuum surface-current matrix, solved
+against a no-wall vacuum.
 
 Solves the 2D vacuum problem with `compute_Iv=true` and inverts. The driving flux harmonics are
 unit columns (`Φ = 𝕀` by construction, matching Fortran `gpvacuum_flxsurf`'s unit driving
@@ -287,7 +287,6 @@ harmonics), so `Φ = L·I^v` (Park 2007, eq. 7 and following text) gives `L = μ
   - `mtheta`: Number of vacuum poloidal grid points
   - `m_modes`: Poloidal mode range mlow:mhigh
   - `nn`: Toroidal mode number
-  - `wall_settings`: Wall shape for the vacuum solve
 
 ## Returns
 
@@ -298,10 +297,10 @@ function calc_surface_inductance(
     ψ::Float64,
     mtheta::Int,
     m_modes::AbstractUnitRange{Int},
-    nn::Int,
-    wall_settings::Vacuum.WallShapeSettings
+    nn::Int
 )::Matrix{ComplexF64}
     vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, [nn])
+    wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
     I_v = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true).I_v
     μ₀ = 4π * 1e-7
     return inv(I_v) .* (μ₀ * (2π)^2)

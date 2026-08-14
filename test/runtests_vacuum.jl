@@ -495,7 +495,7 @@
             pe = Equilibrium.equilibrium_solver(Equilibrium.sol_run(eq_config, sol_config))
 
             m_modes = -2:5
-            L = PerturbedEquilibrium.calc_surface_inductance(pe, 0.9, 64, m_modes, 1, WallShapeSettings(shape="nowall"))
+            L = PerturbedEquilibrium.calc_surface_inductance(pe, 0.9, 64, m_modes, 1)
             @test size(L) == (length(m_modes), length(m_modes))
             @test all(isfinite, L)
             @test isapprox(L, L', rtol=1e-8)   # Hermitian inductance
