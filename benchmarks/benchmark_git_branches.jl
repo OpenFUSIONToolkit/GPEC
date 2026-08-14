@@ -43,6 +43,7 @@ For each branch/commit, reports:
 - Eigenmode energy (et[1]) from gpec.h5
 - Integration steps from gpec.h5
 - Runtime (averaged over warm runs)
+- Per-stage runtime breakdown from `Info/Runtimes` (averaged over warm runs, when both refs record it)
 - Git commit hash
 
 # Example Output
@@ -67,6 +68,12 @@ Comparison:
   Eigenmode Δ:    +0.0067 (+0.4%)
   Steps Δ:        -775 (-85.1%)
   Runtime Δ:      -2.5 s (-1.7% faster)
+
+Per-stage runtime (avg over warm runs):
+  Stage                    Branch 1   Branch 2        Δ s       Δ %
+  equilibrium                 2.10s      2.08s     -0.02     -1.0%
+  force_free_states         100.40s     98.10s     -2.30     -2.3%
+  total                     145.30s    142.80s     -2.50     -1.7%
 ```
 """
 
@@ -156,6 +163,28 @@ function checkout_ref(branch, commit)
     end
 end
 
+# Read the per-stage wall-clock seconds a run recorded under Info/Runtimes.
+# Returns an empty Dict for refs that predate the feature, so those still benchmark.
+function read_stage_runtimes(gpec_path)
+    stages = Dict{String,Float64}()
+    isfile(gpec_path) || return stages
+    h5open(gpec_path, "r") do h5
+        haskey(h5, "Info/Runtimes") || return
+        group = h5["Info/Runtimes"]
+        for stage in keys(group)
+            stages[stage] = read(group[stage])
+        end
+    end
+    return stages
+end
+
+# Average per-stage runtimes over the warm runs, keeping only stages present in every run.
+function average_stage_runtimes(stage_times)
+    isempty(stage_times) && return Dict{String,Float64}()
+    shared = intersect(map(keys, stage_times)...)
+    return Dict(stage => sum(s[stage] for s in stage_times) / length(stage_times) for stage in shared)
+end
+
 # Run the example benchmark.
 # Each run is a fresh Julia subprocess so that git branch switches take effect
 # (using statement only fires once per process; re-checkout without subprocess restart
@@ -176,19 +205,22 @@ function run_example_benchmark(example_path, num_runs)
         println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
         run(`julia --project=$project_root $tmpscript $abs_example_path`)
 
-        # Warm runs for timing
+        # Warm runs for timing. Each run overwrites gpec.h5, so the per-stage
+        # Info/Runtimes record must be collected inside the loop, not after it.
+        gpec_path = joinpath(abs_example_path, "gpec.h5")
         runtimes = Float64[]
+        stage_times = Vector{Dict{String,Float64}}()
         for i in 1:num_runs
             println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
             t_start = time()
             run(`julia --project=$project_root $tmpscript $abs_example_path`)
             runtime = time() - t_start
             push!(runtimes, runtime)
+            push!(stage_times, read_stage_runtimes(gpec_path))
             println("  Runtime: $(round(runtime, digits=2)) s")
         end
 
         # Extract metrics from gpec.h5
-        gpec_path = joinpath(abs_example_path, "gpec.h5")
         if !isfile(gpec_path)
             error("gpec.h5 not found at $gpec_path")
         end
@@ -203,11 +235,29 @@ function run_example_benchmark(example_path, num_runs)
         return (
             eigenvalue=real(et[1]),
             steps=nsteps,
-            runtime=avg_runtime
+            runtime=avg_runtime,
+            stages=average_stage_runtimes(stage_times)
         )
     finally
         rm(tmpscript; force=true)
     end
+end
+
+# Per-stage runtime breakdown (Info/Runtimes), averaged over the warm runs of each branch.
+# Silently skipped when either side lacks the record, so comparisons against older refs work.
+function print_stage_comparison(r1, r2)
+    shared = intersect(keys(r1.metrics.stages), keys(r2.metrics.stages))
+    isempty(shared) && return nothing
+    ordered = sort(collect(shared); by=stage -> (stage == "total", stage))
+
+    println("\nPer-stage runtime (avg over warm runs):")
+    @printf("  %-22s %10s %10s %10s %9s\n", "Stage", "Branch 1", "Branch 2", "Δ s", "Δ %")
+    for stage in ordered
+        t1 = r1.metrics.stages[stage]
+        t2 = r2.metrics.stages[stage]
+        @printf("  %-22s %9.2fs %9.2fs %+9.2f %+8.1f%%\n", stage, t1, t2, t2 - t1, 100 * (t2 - t1) / t1)
+    end
+    return nothing
 end
 
 # Main benchmarking function
@@ -292,6 +342,8 @@ function benchmark_branches(options)
     time_pct = 100 * time_delta / r1.metrics.runtime
     speedup_desc = time_delta < 0 ? "faster" : "slower"
     @printf("  Runtime Δ:      %+.2f s (%+.1f%% %s)\n", time_delta, abs(time_pct), speedup_desc)
+
+    print_stage_comparison(r1, r2)
 
     println("\n" * "="^60)
 
