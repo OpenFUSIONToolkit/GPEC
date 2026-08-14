@@ -48,6 +48,7 @@ Modifies `odet` in place. Call after `free_run` when downstream code consumes th
         mul!(tmp_mat, odet.xi_s_store[:, :, istep], coeffs)
         odet.xi_s_store[:, :, istep] .= tmp_mat
     end
+    return odet
 end
 
 """
@@ -105,7 +106,7 @@ calculations and data dumping.
     eindex = sortperm(real.(et); rev=true)
 
     # Rearrange wt columns for ascending real eigenvalues (most unstable first)
-    etemp = et
+    etemp = copy(et)
     n_tor_idx = zeros(Int, numpert_total)
     for ipert in 1:numpert_total
         orig = eindex[numpert_total+1-ipert]

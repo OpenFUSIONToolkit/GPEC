@@ -446,7 +446,8 @@ function main_from_inputs(
         @warn "Fixed-boundary mode unstable for n = $nstring"
     end
 
-    # Compute free boundary energies
+    # Compute free boundary energies.
+    free_energies = nothing
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
         if ctrl.verbose
             wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
@@ -481,7 +482,7 @@ function main_from_inputs(
     gal_data = nothing
     if ctrl.gal_flag
         gal_start = time()
-        gal_data = galerkin_solve(ctrl, equil, ffit, intr; wv=ctrl.vac_flag ? free_energies.wv : nothing)
+        gal_data = galerkin_solve(ctrl, equil, ffit, intr; wv=free_energies !== nothing ? free_energies.wv : nothing)
         @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     end
 
@@ -491,7 +492,7 @@ function main_from_inputs(
             equil,
             intr,
             odet,
-            ctrl.vac_flag ? free_energies : nothing,
+            free_energies,
             ffit,
             git_version,
             inputs,
@@ -544,7 +545,7 @@ function main_from_inputs(
         slayer_result = _run_slayer_stage(nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
-            free_energies=ctrl.vac_flag ? free_energies : nothing,
+            free_energies=free_energies,
             slayer=slayer_result)
     end
 
@@ -607,7 +608,7 @@ function main_from_inputs(
         # Run perturbed equilibrium calculations
         # Free-boundary wt0 drives the plasma inductance; mthvac sizes the Green's-function solves
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, pe_odet, ctrl.vac_flag ? free_energies.wt0 : nothing, ctrl.mthvac, intr, ft_ctrl, pe_ctrl, pe_intr,
+            equil, pe_odet, free_energies !== nothing ? free_energies.wt0 : nothing, ctrl.mthvac, intr, ft_ctrl, pe_ctrl, pe_intr,
             metric, ffit
         )
 
@@ -678,7 +679,7 @@ function main_from_inputs(
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
     return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
-        free_energies=ctrl.vac_flag ? free_energies : nothing,
+        free_energies=free_energies,
         slayer=slayer_result)
 
 end
@@ -907,23 +908,23 @@ function write_outputs_to_HDF5(
         # working (Jacobian) coordinate. W_freeboundary_eigenmodes holds the generalized
         # eigenvectors, columns sorted most-unstable first, normalized to unit power norm with
         # the largest-magnitude entry made real-positive.
-        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? free_energies.wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? free_energies.wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? free_energies.wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? free_energies.wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? free_energies.et : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? free_energies.ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? free_energies.ev : ComplexF64[]
-        out_h5["FreeBoundaryStability/vacuum_eigenvalue"] = ctrl.vac_flag ? free_energies.vacuum_eigenvalue : NaN
+        out_h5["FreeBoundaryStability/W_freeboundary"] = free_energies !== nothing ? free_energies.wt0 : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_plasma"] = free_energies !== nothing ? free_energies.wp : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_vacuum"] = free_energies !== nothing ? free_energies.wv : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = free_energies !== nothing ? free_energies.wt : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_energies"] = free_energies !== nothing ? free_energies.et : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = free_energies !== nothing ? free_energies.ep : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = free_energies !== nothing ? free_energies.ev : ComplexF64[]
+        out_h5["FreeBoundaryStability/vacuum_eigenvalue"] = free_energies !== nothing ? free_energies.vacuum_eigenvalue : NaN
 
         # Cartesian surface point clouds used downstream for visualisation and
         # perturbed-equilibrium plotting.
-        out_h5["SurfaceGeometries/Plasma/x"] = ctrl.vac_flag ? free_energies.plasma_pts[:, 1] : Float64[]
-        out_h5["SurfaceGeometries/Plasma/y"] = ctrl.vac_flag ? free_energies.plasma_pts[:, 2] : Float64[]
-        out_h5["SurfaceGeometries/Plasma/z"] = ctrl.vac_flag ? free_energies.plasma_pts[:, 3] : Float64[]
-        out_h5["SurfaceGeometries/Wall/x"] = ctrl.vac_flag ? free_energies.wall_pts[:, 1] : Float64[]
-        out_h5["SurfaceGeometries/Wall/y"] = ctrl.vac_flag ? free_energies.wall_pts[:, 2] : Float64[]
-        out_h5["SurfaceGeometries/Wall/z"] = ctrl.vac_flag ? free_energies.wall_pts[:, 3] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/x"] = free_energies !== nothing ? free_energies.plasma_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/y"] = free_energies !== nothing ? free_energies.plasma_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/z"] = free_energies !== nothing ? free_energies.plasma_pts[:, 3] : Float64[]
+        out_h5["SurfaceGeometries/Wall/x"] = free_energies !== nothing ? free_energies.wall_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Wall/y"] = free_energies !== nothing ? free_energies.wall_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Wall/z"] = free_energies !== nothing ? free_energies.wall_pts[:, 3] : Float64[]
 
         # Write kinetic parameters when kinetic mode is enabled
         if ctrl.kinetic_factor > 0

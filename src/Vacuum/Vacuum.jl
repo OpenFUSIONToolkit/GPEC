@@ -67,7 +67,9 @@ of the Green's functions.
     mpert = length(inputs.m_modes)
     num_points_surf = inputs.mtheta
 
-    vac_data.wv .= 0
+    fill!(vac_data.wv, 0)
+    fill!(vac_data.grri, 0)
+    fill!(vac_data.grre, 0)
 
     # Form the plasma and wall geometries
     plasma_surf = PlasmaGeometry(inputs)
