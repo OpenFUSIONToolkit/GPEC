@@ -32,29 +32,17 @@ function _collect_bad_groups(h5)
     return bad
 end
 
-# Metadata contract (docs/development/hdf5-conventions.md): every dataset carries
-# long_name + units, and rank ≥ 2 datasets carry a dims axis-name attribute. Exempt:
-# the Input/ raw snapshot and the debug-only GalerkinIntegration Match/ group.
-_metadata_exempt(path) = startswith(path, "Input/") || occursin("/Match/", path)
+include("h5_metadata_check.jl")
 
-function _collect_metadata_violations(h5)
-    bad = String[]
-    function walk(node, prefix)
-        for k in keys(node)
-            child = node[k]
-            full = isempty(prefix) ? k : prefix * "/" * k
-            if child isa HDF5.Group
-                walk(child, full)
-            elseif !_metadata_exempt(full)
-                a = attrs(child)
-                haskey(a, "long_name") || push!(bad, "$full: missing long_name")
-                haskey(a, "units") || push!(bad, "$full: missing units")
-                ndims(child) >= 2 && !haskey(a, "dims") && push!(bad, "$full: missing dims")
-            end
-        end
-    end
-    walk(h5, "")
-    return bad
+# The full-run walk below only exercises an ideal deck, which never produces the
+# data-driven group names — pin the whitelist rules directly.
+@testset "gpec.h5 schema naming: group-name rule" begin
+    @test _group_name_ok("KineticForces", "fgar")            # method tokens verbatim
+    @test _group_name_ok("Tearing/Scan", "Surface_1")        # scan indices verbatim
+    @test _group_name_ok("Input/RawInputs/Coils", "my_coils") # raw-snapshot names verbatim
+    @test _group_name_ok("", "SingularSurfaces")
+    @test !_group_name_ok("", "singular")
+    @test !_group_name_ok("SingularSurfaces", "kinetic")
 end
 
 @testset "gpec.h5 schema naming" begin
@@ -76,12 +64,10 @@ end
             isempty(bad) || @error "non-CamelCase group paths in gpec.h5" bad
             @test isempty(bad)
 
-            # Retired/renamed legacy top-level groups must not reappear.
-            for legacy in ("info", "input", "equil", "splines", "integration", "locstab",
-                "singular", "matrices", "kinetic", "galerkin", "slayer", "kinetic_forces",
-                "perturbed_equilibrium", "vacuum", "FreeBoundaryStability", "EdgeScan")
-                @test !haskey(h5, legacy)
-            end
+            # The CamelCase walk above already forbids every lowercase legacy group; these
+            # two moved under ForceFreeStates/ and are CamelCase, so pin them explicitly.
+            @test !haskey(h5, "FreeBoundaryStability")
+            @test !haskey(h5, "EdgeScan")
 
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")

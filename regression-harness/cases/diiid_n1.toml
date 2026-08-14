@@ -271,10 +271,9 @@ noise_threshold = 0
 order = 61
 
 # Tearing stability Δ' — canonical STRIDE BVP matrix diagonal (replaces the
-# previous `perturbed_equilibrium/singular_coupling/delta_prime` track, which
+# previous `PerturbedEquilibrium/SingularCoupling/delta_prime` track, which
 # was a per-surface stub computed by SingularCoupling from (rbwp1-lbwp1)/(2π·χ').
-# Per-surface Δ' is now de-emphasized — see PR 178 notes — and SingularCoupling
-# instead reads this BVP matrix diagonal.
+# Per-surface Δ' is de-emphasized; SingularCoupling reads this BVP matrix diagonal.
 [quantities.delta_prime]
 h5path = "SingularSurfaces/delta_prime_matrix"
 type = "complex_matrix"

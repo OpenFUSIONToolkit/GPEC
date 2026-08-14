@@ -5,6 +5,8 @@
     using GeneralizedPerturbedEquilibrium.Runner
     using HDF5
 
+    include("h5_metadata_check.jl")
+
     # ------- Helper: build a synthetic SLAYERParameters with full control
     function _mk_params(; rs=0.5, lu=1e7, tauk=1e-4,
         Q_e=-1.0, Q_i=0.5, m=2, n=1, ising=1,
@@ -173,6 +175,16 @@
             h5open(path, "w") do f
                 write_slayer_hdf5!(f, r)
             end
+
+            # Metadata contract must hold for Tearing/ too — the full-run schema test
+            # only exercises an ideal deck, which writes no Tearing/ group.
+            h5open(path, "r") do f
+                viol = _collect_metadata_violations(f)
+                isempty(viol) || @error "metadata contract violations in Tearing/" viol
+                @test isempty(viol)
+                @test attrs(f["Tearing"])["layer_model"] == "slayer"
+            end
+
             h5open(path, "r") do f
                 g = f["Tearing"]
                 @test haskey(g, "enabled") && read(g["enabled"]) == 1
@@ -208,6 +220,26 @@
                 # Scan group present (store_scan=true)
                 @test haskey(g, "Scan/Surface_1")
                 @test read(g["Scan/Surface_1/kind"]) == "brute_force"
+            end
+        end
+    end
+
+    @testset "GGJ per-surface writer: metadata contract" begin
+        # The GGJ branch of _write_per_surface! is unreachable from the SLAYER
+        # round-trip above; enforce its annotation-table rows on a synthetic write.
+        params = [GGJParameters(; E=0.1, F=0.2, G=0.3, H=0.4, K=0.5, taua=1e-6, taur=1.0, ising=i) for i in 1:2]
+        dp = ComplexF64[1.0 0.0; 0.0 2.0]
+        mktemp() do path, io
+            close(io)
+            h5open(path, "w") do f
+                g = HDF5.create_group(f, "Tearing")
+                Runner._write_per_surface!(g, params, dp)
+                Runner._annotate_tearing!(g)
+            end
+            h5open(path, "r") do f
+                viol = _collect_metadata_violations(f)
+                isempty(viol) || @error "metadata contract violations in GGJ PerSurface/" viol
+                @test isempty(viol)
             end
         end
     end

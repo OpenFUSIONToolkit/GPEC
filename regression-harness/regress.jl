@@ -8,6 +8,7 @@ const DEFAULT_DB_PATH = joinpath(HARNESS_DIR, ".regress_cache.sqlite")
 const CASES_DIR = joinpath(HARNESS_DIR, "cases")
 
 include("src/types.jl")
+include("src/env.jl")
 include("src/config.jl")
 include("src/database.jl")
 include("src/utils.jl")
@@ -26,6 +27,9 @@ function parse_args(args)
     db_path = nothing
     verbose = false
     no_instantiate = false
+    no_pin_manifest = false
+    allow_env_mismatch = false
+    fail_on_change = false
     help = false
 
     i = 1
@@ -45,6 +49,15 @@ function parse_args(args)
             i += 1
         elseif arg == "--no-instantiate"
             no_instantiate = true
+            i += 1
+        elseif arg == "--no-pin-manifest"
+            no_pin_manifest = true
+            i += 1
+        elseif arg == "--allow-env-mismatch"
+            allow_env_mismatch = true
+            i += 1
+        elseif arg == "--fail-on-change"
+            fail_on_change = true
             i += 1
         elseif arg == "--cases" && i < length(args)
             cases = split(args[i+1], ",") |> collect .|> strip
@@ -69,7 +82,8 @@ function parse_args(args)
         end
     end
 
-    return CLIOptions(cases, refs, ref_range, force, list_cases, show_qty, show_case, db_path, verbose, no_instantiate, help)
+    return CLIOptions(cases, refs, ref_range, force, list_cases, show_qty, show_case, db_path, verbose,
+        no_instantiate, no_pin_manifest, allow_env_mismatch, fail_on_change, help)
 end
 
 const HELP_TEXT = """
@@ -77,6 +91,9 @@ GPEC Regression Harness
 
 Runs GPEC test cases across multiple git commits and compares numerical outputs
 to detect unintended changes. Results are cached in a local SQLite database.
+All cases in a single invocation share one git worktree (and one instantiate/
+precompile) per commit, so batching cases into one command is substantially
+faster than running them in separate invocations.
 
 Usage:
     julia --project=regression-harness regression-harness/regress.jl [OPTIONS]
@@ -93,7 +110,18 @@ Options:
     --db path              Override database path
     --verbose              Print subprocess output
     --no-instantiate       Skip Pkg.instantiate() in subprocess
+    --no-pin-manifest      Let each ref resolve its own package set (default: pin the working
+                           tree's Manifest.toml into every worktree so source code is the only
+                           variable in a comparison)
+    --allow-env-mismatch   Reuse cached results produced in a different environment instead of
+                           re-running them
+    --fail-on-change       Exit non-zero if any tracked quantity changed (for CI use; a failed
+                           run always exits non-zero regardless)
     --help                 Print this help message
+
+Exit status:
+    0  all runs completed (and, with --fail-on-change, nothing changed)
+    1  a run failed, or a quantity changed under --fail-on-change
 
 Examples:
     # Compare two refs
@@ -170,27 +198,57 @@ function main(args=ARGS)
             error("No commits resolved from the given refs")
         end
 
-        # Run each case at each commit
+        warn_stale_refs(resolved_refs, REPO_ROOT)
+
+        # Pin every ref to the working tree's package set unless asked not to, so that a
+        # comparison varies source code alone.
+        manifest_path = joinpath(REPO_ROOT, "Manifest.toml")
+        pin_manifest = if opts.no_pin_manifest
+            @warn "Manifest pinning disabled — refs may resolve different package sets, and differences below may not be caused by source changes"
+            nothing
+        elseif !isfile(manifest_path)
+            @warn "No Manifest.toml in the working tree; cannot pin the package set. Run Pkg.instantiate() first."
+            nothing
+        else
+            manifest_path
+        end
+        expected_key = opts.allow_env_mismatch ? nothing : expected_env_key(pin_manifest)
+
+        n_failed = 0
+        n_changed = 0
+
+        # Run every case against each ref, grouped by ref so cases sharing a commit share
+        # one worktree (and one Pkg.instantiate/precompile) instead of paying for it per case.
+        for ref in resolved_refs
+            run_cases_at_ref(db, ref, case_specs, REPO_ROOT;
+                force=opts.force, verbose=opts.verbose,
+                no_instantiate=opts.no_instantiate,
+                pin_manifest=pin_manifest, expected_key=expected_key)
+        end
+
+        # Report, grouped by case as before
         for case_spec in case_specs
             println("\n", "="^64)
             println("Case: $(case_spec.name) — $(case_spec.description)")
             println("="^64)
 
-            for ref in resolved_refs
-                run_commit(db, ref.commit_hash, ref.name, case_spec, REPO_ROOT;
-                           force=opts.force, verbose=opts.verbose,
-                           no_instantiate=opts.no_instantiate)
-            end
-
-            # Report
-            if length(resolved_refs) == 1
-                report_multi_ref(db, case_spec, resolved_refs)
-            elseif length(resolved_refs) == 2
+            summary = if length(resolved_refs) == 2
                 report_two_ref_comparison(db, case_spec,
                     resolved_refs[1], resolved_refs[2])
             else
                 report_multi_ref(db, case_spec, resolved_refs)
             end
+            n_failed += summary.n_failed
+            n_changed += summary.n_changed
+        end
+
+        if n_failed > 0
+            @error "$n_failed run(s) failed — see the reports above"
+            exit(1)
+        end
+        if opts.fail_on_change && n_changed > 0
+            @error "$n_changed quantity/quantities changed (--fail-on-change)"
+            exit(1)
         end
     finally
         close_database(db)

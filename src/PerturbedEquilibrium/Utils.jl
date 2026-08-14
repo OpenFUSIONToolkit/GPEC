@@ -69,7 +69,7 @@ PerturbedEquilibrium/
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
 │   └── b_zeta
-├── ResponseMatrices/          # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
+├── ResponseMatrices/         # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
 │   ├── plasma_inductance     # Λ̃ = R⁻¹·Λ·R⁻†
 │   ├── surface_inductance    # L̃ = R⁻¹·L·R⁻†
 │   ├── permeability          # P̃ = R⁻¹·P·R  (P = Λ·L⁻¹)

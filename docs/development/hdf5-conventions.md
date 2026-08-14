@@ -13,13 +13,15 @@ Physics-topic groups elevated to top level (rather than nested under their produ
 
 ## Naming rules
 
+These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness-internal synthetic fixtures (e.g. the `ggj/*` reference files written by `regression-harness/src/runner.jl`) are out of scope.
+
 - **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinDeltaPrime/`).
 - **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root_real`, `pest3_Delta`, `2piF`).
 - **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), scan indices (`Surface_<k>`, `psi_<i>`).
 
 ## Inputs live only under `Input/`
 
-`Input/gpec_toml_raw` stores the full merged TOML, and `Input/RawInputs/` stores the raw equilibrium/forcing/coil data — together they make `gpec.h5` a self-contained rerun snapshot (`Rerun.jl` reconstructs every control struct from them; the writer/reader path pair is locked by shared `H5_*` consts in `GeneralizedPerturbedEquilibrium.jl`). **Never echo TOML flags or control-struct values into any other group** — every group outside `Input/` is derived output. (The former `kinetic/` and `slayer/settings/` echoes were removed under this rule.)
+`Input/gpec_toml_raw` stores the full merged TOML, and `Input/RawInputs/` stores the raw equilibrium/forcing/coil data — together they make `gpec.h5` a self-contained rerun snapshot (`Rerun.jl` reconstructs every control struct from them; the writer and rerun reader carry cross-reference comments marking the mirrored path pair). **Never echo TOML flags or control-struct values into any other group** — every group outside `Input/` is derived output. (The former `kinetic/` and `slayer/settings/` echoes were removed under this rule.)
 
 ## Schema
 
@@ -62,4 +64,4 @@ Mechanism: writers stay table-driven — each writer keeps a `path => (; long_na
 
 ## Back-compatibility policy
 
-Schema renames are clean breaks in `src/` readers — no dual-path reads. The **only** legacy fallback lives in the regression harness (`regression-harness/src/extractor.jl`, `LEGACY_PREFIX_MAP`), so cross-commit comparisons and `--ref-range` scans keep working across a rename boundary. When renaming a path, update the writer, all readers, the case TOMLs, and add the new→old pair to that map.
+Schema renames are clean breaks everywhere — no dual-path reads, no legacy-path translation layers. When renaming a path, update the writer, all readers, and the regression-harness case TOMLs in the same PR. Cross-commit harness comparisons across a rename boundary work only from already-cached quantities of the pre-rename refs (values are stored by quantity *name*, which renames preserve); fresh extraction of a pre-rename output reports the quantity as missing, and `--ref-range` scans crossing the boundary do the same. Developers should re-baseline old refs with `--force` before a rename lands if they need that history, and treat a schema rename as a `schema_version` bump readers can dispatch on.

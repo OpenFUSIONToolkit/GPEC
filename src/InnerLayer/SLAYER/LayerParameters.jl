@@ -40,8 +40,8 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `R0`       | Major radius [m]                                                  |
 | `bt`       | Toroidal field [T]                                                |
 | `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention) |
-| `dr_val`   | Radial width parameter at surface (input to dc_tmp)               |
-| `dgeo_val` | Geometric Δ (Shafranov shift factor)                              |
+| `dr_val`   | Resistive interchange D_R = E + F + H² (critical-Δ input; auto-derived from GGJ coefficients unless overridden) |
+| `dgeo_val` | Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied) |
 | `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                |
 | `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
 | `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |

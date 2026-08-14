@@ -2,73 +2,13 @@
 HDF5 quantity extraction engine.
 """
 
-# Legacy-path fallback: outputs written before the module-mirroring CamelCase schema
-# use the old group names on the right. Case TOMLs always carry the new paths; when a
-# path is missing (the output came from a pre-rename ref), the translated legacy path
-# is retried so cross-commit comparisons and --ref-range scans work across the
-# boundary. First matching prefix wins — keep more-specific entries first.
-const LEGACY_PREFIX_MAP = [
-    "Input/RawInputs/Equilibrium" => "input/raw_inputs/equilibrium",
-    "Input/RawInputs/ForcingTerms" => "input/raw_inputs/forcing_terms",
-    "Input/RawInputs/Coils" => "input/raw_inputs/coils",
-    "Input/" => "input/",
-    "Info/" => "info/",
-    "Equilibrium/Profiles/" => "splines/profiles/",
-    "Equilibrium/Geometry/" => "splines/rzphi/",
-    "Equilibrium/" => "equil/",
-    "ForceFreeStates/Solutions/ForwardIntegration/" => "integration/",
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/" => "galerkin/solution/",
-    "ForceFreeStates/Solutions/GalerkinIntegration/Match/InnerParams/" => "galerkin/match/inner_params/",
-    "ForceFreeStates/Solutions/GalerkinIntegration/Match/Inner/" => "galerkin/match/inner/",
-    "ForceFreeStates/Solutions/GalerkinIntegration/Match/" => "galerkin/match/",
-    "ForceFreeStates/Solutions/GalerkinIntegration/" => "galerkin/",
-    "ForceFreeStates/EulerLagrangeMatrices/Ideal/" => "matrices/ideal/",
-    "ForceFreeStates/EulerLagrangeMatrices/Kinetic/" => "matrices/kinetic/",
-    "ForceFreeStates/EulerLagrangeMatrices/" => "matrices/",
-    "ForceFreeStates/FreeBoundaryStability/" => "FreeBoundaryStability/",
-    "ForceFreeStates/EdgeScan/" => "EdgeScan/",
-    "LocalStability/" => "locstab/",
-    "SingularSurfaces/GalerkinDeltaPrime/" => "galerkin/",
-    "SingularSurfaces/Kinetic/" => "singular/kinetic/",
-    "SingularSurfaces/" => "singular/",
-    "PerturbedEquilibrium/ForcingModes/" => "perturbed_equilibrium/forcing_modes/",
-    "PerturbedEquilibrium/ResponseMatrices/" => "perturbed_equilibrium/response_matrices/",
-    "PerturbedEquilibrium/Response/" => "perturbed_equilibrium/response/",
-    "PerturbedEquilibrium/SingularCoupling/" => "perturbed_equilibrium/singular_coupling/",
-    "PerturbedEquilibrium/Energies/" => "perturbed_equilibrium/energies/",
-    "PerturbedEquilibrium/" => "perturbed_equilibrium/",
-    "KineticForces/" => "kinetic_forces/",
-    "Tearing/PerSurface/DpMatrix/" => "slayer/per_surface/dp_matrix/",
-    "Tearing/PerSurface/" => "slayer/per_surface/",
-    "Tearing/Roots/" => "slayer/roots/",
-    "Tearing/LayerWidths/" => "slayer/layer_widths/",
-    "Tearing/Diagnostics/ValidRoots/" => "slayer/diagnostics/valid_roots/",
-    "Tearing/Diagnostics/Poles/" => "slayer/diagnostics/poles/",
-    "Tearing/Diagnostics/FilteredRoots/" => "slayer/diagnostics/filtered_roots/",
-    "Tearing/Scan/Surface_" => "slayer/scan/surface_",
-    "Tearing/" => "slayer/",
-]
-
-"""
-Translate a new-schema h5path to its pre-rename legacy equivalent, or return
-`nothing` when no mapping applies.
-"""
-function legacy_h5path(path::String)
-    for (new, old) in LEGACY_PREFIX_MAP
-        if startswith(path, new)
-            legacy = replace(path, new => old; count=1)
-            # Structural renames inside KineticForces (not plain prefix swaps).
-            legacy = replace(legacy, "/EnergyIntegrals/" => "/records/")
-            legacy = replace(legacy, r"^kinetic_forces/(\w+)/KineticMatrices/" => s"kinetic_forces/matrices_\1/")
-            return legacy
-        end
-    end
-    return nothing
-end
-
 """
 Extract all quantities from a gpec.h5 file according to case spec.
 Returns a Vector{ExtractedQuantity}.
+
+Case TOMLs carry current-schema paths only; outputs from refs predating a schema
+rename extract as "missing" unless their quantities are already cached. Re-baseline
+old refs with `--force` after a rename rather than maintaining path translations.
 """
 function extract_quantities(h5path::String, qty_specs::Vector{QuantitySpec}, runtime_s::Float64)::Vector{ExtractedQuantity}
     results = ExtractedQuantity[]
@@ -83,13 +23,8 @@ function extract_quantities(h5path::String, qty_specs::Vector{QuantitySpec}, run
                 continue
             end
 
-            # Resolve the H5 path, falling back to the pre-rename legacy schema.
-            path = spec.h5path
-            if !haskey(fid, path)
-                legacy = legacy_h5path(path)
-                path = (legacy !== nothing && haskey(fid, legacy)) ? legacy : nothing
-            end
-            if path === nothing
+            # Check if the H5 path exists
+            if !haskey(fid, spec.h5path)
                 push!(results, ExtractedQuantity(
                     spec.name, spec.label,
                     nothing, nothing, nothing,
@@ -97,7 +32,7 @@ function extract_quantities(h5path::String, qty_specs::Vector{QuantitySpec}, run
                 continue
             end
 
-            raw = read(fid[path])
+            raw = read(fid[spec.h5path])
             eq = apply_extraction(spec, raw)
             push!(results, eq)
         end
