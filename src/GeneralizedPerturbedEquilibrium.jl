@@ -174,6 +174,9 @@ function main_from_inputs(
     total_start = time()
     # Per-stage wall-clock seconds, written to Info/Runtimes at the end of the run.
     runtimes = Vector{Pair{String,Float64}}()
+    # Output file this run actually wrote, last writer wins (matching where the SLAYER stage
+    # appends). `nothing` means no stage produced a file, so there is nothing to stamp.
+    written_h5 = nothing
 
     # ----------------------------------------------------------------
     # Equilibrium
@@ -508,6 +511,7 @@ function main_from_inputs(
             locstab=locstab,
             ballooning_boundary=ballooning_boundary
         )
+        written_h5 = ctrl.HDF5_filename
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -532,7 +536,7 @@ function main_from_inputs(
             result = Runner.run_slayer(equil, intr, slayer_ctrl;
                 dir_path=intr.dir_path)
             slayer_dt = time() - slayer_start
-            push!(runtimes, "slayer" => slayer_dt)
+            push!(runtimes, "tearing" => slayer_dt)
             @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
             h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
             h5_path = joinpath(intr.dir_path, h5_filename)
@@ -541,6 +545,7 @@ function main_from_inputs(
             HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
                 Runner.write_slayer_hdf5!(f, result)
             end
+            written_h5 = h5_filename
             @info "SLAYER results written to $h5_filename"
             return result
         catch err
@@ -556,9 +561,8 @@ function main_from_inputs(
         slayer_result = _run_slayer_stage(nothing)
         total_dt = time() - total_start
         push!(runtimes, "total" => total_dt)
-        # A returned SLAYER result means that stage created or appended to the file itself.
-        if ctrl.write_outputs_to_HDF5 || slayer_result !== nothing
-            _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+        if written_h5 !== nothing
+            _write_runtimes!(joinpath(intr.dir_path, written_h5), runtimes)
         end
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
         return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
@@ -635,6 +639,7 @@ function main_from_inputs(
             PerturbedEquilibrium.write_outputs_to_HDF5(
                 pe_state, pe_intr, joinpath(intr.dir_path, output_file)
             )
+            written_h5 = output_file
             @info "Results written to $output_file"
         end
 
@@ -646,7 +651,11 @@ function main_from_inputs(
     end
 
     pe_dt = time() - pe_start
-    push!(runtimes, "perturbed_equilibrium" => pe_dt)
+    # Record only when the stage ran; an absent [PerturbedEquilibrium] section would otherwise
+    # stamp a ~0 s entry for work that never happened.
+    if "PerturbedEquilibrium" in keys(inputs)
+        push!(runtimes, "perturbed_equilibrium" => pe_dt)
+    end
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", pe_dt)) s"
 
     # ----------------------------------------------------------------
@@ -672,6 +681,7 @@ function main_from_inputs(
                 h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
                     KineticForces.write_to_hdf5!(h5file, kf_state; dVdpsi_spline=equil.profiles.dVdpsi_spline)
                 end
+                written_h5 = kf_ctrl.HDF5_filename
             end
         end
 
@@ -697,9 +707,8 @@ function main_from_inputs(
     # ----------------------------------------------------------------
     total_dt = time() - total_start
     push!(runtimes, "total" => total_dt)
-    # A returned SLAYER result means that stage created or appended to the file itself.
-    if ctrl.write_outputs_to_HDF5 || slayer_result !== nothing
-        _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+    if written_h5 !== nothing
+        _write_runtimes!(joinpath(intr.dir_path, written_h5), runtimes)
     end
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
 

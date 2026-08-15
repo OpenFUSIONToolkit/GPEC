@@ -255,7 +255,9 @@ function print_stage_comparison(r1, r2)
     for stage in ordered
         t1 = r1.metrics.stages[stage]
         t2 = r2.metrics.stages[stage]
-        @printf("  %-22s %9.2fs %9.2fs %+9.2f %+8.1f%%\n", stage, t1, t2, t2 - t1, 100 * (t2 - t1) / t1)
+        # A stage that ran in no measurable time has no meaningful percentage baseline.
+        pct = t1 == 0 ? "—" : @sprintf("%+.1f%%", 100 * (t2 - t1) / t1)
+        @printf("  %-22s %9.2fs %9.2fs %+9.2f %9s\n", stage, t1, t2, t2 - t1, pct)
     end
     return nothing
 end
