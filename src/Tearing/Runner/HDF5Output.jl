@@ -77,7 +77,7 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/iota_e" => (; long_name="electron fraction ι_e = Q_e/(Q_e − Q_i) per surface", dims=("surface",)),
     "PerSurface/tau_k" =>
         (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = τ_k·ω; diamagnetic inputs Q_e, Q_i carry the opposite sign by convention)", units="s", dims=("surface",)),
-    "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface (SLAYER layer parameters)", units="s", dims=("surface",)),
+    "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface", units="s", dims=("surface",)),
     "PerSurface/Delta_prime_norm" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
     "PerSurface/rs" => (; long_name="minor radius of each rational surface", units="m", dims=("surface",)),
     "PerSurface/R0" => (; long_name="major radius", units="m", dims=("surface",)),
@@ -97,12 +97,11 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/K" => (; long_name="Glasser-Greene-Johnson coefficient K per surface", dims=("surface",)),
     "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
     "PerSurface/tau_A" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
-    "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
     "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces", dims=("surface_row", "surface_col")),
     "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
-        (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root (dataset name is a misnomer: angular, not cycles/s)", units="rad/s", dims=("surface",)),
+        (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root", units="rad/s", dims=("surface",)),
     "Roots/gamma" =>
         (; long_name="growth rate γ = Im(Q)/τ_k of each root, positive = unstable (an e-folding rate, so no 2π distinction applies)", units="1/s", dims=("surface",)),
     "Roots/no_root" => (; long_name="flag: no usable dispersion root found (Q_root is NaN, ω/γ are placeholders)", dims=("surface",)),

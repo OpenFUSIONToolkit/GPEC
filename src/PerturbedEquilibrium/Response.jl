@@ -36,16 +36,9 @@ function compute_plasma_response!(
     # Plasma inductance Lambda (wt0 formula, Fortran resp_induct_flag=TRUE default)
     plasma_inductance = calc_plasma_inductance(wt0, ffs_intr, equil.psio)
 
-    # Surface inductance L from Green's functions at psilim.
-    # Requires a 2D (nzvac=1) vacuum response so rows are theta points only,
+    # Surface inductance L from vacuum surface-current matrix at psilim.
     nn = ffs_intr.nlow
-    vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, mthvac, 1, ffs_intr.mlow:ffs_intr.mhigh, [nn])
-    wall_nowall = Vacuum.WallShapeSettings(; shape="nowall")
-    vac_2d = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall)
-    grri_2d = Matrix{ComplexF64}(vac_2d.grri)
-    grre_2d = Matrix{ComplexF64}(vac_2d.grre)
-    ν_vac = Vacuum.PlasmaGeometry(vac_input_2d).ν
-    surface_inductance = compute_surface_inductance_from_greens(grri_2d, grre_2d, ffs_intr, nn, ν_vac)
+    surface_inductance = calc_surface_inductance(equil, ffs_intr.psilim, mthvac, ffs_intr.mlow:ffs_intr.mhigh, nn)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).

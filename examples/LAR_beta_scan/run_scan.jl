@@ -77,8 +77,8 @@ function extract_results(h5_path::String)
         msing = read(f, "SingularSurfaces/rational_count")
         m_sing = read(f, "SingularSurfaces/rational_m")
         dp_mat = haskey(f, "SingularSurfaces/Delta_prime_matrix") ? read(f, "SingularSurfaces/Delta_prime_matrix") : nothing
-        qlim = haskey(f, "Info/qlim") ? read(f, "Info/qlim") : read(f, "Equilibrium/qmax")
-        q0 = read(f, "Equilibrium/q0"); qmax = read(f, "Equilibrium/qmax")
+        qlim = haskey(f, "Info/qlim") ? read(f, "Info/qlim") : read(f, "Equilibrium/q_max")
+        q0 = read(f, "Equilibrium/q_axis"); qmax = read(f, "Equilibrium/q_max")
 
         dp_21 = NaN + NaN*im; dp_31 = NaN + NaN*im
         if dp_mat !== nothing && msing > 0

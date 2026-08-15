@@ -23,7 +23,7 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
 
     for (method_name, result) in state.method_results
         mg = create_group(g, method_name)
-        mg["nn"] = result.nn
+        mg["n"] = result.nn
         # Torque and kinetic energy are the two real physical quantities packed into the
         # complex T (Re = T_φ, Im = 2n·δW_k); total_energy stores δW_k = Im(T)/(2n).
         mg["total_torque"] = real(result.total_torque)
@@ -78,7 +78,7 @@ const _KINETIC_MATRIX_LETTERS = (("A", 1), ("B", 2), ("C", 3), ("D", 4), ("E", 5
 # coefficient matrices are Logan 2015 Eqs 7.30-7.35, stored in the energy (δW)
 # normalization (torque integrand divided by 2in).
 const KF_METHOD_H5_ANNOTATIONS = [
-    "nn" => (; long_name="toroidal mode number n of this torque calculation"),
+    "n" => (; long_name="toroidal mode number n of this torque calculation"),
     "total_torque" => (; long_name="total NTV toroidal torque T_φ", units="N*m"),
     "total_energy" => (; long_name="total perturbed kinetic energy δW_k = Im(T)/(2n)", units="J"),
     "psi_nsteps" => (; long_name="number of ψ_N quadrature evaluations"),

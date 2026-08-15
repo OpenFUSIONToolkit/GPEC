@@ -11,8 +11,6 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `grri::Array{ComplexF64,2}` - Interior Green's function at this surface [mthvac, mpert]
-  - `grre::Array{ComplexF64,2}` - Exterior Green's function at this surface [mthvac, mpert]
   - `delta_prime::Vector{ComplexF64}` - **STUB (not physically valid)**. Per-surface ca-based Δ' estimate retained for future work / debugging only. The physically valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`, computed via the STRIDE global BVP (Glasser 2018 PoP 25, 032501). Do not use this field for tearing-stability analysis; do not expect agreement with `delta_prime_matrix`.
   - `delta_prime_col::Matrix{ComplexF64}` - **STUB (not physically valid)**. Per-surface ca-based Δ' column retained for future work / debugging only. Shape (numpert_total × n_res_modes); `delta_prime_col[j, i] = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio)`. The diagonal element matches the (also stubbed) `delta_prime[i]`. Only populated for the Riccati/parallel FM paths. The physically valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`; this field exists for future development on intra-surface coupling diagnostics, not for production use.
 """
@@ -23,8 +21,6 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
-    grri::Array{ComplexF64,2} = Array{ComplexF64}(undef, 0, 0)
-    grre::Array{ComplexF64,2} = Array{ComplexF64}(undef, 0, 0)
     delta_prime::Vector{ComplexF64} = ComplexF64[]
     delta_prime_col::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
     ua_left::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)   # asymptotic basis at left inner-layer boundary
@@ -544,25 +540,25 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
 
-    # Initialization parameters
-
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
 
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
 
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
 
-    # Saved data throughout integration
-
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
-# Total ODE solver steps taken (all steps, not just saved ones)
+    # Initialization parameters
 
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
 
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
 
+    # Saved data throughout integration
+
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
+
+# Total ODE solver steps taken (all steps, not just saved ones)
 
   - `index::Array{Int,2}` - Index matrix used for sorting solution norms with shape `(numpert_total, numunorms_init)`.
 
@@ -571,8 +567,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
 
-  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape    # Initialization parameters
-    `(numpert_total, numpert_total, numunorms_init)`.
+  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
 
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
