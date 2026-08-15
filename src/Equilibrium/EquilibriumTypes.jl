@@ -39,7 +39,8 @@ specified in the input.
   - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
     two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
-  - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
+  - `newq0::Float64` - Target on-axis safety factor q(0); the q and F profiles are rescaled to
+    meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
   - `etol::Float64` - Error tolerance for equilibrium solver
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
@@ -68,7 +69,7 @@ specified in the input.
     psi_accuracy::Float64 = 0.001
     mtheta::Int = 512
 
-    newq0::Int = 0
+    newq0::Float64 = 0.0
     etol::Float64 = 1e-10
 
     force_termination::Bool = false
@@ -445,7 +446,9 @@ raw equilibrium data and preparing the initial splines.
   - `psihigh_resolved::Float64` — outer flux limit the equilibrium is formed on: `config.psihigh`
     clamped to the outermost closed flux surface by [`resolve_psihigh!`](@ref). Defaults to
     `config.psihigh` and only differs for efit-family equilibria whose requested limit falls
-    outside the closed-flux region. The solvers build their ψ grid from this field.
+    outside the closed-flux region. The solvers build their ψ grid from this field. IMAS
+    equilibria are read into this struct but are not in `EFIT_KINDS`, so they are never
+    clamped and always keep the request.
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig

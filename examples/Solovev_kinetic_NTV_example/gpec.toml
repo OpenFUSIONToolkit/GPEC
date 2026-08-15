@@ -13,7 +13,7 @@ psilow = 1e-4                           # Lower limit of normalized poloidal flu
 psihigh = 0.9995                        # Upper limit of normalized poloidal flux
 mpsi = 128                              # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
-newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 

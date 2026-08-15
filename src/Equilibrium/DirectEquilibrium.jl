@@ -545,15 +545,18 @@ robustness.
     if q0 <= 0.0
         @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
     end
-    if equil_params.newq0 == -1
-        equil_params.newq0 = -q0
+    # The -1 sentinel means "flip the extrapolated q0"; resolve it into a local so the
+    # config stays the user's request (matches equilibrium_solver(::InverseRunInput)).
+    newq0 = equil_params.newq0
+    if newq0 == -1
+        newq0 = -q0
     end
-    if equil_params.newq0 != 0.0
-        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", equil_params.newq0))"
+    if newq0 != 0.0
+        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", newq0))"
         f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
-        f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
+        f0fac = f0^2 * ((newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.newq0)
+            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(newq0)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac

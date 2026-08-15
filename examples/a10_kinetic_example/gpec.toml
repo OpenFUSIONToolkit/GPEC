@@ -15,7 +15,7 @@ psilow = 1e-3                  # Lower limit of normalized poloidal flux
 psihigh = 0.99                 # Upper limit of normalized poloidal flux
 mpsi = 16                      # Number of radial grid points (low value for fast iteration)
 mtheta = 256                   # Number of poloidal grid points
-newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-7                    # Error tolerance for equilibrium solver
 
 [Wall]
