@@ -1,5 +1,5 @@
 # Piece 1 verification: reconstructed gal ξ(ψ) and analytic ξ′(ψ).
-#   1. shapes / finiteness sanity of galerkin/solution arrays
+#   1. shapes / finiteness sanity of ForceFreeStates/Solutions/GalerkinIntegration/Solution arrays
 #   2. analytic ξ′ vs centered finite-difference of ξ — agree in the smooth interior, diverge at the
 #      packed edge (the spline-endpoint-derivative artifact we deliberately avoid)
 # Usage: julia --project=. verify_gal_solution.jl [path/to/gpec.h5]
@@ -8,10 +8,10 @@ using HDF5, Printf, Statistics
 h5path = length(ARGS) >= 1 ? ARGS[1] : "examples/DIIID-like_gal_resistive_example/gpec.h5"
 @info "Reading $h5path"
 
-psi, q, issing, xi, dxi, sing_psi = h5open(h5path) do f
-    (read(f["galerkin/solution/psi"]), read(f["galerkin/solution/q"]),
-        read(f["galerkin/solution/issing"]), read(f["galerkin/solution/xi"]),
-        read(f["galerkin/solution/xi_deriv"]), read(f["galerkin/sing_psi"]))
+psi, issing, xi, dxi, sing_psi = h5open(h5path) do f
+    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
 end
 issing = Bool.(issing)
 mpert, ngrid, nsol = size(xi)

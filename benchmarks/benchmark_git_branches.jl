@@ -194,8 +194,8 @@ function run_example_benchmark(example_path, num_runs)
         end
 
         h5 = h5open(gpec_path, "r")
-        et = read(h5["FreeBoundaryStability/eigenmode_energies"])
-        nsteps = read(h5["integration/nstep"])
+        et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
+        nsteps = read(h5["ForceFreeStates/Solutions/ForwardIntegration/nstep"])
         close(h5)
 
         avg_runtime = sum(runtimes) / length(runtimes)

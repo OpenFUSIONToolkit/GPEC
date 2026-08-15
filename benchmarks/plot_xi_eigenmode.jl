@@ -3,9 +3,9 @@
 # The total energy operator W = W_plasma + W_vacuum (free_run, Free.jl); its eigenvectors are the
 # free-boundary edge displacement patterns and the eigenvalues are δW. This picks the eigenmode with the
 # largest Re(eigenvalue) and reconstructs its radial profile by projecting the EL fundamental matrix
-# (integration/xi_psi) onto that edge eigenvector:  c = U_edge \ w,  ξ(ψ) = U(ψ)·c.
+# (ForceFreeStates/Solutions/ForwardIntegration/xi_psi) onto that edge eigenvector:  c = U_edge \ w,  ξ(ψ) = U(ψ)·c.
 #
-# Requires a run with populate_dense_xi=true so integration/xi_psi is the dense axis-basis fundamental
+# Requires a run with populate_dense_xi=true so ForceFreeStates/Solutions/ForwardIntegration/xi_psi is the dense axis-basis fundamental
 # matrix (not the Riccati S-matrices).
 # Usage: julia --project=. benchmarks/plot_xi_eigenmode.jl [path/to/gpec.h5] [out.png]
 
@@ -17,12 +17,12 @@ outpng = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "xi_eigenmode.png")
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
 et, wt, u1, psi, mlow, sing_psi = h5open(h5path) do f
-    (to_c(read(f["FreeBoundaryStability/eigenmode_energies"])),
-        to_c(read(f["FreeBoundaryStability/W_freeboundary_eigenmodes"])),
-        to_c(read(f["integration/xi_psi"])),
-        read(f["integration/psi"]),
-        read(f["info/mlow"]),
-        haskey(f, "galerkin/sing_psi") ? read(f["galerkin/sing_psi"]) : Float64[])
+    (to_c(read(f["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])),
+        to_c(read(f["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"])),
+        to_c(read(f["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"])),
+        read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
+        read(f["Info/mlow"]),
+        haskey(f, "SingularSurfaces/GalerkinDeltaPrime/rational_psi") ? read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]) : Float64[])
 end
 
 mpert, _, nstep = size(u1)

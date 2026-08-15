@@ -52,7 +52,7 @@ singfac_min = 1e-4             # Fractional distance from rational q at which id
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
 # Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
+use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks SingularSurfaces/delta_prime_matrix)
 parallel_threads      = 1      # serial/bit-deterministic BVP — keeps the regression Δ' (and hence γ) reproducible
 populate_dense_xi     = false  # No PerturbedEquilibrium here; the dense EL pass has no consumer (auto-disabled under force_termination anyway). SLAYER needs only delta_prime_matrix from the parallel BVP.
 set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost

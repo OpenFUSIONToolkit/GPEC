@@ -70,7 +70,6 @@
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
-            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
             delta_prime=ComplexF64[],
             delta_prime_col=zeros(ComplexF64, 0, 0),
             ua_left=zeros(ComplexF64, 0, 0, 0),
@@ -78,7 +77,6 @@
             psi_ua_left=0.0, psi_ua_right=0.0)
         s2 = SingType(; psifac=0.7, rho=sqrt(0.7), m=[3], n=[1],
             q=3.0, q1=dq(0.7),
-            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
             delta_prime=ComplexF64[],
             delta_prime_col=zeros(ComplexF64, 0, 0),
             ua_left=zeros(ComplexF64, 0, 0, 0),
@@ -113,7 +111,6 @@
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
-            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
             delta_prime=ComplexF64[],
             delta_prime_col=zeros(ComplexF64, 0, 0),
             ua_left=zeros(ComplexF64, 0, 0, 0),
@@ -155,7 +152,6 @@
 
         s_unpop = SingType(; psifac=0.5, rho=sqrt(0.5), m=[2], n=[1],
             q=2.0, q1=1.0,
-            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
             delta_prime=ComplexF64[],
             delta_prime_col=zeros(ComplexF64, 0, 0),
             ua_left=zeros(ComplexF64, 0, 0, 0),
@@ -178,7 +174,6 @@
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
-            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
             delta_prime=ComplexF64[],
             delta_prime_col=zeros(ComplexF64, 0, 0),
             ua_left=zeros(ComplexF64, 0, 0, 0),

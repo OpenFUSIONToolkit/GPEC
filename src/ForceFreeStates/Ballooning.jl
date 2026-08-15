@@ -100,8 +100,8 @@ flux surface [Glasser-Greene-Johnson; Glasser Phys. Plasmas 23, 112506
 field and metric quantities.
 
 The main local-stability scan takes `D_I` from the `det(d0bar)` calculation
-reported as `locstab/di`, then combines it with this surface-average `H` to
-form `locstab/dr`. This avoids recomputing a separate surface-average `D_I`
+reported as `LocalStability/di`, then combines it with this surface-average `H` to
+form `LocalStability/dr`. This avoids recomputing a separate surface-average `D_I`
 inside the `D_R` path.
 """
 function resistive_interchange_h(flux_surface_index::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)

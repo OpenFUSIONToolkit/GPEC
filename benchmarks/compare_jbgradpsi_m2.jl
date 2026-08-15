@@ -1,10 +1,10 @@
-# Compare the area-normalized b^ψ (perturbed_equilibrium/response/psi_area = b^ψ/⟨J·|∇ψ|⟩_θ) for one
+# Compare the area-normalized b^ψ (PerturbedEquilibrium/Response/psi_area = b^ψ/⟨J·|∇ψ|⟩_θ) for one
 # poloidal harmonic between two GPEC runs that are identical except for which ξ feeds PerturbedEquilibrium:
 #   (1) IDEAL galerkin matched ξ   (gal_match_flag=true, gal_ideal_flag=true)
 #   (2) SHOOTING ξ                  (gal_match_flag=false)
 #
-# PE writes no ψ grid, so it's reconstructed: gal-ideal → galerkin/solution/psi minus issing points;
-# shooting → integration/psi.
+# PE writes no ψ grid, so it's reconstructed: gal-ideal → ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi minus issing points;
+# shooting → ForceFreeStates/Solutions/ForwardIntegration/psi.
 # Usage: julia --project=. benchmarks/compare_jbgradpsi_m2.jl [gal_h5] [shoot_h5] [out.png] [m]
 
 using HDF5, Plots, Printf
@@ -18,14 +18,14 @@ to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im
 
 # gal-ideal run: PE grid = gal solution grid with the on-surface (issing) points dropped
 pa_g, psi_g, mlow, sing_psi, sing_m = h5open(gal_h5) do f
-    pa = to_c(read(f["perturbed_equilibrium/response/psi_area"]))   # [npsi, mpert]
-    iss = Bool.(read(f["galerkin/solution/issing"]))
-    (pa, read(f["galerkin/solution/psi"])[.!iss], read(f["info/mlow"]),
-        read(f["galerkin/sing_psi"]), read(f["galerkin/sing_m"]))
+    pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))   # [npsi, mpert]
+    iss = Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]))
+    (pa, read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"])[.!iss], read(f["Info/mlow"]),
+        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_m"]))
 end
-# shooting run: PE grid = integration/psi
+# shooting run: PE grid = ForceFreeStates/Solutions/ForwardIntegration/psi
 pa_s, psi_s = h5open(sh_h5) do f
-    (to_c(read(f["perturbed_equilibrium/response/psi_area"])), read(f["integration/psi"]))
+    (to_c(read(f["PerturbedEquilibrium/Response/psi_area"])), read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"]))
 end
 
 size(pa_g, 1) == length(psi_g) || error("gal grid mismatch: npsi=$(size(pa_g,1)) vs grid=$(length(psi_g))")
