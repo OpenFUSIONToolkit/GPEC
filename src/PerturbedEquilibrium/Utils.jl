@@ -1,7 +1,7 @@
 """
     initialize_mode_arrays!(
         intr::PerturbedEquilibriumInternal,
-        ffs_intr::ForceFreeStatesInternal
+        ffs::ForceFreeStatesResult
     )
 
 Initialize mode number arrays for convenient indexing.
@@ -20,12 +20,12 @@ This matches the convention used in ForceFreeStates where modes are ordered as:
 """
 function initialize_mode_arrays!(
     intr::PerturbedEquilibriumInternal,
-    ffs_intr::ForceFreeStatesInternal
+    ffs::ForceFreeStatesResult
 )
-    numpert_total = ffs_intr.numpert_total
-    mpert = ffs_intr.mpert
-    mlow = ffs_intr.mlow
-    nlow = ffs_intr.nlow
+    numpert_total = ffs.numpert_total
+    mpert = ffs.mpert
+    mlow = ffs.mlow
+    nlow = ffs.nlow
 
     # Allocate arrays
     intr.m_modes = zeros(Int, numpert_total)

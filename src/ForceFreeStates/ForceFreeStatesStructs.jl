@@ -1,4 +1,15 @@
 """
+    ModeSpace
+
+Supertype for objects that carry the resolved (m, n) mode space — `mlow`, `mhigh`, `mpert`,
+`nlow`, `nhigh`, `npert`, `numpert_total`. Both the solve-time scratch
+[`ForceFreeStatesInternal`](@ref) and the published [`ForceFreeStatesResult`](@ref) are
+`ModeSpace`s, so kernels that need nothing but the mode indexing (`el_derivatives!`,
+`materialize_derivative_stores!`, `build_kinetic_metric_matrices`) accept either.
+"""
+abstract type ModeSpace end
+
+"""
     SingType
 
 A mutable struct holding data related to the singular surfaces in the equilibrium.
@@ -152,7 +163,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
-@kwdef mutable struct ForceFreeStatesInternal
+@kwdef mutable struct ForceFreeStatesInternal <: ModeSpace
     dir_path::String = ""
     mlow::Int = 0
     mhigh::Int = 0
@@ -249,7 +260,7 @@ gpec.toml.
   - `HDF5_filename::String` - Name of HDF5 output file
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
-  - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` is not yet a standalone integrator and currently errors — use `gal_flag = true` alongside another integrator. Requires `singfac_min != 0` for `"riccati"`.
+  - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
   - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
@@ -291,8 +302,7 @@ gpec.toml.
     nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
 
-    # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port) ---
-    gal_flag::Bool = false          # enable outer-region Galerkin Δ′ solve
+    # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port); selected by integrator = "galerkin" ---
     gal_solver::String = "LU"       # "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs)
     gal_nx::Int = 256               # elements per interval between singular surfaces
     gal_nq::Int = 6                 # Gauss-Lobatto quadrature order per element

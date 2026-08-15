@@ -157,12 +157,12 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     if ctrl.integrator == "riccati"
         ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
-        # Riccati path returns (odet, propagators, chunks, S_at_surface_left) for the deferred Δ' BVP.
         return riccati_eulerlagrange_integration(ctrl, equil, ffit, intr)
     elseif ctrl.integrator == "forward"
         return forward_eulerlagrange_integration(ctrl, equil, ffit, intr)
     elseif ctrl.integrator == "galerkin"
-        error("integrator = \"galerkin\" is not yet a standalone integrator — use gal_flag = true alongside integrator = \"forward\" or \"riccati\".")
+        error("integrator = \"galerkin\" solves the Euler-Lagrange system variationally, not by ODE integration; " *
+              "it is dispatched to galerkin_solve.")
     end
     error("Unknown integrator: $(ctrl.integrator). Expected \"forward\", \"riccati\", or \"galerkin\".")
 end

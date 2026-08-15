@@ -92,6 +92,20 @@
         @test_throws ArgumentError slayer_control_from_toml(bad)
     end
 
+    @testset "run_slayer: result-facing form forwards surfaces and Δ'" begin
+        # A result with no singular surfaces short-circuits before any equilibrium access,
+        # so a stand-in result is enough to pin the forwarding of surfaces / delta_prime.
+        c = SLAYERControl(; enabled=true, profile_file="unused.h5")
+        no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
+            delta_prime=nothing)
+        r = run_slayer(no_surfaces, c)
+        @test isempty(r.params)
+
+        # A disabled control never looks at the result at all.
+        r_off = run_slayer(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5"))
+        @test r_off.enabled == false
+    end
+
     @testset "run_slayer_from_inputs: disabled path is a no-op" begin
         c = SLAYERControl(; enabled=false)
         params = [_mk_params()]

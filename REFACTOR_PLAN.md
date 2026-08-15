@@ -2,8 +2,11 @@
 ## Complete multi-PR implementation plan
 
 > **NOTE FOR ALL DEVELOPERS (read this first).**
-> This document is the agreed, in-progress plan for a five-PR refactor of the
-> ForceFreeStates ↔ PerturbedEquilibrium interface and the top-level driver. It is
+> This document is the agreed, in-progress plan for a refactor of the
+> ForceFreeStates ↔ PerturbedEquilibrium interface and the top-level driver, delivered
+> as THREE pull requests: #381 (integrator unification), #387 (LocalStability), and one
+> combined "interface PR" whose three commits carry what were originally planned as
+> PRs 3-5 (the stack was collapsed once it became clear reviews would batch at the end). It is
 > committed directly to `develop` (deliberately, as documentation only — no code
 > changes ride with it) so everyone with open PRs can see what is coming and where it
 > will touch their work. Key coordination points:
@@ -62,6 +65,7 @@ pe  = perturbed_equilibrium(ffs, rmp)
 | D10 | No back-compat burden; examples/fixtures updated freely; regression re-baselining accepted. Final validation = fresh Fortran comparison after the sequence. Nothing else merges mid-sequence without coordination (#363/#345 landed before PR 1 and are absorbed — see header amendment). |
 | D11 | New structs immutable from day one (eases the later #367 merge). HDF5 writers become functions on result structs, keeping the merged #363 schema paths unchanged; #364 (metadata) re-targets them later. |
 | D12 | Analysis module reads HDF5 files, not live structs — untouched except where dataset names would change (they don't in this plan). |
+| D13 | Inner-layer matching runs INSIDE `solve` (a `ForceFreeStatesResult` is always a closed basis). `result.solution` holds THE solve's ξ solution product — a thin `SolutionProfiles` interchange type — whenever one exists: forward always; galerkin when matched (built directly from the match — the `gal_matched_odestate` OdeState shim is DELETED); riccati `nothing` until the STRIDE/Frobenius matching lands. Closure is explicit and universal: `result.closure ∈ (:ideal, :matched)` and `result.bpen` (msing × numpert_total; zeros under ideal closure) are always present — the landing pad for any matching implementation. No transitional arbitration API: additive gal is removed in the SAME PR that introduces the result (PR 3), so one run has at most one solution and nothing like `pe_solution` is ever needed. Matching config is integrator-agnostic: a `ResistiveMatch` object (swappable `InnerLayer` model + per-surface `eta/rho/rotation`, `gamma`, `ideal`) passed as a `match=` kwarg to `solve` (PR 5). STRIDE-side matching is a future PR; until then `match` with `Riccati()` errors "not yet implemented". The `gal_*` matching TOML keys are renamed/re-homed by that future PR, not by this stack. |
 
 ### Verified code facts the workers must not re-derive
 
@@ -152,11 +156,14 @@ All code must be JuliaFormatter-clean per `.JuliaFormatter.toml` before commit.
 
 | PR | Branch | Content |
 |----|--------|---------|
-| 1 | `refactor/riccati-unification` | Delete serial-Riccati + `populate_dense_xi` + `parallel_threads`; `integrator=` ctrl key; `nchunks` knob; thread-independent chunking; shooting→forward rename |
-| 2 | `refactor/local-stability-module` | Extract Ballooning.jl → `LocalStability` module; drop ctrl dependency |
-| 3 | `refactor/forcefreestates-result` | `ForceFreeStatesResult` + warn-and-skip consumers (PE, FFS writer, SLAYER, write_imas) |
-| 4 | `refactor/staged-main` | Decompose `main_from_inputs` into stage functions; standalone Galerkin; deprecate `gal_flag` |
-| 5 | `feature/solve-api` | CommonSolve `solve`, integrator structs public, `PlasmaEquilibrium(path;…)`, `RMPField`, `perturbed_equilibrium` |
+| #381 | `refactor/riccati-unification` | Delete serial-Riccati + `populate_dense_xi` + `parallel_threads`; `integrator=` ctrl key; `nchunks` knob; thread-independent chunking; shooting→forward rename |
+| #387 | `refactor/local-stability-module` | Extract Ballooning.jl → `LocalStability` module; drop ctrl dependency (stacked on #381) |
+| interface PR | `refactor/forcefreestates-result` | ONE PR, three slice-pure commits: **(a)** §5 `ForceFreeStatesResult` + warn-and-skip consumers + standalone Galerkin; **(b)** §6 staged `main`; **(c)** §7 `solve` API (stacked on #387) |
+
+Commit discipline for the interface PR: commit boundaries now do the job PR boundaries
+did — keep each commit slice-pure (fixes amend into the right slice before review
+starts; ordinary follow-up commits after). Per-slice numerical isolation stays
+verifiable via the harness with commit SHAs as refs.
 
 ---
 
@@ -333,13 +340,13 @@ harness `--cases diiid_n1 --refs develop,local` (`LocalStability/*` datasets mus
 
 ---
 
-## 5. PR 3 — `refactor/forcefreestates-result`
+## 5. Interface PR, commit (a) — result struct, consumers, standalone Galerkin
 
 ### 5.1 New file `src/ForceFreeStates/Result.jl` (included from ForceFreeStates.jl)
 
 Reuse existing types wholesale (`SingType`, `OdeState`, `FreeBoundaryResult`,
-`GalerkinResult`, `FourFitVars`, `MetricData`, `EdgeScanState`) — minimal-change
-discipline; only two new types + helpers:
+`GalerkinResult`, `FourFitVars`, `MetricData`, `EdgeScanState`); new types are
+`DeltaPrimeData`, `SolutionProfiles`, and the result itself:
 
 ```julia
 "Δ′ outputs of the Riccati STRIDE BVP (moved off ForceFreeStatesInternal at result-build time)."
@@ -347,6 +354,18 @@ struct DeltaPrimeData
     matrix::Matrix{ComplexF64}      # msing×msing PEST3 Δ′  (was intr.delta_prime_matrix)
     raw::Matrix{ComplexF64}         # 2msing×2msing side-major D′ (was intr.delta_prime_raw)
     coil::Matrix{ComplexF64}        # 2msing×numpert_total edge coil response (was intr.delta_coil)
+end
+
+"The solve's ξ solution, in the exact shape PerturbedEquilibrium consumes. Field names
+ mirror the OdeState store subset so PE internals change minimally."
+struct SolutionProfiles
+    basis::Symbol                            # :el_axis (forward) | :gal_native (matched galerkin)
+    step::Int                                # number of stored radial nodes
+    psi_store::Vector{Float64}
+    q_store::Vector{Float64}
+    u_store::Array{ComplexF64,4}             # (N, N, 2, step) — Ξ_ψ and conjugate momentum
+    du_store::Array{ComplexF64,3}            # (N, N, step) dΞ_ψ/dψ, ALWAYS populated
+    xi_s_store::Array{ComplexF64,3}          # (N, N, step) Ξ_s, ALWAYS populated
 end
 
 struct ForceFreeStatesResult
@@ -364,52 +383,64 @@ struct ForceFreeStatesResult
     ffit::FourFitVars
     surfaces::Vector{SingType}               # alias of intr.sing (ua/restype/α live here)
     kinetic::@NamedTuple{kmsing::Int, kinsing::Vector{SingType}, scan_psi::Vector{Float64}, scan_cond::Vector{Float64}, scan_threshold::Float64}
+    # closure of the basis at the rationals (D13) — ALWAYS present
+    closure::Symbol                          # :ideal (jump condition imposed) | :matched (inner layer)
+    bpen::Matrix{ComplexF64}                 # (msing × numpert_total) penetrated resonant field; zeros under :ideal
     # per-integrator products (presence == capability)
-    solution::Union{Nothing,OdeState}        # dense stores; see solution_basis
-    solution_basis::Symbol                   # :el_axis | :riccati | :gal_native | :none
+    solution::Union{Nothing,SolutionProfiles}   # THE solve's ξ solution; nothing when none exists (riccati; unmatched gal)
+    diagnostics::Union{Nothing,OdeState}     # the integrator's raw odet (crit, edge scan, ψ trace, ca); writer-only
+    wp::Union{Nothing,Matrix{ComplexF64}}    # fixed-boundary plasma energy W_p at psilim; present for any EL sweep even with vac_flag=false (aliases free_boundary.wp when free_run ran)
     free_boundary::Union{Nothing,FreeBoundaryResult}
     delta_prime::Union{Nothing,DeltaPrimeData}
     galerkin::Union{Nothing,GalerkinResult}
 end
 ```
 
-Contract of `solution`/`solution_basis`:
-- Forward → dense EL-basis odet, `:el_axis`. PE-usable.
-- Riccati → its odet IS carried (psi/q/crit/edge_scan are valid, u_store is chunk
-  snapshots), `:riccati`. NOT PE-usable; HDF5 `ForceFreeStates/Solutions/ForwardIntegration/psi|crit` and `EdgeScan/*` still
-  written from it, `.../ForwardIntegration/xi_*` written empty.
-- Galerkin with `gal_match_flag` → `gal_matched_odestate(...)`, `:gal_native`
-  (PE-usable; `du_store_populated=true` analytic derivatives). Without match →
-  `nothing`, `:none`.
+Contract (D13 — final, no transitional states):
+- Forward → `solution` = `SolutionProfiles(:el_axis, …)` aliasing the odet's stores (zero
+  copy), `diagnostics` = the same odet, `closure = :ideal`, `bpen` = zeros.
+- Riccati → `solution = nothing` (chunk-endpoint states are not a ξ solution; the future
+  STRIDE/Frobenius matching will populate `solution`, `closure = :matched`, and `bpen`),
+  `diagnostics` = its odet (ψ/q/crit/edge scan/ca are valid), `closure = :ideal`.
+- Galerkin, matched → `solution` = `SolutionProfiles(:gal_native, …)` built DIRECTLY from
+  `GalerkinResult.match`/`solution` (drop `issing` points, analytic Ξ′, `compute_node_xi_s!`
+  for Ξ_s — the useful guts of the deleted `gal_matched_odestate`, minus the OdeState
+  costume), `diagnostics = nothing`, `closure = :matched` (`:ideal` under `gal_ideal_flag`),
+  `bpen = galerkin.match.bpen`.
+- Galerkin, unmatched → `solution = nothing` (raw homogeneous gal columns are not a driven
+  response basis), `closure = :ideal`.
+
+There is NO `pe_solution` and NO stored-basis arbitration: additive gal is removed in this
+PR (§5.3), so a run has at most one solution and PE reads `result.solution` directly.
 
 Helpers (same file):
 
 ```julia
-"Warn-and-skip gate: true iff `field` is populated."
+"Warn-and-skip gate: true iff the optional `field` is populated."
 function require(result::ForceFreeStatesResult, field::Symbol, calc::AbstractString)
     getfield(result, field) === nothing || return true
     @warn "Skipping $calc: `$field` was not produced by the $(result.integrator) integrator"
     return false
 end
 
-"Warn-and-skip gate for ξ-profile consumers: solution present AND in a usable basis."
-function require_solution(result, calc; bases=(:el_axis, :gal_native))
-    result.solution !== nothing && result.solution_basis in bases && return true
-    @warn "Skipping $calc: dense ξ profiles require a Forward (or gal-matched Galerkin) run; " *
-          "this result came from the $(result.integrator) integrator (basis=$(result.solution_basis))"
-    return false
-end
+"Specialized message for the ξ-solution gate."
+require_solution(result, calc) = result.solution !== nothing ? true :
+    (@warn "Skipping $calc: no ξ solution — dense profiles require a Forward (or matched Galerkin) run; " *
+           "this result came from the $(result.integrator) integrator"; false)
 
-"Assemble the result after integration. Pure data movement — no computation."
+"Assemble the published result once the solve is finished."
 build_result(integrator, ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data) -> ForceFreeStatesResult
 ```
 
-`build_result` sets `delta_prime = isempty(intr.delta_prime_matrix) ? nothing :
-DeltaPrimeData(intr.delta_prime_matrix, intr.delta_prime_raw, intr.delta_coil)`,
-`free_boundary = free_energies`, `galerkin = gal_data`, and the gal-vs-odet solution
-selection currently done inline at `GeneralizedPerturbedEquilibrium.jl:584-592`
-(`gal_matched_odestate` + `pe_intr.odet_from_gal`/`inner_bpen` handling moves behind
-the result: `inner_bpen` is fetched from `result.galerkin.match.bpen` by the driver).
+`build_result` responsibilities (the ONLY place with assembly logic):
+- `delta_prime` from the intr Δ′ fields when non-empty; `free_boundary = free_energies`;
+  `galerkin = gal_data`; `diagnostics = odet`.
+- Forward: call `materialize_derivative_stores!(odet, …)` HERE (moving the call out of the
+  writer and PE — one site, always-populated `du_store`/`xi_s_store`), then wrap the stores
+  in `SolutionProfiles(:el_axis, …)`.
+- Matched gal: build `SolutionProfiles(:gal_native, …)` from the match (see contract above).
+- `closure = (gal_data !== nothing && gal_data.match !== nothing && !ctrl.gal_ideal_flag) ? :matched : :ideal`;
+  `bpen` = match bpen or zeros(msing, numpert_total).
 `ForceFreeStatesInternal` stays as internal scratch during the solve; it no longer
 crosses module boundaries after `build_result`.
 
@@ -420,20 +451,29 @@ crosses module boundaries after `build_result`.
   (drop `equil/odet/wt0/mthvac/ffs_intr/metric/ffit` — all read off `result`).
   Internals:
   - `initialize_mode_arrays!` reads mode fields from `result`.
+  - PE's working solution IS `result.solution::SolutionProfiles` (never an OdeState; PE
+    internals re-type from `OdeState` to `SolutionProfiles` — field names match, so the
+    change is annotations, not logic). No materialize call in PE: `du_store`/`xi_s_store`
+    arrive populated.
   - Response step: `require(result, :free_boundary, "plasma response") &&
-    require_solution(result, "plasma response")` else skip (replaces the wt0-warn at
-    :128-130 and the discarded materialize Bool at :88 — `materialize_derivative_stores!`
-    is still called, on `result.solution`, only when the gates pass).
+    require_solution(result, "plasma response")` else skip.
   - Coupling step: same two gates + existing internal `plasma_response` gate.
   - All `ffs_intr.X` reads → `result.X`; `wt0` → `result.free_boundary.wt0`;
-    `mthvac` → `result.control.mthvac`; odet → `result.solution`.
-  - `pe_intr.odet_from_gal` ↔ `result.solution_basis == :gal_native`.
+    `mthvac` → `result.control.mthvac`.
+  - `pe_intr.odet_from_gal` ↔ `result.solution.basis == :gal_native`;
+    `pe_intr.inner_bpen = result.bpen` (driver; the gal special-case `if` is deleted).
 - **FFS HDF5 writer**: re-signature to
   `write_outputs_to_HDF5(result; git_version, inputs, forcing_modes, locstab, ballooning_boundary)`
   — body is today's `:700-991` with `ctrl/equil/intr/odet/free_energies/ffit/gal_data`
   spelled `result.*`; every group that came from an optional field gets the existing
   empty-array fallback (already the pattern for FreeBoundaryStability). Δ′ datasets
-  read from `result.delta_prime`. **Dataset names/paths unchanged** (D11).
+  read from `result.delta_prime`. Solution-adjacent datasets split by source:
+  `ForwardIntegration/xi_psi|u2|dxi_psi|xi_s` from `result.solution` when
+  `basis == :el_axis` (empty otherwise — the gal-native solution is already persisted
+  under the Galerkin group); `psi|q|nstep|nstep_total|crit`, `SingularSurfaces/ca_*`,
+  and `EdgeScan/*` from `result.diagnostics` when present (empty otherwise). Output is
+  byte-identical for every forward/riccati deck; the four gal decks become gal-only
+  files (§5.3). **Dataset names/paths unchanged** (D11).
 - **SLAYER**: `Runner.run_slayer(result, control; dir_path)` — reads
   `result.surfaces`, `result.delta_prime === nothing ? empty : result.delta_prime.matrix`,
   `result.equil`. Keep a thin internal method for the old `(equil, sing, dpm)` shape if
@@ -445,28 +485,67 @@ crosses module boundaries after `build_result`.
 - Kinetic-forces stage keeps consuming `pe_state` + `result` fields analogously
   (`set_perturbation_data!(kf_intr, pe_state, result, …)` — mode/metric reads only).
 
-### 5.3 Tests
+### 5.3 Standalone Galerkin + additive-gal removal (pulled forward from PR 4)
+
+Additive gal is what would force a two-solutions-per-run transitional state; it dies in
+this PR so the result contract above is final from day one.
+
+- Factor the wv computation out of `free_run` into a shared helper in
+  `src/ForceFreeStates/Free.jl`:
+  `compute_scaled_wv(ctrl, equil, intr) -> (wv, vac)` — the `VacuumInput` +
+  `compute_vacuum_response` + Chance singfac scaling block (no OdeState involved).
+  `free_run` calls it; identical numerics by construction.
+- `integrator = "galerkin"` becomes legal: the driver's gal branch skips EL integration
+  and `free_run` entirely; runs `sing_min!` + (when `vac_flag`) `compute_scaled_wv` +
+  `galerkin_solve` (+ `gal_match_rpec` via the existing flags); `build_result` fills the
+  gal fields per the §5.1 contract. Errors if `kinetic_factor > 0`. `npert == 1` enforced
+  by `galerkin_solve` already.
+- DELETE: `gal_matched_odestate` (GalerkinMatch.jl) and the driver's additive-gal PE
+  block (`pe_odet` selection). The additive path (`gal_flag=true` alongside another
+  integrator) is REMOVED; `gal_flag` joins `_DEPRECATED_FFS_KEYS` + the pre-commit hook.
+- RETAIN `_chord_solution_at` (SingularCoupling.jl) as an uncalled helper: re-typed to
+  `SolutionProfiles`, hard-error branch dropped, stub-style docstring. Kept pending the
+  Riccati eigenfunction-reconstruction decision (a Frobenius-reconstructed solution may
+  need chord-slope derivatives) — do NOT re-delete as dead code.
+- Gal → PE this cycle: PerturbedEquilibrium's response step requires the free-boundary
+  δW (`wt0`), which the Galerkin formalism does not produce — so PE warn-skips entirely
+  on gal results (both gates: `free_boundary` missing kills response, and coupling needs
+  the response). The gal-native `solution` consumer path in PE therefore stays dormant
+  until the gal-side δW work lands (next cycle, with the STRIDE matching); the contract
+  and tests are already in place for it.
+- Retoml the four gal decks to `integrator = "galerkin"` (drop `gal_flag`):
+  `DIIID-like_gal_resistive_example`, `DIIID-like_gal_resistive_pe_example`,
+  `LAR_ideal_match_test`, `LAR_resistive_match_test`. Their HDF5 outputs become gal-only
+  (FFS-side integration/energy datasets empty) — accepted per D10; gal datasets identical
+  because `galerkin_solve` inputs are unchanged. `gal_*` sub-knobs stay (they become
+  `Galerkin(...)` / `ResistiveMatch` fields in PR 5).
+
+### 5.4 Tests
 
 - New `test/runtests_result_struct.jl` (add to `test/runtests.jl` include list):
-  build a Solovev case; assert Forward result has `solution_basis == :el_axis`,
+  build a Solovev case; assert Forward result has `solution.basis == :el_axis`,
+  populated `du_store`/`xi_s_store`, `closure == :ideal`, `iszero(bpen)`,
   `delta_prime === nothing`; Riccati result has `delta_prime !== nothing`,
-  `solution_basis == :riccati`; `require_solution` warns exactly once
-  (`@test_logs (:warn,)`) and PE skips without throwing on a Riccati result with a
-  `[PerturbedEquilibrium]` deck.
+  `solution === nothing`, `diagnostics !== nothing`; `require_solution` warns exactly
+  once (`@test_logs (:warn,)`) and PE skips without throwing on a Riccati result with a
+  `[PerturbedEquilibrium]` deck; a matched gal deck (LAR_ideal_match_test-class) yields
+  `solution.basis == :gal_native` and `bpen == galerkin.match.bpen` (zeros under
+  `gal_ideal_flag`, with `closure == :ideal` there).
 - Update every test that consumed `main`'s old named-tuple return
   (`runtests_fullruns.jl`, `runtests_imas.jl`, `runtests_rerun_from_h5.jl`,
   `runtests_parallel_integration.jl` capture helpers).
 
-### 5.4 Verification
+### 5.5 Verification
 
-Full suite; `runtests_fullruns.jl` (all decks — forward decks produce identical
-HDF5 vs pre-PR, riccati decks now emit empty `ForwardIntegration/xi_*` + PE-skip warnings);
-harness `--cases diiid_n1,solovev_n1 --refs develop,local` (forward-deck tracked
-quantities unchanged); docs build.
+Full suite; `runtests_fullruns.jl` (forward decks produce byte-identical HDF5 vs the
+stack base, riccati decks emit empty `ForwardIntegration/xi_*` + PE-skip warnings, gal
+decks become gal-only files); harness vs the stack base
+(`--cases diiid_n1,diiid_n1_riccati,solovev_n1 --refs refactor/local-stability-module,local`
+— tracked quantities unchanged; gal-flavored cases re-baselined); docs build.
 
 ---
 
-## 6. PR 4 — `refactor/staged-main`
+## 6. Interface PR, commit (b) — staged `main` (staging ONLY — gal work is in commit (a))
 
 ### 6.1 Stage functions (all in `src/GeneralizedPerturbedEquilibrium.jl`; `main_from_inputs` becomes ~40 lines of orchestration)
 
@@ -495,44 +574,15 @@ logic stays a pre-FFS stage but is owned by the FFS-facing function
 (`maybe_reform_equilibrium` calls `ForceFreeStates.rational_psi_nodes` +
 `Equilibrium.refined_psi_grid`/`setup_equilibrium` exactly as today).
 
-### 6.2 Standalone Galerkin (`integrator = "galerkin"` becomes legal)
+### 6.2 Tests / verification
 
-- Factor the wv computation out of `free_run` into a shared helper in
-  `src/ForceFreeStates/Free.jl`:
-  ```julia
-  "Raw vacuum response at psilim with the Chance singfac scaling applied (Free.jl:82-88)."
-  compute_scaled_wv(ctrl, equil, intr) -> (wv, vac)   # no OdeState involved
-  ```
-  `free_run` calls it (identical numerics — pure extraction); the galerkin stage calls
-  it when `ctrl.vac_flag` to supply `wv` to `galerkin_solve`.
-- `run_force_free_states` with `"galerkin"`: skip EL integration and `free_run`
-  entirely; `sing_min!` + `galerkin_solve` (+ `gal_match_rpec` via flags as today);
-  result: `free_boundary=nothing`, `delta_prime=nothing`, `galerkin=GalerkinResult`,
-  `solution` from `gal_matched_odestate` when matched (`:gal_native`) else
-  `nothing`/`:none`. Error if `kinetic_factor > 0`. `npert == 1` enforced by
-  `galerkin_solve` already.
-- Deprecate `gal_flag` (add to `_DEPRECATED_FFS_KEYS` + hook): additive gal is
-  REMOVED — `gal_flag=true` decks become `integrator = "galerkin"`. Retoml:
-  `DIIID-like_gal_resistive_example`, `DIIID-like_gal_resistive_pe_example`,
-  `LAR_ideal_match_test`, `LAR_resistive_match_test` (their FFS-side datasets
-  disappear from the HDF5 — accepted per D10; gal datasets identical because
-  `galerkin_solve` inputs are unchanged). `gal_*` sub-knobs stay (they become
-  `Galerkin(...)` fields in PR 5).
-- FFS writer: tolerate `solution === nothing` (write empty `ForwardIntegration/*` datasets —
-  extend the existing empty-fallback pattern).
-
-### 6.3 Tests / verification
-
-- Update `runtests_fullruns.jl` gal decks' expectations (gal-only HDF5).
-- New testset (in `runtests_fullruns.jl` or the gal tests): `integrator="galerkin"`
-  on `LAR_ideal_match_test` produces the Galerkin `delta` dataset identical to the PR-3 additive
-  run (same `wv` by construction — assert against a stored reference or a paired
-  riccati+gal_flag run on the pre-PR commit during development).
-- Full suite; harness (gal cases if present, plus diiid/solovev); docs.
+Pure code motion: full suite unchanged; harness vs commit (a) must be identical for ALL
+cases (no re-baselining in this slice); docs build. Standalone Galerkin and the
+additive-gal removal live in commit (a) (§5.3).
 
 ---
 
-## 7. PR 5 — `feature/solve-api`
+## 7. Interface PR, commit (c) — `solve` API
 
 ### 7.1 Dependencies
 
@@ -555,13 +605,24 @@ Base.@kwdef struct Galerkin <: AbstractIntegrator
     tol::Float64 = 1e-10; gnstep::Int = 20000; dx1dx2_flag::Bool = true
     sing_order::Int = 6; sing_order_ceiling::Bool = true
     rpec_flag::Bool = false; edge_onesided::Bool = false
-    match_flag::Bool = false; ideal_flag::Bool = false; inner_solver::String = "ray"
-    inner_xfac::Float64 = 10.0; inner_nx::Int = 1280; inner_nq::Int = 5
-    inner_cutoff::Int = 5; inner_kmax::Int = 8
-    eta::Vector{Float64} = Float64[]; rho::Vector{Float64} = Float64[]
-    rotation::Vector{Float64} = Float64[]; gamma::Float64 = 5/3
+end
+
+# D13: inner-layer matching config, integrator-agnostic (NOT part of any integrator struct)
+Base.@kwdef struct ResistiveMatch
+    model = InnerLayer.GGJModel(solver=:ray)   # swappable inner layer; backend knobs
+                                               # (xfac/nx/nq/cutoff/kmax ← gal_inner_*) live on the model
+    eta::Vector{Float64} = Float64[]           # per-surface, core→edge   (← gal_eta)
+    rho::Vector{Float64} = Float64[]           #                          (← gal_rho)
+    rotation::Vector{Float64} = Float64[]      # Hz; γ_s = 2πi·n·f_s      (← gal_rotation)
+    gamma::Float64 = 5 / 3                     #                          (← gal_gamma)
+    ideal::Bool = false                        #                          (← gal_ideal_flag)
 end
 ```
+
+`match !== nothing` replaces `gal_match_flag`. Inside `solve`, matching dispatches per
+integrator: Galerkin → `gal_match_rpec`; Riccati → errors "not yet implemented" until
+the STRIDE resonant-matching PR lands (that PR also renames/deprecates the `gal_*`
+matching TOML keys — until then the TOML keys map onto `ResistiveMatch` internally).
 
 Mapping helpers `_integrator_symbol(alg)` and `_apply_alg!(ctrl_kwargs, alg)`
 translate an alg struct into the `ForceFreeStatesControl` keyword set (pure
@@ -575,6 +636,7 @@ solve; the TOML `integrator=` + flat `gal_*`/`nchunks` keys keep working unchang
   ```julia
   function solve(equil::Equilibrium.PlasmaEquilibrium, alg::AbstractIntegrator;
                  nn::Union{Int,UnitRange{Int}}, wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
+                 match::Union{Nothing,ResistiveMatch}=nothing,
                  dir_path::String=".", kwargs...)   # kwargs = any ForceFreeStatesControl field
       -> ForceFreeStatesResult
   ```
@@ -656,7 +718,9 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
 
 | Output | Forward | Riccati | Galerkin |
 |---|---|---|---|
-| dense ξ/Ξ′/Ξ_s profiles (`solution`, PE-usable) | ✅ `:el_axis` | ❌ (until Frobenius work) | matched only (`:gal_native`) |
+| ξ solution (`solution::SolutionProfiles`, PE-usable) | ✅ `:el_axis` | ❌ (until Frobenius matching) | matched only (`:gal_native`) |
+| closure / `bpen` | `:ideal`, zeros | `:ideal`, zeros (matched: future) | `:ideal` or `:matched`, match bpen |
+| raw integrator odet (`diagnostics`: crit, edge scan, ca) | ✅ | ✅ | — |
 | STRIDE Δ′ matrix / raw / `delta_coil` (`delta_prime`) | ❌ | ✅ | ❌ (has own `galerkin.delta`/`delta_coil`) |
 | free-boundary energies (`free_boundary`) | ✅ | ✅ | ❌ (`nothing`) |
 | fixed-boundary crit / nzero / edge scan (on odet) | ✅ | ✅ | ❌ |
@@ -675,8 +739,53 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
   section did not list — `examples/DIIID-like_ideal_example/analyze_example.jl` (five
   ballooning entry points) and two docstring cross-references in
   `src/Analysis/ForceFreeStates.jl`.
-- [ ] PR 3 — `refactor/forcefreestates-result`
-- [ ] PR 4 — `refactor/staged-main`
-- [ ] PR 5 — `feature/solve-api`
+- [ ] Interface PR (`refactor/forcefreestates-result`) — three commits: (a) §5, (b) §6, (c) §7.
+  Commit (a) — **implemented (re-sliced §5), reviewed.**
+  Carries the pivot: no transitional API. `SolutionProfiles` is the one solution slot,
+  `closure`/`bpen` are unconditional on the result, standalone Galerkin and additive-gal
+  removal are pulled forward from PR 4, and `pe_solution` / `gal_matched_odestate` are
+  deleted rather than deferred. Deltas from the §5 spec:
+  1. §5 did not say how the ForceFreeStates kernels PE calls keep working once
+     `ForceFreeStatesInternal` stops crossing the module boundary. Added an abstract
+     `ModeSpace` supertype (`ForceFreeStatesStructs.jl`) that both
+     `ForceFreeStatesInternal` and `ForceFreeStatesResult` subtype, and relaxed the
+     mode-space-only kernels to it: `el_derivatives!`, `materialize_derivative_stores!`,
+     `build_kinetic_metric_matrices`.
+  2. `ForceFreeStatesResult` is parameterized on the equilibrium and `FourFitVars` types
+     (both are themselves parametric), so `result.equil` / `result.ffit` stay concretely
+     typed instead of becoming inference barriers on the PE hot paths.
+  3. Two call sites outside `src/` consumed `main`'s old named tuple and are updated:
+     `benchmarks/benchmark_diiid_ideal_ntv_torque.jl` and
+     `examples/DIIID-like_ideal_example_IMAS/run_imas_example.jl`.
+  4. Of the tests §5.4 lists for update, only `runtests_imas.jl` needed it —
+     `runtests_fullruns.jl`, `runtests_rerun_from_h5.jl` and
+     `runtests_parallel_integration.jl` never read `main`'s return value (the last drives
+     the low-level API directly and is unaffected). Coverage was added instead to
+     `runtests_slayer_runner.jl` (result-facing `run_slayer` dispatch) and
+     `runtests_imas.jl` (the `free_boundary === nothing` warn-and-skip).
+  5. `_chord_solution_at` (PerturbedEquilibrium/SingularCoupling.jl) is deleted: with
+     `SolutionProfiles.du_store` populated by contract, its `!du_store_populated` branch is
+     unreachable. The gal-native / ideal-EL / kinetic branches are unchanged.
+  6. The `integrator` TOML description changed in all 21 decks that carry the key (the
+     three-way value list), per the identical-descriptions rule in
+     `docs/development/toml-conventions.md`.
+
+  Accepted output changes (D10), all spec'd in §5.1/§5.3/§5.4:
+  - Riccati decks write `ForceFreeStates/Solutions/ForwardIntegration/xi_psi` and `u2`
+    empty instead of the sparse chunk-endpoint snapshots (`dxi_psi`/`xi_s` were already
+    empty there). No harness case tracks those datasets.
+  - The four gal decks become gal-only files: their Galerkin datasets are unchanged, and
+    the FFS-side integration/energy datasets that the removed additive Riccati run used to
+    produce are now empty or absent. Verified dataset by dataset (§5.5 gate c).
+
+  Observation for a later PR, not changed here: `result.bpen` has `msing` rows counted
+  from `intr.sing` under `:ideal` closure but from the Galerkin surface set under
+  `:matched`. The two can differ when `sing_min!` raises `psilow`. This reproduces the
+  pre-pivot behavior exactly (the driver previously assigned `gal_data.match.bpen`
+  directly, and `SingularCoupling` guards with `s <= size(inner_bpen, 1)`), so it is a
+  pre-existing row-alignment wart, not a regression.
+
+  - [ ] Commit (b) — staged `main` (§6)
+  - [ ] Commit (c) — `solve` API (§7)
 - [ ] Fortran re-comparison of all important quantities
 - [ ] Delete this file

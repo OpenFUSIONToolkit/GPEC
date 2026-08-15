@@ -44,6 +44,9 @@ include("Galerkin/GalerkinSolution.jl")
 include("Galerkin/GalerkinMatch.jl")
 include("Galerkin/GalerkinSolve.jl")
 
+# The published solve product; last, so it can name every type the stages above define.
+include("Result.jl")
+
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
 global itmax = 50

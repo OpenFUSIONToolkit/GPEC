@@ -1185,7 +1185,7 @@ caller's interval-search accelerators, so concurrent callers just pass their own
 """
 @with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     kinetic::Bool, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
-    intr::ForceFreeStatesInternal, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
+    intr::ModeSpace, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
 
     # Allocate temporary arrays from the pool
     Npert = intr.numpert_total
