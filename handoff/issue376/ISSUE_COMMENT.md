@@ -75,10 +75,9 @@ Two discriminators confirm the mechanism at mpsi = 512:
   (100^(1/9) ≈ 1.7).
 
 So the step size is genuinely error-controlled — but the error *magnitude* per unit ψ is set by
-knot-scale roughness in the interpolated F/K/G coefficients. Hence dψ ∝ knotΔ at fixed tolerance
-and dψ ∝ tol^(1/9) at fixed grid. Physically this is (i) the C² knot discontinuities of a cubic
-spline, which a 9th-order error estimator cannot cheaply step across, plus (ii) node-noise
-amplification on fine grids (the h⁻⁴ effect already warned about in `GridRefinement.jl`).
+knot-scale roughness in the interpolated F/K/G coefficients, not by the physics. §6 is about where
+that roughness comes from, because "it's the same smooth function, just sampled more finely" is
+the natural expectation and it turns out to be false.
 
 ### 4. Tolerance sweep — how tight does `eulerlagrange_tolerance` actually need to be?
 
@@ -86,13 +85,16 @@ Five runs at mpsi = 512 (513 knots), everything but the tolerance held fixed. Δ
 relative to the 1e-12 point; `Δ'diag` is the worst per-surface relative error on the
 `singular/delta_prime_matrix` diagonal.
 
-| tol | nstep | attempted | ψ<0.1 steps | EL (s) | et[1] | Δ'diag rel |
-|---|---|---|---|---|---|---|
-| 1e-6  | 929  | 1159 | 591  | 10.1 | 0.78255904 | 1.7e-02 |
-| 1e-7  | 1240 | 1565 | 807  | 12.2 | 0.78255903 | 3.3e-03 |
-| 1e-8  | 1656 | 2116 | 1090 | 14.7 | 0.78255906 | 6.9e-04 |
-| 1e-10 | 3018 | 3977 | 1893 | 18.9 | 0.78255905 | 6.2e-06 |
-| 1e-12 | 7297 | 9620 | 3732 | 32.9 | 0.78255905 | 0 (ref)  |
+| tol | accepted steps | saved | EL (s) | et[1] | Δ'diag rel |
+|---|---|---|---|---|---|
+| 1e-6  | 1159 | 929  | 10.1 | 0.78255904 | 1.7e-02 |
+| 1e-7  | 1565 | 1240 | 12.2 | 0.78255903 | 3.3e-03 |
+| 1e-8  | 2116 | 1656 | 14.7 | 0.78255906 | 6.9e-04 |
+| 1e-10 | 3977 | 3018 | 18.9 | 0.78255905 | 6.2e-06 |
+| 1e-12 | 9620 | 7297 | 32.9 | 0.78255905 | 0 (ref)  |
+
+(`integration/nstep_total` is accepted steps; `integration/nstep` is saved snapshots at
+`save_interval = 3`. Rejected steps are not recorded anywhere.)
 
 Three things worth knowing:
 
@@ -101,11 +103,14 @@ Three things worth knowing:
   the q = 5 row: −1460 at 1e-6, −1332 at 1e-7, −1321 at 1e-8, −1319.5 at 1e-10). **1e-8 — the
   `ForceFreeStatesControl` default — is the sweet spot**: 1.8× fewer steps than 1e-10 for 7e-4
   relative Δ' error.
-- **Step count scales as tol^(−1/6.7)**, a little steeper than the ideal 9th-order tol^(−1/9),
-  exactly as expected when the error being controlled is knot-scale roughness rather than the
-  smooth truncation term. The rejected-step fraction is flat (0.20–0.24), so this is not a
-  step-control artefact.
-- **EL wall time is sub-linear in nstep**: 1e-10 → 1e-8 cuts accepted steps 1.82× but EL time only
+- **Vern9 never achieves its formal order.** Per-decade exponents of h ∝ tol^α: 0.130, 0.131,
+  0.137, then **0.192** for the last two decades. A 9th-order method on a smooth integrand should
+  give α = 1/(p+1) = 0.100, or 0.111 under error-per-unit-step. Measured α is outside both
+  everywhere and degrades sharply at tight tolerance — an error floor that is not truncation
+  error. Vern7 over the same range gives α = 0.131, comfortably inside its own formal band
+  (0.125–0.143): the 7th-order method behaves as advertised, the 9th-order one does not. §6
+  explains why.
+- **EL wall time is sub-linear in step count**: 1e-10 → 1e-8 cuts accepted steps 1.88× but EL time only
   1.29×. There is a ~7 s tolerance-independent floor in that phase on this deck. And the whole
   warm run is ~220 s regardless of tolerance — at mpsi = 512 with the NTV section active, EL
   integration is under 10% of the run. Tolerance relaxation is real but second-order here; it
@@ -117,12 +122,12 @@ If steps cannot span a knot interval anyway, Vern9's 16 stages per step are wast
 six `Vern9()` call sites inside `ForceFreeStates` for `Vern7()` (10 stages), left the
 equilibrium-side ones alone, and reran at mpsi = 512 (edits reverted afterwards):
 
-| method | tol | nstep | EL (s) | ms/step | et[1] | Δ'diag rel |
+| method | tol | accepted steps | EL (s) | ms/step | et[1] | Δ'diag rel |
 |---|---|---|---|---|---|---|
-| Vern9 | 1e-10 | 3018 | 18.9 | 6.26 | 0.782559048 | 6.2e-06 |
-| Vern7 | 1e-10 | 4163 | 15.3 | 3.67 | 0.782559048 | 2.5e-04 |
-| Vern9 | 1e-8  | 1656 | 14.7 | 8.85 | 0.782559057 | 6.9e-04 |
-| Vern7 | 1e-8  | 2317 | 10.9 | 4.70 | 0.782559050 | 2.5e-04 |
+| Vern9 | 1e-10 | 3977 | 18.9 | 4.75 | 0.782559048 | 6.2e-06 |
+| Vern7 | 1e-10 | 5355 | 15.3 | 2.86 | 0.782559048 | 2.5e-04 |
+| Vern9 | 1e-8  | 2116 | 14.7 | 6.95 | 0.782559057 | 6.9e-04 |
+| Vern7 | 1e-8  | 2927 | 10.9 | 3.72 | 0.782559050 | 2.5e-04 |
 
 Vern7 takes ~40% more steps but each step is 1.7× cheaper, so EL wall time drops ~20% at 1e-10 and
 ~26% at 1e-8. **Vern7 at 1e-8 dominates Vern9 at 1e-8 on both axes** — faster *and* closer to the
@@ -132,6 +137,76 @@ One caveat before anyone acts on this: Vern7's Δ' deviation is 2.47e-4 at 1e-10
 1e-8, i.e. **tolerance-independent**, so it is not step-truncation error. Something in the
 propagator/matching path carries a method-dependent offset that Vern9 does not. It is small, but
 it should be understood rather than absorbed.
+
+### 6. Why refining the grid makes the integrand *rougher* — the actual mechanism
+
+The integrand is the same smooth function only down to the accuracy of the node data. Below that,
+adding knots does not add information; it just interpolates the error more finely.
+
+Diagnostic: second divided differences of `matrices/ideal/F,K,G` (the actual EL integrand splines)
+at their own knots. Two statistics — `r1`, the knot-to-knot autocorrelation of f'' (**+1 = smooth,
+−2/3 = white noise**), and |f''|/|f|. `q(ψ)` on the same grid is the control.
+
+| region | quantity | mpsi=256 | mpsi=512 | mpsi=1024 |
+|---|---|---|---|---|
+| ψ<0.1 | K: r1 / \|f''\|/\|f\| | −0.42 / 1.01e7 | −0.45 / 4.53e7 | −0.56 / 1.62e8 |
+| ψ<0.1 | F: r1 / \|f''\|/\|f\| | +0.91 / 4.48e3 | +0.67 / 4.10e3 | −0.32 / 4.65e3 |
+| 0.3–0.7 | F: r1 / \|f''\|/\|f\| | +0.91 / 1.730 | +0.96 / 1.712 | +0.97 / 1.705 |
+| 0.3–0.7 | G: r1 / \|f''\|/\|f\| | +0.83 / 3.66 | +0.86 / 3.87 | −0.18 / 3.99 |
+| all | **q control r1** | **+0.88…+0.94** | **+0.94…+0.97** | **+0.97** |
+
+Near-axis K grows 4.5× then 3.6× per doubling — the Δ⁻² of a fixed-amplitude node error — while
+r1 marches toward the white-noise value. Meanwhile mid-plasma F converges beautifully
+(1.730 → 1.712 → 1.705): where the grid is still coarse relative to the noise, the physics
+dominates and your intuition holds exactly. The noise floor simply spreads outward with mpsi —
+axis first, then edge, then mid-plasma.
+
+**Three candidate sources tested and ruled out**, all at fixed mpsi = 512:
+
+| knob | range tested | effect on accepted steps |
+|---|---|---|
+| `etol` (field-line integration tolerance) | 1e-8 → 1e-12 | 4038 → 3930 (2.7%) |
+| `mtheta` (poloidal resolution) | 256 → 1024 | 3977 → 3983 (0.3%) |
+| input equilibrium | 257×257 EFIT vs analytic Solovev | Solovev diverges the same, or worse |
+
+So it is not the ODE tolerance, not the poloidal quadrature, and not the finite resolution of the
+input reconstruction. It is generated inside the equilibrium → coefficient pipeline.
+
+**Localised.** A local degree-4 fit residual over a 9-knot window measures the node-error amplitude
+directly (smooth data → falls like Δ⁵; a floor → flat). Mid-plasma:
+
+| matrix | built from | resid @512 | resid @1024 | r1 @512 | r1 @1024 |
+|---|---|---|---|---|---|
+| A, B, D | g22, g23, g33 | ~6e-08 | **~1.3e-08** | +0.972 | **+0.987** |
+| C | + g31, jtheta·imat | 8.90e-06 | 1.21e-05 | +0.694 | **−0.401** |
+| E | + g31, jtheta·imat, q1 | 8.74e-06 | 1.17e-05 | +0.547 | **−0.400** |
+| H | + g31, jtheta·imat | 1.11e-05 | 1.41e-05 | +0.837 | **+0.022** |
+| F = F̃ − D†A⁻¹D | clean inputs | 2.48e-07 | 1.96e-07 | +0.957 | +0.973 |
+| K = E − K†A⁻¹C | dirty inputs | 1.22e-05 | 1.56e-05 | +0.916 | +0.593 |
+| G = H − C†A⁻¹C | dirty inputs | 1.01e-05 | 1.70e-05 | +0.856 | −0.176 |
+
+**The floor enters at C, E, H at the ~1e-5 relative level.** A/B/D are clean at 1e-8 *and still
+converging*, exactly as smooth data should. The derived-matrix algebra is not the culprit either —
+F goes through the same `A⁻¹` path and stays clean at 2e-7 because its inputs are clean; K and G
+are dirty only because E, C and H are. Per `Fourfit.jl:439-447`, the three dirty matrices are
+precisely the ones involving **g31**, **jtheta·imat** and (for E) **q1 = dq/dψ**; the clean ones
+use only g22/g23/g33.
+
+### So, the answer to the question in the title
+
+1. C/E/H node values carry a relative error of ~1e-5 that **does not shrink with mpsi**.
+2. The cubic spline interpolates that error exactly, contributing ~ε/Δ² to f'' — growing 4× per
+   mpsi doubling.
+3. Once ε/Δ² exceeds the physical curvature, the integrand is dominated by knot-scale structure —
+   near axis first, spreading outward.
+4. The adaptive controller prices that structure, so the step collapses onto the knot scale:
+   dψ ∝ Δ, ~6 steps per knot interval, invariant in mpsi.
+5. Because the controlled error is not smooth truncation error, Vern9 cannot reach its formal
+   order — hence §4's exponents and §5's result that Vern7 loses nothing.
+
+The premise "same smooth function, just sampled more finely" is true of the physics and false of
+the data. Below the 1e-5 floor, refining the grid doesn't improve the integrand — it makes the
+interpolant measurably rougher in exactly the derivative norms the error estimator reads.
 
 ### Recommendations
 
@@ -146,11 +221,11 @@ it should be understood rather than absorbed.
 3. **Switch the ForceFreeStates integrator to Vern7** — measured in §5, ~20–26% off the EL phase,
    with better Δ' than Vern9 at the same tolerance. Gated on explaining the tolerance-independent
    2.5e-4 Δ' offset first; then its own branch and a regression-harness run.
-4. **Smoother coefficients** — fitting F/K/G with smoothing (or higher-continuity) splines instead
-   of pure interpolation would lift the knot-scale noise floor that currently pins the step size.
-   This is the only change that would actually decouple nstep from mpsi rather than rescale it.
-5. **Node-noise floor** — tightening the equilibrium field-line integration tolerance (`etol`)
-   reduces the noise that fine grids amplify; worth checking at high mpsi.
+4. **Fix the ~1e-5 node-error floor in C/E/H** — this is the root cause and the only change that
+   would genuinely decouple nstep from mpsi rather than rescale it. `Fourfit.jl:439-447` and the
+   construction of `g31`, `jtheta`/`imat` and `q1` are the place to start, since A/B/D are clean
+   at 1e-8 and converging. Failing that, fit C/E/H with smoothing rather than interpolating
+   splines so the floor is not differentiated.
 
 One bookkeeping note: the
 mpsi ladder (§2–§3) was measured a few merges earlier than the tolerance sweep (§4); the shared
