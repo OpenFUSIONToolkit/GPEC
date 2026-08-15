@@ -129,7 +129,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
 
     wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psio"]), read(fid["Info/mlow"])
+        read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psi_total"]), read(fid["Info/mlow"])
     end
 
     isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
@@ -321,9 +321,9 @@ A `Plots.jl` plot object.
 """
 function plot_delta_prime(h5path; save_path=nothing)
     msing, psi_sing, q_sing, ca_l, ca_r, psio, mn_index = h5open(h5path, "r") do fid
-        read(fid["SingularSurfaces/msing"]), read(fid["SingularSurfaces/psi"]), read(fid["SingularSurfaces/q"]),
+        read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"]),
         read(fid["SingularSurfaces/ca_left"]), read(fid["SingularSurfaces/ca_right"]),
-        read(fid["Equilibrium/psio"]), read(fid["Info/mn_index"])
+        read(fid["Equilibrium/psi_total"]), read(fid["Info/mn_index"])
     end
 
     msing == 0 && return plot(; title="No singular surfaces found", legend=false)
@@ -374,7 +374,7 @@ end
 Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
 pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
 normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
-are ballooning-unstable. Reads `LocalStability/psi`, `LocalStability/alpha`, and
+are ballooning-unstable. Reads `LocalStability/ballooning_psi`, `LocalStability/alpha`, and
 `LocalStability/alpha_critical` (populated when ForceFreeStates runs with
 `local_stability_flag = true`).
 
@@ -395,7 +395,7 @@ A `Plots.jl` plot object.
 function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
     psi, alpha, alpha_crit = h5open(h5path, "r") do fid
         haskey(fid, "LocalStability/alpha") || return (Float64[], Float64[], Float64[])
-        read(fid["LocalStability/psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
+        read(fid["LocalStability/ballooning_psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
     end
 
     isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
@@ -465,9 +465,9 @@ function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
             read(kg["scan_cond"]),
             read(kg["scan_threshold"]),
             read(kg["psi"]),
-            read(fid["SingularSurfaces/psi"]),
-            read(fid["SingularSurfaces/q"]),
-            read(kg["kmsing"]))
+            read(fid["SingularSurfaces/rational_psi"]),
+            read(fid["SingularSurfaces/rational_q"]),
+            read(kg["rational_count"]))
     end
 
     if isempty(scan_psi)

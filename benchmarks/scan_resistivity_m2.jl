@@ -16,7 +16,7 @@ function read_m2(h5; gal::Bool)
     h5open(h5) do f
         pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))   # [npsi, mpert]
         col = mtarget - read(f["Info/mlow"]) + 1
-        psi = gal ? read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"])[.!Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/issing"]))] :
+        psi = gal ? read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"])[.!Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]))] :
               read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"])
         (psi, pa[:, col])
     end
@@ -34,7 +34,7 @@ eta_ref = 8e-8
 
 # rational surface for m=target
 sing_psi, sing_m = h5open(joinpath(scandirs[1], "gpec.h5")) do f
-    (read(f["SingularSurfaces/GalerkinDeltaPrime/sing_psi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/sing_m"]))
+    (read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_m"]))
 end
 psi_res = mtarget in sing_m ? sing_psi[findfirst(==(mtarget), sing_m)] : NaN
 

@@ -64,6 +64,7 @@ include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
 
+include("HDF5Schema.jl")
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
@@ -781,7 +782,7 @@ function run_kinetic_forces(
 
         if kf_ctrl.write_outputs_to_HDF5
             h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                KineticForces.write_to_hdf5!(h5file, kf_state)
+                KineticForces.write_to_hdf5!(h5file, kf_state; dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
             end
         end
     end
@@ -876,6 +877,9 @@ function write_outputs_to_HDF5(
 
     h5open(joinpath(result.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
+        # File-level metadata contract (schema_version, Conventions, title, date).
+        Utilities.HDF5Annotations.write_root_attrs!(out_h5; title="GPEC output: $(basename(abspath(result.dir_path)))")
+
         # Store git version for reproducibility
         out_h5["Info/git_version"] = git_version
 
@@ -914,27 +918,30 @@ function write_outputs_to_HDF5(
         out_h5["Info/mn_index"] = hcat(m, n)   # (N, 2) matrix
         out_h5["Info/psilim"] = result.psilim
         out_h5["Info/qlim"] = result.qlim
-        out_h5["Info/q1lim"] = result.q1lim
+        out_h5["Info/dqdpsi_lim"] = result.q1lim
 
-        # Write derived equilibrium parameters
-        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumParameters), getfield.(Ref(equil.params), fieldnames(Equilibrium.EquilibriumParameters)))
-            if val !== nothing # TODO: looks like ro, zo, psio, and b_norm are not set, so skipping those for now but should fix eventually
-                out_h5["Equilibrium/$key"] = val
-            end
+        # Write derived equilibrium parameters. The struct keeps its legacy field spellings;
+        # EQUIL_H5_NAMES maps them to literature dataset names and EQUIL_H5_SKIP drops
+        # duplicates and control-flag echoes. Fields left `nothing` are not written.
+        for f in fieldnames(Equilibrium.EquilibriumParameters)
+            f in EQUIL_H5_SKIP && continue
+            val = getfield(equil.params, f)
+            val === nothing && continue
+            out_h5["Equilibrium/$(get(EQUIL_H5_NAMES, f, String(f)))"] = val
         end
-        out_h5["Equilibrium/psio"] = equil.psio
-        out_h5["Equilibrium/ro"] = equil.ro
-        out_h5["Equilibrium/zo"] = equil.zo
+        out_h5["Equilibrium/psi_total"] = equil.psio
+        out_h5["Equilibrium/R_axis"] = equil.ro
+        out_h5["Equilibrium/Z_axis"] = equil.zo
 
         # Write equilibrium profile and geometry arrays (from the named splines)
         profiles = equil.profiles
-        out_h5["Equilibrium/Profiles/xs"] = profiles.xs
+        out_h5["Equilibrium/Profiles/psi"] = profiles.xs
         out_h5["Equilibrium/Profiles/2piF"] = profiles.F_spline.y
         out_h5["Equilibrium/Profiles/mu0p"] = profiles.P_spline.y
         out_h5["Equilibrium/Profiles/dVdpsi"] = profiles.dVdpsi_spline.y
         out_h5["Equilibrium/Profiles/q"] = profiles.q_spline.y
-        out_h5["Equilibrium/Geometry/xs"] = equil.rzphi_xs
-        out_h5["Equilibrium/Geometry/ys"] = equil.rzphi_ys
+        out_h5["Equilibrium/Geometry/psi"] = equil.rzphi_xs
+        out_h5["Equilibrium/Geometry/theta"] = equil.rzphi_ys
         # Extract grid point values from interpolants for HDF5 output
         out_h5["Equilibrium/Geometry/rcoords"] = equil.rzphi_rsquared.nodal_derivs.partials[1, :, :]
         out_h5["Equilibrium/Geometry/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
@@ -942,23 +949,26 @@ function write_outputs_to_HDF5(
         out_h5["Equilibrium/Geometry/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
         # Write local stability data; always write all entries, using empty arrays when not computed.
-        # LocalStability/di = Mercier D_I (det(d0bar)); LocalStability/dr = resistive interchange D_R;
+        # LocalStability/D_I = Mercier D_I (det(d0bar)); LocalStability/D_R = resistive interchange D_R;
         # LocalStability/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
-        # tearing Δ' under PerturbedEquilibrium/SingularCoupling/delta_prime).
+        # tearing Δ' under PerturbedEquilibrium/SingularCoupling/Delta_prime).
         if locstab !== nothing
             locstab_xs = locstab.cache.x
-            out_h5["LocalStability/di"] = locstab.y[:, 1] ./ locstab_xs
-            out_h5["LocalStability/dr"] = locstab.y[:, 2] ./ locstab_xs
+            out_h5["LocalStability/psi"] = collect(locstab_xs)  # cached vector → dense for HDF5
+            out_h5["LocalStability/D_I"] = locstab.y[:, 1] ./ locstab_xs
+            out_h5["LocalStability/D_R"] = locstab.y[:, 2] ./ locstab_xs
         else
-            out_h5["LocalStability/di"] = Float64[]
-            out_h5["LocalStability/dr"] = Float64[]
+            out_h5["LocalStability/psi"] = Float64[]
+            out_h5["LocalStability/D_I"] = Float64[]
+            out_h5["LocalStability/D_R"] = Float64[]
         end
-        out_h5["SingularSurfaces/di0"] = (locstab !== nothing && !isempty(result.surfaces)) ?
+        out_h5["SingularSurfaces/D_I"] = (locstab !== nothing && !isempty(result.surfaces)) ?
                                          [locstab(sing.psifac)[1] / sing.psifac for sing in result.surfaces] : Float64[]
         out_h5["LocalStability/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
 
         # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
-        out_h5["LocalStability/psi"] = ballooning_boundary.psi
+        # Its own scan grid, distinct from the LocalStability/psi profile grid above.
+        out_h5["LocalStability/ballooning_psi"] = ballooning_boundary.psi
         out_h5["LocalStability/alpha"] = ballooning_boundary.alpha
         out_h5["LocalStability/alpha_critical"] = ballooning_boundary.alpha_critical
 
@@ -972,7 +982,7 @@ function write_outputs_to_HDF5(
         out_h5["$fwd/q"] = diag !== nothing ? diag.q_store : Float64[]
         out_h5["$fwd/xi_psi"] = xi_solution !== nothing ? xi_solution.u_store[:, :, 1, :] : ComplexF64[]
         out_h5["$fwd/u2"] = xi_solution !== nothing ? xi_solution.u_store[:, :, 2, :] : ComplexF64[] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["$fwd/dxi_psi"] = xi_solution !== nothing ? xi_solution.du_store : ComplexF64[]
+        out_h5["$fwd/dxi_psidpsi"] = xi_solution !== nothing ? xi_solution.du_store : ComplexF64[]
         out_h5["$fwd/xi_s"] = xi_solution !== nothing ? xi_solution.xi_s_store : ComplexF64[]
         out_h5["$fwd/crit"] = diag !== nothing ? diag.crit_store : Float64[]
 
@@ -990,10 +1000,10 @@ function write_outputs_to_HDF5(
         end
 
         # Write singular surface data
-        out_h5["SingularSurfaces/msing"] = msing
-        out_h5["SingularSurfaces/psi"] = [sing.psifac for sing in result.surfaces]
-        out_h5["SingularSurfaces/q"] = [sing.q for sing in result.surfaces]
-        out_h5["SingularSurfaces/q1"] = [sing.q1 for sing in result.surfaces]
+        out_h5["SingularSurfaces/rational_count"] = msing
+        out_h5["SingularSurfaces/rational_psi"] = [sing.psifac for sing in result.surfaces]
+        out_h5["SingularSurfaces/rational_q"] = [sing.q for sing in result.surfaces]
+        out_h5["SingularSurfaces/dqdpsi"] = [sing.q1 for sing in result.surfaces]
         out_h5["SingularSurfaces/ca_left"] = diag !== nothing ? diag.ca_l : ComplexF64[]
         out_h5["SingularSurfaces/ca_right"] = diag !== nothing ? diag.ca_r : ComplexF64[]
 
@@ -1008,8 +1018,8 @@ function write_outputs_to_HDF5(
                     n_matrix[s, i] = sing.n[i]
                 end
             end
-            out_h5["SingularSurfaces/m"] = m_matrix
-            out_h5["SingularSurfaces/n"] = n_matrix
+            out_h5["SingularSurfaces/rational_m"] = m_matrix
+            out_h5["SingularSurfaces/rational_n"] = n_matrix
 
             # Glasser-Greene-Johnson geometric coefficients + surface averages
             # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
@@ -1026,9 +1036,9 @@ function write_outputs_to_HDF5(
                 out_h5["SingularSurfaces/M"] = [s.restype.M for s in result.surfaces]
                 out_h5["SingularSurfaces/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in result.surfaces]
                 out_h5["SingularSurfaces/avg_bsq"] = [s.restype.avg_bsq for s in result.surfaces]
-                out_h5["SingularSurfaces/p_local"] = [s.restype.p_local for s in result.surfaces]
-                out_h5["SingularSurfaces/p1_local"] = [s.restype.p1_local for s in result.surfaces]
-                out_h5["SingularSurfaces/v1_local"] = [s.restype.v1_local for s in result.surfaces]
+                out_h5["SingularSurfaces/mu0p"] = [s.restype.p_local for s in result.surfaces]
+                out_h5["SingularSurfaces/dmu0pdpsi"] = [s.restype.p1_local for s in result.surfaces]
+                out_h5["SingularSurfaces/dVdpsi"] = [s.restype.v1_local for s in result.surfaces]
             end
         end
 
@@ -1039,28 +1049,28 @@ function write_outputs_to_HDF5(
         if msing > 0 && dp !== nothing
             # Inter-surface Δ' matrix, shape [msing × msing] — PEST3-convention deltap
             # (STRIDE BVP with vacuum coupling).
-            out_h5["SingularSurfaces/delta_prime_matrix"] = dp.matrix
+            out_h5["SingularSurfaces/Delta_prime_matrix"] = dp.matrix
 
             # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
-            # the SingularSurfaces/GalerkinDeltaPrime/delta_coil layout so H5Web heatmaps share axes
+            # the SingularSurfaces/GalerkinDeltaPrime/Delta_coil layout so H5Web heatmaps share axes
             # (x = edge mode, y = surface-side).
             # The carried matrix stays (2msing × numpert_total); transpose only at write.
-            isempty(dp.coil) || (out_h5["SingularSurfaces/delta_coil"] = permutedims(dp.coil))
+            isempty(dp.coil) || (out_h5["SingularSurfaces/Delta_coil"] = permutedims(dp.coil))
 
             # Raw 2msing×2msing outer-region D' matrix in side-major ordering
             # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
             # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
             # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
             # pest3_decompose to recover (A', B', Γ', Δ').
-            isempty(dp.raw) || (out_h5["SingularSurfaces/delta_prime_raw"] = dp.raw)
+            isempty(dp.raw) || (out_h5["SingularSurfaces/Delta_prime_raw"] = dp.raw)
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
         # used to find them. Populated only when kinetic crossings were searched for.
-        out_h5["SingularSurfaces/Kinetic/kmsing"] = result.kinetic.kmsing
-        out_h5["SingularSurfaces/Kinetic/psi"] = [s.psifac for s in result.kinetic.kinsing]
-        out_h5["SingularSurfaces/Kinetic/q"] = [s.q for s in result.kinetic.kinsing]
-        out_h5["SingularSurfaces/Kinetic/q1"] = [s.q1 for s in result.kinetic.kinsing]
+        out_h5["SingularSurfaces/Kinetic/rational_count"] = result.kinetic.kmsing
+        out_h5["SingularSurfaces/Kinetic/rational_psi"] = [s.psifac for s in result.kinetic.kinsing]
+        out_h5["SingularSurfaces/Kinetic/rational_q"] = [s.q for s in result.kinetic.kinsing]
+        out_h5["SingularSurfaces/Kinetic/dqdpsi"] = [s.q1 for s in result.kinetic.kinsing]
         out_h5["SingularSurfaces/Kinetic/scan_psi"] = result.kinetic.scan_psi
         out_h5["SingularSurfaces/Kinetic/scan_cond"] = result.kinetic.scan_cond
         out_h5["SingularSurfaces/Kinetic/scan_threshold"] = result.kinetic.scan_threshold
@@ -1139,6 +1149,9 @@ function write_outputs_to_HDF5(
             out_h5["$elm/Kinetic/K"] = _eval_mat_spline(ffit.kkmats)
             out_h5["$elm/Kinetic/G"] = _eval_mat_spline(ffit.gaats)
         end
+
+        # Self-describing metadata pass (long_name/units/dims + dimension scales).
+        apply_main_h5_metadata!(out_h5, result)
     end
 end
 

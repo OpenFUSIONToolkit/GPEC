@@ -22,7 +22,7 @@ et, wt, u1, psi, mlow, sing_psi = h5open(h5path) do f
         to_c(read(f["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"])),
         read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
         read(f["Info/mlow"]),
-        haskey(f, "SingularSurfaces/GalerkinDeltaPrime/sing_psi") ? read(f["SingularSurfaces/GalerkinDeltaPrime/sing_psi"]) : Float64[])
+        haskey(f, "SingularSurfaces/GalerkinDeltaPrime/rational_psi") ? read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]) : Float64[])
 end
 
 mpert, _, nstep = size(u1)

@@ -315,23 +315,23 @@ function load_julia_outputs(h5_path::String)
         julia["psilim"] = read(f, "Info/psilim")
         julia["qlim"] = read(f, "Info/qlim")
         julia["et"] = read(f, "ForceFreeStates/FreeBoundaryStability/eigenmode_energies")
-        julia["psi_q"] = read(f, "Equilibrium/Profiles/xs")
+        julia["psi_q"] = read(f, "Equilibrium/Profiles/psi")
         julia["q"] = read(f, "Equilibrium/Profiles/q")
-        julia["di"] = haskey(f, "LocalStability/di") ? read(f, "LocalStability/di") : Float64[]
-        julia["dr"] = haskey(f, "LocalStability/dr") ? read(f, "LocalStability/dr") : Float64[]
+        julia["di"] = haskey(f, "LocalStability/D_I") ? read(f, "LocalStability/D_I") : Float64[]
+        julia["dr"] = haskey(f, "LocalStability/D_R") ? read(f, "LocalStability/D_R") : Float64[]
 
-        julia["psio"] = haskey(f, "Equilibrium/psio") ? read(f, "Equilibrium/psio") : NaN
+        julia["psio"] = haskey(f, "Equilibrium/psi_total") ? read(f, "Equilibrium/psi_total") : NaN
 
         sc = "PerturbedEquilibrium/SingularCoupling"
         julia["rational_psi"] = haskey(f, "$sc/rational_psi") ? read(f, "$sc/rational_psi") : Float64[]
         julia["rational_q"] = haskey(f, "$sc/rational_q") ? read(f, "$sc/rational_q") : Float64[]
         julia["rational_n"] = haskey(f, "$sc/rational_n") ? read(f, "$sc/rational_n") : Int[]
-        julia["rational_m_res"] = haskey(f, "$sc/rational_m_res") ? read(f, "$sc/rational_m_res") : Int[]
+        julia["rational_m_res"] = haskey(f, "$sc/rational_m") ? read(f, "$sc/rational_m") : Int[]
         julia["resonant_area_weighted_field"] = haskey(f, "$sc/resonant_area_weighted_field") ? read(f, "$sc/resonant_area_weighted_field") : ComplexF64[]
         julia["resonant_current"] = haskey(f, "$sc/resonant_current") ? read(f, "$sc/resonant_current") : ComplexF64[]
         julia["island_half_width"] = haskey(f, "$sc/island_half_width") ? read(f, "$sc/island_half_width") : Float64[]
         julia["chirikov_parameter"] = haskey(f, "$sc/chirikov_parameter") ? read(f, "$sc/chirikov_parameter") : Float64[]
-        julia["delta_prime"] = haskey(f, "$sc/delta_prime") ? read(f, "$sc/delta_prime") : ComplexF64[]
+        julia["delta_prime"] = haskey(f, "$sc/Delta_prime") ? read(f, "$sc/Delta_prime") : ComplexF64[]
 
         pe = "PerturbedEquilibrium"
         # Fortran Phi_x/Phi_tot are the area-weighted field b̄ (tesla), matching forcing/response_b_area directly.
@@ -341,8 +341,8 @@ function load_julia_outputs(h5_path::String)
         julia["Jbgradpsi"] = haskey(f, "$pe/Response/b_psi_area_weighted") ? read(f, "$pe/Response/b_psi_area_weighted") : Matrix{ComplexF64}(undef, 0, 0)
         julia["xi_psi"] = haskey(f, "$pe/Response/xi_psi") ? read(f, "$pe/Response/xi_psi") : Matrix{ComplexF64}(undef, 0, 0)
         julia["xi_n"] = haskey(f, "$pe/Response/xi_n") ? read(f, "$pe/Response/xi_n") : Matrix{ComplexF64}(undef, 0, 0)
-        julia["clebsch_psi1"] = haskey(f, "$pe/Response/clebsch_psi1") ? read(f, "$pe/Response/clebsch_psi1") : Matrix{ComplexF64}(undef, 0, 0)
-        julia["clebsch_alpha"] = haskey(f, "$pe/Response/clebsch_alpha") ? read(f, "$pe/Response/clebsch_alpha") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_psi1"] = haskey(f, "$pe/Response/dxi_clebsch_psidpsi") ? read(f, "$pe/Response/dxi_clebsch_psidpsi") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_alpha"] = haskey(f, "$pe/Response/xi_clebsch_alpha") ? read(f, "$pe/Response/xi_clebsch_alpha") : Matrix{ComplexF64}(undef, 0, 0)
         julia["psi_grid"] = haskey(f, "ForceFreeStates/Solutions/ForwardIntegration/psi") ? read(f, "ForceFreeStates/Solutions/ForwardIntegration/psi") : Float64[]
 
         # R,Z,φ: loaded via modes_to_theta helper below (not raw modes)

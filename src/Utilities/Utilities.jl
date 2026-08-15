@@ -13,6 +13,8 @@ mathematical utilities.
   - `PhysicalConstants`: SI physical constants matching Fortran GPEC/SLAYER values
   - `NeoclassicalResistivity`: Spitzer/Sauter/Redl resistivity closures shared by
     the GGJ and SLAYER inner-layer models
+  - `HDF5Annotations`: self-describing metadata (long_name/units/dims attributes and
+    HDF5 Dimension Scales) for the gpec.h5 output
 """
 module Utilities
 
@@ -22,6 +24,7 @@ include("PhysicalConstants.jl")
 include("KineticProfiles.jl")
 include("NeoclassicalResistivity.jl")
 include("GridUtilities.jl")
+include("HDF5Annotations.jl")
 
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients
@@ -33,6 +36,9 @@ export PhysicalConstants
 export MU_0, M_E, M_P, E_CHG, K_B, EPS_0
 
 export KineticProfiles
+
+using .HDF5Annotations
+export HDF5Annotations
 
 using .NeoclassicalResistivity
 export NeoclassicalResistivity

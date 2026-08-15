@@ -11,7 +11,7 @@ example_dir = "examples/DIIID-like_gal_resistive_example"
 
 # Number of resonant surfaces in the gal domain
 [quantities.gal_msing]
-h5path = "ForceFreeStates/Solutions/GalerkinIntegration/msing"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "gal # singular surfaces"
@@ -19,7 +19,7 @@ noise_threshold = 0
 order = 10
 
 [quantities.gal_sing_q]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/sing_q"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/rational_q"
 type = "real_vector"
 extract = "all_real"
 label = "gal singular q values"
@@ -37,7 +37,7 @@ order = 20
 
 # Full outer Δ′ matrix (nsol × 2·msing) — Frobenius norm catches any element drift
 [quantities.gal_delta_norm]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/delta"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/Delta_prime_raw"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal Δ′ matrix||"
@@ -46,7 +46,7 @@ order = 21
 
 # rpec coil-response block (mpert × 2·msing) — Frobenius norm
 [quantities.gal_delta_coil_norm]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/delta_coil"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/Delta_coil"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal Δ_coil block||"
@@ -55,7 +55,7 @@ order = 22
 
 # Mercier index per surface
 [quantities.gal_di]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/di"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/D_I"
 type = "real_vector"
 extract = "all_real"
 label = "gal D_I per surface"
@@ -79,7 +79,7 @@ order = 31
 
 # Inner-layer matching data Δ(Q) per surface (resist_eval geometry + GGJ inner solver). (msing × 2)
 [quantities.gal_match_deltar_norm]
-h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/deltar"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal inner-layer Δ||"

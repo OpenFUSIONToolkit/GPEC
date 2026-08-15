@@ -53,8 +53,9 @@ and is documented in `docs/src/galerkin.md`.
 
 ### Forward integration
 
-`forward_eulerlagrange_integration` is the baseline driver.  It integrates the EL ODE directly
-in ``(U_1, U_2)`` using Tsit5 with adaptive step control.  Near each rational surface the
+`forward_eulerlagrange_integration` is the baseline driver — our implementation of the
+standard DCON radial integration [Glasser 2016].  It integrates the EL ODE directly
+in ``(U_1, U_2)`` using the adaptive 9th-order `Vern9` solver.  Near each rational surface the
 columns of ``U_2`` that correspond to resonant modes are zeroed via Gaussian reduction (GR),
 keeping the solution bounded; `transform_u!` undoes the reduction at the end, so `u_store`
 comes back dense in the axis (Euler-Lagrange) basis.  This is the reference path for
@@ -69,7 +70,9 @@ integrator = "forward"
 
 ### Riccati integration
 
-`riccati_eulerlagrange_integration` (the default) decomposes the radial domain into
+`riccati_eulerlagrange_integration` (the default) is our implementation of the STRIDE
+approach [Glasser 2018b], built on the dual Riccati reformulation [Glasser 2018a].  It
+decomposes the radial domain into
 independent chunks, integrates each chunk's fundamental-matrix (FM) propagator in parallel
 using `Threads.@threads`, then multiplies the propagators in order and applies each
 singular-surface crossing serially.  It is the only driver that produces the inter-surface
@@ -89,7 +92,7 @@ w = Q - \bar{K}S.
 than integrating the quadratic Riccati ODE directly (which blows up when ``|S|`` is large),
 the code integrates the linear EL system with `sing_der!` as the RHS and recovers
 ``S = U_1 U_2^{-1}`` via periodic renormalization — an approach that is mathematically
-equivalent to O(Δψ) but uses the ODE solver's full 5th-order accuracy.  Renormalization is
+equivalent to O(Δψ) but uses `Vern9`'s full 9th-order accuracy.  Renormalization is
 triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `ucrit`, and is
 forced at the end of each chunk.  At singular surface crossings,
 `riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching directly in column
@@ -160,12 +163,12 @@ For the derivation and implementation details behind these diagnostics, see
 Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile
 in normalized poloidal flux ``\psi``:
 
-- **Mercier criterion ``D_I``** (`LocalStability/di`) — the ideal interchange criterion. A surface
+- **Mercier criterion ``D_I``** (`LocalStability/D_I`) — the ideal interchange criterion. A surface
   is Mercier-unstable where ``D_I > 0``. It is evaluated from the ``\det(\bar{d}_0)`` of the
   integrated local-mode matrix.
-- **Resistive interchange ``D_R``** (`LocalStability/dr`) — the Glasser–Greene–Johnson resistive
+- **Resistive interchange ``D_R``** (`LocalStability/D_R`) — the Glasser–Greene–Johnson resistive
   interchange criterion ``D_R = D_I + (H - 1/2)^2``. The ``D_I`` term is the same
-  ``\det(\bar{d}_0)`` value reported in `LocalStability/di`; ``H`` is computed from the legacy
+  ``\det(\bar{d}_0)`` value reported in `LocalStability/D_I`; ``H`` is computed from the legacy
   Mercier/GGJ flux-surface averages of the field and metric quantities. ``D_R > 0``
   indicates resistive interchange instability.
 - **Ballooning ``\Delta'``** (`LocalStability/ballooning_Delta_prime`) — the high-``n`` ballooning
@@ -176,7 +179,7 @@ in normalized poloidal flux ``\psi``:
 !!! note "Two different Δ' quantities"
     `LocalStability/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
     distinct from the **resistive tearing** ``\Delta'`` described in the next section, which
-    is written under `SingularSurfaces/` and `PerturbedEquilibrium/SingularCoupling/delta_prime`.
+    is written under `SingularSurfaces/` and `PerturbedEquilibrium/SingularCoupling/Delta_prime`.
     They measure different instabilities; do not confuse them.
 
 ### s–α diagram
@@ -246,7 +249,7 @@ where ``\Phi_R[j]`` is the forward FM product from ``\psi_{R,j-1}`` to the junct
 ``\Phi_L[j]`` is the backward crossing FM from ``\psi_{L,j}`` to the junction.
 
 The matrix is only populated by the Riccati path and is written to the HDF5 output
-under `SingularSurfaces/delta_prime_matrix`.
+under `SingularSurfaces/Delta_prime_matrix`.
 
 ## Configuration reference
 

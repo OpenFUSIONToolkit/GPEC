@@ -241,7 +241,7 @@ verifiable via the harness with commit SHAs as refs.
     `integrator="riccati"`) so the canonical Δ′-matrix fixture survives the
     DIIID-like_ideal switch to forward. Add a matching regression case
     `regression-harness/cases/diiid_n1_riccati.toml` tracking
-    `SingularSurfaces/delta_prime_matrix`-derived quantities (mirror the Δ′ entries of the
+    `SingularSurfaces/Delta_prime_matrix`-derived quantities (mirror the Δ′ entries of the
     existing `diiid_n1` case; ξ/PE quantities stay on `diiid_n1`).
 - `benchmarks/benchmark_threads.jl`, `benchmarks/benchmark_delta_prime_methods.jl`:
   update flag names (`use_riccati`/`parallel_threads` → `integrator`/`nchunks`);
