@@ -784,16 +784,18 @@ inner-layer interface (same family as the `ResistiveMatch` models, D13). Later p
 
 ### Live status (updated 2026-08-15 — read this first when resuming)
 
-- **#381** (`refactor/riccati-unification`, ab588498): implemented, AI-reviewed, draft.
-  Owes: full suite, docs build, harness report pasted into PR body before leaving draft.
-- **#387** (`refactor/local-stability-module`, f8996d4f): implemented, AI-reviewed, draft.
-  Same owed gates. Stacked on #381; GitHub auto-retargets when #381's branch is deleted.
-- **Interface PR** (`refactor/forcefreestates-result`, worktree `../result-pr3`, no PR yet):
+- **#381** (`refactor/riccati-unification`): APPROVED by logan-nc; develop/#364 merged in
+  (conflicts resolved), review doc comments addressed (Vern9/9th-order/DCON+STRIDE
+  citations), #387 merged into it; auto-merge into develop armed pending CI.
+- **#387** (`refactor/local-stability-module`): APPROVED by logan-nc; merged into #381's
+  branch (clean); closes automatically when #381 lands.
+- **Interface PR = #393** (`refactor/forcefreestates-result`, worktree `../result-pr3`,
+  DRAFT, stacked on #381 — auto-retargets to develop):
   - Commit (a) = 8f8e1645, done: result struct + SolutionProfiles + closure/bpen/wp +
     standalone Galerkin + additive-gal removal. Verified: 82/82 result-struct tests,
     357/357 across six files, forward byte-identity (145 datasets), gal-group equivalence
     (LAR_ideal_match_test, 12+16 datasets) — all vs f8996d4f, i.e. PRE-#364 base.
-  - Commit (b) implemented and reviewed (not yet committed): staged-main decomposition
+  - Commit (b) committed: staged-main decomposition
     per §6. Verified pure motion — normalized diffs of every stage body vs its old inline
     block are character-identical (only function-boundary lines differ); both
     force_termination early-exits preserved; one inert reorder (local stability hoisted
@@ -812,14 +814,16 @@ inner-layer interface (same family as the `ResistiveMatch` models, D13). Later p
     Also per D14: riccati will NEVER produce full ξ profiles — next-cycle work is the
     `delta_mn` rational-surface matrix (from `delta_coil` asymptotics) for PE resonant
     coupling, not profile reconstruction.
-- **#364 MERGED into develop mid-sequence** (b3abe074; dataset renames + metadata, e.g.
-  `xi_clebsch_*`, literature-symbol names). Reconciliation queue (NOT yet started):
-  merge origin/develop bottom-up `#381 → #387 → result-pr3`; the manual conflict is the
-  FFS writer (commit (a) re-signatured it, #364 renamed datasets inside it). Then:
-  audit `regression-harness/cases/diiid_n1_riccati.toml` h5paths (born on the PR-1
-  branch, never saw #364's renames — will silently read nothing), fix any plan
-  dataset-path references, and RE-RUN all byte-identity/gal-equivalence checks against
-  the post-merge base. Harness re-baselines once after the merge.
+- **#364 reconciliation DONE** (merge commit b803788e in result-pr3): develop merged
+  bottom-up (#381 ← develop, #387 ← #381, result-pr3 ← #381-combined). The FFS-writer
+  conflict resolved as our-structure + #364's literature dataset names; two scope bugs
+  in auto-merged #364 machinery fixed (`write_root_attrs!` and `apply_main_h5_metadata!`
+  referenced the deleted `intr` local); `dVdpsi_spline` kwarg threaded through
+  `run_kinetic_forces`; `diiid_n1_riccati.toml` h5paths renamed (10 paths); stale
+  `LocalStability/di|dr` docstring in Ballooning.jl fixed (stale on develop too).
+  Post-merge smoke: 82/82 result-struct + 66/66 slayer.
+  STILL OWED: fresh byte-identity + gal-equivalence re-runs vs the post-merge base, full
+  suite, docs build, and one harness re-baseline.
 - Standing decisions in force: `_chord_solution_at` retained as uncalled helper (§5.3 —
   do not re-delete); gal→PE warn-skips this cycle (no gal δW yet); matching work lands
   in a new `Matching/` directory (§ follow-on); directory reorg is a separate post-#367
