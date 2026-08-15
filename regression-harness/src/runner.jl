@@ -134,11 +134,11 @@ t_start = time()
 pe = Equilibrium.setup_equilibrium(cfg)
 elapsed = time() - t_start
 h5open(ARGS[1], "w") do fid
-    fid["Equilibrium/psio"]  = pe.psio
-    fid["Equilibrium/q0"]    = pe.params.q0
-    fid["Equilibrium/q95"]   = pe.params.q95
-    fid["Equilibrium/betat"] = pe.params.betat
-    fid["Equilibrium/betan"] = pe.params.betan
+    fid["Equilibrium/psi_total"]  = pe.psio
+    fid["Equilibrium/q_axis"]    = pe.params.q0
+    fid["Equilibrium/q_95"]   = pe.params.q95
+    fid["Equilibrium/beta_t"] = pe.params.betat
+    fid["Equilibrium/beta_N"] = pe.params.betan
 end
 %RUNINFO%
 """

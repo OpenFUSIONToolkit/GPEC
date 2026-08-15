@@ -1,5 +1,5 @@
 # Regression case: DIII-D-like n=1 Δ' matrix from the Riccati chunked propagator BVP.
-# The Riccati integrator is the only one that produces SingularSurfaces/delta_prime_matrix, so
+# The Riccati integrator is the only one that produces SingularSurfaces/Delta_prime_matrix, so
 # this case is the canonical Δ' track (its sibling diiid_n1 runs the forward integrator and
 # carries the ξ/perturbed-equilibrium quantities instead). Also tracks the free-boundary
 # energies and singular-surface locations the BVP depends on, so a Δ' move can be attributed.
@@ -13,7 +13,7 @@ example_dir = "examples/DIIID-like_riccati_deltaprime_example"
 # Tearing stability Δ' — the msing×msing BVP matrix diagonal, and the raw side-major
 # outer-region matrix it is projected from.
 [quantities.delta_prime]
-h5path = "SingularSurfaces/delta_prime_matrix"
+h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
 label = "delta prime (BVP diagonal)"
@@ -21,7 +21,7 @@ noise_threshold = 1e-8
 order = 10
 
 [quantities.delta_prime_raw]
-h5path = "SingularSurfaces/delta_prime_raw"
+h5path = "SingularSurfaces/Delta_prime_raw"
 type = "complex_matrix"
 extract = "all_complex"
 label = "delta prime (raw side-major)"
@@ -29,7 +29,7 @@ noise_threshold = 1e-8
 order = 11
 
 [quantities.delta_coil]
-h5path = "SingularSurfaces/delta_coil"
+h5path = "SingularSurfaces/Delta_coil"
 type = "complex_matrix"
 extract = "all_complex"
 label = "edge coil response delta_coil"
@@ -71,7 +71,7 @@ order = 23
 
 # Singular surfaces — the Δ' matrix is indexed by these, so a shift here explains a Δ' shift.
 [quantities.msing]
-h5path = "SingularSurfaces/msing"
+h5path = "SingularSurfaces/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -79,7 +79,7 @@ noise_threshold = 0
 order = 30
 
 [quantities.sing_psi]
-h5path = "SingularSurfaces/psi"
+h5path = "SingularSurfaces/rational_psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"
@@ -87,7 +87,7 @@ noise_threshold = 1e-8
 order = 31
 
 [quantities.sing_q]
-h5path = "SingularSurfaces/q"
+h5path = "SingularSurfaces/rational_q"
 type = "real_vector"
 extract = "all_real"
 label = "singular q values"
@@ -130,7 +130,7 @@ order = 51
 
 # Equilibrium — shared with diiid_n1; confirms the two cases sit on the same equilibrium.
 [quantities.q0]
-h5path = "Equilibrium/q0"
+h5path = "Equilibrium/q_axis"
 type = "real_scalar"
 extract = "value"
 label = "q0"
@@ -138,7 +138,7 @@ noise_threshold = 1e-12
 order = 60
 
 [quantities.q95]
-h5path = "Equilibrium/q95"
+h5path = "Equilibrium/q_95"
 type = "real_scalar"
 extract = "value"
 label = "q95"
@@ -146,7 +146,7 @@ noise_threshold = 1e-12
 order = 61
 
 [quantities.betan]
-h5path = "Equilibrium/betan"
+h5path = "Equilibrium/beta_N"
 type = "real_scalar"
 extract = "value"
 label = "beta_n"

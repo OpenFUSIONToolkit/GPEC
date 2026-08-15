@@ -1,6 +1,6 @@
 # DIII-D-like H-mode equilibrium — n=1 Δ'-matrix case on the Riccati integrator.
 # Reuses the equilibrium of the sibling DIIID-like_ideal_example (geqdsk referenced by
-# relative path; not duplicated), and is the canonical SingularSurfaces/delta_prime_matrix
+# relative path; not duplicated), and is the canonical SingularSurfaces/Delta_prime_matrix
 # fixture: the Riccati chunked propagator BVP is the only integrator that produces it.
 # No forcing or perturbed equilibrium, so no dense ξ profiles are needed.
 

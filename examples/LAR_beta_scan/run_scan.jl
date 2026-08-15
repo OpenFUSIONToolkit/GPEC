@@ -74,11 +74,11 @@ function extract_results(h5_path::String)
     h5open(h5_path, "r") do f
         fbs = "ForceFreeStates/FreeBoundaryStability"
         ep = read(f, "$fbs/eigenmode_plasma_energies"); ev = read(f, "$fbs/eigenmode_vacuum_energies"); et = read(f, "$fbs/eigenmode_energies")
-        msing = read(f, "SingularSurfaces/msing")
-        m_sing = read(f, "SingularSurfaces/m")
-        dp_mat = haskey(f, "SingularSurfaces/delta_prime_matrix") ? read(f, "SingularSurfaces/delta_prime_matrix") : nothing
-        qlim = haskey(f, "Info/qlim") ? read(f, "Info/qlim") : read(f, "Equilibrium/qmax")
-        q0 = read(f, "Equilibrium/q0"); qmax = read(f, "Equilibrium/qmax")
+        msing = read(f, "SingularSurfaces/rational_count")
+        m_sing = read(f, "SingularSurfaces/rational_m")
+        dp_mat = haskey(f, "SingularSurfaces/Delta_prime_matrix") ? read(f, "SingularSurfaces/Delta_prime_matrix") : nothing
+        qlim = haskey(f, "Info/qlim") ? read(f, "Info/qlim") : read(f, "Equilibrium/q_max")
+        q0 = read(f, "Equilibrium/q_axis"); qmax = read(f, "Equilibrium/q_max")
 
         dp_21 = NaN + NaN*im; dp_31 = NaN + NaN*im
         if dp_mat !== nothing && msing > 0

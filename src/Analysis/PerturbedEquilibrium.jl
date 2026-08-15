@@ -184,15 +184,15 @@ end
     plot_driven_delta_prime(h5path; save_path=nothing)
 
 Scatter plot of `Re(Δ')` per rational surface vs ψ_N, computed by the perturbed
-equilibrium module (from `PerturbedEquilibrium/SingularCoupling/delta_prime`).
+equilibrium module (from `PerturbedEquilibrium/SingularCoupling/Delta_prime`).
 One marker series per toroidal mode n. Integer-valued q rational surfaces are
 annotated.
 
 This is the forcing-driven Δ' (response to the applied perturbation amplitudes
 in `intr.forcing_modes`); for the equilibrium-intrinsic Δ' from the STRIDE BVP,
-read `SingularSurfaces/delta_prime_matrix` from the HDF5 directly.
+read `SingularSurfaces/Delta_prime_matrix` from the HDF5 directly.
 
-Requires `PerturbedEquilibrium/SingularCoupling/delta_prime` in the HDF5 file.
+Requires `PerturbedEquilibrium/SingularCoupling/Delta_prime` in the HDF5 file.
 
 ### Arguments
 
@@ -208,11 +208,11 @@ A `Plots.jl` plot object.
 """
 function plot_driven_delta_prime(h5path; save_path=nothing)
     base = "PerturbedEquilibrium/SingularCoupling/"
-    _has_pe_data(h5path, base * "delta_prime") ||
+    _has_pe_data(h5path, base * "Delta_prime") ||
         return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
 
     delta_prime, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base * "delta_prime"]),
+        read(fid[base * "Delta_prime"]),
         read(fid[base * "rational_psi"]),
         read(fid[base * "rational_q"]),
         read(fid[base * "rational_n"])
@@ -370,7 +370,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
         read(fid[dataset_path]),
         read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
         read(fid["Info/mlow"]), read(fid["Info/mhigh"]), read(fid["Info/nhigh"]),
-        read(fid["Equilibrium/q95"]),
+        read(fid["Equilibrium/q_95"]),
         read(fid["PerturbedEquilibrium/SingularCoupling/rational_psi"])
     end
 
