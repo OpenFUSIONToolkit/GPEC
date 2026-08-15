@@ -80,13 +80,52 @@ error estimator can't step across cheaply, and (ii) node-noise amplification on 
   The ~1.85× drop matches the 9th-order expectation (100^{1/9} ≈ 1.7): the step size is genuinely
   error-controlled, but the error *magnitude* per unit ψ is set by knot-scale roughness in the
   spline coefficients — so dψ ∝ knotΔ at fixed tolerance (§4) and ∝ tol^{1/9} at fixed grid.
-  Practical corollary: the default 1e-10 tolerance looks overly tight — 1e-8 halves EL cost on
-  this case with no change in et[1].
+  (The step count halves; §6 shows EL *wall time* does not — there is a step-independent floor.)
+
+## 6. Tolerance sweep (`parse_tolsweep.jl`, mpsi=512 fixed grid, 513 knots)
+
+Five warm runs, one process each, single-threaded, everything but `eulerlagrange_tolerance` fixed.
+Δ' deviations are relative to the 1e-12 point: `Δ'diag` = worst per-surface relative error on the
+`singular/delta_prime_matrix` diagonal, `Δ'mat` = max elementwise deviation over max|Δ'|.
+
+| tol | nstep | tried | ψ<0.1 | EL (s) | ms/step | run (s) | et[1] | Δ'diag rel | Δ'mat rel |
+|---|---|---|---|---|---|---|---|---|---|
+| 1e-6  | 929  | 1159 | 591  | 10.1 | 10.89 | 224.9 | 0.78255904 | 1.7e-02 | 7.5e-03 |
+| 1e-7  | 1240 | 1565 | 807  | 12.2 | 9.84  | 207.8 | 0.78255903 | 3.3e-03 | 6.5e-04 |
+| 1e-8  | 1656 | 2116 | 1090 | 14.7 | 8.85  | 216.0 | 0.78255906 | 6.9e-04 | 8.1e-05 |
+| 1e-10 | 3018 | 3977 | 1893 | 18.9 | 6.26  | 221.8 | 0.78255905 | 6.2e-06 | 4.3e-06 |
+| 1e-12 | 7297 | 9620 | 3732 | 32.9 | 4.51  | 234.6 | 0.78255905 | 0        | 0        |
+
+- **`et[1]` is not a discriminator**: identical to 8 significant digits across six decades of
+  tolerance. Any tolerance recommendation has to be made on Δ', not on the free-boundary energy.
+- **Δ' is the discriminator** and it degrades fast below 1e-8. The worst surface is the q=5 row
+  (|Δ'| ~ 1.3e3): −1460 at 1e-6, −1332 at 1e-7, −1321 at 1e-8, −1319.5 at 1e-10, converged at
+  1e-12. **1e-8 is the sweet spot** — 1.8× fewer steps than 1e-10 at 7e-4 relative Δ' error.
+- **Step count scales as tol^{−1/6.7}** over the full range (929 → 7297 for 10⁶ in tolerance),
+  slightly steeper than the ideal 9th-order tol^{−1/9}, as expected when the error being
+  controlled is knot-scale roughness rather than the smooth truncation term. The rejected-step
+  fraction is flat (0.20–0.24), so this is not a step-control artefact.
+- **EL wall time is sub-linear in nstep**: 1e-10 → 1e-8 cuts accepted steps 1.82× but EL time only
+  1.29× (18.9 → 14.7 s). A linear fit gives ~2.7 ms per attempted step plus a **~7 s
+  tolerance-independent floor** in the phase (which also contains the parallel-FM BVP setup and
+  the serial dense-ξ pass). The nstep → time proportionality of §2 holds across *grids*, not
+  across tolerances at fixed grid.
+- **Whole-run effect is small on this deck**: total warm run is ~220 s regardless of tolerance —
+  EL integration is under 10% of it at mpsi=512 (KineticForces/NTV and PE dominate). Tolerance
+  relaxation is worth ~4 s of ~220 s here; it matters where EL dominates (large mpsi, no NTV).
+
+Note: this sweep ran on the current branch tree, which has moved since the §2–§5 ladder
+(`e7bb7cb8`, before the on-demand-solution-derivatives merge). The 1e-10 point reproduces §5
+within 0.3% on nstep (3018 vs 3010) and 4e-4 relative on et[1] (0.782559 vs 0.78286); conclusions
+are unaffected, but do not mix numbers across the two tables.
 
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
    minimizes knots for a target accuracy, which this data shows is exactly what minimizes EL time.
+1b. **`eulerlagrange_tolerance = 1e-8`** (the struct default) is the right per-deck value on the
+   evidence of §6; the DIII-D decks' 1e-10 and the LAR decks' 1e-12 buy Δ' accuracy the case does
+   not need. Any such deck edit is a separate branch and needs the regression harness.
 2. **Integrator order**: Vern9's 16 stages/step buy nothing when steps can't span a knot
    interval. A 5–7th order method (Tsit5/Vern6/Vern7) may cut RHS evals per accepted step ~2×
    at equal nstep. Cheap experiment, no physics change.
