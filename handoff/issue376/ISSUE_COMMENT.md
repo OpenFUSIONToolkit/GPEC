@@ -12,6 +12,12 @@ flat in knot count. There is nothing left to win there.** The mpsi slowdown is e
 **adaptive step-count growth**: the integrator's accepted step size is slaved to the *local knot
 spacing*, so `nstep` scales with the number of knots in the regions where steps concentrate.
 
+Two things worth saying up front, because they set what is actionable. Refining the grid genuinely
+does make the integrand rougher — the coefficient matrices carry a node-error floor that grid
+refinement amplifies rather than reduces (§6) — but when I repaired that directly it recovered
+only 11–20% of the steps (§7). The dominant lever is much simpler: the two-pass auto grid reaches
+the same answer with 558 knots and a third of the steps of a fixed mpsi=1024 grid.
+
 ### 1. Spline evaluation is knot-count-independent
 
 `CubicSeriesInterpolant`, 676 `ComplexF64` series (mirrors `fmats`/`kmats`/`gmats` at `numpert = 26`),
@@ -138,7 +144,7 @@ One caveat before anyone acts on this: Vern7's Δ' deviation is 2.47e-4 at 1e-10
 propagator/matching path carries a method-dependent offset that Vern9 does not. It is small, but
 it should be understood rather than absorbed.
 
-### 6. Why refining the grid makes the integrand *rougher* — the actual mechanism
+### 6. Refining the grid makes the integrand measurably *rougher*
 
 The integrand is the same smooth function only down to the accuracy of the node data. Below that,
 adding knots does not add information; it just interpolates the error more finely.
@@ -188,32 +194,70 @@ directly (smooth data → falls like Δ⁵; a floor → flat). Mid-plasma:
 **The floor enters at C, E, H at the ~1e-5 relative level.** A/B/D are clean at 1e-8 *and still
 converging*, exactly as smooth data should. The derived-matrix algebra is not the culprit either —
 F goes through the same `A⁻¹` path and stays clean at 2e-7 because its inputs are clean; K and G
-are dirty only because E, C and H are. Per `Fourfit.jl:439-447`, the three dirty matrices are
-precisely the ones involving **g31**, **jtheta·imat** and (for E) **q1 = dq/dψ**; the clean ones
-use only g22/g23/g33.
+are dirty only because E, C and H are.
 
-### So, the answer to the question in the title
+**Traced to its source**: the dirty matrices are the ones using g11/g12/g31, and per
+`Fourfit.jl:84-90` those are built from **ψ-derivatives** (`partials[2]`) of the per-surface
+geometry, while the clean matrices use only **θ-derivatives** (`partials[3]`) on the fixed
+`mtheta` grid. The raw `splines/rzphi` node data shows why that matters — `nu`, `offset` and
+`rcoords` sit on a ψ-direction floor that is flat in the grid spacing, while `jac` on the same
+grid converges:
 
-1. C/E/H node values carry a relative error of ~1e-5 that **does not shrink with mpsi**.
-2. The cubic spline interpolates that error exactly, contributing ~ε/Δ² to f'' — growing 4× per
-   mpsi doubling.
-3. Once ε/Δ² exceeds the physical curvature, the integrand is dominated by knot-scale structure —
-   near axis first, spreading outward.
-4. The adaptive controller prices that structure, so the step collapses onto the knot scale:
-   dψ ∝ Δ, ~6 steps per knot interval, invariant in mpsi.
-5. Because the controlled error is not smooth truncation error, Vern9 cannot reach its formal
-   order — hence §4's exponents and §5's result that Vern7 loses nothing.
+| quantity | resid @256 | resid @512 | resid @1024 |
+|---|---|---|---|
+| nu (ψ<0.1) | 2.41e-05 | 2.11e-05 | 2.12e-05 |
+| offset (ψ<0.1) | 6.39e-04 | 5.37e-04 | 5.60e-04 |
+| **jac** (0.3–0.7) | 2.22e-07 | 4.29e-08 | **3.26e-09** |
 
-The premise "same smooth function, just sampled more finely" is true of the physics and false of
-the data. Below the 1e-5 floor, refining the grid doesn't improve the integrand — it makes the
-interpolant measurably rougher in exactly the derivative norms the error estimator reads.
+Each flux surface is traced independently, so its geometry carries an error that refining ψ does
+not reduce; differentiating that across surfaces gives ε/Δψ. The 1D profiles are **not** involved
+— q, mu0p, 2piF and dVdpsi all converge, clearing `q1`, `p1` and `jtheta`.
+
+### 7. How much of the slowdown does this actually explain? Only 11–20%
+
+Rather than assume the roughness drives the step count, I repaired the amplification and measured
+it: replace **only** the ψ-derivative channel with derivatives of a fit over a coarser ψ subgrid,
+leaving values, θ-derivatives, `jac` and the coordinate mapping untouched.
+
+The repair does exactly what it was designed to do — mid-plasma at mpsi=1024, C's residual goes
+1.21e-05 → **5.30e-07** and its r1 −0.401 → **+0.915**; G goes 1.70e-05 → 9.38e-07 and −0.176 →
++0.942; near-axis K's |f''|/|f| drops 1.62e8 → 2.10e7. Every autocorrelation flips positive,
+everywhere. The matrices are genuinely smooth afterwards.
+
+The step count barely moves:
+
+| grid | accepted steps, stock | with repair | change |
+|---|---|---|---|
+| mpsi=512  | 3977 | 3551 | **−11%** |
+| mpsi=1024 | 7638 | 6081 | **−20%** |
+
+**So knot-scale roughness is a contributing cause worth 11–20%, not the dominant one.** The share
+grows with mpsi, as an ε/Δψ effect should, but ~80% of the growth is still unexplained.
+
+Two candidate origins of ε are also ruled out, so this is not ODE error control: the `etol` sweep
+above, and the hard-coded `abstol=1e-8` at `DirectEquilibrium.jl:294` (only `reltol` is
+configurable, and `u0` starts at zeros with its components *becoming* ν/offset/r², so it should
+bind where `reltol` cannot) — tightening it to 1e-14 gives 3977 → 4071 at mpsi=512 and
+7638 → 7474 at mpsi=1024. Null.
+
+**Where the rest may live.** After the repair, near-axis K still has |f''|/|f| = 2.1e7 — a
+curvature scale of ~2e-4 in ψ, comparable to the local knot spacing there (median Δψ = 1.7e-4 at
+mpsi=1024). Near the axis the log grid packs to roughly the scale of genuine structure, so a good
+share of those steps may be legitimate resolution rather than noise-chasing. The uniform-grid
+probe in §3 is consistent: un-packing the axis cut near-axis steps 1891 → 559 but left et[1] at
+0.993, i.e. visibly under-resolved.
+
+So the premise "same smooth function, just sampled more finely" is false of the data in a real and
+measurable way — but only partly responsible. The practical consequence is in the recommendations:
+the largest lever is not making the coefficients smoother, it is not placing the knots there.
 
 ### Recommendations
 
-1. **Use the two-pass auto grid** (`mpsi = 0` with `psi_accuracy`) — already the example default.
-   It reaches the converged et[1] ≈ 0.80 with 558 knots and about half the EL time of a fixed
-   1024-knot log grid. Minimising knots for a target accuracy is exactly what minimises EL time,
-   so the auto grid is the direct fix for the symptom in this issue.
+1. **Use the two-pass auto grid** (`mpsi = 0` with `psi_accuracy`) — already the example default,
+   and by some distance the biggest measured lever. It reaches et[1] = 0.801 with 558 knots and
+   2542 steps; a fixed mpsi=1024 log grid needs 7638 steps to reach 0.803. **3× the work for a
+   0.3% difference** — that is the bulk of the "unnecessary" steps this issue is about, and it is
+   fixable today with one config line.
 2. **Revisit the per-deck `eulerlagrange_tolerance`.** The struct default is `1e-8`; the DIII-D
    decks pin `1e-10` and the LAR decks `1e-12`. On the evidence of §4 those tighter values buy
    Δ' accuracy this case does not need, at 1.8–4× the step count. This is a per-deck edit on its
@@ -221,13 +265,15 @@ interpolant measurably rougher in exactly the derivative norms the error estimat
 3. **Switch the ForceFreeStates integrator to Vern7** — measured in §5, ~20–26% off the EL phase,
    with better Δ' than Vern9 at the same tolerance. Gated on explaining the tolerance-independent
    2.5e-4 Δ' offset first; then its own branch and a regression-harness run.
-4. **Fix the ~1e-5 node-error floor in C/E/H** — this is the root cause and the only change that
-   would genuinely decouple nstep from mpsi rather than rescale it. `Fourfit.jl:439-447` and the
-   construction of `g31`, `jtheta`/`imat` and `q1` are the place to start, since A/B/D are clean
-   at 1e-8 and converging. Failing that, fit C/E/H with smoothing rather than interpolating
-   splines so the floor is not differentiated.
+4. **Make the ψ-derivative channel noise-immune** — worth ~20% at mpsi=1024 and growing with the
+   grid, and it makes the coefficient matrices grid-insensitive as a property rather than by
+   luck. The right form of this is *not* smoothing the derivatives after the fact; it is removing
+   the noise at the source, either by making the surface trace correlated in ψ (continuation from
+   surface to surface, so the per-surface error is smooth rather than white) or by obtaining
+   ∂ν/∂ψ and ∂η/∂ψ from equilibrium relations instead of differencing independently-traced data.
+5. **Open question worth more than any of the above**: what accounts for the other ~80% of the
+   step growth (§7).
 
-One bookkeeping note: the
-mpsi ladder (§2–§3) was measured a few merges earlier than the tolerance sweep (§4); the shared
+One bookkeeping note: the mpsi ladder (§2–§3) was measured a few merges earlier than the tolerance sweep (§4); the shared
 mpsi = 512 / 1e-10 point agrees to 0.3% in nstep between the two, but the tables should not be
 mixed element-by-element.

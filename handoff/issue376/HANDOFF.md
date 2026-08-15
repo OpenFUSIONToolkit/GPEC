@@ -23,8 +23,8 @@ on-demand-solution-derivatives merge) — see the note at the end of RESULTS.md 
 
 1. **Tolerance sweep — done** (RESULTS.md §6). et[1] is invariant across 1e-6…1e-12; Δ′ is the
    discriminator; 1e-8 is the sweet spot. EL wall time is sub-linear in nstep at fixed grid.
-2. **Issue comment — drafted, not posted.** `ISSUE_COMMENT.md` holds the full text. Posting needs
-   the user's explicit go-ahead (`gh issue comment 376 --body-file handoff/issue376/ISSUE_COMMENT.md`).
+2. **Issue comment — posted and kept current.** `ISSUE_COMMENT.md` is the source of truth; edit it
+   and PATCH comment 5302684530 rather than appending corrections.
 3. **Integrator-order experiment — done** (RESULTS.md §7). Result recorded there; the `src/` edits
    were reverted, so this branch still touches no source. If it is worth pursuing, it lands on its
    own branch with `regress --cases diiid_n1 --refs develop,local`.
@@ -37,7 +37,8 @@ on-demand-solution-derivatives merge) — see the note at the end of RESULTS.md 
    `etol`/`mtheta`/input resolution/`abstol` — sections 8 and 10 closed all four.
 6. **Repairing it is worth much less than expected** (§11): capping the psi-derivative resolution
    cleans C/E/H by 20-100x but recovers only 11% of steps at mpsi=512 and 20% at mpsi=1024.
-   `ISSUE_CORRECTION.md` holds a drafted correction to the posted issue comment — **not posted**.
+   The posted issue comment was **reworked in place** to say this (no separate correction comment:
+   `gh api -X PATCH repos/OpenFUSIONToolkit/GPEC/issues/comments/5302684530 -F body=@<file>`).
 7. **The real open question**: what accounts for the other ~80% of the step growth. Candidate
    worth testing first: how much of the near-axis step count is legitimate resolution of real
    structure (post-repair near-axis |f''|/|f| for K is 2.1e7, a ~2e-4 curvature scale against a
