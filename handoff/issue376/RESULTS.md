@@ -510,6 +510,51 @@ content; only making the parametrization consistent across surfaces can.
 improvement (it enforces a constraint currently violated by up to 0.4%), but the ~20% lives behind
 the surface-to-surface θ mapping.
 
+## 14. Phase 0 of route (a): geometry cleanliness — not grid packing — governs the step count
+
+Five ladders, chosen to vary one thing at a time. "Geometry ε" is the ψ-direction `surface_roughness.jl`
+residual for `nu` (mid-plasma unless noted); "steps" are accepted EL steps at mpsi 256/512/1024.
+
+| case | input | fill site | grid | geometry ε across ladder | steps | ratios |
+|---|---|---|---|---|---|---|
+| DIII-D `efit` | EFIT g-file | A | packed | flat 1.8e-6 → 1.3e-6 | 2309/3977/7638 | 1.72 / 1.92 |
+| DIII-D `efit_by_inversion` | EFIT + contours | B | packed | **rising** 1.3e-6 → 5.6e-6 | 2058/3629/7116 | 1.76 / 1.96 |
+| Solovev `sol` | **analytic** | A | packed | **flat 0.19**, r1 = −0.65 | 880/1514/2776 | 1.72 / 1.83 |
+| LAR `tj_analytic` | analytic | B | ldp | converging 1.2e-7 → 5.2e-9 | 591/672/739 | **1.14 / 1.10** |
+| LAR + packed grid | analytic | B | **packed** | converging 5.9e-7 → 2.9e-8 | 753/826/951 | **1.10 / 1.15** |
+
+Read in order, these isolate the cause:
+
+- **The fill site alone does not decide cleanliness.** `efit_by_inversion` (Fill Site B) is *dirtier*
+  than Fill Site A on the same equilibrium — its marching-squares contour extraction is its own
+  per-surface noise source — and it scales just as badly.
+- **The input alone does not decide it either.** Solovev is analytic and perfectly smooth, yet
+  through Fill Site A its `nu` node data is flat at **19% relative** with r1 = −0.65 — pure white
+  noise. With the input variable removed, Fill Site A's adaptive-abscissae trace-and-remap
+  manufactures the noise by itself.
+- **Grid packing is not the driver.** This was the one live confound: LAR was the only clean case
+  and also the only one without axis packing. Giving LAR the DIII-D grid (`auto`, psilow = 1e-4)
+  keeps its geometry clean and converging (near-axis `nu` 8.99e-6 → 9.95e-8, r1 +0.938 → +0.984)
+  and its steps stay flat — **1.10× and 1.15× per doubling against 1.72×/1.92%**. et[1] is identical
+  to 6-7 digits across that ladder.
+
+**Conclusion: clean geometry ⟺ flat step count, across two fill sites, two inputs and two grids.**
+Where the geometry converges, quadrupling the knots costs ~25% more steps; where it sits on a
+floor, it costs 3.3×.
+
+Two things this overturns:
+
+1. **§11's speculation that a good share of the near-axis steps might be legitimate resolution of
+   real near-axis structure is wrong.** LAR resolves the same packed near-axis region with flat
+   step counts. Those steps are noise-chasing.
+2. **The ~20% figure is a ceiling on that *partial* repair, not on fixing the source.** §11 capped
+   the ψ-derivatives *of already-noisy data*; §13 corrected one component of e_ψ. Neither removed ε.
+   The LAR ladders show what clean source data buys: flat scaling. Extrapolating the DIII-D 256-point
+   baseline at LAR-like scaling puts mpsi=1024 near ~2600 instead of 7638.
+
+**Phase 0 verdict: proceed.** The premise of route (a) is confirmed with the input, fill-site and
+grid confounds each eliminated by measurement.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
