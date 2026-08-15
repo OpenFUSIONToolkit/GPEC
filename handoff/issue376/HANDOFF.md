@@ -31,10 +31,17 @@ on-demand-solution-derivatives merge) — see the note at the end of RESULTS.md 
 4. **Mechanism established** (RESULTS.md §8–§9, new `roughness.jl`): a ~1e-5 relative node-error
    floor in the C/E/H coefficient matrices, amplified as ε/Δ² by spline interpolation. `etol`,
    `mtheta` and the input equilibrium were each tested and ruled out as the source.
-5. **The one open follow-up that matters**: find what sets the ~1e-5 floor in C/E/H —
-   `Fourfit.jl:439-447`, the construction of `g31`, `jtheta`/`imat`, `q1` — given that A/B/D
-   (g22/g23/g33 only) are clean at 1e-8 and converging. Needs its own branch and a
-   regression-harness run. Do **not** re-test `etol`/`mtheta`/input resolution; §8 closed those.
+5. **Source traced** (§10): the floor is in the per-surface geometry (nu/offset/rcoords), and it
+   reaches C/E/H through the psi-derivative channel (g11/g12/g31 use `partials[2]`; the clean
+   matrices use only theta-derivatives). 1D profiles cleared. Do **not** re-test
+   `etol`/`mtheta`/input resolution/`abstol` — sections 8 and 10 closed all four.
+6. **Repairing it is worth much less than expected** (§11): capping the psi-derivative resolution
+   cleans C/E/H by 20-100x but recovers only 11% of steps at mpsi=512 and 20% at mpsi=1024.
+   `ISSUE_CORRECTION.md` holds a drafted correction to the posted issue comment — **not posted**.
+7. **The real open question**: what accounts for the other ~80% of the step growth. Candidate
+   worth testing first: how much of the near-axis step count is legitimate resolution of real
+   structure (post-repair near-axis |f''|/|f| for K is 2.1e7, a ~2e-4 curvature scale against a
+   1.7e-4 median knot spacing) versus still-unexplained grid slaving.
 
 ## How to reproduce the runs
 

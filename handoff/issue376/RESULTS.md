@@ -78,8 +78,9 @@ Within ψ<0.1: knots 73/145/289 (mpsi 128/256/512) → steps 553/964/1891, and
 dψ/knotΔ p25/med/p75 = 0.06/0.12/0.21 **at every mpsi**. If steps were tolerance/physics-limited,
 dψ would be mpsi-independent; instead it halves when knot spacing halves (~6.5 accepted steps
 per knot interval). Two mechanisms were proposed here originally — C² knot discontinuities of the
-cubic spline, and node-noise amplification on fine grids. **§8–§9 test both: the second is right
-and the first is not the driver.**
+cubic spline, and node-noise amplification on fine grids. §8–§10 confirm the second exists and
+trace it to its source; **§11 then shows it accounts for only 11–20% of the step growth**, so
+neither proposed mechanism is the dominant term and the majority is still unexplained.
 
 ## 5. Discriminators (mpsi=512)
 
