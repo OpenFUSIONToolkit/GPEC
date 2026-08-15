@@ -8,10 +8,10 @@ h5path = length(ARGS) >= 1 ? ARGS[1] : "/tmp/gal_ideal_test/gpec.h5"
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
 cout, deltar, mxi, mdxi, sols, sols_d, sing_psi = h5open(h5path) do f
-    (to_c(read(f["galerkin/match/cout"])), to_c(read(f["galerkin/match/deltar"])),
-        to_c(read(f["galerkin/match/xi"])), to_c(read(f["galerkin/match/xi_deriv"])),
-        to_c(read(f["galerkin/solution/xi"])), to_c(read(f["galerkin/solution/xi_deriv"])),
-        read(f["galerkin/sing_psi"]))
+    (to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"])),
+        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/dxidpsi"])),
+        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi"])),
+        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
 end
 msing = length(sing_psi)
 mpert, ngrid, mcoil = size(mxi)

@@ -349,9 +349,18 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
 
     # Full NTV species set: main ions, the neutrality-closing impurity, and (optionally) electrons.
+    # Labels become HDF5 group names under KineticForces/PerSpecies/, so z and m identify the
+    # species; a repeated (z, m) pair gets a numeric discriminator to keep the names unique.
     species = ResolvedNTVSpecies[]
+    seen_labels = Dict{String,Int}()
+    function _unique_label(base)
+        n = get(seen_labels, base, 0) + 1
+        seen_labels[base] = n
+        return n == 1 ? base : "$(base)_$(n)"
+    end
     for (si, s) in enumerate(ion_species)
-        push!(species, ResolvedNTVSpecies(Int(s.z), Int(s.m), false, "ion$(si)_z$(s.z)_m$(s.m)", _view(ns[si], _nu(s.z, s.m))))
+        label = _unique_label("ion_z$(s.z)_m$(s.m)")
+        push!(species, ResolvedNTVSpecies(Int(s.z), Int(s.m), false, label, _view(ns[si], _nu(s.z, s.m))))
     end
     if any(>(0), n_imp)
         push!(species, ResolvedNTVSpecies(Int(zimp), Int(mimp), false, "impurity_z$(zimp)_m$(mimp)", _view(n_imp, _nu(zimp, mimp))))

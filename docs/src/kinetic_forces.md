@@ -62,11 +62,14 @@ main-ion charge must satisfy `z < zimp`. An empty `ion_species` list runs the
 single main ion from `zi`/`mi` (with `electron = true` still adding the
 electron species — the electron flag always means *in addition to* the ions).
 
-Per-species results are written to HDF5 groups `kinetic_forces_<label>`
-(e.g. `kinetic_forces_ion1_z1_m2`, `kinetic_forces_impurity_z6_m12`,
-`kinetic_forces_electron`) alongside the summed total in `kinetic_forces`. The
-summed cumulative torque profile is a diagnostic (linear interpolation onto the
-union grid); the summed `total_torque` scalar is the exact Gauss-Kronrod value.
+The summed total is written to `KineticForces/<method>/` exactly as in a single-ion
+run, and each species' own contribution to `KineticForces/PerSpecies/<label>/<method>/`
+— labels are `ion_z<z>_m<m>`, `impurity_z<z>_m<m>`, and `electron` (a numeric suffix
+is appended only if a run repeats a `(z, m)` pair). Every per-species group carries the
+same datasets and metadata as the total, so `dTdpsi`, `T`, and `EnergyIntegrals/` are
+available per species. The summed cumulative torque profile is a diagnostic (linear
+interpolation onto the union grid); the summed `total_torque` scalar is the exact
+Gauss-Kronrod value.
 
 The profile-scaling knobs below are not supported together with a multi-ion
 `ion_species` list (they error).
@@ -134,6 +137,36 @@ terms respectively, and do not modify the stored kinetic profile splines.
        mixes pre-scaling spline derivatives with post-scaling array values
        when computing the `toroidal_rotation_factor` back-solve. Julia uses a
        clean reimplementation with consistent pre-scaling derivatives throughout.
+
+## HDF5 outputs: complex torque convention and the EnergyIntegrals layout
+
+The method level of `KineticForces/<method>/` reports the two physical scalars a user
+wants first: `total_torque` = ``T_\phi`` (N·m) and `total_energy` = ``\delta W_k`` (J).
+Internally both are halves of one complex quantity ``T = T_\phi + 2in\,\delta W_k``
+(Logan 2013), and the ψ-profiles `dTdpsi` and `T` store that complex ``T`` directly —
+so `imag(T)` carries the ``2n`` factor while `total_energy` has it divided out. The
+per-record `EnergyIntegrals/torque` and `EnergyIntegrals/kinetic_energy` are separate
+complex diagnostics of the two integrand halves at each ``(\psi, \lambda, \ell)``
+evaluation, which is why they are not packed into one number there.
+
+`EnergyIntegrals/` stores the variable-length integration trajectories in the
+flat-plus-offsets ragged layout (chosen over HDF5 VLEN types for cross-language
+support; `Tearing/Diagnostics/*` uses the same pattern). Record `k` spans
+`offsets[k]+1 : offsets[k+1]` (Julia, 1-based) of each `*_all` array:
+
+```julia
+h5open("gpec.h5", "r") do f
+    g = f["KineticForces/fgar/EnergyIntegrals"]
+    off = read(g["trajectory_offsets"])
+    x_k = read(g["x_all"])[off[k]+1:off[k+1]]          # record k's abscissae
+    I_k = read(g["integrand_all"])[off[k]+1:off[k+1]]  # its complex integrand
+end
+```
+
+```python
+g = f["KineticForces/fgar/EnergyIntegrals"]            # h5py, 0-based
+x_k = g["x_all"][g["trajectory_offsets"][k]:g["trajectory_offsets"][k + 1]]
+```
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.KineticForces]

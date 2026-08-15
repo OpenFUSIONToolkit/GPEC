@@ -111,10 +111,12 @@ where ξ_ψ is the radial displacement eigenfunction.
 ## Arguments
 
   - `boundary_data`: Output from extract_boundary_displacements()
+
       + ξ_psi_boundary: Boundary displacement [numpert_total, numpert_total]
       + dPsi_drho: Flux surface spacing at boundary (scalar)
       + q_boundary: Safety factor at boundary (scalar)
       + psi_boundary: Normalized flux at boundary (scalar)
+
   - `intr`: ForceFreeStates internal state with mode arrays (mlow, mhigh, nlow, etc.)
 
 ## Returns
@@ -260,6 +262,48 @@ function calc_plasma_inductance(
     end
 
     return inv(temp2)
+end
+
+"""
+    calc_surface_inductance(
+        equil::Equilibrium.PlasmaEquilibrium,
+        ψ::Float64,
+        mtheta::Int,
+        m_modes::AbstractUnitRange{Int},
+        nn::Int
+    )::Matrix{ComplexF64}
+
+Surface inductance L at the flux surface ψ, from the vacuum surface-current matrix, solved
+against a no-wall vacuum.
+
+Solves the 2D vacuum problem with `compute_Iv=true` and inverts. The driving flux harmonics are
+unit columns (`Φ = 𝕀` by construction, matching Fortran `gpvacuum_flxsurf`'s unit driving
+harmonics), so `Φ = L·I^v` (Park 2007, eq. 7 and following text) gives `L = μ₀(2π)²·I_v⁻¹`.
+
+## Arguments
+
+  - `equil`: Plasma equilibrium
+  - `ψ`: Normalized poloidal flux of the surface
+  - `mtheta`: Number of vacuum poloidal grid points
+  - `m_modes`: Poloidal mode range mlow:mhigh
+  - `nn`: Toroidal mode number
+
+## Returns
+
+  - Surface inductance matrix in henries [mpert × mpert]
+"""
+function calc_surface_inductance(
+    equil::Equilibrium.PlasmaEquilibrium,
+    ψ::Float64,
+    mtheta::Int,
+    m_modes::AbstractUnitRange{Int},
+    nn::Int
+)::Matrix{ComplexF64}
+    vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, [nn])
+    wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
+    I_v = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true).I_v
+    μ₀ = 4π * 1e-7
+    return inv(I_v) .* (μ₀ * (2π)^2)
 end
 
 """

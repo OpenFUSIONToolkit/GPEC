@@ -10,7 +10,7 @@ example_dir = "examples/Solovev_kinetic_multiion_example"
 
 # Summed total NTV over all species — the headline multi-ion quantity.
 [quantities.ntv_total]
-h5path = "kinetic_forces/fgar/total_torque"
+h5path = "KineticForces/fgar/total_torque"
 type = "real_scalar"
 extract = "value"
 label = "NTV total (D+T+imp+e) [N·m]"
@@ -18,7 +18,7 @@ noise_threshold = 1e-8
 order = 10
 
 [quantities.ntv_D]
-h5path = "kinetic_forces_ion1_z1_m2/fgar/total_torque"
+h5path = "KineticForces/PerSpecies/ion_z1_m2/fgar/total_torque"
 type = "real_scalar"
 extract = "value"
 label = "NTV Deuterium [N·m]"
@@ -26,7 +26,7 @@ noise_threshold = 1e-8
 order = 11
 
 [quantities.ntv_T]
-h5path = "kinetic_forces_ion2_z1_m3/fgar/total_torque"
+h5path = "KineticForces/PerSpecies/ion_z1_m3/fgar/total_torque"
 type = "real_scalar"
 extract = "value"
 label = "NTV Tritium [N·m]"
@@ -34,7 +34,7 @@ noise_threshold = 1e-8
 order = 12
 
 [quantities.ntv_electron]
-h5path = "kinetic_forces_electron/fgar/total_torque"
+h5path = "KineticForces/PerSpecies/electron/fgar/total_torque"
 type = "real_scalar"
 extract = "value"
 label = "NTV electron [N·m]"
@@ -43,7 +43,7 @@ order = 14
 
 # Stability anchors — confirm the upstream FFS/PE stages feeding the NTV diagnostic.
 [quantities.et_real]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
 label = "total energy Re(et[1])"
@@ -51,7 +51,7 @@ noise_threshold = 1e-10
 order = 20
 
 [quantities.msing]
-h5path = "singular/msing"
+h5path = "SingularSurfaces/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"

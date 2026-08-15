@@ -536,7 +536,7 @@ end
     KineticForcesState
 
 Accumulated results from all KineticForces computations.
-Written to gpec.h5 under the "kinetic_forces" group.
+Written to gpec.h5 under the "KineticForces" group.
 """
 @kwdef mutable struct KineticForcesState
     method_results::Dict{String,MethodResult} = Dict{String,MethodResult}()
