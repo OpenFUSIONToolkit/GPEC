@@ -93,7 +93,7 @@ order = 41
 
 # Singular surfaces
 [quantities.msing]
-h5path = "SingularSurfaces/msing"
+h5path = "SingularSurfaces/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -101,7 +101,7 @@ noise_threshold = 0
 order = 50
 
 [quantities.sing_psi]
-h5path = "SingularSurfaces/psi"
+h5path = "SingularSurfaces/rational_psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"

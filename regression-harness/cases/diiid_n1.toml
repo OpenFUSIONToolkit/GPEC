@@ -230,7 +230,7 @@ order = 65
 
 # Singular surfaces
 [quantities.msing]
-h5path = "SingularSurfaces/msing"
+h5path = "SingularSurfaces/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -238,7 +238,7 @@ noise_threshold = 0
 order = 50
 
 [quantities.sing_psi]
-h5path = "SingularSurfaces/psi"
+h5path = "SingularSurfaces/rational_psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"
@@ -246,7 +246,7 @@ noise_threshold = 1e-8
 order = 51
 
 [quantities.sing_q]
-h5path = "SingularSurfaces/q"
+h5path = "SingularSurfaces/rational_q"
 type = "real_vector"
 extract = "all_real"
 label = "singular q values"
@@ -271,11 +271,11 @@ noise_threshold = 0
 order = 61
 
 # Tearing stability Δ' — canonical STRIDE BVP matrix diagonal (replaces the
-# previous `PerturbedEquilibrium/SingularCoupling/delta_prime` track, which
+# previous `PerturbedEquilibrium/SingularCoupling/Delta_prime` track, which
 # was a per-surface stub computed by SingularCoupling from (rbwp1-lbwp1)/(2π·χ').
 # Per-surface Δ' is de-emphasized; SingularCoupling reads this BVP matrix diagonal.
 [quantities.delta_prime]
-h5path = "SingularSurfaces/delta_prime_matrix"
+h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
 label = "delta prime (BVP diagonal)"
@@ -390,7 +390,7 @@ order = 71
 # Local stability profiles (local_stability_flag = true). Checksums hash the full
 # profile so they are robust to NaN edge-surface entries and catch any change.
 [quantities.locstab_di]
-h5path = "LocalStability/di"
+h5path = "LocalStability/D_I"
 type = "real_vector"
 extract = "checksum"
 label = "Mercier D_I profile (checksum)"
@@ -398,7 +398,7 @@ noise_threshold = 0
 order = 72
 
 [quantities.locstab_dr]
-h5path = "LocalStability/dr"
+h5path = "LocalStability/D_R"
 type = "real_vector"
 extract = "checksum"
 label = "resistive interchange D_R profile (checksum)"

@@ -8,10 +8,10 @@ using HDF5, Printf, Statistics
 h5path = length(ARGS) >= 1 ? ARGS[1] : "examples/DIIID-like_gal_resistive_example/gpec.h5"
 @info "Reading $h5path"
 
-psi, q, issing, xi, dxi, sing_psi = h5open(h5path) do f
-    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/q"]),
-        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/issing"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi"]),
-        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_deriv"]), read(f["SingularSurfaces/GalerkinDeltaPrime/sing_psi"]))
+psi, issing, xi, dxi, sing_psi = h5open(h5path) do f
+    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxidpsi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
 end
 issing = Bool.(issing)
 mpert, ngrid, nsol = size(xi)
