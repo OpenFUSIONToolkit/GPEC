@@ -43,7 +43,11 @@ on-demand-solution-derivatives merge) — see the note at the end of RESULTS.md 
    worth testing first: how much of the near-axis step count is legitimate resolution of real
    structure (post-repair near-axis |f''|/|f| for K is 2.1e7, a ~2e-4 curvature scale against a
    1.7e-4 median knot spacing) versus still-unexplained grid slaving.
-8. **Structural fix designed, not implemented** (§12). Two routes, both preferred over the
+8. **Route (b) tried and measured** (§13): correct, unbiased, and worth ~2%. The step count is
+   driven by G via g11, whose residual noise is the tangential (theta-parametrization) component
+   of e_psi -- coordinate freedom no metric identity can constrain. **Route (a) is the fix**;
+   do not re-try (b) expecting more than a couple of percent.
+9. **Structural options as originally designed** (§12). Two routes, both preferred over the
    post-hoc smoothing probed in §11 (which biases et[1]): (a) sample every surface at the common
    theta abscissae so the remap error stops being white in psi -- the current code splines each
    surface on its own solver-chosen nodes and resamples (`DirectEquilibrium.jl:500-525`); (b)

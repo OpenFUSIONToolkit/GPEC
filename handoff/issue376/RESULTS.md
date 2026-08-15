@@ -465,6 +465,51 @@ Expected payoff, stated honestly: §11 caps this whole channel at **~20% of the 
 (growing with mpsi). The stronger reason to do it is correctness — coefficient matrices that are
 insensitive to grid choice by construction — not speed.
 
+## 13. Route (b) tried: it works, and it does not help — and the numbers say why
+
+Route (b) implemented as a rank-1 constraint projection, not a smoothing. ∇ψ = (e_θ × e_ζ)/J needs
+only θ-derivatives (the form already used for `modB` at `DirectEquilibrium.jl:624-626`), and
+duality gives **e_ψ·∇ψ = 1 exactly**, so the noisy normal component of the ψ-derivative-built e_ψ
+can be replaced by clean data with no free parameters and no bias.
+
+**The identity checks out.** Instrumenting the stock code, mid-plasma `e_ψ·∇ψ` has mean
+**1.0000000092** — exact to 8 digits — with pointwise spread **0.9978 … 1.0037**. So the two routes
+to the same geometry disagree by up to 0.4% at individual nodes, and the projection removes exactly
+that disagreement.
+
+Four variants at mpsi=1024 (stripped deck), isolating each channel:
+
+| variant | what it fixes | accepted steps | et[1] | mid-plasma C / G r1 |
+|---|---|---|---|---|
+| stock | — | 7638 | 0.8028405 | −0.401 / −0.176 |
+| **(b)** duality projection on fx1/fx2 | normal part of e_ψ | **7495 (−1.9%)** | 0.8028194 | −0.401 / +0.261 |
+| cap ∂ν/∂ψ only | g31 → C/E/H/K | **7524 (−1.5%)** | 0.7990120 | +0.915 / −0.130 |
+| cap all three ψ-derivatives (§11) | everything incl. g11 → G | **6081 (−20%)** | 0.7998018 | +0.915 / +0.942 |
+
+Read together these are conclusive:
+
+- **Route (b) is correct and harmless but worth ~2%.** et[1] moves by 2.6e-5 relative — it is a
+  consistency repair, not a bias, unlike the §11 smoothing which moved et[1] in the 4th digit.
+- **∂ν/∂ψ is the carrier for C/E/H — and C/E/H are not what the step count cares about.** Capping
+  ∂ν/∂ψ alone makes C, E, H and K clean (r1 +0.92/+0.88/+0.93/+0.94, residuals ~5e-7) and buys
+  **1.5%**. g31 being the common ingredient of the three dirty matrices, established in §9, turns
+  out to be a red herring for cost.
+- **The steps care about G, through g11.** Only the variant that also cleans g11 — which is built
+  from fx1/fx2 — reaches −20%, and it is the only one where G's r1 goes positive (+0.942).
+- **And g11's noise is in the part duality cannot reach.** The projection fixes e_ψ along ∇ψ;
+  G improves only slightly (r1 −0.176 → +0.261). What remains is the **tangential** component of
+  e_ψ — the θ-parametrization slip between neighbouring surfaces.
+
+**That tangential slip is precisely route (a)'s territory.** It is not geometry, it is a statement
+about how each surface's θ parametrization is chosen — and §12(a) shows each surface builds that
+parametrization independently, splining on its own solver-chosen SFL-angle nodes before resampling
+to the common grid. Duality cannot constrain it because it is coordinate freedom, not metric
+content; only making the parametrization consistent across surfaces can.
+
+**Conclusion: (b) is not the fix; (a) is.** Route (b) is still worth keeping as a cheap exactness
+improvement (it enforces a constraint currently violated by up to 0.4%), but the ~20% lives behind
+the surface-to-surface θ mapping.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it

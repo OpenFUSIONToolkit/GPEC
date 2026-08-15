@@ -265,12 +265,21 @@ the largest lever is not making the coefficients smoother, it is not placing the
 3. **Switch the ForceFreeStates integrator to Vern7** — measured in §5, ~20–26% off the EL phase,
    with better Δ' than Vern9 at the same tolerance. Gated on explaining the tolerance-independent
    2.5e-4 Δ' offset first; then its own branch and a regression-harness run.
-4. **Make the ψ-derivative channel noise-immune** — worth ~20% at mpsi=1024 and growing with the
-   grid, and it makes the coefficient matrices grid-insensitive as a property rather than by
-   luck. The right form of this is *not* smoothing the derivatives after the fact; it is removing
-   the noise at the source, either by making the surface trace correlated in ψ (continuation from
-   surface to surface, so the per-surface error is smooth rather than white) or by obtaining
-   ∂ν/∂ψ and ∂η/∂ψ from equilibrium relations instead of differencing independently-traced data.
+4. **Make the surface-to-surface θ parametrization consistent.** Each surface is currently traced
+   independently and splined on its *own* solver-chosen SFL-angle nodes before being resampled to
+   the common θ grid (`DirectEquilibrium.jl:500-525`), so the remap error is uncorrelated between
+   neighbours — which is why neither `reltol` nor `abstol` touches it. Sampling every surface at
+   the common abscissae (dense output plus a root-solve per node) would make that error smooth in
+   ψ instead of white.
+
+   I tried the tidier-looking alternative first — deriving the ψ-derivatives from metric
+   identities — and **measured it: it is worth ~2%, not 20%.** ∇ψ = (e_θ × e_ζ)/J needs only
+   θ-derivatives, and duality gives e_ψ·∇ψ = 1 exactly (verified: mean 1.0000000092, pointwise
+   spread 0.9978–1.0037, so the two routes disagree by up to 0.4%). Projecting e_ψ onto that
+   constraint is exact and unbiased but gives 7638 → 7495 steps. Capping ∂ν/∂ψ alone — which
+   cleans C/E/H/K completely — gives 7524. Only cleaning g11 as well reaches 6081. The step count
+   cares about **G via g11**, and g11's residual noise sits in the *tangential* component of e_ψ,
+   i.e. the θ-parametrization slip — coordinate freedom that no metric identity can constrain.
 5. **Open question worth more than any of the above**: what accounts for the other ~80% of the
    step growth (§7).
 
