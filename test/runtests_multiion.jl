@@ -198,4 +198,34 @@ using HDF5
         c2 = KF.combine_species_states([s1, s3])
         @test all(isfinite, real.(c2.method_results["fgar"].dtdpsi))
     end
+
+    @testset "per-species HDF5 layout" begin
+        # Per-species groups nest under KineticForces/PerSpecies/<label>/<method>/ with the
+        # summed total at KineticForces/<method>/ (docs/development/hdf5-conventions.md).
+        mk(tt) = (
+            st = KF.KineticForcesState();
+            st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
+                total_torque=ComplexF64(tt), psi_grid=collect(0.0:0.25:1.0),
+                dtdpsi=fill(ComplexF64(tt), 5), t_cumulative=zeros(ComplexF64, 5));
+            st
+        )
+        h5 = tempname() * ".h5"
+        HDF5.h5open(h5, "cw") do f
+            KF.write_to_hdf5!(f, mk(1.0); species_label="ion_z1_m2")
+            KF.write_to_hdf5!(f, mk(2.0); species_label="electron")
+            KF.write_to_hdf5!(f, mk(3.0))          # summed total
+        end
+        HDF5.h5open(h5, "r") do f
+            @test sort(collect(keys(f["KineticForces"]))) == ["PerSpecies", "fgar"]
+            @test sort(collect(keys(f["KineticForces"]["PerSpecies"]))) == ["electron", "ion_z1_m2"]
+            @test read(f["KineticForces"]["fgar"]["total_torque"]) == 3.0
+            @test read(f["KineticForces"]["PerSpecies"]["ion_z1_m2"]["fgar"]["total_torque"]) == 1.0
+            # The metadata pass must reach the per-species method level, not stop at PerSpecies.
+            for d in ("total_torque", "dTdpsi")
+                a = HDF5.attributes(f["KineticForces"]["PerSpecies"]["electron"]["fgar"][d])
+                @test haskey(a, "long_name") && haskey(a, "units")
+            end
+        end
+        rm(h5)
+    end
 end
