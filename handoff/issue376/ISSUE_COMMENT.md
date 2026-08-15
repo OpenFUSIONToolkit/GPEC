@@ -111,6 +111,28 @@ Three things worth knowing:
   integration is under 10% of the run. Tolerance relaxation is real but second-order here; it
   matters where EL dominates (large mpsi, no kinetic post-processing).
 
+### 5. Integrator order — Vern9 is the wrong tool here
+
+If steps cannot span a knot interval anyway, Vern9's 16 stages per step are wasted. I swapped all
+six `Vern9()` call sites inside `ForceFreeStates` for `Vern7()` (10 stages), left the
+equilibrium-side ones alone, and reran at mpsi = 512 (edits reverted afterwards):
+
+| method | tol | nstep | EL (s) | ms/step | et[1] | Δ'diag rel |
+|---|---|---|---|---|---|---|
+| Vern9 | 1e-10 | 3018 | 18.9 | 6.26 | 0.782559048 | 6.2e-06 |
+| Vern7 | 1e-10 | 4163 | 15.3 | 3.67 | 0.782559048 | 2.5e-04 |
+| Vern9 | 1e-8  | 1656 | 14.7 | 8.85 | 0.782559057 | 6.9e-04 |
+| Vern7 | 1e-8  | 2317 | 10.9 | 4.70 | 0.782559050 | 2.5e-04 |
+
+Vern7 takes ~40% more steps but each step is 1.7× cheaper, so EL wall time drops ~20% at 1e-10 and
+~26% at 1e-8. **Vern7 at 1e-8 dominates Vern9 at 1e-8 on both axes** — faster *and* closer to the
+converged Δ' — and is 42% faster than the deck's current Vern9 @ 1e-10.
+
+One caveat before anyone acts on this: Vern7's Δ' deviation is 2.47e-4 at 1e-10 and 2.50e-4 at
+1e-8, i.e. **tolerance-independent**, so it is not step-truncation error. Something in the
+propagator/matching path carries a method-dependent offset that Vern9 does not. It is small, but
+it should be understood rather than absorbed.
+
 ### Recommendations
 
 1. **Use the two-pass auto grid** (`mpsi = 0` with `psi_accuracy`) — already the example default.
@@ -121,9 +143,9 @@ Three things worth knowing:
    decks pin `1e-10` and the LAR decks `1e-12`. On the evidence of §4 those tighter values buy
    Δ' accuracy this case does not need, at 1.8–4× the step count. This is a per-deck edit on its
    own branch with a regression-harness run, not a change to the struct default.
-3. **Integrator order** is worth one cheap experiment: Vern9's 16 stages/step buy nothing when a
-   step cannot span a knot interval anyway. A 5th–7th order method (Tsit5/Vern6/Vern7) may cut RHS
-   evaluations per accepted step ~2× at equal nstep, with no physics change.
+3. **Switch the ForceFreeStates integrator to Vern7** — measured in §5, ~20–26% off the EL phase,
+   with better Δ' than Vern9 at the same tolerance. Gated on explaining the tolerance-independent
+   2.5e-4 Δ' offset first; then its own branch and a regression-harness run.
 4. **Smoother coefficients** — fitting F/K/G with smoothing (or higher-continuity) splines instead
    of pure interpolation would lift the knot-scale noise floor that currently pins the step size.
    This is the only change that would actually decouple nstep from mpsi rather than rescale it.

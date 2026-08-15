@@ -119,6 +119,30 @@ Note: this sweep ran on the current branch tree, which has moved since the §2�
 within 0.3% on nstep (3018 vs 3010) and 4e-4 relative on et[1] (0.782559 vs 0.78286); conclusions
 are unaffected, but do not mix numbers across the two tables.
 
+## 7. Integrator order: Vern9 → Vern7 (mpsi=512, same grid)
+
+Working-tree swap of all six `Vern9()` call sites inside `ForceFreeStates` (`EulerLagrange.jl:766`
+and `Riccati.jl:1080,1443,1455,1515,1525`); the equilibrium-side Vern9 uses were left alone so the
+EL phase is isolated. Δ' deviation is again relative to the Vern9 1e-12 point of §6. **The `src/`
+edits were reverted after measurement — this branch touches no source.**
+
+| method | tol | nstep | tried | EL (s) | ms/step | et[1] | Δ'diag rel |
+|---|---|---|---|---|---|---|---|
+| Vern9 | 1e-10 | 3018 | 3977 | 18.9 | 6.26 | 0.782559048 | 6.2e-06 |
+| Vern7 | 1e-10 | 4163 | 5355 | 15.3 | 3.67 | 0.782559048 | 2.5e-04 |
+| Vern9 | 1e-8  | 1656 | 2116 | 14.7 | 8.85 | 0.782559057 | 6.9e-04 |
+| Vern7 | 1e-8  | 2317 | 2927 | 10.9 | 4.70 | 0.782559050 | 2.5e-04 |
+
+- The §2 prediction holds: Vern7 takes ~40% more steps but each step is **1.7× cheaper**
+  (10 stages vs 16), so EL wall time drops ~20% at 1e-10 and ~26% at 1e-8.
+- **Vern7 at 1e-8 dominates Vern9 at 1e-8** on both axes — 10.9 s vs 14.7 s *and* 2.5e-4 vs 6.9e-4
+  Δ' error. Against the current deck setting (Vern9 @ 1e-10) it is 42% faster for a Δ' error of
+  2.5e-4. et[1] is unchanged to 8 digits everywhere.
+- **Open question before acting on this**: Vern7's Δ' deviation is 2.47e-4 at 1e-10 and 2.50e-4 at
+  1e-8 — i.e. *tolerance-independent*, so it is not step-truncation error. Something in the
+  propagator/matching path carries a method-dependent offset that Vern9 does not have. That floor
+  should be understood before Vern7 is adopted; it is small, but it is not a convergence error.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
@@ -126,9 +150,9 @@ are unaffected, but do not mix numbers across the two tables.
 1b. **`eulerlagrange_tolerance = 1e-8`** (the struct default) is the right per-deck value on the
    evidence of §6; the DIII-D decks' 1e-10 and the LAR decks' 1e-12 buy Δ' accuracy the case does
    not need. Any such deck edit is a separate branch and needs the regression harness.
-2. **Integrator order**: Vern9's 16 stages/step buy nothing when steps can't span a knot
-   interval. A 5–7th order method (Tsit5/Vern6/Vern7) may cut RHS evals per accepted step ~2×
-   at equal nstep. Cheap experiment, no physics change.
+2. **Integrator order** — measured (§7). Vern7 is ~20–26% faster in the EL phase and, at 1e-8,
+   strictly better than Vern9 on both time and Δ' accuracy. Blocked on explaining Vern7's
+   tolerance-independent 2.5e-4 Δ' offset; then a branch + regression harness.
 3. **Smoother coefficients**: fit F/K/G with smoothing (or higher-continuity) splines instead of
    pure interpolation to lift the knot-scale noise floor that pins the step size.
 4. **Node-noise floor**: tightening the equilibrium field-line integration tolerance (`etol`)
