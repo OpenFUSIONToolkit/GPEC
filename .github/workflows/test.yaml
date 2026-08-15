@@ -114,17 +114,27 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Julia
+        id: julia
         uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
 
+      # Keyed on the resolved Julia version, not the matrix label: precompiled .ji
+      # files are tied to the exact Julia build, so a patch release invalidates
+      # every one of them. Cache entries are immutable, so were the key not to
+      # rotate the run would recompile the whole tree, hit the unchanged key, skip
+      # the save as having nothing new, and repeat that forever. The version-only
+      # fallback still reuses packages, artifacts and registries across a bump; the
+      # next push to the default branch repopulates under the new key.
       - name: Restore the Julia depot
         id: depot
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.DEPOT_PATHS }}
-          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
-          restore-keys: julia-depot-${{ matrix.os }}-${{ matrix.version }}-
+          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          restore-keys: |
+            julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-
+            julia-depot-${{ matrix.os }}-${{ matrix.version }}-
 
       - name: Pin the CI dependency set
         run: |
@@ -177,7 +187,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.DEPOT_PATHS }}
-          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
 
   # Stable check that is present on every pull request, whether or not the suite
   # ran. Point branch protection at this job so skipped runs do not block merges.
