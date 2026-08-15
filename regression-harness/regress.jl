@@ -119,6 +119,10 @@ Options:
                            run always exits non-zero regardless)
     --help                 Print this help message
 
+Environment:
+    GPEC_REGRESS_THREADS   Threads for GPEC subprocesses (default "auto" = all cores);
+                           the actual count is recorded in each run's env fingerprint
+
 Exit status:
     0  all runs completed (and, with --fail-on-change, nothing changed)
     1  a run failed, or a quantity changed under --fail-on-change
