@@ -70,9 +70,9 @@ Two discriminators confirm the mechanism at mpsi = 512:
 - **`grid_type = "uniform"`** (un-packs the axis): near-axis steps 1891 → **559**, total nstep
   3010 → **2237**. Steps follow knot density, not axis physics. (This is a mechanism probe, not a
   config recommendation — the uniform grid is physically under-resolved near axis, et[1] = 0.993.)
-- **`eulerlagrange_tolerance = 1e-8`** (100× looser, same grid): nstep 3010 → **1629** with
-  identical physics (et[1] = 0.78286 at both). The 1.85× drop matches the 9th-order expectation
-  (100^(1/9) ≈ 1.7).
+- **`eulerlagrange_tolerance = 1e-8`** (100× looser, same grid): accepted steps 3977 → **2116**
+  with identical physics (et[1] unchanged to 8 digits). The step size is genuinely error-controlled
+  — but at an effective order well short of Vern9's, see §4.
 
 So the step size is genuinely error-controlled — but the error *magnitude* per unit ψ is set by
 knot-scale roughness in the interpolated F/K/G coefficients, not by the physics. §6 is about where

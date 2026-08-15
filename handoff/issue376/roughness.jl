@@ -88,24 +88,36 @@ end
 
 const REGIONS = [("psi<0.1 (axis pack)", 0.0, 0.1), ("0.3-0.7 (mid)", 0.3, 0.7), ("psi>0.95 (edge pack)", 0.95, 1.0)]
 
+# Set GPEC_ROUGHNESS_MATS=A,B,C,D,E,H,F,K,G to include the primitive matrices (RESULTS.md section 9,
+# which localises the node-error floor to C/E/H); the default is the three EL integrand matrices.
+const MATS = split(get(ENV, "GPEC_ROUGHNESS_MATS", "F,K,G"), ",")
+
 for rundir in ARGS
     h5open(joinpath(rundir, "gpec.h5"), "r") do h5
         psi = read(h5["matrices/psi"])
         qprof = read(h5["splines/profiles/q"])
         @printf("\n%s  (npsi = %d)\n", basename(rundir), length(psi))
-        @printf("  %-22s | %-6s | %-30s | %-30s | %-30s\n", "region", "nknot", "F: r1 / |f''|/|f| / resid", "K: r1 / |f''|/|f| / resid", "G: r1 / |f''|/|f| / resid")
+        @printf("  %-22s | %-6s", "region", "nknot")
+        for key in MATS
+            @printf(" | %-28s", "$key: r1 / |f''|/|f| / resid")
+        end
+        println()
         for (name, lo, hi) in REGIONS
             idx = window(psi, lo, hi)
             length(idx) < 8 && continue
             cols = String[]
-            for key in ("F", "K", "G")
+            for key in MATS
                 mats = read(h5["matrices/ideal"][key])
                 r1, curv = roughness(psi, mats, idx)
                 push!(cols, @sprintf("%+.3f /%9.2e /%9.2e", r1, curv, noise_floor(psi, mats, idx)))
             end
             # q(psi) is a genuinely smooth control on the same grid.
             dq = second_divided_difference(psi[idx], qprof[idx])
-            @printf("  %-22s | %6d | %-30s | %-30s | %-30s | q ctrl r1 %+.3f\n", name, length(idx), cols[1], cols[2], cols[3], lag1(dq))
+            @printf("  %-22s | %6d", name, length(idx))
+            for c in cols
+                @printf(" | %-28s", c)
+            end
+            @printf(" | q ctrl r1 %+.3f\n", lag1(dq))
         end
     end
 end

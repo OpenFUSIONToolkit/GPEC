@@ -84,10 +84,12 @@ and the first is not the driver.**
   recommendation.)
 - **`eulerlagrange_tolerance = 1e-8`** (100× looser, same packing): nstep 3010 → **1629**
   (near-axis 1891 → 1057) with **identical physics** (et[1] = 0.78286 at both tolerances).
-  The ~1.85× drop matches the 9th-order expectation (100^{1/9} ≈ 1.7): the step size is genuinely
-  error-controlled, but the error *magnitude* per unit ψ is set by knot-scale roughness in the
-  spline coefficients — so dψ ∝ knotΔ at fixed tolerance (§4) and ∝ tol^{1/9} at fixed grid.
-  (The step count halves; §6 shows EL *wall time* does not — there is a step-independent floor.)
+  The step size is genuinely error-controlled, but the error *magnitude* per unit ψ is set by
+  knot-scale roughness in the spline coefficients — so dψ ∝ knotΔ at fixed tolerance (§4) and
+  ∝ tol^α at fixed grid. This drop was originally read as matching the 9th-order expectation
+  (100^{1/9} ≈ 1.7); **§6 measures α properly and it does not** — the effective order here is 7.3,
+  outside Vern9's formal band, which is itself part of the mechanism argument.
+  (The step count drops 1.88×; §6 shows EL *wall time* does not — there is a step-independent floor.)
 
 ## 6. Tolerance sweep (`parse_tolsweep.jl`, mpsi=512 fixed grid, 513 knots)
 

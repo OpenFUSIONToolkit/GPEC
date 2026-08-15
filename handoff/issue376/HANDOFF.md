@@ -49,7 +49,18 @@ julia --project=. handoff/issue376/microbench_mpsi.jl     # standalone, no input
 # tolerance sweep: one run dir per tolerance (run_<tol>/ with mpsi=512 and that
 # eulerlagrange_tolerance) plus its tol_<tol>.log, then
 julia --project=. handoff/issue376/parse_tolsweep.jl <sweep_dir>
+
+# mechanism (RESULTS.md 8-9). Stripped decks run in ~31 s instead of ~220 s: drop the
+# [ForcingTerms]/[PerturbedEquilibrium]/[KineticForces] sections and set
+# local_stability_flag = false. Everything else stays as the example ships it.
+julia --project=. handoff/issue376/roughness.jl <rundir> [<rundir> ...]         # F/K/G
+GPEC_ROUGHNESS_MATS=A,D,C,E,H,F,K,G julia --project=. handoff/issue376/roughness.jl <rundir>
 ```
+
+Read the **mid-plasma (0.3-0.7)** rows for the clean diagnosis: near the axis the r1 statistic is
+unreliable on the strongly graded grid (A and D read r1 < -2/3 there despite a 2e-7 residual), and
+genuine psi->0 structure is mixed in with the noise. `PREDICTIONS.md` records what each hypothesis
+predicted, written before the runs.
 
 The parse/step scripts look for logs and run dirs in their own directory (`@__DIR__`); either
 run them from a scratch dir containing `mpsi_<N>.log` + `run_<N>/`, or adjust `LADDER_DIR`.
