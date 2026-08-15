@@ -269,6 +269,8 @@ function main(args=ARGS)
         n_changed = 0
         n_golden_fail = 0
         n_untracked = 0
+        n_checked = 0
+        n_no_golden = 0
 
         # Run every case against each ref, grouped by ref so cases sharing a commit share
         # one worktree (and one Pkg.instantiate/precompile) instead of paying for it per case.
@@ -292,6 +294,7 @@ function main(args=ARGS)
                 summary = report_golden_check(db, case_spec, resolved_refs[1].commit_hash)
                 n_golden_fail += summary.n_fail
                 n_untracked += summary.n_untracked
+                has_golden(case_spec.name) ? (n_checked += 1) : (n_no_golden += 1)
             else
                 summary = if length(resolved_refs) == 2
                     report_two_ref_comparison(db, case_spec,
@@ -311,6 +314,15 @@ function main(args=ARGS)
         if n_golden_fail > 0
             @error "$n_golden_fail quantity/quantities are outside their golden tolerance"
             exit(1)
+        end
+        if opts.check && n_checked == 0
+            # A green gate that checked nothing is worse than a red one: a deleted or
+            # typo-named golden file must not be indistinguishable from a passing check.
+            @error "--check ran $n_no_golden case(s) but found no golden file for any of them — nothing was actually gated"
+            exit(1)
+        end
+        if opts.check && n_no_golden > 0
+            @warn "$n_no_golden of $(n_no_golden + n_checked) requested case(s) have no golden file and were not gated"
         end
         if n_untracked > 0
             @info "$n_untracked tracked quantity/quantities have no golden value yet (not gating)"
