@@ -5,17 +5,17 @@
 # top-level GPEC runner wires that up; this file only defines the pure
 # writer.
 #
-# Output layout (relative to the parent group the caller provides):
+# Output layout (relative to the parent group the caller provides;
+# settings are not echoed here — inputs live only under Input/):
 #
-#   slayer/
-#   ├── settings/           -- control snapshot (strings, scalars)
-#   ├── per_surface/        -- struct-of-arrays for SLAYERParameters fields
+#   Tearing/
+#   ├── PerSurface/         -- struct-of-arrays for SLAYERParameters fields
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
-#   ├── roots/              -- Q_root (real, imag), omega_Hz, gamma_Hz
-#   ├── diagnostics/        -- all_valid_roots, poles, filtered_roots
+#   ├── Roots/              -- Q_root (real, imag), omega_Hz, gamma_Hz
+#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots
 #   │                           (flat-plus-offsets ragged encoding)
-#   └── scan/               -- optional: full Q/Δ scan data
+#   └── Scan/               -- optional: full Q/Δ scan data
 
 using HDF5
 
@@ -23,21 +23,20 @@ using HDF5
     write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
                         result::SLAYERResult)
 
-Write `result` into a `slayer/` subgroup of `parent`. The subgroup is
+Write `result` into a `Tearing/` subgroup of `parent`. The subgroup is
 created if missing and overwritten if it already exists (keeps the
 output file reproducible across reruns).
 """
 function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     result::SLAYERResult)
-    if haskey(parent, "slayer")
-        delete_object(parent, "slayer")
+    if haskey(parent, "Tearing")
+        delete_object(parent, "Tearing")
     end
-    g = create_group(parent, "slayer")
+    g = create_group(parent, "Tearing")
     g["enabled"] = Int(result.enabled)
 
     result.enabled || return g    # nothing else to write
 
-    _write_settings!(g, result.control)
     _write_per_surface!(g, result.params, result.dp_matrix)
     _write_roots!(g, result)
     _write_layer_widths!(g, result.layer_widths)
@@ -48,53 +47,10 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     return g
 end
 
-# ---------- settings snapshot ----------
-function _write_settings!(g, ctrl::SLAYERControl)
-    s = create_group(g, "settings")
-    s["inner_model"] = String(ctrl.inner_model)
-    s["scan_mode"] = String(ctrl.scan_mode)
-    s["coupling_mode"] = String(ctrl.coupling_mode)
-    s["dc_type"] = String(ctrl.dc_type)
-    s["msing_max"] = ctrl.msing_max
-    s["bt"] = ctrl.bt === nothing ? NaN : ctrl.bt
-    s["mu_i"] = ctrl.mu_i
-    s["zeff"] = ctrl.zeff
-    s["chi_perp"] = ctrl.chi_perp
-    s["chi_tor"] = ctrl.chi_tor
-    # NaN sentinel records the auto-derive (nothing) setting in a numeric dataset.
-    s["dr_val"] = ctrl.dr_val === nothing ? NaN : ctrl.dr_val
-    s["dgeo_val"] = ctrl.dgeo_val === nothing ? NaN : ctrl.dgeo_val
-    s["theta_sample"] = ctrl.theta_sample
-    s["resistivity_model"] = String(ctrl.resistivity_model)
-    s["lnLambda_form"] = String(ctrl.lnLambda_form)
-    s["Q_re_range"] = collect(ctrl.Q_re_range)
-    s["Q_im_range"] = collect(ctrl.Q_im_range)
-    s["nre"] = ctrl.nre
-    s["nim"] = ctrl.nim
-    s["amr_passes"] = ctrl.amr_passes
-    s["amr_max_cells"] = ctrl.amr_max_cells
-    # Multi-box stripe layout: flatten Vector{NTuple{4}} to an N×4 matrix
-    # (empty → 0×4) so a rerun can reconstruct the exact scan boxes.
-    s["boxes"] = isempty(ctrl.boxes) ? Matrix{Float64}(undef, 0, 4) :
-                 permutedims(reduce(hcat, collect.(ctrl.boxes)))
-    s["multi_box_prescreen_n"] = ctrl.multi_box_prescreen_n
-    s["pole_threshold"] = ctrl.pole_threshold
-    s["pole_threshold_adaptive"] = Int(ctrl.pole_threshold_adaptive)
-    s["filter_above_poles"] = Int(ctrl.filter_above_poles)
-    s["filter_outside_re"] = Int(ctrl.filter_outside_re)
-    s["gap_kHz_threshold"] = ctrl.gap_kHz_threshold
-    s["polish_roots"] = Int(ctrl.polish_roots)
-    s["validity_rtol"] = ctrl.validity_rtol
-    s["profile_file"] = ctrl.profile_file
-    s["profile_group"] = ctrl.profile_group
-    s["store_scan"] = Int(ctrl.store_scan)
-    return nothing
-end
-
 # ---------- per-surface layer parameters ----------
 function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     dp_matrix::Matrix{ComplexF64})
-    ps = create_group(g, "per_surface")
+    ps = create_group(g, "PerSurface")
 
     # Scalar struct-of-arrays for all Float64 / Int fields
     for fname in (:ising, :m, :n)
@@ -111,7 +67,7 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     ps["dc_type"] = String[String(p.dc_type) for p in params]
 
     # Full Δ' matrix, split real/imag
-    dp = create_group(ps, "dp_matrix")
+    dp = create_group(ps, "DpMatrix")
     dp["real"] = real.(dp_matrix)
     dp["imag"] = imag.(dp_matrix)
     return nothing
@@ -121,12 +77,12 @@ end
 # and resistive/Alfvén times rather than the SLAYER dimensionless set.
 function _write_per_surface!(g, params::AbstractVector{GGJParameters},
     dp_matrix::Matrix{ComplexF64})
-    ps = create_group(g, "per_surface")
+    ps = create_group(g, "PerSurface")
     ps["ising"] = Int[p.ising for p in params]
     for fname in (:E, :F, :G, :H, :K, :M, :taua, :taur, :v1)
         ps[String(fname)] = Float64[getfield(p, fname) for p in params]
     end
-    dp = create_group(ps, "dp_matrix")
+    dp = create_group(ps, "DpMatrix")
     dp["real"] = real.(dp_matrix)
     dp["imag"] = imag.(dp_matrix)
     return nothing
@@ -134,7 +90,7 @@ end
 
 # ---------- eigenvalue roots ----------
 function _write_roots!(g, r::SLAYERResult)
-    roots = create_group(g, "roots")
+    roots = create_group(g, "Roots")
     roots["Q_root_real"] = real.(r.Q_root)
     roots["Q_root_imag"] = imag.(r.Q_root)
     roots["omega_Hz"] = r.omega_Hz
@@ -151,7 +107,7 @@ end
 
 # ---------- resistive layer thickness (del_s Riccati) ----------
 function _write_layer_widths!(g, widths::Vector{LayerWidths})
-    lw = create_group(g, "layer_widths")
+    lw = create_group(g, "LayerWidths")
     for fname in (:ising, :m, :n)
         lw[String(fname)] = Int[getfield(w, fname) for w in widths]
     end
@@ -168,7 +124,7 @@ end
 
 # ---------- diagnostics: valid roots, poles, filtered roots ----------
 function _write_diagnostics!(g, r::SLAYERResult)
-    diag = create_group(g, "diagnostics")
+    diag = create_group(g, "Diagnostics")
     # Uncoupled: one GrowthRateResult per surface. Coupled: one total.
     extractions = if r.coupled_extraction !== nothing
         [r.coupled_extraction]
@@ -176,11 +132,11 @@ function _write_diagnostics!(g, r::SLAYERResult)
         r.per_surface_extraction
     end
 
-    _write_ragged_complex!(diag, "valid_roots",
+    _write_ragged_complex!(diag, "ValidRoots",
         [gr.valid_roots for gr in extractions])
-    _write_ragged_complex!(diag, "poles",
+    _write_ragged_complex!(diag, "Poles",
         [gr.poles for gr in extractions])
-    _write_ragged_complex!(diag, "filtered_roots",
+    _write_ragged_complex!(diag, "FilteredRoots",
         [gr.filtered_roots for gr in extractions])
     return nothing
 end
@@ -207,9 +163,9 @@ end
 
 # ---------- full scan data (optional) ----------
 function _write_scan_data!(g, r::SLAYERResult)
-    sc = create_group(g, "scan")
+    sc = create_group(g, "Scan")
     for (k, data) in enumerate(r.scan_data)
-        sk = create_group(sc, "surface_$(k)")
+        sk = create_group(sc, "Surface_$(k)")
         _write_single_scan!(sk, data)
     end
     return nothing

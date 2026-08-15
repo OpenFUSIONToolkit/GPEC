@@ -254,7 +254,7 @@ end
 Populate `forcing_modes` from an already-open HDF5 group with datasets `n`,
 `m`, `amplitude_real`, `amplitude_imag`. Mirror of `save_forcing_to_h5` for the
 rerun path — deliberately accepts an open group rather than a file path so
-the snapshot data can live inside `gpec.h5/input/raw_inputs/forcing_terms/`.
+the snapshot data can live inside `gpec.h5/Input/RawInputs/ForcingTerms/`.
 """
 function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
     n_array = read(group, "n")

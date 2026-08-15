@@ -11,7 +11,7 @@ example_dir = "examples/DIIID-like_gal_resistive_example"
 
 # Number of resonant surfaces in the gal domain
 [quantities.gal_msing]
-h5path = "galerkin/msing"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/msing"
 type = "int_scalar"
 extract = "value"
 label = "gal # singular surfaces"
@@ -19,7 +19,7 @@ noise_threshold = 0
 order = 10
 
 [quantities.gal_sing_q]
-h5path = "galerkin/sing_q"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/sing_q"
 type = "real_vector"
 extract = "all_real"
 label = "gal singular q values"
@@ -28,7 +28,7 @@ order = 11
 
 # PEST-3 Δ matching matrix — per-surface diagonal (the physics-meaningful tearing Δ′)
 [quantities.gal_pest3_delta_diag]
-h5path = "galerkin/pest3_Delta"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/pest3_Delta"
 type = "complex_matrix"
 extract = "diagonal_complex"
 label = "gal PEST3 Δ diagonal"
@@ -37,7 +37,7 @@ order = 20
 
 # Full outer Δ′ matrix (nsol × 2·msing) — Frobenius norm catches any element drift
 [quantities.gal_delta_norm]
-h5path = "galerkin/delta"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/delta"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal Δ′ matrix||"
@@ -46,7 +46,7 @@ order = 21
 
 # rpec coil-response block (mpert × 2·msing) — Frobenius norm
 [quantities.gal_delta_coil_norm]
-h5path = "galerkin/delta_coil"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/delta_coil"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal Δ_coil block||"
@@ -55,7 +55,7 @@ order = 22
 
 # Mercier index per surface
 [quantities.gal_di]
-h5path = "galerkin/di"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/di"
 type = "real_vector"
 extract = "all_real"
 label = "gal D_I per surface"
@@ -64,7 +64,7 @@ order = 30
 
 # Resonant exponents α per surface
 [quantities.gal_alpha]
-h5path = "galerkin/alpha"
+h5path = "SingularSurfaces/GalerkinDeltaPrime/alpha"
 type = "complex_vector"
 extract = "all_complex"
 label = "gal α per surface"
@@ -79,7 +79,7 @@ order = 31
 
 # Inner-layer matching data Δ(Q) per surface (resist_eval geometry + GGJ inner solver). (msing × 2)
 [quantities.gal_match_deltar_norm]
-h5path = "galerkin/match/deltar"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/deltar"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal inner-layer Δ||"
@@ -88,7 +88,7 @@ order = 41
 
 # Outer-region matched coefficients cout (2·msing × mcoil) — the 4·msing matching assembly + solve.
 [quantities.gal_match_cout_norm]
-h5path = "galerkin/match/cout"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal match cout||"
@@ -97,7 +97,7 @@ order = 42
 
 # Matching linear-solve residual ‖mat·cof − rmat‖/‖rmat‖ — health check (should stay ~machine eps).
 [quantities.gal_match_residual]
-h5path = "galerkin/match/residual"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/residual"
 type = "real_scalar"
 extract = "value"
 label = "gal match residual"

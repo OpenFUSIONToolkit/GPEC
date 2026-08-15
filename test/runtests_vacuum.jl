@@ -368,7 +368,7 @@
             @testset "nowall" begin
                 inputs = _make_inputs()
                 wall_settings = WallShapeSettings(shape="nowall")
-                wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+                (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
                 numpoints = inputs.mtheta * inputs.nzeta
                 num_modes = length(inputs.m_modes) * length(inputs.n_modes)
@@ -376,10 +376,8 @@
                 @test size(wv) == (num_modes, num_modes)
                 @test eltype(wv) == ComplexF64
                 @test all(isfinite, wv)
-                @test size(grri) == (2 * numpoints, num_modes)
-                @test size(grre) == (2 * numpoints, num_modes)
-                @test all(isfinite, grri)
-                @test all(isfinite, grre)
+                @test size(I_v) == (num_modes, num_modes)
+                @test all(iszero, I_v)  # compute_Iv=false by default
                 @test size(plasma_pts) == (numpoints, 3)
                 @test all(isfinite, plasma_pts)
                 @test size(wall_pts) == (numpoints, 3)
@@ -388,15 +386,28 @@
                 @test isapprox(wv, wv', rtol=1e-12)
             end
 
+            @testset "nowall compute_Iv=true" begin
+                inputs = _make_inputs()
+                wall_settings = WallShapeSettings(shape="nowall")
+                (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
+
+                num_modes = length(inputs.m_modes) * length(inputs.n_modes)
+                @test size(wv) == (num_modes, num_modes)
+                @test all(isfinite, wv)
+                @test size(I_v) == (num_modes, num_modes)
+                @test all(isfinite, I_v)
+                @test !all(iszero, I_v)
+                @test isapprox(wv, wv', rtol=1e-12)
+            end
+
             @testset "conformal wall" begin
                 inputs = _make_inputs()
                 wall_settings = WallShapeSettings(shape="conformal", a=0.5)
-                wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+                (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
-                numpoints = inputs.mtheta * inputs.nzeta
                 num_modes = length(inputs.m_modes) * length(inputs.n_modes)
                 @test size(wv) == (num_modes, num_modes)
-                @test size(grri) == (2 * numpoints, num_modes)
+                @test all(iszero, I_v)
                 @test all(isfinite, plasma_pts)
                 @test all(isfinite, wall_pts)
                 # plasma_pts layout: col1=R, col2=0, col3=Z
@@ -408,41 +419,53 @@
             @testset "edge: single poloidal mode mpert=1" begin
                 inputs = _make_inputs(m_modes=[1], n_modes=[1])
                 wall_settings = WallShapeSettings(shape="nowall")
-                wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+                (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (1, 1)
                 @test all(isfinite, wv)
-                @test size(grri, 2) == 1
+                @test size(I_v) == (1, 1)
             end
 
             @testset "edge: small mtheta" begin
                 # Keep mtheta_eq=17 so boundary has enough points for periodic spline
                 inputs = _make_inputs(mtheta=16, mtheta_eq=17)
                 wall_settings = WallShapeSettings(shape="nowall")
-                wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+                (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (2, 2)
-                @test size(grri) == (32, 2)  # 2*mtheta, num_modes=2
+                @test size(I_v) == (2, 2)
                 @test size(plasma_pts) == (16, 3)
             end
 
             @testset "in-place compute_vacuum_response! matches wrapper" begin
                 # The allocating wrapper is a thin caller of the in-place routine; verify the
-                # in-place entry populates caller-owned duck-typed (NamedTuple) storage identically.
+                # in-place entry populates caller-owned storage identically.
                 for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.5))
                     inputs = _make_inputs()
-                    wv, grri, grre, pp, wp = compute_vacuum_response(inputs, wall_settings)
+                    ref = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
 
-                    numpoints = inputs.mtheta * inputs.nzeta
-                    num_modes = length(inputs.m_modes) * length(inputs.n_modes)
-                    vac = (wv=zeros(ComplexF64, num_modes, num_modes), grri=zeros(ComplexF64, 2 * numpoints, num_modes), grre=zeros(ComplexF64, 2 * numpoints, num_modes),
-                        plasma_pts=zeros(numpoints, 3), wall_pts=zeros(numpoints, 3))
-                    compute_vacuum_response!(vac, inputs, wall_settings)
+                    vac = VacuumResponse(inputs)
+                    compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv=true)
 
-                    @test vac.wv ≈ wv
-                    @test vac.grri ≈ grri
-                    @test vac.grre ≈ grre
-                    @test vac.plasma_pts ≈ pp
-                    @test vac.wall_pts ≈ wp
+                    @test vac.wv ≈ ref.wv
+                    @test vac.I_v ≈ ref.I_v
+                    @test vac.plasma_pts ≈ ref.plasma_pts
+                    @test vac.wall_pts ≈ ref.wall_pts
                 end
+            end
+
+            @testset "in-place compute_vacuum_response! clears a reused buffer" begin
+                # A buffer left over from an earlier run must not leak into the next result:
+                # I_v in particular is only written when compute_Iv=true.
+                inputs = _make_inputs()
+
+                vac = VacuumResponse(inputs)
+                compute_vacuum_response!(vac, inputs, WallShapeSettings(; shape="conformal", a=0.5); compute_Iv=true)
+                @test !all(iszero, vac.I_v)
+
+                compute_vacuum_response!(vac, inputs, WallShapeSettings(; shape="nowall"))
+                fresh = compute_vacuum_response(inputs, WallShapeSettings(; shape="nowall"))
+
+                @test all(iszero, vac.I_v)
+                @test vac.wv ≈ fresh.wv
             end
         end
 
@@ -463,6 +486,19 @@
             r_in, z_in, _ = extract_plasma_surface_at_psi(pe, 0.2)
             r_out, z_out, _ = extract_plasma_surface_at_psi(pe, 0.8)
             @test extent(r_out, z_out) > extent(r_in, z_in)   # minor radius grows outward in ψ
+        end
+
+        @testset "calc_surface_inductance" begin
+            # Same Solovev recipe as above; exercises the PerturbedEquilibrium helper end-to-end
+            eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", eq_filename="unused", jac_type="pest", grid_type="ldp", psilow=1e-4, psihigh=0.99999, mpsi=64, mtheta=128)
+            sol_config = Equilibrium.SolovevConfig(64, 64, 64, 1.6, 0.33, 1.0, 1.9, 1.0, 1.0, 1.0)
+            pe = Equilibrium.equilibrium_solver(Equilibrium.sol_run(eq_config, sol_config))
+
+            m_modes = -2:5
+            L = PerturbedEquilibrium.calc_surface_inductance(pe, 0.9, 64, m_modes, 1)
+            @test size(L) == (length(m_modes), length(m_modes))
+            @test all(isfinite, L)
+            @test isapprox(L, L', rtol=1e-8)   # Hermitian inductance
         end
     end
 
@@ -581,17 +617,15 @@
         @testset "compute_vacuum_response 3D nowall" begin
             inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
             wall_settings = WallShapeSettings(shape="nowall")
-            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+            (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
             num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
             @test all(isfinite, wv)
-            @test size(grri) == (2 * numpoints, num_modes)
-            @test size(grre) == (2 * numpoints, num_modes)
-            @test all(isfinite, grri)
-            @test all(isfinite, grre)
+            @test size(I_v) == (num_modes, num_modes)
+            @test all(iszero, I_v)
             @test size(plasma_pts) == (numpoints, 3)
             @test all(isfinite, plasma_pts)
             @test size(wall_pts) == (numpoints, 3)
@@ -604,7 +638,7 @@
         @testset "compute_vacuum_response 3D nonaxisymmetric boundary" begin
             inputs = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2)
             wall_settings = WallShapeSettings(shape="nowall")
-            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+            (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
             num_modes = length(inputs.m_modes) * length(inputs.n_modes)
@@ -612,10 +646,8 @@
             @test size(wv) == (num_modes, num_modes)
             @test eltype(wv) == ComplexF64
             @test all(isfinite, wv)
-            @test size(grri) == (2 * numpoints, num_modes)
-            @test size(grre) == (2 * numpoints, num_modes)
-            @test all(isfinite, grri)
-            @test all(isfinite, grre)
+            @test size(I_v) == (num_modes, num_modes)
+            @test all(iszero, I_v)
             @test size(plasma_pts) == (numpoints, 3)
             @test all(isfinite, plasma_pts)
             @test size(wall_pts) == (numpoints, 3)
@@ -625,12 +657,11 @@
         @testset "compute_vacuum_response 3D conformal wall" begin
             inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
             wall_settings = WallShapeSettings(shape="conformal", a=0.3)
-            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+            (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
-            numpoints = inputs.mtheta * inputs.nzeta
             num_modes = length(inputs.m_modes) * length(inputs.n_modes)
             @test size(wv) == (num_modes, num_modes)
-            @test size(grri) == (2 * numpoints, num_modes)
+            @test size(I_v) == (num_modes, num_modes)
             @test all(isfinite, plasma_pts)
             @test all(isfinite, wall_pts)
             # Wall and plasma should differ (conformal wall offset from plasma)
@@ -676,13 +707,14 @@
             wall_settings = WallShapeSettings(shape="nowall")
 
             # Reduced (block-circulant) path
-            wv_red, _, _, plasma_pts_red, _ = compute_vacuum_response(inputs_red, wall_settings)
+            vac_red = compute_vacuum_response(inputs_red, wall_settings)
+            wv_red, plasma_pts_red = vac_red.wv, vac_red.plasma_pts
 
             # Full-torus reference: pre-expand so nfp=1 forces the dense path
             inputs_full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inputs_red)
             @test inputs_full.nfp == 1
             @test inputs_full.nzeta == nzeta_p * nfp
-            wv_full, _, _, _, _ = compute_vacuum_response(inputs_full, wall_settings)
+            wv_full = compute_vacuum_response(inputs_full, wall_settings).wv
 
             num_modes = length(m_modes) * length(n_modes)
             @test size(wv_red) == (num_modes, num_modes)

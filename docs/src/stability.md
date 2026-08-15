@@ -142,26 +142,26 @@ Setting `local_stability_flag = true` in `[ForceFreeStates]` runs a local high-`
 stability scan over every flux surface, in addition to the global ideal analysis above.
 For the derivation and implementation details behind these diagnostics, see
 [Ballooning and Mercier Local Stability](ballooning.md).
-Three diagnostics are produced and stored under the `locstab/` HDF5 group, each a profile
+Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile
 in normalized poloidal flux ``\psi``:
 
-- **Mercier criterion ``D_I``** (`locstab/di`) — the ideal interchange criterion. A surface
+- **Mercier criterion ``D_I``** (`LocalStability/di`) — the ideal interchange criterion. A surface
   is Mercier-unstable where ``D_I > 0``. It is evaluated from the ``\det(\bar{d}_0)`` of the
   integrated local-mode matrix.
-- **Resistive interchange ``D_R``** (`locstab/dr`) — the Glasser–Greene–Johnson resistive
+- **Resistive interchange ``D_R``** (`LocalStability/dr`) — the Glasser–Greene–Johnson resistive
   interchange criterion ``D_R = D_I + (H - 1/2)^2``. The ``D_I`` term is the same
-  ``\det(\bar{d}_0)`` value reported in `locstab/di`; ``H`` is computed from the legacy
+  ``\det(\bar{d}_0)`` value reported in `LocalStability/di`; ``H`` is computed from the legacy
   Mercier/GGJ flux-surface averages of the field and metric quantities. ``D_R > 0``
   indicates resistive interchange instability.
-- **Ballooning ``\Delta'``** (`locstab/ballooning_Delta_prime`) — the high-``n`` ballooning
+- **Ballooning ``\Delta'``** (`LocalStability/ballooning_Delta_prime`) — the high-``n`` ballooning
   stability index, obtained by integrating the ballooning equation along the field line and
   taking the jump in the logarithmic derivative of the solution between the two asymptotic
   ends.
 
 !!! note "Two different Δ' quantities"
-    `locstab/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
+    `LocalStability/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
     distinct from the **resistive tearing** ``\Delta'`` described in the next section, which
-    is written under `singular/` and `perturbed_equilibrium/singular_coupling/delta_prime`.
+    is written under `SingularSurfaces/` and `PerturbedEquilibrium/SingularCoupling/delta_prime`.
     They measure different instabilities; do not confuse them.
 
 ### s–α diagram
@@ -231,7 +231,7 @@ where ``\Phi_R[j]`` is the forward FM product from ``\psi_{R,j-1}`` to the junct
 ``\Phi_L[j]`` is the backward crossing FM from ``\psi_{L,j}`` to the junction.
 
 The matrix is only populated by the parallel FM path and is written to the HDF5 output
-under `singular/delta_prime_matrix`.
+under `SingularSurfaces/delta_prime_matrix`.
 
 ## Configuration reference
 
@@ -311,7 +311,7 @@ ffit   = FFS.make_matrix(equil, intr, metric)
 # and always returns a 4-tuple (odet, propagators, chunks, S_at_surface_left).
 odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
 
-vac = FFS.free_run!(odet, ctrl, equil, ffit, intr)
+vac = FFS.free_run(odet, ctrl, equil, ffit, intr)
 println("Energy eigenvalue et[1] = ", real(vac.et[1]))
 ```
 
@@ -356,5 +356,5 @@ end
 
 - `docs/src/galerkin.md` — RDCON outer-region Galerkin Δ′ solver (part of this module)
 - `docs/src/equilibrium.md` — build the `PlasmaEquilibrium` object required by this module
-- `docs/src/vacuum.md` — vacuum response computed from the EL solution in `free_run!`
+- `docs/src/vacuum.md` — vacuum response computed from the EL solution in `free_run`
 - `docs/src/perturbed_equilibrium.md` — downstream singular coupling analysis using Δ'

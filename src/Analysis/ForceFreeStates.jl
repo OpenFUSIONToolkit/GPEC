@@ -33,8 +33,8 @@ A `Plots.jl` plot object.
 """
 function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     mlow, xi_psi, psi, et = h5open(h5path, "r") do fid
-        read(fid["info/mlow"]), read(fid["integration/xi_psi"]),
-        read(fid["integration/psi"]), read(fid["FreeBoundaryStability/eigenmode_energies"])
+        read(fid["Info/mlow"]), read(fid["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"]),
+        read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]), read(fid["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
     end
 
     mpert = size(xi_psi, 1)
@@ -81,7 +81,7 @@ A `Plots.jl` plot object.
 """
 function plot_fixed_boundary_stability_criterion(h5path; save_path=nothing)
     psi, crit = h5open(h5path, "r") do fid
-        read(fid["integration/psi"]), read(fid["integration/crit"])
+        read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]), read(fid["ForceFreeStates/Solutions/ForwardIntegration/crit"])
     end
 
     p = plot(
@@ -129,7 +129,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
 
     wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["equil/psio"]), read(fid["info/mlow"])
+        read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psio"]), read(fid["Info/mlow"])
     end
 
     isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
@@ -191,16 +191,16 @@ A `Plots.jl` plot object, or `nothing` if no `EdgeScan/` group is present in the
 """
 function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
     has_scan, q, et, ep, ev, evonly, qlim = h5open(h5path, "r") do fid
-        if !haskey(fid, "EdgeScan/psi")
+        if !haskey(fid, "ForceFreeStates/EdgeScan/psi")
             return false, Float64[], ComplexF64[], ComplexF64[], ComplexF64[], Float64[], NaN
         end
         true,
-        read(fid["EdgeScan/q"]),
-        read(fid["EdgeScan/total_energy"]),
-        read(fid["EdgeScan/plasma_energy"]),
-        read(fid["EdgeScan/vacuum_energy"]),
-        read(fid["EdgeScan/vacuum_eigenvalue"]),
-        read(fid["info/qlim"])
+        read(fid["ForceFreeStates/EdgeScan/q"]),
+        read(fid["ForceFreeStates/EdgeScan/total_energy"]),
+        read(fid["ForceFreeStates/EdgeScan/plasma_energy"]),
+        read(fid["ForceFreeStates/EdgeScan/vacuum_energy"]),
+        read(fid["ForceFreeStates/EdgeScan/vacuum_eigenvalue"]),
+        read(fid["Info/qlim"])
     end
 
     if !has_scan
@@ -264,9 +264,9 @@ A `Plots.jl` plot object.
 """
 function plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
     dataset = Dict(
-        :total => "FreeBoundaryStability/eigenmode_energies",
-        :plasma => "FreeBoundaryStability/eigenmode_plasma_energies",
-        :vacuum => "FreeBoundaryStability/eigenmode_vacuum_energies"
+        :total => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",
+        :plasma => "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies",
+        :vacuum => "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
     )
     haskey(dataset, matrix_type) || error("matrix_type must be :total, :plasma, or :vacuum")
 
@@ -321,9 +321,9 @@ A `Plots.jl` plot object.
 """
 function plot_delta_prime(h5path; save_path=nothing)
     msing, psi_sing, q_sing, ca_l, ca_r, psio, mn_index = h5open(h5path, "r") do fid
-        read(fid["singular/msing"]), read(fid["singular/psi"]), read(fid["singular/q"]),
-        read(fid["singular/ca_left"]), read(fid["singular/ca_right"]),
-        read(fid["equil/psio"]), read(fid["info/mn_index"])
+        read(fid["SingularSurfaces/msing"]), read(fid["SingularSurfaces/psi"]), read(fid["SingularSurfaces/q"]),
+        read(fid["SingularSurfaces/ca_left"]), read(fid["SingularSurfaces/ca_right"]),
+        read(fid["Equilibrium/psio"]), read(fid["Info/mn_index"])
     end
 
     msing == 0 && return plot(; title="No singular surfaces found", legend=false)
@@ -374,8 +374,8 @@ end
 Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
 pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
 normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
-are ballooning-unstable. Reads `locstab/psi`, `locstab/alpha`, and
-`locstab/alpha_critical` (populated when ForceFreeStates runs with
+are ballooning-unstable. Reads `LocalStability/psi`, `LocalStability/alpha`, and
+`LocalStability/alpha_critical` (populated when ForceFreeStates runs with
 `local_stability_flag = true`).
 
 ### Arguments
@@ -394,8 +394,8 @@ A `Plots.jl` plot object.
 """
 function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
     psi, alpha, alpha_crit = h5open(h5path, "r") do fid
-        haskey(fid, "locstab/alpha") || return (Float64[], Float64[], Float64[])
-        read(fid["locstab/psi"]), read(fid["locstab/alpha"]), read(fid["locstab/alpha_critical"])
+        haskey(fid, "LocalStability/alpha") || return (Float64[], Float64[], Float64[])
+        read(fid["LocalStability/psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
     end
 
     isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
@@ -424,7 +424,7 @@ end
     plot_cond_fbar(h5path; save_path=nothing, zoom=false)
 
 Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan stored in
-`singular/kinetic/` (populated when ForceFreeStates runs with
+`SingularSurfaces/Kinetic/` (populated when ForceFreeStates runs with
 `kinetic_factor > 0`, `singfac_min > 0`).
 
 `F̄` is the kinetic Euler-Lagrange matrix formed by Schur-reducing the six
@@ -457,16 +457,16 @@ A `Plots.jl` plot object, or `nothing` if no kinetic scan is stored in the file.
 """
 function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
     scan_psi, scan_cond, thr, k_psi, i_psi, i_q, kmsing = h5open(h5path, "r") do fid
-        if !(haskey(fid, "singular") && haskey(fid["singular"], "kinetic"))
+        if !(haskey(fid, "SingularSurfaces") && haskey(fid["SingularSurfaces"], "Kinetic"))
             return Float64[], Float64[], 0.0, Float64[], Float64[], Float64[], 0
         end
-        kg = fid["singular/kinetic"]
+        kg = fid["SingularSurfaces/Kinetic"]
         (read(kg["scan_psi"]),
             read(kg["scan_cond"]),
             read(kg["scan_threshold"]),
             read(kg["psi"]),
-            read(fid["singular/psi"]),
-            read(fid["singular/q"]),
+            read(fid["SingularSurfaces/psi"]),
+            read(fid["SingularSurfaces/q"]),
             read(kg["kmsing"]))
     end
 
@@ -553,8 +553,8 @@ A `Plots.jl` plot object.
 """
 function plot_ffs_summary(h5path; save_path=nothing)
     has_vac = h5open(h5path, "r") do fid
-        haskey(fid, "FreeBoundaryStability/W_freeboundary_eigenmodes") &&
-            !isempty(read(fid["FreeBoundaryStability/W_freeboundary_eigenmodes"]))
+        haskey(fid, "ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes") &&
+            !isempty(read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]))
     end
 
     p_crit = plot_fixed_boundary_stability_criterion(h5path)

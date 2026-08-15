@@ -15,7 +15,7 @@ relative to this repository.
 - `gpec/gpeq.f` (gpeq_sol, gpeq_contra, gpeq_surface, gpeq_normal) -> `src/PerturbedEquilibrium/FieldReconstruction.jl` + `src/PerturbedEquilibrium/ResponseMatrices.jl`
 - `gpec/gpresp.f` (gpresp_pinduct, gpresp_sinduct, gpresp_permeab) -> `src/PerturbedEquilibrium/ResponseMatrices.jl`
 - `gpec/gpout.f` (gpout_singcoup, gpout_xbnormal) -> `src/PerturbedEquilibrium/SingularCoupling.jl` + `src/PerturbedEquilibrium/FieldReconstruction.jl`
-- `gpec/gpvacuum.f` (gpvacuum_flxsurf) -> `src/PerturbedEquilibrium/SingularCoupling.jl` (compute_surface_inductance_from_greens)
+- `gpec/gpvacuum.f` (gpvacuum_flxsurf) -> `src/Vacuum/Vacuum.jl` (compute_Iv branch of _compute_vacuum_response_2d!) + `src/PerturbedEquilibrium/ResponseMatrices.jl` (calc_surface_inductance)
 
 ## KineticForces (NTV, Fortran `pentrc/`) — see kinetic_ntv_map.md for the audit checklist
 - `pentrc/torque.F90` -> `src/KineticForces/Torque.jl` (tpsi! single-surface torque)

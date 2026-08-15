@@ -8,7 +8,7 @@ a single global banded system.  Cells adjacent to each rational surface ("resona
 singular behavior is built into the basis rather than resolved numerically.
 
 The solve produces the inter-surface Δ′ matrix and the PEST-3 matching blocks
-(``A'``, ``B'``, ``\Gamma'``, ``\Delta'``), written to the HDF5 output under the `galerkin/`
+(``A'``, ``B'``, ``\Gamma'``, ``\Delta'``), written to the HDF5 output under the `SingularSurfaces/GalerkinDeltaPrime/`
 group.  These are the outer-region inputs to resistive matched-asymptotic stability analysis
 [Glasser 2016, Phys. Plasmas **23**, 072505].
 
