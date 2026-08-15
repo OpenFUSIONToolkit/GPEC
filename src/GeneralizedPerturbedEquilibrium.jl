@@ -788,25 +788,28 @@ function write_outputs_to_HDF5(
         out_h5["Info/qlim"] = intr.qlim
         out_h5["Info/dqdpsi_lim"] = intr.q1lim
 
-        # Write derived equilibrium parameters
-        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumParameters), getfield.(Ref(equil.params), fieldnames(Equilibrium.EquilibriumParameters)))
-            if val !== nothing # TODO: looks like ro, zo, psio, and b_norm are not set, so skipping those for now but should fix eventually
-                out_h5["Equilibrium/$key"] = val
-            end
+        # Write derived equilibrium parameters. The struct keeps its legacy field spellings;
+        # EQUIL_H5_NAMES maps them to literature dataset names and EQUIL_H5_SKIP drops
+        # duplicates and control-flag echoes. Fields left `nothing` are not written.
+        for f in fieldnames(Equilibrium.EquilibriumParameters)
+            f in EQUIL_H5_SKIP && continue
+            val = getfield(equil.params, f)
+            val === nothing && continue
+            out_h5["Equilibrium/$(get(EQUIL_H5_NAMES, f, String(f)))"] = val
         end
-        out_h5["Equilibrium/psio"] = equil.psio
-        out_h5["Equilibrium/ro"] = equil.ro
-        out_h5["Equilibrium/zo"] = equil.zo
+        out_h5["Equilibrium/psi_total"] = equil.psio
+        out_h5["Equilibrium/R_axis"] = equil.ro
+        out_h5["Equilibrium/Z_axis"] = equil.zo
 
         # Write equilibrium profile and geometry arrays (from the named splines)
         profiles = equil.profiles
-        out_h5["Equilibrium/Profiles/xs"] = profiles.xs
+        out_h5["Equilibrium/Profiles/psi"] = profiles.xs
         out_h5["Equilibrium/Profiles/2piF"] = profiles.F_spline.y
         out_h5["Equilibrium/Profiles/mu0p"] = profiles.P_spline.y
         out_h5["Equilibrium/Profiles/dVdpsi"] = profiles.dVdpsi_spline.y
         out_h5["Equilibrium/Profiles/q"] = profiles.q_spline.y
-        out_h5["Equilibrium/Geometry/xs"] = equil.rzphi_xs
-        out_h5["Equilibrium/Geometry/ys"] = equil.rzphi_ys
+        out_h5["Equilibrium/Geometry/psi"] = equil.rzphi_xs
+        out_h5["Equilibrium/Geometry/theta"] = equil.rzphi_ys
         # Extract grid point values from interpolants for HDF5 output
         out_h5["Equilibrium/Geometry/rcoords"] = equil.rzphi_rsquared.nodal_derivs.partials[1, :, :]
         out_h5["Equilibrium/Geometry/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
@@ -819,9 +822,11 @@ function write_outputs_to_HDF5(
         # tearing Δ' under PerturbedEquilibrium/SingularCoupling/Delta_prime).
         if locstab !== nothing
             locstab_xs = locstab.cache.x
+            out_h5["LocalStability/psi"] = collect(locstab_xs)  # cached vector → dense for HDF5
             out_h5["LocalStability/D_I"] = locstab.y[:, 1] ./ locstab_xs
             out_h5["LocalStability/D_R"] = locstab.y[:, 2] ./ locstab_xs
         else
+            out_h5["LocalStability/psi"] = Float64[]
             out_h5["LocalStability/D_I"] = Float64[]
             out_h5["LocalStability/D_R"] = Float64[]
         end
@@ -830,7 +835,8 @@ function write_outputs_to_HDF5(
         out_h5["LocalStability/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
 
         # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
-        out_h5["LocalStability/psi"] = ballooning_boundary.psi
+        # Its own scan grid, distinct from the LocalStability/psi profile grid above.
+        out_h5["LocalStability/ballooning_psi"] = ballooning_boundary.psi
         out_h5["LocalStability/alpha"] = ballooning_boundary.alpha
         out_h5["LocalStability/alpha_critical"] = ballooning_boundary.alpha_critical
 

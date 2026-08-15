@@ -261,9 +261,9 @@ function write_galerkin!(out_h5, result::GalerkinResult)
         sol = result.solution
         out_h5["$gal/Solution/psi"] = sol.psi
         out_h5["$gal/Solution/is_rational"] = collect(sol.issing)
-        out_h5["$gal/Solution/xi"] = sol.xi
-        out_h5["$gal/Solution/dxidpsi"] = sol.xi_deriv
-        isempty(sol.xi_cut) || (out_h5["$gal/Solution/xi_cut"] = sol.xi_cut)
+        out_h5["$gal/Solution/xi_psi"] = sol.xi
+        out_h5["$gal/Solution/dxi_psidpsi"] = sol.xi_deriv
+        isempty(sol.xi_cut) || (out_h5["$gal/Solution/xi_psi_cut"] = sol.xi_cut)
         isempty(sol.cut_range) || (out_h5["$gal/Solution/cut_range"] = sol.cut_range)
     end
     if result.match !== nothing
@@ -283,9 +283,13 @@ function write_galerkin!(out_h5, result::GalerkinResult)
         end
         out_h5["$gal/Match/residual"] = m.residual
         if !isempty(m.inner_params)
-            for f in (:E, :F, :G, :H, :K, :M, :taua, :taur, :v1)
+            for f in (:E, :F, :G, :H, :K, :M)
                 out_h5["$gal/Match/InnerParams/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
             end
+            # Literature names, matching the Tearing PerSurface mapping for the same fields.
+            out_h5["$gal/Match/InnerParams/tau_A"] = [pp.taua for pp in m.inner_params]
+            out_h5["$gal/Match/InnerParams/tau_R"] = [pp.taur for pp in m.inner_params]
+            out_h5["$gal/Match/InnerParams/dVdpsi"] = [pp.v1 for pp in m.inner_params]
         end
     end
     annotate_galerkin!(out_h5)
@@ -299,11 +303,12 @@ const GALERKIN_H5_ANNOTATIONS = [
     "ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi" => (; long_name="normalized poloidal flux ψ_N grid of the Galerkin solution", scale="psi"),
     "ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational" =>
         (; long_name="flag: grid node lies on a rational surface", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi",)),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi" => (; long_name="Galerkin solution functions ξ (arbitrary amplitude)", dims=("mode", "psi", "solution")),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxidpsi" =>
-        (; long_name="ψ_N derivative of the Galerkin solution functions (arbitrary amplitude)", dims=("mode", "psi", "solution")),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_cut" =>
-        (; long_name="Galerkin solution functions with the leading-order resonant response excised", dims=("mode", "psi", "solution")),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi" =>
+        (; long_name="Galerkin solution functions ξ^ψ (arbitrary amplitude; note the psi/solution axis order differs from ForwardIntegration)", dims=("mode", "psi", "solution")),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi" =>
+        (; long_name="ψ_N derivative of the Galerkin solution functions ξ^ψ (arbitrary amplitude)", dims=("mode", "psi", "solution")),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi_cut" =>
+        (; long_name="Galerkin solution functions ξ^ψ with the leading-order resonant response excised", dims=("mode", "psi", "solution")),
     "ForceFreeStates/Solutions/GalerkinIntegration/Solution/cut_range" =>
         (; long_name="ψ_N bounds of the excised resonant + extension cells per surface", dims=("surface", "bound")),
     "SingularSurfaces/GalerkinDeltaPrime/Delta_prime_raw" =>

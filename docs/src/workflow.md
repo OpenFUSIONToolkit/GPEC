@@ -59,8 +59,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Outputs**:
 - `wv` — Vacuum response matrix (scaled by the singular factor (m - nq)(m' - nq), see Chance 1997)
-- `grri` — Interior Green's function matrix (plasma boundary → plasma boundary)
-- `grre` — Exterior Green's function matrix (plasma boundary → wall)
+- `I_v` — Vacuum surface-current matrix Iᵛ when `compute_Iv=true` (otherwise zeros); PerturbedEquilibrium inverts this to surface inductance `L`
 
 **Key references**: [Chance et al. (1997)](citations.md#Vacuum-Module), [Chance et al. (2007)](citations.md#Vacuum-Module)
 
@@ -177,7 +176,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 |---|---|
 | `Info/` | Run metadata: git version, mode-number ranges, ψ limit |
 | `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
-| `Equilibrium/` | Equilibrium scalars (β, q₀, q95, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
+| `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |
 | `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ' matrices (`GalerkinDeltaPrime/`), kinetic surfaces (`Kinetic/`) |

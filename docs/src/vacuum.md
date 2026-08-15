@@ -73,7 +73,7 @@ wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(
     equal_arc_wall = true     # Use equal arc length spacing
 )
 
-# Compute vacuum response; returns a VacuumResponse with wv, grri, grre, plasma_pts, wall_pts
+# Compute vacuum response; returns a VacuumResponse with wv, I_v, plasma_pts, wall_pts
 vac = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wall_settings)
 ```
 

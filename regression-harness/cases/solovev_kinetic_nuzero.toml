@@ -67,14 +67,14 @@ noise_threshold = 0
 
 # Equilibrium
 [quantities.q0]
-h5path = "Equilibrium/q0"
+h5path = "Equilibrium/q_axis"
 type = "real_scalar"
 extract = "value"
 label = "q0"
 noise_threshold = 1e-12
 
 [quantities.q95]
-h5path = "Equilibrium/q95"
+h5path = "Equilibrium/q_95"
 type = "real_scalar"
 extract = "value"
 label = "q95"
