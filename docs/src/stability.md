@@ -45,66 +45,73 @@ finite across every rational surface.
 
 ## Integration methods
 
-Three integration drivers are available, all solving the same EL system but with different
-numerical strategies.
+Two integration drivers are available. Both solve the same EL system, but they differ in
+numerical strategy and in what they leave behind for the rest of the pipeline: the forward
+driver returns dense displacement profiles, the Riccati driver returns the inter-surface
+``\Delta'`` matrix.
 
-### Standard integration
+### Forward integration
 
-`eulerlagrange_integration` is the baseline driver.  It integrates the EL ODE directly in
-``(U_1, U_2)`` using Tsit5 with adaptive step control.  Near each rational surface the
+`forward_eulerlagrange_integration` is the baseline driver — our implementation of the
+standard DCON radial integration [Glasser 2016].  It integrates the EL ODE directly
+in ``(U_1, U_2)`` using the adaptive 9th-order `Vern9` solver.  Near each rational surface the
 columns of ``U_2`` that correspond to resonant modes are zeroed via Gaussian reduction (GR),
-keeping the solution bounded.  This is the reference path for correctness comparisons.
+keeping the solution bounded; `transform_u!` undoes the reduction at the end, so `u_store`
+comes back dense in the axis (Euler-Lagrange) basis.  This is the reference path for
+correctness comparisons, the only path whose solution the perturbed-equilibrium stage can
+consume, and the only path that supports `kinetic_factor > 0`.
 
-Enable with (default):
+Enable with:
 ```toml
 [ForceFreeStates]
-use_riccati  = false
-use_parallel = false
+integrator = "forward"
 ```
 
 ### Riccati integration
 
-`riccati_eulerlagrange_integration` reformulates the problem in terms of the dual Riccati
-matrix ``S = U_1 \cdot U_2^{-1}`` [Glasser 2018a, Eq. 19]:
+`riccati_eulerlagrange_integration` (the default) is our implementation of the STRIDE
+approach [Glasser 2018b], built on the dual Riccati reformulation [Glasser 2018a].  It
+decomposes the radial domain into
+independent chunks, integrates each chunk's fundamental-matrix (FM) propagator in parallel
+using `Threads.@threads`, then multiplies the propagators in order and applies each
+singular-surface crossing serially.  It is the only driver that produces the inter-surface
+``\Delta'`` matrix.  Because chunk endpoints are all it stores, `u_store` is sparse and stays
+in the Riccati basis — dense ``\xi`` profiles and the
+`ForceFreeStates/Solutions/ForwardIntegration/xi_*` datasets require the forward driver.
+
+Crossings and the outer-plasma re-integration use the dual Riccati matrix
+``S = U_1 \cdot U_2^{-1}`` [Glasser 2018a, Eq. 19]:
 
 ```math
 \frac{dS}{d\psi} = w^\dagger \bar{F}^{-1} w - S\bar{G}S, \qquad
 w = Q - \bar{K}S.
 ```
 
-``S`` remains bounded near rational surfaces (where ``U_1, U_2`` grow exponentially), so the
-solver takes fewer steps.  Rather than integrating the quadratic Riccati ODE directly (which
-blows up when ``|S|`` is large), the code integrates the linear EL system with
-`sing_der!` as the RHS and recovers ``S = U_1 U_2^{-1}`` via periodic renormalization — an
-approach that is mathematically equivalent to O(Δψ) but uses the ODE solver's full 5th-order
-accuracy.
-
-Renormalization is triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the
-threshold `ucrit` (default 1e6), and is forced at the end of each chunk.  At singular surface
-crossings, `riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching
-directly in column `ipert_res` — without Gaussian reduction — and renormalizes to ``(S, I)``.
+``S`` remains bounded near rational surfaces (where ``U_1, U_2`` grow exponentially).  Rather
+than integrating the quadratic Riccati ODE directly (which blows up when ``|S|`` is large),
+the code integrates the linear EL system with `sing_der!` as the RHS and recovers
+``S = U_1 U_2^{-1}`` via periodic renormalization — an approach that is mathematically
+equivalent to O(Δψ) but uses `Vern9`'s full 9th-order accuracy.  Renormalization is
+triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `ucrit`, and is
+forced at the end of each chunk.  At singular surface crossings,
+`riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching directly in column
+`ipert_res` — without Gaussian reduction — and renormalizes to ``(S, I)``.
 
 Enable with:
 ```toml
 [ForceFreeStates]
-use_riccati  = true
-use_parallel = false
+integrator = "riccati"
+nchunks    = 0         # 0 = auto: derived from the singular-surface count alone
 ```
 
-**Speedup** (benchmarked on reference examples):
+#### Chunking and thread independence
 
-| Example | N modes | Speedup vs standard |
-|---------|---------|---------------------|
-| Solovev | 8  | ~1.6× (1 thread), ~2.8× (4 threads) |
-| DIIID   | 26 | ~2.0× (1 thread), ~1.3× (4 threads) |
-
-### Parallel fundamental-matrix (FM) integration
-
-`parallel_eulerlagrange_integration` decomposes the radial domain into independent chunks and
-integrates each chunk in parallel using `Threads.@threads`.  Each chunk produces a
-fundamental-matrix (FM) propagator.  Serial post-processing multiplies the propagators in
-order and applies each singular-surface crossing, recovering the same EL trajectory as the
-Riccati path.
+`balance_integration_chunks` splits the base chunks until the count reaches a target derived
+from the number of singular surfaces, `max(2 m_s + 3, 8(m_s + 1) + m_s)`, where ``m_s`` is
+`msing`.  Setting `nchunks` overrides that target; a value below the ``2 m_s + 3`` floor is
+clamped up with a warning.  The target never consults `Threads.nthreads()`, and every chunk
+integrates independently from identity initial conditions, so the results do not depend on how
+many threads `julia -t` provides — threads change wall-clock only.
 
 #### Bidirectional integration for large N
 
@@ -126,15 +133,9 @@ The implementation uses a `direction` field on `IntegrationChunk`:
 crossing chunk.  `balance_integration_chunks` preserves this: the sub-chunk closest to the
 rational surface inherits `direction`, while the earlier sub-chunk always gets `direction=+1`.
 
-Enable with:
-```toml
-[ForceFreeStates]
-use_parallel = true
-```
-
-**Accuracy** (N=26, DIIID-like example): energy eigenvalue within 2% of standard path.
+**Accuracy** (N=26, DIIID-like example): energy eigenvalue within 2% of the forward path.
 The residual ~2% gap comes from the different crossing convention (Riccati-style direct
-zeroing vs GR), not from ODE tolerance; it is present in both 1-thread and 4-thread runs.
+zeroing vs GR), not from ODE tolerance; it is present at every thread count.
 
 ## Local stability: Mercier and ballooning (s–α)
 
@@ -230,7 +231,7 @@ propagator blocks from bidirectional integration rather than the monolithic forw
 where ``\Phi_R[j]`` is the forward FM product from ``\psi_{R,j-1}`` to the junction, and
 ``\Phi_L[j]`` is the backward crossing FM from ``\psi_{L,j}`` to the junction.
 
-The matrix is only populated by the parallel FM path and is written to the HDF5 output
+The matrix is only populated by the Riccati path and is written to the HDF5 output
 under `SingularSurfaces/Delta_prime_matrix`.
 
 ## Configuration reference
@@ -240,8 +241,8 @@ All `ForceFreeStates` options are set in the `[ForceFreeStates]` section of `gpe
 ```toml
 [ForceFreeStates]
 # Integration driver
-use_riccati  = false   # true: Riccati path (faster, same accuracy)
-use_parallel = false   # true: parallel FM path (multi-thread, large N)
+integrator   = "riccati"  # "forward" for dense xi profiles and kinetic runs
+nchunks      = 0          # Riccati chunk-count target (0 = auto, from msing alone)
 
 # Mode space
 nn_low       = 1       # lowest toroidal mode number
@@ -272,7 +273,7 @@ The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separa
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "ForceFreeStatesStructs.jl", "Ballooning.jl", "Resist.jl", "EulerLagrange.jl", "Sing.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati.jl"]
+Pages = ["ForceFreeStates.jl", "ForceFreeStatesStructs.jl", "Resist.jl", "EulerLagrange.jl", "Sing.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati.jl"]
 ```
 
 ## Example usage
@@ -307,8 +308,9 @@ metric = FFS.make_metric(equil, intr.mpert)
 ffit   = FFS.make_matrix(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
-# to the parallel or Riccati path based on ctrl.use_parallel / ctrl.use_riccati,
-# and always returns a 4-tuple (odet, propagators, chunks, S_at_surface_left).
+# on ctrl.integrator and always returns a 4-tuple
+# (odet, propagators, chunks, S_at_surface_left).  The trailing three are `nothing`
+# on the forward path.
 odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
 
 vac = FFS.free_run(odet, ctrl, equil, ffit, intr)
@@ -325,10 +327,10 @@ for s in 1:intr.msing
 end
 ```
 
-### Access inter-surface Δ' matrix (parallel FM path)
+### Access inter-surface Δ' matrix (Riccati path)
 
 ```julia
-# intr.delta_prime_matrix is msing × msing after parallel_eulerlagrange_integration.
+# intr.delta_prime_matrix is msing × msing after riccati_eulerlagrange_integration.
 # Internally the solver builds a 2·msing × 2·msing raw matrix; the stored Δ' is
 # the PEST3 four-term combination that folds the raw block into a per-surface
 # tearing parameter.

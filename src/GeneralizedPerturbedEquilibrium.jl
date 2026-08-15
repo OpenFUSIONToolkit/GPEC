@@ -20,6 +20,11 @@ include("Equilibrium/Equilibrium.jl")
 import .Equilibrium as Equilibrium
 export Equilibrium
 
+# Local high-n stability (Mercier, resistive interchange, ballooning Δ'); depends only on Equilibrium.
+include("LocalStability/LocalStability.jl")
+import .LocalStability as LocalStability
+export LocalStability
+
 include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
@@ -65,13 +70,13 @@ include("Rerun.jl")
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, FreeBoundaryResult, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
-using .ForceFreeStates: compute_local_stability, compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag")
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag",
+                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -336,9 +341,9 @@ function main_from_inputs(
     locstab = nothing
     ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     if ctrl.local_stability_flag
-        locstab = compute_local_stability(ctrl, equil)
+        locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
         # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
-        ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
+        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
     end
 
     # Find all singular surfaces in the equilibrium
@@ -578,9 +583,9 @@ function main_from_inputs(
         )
         pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=intr.dir_path)
 
-        # DRIVEN (RPEC): feed the coil-matched gal solution to PE instead of the shooting solution.
+        # DRIVEN (RPEC): feed the coil-matched gal solution to PE instead of the forward solution.
         # The matched OdeState is in the identity-at-edge basis; build_flux_matrix rederives the edge BC
-        # from u_store[:,:,1,step], so PE consumes it unchanged. The shooting odet is left untouched for
+        # from u_store[:,:,1,step], so PE consumes it unchanged. The forward odet is left untouched for
         # the Force-Free States HDF5 output.
         pe_odet = odet
         if ctrl.gal_flag && ctrl.gal_match_flag && gal_data !== nothing && gal_data.match !== nothing

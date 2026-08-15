@@ -5,7 +5,7 @@
 # gal:  ξ_gal(ψ) = U_gal(ψ) · w                       (identity-at-edge ⇒ coefficient is w itself)
 # w = eigenvector of the total energy operator W = W_plasma + W_vacuum (FreeBoundaryStability).
 #
-# Needs ONE gpec.h5 from a run with populate_dense_xi=true (EL dense u_store), gal_match_flag=true,
+# Needs ONE gpec.h5 from a run with integrator="forward" (EL dense u_store), gal_match_flag=true,
 # gal_ideal_flag=true (gal ideal matched), vac_flag=true (energy operator).
 # Usage: julia --project=. benchmarks/compare_gal_vs_el.jl [gpec.h5] [out.png] [mode]
 #   mode = "highest" (default, most stable), "lowest" (most unstable), or an integer eigenmode index.

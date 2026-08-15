@@ -202,7 +202,7 @@ A mutable struct holding internal state variables for stability calculations.
     via `pest3_decompose(dp_raw)` — needed for the full det(D' − D(γ)) = 0
     eigenvalue problem with Glasser stabilization.
 
-    Empty unless `ctrl.use_parallel` is true. No ½ prefactor is applied (matches
+    Empty unless the Riccati integrator was used. No ½ prefactor is applied (matches
     Fortran rdcon; Pletzer–Dewar paper multiplies by ½).
     """
     delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
@@ -249,10 +249,8 @@ gpec.toml.
   - `HDF5_filename::String` - Name of HDF5 output file
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
-  - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
-  - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
-  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that can cause intermittent BVP divergence on numerically delicate equilibria. The parallel path produces bit-identical Δ′ across thread counts; `parallel_threads = 2` is about 20% faster than serial and saturates the speedup. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
-  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass after the propagator BVP so the returned `odet` carries dense axis-basis `u_store`/`du_store`/`xi_s_store` — the only convention PerturbedEquilibrium / FieldReconstruction consume correctly, and what fills HDF5 `ForceFreeStates/Solutions/ForwardIntegration/xi_*`.  Δ' (`SingularSurfaces/Delta_prime_matrix`) comes from the BVP and is identical either way; free-boundary energies (`ForceFreeStates/FreeBoundaryStability/eigenmode_*`) match a pure serial run when enabled (~0.12 % Riccati-vs-axis gap otherwise).  **Default `false`** (skips the extra serial pass, ~1× BVP wall-clock); **PerturbedEquilibrium-using configs must set it `true`** when `use_parallel = true`, else PE reads Riccati-basis garbage.  Auto-disabled when `force_termination = true`.
+  - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` is not yet a standalone integrator and currently errors — use `gal_flag = true` alongside another integrator. Requires `singfac_min != 0` for `"riccati"`.
+  - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
 @kwdef struct ForceFreeStatesControl
@@ -272,7 +270,7 @@ gpec.toml.
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
-    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for use_parallel path.
+    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
     set_psilim_via_dmlim::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
     dmlim::Float64 = 0.2
     sing_order::Int = 6
@@ -283,16 +281,14 @@ gpec.toml.
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
-    parallel_threads::Int = 2
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
     save_interval::Int = 3
     force_termination::Bool = false
-    use_riccati::Bool = false
-    use_parallel::Bool = true    # Default on: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream.
-    populate_dense_xi::Bool = false  # When use_parallel=true, set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× parallel-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
+    integrator::String = "riccati"   # Default: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream. Use "forward" for dense ξ (PerturbedEquilibrium) or kinetic runs.
+    nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
 
     # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port) ---

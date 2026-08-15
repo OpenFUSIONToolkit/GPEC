@@ -50,9 +50,7 @@ ucrit                   = 1e4   # Maximum fraction of solutions allowed before r
 sing_order              = 6     # Power-series order for the singular-surface asymptotics
 save_interval           = 3     # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks SingularSurfaces/delta_prime_matrix)
-parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 is about +20% speedup)
-populate_dense_xi     = false  # Dense axis-basis xi for the FFS HDF5 output. Not needed here: the gal-matched path builds its own dense xi.
+integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
 set_psilim_via_dmlim  = false  # Keep psilim at psihigh (do not truncate at last_rational_q + dmlim)
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n (only used when set_psilim_via_dmlim = true)
 force_termination     = true   # Terminate after the stability stage (no perturbed-equilibrium section here)
