@@ -93,6 +93,53 @@
         @test plasma_eq_edge.params.psihigh_resolved == plasma_eq_edge.rzphi_xs[end]
     end
 
+    @testset "newq0 q-profile revision" begin
+        # newq0 is a target q(0), not an index: non-integer requests must survive the config,
+        # and neither the -1 sentinel nor an explicit target may write back to the frozen config.
+        newq0_config(newq0) = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
+            eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
+            eq_type="efit",
+            jac_type="boozer",
+            grid_type="ldp",
+            mpsi=32,
+            psilow=0.01,
+            psihigh=0.994,
+            newq0=newq0
+        )
+
+        base_config = newq0_config(0)
+        eq_base = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(base_config)
+
+        # -1 means "flip the sign of the axis extrapolation": f0fac vanishes, so ffac is
+        # exactly -1 and the revised q-profile is the negated baseline.
+        flip_config = newq0_config(-1)
+        eq_flip = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(flip_config)
+        @test flip_config.newq0 == -1.0
+        @test eq_flip.profiles.q_spline.y == -eq_base.profiles.q_spline.y
+
+        # A non-integer target used to throw InexactError at construction (newq0 was ::Int)
+        target_config = newq0_config(1.05)
+        @test target_config.newq0 == 1.05
+        eq_target = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(target_config)
+        @test all(isfinite, eq_target.profiles.q_spline.y)
+        # Extrapolated q(0) meets the target; not exact because ffac uses the first node's F
+        # rather than the extrapolated axis value.
+        xs = eq_target.profiles.xs
+        q_axis = eq_target.profiles.q_spline.y[1] - eq_target.profiles.q_deriv(xs[1]; hint=Ref(1)) * xs[1]
+        @test isapprox(q_axis, 1.05; rtol=0.02)
+    end
+
+    @testset "Deprecated TOML keys are dropped, not fatal" begin
+        # Removed control knobs must keep old gpec.toml decks (and older gpec.h5 replays,
+        # whose stored TOML blob goes through the same path) parsing with a warning.
+        ffs_table = Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1)
+        @test_logs (:warn, r"reform_eq_with_psilim") GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(
+            ffs_table, GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
+        @test !haskey(ffs_table, "reform_eq_with_psilim")
+        @test GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
+    end
+
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 10% to allow for method-specific discretisation differences.
@@ -140,6 +187,15 @@
         global plasma_eq_ascii = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(ascii_config)
 
         @test plasma_eq_ascii isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
+    end
+
+    @testset "Resolved psihigh (inverse readers)" begin
+        # CHEASE data already conforms to the plasma boundary, so the separatrix clamp never
+        # runs and the resolved value is the request — but it must still reach params.
+        for eq in (plasma_eq_binary, plasma_eq_ascii)
+            @test eq.params.psihigh_resolved == 0.994
+            @test isapprox(eq.params.psihigh_resolved, eq.rzphi_xs[end]; atol=1e-12)
+        end
     end
 
     @testset "CHEASE Consistency (ASCII vs Binary)" begin
