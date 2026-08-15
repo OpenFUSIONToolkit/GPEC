@@ -152,7 +152,7 @@ it should be understood rather than absorbed.
 5. **Node-noise floor** — tightening the equilibrium field-line integration tolerance (`etol`)
    reduces the noise that fine grids amplify; worth checking at high mpsi.
 
-Scripts and full tables are in the handoff branch (`handoff/issue376/`). One bookkeeping note: the
+One bookkeeping note: the
 mpsi ladder (§2–§3) was measured a few merges earlier than the tolerance sweep (§4); the shared
 mpsi = 512 / 1e-10 point agrees to 0.3% in nstep between the two, but the tables should not be
 mixed element-by-element.
