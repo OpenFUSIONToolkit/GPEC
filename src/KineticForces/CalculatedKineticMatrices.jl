@@ -121,7 +121,9 @@ function compute_calculated_kinetic_matrices(
                     kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.wdfac, kf_ctrl.divxfac,
                     kf_ctrl.electron, equil, intr_t, kinetic_profiles;
                     nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
-                    atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
+                    atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda,
+                    atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
+                    nested_tolerance_margin=kf_ctrl.nested_tolerance_margin
                 )
                 full_w .+= block_w
                 full_t .+= block_t

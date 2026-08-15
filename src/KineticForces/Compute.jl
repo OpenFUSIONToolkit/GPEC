@@ -135,7 +135,9 @@ function integrate_psi_quadgk(
                 tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
                       electron, method, equil, thread_intrs[tid], kinetic_profiles;
                       op_wmats=w,
-                      atol_xlmda=ctrl.atol_xlmda, rtol_xlmda=ctrl.rtol_xlmda)
+                      atol_xlmda=ctrl.atol_xlmda, rtol_xlmda=ctrl.rtol_xlmda,
+                      atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
+                      nested_tolerance_margin=ctrl.nested_tolerance_margin)
                 harm_vals[ell_idx] = thread_tpsi[tid][]
                 is_matrix_method && (harm_elems[ell_idx] .= w)
             end
