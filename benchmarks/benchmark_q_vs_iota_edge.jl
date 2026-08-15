@@ -24,7 +24,8 @@ function reference_q()
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("grid_type" => "ldp", "mpsi" => 1024))
     eq_config = GPE.Equilibrium.EquilibriumConfig(equil_dict, EXAMPLE_DIR)
     equil = GPE.Equilibrium.setup_equilibrium(eq_config, additional_input)
-    return equil, eq_config
+    # The dict rides along so the mpsi scan can rebuild configs; EquilibriumConfig is immutable.
+    return equil, equil_dict
 end
 
 # Rational surface ψ_s(q = m/n) and q'(ψ_s) recovered from a fitted spline by bisection
@@ -44,7 +45,7 @@ function rational_locations(q_itp, dq_itp, psis, q_targets)
 end
 
 function main()
-    equil, eq_config = reference_q()
+    equil, equil_dict = reference_q()
     xs_ref = equil.profiles.xs
     q_ref_itp = equil.profiles.q_spline
     dq_ref_itp = equil.profiles.q_deriv
@@ -64,8 +65,7 @@ function main()
 
     for N in (16, 32, 64, 128, 256)
         # Same log_asymptotic knot layout the auto grid uses for fixed mpsi
-        cfg = deepcopy(eq_config)
-        cfg.mpsi = N
+        cfg = GPE.Equilibrium.EquilibriumConfig(merge(equil_dict, Dict{String,Any}("mpsi" => N)), EXAMPLE_DIR)
         knots = GPE.Equilibrium._build_psi_grid(cfg, psilow, psihigh)
         q_nodes = [q_ref_itp(p) for p in knots]
 
