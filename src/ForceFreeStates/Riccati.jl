@@ -1293,110 +1293,6 @@ function _store_crossing_step!(odet::OdeState)
 end
 
 """
-    riccati_eulerlagrange_integration(ctrl, equil, ffit, intr) -> OdeState
-
-Integrate the dual Riccati ODE S = U₁·U₂⁻¹ across the plasma (Glasser 2018 Phys. Plasmas 25,
-032507). Reduces stiffness relative to [`serial_eulerlagrange_integration`](@ref), which it
-otherwise mirrors, differing in three places:
-
-1. `riccati_integrate_chunk!` drives `sing_der!` with `riccati_integrator_callback!`, which
-   applies `renormalize_riccati_inplace!` rather than Gaussian reduction when column norms
-   exceed `ctrl.ucrit`
-2. `riccati_cross_ideal_singular_surf!` replaces `cross_ideal_singular_surf!`: it skips
-   Gaussian reduction (avoiding near-zero pivots where S is small near the axis) and
-   renormalizes to (S_new, I) in one step
-3. `transform_u!` is skipped — S is already the true solution, so there is no reduction to undo
-
-Enable via `use_riccati = true` in the `[ForceFreeStates]` section of gpec.toml.
-"""
-function riccati_eulerlagrange_integration(
-    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars, intr::ForceFreeStatesInternal
-)
-    # Initialization — same as eulerlagrange_integration
-    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-    if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
-    elseif ctrl.sing_start <= intr.msing
-        error("sing_start > 0 not implemented yet!")
-    else
-        error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
-    end
-
-    chunks = chunk_el_integration_bounds(odet, ctrl, intr)
-
-    # Prime odet.new = false so that compute_solution_norms! (if called elsewhere)
-    # does not skip Gaussian reduction on first invocation. Also initialize unorm0
-    # to safe defaults since the Riccati callback never calls compute_solution_norms!.
-    odet.new = false
-    fill!(odet.unorm0, 1.0)
-
-    if ctrl.verbose
-        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
-    end
-
-    for chunk in chunks
-        # Integrate this chunk using the Riccati ODE (Riccati callback skips Gaussian reduction)
-        riccati_integrate_chunk!(odet, ctrl, equil, ffit, intr, chunk)
-        if ctrl.verbose
-            @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)"
-        end
-
-        # Cross rational surface (Riccati crossing skips GR, uses ipert_res directly)
-        if chunk.needs_crossing
-            if ctrl.kinetic_factor > 0
-                error("kinetic_factor > 0 not implemented yet in Riccati!")
-            else
-                riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
-                # renormalize_riccati! is called inside riccati_cross_ideal_singular_surf!
-            end
-        end
-    end
-
-    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
-    # See EulerLagrange.jl counterpart and ForceFreeStatesControl docstring for the
-    # diagnostic vs legacy-truncation semantics and reliability caveats on
-    # truncate_at_dW_peak=true.
-    odet.step -= 1
-    trim_storage!(odet)
-    if ctrl.psiedge < intr.psilim
-        saved_psifac, saved_u = odet.psifac, copy(odet.u)
-        peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
-        if ctrl.truncate_at_dW_peak
-            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
-            odet.step = peak_step
-            trim_storage!(odet)
-            intr.psilim = odet.psi_store[end]
-            intr.qlim = odet.q_store[end]
-            odet.u .= odet.u_store[:, :, :, end]
-            if ctrl.verbose
-                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
-            end
-        else
-            odet.psifac = saved_psifac
-            odet.u .= saved_u
-            if ctrl.verbose
-                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.2f" odet.psi_store[peak_step])),  q = $((@sprintf "%.2f" odet.q_store[peak_step])); integration domain unchanged"
-            end
-        end
-    end
-
-    # Evaluate fixed-boundary stability criterion
-    if ctrl.verbose
-        @info "Evaluating fixed-boundary stability criterion"
-    end
-    odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
-
-    # Note: transform_u! is intentionally skipped.
-    # S is already the true solution (invariant under Gaussian reduction),
-    # and u_store entries have u[:,:,1]=S, u[:,:,2]=I throughout integration.
-    # At crossing steps, u_store has U₁_new/U₂_new which compute_smallest_eigenvalue
-    # correctly resolves to S_new via rdiv. No transformation is needed.
-
-    return odet
-end
-
-"""
     integrate_propagator_chunk!(prop, chunk, ctrl, equil, ffit, intr, odet_proxy)
 
 Compute the fundamental matrix (propagator) for one integration chunk by solving the
@@ -1599,41 +1495,42 @@ function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
 end
 
 """
-    parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
+    riccati_eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
 
-Parallel fundamental matrix (propagator) driver for the EL integration. The trailing three
-return values feed the Δ' BVP in `compute_delta_prime_matrix!`; this is the only branch that
-produces them.
+The Riccati/STRIDE integrator: a chunked fundamental matrix (propagator) driver for the EL
+integration. The trailing three return values feed the Δ' BVP in `compute_delta_prime_matrix!`;
+this is the only branch that produces them.
 
-Equivalent to [`serial_eulerlagrange_integration`](@ref), but integrates all bulk chunks
-concurrently using `Threads.@threads`, then re-integrates the outer plasma serially:
+Solves the same system as [`forward_eulerlagrange_integration`](@ref), but integrates all bulk
+chunks concurrently using `Threads.@threads`, then re-integrates the outer plasma serially:
 
 1. **Chunk generation**: calls `chunk_el_integration_bounds`, then `balance_integration_chunks`
-   to sub-divide chunks for load-balanced parallel execution.
-2. **Parallel phase**: `integrate_propagator_chunk!` integrates each chunk independently
+   to sub-divide chunks for load balancing. The chunk count depends only on `intr.msing` and
+   `ctrl.nchunks`, never on the thread count, so results are thread-independent.
+2. **Propagator phase**: `integrate_propagator_chunk!` integrates each chunk independently
    from identity initial conditions (no accumulated state, no normalization/callback).
    Each thread uses a private `OdeState` proxy for `sing_der!` side effects.
 3. **Serial assembly**: propagators are applied sequentially with `apply_propagator!`.
    Rational surface crossings use `riccati_cross_ideal_singular_surf!` (no Gaussian
-   reduction) matching the Riccati path convention.
+   reduction).
 4. **Outer plasma re-integration**: after the last rational surface crossing, the outer
    plasma (from last ψ_s to psilim) is re-integrated using `riccati_integrate_chunk!`.
    FM propagation in this region is prone to precision loss for high N (exponential growth
    without renormalization); Riccati integration keeps matrices bounded and provides dense
    checkpoints for `findmax_dW_edge!`.
 
-Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml. Requires `singfac_min != 0`.
+Select via `integrator = "riccati"` in `[ForceFreeStates]` of gpec.toml. Requires
+`singfac_min != 0`. Uses whatever threads `julia -t` provides; `ctrl.nchunks` is the only
+tunable.
 
-**Key differences from serial integration:**
+**Key differences from the forward integrator:**
 - No Gaussian reduction in the propagator BVP phase (crossings use the
-  Riccati-style algorithm, parallel `odet.ifix` stays 0)
-- `transform_u!` is called on the parallel odet but is a no-op (ifix=0)
+  Riccati-style algorithm, `odet.ifix` stays 0)
+- `transform_u!` is called on the odet but is a no-op (ifix=0)
 - Outer plasma uses serial Riccati integration for numerical stability
-- When `ctrl.populate_dense_xi` is set, a serial EL dense pass is appended and replaces the
-  parallel `odet`, so `u_store` / `du_store` / `xi_s_store` come back in the axis basis that
-  PerturbedEquilibrium requires. Δ' is computed from the parallel BVP either way and is
-  bit-identical between the two. See the `populate_dense_xi` entry in the
-  [`ForceFreeStatesControl`](@ref) docstring for the cost trade-off.
+- `odet.u_store` holds chunk-endpoint Riccati states, not dense Euler-Lagrange ξ, and
+  `odet.u_store_el_basis` stays `false`: this integrator never claims the EL basis, so
+  PerturbedEquilibrium and the HDF5 forward-integration ξ datasets require the forward path.
 
 **Bidirectional integration for large-N accuracy:**
 The crossing chunk (nearest to each rational surface singL[j]) is integrated *backward*
@@ -1644,16 +1541,15 @@ LU solve in `apply_propagator_inverse!`. This follows the same principle as STRI
 (Glasser 2018 Phys. Plasmas 25, 032501). The all-forward path had ~10% energy error for
 the DIIID-like example (N=26, n=1); bidirectional reduces this to within 2%.
 """
-function parallel_eulerlagrange_integration(
+function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
     ffit::FourFitVars, intr::ForceFreeStatesInternal
 )
     odet = _initialize_parallel_odet(ctrl, equil, ffit, intr)
     chunks, propagators, odet_proxies = _setup_parallel_chunks_and_proxies(odet, ctrl, intr)
-    bvp_threads = max(1, min(Threads.nthreads(), ctrl.parallel_threads))
-    _log_parallel_start(ctrl, odet, equil, chunks, bvp_threads)
+    _log_parallel_start(ctrl, odet, equil, chunks)
 
-    _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, ffit, intr, odet_proxies, bvp_threads)
+    _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, ffit, intr, odet_proxies)
 
     # Harvest solver-step counts accumulated thread-locally in each proxy during the BVP phase.
     # The outer re-integration below uses riccati_integrate_chunk!, which counts via its callback.
@@ -1676,11 +1572,6 @@ function parallel_eulerlagrange_integration(
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
     transform_u!(odet, intr)  # no-op when ifix=0 (no Gaussian reduction)
 
-    # Replace BVP `odet` with a dense serial-EL pass so HDF5 `ForwardIntegration/xi_*` carries
-    # valid DCON ξ in axis basis for PerturbedEquilibrium. Skipped when force_termination=true.
-    if ctrl.populate_dense_xi && !ctrl.force_termination
-        odet = _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr)
-    end
     return odet, propagators, chunks, S_at_surface_left
 end
 
@@ -1722,33 +1613,25 @@ end
 
 function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
                              equil::Equilibrium.PlasmaEquilibrium,
-                             chunks::Vector{IntegrationChunk}, bvp_threads::Int)
+                             chunks::Vector{IntegrationChunk})
     ctrl.verbose || return
     @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
-    @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads BVP thread$(bvp_threads == 1 ? "" : "s") (julia_nthreads=$(Threads.nthreads()), ctrl.parallel_threads=$(ctrl.parallel_threads))"
+    @info "   Riccati FM: $(length(chunks)) chunks over $(Threads.nthreads()) thread$(Threads.nthreads() == 1 ? "" : "s")"
 end
 
-# Integrate each chunk's FM propagator from identity IC. Serial when bvp_threads == 1
-# (bit-deterministic; ~20% slower than 2-thread but immune to thread-
-# schedule sensitivity). Parallel uses :static scheduler so Threads.threadid() returns a
-# stable index into odet_proxies. If a parallel run ever diverges on a delicate equilibrium,
-# drop to parallel_threads = 1 rather than use_parallel = false — the latter is silently wrong.
+# Integrate each chunk's FM propagator from identity IC across whatever threads `julia -t`
+# provides. The :static scheduler makes Threads.threadid() a stable index into odet_proxies.
+# Each chunk is independent (identity IC, no accumulated state), so the result does not
+# depend on how chunks are distributed across threads.
 function _run_parallel_bvp_phase!(propagators::Vector{ChunkPropagator},
                                   chunks::Vector{IntegrationChunk},
                                   ctrl::ForceFreeStatesControl,
                                   equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
                                   intr::ForceFreeStatesInternal,
-                                  odet_proxies::Vector{OdeState}, bvp_threads::Int)
-    if bvp_threads == 1
-        for i in eachindex(chunks)
-            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                        odet_proxies[1])
-        end
-    else
-        Threads.@threads :static for i in eachindex(chunks)
-            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                        odet_proxies[Threads.threadid()])
-        end
+                                  odet_proxies::Vector{OdeState})
+    Threads.@threads :static for i in eachindex(chunks)
+        integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
+                                    odet_proxies[Threads.threadid()])
     end
 end
 
@@ -1789,9 +1672,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
             last_crossing_step = odet.step - 1
         else
             # Save non-crossing end-of-chunk state. These columns are FM/Riccati chunk
-            # endpoints, not the Euler-Lagrange state — when ctrl.populate_dense_xi=true the
-            # entire odet is replaced by a serial-EL pass at the end of
-            # parallel_eulerlagrange_integration.
+            # endpoints, not the Euler-Lagrange state, so the odet never claims the EL basis.
             odet.u_store_el_basis = false
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
@@ -1895,86 +1776,4 @@ function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
         @info "Truncating integration at peak edge dW (self-consistent): ψ = $((@sprintf "%.4f" peak_psi)),  q = $((@sprintf "%.3f" odet.q_store[end])).  Rebuilt chunk $last_chunk_idx; dropped $n_dropped of $n_chunks_before outer chunks."
     end
     return chunks, propagators
-end
-
-"""
-    _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr) -> fresh_odet
-
-Replace the propagator-BVP's `odet` with a fresh serial-EL `odet` that has
-dense `u_store` / `du_store` populated in axis basis (the PerturbedEquilibrium
-convention).  The caller's `odet` is fully replaced by the fresh one because
-`free_run` / `normalize_eigenfunctions!` downstream use `odet.u[:,:,1,end]` to
-normalize `odet.u_store`, so both must be in the same basis.  The parallel BVP
-results that survive
-downstream are stored in `intr` (psilim/qlim, sing[*].delta_prime, …) and in
-the externally-returned `propagators` / `chunks` / `S_at_surface_left` —
-none of those live on `odet`, so replacing `odet` is safe.
-
-The dense pass uses the **serial EL path** (`sing_der!` with standard
-`integrator_callback!`, Gaussian reduction, and `transform_u!`) so that
-`u_store` is in the axis basis — the only convention the PerturbedEquilibrium
-/ FieldReconstruction downstream code is known to consume correctly.
-
-We do save and restore the `intr.psilim` / `intr.qlim` / `intr.sing[*]` fields
-that the parallel BVP populated, because the dense EL pass would otherwise
-overwrite them (its standard `cross_ideal_singular_surf!` runs unconditionally
-and does NOT populate `delta_prime`; we keep the parallel pass's values
-which `compute_delta_prime_matrix!` uses).
-
-Called from `parallel_eulerlagrange_integration` when
-`ctrl.populate_dense_xi = true`.  Approximate cost: one serial
-EL integration on top of the parallel BVP phase.  Required to make
-`use_parallel = true` produce DCON eigenfunctions usable by the
-PerturbedEquilibrium downstream pipeline.
-"""
-function _populate_dense_xi_via_serial_el!(
-    odet::OdeState, ctrl::ForceFreeStatesControl,
-    equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
-    intr::ForceFreeStatesInternal
-)
-    msing = intr.msing
-
-    # Preserve parallel-BVP state on intr/odet that the serial-EL pass would otherwise
-    # overwrite. PE downstream (SingularCoupling.jl) is calibrated against the (S, I)
-    # Riccati gauge of `ca_l`/`ca_r`, so keeping the parallel-BVP values is critical.
-    saved = (
-        psilim    = intr.psilim,
-        qlim      = intr.qlim,
-        ca_l      = copy(odet.ca_l),
-        ca_r      = copy(odet.ca_r),
-        sing_state = [(
-            delta_prime     = copy(intr.sing[s].delta_prime),
-            delta_prime_col = copy(intr.sing[s].delta_prime_col),
-            ua_left         = copy(intr.sing[s].ua_left),
-            psi_ua_left     = intr.sing[s].psi_ua_left,
-        ) for s in 1:msing],
-    )
-
-    if ctrl.verbose
-        @info "   S → ξ: serial EL dense pass for HDF5 ForceFreeStates/Solutions/ForwardIntegration/xi_*"
-    end
-
-    # Run the serial branch but suppress logging
-    fresh_odet, _, _, _ = serial_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=false)
-
-    # Restore BVP-result fields on `intr`.
-    intr.psilim = saved.psilim
-    intr.qlim   = saved.qlim
-    for s in 1:msing
-        intr.sing[s].delta_prime     = saved.sing_state[s].delta_prime
-        intr.sing[s].delta_prime_col = saved.sing_state[s].delta_prime_col
-        intr.sing[s].ua_left         = saved.sing_state[s].ua_left
-        intr.sing[s].psi_ua_left     = saved.sing_state[s].psi_ua_left
-    end
-
-    # Restore the parallel BVP's Riccati-gauge `ca_l` / `ca_r` onto the
-    # fresh EL odet — these feed PE's `SingularCoupling.jl` which is
-    # written against the (S, I) Riccati convention.
-    fresh_odet.ca_l .= saved.ca_l
-    fresh_odet.ca_r .= saved.ca_r
-
-    # Return the fresh serial-EL odet (self-consistent for ξ-function
-    # storage in axis basis; `ca_l`/`ca_r` carry the parallel-BVP
-    # Riccati-gauge values needed by PE downstream).
-    return fresh_odet
 end

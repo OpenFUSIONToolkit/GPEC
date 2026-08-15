@@ -5,7 +5,7 @@
 # gal:  ξ_gal(ψ) = U_gal(ψ) · w                       (identity-at-edge ⇒ coefficient is w itself)
 # w = eigenvector of the total energy operator W = W_plasma + W_vacuum (FreeBoundaryStability).
 #
-# Needs ONE gpec.h5 from a run with populate_dense_xi=true (EL dense u_store), gal_match_flag=true,
+# Needs ONE gpec.h5 from a run with integrator="forward" (EL dense u_store), gal_match_flag=true,
 # gal_ideal_flag=true (gal ideal matched), vac_flag=true (energy operator).
 # Usage: julia --project=. benchmarks/compare_gal_vs_el.jl [gpec.h5] [out.png] [mode]
 #   mode = "highest" (default, most stable), "lowest" (most unstable), or an integer eigenmode index.
@@ -23,8 +23,8 @@ et, wt, u1, psiE, gxi, psiG, issing, mlow, sing_psi = h5open(h5path) do f
         to_c(read(f["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"])),
         to_c(read(f["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"])), read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
         to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]),
-        Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/issing"])), read(f["Info/mlow"]),
-        read(f["SingularSurfaces/GalerkinDeltaPrime/sing_psi"]))
+        Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"])), read(f["Info/mlow"]),
+        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
 end
 
 mpert = size(u1, 1)

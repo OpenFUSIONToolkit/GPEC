@@ -237,7 +237,7 @@ end
 """
     gal_matched_odestate(gal_result, ffit, intr) -> OdeState
 
-Pack the RPEC-matched outer solution into an `OdeState` shaped exactly like the shooting integrator's,
+Pack the RPEC-matched outer solution into an `OdeState` shaped exactly like the forward integrator's,
 so `PerturbedEquilibrium` consumes it unchanged. Mirrors Fortran `idcon_build`'s gal branch
 (idcon.f) and `globalsol.bin` (the on-surface `issing` points are dropped, match.f):
 

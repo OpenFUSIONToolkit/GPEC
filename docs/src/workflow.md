@@ -176,7 +176,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 |---|---|
 | `Info/` | Run metadata: git version, mode-number ranges, ψ limit |
 | `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
-| `Equilibrium/` | Equilibrium scalars (β, q₀, q95, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
+| `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |
 | `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ' matrices (`GalerkinDeltaPrime/`), kinetic surfaces (`Kinetic/`) |

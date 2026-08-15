@@ -76,7 +76,7 @@ order = 31
 
 # Equilibrium
 [quantities.q0]
-h5path = "Equilibrium/q0"
+h5path = "Equilibrium/q_axis"
 type = "real_scalar"
 extract = "value"
 label = "q0"
@@ -84,7 +84,7 @@ noise_threshold = 1e-12
 order = 40
 
 [quantities.q95]
-h5path = "Equilibrium/q95"
+h5path = "Equilibrium/q_95"
 type = "real_scalar"
 extract = "value"
 label = "q95"
@@ -93,7 +93,7 @@ order = 41
 
 # Singular surfaces
 [quantities.msing]
-h5path = "SingularSurfaces/msing"
+h5path = "SingularSurfaces/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -101,7 +101,7 @@ noise_threshold = 0
 order = 50
 
 [quantities.sing_psi]
-h5path = "SingularSurfaces/psi"
+h5path = "SingularSurfaces/rational_psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"

@@ -68,7 +68,7 @@ order = 32
 
 # Per-surface Δ' from the PE singular-coupling analysis
 [quantities.pe_delta_prime]
-h5path = "PerturbedEquilibrium/SingularCoupling/delta_prime"
+h5path = "PerturbedEquilibrium/SingularCoupling/Delta_prime"
 type = "complex_vector"
 extract = "all_complex"
 label = "PE Δ' per surface"
