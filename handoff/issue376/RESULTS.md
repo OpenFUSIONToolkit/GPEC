@@ -14,12 +14,17 @@ dψ ≈ 0.12·knotΔ, invariant across mpsi), so `nstep` scales with the number 
 regions where steps concentrate — dominated by the near-axis region where log-family grids pack
 hardest. Per-step cost is flat (~6 ms, Npert-sized LAPACK dominates).
 
-**And the reason the step size follows the knot spacing (§8–§9):** the C/E/H coefficient matrices
-carry a ~1e-5 relative node-error floor that does not shrink with mpsi. The spline interpolates it
-exactly, contributing ~ε/Δ² to the integrand's second derivative — growing 4× per mpsi doubling
-until it swamps the physical curvature, first where the grid packs hardest. The integrand is
-therefore *not* the same smooth function at every mpsi: below the 1e-5 floor, refining the grid
-makes the interpolant measurably rougher in exactly the norms the error estimator reads.
+**Why the step size follows the knot spacing — partial answer (§8–§11).** The C/E/H coefficient
+matrices carry a ~1e-5 relative node-error floor that does not shrink with mpsi, inherited from the
+independently-traced surface geometry (ν, offset, r²) through the ψ-derivative channel that builds
+g11/g12/g31. The spline interpolates it exactly, contributing ~ε/Δ² to the integrand's second
+derivative. So the integrand is genuinely *not* the same function at every mpsi.
+
+**But this is not the dominant term.** §11 repairs the amplification directly and cleans C/E/H by
+20–100× (every r1 flips positive), yet recovers only **11% of the steps at mpsi=512 and 20% at
+mpsi=1024**. The share grows with mpsi, as an ε/Δψ effect should, but ~80% of the step growth is
+still unexplained — and there is evidence (§11) that a good part of it is legitimate resolution of
+real near-axis structure, whose curvature scale is comparable to the local knot spacing there.
 
 ## 1. FastInterpolations microbenchmark (`microbench_mpsi.jl`)
 
@@ -315,6 +320,87 @@ The runs in this section drop the `[ForcingTerms]`/`[PerturbedEquilibrium]`/`[Ki
 sections and set `local_stability_flag = false` (31 s/run instead of 220 s). The slaving is
 unaffected — accepted steps 2309 / 3977 / 7638 for mpsi 256 / 512 / 1024, still tracking knot
 count — so the mechanism is a property of the EL integration, not of the surrounding pipeline.
+
+## 10. Source of the floor: ψ-derivatives of independently-traced surface geometry
+
+`surface_roughness.jl` on the raw `splines/rzphi` node data (ψ-direction, median over four θ):
+
+| quantity | region | resid @256 | resid @512 | resid @1024 | r1 @1024 |
+|---|---|---|---|---|---|
+| nu      | ψ<0.1   | 2.41e-05 | 2.11e-05 | 2.12e-05 | −0.744 |
+| offset  | ψ<0.1   | 6.39e-04 | 5.37e-04 | 5.60e-04 | −0.671 |
+| rcoords | ψ<0.1   | 1.92e-06 | 2.31e-06 | 2.36e-06 | −0.742 |
+| nu      | 0.3–0.7 | 1.76e-06 | 1.51e-06 | 1.29e-06 | +0.786 |
+| **jac** | 0.3–0.7 | 2.22e-07 | 4.29e-08 | **3.26e-09** | **+0.967** |
+
+`nu`, `offset` and `rcoords` are **flat in Δ** — a genuine floor — while `jac` converges cleanly.
+This maps exactly onto the clean/dirty split of §9. In `Fourfit.jl:84-90`, g22/g23/g33 are built
+only from **θ-derivatives** (`partials[3]`, a fixed mtheta grid) and are clean; g11/g12/g31 are
+built from **ψ-derivatives** (`partials[2]`) of exactly those three floored quantities, so their
+error is ε/Δψ and grows as the grid refines.
+
+The 1D profiles are **not** implicated: q, mu0p, 2piF and dVdpsi all have r1 ≥ +0.87 and residuals
+that fall with refinement (mid-plasma q: 2.35e-7 → 5.50e-8 → 7.34e-9), so `q1`, `p1` and `jtheta`
+are cleared.
+
+Two candidate origins of ε were tested and **both are null**, so the floor is not ODE error control:
+
+| knob | change | accepted steps @512 | @1024 |
+|---|---|---|---|
+| `etol` (reltol) | 1e-8 → 1e-12 | 4038 → 3930 | — |
+| hard-coded `abstol` (`DirectEquilibrium.jl:294`) | 1e-8 → 1e-14 | 3977 → 4071 | 7638 → 7474 |
+
+The `abstol=1e-8` literal looked like a smoking gun — `u0` starts at zeros and its components
+become exactly ν/offset/r², so it should bind where `reltol` cannot — but tightening it changes
+nothing. Whatever sets ε, it is not the field-line integration's error control.
+
+## 11. Repairing the amplification works — and buys much less than expected
+
+Since ε is fixed-amplitude in ψ, the amplification (not ε's origin) is the fixable part. Probe:
+replace **only** the ψ-derivative channel (`fx1/fx2/fx3`) with derivatives of a cubic fit over
+every k-th ψ node (k = mpsi÷256), leaving values, θ-derivatives, `jac` and the coordinate mapping
+untouched. Working-tree probe, `src/` reverted afterwards.
+
+**The repair does exactly what it was designed to do.** Mid-plasma at mpsi=1024:
+
+| matrix | resid before | resid after | r1 before | r1 after |
+|---|---|---|---|---|
+| C | 1.21e-05 | **5.30e-07** | −0.401 | **+0.915** |
+| E | 1.17e-05 | **5.21e-07** | −0.400 | **+0.881** |
+| H | 1.41e-05 | **6.56e-07** | +0.022 | **+0.928** |
+| K | 1.56e-05 | **2.58e-06** | +0.593 | **+0.948** |
+| G | 1.70e-05 | **9.38e-07** | −0.176 | **+0.942** |
+
+Near-axis likewise: C/E/H/G residuals fall 30–100×, K's |f''|/|f| drops 1.62e8 → 2.10e7, and every
+r1 flips positive. The causal claim of §9–§10 — that the roughness enters through the ψ-derivative
+channel — is **confirmed**.
+
+**But the step count barely moves:**
+
+| grid | accepted steps, stock | with repair | change | et[1] stock → repaired |
+|---|---|---|---|---|
+| mpsi=512  | 3977 | 3551 | **−11%** | 0.7825590 → 0.7822223 |
+| mpsi=1024 | 7638 | 6081 | **−20%** | 0.8028405 → 0.7998018 |
+
+Cleaning the coefficient matrices by 20–100× recovers only 11–20% of the steps. **So knot-scale
+roughness in C/E/H is a contributing cause, not the dominant one** — §9's causal chain overstated
+the link from matrix roughness to step count, and the summary and issue comment written from it
+need correcting.
+
+What the numbers now say:
+
+- The benefit **grows with mpsi** (−11% at 512, −20% at 1024), exactly as an ε/Δψ amplification
+  should. It is real, and it is worth more on finer grids.
+- The remaining ~80% is not explained. Note that even after the repair, near-axis
+  |f''|/|f| for K is 2.1e7 — a curvature scale of ~2e-4 in ψ, which is the *same order as the
+  local knot spacing there* (median Δψ = 1.7e-4 at mpsi=1024). Near the axis the log grid packs
+  to roughly the scale of genuine structure, so a large share of those steps may be legitimate
+  resolution of real near-axis behaviour rather than noise-chasing. The §5 uniform-grid probe is
+  consistent with this: un-packing the axis cut steps 1891 → 559 but left et[1] = 0.993, i.e.
+  physically under-resolved.
+- The probe also biases the answer slightly (et[1] moves in the 4th digit) because uniform
+  every-k subsampling smooths hardest exactly where the log grid packs. A fixed-ψ-scale
+  (rather than fixed-node-stride) smoothing width would be the correct design.
 
 ## Implications / ranked follow-ups
 
