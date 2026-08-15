@@ -334,6 +334,18 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
         push!(rows, [spec.label, g.class, dev, tol, status * (isempty(detail) ? "" : "  $detail")])
     end
 
+    # Golden entries with no matching case quantity fail regardless of class: a renamed or
+    # removed quantity would otherwise silently delete its gate (the new name enters as merely
+    # "untracked"), and a check that quietly stops checking something is worse than one that
+    # fails. The fix is to regenerate the goldens for the reshaped case, with a reason.
+    spec_names = Set(spec.name for spec in case_spec.quantities)
+    for name in sort(collect(keys(golden.values)))
+        name in spec_names && continue
+        push!(rows, [name, golden.values[name].class, "ORPHANED", "—",
+            "** FAIL **  no matching quantity in the case — renamed or removed? Regenerate goldens."])
+        n_fail += 1
+    end
+
     header = ["Quantity", "Class", "Deviation", "rtol", "Status"]
     widths = [length(h) for h in header]
     for row in rows, i in eachindex(row)
