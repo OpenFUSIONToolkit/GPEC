@@ -320,7 +320,7 @@ function load_julia_outputs(h5_path::String)
         julia["di"] = haskey(f, "LocalStability/D_I") ? read(f, "LocalStability/D_I") : Float64[]
         julia["dr"] = haskey(f, "LocalStability/D_R") ? read(f, "LocalStability/D_R") : Float64[]
 
-        julia["psio"] = haskey(f, "Equilibrium/psio") ? read(f, "Equilibrium/psio") : NaN
+        julia["psio"] = haskey(f, "Equilibrium/psi_total") ? read(f, "Equilibrium/psi_total") : NaN
 
         sc = "PerturbedEquilibrium/SingularCoupling"
         julia["rational_psi"] = haskey(f, "$sc/rational_psi") ? read(f, "$sc/rational_psi") : Float64[]

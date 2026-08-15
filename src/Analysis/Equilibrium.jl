@@ -31,7 +31,7 @@ A `Plots.jl` plot object.
 function plot_qprofile(h5path; show_singular=true, save_path=nothing)
     xs, q, q0, q95 = h5open(h5path, "r") do fid
         read(fid["Equilibrium/Profiles/psi"]), read(fid["Equilibrium/Profiles/q"]),
-        read(fid["Equilibrium/q0"]), read(fid["Equilibrium/q95"])
+        read(fid["Equilibrium/q_axis"]), read(fid["Equilibrium/q_95"])
     end
 
     p = plot(
@@ -173,7 +173,7 @@ function plot_flux_surfaces(h5path; n_psi=11, n_theta=18, save_path=nothing)
     rcoords, offset_data, xs_rz, ys_rz, ro, zo, msing, psi_sing, q_sing = h5open(h5path, "r") do fid
         read(fid["Equilibrium/Geometry/rcoords"]), read(fid["Equilibrium/Geometry/offset"]),
         read(fid["Equilibrium/Geometry/psi"]), read(fid["Equilibrium/Geometry/theta"]),
-        read(fid["Equilibrium/ro"]), read(fid["Equilibrium/zo"]),
+        read(fid["Equilibrium/R_axis"]), read(fid["Equilibrium/Z_axis"]),
         read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"])
     end
 
@@ -361,9 +361,9 @@ A `Plots.jl` plot object.
 """
 function plot_equilibrium_summary(h5path; save_path=nothing)
     q0, q95, betat, betan, kappa, li1 = h5open(h5path, "r") do fid
-        read(fid["Equilibrium/q0"]), read(fid["Equilibrium/q95"]),
-        read(fid["Equilibrium/betat"]), read(fid["Equilibrium/betan"]),
-        read(fid["Equilibrium/kappa"]), read(fid["Equilibrium/li1"])
+        read(fid["Equilibrium/q_axis"]), read(fid["Equilibrium/q_95"]),
+        read(fid["Equilibrium/beta_t"]), read(fid["Equilibrium/beta_N"]),
+        read(fid["Equilibrium/kappa"]), read(fid["Equilibrium/l_i_1"])
     end
 
     title_str = "q0=$(round(q0,digits=2))  q95=$(round(q95,digits=2))  βₜ=$(round(betat,digits=3))  βₙ=$(round(betan,digits=3))  κ=$(round(kappa,digits=2))  li1=$(round(li1,digits=3))"

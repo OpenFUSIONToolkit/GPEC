@@ -762,15 +762,18 @@ function write_outputs_to_HDF5(
         out_h5["Info/qlim"] = intr.qlim
         out_h5["Info/dqdpsi_lim"] = intr.q1lim
 
-        # Write derived equilibrium parameters
-        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumParameters), getfield.(Ref(equil.params), fieldnames(Equilibrium.EquilibriumParameters)))
-            if val !== nothing # TODO: looks like ro, zo, psio, and b_norm are not set, so skipping those for now but should fix eventually
-                out_h5["Equilibrium/$key"] = val
-            end
+        # Write derived equilibrium parameters. The struct keeps its legacy field spellings;
+        # EQUIL_H5_NAMES maps them to literature dataset names and EQUIL_H5_SKIP drops
+        # duplicates and control-flag echoes. Fields left `nothing` are not written.
+        for f in fieldnames(Equilibrium.EquilibriumParameters)
+            f in EQUIL_H5_SKIP && continue
+            val = getfield(equil.params, f)
+            val === nothing && continue
+            out_h5["Equilibrium/$(get(EQUIL_H5_NAMES, f, String(f)))"] = val
         end
-        out_h5["Equilibrium/psio"] = equil.psio
-        out_h5["Equilibrium/ro"] = equil.ro
-        out_h5["Equilibrium/zo"] = equil.zo
+        out_h5["Equilibrium/psi_total"] = equil.psio
+        out_h5["Equilibrium/R_axis"] = equil.ro
+        out_h5["Equilibrium/Z_axis"] = equil.zo
 
         # Write equilibrium profile and geometry arrays (from the named splines)
         profiles = equil.profiles

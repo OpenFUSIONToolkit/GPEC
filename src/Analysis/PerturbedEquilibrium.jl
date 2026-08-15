@@ -370,7 +370,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
         read(fid[dataset_path]),
         read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
         read(fid["Info/mlow"]), read(fid["Info/mhigh"]), read(fid["Info/nhigh"]),
-        read(fid["Equilibrium/q95"]),
+        read(fid["Equilibrium/q_95"]),
         read(fid["PerturbedEquilibrium/SingularCoupling/rational_psi"])
     end
 

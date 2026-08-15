@@ -129,7 +129,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
 
     wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psio"]), read(fid["Info/mlow"])
+        read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psi_total"]), read(fid["Info/mlow"])
     end
 
     isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
@@ -323,7 +323,7 @@ function plot_delta_prime(h5path; save_path=nothing)
     msing, psi_sing, q_sing, ca_l, ca_r, psio, mn_index = h5open(h5path, "r") do fid
         read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"]),
         read(fid["SingularSurfaces/ca_left"]), read(fid["SingularSurfaces/ca_right"]),
-        read(fid["Equilibrium/psio"]), read(fid["Info/mn_index"])
+        read(fid["Equilibrium/psi_total"]), read(fid["Info/mn_index"])
     end
 
     msing == 0 && return plot(; title="No singular surfaces found", legend=false)

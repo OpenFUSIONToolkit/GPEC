@@ -53,7 +53,7 @@ noise_threshold = 1e-8
 order = 22
 
 [quantities.q0]
-h5path = "Equilibrium/q0"
+h5path = "Equilibrium/q_axis"
 type = "real_scalar"
 extract = "value"
 label = "q0"
