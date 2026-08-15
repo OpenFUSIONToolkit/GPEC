@@ -23,12 +23,14 @@ import ..InnerLayer as InnerLayer
 
 include("LayerInputs.jl")
 include("Dispersion/Dispersion.jl")
+include("CriticalResonantField/CriticalResonantField.jl")
 include("Runner/Runner.jl")
 
 import .Dispersion as Dispersion
+import .CriticalResonantField as CriticalResonantField
 import .Runner as Runner
 
-export InnerLayer, Dispersion, Runner
+export InnerLayer, Dispersion, CriticalResonantField, Runner
 export build_ggj_inputs
 
 end # module Tearing
