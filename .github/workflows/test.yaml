@@ -161,12 +161,19 @@ jobs:
         with:
           coverage: false
 
+      # An exact hit has nothing new to store. Otherwise pushes refresh the shared
+      # default-branch entry, and a pull request writes one only when it restored
+      # nothing at all -- which happens when this key prefix is cold, as it is the
+      # first time this runs, after a matrix version is added, or once entries age
+      # out. That entry is scoped to the pull request's own ref and so cannot be
+      # reused by another, but seeding it beats discarding a full compile; once the
+      # default branch has an entry, pull requests always prefix-match and skip.
       - name: Prune the depot before caching
-        if: always() && github.event_name == 'push' && steps.depot.outputs.cache-hit != 'true'
+        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
         run: julia --project=. -e 'using Pkg; Pkg.gc()'
 
       - name: Save the Julia depot
-        if: always() && github.event_name == 'push' && steps.depot.outputs.cache-hit != 'true'
+        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
         uses: actions/cache/save@v4
         with:
           path: ${{ env.DEPOT_PATHS }}
