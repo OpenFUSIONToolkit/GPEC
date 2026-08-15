@@ -84,6 +84,11 @@ using TOML
             @test ffs.delta_prime !== nothing
             @test size(ffs.delta_prime.matrix) == (length(ffs.surfaces), length(ffs.surfaces))
             @test size(ffs.delta_prime.raw) == (2 * length(ffs.surfaces), 2 * length(ffs.surfaces))
+            # Riccati persists only the raw D′ and recovers the parity blocks on demand.
+            @test ffs.delta_prime.A === nothing
+            @test ffs.delta_prime.B === nothing
+            @test ffs.delta_prime.Gamma === nothing
+            @test ffs.delta_prime.matrix ≈ FFS.pest3_decompose(ffs.delta_prime.raw).Δ
             @test ffs.free_boundary !== nothing
         end
     end
@@ -151,7 +156,26 @@ using TOML
                     @test ffs.diagnostics === nothing
                     @test ffs.free_boundary === nothing
                     @test ffs.wp === nothing
-                    @test ffs.delta_prime === nothing
+
+                    # Galerkin publishes its Δ′ through the same unified field the Riccati BVP
+                    # uses, in the same PEST-3 convention and the same shared layout.
+                    dp = ffs.delta_prime
+                    @test dp !== nothing
+                    msing = ffs.galerkin.msing
+                    @test size(dp.matrix) == (msing, msing)
+                    @test size(dp.raw) == (2msing, 2msing)
+                    @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
+
+                    # Unlike Riccati, the Galerkin solve persists the remaining parity blocks.
+                    for (blk, ref) in ((dp.A, :A), (dp.B, :B), (dp.Gamma, :Γ))
+                        @test blk !== nothing
+                        @test size(blk) == (msing, msing)
+                        @test blk ≈ getfield(FFS.pest3_decompose(dp.raw), ref)
+                    end
+
+                    # The rpec coil block is normalized to the Riccati orientation at pack time.
+                    @test size(dp.coil) == (2msing, ffs.numpert_total)
+                    @test !iszero(dp.coil)
 
                     # The ideal-flag match skips the inner layer, so its basis is ideal-closed.
                     if ideal

@@ -13,17 +13,17 @@
 # identity-at-edge basis (coil column j has ξ_edge = e_j).
 
 """
-    gal_match_rpec(ctrl, equil, intr, gal_result) -> GalMatchResult
+    gal_match_rpec(ctrl, equil, intr, gal_result, dp) -> GalMatchResult
 
-Solve the coil-driven RPEC matching from the outer Δ′ (`gal_result`) and the per-surface inner-layer Δ.
-Requires `gal_result.solution` (reconstructed outer ξ/ξ′) and the rpec coil block `gal_result.delta_coil`.
+Solve the coil-driven RPEC matching from the outer Δ′ payload `dp` and the per-surface inner-layer Δ.
+Requires `gal_result.solution` (reconstructed outer ξ/ξ′) and the rpec coil block `dp.coil`.
 
 The resistive path uses per-surface inputs `ctrl.gal_eta`/`gal_rho`/`gal_rotation` (length `msing`) +
 `ctrl.gal_gamma`. When `ctrl.gal_ideal_flag`, the inner layer is skipped and `cout=0`, so the matched
 solution is the bare ideal coil column (Fortran rmatch `coil%ideal_flag`) — the DCON/EL reference.
 """
 function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStatesInternal,
-    gal_result::GalerkinResult)
+    gal_result::GalerkinResult, dp::DeltaPrimeData)
 
     msing = gal_result.msing
     mpert = intr.numpert_total
@@ -32,8 +32,8 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
 
     gal_result.solution !== nothing ||
         error("gal_match_rpec: gal_result.solution is missing (need the gal-reconstructed ξ/ξ′)")
-    isempty(gal_result.delta_coil) &&
-        error("gal_match_rpec: delta_coil is empty — gal_rpec_flag must be true for RPEC matching")
+    isempty(dp.coil) &&
+        error("gal_match_rpec: the coil-response block is empty — gal_rpec_flag must be true for RPEC matching")
 
     if ctrl.gal_ideal_flag
         # Ideal limit (Fortran rmatch coil%ideal_flag, match.f): skip the inner layer entirely
@@ -119,11 +119,10 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         end
 
         # --- assemble the 4·msing matching system (match.f) ---
-        delta_out = gal_result.delta[1:2msing, 1:2msing]   # outer Δ′ plasma block
         mat = zeros(ComplexF64, 4msing, 4msing)
         rmat = zeros(ComplexF64, 4msing, mcoil)
-        @views mat[(2msing+1):4msing, 1:2msing] .= transpose(delta_out)          # Δ_out
-        @views rmat[(2msing+1):4msing, :] .= .-transpose(gal_result.delta_coil)  # −Δ_coil source
+        @views mat[(2msing+1):4msing, 1:2msing] .= transpose(dp.raw)   # Δ_out
+        @views rmat[(2msing+1):4msing, :] .= .-dp.coil                 # −Δ_coil source (already surface-side × edge mode)
         for ising in 1:msing
             idx1 = 2ising - 1
             idx2 = 2ising

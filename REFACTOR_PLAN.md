@@ -784,13 +784,11 @@ inner-layer interface (same family as the `ResistiveMatch` models, D13). Later p
 
 ### Live status (updated 2026-08-15 — read this first when resuming)
 
-- **#381** (`refactor/riccati-unification`): APPROVED by logan-nc; develop/#364 merged in
-  (conflicts resolved), review doc comments addressed (Vern9/9th-order/DCON+STRIDE
-  citations), #387 merged into it; auto-merge into develop armed pending CI.
-- **#387** (`refactor/local-stability-module`): APPROVED by logan-nc; merged into #381's
-  branch (clean); closes automatically when #381 lands.
+- **#381 and #387 MERGED into develop** (a0c270f8, 2026-08-15): riccati unification +
+  LocalStability module are in. Branches deleted; #393 auto-retargeted to develop and
+  shows MERGEABLE.
 - **Interface PR = #393** (`refactor/forcefreestates-result`, worktree `../result-pr3`,
-  DRAFT, stacked on #381 — auto-retargets to develop):
+  DRAFT, base = develop):
   - Commit (a) = 8f8e1645, done: result struct + SolutionProfiles + closure/bpen/wp +
     standalone Galerkin + additive-gal removal. Verified: 82/82 result-struct tests,
     357/357 across six files, forward byte-identity (145 datasets), gal-group equivalence
@@ -806,11 +804,18 @@ inner-layer interface (same family as the `ResistiveMatch` models, D13). Later p
     behavioral gates, NOT the raw diff; locally use `git diff --color-moved=dimmed-zebra
     --color-moved-ws=allow-indentation-change --histogram`.
   - Commit (c) not started (§7).
-  - Commit (b2) not started (§6A, D14 — decided 2026-08-15, IN SCOPE for this PR): unify
-    the Δ′/matching payload into one `delta_prime` type produced by riccati AND galerkin;
-    gal's Δ′/PEST-3/`delta_coil` leave the `galerkin` field; one set of HDF5 paths for Δ′
-    outputs; SLAYER routes through the unified type (enables gal-fed SLAYER). Own
-    slice-pure commit between (b) and (c). Needs an agent prompt.
+  - Commit (b2) implemented and reviewed (not yet committed; §6A, D14): `DeltaPrimeData`
+    (now in ForceFreeStatesStructs.jl for include order) carries matrix/raw/coil + gal-only
+    A/B/Gamma; `galerkin_solve` returns `(GalerkinResult, DeltaPrimeData)`; canonical HDF5
+    paths `SingularSurfaces/{Delta_prime_matrix,Delta_prime_raw,Delta_coil,pest3_*}` written
+    once from `result.delta_prime`; `GalerkinDeltaPrime/` group deleted (per-surface
+    identifiers moved to `GalerkinIntegration/`); gal-fed SLAYER works. Convention gate
+    verified (PEST-3 combinations term-identical). Found+fixed pre-existing bug: old gal
+    `Delta_prime_raw` dataset was (2msing+mpert)×2msing with coil rows duplicated inside.
+    Verified: 114/114 result-struct, 71/71 slayer (independently rerun), gal Δ′ values
+    byte-identical under new paths (147/147 common), forward deck untouched (138/138),
+    benchmarks/ readers repointed. OWED: harness run on gal_resistive_diiid (expect renames
+    only) before PR leaves draft.
     Also per D14: riccati will NEVER produce full ξ profiles — next-cycle work is the
     `delta_mn` rational-surface matrix (from `delta_coil` asymptotics) for PE resonant
     coupling, not profile reconstruction.

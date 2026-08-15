@@ -21,7 +21,7 @@ pa_g, psi_g, mlow, sing_psi, sing_m = h5open(gal_h5) do f
     pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))   # [npsi, mpert]
     iss = Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]))
     (pa, read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"])[.!iss], read(f["Info/mlow"]),
-        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_m"]))
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_m"]))
 end
 # forward run: PE grid = ForceFreeStates/Solutions/ForwardIntegration/psi
 pa_s, psi_s = h5open(sh_h5) do f

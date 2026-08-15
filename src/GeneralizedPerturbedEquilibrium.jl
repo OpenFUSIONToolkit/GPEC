@@ -609,12 +609,13 @@ function run_force_free_states(
     odet = nothing
     free_energies = nothing
     gal_data = nothing
+    gal_dp = nothing
     if ctrl.integrator == "galerkin"
         ctrl.kinetic_factor == 0 ||
             error("integrator = \"galerkin\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         gal_start = time()
         wv = ctrl.vac_flag ? first(ForceFreeStates.compute_scaled_wv(ctrl, equil, intr)) : nothing
-        gal_data = galerkin_solve(ctrl, equil, ffit, intr; wv=wv)
+        gal_data, gal_dp = galerkin_solve(ctrl, equil, ffit, intr; wv=wv)
         @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     else
         # Integrate Euler-Lagrange Equation
@@ -659,7 +660,7 @@ function run_force_free_states(
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data)
+    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data, gal_dp)
 end
 
 """
@@ -1044,17 +1045,18 @@ function write_outputs_to_HDF5(
 
         # Per-surface ca-based Δ' (`sing.delta_prime`) is a stub; only the BVP matrix is emitted (see SingType.delta_prime docstring).
 
-        # Write the Δ' products of the Riccati BVP when that integrator produced them.
+        # Write the Δ' payload on one set of canonical paths, whichever formalism produced it
+        # (Riccati BVP or Galerkin): both compute the same quantities in the same PEST-3
+        # convention. Surface indexing follows the producing formalism's surface list, which for
+        # Galerkin is the in-domain in-band subset of `SingularSurfaces/`.
         dp = result.delta_prime
         if msing > 0 && dp !== nothing
-            # Inter-surface Δ' matrix, shape [msing × msing] — PEST3-convention deltap
-            # (STRIDE BVP with vacuum coupling).
+            # Inter-surface Δ' matrix, shape [msing × msing] — PEST3-convention deltap.
             out_h5["SingularSurfaces/Delta_prime_matrix"] = dp.matrix
 
-            # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
-            # the SingularSurfaces/GalerkinDeltaPrime/Delta_coil layout so H5Web heatmaps share axes
-            # (x = edge mode, y = surface-side).
-            # The carried matrix stays (2msing × numpert_total); transpose only at write.
+            # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side)
+            # so H5Web heatmaps read x = edge mode, y = surface-side. The carried matrix stays
+            # (2msing × numpert_total); transpose only at write.
             isempty(dp.coil) || (out_h5["SingularSurfaces/Delta_coil"] = permutedims(dp.coil))
 
             # Raw 2msing×2msing outer-region D' matrix in side-major ordering
@@ -1063,6 +1065,12 @@ function write_outputs_to_HDF5(
             # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
             # pest3_decompose to recover (A', B', Γ', Δ').
             isempty(dp.raw) || (out_h5["SingularSurfaces/Delta_prime_raw"] = dp.raw)
+
+            # Remaining PEST-3 parity blocks, when the formalism persisted them (Galerkin);
+            # Riccati recovers them from Delta_prime_raw via pest3_decompose.
+            dp.A === nothing || (out_h5["SingularSurfaces/pest3_A"] = dp.A)
+            dp.B === nothing || (out_h5["SingularSurfaces/pest3_B"] = dp.B)
+            dp.Gamma === nothing || (out_h5["SingularSurfaces/pest3_Gamma"] = dp.Gamma)
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan

@@ -248,8 +248,10 @@ propagator blocks from bidirectional integration rather than the monolithic forw
 where ``\Phi_R[j]`` is the forward FM product from ``\psi_{R,j-1}`` to the junction, and
 ``\Phi_L[j]`` is the backward crossing FM from ``\psi_{L,j}`` to the junction.
 
-The matrix is only populated by the Riccati path and is written to the HDF5 output
-under `SingularSurfaces/Delta_prime_matrix`.
+The matrix is written to the HDF5 output under `SingularSurfaces/Delta_prime_matrix`.
+The Galerkin integrator computes the same quantity in the same PEST-3 convention and
+publishes it on the same path, so downstream consumers (SLAYER among them) never branch
+on which formalism ran.
 
 ## Configuration reference
 

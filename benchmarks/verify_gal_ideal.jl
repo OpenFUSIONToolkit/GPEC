@@ -11,7 +11,7 @@ cout, deltar, mxi, mdxi, sols, sols_d, sing_psi = h5open(h5path) do f
     (to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"])),
         to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/dxidpsi"])),
         to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi"])),
-        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]))
 end
 msing = length(sing_psi)
 mpert, ngrid, mcoil = size(mxi)

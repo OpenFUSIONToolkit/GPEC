@@ -1,28 +1,4 @@
 """
-    DeltaPrimeData
-
-Δ′ products of the Riccati/STRIDE boundary-value problem, moved off the solve-time
-`ForceFreeStatesInternal` scratch when the result is assembled. Present only when the
-Riccati integrator ran with a vacuum edge condition and at least one singular surface.
-
-## Fields
-
-  - `matrix::Matrix{ComplexF64}` - Inter-surface Δ′ of shape (msing × msing) in PEST3
-    convention, the odd-parity tearing projection of `raw`.
-  - `raw::Matrix{ComplexF64}` - Raw outer-region matching matrix D′ of shape
-    (2msing × 2msing) in the side-major ordering `[L_s1, R_s1, L_s2, R_s2, …]`.
-  - `coil::Matrix{ComplexF64}` - Edge coil-response matrix of shape
-    (2msing × numpert_total); column k is the resonant small-solution response at each
-    surface side to a unit source on edge poloidal mode k. Empty when the vacuum-edge BVP
-    was not assembled.
-"""
-struct DeltaPrimeData
-    matrix::Matrix{ComplexF64}
-    raw::Matrix{ComplexF64}
-    coil::Matrix{ComplexF64}
-end
-
-"""
     SolutionProfiles
 
 The solve's ξ solution on its radial grid, in the exact shape PerturbedEquilibrium consumes.
@@ -66,7 +42,7 @@ consumer that needs one gates on [`require`](@ref) (or [`require_solution`](@ref
 cannot supply a given product still flows through the pipeline.
 
 A jump condition at the rational surfaces is always applied before a final result is built,
-so bpen and closure are always present. 
+so bpen and closure are always present.
 
 ## Fields
 
@@ -93,8 +69,11 @@ so bpen and closure are always present.
     Riccati) regardless of `vac_flag` — the fixed-boundary run's energy product — and
     identical to `free_boundary.wp` when the free-boundary calculation ran.
   - `free_boundary::Union{Nothing,FreeBoundaryResult}` - Free-boundary energies and eigenmodes; `nothing` when the vacuum step was skipped or the formalism computes none.
-  - `delta_prime::Union{Nothing,DeltaPrimeData}` - STRIDE Δ′ products; `nothing` unless the Riccati BVP produced them.
-  - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solve, including the RPEC inner-layer match when requested.
+  - `delta_prime::Union{Nothing,DeltaPrimeData}` - Δ′/outer-region matching payload from
+    whichever formalism ran (Riccati BVP or Galerkin); `nothing` when neither produced one.
+  - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solver internals and FEM
+    diagnostics, including the RPEC inner-layer match when requested. Its Δ′ payload lives
+    in `delta_prime`, not here.
 """
 struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:FourFitVars} <: ModeSpace
     integrator::Symbol
@@ -197,7 +176,7 @@ function _matched_gal_profiles(gal_result::GalerkinResult, ffit::FourFitVars, in
 end
 
 """
-    build_result(integrator, ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data)
+    build_result(integrator, ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data, gal_dp)
         -> ForceFreeStatesResult
 
 Assemble the published result once the solve is finished — the one place that decides what a
@@ -206,8 +185,9 @@ stores, packing the matched Galerkin solution, and forming the fixed-boundary `W
 free-boundary stage did not run, every field is copied or aliased from what the stages
 already produced.
 
-`odet` is the integrator's ODE state (`nothing` for Galerkin); `gal_data` the Galerkin solve
-(`nothing` otherwise). The two are never both present: additive Galerkin does not exist.
+`odet` is the integrator's ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` the Galerkin
+solver internals and its Δ′ payload (`nothing` otherwise). The two formalisms are never both
+present: additive Galerkin does not exist.
 """
 function build_result(
     integrator::Symbol,
@@ -218,7 +198,8 @@ function build_result(
     ffit::FourFitVars,
     odet::Union{Nothing,OdeState},
     free_energies::Union{Nothing,FreeBoundaryResult},
-    gal_data::Union{Nothing,GalerkinResult}
+    gal_data::Union{Nothing,GalerkinResult},
+    gal_dp::Union{Nothing,DeltaPrimeData}
 )
     matched = gal_data !== nothing && gal_data.match !== nothing
 
@@ -234,8 +215,15 @@ function build_result(
         nothing
     end
 
-    delta_prime = isempty(intr.delta_prime_matrix) ? nothing :
-                  DeltaPrimeData(intr.delta_prime_matrix, intr.delta_prime_raw, intr.delta_coil)
+    # One Δ′ payload whichever formalism produced it; Riccati leaves the PEST-3 blocks unfilled
+    # because it persists only the raw D′ and recovers them on demand via `pest3_decompose`.
+    delta_prime = if gal_dp !== nothing
+        gal_dp
+    elseif !isempty(intr.delta_prime_matrix)
+        DeltaPrimeData(intr.delta_prime_matrix, intr.delta_prime_raw, intr.delta_coil, nothing, nothing, nothing)
+    else
+        nothing
+    end
     kinetic = (kmsing=intr.kmsing, kinsing=intr.kinsing, scan_psi=intr.kinsing_scan_psi,
         scan_cond=intr.kinsing_scan_cond, scan_threshold=intr.kinsing_scan_threshold)
 

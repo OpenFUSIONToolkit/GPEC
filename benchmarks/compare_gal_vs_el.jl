@@ -24,7 +24,7 @@ et, wt, u1, psiE, gxi, psiG, issing, mlow, sing_psi = h5open(h5path) do f
         to_c(read(f["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"])), read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
         to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]),
         Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"])), read(f["Info/mlow"]),
-        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]))
 end
 
 mpert = size(u1, 1)

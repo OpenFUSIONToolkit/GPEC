@@ -34,7 +34,7 @@ eta_ref = 8e-8
 
 # rational surface for m=target
 sing_psi, sing_m = h5open(joinpath(scandirs[1], "gpec.h5")) do f
-    (read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_m"]))
+    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_m"]))
 end
 psi_res = mtarget in sing_m ? sing_psi[findfirst(==(mtarget), sing_m)] : NaN
 
