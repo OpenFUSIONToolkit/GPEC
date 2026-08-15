@@ -81,17 +81,17 @@ PerturbedEquilibrium/
 │   ├── C_resonant_current
 │   ├── C_island_width_sq
 │   ├── C_penetrated_area_weighted_field
-│   ├── C_delta_prime
+│   ├── C_Delta_prime
 │   ├── resonant_area_weighted_field       # [n_rational] applied vector = C̃ · b̃_x (resonant area-weighted field b^r [T])
 │   ├── resonant_current
 │   ├── island_width_sq
 │   ├── penetrated_area_weighted_field
-│   ├── delta_prime
+│   ├── Delta_prime
 │   ├── island_half_width    # [n_rational] Float64
 │   ├── chirikov_parameter
 │   ├── rational_psi         # [n_rational] surface metadata
 │   ├── rational_q
-│   ├── rational_m_res
+│   ├── rational_m
 │   └── rational_n
 └── Energies/
     ├── vacuum_energy
@@ -150,7 +150,7 @@ function write_outputs_to_HDF5(
         # Clebsch displacements for PENTRC (matches Fortran gpout_xclebsch)
         if have_xi
             response_group["clebsch_psi"]   = state.xi_modes.clebsch_psi
-            response_group["clebsch_psi1"]  = state.xi_modes.clebsch_psi1
+            response_group["dclebsch_psidpsi"]  = state.xi_modes.clebsch_psi1
             response_group["clebsch_alpha"] = state.xi_modes.clebsch_alpha
         end
 
@@ -199,14 +199,14 @@ function write_outputs_to_HDF5(
         !isempty(state.C_resonant_current) && (coupling_group["C_resonant_current"] = state.C_resonant_current)
         !isempty(state.C_island_width_sq)  && (coupling_group["C_island_width_sq"]  = state.C_island_width_sq)
         !isempty(state.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = state.C_penetrated_area_weighted_field)
-        !isempty(state.C_delta_prime)      && (coupling_group["C_delta_prime"]      = state.C_delta_prime)
+        !isempty(state.C_delta_prime)      && (coupling_group["C_Delta_prime"]      = state.C_delta_prime)
 
         # Applied resonant vectors [n_rational]
         !isempty(state.resonant_area_weighted_field)     && (coupling_group["resonant_area_weighted_field"]     = state.resonant_area_weighted_field)
         !isempty(state.resonant_current)   && (coupling_group["resonant_current"]   = state.resonant_current)
         !isempty(state.island_width_sq)    && (coupling_group["island_width_sq"]    = state.island_width_sq)
         !isempty(state.penetrated_area_weighted_field)   && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
-        !isempty(state.delta_prime)        && (coupling_group["delta_prime"]        = state.delta_prime)
+        !isempty(state.delta_prime)        && (coupling_group["Delta_prime"]        = state.delta_prime)
         !isempty(state.forcing_solution_weights)         && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
         !isempty(state.rational_area) && (coupling_group["rational_area"] = state.rational_area)
         !isempty(state.island_half_width)  && (coupling_group["island_half_width"]  = state.island_half_width)
@@ -215,7 +215,7 @@ function write_outputs_to_HDF5(
         # Metadata [n_rational]
         !isempty(state.rational_psi)       && (coupling_group["rational_psi"]       = state.rational_psi)
         !isempty(state.rational_q)         && (coupling_group["rational_q"]         = state.rational_q)
-        !isempty(state.rational_m_res)     && (coupling_group["rational_m_res"]     = state.rational_m_res)
+        !isempty(state.rational_m_res)     && (coupling_group["rational_m"]     = state.rational_m_res)
         !isempty(state.rational_n)         && (coupling_group["rational_n"]         = state.rational_n)
 
         # Energies
@@ -262,7 +262,7 @@ const PE_H5_ANNOTATIONS = [
     "Response/xi_cova_theta" => (; long_name="covariant poloidal displacement ξ_θ", units="m^2", dims=("psi", "mode"), attach=(1 => "Response/psi_n",)),
     "Response/xi_cova_zeta" => (; long_name="covariant toroidal displacement ξ_ζ", units="m^2", dims=("psi", "mode"), attach=(1 => "Response/psi_n",)),
     "Response/clebsch_psi" => (; long_name="Clebsch displacement component ξ^ψ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi_n",)),
-    "Response/clebsch_psi1" => (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+reg_spot²))", dims=("psi", "mode")),
+    "Response/dclebsch_psidpsi" => (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+reg_spot²))", dims=("psi", "mode")),
     "Response/clebsch_alpha" =>
         (; long_name="Clebsch displacement component ξ^α/χ₁ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi_n",)),
     "Response/xi_n" => (; long_name="physical normal displacement ξ_n", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi_n",)),
@@ -290,7 +290,7 @@ const PE_H5_ANNOTATIONS = [
         (; long_name="coupling matrix: applied b̃ → squared island half-width", units="1/T", dims=("surface", "mode"), attach=(1 => "SingularCoupling/rational_psi",)),
     "SingularCoupling/C_penetrated_area_weighted_field" =>
         (; long_name="coupling matrix: applied b̃ → penetrated area-weighted field", dims=("surface", "mode"), attach=(1 => "SingularCoupling/rational_psi",)),
-    "SingularCoupling/C_delta_prime" =>
+    "SingularCoupling/C_Delta_prime" =>
         (; long_name="coupling matrix: applied b̃ → forcing-driven Δ'", units="1/T", dims=("surface", "mode"), attach=(1 => "SingularCoupling/rational_psi",)),
     "SingularCoupling/resonant_area_weighted_field" =>
         (; long_name="resonant area-weighted field b̄^r = Φ^r/A^r per rational surface (coordinate-invariant)", units="T", dims=("surface",)),
@@ -300,7 +300,7 @@ const PE_H5_ANNOTATIONS = [
         (; long_name="squared island half-width per rational surface (in ψ_N²)", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi",)),
     "SingularCoupling/penetrated_area_weighted_field" =>
         (; long_name="penetrated area-weighted field per rational surface", units="T", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi",)),
-    "SingularCoupling/delta_prime" =>
+    "SingularCoupling/Delta_prime" =>
         (; long_name="forcing-driven tearing Δ' per rational surface (Riccati; response to applied forcing)", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi",)),
     "SingularCoupling/forcing_solution_weights" =>
         (; long_name="weights of the forcing solutions in the singular-coupling decomposition", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi",)),
@@ -312,7 +312,7 @@ const PE_H5_ANNOTATIONS = [
             attach=(1 => "SingularCoupling/rational_psi",)),
     "SingularCoupling/rational_psi" => (; long_name="normalized poloidal flux ψ_N of each rational surface", scale="psi_rational"),
     "SingularCoupling/rational_q" => (; long_name="safety factor q = m/n at each rational surface", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi",)),
-    "SingularCoupling/rational_m_res" =>
+    "SingularCoupling/rational_m" =>
         (; long_name="resonant poloidal mode number m at each rational surface", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi",)),
     "SingularCoupling/rational_n" => (; long_name="resonant toroidal mode number n at each rational surface", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi",)),
     "Energies/vacuum_energy" => (; long_name="perturbed vacuum energy", units="J"),

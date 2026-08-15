@@ -760,7 +760,7 @@ function write_outputs_to_HDF5(
         out_h5["Info/mn_index"] = hcat(m, n)   # (N, 2) matrix
         out_h5["Info/psilim"] = intr.psilim
         out_h5["Info/qlim"] = intr.qlim
-        out_h5["Info/q1lim"] = intr.q1lim
+        out_h5["Info/dqdpsi_lim"] = intr.q1lim
 
         # Write derived equilibrium parameters
         for (key, val) in zip(fieldnames(Equilibrium.EquilibriumParameters), getfield.(Ref(equil.params), fieldnames(Equilibrium.EquilibriumParameters)))
@@ -788,18 +788,18 @@ function write_outputs_to_HDF5(
         out_h5["Equilibrium/Geometry/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
         # Write local stability data; always write all entries, using empty arrays when not computed.
-        # LocalStability/di = Mercier D_I (det(d0bar)); LocalStability/dr = resistive interchange D_R;
+        # LocalStability/D_I = Mercier D_I (det(d0bar)); LocalStability/D_R = resistive interchange D_R;
         # LocalStability/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
-        # tearing Δ' under PerturbedEquilibrium/SingularCoupling/delta_prime).
+        # tearing Δ' under PerturbedEquilibrium/SingularCoupling/Delta_prime).
         if locstab !== nothing
             locstab_xs = locstab.cache.x
-            out_h5["LocalStability/di"] = locstab.y[:, 1] ./ locstab_xs
-            out_h5["LocalStability/dr"] = locstab.y[:, 2] ./ locstab_xs
+            out_h5["LocalStability/D_I"] = locstab.y[:, 1] ./ locstab_xs
+            out_h5["LocalStability/D_R"] = locstab.y[:, 2] ./ locstab_xs
         else
-            out_h5["LocalStability/di"] = Float64[]
-            out_h5["LocalStability/dr"] = Float64[]
+            out_h5["LocalStability/D_I"] = Float64[]
+            out_h5["LocalStability/D_R"] = Float64[]
         end
-        out_h5["SingularSurfaces/di0"] = (locstab !== nothing && !isempty(intr.sing)) ?
+        out_h5["SingularSurfaces/D_I"] = (locstab !== nothing && !isempty(intr.sing)) ?
                                          [locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
         out_h5["LocalStability/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
 
@@ -816,7 +816,7 @@ function write_outputs_to_HDF5(
         out_h5["$fwd/q"] = odet.q_store
         out_h5["$fwd/xi_psi"] = odet.u_store[:, :, 1, :]
         out_h5["$fwd/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["$fwd/dxi_psi"] = odet.du_store
+        out_h5["$fwd/dxi_psidpsi"] = odet.du_store
         out_h5["$fwd/xi_s"] = odet.xi_s_store
         out_h5["$fwd/crit"] = odet.crit_store
 
@@ -834,10 +834,10 @@ function write_outputs_to_HDF5(
         end
 
         # Write singular surface data
-        out_h5["SingularSurfaces/msing"] = intr.msing
-        out_h5["SingularSurfaces/psi"] = [sing.psifac for sing in intr.sing]
-        out_h5["SingularSurfaces/q"] = [sing.q for sing in intr.sing]
-        out_h5["SingularSurfaces/q1"] = [sing.q1 for sing in intr.sing]
+        out_h5["SingularSurfaces/rational_count"] = intr.msing
+        out_h5["SingularSurfaces/rational_psi"] = [sing.psifac for sing in intr.sing]
+        out_h5["SingularSurfaces/rational_q"] = [sing.q for sing in intr.sing]
+        out_h5["SingularSurfaces/dqdpsi"] = [sing.q1 for sing in intr.sing]
         out_h5["SingularSurfaces/ca_left"] = odet.ca_l
         out_h5["SingularSurfaces/ca_right"] = odet.ca_r
 
@@ -852,8 +852,8 @@ function write_outputs_to_HDF5(
                     n_matrix[s, i] = sing.n[i]
                 end
             end
-            out_h5["SingularSurfaces/m"] = m_matrix
-            out_h5["SingularSurfaces/n"] = n_matrix
+            out_h5["SingularSurfaces/rational_m"] = m_matrix
+            out_h5["SingularSurfaces/rational_n"] = n_matrix
 
             # Glasser-Greene-Johnson geometric coefficients + surface averages
             # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
@@ -870,9 +870,9 @@ function write_outputs_to_HDF5(
                 out_h5["SingularSurfaces/M"] = [s.restype.M for s in intr.sing]
                 out_h5["SingularSurfaces/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in intr.sing]
                 out_h5["SingularSurfaces/avg_bsq"] = [s.restype.avg_bsq for s in intr.sing]
-                out_h5["SingularSurfaces/p_local"] = [s.restype.p_local for s in intr.sing]
-                out_h5["SingularSurfaces/p1_local"] = [s.restype.p1_local for s in intr.sing]
-                out_h5["SingularSurfaces/v1_local"] = [s.restype.v1_local for s in intr.sing]
+                out_h5["SingularSurfaces/mu0p"] = [s.restype.p_local for s in intr.sing]
+                out_h5["SingularSurfaces/dmu0pdpsi"] = [s.restype.p1_local for s in intr.sing]
+                out_h5["SingularSurfaces/dVdpsi"] = [s.restype.v1_local for s in intr.sing]
             end
         end
 
@@ -881,16 +881,16 @@ function write_outputs_to_HDF5(
         # Write inter-surface Δ' matrix if computed (parallel FM path only).
         # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
         if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
-            out_h5["SingularSurfaces/delta_prime_matrix"] = intr.delta_prime_matrix
+            out_h5["SingularSurfaces/Delta_prime_matrix"] = intr.delta_prime_matrix
         end
 
         # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
-        # the SingularSurfaces/GalerkinDeltaPrime/delta_coil layout so H5Web heatmaps share axes
+        # the SingularSurfaces/GalerkinDeltaPrime/Delta_coil layout so H5Web heatmaps share axes
         # (x = edge mode, y = surface-side).
         # Internal intr.delta_coil stays (2msing × numpert_total); transpose only at write.
         if intr.msing > 0 && !isempty(intr.delta_coil)
             dc = permutedims(intr.delta_coil)
-            out_h5["SingularSurfaces/delta_coil"] = dc
+            out_h5["SingularSurfaces/Delta_coil"] = dc
         end
 
         # Write raw 2msing×2msing outer-region D' matrix in side-major ordering
@@ -899,15 +899,15 @@ function write_outputs_to_HDF5(
         # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
         # pest3_decompose to recover (A', B', Γ', Δ').
         if intr.msing > 0 && !isempty(intr.delta_prime_raw)
-            out_h5["SingularSurfaces/delta_prime_raw"] = intr.delta_prime_raw
+            out_h5["SingularSurfaces/Delta_prime_raw"] = intr.delta_prime_raw
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
         # used to find them. Populated only when kinetic crossings were searched for.
-        out_h5["SingularSurfaces/Kinetic/kmsing"] = intr.kmsing
-        out_h5["SingularSurfaces/Kinetic/psi"] = [s.psifac for s in intr.kinsing]
-        out_h5["SingularSurfaces/Kinetic/q"] = [s.q for s in intr.kinsing]
-        out_h5["SingularSurfaces/Kinetic/q1"] = [s.q1 for s in intr.kinsing]
+        out_h5["SingularSurfaces/Kinetic/rational_count"] = intr.kmsing
+        out_h5["SingularSurfaces/Kinetic/rational_psi"] = [s.psifac for s in intr.kinsing]
+        out_h5["SingularSurfaces/Kinetic/rational_q"] = [s.q for s in intr.kinsing]
+        out_h5["SingularSurfaces/Kinetic/dqdpsi"] = [s.q1 for s in intr.kinsing]
         out_h5["SingularSurfaces/Kinetic/scan_psi"] = intr.kinsing_scan_psi
         out_h5["SingularSurfaces/Kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["SingularSurfaces/Kinetic/scan_threshold"] = intr.kinsing_scan_threshold

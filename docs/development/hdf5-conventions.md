@@ -18,6 +18,10 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 - **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinDeltaPrime/`).
 - **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root`, `pest3_Delta`, `2piF`).
 - **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), scan indices (`Surface_<k>`, `psi_<i>`).
+- **Literature capitalization for physics symbols**: names match the standard literature — `D_I`, `D_R`, `Delta_prime`, `tau_R`, `tau_A` (not `di`, `dr`, `delta_prime`, `taur`); lowercase stays where the literature is lowercase (`alpha`, `q`, `beta*`, `delta_s`).
+- **Derivatives are `d<x>dpsi`** (`dTdpsi`, `dVdpsi`, `dqdpsi`, `dxidpsi`) — never Fortran `<x>1` suffixes or `<x>_deriv`.
+- **"rational" over "singular"** in dataset names (`rational_psi`, `rational_q`, `rational_m`, `rational_n`, `rational_index`, `rational_count`) — kinetic/resistive runs are not singular at the rationals. Specifier order is standardized specifier-first (`rational_psi`, never `psi_rational`).
+- **One name per physical quantity**: a quantity written in several groups carries the identical leaf name everywhere (`rational_psi` in `SingularSurfaces/`, `GalerkinDeltaPrime/`, and `SingularCoupling/`; `Delta_prime_matrix` in `SingularSurfaces/` and `Tearing/PerSurface/`; `dVdpsi` in `Profiles/`, `SingularSurfaces/`, and `KineticForces/<method>/`) — the group supplies the context, the leaf supplies the identity.
 
 ## Inputs live only under `Input/`
 
@@ -34,7 +38,7 @@ Top level (10 groups):
 | `Equilibrium/` | Scalars (β, q₀, q95, …) plus `Profiles/` (1-D: xs, 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D: rcoords, offset, nu, jac) |
 | `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (`Solution/`, `Match/`, `msing`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier `di`, resistive interchange `dr`, `ballooning_Delta_prime`, ballooning α boundary |
-| `SingularSurfaces/` | Per-rational-surface data: ψ, q, m/n, GGJ coefficients, `delta_prime_matrix`/`delta_prime_raw`/`delta_coil`, `GalerkinDeltaPrime/`, `Kinetic/` |
+| `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`, `GalerkinDeltaPrime/`, `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
 | `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`) |
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |

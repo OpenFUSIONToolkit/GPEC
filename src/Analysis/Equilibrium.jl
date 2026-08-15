@@ -51,7 +51,7 @@ function plot_qprofile(h5path; show_singular=true, save_path=nothing)
 
     if show_singular
         msing, psi_sing, q_sing = h5open(h5path, "r") do fid
-            read(fid["SingularSurfaces/msing"]), read(fid["SingularSurfaces/psi"]), read(fid["SingularSurfaces/q"])
+            read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"])
         end
         for s in 1:msing
             vline!(p, [psi_sing[s]]; linestyle=:dash, color=:red, label=nothing)
@@ -84,7 +84,7 @@ A `Plots.jl` plot object.
 function plot_pressure_profile(h5path; save_path=nothing)
     xs, mu0p, msing, psi_sing = h5open(h5path, "r") do fid
         read(fid["Equilibrium/Profiles/xs"]), read(fid["Equilibrium/Profiles/mu0p"]),
-        read(fid["SingularSurfaces/msing"]), read(fid["SingularSurfaces/psi"])
+        read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"])
     end
 
     p = plot(
@@ -125,7 +125,7 @@ A `Plots.jl` plot object.
 function plot_f_profile(h5path; save_path=nothing)
     xs, twopif, msing, psi_sing = h5open(h5path, "r") do fid
         read(fid["Equilibrium/Profiles/xs"]), read(fid["Equilibrium/Profiles/2piF"]),
-        read(fid["SingularSurfaces/msing"]), read(fid["SingularSurfaces/psi"])
+        read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"])
     end
 
     p = plot(
@@ -174,7 +174,7 @@ function plot_flux_surfaces(h5path; n_psi=11, n_theta=18, save_path=nothing)
         read(fid["Equilibrium/Geometry/rcoords"]), read(fid["Equilibrium/Geometry/offset"]),
         read(fid["Equilibrium/Geometry/xs"]), read(fid["Equilibrium/Geometry/ys"]),
         read(fid["Equilibrium/ro"]), read(fid["Equilibrium/zo"]),
-        read(fid["SingularSurfaces/msing"]), read(fid["SingularSurfaces/psi"]), read(fid["SingularSurfaces/q"])
+        read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"])
     end
 
     n_psi_grid = length(xs_rz)

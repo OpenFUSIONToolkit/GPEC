@@ -63,7 +63,7 @@ _layer_model_token(::Type{GGJParameters}) = "ggj"
 # subgroups and Scan/Surface_<k> groups are annotated by iteration below.
 const TEARING_H5_ANNOTATIONS = [
     "enabled" => (; long_name="flag: SLAYER/tearing stage ran (1) or was disabled (0)"),
-    "PerSurface/ising" => (; long_name="rational-surface index of each row", dims=("surface",)),
+    "PerSurface/rational_index" => (; long_name="rational-surface index of each row", dims=("surface",)),
     "PerSurface/m" => (; long_name="resonant poloidal mode number m per surface", dims=("surface",)),
     "PerSurface/n" => (; long_name="resonant toroidal mode number n per surface", dims=("surface",)),
     "PerSurface/tau" => (; long_name="temperature ratio τ = T_i/T_e per surface", dims=("surface",)),
@@ -75,10 +75,10 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/Q_e" => (; long_name="normalized electron diamagnetic frequency Q_e per surface", dims=("surface",)),
     "PerSurface/Q_i" => (; long_name="normalized ion diamagnetic frequency Q_i per surface", dims=("surface",)),
     "PerSurface/iota_e" => (; long_name="electron fraction ι_e = Q_e/(Q_e − Q_i) per surface", dims=("surface",)),
-    "PerSurface/tauk" =>
+    "PerSurface/tau_k" =>
         (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = τ_k·ω; diamagnetic inputs Q_e, Q_i carry the opposite sign by convention)", units="s", dims=("surface",)),
-    "PerSurface/tau_r" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface (SLAYER layer parameters)", units="s", dims=("surface",)),
-    "PerSurface/delta_n" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
+    "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface (SLAYER layer parameters)", units="s", dims=("surface",)),
+    "PerSurface/Delta_prime_norm" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
     "PerSurface/rs" => (; long_name="minor radius of each rational surface", units="m", dims=("surface",)),
     "PerSurface/R0" => (; long_name="major radius", units="m", dims=("surface",)),
     "PerSurface/bt" => (; long_name="toroidal field", units="T", dims=("surface",)),
@@ -88,30 +88,30 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/D_geo" => (; long_name="Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied)", dims=("surface",)),
     "PerSurface/eta" => (; long_name="parallel resistivity at each surface", units="Ohm*m", dims=("surface",)),
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
-    "PerSurface/dc_tmp" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
-    "PerSurface/dc_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
+    "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
+    "PerSurface/D_c_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
     "PerSurface/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",)),
     "PerSurface/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",)),
     "PerSurface/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",)),
     "PerSurface/H" => (; long_name="Glasser-Greene-Johnson coefficient H per surface", dims=("surface",)),
     "PerSurface/K" => (; long_name="Glasser-Greene-Johnson coefficient K per surface", dims=("surface",)),
     "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
-    "PerSurface/taua" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
-    "PerSurface/taur" => (; long_name="resistive diffusion time τ_R per surface (GGJ layer parameters)", units="s", dims=("surface",)),
-    "PerSurface/v1" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
-    "PerSurface/dp_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces", dims=("surface_row", "surface_col")),
+    "PerSurface/tau_A" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
+    "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R per surface (GGJ layer parameters)", units="s", dims=("surface",)),
+    "PerSurface/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
+    "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces", dims=("surface_row", "surface_col")),
     "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
-    "Roots/omega_Hz" =>
+    "Roots/omega" =>
         (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root (dataset name is a misnomer: angular, not cycles/s)", units="rad/s", dims=("surface",)),
-    "Roots/gamma_Hz" =>
+    "Roots/gamma" =>
         (; long_name="growth rate γ = Im(Q)/τ_k of each root, positive = unstable (an e-folding rate, so no 2π distinction applies)", units="1/s", dims=("surface",)),
     "Roots/no_root" => (; long_name="flag: no usable dispersion root found (Q_root is NaN, ω/γ are placeholders)", dims=("surface",)),
-    "LayerWidths/ising" => (; long_name="rational-surface index of each row", dims=("surface",)),
+    "LayerWidths/rational_index" => (; long_name="rational-surface index of each row", dims=("surface",)),
     "LayerWidths/m" => (; long_name="resonant poloidal mode number m per surface", dims=("surface",)),
     "LayerWidths/n" => (; long_name="resonant toroidal mode number n per surface", dims=("surface",)),
-    "LayerWidths/dels_db" => (; long_name="complex dimensionless layer thickness δ_s/d_β", dims=("surface",)),
+    "LayerWidths/delta_s_over_d_beta" => (; long_name="complex dimensionless layer thickness δ_s/d_β", dims=("surface",)),
     "LayerWidths/delta_s" => (; long_name="complex resistive layer thickness δ_s (Riccati)", dims=("surface",)),
-    "LayerWidths/delta_s_m" => (; long_name="physical resistive layer thickness |δ_s|", units="m", dims=("surface",)),
+    "LayerWidths/delta_s_abs" => (; long_name="physical resistive layer thickness |δ_s|", units="m", dims=("surface",)),
     "LayerWidths/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",))
 ]
 
@@ -160,23 +160,28 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     ps = create_group(g, "PerSurface")
 
     # Scalar struct-of-arrays for all Float64 / Int fields
-    for fname in (:ising, :m, :n)
+    ps["rational_index"] = Int[p.ising for p in params]
+    for fname in (:m, :n)
         ps[String(fname)] = Int[getfield(p, fname) for p in params]
     end
     for fname in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor,
         :Q_e, :Q_i, :iota_e,
-        :tauk, :tau_r, :delta_n,
         :rs, :R0, :bt, :sval_r,
-        :eta, :d_beta, :dc_tmp)
+        :eta, :d_beta)
         ps[String(fname)] = Float64[getfield(p, fname) for p in params]
     end
+    # Literature/physics dataset names where the struct fields kept legacy spellings.
+    ps["tau_k"] = Float64[p.tauk for p in params]
+    ps["tau_R"] = Float64[p.tau_r for p in params]
+    ps["Delta_prime_norm"] = Float64[p.delta_n for p in params]
+    ps["D_c_offset"] = Float64[p.dc_tmp for p in params]
     # Physics names for the interchange/geometric inputs (struct fields keep *_val).
     ps["D_R"] = Float64[p.dr_val for p in params]
     ps["D_geo"] = Float64[p.dgeo_val for p in params]
     # Store dc_type per-surface as string array
-    ps["dc_type"] = String[String(p.dc_type) for p in params]
+    ps["D_c_type"] = String[String(p.dc_type) for p in params]
 
-    ps["dp_matrix"] = dp_matrix
+    ps["Delta_prime_matrix"] = dp_matrix
     return nothing
 end
 
@@ -185,11 +190,14 @@ end
 function _write_per_surface!(g, params::AbstractVector{GGJParameters},
     dp_matrix::Matrix{ComplexF64})
     ps = create_group(g, "PerSurface")
-    ps["ising"] = Int[p.ising for p in params]
-    for fname in (:E, :F, :G, :H, :K, :M, :taua, :taur, :v1)
+    ps["rational_index"] = Int[p.ising for p in params]
+    for fname in (:E, :F, :G, :H, :K, :M)
         ps[String(fname)] = Float64[getfield(p, fname) for p in params]
     end
-    ps["dp_matrix"] = dp_matrix
+    ps["tau_A"] = Float64[p.taua for p in params]
+    ps["tau_R"] = Float64[p.taur for p in params]
+    ps["dVdpsi"] = Float64[p.v1 for p in params]
+    ps["Delta_prime_matrix"] = dp_matrix
     return nothing
 end
 
@@ -197,8 +205,8 @@ end
 function _write_roots!(g, r::SLAYERResult)
     roots = create_group(g, "Roots")
     roots["Q_root"] = r.Q_root
-    roots["omega_Hz"] = r.omega_Hz
-    roots["gamma_Hz"] = r.gamma_Hz
+    roots["omega"] = r.omega_Hz
+    roots["gamma"] = r.gamma_Hz
     # `no_root[k] == 1` flags entries where the extraction found NO usable
     # root (Q_root is NaN; omega_Hz/gamma_Hz are 0 placeholders, not a true
     # γ≈0 result). Aligned element-wise with Q_root/omega_Hz/gamma_Hz.
@@ -212,14 +220,15 @@ end
 # ---------- resistive layer thickness (del_s Riccati) ----------
 function _write_layer_widths!(g, widths::Vector{LayerWidths})
     lw = create_group(g, "LayerWidths")
-    for fname in (:ising, :m, :n)
+    lw["rational_index"] = Int[w.ising for w in widths]
+    for fname in (:m, :n)
         lw[String(fname)] = Int[getfield(w, fname) for w in widths]
     end
     # Dimensionless del_s/d_beta and the complex layer thickness.
-    lw["dels_db"] = ComplexF64[w.dels_db for w in widths]
+    lw["delta_s_over_d_beta"] = ComplexF64[w.dels_db for w in widths]
     lw["delta_s"] = ComplexF64[w.delta_s for w in widths]
     # Physical thickness [m] and the β-weighted ion drift scale [m].
-    lw["delta_s_m"] = Float64[w.delta_s_m for w in widths]
+    lw["delta_s_abs"] = Float64[w.delta_s_m for w in widths]
     lw["d_beta"] = Float64[w.d_beta for w in widths]
     return nothing
 end
