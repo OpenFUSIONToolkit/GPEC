@@ -59,8 +59,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Outputs**:
 - `wv` — Vacuum response matrix (scaled by the singular factor (m - nq)(m' - nq), see Chance 1997)
-- `grri` — Interior Green's function matrix (plasma boundary → plasma boundary)
-- `grre` — Exterior Green's function matrix (plasma boundary → wall)
+- `I_v` — Vacuum surface-current matrix Iᵛ when `compute_Iv=true` (otherwise zeros); PerturbedEquilibrium inverts this to surface inductance `L`
 
 **Key references**: [Chance et al. (1997)](citations.md#Vacuum-Module), [Chance et al. (2007)](citations.md#Vacuum-Module)
 
