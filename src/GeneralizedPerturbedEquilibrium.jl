@@ -20,6 +20,11 @@ include("Equilibrium/Equilibrium.jl")
 import .Equilibrium as Equilibrium
 export Equilibrium
 
+# Local high-n stability (Mercier, resistive interchange, ballooning Δ'); depends only on Equilibrium.
+include("LocalStability/LocalStability.jl")
+import .LocalStability as LocalStability
+export LocalStability
+
 include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
@@ -65,7 +70,6 @@ include("Rerun.jl")
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, FreeBoundaryResult, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
-using .ForceFreeStates: compute_local_stability, compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
@@ -337,9 +341,9 @@ function main_from_inputs(
     locstab = nothing
     ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     if ctrl.local_stability_flag
-        locstab = compute_local_stability(ctrl, equil)
+        locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
         # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
-        ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
+        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
     end
 
     # Find all singular surfaces in the equilibrium

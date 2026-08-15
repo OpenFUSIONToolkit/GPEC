@@ -670,7 +670,11 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
   from the §3 spec, both improvements: the new Δ′ example references the DIIID geqdsk
   by relative path instead of copying it, and the TOML sweep covered six regression
   fixtures (two more had landed on develop since the plan was written), all `forward`.
-- [ ] PR 2 — `refactor/local-stability-module`
+- [ ] PR 2 — `refactor/local-stability-module` — **implemented, in review.** One delta
+  from the §4 spec: the signature change also required updating two call-site groups the
+  section did not list — `examples/DIIID-like_ideal_example/analyze_example.jl` (five
+  ballooning entry points) and two docstring cross-references in
+  `src/Analysis/ForceFreeStates.jl`.
 - [ ] PR 3 — `refactor/forcefreestates-result`
 - [ ] PR 4 — `refactor/staged-main`
 - [ ] PR 5 — `feature/solve-api`

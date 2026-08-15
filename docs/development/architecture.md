@@ -12,7 +12,7 @@ This workflow is reflected in the modular structure and data flow.
 
 ## Module Structure
 
-GPEC consists of **seven main modules** organized in `src/`:
+GPEC consists of **eight main modules** organized in `src/`:
 
 ### Foundation Modules
 
@@ -67,18 +67,23 @@ GPEC consists of **seven main modules** organized in `src/`:
      - `Fourfit.jl` - Fourier fitting routines
      - `FixedBoundaryStability.jl` - Fixed boundary analysis
      - `Free.jl` - Free boundary stability
-     - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Status: Stable, core DCON functionality implemented
+
+6. **LocalStability** (`src/LocalStability/`) - Local high-n stability
+   - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
+   - Depends only on Equilibrium (plus math libraries); carries no stability-solver state
+   - Main entry points: `compute_local_stability`, `ballooning_alpha_boundary`
+   - Status: Stable
 
 ### Perturbed Equilibrium Modules
 
-6. **ForcingTerms** (`src/ForcingTerms/`) - External field specification
+7. **ForcingTerms** (`src/ForcingTerms/`) - External field specification
    - Handles external magnetic field perturbations (coils, RMP, etc.)
    - Supports ASCII and HDF5 forcing data formats
    - `ForcingMode` data structure specifies amplitude and phase for each (m,n) component
    - Status: Complete and functional
 
-7. **PerturbedEquilibrium** (`src/PerturbedEquilibrium/`) - **GPEC-style plasma response**
+8. **PerturbedEquilibrium** (`src/PerturbedEquilibrium/`) - **GPEC-style plasma response**
    - Computes plasma response to external forcing
    - Calculates singular coupling metrics at rational surfaces
    - Key files:
@@ -191,6 +196,7 @@ GeneralizedPerturbedEquilibrium
 ├── Utilities (shared tools)
 │   └── FourierTransforms
 ├── Equilibrium (uses Splines)
+├── LocalStability (uses Equilibrium)
 ├── Vacuum (uses Splines, Equilibrium, Utilities)
 ├── ForcingTerms (data I/O)
 ├── ForceFreeStates (uses Equilibrium, Vacuum, Splines)
