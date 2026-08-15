@@ -196,88 +196,12 @@ function main_from_inputs(
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
-    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
-    intr.nlow, intr.nhigh = ctrl.nn_low, ctrl.nn_high
-    if intr.nlow == 0 && intr.nhigh == 0
-        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
-    elseif intr.nlow == 0
-        intr.nlow = intr.nhigh
-    elseif intr.nhigh == 0
-        intr.nhigh = intr.nlow
-    end
-    if intr.nlow > intr.nhigh
-        error("nn_low=$(intr.nlow) cannot be greater than nn_high=$(intr.nhigh)")
-    end
-    if intr.nhigh < 1
-        error("All requested toroidal modes (n=$(intr.nlow):$(intr.nhigh)) are below 1; " *
-              "n < 1 modes are not supported")
-    end
-    if intr.nlow < 1
-        @warn "Clamping nn_low from $(intr.nlow) to 1; n < 1 modes are not supported"
-        intr.nlow = 1
-    end
-    intr.npert = intr.nhigh - intr.nlow + 1
-    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
+    resolve_mode_space!(intr, ctrl)
 
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
-    # Build KineticForces control and load kinetic profiles once — reused by the grid
-    # refinement below, the stability kinetic callback (via `calculated_cb`), and the
-    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in stability
-    # does not need kinetic_profiles, but the post-PE block always does, so we load
-    # whenever a [KineticForces] section is present or the stability path requests the
-    # calculated source. psio is invariant across grid re-formation.
-    kf_ctrl =
-        haskey(inputs, "KineticForces") ?
-        KineticForces.KineticForcesControl(;
-            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
-        KineticForces.KineticForcesControl()
-
-    kinetic_profiles = nothing
-    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
-    if needs_kinetic_profiles
-        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
-        kinetic_profiles = Equilibrium.load_kinetic_profiles(
-            kinetic_file;
-            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
-            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
-            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
-            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
-            chi1=2π * equil.psio)
-    end
-
-    # Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry,
-    # kinetic profiles), pin knots on rational surfaces, and re-form on the refined grid
-    # from the in-memory input — no file re-read.
-    if Equilibrium.wants_two_pass(eq_config)
-        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
-        # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
-        # so the rational-surface brackets clear a zone large enough for every mode.
-        n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
-        psi_nodes = Equilibrium.refined_psi_grid(equil;
-            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
-            singfac_min=ctrl.singfac_min, n_min=n_min)
-        rerun_input = if additional_input !== nothing
-            # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
-            # path re-runs read_imas, which must resolve the same psihigh both passes;
-            # _validate_psi_nodes errors loudly if it does not.
-            additional_input
-        elseif equil.ingest isa Equilibrium.DirectIngest
-            Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
-        elseif equil.ingest isa Equilibrium.InverseIngest
-            Equilibrium.build_inverse_from_ingest(eq_config, equil.ingest)
-        else
-            nothing  # fall back to re-reading the input file
-        end
-        equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
-        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
-        if implied > 1.5 * (length(psi_nodes) - 1)
-            @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
-                  "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
-        end
-        @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$nstring)"
-    end
+    kf_ctrl, kinetic_profiles = load_kinetic_context(inputs, intr, ctrl, equil)
+    equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -299,13 +223,205 @@ function main_from_inputs(
         intr.debug_settings = DebugSettings()
     end
 
-    # Forcing-data snapshot: when PerturbedEquilibrium is enabled, load forcing
-    # modes early so they can be written into `Input/RawInputs/ForcingTerms/`
-    # alongside the TOML blob. On the rerun path the caller passes the modes in
-    # directly via `preloaded_forcing_modes`, bypassing the original file. Coil
-    # forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on
-    # replay, so only the file-based formats need their modes captured here.
-    forcing_modes_snapshot = preloaded_forcing_modes
+    forcing_modes_snapshot = snapshot_forcing_modes(inputs, path, ctrl, preloaded_forcing_modes)
+
+    # ----------------------------------------------------------------
+    # Force-Free States
+    # ----------------------------------------------------------------
+    @info "\n  Force-Free States\n$_SECTION"
+    ffs_start = time()
+
+    locstab, ballooning_boundary = run_local_stability(ctrl, equil)
+    metric, ffit = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles)
+    ffs_result = run_force_free_states(ctrl, equil, ffit, intr, metric)
+
+    if ctrl.write_outputs_to_HDF5
+        write_outputs_to_HDF5(
+            ffs_result;
+            git_version=git_version,
+            inputs=inputs,
+            forcing_modes=forcing_modes_snapshot,
+            locstab=locstab,
+            ballooning_boundary=ballooning_boundary
+        )
+        @info "Results written to $(ctrl.HDF5_filename)"
+    end
+
+    @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
+
+    # Early exit if user only requested force-free states (SLAYER still runs).
+    if ctrl.force_termination
+        slayer_result = run_slayer_stage(ffs_result, inputs, nothing)
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result)
+    end
+
+    pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
+
+    run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles)
+
+    # SLAYER runs after PE so it appends to the PE output file; it falls back to the
+    # ForceFreeStates file when PE did not run.
+    pe_file = if "PerturbedEquilibrium" in keys(inputs)
+        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
+        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
+    else
+        ctrl.HDF5_filename
+    end
+    slayer_result = run_slayer_stage(ffs_result, inputs, pe_file)
+
+    # ----------------------------------------------------------------
+    # Done
+    # ----------------------------------------------------------------
+    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+
+    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
+
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result)
+
+end
+
+"""
+    _mode_range_label(intr) -> String
+
+Compact label for the resolved toroidal mode range, `"1"` for a single `n` and `"1:3"` for a range.
+"""
+_mode_range_label(intr::ForceFreeStatesInternal) = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
+
+"""
+    resolve_mode_space!(intr, ctrl) -> intr
+
+Resolve the requested toroidal mode range onto `intr`, filling an unspecified bound from the
+other one and rejecting ranges that contain no supported `n >= 1` mode.
+"""
+function resolve_mode_space!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
+    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
+    intr.nlow, intr.nhigh = ctrl.nn_low, ctrl.nn_high
+    if intr.nlow == 0 && intr.nhigh == 0
+        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
+    elseif intr.nlow == 0
+        intr.nlow = intr.nhigh
+    elseif intr.nhigh == 0
+        intr.nhigh = intr.nlow
+    end
+    if intr.nlow > intr.nhigh
+        error("nn_low=$(intr.nlow) cannot be greater than nn_high=$(intr.nhigh)")
+    end
+    if intr.nhigh < 1
+        error("All requested toroidal modes (n=$(intr.nlow):$(intr.nhigh)) are below 1; " *
+              "n < 1 modes are not supported")
+    end
+    if intr.nlow < 1
+        @warn "Clamping nn_low from $(intr.nlow) to 1; n < 1 modes are not supported"
+        intr.nlow = 1
+    end
+    intr.npert = intr.nhigh - intr.nlow + 1
+    return intr
+end
+
+"""
+    load_kinetic_context(inputs, intr, ctrl, equil) -> (kf_ctrl, kinetic_profiles)
+
+Build the KineticForces control and load the kinetic profiles once for the whole run.
+`kinetic_profiles` is `nothing` when no stage asks for them.
+"""
+function load_kinetic_context(
+    inputs::Dict{String,Any},
+    intr::ForceFreeStatesInternal,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium
+)
+    # The profiles are reused by the grid refinement, the stability kinetic callback (via
+    # `calculated_cb`), and the post-PE torque diagnostics block. The `"fixed"` kinetic source
+    # path in stability does not need kinetic_profiles, but the post-PE block always does, so we
+    # load whenever a [KineticForces] section is present or the stability path requests the
+    # calculated source. psio is invariant across grid re-formation.
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
+        KineticForces.KineticForcesControl(;
+            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
+        KineticForces.KineticForcesControl()
+
+    kinetic_profiles = nothing
+    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+    if needs_kinetic_profiles
+        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
+        kinetic_profiles = Equilibrium.load_kinetic_profiles(
+            kinetic_file;
+            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
+            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+            chi1=2π * equil.psio)
+    end
+
+    return kf_ctrl, kinetic_profiles
+end
+
+"""
+    maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles) -> equil
+
+Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, kinetic
+profiles), pin knots on rational surfaces, and re-form on the refined grid from the in-memory
+input — no file re-read. Returns `equil` untouched when the configuration wants a single pass.
+"""
+function maybe_reform_equilibrium(
+    equil::Equilibrium.PlasmaEquilibrium,
+    eq_config::Equilibrium.EquilibriumConfig,
+    additional_input,
+    intr::ForceFreeStatesInternal,
+    ctrl::ForceFreeStatesControl,
+    kinetic_profiles
+)
+    Equilibrium.wants_two_pass(eq_config) || return equil
+
+    mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+    # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
+    # so the rational-surface brackets clear a zone large enough for every mode.
+    n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
+    psi_nodes = Equilibrium.refined_psi_grid(equil;
+        tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+        singfac_min=ctrl.singfac_min, n_min=n_min)
+    rerun_input = if additional_input !== nothing
+        # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
+        # path re-runs read_imas, which must resolve the same psihigh both passes;
+        # _validate_psi_nodes errors loudly if it does not.
+        additional_input
+    elseif equil.ingest isa Equilibrium.DirectIngest
+        Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
+    elseif equil.ingest isa Equilibrium.InverseIngest
+        Equilibrium.build_inverse_from_ingest(eq_config, equil.ingest)
+    else
+        nothing  # fall back to re-reading the input file
+    end
+    equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+    implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
+    if implied > 1.5 * (length(psi_nodes) - 1)
+        @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
+              "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
+    end
+    @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$(_mode_range_label(intr)))"
+
+    return equil
+end
+
+"""
+    snapshot_forcing_modes(inputs, path, ctrl, preloaded) -> Union{Nothing,Vector{ForcingMode}}
+
+Capture the file-based forcing modes before the solve, when PerturbedEquilibrium is enabled, so
+they land in `Input/RawInputs/ForcingTerms/` alongside the TOML blob. Returns `preloaded`
+unchanged when the caller (the rerun path) already supplied the modes.
+"""
+function snapshot_forcing_modes(
+    inputs::Dict{String,Any},
+    path::String,
+    ctrl::ForceFreeStatesControl,
+    preloaded::Union{Nothing,Vector{ForcingTerms.ForcingMode}}
+)
+    # Coil forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on replay,
+    # so only the file-based formats need their modes captured here.
+    forcing_modes_snapshot = preloaded
     if forcing_modes_snapshot === nothing && "PerturbedEquilibrium" in keys(inputs)
         ft_raw = get(inputs, "ForcingTerms", Dict{String,Any}())
         scalar_forcing = filter(p -> p.first != "coil_set", ft_raw)
@@ -323,13 +439,41 @@ function main_from_inputs(
             )
         end
     end
+    return forcing_modes_snapshot
+end
 
-    # ----------------------------------------------------------------
-    # Force-Free States
-    # ----------------------------------------------------------------
-    @info "\n  Force-Free States\n$_SECTION"
-    ffs_start = time()
+"""
+    run_local_stability(ctrl, equil) -> (locstab, ballooning_boundary)
 
+Run the LocalStability stage when `local_stability_flag` is set. `locstab` holds `D_I` from the
+ballooning coefficient system and the local ballooning result, `ballooning_boundary` the first
+α-vs-ψ_N stability boundary; both are empty placeholders when the stage is off.
+"""
+function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+    locstab = nothing
+    ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
+    if ctrl.local_stability_flag
+        locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
+        # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
+        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
+    end
+    return locstab, ballooning_boundary
+end
+
+"""
+    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, ffit)
+
+Set up the force-free-states solve on `intr`: integration limits, the surviving singular
+surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
+Euler-Lagrange (and, when requested, kinetic) matrices.
+"""
+function prepare_force_free_states!(
+    intr::ForceFreeStatesInternal,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    kf_ctrl::KineticForces.KineticForcesControl,
+    kinetic_profiles
+)
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
 
@@ -340,16 +484,6 @@ function main_from_inputs(
         # something like ?
         # equil.config.psihigh = intr.psilim
         # equil = set_up_equilibrium(equil.config)
-    end
-
-    # Compute local stability (if desired). `locstab` holds `D_I` from the ballooning
-    # coefficient system and the local ballooning result; `nothing` when not computed.
-    locstab = nothing
-    ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
-    if ctrl.local_stability_flag
-        locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
-        # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
-        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
     end
 
     # Find all singular surfaces in the equilibrium
@@ -449,6 +583,25 @@ function main_from_inputs(
         end
     end
 
+    return metric, ffit
+end
+
+"""
+    run_force_free_states(ctrl, equil, ffit, intr, metric) -> ForceFreeStatesResult
+
+Run the formalism selected by `ctrl.integrator` — the standalone Galerkin solve, or the
+Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publish its products as a
+`ForceFreeStatesResult`.
+"""
+function run_force_free_states(
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit,
+    intr::ForceFreeStatesInternal,
+    metric
+)
+    nstring = _mode_range_label(intr)
+
     # The three formalisms are exclusive. Galerkin solves the same Euler-Lagrange system
     # variationally rather than by radial ODE integration, so it replaces both the integration
     # and the free-boundary energies, and supplies its own vacuum response at psilim.
@@ -504,69 +657,29 @@ function main_from_inputs(
         end
     end
 
-    # Publish the solve: from here on the downstream stages read `ffs_result`, never `intr`.
-    ffs_result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data)
+    # Publish the solve: from here on the downstream stages read the result, never `intr`.
+    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data)
+end
 
-    if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(
-            ffs_result;
-            git_version=git_version,
-            inputs=inputs,
-            forcing_modes=forcing_modes_snapshot,
-            locstab=locstab,
-            ballooning_boundary=ballooning_boundary
-        )
-        @info "Results written to $(ctrl.HDF5_filename)"
-    end
+"""
+    run_perturbed_equilibrium(result, inputs, forcing_modes_snapshot, preloaded_coil_sets) -> pe_state
 
-    @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
-
-    # SLAYER tearing-mode analysis stage. Needs only the force-free-states result, so it runs
-    # in both the force_termination=true path and the full pipeline. `pe_file` is the
-    # HDF5 file PE wrote (to append into), or `nothing` if PE did not run.
-    function _run_slayer_stage(pe_file::Union{String,Nothing})
-        ("SLAYER" in keys(inputs)) || return nothing
-        # SLAYER is a post-processing diagnostic. A failure here must not
-        # discard the equilibrium / stability / PE results already computed,
-        # so the whole stage is guarded: on error we log loudly and return
-        # `nothing` for the `slayer` field rather than propagating.
-        try
-            slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-            slayer_ctrl.enabled || return nothing
-            @info "\n  SLAYER\n$_SECTION"
-            slayer_start = time()
-            result = Runner.run_slayer(ffs_result, slayer_ctrl;
-                dir_path=ffs_result.dir_path)
-            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
-            h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
-            h5_path = joinpath(ffs_result.dir_path, h5_filename)
-            # Append the Tearing/ group; create the file if no prior stage wrote
-            # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
-            HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
-                Runner.write_slayer_hdf5!(f, result)
-            end
-            @info "SLAYER results written to $h5_filename"
-            return result
-        catch err
-            @error "SLAYER stage failed; continuing without tearing results. " *
-                   "Equilibrium / stability / PE outputs are unaffected." exception =
-                (err, catch_backtrace())
-            return nothing
-        end
-    end
-
-    # Early exit if user only requested force-free states (SLAYER still runs).
-    if ctrl.force_termination
-        slayer_result = _run_slayer_stage(nothing)
-        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result)
-    end
-
+Run the perturbed-equilibrium stage against a published force-free-states `result` and write its
+outputs. Returns `nothing` when the deck carries no `[PerturbedEquilibrium]` section.
+"""
+function run_perturbed_equilibrium(
+    result::ForceFreeStatesResult,
+    inputs::Dict{String,Any},
+    forcing_modes_snapshot::Union{Nothing,Vector{ForcingTerms.ForcingMode}},
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}
+)
     # ----------------------------------------------------------------
     # Perturbed Equilibrium
     # ----------------------------------------------------------------
     @info "\n  Perturbed Equilibrium\n$_SECTION"
     pe_start = time()
+
+    ctrl = result.control
 
     # Check for PerturbedEquilibrium section and run if present
     pe_state = nothing
@@ -589,10 +702,10 @@ function main_from_inputs(
         pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(;
             (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...
         )
-        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs_result.dir_path)
+        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=result.dir_path)
 
         # Inner-layer penetrated resonant field; zeros under ideal closure.
-        pe_intr.inner_bpen = ffs_result.bpen
+        pe_intr.inner_bpen = result.bpen
 
         # Reuse the forcing modes loaded at snapshot time (or injected by
         # `build_inputs_from_h5`) so the PE compute step never re-reads the original
@@ -609,13 +722,13 @@ function main_from_inputs(
         end
 
         # Run perturbed equilibrium calculations
-        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs_result, ft_ctrl, pe_ctrl, pe_intr)
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(result, ft_ctrl, pe_ctrl, pe_intr)
 
         # Write perturbed equilibrium outputs to same HDF5 file
         if pe_ctrl.write_outputs_to_HDF5
             output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
             PerturbedEquilibrium.write_outputs_to_HDF5(
-                pe_state, pe_intr, joinpath(ffs_result.dir_path, output_file)
+                pe_state, pe_intr, joinpath(result.dir_path, output_file)
             )
             @info "Results written to $output_file"
         end
@@ -623,62 +736,97 @@ function main_from_inputs(
         # Snapshot the coil geometry actually used into the gpec.h5 output so the run
         # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
         if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
-            _write_coil_snapshot!(joinpath(ffs_result.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
+            _write_coil_snapshot!(joinpath(result.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
         end
     end
 
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
 
+    return pe_state
+end
+
+"""
+    run_kinetic_forces(inputs, result, pe_state, kf_ctrl, kinetic_profiles)
+
+Compute and write the neoclassical toroidal viscosity torque diagnostics when the deck carries a
+`[KineticForces]` section. No-op when the perturbed-equilibrium state the operators contract
+against is missing.
+"""
+function run_kinetic_forces(
+    inputs::Dict{String,Any},
+    result::ForceFreeStatesResult,
+    pe_state,
+    kf_ctrl::KineticForces.KineticForcesControl,
+    kinetic_profiles
+)
     # ----------------------------------------------------------------
     # KineticForces (Neoclassical Toroidal Viscosity)
     # ----------------------------------------------------------------
-    if "KineticForces" in keys(inputs)
-        @info "\n  KineticForces\n$_SECTION"
-        kf_start = time()
+    ("KineticForces" in keys(inputs)) || return nothing
 
-        # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
-        # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
-        if pe_state === nothing
-            @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
-        else
-            # kf_ctrl and kinetic_profiles were loaded once above the stability block.
-            kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
-            KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs_result, equil, metric)
+    @info "\n  KineticForces\n$_SECTION"
+    kf_start = time()
 
-            kf_state = KineticForces.KineticForcesState()
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
+    # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
+    # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
+    if pe_state === nothing
+        @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
+    else
+        # kf_ctrl and kinetic_profiles were loaded once before the equilibrium was re-formed.
+        kf_intr = KineticForces.KineticForcesInternal(result.equil; verbose=kf_ctrl.verbose)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, result, result.equil, result.metric)
 
-            if kf_ctrl.write_outputs_to_HDF5
-                h5open(joinpath(ffs_result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                    KineticForces.write_to_hdf5!(h5file, kf_state)
-                end
+        kf_state = KineticForces.KineticForcesState()
+        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles)
+
+        if kf_ctrl.write_outputs_to_HDF5
+            h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                KineticForces.write_to_hdf5!(h5file, kf_state)
             end
         end
-
-        @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
     end
 
-    # ----------------------------------------------------------------
-    # SLAYER tearing-mode analysis (after PE so it appends to the PE output
-    # file; falls back to the ForceFreeStates file when PE did not run).
-    # ----------------------------------------------------------------
-    pe_file = if "PerturbedEquilibrium" in keys(inputs)
-        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
-        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
-    else
-        ctrl.HDF5_filename
+    @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
+
+    return nothing
+end
+
+"""
+    run_slayer_stage(result, inputs, pe_file) -> slayer_result
+
+Run the SLAYER tearing-mode analysis off the force-free-states `result`, appending its group to
+`pe_file` (or the force-free-states output when PE did not run). Needs only the result, so it
+runs in both the `force_termination = true` path and the full pipeline.
+"""
+function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any}, pe_file::Union{String,Nothing})
+    ("SLAYER" in keys(inputs)) || return nothing
+    # SLAYER is a post-processing diagnostic. A failure here must not
+    # discard the equilibrium / stability / PE results already computed,
+    # so the whole stage is guarded: on error we log loudly and return
+    # `nothing` for the `slayer` field rather than propagating.
+    try
+        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+        slayer_ctrl.enabled || return nothing
+        @info "\n  SLAYER\n$_SECTION"
+        slayer_start = time()
+        slayer_result = Runner.run_slayer(result, slayer_ctrl;
+            dir_path=result.dir_path)
+        @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+        h5_filename = pe_file === nothing ? result.control.HDF5_filename : pe_file
+        h5_path = joinpath(result.dir_path, h5_filename)
+        # Append the Tearing/ group; create the file if no prior stage wrote
+        # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+        HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+            Runner.write_slayer_hdf5!(f, slayer_result)
+        end
+        @info "SLAYER results written to $h5_filename"
+        return slayer_result
+    catch err
+        @error "SLAYER stage failed; continuing without tearing results. " *
+               "Equilibrium / stability / PE outputs are unaffected." exception =
+            (err, catch_backtrace())
+        return nothing
     end
-    slayer_result = _run_slayer_stage(pe_file)
-
-    # ----------------------------------------------------------------
-    # Done
-    # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-
-    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
-
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result)
-
 end
 
 """
