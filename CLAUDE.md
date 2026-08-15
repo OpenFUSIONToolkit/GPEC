@@ -36,7 +36,7 @@ julia -t 4 --project=. test/runtests.jl
 # - test/runtests_equil.jl              # Equilibrium reconstruction
 # - test/runtests_sing.jl               # Singular surface handling
 # - test/runtests_parallel_integration.jl  # Parallel FM integration and BVP Delta'
-# - test/runtests_thread_invariance.jl  # Parallel-vs-serial equivalence
+# - test/runtests_decomposition_invariance.jl  # Riccati Δ' chunk-decomposition invariance
 # - test/runtests_fullruns.jl           # End-to-end tests
 ```
 

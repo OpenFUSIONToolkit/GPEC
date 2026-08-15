@@ -32,7 +32,7 @@ else
     include("./runtests_parallel_integration.jl")
     include("./runtests_result_struct.jl")
     include("./runtests_solve_api.jl")
-    include("./runtests_thread_invariance.jl")
+    include("./runtests_decomposition_invariance.jl")
     include("./runtests_sing.jl")
     include("./runtests_innerlayer.jl")
     include("./runtests_tj_analytic.jl")

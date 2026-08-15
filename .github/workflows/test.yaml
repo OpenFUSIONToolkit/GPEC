@@ -108,10 +108,10 @@ jobs:
         threads:
           - '1'
         include:
-          # The parallel FM/BVP paths degenerate to their serial form when
-          # effective_threads = min(nthreads, parallel_threads) collapses to 1, so a
-          # single-threaded matrix never exercises threaded execution at all. This leg runs the
-          # suite multi-threaded, which is what makes the thread-invariance tests meaningful.
+          # The Riccati chunk driver runs its chunks through Threads.@threads, which executes
+          # serially in a single-threaded session — so a single-threaded matrix never exercises
+          # threaded scheduling at all. This leg runs the suite multi-threaded, making the
+          # chunk-decomposition and boundary-pinning tests cover real concurrent execution.
           - version: '1.11'
             os: ubuntu-latest
             threads: '4'
