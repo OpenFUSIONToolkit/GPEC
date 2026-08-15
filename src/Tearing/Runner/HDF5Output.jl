@@ -12,7 +12,7 @@
 #   ├── PerSurface/         -- struct-of-arrays for SLAYERParameters fields
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
-#   ├── Roots/              -- Q_root (real, imag), omega_Hz, gamma_Hz
+#   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
 #   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots
 #   │                           (flat-plus-offsets ragged encoding)
 #   └── Scan/               -- optional: full Q/Δ scan data
@@ -83,9 +83,9 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/R0" => (; long_name="major radius", units="m", dims=("surface",)),
     "PerSurface/bt" => (; long_name="toroidal field", units="T", dims=("surface",)),
     "PerSurface/sval_r" => (; long_name="r-based magnetic shear r_s·(dq/dr)/q (Fitzpatrick convention)", dims=("surface",)),
-    "PerSurface/dr_val" =>
+    "PerSurface/D_R" =>
         (; long_name="resistive interchange D_R = E + F + H² for the critical-Δ formula (auto-derived from GGJ coefficients unless overridden)", dims=("surface",)),
-    "PerSurface/dgeo_val" => (; long_name="Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied)", dims=("surface",)),
+    "PerSurface/D_geo" => (; long_name="Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied)", dims=("surface",)),
     "PerSurface/eta" => (; long_name="parallel resistivity at each surface", units="Ohm*m", dims=("surface",)),
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
     "PerSurface/dc_tmp" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
@@ -99,10 +99,8 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/taua" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/taur" => (; long_name="resistive diffusion time τ_R per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/v1" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
-    "PerSurface/DpMatrix/real" => (; long_name="Re of the full Δ' matrix coupling the rational surfaces", dims=("surface", "surface")),
-    "PerSurface/DpMatrix/imag" => (; long_name="Im of the full Δ' matrix coupling the rational surfaces", dims=("surface", "surface")),
-    "Roots/Q_root_real" => (; long_name="Re of the dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
-    "Roots/Q_root_imag" => (; long_name="Im of the dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
+    "PerSurface/dp_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces", dims=("surface_row", "surface_col")),
+    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
     "Roots/omega_Hz" =>
         (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root (dataset name is a misnomer: angular, not cycles/s)", units="rad/s", dims=("surface",)),
     "Roots/gamma_Hz" =>
@@ -111,26 +109,21 @@ const TEARING_H5_ANNOTATIONS = [
     "LayerWidths/ising" => (; long_name="rational-surface index of each row", dims=("surface",)),
     "LayerWidths/m" => (; long_name="resonant poloidal mode number m per surface", dims=("surface",)),
     "LayerWidths/n" => (; long_name="resonant toroidal mode number n per surface", dims=("surface",)),
-    "LayerWidths/dels_db_real" => (; long_name="Re of the dimensionless layer thickness δ_s/d_β", dims=("surface",)),
-    "LayerWidths/dels_db_imag" => (; long_name="Im of the dimensionless layer thickness δ_s/d_β", dims=("surface",)),
-    "LayerWidths/delta_s_real" => (; long_name="Re of the complex resistive layer thickness δ_s (Riccati)", dims=("surface",)),
-    "LayerWidths/delta_s_imag" => (; long_name="Im of the complex resistive layer thickness δ_s (Riccati)", dims=("surface",)),
+    "LayerWidths/dels_db" => (; long_name="complex dimensionless layer thickness δ_s/d_β", dims=("surface",)),
+    "LayerWidths/delta_s" => (; long_name="complex resistive layer thickness δ_s (Riccati)", dims=("surface",)),
     "LayerWidths/delta_s_m" => (; long_name="physical resistive layer thickness |δ_s|", units="m", dims=("surface",)),
     "LayerWidths/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",))
 ]
 
 const TEARING_RAGGED_H5_ANNOTATIONS = [
-    "flat_real" => (; long_name="Re of the concatenated complex entries (rows delimited by offsets)"),
-    "flat_imag" => (; long_name="Im of the concatenated complex entries (rows delimited by offsets)"),
+    "flat" => (; long_name="concatenated complex entries (rows delimited by offsets)"),
     "offsets" => (; long_name="ragged-array offsets: row k spans offsets[k]+1:offsets[k+1]")
 ]
 
 const TEARING_SCAN_H5_ANNOTATIONS = [
     "kind" => (; long_name="scan kind: brute_force or amr"),
-    "Q_real" => (; long_name="Re of the sampled normalized frequency Q"),
-    "Q_imag" => (; long_name="Im of the sampled normalized frequency Q"),
-    "Delta_real" => (; long_name="Re of the inner-layer matching Δ(Q)"),
-    "Delta_imag" => (; long_name="Im of the inner-layer matching Δ(Q)"),
+    "Q" => (; long_name="sampled complex normalized frequency Q"),
+    "Delta" => (; long_name="complex inner-layer matching Δ(Q)"),
     "re_axis" => (; long_name="Re(Q) axis of the brute-force scan grid"),
     "im_axis" => (; long_name="Im(Q) axis of the brute-force scan grid"),
     "n_cells" => (; long_name="number of AMR cells sampled"),
@@ -151,8 +144,8 @@ function _annotate_tearing!(g)
             sg = g["Scan"][sub]
             ann.annotate!(sg, TEARING_SCAN_H5_ANNOTATIONS)
             # Brute-force scans store 2-D (re, im) grids; AMR stores flat samples.
-            if haskey(sg, "Q_real") && ndims(sg["Q_real"]) == 2
-                for a in ("Q_real", "Q_imag", "Delta_real", "Delta_imag")
+            if haskey(sg, "Q") && ndims(sg["Q"]) == 2
+                for a in ("Q", "Delta")
                     haskey(sg, a) && (attrs(sg[a])["dims"] = "(re_axis, im_axis)")
                 end
             end
@@ -173,17 +166,17 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     for fname in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor,
         :Q_e, :Q_i, :iota_e,
         :tauk, :tau_r, :delta_n,
-        :rs, :R0, :bt, :sval_r, :dr_val, :dgeo_val,
+        :rs, :R0, :bt, :sval_r,
         :eta, :d_beta, :dc_tmp)
         ps[String(fname)] = Float64[getfield(p, fname) for p in params]
     end
+    # Physics names for the interchange/geometric inputs (struct fields keep *_val).
+    ps["D_R"] = Float64[p.dr_val for p in params]
+    ps["D_geo"] = Float64[p.dgeo_val for p in params]
     # Store dc_type per-surface as string array
     ps["dc_type"] = String[String(p.dc_type) for p in params]
 
-    # Full Δ' matrix, split real/imag
-    dp = create_group(ps, "DpMatrix")
-    dp["real"] = real.(dp_matrix)
-    dp["imag"] = imag.(dp_matrix)
+    ps["dp_matrix"] = dp_matrix
     return nothing
 end
 
@@ -196,17 +189,14 @@ function _write_per_surface!(g, params::AbstractVector{GGJParameters},
     for fname in (:E, :F, :G, :H, :K, :M, :taua, :taur, :v1)
         ps[String(fname)] = Float64[getfield(p, fname) for p in params]
     end
-    dp = create_group(ps, "DpMatrix")
-    dp["real"] = real.(dp_matrix)
-    dp["imag"] = imag.(dp_matrix)
+    ps["dp_matrix"] = dp_matrix
     return nothing
 end
 
 # ---------- eigenvalue roots ----------
 function _write_roots!(g, r::SLAYERResult)
     roots = create_group(g, "Roots")
-    roots["Q_root_real"] = real.(r.Q_root)
-    roots["Q_root_imag"] = imag.(r.Q_root)
+    roots["Q_root"] = r.Q_root
     roots["omega_Hz"] = r.omega_Hz
     roots["gamma_Hz"] = r.gamma_Hz
     # `no_root[k] == 1` flags entries where the extraction found NO usable
@@ -225,11 +215,9 @@ function _write_layer_widths!(g, widths::Vector{LayerWidths})
     for fname in (:ising, :m, :n)
         lw[String(fname)] = Int[getfield(w, fname) for w in widths]
     end
-    # Dimensionless del_s/d_beta and the complex layer thickness, split re/im.
-    lw["dels_db_real"] = Float64[real(w.dels_db) for w in widths]
-    lw["dels_db_imag"] = Float64[imag(w.dels_db) for w in widths]
-    lw["delta_s_real"] = Float64[real(w.delta_s) for w in widths]
-    lw["delta_s_imag"] = Float64[imag(w.delta_s) for w in widths]
+    # Dimensionless del_s/d_beta and the complex layer thickness.
+    lw["dels_db"] = ComplexF64[w.dels_db for w in widths]
+    lw["delta_s"] = ComplexF64[w.delta_s for w in widths]
     # Physical thickness [m] and the β-weighted ion drift scale [m].
     lw["delta_s_m"] = Float64[w.delta_s_m for w in widths]
     lw["d_beta"] = Float64[w.d_beta for w in widths]
@@ -255,22 +243,19 @@ function _write_diagnostics!(g, r::SLAYERResult)
     return nothing
 end
 
-# Write a ragged vector-of-vectors of ComplexF64 as (flat_re, flat_im,
-# offsets) — `offsets[k+1] - offsets[k]` is the length of row `k`. This
-# avoids HDF5 VLEN types, which have patchy cross-language support.
+# Write a ragged vector-of-vectors of ComplexF64 as (flat, offsets) —
+# `offsets[k+1] - offsets[k]` is the length of row `k`. This avoids HDF5 VLEN
+# types, which have patchy cross-language support.
 function _write_ragged_complex!(parent, name::String,
     data::Vector{Vector{ComplexF64}})
     g = create_group(parent, name)
-    flat_re = Float64[]
-    flat_im = Float64[]
+    flat = ComplexF64[]
     offsets = Int[0]
     for v in data
-        append!(flat_re, real.(v))
-        append!(flat_im, imag.(v))
+        append!(flat, v)
         push!(offsets, offsets[end] + length(v))
     end
-    g["flat_real"] = flat_re
-    g["flat_imag"] = flat_im
+    g["flat"] = flat
     g["offsets"] = offsets
     return nothing
 end
@@ -287,10 +272,8 @@ end
 
 function _write_single_scan!(g, data::ScanResult)
     g["kind"] = "brute_force"
-    g["Q_real"] = real.(data.Q)
-    g["Q_imag"] = imag.(data.Q)
-    g["Delta_real"] = real.(data.Δ)
-    g["Delta_imag"] = imag.(data.Δ)
+    g["Q"] = data.Q
+    g["Delta"] = data.Δ
     g["re_axis"] = data.re_axis
     g["im_axis"] = data.im_axis
     return nothing
@@ -298,10 +281,8 @@ end
 
 function _write_single_scan!(g, data::AMRResult)
     g["kind"] = "amr"
-    g["Q_real"] = real.(data.Q)
-    g["Q_imag"] = imag.(data.Q)
-    g["Delta_real"] = real.(data.Δ)
-    g["Delta_imag"] = imag.(data.Δ)
+    g["Q"] = data.Q
+    g["Delta"] = data.Δ
     g["n_cells"] = length(data.cells)
     g["truncated"] = Int(data.truncated)
     return nothing

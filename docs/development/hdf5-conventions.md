@@ -16,7 +16,7 @@ Physics-topic groups elevated to top level (rather than nested under their produ
 These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness-internal synthetic fixtures (e.g. the `ggj/*` reference files written by `regression-harness/src/runner.jl`) are out of scope.
 
 - **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinDeltaPrime/`).
-- **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root_real`, `pest3_Delta`, `2piF`).
+- **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root`, `pest3_Delta`, `2piF`).
 - **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), scan indices (`Surface_<k>`, `psi_<i>`).
 
 ## Inputs live only under `Input/`
@@ -48,16 +48,16 @@ Every dataset outside `Input/` (raw snapshot) and `GalerkinIntegration/Match/` (
 
 - **`long_name`** — plain-text physics description.
 - **`units`** — SI string (`"T"`, `"Wb/rad"`, `"A"`, `"m"`, `"J"`, `"N*m"`, `"Hz"`, `"Ohm*m"`); `"1"` for dimensionless (CF convention). Normalized quantities state the normalization in `long_name` (e.g. the power-normalized stability energies are per unit ⟨|ξ|²⟩, not joules).
-- **`dims`** — required on rank ≥ 2 datasets: a greppable string like `"(psi, m)"` listing axis names in **Julia (column-major) order, axis 1 first**. Note h5py/HDFView users see file dimensions in the reversed (row-major) order.
+- **`dims`** — required on rank ≥ 2 datasets: a greppable string like `"(psi, m)"` listing axis names in **Julia (column-major) order, axis 1 first**. Note h5py/HDFView users see file dimensions in the reversed (row-major) order. Square-matrix axes use distinct `_row`/`_col` names (`(mode_row, mode_col)`): netCDF permits repeated dimension names, but xarray mangles them on load.
 - **HDF5 Dimension Scales** (the netCDF-4 coordinate mechanism): shared coordinate datasets (`psi` grids, rational-surface `psi`, geometry `xs`/`ys`) are marked with `h5ds_set_scale` and attached per-axis with `h5ds_attach_scale`/`h5ds_set_label`, so h5py `.dims`, xarray, and HDFView resolve axes natively. The H5DS C API indexes file (row-major) dimensions: Julia axis `k` of an `N`-d dataset is C index `N - k`.
 
 Root-level file attributes: `schema_version` (currently `"2.0"`; bump on breaking schema changes — readers dispatch on it), `Conventions = "GPEC-HDF5-2.0"`, `references`, `title` (run description), `date_created` (ISO 8601 UTC). The code version stays in `Info/git_version`.
 
-Mechanism: writers stay table-driven — each writer keeps a `path => (; long_name, units, dims)` table next to it (`src/HDF5Schema.jl` for the main writer; alongside `write_galerkin!`, the PerturbedEquilibrium writer, `KineticForces/Output.jl`, and `Tearing/Runner/HDF5Output.jl` for the rest) and applies it post-write via `Utilities.HDF5Annotations.annotate!`. Entries for conditionally-written datasets are simply skipped when absent. When adding a dataset, add its table entry in the same commit — the schema test fails otherwise.
+Mechanism: writers stay table-driven — each writer keeps a `path => (; long_name, units, dims, scale, attach)` table next to it (`scale` marks a coordinate dataset as a dimension scale; `attach` binds axes to scales — see the `Utilities.HDF5Annotations.annotate!` docstring) (`src/HDF5Schema.jl` for the main writer; alongside `write_galerkin!`, the PerturbedEquilibrium writer, `KineticForces/Output.jl`, and `Tearing/Runner/HDF5Output.jl` for the rest) and applies it post-write via `Utilities.HDF5Annotations.annotate!`. Entries for conditionally-written datasets are simply skipped when absent. When adding a dataset, add its table entry in the same commit — the schema test fails otherwise.
 
 ## File-wide conventions
 
-- Complex numbers are stored as the native HDF5.jl compound type (readable by h5py as a compound dtype).
+- Complex quantities are stored as the native HDF5.jl compound type (readable by h5py as a compound dtype) — **never split into `*_real`/`*_imag` dataset pairs**. Sole sanctioned exception: `Input/RawInputs/ForcingTerms/amplitude_{real,imag}`, which mirrors the external forcing ingest-file format and keeps pre-existing snapshots replayable.
 - `NaN` is the not-computed sentinel in numeric datasets (e.g. auto-derived settings, rootless growth-rate entries).
 - Ragged (variable-length) data uses the flat-plus-`offsets` companion pattern (`offsets[k+1] - offsets[k]` = length of row `k`) rather than HDF5 VLEN types, e.g. `KineticForces/<method>/EnergyIntegrals/` and `Tearing/Diagnostics/*`.
 

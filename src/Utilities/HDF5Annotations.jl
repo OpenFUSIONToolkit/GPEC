@@ -23,11 +23,24 @@ export annotate!, make_scale!, attach_scale!, write_root_attrs!
 
 Apply a metadata table to datasets under `parent` (an open `HDF5.File` or group).
 `table` iterates `path => meta` pairs where `meta` is a NamedTuple with fields
-`long_name` (required), `units` (default `"1"` = dimensionless), and optionally
-`dims` — a tuple of axis names in Julia (column-major) order, axis 1 first, stored
-as the greppable string attribute `dims = "(psi, m)"`. Missing paths are skipped.
+`long_name` (required), `units` (default `"1"` = dimensionless), and optionally:
+
+  - `dims` — tuple of axis names in Julia (column-major) order, axis 1 first, stored
+    as the greppable string attribute `dims = "(psi, m)"`.
+  - `scale` — mark this dataset as an HDF5 Dimension Scale with the given name
+    (netCDF-4 coordinate variable).
+  - `attach` — tuple of `axis => scale_path` pairs attaching declared scales to this
+    dataset's Julia axes; `scale_path` is relative to `parent` and its dimension
+    label comes from that entry's `scale` name (falling back to the path basename).
+
+Scales are marked in a first pass so attachments within the same table resolve.
+Missing paths are skipped throughout.
 """
 function annotate!(parent::Union{HDF5.File,HDF5.Group}, table)
+    for (path, meta) in table
+        sc = get(meta, :scale, nothing)
+        sc === nothing || make_scale!(parent, path, String(sc))
+    end
     for (path, meta) in table
         haskey(parent, path) || continue
         a = attrs(parent[path])
@@ -35,8 +48,24 @@ function annotate!(parent::Union{HDF5.File,HDF5.Group}, table)
         a["units"] = String(get(meta, :units, "1"))
         d = get(meta, :dims, nothing)
         d === nothing || (a["dims"] = "(" * join(d, ", ") * ")")
+        att = get(meta, :attach, nothing)
+        att === nothing && continue
+        for (axis, scale_path) in att
+            attach_scale!(parent, path, axis, scale_path, _scale_label(table, scale_path))
+        end
     end
     return parent
+end
+
+# Dimension label for an attachment: the target entry's `scale` name when the table
+# declares it, else the scale path's basename.
+function _scale_label(table, scale_path)
+    for (path, meta) in table
+        path == scale_path || continue
+        sc = get(meta, :scale, nothing)
+        sc === nothing || return String(sc)
+    end
+    return String(last(split(scale_path, '/')))
 end
 
 """

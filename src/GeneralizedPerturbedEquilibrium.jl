@@ -652,7 +652,7 @@ function main_from_inputs(
 
             if kf_ctrl.write_outputs_to_HDF5
                 h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                    KineticForces.write_to_hdf5!(h5file, kf_state)
+                    KineticForces.write_to_hdf5!(h5file, kf_state; dVdpsi_spline=equil.profiles.dVdpsi_spline)
                 end
             end
         end
