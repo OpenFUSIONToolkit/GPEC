@@ -13,10 +13,11 @@ _is_camelcase(name) = occursin(r"^[A-Z][A-Za-z0-9]*$", name)
 function _group_name_ok(parent_path, name)
     startswith(parent_path, "Input/") && return true
     parent_path == "KineticForces" && return true
-    # Multi-ion runs: KineticForces/PerSpecies/<species>/<method>/ — the species label
+    # Multi-ion runs nest KineticForces/PerSpecies/<species>/<method>/: the species label
     # (ion_z1_m2, impurity_z6_m12, electron) and the method token are both data-driven.
-    parent_path == "KineticForces/PerSpecies" && return true
-    startswith(parent_path, "KineticForces/PerSpecies/") && return true
+    # Exactly those two levels — anything deeper (EnergyIntegrals/, KineticMatrices/) is
+    # a normal group and still has to be CamelCase.
+    occursin(r"^KineticForces/PerSpecies(/[^/]+)?$", parent_path) && return true
     occursin(r"^Surface_\d+$", name) && return true
     return _is_camelcase(name)
 end
