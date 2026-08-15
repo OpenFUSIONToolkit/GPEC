@@ -52,8 +52,9 @@ driver returns dense displacement profiles, the Riccati driver returns the inter
 
 ### Forward integration
 
-`forward_eulerlagrange_integration` is the baseline driver.  It integrates the EL ODE directly
-in ``(U_1, U_2)`` using Tsit5 with adaptive step control.  Near each rational surface the
+`forward_eulerlagrange_integration` is the baseline driver — our implementation of the
+standard DCON radial integration [Glasser 2016].  It integrates the EL ODE directly
+in ``(U_1, U_2)`` using the adaptive 9th-order `Vern9` solver.  Near each rational surface the
 columns of ``U_2`` that correspond to resonant modes are zeroed via Gaussian reduction (GR),
 keeping the solution bounded; `transform_u!` undoes the reduction at the end, so `u_store`
 comes back dense in the axis (Euler-Lagrange) basis.  This is the reference path for
@@ -68,7 +69,9 @@ integrator = "forward"
 
 ### Riccati integration
 
-`riccati_eulerlagrange_integration` (the default) decomposes the radial domain into
+`riccati_eulerlagrange_integration` (the default) is our implementation of the STRIDE
+approach [Glasser 2018b], built on the dual Riccati reformulation [Glasser 2018a].  It
+decomposes the radial domain into
 independent chunks, integrates each chunk's fundamental-matrix (FM) propagator in parallel
 using `Threads.@threads`, then multiplies the propagators in order and applies each
 singular-surface crossing serially.  It is the only driver that produces the inter-surface
@@ -88,7 +91,7 @@ w = Q - \bar{K}S.
 than integrating the quadratic Riccati ODE directly (which blows up when ``|S|`` is large),
 the code integrates the linear EL system with `sing_der!` as the RHS and recovers
 ``S = U_1 U_2^{-1}`` via periodic renormalization — an approach that is mathematically
-equivalent to O(Δψ) but uses the ODE solver's full 5th-order accuracy.  Renormalization is
+equivalent to O(Δψ) but uses `Vern9`'s full 9th-order accuracy.  Renormalization is
 triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `ucrit`, and is
 forced at the end of each chunk.  At singular surface crossings,
 `riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching directly in column
