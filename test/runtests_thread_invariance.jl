@@ -57,10 +57,12 @@ function _run_at_thread_cap(dir::String, parallel_threads::Int)
         equil = GP_TI.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
     end
     intr.wall_settings = GP_TI.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    GP_TI.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+    # The toroidal range must be resolved before sing_lim!: under set_psilim_via_dmlim it
+    # truncates at (last_rational_q + dmlim)/n and so needs n.
     intr.nlow = ctrl.nn_low
     intr.nhigh = ctrl.nn_high
     intr.npert = 1
+    GP_TI.ForceFreeStates.sing_lim!(intr, ctrl, equil)
     GP_TI.ForceFreeStates.sing_find!(intr, equil)
     intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
     intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
