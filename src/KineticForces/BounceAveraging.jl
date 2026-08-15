@@ -147,7 +147,7 @@ end
 
 """
     compute_bounce_data(psi, n, l, q, bo, bmax, bmin, theta_bmax,
-                        tspl, B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f,
+                        tspl, B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f,
                         divxfac, wdfac, mass, chrg, T_s, method;
                         nlmda=128, ntheta=128,
                         smat=nothing, tmat=nothing, xmat=nothing,
@@ -168,8 +168,8 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 - `bmax, bmin`: Max/min of B(θ) at this ψ
 - `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
 - `tspl`: Periodic poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
-- `B_extrap`: Endpoint-fit (non-periodic) cubic of B(θ) used for v_par and the
-  bounce-point roots (the Fortran `vspl` equivalent)
+- `B_vpar`: Periodic cubic of B(θ) used for v_par and the bounce-point roots
+  (the Fortran `vspl` equivalent)
 - `mfac`: Poloidal mode numbers [mlow:mhigh]
 - `chi1`: 2π·ψ₀ flux normalization
 - `ro`: Major radius [m]
@@ -190,7 +190,7 @@ function compute_bounce_data(
     psi::Float64, n::Int, l::Int, q::Float64,
     bo::Float64, bmax::Float64, bmin::Float64,
     theta_bmax::Float64,
-    tspl, B_extrap, mfac::Vector{Int}, chi1::Float64, ro::Float64,
+    tspl, B_vpar, mfac::Vector{Int}, chi1::Float64, ro::Float64,
     dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     mass::Float64, chrg::Float64,
@@ -241,12 +241,12 @@ function compute_bounce_data(
 
         # Find bounce points and build θ sub-grid
         _, _, tdt_pts, tdt_wts = _find_bounce_points_and_grid(
-            lmda, bo, sigma, B_extrap, theta_bmax, psi, ntheta)
+            lmda, bo, sigma, B_vpar, theta_bmax, psi, ntheta)
 
         # Bounce integrals over θ (Fortran lines 674-735)
         wbbar, wdbar, dJdJ_val, wmats_lmda = _bounce_integrate(
             tdt_pts, tdt_wts, lmda, lnq, sigma, n, q, bo,
-            tspl, B_extrap, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
+            tspl, B_vpar, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
             do_matrices, mpert, smat, tmat, xmat, ymat, zmat, scr)
 
         # Physical frequencies (Fortran lines 744-745)
@@ -409,12 +409,12 @@ end
 
 
 """
-Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` from the endpoint-fit cubic of B
-(`B_extrap`, built where the surface interpolants are constructed), keeping v_par
+Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` from the periodic cubic of B
+(`B_vpar`, built where the surface interpolants are constructed), keeping v_par
 consistent with the bounce-point roots as in Fortran's `vspl`.
 """
-@inline _vpar_from_extrap(B_extrap, lmda::Float64, bo::Float64, θ::Float64) =
-    1.0 - (lmda / bo) * B_extrap(mod(θ, 1.0))
+@inline _vpar_from_spline(B_vpar, lmda::Float64, bo::Float64, θ::Float64) =
+    1.0 - (lmda / bo) * B_vpar(mod(θ, 1.0))
 
 
 """
@@ -423,14 +423,14 @@ Returns (t1, t2, theta_points, theta_weights).
 """
 function _find_bounce_points_and_grid(
     lmda::Float64, bo::Float64, sigma::Int,
-    B_extrap, theta_bmax::Float64, psi::Float64,
+    B_vpar, theta_bmax::Float64, psi::Float64,
     ntheta::Int
 )
     if sigma == 0  # trapped
-        # Bounce points: all roots of v_par(θ) = 1 − (λ/bo)·B_extrap(θ) in (0,1),
+        # Bounce points: all roots of v_par(θ) = 1 − (λ/bo)·B_vpar(θ) in (0,1),
         # sorted descending — the same order as Fortran spline_roots, which the
         # marginally-trapped and deepest-well wrap logic below assume.
-        vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
+        vpar_fn = θ -> _vpar_from_spline(B_vpar, lmda, bo, θ)
         bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
 
         nbpts = length(bpts)
@@ -443,7 +443,7 @@ function _find_bounce_points_and_grid(
             t1 = bpts[1]
             t2 = bpts[1] + 1.0
         else
-            t1, t2 = _find_deepest_well(bpts, B_extrap, lmda, bo)
+            t1, t2 = _find_deepest_well(bpts, B_vpar, lmda, bo)
         end
 
         # Power-law grid refined near bounce points
@@ -463,7 +463,7 @@ end
 Find the deepest potential well (largest midpoint v_par) among bounce-point pairs,
 handling pairs that wrap through θ = 0/1.
 """
-function _find_deepest_well(bpts::Vector{Float64}, B_extrap, lmda::Float64, bo::Float64)
+function _find_deepest_well(bpts::Vector{Float64}, B_vpar, lmda::Float64, bo::Float64)
     nbpts = length(bpts)
     best_vpar = 0.0
     best_t1 = 0.0
@@ -477,7 +477,7 @@ function _find_deepest_well(bpts::Vector{Float64}, B_extrap, lmda::Float64, bo::
         else
             θmid = 0.5 * (bpts[i] + bpts[j])
         end
-        vpar_mid = _vpar_from_extrap(B_extrap, lmda, bo, θmid)
+        vpar_mid = _vpar_from_spline(B_vpar, lmda, bo, θmid)
         if vpar_mid > best_vpar
             best_t1 = bpts[i]
             best_t2 = bpts[j]
@@ -506,7 +506,7 @@ Ports Fortran torque.F90 lines 674-793.
 function _bounce_integrate(
     tdt_pts::Vector{Float64}, tdt_wts::Vector{Float64},
     lmda::Float64, lnq::Float64, sigma::Int, n::Int, q::Float64, bo::Float64,
-    tspl, B_extrap, chi1::Float64, ro::Float64,
+    tspl, B_vpar, chi1::Float64, ro::Float64,
     mfac::Vector{Int}, dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     do_matrices::Bool, mpert::Int,
@@ -550,9 +550,9 @@ function _bounce_integrate(
         jac = tspl_f[4]
         djdpsi = tspl_f[5]
 
-        # v_par from the endpoint-fit cubic (consistent with the bounce points);
+        # v_par from the periodic cubic (consistent with the bounce points);
         # the periodic tspl B_val remains the numerator field in the integrands.
-        vpar = 1.0 - (lmda / bo) * B_extrap(θmod)
+        vpar = 1.0 - (lmda / bo) * B_vpar(θmod)
 
         if vpar <= 0
             # Negative v_par near a bounce point: same fill rules as the Fortran bounce loop.
