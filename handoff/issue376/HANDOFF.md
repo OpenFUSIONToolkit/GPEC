@@ -28,9 +28,13 @@ on-demand-solution-derivatives merge) — see the note at the end of RESULTS.md 
 3. **Integrator-order experiment — done** (RESULTS.md §7). Result recorded there; the `src/` edits
    were reverted, so this branch still touches no source. If it is worth pursuing, it lands on its
    own branch with `regress --cases diiid_n1 --refs develop,local`.
-4. Remaining ranked follow-ups (smoothing splines for F/K/G, equilibrium `etol` noise floor, and
-   any per-deck `eulerlagrange_tolerance` change) are unstarted — each needs its own branch and a
-   regression-harness run.
+4. **Mechanism established** (RESULTS.md §8–§9, new `roughness.jl`): a ~1e-5 relative node-error
+   floor in the C/E/H coefficient matrices, amplified as ε/Δ² by spline interpolation. `etol`,
+   `mtheta` and the input equilibrium were each tested and ruled out as the source.
+5. **The one open follow-up that matters**: find what sets the ~1e-5 floor in C/E/H —
+   `Fourfit.jl:439-447`, the construction of `g31`, `jtheta`/`imat`, `q1` — given that A/B/D
+   (g22/g23/g33 only) are clean at 1e-8 and converging. Needs its own branch and a
+   regression-harness run. Do **not** re-test `etol`/`mtheta`/input resolution; §8 closed those.
 
 ## How to reproduce the runs
 

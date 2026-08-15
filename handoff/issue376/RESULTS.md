@@ -14,6 +14,13 @@ dψ ≈ 0.12·knotΔ, invariant across mpsi), so `nstep` scales with the number 
 regions where steps concentrate — dominated by the near-axis region where log-family grids pack
 hardest. Per-step cost is flat (~6 ms, Npert-sized LAPACK dominates).
 
+**And the reason the step size follows the knot spacing (§8–§9):** the C/E/H coefficient matrices
+carry a ~1e-5 relative node-error floor that does not shrink with mpsi. The spline interpolates it
+exactly, contributing ~ε/Δ² to the integrand's second derivative — growing 4× per mpsi doubling
+until it swamps the physical curvature, first where the grid packs hardest. The integrand is
+therefore *not* the same smooth function at every mpsi: below the 1e-5 floor, refining the grid
+makes the interpolant measurably rougher in exactly the norms the error estimator reads.
+
 ## 1. FastInterpolations microbenchmark (`microbench_mpsi.jl`)
 
 `CubicSeriesInterpolant`, 676 ComplexF64 series (mirrors `fmats/kmats/gmats`, numpert=26),
@@ -65,9 +72,9 @@ Singular-surface neighborhoods are **flat** (physics-controlled). Growth is wher
 Within ψ<0.1: knots 73/145/289 (mpsi 128/256/512) → steps 553/964/1891, and
 dψ/knotΔ p25/med/p75 = 0.06/0.12/0.21 **at every mpsi**. If steps were tolerance/physics-limited,
 dψ would be mpsi-independent; instead it halves when knot spacing halves (~6.5 accepted steps
-per knot interval). Consistent with (i) C² knot discontinuities of cubic splines that a 9th-order
-error estimator can't step across cheaply, and (ii) node-noise amplification on fine grids
-(the h⁻⁴ effect warned about in `src/Equilibrium/GridRefinement.jl`).
+per knot interval). Two mechanisms were proposed here originally — C² knot discontinuities of the
+cubic spline, and node-noise amplification on fine grids. **§8–§9 test both: the second is right
+and the first is not the driver.**
 
 ## 5. Discriminators (mpsi=512)
 
