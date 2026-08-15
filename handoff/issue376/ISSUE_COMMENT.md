@@ -231,8 +231,8 @@ The step count barely moves:
 | mpsi=512  | 3977 | 3551 | **−11%** |
 | mpsi=1024 | 7638 | 6081 | **−20%** |
 
-**So knot-scale roughness is a contributing cause worth 11–20%, not the dominant one.** The share
-grows with mpsi, as an ε/Δψ effect should, but ~80% of the growth is still unexplained.
+**So this partial repair is worth 11–20%** — it caps the ψ-derivatives of data that is still
+noisy, rather than removing the noise. The next section measures what removing it is worth.
 
 Two candidate origins of ε are also ruled out, so this is not ODE error control: the `etol` sweep
 above, and the hard-coded `abstol=1e-8` at `DirectEquilibrium.jl:294` (only `reltol` is
@@ -240,12 +240,28 @@ configurable, and `u0` starts at zeros with its components *becoming* ν/offset/
 bind where `reltol` cannot) — tightening it to 1e-14 gives 3977 → 4071 at mpsi=512 and
 7638 → 7474 at mpsi=1024. Null.
 
-**Where the rest may live.** After the repair, near-axis K still has |f''|/|f| = 2.1e7 — a
-curvature scale of ~2e-4 in ψ, comparable to the local knot spacing there (median Δψ = 1.7e-4 at
-mpsi=1024). Near the axis the log grid packs to roughly the scale of genuine structure, so a good
-share of those steps may be legitimate resolution rather than noise-chasing. The uniform-grid
-probe in §3 is consistent: un-packing the axis cut near-axis steps 1891 → 559 but left et[1] at
-0.993, i.e. visibly under-resolved.
+**Where the rest lives — measured.** Partial repairs recover little because they never remove ε
+itself. Five ladders varying input, fill site and grid one at a time show what removing it is
+worth:
+
+| case | input | construction | geometry ε across the ladder | step ratios |
+|---|---|---|---|---|
+| DIII-D `efit` | EFIT g-file | field-line trace | flat 1.8e-6 → 1.3e-6 | 1.72 / 1.92 |
+| DIII-D `efit_by_inversion` | EFIT + contours | inversion | **rising** 1.3e-6 → 5.6e-6 | 1.76 / 1.96 |
+| Solovev `sol` | **analytic** | field-line trace | **flat 0.19**, r1 = −0.65 | 1.72 / 1.83 |
+| LAR `tj_analytic` | analytic | inversion | converging 1.2e-7 → 5.2e-9 | **1.14 / 1.10** |
+| LAR + DIII-D packed grid | analytic | inversion | converging 5.9e-7 → 2.9e-8 | **1.10 / 1.15** |
+
+**Clean geometry ⟺ flat step count**, across two constructions, two inputs and two grids. Where the
+surface data converges, quadrupling the knots costs ~25% more steps; where it sits on a floor, 3.3×.
+
+Two results worth highlighting. Solovev is *analytic* — perfectly smooth input — yet the standard
+field-line construction hands the metric `nu` node data that is flat at **19% relative** with
+r1 = −0.65, i.e. pure white noise. Each surface is traced independently, splined on that surface's
+own solver-chosen abscissae and resampled to the common θ grid, so the remap error is uncorrelated
+between neighbours; that is where ε is manufactured, and it explains why neither `etol` nor
+`abstol` touches it. And giving the clean LAR case the DIII-D axis-packed grid keeps it flat, so
+**grid packing is not the driver** — those near-axis steps are noise-chasing, not physics.
 
 So the premise "same smooth function, just sampled more finely" is false of the data in a real and
 measurable way — but only partly responsible. The practical consequence is in the recommendations:
@@ -265,12 +281,13 @@ the largest lever is not making the coefficients smoother, it is not placing the
 3. **Switch the ForceFreeStates integrator to Vern7** — measured in §5, ~20–26% off the EL phase,
    with better Δ' than Vern9 at the same tolerance. Gated on explaining the tolerance-independent
    2.5e-4 Δ' offset first; then its own branch and a regression-harness run.
-4. **Make the surface-to-surface θ parametrization consistent.** Each surface is currently traced
-   independently and splined on its *own* solver-chosen SFL-angle nodes before being resampled to
-   the common θ grid (`DirectEquilibrium.jl:500-525`), so the remap error is uncorrelated between
-   neighbours — which is why neither `reltol` nor `abstol` touches it. Sampling every surface at
-   the common abscissae (dense output plus a root-solve per node) would make that error smooth in
-   ψ instead of white.
+4. **Make the surface-to-surface θ parametrization consistent — this is the main lever.** Each
+   surface is currently traced independently and splined on its *own* solver-chosen SFL-angle
+   nodes before being resampled to the common θ grid (`DirectEquilibrium.jl:500-525`), so the
+   remap error is uncorrelated between neighbours. Sampling every surface at the common abscissae
+   (dense output plus a root-solve per node) would make that error smooth in ψ instead of white.
+   The ladders above bound the prize: clean geometry gives ~1.1× step growth per mpsi doubling
+   instead of ~1.9×.
 
    I tried the tidier-looking alternative first — deriving the ψ-derivatives from metric
    identities — and **measured it: it is worth ~2%, not 20%.** ∇ψ = (e_θ × e_ζ)/J needs only

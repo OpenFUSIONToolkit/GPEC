@@ -20,11 +20,17 @@ independently-traced surface geometry (ν, offset, r²) through the ψ-derivativ
 g11/g12/g31. The spline interpolates it exactly, contributing ~ε/Δ² to the integrand's second
 derivative. So the integrand is genuinely *not* the same function at every mpsi.
 
-**But this is not the dominant term.** §11 repairs the amplification directly and cleans C/E/H by
-20–100× (every r1 flips positive), yet recovers only **11% of the steps at mpsi=512 and 20% at
-mpsi=1024**. The share grows with mpsi, as an ε/Δψ effect should, but ~80% of the step growth is
-still unexplained — and there is evidence (§11) that a good part of it is legitimate resolution of
-real near-axis structure, whose curvature scale is comparable to the local knot spacing there.
+**Partial repairs recover little; fixing the source is what matters.** §11 caps the ψ-derivatives
+of the already-noisy data and §13 corrects one component of e_ψ — the first buys 11–20% of the
+steps, the second ~2%. Neither removes ε itself.
+
+**§14 shows what removing ε is worth.** Across five ladders varying input, fill site and grid one
+at a time, **clean geometry ⟺ flat step count**: where the surface data converges, quadrupling the
+knots costs ~25% more steps; where it sits on a floor, 3.3×. An analytic Solovev equilibrium comes
+out of the standard construction with `nu` node data flat at 19% relative and r1 = −0.65 — pure
+white noise from a perfectly smooth input. And a clean case given the DIII-D axis-packed grid stays
+flat (1.10×, 1.15× per doubling), so grid packing is not the driver and those near-axis steps are
+noise-chasing rather than physics.
 
 ## 1. FastInterpolations microbenchmark (`microbench_mpsi.jl`)
 
@@ -79,8 +85,8 @@ dψ/knotΔ p25/med/p75 = 0.06/0.12/0.21 **at every mpsi**. If steps were toleran
 dψ would be mpsi-independent; instead it halves when knot spacing halves (~6.5 accepted steps
 per knot interval). Two mechanisms were proposed here originally — C² knot discontinuities of the
 cubic spline, and node-noise amplification on fine grids. §8–§10 confirm the second exists and
-trace it to its source; **§11 then shows it accounts for only 11–20% of the step growth**, so
-neither proposed mechanism is the dominant term and the majority is still unexplained.
+trace it to its source; §11 and §13 show that *partial* repairs recover only 11–20% and ~2%
+respectively; **§14 shows that removing the noise at its source flattens the scaling entirely.**
 
 ## 5. Discriminators (mpsi=512)
 
