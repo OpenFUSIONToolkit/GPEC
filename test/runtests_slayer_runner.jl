@@ -196,25 +196,24 @@
                 @test haskey(g, "Scan")
 
                 # Per-surface arrays have the right length
-                @test length(read(g["PerSurface/ising"])) == 2
-                @test read(g["PerSurface/ising"]) == [1, 2]
+                @test length(read(g["PerSurface/rational_index"])) == 2
+                @test read(g["PerSurface/rational_index"]) == [1, 2]
                 @test read(g["PerSurface/lu"])[1] ≈ 1.0e7
                 @test read(g["PerSurface/lu"])[2] ≈ 2.0e7
 
                 # Roots arrays
-                @test length(read(g["Roots/Q_root_real"])) == 1    # coupled
-                @test length(read(g["Roots/omega_Hz"])) == 1
+                @test length(read(g["Roots/Q_root"])) == 1    # coupled
+                @test length(read(g["Roots/omega"])) == 1
 
                 # Layer-thickness diagnostic: one entry per surface, with
                 # the physical thickness [m] and the drift scale.
-                @test length(read(g["LayerWidths/delta_s_m"])) == 2
-                @test all(read(g["LayerWidths/delta_s_m"]) .>= 0)
-                @test haskey(g["LayerWidths"], "dels_db_real")
+                @test length(read(g["LayerWidths/delta_s_abs"])) == 2
+                @test all(read(g["LayerWidths/delta_s_abs"]) .>= 0)
+                @test haskey(g["LayerWidths"], "delta_s_over_d_beta")
                 @test haskey(g["LayerWidths"], "d_beta")
 
                 # Ragged diagnostics use flat+offsets encoding
-                @test haskey(g["Diagnostics/ValidRoots"], "flat_real")
-                @test haskey(g["Diagnostics/ValidRoots"], "flat_imag")
+                @test haskey(g["Diagnostics/ValidRoots"], "flat")
                 @test haskey(g["Diagnostics/ValidRoots"], "offsets")
 
                 # Scan group present (store_scan=true)

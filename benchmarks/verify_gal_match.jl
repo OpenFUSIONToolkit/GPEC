@@ -11,10 +11,10 @@ h5path = length(ARGS) >= 1 ? ARGS[1] : "examples/DIIID-like_gal_resistive_exampl
 @info "Reading $h5path"
 
 xi, dxi, cout, cin, deltar, eig, resid, sing_psi = h5open(h5path) do f
-    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi_deriv"]),
+    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/dxidpsi"]),
         read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cin"]),
-        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/deltar"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/rpec_eig"]),
-        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/residual"]), read(f["SingularSurfaces/GalerkinDeltaPrime/sing_psi"]))
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/rpec_eig"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/residual"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
 end
 # HDF5 stores ComplexF64 as a compound (re,im); convert if needed
 to_c(a) = eltype(a) <: Complex ? a : map(x -> ComplexF64(x.re, x.im), a)

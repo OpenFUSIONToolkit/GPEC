@@ -321,7 +321,7 @@ A `Plots.jl` plot object.
 """
 function plot_delta_prime(h5path; save_path=nothing)
     msing, psi_sing, q_sing, ca_l, ca_r, psio, mn_index = h5open(h5path, "r") do fid
-        read(fid["SingularSurfaces/msing"]), read(fid["SingularSurfaces/psi"]), read(fid["SingularSurfaces/q"]),
+        read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"]),
         read(fid["SingularSurfaces/ca_left"]), read(fid["SingularSurfaces/ca_right"]),
         read(fid["Equilibrium/psio"]), read(fid["Info/mn_index"])
     end
@@ -467,9 +467,9 @@ function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
             read(kg["scan_cond"]),
             read(kg["scan_threshold"]),
             read(kg["psi"]),
-            read(fid["SingularSurfaces/psi"]),
-            read(fid["SingularSurfaces/q"]),
-            read(kg["kmsing"]))
+            read(fid["SingularSurfaces/rational_psi"]),
+            read(fid["SingularSurfaces/rational_q"]),
+            read(kg["rational_count"]))
     end
 
     if isempty(scan_psi)

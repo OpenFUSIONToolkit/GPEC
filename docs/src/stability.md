@@ -145,12 +145,12 @@ For the derivation and implementation details behind these diagnostics, see
 Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile
 in normalized poloidal flux ``\psi``:
 
-- **Mercier criterion ``D_I``** (`LocalStability/di`) — the ideal interchange criterion. A surface
+- **Mercier criterion ``D_I``** (`LocalStability/D_I`) — the ideal interchange criterion. A surface
   is Mercier-unstable where ``D_I > 0``. It is evaluated from the ``\det(\bar{d}_0)`` of the
   integrated local-mode matrix.
-- **Resistive interchange ``D_R``** (`LocalStability/dr`) — the Glasser–Greene–Johnson resistive
+- **Resistive interchange ``D_R``** (`LocalStability/D_R`) — the Glasser–Greene–Johnson resistive
   interchange criterion ``D_R = D_I + (H - 1/2)^2``. The ``D_I`` term is the same
-  ``\det(\bar{d}_0)`` value reported in `LocalStability/di`; ``H`` is computed from the legacy
+  ``\det(\bar{d}_0)`` value reported in `LocalStability/D_I`; ``H`` is computed from the legacy
   Mercier/GGJ flux-surface averages of the field and metric quantities. ``D_R > 0``
   indicates resistive interchange instability.
 - **Ballooning ``\Delta'``** (`LocalStability/ballooning_Delta_prime`) — the high-``n`` ballooning
@@ -161,7 +161,7 @@ in normalized poloidal flux ``\psi``:
 !!! note "Two different Δ' quantities"
     `LocalStability/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
     distinct from the **resistive tearing** ``\Delta'`` described in the next section, which
-    is written under `SingularSurfaces/` and `PerturbedEquilibrium/SingularCoupling/delta_prime`.
+    is written under `SingularSurfaces/` and `PerturbedEquilibrium/SingularCoupling/Delta_prime`.
     They measure different instabilities; do not confuse them.
 
 ### s–α diagram
@@ -231,7 +231,7 @@ where ``\Phi_R[j]`` is the forward FM product from ``\psi_{R,j-1}`` to the junct
 ``\Phi_L[j]`` is the backward crossing FM from ``\psi_{L,j}`` to the junction.
 
 The matrix is only populated by the parallel FM path and is written to the HDF5 output
-under `SingularSurfaces/delta_prime_matrix`.
+under `SingularSurfaces/Delta_prime_matrix`.
 
 ## Configuration reference
 
