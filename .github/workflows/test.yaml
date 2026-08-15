@@ -56,11 +56,12 @@ jobs:
 
           # Allowlist of what test/runtests.jl actually exercises: the package
           # itself, the tests and their fixtures, the example decks the tests run
-          # end-to-end, the dependency set, and this workflow. Anything not listed
-          # here does not trigger a run, so new untested Julia (benchmarks, docs
-          # scripts, a future tools/ directory) is excluded by default rather than
-          # by remembering to exclude it.
-          tested='(^src/|^test/|^examples/|^Project\.toml$|^\.github/workflows/test\.yaml$)'
+          # end-to-end, the dependency set (declared in Project.toml and pinned in
+          # ci/manifests), and this workflow. Anything not listed here does not
+          # trigger a run, so new untested Julia (benchmarks, docs scripts, a
+          # future tools/ directory) is excluded by default rather than by
+          # remembering to exclude it.
+          tested='(^src/|^test/|^examples/|^ci/manifests/|^Project\.toml$|^\.github/workflows/test\.yaml$)'
 
           relevant=$(printf '%s\n' "$files" | grep -E "$tested" || true)
 
@@ -112,6 +113,27 @@ jobs:
 
       - name: Cache Julia packages
         uses: julia-actions/cache@v3
+
+      - name: Pin the CI dependency set
+        run: |
+          set -euo pipefail
+
+          minor=$(julia -e 'print(VERSION.major, ".", VERSION.minor)')
+          pinned="ci/manifests/Manifest-v${minor}.toml"
+
+          if [ ! -f "$pinned" ]; then
+            echo "::warning::No pinned dependency set for Julia ${minor}; resolving fresh. Generate one with 'julia +${minor} ci/manifests/update.jl'."
+            exit 0
+          fi
+
+          cp "$pinned" Manifest.toml
+          echo "Pinned dependency set: ${pinned}"
+
+          recorded=$(cat ci/manifests/project.sha256)
+          actual=$(shasum -a 256 Project.toml | cut -d ' ' -f 1)
+          if [ "$recorded" != "$actual" ]; then
+            echo "::warning::Project.toml has changed since the pinned dependency sets were generated, so ${pinned} may be stale. Regenerate with ci/manifests/update.jl."
+          fi
 
       - name: Build Julia packages
         uses: julia-actions/julia-buildpkg@v1
