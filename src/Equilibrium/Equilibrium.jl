@@ -21,6 +21,7 @@ include("DirectEquilibriumArcLength.jl")
 include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
+include("CerfonEquilibrium.jl")
 include("GeometryProfiles.jl")
 include("KineticProfiles.jl")
 
@@ -64,6 +65,7 @@ end
 # rerun input builder dispatch off this table, so adding a new analytic kind is one new row.
 const ANALYTIC_EQ = Dict(
     "sol" => AnalyticEqSpec("SOL_INPUT", SolovevConfig, sol_run),
+    "cerfon" => AnalyticEqSpec("CERFON_INPUT", CerfonConfig, cerfon_run),
     "lar" => AnalyticEqSpec("LAR_INPUT", LargeAspectRatioConfig, lar_run),
     "tj_analytic" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run),
     "tj_analytic_direct" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run_direct)

@@ -101,6 +101,19 @@ The KineticForces module (formerly PENTRC) implements neoclassical toroidal visc
   - Published: PhD Thesis, Princeton University (2015)
   - Describes: Complete NTV theory and implementation. **Chapter 7** details the hybrid drift-kinetic MHD eigenfunction calculation: 6 kinetic matrices Ak,Bk,Ck,Dk,Ek,Hk (Eqs 7.30-7.35) as energy-space integrals of perturbed action operators WX,WY,WZ; hybrid Euler-Lagrange equations; resonance splitting/suppression where Fh=(Q-P†)F̄(Q-P)+... shifts singularities away from rational surfaces (Eq 7.46); convergence to ideal limit. **Appendix C** derives the DCON matrix form of the perturbed action (Eqs C.1-C.11) used to compute the kinetic coefficient matrices. **Appendix D** details numerical treatment of integrable singularities in bounce averages.
 
+## Equilibrium Module
+
+- **Cerfon and Freidberg (2010)**: "One size fits all analytic solutions to the Grad-Shafranov equation"
+  - Published: Physics of Plasmas **17**, 032502 (2010)
+  - Link: https://doi.org/10.1063/1.3328818
+  - Describes: The Solov'ev choice of constant `p'` and `FF'` linearizes Grad-Shafranov to
+    `Δ*ψ̂ = (1−A)x² + A` in normalized coordinates, solved by a particular solution plus a
+    twelve-term homogeneous basis (seven up-down symmetric, five antisymmetric). Point-wise
+    conditions on the `ψ̂ = 0` surface set the plasma shape and place magnetic nulls on the
+    boundary. Implemented in `src/Equilibrium/CerfonEquilibrium.jl` as `eq_type = "cerfon"`,
+    the diverted generalization of the `"sol"` model (which is the `A = 0`, no-null member of
+    the same family).
+
 ## Additional References
 
 - **Park et al. (2009)**: "Nonambipolar Transport by Trapped Particles in Tokamaks"
