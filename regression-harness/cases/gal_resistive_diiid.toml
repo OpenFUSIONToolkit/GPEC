@@ -31,7 +31,7 @@ order = 11
 h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
-label = "gal PEST3 Δ diagonal"
+label = "Δ′ Galerkin RDCON (PEST3) diagonal"
 noise_threshold = 1e-6
 order = 20
 
@@ -40,7 +40,7 @@ order = 20
 h5path = "SingularSurfaces/Delta_prime_raw"
 type = "complex_matrix"
 extract = "norm"
-label = "||gal Δ′ matrix||"
+label = "||Δ′ Galerkin RDCON (PEST3) matrix||"
 noise_threshold = 1e-6
 order = 21
 
