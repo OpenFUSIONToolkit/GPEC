@@ -10,9 +10,7 @@ on:
       - main
       - develop
 
-# needed to allow julia-actions/cache to delete old caches that it has created
 permissions:
-  actions: write
   contents: read
 
 concurrency:
@@ -102,6 +100,15 @@ jobs:
         os:
           - ubuntu-latest
 
+    env:
+      DEPOT_PATHS: |
+        ~/.julia/artifacts
+        ~/.julia/packages
+        ~/.julia/registries
+        ~/.julia/compiled
+        ~/.julia/scratchspaces
+        ~/.julia/logs
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -111,8 +118,13 @@ jobs:
         with:
           version: ${{ matrix.version }}
 
-      - name: Cache Julia packages
-        uses: julia-actions/cache@v3
+      - name: Restore the Julia depot
+        id: depot
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          restore-keys: julia-depot-${{ matrix.os }}-${{ matrix.version }}-
 
       - name: Pin the CI dependency set
         run: |
@@ -137,6 +149,8 @@ jobs:
 
       - name: Build Julia packages
         uses: julia-actions/julia-buildpkg@v1
+        with:
+          ignore-no-cache: true
 
       # Coverage instrumentation is off: nothing consumes the .cov files (they are
       # gitignored and never uploaded), and instrumenting slows compute-heavy
@@ -146,6 +160,17 @@ jobs:
         uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
+
+      - name: Prune the depot before caching
+        if: always() && github.event_name == 'push' && steps.depot.outputs.cache-hit != 'true'
+        run: julia --project=. -e 'using Pkg; Pkg.gc()'
+
+      - name: Save the Julia depot
+        if: always() && github.event_name == 'push' && steps.depot.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
 
   # Stable check that is present on every pull request, whether or not the suite
   # ran. Point branch protection at this job so skipped runs do not block merges.
