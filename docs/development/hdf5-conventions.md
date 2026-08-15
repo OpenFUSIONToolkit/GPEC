@@ -21,6 +21,8 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 - **Literature capitalization for physics symbols**: names match the standard literature — `D_I`, `D_R`, `Delta_prime`, `tau_R`, `tau_A` (not `di`, `dr`, `delta_prime`, `taur`); lowercase stays where the literature is lowercase (`alpha`, `q`, `beta*`, `delta_s`).
 - **Derivatives are `d<x>dpsi`** (`dTdpsi`, `dVdpsi`, `dqdpsi`, `dxidpsi`) — never Fortran `<x>1` suffixes or `<x>_deriv`.
 - **"rational" over "singular"** in dataset names (`rational_psi`, `rational_q`, `rational_m`, `rational_n`, `rational_index`, `rational_count`) — kinetic/resistive runs are not singular at the rationals. Specifier order is standardized specifier-first (`rational_psi`, never `psi_rational`).
+- **Vector components**: a bare coordinate suffix is the **contravariant** component (`xi_psi` = ξ^ψ), `_cov_` marks the **covariant** one (`b_cov_theta` = b_θ), and a leading `J` marks a **Jacobian-weighted** component (`Jxi_theta` = J·ξ^θ). There is no HDF5/netCDF standard for super- vs subscripts — flat `_` names are universal — so the typeset form always appears in the dataset's `long_name`.
+- **Coordinates**: the radial abscissa is `psi` (normalized poloidal flux ψ_N) and the poloidal one is `theta` in every group; never `psi_n`, `xs`, or `ys`.
 - **One name per physical quantity**: a quantity written in several groups carries the identical leaf name everywhere (`rational_psi` in `SingularSurfaces/`, `GalerkinDeltaPrime/`, and `SingularCoupling/`; `Delta_prime_matrix` in `SingularSurfaces/` and `Tearing/PerSurface/`; `dVdpsi` in `Profiles/`, `SingularSurfaces/`, and `KineticForces/<method>/`) — the group supplies the context, the leaf supplies the identity.
 
 ## Inputs live only under `Input/`
@@ -35,9 +37,9 @@ Top level (10 groups):
 |---|---|
 | `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim` |
 | `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
-| `Equilibrium/` | Scalars (β, q₀, q95, …) plus `Profiles/` (1-D: xs, 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D: rcoords, offset, nu, jac) |
+| `Equilibrium/` | Scalars (β, q₀, q95, …) plus `Profiles/` (1-D on `psi`: 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D on `psi`×`theta`: rcoords, offset, nu, jac) |
 | `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (`Solution/`, `Match/`, `msing`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
-| `LocalStability/` | Mercier `di`, resistive interchange `dr`, `ballooning_Delta_prime`, ballooning α boundary |
+| `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`, `GalerkinDeltaPrime/`, `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
 | `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`) |
@@ -53,7 +55,7 @@ Every dataset outside `Input/` (raw snapshot) and `GalerkinIntegration/Match/` (
 - **`long_name`** — plain-text physics description.
 - **`units`** — SI string (`"T"`, `"Wb/rad"`, `"A"`, `"m"`, `"J"`, `"N*m"`, `"Hz"`, `"Ohm*m"`); `"1"` for dimensionless (CF convention). Normalized quantities state the normalization in `long_name` (e.g. the power-normalized stability energies are per unit ⟨|ξ|²⟩, not joules).
 - **`dims`** — required on rank ≥ 2 datasets: a greppable string like `"(psi, m)"` listing axis names in **Julia (column-major) order, axis 1 first**. Note h5py/HDFView users see file dimensions in the reversed (row-major) order. Square-matrix axes use distinct `_row`/`_col` names (`(mode_row, mode_col)`): netCDF permits repeated dimension names, but xarray mangles them on load.
-- **HDF5 Dimension Scales** (the netCDF-4 coordinate mechanism): shared coordinate datasets (`psi` grids, rational-surface `psi`, geometry `xs`/`ys`) are marked with `h5ds_set_scale` and attached per-axis with `h5ds_attach_scale`/`h5ds_set_label`, so h5py `.dims`, xarray, and HDFView resolve axes natively. The H5DS C API indexes file (row-major) dimensions: Julia axis `k` of an `N`-d dataset is C index `N - k`.
+- **HDF5 Dimension Scales** (the netCDF-4 coordinate mechanism): shared coordinate datasets (the `psi` grids, rational-surface `rational_psi`, geometry `psi`/`theta`) are marked with `h5ds_set_scale` and attached per-axis with `h5ds_attach_scale`/`h5ds_set_label`, so h5py `.dims`, xarray, and HDFView resolve axes natively. The H5DS C API indexes file (row-major) dimensions: Julia axis `k` of an `N`-d dataset is C index `N - k`.
 
 Root-level file attributes: `schema_version` (currently `"2.0"`; bump on breaking schema changes — readers dispatch on it), `Conventions = "GPEC-HDF5-2.0"`, `references`, `title` (run description), `date_created` (ISO 8601 UTC). The code version stays in `Info/git_version`.
 

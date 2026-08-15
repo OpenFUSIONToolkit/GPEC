@@ -374,7 +374,7 @@ end
 Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
 pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
 normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
-are ballooning-unstable. Reads `LocalStability/psi`, `LocalStability/alpha`, and
+are ballooning-unstable. Reads `LocalStability/ballooning_psi`, `LocalStability/alpha`, and
 `LocalStability/alpha_critical` (populated when ForceFreeStates runs with
 `local_stability_flag = true`).
 
@@ -395,7 +395,7 @@ A `Plots.jl` plot object.
 function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
     psi, alpha, alpha_crit = h5open(h5path, "r") do fid
         haskey(fid, "LocalStability/alpha") || return (Float64[], Float64[], Float64[])
-        read(fid["LocalStability/psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
+        read(fid["LocalStability/ballooning_psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
     end
 
     isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)

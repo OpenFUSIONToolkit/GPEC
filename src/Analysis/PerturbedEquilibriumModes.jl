@@ -66,8 +66,8 @@ function modes_to_theta(h5_file::String, variable::String;
 
         if !keep_sfl_phi
             # Reconstruct ν spline from stored grid + nodal values (FastInterpolations v0.4 API)
-            rzphi_xs = read(f, "Equilibrium/Geometry/xs")
-            rzphi_ys = read(f, "Equilibrium/Geometry/ys")
+            rzphi_xs = read(f, "Equilibrium/Geometry/psi")
+            rzphi_ys = read(f, "Equilibrium/Geometry/theta")
             nu_vals  = read(f, "Equilibrium/Geometry/nu")
             nu_spline = cubic_interp(
                 (rzphi_xs, rzphi_ys), nu_vals;

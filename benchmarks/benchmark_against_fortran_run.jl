@@ -315,7 +315,7 @@ function load_julia_outputs(h5_path::String)
         julia["psilim"] = read(f, "Info/psilim")
         julia["qlim"] = read(f, "Info/qlim")
         julia["et"] = read(f, "ForceFreeStates/FreeBoundaryStability/eigenmode_energies")
-        julia["psi_q"] = read(f, "Equilibrium/Profiles/xs")
+        julia["psi_q"] = read(f, "Equilibrium/Profiles/psi")
         julia["q"] = read(f, "Equilibrium/Profiles/q")
         julia["di"] = haskey(f, "LocalStability/D_I") ? read(f, "LocalStability/D_I") : Float64[]
         julia["dr"] = haskey(f, "LocalStability/D_R") ? read(f, "LocalStability/D_R") : Float64[]

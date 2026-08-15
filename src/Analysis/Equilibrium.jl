@@ -30,7 +30,7 @@ A `Plots.jl` plot object.
 """
 function plot_qprofile(h5path; show_singular=true, save_path=nothing)
     xs, q, q0, q95 = h5open(h5path, "r") do fid
-        read(fid["Equilibrium/Profiles/xs"]), read(fid["Equilibrium/Profiles/q"]),
+        read(fid["Equilibrium/Profiles/psi"]), read(fid["Equilibrium/Profiles/q"]),
         read(fid["Equilibrium/q0"]), read(fid["Equilibrium/q95"])
     end
 
@@ -83,7 +83,7 @@ A `Plots.jl` plot object.
 """
 function plot_pressure_profile(h5path; save_path=nothing)
     xs, mu0p, msing, psi_sing = h5open(h5path, "r") do fid
-        read(fid["Equilibrium/Profiles/xs"]), read(fid["Equilibrium/Profiles/mu0p"]),
+        read(fid["Equilibrium/Profiles/psi"]), read(fid["Equilibrium/Profiles/mu0p"]),
         read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"])
     end
 
@@ -124,7 +124,7 @@ A `Plots.jl` plot object.
 """
 function plot_f_profile(h5path; save_path=nothing)
     xs, twopif, msing, psi_sing = h5open(h5path, "r") do fid
-        read(fid["Equilibrium/Profiles/xs"]), read(fid["Equilibrium/Profiles/2piF"]),
+        read(fid["Equilibrium/Profiles/psi"]), read(fid["Equilibrium/Profiles/2piF"]),
         read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"])
     end
 
@@ -172,7 +172,7 @@ A `Plots.jl` plot object.
 function plot_flux_surfaces(h5path; n_psi=11, n_theta=18, save_path=nothing)
     rcoords, offset_data, xs_rz, ys_rz, ro, zo, msing, psi_sing, q_sing = h5open(h5path, "r") do fid
         read(fid["Equilibrium/Geometry/rcoords"]), read(fid["Equilibrium/Geometry/offset"]),
-        read(fid["Equilibrium/Geometry/xs"]), read(fid["Equilibrium/Geometry/ys"]),
+        read(fid["Equilibrium/Geometry/psi"]), read(fid["Equilibrium/Geometry/theta"]),
         read(fid["Equilibrium/ro"]), read(fid["Equilibrium/zo"]),
         read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"])
     end

@@ -10,7 +10,7 @@ to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im
 cout, deltar, mxi, mdxi, sols, sols_d, sing_psi = h5open(h5path) do f
     (to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"])),
         to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/dxidpsi"])),
-        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxidpsi"])),
+        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi"])),
         read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
 end
 msing = length(sing_psi)

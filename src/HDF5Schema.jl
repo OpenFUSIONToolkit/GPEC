@@ -17,7 +17,7 @@ const MAIN_H5_ANNOTATIONS = [
     "Info/npert" => (; long_name="number of toroidal mode numbers"),
     "Info/nlow" => (; long_name="lowest toroidal mode number n"),
     "Info/nhigh" => (; long_name="highest toroidal mode number n"),
-    "Info/mn_index" => (; long_name="(m, n) mode numbers for each perturbation index", dims=("mode_index", "m_or_n")),
+    "Info/mn_index" => (; long_name="(m, n) mode numbers for each perturbation index", dims=("mode", "m_or_n")),
     "Info/psilim" => (; long_name="normalized poloidal flux at the integration boundary"),
     "Info/qlim" => (; long_name="safety factor q at the integration boundary"),
     "Info/dqdpsi_lim" => (; long_name="dq/dψ_N at the integration boundary"),
@@ -60,7 +60,6 @@ const MAIN_H5_ANNOTATIONS = [
     "Equilibrium/volume" => (; long_name="plasma volume", units="m^3"),
     "Equilibrium/bt_sign" => (; long_name="sign of the toroidal field"),
     "Equilibrium/psi_norm" => (; long_name="normalized poloidal flux at the axis"),
-    "Equilibrium/b_norm" => (; long_name="normalized total field strength at the axis"),
     "Equilibrium/psi_axis" => (; long_name="poloidal flux at the magnetic axis", units="Wb/rad"),
     "Equilibrium/psi_boundary" => (; long_name="poloidal flux at the plasma boundary", units="Wb/rad"),
     "Equilibrium/psi_axis_norm" => (; long_name="normalized poloidal flux at the axis"),
@@ -74,33 +73,40 @@ const MAIN_H5_ANNOTATIONS = [
     "Equilibrium/diagnose_src" => (; long_name="flag: equilibrium source-data diagnostics were enabled (diagnostic echo)"),
     "Equilibrium/diagnose_maxima" => (; long_name="flag: equilibrium extrema diagnostics were enabled (diagnostic echo)"),
     # --- Equilibrium/Profiles/ (1-D profiles on the ψ_N grid xs) ---
-    "Equilibrium/Profiles/xs" => (; long_name="normalized poloidal flux ψ_N profile grid", scale="psi"),
-    "Equilibrium/Profiles/2piF" => (; long_name="2π F with F = R B_φ the toroidal field function", units="T*m", dims=("psi",), attach=(1 => "Equilibrium/Profiles/xs",)),
-    "Equilibrium/Profiles/mu0p" => (; long_name="μ0 × plasma pressure", units="T^2", dims=("psi",), attach=(1 => "Equilibrium/Profiles/xs",)),
-    "Equilibrium/Profiles/dVdpsi" => (; long_name="flux-surface volume derivative dV/dψ_N", units="m^3", dims=("psi",), attach=(1 => "Equilibrium/Profiles/xs",)),
-    "Equilibrium/Profiles/q" => (; long_name="safety factor profile", dims=("psi",), attach=(1 => "Equilibrium/Profiles/xs",)),
+    "Equilibrium/Profiles/psi" => (; long_name="normalized poloidal flux ψ_N profile grid", scale="psi"),
+    "Equilibrium/Profiles/2piF" => (; long_name="2π F with F = R B_φ the toroidal field function", units="T*m", dims=("psi",), attach=(1 => "Equilibrium/Profiles/psi",)),
+    "Equilibrium/Profiles/mu0p" => (; long_name="μ0 × plasma pressure", units="T^2", dims=("psi",), attach=(1 => "Equilibrium/Profiles/psi",)),
+    "Equilibrium/Profiles/dVdpsi" => (; long_name="flux-surface volume derivative dV/dψ_N", units="m^3", dims=("psi",), attach=(1 => "Equilibrium/Profiles/psi",)),
+    "Equilibrium/Profiles/q" => (; long_name="safety factor profile", dims=("psi",), attach=(1 => "Equilibrium/Profiles/psi",)),
     # --- Equilibrium/Geometry/ (2-D flux-coordinate maps on (xs, ys) = (ψ_N, θ/2π)) ---
-    "Equilibrium/Geometry/xs" => (; long_name="normalized poloidal flux ψ_N geometry grid", scale="psi"),
-    "Equilibrium/Geometry/ys" => (; long_name="normalized poloidal angle θ/2π geometry grid", scale="theta"),
+    "Equilibrium/Geometry/psi" => (; long_name="normalized poloidal flux ψ_N geometry grid", scale="psi"),
+    "Equilibrium/Geometry/theta" => (; long_name="normalized poloidal angle θ/2π geometry grid", scale="theta"),
     "Equilibrium/Geometry/rcoords" =>
         (; long_name="squared minor-radius coordinate r² of the working coordinate map", units="m^2", dims=("psi", "theta"),
-            attach=(1 => "Equilibrium/Geometry/xs", 2 => "Equilibrium/Geometry/ys")),
+            attach=(1 => "Equilibrium/Geometry/psi", 2 => "Equilibrium/Geometry/theta")),
     "Equilibrium/Geometry/offset" =>
         (; long_name="poloidal-angle offset of the working coordinate map (fraction of 2π)", dims=("psi", "theta"),
-            attach=(1 => "Equilibrium/Geometry/xs", 2 => "Equilibrium/Geometry/ys")),
+            attach=(1 => "Equilibrium/Geometry/psi", 2 => "Equilibrium/Geometry/theta")),
     "Equilibrium/Geometry/nu" =>
         (; long_name="toroidal-angle offset ν = φ − 2πζ of the working coordinate map", units="rad", dims=("psi", "theta"),
-            attach=(1 => "Equilibrium/Geometry/xs", 2 => "Equilibrium/Geometry/ys")),
+            attach=(1 => "Equilibrium/Geometry/psi", 2 => "Equilibrium/Geometry/theta")),
     "Equilibrium/Geometry/jac" =>
         (; long_name="Jacobian of the (ψ_N, θ, ζ) working coordinates", units="m^3", dims=("psi", "theta"),
-            attach=(1 => "Equilibrium/Geometry/xs", 2 => "Equilibrium/Geometry/ys")),
+            attach=(1 => "Equilibrium/Geometry/psi", 2 => "Equilibrium/Geometry/theta")),
     # --- LocalStability/ ---
-    "LocalStability/D_I" => (; long_name="Mercier ideal interchange criterion D_I", dims=("psi",)),
-    "LocalStability/D_R" => (; long_name="Glasser-Greene-Johnson resistive interchange criterion D_R", dims=("psi",)),
-    "LocalStability/ballooning_Delta_prime" => (; long_name="high-n ballooning Δ' (distinct from the tearing Δ')", dims=("psi",)),
-    "LocalStability/psi" => (; long_name="normalized poloidal flux ψ_N of the ballooning α boundary scan"),
-    "LocalStability/alpha" => (; long_name="experimental normalized pressure gradient α", dims=("psi",)),
-    "LocalStability/alpha_critical" => (; long_name="critical normalized pressure gradient α for first ballooning stability", dims=("psi",)),
+    "LocalStability/psi" => (; long_name="normalized poloidal flux ψ_N of the local-stability profiles", scale="psi"),
+    "LocalStability/D_I" => (; long_name="Mercier ideal interchange criterion D_I", dims=("psi",), attach=(1 => "LocalStability/psi",)),
+    "LocalStability/D_R" =>
+        (; long_name="Glasser-Greene-Johnson resistive interchange criterion D_R", dims=("psi",), attach=(1 => "LocalStability/psi",)),
+    "LocalStability/ballooning_Delta_prime" =>
+        (; long_name="high-n ballooning Δ' (distinct from the tearing Δ')", dims=("psi",), attach=(1 => "LocalStability/psi",)),
+    "LocalStability/ballooning_psi" =>
+        (; long_name="normalized poloidal flux ψ_N of the ballooning α boundary scan", scale="psi_ballooning"),
+    "LocalStability/alpha" =>
+        (; long_name="experimental normalized pressure gradient α", dims=("psi_ballooning",), attach=(1 => "LocalStability/ballooning_psi",)),
+    "LocalStability/alpha_critical" =>
+        (; long_name="critical normalized pressure gradient α for first ballooning stability", dims=("psi_ballooning",),
+            attach=(1 => "LocalStability/ballooning_psi",)),
     # --- ForceFreeStates/Solutions/ForwardIntegration/ ---
     "ForceFreeStates/Solutions/ForwardIntegration/nstep" => (; long_name="number of saved solution snapshots"),
     "ForceFreeStates/Solutions/ForwardIntegration/nstep_total" => (; long_name="total ODE solver steps taken"),
@@ -132,38 +138,55 @@ const MAIN_H5_ANNOTATIONS = [
     # --- SingularSurfaces/ ---
     "SingularSurfaces/rational_count" => (; long_name="number of rational (singular) surfaces in the domain"),
     "SingularSurfaces/rational_psi" => (; long_name="normalized poloidal flux ψ_N of each rational surface", scale="psi_rational"),
-    "SingularSurfaces/rational_q" => (; long_name="safety factor q = m/n at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/dqdpsi" => (; long_name="dq/dψ_N at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
+    "SingularSurfaces/rational_q" =>
+        (; long_name="safety factor q = m/n at each rational surface", dims=("surface",), scale="q_rational", attach=(1 => "SingularSurfaces/rational_psi",)),
+    "SingularSurfaces/dqdpsi" =>
+        (; long_name="dq/dψ_N at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/rational_m" => (; long_name="resonant poloidal mode numbers per surface (0-padded)", dims=("surface", "mode")),
     "SingularSurfaces/rational_n" => (; long_name="resonant toroidal mode numbers per surface (0-padded)", dims=("surface", "mode")),
-    "SingularSurfaces/D_I" => (; long_name="Mercier D_I evaluated at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
+    "SingularSurfaces/D_I" =>
+        (; long_name="Mercier D_I evaluated at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/ca_left" =>
         (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface", dims=("mode", "solution", "large_small", "surface")),
     "SingularSurfaces/ca_right" =>
         (; long_name="asymptotic large/small-solution coefficient matrices just right of each surface", dims=("mode", "solution", "large_small", "surface")),
-    "SingularSurfaces/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/H" => (; long_name="Glasser-Greene-Johnson coefficient H per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/K" => (; long_name="Glasser-Greene-Johnson coefficient K per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
+    "SingularSurfaces/E" =>
+        (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/F" =>
+        (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/G" =>
+        (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/H" =>
+        (; long_name="Glasser-Greene-Johnson coefficient H per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/K" =>
+        (; long_name="Glasser-Greene-Johnson coefficient K per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/M" =>
+        (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/avg_bsq_over_dpsisq" =>
-        (; long_name="flux-surface average ⟨B²/|∇ψ_N|²⟩ per surface", units="T^2*m^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/avg_bsq" => (; long_name="flux-surface average ⟨B²⟩ per surface", units="T^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/mu0p" => (; long_name="μ0 × local pressure at each surface", units="T^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/dmu0pdpsi" => (; long_name="μ0 × dp/dψ_N at each surface", units="T^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
-    "SingularSurfaces/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi",)),
+        (; long_name="flux-surface average ⟨B²/|∇ψ_N|²⟩ per surface", units="T^2*m^2", dims=("surface",),
+            attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/avg_bsq" =>
+        (; long_name="flux-surface average ⟨B²⟩ per surface", units="T^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/mu0p" =>
+        (; long_name="μ0 × local pressure at each surface", units="T^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/dmu0pdpsi" =>
+        (; long_name="μ0 × dp/dψ_N at each surface", units="T^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/dVdpsi" =>
+        (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/Delta_prime_matrix" => (; long_name="inter-surface Δ' matrix (PEST3 convention, STRIDE BVP with vacuum coupling)", dims=("surface_row", "surface_col")),
     "SingularSurfaces/Delta_prime_raw" =>
         (; long_name="raw 2msing×2msing outer-region D' matrix, side-major ordering [L_s1, R_s1, ...]", dims=("surface_side_row", "surface_side_col")),
     "SingularSurfaces/Delta_coil" => (; long_name="edge coil-response matrix (edge mode × surface-side)", dims=("mode", "surface_side")),
     # --- SingularSurfaces/Kinetic/ ---
     "SingularSurfaces/Kinetic/rational_count" => (; long_name="number of kinetic singular surfaces (det(F̄) near-zeros)"),
-    "SingularSurfaces/Kinetic/rational_psi" => (; long_name="normalized poloidal flux ψ_N of kinetic singular surfaces"),
-    "SingularSurfaces/Kinetic/rational_q" => (; long_name="safety factor at kinetic singular surfaces"),
-    "SingularSurfaces/Kinetic/dqdpsi" => (; long_name="dq/dψ_N at kinetic singular surfaces"),
-    "SingularSurfaces/Kinetic/scan_psi" => (; long_name="ψ_N grid of the cond(F̄) scan"),
-    "SingularSurfaces/Kinetic/scan_cond" => (; long_name="condition number of F̄ along the scan"),
+    "SingularSurfaces/Kinetic/rational_psi" => (; long_name="normalized poloidal flux ψ_N of kinetic singular surfaces", scale="psi_kinetic_rational"),
+    "SingularSurfaces/Kinetic/rational_q" =>
+        (; long_name="safety factor at kinetic singular surfaces", dims=("surface",), attach=(1 => "SingularSurfaces/Kinetic/rational_psi",)),
+    "SingularSurfaces/Kinetic/dqdpsi" =>
+        (; long_name="dq/dψ_N at kinetic singular surfaces", dims=("surface",), attach=(1 => "SingularSurfaces/Kinetic/rational_psi",)),
+    "SingularSurfaces/Kinetic/scan_psi" => (; long_name="ψ_N grid of the cond(F̄) scan", scale="psi_scan"),
+    "SingularSurfaces/Kinetic/scan_cond" =>
+        (; long_name="condition number of F̄ along the scan", dims=("psi_scan",), attach=(1 => "SingularSurfaces/Kinetic/scan_psi",)),
     "SingularSurfaces/Kinetic/scan_threshold" => (; long_name="cond(F̄) threshold used to flag kinetic singular surfaces"),
     # --- ForceFreeStates/FreeBoundaryStability/ (power-normalized (W, N) pencil) ---
     "ForceFreeStates/FreeBoundaryStability/W_freeboundary" => (; long_name="power-normalized free-boundary energy matrix W (per unit ⟨|ξ|²⟩)", dims=("mode_row", "mode_col")),
@@ -197,7 +220,16 @@ const _ELM_IDEAL_LETTERS = [
     ("K", "Euler-Lagrange derived coefficient matrix K"),
     ("G", "Euler-Lagrange derived coefficient matrix G"),
 ]
-const _ELM_KINETIC_LETTERS = vcat(_ELM_IDEAL_LETTERS, [("f0", "raw kinetic component matrix f0")])
+# The kinetic branch overwrites only A, B, C, K, G and adds f0; D, E, H, F are shared
+# unchanged from the ideal set and are not re-emitted.
+const _ELM_KINETIC_LETTERS = [
+    ("A", "Euler-Lagrange primitive coefficient matrix A"),
+    ("B", "Euler-Lagrange primitive coefficient matrix B"),
+    ("C", "Euler-Lagrange primitive coefficient matrix C"),
+    ("K", "Euler-Lagrange derived coefficient matrix K"),
+    ("G", "Euler-Lagrange derived coefficient matrix G"),
+    ("f0", "raw kinetic component matrix f0"),
+]
 const ELM_H5_ANNOTATIONS = vcat(
     ["ForceFreeStates/EulerLagrangeMatrices/psi" => (; long_name="normalized poloidal flux ψ_N grid of the operator matrices", scale="psi")],
     ["ForceFreeStates/EulerLagrangeMatrices/Ideal/$l" =>
