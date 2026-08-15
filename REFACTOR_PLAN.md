@@ -55,7 +55,7 @@ pe  = perturbed_equilibrium(ffs, rmp)
 |---|---|
 | D1 | Three integrators = three formalisms: **Forward** (serial EL; rename all misuses of "shooting"), **Riccati** (the STRIDE FM-chunk driver currently behind `use_parallel`), **Galerkin** (RDCON; becomes fully standalone). |
 | D2 | Riccati uses whatever threads `julia -t` provides. Its ONLY tunable is **number of chunks** (`nchunks`). `parallel_threads` is deleted. Outputs must be independent of thread count ⇒ the auto chunk count derives from problem structure only, never `Threads.nthreads()`. |
-| D3 | **No merging of two integration results.** `populate_dense_xi` + `_populate_dense_xi_via_serial_el!` + the standalone serial-Riccati path (`riccati_eulerlagrange_integration`) are deleted FIRST (PR 1). Riccati-fed PE warn-and-skips profile-based outputs until the separate Frobenius-reconstruction work (not in this plan) restores them from `delta_coil` + surface asymptotics. |
+| D3 | **No merging of two integration results.** `populate_dense_xi` + `_populate_dense_xi_via_serial_el!` + the standalone serial-Riccati path (`riccati_eulerlagrange_integration`) are deleted FIRST (PR 1). Riccati-fed PE warn-and-skips profile-based outputs PERMANENTLY (D14: riccati never produces full profiles); the separate `delta_mn` work (not in this plan) restores the resonant-coupling outputs — not the profile-based ones — from `delta_coil` + surface asymptotics. |
 | D4 | Kinetic (`kinetic_factor > 0`) is Forward-only. `solve`/driver raises a clear error for Riccati+kinetic and Galerkin+kinetic. |
 | D5 | One result struct **`ForceFreeStatesResult`**; optional fields are `Union{Nothing,T}`; consumers use a `require(...)` helper → `@warn` + skip. |
 | D6 | Local stability (Ballooning.jl) → new top-level module **`LocalStability`**, depending only on Equilibrium (+ math deps). Only ctrl dependency is `verbose` → kwarg. |
@@ -65,7 +65,8 @@ pe  = perturbed_equilibrium(ffs, rmp)
 | D10 | No back-compat burden; examples/fixtures updated freely; regression re-baselining accepted. Final validation = fresh Fortran comparison after the sequence. Nothing else merges mid-sequence without coordination (#363/#345 landed before PR 1 and are absorbed — see header amendment). |
 | D11 | New structs immutable from day one (eases the later #367 merge). HDF5 writers become functions on result structs, keeping the merged #363 schema paths unchanged; #364 (metadata) re-targets them later. |
 | D12 | Analysis module reads HDF5 files, not live structs — untouched except where dataset names would change (they don't in this plan). |
-| D13 | Inner-layer matching runs INSIDE `solve` (a `ForceFreeStatesResult` is always a closed basis). `result.solution` holds THE solve's ξ solution product — a thin `SolutionProfiles` interchange type — whenever one exists: forward always; galerkin when matched (built directly from the match — the `gal_matched_odestate` OdeState shim is DELETED); riccati `nothing` until the STRIDE/Frobenius matching lands. Closure is explicit and universal: `result.closure ∈ (:ideal, :matched)` and `result.bpen` (msing × numpert_total; zeros under ideal closure) are always present — the landing pad for any matching implementation. No transitional arbitration API: additive gal is removed in the SAME PR that introduces the result (PR 3), so one run has at most one solution and nothing like `pe_solution` is ever needed. Matching config is integrator-agnostic: a `ResistiveMatch` object (swappable `InnerLayer` model + per-surface `eta/rho/rotation`, `gamma`, `ideal`) passed as a `match=` kwarg to `solve` (PR 5). STRIDE-side matching is a future PR; until then `match` with `Riccati()` errors "not yet implemented". The `gal_*` matching TOML keys are renamed/re-homed by that future PR, not by this stack. |
+| D13 | Inner-layer matching runs INSIDE `solve` (a `ForceFreeStatesResult` is always a closed basis). `result.solution` holds THE solve's ξ solution product — a thin `SolutionProfiles` interchange type — whenever one exists: forward always; galerkin when matched (built directly from the match — the `gal_matched_odestate` OdeState shim is DELETED); riccati permanently `nothing` — STRIDE matching yields rational-surface data (`bpen`, `delta_mn`), never profiles (D14). Closure is explicit and universal: `result.closure ∈ (:ideal, :matched)` and `result.bpen` (msing × numpert_total; zeros under ideal closure) are always present — the landing pad for any matching implementation. No transitional arbitration API: additive gal is removed in the SAME PR that introduces the result (PR 3), so one run has at most one solution and nothing like `pe_solution` is ever needed. Matching config is integrator-agnostic: a `ResistiveMatch` object (swappable `InnerLayer` model + per-surface `eta/rho/rotation`, `gamma`, `ideal`) passed as a `match=` kwarg to `solve` (PR 5). STRIDE-side matching is a future PR; until then `match` with `Riccati()` errors "not yet implemented". The `gal_*` matching TOML keys are renamed/re-homed by that future PR, not by this stack. |
+| D14 | Same physics ⇒ same field, same type, across integrators, organized by the three-class taxonomy in §9 (control surface / full profiles / rational-surface resonant data). Riccati NEVER produces full ξ/ξ′ profiles — `result.solution` is permanently `nothing` for it. The next-cycle work adds `delta_mn` to riccati AND galerkin: a bpen-like matrix encoding the jump in the pitch-resonant derivative of the solution at each rational surface, from outer-solution asymptotics (for riccati: recoverable from `delta_coil`); it yields the perturbed current and shielded resonant flux, and is what PE resonant coupling consumes from a Riccati run (class 2, not class 1). Forward `delta_mn` is NOT planned — no concrete route has been identified and there may be none. There is ONE Δ′/matching data type, unified IN THIS PR: `delta_prime` carries Δ′ matrix, raw D′, `delta_coil`, and the PEST-3 blocks, produced by riccati and galerkin alike — galerkin already computes the same physics content, today under `galerkin.*` fields and different HDF5 names; its Δ′ payload merges into `delta_prime` (fields a formalism doesn't produce stay empty/`nothing`). Control-surface energies (`wp`, `free_boundary`) target all three integrators (galerkin pending its δW implementation). SLAYER consumes the unified `delta_prime`, so riccati- and galerkin-fed SLAYER both work (this PR). SLAYER + GGJ behind one abstract inner-layer interface is a later pass. |
 
 ### Verified code facts the workers must not re-derive
 
@@ -399,8 +400,9 @@ end
 Contract (D13 — final, no transitional states):
 - Forward → `solution` = `SolutionProfiles(:el_axis, …)` aliasing the odet's stores (zero
   copy), `diagnostics` = the same odet, `closure = :ideal`, `bpen` = zeros.
-- Riccati → `solution = nothing` (chunk-endpoint states are not a ξ solution; the future
-  STRIDE/Frobenius matching will populate `solution`, `closure = :matched`, and `bpen`),
+- Riccati → `solution = nothing` PERMANENTLY (chunk-endpoint states are not a ξ solution,
+  and no reconstruction is planned; the future STRIDE matching populates
+  `closure = :matched`, `bpen`, and `delta_mn` — rational-surface data, never profiles),
   `diagnostics` = its odet (ψ/q/crit/edge scan/ca are valid), `closure = :ideal`.
 - Galerkin, matched → `solution` = `SolutionProfiles(:gal_native, …)` built DIRECTLY from
   `GalerkinResult.match`/`solution` (drop `issing` points, analytic Ξ′, `compute_node_xi_s!`
@@ -505,8 +507,8 @@ this PR so the result contract above is final from day one.
   integrator) is REMOVED; `gal_flag` joins `_DEPRECATED_FFS_KEYS` + the pre-commit hook.
 - RETAIN `_chord_solution_at` (SingularCoupling.jl) as an uncalled helper: re-typed to
   `SolutionProfiles`, hard-error branch dropped, stub-style docstring. Kept pending the
-  Riccati eigenfunction-reconstruction decision (a Frobenius-reconstructed solution may
-  need chord-slope derivatives) — do NOT re-delete as dead code.
+  `delta_mn` resonant-coupling design (chord-slope derivatives may be useful when PE
+  consumes rational-surface data instead of profiles) — do NOT re-delete as dead code.
 - Gal → PE this cycle: PerturbedEquilibrium's response step requires the free-boundary
   δW (`wt0`), which the Galerkin formalism does not produce — so PE warn-skips entirely
   on gal results (both gates: `free_boundary` missing kills response, and coupling needs
@@ -581,6 +583,35 @@ cases (no re-baselining in this slice); docs build. Standalone Galerkin and the
 additive-gal removal live in commit (a) (§5.3).
 
 ---
+
+## 6A. Interface PR, commit (b2) — unified Δ′/matching payload (D14)
+
+Galerkin computes the same Δ′ physics riccati does (Δ′ matrix, raw D′, `delta_coil`,
+PEST-3 blocks), today under separate `galerkin.*` fields and different HDF5 names. This
+commit merges the two payloads into the ONE `delta_prime` field so consumers never care
+which formalism produced it.
+
+- **Inventory first (mandatory)**: enumerate every Δ′-flavored field in `GalerkinResult`
+  and every field in `DeltaPrimeData`, and produce the exact mapping (name, shape,
+  normalization, sign/side conventions) BEFORE moving anything. Do not assume the two
+  formalisms' arrays are layout-identical — verify shapes/conventions and document any
+  genuine mismatch in the type's docstring rather than silently coercing.
+- **Type**: extend `DeltaPrimeData` to the union of both payloads (PEST-3 blocks join it).
+  Fields a formalism doesn't produce stay empty/`nothing`. `build_result` fills it from
+  whichever formalism ran; the Δ′ payload LEAVES the `galerkin` field, which keeps only
+  solver internals / FEM diagnostics / RPEC match data (post-inventory list goes in the
+  struct docstrings).
+- **HDF5**: one set of dataset paths for Δ′ outputs regardless of formalism — the
+  riccati/shared paths are canonical; gal's Δ′ datasets move there (clean break per
+  `docs/development/hdf5-conventions.md`: update writer, readers, and harness case TOMLs
+  together; no legacy-path shim). Coordinate with the pending #364 reconciliation so the
+  paths are renamed once, not twice.
+- **SLAYER**: `run_slayer` routes through the unified `delta_prime` — gal-fed SLAYER now
+  works. Update `runtests_slayer_runner.jl` accordingly.
+- **Verification**: gal Δ′ values byte-identical to the pre-unification `galerkin.*`
+  datasets (only paths/fields move); riccati decks byte-identical throughout; result-struct
+  testsets extended for the unified field on both formalisms; gal harness cases re-baseline
+  (h5paths updated).
 
 ## 7. Interface PR, commit (c) — `solve` API
 
@@ -714,21 +745,89 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
 9. Keep this `REFACTOR_PLAN.md` updated (check off completed PRs); delete it in a
    final cleanup commit after PR 5 is merged and the Fortran re-comparison is done.
 
-## 9. Sanity map: which capability comes from where (post-refactor)
+## 9. Sanity map: capability targets by integrator
+
+This is the TARGET matrix (D14): outputs representing the same physics are unified across
+integrators — one field, one data type, regardless of which formalism produced it. Outputs
+fall into three physics classes:
+
+- **Control surface**: quantities on the plasma boundary (`wp`, `free_boundary` energies).
+  Every integrator can supply these (gal pending its δW implementation).
+- **In-plasma class 1 — full profiles**: ξ/ξ′ (or equivalent) across the volume
+  (`solution`), used to construct spectral, full-volume perturbed equilibria.
+  Forward and matched-Galerkin only; Riccati will NEVER produce these.
+- **In-plasma class 2 — rational-surface resonant data**: quantities AT the rational
+  surfaces that quantify island-opening drive: `bpen`, and (future) `delta_mn` — the
+  matrix encoding the jump in the pitch-resonant derivative of the solution at each
+  rational surface, from outer-solution asymptotics (for Riccati: recoverable from
+  `delta_coil`). `delta_mn` yields the perturbed current and the shielded resonant flux,
+  and is what PE's resonant coupling will consume — no full profiles required.
+
+Legend: ✅ implemented · 🔜 target pending the named follow-on work · ❌ never · — N/A.
 
 | Output | Forward | Riccati | Galerkin |
 |---|---|---|---|
-| ξ solution (`solution::SolutionProfiles`, PE-usable) | ✅ `:el_axis` | ❌ (until Frobenius matching) | matched only (`:gal_native`) |
-| closure / `bpen` | `:ideal`, zeros | `:ideal`, zeros (matched: future) | `:ideal` or `:matched`, match bpen |
-| raw integrator odet (`diagnostics`: crit, edge scan, ca) | ✅ | ✅ | — |
-| STRIDE Δ′ matrix / raw / `delta_coil` (`delta_prime`) | ❌ | ✅ | ❌ (has own `galerkin.delta`/`delta_coil`) |
-| free-boundary energies (`free_boundary`) | ✅ | ✅ | ❌ (`nothing`) |
-| fixed-boundary crit / nzero / edge scan (on odet) | ✅ | ✅ | ❌ |
-| RDCON Δ′ + PEST3 blocks + RPEC match (`galerkin`) | ❌ | ❌ | ✅ |
+| `wp` (control surface) | ✅ | ✅ | 🔜 gal δW work |
+| `free_boundary` energies (control surface) | ✅ | ✅ | 🔜 gal δW work |
+| `solution` — full ξ/ξ′ profiles (class 1) | ✅ `:el_axis` | ❌ (class 2 covers resonant coupling) | ✅ `:gal_native` |
+| `closure` / `bpen` (class 2; always present, zeros under `:ideal`) | ✅ `:ideal` | ✅ `:ideal` (🔜 `:matched` with STRIDE matching) | ✅ `:ideal` or `:matched` |
+| `delta_mn` (class 2; resonant-derivative jump) | ❌ not planned (no concrete route identified; may not exist) | 🔜 next-week work, from `delta_coil` | 🔜 next-week work |
+| `delta_prime` — ONE unified type: Δ′ matrix, raw D′, `delta_coil`, PEST-3 blocks (THIS PR) | — | ✅ → unify | ✅ → unify (same physics, today under `galerkin.*` fields / different HDF5 names) |
+| raw integrator odet (`diagnostics`: crit, nzero, edge scan, ca) | ✅ | ✅ | — (no radial ODE sweep) |
 | kinetic (`kinetic_factor>0`) | ✅ | error | error |
-| SLAYER inputs (surfaces + Δ′ matrix) | surfaces only (diag fallback) | ✅ | surfaces only |
+| SLAYER inputs (surfaces + Δ′ matrix) | surfaces only (diag fallback) | ✅ | 🔜 via unified `delta_prime` (this PR) |
+
+SLAYER is an inner-layer consumer: SLAYER + GGJ should eventually sit behind one abstract
+inner-layer interface (same family as the `ResistiveMatch` models, D13). Later pass, not this one.
 
 ## 10. Progress
+
+### Live status (updated 2026-08-15 — read this first when resuming)
+
+- **#381** (`refactor/riccati-unification`, ab588498): implemented, AI-reviewed, draft.
+  Owes: full suite, docs build, harness report pasted into PR body before leaving draft.
+- **#387** (`refactor/local-stability-module`, f8996d4f): implemented, AI-reviewed, draft.
+  Same owed gates. Stacked on #381; GitHub auto-retargets when #381's branch is deleted.
+- **Interface PR** (`refactor/forcefreestates-result`, worktree `../result-pr3`, no PR yet):
+  - Commit (a) = 8f8e1645, done: result struct + SolutionProfiles + closure/bpen/wp +
+    standalone Galerkin + additive-gal removal. Verified: 82/82 result-struct tests,
+    357/357 across six files, forward byte-identity (145 datasets), gal-group equivalence
+    (LAR_ideal_match_test, 12+16 datasets) — all vs f8996d4f, i.e. PRE-#364 base.
+  - Commit (b) implemented and reviewed (not yet committed): staged-main decomposition
+    per §6. Verified pure motion — normalized diffs of every stage body vs its old inline
+    block are character-identical (only function-boundary lines differ); both
+    force_termination early-exits preserved; one inert reorder (local stability hoisted
+    ahead of sing_lim!/sing_find!; it reads only equil). Gates: 82/82 result-struct
+    tests; fresh byte-identity of the coarsened Solovev fixture vs the commit (a)
+    artifact, 143/143 compared datasets identical (145 total incl. git_version + toml
+    blob). Review protocol for motion commits: read resulting functions top-down +
+    behavioral gates, NOT the raw diff; locally use `git diff --color-moved=dimmed-zebra
+    --color-moved-ws=allow-indentation-change --histogram`.
+  - Commit (c) not started (§7).
+  - Commit (b2) not started (§6A, D14 — decided 2026-08-15, IN SCOPE for this PR): unify
+    the Δ′/matching payload into one `delta_prime` type produced by riccati AND galerkin;
+    gal's Δ′/PEST-3/`delta_coil` leave the `galerkin` field; one set of HDF5 paths for Δ′
+    outputs; SLAYER routes through the unified type (enables gal-fed SLAYER). Own
+    slice-pure commit between (b) and (c). Needs an agent prompt.
+    Also per D14: riccati will NEVER produce full ξ profiles — next-cycle work is the
+    `delta_mn` rational-surface matrix (from `delta_coil` asymptotics) for PE resonant
+    coupling, not profile reconstruction.
+- **#364 MERGED into develop mid-sequence** (b3abe074; dataset renames + metadata, e.g.
+  `xi_clebsch_*`, literature-symbol names). Reconciliation queue (NOT yet started):
+  merge origin/develop bottom-up `#381 → #387 → result-pr3`; the manual conflict is the
+  FFS writer (commit (a) re-signatured it, #364 renamed datasets inside it). Then:
+  audit `regression-harness/cases/diiid_n1_riccati.toml` h5paths (born on the PR-1
+  branch, never saw #364's renames — will silently read nothing), fix any plan
+  dataset-path references, and RE-RUN all byte-identity/gal-equivalence checks against
+  the post-merge base. Harness re-baselines once after the merge.
+- Standing decisions in force: `_chord_solution_at` retained as uncalled helper (§5.3 —
+  do not re-delete); gal→PE warn-skips this cycle (no gal δW yet); matching work lands
+  in a new `Matching/` directory (§ follow-on); directory reorg is a separate post-#367
+  post-formatter-PR pure-move PR — never folded into feature commits; comment-audit PRs
+  follow the #354 pattern, separate from moves.
+- Process rules (unchanged): ask before EVERY commit and EVERY push; no formatter ever;
+  slice-pure commits; third-party human review before ANY merge — non-negotiable.
+
 
 - [ ] PR 1 — `refactor/riccati-unification` — **implemented, in review.** Two deltas
   from the §3 spec, both improvements: the new Δ′ example references the DIIID geqdsk
