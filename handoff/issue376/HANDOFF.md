@@ -43,6 +43,13 @@ on-demand-solution-derivatives merge) — see the note at the end of RESULTS.md 
    worth testing first: how much of the near-axis step count is legitimate resolution of real
    structure (post-repair near-axis |f''|/|f| for K is 2.1e7, a ~2e-4 curvature scale against a
    1.7e-4 median knot spacing) versus still-unexplained grid slaving.
+8. **Structural fix designed, not implemented** (§12). Two routes, both preferred over the
+   post-hoc smoothing probed in §11 (which biases et[1]): (a) sample every surface at the common
+   theta abscissae so the remap error stops being white in psi -- the current code splines each
+   surface on its own solver-chosen nodes and resamples (`DirectEquilibrium.jl:500-525`); (b)
+   build the g11/g31/g12 group from theta-derivative metric identities, as
+   `DirectEquilibrium.jl:624-626` already does for modB, so `partials[2]` leaves the metric
+   construction. Acceptance test and diagnostics are in §12.
 
 ## How to reproduce the runs
 

@@ -403,6 +403,68 @@ What the numbers now say:
   every-k subsampling smooths hardest exactly where the log grid packs. A fixed-ψ-scale
   (rather than fixed-node-stride) smoothing width would be the correct design.
 
+## 12. Two structural routes to grid-insensitive matrices (design, not yet implemented)
+
+Post-hoc smoothing of the ψ-derivatives is rejected: it biases the answer (the §11 probe moved
+et[1] in the 4th digit) and treats the symptom. Two structural routes remain.
+
+### (a) Make the surface trace correlated in ψ
+
+`equilibrium_solver` (`DirectEquilibrium.jl:494`) loops `for ipsi in (mpsi+1):-1:1` calling
+`fieldline_int(psi_nodes[ipsi], …)` with **no state carried between surfaces**. Each surface:
+Newton-solves its own start point from a crude guess, integrates θ ∈ [0, 2π] with its **own**
+adaptive step locations, then (`:500-525`) builds a periodic cubic spline `ff_interp` on those
+solver-chosen SFL-angle nodes and resamples onto the common `theta_nodes`.
+
+That resampling error depends on where the solver happened to place its steps on that particular
+surface, so it is **uncorrelated between neighbouring surfaces** — a white-in-ψ error of exactly
+the kind §10 measures, and one that tightening `reltol`/`abstol` does not remove (both null, §10),
+because it is interpolation error in the remap, not integration error.
+
+Fixes, cheapest first:
+
+- Evaluate the trace **at the common θ abscissae directly** (dense output plus a root-solve for the
+  θ where the normalised SFL angle hits each uniform node) instead of splining surface-specific
+  nodes and resampling. Every surface is then sampled at the same abscissae, so the remap error
+  becomes a smooth function of ψ rather than white noise.
+- Weaker variant: continuation — seed each surface's Newton start point and initial step from the
+  previous surface, correlating at least the start-point error.
+
+The per-surface endpoint normalisations (`y_out[end, ·]` in `ff_x_nodes` and `ff_fs_nodes[:,3]`)
+are also per-surface scalars entering multiplicatively; they deserve the same scrutiny.
+
+### (b) Get the ψ-derivative quantities from metric identities instead
+
+**The codebase already contains a worked example of this.** `DirectEquilibrium.jl:624-626`
+computes |∇ψ| for `modB` using **θ-derivatives only**:
+
+```julia
+w11 = (1.0 + fy[2]) * (2π)^2 * rfac * r / jacfac
+w12 = -fy[1] * π * r / (rfac * jacfac)
+delpsi_norm = sqrt(w11^2 + w12^2)
+```
+
+whereas `Fourfit.jl:84-90` builds the same class of quantity from `fx1/fx2/fx3` — the ψ-derivative
+channel. Two routes to the same geometry, one immune to the ψ grid and one not, and the metric
+construction takes the noisy one. This follows from the basis identities: ∇ψ ∝ (∂x/∂θ × ∂x/∂ζ)/J
+needs only θ-derivatives, and in axisymmetry the ζ direction is analytic.
+
+Route (b) is therefore: re-derive `metric.fs` channels 1, 5 and 6 (the g11/g31/g12 group) through
+the θ-derivative identities, reusing the existing `delpsi_norm` form, so `partials[2]` disappears
+from the metric construction. Where a genuine ψ-derivative is unavoidable (∂ν/∂ψ in g31, from the
+straight-field-line defining relation), take it from the analytic 2D field representation
+evaluated locally rather than by differencing traced surfaces.
+
+**Acceptance test for either route** — the issue's own criterion made quantitative: run the mpsi
+ladder (256/512/1024, stripped decks, 31 s each) and require accepted steps to stop tracking knot
+count while et[1] and Δ' hold fixed. Diagnostics to confirm the repair took: `surface_roughness.jl`
+residuals for nu/offset/rcoords should start falling with Δ instead of sitting flat, and
+`GPEC_ROUGHNESS_MATS=A,C,E,H,F,K,G roughness.jl` should show C/E/H converging like A/B/D.
+
+Expected payoff, stated honestly: §11 caps this whole channel at **~20% of the steps at mpsi=1024**
+(growing with mpsi). The stronger reason to do it is correctness — coefficient matrices that are
+insensitive to grid choice by construction — not speed.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
