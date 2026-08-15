@@ -343,7 +343,7 @@ end
 ## Notes
 
 - The standard path does not populate `delta_prime`; the canonical Δ' is the STRIDE BVP
-  `SingularSurfaces/delta_prime_matrix` from the parallel FM path. `ca_l`/`ca_r` are filled
+  `SingularSurfaces/Delta_prime_matrix` from the parallel FM path. `ca_l`/`ca_r` are filled
   only by ideal surface crossings (kinetic and galerkin-matched runs emit zero-extent
   `ca_left`/`ca_right` sentinels).
 - The Riccati and parallel FM paths compute Δ' inline at each crossing, using the
