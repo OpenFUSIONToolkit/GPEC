@@ -16,7 +16,7 @@ example_dir = "examples/DIIID-like_riccati_deltaprime_example"
 h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
-label = "delta prime (BVP diagonal)"
+label = "Δ′ STRIDE-like BVP (PEST3) diagonal"
 noise_threshold = 1e-8
 order = 10
 
@@ -24,7 +24,7 @@ order = 10
 h5path = "SingularSurfaces/Delta_prime_raw"
 type = "complex_matrix"
 extract = "all_complex"
-label = "delta prime (raw side-major)"
+label = "Δ′ STRIDE-like BVP (PEST3) raw side-major"
 noise_threshold = 1e-8
 order = 11
 

@@ -66,12 +66,14 @@ label = "penetrated b field"
 noise_threshold = 1e-8
 order = 32
 
-# Per-surface Δ' from the PE singular-coupling analysis
+# Per-surface driven-response Δ' from the PE singular-coupling jump (∂b^ψ/∂ψ across the
+# rational surface over 2π·χ₁, forced by the applied flux). This is a driven-response
+# diagnostic, NOT the tearing-stability Δ' of the STRIDE-like BVP or Galerkin RDCON solvers.
 [quantities.pe_delta_prime]
 h5path = "PerturbedEquilibrium/SingularCoupling/Delta_prime"
 type = "complex_vector"
 extract = "all_complex"
-label = "PE Δ' per surface"
+label = "PE driven-response Δ′ (SingularCoupling jump)"
 noise_threshold = 1e-8
 order = 33
 
