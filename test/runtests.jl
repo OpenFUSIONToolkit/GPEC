@@ -3,6 +3,7 @@ using Pkg
 using GeneralizedPerturbedEquilibrium.Vacuum
 using GeneralizedPerturbedEquilibrium.Equilibrium
 using GeneralizedPerturbedEquilibrium.ForceFreeStates
+using GeneralizedPerturbedEquilibrium.LocalStability
 using GeneralizedPerturbedEquilibrium.ForcingTerms
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.Utilities

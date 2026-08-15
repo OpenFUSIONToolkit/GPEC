@@ -3,6 +3,7 @@
     using GeneralizedPerturbedEquilibrium.Equilibrium
     using GeneralizedPerturbedEquilibrium.ForceFreeStates
     using GeneralizedPerturbedEquilibrium.ForceFreeStates: SingType, ResistGeometry
+    using GeneralizedPerturbedEquilibrium.LocalStability
     using GeneralizedPerturbedEquilibrium.Utilities
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.Tearing: build_ggj_inputs
@@ -44,7 +45,7 @@
         # scan stores in locstab[:,1]. Build it on the radial grid, interpolate
         # to a few surface ψ values, and check against the GGJ reconstruction.
         xs = equil.profiles.xs
-        di_ref = Float64[ForceFreeStates.prepare_ballooning_coefficients(i, equil).di for i in eachindex(xs)]
+        di_ref = Float64[LocalStability.prepare_ballooning_coefficients(i, equil).di for i in eachindex(xs)]
         di_spline = cubic_interp(xs, di_ref)
 
         dq = deriv_view(equil.profiles.q_spline, 1)
