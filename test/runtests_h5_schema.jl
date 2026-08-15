@@ -32,6 +32,8 @@ function _collect_bad_groups(h5)
     return bad
 end
 
+include("h5_metadata_check.jl")
+
 # The full-run walk below only exercises an ideal deck, which never produces the
 # data-driven group names — pin the whitelist rules directly.
 @testset "gpec.h5 schema naming: group-name rule" begin
@@ -70,6 +72,24 @@ end
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")
             @test haskey(h5, "Info/git_version")
+
+            # Metadata contract: long_name/units everywhere, dims on rank ≥ 2 arrays.
+            viol = _collect_metadata_violations(h5)
+            isempty(viol) || @error "metadata contract violations in gpec.h5" viol
+            @test isempty(viol)
+
+            # File-level attributes.
+            ra = attrs(h5)
+            for k in ("schema_version", "Conventions", "title", "date_created")
+                @test haskey(ra, k)
+            end
+            @test ra["schema_version"] == "2.0"
+
+            # Dimension scales: the ψ_N coordinate of the forward integration is a
+            # scale and is attached to its q profile (netCDF-4 pattern).
+            fwd = "ForceFreeStates/Solutions/ForwardIntegration"
+            @test HDF5.API.h5ds_is_scale(h5["$fwd/psi"])
+            @test HDF5.API.h5ds_is_attached(h5["$fwd/q"], h5["$fwd/psi"], 0)
         end
     end
 end

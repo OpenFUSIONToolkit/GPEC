@@ -93,7 +93,7 @@ order = 31
 
 # Equilibrium
 [quantities.q0]
-h5path = "Equilibrium/q0"
+h5path = "Equilibrium/q_axis"
 type = "real_scalar"
 extract = "value"
 label = "q0"
@@ -101,7 +101,7 @@ noise_threshold = 1e-12
 order = 40
 
 [quantities.q95]
-h5path = "Equilibrium/q95"
+h5path = "Equilibrium/q_95"
 type = "real_scalar"
 extract = "value"
 label = "q95"
@@ -109,7 +109,7 @@ noise_threshold = 1e-12
 order = 41
 
 [quantities.betat]
-h5path = "Equilibrium/betat"
+h5path = "Equilibrium/beta_t"
 type = "real_scalar"
 extract = "value"
 label = "beta_t"
@@ -117,7 +117,7 @@ noise_threshold = 1e-12
 order = 42
 
 [quantities.betan]
-h5path = "Equilibrium/betan"
+h5path = "Equilibrium/beta_N"
 type = "real_scalar"
 extract = "value"
 label = "beta_n"
@@ -125,7 +125,7 @@ noise_threshold = 1e-12
 order = 43
 
 [quantities.li1]
-h5path = "Equilibrium/li1"
+h5path = "Equilibrium/l_i_1"
 type = "real_scalar"
 extract = "value"
 label = "internal inductance li1"
@@ -133,7 +133,7 @@ noise_threshold = 1e-12
 order = 44
 
 [quantities.li2]
-h5path = "Equilibrium/li2"
+h5path = "Equilibrium/l_i_2"
 type = "real_scalar"
 extract = "value"
 label = "internal inductance li2"
@@ -141,7 +141,7 @@ noise_threshold = 1e-12
 order = 45
 
 [quantities.li3]
-h5path = "Equilibrium/li3"
+h5path = "Equilibrium/l_i_3"
 type = "real_scalar"
 extract = "value"
 label = "internal inductance li3"
@@ -149,7 +149,7 @@ noise_threshold = 1e-12
 order = 46
 
 [quantities.betap1]
-h5path = "Equilibrium/betap1"
+h5path = "Equilibrium/beta_p_1"
 type = "real_scalar"
 extract = "value"
 label = "poloidal beta betap1"
@@ -157,7 +157,7 @@ noise_threshold = 1e-12
 order = 47
 
 [quantities.betap2]
-h5path = "Equilibrium/betap2"
+h5path = "Equilibrium/beta_p_2"
 type = "real_scalar"
 extract = "value"
 label = "poloidal beta betap2"
@@ -165,7 +165,7 @@ noise_threshold = 1e-12
 order = 48
 
 [quantities.betap3]
-h5path = "Equilibrium/betap3"
+h5path = "Equilibrium/beta_p_3"
 type = "real_scalar"
 extract = "value"
 label = "poloidal beta betap3"
@@ -173,7 +173,7 @@ noise_threshold = 1e-12
 order = 49
 
 [quantities.betaj]
-h5path = "Equilibrium/betaj"
+h5path = "Equilibrium/beta_j"
 type = "real_scalar"
 extract = "value"
 label = "current beta betaj"
@@ -189,7 +189,7 @@ noise_threshold = 1e-12
 order = 58
 
 [quantities.crnt]
-h5path = "Equilibrium/crnt"
+h5path = "Equilibrium/I_p"
 type = "real_scalar"
 extract = "value"
 label = "plasma current"
@@ -197,7 +197,7 @@ noise_threshold = 1e-12
 order = 59
 
 [quantities.bt0]
-h5path = "Equilibrium/bt0"
+h5path = "Equilibrium/B_T_axis"
 type = "real_scalar"
 extract = "value"
 label = "toroidal field bt0"
@@ -205,7 +205,7 @@ noise_threshold = 1e-12
 order = 62
 
 [quantities.bwall]
-h5path = "Equilibrium/bwall"
+h5path = "Equilibrium/B_T_wall"
 type = "real_scalar"
 extract = "value"
 label = "wall field bwall"
@@ -213,7 +213,7 @@ noise_threshold = 1e-12
 order = 63
 
 [quantities.aratio]
-h5path = "Equilibrium/aratio"
+h5path = "Equilibrium/aspect_ratio"
 type = "real_scalar"
 extract = "value"
 label = "aspect ratio"
@@ -230,7 +230,7 @@ order = 65
 
 # Singular surfaces
 [quantities.msing]
-h5path = "SingularSurfaces/msing"
+h5path = "SingularSurfaces/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -238,7 +238,7 @@ noise_threshold = 0
 order = 50
 
 [quantities.sing_psi]
-h5path = "SingularSurfaces/psi"
+h5path = "SingularSurfaces/rational_psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"
@@ -246,7 +246,7 @@ noise_threshold = 1e-8
 order = 51
 
 [quantities.sing_q]
-h5path = "SingularSurfaces/q"
+h5path = "SingularSurfaces/rational_q"
 type = "real_vector"
 extract = "all_real"
 label = "singular q values"
@@ -271,11 +271,11 @@ noise_threshold = 0
 order = 61
 
 # Tearing stability Δ' — canonical STRIDE BVP matrix diagonal (replaces the
-# previous `PerturbedEquilibrium/SingularCoupling/delta_prime` track, which
+# previous `PerturbedEquilibrium/SingularCoupling/Delta_prime` track, which
 # was a per-surface stub computed by SingularCoupling from (rbwp1-lbwp1)/(2π·χ').
 # Per-surface Δ' is de-emphasized; SingularCoupling reads this BVP matrix diagonal.
 [quantities.delta_prime]
-h5path = "SingularSurfaces/delta_prime_matrix"
+h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
 label = "delta prime (BVP diagonal)"
@@ -390,7 +390,7 @@ order = 71
 # Local stability profiles (local_stability_flag = true). Checksums hash the full
 # profile so they are robust to NaN edge-surface entries and catch any change.
 [quantities.locstab_di]
-h5path = "LocalStability/di"
+h5path = "LocalStability/D_I"
 type = "real_vector"
 extract = "checksum"
 label = "Mercier D_I profile (checksum)"
@@ -398,7 +398,7 @@ noise_threshold = 0
 order = 72
 
 [quantities.locstab_dr]
-h5path = "LocalStability/dr"
+h5path = "LocalStability/D_R"
 type = "real_vector"
 extract = "checksum"
 label = "resistive interchange D_R profile (checksum)"

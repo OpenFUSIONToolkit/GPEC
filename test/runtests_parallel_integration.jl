@@ -265,7 +265,7 @@ using TOML
         @test isapprox(et_par, et_std; rtol=0.02)
         # Per-surface Δ' assertions were removed: per-surface Δ' is a stub calculation
         # left in the code for future work but no longer reported, output, or tested.
-        # The STRIDE BVP Δ' matrix (`SingularSurfaces/delta_prime_matrix`) is the canonical
+        # The STRIDE BVP Δ' matrix (`SingularSurfaces/Delta_prime_matrix`) is the canonical
         # Δ', regression-tested via the DIIID-like fixture which has well-conditioned
         # values; Solovev is near marginal stability and BVP Δ' is pathological there.
     end
