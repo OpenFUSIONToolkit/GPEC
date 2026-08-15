@@ -1,0 +1,163 @@
+# Regression case: DIII-D-like n=1 Δ' matrix from the Riccati chunked propagator BVP.
+# The Riccati integrator is the only one that produces SingularSurfaces/delta_prime_matrix, so
+# this case is the canonical Δ' track (its sibling diiid_n1 runs the forward integrator and
+# carries the ξ/perturbed-equilibrium quantities instead). Also tracks the free-boundary
+# energies and singular-surface locations the BVP depends on, so a Δ' move can be attributed.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
+# noise floor below which a difference is treated as zero.
+[case]
+name = "diiid_n1_riccati"
+description = "DIII-D-like equilibrium, n=1, Riccati integrator Δ' matrix"
+example_dir = "examples/DIIID-like_riccati_deltaprime_example"
+
+# Tearing stability Δ' — the msing×msing BVP matrix diagonal, and the raw side-major
+# outer-region matrix it is projected from.
+[quantities.delta_prime]
+h5path = "SingularSurfaces/delta_prime_matrix"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "delta prime (BVP diagonal)"
+noise_threshold = 1e-8
+order = 10
+
+[quantities.delta_prime_raw]
+h5path = "SingularSurfaces/delta_prime_raw"
+type = "complex_matrix"
+extract = "all_complex"
+label = "delta prime (raw side-major)"
+noise_threshold = 1e-8
+order = 11
+
+[quantities.delta_coil]
+h5path = "SingularSurfaces/delta_coil"
+type = "complex_matrix"
+extract = "all_complex"
+label = "edge coil response delta_coil"
+noise_threshold = 1e-8
+order = 12
+
+# Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
+[quantities.et_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+order = 20
+
+[quantities.ep_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "plasma energy Re(ep[1])"
+noise_threshold = 1e-10
+order = 21
+
+[quantities.ev_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "vacuum energy Re(ev[1])"
+noise_threshold = 1e-10
+order = 22
+
+[quantities.et_all]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "all_complex"
+label = "total energy (all)"
+noise_threshold = 1e-10
+order = 23
+
+# Singular surfaces — the Δ' matrix is indexed by these, so a shift here explains a Δ' shift.
+[quantities.msing]
+h5path = "SingularSurfaces/msing"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+order = 30
+
+[quantities.sing_psi]
+h5path = "SingularSurfaces/psi"
+type = "real_vector"
+extract = "all_real"
+label = "singular psi locations"
+noise_threshold = 1e-8
+order = 31
+
+[quantities.sing_q]
+h5path = "SingularSurfaces/q"
+type = "real_vector"
+extract = "all_real"
+label = "singular q values"
+noise_threshold = 1e-8
+order = 32
+
+# Integration — chunk-endpoint step counts move when the chunk sizing changes.
+[quantities.nstep]
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (saved)"
+noise_threshold = 0
+order = 40
+
+[quantities.nstep_total]
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (total)"
+noise_threshold = 0
+order = 41
+
+# Mode numbers
+[quantities.mpert]
+h5path = "Info/mpert"
+type = "int_scalar"
+extract = "value"
+label = "mpert"
+noise_threshold = 0
+order = 50
+
+[quantities.npert]
+h5path = "Info/npert"
+type = "int_scalar"
+extract = "value"
+label = "npert"
+noise_threshold = 0
+order = 51
+
+# Equilibrium — shared with diiid_n1; confirms the two cases sit on the same equilibrium.
+[quantities.q0]
+h5path = "Equilibrium/q0"
+type = "real_scalar"
+extract = "value"
+label = "q0"
+noise_threshold = 1e-12
+order = 60
+
+[quantities.q95]
+h5path = "Equilibrium/q95"
+type = "real_scalar"
+extract = "value"
+label = "q95"
+noise_threshold = 1e-12
+order = 61
+
+[quantities.betan]
+h5path = "Equilibrium/betan"
+type = "real_scalar"
+extract = "value"
+label = "beta_n"
+noise_threshold = 1e-12
+order = 62
+
+# Runtime
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
