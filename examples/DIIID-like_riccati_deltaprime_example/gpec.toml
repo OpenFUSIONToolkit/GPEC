@@ -1,0 +1,57 @@
+# DIII-D-like H-mode equilibrium — n=1 Δ'-matrix case on the Riccati integrator.
+# Reuses the equilibrium of the sibling DIIID-like_ideal_example (geqdsk referenced by
+# relative path; not duplicated), and is the canonical SingularSurfaces/Delta_prime_matrix
+# fixture: the Riccati chunked propagator BVP is the only integrator that produces it.
+# No forcing or perturbed equilibrium, so no dense ξ profiles are needed.
+
+[Equilibrium]
+eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
+eq_type = "efit"               # Type of the input 2D equilibrium file
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "auto"             # Radial grid packing type ("auto" = two-pass measured-curvature grid)
+psilow = 1e-4                  # Lower limit of normalized poloidal flux
+psihigh = 0.995                # Upper limit of normalized poloidal flux (captures q=6 at this Ip)
+mpsi = 0                       # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
+mtheta = 256                   # Number of poloidal grid points
+newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+etol = 1e-10                   # Error tolerance for equilibrium solver
+force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
+
+[Wall]
+shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.2415                     # Distance from plasma (conformal) or shape parameter
+aw = 0.05                      # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                       # Elongation parameter for wall shapes
+cw = 0                         # Offset of wall center from major radius
+dw = 0.5                       # Triangularity parameter for wall shapes
+tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true          # Equal arc length distribution of nodes on wall
+
+[ForceFreeStates]
+local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
+force_termination = true       # Terminate after force-free states (skip perturbed equilibrium calculations)
+
+psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
+sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
+
+nn_low = 1                     # Smallest toroidal mode number to include
+nn_high = 1                    # Largest toroidal mode number to include
+delta_mlow = 8                 # Expands lower bound of Fourier harmonics
+delta_mhigh = 8                # Expands upper bound of Fourier harmonics
+mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+
+kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
+kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
+eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
+save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
+ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+
+# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
+set_psilim_via_dmlim  = true   # Truncate at (last_rational_q + dmlim)/n — TRUE for diverted equilibria (q → ∞ at separatrix)
+dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)

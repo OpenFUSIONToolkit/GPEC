@@ -909,5 +909,11 @@ Mercier calculation and the new `Bal.jl` calculation.
 
 The local-stability output now stores ballooning ``\Delta'`` in the fourth
 `locstab_fs` entry. In the HDF5 output this is written as
-`locstab/ballooning_Delta_prime`, distinct from the tearing ``\Delta'`` outputs
-under `singular/` and `perturbed_equilibrium/singular_coupling/`.
+`LocalStability/ballooning_Delta_prime`, distinct from the tearing ``\Delta'`` outputs
+under `SingularSurfaces/` and `PerturbedEquilibrium/SingularCoupling/`.
+
+## API
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.LocalStability]
+```

@@ -8,7 +8,7 @@ Fortran GPEC's kinetic DCON reference.
 Runs `GPE.main()` with `kinetic_source="calculated"` and `kinetic_factor=1.0`
 against the EFIT g-file and `.kin` profile taken from a Fortran GPEC
 kinetic example directory, then compares the least-stable total-energy
-eigenvalue `vacuum/et[1]` against `W_t_eigenvalue[:, 0]` in the Fortran
+eigenvalue `ForceFreeStates/FreeBoundaryStability/eigenmode_energies[1]` against `W_t_eigenvalue[:, 0]` in the Fortran
 `dcon_output_n1.nc`.
 
 No inputs are duplicated into this repo — everything is read from the
@@ -202,9 +202,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     isfile(h5path) || error("Expected Julia output not found: $h5path")
 
     et = h5open(h5path, "r") do h5
-        read(h5["vacuum/et"])
+        read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
     end
-    isempty(et) && error("vacuum/et is empty in $h5path")
+    isempty(et) && error("ForceFreeStates/FreeBoundaryStability/eigenmode_energies is empty in $h5path")
     # et is stored as a length-2*N real array (re,im interleaved) by HDF5.jl
     # when the underlying Julia array is ComplexF64. NCDatasets and HDF5 give
     # us a ComplexF64 array directly here.

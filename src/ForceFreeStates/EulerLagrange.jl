@@ -64,10 +64,12 @@ end
 """
     balance_integration_chunks(chunks, ctrl, intr) -> Vector{IntegrationChunk}
 
-Sub-divide integration chunks to produce a load-balanced set for parallel execution.
+Sub-divide integration chunks to produce a load-balanced set for the Riccati BVP.
 Starts from the output of `chunk_el_integration_bounds` and iteratively splits the
-highest-cost chunk (by `ode_itime_cost`) until the total chunk count reaches
-`max(2*msing + 3, 4 * Threads.nthreads())`.
+highest-cost chunk (by `ode_itime_cost`) until the total chunk count reaches the target
+set by `ctrl.nchunks` (`0` = auto). The target is derived from problem structure only —
+never from `Threads.nthreads()` — so the chunk list, and hence every Riccati output, is
+identical whatever thread count `julia -t` provides.
 
 Each split finds the equal-cost midpoint ψ_mid via bisection:
   ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
@@ -84,11 +86,14 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
     # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
     # because single long-span propagators may already have cond ~ 10²⁴.
     min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
-    # Use the effective parallel width (capped by ctrl.parallel_threads) rather than
-    # Threads.nthreads() — otherwise a user on `julia -t 16` who sets parallel_threads=2
-    # for determinism still pays for 4× the requested sub-chunk count.
-    effective_threads = min(Threads.nthreads(), max(ctrl.parallel_threads, 1))
-    target_n = max(min_chunks, 4 * effective_threads, min_bvp_intervals)
+    if ctrl.nchunks > 0
+        if ctrl.nchunks < min_chunks
+            @warn "nchunks = $(ctrl.nchunks) is below the $min_chunks chunks required by $(intr.msing) singular surfaces; clamping up."
+        end
+        target_n = max(ctrl.nchunks, min_chunks)
+    else
+        target_n = max(min_chunks, min_bvp_intervals)
+    end
 
     result = collect(chunks)
 
@@ -140,41 +145,42 @@ end
     eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
 
 Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
-surface on the way (Fortran `ode_run`). Dispatches on `ctrl` to the parallel propagator BVP
-(`use_parallel`), the dual Riccati formulation (`use_riccati`), or
-[`serial_eulerlagrange_integration`](@ref).
+surface on the way (Fortran `ode_run`). Dispatches on `ctrl.integrator` to
+[`riccati_eulerlagrange_integration`](@ref) (the chunked propagator BVP) or
+[`forward_eulerlagrange_integration`](@ref).
 
-Only the parallel branch populates `propagators` / `chunks` / `S_left`, which
-`compute_delta_prime_matrix!` consumes for the Δ' BVP; the other two return `nothing` for all
-three.
+Only the Riccati branch populates `propagators` / `chunks` / `S_left`, which
+`compute_delta_prime_matrix!` consumes for the Δ' BVP; the forward branch returns `nothing`
+for all three.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Dispatch to parallel or Riccati solver if requested.
-    # Parallel path returns (odet, propagators, chunks, S_at_surface_left) for deferred Δ' BVP.
-    if ctrl.use_parallel
-        return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
-    elseif ctrl.use_riccati
-        return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
+    if ctrl.integrator == "riccati"
+        ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
+        # Riccati path returns (odet, propagators, chunks, S_at_surface_left) for the deferred Δ' BVP.
+        return riccati_eulerlagrange_integration(ctrl, equil, ffit, intr)
+    elseif ctrl.integrator == "forward"
+        return forward_eulerlagrange_integration(ctrl, equil, ffit, intr)
+    elseif ctrl.integrator == "galerkin"
+        error("integrator = \"galerkin\" is not yet a standalone integrator — use gal_flag = true alongside integrator = \"forward\" or \"riccati\".")
     end
-    return serial_eulerlagrange_integration(ctrl, equil, ffit, intr)
+    error("Unknown integrator: $(ctrl.integrator). Expected \"forward\", \"riccati\", or \"galerkin\".")
 end
 
 """
-    serial_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
+    forward_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
 
-Serial shooting branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk,
+Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
 applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.ucrit` and undoing it
 via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
-directly to force this branch regardless of `ctrl.use_parallel` / `ctrl.use_riccati`; `verbose`
-overrides `ctrl.verbose` for progress logging.
+directly to force this branch regardless of `ctrl.integrator`; `verbose` overrides
+`ctrl.verbose` for progress logging.
 """
-function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal;
+function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal;
     verbose::Bool=ctrl.verbose)
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-    odet.du_store_populated = true
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
@@ -253,7 +259,7 @@ function serial_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::E
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
-    # Undo Gaussian reduction to get true solution vectors (for free_run! eigenvector use)
+    # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
 
     return (odet, nothing, nothing, nothing)
@@ -643,9 +649,8 @@ function cross_ideal_singular_surf!(
     # so the result is in a different convention. The canonical Δ' is the STRIDE BVP matrix
     # (compute_delta_prime_matrix!) populated by the parallel FM path.
 
-    sing_der!(du1, odet.u, params, odet.psifac)
-
     # Store values after crossing step and advance
+    odet.q = equil.profiles.q_spline(odet.psifac; hint=odet.spline_hint)
     store_ode_data!(odet, odet.psifac, odet.u)
 end
 
@@ -686,10 +691,8 @@ function cross_kinetic_singular_surf!(
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
 
-    # re-evaluate at the final post-crossing u so the stored derivatives match u_store
-    sing_der!(du1, odet.u, params, odet.psifac)
-
     # Store crossing step
+    odet.q = equil.profiles.q_spline(odet.psifac; hint=odet.spline_hint)
     store_ode_data!(odet, odet.psifac, odet.u)
 end
 
@@ -741,7 +744,6 @@ function integrate_el_region!(
     q_range = abs(q_end - q_start)
 
     steps_in_segment = Ref(0)
-    du_buffer = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
     function segment_callback!(integrator)
         ctrl, _, _, intr, odet, chunk = integrator.p
@@ -760,7 +762,8 @@ function integrate_el_region!(
         in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
 
         if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
-            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+            # q at the accepted point, not the last internal Runge-Kutta stage
+            odet.q = equil.profiles.q_spline(integrator.t; hint=odet.spline_hint)
             store_ode_data!(odet, integrator.t, integrator.u)
         end
     end
@@ -773,7 +776,7 @@ function integrate_el_region!(
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
     # regardless of where the last accepted step landed relative to the near_end band.
     if odet.step == 1 || odet.psi_store[odet.step-1] != sol.t[end]
-        sing_der!(du_buffer, sol.u[end], (ctrl, equil, ffit, intr, odet, chunk), sol.t[end])
+        odet.q = equil.profiles.q_spline(sol.t[end]; hint=odet.spline_hint)
         store_ode_data!(odet, sol.t[end], sol.u[end])
     end
 
@@ -1007,12 +1010,14 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             odet.u_store[:, :, 1, istep] .= gauss_buffer
             mul!(gauss_buffer, odet.u_store[:, :, 2, istep], transforms[:, :, ifix])
             odet.u_store[:, :, 2, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.du_store[:, :, 1, istep], transforms[:, :, ifix])
-            odet.du_store[:, :, 1, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.du_store[:, :, 2, istep], transforms[:, :, ifix])
-            odet.du_store[:, :, 2, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.xi_s_store[:, :, istep], transforms[:, :, ifix])
-            odet.xi_s_store[:, :, istep] .= gauss_buffer
+            # Derivative stores are empty unless a path filled them analytically (galerkin);
+            # materialized ones are computed after this transform and need no fixup.
+            if !isempty(odet.du_store)
+                mul!(gauss_buffer, odet.du_store[:, :, istep], transforms[:, :, ifix])
+                odet.du_store[:, :, istep] .= gauss_buffer
+                mul!(gauss_buffer, odet.xi_s_store[:, :, istep], transforms[:, :, ifix])
+                odet.xi_s_store[:, :, istep] .= gauss_buffer
+            end
         end
         jfix = kfix + 1
     end

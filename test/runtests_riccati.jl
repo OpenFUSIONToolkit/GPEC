@@ -93,7 +93,7 @@ end
     #
     # Integration runs:
     #   intr_ric / odet_ric — Riccati path (shared by most tests)
-    #   intr_std / odet_std — Standard path (energy comparison only)
+    #   intr_fwd / odet_fwd — Forward path (energy comparison only)
 
     ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
@@ -110,34 +110,35 @@ end
     ffit = FFS.make_matrix(equil, intr_tmp, metric)
     N = intr_tmp.numpert_total
 
-    # Riccati integration
+    # Riccati integration. The driver returns (odet, propagators, chunks, S_at_surface_left);
+    # only odet is used here.
     intr_ric = make_solovev_intr(inputs, ctrl, equil, ex)
-    odet_ric = FFS.riccati_eulerlagrange_integration(ctrl, equil, ffit, intr_ric)
+    odet_ric, _, _, _ = FFS.riccati_eulerlagrange_integration(ctrl, equil, ffit, intr_ric)
 
     # Save inline Δ' values before any test that calls compute_delta_prime_from_ca!
     # (which overwrites intr_ric.sing[s].delta_prime)
     delta_prime_inline = [copy(intr_ric.sing[s].delta_prime) for s in 1:intr_ric.msing]
 
-    vac_ric = FFS.free_run!(odet_ric, ctrl, equil, ffit, intr_ric)
+    vac_ric = FFS.free_run(odet_ric, ctrl, equil, ffit, intr_ric)
     et_ric = real(vac_ric.et[1])
 
-    # Standard integration (needed only for energy comparison).  eulerlagrange_integration
-    # returns (odet, propagators, chunks, S_at_surface_left); only odet is used here.
-    intr_std = make_solovev_intr(inputs, ctrl, equil, ex)
-    odet_std, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr_std)
-    vac_std = FFS.free_run!(odet_std, ctrl, equil, ffit, intr_std)
-    et_std = real(vac_std.et[1])
+    # Forward integration (needed only for energy comparison).
+    intr_fwd = make_solovev_intr(inputs, ctrl, equil, ex)
+    odet_fwd, _, _, _ = FFS.forward_eulerlagrange_integration(ctrl, equil, ffit, intr_fwd)
+    vac_fwd = FFS.free_run(odet_fwd, ctrl, equil, ffit, intr_fwd)
+    et_fwd = real(vac_fwd.et[1])
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    @testset "Riccati integration matches standard ODE — Solovev example" begin
-        # PR description claims Solovev energy eigenvalue error 0.006 % vs standard path.
-        # Tightened to rtol=1e-4 (matches the PR's headline claim within ≈2×). A regression
-        # of the Riccati/renormalization algorithm to ~1 % error would fail here loudly.
-        @test isapprox(et_ric, et_std; rtol=1e-4)
+    @testset "Riccati integration matches forward ODE — Solovev example" begin
+        # The two formalisms solve the same system, so the leading energy eigenvalue must
+        # agree closely; the measured Solovev disagreement is ≈5e-5. A regression of the
+        # Riccati/renormalization algorithm to ~1 % error would fail here loudly.
+        @test isapprox(et_ric, et_fwd; rtol=1e-4)
 
-        # Riccati uses no more than 2x as many steps as standard
-        @test odet_ric.step <= 2 * odet_std.step
+        # Riccati stores chunk endpoints, the forward path stores every saved ODE step,
+        # so the Riccati store is always the sparser of the two.
+        @test odet_ric.step <= odet_fwd.step
     end
 
     # Note: a Solovev per-surface Δ' regression testset previously lived here,
@@ -148,8 +149,8 @@ end
     # STRIDE BVP Δ' matrix (see runtests_parallel_integration.jl).
 
     @testset "Riccati end state has U₂ ≈ I" begin
-        # After riccati_eulerlagrange_integration, odet.u[:,:,2] should be identity
-        # (canonical Riccati convention after final renorm)
+        # The outer-region re-integration that closes riccati_eulerlagrange_integration
+        # leaves odet.u[:,:,2] as the identity (canonical Riccati convention after final renorm)
         @test odet_ric.u[:, :, 2] ≈ I(N) rtol=1e-10
     end
 
@@ -215,7 +216,7 @@ end
         # result must be bit-for-bit identical (not just approximately equal).
         #
         # Note: this call overwrites intr_ric.sing[s].delta_prime; delta_prime_inline was
-        # saved before free_run! above so it holds the original inline values.
+        # saved before free_run above so it holds the original inline values.
         #
         # See benchmarks/benchmark_delta_prime_methods.jl for the extended version.
         FFS.compute_delta_prime_from_ca!(odet_ric, intr_ric, equil)

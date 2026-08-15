@@ -1,11 +1,11 @@
 # Overlay the IDEAL gal matched ξ(ψ) against the EL total-energy eigenmode ξ(ψ), for the same edge
 # eigenvector w. The ideal gal solution should reproduce the EL (DCON) ideal solution.
 #
-# EL :  ξ_EL(ψ)  = U_EL(ψ) · (U_EL_edge \ w)          (fundamental matrix, integration/xi_psi)
+# EL :  ξ_EL(ψ)  = U_EL(ψ) · (U_EL_edge \ w)          (fundamental matrix, ForceFreeStates/Solutions/ForwardIntegration/xi_psi)
 # gal:  ξ_gal(ψ) = U_gal(ψ) · w                       (identity-at-edge ⇒ coefficient is w itself)
 # w = eigenvector of the total energy operator W = W_plasma + W_vacuum (FreeBoundaryStability).
 #
-# Needs ONE gpec.h5 from a run with populate_dense_xi=true (EL dense u_store), gal_match_flag=true,
+# Needs ONE gpec.h5 from a run with integrator="forward" (EL dense u_store), gal_match_flag=true,
 # gal_ideal_flag=true (gal ideal matched), vac_flag=true (energy operator).
 # Usage: julia --project=. benchmarks/compare_gal_vs_el.jl [gpec.h5] [out.png] [mode]
 #   mode = "highest" (default, most stable), "lowest" (most unstable), or an integer eigenmode index.
@@ -19,12 +19,12 @@ ksel = length(ARGS) >= 3 ? ARGS[3] : "highest"
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
 et, wt, u1, psiE, gxi, psiG, issing, mlow, sing_psi = h5open(h5path) do f
-    (to_c(read(f["FreeBoundaryStability/eigenmode_energies"])),
-        to_c(read(f["FreeBoundaryStability/W_freeboundary_eigenmodes"])),
-        to_c(read(f["integration/xi_psi"])), read(f["integration/psi"]),
-        to_c(read(f["galerkin/match/xi"])), read(f["galerkin/solution/psi"]),
-        Bool.(read(f["galerkin/solution/issing"])), read(f["info/mlow"]),
-        read(f["galerkin/sing_psi"]))
+    (to_c(read(f["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])),
+        to_c(read(f["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"])),
+        to_c(read(f["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"])), read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
+        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]),
+        Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"])), read(f["Info/mlow"]),
+        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
 end
 
 mpert = size(u1, 1)
