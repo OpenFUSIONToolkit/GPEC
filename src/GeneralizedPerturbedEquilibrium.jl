@@ -556,7 +556,10 @@ function main_from_inputs(
         slayer_result = _run_slayer_stage(nothing)
         total_dt = time() - total_start
         push!(runtimes, "total" => total_dt)
-        _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+        # A returned SLAYER result means that stage created or appended to the file itself.
+        if ctrl.write_outputs_to_HDF5 || slayer_result !== nothing
+            _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+        end
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
         return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
             free_energies=free_energies,
@@ -694,7 +697,10 @@ function main_from_inputs(
     # ----------------------------------------------------------------
     total_dt = time() - total_start
     push!(runtimes, "total" => total_dt)
-    _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+    # A returned SLAYER result means that stage created or appended to the file itself.
+    if ctrl.write_outputs_to_HDF5 || slayer_result !== nothing
+        _write_runtimes!(joinpath(intr.dir_path, ctrl.HDF5_filename), runtimes)
+    end
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
@@ -1030,22 +1036,16 @@ function _write_coil_snapshot!(h5_path::String, coil_sets::Vector{ForcingTerms.C
     return nothing
 end
 
-const _RUNTIME_LONG_NAMES = Dict(
-    "equilibrium" => "Wall-clock time of the Equilibrium construction stage",
-    "force_free_states" => "Wall-clock time of the ForceFreeStates stability stage",
-    "galerkin" => "Wall-clock time of the Galerkin outer-region solve",
-    "slayer" => "Wall-clock time of the SLAYER tearing-mode stage",
-    "perturbed_equilibrium" => "Wall-clock time of the PerturbedEquilibrium stage",
-    "kinetic_forces" => "Wall-clock time of the KineticForces (NTV) stage",
-    "total" => "Wall-clock time of the full GPEC run")
-
 """
     _write_runtimes!(h5_path::String, runtimes)
 
 Write the per-stage wall-clock seconds collected during a run into `Info/Runtimes/` of an
 existing gpec.h5 file. `runtimes` iterates `stage => seconds` pairs; only the stages that ran
-are recorded. These timings are informational only — machine- and load-dependent, never a
-regression quantity.
+are recorded. Metadata comes from `RUNTIME_H5_ANNOTATIONS`, which skips the absent stages.
+These timings are informational only — machine- and load-dependent, never a regression quantity.
+
+Call it only when this run produced the file; the `isfile` guard alone would also stamp a
+stale gpec.h5 left over from an earlier run.
 """
 function _write_runtimes!(h5_path::String, runtimes)
     isfile(h5_path) || return nothing
@@ -1054,7 +1054,7 @@ function _write_runtimes!(h5_path::String, runtimes)
         for (stage, dt) in runtimes
             out_h5["Info/Runtimes/$stage"] = dt
         end
-        Utilities.HDF5Annotations.annotate!(out_h5, ["Info/Runtimes/$stage" => (; long_name=_RUNTIME_LONG_NAMES[stage], units="s") for (stage, _) in runtimes])
+        Utilities.HDF5Annotations.annotate!(out_h5, RUNTIME_H5_ANNOTATIONS)
     end
     return nothing
 end

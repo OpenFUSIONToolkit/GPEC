@@ -185,6 +185,18 @@ const MAIN_H5_ANNOTATIONS = [
     "SurfaceGeometries/Wall/z" => (; long_name="Cartesian z of wall point cloud", units="m"),
 ]
 
+# Per-stage wall-clock records written by `_write_runtimes!` after every stage has run.
+# Stages that did not run leave their path absent and are skipped by `annotate!`.
+const RUNTIME_H5_ANNOTATIONS = [
+    "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
+    "Info/Runtimes/galerkin" => (; long_name="wall-clock time of the Galerkin outer-region solve", units="s"),
+    "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
+    "Info/Runtimes/slayer" => (; long_name="wall-clock time of the SLAYER tearing-mode stage", units="s"),
+    "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
+    "Info/Runtimes/kinetic_forces" => (; long_name="wall-clock time of the KineticForces (NTV) stage", units="s"),
+    "Info/Runtimes/total" => (; long_name="wall-clock time of the full GPEC run", units="s"),
+]
+
 # Euler-Lagrange operator matrices: same wording per letter, Ideal/ and Kinetic/ variants.
 const _ELM_IDEAL_LETTERS = [
     ("A", "Euler-Lagrange primitive coefficient matrix A"),
