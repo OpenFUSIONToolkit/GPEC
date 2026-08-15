@@ -341,8 +341,8 @@ function load_julia_outputs(h5_path::String)
         julia["Jbgradpsi"] = haskey(f, "$pe/Response/b_psi_area_weighted") ? read(f, "$pe/Response/b_psi_area_weighted") : Matrix{ComplexF64}(undef, 0, 0)
         julia["xi_psi"] = haskey(f, "$pe/Response/xi_psi") ? read(f, "$pe/Response/xi_psi") : Matrix{ComplexF64}(undef, 0, 0)
         julia["xi_n"] = haskey(f, "$pe/Response/xi_n") ? read(f, "$pe/Response/xi_n") : Matrix{ComplexF64}(undef, 0, 0)
-        julia["clebsch_psi1"] = haskey(f, "$pe/Response/dclebsch_psidpsi") ? read(f, "$pe/Response/dclebsch_psidpsi") : Matrix{ComplexF64}(undef, 0, 0)
-        julia["clebsch_alpha"] = haskey(f, "$pe/Response/clebsch_alpha") ? read(f, "$pe/Response/clebsch_alpha") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_psi1"] = haskey(f, "$pe/Response/dxi_clebsch_psidpsi") ? read(f, "$pe/Response/dxi_clebsch_psidpsi") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_alpha"] = haskey(f, "$pe/Response/xi_clebsch_alpha") ? read(f, "$pe/Response/xi_clebsch_alpha") : Matrix{ComplexF64}(undef, 0, 0)
         julia["psi_grid"] = haskey(f, "ForceFreeStates/Solutions/ForwardIntegration/psi") ? read(f, "ForceFreeStates/Solutions/ForwardIntegration/psi") : Float64[]
 
         # R,Z,φ: loaded via modes_to_theta helper below (not raw modes)

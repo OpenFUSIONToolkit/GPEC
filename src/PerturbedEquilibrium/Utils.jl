@@ -149,9 +149,9 @@ function write_outputs_to_HDF5(
 
         # Clebsch displacements for PENTRC (matches Fortran gpout_xclebsch)
         if have_xi
-            response_group["clebsch_psi"]   = state.xi_modes.clebsch_psi
-            response_group["dclebsch_psidpsi"]  = state.xi_modes.clebsch_psi1
-            response_group["clebsch_alpha"] = state.xi_modes.clebsch_alpha
+            response_group["xi_clebsch_psi"]   = state.xi_modes.clebsch_psi
+            response_group["dxi_clebsch_psidpsi"]  = state.xi_modes.clebsch_psi1
+            response_group["xi_clebsch_alpha"] = state.xi_modes.clebsch_alpha
         end
 
         # Contravariant displacement (from gpeq_contra, all J-weighted)
@@ -261,10 +261,10 @@ const PE_H5_ANNOTATIONS = [
     "Response/xi_cov_psi" => (; long_name="covariant radial displacement ξ_ψ = ξ·e_ψ", units="m^2", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_cov_theta" => (; long_name="covariant poloidal displacement ξ_θ = ξ·e_θ", units="m^2", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_cov_zeta" => (; long_name="covariant toroidal displacement ξ_ζ = ξ·e_ζ", units="m^2", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
-    "Response/clebsch_psi" => (; long_name="Clebsch displacement component ξ^ψ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
-    "Response/dclebsch_psidpsi" =>
+    "Response/xi_clebsch_psi" => (; long_name="Clebsch displacement component ξ^ψ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
+    "Response/dxi_clebsch_psidpsi" =>
         (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+reg_spot²))", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
-    "Response/clebsch_alpha" =>
+    "Response/xi_clebsch_alpha" =>
         (; long_name="Clebsch displacement component ξ^α/χ₁ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_n" => (; long_name="physical normal displacement ξ_n", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_R" => (; long_name="cylindrical displacement component ξ_R (mode space)", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
