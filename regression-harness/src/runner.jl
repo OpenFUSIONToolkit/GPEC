@@ -121,6 +121,40 @@ end
 %RUNINFO%
 """
 
+
+# Fixed-Q probe of the SLAYER inner-layer dispersion Δ(Q) on the DIII-D-like 2/1 surface.
+# The adaptive AMR scan samples in gpec.h5 cannot be pinned (sample locations move under any
+# refinement change), so this evaluates Δ(Q) on a fixed 4×4 grid over Re(Q), Im(Q) ∈ [-10, 10]
+# instead — a refinement-stable pin of the dispersion curve itself. The layer parameters are the
+# DIII-D-like SLAYER deck's own 2/1 surface values (Tearing/PerSurface, develop @ 1f193a6c),
+# quoted verbatim so the case is self-contained and probes the SOLVER alone: the parameter
+# chain that produces these numbers is pinned separately by the diiid_slayer_n1 case.
+const COMPUTED_SLAYER_DELTA_PROBE_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.InnerLayer
+using HDF5
+p = SLAYERParameters(;
+    tau=1.1975430647804235, lu=6.086905739791344e6, c_beta=0.22094021004591707,
+    D_norm=4.191469284125091, P_perp=50.2972642329308, P_tor=34.74437891503841,
+    Q_e=1.0915286815773122, Q_i=-1.6558720999124832, iota_e=0.39729503206497013,
+    tauk=0.00010358784131467763, tau_r=3.453343933553279, delta_n=504.745127277822,
+    rs=0.3617373814196757, R0=1.7433359412007365, bt=1.0, sval_r=1.260093929519795,
+    eta=4.761642777337999e-8, d_beta=0.011249087118484661)
+axis = range(-10.0, 10.0; length=4)
+Q = ComplexF64[re + im_ * 1im for im_ in axis for re in axis]
+t_start = time()
+Δ = ComplexF64[solve_inner(SLAYERModel(), p, q).tearing for q in Q]
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["slayer_probe/Q_re"]     = real.(Q)
+    fid["slayer_probe/Q_im"]     = imag.(Q)
+    fid["slayer_probe/Delta_re"] = real.(Δ)
+    fid["slayer_probe/Delta_im"] = imag.(Δ)
+end
+%RUNINFO%
+"""
 # Self-contained separatrix-finder regression (PR #296). Loads a fixed-boundary EFIT whose
 # computational box hugs the LCFS (eps=0.05 TokaMaker aspect-scan g-file): outside the prescribed
 # LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
@@ -253,6 +287,8 @@ function _computed_script_template(case_spec::CaseSpec)
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
     elseif case_spec.name == "ggj_ray_q500i"
         return COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE
+    elseif case_spec.name == "slayer_delta_probe"
+        return COMPUTED_SLAYER_DELTA_PROBE_SCRIPT_TEMPLATE
     elseif case_spec.name == "efit_fixedbdy_separatrix"
         return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
     end
