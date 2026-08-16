@@ -411,8 +411,8 @@
         # Hit maxevals: error above tolerance
         @test_logs (:warn, r"maxevals_psi") KF.check_psi_quadrature_convergence(total, 0.5, ctrl, "fgar")
         # Nonzero atol_psi dominating a small torque: the silent-garbage scenario
-        ctrl.atol_psi = 1e-2
-        @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl, "fgar")
+        ctrl_atol = KF.KineticForcesControl(; atol_psi=1e-2)
+        @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl_atol, "fgar")
     end
 
     @testset "METHOD_REGISTRY" begin

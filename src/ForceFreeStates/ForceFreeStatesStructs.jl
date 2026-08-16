@@ -253,7 +253,6 @@ gpec.toml.
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
-  - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [psiedge, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
   - `truncate_at_dW_peak::Bool` - When `true` and `psiedge < psilim`, the edge-dW scan's peak location is adopted as the new physical plasma edge — `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, AND the FM Δ' chunks/propagators are made self-consistent with the new boundary (the chunk that straddles the peak is rebuilt + re-integrated; any chunks past the peak are dropped). This reproduces the spirit of the original ode_record_edge heuristic from Fortran STRIDE while keeping Δ' and δW well-defined at the new boundary. The Δ' metric is still physically dependent on where the peak falls in the edge band, so use this flag deliberately when you mean to scan against the peak-defined edge (e.g. for studying edge-mode regimes); leave at `false` (default) for the full-domain Δ' at `qhigh` / `psihigh` / `dmlim`.
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
@@ -291,7 +290,6 @@ gpec.toml.
     kinetic_source::String = "fixed"
     kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
-    reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
     diagnose::Bool = false

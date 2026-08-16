@@ -60,7 +60,7 @@ Constructed via keyword arguments or from a TOML dict:
 ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
 """
-@kwdef mutable struct KineticForcesControl
+@kwdef struct KineticForcesControl
     # Moment type
     moment::String = "pressure"     # "heat" or "pressure"
 

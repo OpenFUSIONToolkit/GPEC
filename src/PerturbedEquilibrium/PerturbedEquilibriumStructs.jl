@@ -29,7 +29,7 @@ Regularization:
     # High Priority (MWE)
   - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
-@kwdef mutable struct PerturbedEquilibriumControl
+@kwdef struct PerturbedEquilibriumControl
     # High Priority (MWE)
     fixed_boundary::Bool = false
     output_eigenmodes::Bool = true
