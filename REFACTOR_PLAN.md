@@ -833,6 +833,29 @@ warn-and-ignore; unknown API kwargs hard-error (decks are archival, scripts fail
 - Nik explicitly likes the multi-shift/tilt-in-one-run capability (his bookkeeping win) —
   keep it central in the two-stage-PE PR spec.
 
+### Plasma-response methods (Fortran resp_index — binding requirement, 2026-08-15)
+
+Fortran GPEC computes the plasma inductance / permeability P by FIVE selectable methods
+(`plas_indmats(0:4)`, `resp_index`): j=0 = ENERGY method (wt0-based when
+resp_induct_flag, else eigenmode energies et) — the Fortran default and the ONLY method
+ported to Julia (`compute_plasma_response!`, Response.jl); j=1..4 = SURFACE-CURRENT
+methods built from the four `kapmats`/`chpmats` variants (surface current κ and scalar
+potential χ per identity-at-edge drive, gpresp_eigen → gpeq_surface at psilim) — these
+need only the solutions' EDGE VALUES + vacuum Green's functions, NOT δW. Under gal_flag
+Fortran computes only j=1 and forces resp_index=1: gal PE worked via surface currents
+from the gal eigenfunctions.
+
+Consequences (correcting the earlier "PE requires δW" premise):
+- The Julia gal→PE skip is a PORTING GAP artifact, not physics: the one ported method is
+  the one method gal cannot feed. Gal's matched solution already provides the
+  identity-at-edge columns the surface-current methods consume.
+- REQUIREMENT for the two-stage-PE PR: preserve method multiplicity — a ResponseMethod
+  selection (energy | surface-current variants, the resp_index analog, as a typed
+  argument not a magic integer), with the surface-current port unlocking gal-fed PE
+  independently of the gal-δW work. The gal δW work remains scheduled for free-boundary
+  stability of gal runs and method-0 parity.
+- gal_resistive_pe harness expectations change when either route lands.
+
 ### North-star usage sketch (user's, verbatim intent; syntax deliberately sloppy —
 ### requirements catalog for the two-stage-PE PR, NOT #393 scope)
 
