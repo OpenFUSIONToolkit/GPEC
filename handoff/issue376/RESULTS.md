@@ -602,6 +602,56 @@ still leaves finite resample error. The Phase 2 fix evaluates *exactly* at the t
 the resample error at the output nodes is zero rather than merely small, and it does not force
 extra steps.
 
+## 16. Route (a) implemented and measured (`route_a.patch`)
+
+Implementation: `direct_fieldline_int` solves with `dense=true` and returns the solution;
+`equilibrium_solver` then root-solves (Brent, bracketed by the monotone `y_out[:,5]`) for the η
+where the normalised SFL angle hits each target node and evaluates there, so `ff_fs_nodes` is built
+**directly on the uniform θ grid** and every surface is sampled at the same abscissae. The
+arclength tracer returns `nothing` and falls back to the old path. Patch saved to
+`route_a.patch`; `src/` is reverted (Phase 4 applies it on a branch off `develop`).
+
+### Primary — accepted steps
+
+| mpsi | stock | route (a) | change |
+|---|---|---|---|
+| 256  | 2309 | 1881 | −19% |
+| 512  | 3977 | 2768 | −30% |
+| 1024 | 7638 | **4403** | **−42%** |
+
+Per-doubling ratio **1.72 / 1.92 → 1.47 / 1.59**. This clears the plan's "strong win" threshold
+(≤5350 at mpsi=1024) and is well past the §11 ceiling that the partial repairs implied.
+
+### Diagnostics
+
+- **Geometry**: near-axis `offset` residual 6.39e-4 → **3.48e-6** at mpsi=256, and every `nu` /
+  `offset` / `rcoords` r1 flips positive (e.g. near-axis `nu` −0.345 → **+0.938**). Across the
+  ladder the residuals now **converge**: mid-plasma `nu` 2.65e-7 → 6.36e-8 → 6.57e-9.
+- **Matrices**: mid-plasma at mpsi=1024, C 1.21e-5 → **1.86e-6** with r1 −0.401 → **+0.856**;
+  G 1.70e-5 → 1.29e-6 with r1 −0.176 → **+0.947**. A is unchanged, as expected.
+- **Physics preserved**: Δ′ diagonal at mpsi=1024 [8.58, −5.53, −16.09, −2368.85, 55.11] →
+  [8.59, −5.51, −16.08, −2367.99, 55.62]; et[1] 0.802840 → 0.799037 (4.7e-3 relative, an accuracy
+  change from sampling the geometry correctly). Singular surfaces and `psilim` identical.
+
+### Two results that say the job is not finished
+
+1. **The etol self-consistency prediction failed.** The plan predicted that once the remap error
+   was gone, ε would become integration-limited and the `etol` sweep would stop being null. At
+   mpsi=512 after route (a): **2857 / 2768 / 2817** accepted steps for etol 1e-8 / 1e-10 / 1e-12 —
+   still flat. A residual ε remains that is not controlled by integration tolerance.
+2. **The crude `dtmax` probe still beats it** — 3614 vs 4403 at mpsi=1024 (ratio 1.43 vs 1.59) —
+   even though every diagnostic available says the two runs are the same: geometry residuals equal
+   to 3-4 significant figures (mid `nu` 6.567e-9 vs 6.499e-9), matrix residuals equal (C 1.86e-6
+   vs 1.84e-6), profiles equal, singular surfaces and `psilim` identical. Elementwise the two
+   geometries differ by only ~1e-6 relative, against the ~1e-4 by which both differ from stock.
+
+**Open question for the next session**: an 18% step difference with no measurable difference in the
+integrand. Whatever it is sits outside the node values, the coefficient matrices, the profiles and
+the surface positions — the leading suspect is the dense-output interpolant's behaviour *between*
+solver steps (route (a) evaluates it; `dtmax` makes the steps small enough that it barely matters),
+which the current diagnostics, all built on node values, cannot see. Closing that gap is worth
+roughly another 18% on top of route (a)'s 42%.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it

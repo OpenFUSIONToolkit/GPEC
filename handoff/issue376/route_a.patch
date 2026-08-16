@@ -1,0 +1,128 @@
+diff --git a/src/Equilibrium/DirectEquilibrium.jl b/src/Equilibrium/DirectEquilibrium.jl
+index ed6582131..c3c9ccfdd 100644
+--- a/src/Equilibrium/DirectEquilibrium.jl
++++ b/src/Equilibrium/DirectEquilibrium.jl
+@@ -227,6 +227,32 @@ function direct_position!(raw_profile::DirectRunInput)
+     return ro, zo, rs1, rs2
+ end
+ 
++"""
++    eta_at_sfl_angle(sol, y_out, x, total_x) -> Float64
++
++Integration angle η at which the normalised straight-fieldline angle ∫jac·dl/Bp reaches `x`.
++
++`y_out[:, 5]` is monotone in η, so it brackets the root to one solver step and Brent converges in
++a handful of dense-output evaluations. Used to sample every flux surface at the *same* SFL angles
++instead of resampling each surface's own solver steps (issue #376).
++"""
++function eta_at_sfl_angle(sol, y_out::Matrix{Float64}, x::Float64, total_x::Float64)
++    x <= 0 && return y_out[1, 1]
++    x >= 1 && return y_out[end, 1]
++    target = x * total_x
++    hi = searchsortedfirst(view(y_out, :, 5), target)
++    hi = clamp(hi, 2, size(y_out, 1))
++    lo = hi - 1
++    eta_lo, eta_hi = y_out[lo, 1], y_out[hi, 1]
++    f(eta) = sol(eta)[4] - target
++    flo, fhi = f(eta_lo), f(eta_hi)
++    # Degenerate bracket (repeated η, or the root sitting exactly on a step) needs no solve.
++    flo == 0 && return eta_lo
++    fhi == 0 && return eta_hi
++    (flo * fhi > 0 || eta_hi <= eta_lo) && return eta_lo + (eta_hi - eta_lo) * (target - y_out[lo, 5]) / max(y_out[hi, 5] - y_out[lo, 5], eps())
++    return find_zero(f, (eta_lo, eta_hi), Roots.Brent())
++end
++
+ """
+     direct_fieldline_int(psifac, raw_profile, ro, zo, rs2)
+ 
+@@ -250,9 +276,12 @@ from 1:5 rather than 0:4 as in Fortran.
+         - `y_out[:, 4]`: ∫(dl/(R²Bp))
+         - `y_out[:, 5]`: ∫(jac*dl/Bp)
+ 
++  - `sol`: the dense ODE solution, so callers can evaluate the trace at prescribed SFL angles
++    rather than resampling this surface's own solver steps (`nothing` for tracers without it).
++
+   - `bfield`: A `DirectBField` object with values at the integration start point.
+ """
+-function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)::Tuple{Matrix{Float64},DirectBField}
++function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)
+ 
+     # Find the starting point on the flux surface (outboard midplane)
+     psi0_guess = raw_profile.psio * (1.0 - psifac)
+@@ -291,10 +320,12 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
+     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
+ 
+     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
+-    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
++    # Dense output lets the caller evaluate the trace at the SFL angles it actually wants, instead
++    # of splining this surface's solver-chosen steps and resampling (issue #376).
++    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=true)
+ 
+     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
+-    return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
++    return hcat(sol.t::Vector{Float64}, sol_matrix), bfield, sol
+ end
+ 
+ """
+@@ -495,18 +526,39 @@ robustness.
+     ff_deriv_val = zeros!(pool, Float64, 4)
+ 
+     for ipsi in (mpsi+1):-1:1  # outermost to innermost
+-        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
++        y_out, bfield, sol = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
+         checkpoint!(pool, Float64)
+ 
+-        # Fit data into temporary straight fieldline poloidal angle splines
+-        ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
+-        @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+-
+-        ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
+-        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3])^2
+-        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+-        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
+-        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
++        # Straight-fieldline angle x = normalised ∫jac·dl/Bp, monotone in the integration angle η.
++        #
++        # Sampling x at this surface's own solver steps and resampling onto theta_nodes leaves a
++        # resample error that is uncorrelated between neighbouring surfaces, i.e. white noise in ψ
++        # that grid refinement then amplifies (issue #376). With dense output we instead solve for
++        # the η where x hits each target node and evaluate there, so every surface is sampled at
++        # the same abscissae and the resample error at the output nodes is zero.
++        nff = sol === nothing ? size(y_out, 1) : mtheta + 1
++        ff_x_nodes = acquire!(pool, Float64, nff)
++        ff_fs_nodes = acquire!(pool, Float64, nff, 4)
++
++        if sol === nothing
++            @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
++            @. ff_fs_nodes[:, 1] = @view(y_out[:, 3])^2
++            @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
++            @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
++            @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
++        else
++            total_x = y_out[end, 5]
++            for itheta in 1:(mtheta+1)
++                x = theta_nodes[itheta]
++                eta = eta_at_sfl_angle(sol, y_out, x, total_x)
++                u = sol(eta)
++                ff_x_nodes[itheta] = x
++                ff_fs_nodes[itheta, 1] = u[2]^2
++                ff_fs_nodes[itheta, 2] = eta / (2π) - x
++                ff_fs_nodes[itheta, 3] = bfield.f * (u[3] - x * y_out[end, 4])
++                ff_fs_nodes[itheta, 4] = u[1] / y_out[end, 2] - x
++            end
++        end
+ 
+         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
+ 
+diff --git a/src/Equilibrium/DirectEquilibriumArcLength.jl b/src/Equilibrium/DirectEquilibriumArcLength.jl
+index 32b93a0ac..6774e5601 100644
+--- a/src/Equilibrium/DirectEquilibriumArcLength.jl
++++ b/src/Equilibrium/DirectEquilibriumArcLength.jl
+@@ -142,6 +142,6 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
+     end
+ 
+     # bfield at the starting point carries F and P for the surface-averaged quantities
+-    return y_out, bfield
++    return y_out, bfield, nothing
+ end
+ 
