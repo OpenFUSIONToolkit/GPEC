@@ -44,6 +44,9 @@ include("Galerkin/GalerkinSolution.jl")
 include("Galerkin/GalerkinMatch.jl")
 include("Galerkin/GalerkinSolve.jl")
 
+# Scripting-API integrator selectors: pure configuration translated onto ForceFreeStatesControl.
+include("Integrators.jl")
+
 # The published solve product; last, so it can name every type the stages above define.
 include("Result.jl")
 

@@ -728,6 +728,137 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
 
 ---
 
+## 7A. Interface PR, commit (d) — cross-formalism file contract (issue #388 items 1 + 2)
+
+Two #388 follow-ups belong to THIS PR because they complete the D14 promise (same physics ⇒
+same layout across integrators) and close a gap this PR itself introduces:
+
+- **ξ axis-order unification (#388 item 1, MINIMAL form only)**: `ForwardIntegration/xi_psi`
+  is `(mode, solution, psi)`; `GalerkinIntegration/Solution/xi_psi` is `(mode, psi, solution)` —
+  same physics, transposed. Fix: keep the per-formalism groups; `permutedims` at gal write so
+  every `Solutions/*/xi_*` dataset shares the Forward axis order; update the gal `dims`
+  attributes (and drop the axis-order warning from the gal `long_name`); update the gal
+  readers (`benchmarks/verify_gal_{solution,ideal,match}.jl`, `compare_gal_vs_el.jl`, and any
+  Analysis readers). The FULL unification (one Solutions layout written from
+  `result.solution`) is future work — gal-native grid semantics make that a design job.
+- **`Tearing/PerSurface/rational_psi` + `rational_q` (#388 item 2)**: gal-fed SLAYER (new in
+  commit (b2)) analyzes gal's in-domain SUBSET of the singular surfaces, so tearing output
+  must identify its own surfaces. Write both datasets from the surface list `run_slayer`
+  actually used; `rational_q` for schema symmetry; annotate per hdf5-conventions.
+
+Verification: gal ξ values identical under transposed layout (compare vs pre-change with an
+axis-aware script); forward decks byte-identical; slayer tests extended for the new
+datasets; harness gal cases re-baseline once (with the (b2) renames).
+
+NOT in this commit (stay on #388): item 3 (PE empty-placeholder pattern — align with #368's
+zero-extent sentinels after it lands), items 4–5 (schema-owner calls), items 6–8
+(comment-audit pass, #354 pattern).
+
+## 7B. Settled design (2026-08-15): source algebra, two-stage PE, deck-as-serialization
+
+Discussion CLOSED with the user; decisions D15/D16 below are binding. Commit (c) is
+implemented but UNCOMMITTED, so its concrete `RMPField` is REPLACED in place (no shim).
+
+### D15 — `RMPField` is abstract, with lazy linear algebra (lands in the (c) revision)
+
+- `RMPField` = the user-facing ABSTRACT supertype of every forcing source. File modes,
+  coil set + currents, or (future, #377) fields given on ψ=1 / an arbitrary surface via
+  equivalent surface currents — "they are all just external fields." Constructors on the
+  abstract type return concrete internal subtypes (today: one leaf wrapping
+  `ForcingTermsControl`; a surface-field leaf arrives with #377).
+- Lazy `+`, `-`, scalar `*`: return a formal linear combination WITHOUT materializing.
+  Valid because PE is linear in the forcing — materialization commutes with summation.
+  Both current leaf kinds materialize to the same normalized `Vector{ForcingMode}` basis,
+  so summation = match (m,n), add amplitudes. Prefer ComplexF64 scale (coil phase
+  rotation is physical); scale must apply to the MATERIALIZED modes, format-independent.
+
+### D16 — the deck is the API, serialized (one path)
+
+Every TOML section corresponds 1:1 to an API object/call; the keys ARE the kwargs
+(the `@kwdef` splat is the mapping). Consequences, in delivery order:
+
+1. **#393 (this PR)**: (c) revision per D15 + commit (d). Nothing else grows scope.
+   ctrl→TOML serialization explicitly deferred to step 3.
+2. **Stacked PR: two-stage PE** — `GeneralPE = perturbed_equilibrium(ffs)` builds the
+   source-independent response/coupling operators; `force(GeneralPE, fields)` (or
+   callable `GeneralPE(fields)`) materializes sources, applies P, computes derived
+   quantities. Pairs with the delta_mn resonant-coupling work. Payoff: coil scans and
+   optimization reuse one GeneralPE across many cheap force() calls; a TOML deck maps
+   onto "GeneralPE + one force()" with no deck-format change.
+3. **Follow-on PR: "main = 20 lines"** — kinetic + SLAYER get API entry points;
+   `main()` becomes a deck INTERPRETER (parse file → same constructors and calls a
+   script would make); `main_from_inputs` and the stage functions dissolve. The writer
+   serializes the RESOLVED ctrl structs (defaults included) into every output — same
+   blob for TOML and API runs — so every gpec.h5 is replayable and h5→toml regeneration
+   is just extracting it. Scripting users get the SAME per-section loaders main uses
+   (e.g. `PlasmaEquilibrium("case_dir/")` reads the `[Equilibrium]` section); no second
+   config system, ever. Deck completeness is automatic: the deck schema IS the struct
+   schema, and TOML array-of-tables (`[[ForcingTerms.source]]` with per-block scale)
+   serializes even the source algebra.
+
+Defaults contract (established, keep): both paths splat over the same `@kwdef` struct
+defaults — one defaults table. API is deliberately more explicit in two spots (no
+default alg; `nn` required, `nn_low/nn_high` kwargs rejected). Deprecated deck keys
+warn-and-ignore; unknown API kwargs hard-error (decks are archival, scripts fail fast).
+
+### Reviewer constraints from Nik (Slack, 2026-08-15 — binding on the follow-on PRs)
+
+- **No source-type zoo.** The common currency is the control-surface spectrum per source;
+  keep the concrete RMPField kinds minimal. Endpoint: at most ONE more leaf kind, ever — a
+  spectrum-literal ("here are control-surface modes, computed elsewhere") — and the #377
+  equivalent-surface-currents solve becomes a UTILITY converting fields-on-a-surface into
+  that spectrum, NOT a type. External couplings (thincurr/surfmn/ferritic tools) cost GPEC
+  zero adapters: they produce spectra, directly or via the utility.
+- **`scale` is a linear-combination weight, never a physical amplitude** (amplitudes are
+  ambiguous for magnetic materials, coil sets with dropouts, etc.). A degraded coil set is
+  `nominal - failed_coil`, not `0.9 * nominal`; material fields are computed at the
+  operating point by the code owning their physics, weight meaningful only for small linear
+  excursions. Docstrings reworded accordingly (2026-08-15, in the (c) revision).
+- Nik explicitly likes the multi-shift/tilt-in-one-run capability (his bookkeeping win) —
+  keep it central in the two-stage-PE PR spec.
+
+### North-star usage sketch (user's, verbatim intent; syntax deliberately sloppy —
+### requirements catalog for the two-stage-PE PR, NOT #393 scope)
+
+```julia
+Source_A = RMPField(coil1)
+Source_B = RMPField(ferritic_material_fields_at_psi1)          # needs #377
+Total_fields = Source_A + Source_B          # fast: just records both sources
+
+GeneralPE  = perturbed_equilibrium(ffs_result)
+SpecificPE = force(GeneralPE, Total_fields) # Biot-Savart for A, Laplace/current-potential
+                                            # solve for B, sum on the control surface,
+                                            # apply P, derived quantities per output flags
+
+# Error-field sensitivity workflow: per-unit sources built by coil manipulation + algebra
+PF1U_nominal = RMPField(pf1u_dat, 1)                # 1 A
+PF1U_shifted = shift_coil(PF1U_nominal, 1e-3) - PF1U_nominal   # field per mm of shift
+
+# Named source SETS: force() runs per key, results in per-key (xarray-like) datasets
+rmp_set = ("PF1U_shift"=PF1U_shifted, "PF1U_tilt"=PF1U_tilted,
+           "ferritic_welds"=surfmn_fields, "REMC"=thincurr_fields)
+iter_pe = force(GeneralPE, rmp_set)
+
+# Keyed, labeled linear algebra on operators and results ("@" = xarray-like matmul):
+overlaps_per_amp_per_mm = GeneralPE.C_xe @ iter_pe.Phi_sources_root_area_normalized
+
+# Collapse per-unit sources to a physical case: keyed scalar sets with wildcards,
+# elementwise multiply, then sum to a single total field
+tilts_shifts = ("PF1U_shift"=1.1e-3, "PF1U_tilt"=0.9e-3, "ferritic_welds"=1)
+currents     = ("PF1U_*"=14e3,)
+total        = sum(tilts_shifts * currents * rmp_set)
+real_pe      = force(GeneralPE, total; profile_output=true)
+jbgradpsi    = real_pe.Jbgradpsi
+```
+
+Requirements this implies for the two-stage-PE PR (catalogue, to be specced there):
+named source sets with per-key PE results; coil-geometry manipulation (`shift_coil`,
+tilts) composing with source algebra to build per-unit error-field bases; keyed scalar
+sets with wildcard matching, elementwise `*` against source sets, `sum` collapsing to
+one field; labeled (xarray-style) operator/result access so couplings contract naturally
+per key; a `profile_output`-style flag family for derived profile quantities.
+
+
 ## 8. Cross-cutting execution rules (for every PR)
 
 1. **Never merge without third-party human review. State this in every PR body.**
@@ -803,7 +934,44 @@ inner-layer interface (same family as the `ResistiveMatch` models, D13). Later p
     blob). Review protocol for motion commits: read resulting functions top-down +
     behavioral gates, NOT the raw diff; locally use `git diff --color-moved=dimmed-zebra
     --color-moved-ws=allow-indentation-change --histogram`.
-  - Commit (c) not started (§7).
+  - Commit (c) implemented, reviewed, and REVISED per D15 (not yet committed): solve API
+    per §7, then RMPField reworked in place — now an ABSTRACT type with RMPSource leaf
+    (ComplexF64 scale) and RMPFieldSum lazy linear combinations (+, -, scalar *; flattened
+    term list); sum materialization evaluates each leaf via a scratch
+    PerturbedEquilibriumInternal and merges amplitudes per (n,m), sorted;
+    compute_perturbed_equilibrium accepts Union{ForcingTermsControl,RMPField}; algebra
+    tests added (type-level testset + one PE call asserting 3A-A == 2A); api.md gained a
+    Combining-forcing-sources section. THEN materialization made PURE (user request, fewer
+    !-functions for multithreading): materialize_forcing_modes(ffs, forcing; dir_path,
+    preloaded_coil_sets, verbose) -> (modes, coil_sets), three dispatch methods, no
+    mutation; the preload guard + state writes live ONLY in compute_perturbed_equilibrium
+    (double-apply bugs structurally impossible); driver pre-materialize call deleted.
+    scale reworded everywhere per Nik: linear-combination WEIGHT, never physical amplitude
+    (dropout example: nominal - failed_coil, not 0.9*nominal). Final gates: 70/70 solve
+    API + 17/17 fullruns after the refactor; docs build clean.
+    THEN problem-type form added (user design call): EulerLagrangeProblem(equil; nn, wall,
+    match, dir_path, debug, ctrl kwargs) names WHAT is solved (SciML problem/alg split —
+    PlasmaEquilibrium hosts many future problems, so solve(eq, alg) alone was namespace-
+    greedy); solve(prob, alg) is canonical, solve(eq, alg; kwargs...) retained as sugar
+    forwarding to it; nn_low/nn_high rejection lives in the problem constructor. Name
+    chosen over StabilityProblem because kinetic runs make stability an imprecise label.
+    Deviations recorded: `solve` lives in the TOP module (prepare_force_free_states!
+    needs the KineticForces callback; FFS cannot import KineticForces — same CommonSolve
+    generic, so ForceFreeStates.solve still resolves); ResistiveMatch is a plain config
+    mapping 1:1 onto gal_* keys (forces gal_rpec_flag=true); solve mirrors TOML side
+    effects (HDF5 write, local stability); forcing materialization unified in
+    PerturbedEquilibrium.materialize_forcing_modes! and the TOML driver rewired through
+    perturbed_equilibrium (ONE forcing path). Verified: 59/59 solve-api + 114/114
+    result-struct + 17/17 fullruns (agent + independent rerun), TOML byte-identity
+    207/207 datasets after the rewiring, docs build exit 0.
+    FOUND pre-existing bug (filed as #396, cross-linked from #377): TOML file-forcing
+    never applies convert_forcing_normalization! (snapshot preloads raw modes; the
+    isempty guard skips the convert branch) — factor 16.85 on Solovev amplitude-linear
+    PE outputs; present since the forcing-snapshot PR; NOT fixed here (needs a design
+    decision re: replay double-conversion; fixing moves TOML outputs).
+  - Commit (d) planned (§7A, decided 2026-08-15): #388 items 1 (ξ axis-order unification,
+    minimal permutedims-at-write form) + 2 (Tearing/PerSurface rational_psi/rational_q).
+    Remaining #388 items stay on the issue for follow-ups.
   - Commit (b2) implemented and reviewed (not yet committed; §6A, D14): `DeltaPrimeData`
     (now in ForceFreeStatesStructs.jl for include order) carries matrix/raw/coil + gal-only
     A/B/Gamma; `galerkin_solve` returns `(GalerkinResult, DeltaPrimeData)`; canonical HDF5
@@ -814,8 +982,14 @@ inner-layer interface (same family as the `ResistiveMatch` models, D13). Later p
     `Delta_prime_raw` dataset was (2msing+mpert)×2msing with coil rows duplicated inside.
     Verified: 114/114 result-struct, 71/71 slayer (independently rerun), gal Δ′ values
     byte-identical under new paths (147/147 common), forward deck untouched (138/138),
-    benchmarks/ readers repointed. OWED: harness run on gal_resistive_diiid (expect renames
-    only) before PR leaves draft.
+    benchmarks/ readers repointed. Harness gal_resistive_diiid triage CLOSED: the "3
+    changed" rows were the invoking repo's renamed case TOML reading develop's RICCATI
+    datasets (the additive deck writes both formalisms, and riccati's datasets sit at
+    exactly the new canonical names) against local's GAL datasets — cross-formalism
+    apples-to-oranges, not numerical movement. Fresh dual-run proved gal==gal bit-for-bit
+    (leading raw block isequal, pest3 diag ratio 1.0, coil isequal). Action: re-baseline
+    the case once; harness cross-ref comparisons spanning the rename boundary are
+    confounded for this case and should not be repeated.
     Also per D14: riccati will NEVER produce full ξ profiles — next-cycle work is the
     `delta_mn` rational-surface matrix (from `delta_coil` asymptotics) for PE resonant
     coupling, not profile reconstruction.

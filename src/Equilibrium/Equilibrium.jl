@@ -156,6 +156,27 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 end
 
 """
+    PlasmaEquilibrium(path::AbstractString; eq_type="efit", kwargs...) -> PlasmaEquilibrium
+
+Read the equilibrium file at `path` and return the processed equilibrium. Convenience entry
+point of the scripting API: `kwargs` are [`EquilibriumConfig`](@ref) fields, so
+`PlasmaEquilibrium("g000001.00001"; jac_type="hamada", mpsi=128)` is the whole setup.
+
+Only file-based equilibria go through this constructor. Analytic kinds (`sol`, `lar`,
+`tj_analytic`) take their parameters from a separate config object and are built with
+`setup_equilibrium(config, analytic_config)` instead.
+
+```julia
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+```
+"""
+function PlasmaEquilibrium(path::AbstractString; eq_type::String="efit", kwargs...)
+    haskey(ANALYTIC_EQ, eq_type) &&
+        error("$eq_type is an analytic equilibrium: build it with setup_equilibrium(config, $(ANALYTIC_EQ[eq_type].config_type)(...)) instead")
+    return setup_equilibrium(EquilibriumConfig(; eq_type, eq_filename=abspath(path), kwargs...))
+end
+
+"""
     equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
 
 Finds the separatrix locations in the plasma equilibrium (rsep, zsep, rext, zext).

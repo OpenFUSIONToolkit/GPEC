@@ -9,6 +9,8 @@ using FastInterpolations
 import IMASdd
 import AdaptiveArrayPools: @with_pool
 
+import CommonSolve: solve
+
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
@@ -75,6 +77,12 @@ using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
 using .ForceFreeStates: galerkin_solve, write_galerkin!
+
+# Scripting-API surface: the integrator selectors, the published result, the equilibrium
+# constructor and the forcing description, re-exported so a user needs one `using`.
+using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, ResistiveMatch
+using .Equilibrium: PlasmaEquilibrium
+using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag",
                               "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
@@ -664,6 +672,131 @@ function run_force_free_states(
 end
 
 """
+    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(), match=nothing,
+                         dir_path=".", debug=DebugSettings(), kwargs...)
+
+The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
+the perturbed potential energy whose solutions are the force-free (and, via the TOML path,
+kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
+[`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
+names this one, so `solve` stays unambiguous as other problem classes appear.
+
+`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `match` an
+optional [`ResistiveMatch`](@ref) closing the basis with an inner-layer solution instead of
+the ideal jump, `dir_path` the working directory outputs are written to, and `debug` the
+diagnostic dump settings of the DEBUG deck section. Any remaining keyword is a
+`ForceFreeStatesControl` field, so the TOML keys and the problem keywords are the same
+knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
+
+## Fields
+
+  - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
+  - `wall::Vacuum.WallShapeSettings` - Vacuum wall shape for the free-boundary energies.
+  - `match::Union{Nothing,ForceFreeStates.ResistiveMatch}` - Optional inner-layer closure.
+  - `dir_path::String` - Working directory for outputs.
+  - `debug::DebugSettings` - Diagnostic dump settings.
+  - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
+"""
+struct EulerLagrangeProblem
+    equil::Equilibrium.PlasmaEquilibrium
+    wall::Vacuum.WallShapeSettings
+    match::Union{Nothing,ForceFreeStates.ResistiveMatch}
+    dir_path::String
+    debug::DebugSettings
+    ctrl_kwargs::Dict{Symbol,Any}
+end
+
+function EulerLagrangeProblem(
+    equil::Equilibrium.PlasmaEquilibrium;
+    nn::Union{Int,AbstractUnitRange{Int}},
+    wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
+    match::Union{Nothing,ForceFreeStates.ResistiveMatch}=nothing,
+    dir_path::AbstractString=".",
+    debug::DebugSettings=DebugSettings(),
+    kwargs...
+)
+    ctrl_kwargs = Dict{Symbol,Any}(kwargs)
+    (haskey(ctrl_kwargs, :nn_low) || haskey(ctrl_kwargs, :nn_high)) &&
+        error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
+    ctrl_kwargs[:nn_low] = first(nn)
+    ctrl_kwargs[:nn_high] = last(nn)
+    return EulerLagrangeProblem(equil, wall, match, String(dir_path), debug, ctrl_kwargs)
+end
+
+"""
+    solve(prob::EulerLagrangeProblem, alg) -> ForceFreeStatesResult
+    solve(equil, alg; nn, kwargs...) -> ForceFreeStatesResult
+
+Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `alg` —
+[`Forward`](@ref), [`Riccati`](@ref) or [`Galerkin`](@ref) — and return the published
+[`ForceFreeStatesResult`](@ref). This is the scripting entry point; it runs the same stages
+a `gpec.toml` run of `main` does and produces the same result object. The second form is
+sugar building the problem from an equilibrium and the problem keywords in one call.
+
+Knobs owned by `alg` or `match` are rejected as `ForceFreeStatesControl` keywords. Kinetic
+runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]` profiles
+and errors here.
+
+```julia
+eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
+ffs  = solve(prob, Riccati())
+ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+```
+"""
+function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
+    total_start = time()
+
+    equil = prob.equil
+    ctrl_kwargs = copy(prob.ctrl_kwargs)
+    ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
+    ForceFreeStates._apply_match!(ctrl_kwargs, prob.match, alg)
+    ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
+
+    ctrl.kinetic_factor > 0 &&
+        error("kinetic runs (kinetic_factor > 0) need the [KineticForces] profiles and are TOML-driven; run them through `main`")
+
+    intr = ForceFreeStatesInternal(; dir_path=prob.dir_path)
+    intr.wall_settings = prob.wall
+    intr.debug_settings = prob.debug
+
+    resolve_mode_space!(intr, ctrl)
+
+    # The API path never reads kinetic profiles, so the KineticForces control is only the
+    # placeholder `prepare_force_free_states!` threads into its (unused) callback.
+    kf_ctrl = KineticForces.KineticForcesControl()
+
+    if Equilibrium.wants_two_pass(equil.config) && equil.ingest === nothing
+        @warn "Two-pass auto grid needs the equilibrium's raw ingest, which analytic and IMAS equilibria do not carry; " *
+              "solving on the single-pass grid. Set mpsi explicitly to choose the grid."
+    else
+        equil = maybe_reform_equilibrium(equil, equil.config, nothing, intr, ctrl, nothing)
+    end
+
+    locstab, ballooning_boundary = run_local_stability(ctrl, equil)
+    metric, ffit = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
+    result = run_force_free_states(ctrl, equil, ffit, intr, metric)
+
+    if ctrl.write_outputs_to_HDF5
+        write_outputs_to_HDF5(result; locstab=locstab, ballooning_boundary=ballooning_boundary)
+        @info "Results written to $(ctrl.HDF5_filename)"
+    end
+
+    @info "Force-Free States completed in $(@sprintf("%.3f", time() - total_start)) s"
+
+    return result
+end
+
+"""
+    solve(equil::PlasmaEquilibrium, alg; nn, kwargs...) -> ForceFreeStatesResult
+
+Convenience form of [`solve`](@ref): builds the [`EulerLagrangeProblem`](@ref) from the
+equilibrium and the problem keywords, then solves it with `alg`.
+"""
+solve(equil::Equilibrium.PlasmaEquilibrium, alg::ForceFreeStates.AbstractIntegrator; kwargs...) =
+    solve(EulerLagrangeProblem(equil; kwargs...), alg)
+
+"""
     run_perturbed_equilibrium(result, inputs, forcing_modes_snapshot, preloaded_coil_sets) -> pe_state
 
 Run the perturbed-equilibrium stage against a published force-free-states `result` and write its
@@ -680,8 +813,6 @@ function run_perturbed_equilibrium(
     # ----------------------------------------------------------------
     @info "\n  Perturbed Equilibrium\n$_SECTION"
     pe_start = time()
-
-    ctrl = result.control
 
     # Check for PerturbedEquilibrium section and run if present
     pe_state = nothing
@@ -701,48 +832,78 @@ function run_perturbed_equilibrium(
             ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
         end
 
-        pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(;
-            (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...
-        )
-        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=result.dir_path)
-
-        # Inner-layer penetrated resonant field; zeros under ideal closure.
-        pe_intr.inner_bpen = result.bpen
-
-        # Reuse the forcing modes loaded at snapshot time (or injected by
-        # `build_inputs_from_h5`) so the PE compute step never re-reads the original
-        # forcing file. `compute_perturbed_equilibrium` short-circuits
-        # `load_forcing_data!` when `pe_intr.forcing_modes` is non-empty.
-        if forcing_modes_snapshot !== nothing
-            pe_intr.forcing_modes = copy(forcing_modes_snapshot)
-        end
-
-        # Inject preloaded coil geometry (gpec.h5 replay with `--coil-source coils`)
-        # so the coil field is recomputed from stored geometry without the .dat/.h5 file.
-        if preloaded_coil_sets !== nothing
-            pe_intr.coil_sets = copy(preloaded_coil_sets)
-        end
-
-        # Run perturbed equilibrium calculations
-        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(result, ft_ctrl, pe_ctrl, pe_intr)
-
-        # Write perturbed equilibrium outputs to same HDF5 file
-        if pe_ctrl.write_outputs_to_HDF5
-            output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
-            PerturbedEquilibrium.write_outputs_to_HDF5(
-                pe_state, pe_intr, joinpath(result.dir_path, output_file)
-            )
-            @info "Results written to $output_file"
-        end
-
-        # Snapshot the coil geometry actually used into the gpec.h5 output so the run
-        # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
-        if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
-            _write_coil_snapshot!(joinpath(result.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
-        end
+        # The deck's forcing block is an unscaled RMPField, so the TOML path and the
+        # scripting API share one stage.
+        pe_state = perturbed_equilibrium(result, ForcingTerms.RMPField(ft_ctrl);
+            forcing_modes=forcing_modes_snapshot, coil_sets=preloaded_coil_sets,
+            (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...)
     end
 
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
+
+    return pe_state
+end
+
+"""
+    perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, kwargs...) -> PerturbedEquilibriumState
+
+Compute the plasma response to the external field `rmp` on top of a force-free-states solve
+`ffs`, and write the perturbed-equilibrium outputs. `rmp` is an [`RMPField`](@ref); keyword
+arguments are `PerturbedEquilibrium.PerturbedEquilibriumControl` fields.
+
+Products the producing integrator could not supply gate the corresponding calculation: the
+step warns and is skipped rather than erroring, so a Riccati- or Galerkin-fed result still
+flows through.
+
+`forcing_modes` injects already-loaded modes (the gpec.h5 replay path) and `coil_sets`
+already-built coil geometry, both bypassing the corresponding read.
+
+```julia
+pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
+```
+"""
+function perturbed_equilibrium(
+    ffs::ForceFreeStatesResult,
+    rmp::ForcingTerms.RMPField;
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing,
+    kwargs...
+)
+    ctrl = ffs.control
+    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; kwargs...)
+    pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
+
+    # Inner-layer penetrated resonant field; zeros under ideal closure.
+    pe_intr.inner_bpen = ffs.bpen
+
+    # Reuse forcing modes loaded at snapshot time (or injected by `build_inputs_from_h5`) so
+    # the materialization step never re-reads the original forcing file.
+    if forcing_modes !== nothing
+        pe_intr.forcing_modes = copy(forcing_modes)
+    end
+
+    # Injected coil geometry (gpec.h5 replay with `--coil-source coils`) lets the coil field
+    # be recomputed from stored geometry without the .dat/.h5 files.
+    if coil_sets !== nothing
+        pe_intr.coil_sets = copy(coil_sets)
+    end
+
+    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, rmp, pe_ctrl, pe_intr)
+
+    # Write perturbed equilibrium outputs to same HDF5 file
+    if pe_ctrl.write_outputs_to_HDF5
+        output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
+        PerturbedEquilibrium.write_outputs_to_HDF5(
+            pe_state, pe_intr, joinpath(ffs.dir_path, output_file)
+        )
+        @info "Results written to $output_file"
+    end
+
+    # Snapshot the coil geometry actually used into the gpec.h5 output so the run
+    # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
+    if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
+        _write_coil_snapshot!(joinpath(ffs.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
+    end
 
     return pe_state
 end
@@ -1222,5 +1383,7 @@ function write_imas(dd, result)
 end
 
 export main, write_imas
+export solve, perturbed_equilibrium
+export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
 
 end # module GeneralizedPerturbedEquilibrium
