@@ -75,7 +75,7 @@ using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag",
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
                               "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
@@ -327,15 +327,6 @@ function main_from_inputs(
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
 
-    # If truncating before psihigh, reform equilibrium if desired
-    if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
-        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.psihigh)."
-        # JMH - Nik please put the logic we discussed here
-        # something like ?
-        # equil.config.psihigh = intr.psilim
-        # equil = set_up_equilibrium(equil.config)
-    end
-
     # Compute local stability (if desired). `locstab` holds `D_I` from the ballooning
     # coefficient system and the local ballooning result; `nothing` when not computed.
     locstab = nothing
@@ -567,13 +558,12 @@ function main_from_inputs(
         if "ForcingTerms" in keys(inputs)
             forcing_raw = inputs["ForcingTerms"]
             # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
-            # kwarg splatting and handled separately via coil_sets_raw field
+            # kwarg splatting and passed as the explicit coil_sets_raw keyword
             coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
             scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
             ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in scalar_forcing)...
+                (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw
             )
-            ft_ctrl.coil_sets_raw = coil_sets_raw
         else
             ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
         end
