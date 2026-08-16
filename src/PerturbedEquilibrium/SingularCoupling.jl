@@ -56,14 +56,14 @@ end
 
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution:
 cubic Hermite for the value, chord slope across the bracketing nodes for the derivative.
-Least accurate method, kept for solution paths outside the serial EL integrator
+Least accurate method, kept for solution paths outside the forward EL integrator
 (gal-matched, Riccati) whose stored derivatives cover only Ξ′.
 """
 function _chord_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
     isempty(odet.du_store) && error(
         "_chord_solution_at: no derivative store. The solution is in a basis " *
-        "the Euler-Lagrange kernel cannot be re-applied to (sparse parallel path); " *
-        "set populate_dense_xi = true for PerturbedEquilibrium runs."
+        "the Euler-Lagrange kernel cannot be re-applied to (sparse Riccati path); " *
+        "dense Ξ′ requires the Forward integrator."
     )
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]

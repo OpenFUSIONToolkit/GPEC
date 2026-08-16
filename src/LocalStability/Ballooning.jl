@@ -2,8 +2,6 @@
 #   Main Driver for Ballooning Stability Analysis
 #   Computes ballooning stability criterion over all flux surfaces
 # ======================================================================
-using LinearAlgebra
-using StaticArrays: SVector
 
 const BALLOONING_THETA_MAX_CAP = 16.5
 const BALLOONING_THETA_SCALE_MULTIPLIER = 10.0
@@ -17,7 +15,7 @@ _in_ballooning_scan_window(psi::Float64, psi_edge::Float64) =
     BALLOONING_SCAN_PSI_WINDOW[1] <= psi <= min(BALLOONING_SCAN_PSI_WINDOW[2], psi_edge)
 
 """
-    compute_ballooning_stability!(ctrl, locstab_fs, plasma_eq)
+    compute_ballooning_stability!(locstab_fs, plasma_eq)
 
 Main driver routine for local high-n stability analysis. Iterates over all
 magnetic flux surfaces, prepares ballooning coefficients, stores `det(d0bar)`
@@ -26,9 +24,9 @@ to compute Delta Prime.
 
 ## Arguments
 
-  - `ctrl::ForceFreeStatesControl`: Control parameters for the analysis.
   - `locstab_fs::Matrix{Float64}`: Local stability matrix to store results (modified in place).
   - `plasma_eq::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data.
+  - `verbose::Bool`: Print progress messages.
 
 This function modifies `locstab_fs` in place with:
 
@@ -38,14 +36,14 @@ This function modifies `locstab_fs` in place with:
   - Column 4: Delta Prime (Δ')
 """
 function compute_ballooning_stability!(
-    ctrl::ForceFreeStatesControl,
     locstab_fs::Matrix{Float64},
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
-    compute_delta_prime::Bool=true
+    compute_delta_prime::Bool=true,
+    verbose::Bool=false
 )
 
-    if ctrl.verbose
+    if verbose
         println("Evaluating local high-n ballooning stability...")
     end
 
@@ -72,22 +70,22 @@ function compute_ballooning_stability!(
         end
     end
 
-    if ctrl.verbose
+    if verbose
         println("Ballooning analysis complete.")
     end
 
 end
 
 """
-    compute_local_stability(ctrl, plasma_eq) -> CubicSeriesInterpolant
+    compute_local_stability(plasma_eq; verbose=false) -> CubicSeriesInterpolant
 
 Local stability profile spline over `plasma_eq.profiles.xs`, with the columns filled by
 [`compute_ballooning_stability!`](@ref): 1 = `D_I·ψ`, 2 = `D_R·ψ`, 4 = ballooning `Δ'`.
 """
-function compute_local_stability(ctrl::ForceFreeStatesControl, plasma_eq::Equilibrium.PlasmaEquilibrium)
+function compute_local_stability(plasma_eq::Equilibrium.PlasmaEquilibrium; verbose::Bool=false)
     xs = plasma_eq.profiles.xs
     locstab_fs = zeros(Float64, length(xs), 5)
-    compute_ballooning_stability!(ctrl, locstab_fs, plasma_eq)
+    compute_ballooning_stability!(locstab_fs, plasma_eq; verbose=verbose)
     return cubic_interp(xs, Series(locstab_fs); extrap=ExtendExtrap())
 end
 
@@ -669,10 +667,10 @@ ballooning evaluator, and returns delta-prime and `det(d0bar)` `Di` maps.
 function scan_delta_prime_map(
     psi_idx::Int,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
-    ctrl::ForceFreeStatesControl=ForceFreeStatesControl(; verbose=false),
     theta_k::Float64=0.0,
     s_scales::AbstractVector{<:Real},
-    alpha_scales::AbstractVector{<:Real}
+    alpha_scales::AbstractVector{<:Real},
+    verbose::Bool=false
 )
     ref = salpha_reference(psi_idx, plasma_eq)
 
@@ -697,7 +695,7 @@ function scan_delta_prime_map(
                 theta_k=theta_k
             )
         catch err
-            if ctrl.verbose
+            if verbose
                 @warn "s-alpha scan point failed" psi_idx is ia err
             end
             nothing
@@ -841,7 +839,7 @@ function critical_ballooning_alpha(
 end
 
 """
-    ballooning_alpha_boundary(ctrl, plasma_eq; theta_k=0.0, n_scan=24)
+    ballooning_alpha_boundary(plasma_eq; theta_k=0.0, n_scan=24, verbose=false)
 
 Profile driver for the BALOO-style ballooning stability diagram. Loops over flux
 surfaces returning the experimental pressure gradient `alpha` (from
@@ -861,10 +859,10 @@ far-edge surfaces dominate the scan cost. Per-surface failures, skipped surfaces
 surfaces with no boundary within range are returned as `NaN`.
 """
 function ballooning_alpha_boundary(
-    ctrl::ForceFreeStatesControl,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
-    n_scan::Int=24
+    n_scan::Int=24,
+    verbose::Bool=false
 )
     xs = plasma_eq.profiles.xs
     npsi = length(xs)
@@ -878,7 +876,7 @@ function ballooning_alpha_boundary(
             alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
             alpha_critical[i] = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k, n_scan=n_scan).alpha_crit
         catch err
-            if ctrl.verbose
+            if verbose
                 @warn "ballooning alpha boundary failed" psi_idx = i exception = err
             end
         end
@@ -910,7 +908,7 @@ function second_critical_ballooning_alpha(
 end
 
 """
-    ballooning_alpha_boundaries(ctrl, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24)
+    ballooning_alpha_boundaries(plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, verbose=false)
 
 Profile driver returning the experimental pressure gradient `alpha`, the first stability
 boundary `alpha_critical1` (lowest Δ' zero), and the second stability boundary
@@ -924,11 +922,11 @@ smooth boundary curves. Surfaces outside `BALLOONING_SCAN_PSI_WINDOW` are skippe
 (returned as `NaN`), like per-surface failures.
 """
 function ballooning_alpha_boundaries(
-    ctrl::ForceFreeStatesControl,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
     max_alpha_scale::Float64=8.0,
-    n_scan::Int=24
+    n_scan::Int=24,
+    verbose::Bool=false
 )
     xs = plasma_eq.profiles.xs
     npsi = length(xs)
@@ -946,7 +944,7 @@ function ballooning_alpha_boundaries(
             alpha_critical1[i] = cr.alphas[1]
             length(cr.alphas) >= 2 && (alpha_critical2[i] = cr.alphas[2])
         catch err
-            if ctrl.verbose
+            if verbose
                 @warn "ballooning alpha boundaries failed" psi_idx=i exception=err
             end
         end
@@ -1002,7 +1000,7 @@ function ballooning_qprime_crossings(
 end
 
 """
-    ballooning_qprime_boundaries(ctrl, plasma_eq; theta_k=0.0, min_qprime_scale=-2.0, max_qprime_scale=4.0, n_scan=24)
+    ballooning_qprime_boundaries(plasma_eq; theta_k=0.0, min_qprime_scale=-2.0, max_qprime_scale=4.0, n_scan=24, verbose=false)
 
 Profile driver returning the experimental shear profile `qprime` (`dq/dpsi_norm`), the
 critical shear `qprime_critical1` below which the surface is ballooning unstable at the
@@ -1012,12 +1010,12 @@ normalized flux `psi`, from [`ballooning_qprime_crossings`](@ref) at each surfac
 Arrays contain `NaN` where no boundary exists.
 """
 function ballooning_qprime_boundaries(
-    ctrl::ForceFreeStatesControl,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
     min_qprime_scale::Float64=-2.0,
     max_qprime_scale::Float64=4.0,
-    n_scan::Int=24
+    n_scan::Int=24,
+    verbose::Bool=false
 )
     xs = plasma_eq.profiles.xs
     npsi = length(xs)
@@ -1037,7 +1035,7 @@ function ballooning_qprime_boundaries(
             qprime_critical1[i] = cr.qprimes[1]
             length(cr.qprimes) >= 2 && (qprime_critical2[i] = cr.qprimes[2])
         catch err
-            if ctrl.verbose
+            if verbose
                 @warn "ballooning qprime boundaries failed" psi_idx=i exception=err
             end
         end
@@ -1047,7 +1045,7 @@ function ballooning_qprime_boundaries(
 end
 
 """
-    ballooning_delta_prime_map(ctrl, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_alpha=61, max_surfaces=40)
+    ballooning_delta_prime_map(plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_alpha=61, max_surfaces=40, verbose=false)
 
 Map the ballooning Δ' over the (ψ_N, α) plane at fixed magnetic shear: at each flux
 surface, scan the pressure-gradient scaling from 0 to `max_alpha_scale` times the
@@ -1058,12 +1056,12 @@ Returns a NamedTuple `(psi, alpha_scales, alpha_ref, delta_prime)` where `delta_
 is `[n_surf × n_alpha]` with `NaN` on failed surfaces; physical `α = alpha_ref * scale`.
 """
 function ballooning_delta_prime_map(
-    ctrl::ForceFreeStatesControl,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
     max_alpha_scale::Float64=8.0,
     n_alpha::Int=61,
-    max_surfaces::Int=40
+    max_surfaces::Int=40,
+    verbose::Bool=false
 )
     xs = plasma_eq.profiles.xs
     idx_all = [i for i in eachindex(xs) if xs[i] <= 1.0]
@@ -1077,11 +1075,11 @@ function ballooning_delta_prime_map(
 
     for (k, i) in enumerate(idx)
         try
-            res = scan_delta_prime_map(i, plasma_eq; ctrl=ctrl, theta_k=theta_k, s_scales=[1.0], alpha_scales=alpha_scales)
+            res = scan_delta_prime_map(i, plasma_eq; theta_k=theta_k, s_scales=[1.0], alpha_scales=alpha_scales, verbose=verbose)
             alpha_ref[k] = res.reference.alpha_ref
             delta_prime[k, :] .= vec(res.delta_prime)
         catch err
-            if ctrl.verbose
+            if verbose
                 @warn "ballooning delta-prime map failed" psi_idx=i exception=err
             end
         end
@@ -1091,7 +1089,7 @@ function ballooning_delta_prime_map(
 end
 
 """
-    ballooning_qprime_delta_prime_map(ctrl, plasma_eq; theta_k=0.0, min_qprime_scale=-2.0, max_qprime_scale=4.0, n_qprime=61, max_surfaces=40)
+    ballooning_qprime_delta_prime_map(plasma_eq; theta_k=0.0, min_qprime_scale=-2.0, max_qprime_scale=4.0, n_qprime=61, max_surfaces=40, verbose=false)
 
 Map the ballooning Δ' over the (ψ_N, q') plane at the fixed experimental pressure
 gradient: at each flux surface, scan the magnetic shear scaling from `min_qprime_scale`
@@ -1104,13 +1102,13 @@ Returns a NamedTuple `(psi, qprime_scales, qprime_ref, delta_prime)` where
 `q' = qprime_ref * scale` in `dq/dpsi_norm` units.
 """
 function ballooning_qprime_delta_prime_map(
-    ctrl::ForceFreeStatesControl,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
     min_qprime_scale::Float64=-2.0,
     max_qprime_scale::Float64=4.0,
     n_qprime::Int=61,
-    max_surfaces::Int=40
+    max_surfaces::Int=40,
+    verbose::Bool=false
 )
     xs = plasma_eq.profiles.xs
     idx_all = [i for i in eachindex(xs) if xs[i] <= 1.0]
@@ -1124,11 +1122,11 @@ function ballooning_qprime_delta_prime_map(
 
     for (k, i) in enumerate(idx)
         try
-            res = scan_delta_prime_map(i, plasma_eq; ctrl=ctrl, theta_k=theta_k, s_scales=qprime_scales, alpha_scales=[1.0])
+            res = scan_delta_prime_map(i, plasma_eq; theta_k=theta_k, s_scales=qprime_scales, alpha_scales=[1.0], verbose=verbose)
             qprime_ref[k] = res.reference.qprime_norm_ref
             delta_prime[k, :] .= vec(res.delta_prime)
         catch err
-            if ctrl.verbose
+            if verbose
                 @warn "ballooning qprime delta-prime map failed" psi_idx=i exception=err
             end
         end

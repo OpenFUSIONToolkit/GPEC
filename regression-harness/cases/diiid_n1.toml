@@ -1,8 +1,10 @@
 # Regression case: DIII-D-like n=1 ideal stability + perturbed equilibrium.
-# Tracks energies, singular-surface metrics, Δ' (BVP diagonal), and resonant-flux
-# diagnostics for the canonical DIIID-like fixture. Each [quantities.*] block names an
-# HDF5 path in the run output, how to extract it, and the noise floor below which a
-# difference is treated as zero. Run via the regression-harness (see CLAUDE.md).
+# Tracks energies, singular-surface metrics, and resonant-flux diagnostics for the canonical
+# DIIID-like fixture, which runs the forward integrator for its dense ξ profiles. The BVP Δ'
+# matrix comes from the Riccati integrator only and is tracked by the sibling case
+# diiid_n1_riccati. Each [quantities.*] block names an HDF5 path in the run output, how to
+# extract it, and the noise floor below which a difference is treated as zero. Run via the
+# regression-harness (see CLAUDE.md).
 [case]
 name = "diiid_n1"
 description = "DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium"
@@ -269,18 +271,6 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 order = 61
-
-# Tearing stability Δ' — canonical STRIDE BVP matrix diagonal (replaces the
-# previous `PerturbedEquilibrium/SingularCoupling/Delta_prime` track, which
-# was a per-surface stub computed by SingularCoupling from (rbwp1-lbwp1)/(2π·χ').
-# Per-surface Δ' is de-emphasized; SingularCoupling reads this BVP matrix diagonal.
-[quantities.delta_prime]
-h5path = "SingularSurfaces/Delta_prime_matrix"
-type = "complex_matrix"
-extract = "diagonal_complex"
-label = "delta prime (BVP diagonal)"
-noise_threshold = 1e-8
-order = 80
 
 [quantities.island_half_width]
 h5path = "PerturbedEquilibrium/SingularCoupling/island_half_width"

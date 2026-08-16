@@ -8,11 +8,17 @@
 > changes ride with it) so everyone with open PRs can see what is coming and where it
 > will touch their work. Key coordination points:
 >
-> - The PR sequence below assumes **nothing else merges into `develop` before it
->   finishes**. If your PR must land mid-sequence, talk to Matthew first.
-> - The HDF5 schema PRs (#363/#364) are treated as guidance on the final HDF5 shape;
->   writers refactored here keep today's dataset paths and will be re-targeted by
->   those PRs afterward. #367 (immutable control structs) merges after this sequence.
+> - The PR sequence below assumes **nothing else merges into `develop` mid-sequence**.
+>   If your PR must land before it finishes, talk to Matthew first.
+> - **Amendment (post-PR-1):** the module-mirroring HDF5 schema (#363) and the vacuum
+>   surface-inductance migration (#345) merged into develop before PR 1 branched, so
+>   the sequence is built on the NEW schema (`ForceFreeStates/…`, `SingularSurfaces/…`,
+>   `LocalStability/…`, `Equilibrium/…`). Writer refactors in PR 3/4 therefore target
+>   that schema directly; dataset-path references below have been updated accordingly.
+>   Only #364 (self-describing metadata) remains as a later re-target, and #367
+>   (immutable control structs) still merges after this sequence. Neither merged PR
+>   changes any decision: #345 left `calc_surface_inductance` in PerturbedEquilibrium
+>   (only its Vacuum support types moved), so the PE consumer map stands.
 > - The regression harness will be re-baselined during this work; a fresh
 >   Fortran-agreement comparison is the final validation gate for the whole sequence.
 > - The "Decision record" and "Verified code facts" sections are settled — please do
@@ -53,8 +59,8 @@ pe  = perturbed_equilibrium(ffs, rmp)
 | D7 | Public API via **CommonSolve.jl**: `solve(eq::PlasmaEquilibrium, alg; kwargs...)`. `PlasmaEquilibrium(path; kwargs...)` constructor. Module names unchanged. |
 | D8 | Galerkin standalone computes its own vacuum `wv` (no ODE state needed — verified); its result has `free_boundary = nothing`. |
 | D9 | TOML: new `integrator = "forward"|"riccati"|"galerkin"` key. Old keys (`use_riccati`, `use_parallel`, `parallel_threads`, `populate_dense_xi`, later `gal_flag`) go to the `_DEPRECATED_FFS_KEYS` warn-and-ignore list AND the `toml-no-deprecated-keys` pre-commit hook pattern. |
-| D10 | No back-compat burden; examples/fixtures updated freely; regression re-baselining accepted (HDF5 schema PRs #363/#364 churn it anyway). Final validation = fresh Fortran comparison after the sequence. Assume nothing else merges first. |
-| D11 | New structs immutable from day one (eases the later #367 merge). HDF5 writers become functions on result structs (schema itself unchanged here; #363/#364 re-target them later). |
+| D10 | No back-compat burden; examples/fixtures updated freely; regression re-baselining accepted. Final validation = fresh Fortran comparison after the sequence. Nothing else merges mid-sequence without coordination (#363/#345 landed before PR 1 and are absorbed — see header amendment). |
+| D11 | New structs immutable from day one (eases the later #367 merge). HDF5 writers become functions on result structs, keeping the merged #363 schema paths unchanged; #364 (metadata) re-targets them later. |
 | D12 | Analysis module reads HDF5 files, not live structs — untouched except where dataset names would change (they don't in this plan). |
 
 ### Verified code facts the workers must not re-derive
@@ -227,7 +233,7 @@ All code must be JuliaFormatter-clean per `.JuliaFormatter.toml` before commit.
     `integrator="riccati"`) so the canonical Δ′-matrix fixture survives the
     DIIID-like_ideal switch to forward. Add a matching regression case
     `regression-harness/cases/diiid_n1_riccati.toml` tracking
-    `singular/delta_prime_matrix`-derived quantities (mirror the Δ′ entries of the
+    `SingularSurfaces/delta_prime_matrix`-derived quantities (mirror the Δ′ entries of the
     existing `diiid_n1` case; ξ/PE quantities stay on `diiid_n1`).
 - `benchmarks/benchmark_threads.jl`, `benchmarks/benchmark_delta_prime_methods.jl`:
   update flag names (`use_riccati`/`parallel_threads` → `integrator`/`nchunks`);
@@ -323,7 +329,7 @@ All code must be JuliaFormatter-clean per `.JuliaFormatter.toml` before commit.
 
 Full test suite; targeted `runtests_resist_eval.jl`, `runtests_fullruns.jl`
 (exercises `local_stability_flag=true` decks); docs build (missing-docs gate);
-harness `--cases diiid_n1 --refs develop,local` (locstab datasets must be identical).
+harness `--cases diiid_n1 --refs develop,local` (`LocalStability/*` datasets must be identical; note the #363 group name already matches the new module name).
 
 ---
 
@@ -370,8 +376,8 @@ end
 Contract of `solution`/`solution_basis`:
 - Forward → dense EL-basis odet, `:el_axis`. PE-usable.
 - Riccati → its odet IS carried (psi/q/crit/edge_scan are valid, u_store is chunk
-  snapshots), `:riccati`. NOT PE-usable; HDF5 `integration/psi|crit|EdgeScan` still
-  written from it, `integration/xi_*` written empty.
+  snapshots), `:riccati`. NOT PE-usable; HDF5 `ForceFreeStates/Solutions/ForwardIntegration/psi|crit` and `EdgeScan/*` still
+  written from it, `.../ForwardIntegration/xi_*` written empty.
 - Galerkin with `gal_match_flag` → `gal_matched_odestate(...)`, `:gal_native`
   (PE-usable; `du_store_populated=true` analytic derivatives). Without match →
   `nothing`, `:none`.
@@ -454,7 +460,7 @@ crosses module boundaries after `build_result`.
 ### 5.4 Verification
 
 Full suite; `runtests_fullruns.jl` (all decks — forward decks produce identical
-HDF5 vs pre-PR, riccati decks now emit empty `integration/xi_*` + PE-skip warnings);
+HDF5 vs pre-PR, riccati decks now emit empty `ForwardIntegration/xi_*` + PE-skip warnings);
 harness `--cases diiid_n1,solovev_n1 --refs develop,local` (forward-deck tracked
 quantities unchanged); docs build.
 
@@ -512,14 +518,14 @@ logic stays a pre-FFS stage but is owned by the FFS-facing function
   disappear from the HDF5 — accepted per D10; gal datasets identical because
   `galerkin_solve` inputs are unchanged). `gal_*` sub-knobs stay (they become
   `Galerkin(...)` fields in PR 5).
-- FFS writer: tolerate `solution === nothing` (write empty `integration/*` datasets —
+- FFS writer: tolerate `solution === nothing` (write empty `ForwardIntegration/*` datasets —
   extend the existing empty-fallback pattern).
 
 ### 6.3 Tests / verification
 
 - Update `runtests_fullruns.jl` gal decks' expectations (gal-only HDF5).
 - New testset (in `runtests_fullruns.jl` or the gal tests): `integrator="galerkin"`
-  on `LAR_ideal_match_test` produces `galerkin/delta` identical to the PR-3 additive
+  on `LAR_ideal_match_test` produces the Galerkin `delta` dataset identical to the PR-3 additive
   run (same `wv` by construction — assert against a stored reference or a paired
   riccati+gal_flag run on the pre-PR commit during development).
 - Full suite; harness (gal cases if present, plus diiid/solovev); docs.
@@ -660,8 +666,15 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
 
 ## 10. Progress
 
-- [ ] PR 1 — `refactor/riccati-unification`
-- [ ] PR 2 — `refactor/local-stability-module`
+- [ ] PR 1 — `refactor/riccati-unification` — **implemented, in review.** Two deltas
+  from the §3 spec, both improvements: the new Δ′ example references the DIIID geqdsk
+  by relative path instead of copying it, and the TOML sweep covered six regression
+  fixtures (two more had landed on develop since the plan was written), all `forward`.
+- [ ] PR 2 — `refactor/local-stability-module` — **implemented, in review.** One delta
+  from the §4 spec: the signature change also required updating two call-site groups the
+  section did not list — `examples/DIIID-like_ideal_example/analyze_example.jl` (five
+  ballooning entry points) and two docstring cross-references in
+  `src/Analysis/ForceFreeStates.jl`.
 - [ ] PR 3 — `refactor/forcefreestates-result`
 - [ ] PR 4 — `refactor/staged-main`
 - [ ] PR 5 — `feature/solve-api`
