@@ -786,14 +786,15 @@ Every TOML section corresponds 1:1 to an API object/call; the keys ARE the kwarg
 (the `@kwdef` splat is the mapping). Consequences, in delivery order:
 
 1. **#393 (this PR)**: (c) revision per D15 + commit (d). Nothing else grows scope.
-   ctrl→TOML serialization explicitly deferred to step 3.
-2. **Stacked PR: two-stage PE** — `GeneralPE = perturbed_equilibrium(ffs)` builds the
-   source-independent response/coupling operators; `force(GeneralPE, fields)` (or
-   callable `GeneralPE(fields)`) materializes sources, applies P, computes derived
-   quantities. Pairs with the delta_mn resonant-coupling work. Payoff: coil scans and
-   optimization reuse one GeneralPE across many cheap force() calls; a TOML deck maps
-   onto "GeneralPE + one force()" with no deck-format change.
-3. **Follow-on PR: "main = 20 lines"** — kinetic + SLAYER get API entry points;
+   ctrl→TOML serialization explicitly deferred to step 2.
+2. **Next PR: "main = 20 lines" (REORDERED ahead of the PE split, user call 2026-08-15:
+   close FFS completely before touching PE)** — kinetic profiles become an OPTIONAL
+   ATTRIBUTE OF PlasmaEquilibrium (`kinetic::Union{Nothing,KineticProfiles}`, loaded
+   data not file path; species/factor knobs are loader kwargs; rationale: the two-pass
+   grid refinement needs the profiles at equilibrium FORMATION, before any solve exists;
+   `solve` with kinetic_factor>0 then gates on `eq.kinetic`). COORDINATE with #367
+   (struct freeze) — the field addition lands after Jake's PR. SLAYER gets an API entry
+   point; kinetic + SLAYER get API homes;
    `main()` becomes a deck INTERPRETER (parse file → same constructors and calls a
    script would make); `main_from_inputs` and the stage functions dissolve. The writer
    serializes the RESOLVED ctrl structs (defaults included) into every output — same
@@ -803,6 +804,13 @@ Every TOML section corresponds 1:1 to an API object/call; the keys ARE the kwarg
    config system, ever. Deck completeness is automatic: the deck schema IS the struct
    schema, and TOML array-of-tables (`[[ForcingTerms.source]]` with per-block scale)
    serializes even the source algebra.
+3. **Then: two-stage PE (stacked, AFTER FFS is closed)** — `GeneralPE =
+   perturbed_equilibrium(ffs)` builds the source-independent response/coupling
+   operators; `force(GeneralPE, fields)` (or callable `GeneralPE(fields)`) materializes
+   sources, applies P, computes derived quantities. Pairs with the delta_mn
+   resonant-coupling work (same territory, same cycle). Payoff: coil scans and
+   optimization reuse one GeneralPE across many cheap force() calls; a TOML deck maps
+   onto "GeneralPE + one force()" with no deck-format change.
 
 Defaults contract (established, keep): both paths splat over the same `@kwdef` struct
 defaults — one defaults table. API is deliberately more explicit in two spots (no
