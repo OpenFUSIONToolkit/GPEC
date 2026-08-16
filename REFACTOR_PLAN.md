@@ -942,10 +942,10 @@ Legend: ✅ implemented · 🔜 target pending the named follow-on work · ❌ n
 | `solution` — full ξ/ξ′ profiles (class 1) | ✅ `:el_axis` | ❌ (class 2 covers resonant coupling) | ✅ `:gal_native` |
 | `closure` / `bpen` (class 2; always present, zeros under `:ideal`) | ✅ `:ideal` | ✅ `:ideal` (🔜 `:matched` with STRIDE matching) | ✅ `:ideal` or `:matched` |
 | `delta_mn` (class 2; resonant-derivative jump) | ❌ not planned (no concrete route identified; may not exist) | 🔜 next-week work, from `delta_coil` | 🔜 next-week work |
-| `delta_prime` — ONE unified type: Δ′ matrix, raw D′, `delta_coil`, PEST-3 blocks (THIS PR) | — | ✅ → unify | ✅ → unify (same physics, today under `galerkin.*` fields / different HDF5 names) |
+| `delta_prime` — ONE unified type: Δ′ matrix, raw D′, `delta_coil`, PEST-3 blocks | — | ✅ | ✅ (PEST-3 blocks persisted; riccati recovers them via `pest3_decompose`) |
 | raw integrator odet (`diagnostics`: crit, nzero, edge scan, ca) | ✅ | ✅ | — (no radial ODE sweep) |
 | kinetic (`kinetic_factor>0`) | ✅ | error | error |
-| SLAYER inputs (surfaces + Δ′ matrix) | surfaces only (diag fallback) | ✅ | 🔜 via unified `delta_prime` (this PR) |
+| SLAYER inputs (surfaces + Δ′ matrix) | surfaces only (diag fallback) | ✅ | ✅ via unified `delta_prime` |
 
 SLAYER is an inner-layer consumer: SLAYER + GGJ should eventually sit behind one abstract
 inner-layer interface (same family as the `ResistiveMatch` models, D13). Later pass, not this one.
