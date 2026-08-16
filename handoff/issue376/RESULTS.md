@@ -561,6 +561,47 @@ Two things this overturns:
 **Phase 0 verdict: proceed.** The premise of route (a) is confirmed with the input, fill-site and
 grid confounds each eliminated by measurement.
 
+## 15. Phase 1 of route (a): the remap is the manufacturer, and the prize is ~50%
+
+**Gate 1a — force dense saves.** `dtmax = 2π/2000` at `DirectEquilibrium.jl:294` shrinks the
+spacing of `ff_x_nodes`, leaving tolerances and refinement untouched.
+
+| mpsi | accepted steps | near-axis `nu` resid | near-axis r1 |
+|---|---|---|---|
+| 512 stock | 3977 | 2.11e-5 (flat) | −0.515 |
+| 512 + dtmax | **2521 (−37%)** | 7.42e-7 | **+0.968** |
+| 1024 stock | 7638 | 2.12e-5 (flat) | −0.744 |
+| 1024 + dtmax | **3614 (−53%)** | 8.22e-8 | **+0.984** |
+
+The geometry flips from a flat floor with white-noise correlation to **converging** data with
+r1 → +0.98, and the per-doubling step ratio drops **1.92× → 1.43×**.
+
+**The confound inside Gate 1a is settled.** `dtmax` improves integration accuracy *and* save
+density together. The existing etol sweep separates them, at mpsi=512 mid-plasma:
+
+| variant | `nu` resid | `offset` resid |
+|---|---|---|
+| etol 1e-8 | 1.544e-06 | 9.09e-06 |
+| etol 1e-10 | 1.513e-06 | 7.93e-06 |
+| etol 1e-12 | 1.769e-06 | 7.04e-06 |
+| **etol 1e-10 + dtmax** | **6.36e-08** | **3.39e-07** |
+
+Four decades of integration accuracy move nothing; forcing dense steps at the *same* accuracy
+cleans by ~24×. **The error is set by the spacing of the resample abscissae, not by how accurately
+each node is computed** — the remap-interpolation signature, and the reason `etol` and `abstol`
+were both null.
+
+**Gate 1b did not run.** `save_positions=(true,false) → (false,true)` breaks the periodic closure
+— θ=0 is the unrefined initial condition while θ=2π is refined — and the `PeriodicBC` check
+rejects it. Its premise was weak regardless (drift ~ reltol = 1e-10, orders below the observed
+floor). Recorded as inconclusive, with a constraint for Phase 2: **whatever points are evaluated,
+the periodic closure must be preserved.**
+
+**Phase 1 verdict: proceed.** `dtmax` is a brute-force proxy — it forces 2000 steps per surface and
+still leaves finite resample error. The Phase 2 fix evaluates *exactly* at the target abscissae, so
+the resample error at the output nodes is zero rather than merely small, and it does not force
+extra steps.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it

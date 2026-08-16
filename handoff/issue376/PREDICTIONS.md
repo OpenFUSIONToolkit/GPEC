@@ -119,3 +119,42 @@ et[1] identical to 6-7 digits across the ladder.
    Route (a) is strongly motivated. This also refutes the section 11 speculation that a good share
    of the near-axis steps might be legitimate resolution of real structure, and shows the ~20%
    ceiling was a limit of that PARTIAL repair, not of fixing the source.
+
+--- Phase 1 gates (route (a)), written before the runs ---
+
+Two candidate manufacturers of eps inside the Fill Site A trace+remap, probed one line at a time
+on the DIIID stripped decks at mpsi 512 and 1024 (baselines 3977 / 7638 accepted steps; nu
+mid-plasma residual flat at 1.51e-6 / 1.29e-6):
+
+Gate 1a "remap interpolation error": dtmax = 2pi/2000 at DirectEquilibrium.jl:294 forces >=2000
+solver steps, so ff_x_nodes get much denser and the periodic-cubic resample error (~h^4) collapses,
+with tolerances and refinement untouched.
+  - predicts, if the remap is the source: nu/offset/rcoords residuals drop by orders of magnitude
+    and start converging; accepted steps fall toward the LAR-like flat scaling.
+
+Gate 1b "pre-refinement save drift": save_positions=(true,false) -> (false,true) at line 290. The
+saved states are currently taken BEFORE refine_affect! Newton-projects them onto the flux surface,
+so every saved rfac carries the raw per-step drift off the surface.
+  - predicts, if the drift is the source: same qualitative drop, and the fix is nearly free.
+  - note reltol is already 1e-10, so the drift should be ~1e-10 relative -- too small to explain a
+    1e-6..0.19 floor. Expected to be null or minor; running it to be sure rather than assuming.
+
+If BOTH are null, the eps is manufactured by neither candidate and Phase 2 must be rethought
+before any code is written.
+
+Phase 1 RESULTS:
+  Gate 1a (dtmax=2pi/2000) FIRES. Geometry goes from flat to converging: near-axis nu residual
+  2.11e-5 / 2.12e-5 (flat, r1 -0.52/-0.74) -> 7.42e-7 / 8.22e-8 (converging, r1 +0.97/+0.98).
+  Accepted steps 3977 -> 2521 (-37%) at mpsi=512 and 7638 -> 3614 (-53%) at mpsi=1024; the
+  per-doubling ratio drops 1.92x -> 1.43x. Far beyond the section 11 "20% ceiling".
+
+  Gate 1a's internal confound (dtmax improves integration accuracy AND save density together)
+  settled for free from the existing etol sweep: at mpsi=512 mid-plasma, nu residual is 1.544e-6 /
+  1.513e-6 / 1.769e-6 for etol 1e-8 / 1e-10 / 1e-12 -- FLAT across four decades of integration
+  accuracy -- versus 6.36e-8 for gate 1a at etol 1e-10. Integration accuracy is not the lever;
+  save/step density is. That is the remap-interpolation signature.
+
+  Gate 1b DID NOT RUN: save_positions=(false,true) breaks the periodic closure (theta=0 is the
+  unrefined initial condition while theta=2pi is refined), so the PeriodicBC check rejects the
+  data. Its premise was weak anyway (drift ~reltol=1e-10, far below the observed floor). Recorded
+  as inconclusive; Phase 2 must preserve the periodic closure when choosing evaluation points.
