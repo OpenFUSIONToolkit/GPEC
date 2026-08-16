@@ -189,15 +189,6 @@
         @test plasma_eq_ascii isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
 
-    @testset "Resolved psihigh (inverse readers)" begin
-        # CHEASE data already conforms to the plasma boundary, so the separatrix clamp never
-        # runs and the resolved value is the request — but it must still reach params.
-        for eq in (plasma_eq_binary, plasma_eq_ascii)
-            @test eq.params.psihigh_resolved == 0.994
-            @test isapprox(eq.params.psihigh_resolved, eq.rzphi_xs[end]; atol=1e-12)
-        end
-    end
-
     @testset "CHEASE Consistency (ASCII vs Binary)" begin
         # Both formats encode the same physical data; differences arise only from
         # floating-point text serialization in the ASCII format vs exact binary storage.

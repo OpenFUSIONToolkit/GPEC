@@ -27,11 +27,8 @@ specified in the input.
     refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
     "log_asymptotic" is a legacy alias for "auto")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
-  - `psihigh::Float64` - Requested upper limit of normalized flux coordinate. For efit-family
-    equilibria this is the user's request, which may lie outside the closed-flux region; the
-    value the equilibrium is actually formed on is `DirectRunInput.psihigh_resolved` (carried
-    onto the equilibrium as `EquilibriumParameters.psihigh_resolved`). Read that, not this,
-    for anything downstream of `setup_equilibrium`.
+  - `psihigh::Float64` - Requested upper limit of normalized flux coordinate; the value the
+    equilibrium is actually formed on is `EquilibriumParameters.psihigh_resolved`.
   - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
     two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
     pins knots on rational surfaces, and re-forms on the refined grid. Standalone `setup_equilibrium`
@@ -524,9 +521,8 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `ro::Union{Nothing,Float64}` - R-coordinate of the magnetic axis [m]
   - `zo::Union{Nothing,Float64}` - Z-coordinate of the magnetic axis [m]
   - `psio::Union{Nothing,Float64}` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
-  - `psihigh_resolved::Union{Nothing,Float64}` - Outer flux limit the equilibrium was formed on,
-    equal to the outermost ψ node. This is `config.psihigh` clamped to the outermost closed flux
-    surface; downstream code wanting the plasma edge must read this, not `config.psihigh`.
+  - `psihigh_resolved::Union{Nothing,Float64}` - Outer flux limit the equilibrium was formed on
+    (the outermost ψ node); the plasma edge downstream of `setup_equilibrium`.
   - `rsep::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma boundary [m]
   - `zsep::Union{Nothing,Vector{Float64}}` - Z-coordinates of the plasma boundary [m]
   - `rext::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma edge [m]
