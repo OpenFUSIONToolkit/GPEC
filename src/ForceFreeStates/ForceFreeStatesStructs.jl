@@ -131,9 +131,11 @@ A mutable struct containing settings for debugging and benchmarking output.
 ## Fields
 
   - `output_benchmark_data::Bool` - Flag to output benchmark data for comparison between codes
+  - `gal_basis_output::Bool` - Write the raw Galerkin outer-region basis functions (per-interval, unconstrained at the rationals) under `GalerkinIntegration/Basis/`. Solver internals for development verification, not physics output.
 """
 @kwdef mutable struct DebugSettings
     output_benchmark_data::Bool = false
+    gal_basis_output::Bool = false
 end
 
 """

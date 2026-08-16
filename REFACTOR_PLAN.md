@@ -728,31 +728,39 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
 
 ---
 
-## 7A. Interface PR, commit (d) — cross-formalism file contract (issue #388 items 1 + 2)
+## 7A. Interface PR, commit (d) — ξ unification + tearing surface identity (IMPLEMENTED 2026-08-15)
 
-Two #388 follow-ups belong to THIS PR because they complete the D14 promise (same physics ⇒
-same layout across integrators) and close a gap this PR itself introduces:
+Final scope (converged with the user; supersedes the earlier "minimal transpose" reading):
 
-- **ξ axis-order unification (#388 item 1, MINIMAL form only)**: `ForwardIntegration/xi_psi`
-  is `(mode, solution, psi)`; `GalerkinIntegration/Solution/xi_psi` is `(mode, psi, solution)` —
-  same physics, transposed. Fix: keep the per-formalism groups; `permutedims` at gal write so
-  every `Solutions/*/xi_*` dataset shares the Forward axis order; update the gal `dims`
-  attributes (and drop the axis-order warning from the gal `long_name`); update the gal
-  readers (`benchmarks/verify_gal_{solution,ideal,match}.jl`, `compare_gal_vs_el.jl`, and any
-  Analysis readers). The FULL unification (one Solutions layout written from
-  `result.solution`) is future work — gal-native grid semantics make that a design job.
-- **`Tearing/PerSurface/rational_psi` + `rational_q` (#388 item 2)**: gal-fed SLAYER (new in
-  commit (b2)) analyzes gal's in-domain SUBSET of the singular surfaces, so tearing output
-  must identify its own surfaces. Write both datasets from the surface list `run_slayer`
-  actually used; `rational_q` for schema symmetry; annotate per hdf5-conventions.
+- **ξ unification (the real one)**: closed axis-to-edge ξ profiles are written from
+  `result.solution` into the producing formalism's Solutions group with IDENTICAL names and
+  (mode, solution, psi) axis order: `Solutions/ForwardIntegration/*` (unchanged) and new
+  `Solutions/GalerkinIntegration/{psi, q, xi_psi, dxi_psidpsi, xi_s}` (the gal grid, issing
+  nodes dropped — the same arrays as `result.solution`, which IS `Match/xi` repacked). The
+  gal closure (ideal jump or inner-layer Δ) always yields these profiles; a no-closure gal
+  run is Δ′-only and writes none. `Match/xi`/`Match/dxidpsi` datasets are REMOVED (they were
+  the profiles, mislabeled as matching diagnostics); `Match/` keeps cout/cin/Delta_r/bpen/
+  rpec_eig/Inner/ only.
+- **Raw outer basis demoted to debug output** (user call: solver internals, like dumping an
+  ODE work array): the old `GalerkinIntegration/Solution/` group is now `Basis/`, written
+  ONLY under the new `DebugSettings.gal_basis_output` flag ([DEBUG] deck section / `debug=`
+  API kwarg), transposed to the shared axis order. `ForceFreeStatesResult` now carries
+  `debug_settings` so the writer sees the flag. verify_gal_{solution,ideal}.jl need the flag.
+- **Tearing surface identity (#388 item 2)**: `SLAYERResult` gained `rational_psi`/
+  `rational_q` (aligned with `params`; empty when built from bare parameters);
+  `run_slayer_from_inputs` takes them as kwargs; the loose `run_slayer` fills them from
+  `surfaces[p.ising]`; writer emits `Tearing/PerSurface/rational_psi|rational_q` when
+  present + annotations. Gal-fed SLAYER output now identifies its surface subset.
+- Benchmarks repointed (verify_gal_match/ideal/solution, compare_gal_vs_el,
+  scan_{rotation,resistivity}_m2, compare_jbgradpsi_m2 — the filtered psi grid is now
+  first-class so several scripts simplified); annotation tables updated (axis-order
+  warning dropped); hdf5-conventions.md updated; result-struct testsets assert
+  file == result.solution + Basis gating; slayer round-trip asserts surface identity.
 
-Verification: gal ξ values identical under transposed layout (compare vs pre-change with an
-axis-aware script); forward decks byte-identical; slayer tests extended for the new
-datasets; harness gal cases re-baseline once (with the (b2) renames).
-
-NOT in this commit (stay on #388): item 3 (PE empty-placeholder pattern — align with #368's
-zero-extent sentinels after it lands), items 4–5 (schema-owner calls), items 6–8
-(comment-audit pass, #354 pattern).
+NOT done (stays on #388): item 3 (PE empty-placeholder pattern — align with #368), items
+4–5 (schema-owner calls), items 6–8 (comment-audit pass). Full shared-Solutions schema for
+closed profiles across formalisms (one group, grid-semantics contract) is future work with
+the two-stage PE.
 
 ## 7B. Settled design (2026-08-15): source algebra, two-stage PE, deck-as-serialization
 
@@ -969,9 +977,13 @@ inner-layer interface (same family as the `ResistiveMatch` models, D13). Later p
     isempty guard skips the convert branch) — factor 16.85 on Solovev amplitude-linear
     PE outputs; present since the forcing-snapshot PR; NOT fixed here (needs a design
     decision re: replay double-conversion; fixing moves TOML outputs).
-  - Commit (d) planned (§7A, decided 2026-08-15): #388 items 1 (ξ axis-order unification,
-    minimal permutedims-at-write form) + 2 (Tearing/PerSurface rational_psi/rational_q).
-    Remaining #388 items stay on the issue for follow-ups.
+  - Commit (d) IMPLEMENTED by the coordinator directly (not yet committed; §7A has the
+    full final scope): ξ unification (closed gal profiles in the shared Solutions layout
+    from result.solution; raw basis debug-gated as Basis/), Tearing/PerSurface
+    rational_psi/rational_q. Gates GREEN: 133/133 result-struct (file == result.solution,
+    Basis gating, Match/xi absent), 73/73 slayer (surface identity), 17/17 fullruns,
+    6/6 + 14/14 h5-schema (metadata contract on all new/moved datasets), forward fixture
+    byte-identical 137/137 vs pre-(d) tree.
   - Commit (b2) implemented and reviewed (not yet committed; §6A, D14): `DeltaPrimeData`
     (now in ForceFreeStatesStructs.jl for include order) carries matrix/raw/coil + gal-only
     A/B/Gamma; `galerkin_solve` returns `(GalerkinResult, DeltaPrimeData)`; canonical HDF5

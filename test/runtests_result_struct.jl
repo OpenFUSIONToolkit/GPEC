@@ -1,4 +1,5 @@
 using TOML
+using HDF5
 
 # ForceFreeStatesResult: what each formalism publishes, and how consumers gate on it.
 # The Solovev fixture deck (mpsi=16, delta_m=0) is coarse but has two rational surfaces,
@@ -186,10 +187,43 @@ using TOML
                         @test ffs.bpen == ffs.galerkin.match.bpen
                         @test !iszero(ffs.bpen)
                     end
+
+                    # The closed profiles land in the shared Solutions layout: same names and
+                    # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
+                    gal = "ForceFreeStates/Solutions/GalerkinIntegration"
+                    HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                        @test read(f["$gal/psi"]) == sol.psi_store
+                        @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
+                        @test read(f["$gal/dxi_psidpsi"]) == sol.du_store
+                        @test read(f["$gal/xi_s"]) == sol.xi_s_store
+                        # Matching diagnostics keep their group; the profile datasets left it,
+                        # and the raw outer basis is debug-gated off by default.
+                        @test haskey(f, "$gal/Match/cout")
+                        @test !haskey(f, "$gal/Match/xi")
+                        @test !haskey(f, "$gal/Basis")
+                        @test !haskey(f, "$gal/Solution")
+                    end
                 end
             end
         end
     end
+    @testset "gal_basis_output dumps the raw outer basis" begin
+        mktempdir() do dir
+            _stage_deck(dir, joinpath(@__DIR__, "..", "examples", "LAR_ideal_match_test");
+                extra_sections=Dict{String,Any}("DEBUG" => Dict{String,Any}("gal_basis_output" => true)))
+            ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
+            gal = "ForceFreeStates/Solutions/GalerkinIntegration"
+            HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                @test haskey(f, "$gal/Basis/xi_psi")
+                basis = read(f["$gal/Basis/xi_psi"])
+                # (mode, solution, psi) on the FULL gal grid, on-surface nodes included; the
+                # columns are the 2·msing resonant basis solutions plus the coil-drive columns.
+                @test size(basis, 2) == 2 * ffs.galerkin.msing + ffs.numpert_total
+                @test size(basis, 3) == length(read(f["$gal/Basis/psi"]))
+            end
+        end
+    end
+
     @testset "fixed-boundary run still publishes the plasma energy matrix" begin
         mktempdir() do dir
             _stage_deck(dir, template; ffs_overrides=Dict{String,Any}("vac_flag" => false))

@@ -1032,10 +1032,11 @@ function write_outputs_to_HDF5(
     gal_data = result.galerkin
     diag = result.diagnostics
     msing = length(result.surfaces)
-    # The ForwardIntegration ξ datasets carry the forward sweep's axis-basis profiles. A
-    # gal-native solution is already persisted in full under the Galerkin group, so it is not
-    # duplicated here.
+    # Closed ξ profiles are written into the producing formalism's Solutions group with the
+    # same dataset names and (mode, solution, psi) axis order: ForwardIntegration for the
+    # axis-basis sweep, GalerkinIntegration for the matched gal solution (its own grid).
     xi_solution = (result.solution !== nothing && result.solution.basis === :el_axis) ? result.solution : nothing
+    gal_solution = (result.solution !== nothing && result.solution.basis === :gal_native) ? result.solution : nothing
 
     h5open(joinpath(result.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
@@ -1045,9 +1046,18 @@ function write_outputs_to_HDF5(
         # Store git version for reproducibility
         out_h5["Info/git_version"] = git_version
 
-        # Outer-region Galerkin Δ′ matrix (RDCON), if computed
+        # Outer-region Galerkin solver outputs (RDCON), if it ran
         if gal_data !== nothing
-            write_galerkin!(out_h5, gal_data)
+            write_galerkin!(out_h5, gal_data; basis_output=result.debug_settings.gal_basis_output)
+        end
+
+        if gal_solution !== nothing
+            gal = "ForceFreeStates/Solutions/GalerkinIntegration"
+            out_h5["$gal/psi"] = gal_solution.psi_store
+            out_h5["$gal/q"] = gal_solution.q_store
+            out_h5["$gal/xi_psi"] = gal_solution.u_store[:, :, 1, :]
+            out_h5["$gal/dxi_psidpsi"] = gal_solution.du_store
+            out_h5["$gal/xi_s"] = gal_solution.xi_s_store
         end
 
         # Self-contained run snapshot: the full merged TOML (so a rerun can reconstruct every

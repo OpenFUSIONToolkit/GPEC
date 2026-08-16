@@ -167,7 +167,9 @@ from cached HDF5 output).
 """
 function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     dp_matrix::AbstractMatrix,
-    control::SLAYERControl)
+    control::SLAYERControl;
+    rational_psi::Vector{Float64}=Float64[],
+    rational_q::Vector{Float64}=Float64[])
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(params) && return empty_slayer_result(control)
@@ -309,7 +311,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         control.store_scan && push!(scan_data_list, scan)
     end
 
-    return SLAYERResult(true, control, params, dp,
+    return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
         layer_widths, scan_data_list)
@@ -441,5 +443,7 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
         M
     end
 
-    return run_slayer_from_inputs(params, dp, control)
+    rational_psi = Float64[surfaces[p.ising].psifac for p in params]
+    rational_q = Float64[surfaces[p.ising].q for p in params]
+    return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
 end

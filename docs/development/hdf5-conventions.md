@@ -40,7 +40,7 @@ Top level (10 groups):
 | `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim` |
 | `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
 | `Equilibrium/` | Scalars (`beta_N`, `q_axis`, `q_95`, `I_p`, …) plus `Profiles/` (1-D on `psi`: 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D on `psi`×`theta`: rcoords, offset, nu, jac) |
-| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (`Solution/`, `Match/`, the gal surface list), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, `Match/` diagnostics, the gal surface list, debug-gated `Basis/`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |

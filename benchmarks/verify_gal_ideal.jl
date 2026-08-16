@@ -2,19 +2,22 @@
 #   1. cout / cin / deltar all zero (no resistive plasma combination, no inner layer)
 #   2. matched ξ_j == the gal coil column sols(:,:,2·msing+j)   (and ξ′ likewise)
 # Usage: julia --project=. benchmarks/verify_gal_ideal.jl [path/to/gpec.h5]
+# Requires [DEBUG] gal_basis_output = true in the deck (compares against the raw-basis dump).
 using HDF5, Printf, LinearAlgebra
 
 h5path = length(ARGS) >= 1 ? ARGS[1] : "/tmp/gal_ideal_test/gpec.h5"
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
-cout, deltar, mxi, mdxi, sols, sols_d, sing_psi = h5open(h5path) do f
+cout, deltar, mxi, mdxi, sols, sols_d, iss, sing_psi = h5open(h5path) do f
     (to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"])),
-        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/dxidpsi"])),
-        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi"])),
+        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/dxi_psidpsi"])),
+        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/dxi_psidpsi"])),
+        Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/is_rational"])),
         read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]))
 end
 msing = length(sing_psi)
-mpert, ngrid, mcoil = size(mxi)
+mpert, mcoil, ngrid = size(mxi)
+keep = .!iss
 
 @printf("[1] ‖cout‖ = %.2e, ‖deltar‖ = %.2e   %s\n", norm(cout), norm(deltar),
     (norm(cout) == 0 && norm(deltar) == 0) ? "✓ no resistive combination (ideal)" : "✗")
@@ -22,7 +25,7 @@ mpert, ngrid, mcoil = size(mxi)
 # matched ξ_j should equal the coil column sols(:,:,2msing+j)
 err = maximum(1:mcoil) do j
     csol = 2msing + j
-    max(norm(mxi[:, :, j] - sols[:, :, csol]), norm(mdxi[:, :, j] - sols_d[:, :, csol]))
+    max(norm(mxi[:, j, :] - sols[:, csol, keep]), norm(mdxi[:, j, :] - sols_d[:, csol, keep]))
 end
 @printf("[2] max‖ξ_matched − coil column‖ = %.2e   %s\n", err,
     err < 1e-12 ? "✓ matched ξ == bare ideal coil column" : "✗")

@@ -15,7 +15,7 @@ function read_m2(h5; gal::Bool)
     h5open(h5) do f
         pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))
         col = mtarget - read(f["Info/mlow"]) + 1
-        psi = gal ? read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"])[.!Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]))] :
+        psi = gal ? read(f["ForceFreeStates/Solutions/GalerkinIntegration/psi"]) :
               read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"])
         (psi, pa[:, col])
     end

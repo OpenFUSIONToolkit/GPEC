@@ -53,6 +53,7 @@ so bpen and closure are always present.
   - `psilow`, `psilim`, `qlim`, `q1lim` - Integration bounds, and q with its ψ-derivative at `psilim`.
   - `dir_path::String` - Working directory of the run.
   - `wall_settings::Vacuum.WallShapeSettings` - Wall shape used by the vacuum calculation.
+  - `debug_settings::DebugSettings` - Diagnostic dump settings (the `[DEBUG]` deck section / `debug=` API keyword).
   - `metric::MetricData`, `ffit::FourFitVars` - Metric data and Euler-Lagrange matrix interpolants.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
@@ -94,6 +95,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:FourFitVars} <:
     q1lim::Float64
     dir_path::String
     wall_settings::Vacuum.WallShapeSettings
+    debug_settings::DebugSettings
 
     # Assembly products, always present.
     metric::MetricData
@@ -246,7 +248,7 @@ function build_result(
     return ForceFreeStatesResult(
         integrator, ctrl, equil,
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
-        intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings,
+        intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
         metric, ffit, intr.sing, kinetic,
         closure, bpen,
         solution, odet, wp, free_energies, delta_prime, gal_data

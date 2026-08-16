@@ -210,7 +210,8 @@
             nre=40, nim=40,
             pole_threshold=1e5,
             store_scan=true)
-        r = run_slayer_from_inputs(params, dp, c)
+        r = run_slayer_from_inputs(params, dp, c;
+            rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
 
         mktemp() do path, io
             close(io)
@@ -233,6 +234,10 @@
                 # Settings are not echoed — inputs live only under Input/ (the merged TOML).
                 @test !haskey(g, "Settings")
                 @test haskey(g, "PerSurface")
+                # Surface identity: present when the caller supplied it, so Tearing
+                # results plot against psi/q even when SLAYER analyzed a surface subset.
+                @test read(g["PerSurface/rational_psi"]) == [0.45, 0.72]
+                @test read(g["PerSurface/rational_q"]) == [2.0, 3.0]
                 @test haskey(g, "Roots")
                 @test haskey(g, "Diagnostics")
                 @test haskey(g, "Scan")
