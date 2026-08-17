@@ -14,6 +14,28 @@ example_dir = "examples/DIIID-like_gal_resistive_pe_example"
 # any whole-profile ξ/ξ′ norm (those diverge at the rationals and are ill-posed as benchmarks).
 
 # Surface locations / count (sanity)
+# Which formalism produced the Galerkin Δ′ below. Both this deck's `integrator` and its
+# `gal_flag` are pinned because the Galerkin Δ′ is currently the additive path (gal_flag
+# layered on a riccati sweep) rather than a standalone integrator, so the pair is what names
+# the formalism. Once the standalone `integrator = "galerkin"` lands and gal_flag is retired,
+# these pins fail loudly — which is the intent: a deliberate formalism change must regenerate
+# the gold rather than silently re-pointing it at different physics.
+[quantities.integrator]
+h5path = "Input/gpec_toml_raw"
+type = "token"
+extract = "toml_key:ForceFreeStates.integrator"
+label = "integrator (Δ′ provenance)"
+noise_threshold = 0
+order = 1
+
+[quantities.gal_flag]
+h5path = "Input/gpec_toml_raw"
+type = "token"
+extract = "toml_key:ForceFreeStates.gal_flag"
+label = "gal_flag (Δ′ provenance)"
+noise_threshold = 0
+order = 2
+
 [quantities.pe_rational_q]
 h5path = "PerturbedEquilibrium/SingularCoupling/rational_q"
 type = "real_vector"
