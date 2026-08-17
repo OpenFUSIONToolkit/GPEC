@@ -735,6 +735,68 @@ a hypothesis, not a measurement, and it is where the next session should start.
 **Untouched**: A2 (the EL-side error-control question — the solves pass only `reltol`, so `abstol`
 sits at the DiffEq default; plus the integration-direction and Frobenius-start questions).
 
+## 18. A2 — the deep-core startup: three levers tested, none flattens the ladder
+
+The hypothesis: near the axis the surfaces are nearly circular/large-aspect-ratio, harmonics
+approach the cylindrical limit ξ_m ~ ψ^(|m|/2), so with mpert = 35 the state spans an enormous
+range and the controller may be chasing components that are pure noise. Measured on the stored
+solution the dynamic range across components is **~1e14** in the core with max|ξ| = 5.85e-4, so the
+premise is real. All runs DIII-D, route (a) applied, stripped decks.
+
+**E1 — absolute tolerance bracket** (the EL solves pass only `reltol`; `abstol` sits at the DiffEq
+default 1e-6). At mpsi=512:
+
+| abstol | total steps | core (ψ<0.05) | et[1] |
+|---|---|---|---|
+| 1e-2 (loose) | 2468 | 771 | 0.781587768 |
+| 1e-6 (default) | 2768 | 1066 | 0.781587768 |
+| 1e-12 (tight) | 3400 | 1615 | 0.781587768 |
+
+**et[1] is identical to 9 digits across four decades** while core steps vary 2.1×, and 91% of the
+variation is in ψ<0.05. So the solver *is* spending steps on components that contribute nothing —
+the hypothesis is confirmed as a real waste.
+
+**E2 — but it is not the mpsi mechanism.** The same comparison across the ladder:
+
+| abstol | 256 | 512 | 1024 | ratios |
+|---|---|---|---|---|
+| 1e-6 | 1881 | 2768 | 4403 | 1.472 / 1.591 |
+| 1e-2 | 1686 | 2468 | 3884 | **1.464 / 1.574** |
+
+A level shift of ~11% at unchanged physics, and the scaling is untouched.
+
+**E3 — harmonic count.** Cutting `delta_mlow`/`delta_mhigh` 8 → 2 (mpert 35 → 17; this *does*
+change the physics, so it is a diagnostic only):
+
+| harmonics | 256 | 512 | 1024 | ratios | core steps |
+|---|---|---|---|---|---|
+| mpert 35 | 1881 | 2768 | 4403 | 1.472 / 1.591 | 603 / 1066 / 2017 |
+| mpert 17 | 1126 | 1526 | 2215 | 1.355 / 1.452 | 224 / 392 / **745** |
+
+High-m harmonics *are* disproportionately expensive in the core — core steps fall 2.7× against a
+2.0× fall in the total, and the core's share drops 46% → 34%. But halving the harmonics moves the
+ratio only 1.591 → 1.452. **It does not flatten the ladder either**, which is consistent with the
+earlier attempt at core harmonic truncation ending up slower than the full solve: the harmonics are
+a cost multiplier, not the knot-count mechanism.
+
+### What this leaves
+
+Every lever tried — route (a) (−42%), `abstol` (−11%), harmonics (−50%) — shifts the *level* and
+leaves the *scaling* at ~1.45–1.59, while the inversion path reaches 1.18 on the same analytic
+equilibrium. The arithmetic that explains it: at mpsi=1024 the near-axis spacing is Δψ ~ 1e-6, so
+the ε/Δψ² amplification is ~1e12. Route (a) cut ε from ~1e-4 to ~1e-9 — five orders, hence the big
+level drop — but ε is still **white in ψ**, because each surface is still constructed independently.
+Shrinking ε lowers the curve; only making ε *smooth in ψ* can change its slope.
+
+### Actionable
+
+1. **Free ~11%**: give the EL solves an explicit `abstol` (`EulerLagrange.jl:766`;
+   `Riccati.jl:1080,1443,1455,1515,1525`). et[1] identical to 9 digits at every mpsi tested. Its own
+   small PR with a harness run; a *vector* abstol scaled per harmonic (the `abstol_vec` idiom at
+   `DirectEquilibriumArcLength.jl:115`) would be the more surgical version.
+2. **The scaling** needs correlated surface construction — continuation from surface to surface so
+   the per-surface error is smooth rather than white — or the inversion construction. Not attempted.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
