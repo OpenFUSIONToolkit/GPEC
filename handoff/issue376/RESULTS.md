@@ -846,6 +846,47 @@ was different in kind — it *was* confirmed by wall clock (harness runtime 202 
 **Corollary for future work**: step count is not a proxy for cost here, and et[1] is not a proxy for
 correctness. Any deep-core optimisation must be judged on wall time **and** Δ′.
 
+## 20. Δ′ and wall time for PR #398 (the check that was missing)
+
+The §17 evidence used `diiid_n1`/`solovev_n1`, which run `integrator = "forward"` and therefore
+**emit no BVP Δ′ matrix at all** — so route (a) had never been checked against Δ′, the observable
+that §19 showed can break while et[1] looks fine. Closed with the dedicated cases.
+
+`diiid_n1_riccati`: Δ′ BVP diagonal **16.73%**, raw side-major 2.35%, delta_coil 1.26%, et[1] 0.10%,
+singular surfaces/psi/q unchanged, ODE steps 1649 → 1358, runtime 202.5 → 192.8 s.
+
+`gal_resistive_diiid` — what the tearing/matching path actually consumes:
+
+| quantity | diff |
+|---|---|
+| gal PEST3 Δ diagonal | **0.01%** |
+| ‖gal Δ′ matrix‖ | **0.03%** |
+| gal D_I / α per surface | 0.00% |
+| ‖gal inner-layer Δ‖ | 0.00% |
+| ‖gal Δ_coil block‖ | 0.80% |
+| ‖gal match cout‖ | 1.38% |
+
+**The 16.73% is one element.** Δ′ BVP diagonal across an mpsi ladder on the riccati deck:
+
+| mpsi | develop | route (a) |
+|---|---|---|
+| 256  | [9.7, −1.9, −13.1, **103024**, 336.0] | [9.7, −1.9, −13.1, **102768**, 336.1] |
+| 512  | [7.2, −5.2, −16.6, **−1319.5**, 61.4] | [7.2, −5.2, −16.6, **−1293.2**, 61.5] |
+| 1024 | [8.6, −5.5, −16.1, **−2368.8**, 55.1] | [8.6, −5.5, −16.1, **−2368.0**, 55.6] |
+| drift vs prev mpsi | 174% → 79.5% | 174.7% → 83.1% |
+
+The 4th entry (q=5) runs 1e5 → −1319 → −2369 and **changes sign — it is not converged in mpsi on
+either version**, so it cannot discriminate between them. The other four entries agree between
+versions at every grid; full-diagonal agreement is 0.25% / 2.0% / 0.03% at mpsi 256 / 512 / 1024.
+
+**Route (a) does not improve Δ′ convergence either** (174.7%/83.1% vs 174.0%/79.5%). The unconverged
+q=5 Δ′ element is pre-existing, is arguably more concerning than anything in #398, and deserves its
+own investigation — it means BVP Δ′ at that surface is not trustworthy at these resolutions today.
+
+Wall time improves on every case: forward `diiid_n1` 210.6 → 184.5 s, `diiid_n1_riccati`
+202.5 → 192.8 s, `gal_resistive_diiid` 216.8 → 213.6 s. (Earlier a single identical "Runtime" row
+appeared in both case reports — that was an aggregate; these are per-case and differ.)
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
