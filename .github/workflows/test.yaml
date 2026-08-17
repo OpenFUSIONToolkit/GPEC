@@ -95,8 +95,6 @@ jobs:
     if: needs.changes.outputs.julia == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
-    env:
-      JULIA_NUM_THREADS: ${{ matrix.threads }}
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +115,7 @@ jobs:
             threads: '4'
 
     env:
+      JULIA_NUM_THREADS: ${{ matrix.threads }}
       DEPOT_PATHS: |
         ~/.julia/artifacts
         ~/.julia/packages
