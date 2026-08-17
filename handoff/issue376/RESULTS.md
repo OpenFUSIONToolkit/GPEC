@@ -652,6 +652,89 @@ solver steps (route (a) evaluates it; `dtmax` makes the steps small enough that 
 which the current diagnostics, all built on node values, cannot see. Closing that gap is worth
 roughly another 18% on top of route (a)'s 42%.
 
+## 17. Route (a) landed; Phase A diagnostics cancel the planned Phase B
+
+Route (a) is now on `performance/consistent-surface-theta-parametrization` (PR #398), measured
+against **current** develop (9491f893d — the earlier harness run used a stale local `develop` at
+40f9a9d03, ~20 commits behind; refreshed, conclusions unchanged):
+
+- `diiid_n1`: ODE steps (total) **4572 → 1974 (−56.8%)**, et[1] 0.10%, q0/q95/singular surfaces
+  unchanged to 0.00%. Runtime 202.1 → 177.6 s.
+- `solovev_n1`: et[1] moves 98% — **because the develop value was grid-dependent**. Same commit,
+  only route (a) differing:
+
+  | mpsi | et[1] develop | et[1] route (a) | steps develop | steps route (a) |
+  |---|---|---|---|---|
+  | 256  | 1.959e-02 | **1.462068e-02** | 1074 | 775 |
+  | 512  | 5.399e-02 | **1.462087e-02** | 1558 | 806 |
+  | 1024 | 8.890e-02 | **1.462084e-02** | 2689 | 891 |
+
+  develop drifts 4.5× and is still moving; route (a) is converged to 6 significant figures and the
+  step ratio is 1.04×/1.11× against 1.45×/1.73×. **For Solovev the issue's goal is met on both
+  axes at once.**
+
+### A3 — the kill-switch fires: there is no interpolant error left to remove
+
+Route (a) geometry vs a near-exact trace (`dtmax = 2π/8000`), DIII-D mpsi=512, max relative
+difference:
+
+| quantity | ψ<0.05 (280 surfaces) | mid-plasma |
+|---|---|---|
+| nu      | 5.53e-10 | 1.31e-09 |
+| offset  | 2.40e-08 | 7.38e-09 |
+| rcoords | 7.30e-10 | 4.63e-09 |
+| jac     | 9.92e-10 | 7.45e-10 |
+
+The pre-registered prediction was that route (a) would differ from gold near the axis by **far more
+than the integration tolerance**. It does not — it agrees *at* tolerance. **Phase B (reparametrise
+onto the SFL angle with `tstops`) would fix an error that is not there, and is cancelled.**
+
+### The step count is hypersensitive, so small step differences are not signal
+
+Two traces differing only by `dtmax = 2π/8000` vs `2π/7900` — geometry identical to **5.3e-11** —
+give 2343 vs 2370 steps (1.2%). And the gold trace takes 15% fewer steps than route (a) while
+agreeing with it to ~1e-9. So `nstep` is not a smooth functional of equilibrium quality: it responds
+to perturbations far below physical significance (et[1] agrees to 8-9 digits throughout). Route
+(a)'s −57% is far outside this sensitivity and is real; the leftover 15–20% gaps are its tail.
+
+### A1 — the residual belongs to the traced construction, not to the EFIT input
+
+Same analytic equilibrium (`TJ_ANALYTIC_INPUT`), same grid, both with route (a) applied, only the
+construction path differing:
+
+| mpsi | traced (`tj_analytic_direct`) | inversion (`tj_analytic`) |
+|---|---|---|
+| 256  | 814  | 789 |
+| 512  | 997 (1.23×) | 892 (1.13×) |
+| 1024 | 1470 (1.47×) | 1056 (1.18×) |
+
+With a perfectly smooth analytic input, the traced path still grows 1.47× while the inversion path
+grows 1.18×. So the DIII-D residual is **not** specific to the EFIT file.
+
+### …and it is not trace integration error either
+
+On that same traced analytic case at mpsi=1024, tightening the trace tolerance 1000× is null:
+`etol` 1e-10 → 1470 steps, 1e-13 → 1487 steps (+1.2%), et[1] identical to 8 digits.
+
+(Method note: the first attempt at this test was a **no-op** — `examples/LAR_epsilon_scan` has no
+`etol` key, so the `sed` matched nothing and all three runs used the default. Bit-identical results
+gave it away. The numbers above are from runs with the key actually inserted.)
+
+### Where that leaves the deep core
+
+Geometry accurate to ~1e-9, insensitive to trace tolerance, yet still growing with mpsi on the
+traced path but not the inversion path. What distinguishes them is not the *size* of the per-surface
+error but its *character*: tracing each surface independently produces an error that is white in ψ
+at whatever amplitude it has, and a packed grid amplifies white noise no matter how small. The
+inversion path's quadrature error is smooth in ψ and so is not amplified.
+
+If that is right, no amount of per-surface accuracy will flatten the traced path — only making the
+error *correlated* across surfaces (continuation) or using the inversion construction will. That is
+a hypothesis, not a measurement, and it is where the next session should start.
+
+**Untouched**: A2 (the EL-side error-control question — the solves pass only `reltol`, so `abstol`
+sits at the DiffEq default; plus the integration-direction and Frobenius-start questions).
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
