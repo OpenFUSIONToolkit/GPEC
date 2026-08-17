@@ -259,4 +259,19 @@
             end
         end
     end
+    @testset "toroidal field is the physical B_T, not the b0exp normalization" begin
+        # run_slayer used to substitute equil.config.b0exp for the toroidal field. That is a
+        # NORMALIZATION -- commonly exactly 1.0 -- so the layer physics ran at B_T = 1 T while
+        # the equilibrium's own F-spline gives ~1.95 T on the DIII-D-like deck. c_beta, d_beta
+        # and hence delta_s all scale with it, so layer widths were off by several percent.
+        src = read(joinpath(dirname(@__DIR__), "src", "Tearing", "Runner", "run_slayer.jl"), String)
+        # the substitution itself, not any prose mentioning it
+        @test !occursin("control.bt === nothing ? equil.config.b0exp", src)
+        @test occursin(r"^\s*bt = control\.bt\s*$"m, src)
+        # build_slayer_inputs must still be the thing that resolves `nothing` to the physical
+        # field, so the default path is documented where it is implemented.
+        li = read(joinpath(dirname(@__DIR__), "src", "InnerLayer", "SLAYER", "LayerInputs.jl"), String)
+        @test occursin("F_spline(ψ)) / (2π * R0_use)", li) || occursin("F_spline", li)
+    end
+
 end
