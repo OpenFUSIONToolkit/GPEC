@@ -15,12 +15,12 @@
 
 Output of a brute-force or AMR Q-plane scan.
 
-| field      | meaning                                           |
-|------------|---------------------------------------------------|
-| `Q`        | Complex Q values (`Matrix` for grid, `Vector` for AMR)   |
-| `Δ`        | Residual values, same shape as `Q`                       |
-| `re_axis`  | Real-axis grid (only for regular-grid `ScanResult`)      |
-| `im_axis`  | Imaginary-axis grid (only for regular-grid `ScanResult`) |
+| field     | meaning                                                  |
+|:--------- |:-------------------------------------------------------- |
+| `Q`       | Complex Q values (`Matrix` for grid, `Vector` for AMR)   |
+| `Δ`       | Residual values, same shape as `Q`                       |
+| `re_axis` | Real-axis grid (only for regular-grid `ScanResult`)      |
+| `im_axis` | Imaginary-axis grid (only for regular-grid `ScanResult`) |
 """
 struct ScanResult
     Q::Matrix{ComplexF64}
@@ -53,15 +53,15 @@ from the result.
   - `threaded`    -- distribute Q evaluations across `Threads.@threads`
 """
 function brute_force_scan(f, Q_re_range::NTuple{2,<:Real},
-                          Q_im_range::NTuple{2,<:Real};
-                          nre::Integer, nim::Integer,
-                          threaded::Bool=true)
+    Q_im_range::NTuple{2,<:Real};
+    nre::Integer, nim::Integer,
+    threaded::Bool=true)
     nre >= 2 || throw(ArgumentError("brute_force_scan: nre must be ≥ 2"))
     nim >= 2 || throw(ArgumentError("brute_force_scan: nim must be ≥ 2"))
     re_axis = collect(range(Float64(Q_re_range[1]); stop=Float64(Q_re_range[2]),
-                            length=nre))
+        length=nre))
     im_axis = collect(range(Float64(Q_im_range[1]); stop=Float64(Q_im_range[2]),
-                            length=nim))
+        length=nim))
     Q = ComplexF64[(qr + qi*im) for qr in re_axis, qi in im_axis]
     Δ = Matrix{ComplexF64}(undef, nre, nim)
     if threaded

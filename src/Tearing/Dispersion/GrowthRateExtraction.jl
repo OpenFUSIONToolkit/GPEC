@@ -253,10 +253,10 @@ function _all_intersections(re_paths::Vector{Vector{ComplexF64}},
     im_paths::Vector{Vector{ComplexF64}})
     out = ComplexF64[]
     for re_path in re_paths
-        for i in 1:length(re_path)-1
+        for i in 1:(length(re_path)-1)
             a, b = re_path[i], re_path[i+1]
             for im_path in im_paths
-                for j in 1:length(im_path)-1
+                for j in 1:(length(im_path)-1)
                     c, d = im_path[j], im_path[j+1]
                     pt = _segment_intersection(a, b, c, d)
                     pt !== nothing && push!(out, pt)
@@ -468,7 +468,7 @@ function _median_segment_length(re_paths::Vector{Vector{ComplexF64}},
     im_paths::Vector{Vector{ComplexF64}})
     lens = Float64[]
     for paths in (re_paths, im_paths), p in paths
-        @inbounds for i in 1:length(p)-1
+        @inbounds for i in 1:(length(p)-1)
             push!(lens, abs(p[i+1] - p[i]))
         end
     end
@@ -811,7 +811,7 @@ function _march_triangle(p1::ComplexF64, p2::ComplexF64, p3::ComplexF64,
     v1::ComplexF64, v2::ComplexF64, v3::ComplexF64,
     re_target::Float64, im_target::Float64)
     return (_march_single(p1, p2, p3, real(v1), real(v2), real(v3),
-            imag(v1), imag(v2), imag(v3), re_target),
+        imag(v1), imag(v2), imag(v3), re_target),
         _march_single(p1, p2, p3, imag(v1), imag(v2), imag(v3),
             real(v1), real(v2), real(v3), im_target))
 end

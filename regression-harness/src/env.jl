@@ -49,7 +49,9 @@ end
 
 env_key(fp::EnvFingerprint) = env_key(fp.julia_version, fp.os_arch, fp.pinned ? fp.manifest_sha : "unpinned")
 
-"""SHA-256 of a file, or "" when it does not exist."""
+"""
+SHA-256 of a file, or "" when it does not exist.
+"""
 function file_sha256(path::AbstractString)::String
     isfile(path) || return ""
     return bytes2hex(SHA.sha256(read(path)))
@@ -108,7 +110,9 @@ function read_runinfo(path::String, pinned::Bool)
     return (something(runtime_s, NaN), fp)
 end
 
-"""One-line human-readable summary of an environment, for report headers."""
+"""
+One-line human-readable summary of an environment, for report headers.
+"""
 function describe_env(fp::EnvFingerprint)::String
     isempty(fp.julia_version) && return "environment unknown (cached before fingerprinting)"
     mani = isempty(fp.manifest_sha) ? "no Manifest" : "manifest " * fp.manifest_sha[1:min(8, end)]

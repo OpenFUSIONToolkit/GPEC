@@ -123,9 +123,11 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # strategy. Multi-n runs are not supported — the "outermost rational + dmlim/n" cutoff depends
     # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
     if ctrl.set_psilim_via_dmlim && intr.nlow <= 0
-        error("sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
-              "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
-              "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead.")
+        error(
+            "sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+            "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
+            "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead."
+        )
     elseif ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
         @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
     elseif ctrl.set_psilim_via_dmlim

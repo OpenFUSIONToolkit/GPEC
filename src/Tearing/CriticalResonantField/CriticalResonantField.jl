@@ -14,8 +14,8 @@ using ..InnerLayer
 using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
     SLAYERModel, SLAYERParameters
 
-#include("TorqueBalance.jl")
+include("TorqueBalance.jl")
 
-#export TorqueBalance, torque_balance
+export TorqueBalance, torque_balance_value, torque_balance_scan
 
 end # module CriticalResonantField

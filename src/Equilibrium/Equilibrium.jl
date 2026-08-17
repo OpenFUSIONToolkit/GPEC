@@ -330,10 +330,10 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     P_vals = profiles.P_spline.y
     dVdpsi_vals = profiles.dVdpsi_spline.y
 
-    fsi_pdv  = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
-    fsi_dv   = fsi(dVdpsi_vals)                   # ∫ dV/dψ
+    fsi_pdv = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
+    fsi_dv = fsi(dVdpsi_vals)                   # ∫ dV/dψ
     fsi_p2dv = fsi(P_vals .^ 2 .* dVdpsi_vals)    # ∫ p² dV/dψ
-    volume   = fsi_dv                             # same integrand as hs col 2 in Fortran
+    volume = fsi_dv                             # same integrand as hs col 2 in Fortran
 
     # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J).
     # This is Fortran equil_out.f's hs%fs(:,3) and is the correct integrand for
@@ -343,21 +343,21 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     for ipsi in 0:mpsi
         acc = 0.0
         for itheta in 0:mtheta
-            r2       = pe.rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1]
-            offset   = pe.rzphi_offset.nodal_derivs.partials[1,    ipsi+1, itheta+1]
-            jac      = pe.rzphi_jac.nodal_derivs.partials[1,       ipsi+1, itheta+1]
-            r2_y     = pe.rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1]
-            offset_y = pe.rzphi_offset.nodal_derivs.partials[3,    ipsi+1, itheta+1]
+            r2 = pe.rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            offset = pe.rzphi_offset.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            jac = pe.rzphi_jac.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            r2_y = pe.rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1]
+            offset_y = pe.rzphi_offset.nodal_derivs.partials[3, ipsi+1, itheta+1]
 
             jacfac = π / jac
-            rfac   = sqrt(r2)
-            eta    = 2π * (pe.rzphi_ys[itheta+1] + offset)
-            r      = pe.ro + rfac * cos(eta)
-            v21    = jacfac * r2_y / (2π * rfac)
-            v22    = jacfac * (1 + offset_y) * (2 * rfac)
-            v33    = jacfac * 2π * (r / π)
-            dvsq   = (v21^2 + v22^2) * (v33 * jac^2)^2
-            acc   += dvsq / (r^2) / jac
+            rfac = sqrt(r2)
+            eta = 2π * (pe.rzphi_ys[itheta+1] + offset)
+            r = pe.ro + rfac * cos(eta)
+            v21 = jacfac * r2_y / (2π * rfac)
+            v22 = jacfac * (1 + offset_y) * (2 * rfac)
+            v33 = jacfac * 2π * (r / π)
+            dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
+            acc += dvsq / (r^2) / jac
         end
         # Periodic trapezoidal rule on uniform θ grid reduces to a plain mean
         # because the first and last grid points coincide — matches the int1/int2
@@ -367,15 +367,15 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     fsi_bp2 = fsi(hs_bp2)
 
     p0 = P_vals[1] - profiles.P_deriv(profiles.xs[1]; hint=Ref(1)) * profiles.xs[1]  # linear extrapolation
-    betat  = 2 * (fsi_pdv / fsi_dv) / bt0^2
-    betaj  = 2 * sqrt(fsi_p2dv / fsi_dv) / bwall^2
-    betan  = 100 * amean * bt0 * betat / crnt
+    betat = 2 * (fsi_pdv / fsi_dv) / bt0^2
+    betaj = 2 * sqrt(fsi_p2dv / fsi_dv) / bwall^2
+    betan = 100 * amean * bt0 * betat / crnt
     betap1 = 2 * (fsi_pdv / fsi_dv) / bp0^2
     betap2 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * pe.ro)
     betap3 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * rmean)
-    li1    = fsi_bp2 / fsi_dv / bp0^2
-    li2    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * pe.ro)
-    li3    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * rmean)
+    li1 = fsi_bp2 / fsi_dv / bp0^2
+    li2 = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * pe.ro)
+    li3 = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * rmean)
 
     pe.params.psi0 = psio
     pe.params.psi_axis = pe.psio

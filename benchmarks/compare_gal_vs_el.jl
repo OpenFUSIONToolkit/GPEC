@@ -43,14 +43,14 @@ xiE = reduce(hcat, (u1[:, :, ip] * cEL for ip in 1:size(u1, 3)))   # (mpert, nE)
 psiGk = psiG
 xiG = reduce(hcat, (gxi[:, :, ip] * w for ip in eachindex(psiG)))    # (mpert, nGk)
 
-ms = mlow .+ (0:mpert-1)
+ms = mlow .+ (0:(mpert-1))
 peak = [maximum(abs, @view xiE[i, :]) for i in 1:mpert]
 order = sortperm(peak; rev=true)
 ndom = min(5, mpert)
 
 # quantitative bulk agreement on the dominant harmonic (linear-interp EL onto gal grid, off rationals/edge)
-lininterp(xq, x, y) = (j = clamp(searchsortedlast(x, xq), 1, length(x) - 1);
-t = (xq - x[j]) / (x[j+1] - x[j]); y[j] * (1 - t) + y[j+1] * t)
+lininterp(xq, x, y) = (j=clamp(searchsortedlast(x, xq), 1, length(x) - 1);
+    t=(xq - x[j]) / (x[j+1] - x[j]); y[j] * (1 - t) + y[j+1] * t)
 idom = order[1]
 inbulk(p) = 0.1 <= p <= 0.92 && all(abs(p - ps) > 8e-3 for ps in sing_psi)
 sel = [ip for ip in eachindex(psiGk) if inbulk(psiGk[ip])]

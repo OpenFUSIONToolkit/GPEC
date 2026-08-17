@@ -21,26 +21,26 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
-config_path  = joinpath(example_path, "gpec.toml")
+config_path = joinpath(example_path, "gpec.toml")
 
 function make_config(path, eq_type, mpsi, mtheta)
     raw = TOML.parsefile(path)
     raw["Equilibrium"]["eq_type"] = eq_type
-    raw["Equilibrium"]["mpsi"]    = mpsi
-    raw["Equilibrium"]["mtheta"]  = mtheta
+    raw["Equilibrium"]["mpsi"] = mpsi
+    raw["Equilibrium"]["mtheta"] = mtheta
     return Equilibrium.EquilibriumConfig(raw["Equilibrium"], dirname(path))
 end
 
 function roundtrip_error(pe, raw_profile)
     psi_xs = pe.rzphi_xs
-    psio   = pe.psio
+    psio = pe.psio
     mtheta = length(pe.rzphi_ys) - 1
     errors = Float64[]
     for ipsi in 1:4:length(psi_xs)
         ψ = psi_xs[ipsi]
-        for itheta in 1:8:mtheta+1
+        for itheta in 1:8:(mtheta+1)
             θ = pe.rzphi_ys[itheta]
-            r2  = pe.rzphi_rsquared((ψ, θ))
+            r2 = pe.rzphi_rsquared((ψ, θ))
             off = pe.rzphi_offset((ψ, θ))
             rfac = sqrt(max(r2, 0.0))
             η = 2π * (θ + off)

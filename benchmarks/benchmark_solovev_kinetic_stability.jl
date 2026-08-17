@@ -43,10 +43,10 @@ using HDF5
 using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 
-const REPO            = normpath(joinpath(@__DIR__, ".."))
-const JULIA_FIXTURE   = joinpath(REPO, "test", "test_data", "regression_solovev_kinetic_calculated")
-const FORTRAN_DCON    = get(ENV, "GPEC_FORTRAN_DCON", "")
-const FORTRAN_SOLDIR  = get(ENV, "GPEC_FORTRAN_SOLDIR", "")
+const REPO = normpath(joinpath(@__DIR__, ".."))
+const JULIA_FIXTURE = joinpath(REPO, "test", "test_data", "regression_solovev_kinetic_calculated")
+const FORTRAN_DCON = get(ENV, "GPEC_FORTRAN_DCON", "")
+const FORTRAN_SOLDIR = get(ENV, "GPEC_FORTRAN_SOLDIR", "")
 
 _p(args...) = (println(stderr, args...); flush(stderr))
 
@@ -90,35 +90,35 @@ function build_matched_fortran_deck(workdir::String)
     end
 
     gpec = TOML.parsefile(joinpath(JULIA_FIXTURE, "gpec.toml"))
-    eq   = gpec["Equilibrium"]
-    ffs  = gpec["ForceFreeStates"]
-    kf   = get(gpec, "KineticForces", Dict{String,Any}())
+    eq = gpec["Equilibrium"]
+    ffs = gpec["ForceFreeStates"]
+    kf = get(gpec, "KineticForces", Dict{String,Any}())
 
     # equil.in — grid + coordinate settings to match the Julia [Equilibrium] block.
     eqin = joinpath(workdir, "equil.in")
-    replace_namelist_value!(eqin, "psilow",  string(eq["psilow"]))
+    replace_namelist_value!(eqin, "psilow", string(eq["psilow"]))
     replace_namelist_value!(eqin, "psihigh", string(eq["psihigh"]))
-    replace_namelist_value!(eqin, "mpsi",    string(eq["mpsi"]))
-    replace_namelist_value!(eqin, "mtheta",  string(eq["mtheta"]))
+    replace_namelist_value!(eqin, "mpsi", string(eq["mpsi"]))
+    replace_namelist_value!(eqin, "mtheta", string(eq["mtheta"]))
 
     # dcon.in — kinetic flags already match; align mode band, edge truncation, n.
     dconin = joinpath(workdir, "dcon.in")
-    replace_namelist_value!(dconin, "nn",          string(ffs["nn_low"]))
-    replace_namelist_value!(dconin, "delta_mlow",  string(get(ffs, "delta_mlow", 0)))
+    replace_namelist_value!(dconin, "nn", string(ffs["nn_low"]))
+    replace_namelist_value!(dconin, "delta_mlow", string(get(ffs, "delta_mlow", 0)))
     replace_namelist_value!(dconin, "delta_mhigh", string(get(ffs, "delta_mhigh", 0)))
-    replace_namelist_value!(dconin, "qlow",        string(ffs["qlow"]))
-    replace_namelist_value!(dconin, "qhigh",       string(ffs["qhigh"]))
+    replace_namelist_value!(dconin, "qlow", string(ffs["qlow"]))
+    replace_namelist_value!(dconin, "qhigh", string(ffs["qhigh"]))
     replace_namelist_value!(dconin, "singfac_min", string(ffs["singfac_min"]))
     # Julia set_psilim_via_dmlim defaults true (sas_flag) with dmlim 0.2.
     replace_namelist_value!(dconin, "sas_flag", "t")
-    replace_namelist_value!(dconin, "dmlim",    "0.2")
+    replace_namelist_value!(dconin, "dmlim", "0.2")
 
     # pentrc.in — bounce harmonics + species; defaults mirror KineticForcesControl.
     pentin = joinpath(workdir, "pentrc.in")
-    replace_namelist_value!(pentin, "nl",     string(get(kf, "nl", 1)))
+    replace_namelist_value!(pentin, "nl", string(get(kf, "nl", 1)))
     replace_namelist_value!(pentin, "nutype", "\"" * string(get(kf, "nutype", "harmonic")) * "\"")
     replace_namelist_value!(pentin, "f0type", "\"" * string(get(kf, "f0type", "maxwellian")) * "\"")
-    replace_namelist_value!(pentin, "nufac",  string(get(kf, "nufac", 1)))
+    replace_namelist_value!(pentin, "nufac", string(get(kf, "nufac", 1)))
     replace_namelist_value!(pentin, "kinetic_file", "\"kinetic.txt\"")
 
     # kinetic.txt — Fortran readtable wants a title line then numeric rows; the

@@ -432,15 +432,17 @@ Load an equilibrium from an IMAS data dictionary and return a `DirectRunInput`.
 The `dd.equilibrium.time_slice[]` is used (active time slice). Poloidal flux is
 converted from the IMAS COCOS convention (set by `config.imas_cocos`) to the
 internal COCOS 2 convention:
+
   - `imas_cocos = 11` (default, IMAS standard): divide ψ by 2π
   - `imas_cocos = 2` (GPEC internal): no conversion
 
 ## Arguments
-- `config`: `EquilibriumConfig` with `eq_type = "imas"` and `imas_cocos` set.
-- `dd`: populated `IMASdd.dd` with `dd.equilibrium.time_slice[]` containing:
-  - `global_quantities.psi_axis`, `global_quantities.psi_boundary`
-  - `profiles_1d.psi`, `profiles_1d.f`, `profiles_1d.pressure`, `profiles_1d.q`
-  - `profiles_2d[1].grid.dim1` (R), `profiles_2d[1].grid.dim2` (Z), `profiles_2d[1].psi`
+
+  - `config`: `EquilibriumConfig` with `eq_type = "imas"` and `imas_cocos` set.
+  - `dd`: populated `IMASdd.dd` with `dd.equilibrium.time_slice[]` containing:
+      + `global_quantities.psi_axis`, `global_quantities.psi_boundary`
+      + `profiles_1d.psi`, `profiles_1d.f`, `profiles_1d.pressure`, `profiles_1d.q`
+      + `profiles_2d[1].grid.dim1` (R), `profiles_2d[1].grid.dim2` (Z), `profiles_2d[1].psi`
 """
 function read_imas(config::EquilibriumConfig, dd)
     @info "Processing IMAS equilibrium at global_time = $(dd.global_time) s"

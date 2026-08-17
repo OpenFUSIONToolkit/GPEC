@@ -243,7 +243,7 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
     _bulk_eval_into_cache!(cache, f, corners; parallel=parallel)
 
     cells = Vector{AMRCell}(undef, nre0 * nim0)
-    @inbounds for j in 0:nim0-1, i in 0:nre0-1
+    @inbounds for j in 0:(nim0-1), i in 0:(nre0-1)
         # Read corner Q values from the same `corners` array used to populate
         # the cache. Recomputing them with `x + re_step` here would differ in
         # the last floating-point bit from the cache keys, causing spurious
@@ -573,7 +573,7 @@ function multi_box_amr_scan(f,
 
         # Build pre-screen cells
         ps_cells = Vector{AMRCell}(undef, prescreen_nre * prescreen_nim)
-        @inbounds for j in 0:prescreen_nim-1, i in 0:prescreen_nre-1
+        @inbounds for j in 0:(prescreen_nim-1), i in 0:(prescreen_nre-1)
             q_bl = corners[j*ncorners_x+i+1]
             q_br = corners[j*ncorners_x+(i+1)+1]
             q_tl = corners[(j+1)*ncorners_x+i+1]

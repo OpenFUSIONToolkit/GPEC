@@ -7,8 +7,7 @@ Self-describing metadata for `gpec.h5` (the contract in
 datasets are marked as HDF5 Dimension Scales (netCDF-4 coordinate variables) attached
 to the arrays that share their axis, so h5py/xarray/HDFView read the file unaided.
 
-Writers stay table-driven: each writer keeps a table of `path => (; long_name, units,
-dims)` entries next to it and calls [`annotate!`](@ref) once after its datasets are
+Writers stay table-driven: each writer keeps a table of `path => (; long_name, units, dims)` entries next to it and calls [`annotate!`](@ref) once after its datasets are
 written. Paths absent from the file are skipped silently (many writes are conditional).
 """
 module HDF5Annotations

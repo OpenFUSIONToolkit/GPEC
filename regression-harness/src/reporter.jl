@@ -233,7 +233,7 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     println("Summary: ", join(parts, ", "))
     println()
     return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
-            n_failed=count(identity, (failed1, failed2)))
+        n_failed=count(identity, (failed1, failed2)))
 end
 
 """
@@ -366,7 +366,7 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
         end
     end
     if length(refs) >= 2
-        last_two = filter(!isnothing, run_infos[(end - 1):end])
+        last_two = filter(!isnothing, run_infos[(end-1):end])
         length(last_two) == 2 && _warn_env_difference(last_two[1].fingerprint, last_two[2].fingerprint)
     end
     println("-"^total_w)
@@ -387,7 +387,7 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
     end
     println()
     return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
-            n_failed=count(identity, failed_mask))
+        n_failed=count(identity, failed_mask))
 end
 
 """

@@ -41,7 +41,7 @@ function symmetric_clims(z)
 end
 
 geqdsk_cases = [
-    "TkMkr_D3Dlike_Hmode.geqdsk",
+    "TkMkr_D3Dlike_Hmode.geqdsk"
 ]
 
 base_toml = TOML.parsefile(joinpath(@__DIR__, "gpec.toml"))

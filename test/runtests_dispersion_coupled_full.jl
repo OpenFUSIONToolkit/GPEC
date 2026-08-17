@@ -255,7 +255,7 @@
             0.2 0.1 0.05 0.1 0.3 -6.5]
         # Non-trivial Q dependence: Δ_t(Q) = a + 0.5·Q, Δ_i(Q) = b + 0.2·Q
         scs = [surface_coupling(_LinearInnerF(0.3 + 0.01k * im, 0.5 + 0im,
-                0.7 + 0.02k * im, 0.2 + 0im),
+            0.7 + 0.02k * im, 0.2 + 0im),
             nothing, 0 + 0im; scale=1.0, tauk=1.0)
                for k in 1:m]
         mc = multi_surface_coupling_full(scs, Random_dp)

@@ -755,17 +755,18 @@ function ballooning_alpha_crossings(
     # Δ' as a function of the α scaling at fixed magnetic shear. Failed evaluations
     # (extreme corrections can break the coefficient assembly) count as non-stable
     # samples and are rejected by the crossing classification, like in scan_delta_prime_map.
-    delta_at(scale) = try
-        ballooning_delta_prime(
-            psi_idx,
-            plasma_eq;
-            corr_qprime=0.0,
-            corr_pprime=ref.pprime_norm_ref * (scale - 1.0),
-            theta_k=theta_k
-        ).delta_prime
-    catch
-        NaN
-    end
+    delta_at(scale) =
+        try
+            ballooning_delta_prime(
+                psi_idx,
+                plasma_eq;
+                corr_qprime=0.0,
+                corr_pprime=ref.pprime_norm_ref * (scale - 1.0),
+                theta_k=theta_k
+            ).delta_prime
+        catch
+            NaN
+        end
 
     samples = collect(range(0.0, max_alpha_scale; length=n_scan + 1))
     scales = _ballooning_marginal_crossings(delta_at, samples, tol; max_crossings=max_crossings)
@@ -796,7 +797,7 @@ function _ballooning_marginal_crossings(delta_at, samples, tol; pole_cap=3.0, ma
     k0 == 0 && return Float64[]
     d_anchor = abs(d_prev)
     locs = Float64[]
-    for k in k0+1:n
+    for k in (k0+1):n
         d = delta_at(samples[k])
         if isfinite(d_prev) && isfinite(d) && sign(d) != sign(d_prev) && max(abs(d_prev), abs(d)) <= pole_cap * d_anchor
             lo, hi = samples[k-1], samples[k]
@@ -981,17 +982,18 @@ function ballooning_qprime_crossings(
     # Δ' as a function of the q' scaling at the experimental pressure gradient. Failed
     # evaluations (reversed-shear corrections can break the coefficient assembly) count
     # as non-stable samples and are rejected by the crossing classification.
-    delta_at(scale) = try
-        ballooning_delta_prime(
-            psi_idx,
-            plasma_eq;
-            corr_qprime=ref.qprime_norm_ref * (scale - 1.0),
-            corr_pprime=0.0,
-            theta_k=theta_k
-        ).delta_prime
-    catch
-        NaN
-    end
+    delta_at(scale) =
+        try
+            ballooning_delta_prime(
+                psi_idx,
+                plasma_eq;
+                corr_qprime=ref.qprime_norm_ref * (scale - 1.0),
+                corr_pprime=0.0,
+                theta_k=theta_k
+            ).delta_prime
+        catch
+            NaN
+        end
 
     samples = collect(range(max_qprime_scale, min_qprime_scale; length=n_scan + 1))
     scales = _ballooning_marginal_crossings(delta_at, samples, tol)

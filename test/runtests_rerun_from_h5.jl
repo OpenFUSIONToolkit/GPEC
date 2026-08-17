@@ -102,7 +102,11 @@ end
                 inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
                 @test inputs["ForceFreeStates"]["use_parallel"] == true
 
-                @test_logs (:warn,) GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(inputs["ForceFreeStates"], GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
+                @test_logs (:warn,) GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(
+                    inputs["ForceFreeStates"],
+                    GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS,
+                    "ForceFreeStates"
+                )
                 @test !haskey(inputs["ForceFreeStates"], "use_parallel")
 
                 # With the key gone the control struct builds again, on the default integrator.

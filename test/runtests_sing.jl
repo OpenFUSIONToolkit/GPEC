@@ -41,14 +41,14 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
 
     function read_solutions_3d(fname::String)
         lines = readlines(fname)
-        blocks = Vector{Vector{Vector{Float64}}}();
+        blocks = Vector{Vector{Vector{Float64}}}()
         current = Vector{Vector{Float64}}()
         for s in lines
-            t = strip(s);
+            t = strip(s)
             isempty(t) && continue
             if occursin("Solution index", t)
                 if !isempty(current)
-                    push!(blocks, current);
+                    push!(blocks, current)
                     current = Vector{Vector{Float64}}()
                 end
                 continue
@@ -62,11 +62,11 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         if !isempty(current)
             push!(blocks, current)
         end
-        mpert = length(blocks[1]);
+        mpert = length(blocks[1])
         nsol = length(blocks)
         result = Array{ComplexF64}(undef, mpert, nsol, 2)
         for (j, block) in enumerate(blocks), (i, row) in enumerate(block)
-            result[i, j, 1] = complex(row[2], row[3]);
+            result[i, j, 1] = complex(row[2], row[3])
             result[i, j, 2] = complex(row[4], row[5])
         end
         return result
@@ -105,7 +105,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(; numpert_total=intr.numpert_total,
             numsteps_init=ctrl.numsteps_init, numunorms_init=ctrl.numunorms_init, msing=intr.msing)
 
-        psifac_dummy = collect(range(0, 1, 10));
+        psifac_dummy = collect(range(0, 1, 10))
         points = length(psifac_dummy)
         amat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/amat.dat"))
         amats = copyForSplines(amat, psifac_dummy)
@@ -115,7 +115,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         cmats = copyForSplines(cmat, psifac_dummy)
 
         fmat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/fmat.dat"))
-        fmat .= cholesky(Hermitian(fmat)).L;
+        fmat .= cholesky(Hermitian(fmat)).L
         fmats = copyForSplines(fmat, psifac_dummy)
         kmat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/kmat.dat"))
         kmats = copyForSplines(kmat, psifac_dummy)
@@ -125,7 +125,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         umat_p1 = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/umat_p1.dat"))
         umat_p2 = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/umat_p2.dat"))
         odet.psifac = extract_value(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/sing_der_output_normal.dat"), "psifac")
-        odet.u[:, :, 1] .= umat_p1;
+        odet.u[:, :, 1] .= umat_p1
         odet.u[:, :, 2] .= umat_p2
 
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, numpert_total=intr.numpert_total)

@@ -155,7 +155,7 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
     # Allocate the matching matrix and fill the lower-left 2m × 2m block
     # with transpose(dp_raw[1:s2, 1:s2]).
     mat = zeros(ComplexF64, s4, s4)
-    @views mat[s2+1:s4, 1:s2] .= transpose(mc.dp_raw[1:s2, 1:s2])
+    @views mat[(s2+1):s4, 1:s2] .= transpose(mc.dp_raw[1:s2, 1:s2])
 
     # Per-surface inner-layer assembly
     @inbounds for k in 1:m

@@ -455,3 +455,82 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
     rational_q = Float64[surfaces[p.ising].q for p in params]
     return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
 end
+
+# ---------------------------------------------------------------------
+# Critical Resonant Field (Torque-Balance) Workflow
+# ---------------------------------------------------------------------
+"""
+    Critical Resonant Field (Torque-Balance) Workflow
+
+    The critical resonant field is the minimum resonant magnetic perturbation
+    amplitude that can drive a tearing mode unstable.
+
+    Returns a `CriticalResonantFieldResult` containing the critical resonant field
+    and the corresponding critical resoannt field values for each rational surface.
+"""
+
+function run_critical_resonant_field(equil, intr, ctrl; dir_path="./")
+    ctrl.enabled || return empty_critical_resonant_field_result()
+
+    # Use the same per-surface params already built for SLAYER
+    profiles = Equilibrium.load_kinetic_profiles(joinpath(dir_path, ctrl.profile_file))
+    params = build_slayer_inputs(equil, intr.sing, profiles)
+
+    surface_index = Int[]
+    Qpeak_vec = Float64[]
+    br_vec = Float64[]
+    Q0_vec = Float64[]
+    P_vec = Float64[]
+    scan_data = NamedTuple[]
+
+    for (isurf, p) in enumerate(params)
+        # Fill in the actual per-surface drive from your model
+        Q0_here = 0.5
+        P_here = 1.0
+
+        tb = TorqueBalance(
+            SLAYERModel{:fitzpatrick}(),
+            p,
+            Q0_here,
+            P_here,
+            p.lu,
+            p.sval_r
+        )
+
+        Qs, bal, Qs_positive, bal_positive, Qpeak, br_crit, Qpeak_ind, Δs =
+            torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
+
+        push!(surface_index, isurf)
+        push!(Qpeak_vec, Qpeak)
+        push!(br_vec, br_crit)
+        push!(Q0_vec, Q0_here)
+        push!(P_vec, P_here)
+
+        if ctrl.store_scan
+            push!(
+                scan_data,
+                (
+                    surface=isurf,
+                    Q=collect(Qs),
+                    balance=collect(bal),
+                    delta=collect(Δs),
+                    Q_positive=collect(Qs_positive),
+                    balance_positive=collect(bal_positive),
+                    Qpeak=Qpeak,
+                    br_crit=br_crit
+                )
+            )
+        end
+    end
+
+    return CriticalResonantFieldResult(
+        true,
+        params,
+        surface_index,
+        Qpeak_vec,
+        br_vec,
+        Q0_vec,
+        P_vec,
+        scan_data
+    )
+end

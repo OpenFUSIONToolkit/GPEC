@@ -29,9 +29,9 @@
 
     @testset "Constructor validation" begin
         sc1 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               1.0+0im; scale=1.0, tauk=1.0)
+            1.0+0im; scale=1.0, tauk=1.0)
         sc2 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               2.0+0im; scale=1.0, tauk=1.0)
+            2.0+0im; scale=1.0, tauk=1.0)
         good_dp = ComplexF64[1.0 0.1; 0.1 2.0]
 
         mc = multi_surface_coupling([sc1, sc2], good_dp)
@@ -41,7 +41,7 @@
 
         # 3-surface default also caps at 3 (min(3, 3) = 3)
         sc3 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               3.0+0im; scale=1.0, tauk=1.0)
+            3.0+0im; scale=1.0, tauk=1.0)
         good_dp3 = ComplexF64[1.0 0.1 0.0; 0.1 2.0 0.0; 0.0 0.0 3.0]
         mc3 = multi_surface_coupling([sc1, sc2, sc3], good_dp3)
         @test mc3.msing_max == 3
@@ -49,16 +49,16 @@
         # 4-surface case caps at 3 (the design default — Δ' beyond 3 surfaces
         # tends to be erratic in practice)
         sc4 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               4.0+0im; scale=1.0, tauk=1.0)
+            4.0+0im; scale=1.0, tauk=1.0)
         good_dp4 = ComplexF64[1.0 0.0 0.0 0.0;
-                               0.0 2.0 0.0 0.0;
-                               0.0 0.0 3.0 0.0;
-                               0.0 0.0 0.0 4.0]
+            0.0 2.0 0.0 0.0;
+            0.0 0.0 3.0 0.0;
+            0.0 0.0 0.0 4.0]
         mc4 = multi_surface_coupling([sc1, sc2, sc3, sc4], good_dp4)
         @test mc4.msing_max == 3         # default capped at 3
         # Caller can opt in to all 4
         mc4_full = multi_surface_coupling([sc1, sc2, sc3, sc4], good_dp4;
-                                           msing_max=4)
+            msing_max=4)
         @test mc4_full.msing_max == 4
 
         # Mismatched dp size
@@ -69,15 +69,15 @@
 
         # Out-of-range ref_idx
         @test_throws ArgumentError multi_surface_coupling([sc1, sc2], good_dp;
-                                                           ref_idx=3)
+            ref_idx=3)
         @test_throws ArgumentError multi_surface_coupling([sc1, sc2], good_dp;
-                                                           ref_idx=0)
+            ref_idx=0)
 
         # Out-of-range msing_max
         @test_throws ArgumentError multi_surface_coupling([sc1, sc2], good_dp;
-                                                           msing_max=3)
+            msing_max=3)
         @test_throws ArgumentError multi_surface_coupling([sc1, sc2], good_dp;
-                                                           msing_max=0)
+            msing_max=0)
     end
 
     @testset "Diagonal Δ' factorizes (det = ∏ per-surface residuals)" begin
@@ -85,14 +85,14 @@
         # the coupled determinant should reduce exactly to the product of
         # per-surface residuals.
         sc1 = surface_coupling(LinTestModel(1.0+0im, 1.0+0im), nothing,
-                               5.0+0im; scale=1.0, tauk=1.0)
+            5.0+0im; scale=1.0, tauk=1.0)
         sc2 = surface_coupling(LinTestModel(2.0+0im, 1.0+0im), nothing,
-                               7.0+0im; scale=1.0, tauk=1.0)
+            7.0+0im; scale=1.0, tauk=1.0)
         sc3 = surface_coupling(LinTestModel(0.5+0im, 0.5+0im), nothing,
-                               3.0+0im; scale=1.0, tauk=1.0)
+            3.0+0im; scale=1.0, tauk=1.0)
         dp = ComplexF64[5.0 0.0 0.0;
-                         0.0 7.0 0.0;
-                         0.0 0.0 3.0]
+            0.0 7.0 0.0;
+            0.0 0.0 3.0]
         mc = multi_surface_coupling([sc1, sc2, sc3], dp)
         for Q in (0.5+0im, 2.0+0.3im, -1.0-0.5im, 4.5+1.0im)
             @test mc(Q) ≈ sc1(Q) * sc2(Q) * sc3(Q) rtol = 1e-12
@@ -105,9 +105,9 @@
         # single-surface roots.
         Q1, Q2 = 0.5+0.0im, 2.0+0.0im
         sc1 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               Q1; scale=1.0, tauk=1.0)
+            Q1; scale=1.0, tauk=1.0)
         sc2 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               Q2; scale=1.0, tauk=1.0)
+            Q2; scale=1.0, tauk=1.0)
         dp = ComplexF64[real(Q1) 0.0; 0.0 real(Q2)]
         mc = multi_surface_coupling([sc1, sc2], dp)
         @test abs(mc(Q1)) < 1e-12
@@ -117,9 +117,9 @@
 
     @testset "Off-diagonal coupling shifts the roots away from the diagonal" begin
         sc1 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               0.5+0im; scale=1.0, tauk=1.0)
+            0.5+0im; scale=1.0, tauk=1.0)
         sc2 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               2.0+0im; scale=1.0, tauk=1.0)
+            2.0+0im; scale=1.0, tauk=1.0)
         # Coupling-free baseline
         dp_diag = ComplexF64[0.5 0.0; 0.0 2.0]
         mc_diag = multi_surface_coupling([sc1, sc2], dp_diag)
@@ -138,14 +138,14 @@
 
     @testset "msing_max truncation uses upper-left submatrix" begin
         sc1 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               1.0+0im; scale=1.0, tauk=1.0)
+            1.0+0im; scale=1.0, tauk=1.0)
         sc2 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               2.0+0im; scale=1.0, tauk=1.0)
+            2.0+0im; scale=1.0, tauk=1.0)
         sc3 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               3.0+0im; scale=1.0, tauk=1.0)
+            3.0+0im; scale=1.0, tauk=1.0)
         dp = ComplexF64[1.0 0.0 0.0;
-                         0.0 2.0 0.0;
-                         0.0 0.0 3.0]
+            0.0 2.0 0.0;
+            0.0 0.0 3.0]
 
         # msing_max = 1 reduces to sc1(Q) alone
         mc1 = multi_surface_coupling([sc1, sc2, sc3], dp; msing_max=1)
@@ -173,9 +173,9 @@
         #   M[k,k] = dp_diag_k - scale·Q·(tauk_ref/tauk_k)
         # Verify against an explicit closed form with mismatched tauks.
         sc1 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               0.0+0im; scale=1.0, tauk=2.0)   # ref tauk
+            0.0+0im; scale=1.0, tauk=2.0)   # ref tauk
         sc2 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               0.0+0im; scale=1.0, tauk=4.0)   # half rate
+            0.0+0im; scale=1.0, tauk=4.0)   # half rate
         dp = ComplexF64[0.0 0.0; 0.0 0.0]
         mc = multi_surface_coupling([sc1, sc2], dp; ref_idx=1)
         for Q in (1.0+0im, 0.5+0.3im)
@@ -219,8 +219,8 @@
         # Pick M[1,1] arbitrarily, solve for M[2,2]:
         M11 = 0.7 + 0.0im
         M22 = (c12 * c21) / M11
-        dp = ComplexF64[M11+Δ1  c12;
-                         c21    M22+Δ2]
+        dp = ComplexF64[M11+Δ1 c12;
+            c21 M22+Δ2]
 
         mc = multi_surface_coupling([sc1, sc2], dp)
         # The constructed M(Q_pin) is exactly singular by construction
@@ -244,9 +244,9 @@
     @testset "Broadcast over a 2D Q grid" begin
         # Coupled residual must be broadcast-compatible for PR 5/6 scans.
         sc1 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               0.0+0im; scale=1.0, tauk=1.0)
+            0.0+0im; scale=1.0, tauk=1.0)
         sc2 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               0.0+0im; scale=1.0, tauk=1.0)
+            0.0+0im; scale=1.0, tauk=1.0)
         dp = ComplexF64[0.0 0.0; 0.0 0.0]
         mc = multi_surface_coupling([sc1, sc2], dp)
 

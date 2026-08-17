@@ -245,7 +245,9 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     zeroth::Bool = false
 end
 
-"Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table."
+"""
+Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table.
+"""
 function LargeAspectRatioConfig(input_dict::Dict{String,Any})
     return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
 end
@@ -285,7 +287,9 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
-"Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table."
+"""
+Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table.
+"""
 function TJAnalyticConfig(input_dict::Dict{String,Any})
     return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
@@ -321,7 +325,9 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
     f0fac::Float64 = 1       # scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 end
 
-"Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table."
+"""
+Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table.
+"""
 function SolovevConfig(input_dict::Dict{String,Any})
     return SolovevConfig(; symbolize_keys(input_dict)...)
 end
@@ -419,6 +425,7 @@ raw equilibrium data and preparing the initial splines.
      2. `μ₀ * Pressure` — plasma pressure (non-negative) [T²]
      3. `q` — safety factor profile
      4. `√ψ_norm` — square root of normalized flux
+
   - `psi_in`
     2D cubic interpolant on the (R, Z) grid [m].
     The values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
@@ -430,14 +437,23 @@ raw equilibrium data and preparing the initial splines.
 
           * 1D profiles are represented by `CubicInterpolant` or `CubicSeriesInterpolant`
           * 2D flux surfaces by `CubicInterpolantND`
+
   - `psi_in_xs::Vector{Float64}` — R coordinate grid for psi_in [m]
+
   - `psi_in_ys::Vector{Float64}` — Z coordinate grid for psi_in [m]
+
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
+
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
+
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
+
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
+
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
+
   - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
+
   - `ingest::EquilibriumIngest` — captured raw arrays for the `gpec.h5` rerun snapshot
     (a [`DirectIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
   - `psihigh_resolved::Float64` — outer flux limit the equilibrium is formed on: `config.psihigh`
@@ -749,7 +765,7 @@ function GeometryProfileSplines(xs::Vector{Float64},
 
     GeometryProfileSplines{typeof(area_spline)}(
         xs, npts, npts - 1,
-        area_spline, avg_r_spline, avg_R_spline,
+        area_spline, avg_r_spline, avg_R_spline
     )
 end
 
@@ -828,7 +844,7 @@ function KineticProfileSplines(xs::Vector{Float64},
         xs, npts, npts - 1,
         ni_spline, ne_spline, Ti_spline, Te_spline,
         omegaE_spline, loglam_spline, nui_spline, nue_spline, zeff_spline,
-        ni_deriv, ne_deriv, Ti_deriv, Te_deriv,
+        ni_deriv, ne_deriv, Ti_deriv, Te_deriv
     )
 end
 
@@ -845,17 +861,21 @@ This object provides a complete representation of the processed plasma equilibri
 
   - `params::EquilibriumParameters`:
     Computed equilibrium parameters and diagnostics.
+
   - `profiles::ProfileSplines`:
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
+
   - `geometry::GeometryProfileSplines`:
     Named 1D splines for flux-surface-averaged geometry (area, ⟨r⟩, ⟨R⟩),
     populated automatically by `compute_geometry_profiles` during construction.
+
   - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
 
       + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
       + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
+
   - **Geometric quantities (rzphi, 4 interpolants):**
     2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
 
@@ -865,6 +885,7 @@ This object provides a complete representation of the processed plasma equilibri
       + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
       + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
       + `rzphi_jac::CubicInterpolantND`: Jacobian
+
   - **Physics quantities (eqfun, 3 interpolants):**
     2D cubic interpolants storing local physics and geometric quantities.
 
@@ -873,9 +894,13 @@ This object provides a complete representation of the processed plasma equilibri
       + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
       + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
       + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
+
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
+
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
+
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
+
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)

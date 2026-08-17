@@ -60,7 +60,7 @@ amplitudes directly — no conversion is applied.
 
 Required datasets:
 - `n`: integer array of toroidal mode numbers
-- `m`: integer array of poloidal mode numbers  
+- `m`: integer array of poloidal mode numbers
 - `amplitude_real`: float array of real parts
 - `amplitude_imag`: float array of imaginary parts (optional)
 

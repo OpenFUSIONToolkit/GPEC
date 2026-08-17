@@ -21,8 +21,8 @@ function run_ffs(ex; integrator)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low;
-    intr.nhigh = ctrl.nn_high;
+    intr.nlow = ctrl.nn_low
+    intr.nhigh = ctrl.nn_high
     intr.npert = 1
     GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
     intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow

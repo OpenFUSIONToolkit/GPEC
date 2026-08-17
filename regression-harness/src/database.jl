@@ -50,7 +50,9 @@ added by a later schema migration (NULL on every pre-existing row) need both cas
 """
 _column(x, default) = (x === nothing || x === missing) ? default : x
 
-"""Materialize SQLite query results as a Vector of NamedTuples."""
+"""
+Materialize SQLite query results as a Vector of NamedTuples.
+"""
 function query_rows(db::SQLite.DB, sql::String, params=())
     result = DBInterface.execute(db, sql, params)
     ct = Tables.columntable(result)
@@ -70,7 +72,9 @@ const ENV_COLUMNS = [
     ("pinned", "INTEGER")
 ]
 
-"""Add any `runs` columns missing from a database created by an earlier harness version."""
+"""
+Add any `runs` columns missing from a database created by an earlier harness version.
+"""
 function migrate_schema!(db::SQLite.DB)
     existing = Set(String[])
     for row in query_rows(db, "PRAGMA table_info(runs)")
@@ -107,10 +111,10 @@ environment. Rows predating fingerprinting hold NULL and therefore never match â
 entries most likely to be misleading are exactly the ones that get re-run.
 """
 function is_cached(db::SQLite.DB, commit_hash::String, case_name::String;
-                   expected_key::Union{String,Nothing}=nothing)::Bool
+    expected_key::Union{String,Nothing}=nothing)::Bool
     if expected_key === nothing
         rows = query_rows(db, "SELECT id FROM runs WHERE commit_hash = ? AND case_name = ? AND success = 1",
-                          (commit_hash, case_name))
+            (commit_hash, case_name))
         return !isempty(rows)
     end
     rows = query_rows(db,
@@ -125,7 +129,7 @@ fingerprinting. Used to explain *why* a cached result was rejected.
 """
 function cached_env_key(db::SQLite.DB, commit_hash::String, case_name::String)::Union{String,Nothing}
     rows = query_rows(db, "SELECT env_key FROM runs WHERE commit_hash = ? AND case_name = ?",
-                      (commit_hash, case_name))
+        (commit_hash, case_name))
     isempty(rows) && return nothing
     key = _column(first(rows).env_key, nothing)
     key === nothing && return nothing
@@ -135,15 +139,15 @@ end
 function delete_cached(db::SQLite.DB, commit_hash::String, case_name::String)
     # ON DELETE CASCADE handles quantities cleanup automatically
     DBInterface.execute(db, "DELETE FROM runs WHERE commit_hash = ? AND case_name = ?",
-                        (commit_hash, case_name))
+        (commit_hash, case_name))
 end
 
 function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::AbstractString,
-                   commit_date::AbstractString, commit_msg::AbstractString,
-                   case_name::AbstractString, runtime_s::Float64,
-                   extracted::Vector{ExtractedQuantity};
-                   success::Bool=true, error_msg::AbstractString="",
-                   fingerprint::EnvFingerprint=UNKNOWN_ENV)
+    commit_date::AbstractString, commit_msg::AbstractString,
+    case_name::AbstractString, runtime_s::Float64,
+    extracted::Vector{ExtractedQuantity};
+    success::Bool=true, error_msg::AbstractString="",
+    fingerprint::EnvFingerprint=UNKNOWN_ENV)
     ran_at = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
 
     SQLite.transaction(db) do
@@ -155,10 +159,10 @@ function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::Abs
                 env_key, julia_version, os_arch, manifest_sha, nthreads, blas_threads, pinned)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (String(commit_hash), String(commit_short), String(commit_date), String(commit_msg),
-             String(case_name), ran_at, runtime_s, success ? 1 : 0, String(error_msg),
-             env_key(fingerprint), fingerprint.julia_version, fingerprint.os_arch,
-             fingerprint.manifest_sha, fingerprint.nthreads, fingerprint.blas_threads,
-             fingerprint.pinned ? 1 : 0))
+                String(case_name), ran_at, runtime_s, success ? 1 : 0, String(error_msg),
+                env_key(fingerprint), fingerprint.julia_version, fingerprint.os_arch,
+                fingerprint.manifest_sha, fingerprint.nthreads, fingerprint.blas_threads,
+                fingerprint.pinned ? 1 : 0))
 
         run_id = SQLite.last_insert_rowid(db)
 
@@ -168,14 +172,14 @@ function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::Abs
                    (run_id, qty_name, qty_label, value_real, value_int, value_text, value_type, noise_threshold)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (run_id, eq.name, eq.label, eq.value_real, eq.value_int, eq.value_text,
-                 eq.value_type, eq.noise_threshold))
+                    eq.value_type, eq.noise_threshold))
         end
     end
 end
 
 function store_failed_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::AbstractString,
-                          commit_date::AbstractString, commit_msg::AbstractString,
-                          case_name::AbstractString, error_msg::AbstractString)
+    commit_date::AbstractString, commit_msg::AbstractString,
+    case_name::AbstractString, error_msg::AbstractString)
     ran_at = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
     delete_cached(db, String(commit_hash), String(case_name))
     DBInterface.execute(db,
@@ -183,14 +187,14 @@ function store_failed_run(db::SQLite.DB, commit_hash::AbstractString, commit_sho
            (commit_hash, commit_short, commit_date, commit_msg, case_name, ran_at, runtime_s, success, error_msg)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (String(commit_hash), String(commit_short), String(commit_date), String(commit_msg),
-         String(case_name), ran_at, 0.0, 0, String(error_msg)))
+            String(case_name), ran_at, 0.0, 0, String(error_msg)))
 end
 
 """
 Get all quantities for a (commit, case) pair. Returns Dict{qty_name => NamedTuple}.
 """
 function get_quantities(db::SQLite.DB, commit_hash::String, case_name::String)
-    results = Dict{String, NamedTuple}()
+    results = Dict{String,NamedTuple}()
     rows = query_rows(db,
         """SELECT q.qty_name, q.qty_label, q.value_real, q.value_int, q.value_text,
                   q.value_type, q.noise_threshold
@@ -202,12 +206,12 @@ function get_quantities(db::SQLite.DB, commit_hash::String, case_name::String)
     for row in rows
         name = something(row.qty_name, "")
         results[name] = (
-            label = something(row.qty_label, name),
-            value_real = row.value_real,
-            value_int = row.value_int,
-            value_text = row.value_text,
-            value_type = something(row.value_type, "missing"),
-            noise_threshold = something(row.noise_threshold, 0.0),
+            label=something(row.qty_label, name),
+            value_real=row.value_real,
+            value_int=row.value_int,
+            value_text=row.value_text,
+            value_type=something(row.value_type, "missing"),
+            noise_threshold=something(row.noise_threshold, 0.0)
         )
     end
     return results
@@ -233,13 +237,13 @@ function get_run_info(db::SQLite.DB, commit_hash::String, case_name::String)
         _column(row.pinned, 0) == 1
     )
     return (
-        commit_short = something(row.commit_short, ""),
-        commit_date = something(row.commit_date, ""),
-        commit_msg = something(row.commit_msg, ""),
-        runtime_s = something(row.runtime_s, 0.0),
-        success = coalesce(row.success, 0) == 1,
-        error_msg = something(row.error_msg, ""),
-        fingerprint = fingerprint,
+        commit_short=something(row.commit_short, ""),
+        commit_date=something(row.commit_date, ""),
+        commit_msg=something(row.commit_msg, ""),
+        runtime_s=something(row.runtime_s, 0.0),
+        success=coalesce(row.success, 0) == 1,
+        error_msg=something(row.error_msg, ""),
+        fingerprint=fingerprint
     )
 end
 

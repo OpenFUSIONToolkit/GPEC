@@ -44,7 +44,7 @@ in `psi_panel_points`).
 function _resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n::Int, nl::Int, xeval::Float64=2.5)
     nodes = Float64[]
     sx = sqrt(xeval)
-    for l in -nl:nl
+    for l in (-nl):nl
         append!(nodes, find_sign_change_roots(psi -> l * wbhat_f(psi) * sx + n * (welec_f(psi) + wdhat_f(psi) * xeval), grid))
     end
     return nodes
@@ -71,7 +71,7 @@ the estimate degenerates. Panel placement only needs ~peak-width accuracy, so th
 estimates (single spline evaluations) are sufficient and no bounce averaging is performed.
 """
 function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
-                                     n::Int, nl::Int, zi::Int=1, mi::Int=2, electron::Bool=false, wdfac::Float64=1.0, xeval::Float64=2.5)
+    n::Int, nl::Int, zi::Int=1, mi::Int=2, electron::Bool=false, wdfac::Float64=1.0, xeval::Float64=2.5)
     chrg = electron ? -e : zi * e
     mass = electron ? me : mi * mp
     T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline

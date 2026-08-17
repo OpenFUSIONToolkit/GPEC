@@ -33,8 +33,8 @@ function setup_solovev()
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     FFS.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low;
-    intr.nhigh = ctrl.nn_high;
+    intr.nlow = ctrl.nn_low
+    intr.nhigh = ctrl.nn_high
     intr.npert = 1
     FFS.sing_find!(intr, equil)
     intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow

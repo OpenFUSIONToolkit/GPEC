@@ -1,6 +1,6 @@
 # HDF5Output.jl
 #
-# Write a `SLAYERResult` into an HDF5 group. Designed to be called by the
+# Write a `SLAYERResult` or `CriticalResonantFieldResult` into an HDF5 group. Designed to be called by the
 # existing `PerturbedEquilibrium.write_outputs_to_HDF5` path — the
 # top-level GPEC runner wires that up; this file only defines the pure
 # writer.
@@ -54,6 +54,38 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
         _write_scan_data!(g, result)
     end
     _annotate_tearing!(g)
+    return g
+end
+
+function write_critical_resonant_field_hdf5!(parent::Union{HDF5.File,HDF5.Group},
+    result::CriticalResonantFieldResult)
+
+    if !haskey(parent, "Tearing")
+        create_group(parent, "Tearing")
+    end
+    g = create_group(parent["Tearing"], "CriticalResonantField")
+
+    g["surface_index"] = result.surface_index
+    g["Qpeak"] = result.Qpeak
+    g["br_crit"] = result.br_crit
+    g["Q0"] = result.Q0
+    g["P"] = result.P
+
+    if !isempty(result.scan_data)
+        scan_group = create_group(g, "Scan")
+        for d in result.scan_data
+            sg = create_group(scan_group, "surface_$(d.surface)")
+            sg["Q"] = d.Q
+            sg["balance"] = d.balance
+            sg["delta"] = d.delta
+            sg["Q_positive"] = d.Q_positive
+            sg["balance_positive"] = d.balance_positive
+            sg["Qpeak"] = d.Qpeak
+            sg["br_crit"] = d.br_crit
+        end
+    end
+
+    attrs(g)["kind"] = "critical_resonant_field"
     return g
 end
 

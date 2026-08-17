@@ -4,6 +4,9 @@
 # growth-rate analysis. Populated either directly via the `@kwdef`
 # constructor or by parsing the `[SLAYER]` (and nested `[SLAYER.*]`)
 # section(s) of a `gpec.toml`.
+#
+# `CriticalResonantFieldControl` holds the user-facing knobs that drive the critical resonant field
+# analysis. Populated either directly via the `@kwdef` constructor or by parsing the `[CriticalResonantField]` section of a `gpec.toml`.
 
 """
     SLAYERControl
@@ -267,4 +270,42 @@ function slayer_control_from_toml(section::AbstractDict)
         end
     end
     return validate(SLAYERControl(; kwargs...))
+end
+
+"""
+    CriticalResonantFieldControl
+
+Configuration for the critical resonant field analysis. All fields are
+user-facing: read from the `[CriticalResonantField]` TOML section of a `gpec.toml` via
+`critical_resonant_field_control_from_toml`, or built directly via the `@kwdef` keyword
+constructor.
+"""
+@kwdef struct CriticalResonantFieldControl
+    enabled::Bool = false
+    inner_model::Symbol = :slayer_fitzpatrick
+    Qmin::Float64 = -10.0
+    Qmax::Float64 = 10.0
+    n::Int = 200
+    profile_file::String = ""
+    profile_group::String = "/"
+    store_scan::Bool = false
+end
+
+function critical_resonant_field_control_from_toml(section::AbstractDict)
+    flat = Dict{String,Any}()
+    for (k, v) in section
+        flat[k] = v
+    end
+
+    kwargs = Dict{Symbol,Any}()
+    for (k, v) in flat
+        sym = Symbol(k)
+        if sym in (:inner_model,)
+            kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
+        else
+            kwargs[sym] = v
+        end
+    end
+
+    return CriticalResonantFieldControl(; kwargs...)
 end

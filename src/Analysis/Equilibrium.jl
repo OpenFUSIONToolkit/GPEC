@@ -219,7 +219,7 @@ function plot_flux_surfaces(h5path; n_psi=11, n_theta=18, save_path=nothing)
     for s in 1:msing
         idx = argmin(abs.(xs_rz .- psi_sing[s]))
         q_label = abs(q_sing[s] - round(q_sing[s])) < 0.05 ?
-            "q=$(round(Int, q_sing[s]))" : "q=$(round(q_sing[s], digits=2))"
+                  "q=$(round(Int, q_sing[s]))" : "q=$(round(q_sing[s], digits=2))"
         plot!(p, [R_grid[idx, :]; R_grid[idx, 1]], [Z_grid[idx, :]; Z_grid[idx, 1]];
             color=:red, linewidth=1.5,
             label=s == 1 ? "Rational surface" : "")
@@ -368,23 +368,26 @@ function plot_equilibrium_summary(h5path; save_path=nothing)
 
     title_str = "q0=$(round(q0,digits=2))  q95=$(round(q95,digits=2))  βₜ=$(round(betat,digits=3))  βₙ=$(round(betan,digits=3))  κ=$(round(kappa,digits=2))  li1=$(round(li1,digits=3))"
 
-    p_rz   = plot_flux_surfaces(h5path)
-    p_q    = plot_qprofile(h5path; show_singular=true)
+    p_rz = plot_flux_surfaces(h5path)
+    p_q = plot_qprofile(h5path; show_singular=true)
     p_pres = plot_pressure_profile(h5path)
-    p_f    = plot_f_profile(h5path)
-    p_gse  = plot_gse_by_theta(h5path)  # includes integrated overplot; nothing if absent
+    p_f = plot_f_profile(h5path)
+    p_gse = plot_gse_by_theta(h5path)  # includes integrated overplot; nothing if absent
 
     # Suppress x-axis labels/ticks on all but the bottom profile panel — they share the
     # same ψ_N axis and labeling every panel wastes vertical space.
     hide_xaxis!(p) = plot!(p; xlabel="", xformatter=_->"", bottom_margin=1Plots.mm)
 
     if isnothing(p_gse)
-        hide_xaxis!(p_q); hide_xaxis!(p_pres)
+        hide_xaxis!(p_q)
+        hide_xaxis!(p_pres)
         l = @layout [a{0.38w} [b; c; d]]
         p = plot(p_rz, p_q, p_pres, p_f; layout=l, size=(1300, 750),
             plot_title=title_str, plot_titlefontsize=10, top_margin=8Plots.mm)
     else
-        hide_xaxis!(p_q); hide_xaxis!(p_pres); hide_xaxis!(p_f)
+        hide_xaxis!(p_q)
+        hide_xaxis!(p_pres)
+        hide_xaxis!(p_f)
         l = @layout [a{0.38w} [b; c; d; e]]
         p = plot(p_rz, p_q, p_pres, p_f, p_gse; layout=l, size=(1300, 1000),
             plot_title=title_str, plot_titlefontsize=10, top_margin=8Plots.mm)

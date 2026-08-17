@@ -19,7 +19,12 @@ xi, dxi, cout, cin, deltar, eig, resid, sing_psi = h5open(h5path) do f
 end
 # HDF5 stores ComplexF64 as a compound (re,im); convert if needed
 to_c(a) = eltype(a) <: Complex ? a : map(x -> ComplexF64(x.re, x.im), a)
-xi = to_c(xi); dxi = to_c(dxi); cout = to_c(cout); cin = to_c(cin); deltar = to_c(deltar); eig = to_c(eig)
+xi = to_c(xi);
+dxi = to_c(dxi);
+cout = to_c(cout);
+cin = to_c(cin);
+deltar = to_c(deltar);
+eig = to_c(eig)
 
 mpert, mcoil, ngrid = size(xi)
 msing = size(deltar, 1)

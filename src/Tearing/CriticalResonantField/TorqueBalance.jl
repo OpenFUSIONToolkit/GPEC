@@ -25,98 +25,62 @@
 """
     TorqueBalance{M<:InnerLayerModel, P}
 
-Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk)`.
-Calling `sc(Q)` returns the complex residual
+Per-surface torque balance data: `(model, params, Q0, P, lu, sval)`.
 
-```
-r(Q) = dp_diag - scale * solve_inner(model, params, Q).tearing - dc
-```
-
-A root of `sc` in the complex `Q` plane is a **tearing** eigenvalue at
-this surface in the *uncoupled* approximation (only the tearing channel
-of the inner-layer response appears — the interchange channel enters the
-full 2m×2m dispersion via `MultiSurfaceCoupling`, not this scalar form).
-Coupled multi-surface eigenvalues come from `MultiSurfaceCoupling`
-evaluating the determinant of the modified Δ' matrix.
 """
-struct SurfaceCoupling{M<:InnerLayerModel,P}
+
+struct TorqueBalance{M<:InnerLayerModel,P}
     model::M
     params::P
-    dp_diag::ComplexF64
-    dc::Float64
-    scale::Float64
-    tauk::Float64
-end
-
-function (sc::SurfaceCoupling)(Q::Number)
-    Δ = solve_inner(sc.model, sc.params, ComplexF64(Q)).tearing
-    return sc.dp_diag - sc.scale * Δ - sc.dc
-end
-
-"""
-    surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-                     dp_diag::Number; dc::Real=0.0) -> SurfaceCoupling
-
-SLAYER convenience constructor. `scale` is set to `params.lu^(1/3)` so that
-the dimensionless Δ from `riccati_f` is mapped to outer ψ-units before
-subtraction from the Δ' diagonal. `tauk` is taken from `params.tauk` for use
-by `MultiSurfaceCoupling` Q rescaling.
-"""
-function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-    dp_diag::Number; dc::Real=0.0)
-    return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        Float64(dc), params.lu^(1 / 3), params.tauk)
-end
-
-"""
-    surface_coupling(model::GGJModel, params::GGJParameters,
-                     dp_diag::Number) -> SurfaceCoupling
-
-GGJ convenience constructor. `scale` is `1.0` because GGJ's `solve_inner`
-applies its own `rescale_delta` (S^(2p₁/3)·v1^(2p₁)) internally, so the
-returned Δ is already in outer units. `tauk` defaults to `1.0` (GGJ has no
-direct analogue of SLAYER's per-surface time normalization, so multi-surface
-Q rescaling is a no-op for GGJ surfaces unless overridden).
-
-**No `dc` kwarg**: GGJ's 4m×4m Pletzer-Dewar residual already includes the
-interchange channel, which provides Glasser (Mercier) stabilization
-natively. A Δ_crit proxy (χ_parallel-matching offset on the diagonal) is
-meaningful only for tearing-only slab-layer approximations like SLAYER;
-for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
-struct's `dc` field is hard-wired to 0 here.
-"""
-function surface_coupling(model::GGJModel, params::GGJParameters,
-    dp_diag::Number)
-    return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        0.0, 1.0, 1.0)
-end
-
-"""
-    surface_coupling(model::InnerLayerModel, params, dp_diag::Number;
-                     dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0)
-        -> SurfaceCoupling
-
-Generic fallback constructor. Use this when wiring a new inner-layer model
-into the dispersion solver — pass the appropriate inner→outer-units `scale`
-and per-surface `tauk` explicitly.
-"""
-function surface_coupling(model::InnerLayerModel, params, dp_diag::Number;
-    dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0)
-    return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        Float64(dc), Float64(scale), Float64(tauk))
+    Q0::Float64
+    P::Float64
+    lu::Float64
+    sval::Float64
 end
 
 function torque_balance_value(tb::TorqueBalance, Q::Number)
     Δ = solve_inner(tb.model, tb.params, ComplexF64(Q)).tearing
-    jxb = -imag(1.0 / (Δ + tb.delta_n_p))
-    return 2.0 * tb.P * (tb.Q0 - Q) / jxb
+    delta_n_p = 1e-2 # JK hack to avoid singularity at Δ=0.0. Need to fix this in the future.
+    jxb = -imag(1.0 / (Δ + delta_n_p))
+    return 2.0 * tb.P * (tb.Q0 - Q) / jxb, Δ
 end
 
-function scan_torque_balance(tb; Qmin=-10.0, Qmax=10.0, nscan=200)
-    qs = range(Qmin, Qmax; length=nscan)
-    vals = torque_balance_value.(Ref(tb), qs)
-    idx = argmax(vals)
-    return qs[idx], vals[idx]
+"""
+    torque_balance_scan(model::InnerLayerModel, params::InnerLayerParameters, Q0::Real, P::Real,
+        lu::Real, sval::Real;Qmin=-10.0, Qmax=10.0, n=200) -> (Qs, bal, Qs_positive, bal_positive,
+        Qpeak, br_crit, Qpeak_ind, Δs)
+
+Scan over a range of Q values to find the maximum of the torque balance equation.
+Returns the Q values, torque balance values, positive Q values, positive torque balance values,
+the Q value at the peak, the critical resonant field, the index of the peak Q value, and the Δ values for each Q.
+"""
+
+function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=200)
+    Qs = range(Qmin, Qmax; length=n)
+    torque_out = [torque_balance_value(tb, q) for q in Qs]
+    bal = [x[1] for x in torque_out]
+    Δs = [x[2] for x in torque_out]
+    positive = isfinite.(bal) .& (bal .> 0.0)
+
+    if !any(positive)
+        return Qs, bal, [0.0], [0.0], 0.0, 0.0, NaN, Δs
+    end
+    i = argmax(bal)
+    Qpeak_ind = i
+    Qpeak = Qs[i]
+    maxbal = bal[i]
+
+    Qs_positive = Qs[positive]
+    bal_positive = bal[positive]
+
+    i = argmax(bal_positive)
+    #Qpeak = Qs_positive[i]
+
+    #maxbal = bal_positive[i]
+
+    br_crit = sqrt(maxbal / tb.lu * (tb.sval^2 / 2.0))
+    return Qs, bal, Qs_positive, bal_positive, Qpeak, br_crit, Qpeak_ind, Δs
 end
 
-br_th = sqrt(maxbal / tb.lu * (tb.sval^2 / 2.0))
+# Need to fix and improve this function. The positive masking is not helpful.
+# Need to avoid poles from Q_e and Q_i.
