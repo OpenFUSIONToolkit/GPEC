@@ -112,6 +112,24 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         json_str = JSON.json(pairs; allownan=true)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
+    elseif startswith(spec.extract, "toml_key:")
+        # "toml_key:<dotted.path>": pin a deck's declared control value, read out of the
+        # `Input/gpec_toml_raw` rerun snapshot. Used to record which formalism a case asked
+        # for, because the Δ′ matrix is written to one canonical `SingularSurfaces/` path
+        # whichever integrator produced it, so the numbers alone no longer say. Reading it
+        # from `Input/` respects the schema rule that control values live nowhere else.
+        # A key the deck leaves unset pins as "<unset>", so a deck that starts or stops
+        # declaring one is itself a change rather than being silently absorbed.
+        keypath = spec.extract[(length("toml_key:")+1):end]
+        table = TOML.parse(raw isa AbstractString ? raw : String(raw))
+        node = table
+        for key in split(keypath, ".")
+            node = (node isa AbstractDict && haskey(node, key)) ? node[key] : nothing
+            node === nothing && break
+        end
+        token = node === nothing ? "<unset>" : string(node)
+        return ExtractedQuantity(name, label, nothing, nothing, token, "token", threshold)
+
     elseif spec.extract == "checksum"
         bytes = reinterpret(UInt8, vec(collect(raw)))
         hash = bytes2hex(sha256(bytes))
@@ -218,7 +236,7 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         status = max_diff <= threshold ? "OK" : "CHANGED"
         return (max_diff, rel_diff, status)
 
-    elseif vtype == "checksum"
+    elseif vtype == "checksum" || vtype == "token"
         t1 = q1.value_text
         t2 = q2.value_text
         if t1 === nothing || t2 === nothing

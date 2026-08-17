@@ -8,8 +8,9 @@ Specification for a single quantity to extract from gpec.h5.
 struct QuantitySpec
     name::String
     h5path::String          # HDF5 dataset path (e.g. "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"), empty for runtime
-    type::String            # "complex_vector", "real_vector", "real_scalar", "int_scalar", "real_matrix", "runtime"
-    extract::String         # "value", "real_first", "imag_first", "abs_first", "norm", "all_real", "all_complex", "checksum"
+    type::String            # "complex_vector", "real_vector", "real_scalar", "int_scalar", "real_matrix", "token", "runtime"
+    extract::String         # "value", "real_first", "imag_first", "abs_first", "norm", "all_real", "all_complex",
+    # "diagonal_complex", "first_<N>", "first_<N>_complex", "checksum", "toml_key:<dotted.path>"
     label::String           # Human-readable label for reports
     noise_threshold::Float64 # Absolute changes below this are noise
     order::Int              # Display order in reports (lower = earlier)
