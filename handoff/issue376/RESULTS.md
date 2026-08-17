@@ -790,12 +790,61 @@ Shrinking ε lowers the curve; only making ε *smooth in ψ* can change its slop
 
 ### Actionable
 
-1. **Free ~11%**: give the EL solves an explicit `abstol` (`EulerLagrange.jl:766`;
-   `Riccati.jl:1080,1443,1455,1515,1525`). et[1] identical to 9 digits at every mpsi tested. Its own
-   small PR with a harness run; a *vector* abstol scaled per harmonic (the `abstol_vec` idiom at
-   `DirectEquilibriumArcLength.jl:115`) would be the more surgical version.
+1. ~~Free ~11% from an explicit `abstol`~~ — **retracted, see §19.** That figure was measured on
+   *step count only*. Wall time does not follow, and on the Riccati path an `abstol` destroys Δ′.
 2. **The scaling** needs correlated surface construction — continuation from surface to surface so
    the per-surface error is smooth rather than white — or the inversion construction. Not attempted.
+
+## 19. abstol: tested thoroughly, and it must not ship
+
+**Prior art (found in the history, not in `develop`).** `abstol` was implemented for exactly this
+purpose in Jan 2026 — `377d85132 DCON - IMPROVEMENT - Add absolute tolerance to ODE solver to reduce
+deep core steps`, issue #122 option (1), with a scale-aware `compute_atol_scale!` sampling solution
+magnitudes at half-integer q. It was **never merged**: it lives only on
+`origin/claude/issue-122-20260103-1833`. Issue #122 (still open) records the verdict — the maintainer
+benchmarked it and concluded *"the user shouldn't be given an `abstol`. Not enough gain in the safe
+range to warrant the possibility of being in the bad range."* Their table shows runtime *rising*
+with looser atol (150 → 274 → 1547 → 36800 s) and et going to garbage (−775) at 1e6.
+
+So there was no removal to explain: it was tried, measured, and rejected. This section re-tests it on
+the current code with the observable that was missing then — **Δ′**.
+
+Setup: DIII-D stripped deck, mpsi=512, route (a) applied. `integrator = "riccati"` (which is what
+unlocks `SingularSurfaces/Delta_prime_matrix`) vs `integrator = "forward"`. Δ′ deviations are
+relative to that integrator's own no-abstol run.
+
+**Riccati chunks — Δ′ is destroyed, and et[1] hides it completely:**
+
+| abstol | steps | run (s) | et[1] | Δ'diag rel |
+|---|---|---|---|---|
+| none (default 1e-6) | 1384 | 17.7 | 0.7841145216 | ref |
+| 1e-4 | 907 | 17.0 | 0.7840998277 | **4.9e-03** |
+| 1e-2 | 679 | 16.4 | 0.7840701367 | **2.54 (254%)** |
+| 1    | 535 | 16.6 | 0.7845740708 | **4.68 (468%)** |
+
+Steps fall 51% and **runtime barely moves (−7%)**, while Δ′ — which feeds the tearing calculations —
+is wrong by 254% at abstol 1e-2. et[1] moves only 5e-5 relative, so **an et-only acceptance check
+would have passed this**. That is the trap the Δ′ test was for.
+
+**Forward integration — safe, but worthless:**
+
+| abstol | steps | core | run (s) | et[1] |
+|---|---|---|---|---|
+| none (default 1e-6) | 2768 | 1066 | 12.8 | 0.7815877685 |
+| 1e-4 | 2575 | 887 | 14.0 | 0.7815877684 |
+| 1e-2 | 2468 | 771 | 12.4 | 0.7815877685 |
+| 1    | 2282 | 642 | 13.3 | 0.7815877685 |
+
+et[1] identical to 10 digits and core steps down 40%, but **wall time is flat within noise
+(12.4–14.0 s)**. Consistent with §6's step-independent floor in that phase: the steps being removed
+are cheap ones, so removing them buys nothing.
+
+**Conclusion: no PR.** Riccati is unsafe (Δ′), forward is safe but gains nothing. This independently
+reproduces the issue #122 verdict and adds the mechanism it was missing. Route (a)'s step reduction
+was different in kind — it *was* confirmed by wall clock (harness runtime 202 → 178 s).
+
+**Corollary for future work**: step count is not a proxy for cost here, and et[1] is not a proxy for
+correctness. Any deep-core optimisation must be judged on wall time **and** Δ′.
 
 ## Implications / ranked follow-ups
 
