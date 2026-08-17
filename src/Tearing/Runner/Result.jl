@@ -20,7 +20,9 @@ downstream inspection and HDF5 output.
     factor q of each analyzed surface, aligned with `params`. Empty when the
     analysis was built from bare parameters (`run_slayer_from_inputs` without
     the surface list), in which case the HDF5 writer skips them.
-  - `dp_matrix`           -- outer-region Δ' matrix used in the analysis
+  - `dp_matrix`           -- outer-region Δ' matrix used in the analysis.
+    SLAYER path: r_s-referenced (the ψ_N BVP matrix transformed by
+    `delta_prime_to_rs_reference`); GGJ path: the ψ_N matrix unchanged
   - `Q_root`              -- tearing eigenvalue(s) in normalized Q
     * length `nsurfaces` in `:uncoupled` mode
     * length `1` in `:coupled` mode (global eigenvalue normalized by

@@ -289,6 +289,20 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             _eval(dgeo_val, psi)
         end
 
+        # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s
+        # and μ = √(−D_I) with D_I = E + F + H − 1/4 (Glasser-Greene-Johnson 1975).
+        # A Mercier-unstable surface (D_I ≥ 0) has no real exponent; μ → 0 there,
+        # which makes the conversion factor K^(2μ) → 1 continuously (Δ' left raw).
+        k_ref_k = da_dpsi == 0.0 ? 1.0 : rs / da_dpsi
+        mu_k = if rg === nothing
+            @warn("build_slayer_inputs: sing.restype not populated; using the " *
+                  "slab Mercier exponent μ = 1/2 for the Δ' reference-length " *
+                  "conversion at all such surfaces.", maxlog=1)
+            0.5
+        else
+            sqrt(max(-(rg.E + rg.F + rg.H - 0.25), 0.0))
+        end
+
         out[k] = slayer_parameters(;
             n_e=prof.n_e, t_e=prof.T_e, t_i=prof.T_i,
             omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
@@ -304,7 +318,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             f_trap=f_trap_kw,
             nu_e_star=nu_e_star_kw,
             R_major_eff=R_major_eff,
-            lnLambda_form=lnLambda_form
+            lnLambda_form=lnLambda_form,
+            k_ref=k_ref_k,
+            mu_mercier=mu_k
         )
     end
     return out
