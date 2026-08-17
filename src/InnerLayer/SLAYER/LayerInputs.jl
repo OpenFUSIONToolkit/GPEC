@@ -91,7 +91,7 @@ profiles, without an intermediate file round-trip.
   - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
   - `chi_tor`   -- Fitzpatrick's χ_φ: anomalous perpendicular ion MOMENTUM
-    diffusivity [m²/s] (a viscosity entering the vorticity and parallel-flow
+    diffusivity `[m²/s]` (a viscosity entering the vorticity and parallel-flow
     equations — not a heat diffusivity). Scalar or a callable of `psi`
     (default `1.0`).
   - `dr_val`    -- resistive interchange index `D_R = E + F + H²`

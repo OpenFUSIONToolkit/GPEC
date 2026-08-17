@@ -199,7 +199,7 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `zeff`    -- effective charge
   - `chi_perp` -- perpendicular energy diffusivity χ⊥ [m²/s]
   - `chi_tor`  -- Fitzpatrick's χ_φ, the anomalous perpendicular ion momentum
-    diffusivity [m²/s] (a viscosity, not heat; TJ Layer.tex eqs. — enters the
+    diffusivity `[m²/s]` (a viscosity, not heat; TJ Layer.tex eqs. — enters the
     vorticity and parallel-flow equations, τ_φ = r_s²/χ_φ)
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
