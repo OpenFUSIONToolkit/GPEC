@@ -30,7 +30,6 @@ using HDF5
 using FastInterpolations: cubic_interp
 using ..Utilities
 using ..Utilities: KineticProfiles
-using ...Equilibrium: read_kinetic_file, KineticProfileData
 using ..InnerLayer
 using ..InnerLayer:
     InnerLayerParameters, InnerLayerResponse, solve_inner,
@@ -47,6 +46,7 @@ using ..Dispersion: SurfaceCoupling, surface_coupling,
     AMRResult, amr_scan,
     MultiBoxAMRResult, multi_box_amr_scan, as_amr_result,
     GrowthRateResult, find_growth_rates
+using ..CriticalResonantField: TorqueBalance, torque_balance_scan
 
 include("Control.jl")
 include("Result.jl")

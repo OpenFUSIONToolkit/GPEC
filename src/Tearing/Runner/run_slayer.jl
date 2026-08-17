@@ -469,12 +469,18 @@ end
     and the corresponding critical resoannt field values for each rational surface.
 """
 
-function run_critical_resonant_field(equil, intr, ctrl; dir_path="./")
+function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_result=nothing)
     ctrl.enabled || return empty_critical_resonant_field_result()
 
-    # Use the same per-surface params already built for SLAYER
-    profiles = Equilibrium.load_kinetic_profiles(joinpath(dir_path, ctrl.profile_file))
-    params = build_slayer_inputs(equil, intr.sing, profiles)
+    params = if slayer_result !== nothing && slayer_result.enabled && !isempty(slayer_result.params)
+        slayer_result.params
+    else
+        profiles = load_kinetic_profiles(joinpath(dir_path, ctrl.profile_file))
+        build_slayer_inputs(equil, intr.sing, profiles)
+    end
+
+    all(p -> p isa SLAYERParameters, params) ||
+        throw(ArgumentError("CriticalResonantField requires SLAYERParameters; run SLAYER first or provide compatible params."))
 
     surface_index = Int[]
     Qpeak_vec = Float64[]
