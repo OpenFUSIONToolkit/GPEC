@@ -365,7 +365,7 @@ function compute_clebsch_displacements(
     end
 
     # A/B/C of the active model, matching what the ODE integrated.
-    mats = ForceFreeStates.active_matrices(ffit)
+    active_mats = ffit.kinetic === nothing ? ffit.ideal : ffit.kinetic
 
     # Per-thread workspaces: matrix ops and spline hints are not safe to share across threads.
     # Size by maxthreadid() and index by threadid() under :static scheduling (GPEC convention).
@@ -400,19 +400,19 @@ function compute_clebsch_displacements(
 
         # Compute regularized xms = -A⁻¹(B·xmp1 + C·xsp) (matches Fortran gpeq_sol)
         # Evaluate stability matrices at this psi
-        mats.amats(view(amat, :), psi_norm; hint=hint)
-        mats.bmats(view(bmat, :), psi_norm; hint=hint)
-        mats.cmats(view(cmat_buf, :), psi_norm; hint=hint)
+        active_mats.amats(view(amat, :), psi_norm; hint=hint)
+        active_mats.bmats(view(bmat, :), psi_norm; hint=hint)
+        active_mats.cmats(view(cmat_buf, :), psi_norm; hint=hint)
 
         # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
         # cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
-        # mats.amats each surface), avoiding a fresh factorization allocation per surface.
+        # active_mats.amats each surface), avoiding a fresh factorization allocation per surface.
         # NOTE: this assumes the ideal A (positive-definite Newcomb kinetic-energy form). The
         # kinetic A is non-Hermitian and needs an LU, as compute_node_xi_s! does — see the
-        # `mats` binding above.
+        # `active_mats` binding above.
         amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
         xms_vec .*= -1                                     # xms = -A\(B*xmp1 + C*xsp)

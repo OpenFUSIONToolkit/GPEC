@@ -84,7 +84,7 @@ function materialize_derivative_stores!(
     odet.du_store_populated && return true
     (isnothing(ffit) || odet.step == 0 || isempty(odet.u_store) || !odet.u_store_el_basis) && return false
 
-    kinetic = is_kinetic(ffit)
+    kinetic = ffit.kinetic !== nothing
     nstep = min(odet.step, size(odet.u_store, 4))
     npert = odet.numpert_total
     odet.du_store = Array{ComplexF64}(undef, npert, npert, nstep)

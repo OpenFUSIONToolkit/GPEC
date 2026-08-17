@@ -342,7 +342,7 @@ function compute_singular_coupling_metrics!(
     # @threads region.
     nstep = solution.step
     # ξ′ evaluation preference: the ideal EL relation, or the interpolated stored RHS for kinetic runs.
-    use_el = !ForceFreeStates.is_kinetic(ffit)
+    use_el = ffit.kinetic === nothing
     _blas_nthreads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try

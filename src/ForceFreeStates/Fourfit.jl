@@ -91,22 +91,6 @@ and for the Galerkin/vacuum paths that are defined only in the ideal basis.
     _hint::Base.RefValue{Int} = Ref(1)
 end
 
-"""
-    is_kinetic(ffit) -> Bool
-
-Whether `ffit` carries kinetic matrices, i.e. whether the solution obeys the FKG ODE.
-"""
-is_kinetic(ffit::FourFitVars) = ffit.kinetic !== nothing
-
-"""
-    active_matrices(ffit) -> Union{IdealMatrices,KineticMatrices}
-
-The A/B/C set the ODE is actually integrating: kinetic-modified when a kinetic fit is attached,
-ideal otherwise. Use only where the caller genuinely means "whichever model is active" — prefer
-naming `ffit.ideal` or `ffit.kinetic` explicitly, since the two differ in Hermiticity.
-"""
-active_matrices(ffit::FourFitVars) = ffit.kinetic === nothing ? ffit.ideal : ffit.kinetic
-
 # Helper to create an empty complex series interpolant for default initialization
 function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
