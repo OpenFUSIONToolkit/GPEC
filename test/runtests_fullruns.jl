@@ -28,6 +28,9 @@ using HDF5
             et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
             @test real(et[1]) > 0
+            # Per-stage wall-clock records (informational, not regression quantities).
+            @test haskey(h5, "Info/Runtimes/total") && read(h5["Info/Runtimes/total"]) > 0
+            @test haskey(h5, "Info/Runtimes/force_free_states")
         end
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true
