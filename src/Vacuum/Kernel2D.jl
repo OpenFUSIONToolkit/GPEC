@@ -647,6 +647,8 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     ζ2 = ζ^2
 
     ρ2 = x_minus2 + ζ2
+
+    # Distance parameter ℛ [Chance Phys. Plasmas 1997 2161 eq. 41]
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
     R2 = sqrt(R4)
     R = sqrt(R2)
