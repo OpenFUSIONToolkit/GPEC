@@ -223,6 +223,9 @@ function infer_class(spec::QuantitySpec)::String
     spec.type == "runtime" && return "diagnostic"
     spec.name in ("nstep", "nstep_total") && return "diagnostic"
     spec.type == "int_scalar" && return "topological"
+    # A declared control token is an exact-match gate, like a count: there is no tolerance
+    # that means anything between "riccati" and "galerkin".
+    startswith(spec.extract, "toml_key:") && return "topological"
     name = spec.name
     # sing_psi / sing_q are deliberately absent: singular-surface locations come from a root
     # search, not pure spline/quadrature, so they take the measured physics_converged path.
@@ -269,6 +272,15 @@ function compare_to_golden(q::NamedTuple, g::GoldenValue)
         gold = JSON.parse(g.value_text; allownan=true)
         length(got) == length(gold) && return _compare_arrays(got, gold, g, within)
         return (false, NaN, "length $(length(gold)) → $(length(got))")
+
+    elseif g.value_type == "token"
+        # A token names a discrete choice (which integrator produced the Δ′), so there is no
+        # tolerance to apply: it matches or the run is answering a different question than the
+        # gold does. Deviation is reported as 1.0 on mismatch rather than NaN so it sorts as a
+        # real failure in reports.
+        (q.value_text === nothing || g.value_text === nothing) && return (false, NaN, "missing token")
+        matched = q.value_text == g.value_text
+        return (matched, matched ? 0.0 : 1.0, matched ? "" : "$(g.value_text) → $(q.value_text)")
     end
 
     return (false, NaN, "unsupported value type $(g.value_type)")
