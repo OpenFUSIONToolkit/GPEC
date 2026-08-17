@@ -34,7 +34,7 @@ end
 
 for rundir in ARGS
     h5open(joinpath(rundir, "gpec.h5"), "r") do h5
-        psi = read(h5["splines/rzphi/xs"])
+        psi = read(h5["Equilibrium/Geometry/psi"])
         @printf("\n%s  (npsi = %d)\n", basename(rundir), length(psi))
         @printf("  %-22s | %-6s", "region", "nknot")
         for q in QUANTITIES
@@ -46,7 +46,7 @@ for rundir in ARGS
             length(idx) < 12 && continue
             @printf("  %-22s | %6d", name, length(idx))
             for q in QUANTITIES
-                r1, res = psi_roughness(psi, read(h5["splines/rzphi"][q]), idx)
+                r1, res = psi_roughness(psi, read(h5["Equilibrium/Geometry"][q]), idx)
                 @printf(" | %+.3f / %10.3e", r1, res)
             end
             println()

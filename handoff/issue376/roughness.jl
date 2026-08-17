@@ -94,8 +94,8 @@ const MATS = split(get(ENV, "GPEC_ROUGHNESS_MATS", "F,K,G"), ",")
 
 for rundir in ARGS
     h5open(joinpath(rundir, "gpec.h5"), "r") do h5
-        psi = read(h5["matrices/psi"])
-        qprof = read(h5["splines/profiles/q"])
+        psi = read(h5["ForceFreeStates/EulerLagrangeMatrices/psi"])
+        qprof = read(h5["Equilibrium/Profiles/q"])
         @printf("\n%s  (npsi = %d)\n", basename(rundir), length(psi))
         @printf("  %-22s | %-6s", "region", "nknot")
         for key in MATS
@@ -107,7 +107,7 @@ for rundir in ARGS
             length(idx) < 8 && continue
             cols = String[]
             for key in MATS
-                mats = read(h5["matrices/ideal"][key])
+                mats = read(h5["ForceFreeStates/EulerLagrangeMatrices/Ideal"][key])
                 r1, curv = roughness(psi, mats, idx)
                 push!(cols, @sprintf("%+.3f /%9.2e /%9.2e", r1, curv, noise_floor(psi, mats, idx)))
             end

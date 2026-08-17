@@ -158,3 +158,26 @@ Phase 1 RESULTS:
   unrefined initial condition while theta=2pi is refined), so the PeriodicBC check rejects the
   data. Its premise was weak anyway (drift ~reltol=1e-10, far below the observed floor). Recorded
   as inconclusive; Phase 2 must preserve the periodic closure when choosing evaluation points.
+
+--- Phase 0 of the alignment work (traced vs inversion smoothness), written BEFORE looking ---
+
+Question: does the traced construction leave geometry that is measurably ROUGHER IN PSI than the
+inversion construction, at the same mpsi? Only a smoothness difference licenses the alignment idea;
+an amplitude difference does not, because A3 showed the traced error is already at tolerance
+(5e-10..2.4e-8) and the step count is hypersensitive to perturbations far below physical
+significance (5.3e-11 -> 1.2%).
+
+Data: a1_dir_m{256,512,1024} (traced, tj_analytic_direct) vs a1_inv_m{256,512,1024} (inversion,
+tj_analytic). Same analytic equilibrium, same grid, both with route (a).
+
+PASS only if EITHER:
+  (i)  inversion r1 exceeds traced r1 by >= 0.2 in the same region at >= 2 of the 3 mpsi values,
+       checked in both the core (psi<0.1) and mid-plasma (0.3-0.7) windows; OR
+  (ii) inversion fit-residuals fall >= 3x faster down the ladder (ratio of per-doubling decay
+       factors >= 3).
+
+Otherwise FAIL -> stop, report, and rewrite the plan rather than implementing. Amplitude-only
+differences are explicitly NOT a pass.
+
+Recorded step counts for reference: traced 814/997/1470 (1.23/1.47), inversion 789/892/1056
+(1.13/1.18).
