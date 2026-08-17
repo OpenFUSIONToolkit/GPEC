@@ -207,10 +207,14 @@ const MAIN_H5_ANNOTATIONS = [
         (; long_name="μ0 × dp/dψ_N at each surface", units="T^2", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/dVdpsi" =>
         (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
-    "SingularSurfaces/Delta_prime_matrix" => (; long_name="inter-surface Δ' matrix (PEST3 convention, STRIDE BVP with vacuum coupling)", dims=("surface_row", "surface_col")),
+    "SingularSurfaces/Delta_prime_matrix" =>
+        (; long_name="inter-surface Δ' matrix (PEST-3 tearing↔tearing block; STRIDE BVP or Galerkin outer region)", dims=("surface_row", "surface_col")),
     "SingularSurfaces/Delta_prime_raw" =>
         (; long_name="raw 2msing×2msing outer-region D' matrix, side-major ordering [L_s1, R_s1, ...]", dims=("surface_side_row", "surface_side_col")),
     "SingularSurfaces/Delta_coil" => (; long_name="edge coil-response matrix (edge mode × surface-side)", dims=("mode", "surface_side")),
+    "SingularSurfaces/pest3_A" => (; long_name="PEST-3 matching block A' (interchange↔interchange)", dims=("surface_row", "surface_col")),
+    "SingularSurfaces/pest3_B" => (; long_name="PEST-3 matching block B' (interchange↔tearing)", dims=("surface_row", "surface_col")),
+    "SingularSurfaces/pest3_Gamma" => (; long_name="PEST-3 matching block Γ' (tearing↔interchange)", dims=("surface_row", "surface_col")),
     # --- SingularSurfaces/Kinetic/ ---
     "SingularSurfaces/Kinetic/rational_count" => (; long_name="number of kinetic singular surfaces (det(F̄) near-zeros)"),
     "SingularSurfaces/Kinetic/rational_psi" => (; long_name="normalized poloidal flux ψ_N of kinetic singular surfaces", scale="psi_kinetic_rational"),

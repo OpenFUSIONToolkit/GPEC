@@ -3,7 +3,7 @@
 #   (1) IDEAL galerkin matched ξ   (gal_match_flag=true, gal_ideal_flag=true)
 #   (2) FORWARD ξ                  (gal_match_flag=false)
 #
-# PE writes no ψ grid, so it's reconstructed: gal-ideal → ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi minus issing points;
+# PE writes no ψ grid, so it's reconstructed: gal-ideal → ForceFreeStates/Solutions/GalerkinIntegration/psi (already excludes on-surface points);
 # forward → ForceFreeStates/Solutions/ForwardIntegration/psi.
 # Usage: julia --project=. benchmarks/compare_jbgradpsi_m2.jl [gal_h5] [shoot_h5] [out.png] [m]
 
@@ -19,9 +19,8 @@ to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im
 # gal-ideal run: PE grid = gal solution grid with the on-surface (issing) points dropped
 pa_g, psi_g, mlow, sing_psi, sing_m = h5open(gal_h5) do f
     pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))   # [npsi, mpert]
-    iss = Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]))
-    (pa, read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"])[.!iss], read(f["Info/mlow"]),
-        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_m"]))
+    (pa, read(f["ForceFreeStates/Solutions/GalerkinIntegration/psi"]), read(f["Info/mlow"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_m"]))
 end
 # forward run: PE grid = ForceFreeStates/Solutions/ForwardIntegration/psi
 pa_s, psi_s = h5open(sh_h5) do f

@@ -79,7 +79,7 @@ function materialize_derivative_stores!(
     odet::OdeState,
     equil::Equilibrium.PlasmaEquilibrium,
     ffit::Union{FourFitVars,Nothing},
-    intr::ForceFreeStatesInternal
+    intr::ModeSpace
 )
     odet.du_store_populated && return true
     (isnothing(ffit) || odet.step == 0 || isempty(odet.u_store) || !odet.u_store_el_basis) && return false

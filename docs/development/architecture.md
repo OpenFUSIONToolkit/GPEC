@@ -62,6 +62,7 @@ GPEC consists of **eight main modules** organized in `src/`:
    - Identifies singular surfaces where ξ·∇ψ = 0
    - Key files:
      - `ForceFreeStatesStructs.jl` - Core data structures
+     - `Result.jl` - `ForceFreeStatesResult`, the published solve product every downstream stage reads
      - `Ode.jl` - ODE solver for Euler-Lagrange equations
      - `Sing.jl` - Singular point handling and layer analysis
      - `Fourfit.jl` - Fourier fitting routines
@@ -146,7 +147,7 @@ The complete GPEC analysis pipeline:
    - Compute Δ' at each singular surface
    - Calculate potential and kinetic energies
    - Check Mercier and ballooning stability criteria
-   - Outputs: Eigenmode structure ξ(ψ,θ)
+   - Outputs: `ForceFreeStatesResult` carrying the eigenmode structure ξ(ψ,θ) and the per-integrator products
 
 4. **Perturbed Equilibrium** (GPEC-style):
    - Load external forcing data (coil fields, RMP configuration)
@@ -176,8 +177,14 @@ The complete GPEC analysis pipeline:
 ### Stability
 - `SingType` - Singular surface data including:
   - Rational surface location (ψ, ρ, q = m/n, dq/dψ)
-  - Δ' (tearing stability parameter) — **stub**; the valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`
+  - Δ' (tearing stability parameter) — **stub**; the valid Δ' is `ForceFreeStatesResult.delta_prime.matrix`
   - Asymptotic solution bases at the inner-layer boundaries
+- `ForceFreeStatesResult` - Published product of a solve: mode space, metric/matrix fits, singular
+  surfaces, and the per-integrator products (ξ solution and its basis, free-boundary energies,
+  STRIDE Δ', Galerkin solve). Optional products are `nothing` when the integrator that ran cannot
+  supply them, and consumers warn-and-skip via `require` / `require_solution`.
+- `ForceFreeStatesInternal` - Solve-time scratch; does not cross a module boundary once the result
+  is built
 
 ### Perturbed Equilibrium
 - `PerturbedEquilibriumControl` - User-facing TOML configuration parameters

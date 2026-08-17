@@ -143,7 +143,7 @@ each mapping ψ → flattened mpert² complex vector.
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
 function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
-    intr::ForceFreeStatesInternal,
+    intr::ModeSpace,
     metric::MetricData)
     (; mpert, nlow, nhigh, mlow, mhigh) = intr
     mpsi = metric.mpsi
