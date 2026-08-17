@@ -152,6 +152,39 @@ function _build_surface_coupling(model::GGJModel, params::GGJParameters,
 end
 
 # ---------------------------------------------------------------------
+# Reference-length conversion of the outer Δ' for the slab layer
+# ---------------------------------------------------------------------
+"""
+    delta_prime_to_rs_reference(dp_matrix, params) -> Matrix{ComplexF64}
+
+Convert the outer-region Δ' matrix from its ψ_N reference length (the
+STRIDE/BVP convention: Frobenius coefficients normalized per unit Δψ_N) to
+the r_s-based `x̂ = (r − r_s)/r_s` reference the slab layer works in
+(Fitzpatrick 2023 convention — the same reference used by `dc_tmp` and by
+the `S^(1/3)` Δ(Q) scale, both built on r_s).
+
+Near surface `k` the tearing-parity outer solution is
+`A_L·|x|^(1/2−μ) + A_S·|x|^(1/2+μ)` with `μ = √(−D_I)` (Glasser, Wang &
+Park 2016, Eq. 26). Rescaling the radial variable `x_ψ = K·x̂` with
+`K = r_s·(dψ_N/dr)|_s` maps the coefficients as `Â_L = A_L·K^(1/2−μ)` and
+`Â_S = A_S·K^(1/2+μ)`, so the response matrix (small coefficient at surface
+`i` per unit large coefficient at surface `j`) transforms as
+
+    Δ̂_ij = K_i^(1/2+μ_i) · Δ'_ij · K_j^(μ_j−1/2)
+
+whose diagonal is `K^(2μ)·Δ'_kk`; at D_I = −1/4 (μ = 1/2) this reduces to
+the textbook `Δ̂ = r_s·Δ'_phys`. `K` and `μ` are carried per surface in
+`SLAYERParameters.k_ref` / `.mu_mercier`; hand-built parameters default to
+`k_ref = 1`, making the conversion the identity.
+"""
+function delta_prime_to_rs_reference(dp_matrix::AbstractMatrix,
+    params::AbstractVector)
+    dl = [p.k_ref^(0.5 + p.mu_mercier) for p in params]
+    dr = [p.k_ref^(p.mu_mercier - 0.5) for p in params]
+    return Diagonal(dl) * Matrix{ComplexF64}(dp_matrix) * Diagonal(dr)
+end
+
+# ---------------------------------------------------------------------
 # Core analysis entry point that takes pre-built parameters.
 # ---------------------------------------------------------------------
 """
@@ -193,6 +226,14 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
                 "$(eltype(params)). Build inputs with the matching builder " *
                 "(build_slayer_inputs for SLAYER, build_ggj_inputs for GGJ).")
         )
+
+    # Slab-layer path: convert Δ' from its ψ_N reference length to the
+    # r_s-based convention shared by the layer Δ(Q) and the critical-Δ (see
+    # `delta_prime_to_rs_reference`). GGJ is genuinely toroidal/ψ-based
+    # (its `rescale_delta` handles inner→outer units natively) — no conversion.
+    if !_is_ggj(model)
+        dp = delta_prime_to_rs_reference(dp, params)
+    end
 
     # The coupled determinant uses the reduced m×m (tearing-only) form, which
     # drops the interchange channel. For GGJ that channel carries the Glasser

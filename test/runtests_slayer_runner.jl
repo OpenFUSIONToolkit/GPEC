@@ -153,6 +153,41 @@
         @test_throws ArgumentError run_slayer_from_inputs(params, bad_dp, c)
     end
 
+    @testset "delta_prime_to_rs_reference: ψ_N → r_s conversion" begin
+        # Two surfaces with distinct K and μ; the transform is
+        # Δ̂_ij = K_i^(1/2+μ_i) · Δ'_ij · K_j^(μ_j−1/2).
+        K1, mu1 = 0.9, 0.54
+        K2, mu2 = 1.2, 0.60
+        p1 = SLAYERParameters(; tau=1.0, lu=1e7, c_beta=0.1, D_norm=2.0,
+            P_perp=20.0, P_tor=10.0, Q_e=-1.0, Q_i=0.5, iota_e=2 / 3,
+            tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.4, R0=1.7, bt=2.0,
+            sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=2, n=1, ising=1,
+            k_ref=K1, mu_mercier=mu1)
+        p2 = SLAYERParameters(; tau=1.0, lu=1e7, c_beta=0.1, D_norm=2.0,
+            P_perp=20.0, P_tor=10.0, Q_e=-1.0, Q_i=0.5, iota_e=2 / 3,
+            tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.5, R0=1.7, bt=2.0,
+            sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=3, n=1, ising=2,
+            k_ref=K2, mu_mercier=mu2)
+        dp = ComplexF64[10.0+1im 2.0-0.5im; 3.0+0im 1.5+2im]
+        out = Runner.delta_prime_to_rs_reference(dp, [p1, p2])
+        # Diagonal carries the scalar K^(2μ)
+        @test out[1, 1] ≈ K1^(2mu1) * dp[1, 1]
+        @test out[2, 2] ≈ K2^(2mu2) * dp[2, 2]
+        # Off-diagonals carry the split row/column factors
+        @test out[1, 2] ≈ K1^(0.5 + mu1) * K2^(mu2 - 0.5) * dp[1, 2]
+        @test out[2, 1] ≈ K2^(0.5 + mu2) * K1^(mu1 - 0.5) * dp[2, 1]
+        # At the slab point μ = 1/2 the diagonal factor is exactly K
+        pslab = SLAYERParameters(; tau=1.0, lu=1e7, c_beta=0.1, D_norm=2.0,
+            P_perp=20.0, P_tor=10.0, Q_e=-1.0, Q_i=0.5, iota_e=2 / 3,
+            tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.4, R0=1.7, bt=2.0,
+            sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=2, n=1, ising=1,
+            k_ref=0.8, mu_mercier=0.5)
+        dp1 = ComplexF64[5.0+0im;;]
+        @test Runner.delta_prime_to_rs_reference(dp1, [pslab])[1, 1] ≈ 0.8 * 5.0
+        # Default parameters (k_ref = 1) give the identity regardless of μ
+        @test Runner.delta_prime_to_rs_reference(dp, [_mk_params(), _mk_params()]) ≈ dp
+    end
+
     @testset "run_slayer_from_inputs: coupled mode finds known root" begin
         # Build a 2-surface problem with a known coupled root by construction.
         p1 = _mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, Q_e=-1.0, Q_i=0.5,
