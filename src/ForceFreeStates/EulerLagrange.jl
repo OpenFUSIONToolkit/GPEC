@@ -1,4 +1,194 @@
 """
+EdgeScanState
+
+Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
+Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`.
+The energies are generalized (W, N) pencil values: power-normalized and invariant to the
+working (Jacobian) coordinate (see `power_norm_matrix!`).
+
+## Fields
+
+  - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
+  - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
+  - `psi, q` - ψ and q values at each edge scan step.
+  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Power-normalized energy components at each step (NaN for steps where the wp solve was singular). These drive the truncation choice and are written to `EdgeScan/`.
+"""
+@kwdef mutable struct EdgeScanState
+    numpert_total::Int
+    N_edge::Int
+
+    # Vacuum matrix spline and evaluation infrastructure
+    wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    wv_hint::Base.RefValue{Int} = Ref(1)
+
+    # Scan results (written to HDF5 under EdgeScan/; NaN where free_compute_total raised SingularException)
+    psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
+    q::Vector{Float64} = Vector{Float64}(undef, N_edge)
+    total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
+end
+
+EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)
+
+"""
+OdeState
+
+A mutable struct to hold the state of the ODE solver used by the ForceFreeStates integration routines.
+This struct stores configuration parameters used to allocate arrays, the evolving stored
+solution during integration, diagnostic arrays used for normalization / Gaussian reduction,
+and a small set of temporary matrices and factors used to compute singular-layer corrections.
+
+## Fields
+
+  - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
+
+  - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
+
+  - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
+
+  - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
+
+  - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
+
+  - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
+
+  - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
+
+  - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
+    `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
+
+  - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
+    `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
+    except on the galerkin-matched path which supplies the analytic derivative at construction.
+    du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
+
+  - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
+    shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
+
+  - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
+    derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
+    are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
+
+  - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
+    (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
+    galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
+    sparse parallel path whose solution is in the Riccati basis.
+
+  - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
+
+  - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
+    with shape `(numpert_total, numpert_total, 2, msing)`.
+
+  - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
+    with shape `(numpert_total, numpert_total, 2, msing)`.
+
+  - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
+
+  - `psifac::Float64` - Current normalized flux coordinate for the integrator.
+
+  - `q::Float64` - Safety factor value at `psifac` (current q during integration).
+
+  - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
+
+  - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
+
+  - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
+
+  - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
+
+  - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
+
+  - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
+
+    # Initialization parameters
+
+  - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
+
+  - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
+
+    # Saved data throughout integration
+
+  - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
+
+# Total ODE solver steps taken (all steps, not just saved ones)
+
+  - `index::Array{Int,2}` - Index matrix used for sorting solution norms with shape `(numpert_total, numunorms_init)`.
+
+  - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+    (length `numunorms_init`).
+
+  - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
+
+  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
+
+  - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
+"""
+@kwdef mutable struct OdeState
+    # Initialization parameters
+    numpert_total::Int
+    numunorms_init::Int
+    msing::Int
+    numsteps_init::Int
+
+    # Saved data throughout integration
+    step::Int = 1
+    total_steps::Int = 0  # Total ODE solver steps taken (all steps, not just saved ones)
+    psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
+    q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
+    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    du_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
+    xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
+    u_store_el_basis::Bool = true
+    du_store_populated::Bool = false
+    crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
+    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
+    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
+
+    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+    edge_scan::EdgeScanState = EdgeScanState(numpert_total, 0)
+
+    # Data for integrator
+    psifac::Float64 = 0.0
+    q::Float64 = 0.0
+    u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
+    ising_start::Int = 0
+    psimax::Float64 = 0.0
+    needs_crossing::Bool = false
+    nzero::Int = 0
+
+    # Used for Gaussian reduction
+    new::Bool = true
+    unorm::Vector{Float64} = zeros(Float64, numpert_total)
+    unorm0::Vector{Float64} = zeros(Float64, numpert_total)
+    ifix::Int = 0
+    index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)
+    sing_flag::Vector{Bool} = falses(numunorms_init)
+    zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
+    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
+    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
+
+    # Kinetic workspace arrays: evaluated from kwmats/ktmats splines at current psi
+    kwmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
+    ktmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
+
+    # Shared hint for CubicInterpolant interval search optimization during ODE integration
+    # All splines evaluated at the same psi can share this hint for O(1) interval lookups
+    spline_hint::Base.RefValue{Int} = Ref(1)
+    # Shared 2D hint for CubicInterpolantND (rzphi splines) during ODE integration
+    # Tuple of (psi_hint, theta_hint) for O(1) interval lookups in 2D bicubic splines
+    rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
+    # Per-thread hint for FourFitVars matrix splines (amats/bmats/cmats/fmats_lower/kmats/gmats
+    # and kinetic equivalents). Lives on OdeState — which is already cloned per thread in the
+    # parallel BVP path — so concurrent sing_der! invocations don't race on a shared Ref.
+    ffit_hint::Base.RefValue{Int} = Ref(1)
+end
+
+OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
+    OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+
+"""
     compute_delta_prime_from_ca!(odet, intr, equil)
 
 **STUB — not physically valid.** Compute a per-surface Δ' estimate from the asymptotic
@@ -230,7 +420,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
     # location. Legacy path (true) reproduces the ode_record_edge heuristic from Fortran
     # STRIDE — psilim/qlim/u are pulled back to the dW peak. Preserved for experimental
-    # work; see docstring in ForceFreeStatesStructs.jl for the reliability caveats.
+    # work; see the ForceFreeStatesControl docstring for the reliability caveats.
     if ctrl.psiedge < intr.psilim
         saved_psifac, saved_u = odet.psifac, copy(odet.u)
         peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
@@ -1022,3 +1212,229 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
         jfix = kfix + 1
     end
 end
+
+"""
+    sing_der!(
+        du::Array{ComplexF64,3},
+        u::Array{ComplexF64,3},
+        params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk},
+        psieval::Float64
+    )
+
+Evaluate the derivative of the Euler-Lagrange equations [Glasser Phys. Plasmas 2016 112506 eq. 24].
+This implements du/dψ for both the ideal and kinetic MHD eigenvalue problems.
+
+This function performs the same role as `sing_der` in the Fortran code, with main differences
+coming from hiding LAPACK operations under the hood via Julia's LinearAlgebra package,
+so the code is much more straightforward.
+
+This follows the Julia DifferentialEquations package format for in place updating.
+
+    ode_function!(du, u, p, t)
+
+From DifferentialEquations.jl docs: Defining your ODE function to be in-place updating
+can have performance benefits. What this means is that, instead of writing a function
+which outputs its solution, you write a function which updates a vector that is designated
+to hold the solution. By doing this, DifferentialEquations.jl's solver packages are able
+to reduce the amount of array allocations and achieve better performance.
+
+Wherever possible, in-place operations on pre-allocated arrays are used to minimize memory allocations.
+All LAPACK operations are handled under the hood by Julia's LinearAlgebra package, so we can obtain a much
+more simplistic code with similar performance.
+
+### Arguments
+
+  - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
+  - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
+  - `params::Tuple{ForceFreeStatesControl, PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk}`: Tuple of relevant structs
+  - `psieval::Float64`: Current psi value at which to evaluate the derivative
+
+The unpacked-argument method carries the arithmetic; this tuple method is the thin adapter the
+integrator calls. Ξ_s is *not* computed here — it is a save-point quantity, obtained from
+[`compute_node_xi_s!`](@ref) only where it is actually consumed.
+"""
+function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+    params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
+        FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
+    psieval::Float64)
+    ctrl, equil, ffit, intr, odet, _ = params
+    return sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+end
+
+"""
+    sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+
+Unpacked-argument form of the Euler-Lagrange derivative, using `odet`'s spline hints and
+recording q at `psieval` in `odet.q`. Not safe to call concurrently on a shared `odet`;
+multi-threaded callers should use [`el_derivatives!`](@ref) with their own hints.
+"""
+function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    intr::ForceFreeStatesInternal, odet::OdeState, psieval::Float64)
+    odet.q = el_derivatives!(du, u, ctrl.kinetic_factor > 0, equil, ffit, intr, psieval, odet.spline_hint, odet.ffit_hint)
+    return nothing
+end
+
+"""
+    el_derivatives!(du, u, kinetic, equil, ffit, intr, psieval, spline_hint, ffit_hint) -> q
+
+Euler-Lagrange (or, when `kinetic` is true, FKG) derivative kernel: writes du₁/dψ and du₂/dψ at
+`psieval` into `du` and returns q there. Holds no state of its own — the two hints are the
+caller's interval-search accelerators, so concurrent callers just pass their own.
+"""
+@with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+    kinetic::Bool, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    intr::ModeSpace, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
+
+    # Allocate temporary arrays from the pool
+    Npert = intr.numpert_total
+
+    singfac_vec = acquire!(pool, Float64, Npert)
+    singfac_mat = reshape(singfac_vec, intr.mpert, intr.npert)
+
+    fmat_lower = acquire!(pool, ComplexF64, Npert, Npert)
+    kmat = similar!(pool, fmat_lower)
+    gmat = similar!(pool, fmat_lower)
+    tmp_mat = similar!(pool, fmat_lower)
+
+    fill!(tmp_mat, zero(ComplexF64))
+    u1 = @view(u[:, :, 1])
+    u2 = @view(u[:, :, 2])
+    du1 = @view(du[:, :, 1])
+    du2 = @view(du[:, :, 2])
+
+    # Compute singfac = 1 / (m - nq)
+    # Use caller-supplied hint for O(1) interval lookup during sequential ODE integration
+    q = equil.profiles.q_spline(psieval; hint=spline_hint)
+    singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
+
+    if kinetic
+        # ---- Kinetic path with pre-computed FKG matrices ----
+        # Use the caller's hint, not ffit._hint (shared, racy in the parallel BVP)
+        # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
+        f0mat = similar!(pool, fmat_lower)
+        pmat_kin = similar!(pool, fmat_lower)
+        paat_kin = similar!(pool, fmat_lower)
+        kkmat_kin = similar!(pool, fmat_lower)
+        kkaat_kin = similar!(pool, fmat_lower)
+        r1mat_kin = similar!(pool, fmat_lower)
+        r2mat_kin = similar!(pool, fmat_lower)
+        r3mat_kin = similar!(pool, fmat_lower)
+        gaat_kin = similar!(pool, fmat_lower)
+
+        ffit.f0mats(vec(f0mat), psieval; hint=ffit_hint)
+        ffit.pmats(vec(pmat_kin), psieval; hint=ffit_hint)
+        ffit.paats(vec(paat_kin), psieval; hint=ffit_hint)
+        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit_hint)
+        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit_hint)
+        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit_hint)
+        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit_hint)
+        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit_hint)
+        ffit.gaats(vec(gaat_kin), psieval; hint=ffit_hint)
+
+        # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11):
+        # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1
+        # K̄(i,j) = q1*KK + R2
+        # K̄†(i,j) = KK†*q2 + R3
+        # where q1 = (m₁ - n*q), q2 = (m₂ - n*q) — direct singfac, NOT 1/(m-nq) as in ideal path
+        singfac_direct = acquire!(pool, Float64, Npert)
+        singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
+        singfac_direct_mat .= (intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)'
+
+        # Build F, K, K† with singfac (using fmat_lower, kmat, gmat as workspace for F, K, K†)
+        kaat_kin = similar!(pool, fmat_lower)  # K† matrix
+        for j in 1:Npert
+            q2 = singfac_direct[j]
+            for i in 1:Npert
+                q1 = singfac_direct[i]
+                fmat_lower[i, j] = q1 * f0mat[i, j] * q2 - q1 * pmat_kin[i, j] -
+                                   conj(paat_kin[j, i]) * q2 + r1mat_kin[i, j]
+                kmat[i, j] = q1 * kkmat_kin[i, j] + r2mat_kin[i, j]
+                kaat_kin[i, j] = kkaat_kin[i, j] * q2 + r3mat_kin[i, j]
+            end
+        end
+        # gmat = gaat (already loaded)
+        gmat .= gaat_kin
+
+        # Kinetic ODE (Logan 2015 Eq 7.46): singfac absorbed into F̄/K̄/K̄†, no explicit Q⁻¹
+        # du₁ = F̄⁻¹(u₂ - K̄·u₁)
+        du1 .= u2
+        mul!(tmp_mat, kmat, u1)
+        du1 .-= tmp_mat
+        # LU factorize F (non-Hermitian, non-symmetric); direct LAPACK for the same hot-loop reason
+        _, ipiv2, _ = LAPACK.getrf!(fmat_lower)
+        LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
+
+        # du₂ = Ḡ†·u₁ + K̄†·du₁  (Logan 2015 Eq C.10-C.11)
+        mul!(tmp_mat, gmat, u1)
+        du2 .= tmp_mat
+        mul!(tmp_mat, kaat_kin, du1)
+        du2 .+= tmp_mat
+
+    else
+        # ---- Ideal path ----
+        # Evaluate matrix splines at the current psi (hint is the caller's, never shared)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit_hint)
+        ffit.kmats(vec(kmat), psieval; hint=ffit_hint)
+        ffit.gmats(vec(gmat), psieval; hint=ffit_hint)
+
+        # See equations 22-24 in Glasser 2016 DCON paper for derivation
+        # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
+        du1 .= u2 .* singfac_vec
+        mul!(tmp_mat, kmat, u1)
+        du1 .-= tmp_mat
+        ldiv!(LowerTriangular(fmat_lower), du1)
+        ldiv!(UpperTriangular(fmat_lower'), du1)
+        # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
+        mul!(tmp_mat, gmat, u1)
+        du2 .= tmp_mat
+        mul!(tmp_mat, adjoint(kmat), du1)
+        du2 .+= tmp_mat
+        # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
+        du1 .*= singfac_vec
+    end
+    return q
+end
+
+"""
+    compute_node_xi_s!(xi_s, du1, u1, ffit, psieval; kinetic=false, hint=Ref(1))
+
+Evaluate Ξ_s = -A⁻¹(B·Ξ′_ψ + C·Ξ_ψ) [Glasser Phys. Plasmas 2016 112506 eq. 18] at `psieval`,
+writing into `xi_s`. `du1` and `u1` are the Ξ′_ψ and Ξ_ψ blocks at the same ψ, i.e. slices of a
+`el_derivatives!` result and its input state.
+
+Split out of the derivative kernel because Ξ_s is needed only at saved nodes, not at every
+Runge-Kutta stage. Ideal runs factor the Hermitian A by Cholesky; with `kinetic=true` A picks up
+non-Hermitian contributions and needs an LU.
+"""
+@with_pool pool function compute_node_xi_s!(xi_s::AbstractMatrix{ComplexF64}, du1::AbstractMatrix{ComplexF64},
+    u1::AbstractMatrix{ComplexF64}, ffit::FourFitVars, psieval::Float64; kinetic::Bool=false, hint::Base.RefValue{Int}=Ref(1))
+
+    Npert = size(u1, 1)
+    amat = acquire!(pool, ComplexF64, Npert, Npert)
+    bmat = similar!(pool, amat)
+    cmat = similar!(pool, amat)
+    tmp_mat = similar!(pool, amat)
+
+    ffit.amats(vec(amat), psieval; hint=hint)
+    ffit.bmats(vec(bmat), psieval; hint=hint)
+    ffit.cmats(vec(cmat), psieval; hint=hint)
+
+    # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place
+    if kinetic
+        _, ipiv, _ = LAPACK.getrf!(amat)
+        LAPACK.getrs!('N', amat, ipiv, bmat)
+        LAPACK.getrs!('N', amat, ipiv, cmat)
+    else
+        LAPACK.potrf!('U', amat)
+        LAPACK.potrs!('U', amat, bmat)
+        LAPACK.potrs!('U', amat, cmat)
+    end
+
+    mul!(tmp_mat, bmat, du1)
+    xi_s .= .-tmp_mat
+    mul!(tmp_mat, cmat, u1)
+    xi_s .-= tmp_mat
+    return xi_s
+end
+
