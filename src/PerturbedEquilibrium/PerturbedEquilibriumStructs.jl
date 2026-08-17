@@ -29,7 +29,7 @@ Regularization:
     # High Priority (MWE)
   - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
-@kwdef mutable struct PerturbedEquilibriumControl
+@kwdef struct PerturbedEquilibriumControl
     # High Priority (MWE)
     fixed_boundary::Bool = false
     output_eigenmodes::Bool = true
@@ -76,7 +76,7 @@ Internal state variables for perturbed equilibrium calculations.
     n_modes::Vector{Int} = Int[]
     # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer.
     inner_bpen::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
-    # True when the consumed OdeState came from gal matching, whose du_store carries the
+    # True when the consumed solution came from gal matching, whose du_store carries the
     # analytic galerkin Ξ′; selects the gal branch of the singular-coupling Ξ′ evaluation.
     odet_from_gal::Bool = false
 end

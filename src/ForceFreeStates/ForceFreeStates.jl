@@ -24,7 +24,6 @@ import StaticArrays: @MMatrix
 
 # Include all necessary files
 include("ForceFreeStatesStructs.jl")
-include("Ballooning.jl")
 include("Resist.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")
@@ -44,6 +43,12 @@ include("Galerkin/GalerkinAssembly.jl")
 include("Galerkin/GalerkinSolution.jl")
 include("Galerkin/GalerkinMatch.jl")
 include("Galerkin/GalerkinSolve.jl")
+
+# Scripting-API integrator selectors: pure configuration translated onto ForceFreeStatesControl.
+include("Integrators.jl")
+
+# The published solve product; last, so it can name every type the stages above define.
+include("Result.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10

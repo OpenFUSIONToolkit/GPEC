@@ -52,9 +52,7 @@ singfac_min             = 1e-4 # Fractional distance from rational q at which id
 ucrit                   = 1e4  # Column-norm threshold that triggers solution renormalization
 sing_order              = 6    # Order of the singular-surface (Frobenius) series expansion
 
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks SingularSurfaces/delta_prime_matrix)
-parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
-populate_dense_xi     = false  # Append serial-EL pass for dense ξ; not needed without [PerturbedEquilibrium] (default false)
+integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim  = false  # FALSE for limited/analytical equilibria — rationals sparse, dmlim would chop too much edge
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
 force_termination     = true   # Stop after force-free states (skip perturbed equilibrium)

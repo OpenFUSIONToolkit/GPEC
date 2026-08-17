@@ -3,13 +3,12 @@
 
 Single source of truth for the NTV calculation methods. Each entry is a NamedTuple
 `(name, flag, kind, doc)`:
-
-  - `name`  — short method identifier used as the HDF5 group key and in `intr.method`
-  - `flag`  — the `KineticForcesControl` field symbol that enables the method
-  - `kind`  — dispatch routing tag consumed by `method_kind` / `Torque.jl`
-    (`:gar` for the GAR/matrix family, `:fcgl`/`:rlar`/`:clar` for the
-    three special-cased methods)
-  - `doc`   — one-line description printed in verbose output
+- `name`  — short method identifier used as the HDF5 group key and in `intr.method`
+- `flag`  — the `KineticForcesControl` field symbol that enables the method
+- `kind`  — dispatch routing tag consumed by `method_kind` / `Torque.jl`
+            (`:gar` for the GAR/matrix family, `:fcgl`/`:rlar`/`:clar` for the
+            three special-cased methods)
+- `doc`   — one-line description printed in verbose output
 
 The method names/docs and the `Compute.jl` enable list are all derived from this
 tuple, and `Torque.jl` routes on `kind`, so the methods are enumerated in one place.
@@ -54,15 +53,8 @@ end
     IonSpecies(; z, m, fraction=NaN, density="")
 
 One main-ion species in a multi-ion NTV run. `z`/`m` are the charge (e) and mass (proton
-masses). The density is given by **exactly one** of:
-
-  - `fraction`: this species' share of the total main-ion density (the kinetic file's `n_i`
-    column), e.g. 0.5 for each of 50/50 D-T. Convenient when species share a profile shape.
-  - `density`: the name of an explicit per-species density profile in the (HDF5) kinetic file,
-    for measured profiles with distinct shapes.
-
-Both resolve to a per-species density profile `n_s(ψ)` at load time (one downstream path).
-Constructed from a TOML `[[KineticForces.ion_species]]` table via `convert`.
+masses). The density is given by exactly one of `fraction` or `density`, which select a
+fraction of the total `n_i` profile or an explicit per-species profile in the kinetic file.
 """
 struct IonSpecies
     z::Int
@@ -70,13 +62,13 @@ struct IonSpecies
     fraction::Float64
     density::String
 end
+
 IonSpecies(; z::Integer, m::Integer, fraction=NaN, density="") =
     IonSpecies(Int(z), Int(m), Float64(fraction), String(density))
 IonSpecies(d::AbstractDict) = IonSpecies(; (Symbol(k) => v for (k, v) in d)...)
-# TOML.jl parses [[KineticForces.ion_species]] as a Vector{Any} of Dicts, so accept any
-# AbstractVector and build each element (pass IonSpecies through unchanged).
 Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector) =
     IonSpecies[x isa IonSpecies ? x : IonSpecies(x) for x in v]
+
 
 """
     KineticForcesControl
@@ -84,19 +76,7 @@ Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector) =
 User-facing control parameters from the TOML `[KineticForces]` section.
 Configures which NTV methods to run, species parameters, tolerances, and output options.
 
-`ion_species` selects the plasma model: empty (default) ⇒ a single main ion from `zi`/`mi`
-(unchanged behaviour); non-empty ⇒ a multi-main-ion run where the NTV is computed per
-`IonSpecies` under one shared full-composition Zeff and summed. For a multi-ion run the kinetic
-file's `n_i` column is the **total** main-ion density, split across species by their `fraction`
-or explicit `density` profile.
-
-`electron = true` always adds the electron NTV **in addition to** the ion species, on both the
-single-ion and multi-ion paths (a single-ion + electron run resolves as the species pair
-{main ion, electron} plus any quasineutrality impurity, summed). The legacy Fortran PENTRC
-electron-*instead-of*-ions behaviour was an IO limitation and is not reproduced.
-
 Constructed via keyword arguments or from a TOML dict:
-
 ```julia
 ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
@@ -130,8 +110,8 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     mi::Int = 2                     # Ion mass (proton masses)
     zimp::Int = 6                   # Impurity charge
     mimp::Int = 12                  # Impurity mass
-    electron::Bool = false          # Add electron NTV in addition to the ion species (see docstring)
-    ion_species::Vector{IonSpecies} = IonSpecies[]   # multi-main-ion set (see docstring); empty ⇒ single ion
+    electron::Bool = false          # Add electron NTV in addition to the ion species
+    ion_species::Vector{IonSpecies} = IonSpecies[]   # multi-main-ion set; empty ⇒ single ion
 
     # Mode numbers
     nn::Int = 1                     # Toroidal mode number
@@ -218,13 +198,12 @@ Internal working state for KineticForces calculations.
 Holds equilibrium-derived quantities, profile interpolants, and integration results.
 
 Fields replacing former module-level globals:
-
-  - `ro`, `bo`, `chi1`: Equilibrium geometry parameters
-  - `mthsurf`, `mfac`: Poloidal grid info
-  - `dbob_m`, `divx_m`: Perturbation mode interpolants
-  - `sing_psis`: Rational-surface ψ locations (sorted, from the stability analysis), used as
-    panel boundaries for the outer ψ torque quadrature so the resonant peaks fall on
-    Gauss-Kronrod interval endpoints instead of driving deep adaptive bisection
+- `ro`, `bo`, `chi1`: Equilibrium geometry parameters
+- `mthsurf`, `mfac`: Poloidal grid info
+- `dbob_m`, `divx_m`: Perturbation mode interpolants
+- `sing_psis`: Rational-surface ψ locations (sorted, from the stability analysis), used as
+  panel boundaries for the outer ψ torque quadrature so the resonant peaks fall on
+  Gauss-Kronrod interval endpoints instead of driving deep adaptive bisection
 
 Equilibrium and kinetic profile data are read directly from the
 `PlasmaEquilibrium` (`equil.profiles`, `equil.geometry`) and the
@@ -314,55 +293,54 @@ function KineticForcesInternal(equil; verbose::Bool=false)
     # Axis toroidal field F(0)/ro that normalizes λ = μ·bo/E; F_spline stores 2πF.
     bo_axis = abs(equil.profiles.F_spline(0.0)) / (2π * equil.ro)
     KineticForcesInternal(;
-        ro=equil.ro,
-        bo=bo_axis,
-        chi1=2π * equil.psio,
+        ro      = equil.ro,
+        bo      = bo_axis,
+        chi1    = 2π * equil.psio,
         mthsurf,
-        tpsi_xs=collect(range(0.0, 1.0; length=nth)),
-        tpsi_B=Vector{Float64}(undef, nth),
-        tpsi_dBdpsi=Vector{Float64}(undef, nth),
-        tpsi_dBdtheta=Vector{Float64}(undef, nth),
-        tpsi_jac=Vector{Float64}(undef, nth),
-        tpsi_djdpsi=Vector{Float64}(undef, nth),
-        verbose
+        tpsi_xs       = collect(range(0.0, 1.0, length=nth)),
+        tpsi_B        = Vector{Float64}(undef, nth),
+        tpsi_dBdpsi   = Vector{Float64}(undef, nth),
+        tpsi_dBdtheta = Vector{Float64}(undef, nth),
+        tpsi_jac      = Vector{Float64}(undef, nth),
+        tpsi_djdpsi   = Vector{Float64}(undef, nth),
+        verbose,
     )
 end
 
 """
-    set_perturbation_data!(kf_intr, pe_state, ffs_intr, equil, metric)
+    set_perturbation_data!(kf_intr, pe_state, ffs, equil, metric)
 
 Populate perturbation data from PerturbedEquilibriumState into KineticForcesInternal.
 
 Builds three interpolant sets from PE Clebsch displacements:
-
- 1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] CubicSeriesInterpolants over ψ
- 2. `dbob_m` — δB/B Fourier modes via JBB deweighting (Fortran set_peq)
- 3. `divx_m` — ∇·ξ⊥ Fourier modes via JBB deweighting
+1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] CubicSeriesInterpolants over ψ
+2. `dbob_m` — δB/B Fourier modes via JBB deweighting (Fortran set_peq)
+3. `divx_m` — ∇·ξ⊥ Fourier modes via JBB deweighting
 
 The JBB deweighting algorithm (Fortran pentrc/inputs.f90:828-868):
-
- 1. Apply geometric matrices S,T,X,Y,Z in m-space
- 2. Inverse DFT to θ-space
- 3. Divide by J·B² at each θ
- 4. Forward DFT back to m-space
+1. Apply geometric matrices S,T,X,Y,Z in m-space
+2. Inverse DFT to θ-space
+3. Divide by J·B² at each θ
+4. Forward DFT back to m-space
 """
-function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_intr,
-    equil::Equilibrium.PlasmaEquilibrium,
-    metric::ForceFreeStates.MetricData)
+function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
+                                ffs::ForceFreeStates.ForceFreeStatesResult,
+                                equil::Equilibrium.PlasmaEquilibrium,
+                                metric::ForceFreeStates.MetricData)
     # Copy mode numbers from FFS
-    kf_intr.mlow = ffs_intr.mlow
-    kf_intr.mhigh = ffs_intr.mhigh
-    kf_intr.mpert = ffs_intr.mpert
-    kf_intr.nlow = ffs_intr.nlow
-    kf_intr.nhigh = ffs_intr.nhigh
-    kf_intr.npert = ffs_intr.npert
-    kf_intr.numpert_total = ffs_intr.numpert_total
-    kf_intr.mfac = collect(ffs_intr.mlow:ffs_intr.mhigh)
-    kf_intr.psilim = ffs_intr.psilim
+    kf_intr.mlow = ffs.mlow
+    kf_intr.mhigh = ffs.mhigh
+    kf_intr.mpert = ffs.mpert
+    kf_intr.nlow = ffs.nlow
+    kf_intr.nhigh = ffs.nhigh
+    kf_intr.npert = ffs.npert
+    kf_intr.numpert_total = ffs.numpert_total
+    kf_intr.mfac = collect(ffs.mlow:ffs.mhigh)
+    kf_intr.psilim = ffs.psilim
 
     # Rational-surface ψ locations (ideal + kinetic EL) become panel boundaries for the
     # outer ψ torque quadrature; dedupe against coincident points happens in psi_panel_points.
-    kf_intr.sing_psis = sort!(vcat([s.psifac for s in ffs_intr.sing], [s.psifac for s in ffs_intr.kinsing]))
+    kf_intr.sing_psis = sort!(vcat([s.psifac for s in ffs.surfaces], [s.psifac for s in ffs.kinetic.kinsing]))
 
     # Bail if no xi_modes available (PE didn't run or failed)
     if pe_state.xi_modes === nothing || isempty(pe_state.psi_grid)
@@ -373,7 +351,7 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     xi_modes = pe_state.xi_modes
     psi_grid = pe_state.psi_grid
     npsi = length(psi_grid)
-    mpert = ffs_intr.mpert
+    mpert = ffs.mpert
 
     # Build xs_m: 3 CubicSeriesInterpolants from Clebsch displacement matrices
     # xs_m[1] = ξ^ψ (unregularized), xs_m[2] = ∂ξ^ψ/∂ψ (regularized), xs_m[3] = ξ^α
@@ -386,11 +364,11 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     kf_intr.xs_m = [xs_m_1, xs_m_2, xs_m_3]
 
     # Build geometric matrices (S,T,X,Y,Z) for JBB deweighting
-    geom_mats = ForceFreeStates.build_kinetic_metric_matrices(equil, ffs_intr, metric)
+    geom_mats = ForceFreeStates.build_kinetic_metric_matrices(equil, ffs, metric)
 
     # Build FourierTransform for the JBB deweighting DFT round-trip
     mthsurf = kf_intr.mthsurf
-    ft = Utilities.FourierTransforms.FourierTransform(mthsurf, mpert, ffs_intr.mlow)
+    ft = Utilities.FourierTransforms.FourierTransform(mthsurf, mpert, ffs.mlow)
 
     # JBB deweighting: convert Clebsch modes → physical δB/B and ∇·ξ⊥ modes
     dbob_m_data = zeros(ComplexF64, npsi, mpert)
@@ -417,9 +395,9 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
         psi = psi_grid[ipsi]
 
         # Get Clebsch displacement vectors at this ψ
-        xsp = view(xi_modes.clebsch_psi, ipsi, :)       # ξ^ψ [mpert]
+        xsp  = view(xi_modes.clebsch_psi,  ipsi, :)       # ξ^ψ [mpert]
         xmp1 = view(xi_modes.clebsch_psi1, ipsi, :)       # ∂ξ^ψ/∂ψ [mpert]
-        xms = view(clebsch_alpha_mat, ipsi, :)            # ξ^α [mpert]
+        xms  = view(clebsch_alpha_mat, ipsi, :)            # ξ^α [mpert]
 
         # Evaluate geometric matrices at ψ → mpert² flat vectors, reshape to mpert×mpert
         geom_mats.smats(smat_flat, psi; hint=hint_s)
@@ -439,8 +417,8 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
         mul!(jbb_kapx, smat, xsp)
         mul!(jbb_kapx, tmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)   # += tmat * xms
         mul!(jbb_divx, xmat, xmp1)
-        mul!(jbb_divx, ymat, xsp, 1.0 + 0.0im, 1.0 + 0.0im)  # += ymat * xsp
-        mul!(jbb_divx, zmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)  # += zmat * xms
+        mul!(jbb_divx, ymat, xsp,  1.0 + 0.0im, 1.0 + 0.0im)  # += ymat * xsp
+        mul!(jbb_divx, zmat, xms,  1.0 + 0.0im, 1.0 + 0.0im)  # += zmat * xms
         @. jbb_dbob = -(jbb_divx + jbb_kapx)
 
         # Inverse DFT to θ-space, divide by J·B², forward DFT back
@@ -467,9 +445,9 @@ Matches Fortran set_peq lines 859-868: transforms JBB-weighted m-space data
 to θ-space, removes the J·B² weighting at each poloidal angle, and transforms back.
 """
 function _jbb_deweight!(out::AbstractVector{ComplexF64}, jbb_modes::Vector{ComplexF64},
-    ft::Utilities.FourierTransforms.FourierTransform,
-    psi::Float64, equil::Equilibrium.PlasmaEquilibrium,
-    mthsurf::Int, theta_buf::Vector{ComplexF64})
+                        ft::Utilities.FourierTransforms.FourierTransform,
+                        psi::Float64, equil::Equilibrium.PlasmaEquilibrium,
+                        mthsurf::Int, theta_buf::Vector{ComplexF64})
     # Inverse DFT: m-space → θ-space
     theta_buf .= Utilities.FourierTransforms.inverse(ft, jbb_modes)
 
@@ -539,8 +517,8 @@ Accumulated results from all KineticForces computations.
 Written to gpec.h5 under the "KineticForces" group.
 """
 @kwdef mutable struct KineticForcesState
-    method_results::Dict{String,MethodResult} = Dict{String,MethodResult}()
+    method_results::Dict{String, MethodResult} = Dict{String, MethodResult}()
     # Block-diagonal kinetic matrices: key=method, value=(numpert_total, numpert_total, 6)
-    kinetic_matrices::Dict{String,Array{ComplexF64,3}} = Dict{String,Array{ComplexF64,3}}()
+    kinetic_matrices::Dict{String, Array{ComplexF64,3}} = Dict{String, Array{ComplexF64,3}}()
     completed::Bool = false
 end
