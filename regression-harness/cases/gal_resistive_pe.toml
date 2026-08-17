@@ -1,3 +1,9 @@
+# Regression case: DIII-D-like n=1 DRIVEN/RPEC pipeline — gal-matched resistive ξ
+# fed into PerturbedEquilibrium with DIII-D C-coil forcing. Tracks the finite
+# per-rational-surface singular-coupling scalars (island half-widths, Chirikov
+# overlap, resonant flux, penetrated field, Δ′).
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
 [case]
 name = "gal_resistive_pe"
 description = "DIII-D-like, n=1, DRIVEN/RPEC: gal-matched resistive ξ → PerturbedEquilibrium (coil-driven singular coupling)"
@@ -9,7 +15,7 @@ example_dir = "examples/DIIID-like_gal_resistive_pe_example"
 
 # Surface locations / count (sanity)
 [quantities.pe_rational_q]
-h5path = "perturbed_equilibrium/singular_coupling/rational_q"
+h5path = "PerturbedEquilibrium/SingularCoupling/rational_q"
 type = "real_vector"
 extract = "all_real"
 label = "rational q values"
@@ -18,7 +24,7 @@ order = 10
 
 # Island half-widths per rational surface — the headline driven quantity
 [quantities.pe_island_half_width]
-h5path = "perturbed_equilibrium/singular_coupling/island_half_width"
+h5path = "PerturbedEquilibrium/SingularCoupling/island_half_width"
 type = "real_vector"
 extract = "all_real"
 label = "island half-widths"
@@ -27,54 +33,54 @@ order = 20
 
 # Chirikov overlap parameter per surface
 [quantities.pe_chirikov]
-h5path = "perturbed_equilibrium/singular_coupling/chirikov_parameter"
+h5path = "PerturbedEquilibrium/SingularCoupling/chirikov_parameter"
 type = "real_vector"
 extract = "all_real"
 label = "Chirikov parameter"
 noise_threshold = 1e-8
 order = 21
 
-# Resonant flux Φ_res per surface (applied) — norm + per-surface complex values
+# Resonant area-weighted field b̄^r = Φ^r/A^r per surface (tesla) — norm + per-surface complex values
 [quantities.pe_resonant_flux_norm]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "norm"
-label = "||resonant flux||"
+label = "||resonant b field||"
 noise_threshold = 1e-6
 order = 30
 
 [quantities.pe_resonant_flux_all]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "all_complex"
-label = "resonant flux Phi_res"
+label = "resonant b field (all)"
 noise_threshold = 1e-8
 order = 31
 
 # Penetrated (reconnected) resonant field per surface — the resistive shielding signature
 [quantities.pe_penetrated_field]
-h5path = "perturbed_equilibrium/singular_coupling/penetrated_field"
+h5path = "PerturbedEquilibrium/SingularCoupling/penetrated_area_weighted_field"
 type = "complex_vector"
 extract = "all_complex"
-label = "penetrated field"
+label = "penetrated b field"
 noise_threshold = 1e-8
 order = 32
 
 # Per-surface Δ' from the PE singular-coupling analysis
 [quantities.pe_delta_prime]
-h5path = "perturbed_equilibrium/singular_coupling/delta_prime"
+h5path = "PerturbedEquilibrium/SingularCoupling/Delta_prime"
 type = "complex_vector"
 extract = "all_complex"
 label = "PE Δ' per surface"
 noise_threshold = 1e-8
 order = 33
 
-# Resonant-flux coupling matrix (n_rational × numpert_total) — Frobenius norm, catches broader drift
+# Resonant-field coupling matrix (n_rational × numpert_total) — Frobenius norm, catches broader drift
 [quantities.pe_C_resonant_flux_norm]
-h5path = "perturbed_equilibrium/singular_coupling/C_resonant_flux"
+h5path = "PerturbedEquilibrium/SingularCoupling/C_resonant_area_weighted_field"
 type = "complex_matrix"
 extract = "norm"
-label = "||C resonant flux||"
+label = "||C resonant b field||"
 noise_threshold = 1e-6
 order = 40
 

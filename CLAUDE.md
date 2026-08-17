@@ -8,7 +8,7 @@ GPEC (Generalized Perturbed Equilibrium Code, Julia implementation) is a compreh
 
 **Relationship to Fortran GPEC**: This Julia GPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "the Fortran code", "the original GPEC", "Fortran GPEC", or "legacy VACUUM", they are referring to that Fortran codebase — not a runtime dependency of this Julia implementation. This Julia implementation reimplements and extends GPEC's functionality with improved performance and maintainability.
 
-**Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, check for a local GPEC repository at `~/Code/gpec`. If not found at this location, ask the user for the correct path.
+**Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, a local clone of the Fortran GPEC repository is needed; ask the user for its path.
 
 ## Key References
 
@@ -95,6 +95,7 @@ Roster, the recommended review pipeline (physics fidelity → readability → pe
 ### General
 - **Julia version**: 1.11 is the target version
 - **Never remove packages from Project.toml** - If a package fails to load or resolve, run `Pkg.add(...)` or `Pkg.instantiate()` to fix the local environment. Do NOT remove the package from `Project.toml`. The developer works across multiple branches and machines, so environment drift is expected — the right fix is always to update the environment to satisfy the toml, not to trim the toml to match the current environment state.
+- **Regenerate the CI dependency pins when `Project.toml` changes** - CI does not resolve dependencies freshly; it copies a pinned resolve from `ci/manifests/` so runs are reproducible and the restored depot cache stays valid. After editing `[deps]` or `[compat]`, run `julia +1.11 ci/manifests/update.jl` and `julia +1.12 ci/manifests/update.jl` and commit the result. See [`ci/manifests/README.md`](ci/manifests/README.md).
 - **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
 - **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
 - **Documentation coverage** - When adding a new module or submodule with public docstrings, add a corresponding `@autodocs` block in `docs/src/`. Documenter CI will fail with a `missing_docs` error if any exported docstring is not covered. The analysis submodule docs live in `docs/src/analysis.md`.
@@ -129,7 +130,7 @@ These rules apply to **every** Agent tool invocation, not just performance work.
 
 ### Code Formatting
 
-Pre-commit hooks enforce formatting via JuliaFormatter (v1.0.62) and general file hygiene. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
+Pre-commit hooks enforce formatting via JuliaFormatter and general file hygiene. The hook runs the developer's globally installed JuliaFormatter (the version is not currently pinned), so previously untouched files may normalize wholesale on first edit; this churn is expected and should not be reverted. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
 
 The project's `.JuliaFormatter.toml` settings:
 - **Line width**: 180 characters max (`margin = 180`)
@@ -145,6 +146,10 @@ Additional file hygiene (enforced by pre-commit hooks):
 - No trailing whitespace on any line
 - Files must end with exactly one newline
 - LF line endings only (no CRLF)
+
+### HDF5 Output Conventions
+
+The `gpec.h5` schema follows one physics-first convention (CamelCase groups at all levels, snake_case datasets, data-driven tokens verbatim, inputs only under `Input/`, five named top-level physics-topic exceptions). **Do not invent new group names or echo inputs into output groups** — read **[`docs/development/hdf5-conventions.md`](docs/development/hdf5-conventions.md)** before adding or moving any HDF5 output; renames are clean breaks (update writer, readers, and harness case TOMLs together — there is no legacy-path shim).
 
 ### TOML Annotation Conventions
 

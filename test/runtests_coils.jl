@@ -541,11 +541,11 @@ end
     mktempdir() do dir
         path = joinpath(dir, "snap.h5")
         HDF5.h5open(path, "w") do f
-            ForcingTerms.save_coils_to_h5(sets_in, HDF5.create_group(f, "input/raw_inputs/coils"))
+            ForcingTerms.save_coils_to_h5(sets_in, HDF5.create_group(f, "Input/RawInputs/Coils"))
         end
         sets_out = ForcingTerms.CoilSet[]
         HDF5.h5open(path, "r") do f
-            ForcingTerms.load_coils_from_h5_group!(sets_out, f["input/raw_inputs/coils"])
+            ForcingTerms.load_coils_from_h5_group!(sets_out, f["Input/RawInputs/Coils"])
         end
         @test length(sets_out) == 2
         byname = Dict(s.name => s for s in sets_out)

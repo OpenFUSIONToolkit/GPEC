@@ -415,10 +415,11 @@ solvers.
 function _build_psi_grid(equil_params, psilow, psihigh)
     mpsi = equil_params.mpsi
     if equil_params.grid_type in ("auto", "log_asymptotic") && mpsi == 0 && equil_params.psi_accuracy > 0
-        # Two-pass auto grid: this is the coarse pass-1 layout; the driver measures the
-        # formed equilibrium's curvature and re-forms on a refined grid (GridRefinement.jl).
-        mpsi = 128
-        @info "Auto psi grid: forming pass-1 equilibrium on coarse $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
+        # Two-pass auto grid: this is the pass-1 layout; the driver measures the formed
+        # equilibrium's curvature and re-forms on a refined grid (GridRefinement.jl). Sized to
+        # resolve the gradient structure accurately so pass 2 is well-provisioned (PASS1_INTERVALS).
+        mpsi = PASS1_INTERVALS
+        @info "Auto psi grid: forming pass-1 equilibrium on $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
     elseif mpsi == 0
         mpsi = 128
     end
@@ -444,7 +445,10 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
-    return psi_nodes
+    # Floor node spacing on the fixed grids: ldp/pow1 pack the edge as ~(π/2·mpsi)⁻² and at high
+    # mpsi drive it below the integration-noise scale (garbage curvature). The auto grid floors its
+    # refined pass-2 grid in refined_psi_grid, so it is left untouched here.
+    return equil_params.grid_type in ("auto", "log_asymptotic") ? psi_nodes : enforce_min_spacing(psi_nodes, MIN_KNOT_SPACING)
 end
 
 """
@@ -474,7 +478,7 @@ robustness.
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
-    psihigh = equil_params.psihigh
+    psihigh = raw_profile.psihigh_resolved
 
     # Locate the magnetic axis and separatrix for the field-line integrations
     ro, zo, _, rs2 = direct_position!(raw_profile)
@@ -541,15 +545,18 @@ robustness.
     if q0 <= 0.0
         @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
     end
-    if equil_params.newq0 == -1
-        equil_params.newq0 = -q0
+    # The -1 sentinel means "flip the extrapolated q0"; resolve it into a local so the
+    # config stays the user's request (matches equilibrium_solver(::InverseRunInput)).
+    newq0 = equil_params.newq0
+    if newq0 == -1
+        newq0 = -q0
     end
-    if equil_params.newq0 != 0.0
-        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", equil_params.newq0))"
+    if newq0 != 0.0
+        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", newq0))"
         f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
-        f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
+        f0fac = f0^2 * ((newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.newq0)
+            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(newq0)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
@@ -647,6 +654,7 @@ robustness.
 
     params = EquilibriumParameters()
     params.bt_sign = raw_profile.bt_sign
+    params.psihigh_resolved = psihigh
 
     return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
         rzphi_xs, rzphi_ys,

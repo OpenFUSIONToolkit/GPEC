@@ -1,7 +1,7 @@
 using LinearAlgebra
 using TOML
 
-@testset "Parallel FM Integration Tests" begin
+@testset "Riccati FM Integration Tests" begin
 
     @testset "ChunkPropagator identity on trivial interval" begin
         # Integrating over a zero-width interval should give the identity propagator.
@@ -106,7 +106,7 @@ using TOML
 
     @testset "balance_integration_chunks produces target count" begin
         # Verify that balance_integration_chunks creates at least
-        # max(2*msing+3, 4*nthreads) chunks from a small set of base chunks.
+        # max(2*msing+3, 8*(msing+1)+msing) chunks from a small set of base chunks.
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
@@ -115,10 +115,10 @@ using TOML
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -134,9 +134,11 @@ using TOML
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         balanced = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
 
-        # Must mirror balance_integration_chunks' internal target_n formula
-        # (src/ForceFreeStates/EulerLagrange.jl). Keep this in sync.
-        target_n = max(2 * intr.msing + 3, 4 * Threads.nthreads(), 8 * (intr.msing + 1) + intr.msing)
+        # Must mirror balance_integration_chunks' internal target_n formula for nchunks = 0
+        # (src/ForceFreeStates/EulerLagrange.jl). Keep this in sync. The formula reads only
+        # intr.msing — no thread count enters it, which is what makes Riccati outputs
+        # independent of how many threads `julia -t` provides.
+        target_n = max(2 * intr.msing + 3, 8 * (intr.msing + 1) + intr.msing)
 
         # After balancing, chunk count equals target_n: the while-loop adds exactly one
         # chunk per iteration (a bisection split) and exits when length(result) >= target_n,
@@ -165,6 +167,27 @@ using TOML
         n_crossings_base = count(c -> c.needs_crossing, base_chunks)
         n_crossings_bal = count(c -> c.needs_crossing, balanced)
         @test n_crossings_bal == n_crossings_base
+
+        # Chunking is a pure function of (chunks, ctrl, intr): repeated calls on the same
+        # inputs give bit-identical boundaries. Together with the thread-free target_n
+        # formula above, this is what guarantees Riccati results do not move with `julia -t`.
+        balanced_again = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
+        @test length(balanced_again) == length(balanced)
+        @test all(balanced_again[i].psi_start == balanced[i].psi_start for i in eachindex(balanced))
+        @test all(balanced_again[i].psi_end == balanced[i].psi_end for i in eachindex(balanced))
+
+        # An explicit nchunks steers the target count directly.
+        ctrl_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., nchunks=target_n + 7)
+        balanced_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_more, intr)
+        @test length(balanced_more) == target_n + 7
+
+        # An nchunks below the singular-surface floor is clamped up, with a warning.
+        min_chunks = 2 * intr.msing + 3
+        ctrl_few = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., nchunks=1)
+        balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
+        @test length(balanced_few) == max(min_chunks, length(base_chunks))
     end
 
     @testset "chunk_el_integration_bounds direction field — bidirectional mode" begin
@@ -179,10 +202,10 @@ using TOML
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -222,19 +245,19 @@ using TOML
         end
     end
 
-    @testset "Parallel FM integration matches standard ODE — Solovev example" begin
-        # Run standard and parallel FM integrations on the Solovev regression test.
+    @testset "Riccati FM integration matches forward ODE — Solovev example" begin
+        # Run forward and Riccati FM integrations on the Solovev regression test.
         # The energy eigenvalue et[1] should match to within 2%.
         #
-        # Bidirectional FM integration (crossing chunks integrated backward) is the
-        # default for use_parallel=true. It keeps FM propagators well-conditioned for
-        # both small-N (Solovev N=8, tested here) and large-N (DIIID N=26, tested below).
+        # Bidirectional FM integration (crossing chunks integrated backward) is what the
+        # Riccati path uses. It keeps FM propagators well-conditioned for both small-N
+        # (Solovev N=8, tested here) and large-N (DIIID N=26, tested below).
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
-        function run_solovev(use_parallel)
+        function run_solovev(integrator)
             inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
             inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
+            inputs["ForceFreeStates"]["integrator"] = integrator
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
@@ -242,10 +265,10 @@ using TOML
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -254,24 +277,24 @@ using TOML
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
             return real(vac.et[1]), intr
         end
 
-        et_std, intr_std = run_solovev(false)
-        et_par, intr_par = run_solovev(true)
+        et_fwd, intr_fwd = run_solovev("forward")
+        et_ric, intr_ric = run_solovev("riccati")
 
         # Energy eigenvalue matches to 2%
-        @test isapprox(et_par, et_std; rtol=0.02)
+        @test isapprox(et_ric, et_fwd; rtol=0.02)
         # Per-surface Δ' assertions were removed: per-surface Δ' is a stub calculation
         # left in the code for future work but no longer reported, output, or tested.
-        # The STRIDE BVP Δ' matrix (`singular/delta_prime_matrix`) is the canonical
+        # The STRIDE BVP Δ' matrix (`SingularSurfaces/Delta_prime_matrix`) is the canonical
         # Δ', regression-tested via the DIIID-like fixture which has well-conditioned
         # values; Solovev is near marginal stability and BVP Δ' is pathological there.
     end
 
-    @testset "Parallel FM integration matches standard ODE — DIIID-like example (large N)" begin
-        # Run standard and parallel FM integrations on the DIIID-like example (N≈26 modes).
+    @testset "Riccati FM integration matches forward ODE — DIIID-like example (large N)" begin
+        # Run forward and Riccati FM integrations on the DIIID-like example (N≈26 modes).
         # Before bidirectional integration, the all-forward FM propagators were ill-conditioned
         # for large N, producing ~10% energy error. Bidirectional integration (backward crossing
         # chunks + forward intermediate chunks) restores accuracy to within 2%.
@@ -279,10 +302,10 @@ using TOML
         # This is the key regression test for the bidirectional parallel FM fix.
         ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
 
-        function run_diiid(use_parallel)
+        function run_diiid(integrator)
             inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
             inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
+            inputs["ForceFreeStates"]["integrator"] = integrator
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
@@ -301,10 +324,10 @@ using TOML
             end
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -313,22 +336,22 @@ using TOML
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
             return real(vac.et[1]), intr
         end
 
-        et_par, intr_par = run_diiid(true)
+        et_ric, intr_ric = run_diiid("riccati")
 
-        # Parallel FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
+        # Riccati FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
         # equilibrium-sensitive (auto-mpsi gives a spurious value; a wrong grid/Ip shifts it), so
-        # a loose bracket would mask exactly that accuracy regression. The parallel-path value is
+        # a loose bracket would mask exactly that accuracy regression. The Riccati-path value is
         # deterministic and reproducible.
-        @test isapprox(et_par, 0.800637; rtol=2e-2)
+        @test isapprox(et_ric, 0.800637; rtol=2e-2)
         # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
         # comment above). BVP Δ' matrix regression for DIIID-like is in the
         # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
 
-        # No explicit parallel-vs-standard cross-path check here: the two paths share the
+        # No explicit Riccati-vs-forward cross-path check here: the two paths share the
         # equilibrium grid (so a cross-path comparison is blind to grid/accuracy regressions),
         # and their agreement is already verified on the lighter Solovev case above. The tight
         # absolute pin above is the guard for grid/equilibrium regressions on this case.
@@ -350,10 +373,10 @@ using TOML
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -386,28 +409,15 @@ using TOML
     # physically meaningful. BVP Δ' regression is concentrated on the DIIID-like
     # fixture below (intrinsically stable, well-conditioned BVP Δ').
 
-    @testset "ξ functions bit-identical between use_parallel modes (populate_dense_xi)" begin
-        # When `ctrl.use_parallel = true` and `ctrl.populate_dense_xi = true`
-        # (default), `parallel_eulerlagrange_integration` appends a serial
-        # Euler-Lagrange pass and returns that fresh `odet` instead of the
-        # propagator-BVP one.  That dense pass invokes the SAME
-        # `eulerlagrange_integration` code path the serial `use_parallel = false`
-        # benchmark goes through with the SAME `(ctrl, equil, ffit, intr)`
-        # inputs (BVP-only state on `intr` saved/restored across the pass), so
-        # the resulting `psi_store` / `q_store` / `u_store` / `du_store` /
-        # `crit_store` arrays must be bit-identical to a standalone serial run.
-        # This is a strong correctness guarantee that the dense pass does NOT
-        # perturb the DCON eigenfunction calculation in any way — exactly what
-        # downstream PerturbedEquilibrium / FieldReconstruction needs.
-        #
-        # Run on both the small-N Solovev case and the large-N DIIID-like case
-        # to catch any (m, IC, ψ)-dependent regression.
-
-        function run_and_capture(example_dir, use_parallel; populate_dense_xi=true)
+    @testset "Riccati leaves a sparse u_store in the Riccati basis" begin
+        # The Riccati path stores only chunk-endpoint snapshots, so u_store / psi_store have
+        # strictly fewer entries than the forward path's dense saved steps, and the stored
+        # state is not in the Euler-Lagrange axis basis. Downstream ξ consumers must therefore
+        # be fed by the forward integrator; this test pins that contract.
+        function run_and_capture(example_dir, integrator)
             inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
             inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
-            inputs["ForceFreeStates"]["populate_dense_xi"] = populate_dense_xi
+            inputs["ForceFreeStates"]["integrator"] = integrator
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_dir)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
@@ -416,10 +426,10 @@ using TOML
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
             intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
             intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -428,59 +438,28 @@ using TOML
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            # Derivatives are recomputed on demand; materialize so the stores can be compared.
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, ffit, intr)
             return odet
         end
 
-        # Compare the storage arrays that downstream code reads.  All values
-        # must be EXACTLY equal (no tolerance — the dense pass calls the same
-        # ODE solver with the same inputs as the standalone serial path, so
-        # any nonzero difference indicates a real regression in the dense-pass
-        # machinery).
-        function assert_bit_identical(odet_a, odet_b)
-            @test odet_a.step == odet_b.step
-            @test odet_a.nzero == odet_b.nzero
-            @test length(odet_a.psi_store) == length(odet_b.psi_store)
-            @test length(odet_a.q_store) == length(odet_b.q_store)
-            @test size(odet_a.u_store) == size(odet_b.u_store)
-            @test size(odet_a.du_store) == size(odet_b.du_store)
-            @test maximum(abs.(odet_a.psi_store .- odet_b.psi_store)) == 0.0
-            @test maximum(abs.(odet_a.q_store .- odet_b.q_store)) == 0.0
-            @test maximum(abs.(odet_a.u_store .- odet_b.u_store)) == 0.0
-            @test maximum(abs.(odet_a.du_store .- odet_b.du_store)) == 0.0
-            @test maximum(abs.(odet_a.xi_s_store .- odet_b.xi_s_store)) == 0.0
-            @test maximum(abs.(odet_a.crit_store .- odet_b.crit_store)) == 0.0
-        end
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        odet_fwd = run_and_capture(ex, "forward")
+        odet_ric = run_and_capture(ex, "riccati")
 
-        @testset "Solovev (small N)" begin
-            ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true; populate_dense_xi=true)
-            assert_bit_identical(odet_std, odet_par)
-        end
+        @test odet_ric.step < odet_fwd.step
+        @test length(odet_ric.psi_store) < length(odet_fwd.psi_store)
 
-        @testset "DIIID-like (large N)" begin
-            ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true; populate_dense_xi=true)
-            assert_bit_identical(odet_std, odet_par)
-        end
+        # The forward path returns dense ξ in the axis basis, ready for PerturbedEquilibrium.
+        @test odet_fwd.u_store_el_basis
+        @test odet_fwd.du_store_populated
 
-        @testset "populate_dense_xi=false leaves sparse u_store (control)" begin
-            # Sanity-check the opposite mode: with populate_dense_xi=false, the
-            # parallel BVP path stores only chunk-endpoint Riccati snapshots,
-            # so u_store / du_store / psi_store have strictly fewer entries
-            # than the serial path.  Catching this guarantees the bit-identical
-            # test above is meaningful — it's NOT trivially passing because
-            # both modes accidentally produce the same sparse data.
-            ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_sparse = run_and_capture(ex, true; populate_dense_xi=false)
-            @test odet_sparse.step < odet_std.step
-            # du_store entries inside FM chunks are left at the @kwdef
-            # `undef` initial value when populate_dense_xi=false; ensure the
-            # array IS smaller (sparse).
-            @test length(odet_sparse.psi_store) < length(odet_std.psi_store)
-        end
+        # The Riccati solution is in the Riccati basis, so the derivative stores cannot be
+        # materialized from it and stay empty rather than holding unusable values.
+        @test !odet_ric.u_store_el_basis
+        @test !odet_ric.du_store_populated
+        @test isempty(odet_ric.du_store)
+        @test isempty(odet_ric.xi_s_store)
     end
 
     @testset "delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)" begin
@@ -491,7 +470,7 @@ using TOML
         ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
-        inputs["ForceFreeStates"]["use_parallel"] = true
+        inputs["ForceFreeStates"]["integrator"] = "riccati"
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
@@ -509,10 +488,10 @@ using TOML
         end
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
             (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
@@ -522,7 +501,7 @@ using TOML
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
         odet, fm_propagators, fm_chunks, fm_S_left =
             GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
             intr, fm_propagators, fm_chunks;
             wv=vac.wv, psio=equil.psio,
@@ -546,12 +525,18 @@ using TOML
 
         # Pinned diagonal `delta_prime_matrix` REAL parts, PEST3-convention self-response Δ' from
         # the STRIDE BVP with vacuum coupling, on the two-pass measured-curvature grid (rational
-        # surfaces pinned as mandatory knots). These pin one point at the default psi_accuracy so
-        # the test catches unintended changes; they are NOT converged Δ'. The extraction is
-        # intrinsically grid-sensitive — a psi_accuracy scan (2e-3→2.5e-4) swings dpm[1,1] by ~50%
-        # (6.2–9.9) and a finer ldp mpsi=512 grid gives ≈8.5 — so treat the diagonal as an
-        # order-of-magnitude/sign diagnostic, and expect to re-pin whenever the grid generator
-        # changes (as here). See the "pinning grid-sensitive Δ′ robustly" open problem in
+        # surfaces now *bracketed* rather than pinned on — see `bracket_mandatory_nodes`).
+        #
+        # The q=2 pin is now a CONVERGED value, which closes the "replace this with a converged-Δ′
+        # pin on a fixed ldp grid" item the previous pin carried. Three independent grid families
+        # on this fixture agree to ~1%:
+        #     ldp     mpsi 512 / 1024 / 2048   :  8.478 / 9.142 / 9.244
+        #     uniform mpsi 1024 / 2048         :  9.146 / 9.143
+        #     auto    τ 2e-3/1e-3/5e-4/2.5e-4  :  9.198 / 9.239 / 9.206 / 9.157
+        # i.e. dpm[1,1] → ≈9.2. Before this grid fix the τ-scan swung ~50% (6.2–9.9) and the pin
+        # had to be a mid-spread snapshot; it is now flat in τ to 0.9%, so the default
+        # psi_accuracy lands on the converged value rather than near it by luck.
+        # See the "pinning grid-sensitive Δ′ robustly" open problem in
         # docs/src/developer_notes.md for the plateau criterion meant to replace single-point pins.
         # (et[1], NTV torque, and ‖resonant flux‖ stay grid-robust to <1% — the sensitivity is
         # local to the singular-layer matching, not the global response.) Only real parts are
@@ -559,15 +544,15 @@ using TOML
         # FP/platform-sensitive. Near-separatrix surfaces q=5,6 keep only the finiteness/non-zero
         # checks above. Values use this testset's mode range (mpert=27, vs full-pipeline mpert=35).
         #
-        # q=2 additionally carries a platform spread that the other surfaces do not: the same grid
-        # and inputs give 6.1438 (linux/julia 1.11), 6.6867 (linux/julia 1.x), and 7.7036
-        # (macOS/aarch64) — ~25% end to end. This is the surface with the known Δ' plateau problem,
-        # so its extraction sits on the steepest part of the grid-refinement curve and small
-        # platform differences in knot placement move it. The q=2 pin is therefore centered on the
-        # midpoint of the observed spread with rtol=1.5e-1 to span it; q=3 and q=4 are reproducible
-        # across the same platforms and keep rtol=1e-1. Replacing this with a converged-Δ' pin on a
-        # fixed ldp grid is tracked as an open issue.
-        @test isapprox(real(dpm[1, 1]), +6.923700e+00; rtol=1.5e-1)  # q=2 (platform spread 6.14–7.70)
+        # The q=2 platform spread also collapsed with this fix: because the matching stencil no
+        # longer straddles a knot, q‴ is single-valued across it and the surface no longer sits on
+        # the steepest part of the refinement curve. Same grid and inputs now give 9.239
+        # (macOS/aarch64), 9.333 (linux/julia 1.11) and 9.356 (linux/julia 1.x) — 1.3% end to end,
+        # against ~25% before (6.14 / 6.69 / 7.70). rtol=3e-2 spans that with margin and is a 5×
+        # TIGHTENING of the old 1.5e-1. q=3 and q=4 are unchanged: the same ladder puts them at
+        # −5.716 and −16.033 (ldp 2048), inside their existing tolerances, and they reproduce
+        # across platforms.
+        @test isapprox(real(dpm[1, 1]), +9.300000e+00; rtol=3e-2)   # q=2, converged (ldp2048 9.244)
         @test isapprox(real(dpm[2, 2]), -5.344199e+00; rtol=1e-1)   # q=3
         @test isapprox(real(dpm[3, 3]), -1.590034e+01; rtol=1e-1)   # q=4
     end

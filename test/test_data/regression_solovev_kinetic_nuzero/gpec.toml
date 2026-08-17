@@ -1,3 +1,8 @@
+# Solovev n=1 collisionless-kinetic smoke fixture (nutype = "zero").
+# Intentionally coarse (mpsi = 16, delta_m = 0) so the full-run test suite can
+# exercise the real-x-space collisionless energy-integral path end-to-end; the
+# test asserts only finiteness/sign of et[1]. The mode-converged eigenvalue is
+# tracked separately by the solovev_kinetic_nuzero regression case.
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
@@ -6,7 +11,7 @@ psilow = 1e-4                           # Lower limit of normalized flux coordin
 psihigh = 0.9995                        # Upper limit of normalized flux coordinate
 mpsi = 16                               # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
-newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
@@ -37,14 +42,15 @@ mthvac = 64                   # Number of points used in splines over poloidal a
 
 kinetic_source = "calculated" # Kinetic matrix source — exercises KineticForces.compute_calculated_kinetic_matrices callback with real physics
 kinetic_factor = 1.0          # Full-strength kinetic matrices (the "calculated" path is the real physics; no perturbation scaling)
+integrator = "forward"        # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-write_outputs_to_HDF5 = true
-verbose = false
+write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
+verbose = false               # Enable verbose logging
 
 [KineticForces]
-nutype = "zero"               # Collisionless operator — isolates the real-x-space collisionless energy integral (issue #281)
+nutype = "zero"               # Collisionless operator — isolates the real-x-space collisionless energy integral
 
 # Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
 [SOL_INPUT]

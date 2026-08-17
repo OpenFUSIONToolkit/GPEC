@@ -90,7 +90,8 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
     @testset "sing_der" begin
 
         equil = load_equilibrium_from_gpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "gpec.toml"))
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
+        # default single toroidal mode used in test data; matches intr.nlow set below
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; nn_low=1)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
         intr.numpert_total = 32 # replacing mpert (we set equal to 32). This is the same as msol
         # set mode ranges so sing_der can form singfac_vec consistently
@@ -101,7 +102,6 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         intr.nlow = 1
         intr.nhigh = 1
         intr.npert = intr.nhigh - intr.nlow + 1
-        ctrl.nn_low = intr.nlow
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(; numpert_total=intr.numpert_total,
             numsteps_init=ctrl.numsteps_init, numunorms_init=ctrl.numunorms_init, msing=intr.msing)
 
@@ -171,19 +171,21 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
     # ---------------------------------
     @testset "sing_lim" begin
         equil = load_equilibrium_from_gpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "gpec.toml"))
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; qhigh=equil.params.qmax, set_psilim_via_dmlim=false)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-        ctrl.qhigh = equil.params.qmax
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         @test isapprox(intr.qlim, equil.params.qmax; atol=1e-12)
-        @test isapprox(intr.psilim, equil.config.psihigh; atol=1e-12)
+        @test isapprox(intr.psilim, equil.params.psihigh_resolved; atol=1e-12)
 
-        ctrl.qhigh = max(equil.params.qmin + 0.1, equil.params.qmax - 0.5)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; qhigh=max(equil.params.qmin + 0.1, equil.params.qmax - 0.5), set_psilim_via_dmlim=false)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         @test intr.qlim < equil.params.qmax + 1e-12
-        @test intr.psilim <= equil.config.psihigh
+        @test intr.psilim <= equil.params.psihigh_resolved
         q_at_psilim = equil.profiles.q_spline(intr.psilim)
         @test isapprox(q_at_psilim, intr.qlim; atol=1e-6)
+        ctrl_dmlim = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; qhigh=equil.params.qmax, set_psilim_via_dmlim=true)
+        intr_unresolved = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
+        @test_throws ErrorException GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr_unresolved, ctrl_dmlim, equil)
     end
 
 end

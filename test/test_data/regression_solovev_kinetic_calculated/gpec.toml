@@ -10,7 +10,7 @@ psilow = 1e-4                           # Lower limit of normalized poloidal flu
 psihigh = 0.9995                        # Upper limit of normalized poloidal flux
 mpsi = 16                               # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
-newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
@@ -42,6 +42,7 @@ mthvac = 64                   # Number of points used in splines over poloidal a
 
 kinetic_source = "calculated" # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 1.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode; 1.0 = full strength)
+integrator = "forward"        # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Column-norm threshold that triggers solution renormalization

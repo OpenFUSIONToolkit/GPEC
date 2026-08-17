@@ -1,8 +1,10 @@
 # Regression case: DIII-D-like n=1 ideal stability + perturbed equilibrium.
-# Tracks energies, singular-surface metrics, Δ' (BVP diagonal), and resonant-flux
-# diagnostics for the canonical DIIID-like fixture. Each [quantities.*] block names an
-# HDF5 path in the run output, how to extract it, and the noise floor below which a
-# difference is treated as zero. Run via the regression-harness (see CLAUDE.md).
+# Tracks energies, singular-surface metrics, and resonant-flux diagnostics for the canonical
+# DIIID-like fixture, which runs the forward integrator for its dense ξ profiles. The BVP Δ'
+# matrix comes from the Riccati integrator only and is tracked by the sibling case
+# diiid_n1_riccati. Each [quantities.*] block names an HDF5 path in the run output, how to
+# extract it, and the noise floor below which a difference is treated as zero. Run via the
+# regression-harness (see CLAUDE.md).
 [case]
 name = "diiid_n1"
 description = "DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium"
@@ -10,7 +12,7 @@ example_dir = "examples/DIIID-like_ideal_example"
 
 # Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
 [quantities.et_real]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
 label = "total energy Re(et[1])"
@@ -18,7 +20,7 @@ noise_threshold = 1e-10
 order = 10
 
 [quantities.et_imag]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "imag_first"
 label = "total energy Im(et[1])"
@@ -26,7 +28,7 @@ noise_threshold = 1e-10
 order = 11
 
 [quantities.ep_real]
-h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "real_first"
 label = "plasma energy Re(ep[1])"
@@ -34,7 +36,7 @@ noise_threshold = 1e-10
 order = 12
 
 [quantities.ev_real]
-h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "real_first"
 label = "vacuum energy Re(ev[1])"
@@ -42,7 +44,7 @@ noise_threshold = 1e-10
 order = 13
 
 [quantities.vacuum_eigenvalue]
-h5path = "FreeBoundaryStability/vacuum_eigenvalue"
+h5path = "ForceFreeStates/FreeBoundaryStability/vacuum_eigenvalue"
 type = "real_scalar"
 extract = "value"
 label = "vacuum matrix min eigenvalue"
@@ -51,7 +53,7 @@ order = 14
 
 # Energies — full eigenvalue arrays
 [quantities.ep_all]
-h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "plasma energy (all)"
@@ -59,7 +61,7 @@ noise_threshold = 1e-10
 order = 20
 
 [quantities.ev_all]
-h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "vacuum energy (all)"
@@ -67,7 +69,7 @@ noise_threshold = 1e-10
 order = 21
 
 [quantities.et_all]
-h5path = "FreeBoundaryStability/eigenmode_energies"
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "total energy (all)"
@@ -76,7 +78,7 @@ order = 22
 
 # Integration
 [quantities.nstep]
-h5path = "integration/nstep"
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep"
 type = "int_scalar"
 extract = "value"
 label = "ODE steps (saved)"
@@ -84,7 +86,7 @@ noise_threshold = 0
 order = 30
 
 [quantities.nstep_total]
-h5path = "integration/nstep_total"
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
 type = "int_scalar"
 extract = "value"
 label = "ODE steps (total)"
@@ -93,7 +95,7 @@ order = 31
 
 # Equilibrium
 [quantities.q0]
-h5path = "equil/q0"
+h5path = "Equilibrium/q_axis"
 type = "real_scalar"
 extract = "value"
 label = "q0"
@@ -101,7 +103,7 @@ noise_threshold = 1e-12
 order = 40
 
 [quantities.q95]
-h5path = "equil/q95"
+h5path = "Equilibrium/q_95"
 type = "real_scalar"
 extract = "value"
 label = "q95"
@@ -109,7 +111,7 @@ noise_threshold = 1e-12
 order = 41
 
 [quantities.betat]
-h5path = "equil/betat"
+h5path = "Equilibrium/beta_t"
 type = "real_scalar"
 extract = "value"
 label = "beta_t"
@@ -117,7 +119,7 @@ noise_threshold = 1e-12
 order = 42
 
 [quantities.betan]
-h5path = "equil/betan"
+h5path = "Equilibrium/beta_N"
 type = "real_scalar"
 extract = "value"
 label = "beta_n"
@@ -125,7 +127,7 @@ noise_threshold = 1e-12
 order = 43
 
 [quantities.li1]
-h5path = "equil/li1"
+h5path = "Equilibrium/l_i_1"
 type = "real_scalar"
 extract = "value"
 label = "internal inductance li1"
@@ -133,7 +135,7 @@ noise_threshold = 1e-12
 order = 44
 
 [quantities.li2]
-h5path = "equil/li2"
+h5path = "Equilibrium/l_i_2"
 type = "real_scalar"
 extract = "value"
 label = "internal inductance li2"
@@ -141,7 +143,7 @@ noise_threshold = 1e-12
 order = 45
 
 [quantities.li3]
-h5path = "equil/li3"
+h5path = "Equilibrium/l_i_3"
 type = "real_scalar"
 extract = "value"
 label = "internal inductance li3"
@@ -149,7 +151,7 @@ noise_threshold = 1e-12
 order = 46
 
 [quantities.betap1]
-h5path = "equil/betap1"
+h5path = "Equilibrium/beta_p_1"
 type = "real_scalar"
 extract = "value"
 label = "poloidal beta betap1"
@@ -157,7 +159,7 @@ noise_threshold = 1e-12
 order = 47
 
 [quantities.betap2]
-h5path = "equil/betap2"
+h5path = "Equilibrium/beta_p_2"
 type = "real_scalar"
 extract = "value"
 label = "poloidal beta betap2"
@@ -165,7 +167,7 @@ noise_threshold = 1e-12
 order = 48
 
 [quantities.betap3]
-h5path = "equil/betap3"
+h5path = "Equilibrium/beta_p_3"
 type = "real_scalar"
 extract = "value"
 label = "poloidal beta betap3"
@@ -173,7 +175,7 @@ noise_threshold = 1e-12
 order = 49
 
 [quantities.betaj]
-h5path = "equil/betaj"
+h5path = "Equilibrium/beta_j"
 type = "real_scalar"
 extract = "value"
 label = "current beta betaj"
@@ -181,7 +183,7 @@ noise_threshold = 1e-12
 order = 57
 
 [quantities.volume]
-h5path = "equil/volume"
+h5path = "Equilibrium/volume"
 type = "real_scalar"
 extract = "value"
 label = "plasma volume"
@@ -189,7 +191,7 @@ noise_threshold = 1e-12
 order = 58
 
 [quantities.crnt]
-h5path = "equil/crnt"
+h5path = "Equilibrium/I_p"
 type = "real_scalar"
 extract = "value"
 label = "plasma current"
@@ -197,7 +199,7 @@ noise_threshold = 1e-12
 order = 59
 
 [quantities.bt0]
-h5path = "equil/bt0"
+h5path = "Equilibrium/B_T_axis"
 type = "real_scalar"
 extract = "value"
 label = "toroidal field bt0"
@@ -205,7 +207,7 @@ noise_threshold = 1e-12
 order = 62
 
 [quantities.bwall]
-h5path = "equil/bwall"
+h5path = "Equilibrium/B_T_wall"
 type = "real_scalar"
 extract = "value"
 label = "wall field bwall"
@@ -213,7 +215,7 @@ noise_threshold = 1e-12
 order = 63
 
 [quantities.aratio]
-h5path = "equil/aratio"
+h5path = "Equilibrium/aspect_ratio"
 type = "real_scalar"
 extract = "value"
 label = "aspect ratio"
@@ -221,7 +223,7 @@ noise_threshold = 1e-12
 order = 64
 
 [quantities.kappa]
-h5path = "equil/kappa"
+h5path = "Equilibrium/kappa"
 type = "real_scalar"
 extract = "value"
 label = "elongation kappa"
@@ -230,7 +232,7 @@ order = 65
 
 # Singular surfaces
 [quantities.msing]
-h5path = "singular/msing"
+h5path = "SingularSurfaces/rational_count"
 type = "int_scalar"
 extract = "value"
 label = "# singular surfaces"
@@ -238,7 +240,7 @@ noise_threshold = 0
 order = 50
 
 [quantities.sing_psi]
-h5path = "singular/psi"
+h5path = "SingularSurfaces/rational_psi"
 type = "real_vector"
 extract = "all_real"
 label = "singular psi locations"
@@ -246,7 +248,7 @@ noise_threshold = 1e-8
 order = 51
 
 [quantities.sing_q]
-h5path = "singular/q"
+h5path = "SingularSurfaces/rational_q"
 type = "real_vector"
 extract = "all_real"
 label = "singular q values"
@@ -255,7 +257,7 @@ order = 52
 
 # Mode numbers
 [quantities.mpert]
-h5path = "info/mpert"
+h5path = "Info/mpert"
 type = "int_scalar"
 extract = "value"
 label = "mpert"
@@ -263,28 +265,15 @@ noise_threshold = 0
 order = 60
 
 [quantities.npert]
-h5path = "info/npert"
+h5path = "Info/npert"
 type = "int_scalar"
 extract = "value"
 label = "npert"
 noise_threshold = 0
 order = 61
 
-# Tearing stability Δ' — canonical STRIDE BVP matrix diagonal (replaces the
-# previous `perturbed_equilibrium/singular_coupling/delta_prime` track, which
-# was a per-surface stub computed by SingularCoupling from (rbwp1-lbwp1)/(2π·χ').
-# Per-surface Δ' is now de-emphasized — see PR 178 notes — and SingularCoupling
-# instead reads this BVP matrix diagonal.
-[quantities.delta_prime]
-h5path = "singular/delta_prime_matrix"
-type = "complex_matrix"
-extract = "diagonal_complex"
-label = "delta prime (BVP diagonal)"
-noise_threshold = 1e-8
-order = 80
-
 [quantities.island_half_width]
-h5path = "perturbed_equilibrium/singular_coupling/island_half_width"
+h5path = "PerturbedEquilibrium/SingularCoupling/island_half_width"
 type = "real_vector"
 extract = "all_real"
 label = "island half-widths"
@@ -292,7 +281,7 @@ noise_threshold = 1e-8
 order = 81
 
 [quantities.chirikov_parameter]
-h5path = "perturbed_equilibrium/singular_coupling/chirikov_parameter"
+h5path = "PerturbedEquilibrium/SingularCoupling/chirikov_parameter"
 type = "real_vector"
 extract = "all_real"
 label = "Chirikov parameter"
@@ -300,7 +289,7 @@ noise_threshold = 1e-8
 order = 82
 
 [quantities.resonant_area_weighted_field]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_area_weighted_field"
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "norm"
 label = "||resonant area-weighted field||"
@@ -308,7 +297,7 @@ noise_threshold = 1e-8
 order = 83
 
 [quantities.resonant_area_weighted_field_all]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_area_weighted_field"
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
 type = "complex_vector"
 extract = "all_complex"
 label = "resonant area-weighted field b^r"
@@ -316,7 +305,7 @@ noise_threshold = 1e-8
 
 # Perturbed equilibrium: energies
 [quantities.pe_plasma_energy]
-h5path = "perturbed_equilibrium/energies/plasma_energy"
+h5path = "PerturbedEquilibrium/Energies/plasma_energy"
 type = "real_scalar"
 extract = "value"
 label = "PE plasma energy"
@@ -324,7 +313,7 @@ noise_threshold = 1e-10
 order = 91
 
 [quantities.pe_vacuum_energy]
-h5path = "perturbed_equilibrium/energies/vacuum_energy"
+h5path = "PerturbedEquilibrium/Energies/vacuum_energy"
 type = "real_scalar"
 extract = "value"
 label = "PE vacuum energy"
@@ -332,7 +321,7 @@ noise_threshold = 1e-10
 order = 92
 
 [quantities.pe_surface_energy]
-h5path = "perturbed_equilibrium/energies/surface_energy"
+h5path = "PerturbedEquilibrium/Energies/surface_energy"
 type = "real_scalar"
 extract = "value"
 label = "PE surface energy"
@@ -340,7 +329,7 @@ noise_threshold = 1e-10
 order = 93
 
 [quantities.pe_toroidal_torque]
-h5path = "perturbed_equilibrium/energies/toroidal_torque"
+h5path = "PerturbedEquilibrium/Energies/toroidal_torque"
 type = "real_scalar"
 extract = "value"
 label = "PE toroidal torque"
@@ -353,7 +342,7 @@ order = 94
 # section. Threshold is a noise floor for the adaptive-quadrature result; tune if
 # run-to-run jitter appears.
 [quantities.ntv_torque_fgar]
-h5path = "kinetic_forces/fgar/total_torque"
+h5path = "KineticForces/fgar/total_torque"
 type = "real_scalar"
 extract = "value"
 label = "NTV torque FGAR [N·m]"
@@ -364,7 +353,7 @@ order = 95
 # Tracked at a tighter threshold — it isolates the energy component the
 # bounce-averaging chain moves most.
 [quantities.ntv_energy_fgar]
-h5path = "kinetic_forces/fgar/total_energy"
+h5path = "KineticForces/fgar/total_energy"
 type = "real_scalar"
 extract = "value"
 label = "NTV kinetic energy dW FGAR [J]"
@@ -373,7 +362,7 @@ order = 96
 
 # Profiles (checksums)
 [quantities.q_profile]
-h5path = "splines/profiles/q"
+h5path = "Equilibrium/Profiles/q"
 type = "real_vector"
 extract = "checksum"
 label = "q profile (checksum)"
@@ -381,7 +370,7 @@ noise_threshold = 0
 order = 70
 
 [quantities.pressure_profile]
-h5path = "splines/profiles/mu0p"
+h5path = "Equilibrium/Profiles/mu0p"
 type = "real_vector"
 extract = "checksum"
 label = "pressure profile (checksum)"
@@ -391,7 +380,7 @@ order = 71
 # Local stability profiles (local_stability_flag = true). Checksums hash the full
 # profile so they are robust to NaN edge-surface entries and catch any change.
 [quantities.locstab_di]
-h5path = "locstab/di"
+h5path = "LocalStability/D_I"
 type = "real_vector"
 extract = "checksum"
 label = "Mercier D_I profile (checksum)"
@@ -399,7 +388,7 @@ noise_threshold = 0
 order = 72
 
 [quantities.locstab_dr]
-h5path = "locstab/dr"
+h5path = "LocalStability/D_R"
 type = "real_vector"
 extract = "checksum"
 label = "resistive interchange D_R profile (checksum)"
@@ -407,7 +396,7 @@ noise_threshold = 0
 order = 73
 
 [quantities.locstab_ballooning_dp]
-h5path = "locstab/ballooning_Delta_prime"
+h5path = "LocalStability/ballooning_Delta_prime"
 type = "real_vector"
 extract = "checksum"
 label = "ballooning Delta' profile (checksum)"

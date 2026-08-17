@@ -40,28 +40,66 @@ function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
 end
 
-# Reflect a periodic theta-space vector θ → -θ (the theta reversal in gpvacuum_flxsurf).
-_reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
+# Cubic Hermite interpolant DERIVATIVE at psi, consistent with `_hermite_cubic_val`.
+function _hermite_cubic_deriv(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
+    h = psi_b - psi_a
+    t = (psi - psi_a) / h
+    d00 = (6t^2 - 6t) / h
+    d10 = 3t^2 - 4t + 1
+    d01 = (-6t^2 + 6t) / h
+    d11 = 3t^2 - 2t
+    return @. d00 * u_a + d10 * du_a + d01 * u_b + d11 * du_b
+end
 
 """
     _chord_solution_at(psi, resnum, odet, nstep) -> (u, du)
 
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution:
 cubic Hermite for the value, chord slope across the bracketing nodes for the derivative.
-Least accurate method, kept for solution paths outside the serial EL integrator
+Least accurate method, kept for solution paths outside the forward EL integrator
 (gal-matched, Riccati) whose stored derivatives cover only Ξ′.
 """
 function _chord_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
+    isempty(odet.du_store) && error(
+        "_chord_solution_at: no derivative store. The solution is in a basis " *
+        "the Euler-Lagrange kernel cannot be re-applied to (sparse Riccati path); " *
+        "dense Ξ′ requires the Forward integrator."
+    )
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
 
     u_a = odet.u_store[resnum, :, 1, il]
     u_b = odet.u_store[resnum, :, 1, ir]
-    du_a = odet.du_store[resnum, :, 1, il]
-    du_b = odet.du_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, il]
+    du_b = odet.du_store[resnum, :, ir]
 
     u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     du_e = (u_b .- u_a) ./ (psi_b - psi_a)
+    return u_e, du_e
+end
+
+"""
+    _gal_solution_at(psi, resnum, odet, nstep) -> (u, du)
+
+Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` for a gal-matched `OdeState`:
+cubic Hermite for the value, and the analytic Ξ′ carried in `du_store` for the
+derivative. Mirrors the `galsol%gal_flag` branch of Fortran `gpeq_sol`, which takes
+Ξ′ from the analytic galerkin derivative rather than differentiating the value
+spline. Differencing `u_store` here would discard that analytic content, and
+near-cancellation in `bwp1` (singfac·Ξ′ against n q′·Ξ, with singfac → 0 at the
+surface) amplifies the resulting error into Δ′ at the outer surfaces.
+"""
+function _gal_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
+    il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
+    psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
+
+    u_a = odet.u_store[resnum, :, 1, il]
+    u_b = odet.u_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, il]
+    du_b = odet.du_store[resnum, :, ir]
+
+    u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
+    du_e = _hermite_cubic_deriv(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     return u_e, du_e
 end
 
@@ -89,14 +127,14 @@ function _solution_at(
 
     u_a = odet.u_store[resnum, :, 1, il]
     u_b = odet.u_store[resnum, :, 1, ir]
-    du_a = odet.du_store[resnum, :, 1, il]
-    du_b = odet.du_store[resnum, :, 1, ir]
+    du_a = odet.du_store[resnum, :, il]
+    du_b = odet.du_store[resnum, :, ir]
 
     u_e = _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
 
     # Same-side candidate nodes around the bracket, trimmed to the 4 nearest psi.
     side = sign(psi - psi_surf)
-    idxs = [j for j in max(1, il - 3):min(nstep, ir + 3) if sign(odet.psi_store[j] - psi_surf) == side]
+    idxs = [j for j in max(1, il-3):min(nstep, ir+3) if sign(odet.psi_store[j] - psi_surf) == side]
     while length(idxs) > 4
         abs(odet.psi_store[idxs[1]] - psi) > abs(odet.psi_store[idxs[end]] - psi) ? popfirst!(idxs) : pop!(idxs)
     end
@@ -110,7 +148,7 @@ function _solution_at(
             j == k && continue
             w *= (psi - odet.psi_store[idxs[j]]) / (odet.psi_store[idxs[k]] - odet.psi_store[idxs[j]])
         end
-        du_e .+= (w * singfac(odet.psi_store[idxs[k]])) .* @view(odet.du_store[resnum, :, 1, idxs[k]])
+        du_e .+= (w * singfac(odet.psi_store[idxs[k]])) .* @view(odet.du_store[resnum, :, idxs[k]])
     end
     du_e ./= singfac(psi)
 
@@ -124,6 +162,10 @@ Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE sol
 ideal Euler-Lagrange relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) [Glasser 2016 eqs. 22-24],
 with u₁, u₂ Hermite-interpolated to `psi`. Only valid for ideal runs where
 `ffit.fmats_lower` and `kmats` generated the solution.
+
+The Hermite slopes need du₂ as well as du₁, and du₂ is not stored: both are evaluated here
+from the derivative kernel at the two bracketing nodes, which is where the handful of
+resonant evaluation points actually need them.
 """
 function _el_solution_at(
     psi::Float64,
@@ -142,12 +184,19 @@ function _el_solution_at(
     u1_b = @view odet.u_store[:, :, 1, ir]
     u2_a = @view odet.u_store[:, :, 2, il]
     u2_b = @view odet.u_store[:, :, 2, ir]
-    du1_a = @view odet.du_store[:, :, 1, il]
-    du1_b = @view odet.du_store[:, :, 1, ir]
-    du2_a = @view odet.du_store[:, :, 2, il]
-    du2_b = @view odet.du_store[:, :, 2, ir]
 
+    # Own hints: this runs inside a threaded loop over rational surfaces.
     hint = Ref(1)
+    q_hint = Ref(1)
+    du_a = zeros(ComplexF64, npert, npert, 2)
+    du_b = zeros(ComplexF64, npert, npert, 2)
+    ForceFreeStates.el_derivatives!(du_a, odet.u_store[:, :, :, il], false, equil, ffit, ffs_intr, psi_a, q_hint, hint)
+    ForceFreeStates.el_derivatives!(du_b, odet.u_store[:, :, :, ir], false, equil, ffit, ffs_intr, psi_b, q_hint, hint)
+    du1_a = @view du_a[:, :, 1]
+    du1_b = @view du_b[:, :, 1]
+    du2_a = @view du_a[:, :, 2]
+    du2_b = @view du_b[:, :, 2]
+
     kmat = Matrix{ComplexF64}(undef, npert, npert)
 
     u1_e = _hermite_cubic_val(u1_a, u1_b, du1_a, du1_b, psi_a, psi_b, psi)
@@ -173,7 +222,7 @@ end
         state::PerturbedEquilibriumState,
         equil::Equilibrium.PlasmaEquilibrium,
         ForceFreeStates_results::OdeState,
-        vac_data::VacuumData,
+        mthvac::Int,
         ffs_intr::ForceFreeStatesInternal,
         intr::PerturbedEquilibriumInternal,
         ctrl::PerturbedEquilibriumControl,
@@ -205,7 +254,7 @@ function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
     ForceFreeStates_results::OdeState,
-    vac_data::VacuumData,
+    mthvac::Int,
     ffs_intr::ForceFreeStatesInternal,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
@@ -227,8 +276,7 @@ function compute_singular_coupling_metrics!(
 
     chi1 = 2π * equil.psio
     twopi = 2π
-    mtheta = vac_data.mthvac
-    wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
+    mtheta = mthvac
 
     # Phase 1: Collect all resonant (surface, n) pairs in psi order
     resonant_pairs = Tuple{Int,Int}[]
@@ -254,13 +302,20 @@ function compute_singular_coupling_metrics!(
     state.C_resonant_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     state.C_resonant_current = zeros(ComplexF64, n_rational, numpert_total)
     state.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
-    state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
+    have_inner_bpen = !isempty(intr.inner_bpen)
+    if have_inner_bpen
+        state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
+    else
+        state.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
+        @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog=1
+    end
     state.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
     state.rational_psi = zeros(Float64, n_rational)
     state.rational_q = zeros(Float64, n_rational)
     state.rational_m_res = zeros(Int, n_rational)
     state.rational_n = zeros(Int, n_rational)
     state.rational_surface_idx = zeros(Int, n_rational)
+    state.rational_area = zeros(Float64, n_rational)
 
     # Precompute ODE coefficient matrix C_coeffs for all PE forcing modes.
     # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
@@ -303,17 +358,10 @@ function compute_singular_coupling_metrics!(
                 continue
             end
 
-            # Compute Green's functions at this surface for this n (once per pair)
-            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mlow:mhigh, [nn])
-            _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
-            grri = Matrix{ComplexF64}(grri_raw)
-            grre = Matrix{ComplexF64}(grre_raw)
+            # Surface inductance at this surface for this n (once per pair)
+            L_surf = calc_surface_inductance(equil, sing_surf.psifac, mtheta, mlow:mhigh, nn)
 
-            # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
-            ν_vac = Vacuum.PlasmaGeometry(vac_input).ν
-
-            # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
-            L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, nn, ν_vac)
+            # Only the (m_res, m_res) diagonal element is needed for singflx
             m_idx = m_res - mlow + 1
             L_mm = L_surf[m_idx, m_idx]
 
@@ -331,8 +379,14 @@ function compute_singular_coupling_metrics!(
             lpsi = sing_surf.psifac - spot_psi
             rpsi = sing_surf.psifac + spot_psi
 
-            # Evaluate u and dξ/dψ at lpsi and rpsi from the stored ODE solution
-            if !use_du_store
+            # Evaluate u and dξ/dψ at lpsi and rpsi from the stored ODE solution.
+            # Branch order mirrors Fortran gpeq_sol: gal-matched solutions take the analytic
+            # galerkin Ξ′, ideal runs the EL relation, kinetic runs the stored Ξ′.
+            if intr.odet_from_gal
+                # interpolate u and the analytic galerkin dξ/dψ carried in du_store
+                u_l, ud_l = _gal_solution_at(lpsi, resnum, ForceFreeStates_results, nstep)
+                u_r, ud_r = _gal_solution_at(rpsi, resnum, ForceFreeStates_results, nstep)
+            elseif !use_du_store
                 # interpolate u and finite-difference dξ/dψ across the bracketing nodes
                 u_l, ud_l = _chord_solution_at(lpsi, resnum, ForceFreeStates_results, nstep)
                 u_r, ud_r = _chord_solution_at(rpsi, resnum, ForceFreeStates_results, nstep)
@@ -363,14 +417,15 @@ function compute_singular_coupling_metrics!(
                 bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
                 bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
                 jump_vec[k] = bwp1_r - bwp1_l
-                # C_penetrated_area_weighted_field: midpoint of b^ψ at lpsi/rpsi divided by the scalar surface area.
-                # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi.
-                # LHS normalization audit (#233): the resonant flux Φ^r divided by the scalar area A^r
-                # is a genuine field amplitude in tesla and is coordinate-invariant [Pharr 2026; cf.
-                # the resonant-field definition in the Conventions Reference].
-                b_l = chi1 * singfac_l * 2π * im * xsp_l
-                b_r = chi1 * singfac_r * 2π * im * xsp_r
-                state.C_penetrated_area_weighted_field[row, k] = (b_l + b_r) / 2 / area
+            end
+
+            # Inner-layer (cusp-free) penetrated field: bpen[s, j] is linear in the same identity-at-edge
+            # coil-drive columns as the OdeState solutions, so it contracts with C_coeffs exactly like
+            # the outer solution values above (xsp = transpose(u) * ck); /area matches the area-weighted
+            # convention of the pointwise row.
+            if have_inner_bpen && s <= size(intr.inner_bpen, 1)
+                pen_row = (transpose(C_coeffs) * @view(intr.inner_bpen[s, :])) ./ area
+                state.C_penetrated_area_weighted_field[row, :] = pen_row
             end
 
             # LHS normalization audit (#233) — output scalar coordinate-invariance per row:
@@ -390,6 +445,7 @@ function compute_singular_coupling_metrics!(
             end
 
             state.rational_psi[row] = sing_surf.psifac
+            state.rational_area[row] = area
             state.rational_q[row] = sing_surf.q
             state.rational_m_res[row] = m_res
             state.rational_n[row] = nn
@@ -416,8 +472,9 @@ function compute_singular_coupling_metrics!(
     state.resonant_area_weighted_field = state.C_resonant_area_weighted_field * forcing_flux
     state.resonant_current = state.C_resonant_current * forcing_flux
     state.island_width_sq = state.C_island_width_sq * forcing_flux
-    state.penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * forcing_flux
     state.delta_prime = state.C_delta_prime * forcing_flux
+    have_inner_bpen && (state.penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * forcing_flux)
+    state.forcing_solution_weights = C_coeffs * forcing_flux
 
     # Conform the stored coupling-matrix input basis to the coordinate-invariant root-area-weighted
     # field (b̃) space (#233 / Pharr 2026): C̃ = C·R, so each stored row acts on the applied field
@@ -430,8 +487,8 @@ function compute_singular_coupling_metrics!(
     state.C_resonant_area_weighted_field = state.C_resonant_area_weighted_field * flux_conform
     state.C_resonant_current = state.C_resonant_current * flux_conform
     state.C_island_width_sq = state.C_island_width_sq * flux_conform
-    state.C_penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * flux_conform
     state.C_delta_prime = state.C_delta_prime * flux_conform
+    have_inner_bpen && (state.C_penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * flux_conform)
 
     # Phase 5: Island diagnostics from applied resonant vectors
     compute_island_diagnostics!(state, n_rational)
@@ -544,99 +601,6 @@ function compute_current_density(
     j_c = (1.0 / integral) * chi1^2 * q / μ₀
 
     return j_c
-end
-
-"""
-    compute_surface_inductance_from_greens(
-        grri::Matrix{ComplexF64},
-        grre::Matrix{ComplexF64},
-        ffs_intr::ForceFreeStatesInternal,
-        nn::Int,
-        ν::Vector{Float64}
-    )::Matrix{ComplexF64}
-
-Compute surface inductance matrix from Green's functions at flux surface.
-
-Implements the GPEC `gpvacuum_flxsurf` algorithm.
-
-The Julia vacuum code uses SFL Fourier basis `cos(m*θ - n*ν)` in the column transform,
-so the row DFT must apply the matching toroidal phase correction `exp(-i*n*ν)` before
-the DFT (matching Fortran `gpvacuum_flxsurf`'s `EXP(-ifac*nn*dphi)` phase correction).
-
-## Arguments
-
-  - `grri`: Interior Green's function [mtheta, mpert]
-  - `grre`: Exterior Green's function [mtheta, mpert]
-  - `ffs_intr`: ForceFreeStates internal state
-  - `nn`: Toroidal mode number
-  - `ν`: Toroidal angle offset on the vacuum theta grid [mtheta]
-
-## Returns
-
-Surface inductance matrix [mpert × mpert]
-"""
-@with_pool pool function compute_surface_inductance_from_greens(
-    grri::Matrix{ComplexF64},
-    grre::Matrix{ComplexF64},
-    ffs_intr::ForceFreeStatesInternal,
-    nn::Int,
-    ν::Vector{Float64}
-)::Matrix{ComplexF64}
-    mpert = ffs_intr.mpert
-    mtheta = length(ν)
-    μ₀ = 4π * 1e-7
-
-    ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
-
-    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
-    current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
-
-    kax = zeros!(pool, ComplexF64, mtheta)
-    grri_surf = @view grri[1:mtheta, :]
-    grre_surf = @view grre[1:mtheta, :]
-
-    # Toroidal phase correction: exp(-i*n*ν)
-    phase = cis.(-nn .* ν)
-
-    for i in 1:mpert
-        flux_matrix[i, i] = 1.0
-
-        # Complex grri/e stores exp(i(mθ-nν)) projection, need conjugate for exp(-i(mθ-nν))
-        kax .= conj.(grri_surf[:, i] .+ grre_surf[:, i]) ./ (μ₀ * (2π)^2)
-
-        # Port of Fortran gpvacuum_flxsurf: apply toroidal phase, reverse theta, forward-DFT.
-        g_phased = kax .* phase
-        current_matrix[:, i] = ft(_reverse_theta(g_phased))
-    end
-
-    # Compute surface inductance: L_surf = flux * inv(current) = inv(current)
-    L_surf = zeros(ComplexF64, mpert, mpert)
-
-    current_mag = maximum(abs.(current_matrix))
-
-    if current_mag < 1e-15
-        @warn "Current matrix is all zeros! Cannot compute surface inductance." maxlog=1
-        for i in 1:mpert
-            L_surf[i, i] = μ₀ * 1e-6
-        end
-    else
-        try
-            regularization = 1e-12 * current_mag
-            current_reg = current_matrix + regularization * I
-
-            L_surf = flux_matrix * inv(current_reg)
-
-            # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
-            L_surf = 0.5 * (L_surf + L_surf')
-        catch e
-            @warn "Surface inductance inversion failed: $e" maxlog=1
-            for i in 1:mpert
-                L_surf[i, i] = μ₀ * 1e-6
-            end
-        end
-    end
-
-    return L_surf
 end
 
 """

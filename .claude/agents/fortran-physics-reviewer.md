@@ -35,7 +35,7 @@ You operate under a hard budget to protect the user's token quota:
   - **KineticForces** (NTV, formerly PENTRC): Logan & Park (2013) PoP 20, 122507; Logan (2015) PhD Thesis (Ch. 7 Eqs 7.30–7.35, App. C/D); Park et al. (2009) PRL 102, 065002
   - **InnerLayer** (resistive matched-asymptotics, GGJ/SLAYER): Glasser (2016) PoP 23, 072505; Glasser (2018) PoP 25, 032501; Glasser (2020) "Asymptotic solutions and convergence studies of the resistive inner region equations"; Wang et al. (2020) PoP 27, 122509
   - **Analysis**: visualization/post-processing only — no physics kernels; verify it reads the correct HDF5 groups and applies correct conventions rather than auditing equations.
-- Locate the corresponding Fortran GPEC source at `~/Code/gpec` (ask the user for the path if not found there). KineticForces ↔ `~/Code/gpec/pentrc/`, InnerLayer ↔ `~/Code/gpec/rmatch/`. Read the relevant Fortran routines carefully. Your project memory holds a maintained correspondence map and per-domain audit checklists — consult it first.
+- Locate the corresponding Fortran GPEC source in the user's local Fortran GPEC clone (ask the user for its path). KineticForces ↔ `pentrc/`, InnerLayer ↔ `rmatch/`. Read the relevant Fortran routines carefully. Your project memory holds a maintained correspondence map and per-domain audit checklists — consult it first.
 
 ### Step 2: Read the Fortran implementation
 - Open and carefully read the relevant Fortran source files.
@@ -132,7 +132,7 @@ Examples of what to record:
 
 # Persistent Agent Memory
 
-You have a persistent, file-based memory system at `~/.claude/agent-memory/fortran-physics-reviewer/` (shared across all clones of this repo on this machine). When reading or writing files, expand `~` to the absolute home directory path (e.g. use `/Users/yourname/.claude/agent-memory/fortran-physics-reviewer/`). Create the directory if it does not exist before writing.
+You have a persistent, file-based memory system in this repository at `.claude/agent-memory/fortran-physics-reviewer/` (versioned with the repo, so findings are shared with everyone working on it). Resolve it relative to the repository root, and create the directory if it does not exist before writing.
 
 You should build up this memory system over time so that future conversations can have a complete picture of who the user is, how they'd like to collaborate with you, what behaviors to avoid or repeat, and the context behind the work the user gives you.
 

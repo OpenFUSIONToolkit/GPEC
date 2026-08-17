@@ -31,10 +31,9 @@ the pre-rewrite (`ximag`) value of 34.176 was not.
 Usage:
     julia --project=. benchmarks/benchmark_solovev_kinetic_stability.jl
 
-Environment:
-    GPEC_FORTRAN_DCON   path to Fortran `dcon` (default ~/Code/gpec/bin/dcon)
+Environment (both required):
+    GPEC_FORTRAN_DCON   path to the Fortran `dcon` executable
     GPEC_FORTRAN_SOLDIR Fortran solovev_kinetic_example dir used as deck template
-                        (default ~/Code/gpec/docs/examples/solovev_kinetic_example)
 """
 
 using Printf
@@ -46,9 +45,8 @@ const GPE = GeneralizedPerturbedEquilibrium
 
 const REPO            = normpath(joinpath(@__DIR__, ".."))
 const JULIA_FIXTURE   = joinpath(REPO, "test", "test_data", "regression_solovev_kinetic_calculated")
-const FORTRAN_DCON    = get(ENV, "GPEC_FORTRAN_DCON", expanduser("~/Code/gpec/bin/dcon"))
-const FORTRAN_SOLDIR  = get(ENV, "GPEC_FORTRAN_SOLDIR",
-                            expanduser("~/Code/gpec/docs/examples/solovev_kinetic_example"))
+const FORTRAN_DCON    = get(ENV, "GPEC_FORTRAN_DCON", "")
+const FORTRAN_SOLDIR  = get(ENV, "GPEC_FORTRAN_SOLDIR", "")
 
 _p(args...) = (println(stderr, args...); flush(stderr))
 
@@ -86,7 +84,7 @@ fields that must match the Julia regression fixture (read from its `gpec.toml`
 and `sol.toml`). Converts the fixture's `kinetic.dat` into Fortran `kinetic.txt`.
 """
 function build_matched_fortran_deck(workdir::String)
-    isdir(FORTRAN_SOLDIR) || error("Fortran deck template not found: $FORTRAN_SOLDIR")
+    isdir(FORTRAN_SOLDIR) || error("Fortran deck template not found: '$FORTRAN_SOLDIR' (set GPEC_FORTRAN_SOLDIR)")
     for f in ("sol.in", "equil.in", "dcon.in", "pentrc.in", "vac.in")
         cp(joinpath(FORTRAN_SOLDIR, f), joinpath(workdir, f); force=true)
     end
@@ -157,7 +155,7 @@ function run_julia_reference()
     GPE.main([rundir])
     wall = time() - t0
     et = h5open(joinpath(rundir, "gpec.h5"), "r") do h5
-        read(h5["FreeBoundaryStability/eigenmode_energies"])
+        read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
     end
     return real(et[1]), imag(et[1]), wall
 end

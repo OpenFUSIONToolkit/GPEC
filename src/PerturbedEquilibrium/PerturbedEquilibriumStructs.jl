@@ -29,7 +29,7 @@ Regularization:
     # High Priority (MWE)
   - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
-@kwdef mutable struct PerturbedEquilibriumControl
+@kwdef struct PerturbedEquilibriumControl
     # High Priority (MWE)
     fixed_boundary::Bool = false
     output_eigenmodes::Bool = true
@@ -74,6 +74,11 @@ Internal state variables for perturbed equilibrium calculations.
     singular_coupling_metrics::Dict{String,Float64} = Dict{String,Float64}()
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
+    # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer.
+    inner_bpen::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    # True when the consumed OdeState came from gal matching, whose du_store carries the
+    # analytic galerkin Ξ′; selects the gal branch of the singular-coupling Ξ′ evaluation.
+    odet_from_gal::Bool = false
 end
 
 """
@@ -165,6 +170,8 @@ well-conditioned flux-space inductances L, Λ:
     island_width_sq::Vector{ComplexF64} = ComplexF64[]
     penetrated_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
     delta_prime::Vector{ComplexF64} = ComplexF64[]
+    forcing_solution_weights::Vector{ComplexF64} = ComplexF64[]
+    rational_area::Vector{Float64} = Float64[]
 
     # Diagnostics [n_rational]
     island_half_width::Vector{Float64} = Float64[]

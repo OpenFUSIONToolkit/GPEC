@@ -60,7 +60,7 @@ Constructed via keyword arguments or from a TOML dict:
 ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
 """
-@kwdef mutable struct KineticForcesControl
+@kwdef struct KineticForcesControl
     # Moment type
     moment::String = "pressure"     # "heat" or "pressure"
 
@@ -491,7 +491,7 @@ end
     KineticForcesState
 
 Accumulated results from all KineticForces computations.
-Written to gpec.h5 under the "kinetic_forces" group.
+Written to gpec.h5 under the "KineticForces" group.
 """
 @kwdef mutable struct KineticForcesState
     method_results::Dict{String, MethodResult} = Dict{String, MethodResult}()

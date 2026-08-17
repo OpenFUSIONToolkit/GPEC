@@ -30,7 +30,7 @@ export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParam
     KineticProfileSplines, load_kinetic_profiles,
     KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
-export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, implied_knot_count
+export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, bracket_mandatory_nodes, enforce_min_spacing, implied_knot_count
 export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
 
 # --- Constants ---
@@ -92,27 +92,16 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     if additional_input isa DirectRunInput
         eq_input = additional_input
         eq_input.config = eq_config
-        # Re-run the separatrix clamp for efit-family replays so an overridden
-        # psihigh from the rerun TOML is re-validated against the closed flux region.
-        if eq_type in EFIT_KINDS
-            psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
-            if adjusted
-                @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
-                      "clamped to $(round(psihigh_safe; sigdigits=7))"
-                eq_input.config.psihigh = psihigh_safe
-            end
-        end
+        # Reset before re-resolving: a pass-1 clamped value must not shadow a psihigh
+        # overridden in the rerun TOML.
+        eq_input.psihigh_resolved = eq_config.psihigh
+        eq_type in EFIT_KINDS && resolve_psihigh!(eq_input)
     elseif additional_input isa InverseRunInput
         eq_input = additional_input
         eq_input.config = eq_config
+        eq_input.psihigh_resolved = eq_config.psihigh
     elseif eq_type in EFIT_KINDS
-        eq_input = read_efit(eq_config)
-        psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
-        if adjusted
-            @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
-                  "clamped to $(round(psihigh_safe; sigdigits=7))"
-            eq_input.config.psihigh = psihigh_safe
-        end
+        eq_input = resolve_psihigh!(read_efit(eq_config))
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]

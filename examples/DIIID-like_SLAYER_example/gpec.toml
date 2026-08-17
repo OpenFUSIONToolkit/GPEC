@@ -8,16 +8,13 @@
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                   # Poloidal field power exponent for Jacobian
-power_b = 0                    # Toroidal field power exponent for Jacobian
-power_r = 0                    # Major radius power exponent for Jacobian
 grid_type = "log_asymptotic"   # Radial grid packing type
 psilow = 1e-4                  # Lower limit of normalized flux coordinate
 psihigh = 0.9995               # Upper limit of normalized flux coordinate
 mpsi = 0                       # Number of radial grid points (0 = auto-compute from psi_accuracy)
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
 mtheta = 256                   # Number of poloidal grid points
-newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-10                   # Error tolerance for equilibrium solver
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
@@ -34,11 +31,9 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 [ForceFreeStates]
 force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
-mat_flag = true                # Construct coefficient matrices for diagnostic purposes
-ode_flag = true                # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                 # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
+psiedge = 0.99                 # Edge dW scan band: diagnostic dW(ψ) computed for ψ ∈ [psiedge, psilim]; integration domain set by qhigh / psihigh / dmlim
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
@@ -56,11 +51,8 @@ save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th).
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
-# Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
-parallel_threads      = 1      # serial/bit-deterministic BVP — keeps the regression Δ' (and hence γ) reproducible
-populate_dense_xi     = false  # No PerturbedEquilibrium here; the dense EL pass has no consumer (auto-disabled under force_termination anyway). SLAYER needs only delta_prime_matrix from the parallel BVP.
-truncate_at_dW_peak   = false  # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
+# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
 set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n
 
@@ -71,26 +63,26 @@ dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmli
 # kinetic file shared with the kinetic/NTV physics. Per-surface (uncoupled)
 # analysis: the headline is the unstable 2/1; the validity gate drops surfaces
 # with no real root (e.g. the 5/1, whose Δ' BVP yields a huge uncancellable Δ').
-enabled                 = true
-inner_model             = "slayer_fitzpatrick"
-scan_mode               = "amr"
-coupling_mode           = "uncoupled"
-dc_type                 = "none"
-mu_i                    = 2.0
-zeff                    = 1.0
+enabled                 = true       # Run the SLAYER tearing-mode analysis
+inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
+scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive refinement) or "brute_force"
+coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
+dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar", "rfitzp", or "toroidal"
+mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
+zeff                    = 1.0        # Effective charge
 chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
-filter_above_poles      = true
-filter_outside_re       = true
+filter_above_poles      = true       # Discard roots above the highest pole γ
+filter_outside_re       = true       # Condition the above-pole filter on the +γ step exiting the Re(Δ)=0 contour loop
 polish_roots            = true       # refine each root to the true zero; enables the validity gate
 store_scan              = false      # per-surface scans omitted from HDF5 (uncoupled has one per surface)
 # Standardized kinetic-profile file (GPEC HDF5 kinetic schema), shared with the
 # sibling ideal example; carries n_e, T_e, T_i, omega_E, chi_e (χ⊥), chi_phi (χ_φ).
-profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5"
+profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (relative to the run dir), required when SLAYER is enabled
 
 [SLAYER.scan_grid]
-Q_re_range = [-2.0, 2.0]
-Q_im_range = [-0.5, 3.0]
-nre        = 41
-nim        = 31
+Q_re_range = [-2.0, 2.0]       # Scan box in the normalized Q plane, Re(Q) axis
+Q_im_range = [-0.5, 3.0]       # Scan box in the normalized Q plane, Im(Q) axis
+nre        = 41                # Grid resolution along the Re(Q) axis
+nim        = 31                # Grid resolution along the Im(Q) axis

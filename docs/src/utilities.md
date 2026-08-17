@@ -29,6 +29,15 @@ neoclassical models) used to set the Lundquist number in the tearing stack.
 Modules = [GeneralizedPerturbedEquilibrium.Utilities.NeoclassicalResistivity]
 ```
 
+## HDF5 Annotations
+
+Self-describing metadata for `gpec.h5` (long_name/units/dims attributes and HDF5
+Dimension Scales); see the metadata contract in `docs/development/hdf5-conventions.md`.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Utilities.HDF5Annotations]
+```
+
 ## IMAS Output
 
 ```@docs

@@ -1,6 +1,6 @@
 """
     compute_plasma_response!(
-        state, equil, ForceFreeStates_results, vac_data, ffs_intr,
+        state, equil, ForceFreeStates_results, wt0, mthvac, ffs_intr,
         intr, ctrl, metric, ffit
     )
 
@@ -18,7 +18,8 @@ function compute_plasma_response!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
     ForceFreeStates_results::OdeState,
-    vac_data::VacuumData,
+    wt0::Matrix{ComplexF64},
+    mthvac::Int,
     ffs_intr::ForceFreeStatesInternal,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
@@ -30,21 +31,14 @@ function compute_plasma_response!(
     end
 
     # Build flux matrix from ForceFreeStates eigenmodes [mode × eigenmode]
-    flux_matrix = build_flux_matrix(equil, ForceFreeStates_results, vac_data, ffs_intr)
+    flux_matrix = build_flux_matrix(equil, ForceFreeStates_results, ffs_intr)
 
     # Plasma inductance Lambda (wt0 formula, Fortran resp_induct_flag=TRUE default)
-    plasma_inductance = calc_plasma_inductance(vac_data, ffs_intr, equil.psio)
+    plasma_inductance = calc_plasma_inductance(wt0, ffs_intr, equil.psio)
 
-    # Surface inductance L from Green's functions at psilim.
-    # Requires a 2D (nzvac=1) vacuum response so rows are theta points only,
+    # Surface inductance L from vacuum surface-current matrix at psilim.
     nn = ffs_intr.nlow
-    vac_input_2d = Vacuum.VacuumInput(equil, ffs_intr.psilim, vac_data.mthvac, 1, ffs_intr.mlow:ffs_intr.mhigh, [nn])
-    wall_nowall = Vacuum.WallShapeSettings(; shape="nowall")
-    _, grri_2d_raw, grre_2d_raw, _, _ = Vacuum.compute_vacuum_response(vac_input_2d, wall_nowall)
-    grri_2d = Matrix{ComplexF64}(grri_2d_raw)
-    grre_2d = Matrix{ComplexF64}(grre_2d_raw)
-    ν_vac = Vacuum.PlasmaGeometry(vac_input_2d).ν
-    surface_inductance = compute_surface_inductance_from_greens(grri_2d, grre_2d, ffs_intr, nn, ν_vac)
+    surface_inductance = calc_surface_inductance(equil, ffs_intr.psilim, mthvac, ffs_intr.mlow:ffs_intr.mhigh, nn)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).

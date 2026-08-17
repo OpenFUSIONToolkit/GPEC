@@ -1,13 +1,16 @@
+# Regression case: DIII-D-like H-mode n=1 SLAYER tearing-mode growth rates.
+# Uncoupled per-surface analysis with the AMR Q-plane scan; tracks the per-surface
+# layer parameters and the extracted roots (Q, ω, γ) for the inner three rationals.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
 [case]
 name = "diiid_slayer_n1"
 description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis (uncoupled per-surface, AMR, validity-gated)"
 example_dir = "examples/DIIID-like_SLAYER_example"
 
-# ---------------------------------------------------------------------
 # Per-surface SLAYER layer parameters (geometry + dimensionless)
-# ---------------------------------------------------------------------
 [quantities.slayer_ising]
-h5path = "slayer/per_surface/ising"
+h5path = "Tearing/PerSurface/rational_index"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER surface indices"
@@ -15,7 +18,7 @@ noise_threshold = 0
 order = 10
 
 [quantities.slayer_m]
-h5path = "slayer/per_surface/m"
+h5path = "Tearing/PerSurface/m"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER poloidal m"
@@ -23,7 +26,7 @@ noise_threshold = 0
 order = 11
 
 [quantities.slayer_n]
-h5path = "slayer/per_surface/n"
+h5path = "Tearing/PerSurface/n"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER toroidal n"
@@ -31,7 +34,7 @@ noise_threshold = 0
 order = 12
 
 [quantities.slayer_rs]
-h5path = "slayer/per_surface/rs"
+h5path = "Tearing/PerSurface/rs"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER minor radius rs"
@@ -39,7 +42,7 @@ noise_threshold = 1e-10
 order = 13
 
 [quantities.slayer_sval_r]
-h5path = "slayer/per_surface/sval_r"
+h5path = "Tearing/PerSurface/sval_r"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER r-based shear"
@@ -47,7 +50,7 @@ noise_threshold = 1e-10
 order = 14
 
 [quantities.slayer_lu]
-h5path = "slayer/per_surface/lu"
+h5path = "Tearing/PerSurface/lu"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER Lundquist S"
@@ -55,7 +58,7 @@ noise_threshold = 1e-8
 order = 15
 
 [quantities.slayer_D_norm]
-h5path = "slayer/per_surface/D_norm"
+h5path = "Tearing/PerSurface/D_norm"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER D_norm"
@@ -63,7 +66,7 @@ noise_threshold = 1e-10
 order = 16
 
 [quantities.slayer_P_perp]
-h5path = "slayer/per_surface/P_perp"
+h5path = "Tearing/PerSurface/P_perp"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER P_perp"
@@ -71,7 +74,7 @@ noise_threshold = 1e-8
 order = 17
 
 [quantities.slayer_tauk]
-h5path = "slayer/per_surface/tauk"
+h5path = "Tearing/PerSurface/tau_k"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER tauk"
@@ -79,14 +82,13 @@ noise_threshold = 1e-12
 order = 18
 
 [quantities.slayer_iota_e]
-h5path = "slayer/per_surface/iota_e"
+h5path = "Tearing/PerSurface/iota_e"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER iota_e"
 noise_threshold = 1e-12
 order = 19
 
-# ---------------------------------------------------------------------
 # Tearing eigenvalue (coupled mode → length 1). The headline deliverable:
 # a real, nonzero growth rate on a realistic equilibrium. Root-extraction
 # is sensitive to the AMR cell topology and ODE solver, so the Q/ω/γ
@@ -96,25 +98,16 @@ order = 19
 # surfaces only (2/1, 3/1, 4/1) via `first_3`: the Δ'/γ contour search is
 # numerically unreliable on the outermost surfaces (e.g. 5/1, 6/1, 7/1 near the
 # edge), so those are deliberately not golden-tracked.
-# ---------------------------------------------------------------------
-[quantities.slayer_Q_re]
-h5path = "slayer/roots/Q_root_real"
-type = "real_vector"
-extract = "first_3"
-label = "SLAYER Re(Q_root) [2/1,3/1,4/1]"
+[quantities.slayer_Q]
+h5path = "Tearing/Roots/Q_root"
+type = "complex_vector"
+extract = "first_3_complex"
+label = "SLAYER Q_root [2/1,3/1,4/1]"
 noise_threshold = 1e-4
 order = 30
 
-[quantities.slayer_Q_im]
-h5path = "slayer/roots/Q_root_imag"
-type = "real_vector"
-extract = "first_3"
-label = "SLAYER Im(Q_root) [2/1,3/1,4/1]"
-noise_threshold = 1e-4
-order = 31
-
 [quantities.slayer_omega_Hz]
-h5path = "slayer/roots/omega_Hz"
+h5path = "Tearing/Roots/omega"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER ω_Hz [2/1,3/1,4/1]"
@@ -122,7 +115,7 @@ noise_threshold = 1.0
 order = 32
 
 [quantities.slayer_gamma_Hz]
-h5path = "slayer/roots/gamma_Hz"
+h5path = "Tearing/Roots/gamma"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER γ_Hz [2/1,3/1,4/1]"
@@ -132,27 +125,22 @@ order = 33
 # no_root flag (1 = extraction failed). Pinned for the inner three surfaces;
 # this case guards that the 2/1, 3/1, 4/1 keep finding a real root.
 [quantities.slayer_no_root]
-h5path = "slayer/roots/no_root"
+h5path = "Tearing/Roots/no_root"
 type = "real_vector"
 extract = "first_3"
 label = "SLAYER no_root flags [2/1,3/1,4/1]"
 noise_threshold = 0
 order = 34
 
-# ---------------------------------------------------------------------
 # Settings (catches accidental config drift)
-# ---------------------------------------------------------------------
 [quantities.slayer_enabled]
-h5path = "slayer/enabled"
+h5path = "Tearing/enabled"
 type = "int_scalar"
 extract = "value"
 label = "SLAYER enabled flag"
 noise_threshold = 0
 order = 90
 
-# ---------------------------------------------------------------------
-# Runtime
-# ---------------------------------------------------------------------
 [quantities.runtime]
 h5path = ""
 type = "runtime"

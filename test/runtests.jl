@@ -3,6 +3,7 @@ using Pkg
 using GeneralizedPerturbedEquilibrium.Vacuum
 using GeneralizedPerturbedEquilibrium.Equilibrium
 using GeneralizedPerturbedEquilibrium.ForceFreeStates
+using GeneralizedPerturbedEquilibrium.LocalStability
 using GeneralizedPerturbedEquilibrium.ForcingTerms
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.Utilities
@@ -49,4 +50,5 @@ else
     include("./runtests_coils.jl")
     include("./runtests_imas.jl")
     include("./runtests_rerun_from_h5.jl")
+    include("./runtests_h5_schema.jl")
 end

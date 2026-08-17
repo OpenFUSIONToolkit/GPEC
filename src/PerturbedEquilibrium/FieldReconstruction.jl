@@ -6,7 +6,7 @@ field perturbations in mode space, following the GPEC gpeq module approach.
 
 Displacement components from ODE integration (u_store/du_store/xi_s_store):
 - ξ_ψ: radial displacement (u_store[:,:,1,:])
-- dξ_ψ/dψ: radial derivative (du_store[:,:,1,:])
+- dξ_ψ/dψ: radial derivative (du_store)
 - ξ_s: toroidal displacement (xi_s_store, Glasser 2016 eq. 18)
 
 Contravariant perturbed field from ideal MHD (matches Fortran gpeq_sol):
@@ -219,7 +219,7 @@ alpha = flux_matrix \\ response_vector
 
 Then sum eigenmode contributions at each radial point (matches Fortran gpeq_sol):
 xi_psi[ipsi, :]  = u_store[:, :, 1, ipsi]  * alpha   # Ξ_ψ
-xi_psi1[ipsi, :] = du_store[:, :, 1, ipsi] * alpha   # dΞ_ψ/dψ
+xi_psi1[ipsi, :] = du_store[:, :, ipsi] * alpha   # dΞ_ψ/dψ
 xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (toroidal, Glasser 2016 eq. 18)
 
 # Returns
@@ -251,9 +251,9 @@ function sum_eigenmode_contributions(
         mul!(view(xi_psi_modes, ipsi, :),
             @view(ForceFreeStates_results.u_store[:, :, 1, ipsi]),
             alpha)
-        # du_store[:,:,1] = dΞ_ψ/dψ (radial derivative)
+        # du_store = dΞ_ψ/dψ (radial derivative)
         mul!(view(xi_psi1_modes, ipsi, :),
-            @view(ForceFreeStates_results.du_store[:, :, 1, ipsi]),
+            @view(ForceFreeStates_results.du_store[:, :, ipsi]),
             alpha)
         # xi_s_store = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
         mul!(view(xi_s_modes, ipsi, :),

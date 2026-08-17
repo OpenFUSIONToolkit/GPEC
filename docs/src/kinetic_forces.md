@@ -89,6 +89,36 @@ terms respectively, and do not modify the stored kinetic profile splines.
        when computing the `toroidal_rotation_factor` back-solve. Julia uses a
        clean reimplementation with consistent pre-scaling derivatives throughout.
 
+## HDF5 outputs: complex torque convention and the EnergyIntegrals layout
+
+The method level of `KineticForces/<method>/` reports the two physical scalars a user
+wants first: `total_torque` = ``T_\phi`` (N·m) and `total_energy` = ``\delta W_k`` (J).
+Internally both are halves of one complex quantity ``T = T_\phi + 2in\,\delta W_k``
+(Logan 2013), and the ψ-profiles `dTdpsi` and `T` store that complex ``T`` directly —
+so `imag(T)` carries the ``2n`` factor while `total_energy` has it divided out. The
+per-record `EnergyIntegrals/torque` and `EnergyIntegrals/kinetic_energy` are separate
+complex diagnostics of the two integrand halves at each ``(\psi, \lambda, \ell)``
+evaluation, which is why they are not packed into one number there.
+
+`EnergyIntegrals/` stores the variable-length integration trajectories in the
+flat-plus-offsets ragged layout (chosen over HDF5 VLEN types for cross-language
+support; `Tearing/Diagnostics/*` uses the same pattern). Record `k` spans
+`offsets[k]+1 : offsets[k+1]` (Julia, 1-based) of each `*_all` array:
+
+```julia
+h5open("gpec.h5", "r") do f
+    g = f["KineticForces/fgar/EnergyIntegrals"]
+    off = read(g["trajectory_offsets"])
+    x_k = read(g["x_all"])[off[k]+1:off[k+1]]          # record k's abscissae
+    I_k = read(g["integrand_all"])[off[k]+1:off[k+1]]  # its complex integrand
+end
+```
+
+```python
+g = f["KineticForces/fgar/EnergyIntegrals"]            # h5py, 0-based
+x_k = g["x_all"][g["trajectory_offsets"][k]:g["trajectory_offsets"][k + 1]]
+```
+
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.KineticForces]
 ```

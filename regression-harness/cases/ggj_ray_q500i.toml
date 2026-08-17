@@ -1,0 +1,56 @@
+# Regression case: GGJ inner-layer rotated-ray collocation backend at Q = 500i.
+# A "computed" case (kind = "computed", no example_dir) that calls solve_inner with the
+# :ray backend on the physical q=4 benchmark surface at Q = 500i — a regime beyond the
+# :galerkin backend — and tracks the Δ_odd / Δ_even matching coefficients. Guards the
+# rotated-ray solver (and its extended-precision damped-zone march) against numerical
+# drift across changes. Each [quantities.*] block names an HDF5 path in the computed
+# output, how to extract it, and the noise floor for diffs.
+[case]
+name = "ggj_ray_q500i"
+description = "GGJ inner-layer :ray backend, q=4 surface, Q = 500i (beyond :galerkin)"
+kind = "computed"
+
+# Δ_odd / Δ_even from solve_inner(GGJModel(:ray), q4_surface_benchmark(), 500im·Q₀).
+# Complex-valued; both real and imaginary parts are tracked separately.
+# noise_threshold 1e-4 (absolute): the extended-precision damped-zone march carries
+# BLAS/platform-dependent structured roundoff at the ~1e-4 absolute level on these
+# O(10) components (~1e-5 relative); a tighter floor flags phantom cross-machine drift.
+[quantities.delta_odd_real]
+h5path = "ggj/delta_odd_real"
+type = "real_scalar"
+extract = "value"
+label = "Re(Δ_odd)"
+noise_threshold = 1e-4
+order = 10
+
+[quantities.delta_odd_imag]
+h5path = "ggj/delta_odd_imag"
+type = "real_scalar"
+extract = "value"
+label = "Im(Δ_odd)"
+noise_threshold = 1e-4
+order = 11
+
+[quantities.delta_even_real]
+h5path = "ggj/delta_even_real"
+type = "real_scalar"
+extract = "value"
+label = "Re(Δ_even)"
+noise_threshold = 1e-4
+order = 12
+
+[quantities.delta_even_imag]
+h5path = "ggj/delta_even_imag"
+type = "real_scalar"
+extract = "value"
+label = "Im(Δ_even)"
+noise_threshold = 1e-4
+order = 13
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 90

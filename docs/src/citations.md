@@ -36,7 +36,7 @@ The primary reference for the `ForceFreeStates` module. Derives the Euler-Lagran
 > *Physics of Plasmas* **25**, 032507 (2018).
 > DOI: [10.1063/1.5007042](https://doi.org/10.1063/1.5007042)
 
-Reformulates the DCON eigenvalue problem as a Riccati matrix ODE, enabling parallel integration across singular surfaces and faster computation. Implemented in `src/ForceFreeStates/Riccati.jl` and enabled via `use_riccati = true` in `[ForceFreeStates]`.
+Reformulates the DCON eigenvalue problem as a Riccati matrix ODE, enabling parallel integration across singular surfaces and faster computation. Implemented in `src/ForceFreeStates/Riccati.jl` and enabled via `integrator = "riccati"` in `[ForceFreeStates]`.
 
 ---
 
@@ -104,7 +104,7 @@ Provides an efficient algorithm for computing the full Δ' matrix (coupling betw
 > *Physics of Plasmas* **27**, 012506 (2020).
 > DOI: [10.1063/1.5134999](https://doi.org/10.1063/1.5134999)
 
-Showcases a different basis that significantly aids convergence of the Galerkin solver used in the GGJ InnerLayer module.
+Constructs the Wasow large-``x`` asymptotic basis (the `inps` kernel) that supplies the far-field boundary condition for every GGJ InnerLayer backend — the Galerkin solver and the rotated-contour collocation (`:ray`) solver alike.
 
 ---
 

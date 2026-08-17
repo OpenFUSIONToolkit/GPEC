@@ -162,7 +162,7 @@ in a single pitch integration, sharing one energy integration per (λ, E).
 
 Returns a length-`2*nqty` packed buffer: `[wmm | tmm]`. The two halves each
 reproduce Fortran's independent-pass result at Fortran's element-by-element
-convention (verified via matrix-dump comparison vs `~/Code/gpec/dcon/fourfit.F`
+convention (verified via matrix-dump comparison vs Fortran `dcon/fourfit.F`
 `kwmat_l`/`ktmat_l`). Downstream `kwmat ± ktmat` combinations in
 `ForceFreeStates/Kinetic.jl` then reproduce `sing.f:967-1075` exactly for the
 non-Hermitian B_k, C_k, E_k diagonals.

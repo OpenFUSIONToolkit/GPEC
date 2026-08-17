@@ -179,7 +179,7 @@ Use `convert_coil_dat_to_h5` / `convert_coil_h5_to_dat` to migrate legacy files,
 ### Rerun snapshot
 
 When a coil run writes `gpec.h5`, the coil geometry actually used (after shifts/tilts and with
-currents) is captured under `input/raw_inputs/coils/`. The run can then be replayed with
+currents) is captured under `Input/RawInputs/Coils/`. The run can then be replayed with
 `main_from_h5` even if the original `.dat`/`.h5` files are gone:
 
 - `--coil-source forcing-modes` (default) recomputes the field from the stored TOML coil config

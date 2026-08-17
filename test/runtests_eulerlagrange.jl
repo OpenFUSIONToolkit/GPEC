@@ -1,6 +1,7 @@
-# TODO: perhaps this isn't the best place for this function?
-# Should I do include("../ForceFreeStates/utils.jl") instead? or maybe save these functions in a separate file?
-# associated TODO: come up with Gaussian reduction test that doesn't rely on external data
+using TOML
+
+# TODO: this helper may belong in a shared test-utilities file rather than here.
+# TODO: come up with a Gaussian reduction test that doesn't rely on external data.
 
 function load_u_matrix(filename)
     lines = readlines(filename)
@@ -36,8 +37,6 @@ end
             odet.psi_store[i] = Float64(i)
             odet.q_store[i] = Float64(i * 2)
             odet.u_store[:, :, :, i] .= ComplexF64(i)
-            odet.du_store[:, :, :, i] .= ComplexF64(i + 0.5)
-            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.25)
         end
 
         # Resize storage
@@ -47,16 +46,16 @@ end
         @test length(odet.psi_store) == 2 * numsteps_init
         @test length(odet.q_store) == 2 * numsteps_init
         @test size(odet.u_store, 4) == 2 * numsteps_init
-        @test size(odet.du_store, 4) == 2 * numsteps_init
-        @test size(odet.xi_s_store, 3) == 2 * numsteps_init
+
+        # Derivative stores are materialized after integration, so growth never touches them
+        @test isempty(odet.du_store)
+        @test isempty(odet.xi_s_store)
 
         # Check data is preserved
         @test all(odet.psi_store[1:odet.step] .== Float64.(1:odet.step))
         @test all(odet.q_store[1:odet.step] .== Float64.(2:2:(2*odet.step)))
         for i in 1:odet.step
             @test all(odet.u_store[:, :, :, i] .== ComplexF64(i))
-            @test all(odet.du_store[:, :, :, i] .== ComplexF64(i + 0.5))
-            @test all(odet.xi_s_store[:, :, i] .== ComplexF64(i + 0.25))
         end
 
         # Check that you can resize again
@@ -64,8 +63,6 @@ end
         @test length(odet.psi_store) == 4 * numsteps_init
         @test length(odet.q_store) == 4 * numsteps_init
         @test size(odet.u_store, 4) == 4 * numsteps_init
-        @test size(odet.du_store, 4) == 4 * numsteps_init
-        @test size(odet.xi_s_store, 3) == 4 * numsteps_init
     end
 
     @testset "trim_storage!" begin
@@ -80,8 +77,6 @@ end
             odet.psi_store[i] = Float64(i)
             odet.q_store[i] = Float64(i * 2)
             odet.u_store[:, :, :, i] .= ComplexF64(i)
-            odet.du_store[:, :, :, i] .= ComplexF64(i + 0.5)
-            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.25)
         end
 
         # Trim storage
@@ -91,8 +86,6 @@ end
         @test length(odet.psi_store) == odet.step
         @test length(odet.q_store) == odet.step
         @test size(odet.u_store, 4) == odet.step
-        @test size(odet.du_store, 4) == odet.step
-        @test size(odet.xi_s_store, 3) == odet.step
 
         # Check all data is preserved
         @test all(odet.psi_store .== Float64.(1:odet.step))
@@ -121,13 +114,10 @@ end
         # Initialize index (sorted by unorm)
         odet.index[:, 1] = [1, 2]
 
-        # Set up some u_store, du_store, and xi_s_store data
+        # Set up some u_store data; derivative stores stay empty on this path
         for i in 1:odet.step
             odet.u_store[:, :, 1, i] .= ComplexF64(i)
             odet.u_store[:, :, 2, i] .= ComplexF64(i + 0.1)
-            odet.du_store[:, :, 1, i] .= ComplexF64(i + 0.2)
-            odet.du_store[:, :, 2, i] .= ComplexF64(i + 0.3)
-            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.4)
         end
 
         u_orig = copy(odet.u_store)
@@ -142,6 +132,47 @@ end
         # transform_u! doesn't resize arrays - it only applies transformations in-place
         # The storage arrays retain their original allocated size
         @test size(odet.u_store) == size(u_orig)
+
+        # Empty derivative stores must be skipped, not indexed into
+        @test isempty(odet.du_store)
+        @test isempty(odet.xi_s_store)
+    end
+
+    @testset "transform_u! with pre-filled derivative stores" begin
+        # The galerkin-matched path supplies analytic derivatives before the fixup transforms,
+        # so those arrays must be mixed by the same fixfac matrices as u_store.
+        mpert = 2
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 5, 2)
+
+        odet.ifix = 1
+        odet.step = 5
+        odet.sing_flag[1] = false
+        odet.fixstep[1] = 3
+        odet.zeroed_idx[1] = Int[]
+        odet.fixfac[1, 1, 1] = 1.0
+        odet.fixfac[1, 2, 1] = 0.5
+        odet.fixfac[2, 1, 1] = 0.0
+        odet.fixfac[2, 2, 1] = 1.0
+        odet.index[:, 1] = [1, 2]
+
+        odet.du_store = zeros(ComplexF64, mpert, mpert, odet.step)
+        odet.xi_s_store = zeros(ComplexF64, mpert, mpert, odet.step)
+        for i in 1:odet.step
+            odet.u_store[:, :, 1, i] .= ComplexF64(i)
+            odet.u_store[:, :, 2, i] .= ComplexF64(i + 0.1)
+            odet.du_store[:, :, i] .= ComplexF64(i + 0.2)
+            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.4)
+        end
+        du_orig = copy(odet.du_store)
+        xi_s_orig = copy(odet.xi_s_store)
+
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.transform_u!(odet, intr)
+
+        @test size(odet.du_store) == size(du_orig)
+        @test size(odet.xi_s_store) == size(xi_s_orig)
+        @test !all(odet.du_store .== du_orig)
+        @test !all(odet.xi_s_store .== xi_s_orig)
     end
 
     @testset "apply_gaussian_reduction!" begin
@@ -221,8 +252,7 @@ end
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.ucrit = 10.0
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; ucrit=10.0)
 
         # Case 1: Basic norm computation
         odet.u = zeros(ComplexF64, 2, 2, 2)
@@ -284,11 +314,12 @@ end
 
         # Check array dimensions
         @test size(odet.u) == (numpert_total, numpert_total, 2)
-        @test size(odet.du) == (numpert_total, numpert_total, 2)
-        @test size(odet.xi_s) == (numpert_total, numpert_total)
         @test size(odet.u_store) == (numpert_total, numpert_total, 2, numsteps_init)
-        @test size(odet.du_store) == (numpert_total, numpert_total, 2, numsteps_init)
-        @test size(odet.xi_s_store) == (numpert_total, numpert_total, numsteps_init)
+        # Derivative stores start empty and are sized when materialized
+        @test size(odet.du_store) == (numpert_total, numpert_total, 0)
+        @test size(odet.xi_s_store) == (numpert_total, numpert_total, 0)
+        @test odet.du_store_populated == false
+        @test odet.u_store_el_basis == true
         @test length(odet.psi_store) == numsteps_init
         @test length(odet.q_store) == numsteps_init
         @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
@@ -300,9 +331,7 @@ end
 
     @testset "chunk_el_integration_bounds tests" begin
         # Helper to build a minimal control and internal structs
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.numsteps_init = 10
-        ctrl.numunorms_init = 5
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-4)
 
         # Case 1: No singular surfaces -> single chunk to edge
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
@@ -312,7 +341,6 @@ end
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
 
-        ctrl.singfac_min = 1e-4
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
@@ -332,7 +360,6 @@ end
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl.singfac_min = 1e-4
 
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 2
@@ -352,7 +379,7 @@ end
         intr.mhigh = 1
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl.singfac_min = 1e-6
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-6)
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 3
         @test all(c.needs_crossing == true for c in chunks[1:2])
@@ -365,7 +392,7 @@ end
         intr.psilim = 1.0
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl.singfac_min = 0.0
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=0.0)
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
@@ -394,5 +421,99 @@ end
         ode = FFS.OdeState(2, 100, 10, 0)
         @test ode.numpert_total == 2
         @test ode.step == 1
+    end
+end
+
+@testset "materialize_derivative_stores!" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+
+    # Integrate a small ideal case and hand back everything the materializer needs.
+    function setup_solovev_run()
+        example_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
+        inputs["ForceFreeStates"]["verbose"] = false
+        inputs["ForceFreeStates"]["integrator"] = "forward"
+        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
+        intr = FFS.ForceFreeStatesInternal(; dir_path=example_dir)
+        ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
+        sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, sol_cfg)
+        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        FFS.sing_lim!(intr, ctrl, equil)
+        intr.nlow = ctrl.nn_low
+        intr.nhigh = ctrl.nn_high
+        intr.npert = 1
+        FFS.sing_find!(intr, equil)
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.numpert_total = intr.mpert * intr.npert
+        metric = FFS.make_metric(equil, intr.mpert)
+        ffit = FFS.make_matrix(equil, intr, metric)
+        odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+        return odet, ctrl, equil, ffit, intr
+    end
+
+    odet, ctrl, equil, ffit, intr = setup_solovev_run()
+    # Untouched copy of the solution, for the column-transform check further down.
+    odet_pristine = deepcopy(odet)
+
+    @testset "fills the stores once" begin
+        @test isempty(odet.du_store)
+        @test !odet.du_store_populated
+        @test FFS.materialize_derivative_stores!(odet, equil, ffit, intr)
+        @test odet.du_store_populated
+        @test size(odet.du_store) == (intr.numpert_total, intr.numpert_total, odet.step)
+        @test size(odet.xi_s_store) == (intr.numpert_total, intr.numpert_total, odet.step)
+        @test all(isfinite, abs.(odet.du_store))
+        @test all(isfinite, abs.(odet.xi_s_store))
+
+        # Idempotent: a second call must not overwrite what is already there.
+        du_first = copy(odet.du_store)
+        @test FFS.materialize_derivative_stores!(odet, equil, ffit, intr)
+        @test odet.du_store == du_first
+    end
+
+    @testset "agrees with a direct kernel evaluation" begin
+        npert = intr.numpert_total
+        du = zeros(ComplexF64, npert, npert, 2)
+        xi_s = zeros(ComplexF64, npert, npert)
+        for istep in (1, odet.step ÷ 2, odet.step)
+            psi = odet.psi_store[istep]
+            u = odet.u_store[:, :, :, istep]
+            FFS.el_derivatives!(du, u, false, equil, ffit, intr, psi, Ref(1), Ref(1))
+            FFS.compute_node_xi_s!(xi_s, @view(du[:, :, 1]), @view(u[:, :, 1]), ffit, psi)
+            @test odet.du_store[:, :, istep] == du[:, :, 1]
+            @test odet.xi_s_store[:, :, istep] == xi_s
+        end
+    end
+
+    @testset "commutes with a column transform" begin
+        # The design relies on du(psi, u*T) == du(psi, u)*T, which is what makes it exact to
+        # materialize after the Gaussian fixups and free-boundary normalization rather than
+        # transforming stored derivatives alongside u_store.
+        npert = intr.numpert_total
+        T = Matrix{ComplexF64}(I, npert, npert) .+ 0.25 .* ComplexF64.(reshape(sin.(1:npert^2), npert, npert))
+        odet_t = deepcopy(odet_pristine)
+        for istep in 1:odet_t.step
+            odet_t.u_store[:, :, 1, istep] = odet_t.u_store[:, :, 1, istep] * T
+            odet_t.u_store[:, :, 2, istep] = odet_t.u_store[:, :, 2, istep] * T
+        end
+        @test FFS.materialize_derivative_stores!(odet_t, equil, ffit, intr)
+
+        for istep in (1, odet.step ÷ 2, odet.step)
+            @test isapprox(odet_t.du_store[:, :, istep], odet.du_store[:, :, istep] * T; rtol=1e-10)
+            @test isapprox(odet_t.xi_s_store[:, :, istep], odet.xi_s_store[:, :, istep] * T; rtol=1e-10)
+        end
+    end
+
+    @testset "refuses a solution outside the Euler-Lagrange basis" begin
+        odet.du_store_populated = false
+        odet.du_store = Array{ComplexF64}(undef, intr.numpert_total, intr.numpert_total, 0)
+        odet.u_store_el_basis = false
+        @test !FFS.materialize_derivative_stores!(odet, equil, ffit, intr)
+        @test isempty(odet.du_store)
+        @test !odet.du_store_populated
     end
 end
