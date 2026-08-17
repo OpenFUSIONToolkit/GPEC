@@ -1,0 +1,142 @@
+name: PR Conventions
+
+# Checks the title grammar, the release-note block, and the freshness of the
+# regression stamp, then applies the label implied by the title.
+# Conventions: docs/development/naming.md
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Title and release note
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Title and body are author-controlled text; pass them through the
+      # environment rather than interpolating them into a shell command.
+      - name: Capture title and body
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_TITLE" > "$RUNNER_TEMP/pr_title.txt"
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr_body.md"
+
+      - name: Does this PR change src/?
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          if [ -n "$(git diff --name-only "$merge_base".."$HEAD_SHA" -- src/)" ]; then
+            echo "touches_src=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touches_src=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check title, release note and Area table
+        env:
+          TOUCHES_SRC: ${{ steps.scope.outputs.touches_src }}
+        run: |
+          title=$(cat "$RUNNER_TEMP/pr_title.txt")
+          args=(--title "$title" --body "$RUNNER_TEMP/pr_body.md" --check-table docs/development/naming.md)
+          if [ "$TOUCHES_SRC" = "true" ]; then
+            args+=(--touches-src)
+          fi
+          python3 ci/conventions/check_subject.py "${args[@]}"
+
+      - name: Is the regression stamp still current?
+        if: steps.scope.outputs.touches_src == 'true'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          stamp=$(python3 ci/conventions/check_subject.py --harness-sha "$RUNNER_TEMP/pr_body.md")
+          if ! git cat-file -e "$stamp^{commit}" 2>/dev/null; then
+            echo "::error::Harness stamp '$stamp' is not a commit in this repository."
+            exit 1
+          fi
+          changed=$(git diff --name-only "$stamp".."$HEAD_SHA" -- src/)
+          if [ -n "$changed" ]; then
+            echo "::error::The regression report is stale. Files under src/ changed after $stamp:"
+            echo "$changed"
+            echo "Re-run the harness and update the '_(harness @ ...)_' stamp in the release-note block."
+            exit 1
+          fi
+
+  metadata:
+    name: Label and metadata
+    runs-on: ubuntu-latest
+    # Forked PRs get a read-only token, so these steps cannot run there.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+
+            // Labels follow from the TAG, so nobody has to set them by hand.
+            const match = /^\S+ - ([A-Za-z]+)(!?) - /.exec(pr.title || '');
+            if (match) {
+              const wanted = [match[1].toLowerCase()];
+              if (match[2]) wanted.push('changed-results');
+              const owned = new Set([
+                'feature', 'bugfix', 'perf', 'api', 'deprecation',
+                'docs', 'refactor', 'test', 'minor', 'changed-results',
+              ]);
+              const current = pr.labels.map(l => l.name);
+              const add = wanted.filter(l => !current.includes(l));
+              const remove = current.filter(l => owned.has(l) && !wanted.includes(l));
+              if (add.length) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: add });
+              }
+              for (const name of remove) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name });
+              }
+            }
+
+            // Assignee and reviewer need a human decision, so comment rather than block.
+            const missing = [];
+            if (!pr.assignees.length) missing.push('an **assignee**');
+            if (!pr.requested_reviewers.length && !pr.requested_teams.length) {
+              missing.push('a **reviewer**');
+            }
+
+            const marker = '<!-- pr-conventions-metadata -->';
+            const existing = (await github.rest.issues.listComments({
+              owner, repo, issue_number: pr.number, per_page: 100,
+            })).data.find(c => c.body.includes(marker));
+
+            if (!missing.length) {
+              if (existing) {
+                await github.rest.issues.deleteComment({ owner, repo, comment_id: existing.id });
+              }
+              return;
+            }
+
+            const body = [
+              marker,
+              `This pull request is missing ${missing.join(' and ')}.`,
+              '',
+              'If you are not ready to name them, mark this pull request as a **draft**.',
+              '`docs/development/contributors.md` suggests lead developers to ask.',
+              'Merging is not blocked here, but no pull request may be merged without human review.',
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+            }

@@ -639,7 +639,8 @@ manual smoke: run the 4-line UX from the Context section in a REPL against
 
 1. **Never merge without third-party human review. State this in every PR body.**
 2. Every commit and push requires explicit per-instance maintainer approval.
-3. Commit messages: `CODE - TAG - message` (e.g. `FFS - REFACTOR - Unify Riccati integrator`).
+3. Commit messages: `Area - TAG - message` (e.g. `ForceFreeStates - REFACTOR - Unify Riccati integrator`),
+   with closed Area and TAG vocabularies per `docs/development/naming.md`.
 4. JuliaFormatter-clean (margin 180, kwargs `f(x; a=1)`, no trailing whitespace, LF,
    single trailing newline). TOML edits follow `docs/development/toml-conventions.md`
    (header block, per-line `# description` copied from the struct docstring,
