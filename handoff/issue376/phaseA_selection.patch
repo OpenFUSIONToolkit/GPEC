@@ -1,0 +1,204 @@
+diff --git a/examples/DIIID-like_ideal_example/gpec.toml b/examples/DIIID-like_ideal_example/gpec.toml
+index b84e12872..8de5e9050 100644
+--- a/examples/DIIID-like_ideal_example/gpec.toml
++++ b/examples/DIIID-like_ideal_example/gpec.toml
+@@ -47,6 +47,7 @@ kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0
+ eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
+ save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+ singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
++matrix_grid_tol = 1e-5         # Relative tolerance for selecting EL coefficient-spline knots from the equilibrium grid (0 = use every knot)
+ ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+ 
+ # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+diff --git a/src/ForceFreeStates/ForceFreeStatesStructs.jl b/src/ForceFreeStates/ForceFreeStatesStructs.jl
+index 69fdd5f98..947717a01 100644
+--- a/src/ForceFreeStates/ForceFreeStatesStructs.jl
++++ b/src/ForceFreeStates/ForceFreeStatesStructs.jl
+@@ -233,6 +233,7 @@ gpec.toml.
+   - `numsteps_init::Int` - Initial array size for ODE data storage
+   - `numunorms_init::Int` - Initial array size for solution normalization data
+   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
++  - `matrix_grid_tol::Float64` - Relative tolerance for selecting the ψ knots of the Euler-Lagrange coefficient splines from the equilibrium grid. Knots whose values a cubic through their neighbours reproduces within `matrix_grid_tol · max|M|` for every monitored matrix element are dropped, so noise-level knots cannot roughen the integrand (spline third-derivative jumps scale as node error / Δψ³ and slave the ODE step size). Rational-surface Δ′-stencil bracket knots are always kept. `0` disables selection and uses the full equilibrium grid
+   - `set_psilim_via_dmlim::Bool` - Truncate the integration domain at `(last_rational_q + dmlim) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`dmlim = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `set_psilim_via_dmlim = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `set_psilim_via_dmlim = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + dmlim / n" depends on which `n`); when `set_psilim_via_dmlim = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
+   - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
+   - `sing_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
+@@ -270,6 +271,7 @@ gpec.toml.
+     numsteps_init::Int = 4000
+     numunorms_init::Int = 100
+     singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
++    matrix_grid_tol::Float64 = 1e-5
+     set_psilim_via_dmlim::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
+     dmlim::Float64 = 0.2
+     sing_order::Int = 6
+diff --git a/src/ForceFreeStates/Fourfit.jl b/src/ForceFreeStates/Fourfit.jl
+index 3eef94da5..541bd1cbb 100644
+--- a/src/ForceFreeStates/Fourfit.jl
++++ b/src/ForceFreeStates/Fourfit.jl
+@@ -309,6 +309,108 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
+ end
+ 
+ 
++"""
++    select_matrix_knots(xs, flats, tol, mandatory, windows) -> Vector{Int}
++
++Indices of the ψ-grid knots the EL coefficient splines should keep, chosen by a removal-error
++test: an interior knot is dropped when the cubic Lagrange interpolant through its nearest kept
++neighbours (two per side) reproduces its value within `tol · max|M|` for **every element of every
++matrix** in `flats`. A cubic spline's third-derivative jumps at knots scale as (node error)/Δψ³,
++so knots that carry no information above the data's noise floor only roughen the integrand the
++Euler-Lagrange solver sees; this keeps knots exactly where the matrices have structure above `tol`.
++
++Passes repeat (never removing adjacent knots within one pass) until no knot is removable.
++Endpoints are always kept, as is any knot inside a rational-surface window: `mandatory[i] ± windows[i]`
++plus the nearest knot on each side, preserving the Δ′-stencil bracket structure the equilibrium
++grid encodes (see `GridRefinement.jl`). Residuals are normalized by each matrix's largest element
++so near-zero elements cannot noise-trap the test.
++"""
++function select_matrix_knots(xs::Vector{Float64}, flats::Vector{<:AbstractMatrix{ComplexF64}},
++    tol::Float64, mandatory::Vector{Float64}, windows::Vector{Float64})
++    n = length(xs)
++    tol <= 0 && return collect(1:n)
++
++    # Per-matrix absolute thresholds; every element of every matrix is tested against its own
++    # matrix's threshold, so no structure can hide in an unmonitored element.
++    thresholds = Float64[]
++    mats = AbstractMatrix{ComplexF64}[]
++    for flat in flats
++        scale = maximum(abs, flat; init=0.0)
++        scale == 0 && continue
++        push!(thresholds, tol * scale)
++        push!(mats, flat)
++    end
++    isempty(mats) && return collect(1:n)
++
++    protected = falses(n)
++    protected[1] = protected[n] = true
++    for (c, w) in zip(mandatory, windows)
++        lo = searchsortedlast(xs, c)
++        for i in (lo, lo + 1)                       # nearest knot on each side
++            1 <= i <= n && (protected[i] = true)
++        end
++        for i in searchsortedfirst(xs, c - w):searchsortedlast(xs, c + w)
++            1 <= i <= n && (protected[i] = true)
++        end
++    end
++
++    keep = trues(n)
++    changed = true
++    while changed
++        changed = false
++        kept = findall(keep)
++        removed_prev = false
++        for (pos, i) in pairs(kept)
++            (protected[i] || pos <= 2 || pos >= length(kept) - 1) && (removed_prev = false; continue)
++            if removed_prev                          # keep the test local: no adjacent removals per pass
++                removed_prev = false
++                continue
++            end
++            stencil = (kept[pos-2], kept[pos-1], kept[pos+1], kept[pos+2])
++            w = _lagrange4_weights(xs, stencil, xs[i])
++            removable = true
++            for (thr, flat) in zip(thresholds, mats)
++                if _max_stencil_residual(flat, stencil, w, i) > thr
++                    removable = false
++                    break
++                end
++            end
++            if removable
++                keep[i] = false
++                changed = true
++                removed_prev = true
++            end
++        end
++    end
++    return findall(keep)
++end
++
++# Cubic Lagrange weights at x for the four knot indices in `stencil`.
++function _lagrange4_weights(xs::Vector{Float64}, stencil::NTuple{4,Int}, x::Float64)
++    w = ntuple(a -> begin
++            wa = 1.0
++            for b in 1:4
++                a == b && continue
++                wa *= (x - xs[stencil[b]]) / (xs[stencil[a]] - xs[stencil[b]])
++            end
++            wa
++        end, 4)
++    return w
++end
++
++# Largest |interpolation residual| over every element of one flat matrix at row i.
++function _max_stencil_residual(flat::AbstractMatrix{ComplexF64}, stencil::NTuple{4,Int},
++    w::NTuple{4,Float64}, i::Int)
++    a, b, c, d = stencil
++    worst = 0.0
++    @inbounds for j in axes(flat, 2)
++        pred = w[1] * flat[a, j] + w[2] * flat[b, j] + w[3] * flat[c, j] + w[4] * flat[d, j]
++        r = abs(flat[i, j] - pred)
++        r > worst && (worst = r)
++    end
++    return worst
++end
++
+ """
+     make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> FourFitVars
+ 
+@@ -334,7 +436,8 @@ later (i.e. `sing_der!`).
+ Add kinetic metric tensor components for kinetic mode
+ Set powers if necessary
+ """
+-function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
++function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData;
++    matrix_grid_tol::Float64=0.0, singfac_min::Float64=1e-4)
+ 
+     # --- Extract inputs ---
+     profiles = equil.profiles
+@@ -496,20 +599,22 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
+ 
+     # FastInterpolations now natively supports complex values - no need to split real/imag
+     # Create complex series interpolants with per-column extrap BC
+-    # Decouple the coefficient-spline knots from the equilibrium grid in the packed core:
+-    # a cubic spline's third-derivative jumps scale as (node error)/dpsi^3, so equilibrium-grade
+-    # core packing amplifies tolerance-level node error into jumps that slave the EL step size.
+-    # The coefficients are near-cylindrical there; cap the density at dpsi >= 0.05*psi below psi=0.1.
+-    keep = Int[1]
+-    for i in 2:length(metric.xs)-1
+-        x = metric.xs[i]
+-        if x >= 0.1 || (x - metric.xs[keep[end]]) >= 0.05 * x
+-            push!(keep, i)
+-        end
+-    end
+-    push!(keep, length(metric.xs))
++    # Decouple the coefficient-spline knots from the equilibrium grid: keep only the knots whose
++    # values carry information above matrix_grid_tol, so noise-level knots cannot roughen the EL
++    # integrand (third-derivative jumps scale as node error / dpsi^3). Rational surfaces keep their
++    # Delta'-stencil bracket knots via the same windows the equilibrium grid uses.
++    rationals = [s.psifac for s in intr.sing]
++    # Window = the larger of the Delta'-stencil bracket width and the equilibrium grid's own
++    # near-rational resolution radius, so Delta' extraction sees the same local knot density it
++    # was converged against (GridRefinement RATIONAL_RES_RADIUS).
++    windows = [max(Equilibrium.BRACKET_COEF * singfac_min / max(minimum(abs.(s.n); init=1) * abs(s.q1), Base.eps()),
++        Equilibrium.RATIONAL_RES_RADIUS) for s in intr.sing]
++    all_flats = [amats_flat, bmats_flat, cmats_flat, dmats_flat, emats_flat, hmats_flat,
++        fmats_lower_flat, fmats_prim_flat, fmats_gal_flat, gmats_flat, kmats_flat, jmats_flat]
++    keep = select_matrix_knots(metric.xs, all_flats, matrix_grid_tol, rationals, windows)
+     mxs = metric.xs[keep]
+-    @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots after core density cap"
++    length(keep) < length(metric.xs) &&
++        @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots (matrix_grid_tol=$(matrix_grid_tol))"
+ 
+     ffit.amats = cubic_interp(mxs, Series(amats_flat[keep, :]); ffit.itp_opts...)
+     ffit.bmats = cubic_interp(mxs, Series(bmats_flat[keep, :]); ffit.itp_opts...)
+diff --git a/src/GeneralizedPerturbedEquilibrium.jl b/src/GeneralizedPerturbedEquilibrium.jl
+index 7b17683cf..42fa4bc94 100755
+--- a/src/GeneralizedPerturbedEquilibrium.jl
++++ b/src/GeneralizedPerturbedEquilibrium.jl
+@@ -410,7 +410,7 @@ function main_from_inputs(
+     end
+ 
+     # Compute matrices and populate FourFitVars struct
+-    ffit = make_matrix(equil, intr, metric)
++    ffit = make_matrix(equil, intr, metric; matrix_grid_tol=ctrl.matrix_grid_tol, singfac_min=ctrl.singfac_min)
+ 
+     if ctrl.kinetic_factor > 0
+         if ctrl.verbose

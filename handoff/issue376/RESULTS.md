@@ -996,6 +996,50 @@ growing jumps. A production version could apply a matrix-curvature criterion ove
 (the same measured-curvature machinery the auto grid uses), plausibly approaching the clean-data
 ~1.19 floor.
 
+## 23. Curvature-based knot selection: tried, measured, and the fixed cap wins for the ideal path
+
+Implementation (`phaseA_selection.patch`): removal-error greedy coarsening in `make_matrix` — drop a
+knot when a cubic Lagrange through its kept neighbours reproduces its value within
+`matrix_grid_tol · max|M|` for **every element of all 12 matrices** (top-K monitoring was tried
+first and made no difference — the certificate was already honest), rational Δ′-stencil brackets
+and the `RATIONAL_RES_RADIUS` windows mandatory-keep, `matrix_grid_tol` control field.
+
+DIII-D m512, stripped decks, vs the uncapped route-(a) baseline (steps 2768, et[1] 0.781587768;
+Riccati steps 1384, et[1] 0.7841145216):
+
+| δ | knots | fwd steps | et[1] rel err | Riccati Δ′ diag rel (excl q=5) |
+|---|---|---|---|---|
+| 1e-5 | 158 | 1527 | 1.4e-3 | 5.3e-2 |
+| 1e-6 | 358 | 2297 | 3.6e-5 | 2.2e-2 |
+| 1e-7 | 504 | 2742 | 1.6e-9 | 3.4e-9 |
+| 1e-8 | 513 | 2768 | 6e-10 | 0 |
+| **fixed cap** | **329** | **2188** | **3e-8** | **4e-7** |
+
+The physics plateau (et[1] ≤1e-6, Δ′ ≤1e-5) is reached only at δ = 1e-7 — where selection keeps
+504/513 knots and buys nothing. At δ small enough to matter, physics breaks. **The fixed cap
+strictly dominates** (fewer knots, fewer steps, better physics), so per the pre-registered
+threshold the general selection is not landed for the ideal path.
+
+(The mpsi ladder at δ=1e-5 did hit ratio 1.07/1.11 — below the clean floor — proving the *steps*
+follow the knot count exactly as the mechanism says; the failure is purely that physics-safe
+tolerances leave nothing to remove beyond what the cap already removes.)
+
+**Why interpolation error is the wrong objective for the ideal path** — the lesson that matters for
+Phase B: the cap removes 184 core knots that *fail* the removal test at 1e-7 (the near-axis K
+matrix has real relative curvature ~1e4 there), yet physics is unchanged at 3e-8. The physics does
+not need the coefficients resolved where the solution components are negligible (ξ_m ~ ψ^|m|/2).
+Conversely, mid/edge knots that *pass* a loose removal test carry structure whose small
+interpolation errors amplify ~40–140× into et[1] and Δ′. A correct general certificate would be
+**solution-weighted** — coefficient accuracy demanded in proportion to the solution magnitude that
+multiplies it — not raw interpolation error. Two further implementation lessons recorded for
+Phase B: matrix-scale normalization (`max|M|` global) is distorted when one region dominates the
+matrix norm (near-axis K is ~1e4× mid values), and the `ForceFreeStates` module shadows `Base.eps`
+with a const `eps = 1e-10`, so never call `eps()` unqualified there.
+
+**Phase A outcome:** the committed fixed cap *is* the ideal-path deliverable. The selection
+machinery (patch preserved here) moves to Phase B, where the certificate must be built
+solution-weighted from the start and where per-eval cost makes adaptive selection actually pay.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
