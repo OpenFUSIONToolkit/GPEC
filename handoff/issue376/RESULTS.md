@@ -887,6 +887,62 @@ Wall time improves on every case: forward `diiid_n1` 210.6 → 184.5 s, `diiid_n
 202.5 → 192.8 s, `gal_resistive_diiid` 216.8 → 213.6 s. (Earlier a single identical "Runtime" row
 appeared in both case reports — that was an aggregate; these are per-case and differ.)
 
+## 21. Phase 0 of the alignment work: the hypothesis is refuted, in the opposite direction
+
+The plan was to make the per-surface trace error *smooth in ψ* by aligning step breakpoints between
+neighbouring surfaces (continuation). It was gated on a pre-registered check (`PREDICTIONS.md`):
+does the traced construction leave geometry measurably **rougher in ψ** than the inversion
+construction at the same mpsi? Only a smoothness difference licenses alignment — an amplitude
+difference does not, since A3 showed the traced error is already at tolerance and the step count is
+hypersensitive to perturbations far below physical significance.
+
+Same analytic equilibrium (`TJ_ANALYTIC_INPUT`), same grid, both with route (a).
+
+**Geometry, mid-plasma fit-residual:**
+
+| quantity | traced 256/512/1024 | inversion 256/512/1024 |
+|---|---|---|
+| nu | 6.08e-10 / 6.67e-10 / 4.08e-10 | 6.04e-07 / 8.61e-08 / 2.84e-08 |
+| jac | 2.62e-10 / 8.93e-10 / 5.06e-10 | 8.09e-07 / 1.13e-07 / 3.27e-08 |
+
+**EL coefficient matrices, mid-plasma (r1 / residual):**
+
+| matrix | traced @1024 | inversion @1024 |
+|---|---|---|
+| A | +0.978 / 5.84e-10 | +0.958 / 3.43e-08 |
+| C | −0.422 / 1.20e-07 | −0.220 / **9.01e-06** |
+| E | **+0.949** / 1.18e-07 | **+0.235** / 9.25e-06 |
+| H | **+0.971** / 1.49e-07 | **+0.394** / 1.37e-05 |
+| G | +0.966 / 4.79e-08 | +0.964 / 3.10e-07 |
+
+**The traced construction is both smoother (higher r1 on A/E/H) and 100–1000× more accurate than
+the inversion construction** — and it is the one whose step count scales *worse* (1.47 vs 1.18).
+Neither pre-registered criterion is met; the hypothesis fails, and not narrowly.
+
+**Therefore: do not build the alignment/continuation change.** There is nothing to align — the
+traced path's coefficients are already the smoother and more accurate of the two. Whatever makes
+the inversion path's step count scale better, it is not geometry smoothness.
+
+The one narrow signature worth noting for the record: traced `rcoords` r1 in the **core** degrades
+0.959 → 0.708 → **−0.304** across the ladder while inversion improves 0.984 → 0.992 → 0.996. That
+is a real per-surface signature in exactly one quantity, in the region where the steps are — but it
+sits alongside mid-plasma residuals that are 1000× *better* than inversion's, so it does not support
+a general alignment scheme.
+
+### This also weakens §14's A1 inference
+
+A1 concluded "the residual belongs to the traced construction, not the input" from traced 1.47× vs
+inversion 1.18× on the same analytic equilibrium. But those two runs give **et[1] = 0.4623 vs
+0.4700 — a 1.7% difference**, so the two constructions are not solving quite the same problem to
+high accuracy. Their step counts are therefore not a clean apples-to-apples comparison, and A1
+supports "the constructions differ" more than it supports "the trace is at fault".
+
+**Net state of the deep-core question:** after route (a), the remaining mpsi-scaling (1.59× on
+DIII-D) has **no identified mechanism**. Ruled out by measurement: remap interpolation, EFIT input
+resolution, trace tolerance (`etol`, `abstol`), poloidal resolution, EL error control (`abstol` on
+either integrator), harmonic count, and now geometry/coefficient smoothness. The honest position is
+that the cause is unknown, and the next step should be finding it rather than fixing a candidate.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
