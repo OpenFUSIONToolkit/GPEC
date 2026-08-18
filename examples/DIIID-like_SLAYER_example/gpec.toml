@@ -14,7 +14,7 @@ psihigh = 0.9995               # Upper limit of normalized flux coordinate
 mpsi = 0                       # Number of radial grid points (0 = auto-compute from psi_accuracy)
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
 mtheta = 256                   # Number of poloidal grid points
-newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-10                   # Error tolerance for equilibrium solver
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
@@ -51,10 +51,8 @@ save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th).
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
-# Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks SingularSurfaces/delta_prime_matrix)
-parallel_threads      = 1      # serial/bit-deterministic BVP — keeps the regression Δ' (and hence γ) reproducible
-populate_dense_xi     = false  # No PerturbedEquilibrium here; the dense EL pass has no consumer (auto-disabled under force_termination anyway). SLAYER needs only delta_prime_matrix from the parallel BVP.
+# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n
 

@@ -73,12 +73,12 @@ end
 """
     clamp_psihigh_to_separatrix(raw_profile) -> (clamped_psihigh, was_adjusted)
 
-Binary-searches for the highest psihigh ≤ raw_profile.config.psihigh at which the
+Binary-searches for the highest psihigh ≤ `raw_profile.psihigh_resolved` at which the
 ψ level set is still a closed curve in the EFIT grid. Returns the safe value and a
 Bool indicating whether any clamping occurred.
 """
 function clamp_psihigh_to_separatrix(raw_profile::DirectRunInput)
-    psihigh = raw_profile.config.psihigh
+    psihigh = raw_profile.psihigh_resolved
     ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
 
     has_closed_contour(ψ_high) = any(
@@ -97,6 +97,22 @@ function clamp_psihigh_to_separatrix(raw_profile::DirectRunInput)
         has_closed_contour(mid) ? (lo = mid) : (hi = mid)
     end
     return (lo, true)
+end
+
+"""
+    resolve_psihigh!(raw_profile) -> raw_profile
+
+Clamp `raw_profile.psihigh_resolved` to the outermost closed flux surface, warning if the
+requested `psihigh` had none. Mutates and returns the input; `config.psihigh` keeps the request.
+"""
+function resolve_psihigh!(raw_profile::DirectRunInput)
+    psihigh_safe, adjusted = clamp_psihigh_to_separatrix(raw_profile)
+    if adjusted
+        @warn "psihigh=$(raw_profile.psihigh_resolved) has no closed flux surface in EFIT grid; " *
+              "clamped to $(round(psihigh_safe; sigdigits=7))"
+        raw_profile.psihigh_resolved = psihigh_safe
+    end
+    return raw_profile
 end
 
 """
@@ -408,7 +424,7 @@ function equilibrium_solver_by_inversion(
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
-    psihigh = equil_params.psihigh
+    psihigh = raw_profile.psihigh_resolved
 
     # Locate the magnetic axis and separatrix for the contour tracing
     ro, zo, _, rs2 = direct_position!(raw_profile)
@@ -672,7 +688,7 @@ function equilibrium_solver_by_inversion(
     # Intermediate inverse input; the captured DirectIngest rides on the original eq_input,
     # which setup_equilibrium forwards onto the equilibrium, so this one carries ingest=nothing.
     inv_input = InverseRunInput(raw_profile.config, raw_profile.sq_in,
-        rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, nothing)
+        rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, nothing, raw_profile.psihigh_resolved)
 
     pe = equilibrium_solver(inv_input; override_psi_nodes)
 
