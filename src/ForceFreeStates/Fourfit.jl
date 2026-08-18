@@ -509,7 +509,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     end
     push!(keep, length(metric.xs))
     mxs = metric.xs[keep]
-    @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots after core density cap"
+    length(mxs) < length(metric.xs) &&
+        @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots after core density cap"
 
     ffit.amats = cubic_interp(mxs, Series(amats_flat[keep, :]); ffit.itp_opts...)
     ffit.bmats = cubic_interp(mxs, Series(bmats_flat[keep, :]); ffit.itp_opts...)
