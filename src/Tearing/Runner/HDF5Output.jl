@@ -82,6 +82,13 @@ function write_critical_resonant_field_hdf5!(parent::Union{HDF5.File,HDF5.Group}
             sg["balance_positive"] = d.balance_positive
             sg["Qpeak"] = d.Qpeak
             sg["br_crit"] = d.br_crit
+
+            # Save inputs for analysis in post
+            for field in (:Q0, :P, :lu, :sval, :m, :n)
+                if field in keys(d)
+                    sg[String(field)] = getfield(d, field)
+                end
+            end
         end
     end
 

@@ -40,8 +40,8 @@ end
 
 function torque_balance_value(tb::TorqueBalance, Q::Number)
     Δ = solve_inner(tb.model, tb.params, ComplexF64(Q)).tearing
-    delta_n_p = 1e-2 # JK hack to avoid singularity at Δ=0.0. Need to fix this in the future.
-    jxb = -imag(1.0 / (Δ + delta_n_p))
+    alpha = 1e-2 # Equation 62 of Cole PopP 2006 takes limit of alpha << 1. Set at 1e-2 but more accurate method is alpha = S^(-1/3) * (-r_s Δ'_s)
+    jxb = -imag(1.0 / (Δ + alpha))
     return 2.0 * tb.P * (tb.Q0 - Q) / jxb, Δ
 end
 

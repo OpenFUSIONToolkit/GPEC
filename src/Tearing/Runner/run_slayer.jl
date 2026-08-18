@@ -472,10 +472,11 @@ end
 function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_result=nothing)
     ctrl.enabled || return empty_critical_resonant_field_result()
 
+    profiles = load_kinetic_profiles(joinpath(dir_path, ctrl.profile_file))
+
     params = if slayer_result !== nothing && slayer_result.enabled && !isempty(slayer_result.params)
         slayer_result.params
     else
-        profiles = load_kinetic_profiles(joinpath(dir_path, ctrl.profile_file))
         build_slayer_inputs(equil, intr.sing, profiles)
     end
 
@@ -490,8 +491,9 @@ function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_re
     scan_data = NamedTuple[]
 
     for (isurf, p) in enumerate(params)
-        # Fill in the actual per-surface drive from your model
-        Q0_here = 0.5
+        psi_here = intr.sing[isurf].psifac
+        omega_here = profiles(psi_here).omega
+        Q0_here = p.tauk * omega_here
         P_here = 1.0
 
         tb = TorqueBalance(
@@ -512,21 +514,25 @@ function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_re
         push!(Q0_vec, Q0_here)
         push!(P_vec, P_here)
 
-        if ctrl.store_scan
-            push!(
-                scan_data,
-                (
-                    surface=isurf,
-                    Q=collect(Qs),
-                    balance=collect(bal),
-                    delta=collect(Δs),
-                    Q_positive=collect(Qs_positive),
-                    balance_positive=collect(bal_positive),
-                    Qpeak=Qpeak,
-                    br_crit=br_crit
-                )
-            )
-        end
+        scan_entry = (
+            surface=isurf,
+            Q=collect(Qs),
+            balance=collect(bal),
+            delta=collect(Δs),
+            Q_positive=collect(Qs_positive),
+            balance_positive=collect(bal_positive),
+            Qpeak=Qpeak,
+            br_crit=br_crit,
+            Q0=Q0_here,
+            P=P_here,
+            lu=p.lu,
+            sval=p.sval_r,
+            m=p.m,
+            n=p.n,
+            params=p
+        )
+        push!(scan_data, scan_entry)
+
     end
 
     return CriticalResonantFieldResult(
