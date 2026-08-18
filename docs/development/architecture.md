@@ -12,24 +12,20 @@ This workflow is reflected in the modular structure and data flow.
 
 ## Module Structure
 
-GPEC consists of **eight main modules** organized in `src/`:
+GPEC consists of physics modules organized in `src/`. These names are the canonical Areas used in commit subjects and PR titles; see [`naming.md`](naming.md).
+
+Splines are provided by the external `FastInterpolations` package rather than by a module here.
 
 ### Foundation Modules
 
-1. **Splines** (`src/Splines/`) - Numerical interpolation library
-   - `CubicSpline.jl` - 1D cubic spline interpolation
-   - `BicubicSpline.jl` - 2D bicubic spline interpolation
-   - `FourierSpline.jl` - Fourier-based spline interpolation
-   - Status: Mature, pure Julia implementation
-
-2. **Utilities** (`src/Utilities/`) - Shared computational tools
+1. **Utilities** (`src/Utilities/`) - Shared computational tools
    - `FourierTransforms.jl` - Efficient Fourier transform utilities with pre-computed basis functions
    - Provides type-stable functor pattern for repeated transforms
    - Used by Vacuum and PerturbedEquilibrium modules
 
 ### Core Physics Modules
 
-3. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
+2. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
    - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
@@ -44,7 +40,7 @@ GPEC consists of **eight main modules** organized in `src/`:
      - `AnalyticEquilibrium.jl` - Analytical solutions
    - Status: Stable and feature-complete
 
-4. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
+3. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
    - Computes vacuum response matrices for ideal MHD analysis
    - Solves the exterior boundary-integral system for the vacuum energy matrix `wv`, and optionally
      (`compute_Iv=true`) the interior system as well to build the surface-current matrix `I_v`
@@ -57,7 +53,7 @@ GPEC consists of **eight main modules** organized in `src/`:
      - `Field.jl` - Vacuum field and potential evaluation off the surface
    - Status: **Pure Julia implementation complete and available**
 
-5. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
+4. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
    - Solves ideal MHD eigenvalue problem with force-free boundary conditions
    - Identifies singular surfaces where ξ·∇ψ = 0
    - Key files:
@@ -73,7 +69,7 @@ GPEC consists of **eight main modules** organized in `src/`:
      - `Free.jl` - Free boundary stability
    - Status: Stable, core DCON functionality implemented
 
-6. **LocalStability** (`src/LocalStability/`) - Local high-n stability
+5. **LocalStability** (`src/LocalStability/`) - Local high-n stability
    - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Depends only on Equilibrium (plus math libraries); carries no stability-solver state
    - Main entry points: `compute_local_stability`, `ballooning_alpha_boundary`
@@ -81,13 +77,13 @@ GPEC consists of **eight main modules** organized in `src/`:
 
 ### Perturbed Equilibrium Modules
 
-7. **ForcingTerms** (`src/ForcingTerms/`) - External field specification
+6. **ForcingTerms** (`src/ForcingTerms/`) - External field specification
    - Handles external magnetic field perturbations (coils, RMP, etc.)
    - Supports ASCII and HDF5 forcing data formats
    - `ForcingMode` data structure specifies amplitude and phase for each (m,n) component
    - Status: Complete and functional
 
-8. **PerturbedEquilibrium** (`src/PerturbedEquilibrium/`) - **GPEC-style plasma response**
+7. **PerturbedEquilibrium** (`src/PerturbedEquilibrium/`) - **GPEC-style plasma response**
    - Computes plasma response to external forcing
    - Calculates singular coupling metrics at rational surfaces
    - Key files:
@@ -104,6 +100,28 @@ GPEC consists of **eight main modules** organized in `src/`:
        - Surface inductance for singular surfaces
      - `Utils.jl` - Helper functions
    - Status: Core plasma response and singular coupling calculations implemented; active area of development
+
+### Resistive and Kinetic Modules
+
+8. **InnerLayer** (`src/InnerLayer/`) - Resistive inner-layer physics
+   - `GGJ/` - Glasser-Greene-Johnson layer model
+   - `SLAYER/` - Layer solver used for growth-rate extraction
+   - Both are submodules and are valid Areas in their own right (`InnerLayer.GGJ`, `InnerLayer.SLAYER`)
+
+9. **Tearing** (`src/Tearing/`) - Tearing mode dispersion and drivers
+   - `Dispersion/` - Dispersion relation solvers
+   - `Runner/` - Orchestration across surfaces and toroidal mode numbers
+   - Re-binds `InnerLayer` and exposes it alongside its own submodules
+
+10. **KineticForces** (`src/KineticForces/`) - Kinetic contributions to the force balance
+    - Neoclassical toroidal viscosity (NTV) torque and kinetic energy contributions
+    - Reads kinetic profiles configured under `[KineticForces]`
+
+### Post-processing
+
+11. **Analysis** (`src/Analysis/`) - Plotting and post-processing
+    - Submodules mirror the physics modules they visualize, so their names shadow them
+    - Not part of the solve path; consumes `gpec.h5`
 
 ## Configuration
 
