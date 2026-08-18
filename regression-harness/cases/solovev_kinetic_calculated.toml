@@ -111,6 +111,29 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 
+# Perturbed equilibrium — guards the kinetic branch of compute_clebsch_displacements.
+# This is the only case that runs PE on a kinetic solve; without it that branch is untested.
+[quantities.pe_clebsch_alpha_norm]
+h5path = "PerturbedEquilibrium/Response/xi_clebsch_alpha"
+type = "complex_matrix"
+extract = "norm"
+label = "||xi_clebsch_alpha||"
+noise_threshold = 1e-12
+
+[quantities.pe_clebsch_psi1_norm]
+h5path = "PerturbedEquilibrium/Response/dxi_clebsch_psidpsi"
+type = "complex_matrix"
+extract = "norm"
+label = "||dxi_clebsch_psi/dpsi||"
+noise_threshold = 1e-12
+
+[quantities.pe_b_theta_reg_norm]
+h5path = "PerturbedEquilibrium/Response/Jb_theta_reg"
+type = "complex_matrix"
+extract = "norm"
+label = "||Jb_theta_reg||"
+noise_threshold = 1e-12
+
 # Runtime (special: not from H5)
 [quantities.runtime]
 h5path = ""
