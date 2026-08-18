@@ -106,6 +106,34 @@
         @test sl[1].Q_i == -sl[1].tauk * profiles.omega_i(0.3)
     end
 
+    @testset "build_slayer_inputs: bt defaults to the physical B_T, not a normalization" begin
+        # `b0exp` is a normalization (commonly exactly 1.0), not a field. Passing it as `bt` ran
+        # the layer physics at the wrong toroidal field. Asserted behaviourally rather than by
+        # grepping the source, so a refactor cannot silently break the check and a reintroduction
+        # anywhere in the chain still fails: tau_h = R0*sqrt(mu0*rho)/(n*sval_r*bt), so lu ∝ bt
+        # and the resolved field is recoverable from the returned parameters.
+        sings = [_mk_sing(psi=0.3, q=2.0, q1=1.5, m=2, n=1)]
+
+        sl_default = build_slayer_inputs(equil, sings, profiles; dr_val=0.0, compute_omega_star=false)
+        sl_explicit = build_slayer_inputs(equil, sings, profiles; bt=2.0, dr_val=0.0, compute_omega_star=false)
+
+        # The default must be the equilibrium's own F-spline field at that surface.
+        bt_phys = Float64(equil.profiles.F_spline(0.3)) / (2π * equil.ro)
+        @test bt_phys > 0
+
+        # lu scales linearly with the field actually used, so the ratio recovers it exactly.
+        @test sl_default[1].lu / sl_explicit[1].lu ≈ bt_phys / 2.0 rtol = 1e-10
+
+        # An explicitly configured bt still wins over the physical default.
+        @test sl_explicit[1].lu != sl_default[1].lu
+
+        # The regression itself: resolving bt to b0exp is not the same as the physical field.
+        b0exp = equil.config.b0exp
+        sl_b0exp = build_slayer_inputs(equil, sings, profiles; bt=b0exp, dr_val=0.0, compute_omega_star=false)
+        @test !isapprox(sl_default[1].lu, sl_b0exp[1].lu; rtol=1e-6)
+        @test sl_default[1].lu / sl_b0exp[1].lu ≈ bt_phys / b0exp rtol = 1e-10
+    end
+
     @testset "build_slayer_inputs: chi_perp/chi_tor as scalars and callables" begin
         sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
 
