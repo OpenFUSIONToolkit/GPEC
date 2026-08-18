@@ -43,6 +43,7 @@ const EQUIL_H5_NAMES = Dict(
     :li1 => "l_i_1",
     :li2 => "l_i_2",
     :li3 => "l_i_3",
+    :psihigh_resolved => "psi_edge",
     :bt_sign => "B_T_sign",
     :psio => "psi_total"
 )
@@ -65,7 +66,7 @@ const MAIN_H5_ANNOTATIONS = [
     "Equilibrium/R_axis" => (; long_name="R-coordinate of the magnetic axis", units="m"),
     "Equilibrium/Z_axis" => (; long_name="Z-coordinate of the magnetic axis", units="m"),
     "Equilibrium/psi_total" => (; long_name="total poloidal flux difference |ψ_axis − ψ_boundary|", units="Wb/rad"),
-    "Equilibrium/psihigh_resolved" => (; long_name="normalized poloidal flux at the outermost formed flux surface (requested psihigh clamped to the outermost closed surface)"),
+    "Equilibrium/psi_edge" => (; long_name="normalized poloidal flux at the outermost formed flux surface (the requested psihigh, clamped to the outermost closed surface)"),
     "Equilibrium/R_midplane" => (; long_name="R of the boundary at the inboard and outboard midplane crossings", units="m"),
     "Equilibrium/R_extremum" => (; long_name="R of the boundary at its upper and lower Z extrema", units="m"),
     "Equilibrium/Z_extremum" => (; long_name="Z of the boundary at its upper and lower Z extrema", units="m"),
