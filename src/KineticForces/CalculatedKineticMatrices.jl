@@ -66,8 +66,6 @@ function compute_calculated_kinetic_matrices(
     npert = ffs_intr.npert
     np = ffs_intr.numpert_total
 
-    @assert mats.numpert_total == np "MatrixSplines and ForceFreeStatesInternal disagree on numpert_total"
-
     kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
     kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
 

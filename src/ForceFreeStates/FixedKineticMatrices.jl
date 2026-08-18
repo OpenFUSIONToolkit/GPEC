@@ -43,7 +43,7 @@ function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=
 end
 
 """
-    fixed_kinetic_matrices(mpert, mpsi, sigma, mlow, mats, xs)
+    fixed_kinetic_matrices(mpert, np, mpsi, sigma, mlow, mats, xs)
 
 Build X-shaped fixed kinetic energy matrices for testing all 6 components.
 
@@ -69,10 +69,9 @@ Torque matrices (T) are all zero (torque requires finite rotation frequency).
 Returns `(kw_flat, kt_flat)` where each is `(mpsi, mpert^2, 6)`.
 """
 function fixed_kinetic_matrices(
-    mpert::Int, mpsi::Int, sigma::Float64, mlow::Int,
+    mpert::Int, np::Int, mpsi::Int, sigma::Float64, mlow::Int,
     mats::MatrixSplines, xs::Vector{Float64}
 )
-    np = mats.numpert_total
     kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
     kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
 
@@ -100,7 +99,7 @@ function fixed_kinetic_matrices(
             # Scale: σ × ‖ideal(ψ)‖_F × unit X-pattern
             # For multi-n, tile the mpert×mpert X-pattern into the np×np block
             W = zeros(ComplexF64, np, np)
-            for jn in 0:(mats.numpert_total÷mpert-1)
+            for jn in 0:(np÷mpert-1)
                 offset = jn * mpert
                 W[(offset+1):(offset+mpert), (offset+1):(offset+mpert)] .= X
             end

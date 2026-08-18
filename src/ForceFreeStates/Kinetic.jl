@@ -34,7 +34,7 @@ function make_kinetic_matrix(
 
     # Get raw kinetic matrices (scaling is baked into each source)
     if ctrl.kinetic_source == "fixed"
-        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, mpsi, ctrl.kinetic_factor, intr.mlow, mats, xs)
+        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, intr.numpert_total, mpsi, ctrl.kinetic_factor, intr.mlow, mats, xs)
     elseif ctrl.kinetic_source == "calculated"
         isnothing(calculated_source) && error(
             "kinetic_source=\"calculated\" requires the KineticForces callback. " *
@@ -49,16 +49,12 @@ function make_kinetic_matrix(
         error("Unknown kinetic_source: $(ctrl.kinetic_source). Must be \"fixed\" or \"calculated\"")
     end
 
-    # Build splines for each of the 6 components
-    Kw_spline = [cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); mats.itp_opts...) for ic in 1:6]
-    Kt_spline = [cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); mats.itp_opts...) for ic in 1:6]
-
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
-    return _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat, Kw_spline, Kt_spline)
+    return _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat)
 end
 
 """
-    _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat, Kw_spline, Kt_spline) -> MatrixSplines
+    _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat) -> MatrixSplines
 
 Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and return a new `MatrixSplines`
 whose `kinetic` field holds them alongside the kinetic-modified A/B/C; `mats.ideal` is carried over
@@ -77,9 +73,7 @@ function _compute_fkg_matrices(
     intr::ForceFreeStatesInternal,
     metric::MetricData,
     kw_flat::Array{ComplexF64,3},
-    kt_flat::Array{ComplexF64,3},
-    Kw_spline::Vector,
-    Kt_spline::Vector
+    kt_flat::Array{ComplexF64,3}
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -239,14 +233,14 @@ function _compute_fkg_matrices(
         end
     end
 
-    itp_opts = mats.itp_opts
+    itp_opts = (; extrap=ExtendExtrap())
     kinetic = KineticMatrices(;
         # kinetic-modified A/B/C consumed by sing_der!; A is non-Hermitian here
         A_spline=cubic_interp(xs, Series(ak_flat); itp_opts...),
         B_spline=cubic_interp(xs, Series(bk_flat); itp_opts...),
         C_spline=cubic_interp(xs, Series(ck_flat); itp_opts...),
-        Kw_spline,
-        Kt_spline,
+        Kw_spline=[cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); itp_opts...) for ic in 1:6],
+        Kt_spline=[cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); itp_opts...) for ic in 1:6],
         F0_spline=cubic_interp(xs, Series(f0_flat); itp_opts...),
         P_spline=cubic_interp(xs, Series(p_flat); itp_opts...),
         P_spline_adj=cubic_interp(xs, Series(pa_flat); itp_opts...),
@@ -257,5 +251,5 @@ function _compute_fkg_matrices(
         R3_spline=cubic_interp(xs, Series(r3_flat); itp_opts...),
         G_spline_adj=cubic_interp(xs, Series(ga_flat); itp_opts...))
 
-    return MatrixSplines(mats.numpert_total, itp_opts, mats.ideal, kinetic, mats._hint)
+    return MatrixSplines(mats.ideal, kinetic, mats._hint)
 end

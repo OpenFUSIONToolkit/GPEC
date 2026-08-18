@@ -99,16 +99,12 @@ and for the Galerkin/vacuum paths that are defined only in the ideal basis.
 
 ## Fields
 
-  - `numpert_total::Int` - `mpert · npert`; each matrix carries `numpert_total^2` series.
-  - `itp_opts::NamedTuple` - interpolant options applied to every spline built for this fit.
   - `ideal::IdealMatrices` - always present.
   - `kinetic::Union{Nothing,KineticMatrices}` - present iff `ctrl.kinetic_factor > 0`.
   - `_hint::Base.RefValue{Int}` - shared bracket-search hint for sequential (single-threaded)
     evaluation. Not thread-safe: parallel paths must pass their own hint.
 """
-@kwdef struct MatrixSplines{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
-    numpert_total::Int
-    itp_opts::Opts = (; extrap=ExtendExtrap())
+@kwdef struct MatrixSplines{S<:CubicSeriesInterpolant}
     ideal::IdealMatrices{S}
     kinetic::Union{Nothing,KineticMatrices{S}} = nothing
     _hint::Base.RefValue{Int} = Ref(1)
@@ -633,5 +629,5 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         K_spline=cubic_interp(metric.xs, Series(kmats_flat); itp_opts...),
         # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
         J_spline=cubic_interp(metric.xs, Series(jmats_flat); itp_opts...))
-    return MatrixSplines(; numpert_total=intr.numpert_total, itp_opts, ideal)
+    return MatrixSplines(; ideal)
 end
