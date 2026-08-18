@@ -13,7 +13,7 @@ using ..Utilities.FourierTransforms
 """
     extract_boundary_displacements(
         equil::Equilibrium.PlasmaEquilibrium,
-        ForceFreeStates_results::SolutionProfiles,
+        solution::SolutionProfiles,
         ffs::ForceFreeStatesResult
     )::NamedTuple
 
@@ -43,7 +43,7 @@ plasma surface from ForceFreeStates eigenmode solutions.
 ## Arguments
 
   - `equil`: Equilibrium solution containing flux surfaces and q-profile
-  - `ForceFreeStates_results`: ODE integration results containing u_store with eigenmodes
+  - `solution`: ODE integration results containing u_store with eigenmodes
   - `ffs`: ForceFreeStates result with the boundary location (psilim)
 
 ## Returns
@@ -57,21 +57,21 @@ Named tuple with:
 """
 function extract_boundary_displacements(
     equil::Equilibrium.PlasmaEquilibrium,
-    ForceFreeStates_results::SolutionProfiles,
+    solution::SolutionProfiles,
     ffs::ForceFreeStatesResult
 )
     # Extract boundary displacement (normal component)
     # u_store dimensions: [numpert_total, numpert_total, 2, numsteps]
     # Index 1 in 3rd dimension is ξ_ψ (radial displacement)
     # Last index in 4th dimension is the boundary
-    ξ_psi_boundary = ForceFreeStates_results.u_store[:, :, 1, ForceFreeStates_results.step]
+    ξ_psi_boundary = solution.u_store[:, :, 1, solution.step]
 
     # Get boundary location in normalized flux coordinates
-    psi_boundary = ForceFreeStates_results.psi_store[ForceFreeStates_results.step]
+    psi_boundary = solution.psi_store[solution.step]
 
     # Evaluate equilibrium quantities at boundary
     # Safety factor at boundary
-    q_boundary = ForceFreeStates_results.q_store[ForceFreeStates_results.step]
+    q_boundary = solution.q_store[solution.step]
 
     # FFS ODE integrates in ψ (normalized flux), so bwp_mn = chi1·singfac·2πi·ξ_ψ
     # where chi1 = 2π·psio  (Fortran idcon.f: chi1 = twopi*psio)
@@ -162,7 +162,7 @@ end
 """
     build_flux_matrix(
         equil::Equilibrium.PlasmaEquilibrium,
-        ForceFreeStates_results::SolutionProfiles,
+        solution::SolutionProfiles,
         ffs::ForceFreeStatesResult
     )::Matrix{ComplexF64}
 
@@ -181,7 +181,7 @@ The flux matrix relates eigenmode displacements to vacuum poloidal flux:
 ## Arguments
 
   - `equil`: Equilibrium solution containing flux surfaces and q-profile
-  - `ForceFreeStates_results`: ForceFreeStates ODE integration results containing eigenmodes
+  - `solution`: ForceFreeStates ODE integration results containing eigenmodes
   - `ffs`: ForceFreeStates result with the mode space
 
 ## Returns
@@ -191,12 +191,12 @@ The flux matrix relates eigenmode displacements to vacuum poloidal flux:
 """
 function build_flux_matrix(
     equil::Equilibrium.PlasmaEquilibrium,
-    ForceFreeStates_results::SolutionProfiles,
+    solution::SolutionProfiles,
     ffs::ForceFreeStatesResult
 )::Matrix{ComplexF64}
 
     # Step 1: Extract boundary displacements and equilibrium quantities
-    boundary_data = extract_boundary_displacements(equil, ForceFreeStates_results, ffs)
+    boundary_data = extract_boundary_displacements(equil, solution, ffs)
 
     # Step 2: Compute normal magnetic field at plasma boundary
     # This is the actual implementation of GPEC's bwp_mn calculation

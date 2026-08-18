@@ -1,6 +1,6 @@
 """
     compute_plasma_response!(
-        state, equil, ForceFreeStates_results, wt0, mthvac, ffs,
+        state, equil, solution, wt0, mthvac, ffs,
         intr, ctrl, metric, ffit
     )
 
@@ -17,7 +17,7 @@ Implements resp_index=0 calculation from Fortran gpresp:
 function compute_plasma_response!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
-    ForceFreeStates_results::SolutionProfiles,
+    solution::SolutionProfiles,
     wt0::Matrix{ComplexF64},
     mthvac::Int,
     ffs::ForceFreeStatesResult,
@@ -31,7 +31,7 @@ function compute_plasma_response!(
     end
 
     # Build flux matrix from ForceFreeStates eigenmodes [mode × eigenmode]
-    flux_matrix = build_flux_matrix(equil, ForceFreeStates_results, ffs)
+    flux_matrix = build_flux_matrix(equil, solution, ffs)
 
     # Plasma inductance Lambda (wt0 formula, Fortran resp_induct_flag=TRUE default)
     plasma_inductance = calc_plasma_inductance(wt0, ffs, equil.psio)
@@ -98,17 +98,17 @@ function compute_plasma_response!(
     state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(
-        response_flux, flux_matrix, ForceFreeStates_results, equil, ffs, intr,
+        response_flux, flux_matrix, solution, equil, ffs, intr,
         metric, ffit, ctrl
     )
 
-    npsi = size(ForceFreeStates_results.u_store, 4)
-    state.psi_grid = ForceFreeStates_results.psi_store[1:npsi]
+    npsi = size(solution.u_store, 4)
+    state.psi_grid = solution.psi_store[1:npsi]
     state.xi_modes = xi_modes
     state.b_modes = b_modes
 
     b_n_modes, xi_n_modes = compute_b_n_xi_n_modes(
-        xi_modes.psi_J, b_modes.psi, ForceFreeStates_results, equil, ffs
+        xi_modes.psi_J, b_modes.psi, solution, equil, ffs
     )
     state.b_n_modes = b_n_modes
     state.xi_n_modes = xi_n_modes

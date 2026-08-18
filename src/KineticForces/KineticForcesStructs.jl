@@ -301,7 +301,8 @@ The JBB deweighting algorithm (Fortran pentrc/inputs.f90:828-868):
 3. Divide by J·B² at each θ
 4. Forward DFT back to m-space
 """
-function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs,
+function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
+                                ffs::ForceFreeStates.ForceFreeStatesResult,
                                 equil::Equilibrium.PlasmaEquilibrium,
                                 metric::ForceFreeStates.MetricData)
     # Copy mode numbers from FFS

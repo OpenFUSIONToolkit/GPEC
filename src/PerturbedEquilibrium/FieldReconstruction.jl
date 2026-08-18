@@ -36,7 +36,7 @@ Covariant components from metric tensor contraction (matches Fortran gpeq_cova):
 
 """
     reconstruct_physical_fields(
-        response_vector, flux_matrix, ForceFreeStates_results,
+        response_vector, flux_matrix, solution,
         equil, ffs, intr, metric, ffit, ctrl
     ) -> (xi_modes, b_modes)
 
@@ -69,7 +69,7 @@ Tuple of (xi_modes, b_modes) NamedTuples:
 function reconstruct_physical_fields(
     response_vector::Vector{ComplexF64},
     flux_matrix::Matrix{ComplexF64},
-    ForceFreeStates_results::SolutionProfiles,
+    solution::SolutionProfiles,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
@@ -77,8 +77,8 @@ function reconstruct_physical_fields(
     ffit::FourFitVars,
     ctrl::PerturbedEquilibriumControl
 )
-    npsi = size(ForceFreeStates_results.u_store, 4)
-    psi_grid = ForceFreeStates_results.psi_store[1:npsi]
+    npsi = size(solution.u_store, 4)
+    psi_grid = solution.psi_store[1:npsi]
 
     # Pin BLAS to a single thread for the per-surface reconstruction below. Each threaded
     # loop over ψ calls only small BLAS kernels (per-surface mpert×mpert solves and mode
@@ -92,7 +92,7 @@ function reconstruct_physical_fields(
         xi_psi_modes, xi_psi1_modes, xi_s_modes = sum_eigenmode_contributions(
             response_vector,
             flux_matrix,
-            ForceFreeStates_results,
+            solution,
             ffs
         )
 
@@ -208,7 +208,7 @@ end
 
 """
     sum_eigenmode_contributions(
-        response_vector, flux_matrix, ForceFreeStates_results, ffs
+        response_vector, flux_matrix, solution, ffs
     ) -> (xi_psi_modes, xi_psi1_modes, xi_s_modes)
 
 Sum eigenmode contributions weighted by response coefficients.
@@ -231,11 +231,11 @@ xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (toroidal, Glasser 2
 function sum_eigenmode_contributions(
     response_vector::Vector{ComplexF64},
     flux_matrix::Matrix{ComplexF64},
-    ForceFreeStates_results::SolutionProfiles,
+    solution::SolutionProfiles,
     ffs::ForceFreeStatesResult
 )
     mpert = ffs.mpert
-    npsi = size(ForceFreeStates_results.u_store, 4)
+    npsi = size(solution.u_store, 4)
 
     # Convert mode-basis response (Phi_tot) to eigenmode amplitudes alpha
     # flux_matrix[mode, eigenmode], so: flux_matrix * alpha = response_vector
@@ -249,15 +249,15 @@ function sum_eigenmode_contributions(
         # u_store[:,:,1] = Ξ_ψ (radial displacement). @view avoids copying the mpert×mpert
         # eigenmode-matrix slice on every surface (mul! takes the view directly).
         mul!(view(xi_psi_modes, ipsi, :),
-            @view(ForceFreeStates_results.u_store[:, :, 1, ipsi]),
+            @view(solution.u_store[:, :, 1, ipsi]),
             alpha)
         # du_store = dΞ_ψ/dψ (radial derivative)
         mul!(view(xi_psi1_modes, ipsi, :),
-            @view(ForceFreeStates_results.du_store[:, :, ipsi]),
+            @view(solution.du_store[:, :, ipsi]),
             alpha)
         # xi_s_store = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
         mul!(view(xi_s_modes, ipsi, :),
-            @view(ForceFreeStates_results.xi_s_store[:, :, ipsi]),
+            @view(solution.xi_s_store[:, :, ipsi]),
             alpha)
     end
 
@@ -742,7 +742,7 @@ end
 
 """
     compute_b_n_xi_n_modes(
-        xwp_modes, b_psi_modes, ForceFreeStates_results, equil, ffs
+        xwp_modes, b_psi_modes, solution, equil, ffs
     ) -> (b_n_modes, xi_n_modes)
 
 Compute physical normal field b_n and displacement xi_n in mode space.
@@ -769,7 +769,7 @@ Tuple (b_n_modes, xi_n_modes), each [npsi, mpert] ComplexF64.
 function compute_b_n_xi_n_modes(
     xwp_modes::Matrix{ComplexF64},
     b_psi_modes::Matrix{ComplexF64},
-    ForceFreeStates_results::SolutionProfiles,
+    solution::SolutionProfiles,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult
 )
@@ -790,7 +790,7 @@ function compute_b_n_xi_n_modes(
     phase_back = [exp(-twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
 
     Threads.@threads :static for ipsi in 1:npsi
-        psi = ForceFreeStates_results.psi_store[ipsi]
+        psi = solution.psi_store[ipsi]
         hint2d_psi = (Ref(1), Ref(1))
 
         # IDFT: mode space → theta space

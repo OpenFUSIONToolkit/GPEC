@@ -221,7 +221,7 @@ end
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
         equil::Equilibrium.PlasmaEquilibrium,
-        ForceFreeStates_results::SolutionProfiles,
+        solution::SolutionProfiles,
         mthvac::Int,
         ffs::ForceFreeStatesResult,
         intr::PerturbedEquilibriumInternal,
@@ -253,7 +253,7 @@ Metadata `[n_rational]`: `rational_psi`, `rational_q`, `rational_m_res`, `ration
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
-    ForceFreeStates_results::SolutionProfiles,
+    solution::SolutionProfiles,
     mthvac::Int,
     ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
@@ -322,10 +322,10 @@ function compute_singular_coupling_metrics!(
     # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
     # where edge_mn_k[j] = plasma_response[j,k] / (chi1·singfac_lim[j]·2πi)
     # Matches Fortran gpout_resp: edge_mn = foutmn/(chi1·singfac·twopi·ifac)
-    psi_lim = ForceFreeStates_results.psi_store[ForceFreeStates_results.step]
+    psi_lim = solution.psi_store[solution.step]
     q_lim = equil.profiles.q_spline(psi_lim)
     singfac_lim = [intr.m_modes[j] - intr.n_modes[j] * q_lim for j in 1:numpert_total]
-    u_bnd = ForceFreeStates_results.u_store[:, :, 1, ForceFreeStates_results.step]
+    u_bnd = solution.u_store[:, :, 1, solution.step]
     # Divide each row j by singfac_lim[j] — reshape to column vector so Julia broadcasts row-wise, not column-wise.
     edge_mn = intr.plasma_response ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
     C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
@@ -340,7 +340,7 @@ function compute_singular_coupling_metrics!(
     # a `finally` so an exception in the loop cannot leak the pinned count into the session. The
     # loop is top-level: its threadid()-indexed state must never be nested inside another
     # @threads region.
-    nstep = ForceFreeStates_results.step
+    nstep = solution.step
     # ξ′ evaluation preference: the ideal EL relation, or the interpolated stored RHS for kinetic runs.
     use_el = !ffit.kinetic_populated
     _blas_nthreads = BLAS.get_num_threads()
@@ -383,16 +383,16 @@ function compute_singular_coupling_metrics!(
             # galerkin Ξ′, ideal runs the EL relation, kinetic runs the stored Ξ′.
             if intr.odet_from_gal
                 # interpolate u and the analytic galerkin dξ/dψ carried in du_store
-                u_l, ud_l = _gal_solution_at(lpsi, resnum, ForceFreeStates_results, nstep)
-                u_r, ud_r = _gal_solution_at(rpsi, resnum, ForceFreeStates_results, nstep)
+                u_l, ud_l = _gal_solution_at(lpsi, resnum, solution, nstep)
+                u_r, ud_r = _gal_solution_at(rpsi, resnum, solution, nstep)
             elseif use_el
                 # interpolate u and evaluate dξ/dψ from the ideal EL relation
-                u_l, ud_l = _el_solution_at(lpsi, resnum, ForceFreeStates_results, ffit, equil, ffs, nstep)
-                u_r, ud_r = _el_solution_at(rpsi, resnum, ForceFreeStates_results, ffit, equil, ffs, nstep)
+                u_l, ud_l = _el_solution_at(lpsi, resnum, solution, ffit, equil, ffs, nstep)
+                u_r, ud_r = _el_solution_at(rpsi, resnum, solution, ffit, equil, ffs, nstep)
             else
                 # interpolate u and the stored dξ/dψ, weighted to remove the resonant pole
-                u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, ForceFreeStates_results, equil, nstep)
-                u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, ForceFreeStates_results, equil, nstep)
+                u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
+                u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
             end
 
             q_l = equil.profiles.q_spline(lpsi)
