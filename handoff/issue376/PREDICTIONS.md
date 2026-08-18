@@ -181,3 +181,24 @@ differences are explicitly NOT a pass.
 
 Recorded step counts for reference: traced 814/997/1470 (1.23/1.47), inversion 789/892/1056
 (1.13/1.18).
+
+--- Decoupled EL-matrix grid probe, written BEFORE the runs ---
+
+Mechanism (measured, jumps.jl): the EL coefficient splines' third-derivative jumps at knots are
+J ~ eps/dpsi^3. Traced-path core J = 5.2e9 -> 1.8e11 across m512 -> m1024 (growing ~34x/doubling)
+while the inversion path sits flat at ~2e7; a (tol/J)^(1/4) step model then predicts the observed
+step growth of both paths and their difference. Node-value statistics measure eps, not eps/dpsi^3,
+which is why Phase 0's metric could not see this.
+
+Probe: build the EL coefficient splines on a subset of the equilibrium grid with core density
+capped at dpsi >= 0.05*psi below psi=0.1 (~20 knots/decade), all other knots kept. Values at kept
+knots are unchanged; only knot density changes. Core J should fall by (dpsi_new/dpsi_old)^3.
+
+Predictions:
+  - m1024 forward accepted steps fall from 4403 toward ~2800 or below, with the psi<0.05 bin
+    collapsing toward the uniform-grid level (~500-900).
+  - the m512->m1024 ratio drops from 1.59 toward <=1.3 (mid-plasma jumps still grow slowly).
+  - et[1] shifts by <= a few e-3 relative (coarser matrix representation in the core), and the
+    riccati Delta' diagonal (excluding the known-unconverged q=5 element) shifts <= ~1%.
+  - equilibrium wall time unchanged (same trace); EL wall time falls with steps.
+If steps do NOT fall, the jump model is wrong and goes the way of the other four hypotheses.
