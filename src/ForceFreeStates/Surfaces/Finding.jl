@@ -259,7 +259,7 @@ Algorithm:
 """
 function find_kinetic_singular_surfaces!(mats::MatrixSplines, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; ngrid::Int=2000, cond_threshold::Float64=1e8)
     kin = mats.kinetic
-    kin === nothing && error("find_kinetic_singular_surfaces! requires a kinetic fit; call make_kinetic_matrix first")
+    kin === nothing && error("find_kinetic_singular_surfaces! requires a kinetic fit; call build_kinetic_matrix_splines first")
     psilow = equil.profiles.xs[1]
     psihigh = intr.psilim
 

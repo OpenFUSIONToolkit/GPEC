@@ -450,7 +450,7 @@ end
         intr.mpert = intr.mhigh - intr.mlow + 1
         intr.numpert_total = intr.mpert * intr.npert
         metric = FFS.make_metric(equil, intr.mpert)
-        mats = FFS.make_matrix(equil, intr, metric)
+        mats = FFS.build_matrix_splines(equil, intr, metric)
         odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
         return odet, ctrl, equil, mats, intr
     end

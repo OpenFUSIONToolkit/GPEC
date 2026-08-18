@@ -1,7 +1,7 @@
 """
     IdealMatrices
 
-Ideal-MHD stability matrix ψ-splines assembled by [`make_matrix`](@ref). Each field flattens a
+Ideal-MHD stability matrix ψ-splines assembled by [`build_matrix_splines`](@ref). Each field flattens a
 `numpert_total × numpert_total` matrix to `numpert_total^2` complex series (`J_spline` to `2·mpert−1`),
 following the appendix of Glasser Phys. Plasmas 2016 112506.
 
@@ -47,7 +47,7 @@ end
 """
     KineticMatrices
 
-Kinetic-MHD matrix ψ-splines assembled by [`make_kinetic_matrix`](@ref). Present on a
+Kinetic-MHD matrix ψ-splines assembled by [`build_kinetic_matrix_splines`](@ref). Present on a
 [`MatrixSplines`](@ref) only for kinetic runs; its presence means the solution obeys the FKG ODE
 rather than the ideal Euler-Lagrange relation.
 
@@ -429,7 +429,7 @@ end
 
 
 """
-    make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> MatrixSplines
+    build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData) -> MatrixSplines
 
 Constructs main ForceFreeStates matrices for a given toroidal mode number and returns
 them as a new `MatrixSplines` object. See the appendix of the Glasser Phys. Plasmas 2016 112506
@@ -447,13 +447,8 @@ later (i.e. `sing_der!`).
 ### Returns
 
   - `mats::MatrixSplines`: A struct holding cubic spline fits of the assembled matrices
-
-### TODOs
-
-Add kinetic metric tensor components for kinetic mode
-Set powers if necessary
 """
-function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
+function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
 
     # --- Extract inputs ---
     profiles = equil.profiles
@@ -604,10 +599,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
-        # TODO: does F stay Hermitian in the 3D case, allowing us to use the lower representation?
         fmat .= cholesky(Hermitian(fmat)).L
-
-        # TODO: add kinetic matrices here
     end
 
     # --- Create Fourier coefficient splines (multi-quantity cubic interpolants) ---

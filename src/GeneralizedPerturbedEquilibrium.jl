@@ -73,7 +73,7 @@ include("Rerun.jl")
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings
 using .ForceFreeStates: ForceFreeStatesResult, build_result
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
-using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
+using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
 using .ForceFreeStates: galerkin_solve, write_galerkin!
@@ -559,7 +559,7 @@ function prepare_force_free_states!(
     end
 
     # Compute matrices and build the MatrixSplines container
-    mats = make_matrix(equil, intr, metric)
+    mats = build_matrix_splines(equil, intr, metric)
 
     if ctrl.kinetic_factor > 0
         if ctrl.verbose
@@ -572,7 +572,7 @@ function prepare_force_free_states!(
             KineticForces.compute_calculated_kinetic_matrices(
                 c, e, i, m, f;
                 kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
-        mats = make_kinetic_matrix(ctrl, equil, mats, intr, metric;
+        mats = build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
             calculated_source=calculated_cb)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.

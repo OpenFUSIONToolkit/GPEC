@@ -107,7 +107,7 @@ end
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
     metric = FFS.make_metric(equil, intr_tmp.mpert)
-    mats = FFS.make_matrix(equil, intr_tmp, metric)
+    mats = FFS.build_matrix_splines(equil, intr_tmp, metric)
     N = intr_tmp.numpert_total
 
     # Riccati integration. The driver returns (odet, propagators, chunks, S_at_surface_left);

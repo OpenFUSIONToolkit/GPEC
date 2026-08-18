@@ -42,7 +42,7 @@ function setup_solovev()
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
     metric = FFS.make_metric(equil, intr.mpert)
-    mats = FFS.make_matrix(equil, intr, metric)
+    mats = FFS.build_matrix_splines(equil, intr, metric)
     return ctrl, equil, mats, intr
 end
 

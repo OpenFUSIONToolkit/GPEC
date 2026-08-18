@@ -2,7 +2,7 @@
     FixedKineticMatrices
 
 Test fixtures: synthetic X-shaped kinetic energy matrices keyed off the ideal
-matrices' Frobenius norms. Used by `make_kinetic_matrix` when
+matrices' Frobenius norms. Used by `build_kinetic_matrix_splines` when
 `ctrl.kinetic_source == "fixed"` to exercise the kinetic-MHD code path before
 the calculated NTV pipeline (see `KineticForces.compute_calculated_kinetic_matrices`)
 is wired in.

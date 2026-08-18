@@ -324,7 +324,7 @@ intr.mpert = intr.mhigh - intr.mlow + 1
 intr.numpert_total = intr.mpert * intr.npert
 
 metric = FFS.make_metric(equil, intr.mpert)
-mats   = FFS.make_matrix(equil, intr, metric)
+mats   = FFS.build_matrix_splines(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
 # on ctrl.integrator and always returns a 4-tuple

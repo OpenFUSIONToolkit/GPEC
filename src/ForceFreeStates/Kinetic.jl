@@ -1,5 +1,5 @@
 """
-    make_kinetic_matrix(ctrl, equil, mats, intr, metric;
+    build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
                         calculated_source=nothing)
 
 Construct kinetic energy (W) and torque (T) matrices and pre-compute the FKG derived
@@ -21,7 +21,7 @@ Dispatches on `ctrl.kinetic_source`:
 Both paths apply `ctrl.kinetic_factor` as a global scale before the FKG Schur
 reduction.
 """
-function make_kinetic_matrix(
+function build_kinetic_matrix_splines(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     mats::MatrixSplines,
@@ -39,7 +39,7 @@ function make_kinetic_matrix(
         isnothing(calculated_source) && error(
             "kinetic_source=\"calculated\" requires the KineticForces callback. " *
             "Drive the run via `GeneralizedPerturbedEquilibrium.main` instead of " *
-            "calling make_kinetic_matrix directly, or pass " *
+            "calling build_kinetic_matrix_splines directly, or pass " *
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
         )
         kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats)
