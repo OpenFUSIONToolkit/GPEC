@@ -943,6 +943,59 @@ resolution, trace tolerance (`etol`, `abstol`), poloidal resolution, EL error co
 either integrator), harmonic count, and now geometry/coefficient smoothness. The honest position is
 that the cause is unknown, and the next step should be finding it rather than fixing a candidate.
 
+## 22. Mechanism found and confirmed by intervention: C3 knot jumps, and grid decoupling fixes it
+
+**The metric that finally discriminates** (`jumps.jl`): the solver never sees node values — it sees
+the spline between them, and a cubic spline has a discontinuous third derivative at every knot. The
+jump is J ~ dpsi*f'''' for perfect data but **J ~ eps/dpsi^3 for node error eps**, and the local
+error crossing a C2 kink is ~J*h^4 regardless of method order, forcing h ~ (tol/J)^(1/4). Node
+statistics measure eps; the solver feels eps/dpsi^3 — which weights the packed core (dpsi ~ 1e-6)
+by ~1e18. That is why every node-smoothness metric failed to discriminate (§21) while the step
+counts differed.
+
+Measured on the a1 pair (same analytic equilibrium, both with route (a)):
+
+| | traced | inversion |
+|---|---|---|
+| median core J, m512 → m1024 | 5.2e9 → **1.8e11** | 3.1e7 → **1.7e7** |
+| model-predicted extra core steps | 868 → 1579 | 157 → 93 |
+| observed step growth | 997 → 1470 | 892 → 1056 |
+
+Consistency checks: A3's measured eps ~ 1e-9 at core dpsi ~ 1e-6 predicts J ~ 1e9 (matches);
+white-noise-floor scaling predicts step ratio 2^(3/4) = 1.68/doubling (pre-route-(a) DIII-D was
+1.72/1.92), clean-data scaling predicts ~2^(1/4) = 1.19 (inversion is 1.13/1.18); the dtmax probe,
+uniform-grid probe and LAR flatness all fit the same arithmetic.
+
+**The intervention** (pre-registered, `patch_decouple.py`): the EL coefficient splines do not need
+the equilibrium's core-packed knots — the coefficients are near-cylindrical there. Build them on a
+subset with core density capped at dpsi >= 0.05*psi below psi = 0.1 (513→329 and 1025→575 knots;
+values at kept knots unchanged, only density changes).
+
+| | baseline route (a) | decoupled grid |
+|---|---|---|
+| forward m512 steps / core | 2768 / 1066 | **2188 / 489** |
+| forward m1024 steps / core | 4403 / 2017 | **3034 / 626** |
+| ratio per doubling | 1.59 | **1.39** |
+| forward m512 warm run | 12.8 s | **10.4 s (−19%)** |
+| et[1] m512 / m1024 | 0.781587768 / 0.799036879 | 0.781587786 / 0.7990369 (**3e-8 rel**) |
+| riccati m512 Δ′ diagonal | ref | **4e-7 rel, all 5 elements** |
+
+Every pre-registered prediction fired: core steps collapsed into the predicted 500–900 band, the
+ratio fell to ~1.39, equilibrium time was unchanged, and — far better than predicted — et[1] and
+Δ′ are unchanged at the 1e-7–1e-8 level, because the kept node values are identical and the coarse
+representation is adequate for near-cylindrical coefficients.
+
+**This is the answer to issue #376's mpsi question in its final form**: the EL integrand inherits
+the equilibrium grid's knots, and knot-packed regions amplify tolerance-level node error into huge
+third-derivative jumps that slave the step size. Decouple the coefficient-spline grid from the
+equilibrium grid and the coupling breaks — with bit-level physics, because decoupling changes only
+the interpolation density, not the data.
+
+Remaining 1.39 ratio: the cap only touched psi < 0.1; mid-plasma and edge-packed knots still carry
+growing jumps. A production version could apply a matrix-curvature criterion over the whole domain
+(the same measured-curvature machinery the auto grid uses), plausibly approaching the clean-data
+~1.19 floor.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
