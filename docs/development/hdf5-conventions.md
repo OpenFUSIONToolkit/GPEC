@@ -44,7 +44,7 @@ Top level (10 groups):
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
-| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`) |
+| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
 

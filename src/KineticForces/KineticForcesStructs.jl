@@ -80,8 +80,12 @@ Constructed via keyword arguments or from a TOML dict:
 ```julia
 ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
+
+Immutable: vary a field by building a new control rather than assigning to one (the
+multi-species loop does this per species, and `check_psi_quadrature_convergence`'s test
+builds a second control for its differing tolerance).
 """
-@kwdef mutable struct KineticForcesControl
+@kwdef struct KineticForcesControl
     # Moment type
     moment::String = "pressure"     # "heat" or "pressure"
 

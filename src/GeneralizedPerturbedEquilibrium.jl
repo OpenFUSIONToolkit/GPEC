@@ -954,11 +954,11 @@ function run_kinetic_forces(
             states = KineticForces.KineticForcesState[]
             labels = String[]
             for sp in species
-                sctrl = deepcopy(kf_ctrl)
-                sctrl.zi = sp.z
-                sctrl.mi = sp.m
-                sctrl.electron = sp.electron
-                sctrl.ion_species = KineticForces.IonSpecies[]
+                # KineticForcesControl is immutable, so each species gets a fresh control
+                # built from the run's control with only its own identity overridden.
+                sctrl = KineticForces.KineticForcesControl(;
+                    (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
+                    zi=sp.z, mi=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
                 st = KineticForces.KineticForcesState()
                 KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles)
                 push!(states, st)
