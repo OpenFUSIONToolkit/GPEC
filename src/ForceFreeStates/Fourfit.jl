@@ -496,23 +496,38 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
 
     # FastInterpolations now natively supports complex values - no need to split real/imag
     # Create complex series interpolants with per-column extrap BC
-    ffit.amats = cubic_interp(metric.xs, Series(amats_flat); ffit.itp_opts...)
-    ffit.bmats = cubic_interp(metric.xs, Series(bmats_flat); ffit.itp_opts...)
-    ffit.cmats = cubic_interp(metric.xs, Series(cmats_flat); ffit.itp_opts...)
-    ffit.dmats_prim = cubic_interp(metric.xs, Series(dmats_flat); ffit.itp_opts...)
-    ffit.emats_prim = cubic_interp(metric.xs, Series(emats_flat); ffit.itp_opts...)
-    ffit.hmats = cubic_interp(metric.xs, Series(hmats_flat); ffit.itp_opts...)
-    ffit.fmats_lower = cubic_interp(metric.xs, Series(fmats_lower_flat); ffit.itp_opts...)
-    ffit.fmats_prim = cubic_interp(metric.xs, Series(fmats_prim_flat); ffit.itp_opts...)
-    ffit.fmats_gal = cubic_interp(metric.xs, Series(fmats_gal_flat); ffit.itp_opts...)
-    ffit.gmats = cubic_interp(metric.xs, Series(gmats_flat); ffit.itp_opts...)
-    ffit.kmats = cubic_interp(metric.xs, Series(kmats_flat); ffit.itp_opts...)
+    # Decouple the coefficient-spline knots from the equilibrium grid in the packed core:
+    # a cubic spline's third-derivative jumps scale as (node error)/dpsi^3, so equilibrium-grade
+    # core packing amplifies tolerance-level node error into jumps that slave the EL step size.
+    # The coefficients are near-cylindrical there; cap the density at dpsi >= 0.05*psi below psi=0.1.
+    keep = Int[1]
+    for i in 2:length(metric.xs)-1
+        x = metric.xs[i]
+        if x >= 0.1 || (x - metric.xs[keep[end]]) >= 0.05 * x
+            push!(keep, i)
+        end
+    end
+    push!(keep, length(metric.xs))
+    mxs = metric.xs[keep]
+    @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots after core density cap"
+
+    ffit.amats = cubic_interp(mxs, Series(amats_flat[keep, :]); ffit.itp_opts...)
+    ffit.bmats = cubic_interp(mxs, Series(bmats_flat[keep, :]); ffit.itp_opts...)
+    ffit.cmats = cubic_interp(mxs, Series(cmats_flat[keep, :]); ffit.itp_opts...)
+    ffit.dmats_prim = cubic_interp(mxs, Series(dmats_flat[keep, :]); ffit.itp_opts...)
+    ffit.emats_prim = cubic_interp(mxs, Series(emats_flat[keep, :]); ffit.itp_opts...)
+    ffit.hmats = cubic_interp(mxs, Series(hmats_flat[keep, :]); ffit.itp_opts...)
+    ffit.fmats_lower = cubic_interp(mxs, Series(fmats_lower_flat[keep, :]); ffit.itp_opts...)
+    ffit.fmats_prim = cubic_interp(mxs, Series(fmats_prim_flat[keep, :]); ffit.itp_opts...)
+    ffit.fmats_gal = cubic_interp(mxs, Series(fmats_gal_flat[keep, :]); ffit.itp_opts...)
+    ffit.gmats = cubic_interp(mxs, Series(gmats_flat[keep, :]); ffit.itp_opts...)
+    ffit.kmats = cubic_interp(mxs, Series(kmats_flat[keep, :]); ffit.itp_opts...)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
 
     # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
-    ffit.jmats = cubic_interp(metric.xs, Series(jmats_flat); ffit.itp_opts...)
+    ffit.jmats = cubic_interp(mxs, Series(jmats_flat[keep, :]); ffit.itp_opts...)
 
     return ffit
 end
