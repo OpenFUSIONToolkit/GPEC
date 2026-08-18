@@ -1,0 +1,3 @@
+# Non-merging assets branch: figures referenced from PR discussion comments.
+# The repo-root ignore excludes *.png; explicitly include the figures here.
+!*.png
