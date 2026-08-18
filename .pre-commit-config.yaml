@@ -50,6 +50,14 @@ repos:
   # pygrep hooks fail when the pattern matches, so each entry matches a violation.
   - repo: local
     hooks:
+      # Keeps the Area table in docs/development/naming.md matching src/ on disk,
+      # since the commit and PR title vocabulary is derived from it.
+      - id: naming-table-in-sync
+        name: 'Naming conventions: Area table matches src/'
+        language: system
+        entry: python3 ci/conventions/check_subject.py --check-table docs/development/naming.md
+        pass_filenames: false
+        files: ^(src/|docs/development/naming\.md$)
       - id: toml-header-block
         name: 'TOML conventions: file starts with a # header block'
         language: pygrep
