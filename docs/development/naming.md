@@ -129,4 +129,7 @@ To check a subject by hand, or to wire it into your own clone as a `commit-msg` 
 
 ```bash
 python3 ci/conventions/check_subject.py --title "Equilibrium - BUGFIX! - Correct bp0 edge quadrature"
+
+# The script carries PEP 723 metadata, so it also runs with no Python environment set up:
+uv run ci/conventions/check_subject.py --title "Equilibrium - BUGFIX! - Correct bp0 edge quadrature"
 ```

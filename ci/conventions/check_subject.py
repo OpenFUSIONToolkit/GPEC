@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# PEP 723 inline metadata, so the script runs anywhere without setting up an
+# environment: `uv run ci/conventions/check_subject.py --title "..."`.
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 """Validate pull request titles, release-note blocks, and commit subjects.
 
 Two things block on this: the `pr-conventions` CI job, which checks a pull request
