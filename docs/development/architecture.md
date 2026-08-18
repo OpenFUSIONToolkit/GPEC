@@ -64,7 +64,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
      - `Riccati/` - Chunked fundamental-matrix (STRIDE) driver and Δ' boundary-value problem
      - `Galerkin/` - RDCON outer-region singular Galerkin Δ' solver
      - `Matching/` - Outer↔inner resistive matching (`DeltaPrimeData`, `resonant_match_rpec`)
-     - `Fourfit.jl` - Fourier fitting routines (`FourFitVars`)
+     - `Fourfit.jl` - Fourier fitting routines (`MatrixSplines`)
      - `FixedBoundaryStability.jl` - Fixed boundary analysis
      - `Free.jl` - Free boundary stability
    - Status: Stable, core DCON functionality implemented

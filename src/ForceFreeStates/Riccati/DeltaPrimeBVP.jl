@@ -1,7 +1,7 @@
 # STRIDE global boundary-value problem: Delta-prime matrix assembly, solve, PEST-3 decomposition.
 
 """
-    compute_delta_prime_matrix!(intr, propagators, chunks; wv, psio, debug, ctrl, equil, ffit)
+    compute_delta_prime_matrix!(intr, propagators, chunks; wv, psio, debug, ctrl, equil, mats)
 
 Compute the inter-surface tearing stability matrix (msing × msing) using the
 STRIDE global BVP formulation [Glasser 2018 Phys. Plasmas 25, 032501, Sec. III.B].
@@ -71,7 +71,7 @@ function compute_delta_prime_matrix!(
     S_at_surface_left::Union{Nothing,Vector{Matrix{ComplexF64}}} = nothing,
     ctrl::Union{Nothing,ForceFreeStatesControl} = nothing,
     equil::Union{Nothing,Equilibrium.PlasmaEquilibrium} = nothing,
-    ffit::Union{Nothing,FourFitVars} = nothing
+    mats::Union{Nothing,MatrixSplines} = nothing
 )
     intr.msing == 0 && return
     _has_unsupported_multi_resonance(intr) && return
@@ -110,7 +110,7 @@ function compute_delta_prime_matrix!(
     if use_S_axis
         uShootR, uShootL, uAxis = _build_S_axis_shooting_propagators(
             propagators, chunks, i_crossings, sing, msing, N,
-            T_left_mats, T_right_mats, has_ua, ctrl, equil, ffit, intr, debug)
+            T_left_mats, T_right_mats, has_ua, ctrl, equil, mats, intr, debug)
         debug && _log_S_axis_shooting_propagators(uShootR, uShootL, uAxis,
                                                   S_at_surface_left, T_left_mats,
                                                   ipert_all, has_ua, msing, N)
@@ -245,9 +245,9 @@ function _build_S_axis_shooting_propagators(
     propagators::Vector{ChunkPropagator}, chunks::Vector{IntegrationChunk},
     i_crossings::Vector{Int}, sing::Vector{SingType}, msing::Int, N::Int,
     T_left_mats::Vector{Matrix{ComplexF64}}, T_right_mats::Vector{Matrix{ComplexF64}},
-    has_ua::Bool, ctrl, equil, ffit, intr::ForceFreeStatesInternal, debug::Bool)
+    has_ua::Bool, ctrl, equil, mats, intr::ForceFreeStatesInternal, debug::Bool)
 
-    can_reintegrate = has_ua && ctrl !== nothing && equil !== nothing && ffit !== nothing
+    can_reintegrate = has_ua && ctrl !== nothing && equil !== nothing && mats !== nothing
     uShootR = Vector{Matrix{ComplexF64}}(undef, msing)
     uShootL = Vector{Matrix{ComplexF64}}(undef, msing)   # uShootL[1] handled separately below
 
@@ -261,7 +261,7 @@ function _build_S_axis_shooting_propagators(
         end
         if can_reintegrate && !isempty(shoot_range_R)
             uShootR[j] = integrate_fm_with_ua_ic(chunks, shoot_range_R, sing[j].ua_right,
-                            ctrl, equil, ffit, intr; backward=false, psi_ua=sing[j].psi_ua_right)
+                            ctrl, equil, mats, intr; backward=false, psi_ua=sing[j].psi_ua_right)
         else
             T_init = has_ua ? T_right_mats[j] : nothing
             uShootR[j] = assemble_fm_matrix(propagators, shoot_range_R; T_init=T_init)
@@ -278,7 +278,7 @@ function _build_S_axis_shooting_propagators(
         end
         if can_reintegrate && !isempty(shoot_range_L)
             uShootL[j] = integrate_fm_with_ua_ic(chunks, shoot_range_L, sing[j].ua_left,
-                            ctrl, equil, ffit, intr; backward=true, psi_ua=sing[j].psi_ua_left)
+                            ctrl, equil, mats, intr; backward=true, psi_ua=sing[j].psi_ua_left)
         else
             T_init = has_ua ? T_left_mats[j] : nothing
             uShootL[j] = assemble_fm_matrix(propagators, shoot_range_L; T_init=T_init)
@@ -288,7 +288,7 @@ function _build_S_axis_shooting_propagators(
     uAxis, i_axis_mid = _build_conditioned_axis_propagator(propagators, i_crossings, N)
     uShootL[1] = _build_uShootL_first(propagators, chunks, i_crossings, sing,
                                       T_left_mats, has_ua, can_reintegrate, i_axis_mid,
-                                      ctrl, equil, ffit, intr, N)
+                                      ctrl, equil, mats, intr, N)
     if debug
         shoot_range_L1 = (i_axis_mid + 1):(i_crossings[1] - 1)
         @info "  Axis propagator: $(i_axis_mid) chunks, cond=$(@sprintf("%.2e", cond(uAxis)))"
@@ -358,11 +358,11 @@ function _build_uShootL_first(propagators::Vector{ChunkPropagator},
                               chunks::Vector{IntegrationChunk}, i_crossings::Vector{Int},
                               sing::Vector{SingType}, T_left_mats::Vector{Matrix{ComplexF64}},
                               has_ua::Bool, can_reintegrate::Bool, i_axis_mid::Int,
-                              ctrl, equil, ffit, intr::ForceFreeStatesInternal, N::Int)
+                              ctrl, equil, mats, intr::ForceFreeStatesInternal, N::Int)
     shoot_range_L1 = (i_axis_mid + 1):(i_crossings[1] - 1)
     if can_reintegrate && !isempty(shoot_range_L1)
         return integrate_fm_with_ua_ic(chunks, shoot_range_L1, sing[1].ua_left,
-                                       ctrl, equil, ffit, intr;
+                                       ctrl, equil, mats, intr;
                                        backward=true, psi_ua=sing[1].psi_ua_left)
     elseif !isempty(shoot_range_L1)
         return assemble_fm_matrix(propagators, shoot_range_L1;

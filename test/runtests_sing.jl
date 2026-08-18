@@ -108,19 +108,19 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         psifac_dummy = collect(range(0, 1, 10));
         points = length(psifac_dummy)
         amat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/amat.dat"))
-        amats = copyForSplines(amat, psifac_dummy)
+        A_spline = copyForSplines(amat, psifac_dummy)
         bmat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/bmat.dat"))
-        bmats = copyForSplines(bmat, psifac_dummy)
+        B_spline = copyForSplines(bmat, psifac_dummy)
         cmat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/cmat.dat"))
-        cmats = copyForSplines(cmat, psifac_dummy)
+        C_spline = copyForSplines(cmat, psifac_dummy)
 
         fmat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/fmat.dat"))
         fmat .= cholesky(Hermitian(fmat)).L;
         fmats = copyForSplines(fmat, psifac_dummy)
         kmat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/kmat.dat"))
-        kmats = copyForSplines(kmat, psifac_dummy)
+        K_spline = copyForSplines(kmat, psifac_dummy)
         gmat = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/gmat.dat"))
-        gmats = copyForSplines(gmat, psifac_dummy)
+        G_spline = copyForSplines(gmat, psifac_dummy)
 
         umat_p1 = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/umat_p1.dat"))
         umat_p2 = read_complex_fortran(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/umat_p2.dat"))
@@ -132,20 +132,20 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         # Only the six matrices sing_der! reads are physical here; the rest are unused placeholders.
         unused = cubic_interp(psifac_dummy, Series(zeros(ComplexF64, points, intr.numpert_total^2)); itp_opts...)
         ideal = GeneralizedPerturbedEquilibrium.ForceFreeStates.IdealMatrices(;
-            amats=cubic_interp(psifac_dummy, Series(reshape(amats, points, :)); itp_opts...),
-            bmats=cubic_interp(psifac_dummy, Series(reshape(bmats, points, :)); itp_opts...),
-            cmats=cubic_interp(psifac_dummy, Series(reshape(cmats, points, :)); itp_opts...),
-            fmats_lower=cubic_interp(psifac_dummy, Series(reshape(fmats, points, :)); itp_opts...),
-            kmats=cubic_interp(psifac_dummy, Series(reshape(kmats, points, :)); itp_opts...),
-            gmats=cubic_interp(psifac_dummy, Series(reshape(gmats, points, :)); itp_opts...),
-            dmats_prim=unused, emats_prim=unused, hmats=unused, fmats_prim=unused,
-            fmats_gal=unused, jmats=unused)
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(;
+            A_spline=cubic_interp(psifac_dummy, Series(reshape(A_spline, points, :)); itp_opts...),
+            B_spline=cubic_interp(psifac_dummy, Series(reshape(B_spline, points, :)); itp_opts...),
+            C_spline=cubic_interp(psifac_dummy, Series(reshape(C_spline, points, :)); itp_opts...),
+            F_spline_lower=cubic_interp(psifac_dummy, Series(reshape(fmats, points, :)); itp_opts...),
+            K_spline=cubic_interp(psifac_dummy, Series(reshape(K_spline, points, :)); itp_opts...),
+            G_spline=cubic_interp(psifac_dummy, Series(reshape(G_spline, points, :)); itp_opts...),
+            D_spline_prim=unused, E_spline_prim=unused, H_spline=unused, F_spline_prim=unused,
+            F_spline_gal=unused, J_spline=unused)
+        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.MatrixSplines(;
             numpert_total=intr.numpert_total, itp_opts, ideal)
 
         du = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
         chunk = GeneralizedPerturbedEquilibrium.ForceFreeStates.IntegrationChunk(; psi_start=odet.psifac, psi_end=odet.psifac, needs_crossing=false)
-        params = (ctrl, equil, ffit, intr, odet, chunk)
+        params = (ctrl, equil, mats, intr, odet, chunk)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_der!(du, odet.u, params, odet.psifac)
 
         du_fortran = read_solutions_3d(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/sing_der_output_du.dat"))

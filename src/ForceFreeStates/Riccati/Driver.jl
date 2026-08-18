@@ -92,7 +92,7 @@ This is compatible with downstream code (which uses U₁/U₂ ratio):
 """
 
 """
-    riccati_eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
+    riccati_eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, propagators, chunks, S_left)
 
 The Riccati/STRIDE integrator: a chunked fundamental matrix (propagator) driver for the EL
 integration. The trailing three return values feed the Δ' BVP in `compute_delta_prime_matrix!`;
@@ -140,24 +140,24 @@ the DIIID-like example (N=26, n=1); bidirectional reduces this to within 2%.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars, intr::ForceFreeStatesInternal
+    mats::MatrixSplines, intr::ForceFreeStatesInternal
 )
-    odet = _initialize_parallel_odet(ctrl, equil, ffit, intr)
+    odet = _initialize_parallel_odet(ctrl, equil, mats, intr)
     chunks, propagators, odet_proxies = _setup_parallel_chunks_and_proxies(odet, ctrl, intr)
     _log_parallel_start(ctrl, odet, equil, chunks)
 
-    _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, ffit, intr, odet_proxies)
+    _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, mats, intr, odet_proxies)
 
     # Harvest solver-step counts accumulated thread-locally in each proxy during the BVP phase.
     # The outer re-integration below uses riccati_integrate_chunk!, which counts via its callback.
     odet.total_steps += sum(p.total_steps for p in odet_proxies)
 
     S_at_surface_left, last_crossing_step =
-        _assemble_propagators_serially!(odet, propagators, chunks, ctrl, equil, ffit, intr)
+        _assemble_propagators_serially!(odet, propagators, chunks, ctrl, equil, mats, intr)
 
-    _reintegrate_outer_plasma!(odet, last_crossing_step, ctrl, equil, ffit, intr)
+    _reintegrate_outer_plasma!(odet, last_crossing_step, ctrl, equil, mats, intr)
 
-    chunks, propagators = _handle_edge_dW_scan!(odet, chunks, propagators, ctrl, equil, ffit, intr)
+    chunks, propagators = _handle_edge_dW_scan!(odet, chunks, propagators, ctrl, equil, mats, intr)
 
     # compute_delta_prime_matrix! is called from the main pipeline (after free_run) so
     # that vacuum response wv is available for the edge BC. With self-consistent truncation,
@@ -175,11 +175,11 @@ end
 # Build odet and initialize at the magnetic axis. Same path as serial eulerlagrange_integration.
 function _initialize_parallel_odet(ctrl::ForceFreeStatesControl,
                                    equil::Equilibrium.PlasmaEquilibrium,
-                                   ffit::FourFitVars,
+                                   mats::MatrixSplines,
                                    intr::ForceFreeStatesInternal)
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
+        initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
     else
@@ -223,11 +223,11 @@ end
 function _run_parallel_bvp_phase!(propagators::Vector{ChunkPropagator},
                                   chunks::Vector{IntegrationChunk},
                                   ctrl::ForceFreeStatesControl,
-                                  equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+                                  equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
                                   intr::ForceFreeStatesInternal,
                                   odet_proxies::Vector{OdeState})
     Threads.@threads :static for i in eachindex(chunks)
-        integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
+        integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, mats, intr,
                                     odet_proxies[Threads.threadid()])
     end
 end
@@ -243,7 +243,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
                                          chunks::Vector{IntegrationChunk},
                                          ctrl::ForceFreeStatesControl,
                                          equil::Equilibrium.PlasmaEquilibrium,
-                                         ffit::FourFitVars, intr::ForceFreeStatesInternal)
+                                         mats::MatrixSplines, intr::ForceFreeStatesInternal)
     N = intr.numpert_total
     S_at_surface_left = Matrix{ComplexF64}[]
     last_crossing_step = 1
@@ -265,7 +265,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
             ctrl.kinetic_factor > 0 && error("kinetic_factor > 0 not implemented yet in Riccati!")
             # State is (S, I) from the renorm above — well-conditioned at the surface's left boundary.
             push!(S_at_surface_left, copy(odet.u[:, :, 1]))
-            riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             last_crossing_step = odet.step - 1
         else
             # Save non-crossing end-of-chunk state. These columns are FM/Riccati chunk
@@ -291,7 +291,7 @@ end
 # before renormalization; we renorm here to (S_new, I) as the Riccati starting state.
 function _reintegrate_outer_plasma!(odet::OdeState, last_crossing_step::Int,
                                     ctrl::ForceFreeStatesControl,
-                                    equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+                                    equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
                                     intr::ForceFreeStatesInternal)
     N = intr.numpert_total
     odet.u .= odet.u_store[:, :, :, last_crossing_step]
@@ -301,7 +301,7 @@ function _reintegrate_outer_plasma!(odet::OdeState, last_crossing_step::Int,
     renormalize_riccati_inplace!(odet.u, N)
     outer_chunk = IntegrationChunk(; psi_start=odet.psifac, psi_end=intr.psilim * (1 - eps),
                                    needs_crossing=false, ising=0)
-    riccati_integrate_chunk!(odet, ctrl, equil, ffit, intr, outer_chunk)
+    riccati_integrate_chunk!(odet, ctrl, equil, mats, intr, outer_chunk)
     # Post: odet.u is in (S, I) form; odet.step points to next empty slot.
 end
 
@@ -316,7 +316,7 @@ end
 function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
                                propagators::Vector{ChunkPropagator},
                                ctrl::ForceFreeStatesControl,
-                               equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+                               equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
                                intr::ForceFreeStatesInternal)
     N = intr.numpert_total
     odet.step -= 1
@@ -324,7 +324,7 @@ function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
     ctrl.psiedge < intr.psilim || return chunks, propagators
 
     saved_psifac, saved_u = odet.psifac, copy(odet.u)
-    peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
+    peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
 
     if !ctrl.truncate_at_dW_peak
         odet.psifac = saved_psifac
@@ -361,7 +361,7 @@ function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
         chunks[last_chunk_idx] = new_chunk
         odet_proxy = OdeState(N, 1, 1, 0)
         integrate_propagator_chunk!(propagators[last_chunk_idx], new_chunk,
-                                    ctrl, equil, ffit, intr, odet_proxy)
+                                    ctrl, equil, mats, intr, odet_proxy)
     end
     n_dropped = 0
     if last_chunk_idx < length(chunks)

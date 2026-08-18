@@ -241,8 +241,8 @@ function main_from_inputs(
     ffs_start = time()
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
-    metric, ffit = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles)
-    ffs_result = run_force_free_states(ctrl, equil, ffit, intr, metric)
+    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles)
+    ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
         write_outputs_to_HDF5(
@@ -470,7 +470,7 @@ function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.Pl
 end
 
 """
-    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, ffit)
+    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, mats)
 
 Set up the force-free-states solve on `intr`: integration limits, the surviving singular
 surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
@@ -558,8 +558,8 @@ function prepare_force_free_states!(
         @info "Computing F, G, and K matrices"
     end
 
-    # Compute matrices and populate FourFitVars struct
-    ffit = make_matrix(equil, intr, metric)
+    # Compute matrices and build the MatrixSplines container
+    mats = make_matrix(equil, intr, metric)
 
     if ctrl.kinetic_factor > 0
         if ctrl.verbose
@@ -572,22 +572,22 @@ function prepare_force_free_states!(
             KineticForces.compute_calculated_kinetic_matrices(
                 c, e, i, m, f;
                 kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
-        ffit = make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+        mats = make_kinetic_matrix(ctrl, equil, mats, intr, metric;
             calculated_source=calculated_cb)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
         # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
         # singfac_min == 0 preserves single-chunk behavior.
         if ctrl.singfac_min > 0
-            find_kinetic_singular_surfaces!(ffit, equil, intr)
+            find_kinetic_singular_surfaces!(mats, equil, intr)
         end
     end
 
-    return metric, ffit
+    return metric, mats
 end
 
 """
-    run_force_free_states(ctrl, equil, ffit, intr, metric) -> ForceFreeStatesResult
+    run_force_free_states(ctrl, equil, mats, intr, metric) -> ForceFreeStatesResult
 
 Run the formalism selected by `ctrl.integrator` — the standalone Galerkin solve, or the
 Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publish its products as a
@@ -596,7 +596,7 @@ Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publi
 function run_force_free_states(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit,
+    mats,
     intr::ForceFreeStatesInternal,
     metric
 )
@@ -614,14 +614,14 @@ function run_force_free_states(
             error("integrator = \"galerkin\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         gal_start = time()
         wv = ctrl.vac_flag ? first(ForceFreeStates.compute_scaled_wv(ctrl, equil, intr)) : nothing
-        gal_data, gal_dp = galerkin_solve(ctrl, equil, ffit, intr; wv=wv)
+        gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv)
         @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
     else
         # Integrate Euler-Lagrange Equation
         if ctrl.verbose
             @info "Integrating Euler-Lagrange equation"
         end
-        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
+        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, mats, intr)
         if odet.nzero > 0 && ctrl.verbose
             @warn "Fixed-boundary mode unstable for n = $nstring"
         end
@@ -632,7 +632,7 @@ function run_force_free_states(
                 wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
                 @info "Computing free boundary energies ($wall_desc)"
             end
-            free_energies = free_run(odet, ctrl, equil, ffit, intr)
+            free_energies = free_run(odet, ctrl, equil, mats, intr)
             normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
             if real(free_energies.et[1]) < 0
                 if ctrl.verbose
@@ -653,13 +653,13 @@ function run_force_free_states(
                 ForceFreeStates.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
                     wv=free_energies.wv, psio=equil.psio, debug=ctrl.verbose,
                     S_at_surface_left=fm_S_left,
-                    ctrl=ctrl, equil=equil, ffit=ffit)
+                    ctrl=ctrl, equil=equil, mats=mats)
             end
         end
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data, gal_dp)
+    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
 end
 
 """
@@ -765,8 +765,8 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     end
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
-    metric, ffit = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
-    result = run_force_free_states(ctrl, equil, ffit, intr, metric)
+    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
+    result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
         write_outputs_to_HDF5(result; locstab=locstab, ballooning_boundary=ballooning_boundary)
@@ -1017,7 +1017,7 @@ function write_outputs_to_HDF5(
 
     ctrl = result.control
     equil = result.equil
-    ffit = result.ffit
+    mats = result.mats
     free_energies = result.free_boundary
     gal_data = result.galerkin
     diag = result.diagnostics
@@ -1287,27 +1287,27 @@ function write_outputs_to_HDF5(
         elm = "ForceFreeStates/EulerLagrangeMatrices"
         out_h5["$elm/psi"] = xs
         # Ideal primitive matrices (A, B, C, D, E, H)
-        out_h5["$elm/Ideal/A"] = _eval_mat_spline(ffit.ideal.amats)
-        out_h5["$elm/Ideal/B"] = _eval_mat_spline(ffit.ideal.bmats)
-        out_h5["$elm/Ideal/C"] = _eval_mat_spline(ffit.ideal.cmats)
-        out_h5["$elm/Ideal/D"] = _eval_mat_spline(ffit.ideal.dmats_prim)
-        out_h5["$elm/Ideal/E"] = _eval_mat_spline(ffit.ideal.emats_prim)
-        out_h5["$elm/Ideal/H"] = _eval_mat_spline(ffit.ideal.hmats)
+        out_h5["$elm/Ideal/A"] = _eval_mat_spline(mats.ideal.A_spline)
+        out_h5["$elm/Ideal/B"] = _eval_mat_spline(mats.ideal.B_spline)
+        out_h5["$elm/Ideal/C"] = _eval_mat_spline(mats.ideal.C_spline)
+        out_h5["$elm/Ideal/D"] = _eval_mat_spline(mats.ideal.D_spline_prim)
+        out_h5["$elm/Ideal/E"] = _eval_mat_spline(mats.ideal.E_spline_prim)
+        out_h5["$elm/Ideal/H"] = _eval_mat_spline(mats.ideal.H_spline)
 
         # Ideal derived matrices (F, K, G)
-        out_h5["$elm/Ideal/F"] = _eval_mat_spline(ffit.ideal.fmats_lower)
-        out_h5["$elm/Ideal/K"] = _eval_mat_spline(ffit.ideal.kmats)
-        out_h5["$elm/Ideal/G"] = _eval_mat_spline(ffit.ideal.gmats)
+        out_h5["$elm/Ideal/F"] = _eval_mat_spline(mats.ideal.F_spline_lower)
+        out_h5["$elm/Ideal/K"] = _eval_mat_spline(mats.ideal.K_spline)
+        out_h5["$elm/Ideal/G"] = _eval_mat_spline(mats.ideal.G_spline)
 
         # Kinetic-modified matrices
-        kin = ffit.kinetic
+        kin = mats.kinetic
         if kin !== nothing
-            out_h5["$elm/Kinetic/A"] = _eval_mat_spline(kin.amats)
-            out_h5["$elm/Kinetic/B"] = _eval_mat_spline(kin.bmats)
-            out_h5["$elm/Kinetic/C"] = _eval_mat_spline(kin.cmats)
-            out_h5["$elm/Kinetic/f0"] = _eval_mat_spline(kin.f0mats)
-            out_h5["$elm/Kinetic/K"] = _eval_mat_spline(kin.kkmats)
-            out_h5["$elm/Kinetic/G"] = _eval_mat_spline(kin.gaats)
+            out_h5["$elm/Kinetic/A"] = _eval_mat_spline(kin.A_spline)
+            out_h5["$elm/Kinetic/B"] = _eval_mat_spline(kin.B_spline)
+            out_h5["$elm/Kinetic/C"] = _eval_mat_spline(kin.C_spline)
+            out_h5["$elm/Kinetic/f0"] = _eval_mat_spline(kin.F0_spline)
+            out_h5["$elm/Kinetic/K"] = _eval_mat_spline(kin.Kk_spline)
+            out_h5["$elm/Kinetic/G"] = _eval_mat_spline(kin.G_spline_adj)
         end
 
         # Self-describing metadata pass (long_name/units/dims + dimension scales).

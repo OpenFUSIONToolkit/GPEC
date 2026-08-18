@@ -217,10 +217,10 @@ function evaluate_fbar_condition(psi::Float64, kin::KineticMatrices, equil::Equi
     p_vec = zeros(ComplexF64, np * np)
     pa_vec = zeros(ComplexF64, np * np)
     r1_vec = zeros(ComplexF64, np * np)
-    kin.f0mats(f0_vec, psi; hint=hint)
-    kin.pmats(p_vec, psi; hint=hint)
-    kin.paats(pa_vec, psi; hint=hint)
-    kin.r1mats(r1_vec, psi; hint=hint)
+    kin.F0_spline(f0_vec, psi; hint=hint)
+    kin.P_spline(p_vec, psi; hint=hint)
+    kin.P_spline_adj(pa_vec, psi; hint=hint)
+    kin.R1_spline(r1_vec, psi; hint=hint)
     f0mat = reshape(f0_vec, np, np)
     pmat = reshape(p_vec, np, np)
     paat = reshape(pa_vec, np, np)
@@ -240,7 +240,7 @@ function evaluate_fbar_condition(psi::Float64, kin::KineticMatrices, equil::Equi
 end
 
 """
-    find_kinetic_singular_surfaces!(ffit, equil, intr; ngrid=2000, cond_threshold=1e8)
+    find_kinetic_singular_surfaces!(mats, equil, intr; ngrid=2000, cond_threshold=1e8)
 
 Find kinetically-displaced singular surfaces — locations where cond(F̄) peaks,
 indicating near-singularity of the kinetic F̄ matrix in the ODE RHS. Populates
@@ -257,8 +257,8 @@ Algorithm:
  3. Refine each peak with golden-section minimization of -cond
  4. Filter by threshold and resonance condition
 """
-function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; ngrid::Int=2000, cond_threshold::Float64=1e8)
-    kin = ffit.kinetic
+function find_kinetic_singular_surfaces!(mats::MatrixSplines, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; ngrid::Int=2000, cond_threshold::Float64=1e8)
+    kin = mats.kinetic
     kin === nothing && error("find_kinetic_singular_surfaces! requires a kinetic fit; call make_kinetic_matrix first")
     psilow = equil.profiles.xs[1]
     psihigh = intr.psilim

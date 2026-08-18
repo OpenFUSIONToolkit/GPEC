@@ -8,7 +8,7 @@ injected from `GeneralizedPerturbedEquilibrium.main`).
 """
 
 """
-    compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, ffit;
+    compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, mats;
                                         kf_ctrl=KineticForcesControl(),
                                         kinetic_profiles)
         → (kw_flat, kt_flat)
@@ -36,7 +36,7 @@ section.
   - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
   - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
   - `metric`: MetricData (provides ψ grid via `metric.xs`)
-  - `ffit`: FourFitVars (used only for `numpert_total` cross-check)
+  - `mats`: MatrixSplines (used only for `numpert_total` cross-check)
 
 # Keyword arguments
 
@@ -56,7 +56,7 @@ function compute_calculated_kinetic_matrices(
     equil,
     ffs_intr,
     metric,
-    ffit;
+    mats;
     kf_ctrl::KineticForcesControl=KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines
 )
@@ -66,7 +66,7 @@ function compute_calculated_kinetic_matrices(
     npert = ffs_intr.npert
     np = ffs_intr.numpert_total
 
-    @assert ffit.numpert_total == np "FourFitVars and ForceFreeStatesInternal disagree on numpert_total"
+    @assert mats.numpert_total == np "MatrixSplines and ForceFreeStatesInternal disagree on numpert_total"
 
     kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
     kt_flat = zeros(ComplexF64, mpsi, np^2, 6)

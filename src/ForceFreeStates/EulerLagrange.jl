@@ -169,7 +169,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
 
-    # Kinetic workspace arrays: evaluated from kwmats/ktmats splines at current psi
+    # Kinetic workspace arrays: evaluated from Kw_spline/Kt_spline splines at current psi
     kwmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
     ktmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
 
@@ -179,10 +179,10 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # Shared 2D hint for CubicInterpolantND (rzphi splines) during ODE integration
     # Tuple of (psi_hint, theta_hint) for O(1) interval lookups in 2D bicubic splines
     rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
-    # Per-thread hint for FourFitVars matrix splines (amats/bmats/cmats/fmats_lower/kmats/gmats
+    # Per-thread hint for MatrixSplines matrix splines (A_spline/B_spline/C_spline/F_spline_lower/K_spline/G_spline
     # and kinetic equivalents). Lives on OdeState — which is already cloned per thread in the
     # parallel BVP path — so concurrent sing_der! invocations don't race on a shared Ref.
-    ffit_hint::Base.RefValue{Int} = Ref(1)
+    mats_hint::Base.RefValue{Int} = Ref(1)
 end
 
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
@@ -332,7 +332,7 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
 end
 
 """
-    eulerlagrange_integration(ctrl, equil, ffit, intr) -> (odet, propagators, chunks, S_left)
+    eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, propagators, chunks, S_left)
 
 Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
 surface on the way (Fortran `ode_run`). Dispatches on `ctrl.integrator` to
@@ -343,13 +343,13 @@ Only the Riccati branch populates `propagators` / `chunks` / `S_left`, which
 `compute_delta_prime_matrix!` consumes for the Δ' BVP; the forward branch returns `nothing`
 for all three.
 """
-function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     if ctrl.integrator == "riccati"
         ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
-        return riccati_eulerlagrange_integration(ctrl, equil, ffit, intr)
+        return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.integrator == "forward"
-        return forward_eulerlagrange_integration(ctrl, equil, ffit, intr)
+        return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.integrator == "galerkin"
         error("integrator = \"galerkin\" solves the Euler-Lagrange system variationally, not by ODE integration; " *
               "it is dispatched to galerkin_solve.")
@@ -358,7 +358,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    forward_eulerlagrange_integration(ctrl, equil, ffit, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
+    forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
 applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.ucrit` and undoing it
@@ -366,13 +366,13 @@ via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis ba
 directly to force this branch regardless of `ctrl.integrator`; `verbose` overrides
 `ctrl.verbose` for progress logging.
 """
-function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal;
+function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal;
     verbose::Bool=ctrl.verbose)
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
+        initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
         # initialize_el_at_singular_surf!(ctrl, equil, intr, odet)
@@ -391,7 +391,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     # Iterate through each integration chunk
     for chunk in chunks
         # Integrate this region and display progress
-        integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
+        integrate_el_region!(odet, ctrl, equil, mats, intr, chunk)
         if verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
@@ -399,9 +399,9 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
         # Cross a singular surface after integration if this chunk requires it
         if chunk.needs_crossing
             if ctrl.kinetic_factor > 0
-                cross_kinetic_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+                cross_kinetic_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             else
-                cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+                cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             end
         end
     end
@@ -423,7 +423,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     # work; see the ForceFreeStatesControl docstring for the reliability caveats.
     if ctrl.psiedge < intr.psilim
         saved_psifac, saved_u = odet.psifac, copy(odet.u)
-        peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
+        peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
         if ctrl.truncate_at_dW_peak
             # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
             odet.step = peak_step
@@ -456,7 +456,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 end
 
 """
-    compute_axis_init(ffit, profiles, intr, psi_low) -> (U1_init, U2_init)
+    compute_axis_init(mats, profiles, intr, psi_low) -> (U1_init, U2_init)
 
 Compute axis initial conditions for the Euler-Lagrange ODE via the Frobenius
 leading-coefficient eigenvalue problem [Glasser Phys. Plasmas 2016 112506 Eq. 51]:
@@ -473,7 +473,7 @@ the Glasser [0, I] limit as ψ_low → 0. For m=0 (degenerate a≈0), the regula
 is identified by dominant |U₁| component, giving the physically correct constant-displacement
 Frobenius solution and avoiding the spurious logarithmic irregularity.
 """
-function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplines,
+function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSplines,
         intr::ForceFreeStatesInternal, psi_low::Float64)
     N    = intr.numpert_total
     hint = Ref(1)
@@ -482,9 +482,9 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
     F_lower = zeros(ComplexF64, N, N)
     kmat    = zeros(ComplexF64, N, N)
     gmat    = zeros(ComplexF64, N, N)
-    ffit.ideal.fmats_lower(vec(F_lower), psi_low; hint=hint)
-    ffit.ideal.kmats(vec(kmat),          psi_low; hint=hint)
-    ffit.ideal.gmats(vec(gmat),          psi_low; hint=hint)
+    mats.ideal.F_spline_lower(vec(F_lower), psi_low; hint=hint)
+    mats.ideal.K_spline(vec(kmat),          psi_low; hint=hint)
+    mats.ideal.G_spline(vec(gmat),          psi_low; hint=hint)
 
     # singfac[j] = 1 / (m_j − n_j · q) for each mode j
     q0      = profiles.q_spline(psi_low; hint=hint)
@@ -545,7 +545,7 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
 end
 
 """
-    initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ffit::FourFitVars, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+    initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, mats::MatrixSplines, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
 Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
@@ -554,7 +554,7 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 
 Move ising_start logic to chunk_el_integration_bounds?
 """
-function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ffit::FourFitVars,
+function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, mats::MatrixSplines,
         profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
     # Default psifac to minimum equilibrium psi value
@@ -596,7 +596,7 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ff
         # Frobenius initialization [Glasser 2016 §VI Eq. 51]: selects the regular
         # (non-logarithmic) solution for each mode, including the correct constant
         # displacement solution for the degenerate m=0 case (free magnetic axis).
-        U1_init, U2_init = compute_axis_init(ffit, profiles, intr, odet.psifac)
+        U1_init, U2_init = compute_axis_init(mats, profiles, intr, odet.psifac)
         odet.u[:, :, 1] .= U1_init
         odet.u[:, :, 2] .= U2_init
     end
@@ -759,7 +759,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
 end
 
 """
-    cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
 Handle the crossing of a rational surface during integration if kinetic mode is disabled.
 Formerly `ode_ideal_cross!`. Performs the same function as `ode_ideal_cross` in the Fortran code.
@@ -777,7 +777,7 @@ function cross_ideal_singular_surf!(
     odet::OdeState,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
     ising::Int
 )
@@ -787,8 +787,8 @@ function cross_ideal_singular_surf!(
 
     # Compute direction-specific asymptotic power series for this singular surface
     singp = intr.sing[ising]
-    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=1.0)
-    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
+    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
+    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
     dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
 
     # Get asymptotic coefficients before crossing (left side)
@@ -811,7 +811,7 @@ function cross_ideal_singular_surf!(
     end
 
     # Re-initialize on opposite side of rational surface by approximating solution
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
+    params = (ctrl, equil, mats, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     sing_der!(du1, odet.u, params, odet.psifac)
@@ -845,7 +845,7 @@ function cross_ideal_singular_surf!(
 end
 
 """
-    cross_kinetic_singular_surf!(odet, ctrl, equil, ffit, intr, ising)
+    cross_kinetic_singular_surf!(odet, ctrl, equil, mats, intr, ising)
 
 Cross a kinetically-displaced singular surface using a simple trapezoidal step.
 Matches Fortran `ode_kin_cross` with `con_flag=true` (`ode.f:615-619`): evaluate
@@ -861,7 +861,7 @@ function cross_kinetic_singular_surf!(
     odet::OdeState,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
     ising::Int
 )
@@ -872,7 +872,7 @@ function cross_kinetic_singular_surf!(
     ksurf = intr.kinsing[ising]
     dpsi = ksurf.psifac - odet.psifac
 
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
+    params = (ctrl, equil, mats, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
@@ -888,7 +888,7 @@ end
 
 
 """
-    integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
+    integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
 Integrate the Euler-Lagrange equations from `psi_start` to `psi_end`.
 Formerly `ode_step!`. Performs the same function as `ode_step` in the Fortran code, with the addition of
@@ -904,7 +904,7 @@ making it clear what region is being integrated.
   - `odet::OdeState` - ODE state struct (modified in-place)
   - `ctrl::ForceFreeStatesControl` - Control parameters
   - `equil::Equilibrium.PlasmaEquilibrium` - Plasma equilibrium
-  - `ffit::FourFitVars` - Fourier fit variables
+  - `mats::MatrixSplines` - Fourier fit variables
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
 
@@ -917,7 +917,7 @@ function integrate_el_region!(
     odet::OdeState,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
     chunk::IntegrationChunk
 )
@@ -959,7 +959,7 @@ function integrate_el_region!(
     end
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
-    prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
+    prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
     sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
@@ -1076,7 +1076,7 @@ function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr:
 end
 
 """
-    findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
 Records the total dW in the integration region between `ctrl.psiedge` and
 `ctrl.psilim`. This performs the same function as `ode_record_edge` in the
@@ -1092,7 +1092,7 @@ We have also separated the computation of the wv matrix spline and the total dW
 calculation into `free_compute_wv_spline` and `free_compute_total` respectively
 for clarity. We create the wv matrix spline once prior to the loop.
 """
-function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     # Find the first ODE step at or past psiedge; all subsequent steps are contiguous edge steps
     edge_start = findfirst(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
@@ -1115,7 +1115,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
         odet.psifac = odet.psi_store[istep]
         odet.u .= odet.u_store[:, :, :, istep]
         try
-            result = free_compute_total(equil, ffit, intr, odet)
+            result = free_compute_total(equil, mats, intr, odet)
             es.total_eigenvalue[j] = result.total_eigenvalue
             es.plasma_energy[j] = result.plasma_energy
             es.vacuum_energy[j] = result.vacuum_energy
@@ -1217,7 +1217,7 @@ end
     sing_der!(
         du::Array{ComplexF64,3},
         u::Array{ComplexF64,3},
-        params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk},
+        params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, MatrixSplines, ForceFreeStatesInternal, OdeState, IntegrationChunk},
         psieval::Float64
     )
 
@@ -1246,7 +1246,7 @@ more simplistic code with similar performance.
 
   - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
-  - `params::Tuple{ForceFreeStatesControl, PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk}`: Tuple of relevant structs
+  - `params::Tuple{ForceFreeStatesControl, PlasmaEquilibrium, MatrixSplines, ForceFreeStatesInternal, OdeState, IntegrationChunk}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
 
 The unpacked-argument method carries the arithmetic; this tuple method is the thin adapter the
@@ -1255,36 +1255,36 @@ integrator calls. Ξ_s is *not* computed here — it is a save-point quantity, o
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
+        MatrixSplines,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
-    ctrl, equil, ffit, intr, odet, _ = params
-    return sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+    ctrl, equil, mats, intr, odet, _ = params
+    return sing_der!(du, u, ctrl, equil, mats, intr, odet, psieval)
 end
 
 """
-    sing_der!(du, u, ctrl, equil, ffit, intr, odet, psieval)
+    sing_der!(du, u, ctrl, equil, mats, intr, odet, psieval)
 
 Unpacked-argument form of the Euler-Lagrange derivative, using `odet`'s spline hints and
 recording q at `psieval` in `odet.q`. Not safe to call concurrently on a shared `odet`;
 multi-threaded callers should use [`el_derivatives!`](@ref) with their own hints.
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
-    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
     intr::ForceFreeStatesInternal, odet::OdeState, psieval::Float64)
-    odet.q = el_derivatives!(du, u, ctrl.kinetic_factor > 0, equil, ffit, intr, psieval, odet.spline_hint, odet.ffit_hint)
+    odet.q = el_derivatives!(du, u, ctrl.kinetic_factor > 0, equil, mats, intr, psieval, odet.spline_hint, odet.mats_hint)
     return nothing
 end
 
 """
-    el_derivatives!(du, u, kinetic, equil, ffit, intr, psieval, spline_hint, ffit_hint) -> q
+    el_derivatives!(du, u, kinetic, equil, mats, intr, psieval, spline_hint, mats_hint) -> q
 
 Euler-Lagrange (or, when `kinetic` is true, FKG) derivative kernel: writes du₁/dψ and du₂/dψ at
 `psieval` into `du` and returns q there. Holds no state of its own — the two hints are the
 caller's interval-search accelerators, so concurrent callers just pass their own.
 """
 @with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
-    kinetic::Bool, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
-    intr::ModeSpace, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
+    kinetic::Bool, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
+    intr::ModeSpace, psieval::Float64, spline_hint::Base.RefValue{Int}, mats_hint::Base.RefValue{Int})
 
     # Allocate temporary arrays from the pool
     Npert = intr.numpert_total
@@ -1308,11 +1308,11 @@ caller's interval-search accelerators, so concurrent callers just pass their own
     q = equil.profiles.q_spline(psieval; hint=spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
 
-    kin = ffit.kinetic
+    kin = mats.kinetic
     if kinetic
-        kin === nothing && error("el_derivatives! called with kinetic=true but ffit carries no kinetic matrices")
+        kin === nothing && error("el_derivatives! called with kinetic=true but mats carries no kinetic matrices")
         # ---- Kinetic path with pre-computed FKG matrices ----
-        # Use the caller's hint, not ffit._hint (shared, racy in the parallel BVP)
+        # Use the caller's hint, not mats._hint (shared, racy in the parallel BVP)
         # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
         f0mat = similar!(pool, fmat_lower)
         pmat_kin = similar!(pool, fmat_lower)
@@ -1324,15 +1324,15 @@ caller's interval-search accelerators, so concurrent callers just pass their own
         r3mat_kin = similar!(pool, fmat_lower)
         gaat_kin = similar!(pool, fmat_lower)
 
-        kin.f0mats(vec(f0mat), psieval; hint=ffit_hint)
-        kin.pmats(vec(pmat_kin), psieval; hint=ffit_hint)
-        kin.paats(vec(paat_kin), psieval; hint=ffit_hint)
-        kin.kkmats(vec(kkmat_kin), psieval; hint=ffit_hint)
-        kin.kkaats(vec(kkaat_kin), psieval; hint=ffit_hint)
-        kin.r1mats(vec(r1mat_kin), psieval; hint=ffit_hint)
-        kin.r2mats(vec(r2mat_kin), psieval; hint=ffit_hint)
-        kin.r3mats(vec(r3mat_kin), psieval; hint=ffit_hint)
-        kin.gaats(vec(gaat_kin), psieval; hint=ffit_hint)
+        kin.F0_spline(vec(f0mat), psieval; hint=mats_hint)
+        kin.P_spline(vec(pmat_kin), psieval; hint=mats_hint)
+        kin.P_spline_adj(vec(paat_kin), psieval; hint=mats_hint)
+        kin.Kk_spline(vec(kkmat_kin), psieval; hint=mats_hint)
+        kin.Kk_spline_adj(vec(kkaat_kin), psieval; hint=mats_hint)
+        kin.R1_spline(vec(r1mat_kin), psieval; hint=mats_hint)
+        kin.R2_spline(vec(r2mat_kin), psieval; hint=mats_hint)
+        kin.R3_spline(vec(r3mat_kin), psieval; hint=mats_hint)
+        kin.G_spline_adj(vec(gaat_kin), psieval; hint=mats_hint)
 
         # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11):
         # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1
@@ -1376,9 +1376,9 @@ caller's interval-search accelerators, so concurrent callers just pass their own
     else
         # ---- Ideal path ----
         # Evaluate matrix splines at the current psi (hint is the caller's, never shared)
-        ffit.ideal.fmats_lower(vec(fmat_lower), psieval; hint=ffit_hint)
-        ffit.ideal.kmats(vec(kmat), psieval; hint=ffit_hint)
-        ffit.ideal.gmats(vec(gmat), psieval; hint=ffit_hint)
+        mats.ideal.F_spline_lower(vec(fmat_lower), psieval; hint=mats_hint)
+        mats.ideal.K_spline(vec(kmat), psieval; hint=mats_hint)
+        mats.ideal.G_spline(vec(gmat), psieval; hint=mats_hint)
 
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
@@ -1399,7 +1399,7 @@ caller's interval-search accelerators, so concurrent callers just pass their own
 end
 
 """
-    compute_node_xi_s!(xi_s, du1, u1, ffit, psieval; kinetic=false, hint=Ref(1))
+    compute_node_xi_s!(xi_s, du1, u1, mats, psieval; kinetic=false, hint=Ref(1))
 
 Evaluate Ξ_s = -A⁻¹(B·Ξ′_ψ + C·Ξ_ψ) [Glasser Phys. Plasmas 2016 112506 eq. 18] at `psieval`,
 writing into `xi_s`. `du1` and `u1` are the Ξ′_ψ and Ξ_ψ blocks at the same ψ, i.e. slices of a
@@ -1410,7 +1410,7 @@ Runge-Kutta stage. Ideal runs factor the Hermitian A by Cholesky; with `kinetic=
 non-Hermitian contributions and needs an LU.
 """
 @with_pool pool function compute_node_xi_s!(xi_s::AbstractMatrix{ComplexF64}, du1::AbstractMatrix{ComplexF64},
-    u1::AbstractMatrix{ComplexF64}, ffit::FourFitVars, psieval::Float64; kinetic::Bool=false, hint::Base.RefValue{Int}=Ref(1))
+    u1::AbstractMatrix{ComplexF64}, mats::MatrixSplines, psieval::Float64; kinetic::Bool=false, hint::Base.RefValue{Int}=Ref(1))
 
     Npert = size(u1, 1)
     amat = acquire!(pool, ComplexF64, Npert, Npert)
@@ -1419,11 +1419,11 @@ non-Hermitian contributions and needs an LU.
     tmp_mat = similar!(pool, amat)
 
     # A/B/C of the active model: the kinetic A is non-Hermitian, hence the factorization split below
-    mats = kinetic ? ffit.kinetic : ffit.ideal
-    mats === nothing && error("compute_node_xi_s! called with kinetic=true but ffit carries no kinetic matrices")
-    mats.amats(vec(amat), psieval; hint=hint)
-    mats.bmats(vec(bmat), psieval; hint=hint)
-    mats.cmats(vec(cmat), psieval; hint=hint)
+    active_mats = kinetic ? mats.kinetic : mats.ideal
+    active_mats === nothing && error("compute_node_xi_s! called with kinetic=true but mats carries no kinetic matrices")
+    active_mats.A_spline(vec(amat), psieval; hint=hint)
+    active_mats.B_spline(vec(bmat), psieval; hint=hint)
+    active_mats.C_spline(vec(cmat), psieval; hint=hint)
 
     # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place
     if kinetic

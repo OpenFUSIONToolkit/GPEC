@@ -1,7 +1,7 @@
 # Singular-surface crossing algorithms for the Riccati/fundamental-matrix integration.
 
 """
-    riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, ising)
+    riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, ising)
 
 Cross a singular surface for the Riccati formulation. Replaces `cross_ideal_singular_surf!`
 for the Riccati integration path with two key differences:
@@ -30,18 +30,18 @@ The u_store entry at the crossing step correctly stores (U₁_new, U₂_new) so 
 """
 function riccati_cross_ideal_singular_surf!(
     odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars, intr::ForceFreeStatesInternal, ising::Int
+    mats::MatrixSplines, intr::ForceFreeStatesInternal, ising::Int
 )
     # Skip Gaussian reduction — S is bounded so no large-norm columns exist.
     singp = intr.sing[ising]
     dpsi = singp.psifac - odet.psifac  # ψ_res - ψ_current (positive)
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
 
-    sing_asymp_left, sing_asymp_right = _two_sided_singular_asymptotics(singp, ctrl, equil, ffit, intr)
+    sing_asymp_left, sing_asymp_right = _two_sided_singular_asymptotics(singp, ctrl, equil, mats, intr)
     _log_riccati_crossing_diagnostics(odet, intr, ising, singp, dpsi, sing_asymp_left, sing_asymp_right)
 
     _capture_left_crossing_data!(odet, singp, sing_asymp_left, dpsi, intr, ising)
-    _predict_across_singular_surface!(odet, ctrl, equil, ffit, intr, ising, ipert_res, dpsi, sing_asymp_right)
+    _predict_across_singular_surface!(odet, ctrl, equil, mats, intr, ising, ipert_res, dpsi, sing_asymp_right)
     _capture_right_crossing_data!(odet, singp, sing_asymp_right, dpsi, intr, ising, ipert_res, ctrl)
 
     _stash_per_surface_delta_prime_stub!(odet, intr, ising, ipert_res, sing_asymp_right, equil, ctrl)
@@ -52,17 +52,17 @@ function riccati_cross_ideal_singular_surf!(
 end
 
 """
-    _two_sided_singular_asymptotics(singp, ctrl, equil, ffit, intr) -> (left, right)
+    _two_sided_singular_asymptotics(singp, ctrl, equil, mats, intr) -> (left, right)
 
 Compute left- (`sig=-1`) and right- (`sig=+1`) side singular asymptotics matching
 Fortran STRIDE's separate vmatl/vmatr (sing_vmat). Alpha is taken from the right
 side and shared with the left.
 """
 function _two_sided_singular_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
-                                         equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+                                         equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
                                          intr::ForceFreeStatesInternal)
-    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=1.0)
-    sing_asymp_left  = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=-1.0,
+    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
+    sing_asymp_left  = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0,
                                                 alpha_override=sing_asymp_right.alpha)
     return sing_asymp_left, sing_asymp_right
 end
@@ -95,7 +95,7 @@ end
 # odet.psifac to the right side. The zeroed columns stay zero through the predictor
 # since du[:, ipert_res, :] = 0 when u[:, ipert_res, :] = 0.
 function _predict_across_singular_surface!(odet::OdeState, ctrl::ForceFreeStatesControl,
-                                           equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+                                           equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
                                            intr::ForceFreeStatesInternal, ising::Int,
                                            ipert_res, dpsi::Float64, sing_asymp_right)
     if ctrl.kinetic_factor == 0
@@ -103,7 +103,7 @@ function _predict_across_singular_surface!(odet::OdeState, ctrl::ForceFreeStates
             odet.u[:, ipert_res[i], :] .= 0
         end
     end
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
+    params = (ctrl, equil, mats, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     sing_der!(du1, odet.u, params, odet.psifac)

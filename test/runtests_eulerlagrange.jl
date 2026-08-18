@@ -450,19 +450,19 @@ end
         intr.mpert = intr.mhigh - intr.mlow + 1
         intr.numpert_total = intr.mpert * intr.npert
         metric = FFS.make_metric(equil, intr.mpert)
-        ffit = FFS.make_matrix(equil, intr, metric)
-        odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
-        return odet, ctrl, equil, ffit, intr
+        mats = FFS.make_matrix(equil, intr, metric)
+        odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
+        return odet, ctrl, equil, mats, intr
     end
 
-    odet, ctrl, equil, ffit, intr = setup_solovev_run()
+    odet, ctrl, equil, mats, intr = setup_solovev_run()
     # Untouched copy of the solution, for the column-transform check further down.
     odet_pristine = deepcopy(odet)
 
     @testset "fills the stores once" begin
         @test isempty(odet.du_store)
         @test !odet.du_store_populated
-        @test FFS.materialize_derivative_stores!(odet, equil, ffit, intr)
+        @test FFS.materialize_derivative_stores!(odet, equil, mats, intr)
         @test odet.du_store_populated
         @test size(odet.du_store) == (intr.numpert_total, intr.numpert_total, odet.step)
         @test size(odet.xi_s_store) == (intr.numpert_total, intr.numpert_total, odet.step)
@@ -471,7 +471,7 @@ end
 
         # Idempotent: a second call must not overwrite what is already there.
         du_first = copy(odet.du_store)
-        @test FFS.materialize_derivative_stores!(odet, equil, ffit, intr)
+        @test FFS.materialize_derivative_stores!(odet, equil, mats, intr)
         @test odet.du_store == du_first
     end
 
@@ -482,8 +482,8 @@ end
         for istep in (1, odet.step ÷ 2, odet.step)
             psi = odet.psi_store[istep]
             u = odet.u_store[:, :, :, istep]
-            FFS.el_derivatives!(du, u, false, equil, ffit, intr, psi, Ref(1), Ref(1))
-            FFS.compute_node_xi_s!(xi_s, @view(du[:, :, 1]), @view(u[:, :, 1]), ffit, psi)
+            FFS.el_derivatives!(du, u, false, equil, mats, intr, psi, Ref(1), Ref(1))
+            FFS.compute_node_xi_s!(xi_s, @view(du[:, :, 1]), @view(u[:, :, 1]), mats, psi)
             @test odet.du_store[:, :, istep] == du[:, :, 1]
             @test odet.xi_s_store[:, :, istep] == xi_s
         end
@@ -500,7 +500,7 @@ end
             odet_t.u_store[:, :, 1, istep] = odet_t.u_store[:, :, 1, istep] * T
             odet_t.u_store[:, :, 2, istep] = odet_t.u_store[:, :, 2, istep] * T
         end
-        @test FFS.materialize_derivative_stores!(odet_t, equil, ffit, intr)
+        @test FFS.materialize_derivative_stores!(odet_t, equil, mats, intr)
 
         for istep in (1, odet.step ÷ 2, odet.step)
             @test isapprox(odet_t.du_store[:, :, istep], odet.du_store[:, :, istep] * T; rtol=1e-10)
@@ -512,7 +512,7 @@ end
         odet.du_store_populated = false
         odet.du_store = Array{ComplexF64}(undef, intr.numpert_total, intr.numpert_total, 0)
         odet.u_store_el_basis = false
-        @test !FFS.materialize_derivative_stores!(odet, equil, ffit, intr)
+        @test !FFS.materialize_derivative_stores!(odet, equil, mats, intr)
         @test isempty(odet.du_store)
         @test !odet.du_store_populated
     end
