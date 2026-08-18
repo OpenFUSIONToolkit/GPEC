@@ -155,6 +155,46 @@ h5open(ARGS[1], "w") do fid
 end
 %RUNINFO%
 """
+# External-reference validation: GPEC's del_s Riccati solver against Fitzpatrick, "Tearing Mode
+# Dynamics in Tokamak Plasmas" (IOP 2023), figures 6.2 and 6.3. Unlike every other case in this
+# suite -- which pins GPEC against its own previous output -- this one pins it against published
+# values, so a failure means "we no longer reproduce the textbook", not "we changed".
+#
+# riccati_del_s integrates the book's layer equations directly: E and F are (6.29)/(6.30), the
+# Riccati form is (6.38), and the returned dels_db is the plotted delta_s/d_beta. Prescribing the
+# normalized parameters (D_norm = 1, P_perp = P_tor = Phat, Q_e = Qhat/(1+1/tau)) makes the solver's
+# internal Q_hat equal the book's Qhat_*, so the grid below is exactly the figures' axes.
+#
+# tau is NOT stated in the figure captions; tau = 1 (table 5.1, low-field reactor) is pinned here as
+# an explicit assumption of the case, not inherited from a default that could drift.
+#
+# Phat = 0 is a singular edge of the model, not a hard case: alpha = sqrt(Phat_perp/(1+1/tau))
+# vanishes so the large-q boundary form degenerates, and F -> -i*Qhat at the origin. The grid starts
+# just inside so the pins record results rather than a modelling boundary.
+const COMPUTED_SLAYER_DELS_FITZPATRICK_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.InnerLayer
+using HDF5
+const TAU = 1.0
+probe(Q, P) = SLAYERParameters(; tau=TAU, lu=1.0, c_beta=0.0, D_norm=1.0,
+    P_perp=P, P_tor=P, Q_e=Q / (1 + 1/TAU), Q_i=0.0, iota_e=0.0, tauk=1.0,
+    tau_r=1.0, delta_n=1.0, rs=1.0, R0=1.0, bt=1.0, sval_r=1.0, eta=1.0, d_beta=1.0)
+axis = [0.02, 0.5, 1.0, 2.0, 4.0]
+QP = [(q, p) for p in axis for q in axis]
+t_start = time()
+dels = ComplexF64[riccati_del_s(probe(q, p)) for (q, p) in QP]
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["fitzpatrick/Q_hat"]  = Float64[q for (q, _) in QP]
+    fid["fitzpatrick/P_hat"]  = Float64[p for (_, p) in QP]
+    fid["fitzpatrick/dels_db_re"] = real.(dels)
+    fid["fitzpatrick/dels_db_im"] = imag.(dels)
+    fid["fitzpatrick/tau"] = TAU
+end
+%RUNINFO%
+"""
 # Self-contained separatrix-finder regression (PR #296). Loads a fixed-boundary EFIT whose
 # computational box hugs the LCFS (eps=0.05 TokaMaker aspect-scan g-file): outside the prescribed
 # LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
@@ -291,6 +331,8 @@ function _computed_script_template(case_spec::CaseSpec)
         return COMPUTED_SLAYER_DELTA_PROBE_SCRIPT_TEMPLATE
     elseif case_spec.name == "efit_fixedbdy_separatrix"
         return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
+    elseif case_spec.name == "slayer_dels_fitzpatrick"
+        return COMPUTED_SLAYER_DELS_FITZPATRICK_SCRIPT_TEMPLATE
     end
     error("No computed-script template registered for case '$(case_spec.name)'")
 end
