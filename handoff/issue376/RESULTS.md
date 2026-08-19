@@ -1076,6 +1076,79 @@ noise structure to exploit — and the cap is still harmless while mildly helpin
 relative number is cancellation-amplified ~700×; in absolute energy terms it matches the other
 cases.
 
+## 25. Phase B0: the kinetic matrices are under-resolved in ψ, and the kernel cost is real
+
+Solovev_kinetic_calculated ladder (mpsi 16/64/256; the shipped deck uses **mpsi = 16** — itself
+evidence that kernel cost forces grid starvation). Measured on the h5 totals
+(`EulerLagrangeMatrices/Kinetic/*`) with the preserved `Ideal/*` group as in-run control:
+
+| family (total) | ε @m16 | ε @m64 | ε @m256 | r1 @m256 |
+|---|---|---|---|---|
+| A | 2.5e-4 | 4.2e-5 | 3.0e-6 | −0.08 |
+| B | 6.8e-2 | 7.3e-3 | 5.8e-4 | −0.35 |
+| C | 2.8e-2 | 2.4e-2 | 5.4e-3 | −0.37 |
+| K | 3.3e-3 | 1.2e-3 | 4.2e-4 | −0.06 |
+| (ideal A control) | 5.1e-8 | 2.2e-8 | 3.1e-8 | +0.27 |
+
+**Fork resolution — mostly unresolved real structure, not a noise floor.** ε falls steadily with
+refinement (B by ~12× per size step), so the dominant error is kinetic ψ-structure the grids do
+not resolve; the negative r1 at m256 suggests a white component underneath, floor not yet reached
+at these sizes (A is down to 3e-6 and still falling). Consequence: the shipped kinetic deck carries
+**percent-level** total-matrix errors — certification is needed for correctness first, cost second.
+J on the kinetic totals still explodes with refinement (C: 2.2e3 → 3.9e6 → 6.8e9 relative),
+~10³–10⁴× above the same-family ideal values, so the conditioning concern stands alongside.
+
+**Cost anchor**: from the threaded m64→m256 delta, kinetic-matrix formation + EL ≈ 1.3 s/surface
+single-thread-equivalent (~80 ms threaded at 16). At mpsi=1024 that is ~20 serial minutes per run
+of matrix formation alone — the budget certification competes against.
+
+Observation flagged (not chased): `Kinetic/G` and `Ideal/G`/`Ideal/H` show identical statistics at
+every size — plausibly small kinetic corrections on a large shared scale, but worth one look
+before building G-based diagnostics.
+
+## 26. Phase B1: batched certified kinetic grid — implemented, knob-off bit-identical
+
+Implementation (cap branch): `certified_kinetic_grid` in `Kinetic.jl` — seed = the ideal
+coefficient-spline knots (`ffit.matrix_xs`), batched certify-or-refine rounds, kernel driven over
+arbitrary ψ lists (`CalculatedKineticMatrices.jl` `psis` kwarg; the threaded per-surface pattern
+untouched), certificate = max-element residual of the spline-predicted **totals** (ideal part
+cancels, so only increments are splined, but the tolerance scale is the total's — the user's rule
+at increment-only cost), including the adjoint combination `kw₃ − kt₃`; spacing floors = the
+Frobenius cap in the core, `RATIONAL_RES_SPACING` outside, and `RATIONAL_RES_SPACING/4` inside
+rational windows (anti-aliasing). Control: `kinetic_grid_tol` (default 0 = off, today's behaviour).
+
+Smoke (Solovev calculated, m64, tol 1e-3): knob-off **bit-identical** to the unpatched run;
+knob-on: **65-knot seed → 93 knots, 168 kernel evaluations, 28 refined** — the certification
+*added* knots at this coarse grid, matching both the pre-registered expectation (kinetic adds to
+the ideal-optimal seed) and §25's under-resolution finding. et[1] certified-vs-plain agrees within
+the 1e-3 tolerance, as designed.
+
+## 27. Phase B2: tolerance sweep, coarse seeding, and the honest accounting
+
+**Tolerance sweep** (Solovev calculated m64, certified knots/evals → et[1]):
+3e-3: 85/158; 1e-3: 93/168; 3e-4: 100/178; 1e-4: 112/197 — et[1] plateau-flat at 1.767261 across
+the sweep. The certified answer is internally converged; the residual ~1e-3 difference from the
+m256 run is **equilibrium resolution, not kinetic-grid resolution** (the m64 equilibrium itself
+differs), so cross-mpsi comparisons conflate the two. The clean accuracy statement is at fixed
+equilibrium: certified vs full kinetic grid on the m256 deck agrees to **9.4e-5** on et[1].
+
+**The seed policy is the cost story.** Seeding with the full capped ideal grid made certification
+*more* expensive than blanket evaluation at fine grids (484 vs 255 evals at m256 — every certified
+interval costs one midpoint evaluation). Fixed by decimating the seed to a coarse skeleton (~50
+knots; endpoints and rational windows always retained): m256 now runs **150 evals vs 255 (−41%)**,
+and the saving scales with grid size (~6× at m1024-class grids at ~1.3 s/surface serial-equivalent
+kernel cost). At coarse decks the ledger goes the other way by design — m64 spends 168 evals vs 65
+to *fix* under-resolution (65 → 93 knots), per §25.
+
+**nuzero** (collisionless): certified m64 tracks plain m64 to 1.9e-5; both sit ~5e-4 from the m256
+gold — again equilibrium-resolution-dominated at these sizes. The 1e-3 certificate did not trigger
+extra resonance refinement on this case; the withheld-seed aliasing stress test has **not** been
+run (rational windows are always seeded by construction) and is recorded as outstanding.
+
+Status: committed on `performance/decoupled-el-matrix-grid` (2225813fc), **default OFF**
+(`kinetic_grid_tol = 0`), knob-off verified bit-identical. Open design questions for review are in
+the morning-questions list (seed size constant, default-on policy, kinetic ground-truth case).
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
