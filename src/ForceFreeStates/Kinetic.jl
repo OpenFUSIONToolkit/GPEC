@@ -22,7 +22,7 @@ always contains the seed, so structure resolved by the ideal grid is retained.
 """
 function certified_kinetic_grid(seed::Vector{Float64}, evaluate::Function,
     ideal_scales::NTuple{6,Float64}, tol::Float64, rationals::Vector{Float64};
-    max_rounds::Int=6, verbose::Bool=true)
+    max_rounds::Int=10, verbose::Bool=true)
 
     xs = copy(seed)
     kw, kt = evaluate(xs)

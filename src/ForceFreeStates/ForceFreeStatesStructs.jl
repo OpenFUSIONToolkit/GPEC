@@ -233,7 +233,7 @@ gpec.toml.
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
-  - `kinetic_grid_tol::Float64` - Relative tolerance for the certified adaptive ψ grid of the calculated kinetic matrices. When > 0, the expensive kinetic kernel is evaluated on a seed grid (the ideal coefficient-spline knots) and intervals are refined until the spline-predicted **total** (ideal + kinetic) matrices match fresh evaluations within `kinetic_grid_tol · max|T|` for every element of every consumed family, including the non-Hermitian adjoint combination. `0` (default) evaluates the kernel on every equilibrium knot, today's behaviour. Applies only to `kinetic_source = "calculated"`
+  - `kinetic_grid_tol::Float64` - Relative tolerance for the certified adaptive ψ grid of the calculated kinetic matrices. When > 0, the expensive kinetic kernel is evaluated on a physics-skeleton seed (rational windows, located kinetic-resonance surfaces, and a few interior points per inter-rational span) and intervals are refined until the spline-predicted **total** (ideal + kinetic) matrices match fresh evaluations within `kinetic_grid_tol · max|T|` for every element of every consumed family, including the non-Hermitian adjoint combination. `0` (default) evaluates the kernel on every equilibrium knot, today's behaviour. Applies only to `kinetic_source = "calculated"`
   - `set_psilim_via_dmlim::Bool` - Truncate the integration domain at `(last_rational_q + dmlim) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`dmlim = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `set_psilim_via_dmlim = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `set_psilim_via_dmlim = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + dmlim / n" depends on which `n`); when `set_psilim_via_dmlim = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
   - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
   - `sing_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
@@ -484,71 +484,46 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
 
   - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
-
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
-
   - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
-
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
-
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
-
   - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
-
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
-
   - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
     `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
     except on the galerkin-matched path which supplies the analytic derivative at construction.
     du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
-
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
     shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
-
   - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
     derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
     are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
-
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
     (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
     galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
     sparse parallel path whose solution is in the Riccati basis.
-
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
-
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-
   - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
-
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
-
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
-
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
-
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
-
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
-
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
-
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
     # Initialization parameters
-
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
-
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
 
     # Saved data throughout integration
-
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
 
 # Total ODE solver steps taken (all steps, not just saved ones)
@@ -557,11 +532,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
-
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
-
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
-
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
 @kwdef mutable struct OdeState
