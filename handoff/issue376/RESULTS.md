@@ -1040,6 +1040,42 @@ with a const `eps = 1e-10`, so never call `eps()` unqualified there.
 machinery (patch preserved here) moves to Phase B, where the certificate must be built
 solution-weighted from the start and where per-eval cost makes adaptive selection actually pay.
 
+## 24. The cap grounded and generalization-tested (response to the over-fit concern)
+
+The user challenged the fixed cap as a possibly unphysical rule tuned to one case. Three answers,
+all by measurement:
+
+**1. The auto-grid no-op is genuine, not a stacking artifact.** The selection experiment *replaced*
+the cap (never stacked); the no-op test ran cap-only. Measured directly, the production auto grid's
+core spacing sits 1.65–2.93× *above* the 0.05·ψ floor in every decade, so the cap removes nothing
+there by construction.
+
+**2. The rule has a physics basis.** Near the axis every component is a Frobenius power law in ψ;
+power laws are scale-free, so log-uniform sampling (Δψ ≥ c·ψ) resolves them at constant relative
+accuracy. Cubic interpolation of ψ^p on a log-uniform grid errs by ~(p·c)⁴/384, so c = 0.05
+resolves even the steepest spectrum component (p = m_max/2 = 11) to ~2e-4 — with the physics far
+below that because steep components carry vanishing solution amplitude. The genuinely ad-hoc piece
+was the ψ<0.1 region bound; it is now min(0.1, innermost rational − RATIONAL_RES_RADIUS) with
+rational windows never coarsened (commit 0c17097b5). Both guards verified as no-ops on all current
+cases (DIII-D and Solovev m512 reproduce the prior step counts and knot sets exactly); they exist
+for decks whose rationals reach the core (Solovev's q=2 sits at ψ=0.122 — only 22% outside the old
+bound — and higher-n decks will cross it).
+
+**3. It generalizes across everything in hand** — four equilibria, two construction paths, three
+grid families:
+
+| case | knots | steps | et[1] change |
+|---|---|---|---|
+| DIII-D efit, traced, log-family m1024 | 1025→575 | −31% | 3e-8 |
+| tj_analytic_direct, traced, log-family m1024 | 1025→575 | −35% | 1.3e-9 |
+| LAR, inversion, packed auto m1024 | 1025→575 | −8% | exact to 8 digits |
+| Solovev, traced, ldp m512/m1024 | 505→468 | ~0 | ~4.5e-7 abs (3e-5 rel via the ±10.4→0.0146 cancellation) |
+
+The LAR row is the sharpest anti-over-fit evidence: its geometry is *clean* — there is no DIII-D
+noise structure to exploit — and the cap is still harmless while mildly helping. The Solovev
+relative number is cancellation-amplified ~700×; in absolute energy terms it matches the other
+cases.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
