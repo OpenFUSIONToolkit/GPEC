@@ -419,10 +419,10 @@ function main_from_inputs(
         # Inject the KineticForces callback so the "calculated" source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
-        calculated_cb = (c, e, i, m, f) ->
+        calculated_cb = (c, e, i, m, f; psis=nothing) ->
             KineticForces.compute_calculated_kinetic_matrices(
                 c, e, i, m, f;
-                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
+                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, psis=psis)
         make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
             calculated_source=calculated_cb)
 

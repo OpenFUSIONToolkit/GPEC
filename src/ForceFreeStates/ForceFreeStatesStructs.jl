@@ -233,6 +233,7 @@ gpec.toml.
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
+  - `kinetic_grid_tol::Float64` - Relative tolerance for the certified adaptive ψ grid of the calculated kinetic matrices. When > 0, the expensive kinetic kernel is evaluated on a seed grid (the ideal coefficient-spline knots) and intervals are refined until the spline-predicted **total** (ideal + kinetic) matrices match fresh evaluations within `kinetic_grid_tol · max|T|` for every element of every consumed family, including the non-Hermitian adjoint combination. `0` (default) evaluates the kernel on every equilibrium knot, today's behaviour. Applies only to `kinetic_source = "calculated"`
   - `set_psilim_via_dmlim::Bool` - Truncate the integration domain at `(last_rational_q + dmlim) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`dmlim = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `set_psilim_via_dmlim = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `set_psilim_via_dmlim = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + dmlim / n" depends on which `n`); when `set_psilim_via_dmlim = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
   - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
   - `sing_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
@@ -270,6 +271,7 @@ gpec.toml.
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
     singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
+    kinetic_grid_tol::Float64 = 0.0
     set_psilim_via_dmlim::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
     dmlim::Float64 = 0.2
     sing_order::Int = 6
@@ -332,6 +334,7 @@ end
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
     # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
     itp_opts::Opts = (; extrap=ExtendExtrap())
+    matrix_xs::Vector{Float64} = Float64[]  # psi knots the coefficient splines are built on (density-capped equilibrium-grid subset)
 
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)

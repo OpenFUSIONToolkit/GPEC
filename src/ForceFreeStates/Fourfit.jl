@@ -520,6 +520,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     end
     push!(keep, length(metric.xs))
     mxs = metric.xs[keep]
+    ffit.matrix_xs = mxs
     length(mxs) < length(metric.xs) &&
         @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots after core density cap"
 

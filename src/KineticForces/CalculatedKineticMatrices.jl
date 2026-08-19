@@ -56,8 +56,11 @@ function compute_calculated_kinetic_matrices(
     ffit;
     kf_ctrl::KineticForcesControl = KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
+    psis::Union{Nothing,Vector{Float64}}=nothing,
 )
-    xs = metric.xs
+    # The kernel is a pure function of psi (it evaluates equilibrium splines), so it can be driven
+    # over any knot list; default is the full equilibrium grid.
+    xs = psis === nothing ? metric.xs : psis
     mpsi = length(xs)
     mpert = ffs_intr.mpert
     npert = ffs_intr.npert

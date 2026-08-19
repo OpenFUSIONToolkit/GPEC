@@ -1,4 +1,136 @@
 """
+    certified_kinetic_grid(seed, evaluate, ideal_scales, tol, rationals; kwargs...)
+        -> (xs, kw_flat, kt_flat)
+
+Choose the ψ knots for the calculated kinetic matrices by batched certify-or-refine rounds, so the
+expensive kernel runs only where the **total** (ideal + kinetic) matrices demand it.
+
+`evaluate(psis) -> (kw, kt)` runs the threaded kernel on a batch of ψ values. Starting from `seed`
+(the ideal coefficient-spline knots), each round splines the kinetic increments on the current
+knots, proposes the midpoints of all uncertified intervals, evaluates the whole batch, and
+classifies: a midpoint whose predicted increments match the fresh evaluation within
+`tol · scale` for **every element of every consumed family** certifies its interval and is
+discarded (a knot the spline already predicts only adds noise-scale curvature); otherwise it
+becomes a knot and its sub-intervals join the queue. The families are the six kinetic components
+plus the non-Hermitian adjoint combination `kw₃ − kt₃`, and each `scale` is the largest magnitude
+of the corresponding **total** matrix over the seed — so the tolerance is held on what the
+Euler-Lagrange solver actually consumes, never on the increments in isolation.
+
+Intervals are never refined below a floor of `0.05·ψ` in the Frobenius core or
+`RATIONAL_RES_SPACING` outside it, and refinement stops after `max_rounds`. The returned knot set
+always contains the seed, so structure resolved by the ideal grid is retained.
+"""
+function certified_kinetic_grid(seed::Vector{Float64}, evaluate::Function,
+    ideal_scales::NTuple{6,Float64}, tol::Float64, rationals::Vector{Float64};
+    max_rounds::Int=6, verbose::Bool=true)
+
+    xs = copy(seed)
+    kw, kt = evaluate(xs)
+    nevals = length(xs)
+    np2 = size(kw, 2)
+
+    # Tolerance scale per family: the total matrix the solver sees (ideal + increments over seed).
+    scales = ntuple(ic -> max(ideal_scales[ic],
+            maximum(abs, @view(kw[:, :, ic])) + maximum(abs, @view(kt[:, :, ic]))), 6)
+
+    uncertified = trues(length(xs) - 1)
+    # Spacing floors: the Frobenius-region cap in the core, RATIONAL_RES_SPACING elsewhere — and a
+    # finer floor inside rational windows, so a narrow resonance layer cannot hide behind the
+    # coarse floor exactly where layers are expected (the anti-aliasing rule).
+    near_rational(x) = any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rationals)
+    floor_at(x) = near_rational(x) ? Equilibrium.RATIONAL_RES_SPACING / 4 :
+                  (x < 0.1 ? 0.05 * x : Equilibrium.RATIONAL_RES_SPACING)
+    added = 0
+    for round in 1:max_rounds
+        props = Float64[]
+        slots = Int[]
+        for i in findall(uncertified)
+            m = 0.5 * (xs[i] + xs[i+1])
+            if xs[i+1] - xs[i] < 2 * floor_at(m)
+                uncertified[i] = false      # certified by the spacing floor
+                continue
+            end
+            push!(props, m)
+            push!(slots, i)
+        end
+        isempty(props) && break
+        kwp, ktp = evaluate(props)
+        nevals += length(props)
+
+        # Spline each increment family on the current knots to predict the midpoints.
+        pred_kw = [cubic_interp(xs, Series(@view(kw[:, :, ic]))) for ic in 1:6]
+        pred_kt = [cubic_interp(xs, Series(@view(kt[:, :, ic]))) for ic in 1:6]
+        buf = Vector{ComplexF64}(undef, np2)
+
+        fails = Int[]
+        for (k, m) in pairs(props)
+            ok = true
+            for ic in 1:6
+                pred_kw[ic](buf, m)
+                r = maximum(abs(buf[j] - kwp[k, j, ic]) for j in 1:np2)
+                pred_kt[ic](buf, m)
+                r = max(r, maximum(abs(buf[j] - ktp[k, j, ic]) for j in 1:np2))
+                if r > tol * scales[ic]
+                    ok = false
+                    break
+                end
+            end
+            if ok  # adjoint combination kw3 - kt3, held against the C-total scale
+                pred_kw[3](buf, m)
+                a = copy(buf)
+                pred_kt[3](buf, m)
+                r = maximum(abs((a[j] - buf[j]) - (kwp[k, j, 3] - ktp[k, j, 3])) for j in 1:np2)
+                ok = r <= tol * scales[3]
+            end
+            if ok
+                uncertified[slots[k]] = false
+            else
+                push!(fails, k)
+            end
+        end
+        isempty(fails) && (fill!(uncertified, false); break)
+
+        # Insert failed midpoints as knots (batch merge, preserving order).
+        newxs = Float64[]
+        newkw = zeros(ComplexF64, length(xs) + length(fails), np2, 6)
+        newkt = zeros(ComplexF64, length(xs) + length(fails), np2, 6)
+        newunc = Bool[]
+        fi = 1
+        row = 0
+        for i in eachindex(xs)
+            row += 1
+            push!(newxs, xs[i])
+            newkw[row, :, :] .= kw[i, :, :]
+            newkt[row, :, :] .= kt[i, :, :]
+            i == length(xs) && break
+            inserted = false
+            while fi <= length(fails) && slots[fails[fi]] == i
+                k = fails[fi]
+                row += 1
+                push!(newxs, props[k])
+                newkw[row, :, :] .= kwp[k, :, :]
+                newkt[row, :, :] .= ktp[k, :, :]
+                inserted = true
+                fi += 1
+            end
+            if inserted
+                push!(newunc, true, true)   # both halves of the split interval re-enter the queue
+            else
+                push!(newunc, uncertified[i])
+            end
+        end
+        added += length(fails)
+        xs = newxs
+        kw = newkw[1:row, :, :]
+        kt = newkt[1:row, :, :]
+        uncertified = BitVector(newunc)
+    end
+    @info "Certified kinetic grid: $(length(seed)) seed -> $(length(xs)) knots " *
+          "($nevals kernel evaluations, $added refined, tol=$tol)"
+    return xs, kw, kt
+end
+
+"""
     make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
                         calculated_source=nothing)
 
@@ -41,7 +173,42 @@ function make_kinetic_matrix(
             "calling make_kinetic_matrix directly, or pass " *
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
         )
-        kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
+        if ctrl.kinetic_grid_tol > 0
+            # Certified adaptive grid: seed with the ideal coefficient-spline knots and refine
+            # until the total matrices are spline-predictable to kinetic_grid_tol everywhere.
+            # Seed with a coarse skeleton of the ideal coefficient-spline knots: the kernel is the
+            # expensive part, so the seed must not scale with the equilibrium grid. Every ~seed
+            # gap the certificate cannot vouch for is refined, so coarse seeding trades cheap
+            # certificates for expensive blanket evaluation. Endpoints and rational-window knots
+            # are always retained.
+            base = isempty(ffit.matrix_xs) ? metric.xs : ffit.matrix_xs
+            seed_max = 49
+            if length(base) > seed_max
+                rats = [sng.psifac for sng in intr.sing]
+                keep_idx = falses(length(base))
+                keep_idx[1] = keep_idx[end] = true
+                stride = max(1, (length(base) - 1) ÷ (seed_max - 1))
+                keep_idx[1:stride:end] .= true
+                for (i, x) in pairs(base)
+                    any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rats) && (keep_idx[i] = true)
+                end
+                seed = base[keep_idx]
+            else
+                seed = copy(base)
+            end
+            hint = Ref(1)
+            ideal_scales = ntuple(ic -> begin
+                    sp = (ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats_prim, ffit.emats_prim, ffit.hmats)[ic]
+                    maximum(maximum(abs, sp(x; hint=hint)) for x in seed)
+                end, 6)
+            rationals = [sng.psifac for sng in intr.sing]
+            xs, kw_flat, kt_flat = certified_kinetic_grid(seed,
+                psis -> calculated_source(ctrl, equil, intr, metric, ffit; psis=psis),
+                ideal_scales, ctrl.kinetic_grid_tol, rationals; verbose=ctrl.verbose)
+            mpsi = length(xs)
+        else
+            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
+        end
         kw_flat .*= ctrl.kinetic_factor
         kt_flat .*= ctrl.kinetic_factor
     else
@@ -55,7 +222,7 @@ function make_kinetic_matrix(
     end
 
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
-    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
+    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
 
     return nothing
 end
@@ -78,9 +245,9 @@ function _compute_fkg_matrices!(
     intr::ForceFreeStatesInternal,
     metric::MetricData,
     kw_flat::Array{ComplexF64,3},
-    kt_flat::Array{ComplexF64,3}
+    kt_flat::Array{ComplexF64,3};
+    xs::Vector{Float64}=metric.xs
 )
-    xs = metric.xs
     mpsi = length(xs)
     np = intr.numpert_total
     mpert = intr.mpert
