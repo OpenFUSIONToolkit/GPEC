@@ -1156,6 +1156,61 @@ Status: committed on `performance/decoupled-el-matrix-grid` (2225813fc), **defau
 (`kinetic_grid_tol = 0`), knob-off verified bit-identical. Open design questions for review are in
 the morning-questions list (seed size constant, default-on policy, kinetic ground-truth case).
 
+## 28. Morning decisions applied: PR split, physics-skeleton seed, and the DIII-D survival test
+
+User decisions (morning after §27): (1) PR #398 must own the kinetic harness moves in its body —
+done, with the ntv torque ~2500× move stated plainly and flagged for physics review + re-pinning;
+(2) the certified kinetic grid is its own PR — #410, stacked on #408 (branch
+`performance/certified-kinetic-grid`; #408's branch trimmed back to the cap commits);
+(3+4) the DIII-D example, not Solovev, is the referee — it is fully kinetic-capable (bundled
+kinetic h5, forward integrator, mpsi=0 auto grid) and the survival test simply had never been run;
+(5) the constant-49 seed was wrong — the user correctly remembered the seed should be the
+resonance structure. Reworked (35e4ae593): seed = rational windows ∪ located Ω_ℓ=0 resonance
+surfaces (`kinetic_resonance_psi_nodes`, one source of truth with the NTV quadrature paneling)
+∪ 4 interior points per inter-rational span (log-spaced in the axis span). Certification
+exhaustion now warns loudly. Solovev smoke (m16, tol 1e-3): 15 seed → 74 knots, 133 evals, fully
+certified; (6) Kinetic/G vs Ideal/G identical-statistics observation: leave as is.
+
+**DIII-D kinetic-calculated survival test** (pre-registered acceptance in
+`run_survival.sh`: et[1] ≤ 1e-4, NTV torque ≤ 1e-2, evals < auto grid, wall ≤ knob-off):
+FIRST ATTEMPT KILLED THE DISK — the knob-off run wrote a 9.1 GB gpec.h5 within ~4 minutes and
+died on ENOSPC (tmp filesystem hit 100%). The dominant dataset is [TBD from instrumented rerun];
+this is itself a finding about the never-before-run configuration.
+
+[RESULTS OF INSTRUMENTED RERUN — TBD]
+
+### Pre-registered decision rule (written before the ladder/discriminator results were known)
+
+The original et ≤ 1e-4 acceptance assumed a trustworthy knob-off baseline; the baseline turned out
+to be the pathology itself (223,271 EL steps vs ~2,000 ideal; 17.5 GB of solution output). Revised
+referee, fixed in advance:
+
+- Run the certified ladder (tol 1e-3/3e-4/1e-4, max_rounds=10) AND the discriminator: knob-off
+  full grid with rtol_xlmda tightened 1e-5 → 1e-6 (kernel node noise ε↓10×, so J ∝ ε drops 10×).
+- If knob-off(rtol 1e-6) moves TOWARD the certified plateau: the full-grid baseline was
+  noise-biased; certified is vindicated; the PR story is "the full grid needs a ~10× more
+  expensive kernel to approach the answer the certificate gets at rtol 1e-5".
+- If knob-off(rtol 1e-6) stays near et[1] = 1.0055−0.2594i: certification is smoothing real core
+  structure (suspect: the Frobenius floor at ψ≈0.02, derived for ideal ξ ~ ψ^|m|/2, binding both
+  uncertified intervals); the floor/seed needs rework and #410 does not ship until fixed.
+- A ladder plateau alone proves internal consistency only (shared seed/floors/kernel tolerance),
+  never correctness. Floor-certified intervals are certified WITHOUT a residual check — a known
+  blind spot recorded here.
+- Holds until resolved: no deck enabling, #410 stays draft, no stage-2 torque referee.
+
+### Localization (zero-cost, from the two stage-1 h5 files)
+
+Full-grid vs certified on the shared 288-point output grid, max-element relative residual per
+family: A 8.5e-4, B 2.8e-3 — at certificate level. But C/K ~9.8% and G 23% in the deep core
+(ψ<0.05; the whole core is one rational-free span, innermost rational at ψ=0.518), and f0 2.1%
+at mid-radius ψ≈0.40. The worst core elements are high-m corner modes (34,34) where solution
+amplitude ~ψ^|m|/2 is negligible; the mid-radius f0 deviation is in the physically live region.
+G's core residuals have lag-1 correlation +0.95 (real steep structure, not noise); K/C core
+r1 ≈ −0.2 (noise-like) with certified deviating ~7× above the data's own roughness.
+**Candidate certificate-design gap**: f0/K/G are derived (post-Schur) — the 1e-3 certificate on
+raw increments amplifies through the derivation (f0: 20×). If the discriminator vindicates the
+certified answer this still needs addressing; if not, it is a prime suspect.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
