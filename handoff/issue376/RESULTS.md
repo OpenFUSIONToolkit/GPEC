@@ -1145,6 +1145,13 @@ gold — again equilibrium-resolution-dominated at these sizes. The 1e-3 certifi
 extra resonance refinement on this case; the withheld-seed aliasing stress test has **not** been
 run (rational windows are always seeded by construction) and is recorded as outstanding.
 
+**Kinetic-case harness attribution**: vs develop the three `solovev_kinetic_*` cases move
+substantially (et[1] 1.7–2.5%, Im up to 23%, NTV torque magnitude, and NTV ψ-quadrature
+evaluations 840 → 60 — the torque quadrature was apparently spending 14× the evaluations
+resolving geometry noise). Vs the #398 branch: **zero changed quantities (34/34 unchanged)** —
+the deltas are inherited entirely from route (a)'s Solovev geometry fix, and this branch is
+bit-neutral on the kinetic cases with the knob off.
+
 Status: committed on `performance/decoupled-el-matrix-grid` (2225813fc), **default OFF**
 (`kinetic_grid_tol = 0`), knob-off verified bit-identical. Open design questions for review are in
 the morning-questions list (seed size constant, default-on policy, kinetic ground-truth case).
