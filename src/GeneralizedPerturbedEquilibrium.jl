@@ -423,8 +423,20 @@ function main_from_inputs(
             KineticForces.compute_calculated_kinetic_matrices(
                 c, e, i, m, f;
                 kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, psis=psis)
+        # Locate the kinetic-resonance surfaces (Ω_ℓ = 0) that seed the certified matrix
+        # grid -- the same nodes the NTV ψ quadrature panels at (one source of truth).
+        resonance_psis = Float64[]
+        if ctrl.kinetic_source == "calculated" && ctrl.kinetic_grid_tol > 0
+            for n_res in intr.nlow:intr.nhigh
+                n_res == 0 && continue
+                append!(resonance_psis, KineticForces.kinetic_resonance_psi_nodes(
+                    kinetic_profiles, equil;
+                    n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
+                    electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac))
+            end
+        end
         make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
-            calculated_source=calculated_cb)
+            calculated_source=calculated_cb, resonance_psis=resonance_psis)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
         # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;

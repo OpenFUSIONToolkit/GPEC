@@ -125,6 +125,10 @@ function certified_kinetic_grid(seed::Vector{Float64}, evaluate::Function,
         kt = newkt[1:row, :, :]
         uncertified = BitVector(newunc)
     end
+    nunc = count(uncertified)
+    nunc > 0 && @warn "Certified kinetic grid: $nunc interval(s) still uncertified after $max_rounds rounds " *
+          "(first near ψ=$(round(xs[findfirst(uncertified)]; digits=4))) -- results may be under-resolved there; " *
+          "raise max_rounds or loosen kinetic_grid_tol"
     @info "Certified kinetic grid: $(length(seed)) seed -> $(length(xs)) knots " *
           "($nevals kernel evaluations, $added refined, tol=$tol)"
     return xs, kw, kt
@@ -149,6 +153,11 @@ Dispatches on `ctrl.kinetic_source`:
     is loaded before KineticForces, so a direct import would invert the
     dependency order.
 
+When `ctrl.kinetic_grid_tol > 0` on the "calculated" path, the kernel is driven over a
+certified adaptive grid instead of the full equilibrium grid; `resonance_psis` supplies the
+located kinetic-resonance surfaces (the same Ω_ℓ = 0 nodes the NTV ψ quadrature panels at)
+as mandatory seed points.
+
 Both paths apply `ctrl.kinetic_factor` as a global scale before the FKG Schur
 reduction.
 """
@@ -158,7 +167,8 @@ function make_kinetic_matrix(
     ffit::FourFitVars,
     intr::ForceFreeStatesInternal,
     metric::MetricData;
-    calculated_source::Union{Nothing,Function}=nothing
+    calculated_source::Union{Nothing,Function}=nothing,
+    resonance_psis::Vector{Float64}=Float64[]
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -174,28 +184,44 @@ function make_kinetic_matrix(
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
         )
         if ctrl.kinetic_grid_tol > 0
-            # Certified adaptive grid: seed with the ideal coefficient-spline knots and refine
-            # until the total matrices are spline-predictable to kinetic_grid_tol everywhere.
-            # Seed with a coarse skeleton of the ideal coefficient-spline knots: the kernel is the
-            # expensive part, so the seed must not scale with the equilibrium grid. Every ~seed
-            # gap the certificate cannot vouch for is refined, so coarse seeding trades cheap
-            # certificates for expensive blanket evaluation. Endpoints and rational-window knots
-            # are always retained.
+            # Certified adaptive grid: seed with the physics skeleton and refine until the
+            # total matrices are spline-predictable to kinetic_grid_tol everywhere. The seed is
+            # the same structure the NTV ψ quadrature panels at: the rational windows (retained
+            # from the ideal coefficient grid), the located kinetic-resonance surfaces, and a few
+            # interior points per inter-rational span (log-spaced in the axis span to match the
+            # core's Frobenius power-law structure). The kernel is the expensive part, so the
+            # seed must not scale with the equilibrium grid; every gap the certificate cannot
+            # vouch for is refined, so coarse seeding trades cheap certificates for expensive
+            # blanket evaluation. Seed adequacy is not correctness-critical (certification is) --
+            # the seed's job is to pre-place knots where sharp structure is expected so it cannot
+            # alias between midpoints.
             base = isempty(ffit.matrix_xs) ? metric.xs : ffit.matrix_xs
-            seed_max = 49
-            if length(base) > seed_max
-                rats = [sng.psifac for sng in intr.sing]
-                keep_idx = falses(length(base))
-                keep_idx[1] = keep_idx[end] = true
-                stride = max(1, (length(base) - 1) ÷ (seed_max - 1))
-                keep_idx[1:stride:end] .= true
-                for (i, x) in pairs(base)
-                    any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rats) && (keep_idx[i] = true)
-                end
-                seed = base[keep_idx]
-            else
-                seed = copy(base)
+            rats = [sng.psifac for sng in intr.sing]
+            lo, hi = base[1], base[end]
+            seed = [lo, hi]
+            for x in base   # rational-window knots: the anti-aliasing floor where layers live
+                any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rats) && push!(seed, x)
             end
+            append!(seed, filter(p -> lo < p < hi, resonance_psis))
+            anchors = sort!(filter(r -> lo < r < hi, unique(rats)))
+            spans = [lo; anchors; hi]
+            nbetween = 4   # interior points per span: cubic-spline support everywhere before round one
+            for i in 1:length(spans)-1
+                a, b = spans[i], spans[i+1]
+                if i == 1 && b > 4 * a
+                    append!(seed, exp.(range(log(a), log(b); length=nbetween + 2))[2:end-1])
+                else
+                    append!(seed, range(a, b; length=nbetween + 2)[2:end-1])
+                end
+            end
+            sort!(seed)
+            # Merge near-coincident points (e.g. a resonance on a rational) but never the endpoints.
+            merged = [seed[1]]
+            for x in seed[2:end]
+                x - merged[end] > Equilibrium.RATIONAL_RES_SPACING / 8 && push!(merged, x)
+            end
+            merged[end] = hi
+            seed = merged
             hint = Ref(1)
             ideal_scales = ntuple(ic -> begin
                     sp = (ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats_prim, ffit.emats_prim, ffit.hmats)[ic]
