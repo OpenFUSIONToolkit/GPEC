@@ -1211,6 +1211,46 @@ r1 ≈ −0.2 (noise-like) with certified deviating ~7× above the data's own ro
 raw increments amplifies through the derivation (f0: 20×). If the discriminator vindicates the
 certified answer this still needs addressing; if not, it is a prime suspect.
 
+### Ladder + discriminator results: the pre-registered rule fires AGAINST the certified grid
+
+| run | et[1] | nstep_total | knots / kernel evals |
+|---|---|---|---|
+| full grid, rtol_xlmda 1e-5 | 1.005545 − 0.259371i | 223,271 | 288 / 288 |
+| **full grid, rtol_xlmda 1e-6 (discriminator)** | **1.005545 − 0.259371i (Δ 2.7e-7)** | 223,444 | 288 / 288 |
+| certified 1e-3 | 0.839108 − 0.283538i | 83,016 | 157 / 268 |
+| certified 3e-4 | 0.844656 − 0.257708i | 192,199 | 205 / 351 |
+| certified 1e-4 | 0.855938 − 0.256915i | 230,883 | 254 / 424 |
+
+The discriminator reproduces the full-grid answer to 2.7e-7 with steps unchanged — both
+noise-hypothesis predictions fail: the 223k steps and the et[1]=1.0055 value are driven by REAL
+structure, not kernel noise. The certified ladder walks toward the full-grid answer with cost
+climbing past the full grid (424 evals > 288 at tol 1e-4). Per the pre-registered rule:
+**certification is smoothing real core structure; #410 does not ship as-is; no deck enabling.**
+
+### Root cause localized: the near-axis kinetic increments
+
+94% of all EL steps (209,049 / 222,148 saved) are at ψ < 0.01 — the rational-free axis span. On
+the noise-free (rtol 1e-6) data the kinetic increments DIVERGE toward the axis (G-increment
+max-element: 1092 → 634 → 451 → 348 over ψ = 1.0e-4 → 2.2e-4 → 3.6e-4 → 4.9e-4, roughly ψ^−0.7),
+with an additional sharp feature at ψ ≈ 0.022 (exactly where certification exhausted its rounds).
+G's core residual autocorrelation is +0.95 — smooth steep structure, not noise. The kernel has no
+near-axis clamp: it evaluates the drift-kinetic closed forms (ω_d ~ 1/ε) down to ψ = 1e-4 where
+trapped fractions and the LAR estimates degenerate.
+
+**The open question is physics, not numerics**: is the near-axis divergence of the calculated
+kinetic increments physical (precession resonance, regularized in reality by finite orbit width)
+or a model artifact outside its validity domain? If the kinetic contribution should be tapered or
+cut below some ψ (trapped fraction → 0 argument), both the 223k-step pathology and the
+certification failure disappear together. This decision belongs to a physicist.
+
+Secondary suspects recorded for the eventual fix: (a) the derived matrices f0/K/G amplify the
+raw-increment certificate ~20× (certify what the ODE consumes, post-Schur, instead); (b) the
+Frobenius core floor was derived for ideal ξ ~ ψ^|m|/2 and has no justification for kinetic
+increments that grow toward the axis.
+
+Pending: dense_off (psi_accuracy 3e-4, ~2× auto grid) — is the full-grid et[1] itself converged
+with respect to the equilibrium grid?
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
