@@ -499,11 +499,22 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     # Decouple the coefficient-spline knots from the equilibrium grid in the packed core:
     # a cubic spline's third-derivative jumps scale as (node error)/dpsi^3, so equilibrium-grade
     # core packing amplifies tolerance-level node error into jumps that slave the EL step size.
-    # The coefficients are near-cylindrical there; cap the density at dpsi >= 0.05*psi below psi=0.1.
+    # Near the axis every component is a Frobenius power law in psi, and power laws are scale-free,
+    # so log-uniform sampling (dpsi >= c*psi) resolves them at constant relative accuracy: cubic
+    # interpolation of psi^p on that grid errs by ~(p*c)^4/384, so c = 0.05 resolves even the
+    # steepest spectrum component (p = mmax/2) to ~2e-4 while the physics responds far below that
+    # (the steep components carry vanishing solution amplitude). The capped region ends at the
+    # innermost rational surface (or psi = 0.1, whichever is smaller) and never removes a knot
+    # inside a rational's resolution window, preserving the Delta'-stencil structure the
+    # equilibrium grid encodes (GridRefinement RATIONAL_RES_RADIUS).
+    cap_edge = 0.1
+    rationals = [s.psifac for s in intr.sing]
+    isempty(rationals) || (cap_edge = min(cap_edge, minimum(rationals) - Equilibrium.RATIONAL_RES_RADIUS))
+    in_rational_window(x) = any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rationals)
     keep = Int[1]
     for i in 2:length(metric.xs)-1
         x = metric.xs[i]
-        if x >= 0.1 || (x - metric.xs[keep[end]]) >= 0.05 * x
+        if x >= cap_edge || in_rational_window(x) || (x - metric.xs[keep[end]]) >= 0.05 * x
             push!(keep, i)
         end
     end
