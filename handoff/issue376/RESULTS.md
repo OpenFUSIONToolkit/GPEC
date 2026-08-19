@@ -1248,8 +1248,25 @@ raw-increment certificate ~20× (certify what the ODE consumes, post-Schur, inst
 Frobenius core floor was derived for ideal ξ ~ ψ^|m|/2 and has no justification for kinetic
 increments that grow toward the axis.
 
-Pending: dense_off (psi_accuracy 3e-4, ~2× auto grid) — is the full-grid et[1] itself converged
-with respect to the equilibrium grid?
+
+### Convergence check closes the loop: the full-grid reference is converged, and the certificate's blind spot is identified
+
+dense_off (psi_accuracy 3e-4 → 367-knot auto grid): et[1] = 1.005671 − 0.259474i — **1.6e-4 from
+the 288-knot value** (steps 225,127, unchanged; structure-driven, confirmed a third time). The
+full-grid DIII-D kinetic answer is therefore converged in kernel tolerance (2.7e-7) AND
+equilibrium grid (1.6e-4); the certified grid's 14–17% deviation is unambiguously certification
+error.
+
+**Why the certificate is blind to it (the design flaw, now precisely identified)**: the residual
+test is `max-element residual ≤ tol · max|T|` with max|T| the family's GLOBAL maximum. For G that
+scale is 6.7e6 (edge/rational-dominated), while the near-axis increment is ~1e3 — only 1.6e-4 of
+scale, far under any practical tol, so the core passes the certificate while being grossly
+under-resolved. But the EL ODE responds to LOCAL derivative structure, and 94% of its work is
+exactly there. The auto grid resolves it only coincidentally (its ideal-driven core packing lands
+where the kinetic divergence lives). Fix candidates, pending the physics decision on near-axis
+validity: a local (per-region or solution-amplitude-weighted) certificate scale, certifying the
+post-Schur f0/K/G the ODE consumes, and dropping the ideal-derived Frobenius core floor for
+kinetic increments.
 
 ## Implications / ranked follow-ups
 
