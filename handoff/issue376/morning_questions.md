@@ -1,3 +1,5 @@
+> **Superseded by RESULTS.md §28** — the user answered these on 2026-08-19; the decisions and their consequences (PR split, seed rework, DIII-D survival-test verdict) are recorded there.
+
 # Questions for the morning
 
 1. **PR #408 review-package sharing worked?** (You flipped both; reviewers should confirm access.)

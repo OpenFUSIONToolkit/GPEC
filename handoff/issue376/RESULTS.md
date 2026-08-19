@@ -1257,6 +1257,11 @@ full-grid DIII-D kinetic answer is therefore converged in kernel tolerance (2.7e
 equilibrium grid (1.6e-4); the certified grid's 14–17% deviation is unambiguously certification
 error.
 
+Refuted along the way (recorded per the pre-registration discipline): the reviewer-model
+prediction that the residual certified-run steps sit on rational-window kinks (J ~ rtol/Δψ³ in the
+kept-dense windows). The ψ-distribution and rtol-invariance rule it out — the steps are near-axis
+real structure, in the rational-free span.
+
 **Why the certificate is blind to it (the design flaw, now precisely identified)**: the residual
 test is `max-element residual ≤ tol · max|T|` with max|T| the family's GLOBAL maximum. For G that
 scale is 6.7e6 (edge/rational-dominated), while the near-axis increment is ~1e3 — only 1.6e-4 of
