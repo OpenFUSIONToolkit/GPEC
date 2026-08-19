@@ -1,101 +1,86 @@
 using Test
 using TOML
 
-# Decomposition invariance of the Riccati/FM Δ′ path.
+# Decomposition invariance of the Riccati Δ′ path.
 #
 # The chunked propagator driver reassociates the fundamental-matrix products whenever the chunk
 # decomposition changes: ((A·B)·C)·D becomes (A·B)·(C·D). Floating-point matrix products do not
 # reassociate exactly in general, so Δ′ being reproducible requires more than thread-count
 # independence of the chunk *count* (which is structural: the nchunks=0 target is derived from
 # msing alone and pinned by unit tests in runtests_parallel_integration.jl). This file asserts
-# the end-to-end claim those unit tests cannot: the Δ′ matrix and the leading energy eigenvalue
-# are bit-identical when the same integration is cut into a genuinely different set of chunks.
+# the end-to-end claim those unit tests cannot: the Δ′ matrix is bit-identical when the same
+# integration is cut into a genuinely different set of chunks.
 #
-# Measured basis (DIII-D-like deck): 53-chunk and 64-chunk decompositions with confirmed
-# different boundaries gave bit-identical Δ′ diagonals and et[1]. This test pins that property.
-# Unlike thread-count variation, the decomposition axis is exercisable in-session at any thread
-# count, because nchunks steers it directly.
+# Driven through the public solve API rather than the internal stage sequence, so the test
+# exercises the same path production does instead of a copy of it that can drift from it.
 
 const GP_TI = GeneralizedPerturbedEquilibrium
 
 """
-Run the ideal stability pipeline on `dir` with the Riccati integrator at a given chunk count
-(`nchunks = 0` = the msing-derived auto target). Mirrors the standalone setup used by the
-parallel-integration tests. Returns the Δ′ matrix, the leading energy eigenvalue, and the chunk
-boundaries so the test can prove the decompositions actually differed.
+Solve the DIII-D-like deck with the Riccati integrator at a given chunk count (`nchunks = 0` is
+the msing-derived auto target) and return the published Δ′ matrix alongside the leading energy
+eigenvalue, which is used only as a witness that the two decompositions really differed.
 """
-function _run_at_nchunks(dir::String, nchunks::Int)
+function _solve_at_nchunks(dir::String, nchunks::Int)
     inputs = TOML.parsefile(joinpath(dir, "gpec.toml"))
-    inputs["ForceFreeStates"]["verbose"] = false
-    inputs["ForceFreeStates"]["integrator"] = "riccati"
-    inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-    inputs["ForceFreeStates"]["nchunks"] = nchunks
-
-    intr = GP_TI.ForceFreeStates.ForceFreeStatesInternal(; dir_path=dir)
-    ctrl = GP_TI.ForceFreeStates.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ffs_in = inputs["ForceFreeStates"]
     eq_config = GP_TI.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir)
-    sol_config = haskey(inputs, "SOL_INPUT") ? GP_TI.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-    equil = GP_TI.Equilibrium.setup_equilibrium(eq_config, sol_config)
+    equil = GP_TI.Equilibrium.setup_equilibrium(eq_config, nothing)
     if GP_TI.Equilibrium.wants_two_pass(eq_config)
-        mand = GP_TI.ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
+        mand = GP_TI.ForceFreeStates.rational_psi_nodes(equil; nlow=ffs_in["nn_low"], nhigh=ffs_in["nn_high"])
         psi_nodes = GP_TI.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
         rerun_input = GP_TI.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
         equil = GP_TI.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
     end
-    intr.wall_settings = GP_TI.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    # The toroidal range must be resolved before sing_lim!: under set_psilim_via_dmlim it
-    # truncates at (last_rational_q + dmlim)/n and so needs n.
-    intr.nlow = ctrl.nn_low
-    intr.nhigh = ctrl.nn_high
-    intr.npert = 1
-    GP_TI.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-    GP_TI.ForceFreeStates.sing_find!(intr, equil)
-    intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-    intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-    intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.numpert_total = intr.mpert * intr.npert
-    metric = GP_TI.ForceFreeStates.make_metric(equil, intr.mpert)
-    ffit = GP_TI.ForceFreeStates.make_matrix(equil, intr, metric)
-    odet, fm_propagators, fm_chunks, fm_S_left = GP_TI.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-    vac = GP_TI.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
-    GP_TI.ForceFreeStates.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
-        wv=vac.wv, psio=equil.psio, S_at_surface_left=fm_S_left, ctrl=ctrl, equil=equil, ffit=ffit)
-    return (dpm=copy(intr.delta_prime_matrix), et1=vac.et[1], msing=intr.msing,
-        bounds=[(c.psi_start, c.psi_end) for c in fm_chunks])
+
+    # Every ForceFreeStatesControl key from the deck except the ones the problem or the
+    # integrator owns: nn_low/nn_high come from `nn`, nchunks and the formalism from the alg.
+    ctrl_kwargs = Dict(Symbol(k) => v for (k, v) in ffs_in
+                       if !(k in ("nn_low", "nn_high", "nchunks", "integrator")))
+    ctrl_kwargs[:verbose] = false
+    ctrl_kwargs[:write_outputs_to_HDF5] = false
+
+    wall = GP_TI.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+    prob = GP_TI.EulerLagrangeProblem(equil; nn=ffs_in["nn_low"], wall=wall, dir_path=dir, ctrl_kwargs...)
+    return GP_TI.solve(prob, GP_TI.ForceFreeStates.Riccati(; nchunks=nchunks))
 end
 
 @testset "Decomposition invariance of the Riccati Δ′ path" begin
     # The deck whose Δ′ the regression harness pins, and where the BVP Δ′ is well-conditioned
     # (Solovev sits near marginal stability and its BVP Δ′ is pathological there).
     dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
-    auto = _run_at_nchunks(dir, 0)
-    # 11 more chunks than the auto target: enough to move several boundaries and change the
-    # association of the propagator products, cheap enough not to distort the runtime.
-    finer = _run_at_nchunks(dir, length(auto.bounds) + 11)
+    auto = _solve_at_nchunks(dir, 0)
+    @test auto.delta_prime !== nothing
+    msing = size(auto.delta_prime.matrix, 1)
 
-    # The premise first: the two decompositions must genuinely differ, otherwise the equality
-    # below is vacuous and this file silently stops testing anything.
-    @test length(finer.bounds) > length(auto.bounds)
-    @test finer.bounds != auto.bounds
+    # The nchunks=0 target, mirroring balance_integration_chunks' internal formula (the same
+    # mirroring runtests_parallel_integration.jl does). Invariance is asserted ABOVE this target
+    # only: requesting fewer chunks than the msing-derived minimum is not merely a different
+    # decomposition but a structurally deficient one -- measured, auto(53) vs 29 moves Δ′ by
+    # ~1e-6 relative on this deck, while auto(53) vs 64 is bit-identical. The floor exists to
+    # give the crossings room, so below it the comparison is not like-for-like.
+    auto_target = max(2 * msing + 3, 8 * (msing + 1) + msing)
+    finer = _solve_at_nchunks(dir, auto_target + 11)
+    @test finer.delta_prime !== nothing
 
-    @test finer.msing == auto.msing
-    @test size(finer.dpm) == size(auto.dpm)
+    # The premise: the two runs must be genuinely different computations, otherwise the equality
+    # below is vacuous and this file silently stops testing anything. et[1] is the witness —
+    # it is decomposition-SENSITIVE on the unified driver (measured 2.7e-8 relative), so its
+    # differing is evidence the decompositions differed. A failure here means either the chunk
+    # steering stopped taking effect, or exact et[1] invariance was restored; both want a look
+    # before this file is trusted again. (The value of et[1] is pinned by the regression
+    # harness, not here — this is a witness, not an assertion about the physics.)
+    @test auto.free_boundary !== nothing && finer.free_boundary !== nothing
+    @test finer.free_boundary.et[1] != auto.free_boundary.et[1]
+
+    @test size(finer.delta_prime.matrix) == size(auto.delta_prime.matrix)
 
     # Δ′ is bit-identical, not approximate: a tolerance would hide exactly the reassociation
-    # drift this test exists to catch, and the measured behaviour is exact equality.
-    for j in 1:auto.msing
-        @test finer.dpm[j, j] === auto.dpm[j, j]
+    # drift this test exists to catch, and the measured behaviour is exact equality. The
+    # element-wise `===` is deliberately paired with the whole-matrix `==`: `===` holds for
+    # NaN === NaN, so the `==` is what fails if the computation degrades to NaN.
+    for j in 1:size(auto.delta_prime.matrix, 1)
+        @test finer.delta_prime.matrix[j, j] === auto.delta_prime.matrix[j, j]
     end
-    @test finer.dpm == auto.dpm
-
-    # et[1] is NOT decomposition-invariant under the unified Riccati driver: measured relative
-    # difference 2.7e-8 between the auto and auto+11 decompositions on this deck (it was
-    # bit-identical under the pre-unification driver). The tolerance below is 30× the measured
-    # effect — documented, not chosen to make the test pass — and exists to catch this
-    # sensitivity growing by orders of magnitude while the exact-invariance question is open.
-    # test_broken: if a future driver change restores exact invariance, this reports an
-    # Unexpected Pass, forcing the === assertion to be reinstated rather than the improvement
-    # going unnoticed.
-    @test_broken finer.et1 === auto.et1
-    @test isapprox(finer.et1, auto.et1; rtol=1e-6)
+    @test finer.delta_prime.matrix == auto.delta_prime.matrix
 end
