@@ -202,3 +202,24 @@ Predictions:
     riccati Delta' diagonal (excluding the known-unconverged q=5 element) shifts <= ~1%.
   - equilibrium wall time unchanged (same trace); EL wall time falls with steps.
 If steps do NOT fall, the jump model is wrong and goes the way of the other four hypotheses.
+
+--- Phase B0: kinetic-matrix noise character, written BEFORE the runs ---
+
+Setup: Solovev_kinetic_calculated_example (kinetic_source=calculated, kinetic_factor=1, forward
+integrator, ldp grid, psilow=1e-4; the shipped deck uses mpsi=16 -- itself evidence that kernel
+cost forces grid starvation). Ladder mpsi = 16 / 64 / 256. Measure on the h5's
+EulerLagrangeMatrices/Kinetic/{A,B,C,f0,K,G} (the totals the solver consumes) and Ideal/*:
+node-value fit residual eps_kin, its knot-to-knot correlation r1, and the spline third-derivative
+jumps J_kin; plus KineticForces matrix-formation wall time per surface.
+
+Fork, pre-registered:
+  WHITE:  eps_kin ~ rtol_xlmda (default 1e-5) relative, r1 <= ~0 in packed regions, and J_kin
+          grows as the local dpsi^-3 as mpsi rises (>= ~8x per doubling where packing is
+          proportional). Consequence: dense kinetic grids are HARMFUL (conditioning) and wasteful;
+          delta_kin defaults ~3x rtol_xlmda.
+  SMOOTH: adjacent surfaces have nearly identical integrands, so quadrature error correlates;
+          r1 > +0.8, J_kin tracks the ideal matrices' J. Consequence: dense grids are only
+          WASTEFUL; the eval-count win stands; delta_kin may sit tighter.
+
+Either way the eval-cost measurement stands on its own: per-surface kernel cost x (mpsi+1) is the
+budget the certified grid must beat.
