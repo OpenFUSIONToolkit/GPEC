@@ -55,6 +55,28 @@ downstream code consumes the stored ξ profiles.
 end
 
 """
+    compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> (wv, vac)
+
+Vacuum response matrix at the control surface `intr.psilim`, scaled by the singular factors
+`(m - n·q)(m' - n'·q)` [Chance Phys. Plasmas 1997 2161 eq. 126]. Handles 2D single-n, 2D
+multi-n block-diagonal and 3D vacuum problems through `Vacuum.compute_vacuum_response`.
+
+Needs no ODE state, so both the free-boundary calculation and the standalone Galerkin solve
+share it. Returns the scaled `wv` alongside the full vacuum response `vac`, whose surface
+point clouds the free-boundary result carries to HDF5. `wv` aliases `vac.wv`, which is
+scaled in place.
+"""
+function compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+    (; mlow, mhigh, nlow, nhigh, psilim, qlim, wall_settings) = intr
+    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh)
+    vac = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
+    wv = vac.wv
+    singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
+    wv .*= singfac .* singfac'
+    return wv, vac
+end
+
+"""
     free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> FreeBoundaryResult
 
 Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
@@ -66,7 +88,7 @@ calculations and data dumping.
 @with_pool pool function free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     # Initializations and allocations
-    (; mpert, mlow, mhigh, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
+    (; mpert, numpert_total, psilim, npert) = intr
     wpt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     wvt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     tmp_mat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
@@ -78,14 +100,7 @@ calculations and data dumping.
     wp = zeros(ComplexF64, numpert_total, numpert_total)
     @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum response (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
-    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh)
-    vac = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
-    wv = vac.wv
-
-    # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
-    singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
-    wv .*= singfac .* singfac'
+    wv, vac = compute_scaled_wv(ctrl, equil, intr)
 
     # Power-normalization matrix N at the plasma edge: ξ†·N·ξ = ⟨|ξ|²⟩ (see power_norm_matrix!).
     # The Jacobian band is evaluated at psilim (same surface as W), not at the last grid surface.

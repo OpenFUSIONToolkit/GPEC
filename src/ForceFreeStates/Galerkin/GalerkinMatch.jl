@@ -13,17 +13,17 @@
 # identity-at-edge basis (coil column j has ξ_edge = e_j).
 
 """
-    gal_match_rpec(ctrl, equil, intr, gal_result) -> GalMatchResult
+    gal_match_rpec(ctrl, equil, intr, gal_result, dp) -> GalMatchResult
 
-Solve the coil-driven RPEC matching from the outer Δ′ (`gal_result`) and the per-surface inner-layer Δ.
-Requires `gal_result.solution` (reconstructed outer ξ/ξ′) and the rpec coil block `gal_result.delta_coil`.
+Solve the coil-driven RPEC matching from the outer Δ′ payload `dp` and the per-surface inner-layer Δ.
+Requires `gal_result.solution` (reconstructed outer ξ/ξ′) and the rpec coil block `dp.coil`.
 
 The resistive path uses per-surface inputs `ctrl.gal_eta`/`gal_rho`/`gal_rotation` (length `msing`) +
 `ctrl.gal_gamma`. When `ctrl.gal_ideal_flag`, the inner layer is skipped and `cout=0`, so the matched
 solution is the bare ideal coil column (Fortran rmatch `coil%ideal_flag`) — the DCON/EL reference.
 """
 function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStatesInternal,
-    gal_result::GalerkinResult)
+    gal_result::GalerkinResult, dp::DeltaPrimeData)
 
     msing = gal_result.msing
     mpert = intr.numpert_total
@@ -32,8 +32,8 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
 
     gal_result.solution !== nothing ||
         error("gal_match_rpec: gal_result.solution is missing (need the gal-reconstructed ξ/ξ′)")
-    isempty(gal_result.delta_coil) &&
-        error("gal_match_rpec: delta_coil is empty — gal_rpec_flag must be true for RPEC matching")
+    isempty(dp.coil) &&
+        error("gal_match_rpec: the coil-response block is empty — gal_rpec_flag must be true for RPEC matching")
 
     if ctrl.gal_ideal_flag
         # Ideal limit (Fortran rmatch coil%ideal_flag, match.f): skip the inner layer entirely
@@ -119,11 +119,10 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         end
 
         # --- assemble the 4·msing matching system (match.f) ---
-        delta_out = gal_result.delta[1:2msing, 1:2msing]   # outer Δ′ plasma block
         mat = zeros(ComplexF64, 4msing, 4msing)
         rmat = zeros(ComplexF64, 4msing, mcoil)
-        @views mat[(2msing+1):4msing, 1:2msing] .= transpose(delta_out)          # Δ_out
-        @views rmat[(2msing+1):4msing, :] .= .-transpose(gal_result.delta_coil)  # −Δ_coil source
+        @views mat[(2msing+1):4msing, 1:2msing] .= transpose(dp.raw)   # Δ_out
+        @views rmat[(2msing+1):4msing, :] .= .-dp.coil                 # −Δ_coil source (already surface-side × edge mode)
         for ising in 1:msing
             idx1 = 2ising - 1
             idx2 = 2ising
@@ -232,53 +231,4 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
     end
 
     return GalMatchResult(cout, cin, xi, xi_deriv, deltar, bpen, inner_psi, inner_xi, inner_b, inner_params, rpec_eig, residual)
-end
-
-"""
-    gal_matched_odestate(gal_result, ffit, intr) -> OdeState
-
-Pack the RPEC-matched outer solution into an `OdeState` shaped exactly like the shooting integrator's,
-so `PerturbedEquilibrium` consumes it unchanged. Mirrors Fortran `idcon_build`'s gal branch
-(idcon.f) and `globalsol.bin` (the on-surface `issing` points are dropped, match.f):
-
-  - `u_store[:,:,1,ip] = ξ_ψ`  (matched fundamental matrix, mode×coil-drive, identity-at-edge basis)
-  - `du_store[:,:,1,ip] = dξ_ψ/dψ`  (analytic)
-  - `xi_s_store[:,:,ip] = ξ_s = −A⁻¹(B·ξ′ + C·ξ)`  via `ffit` (same outer ideal-MHD relation as `sing_der!`)
-  - `u_store[:,:,2] = 0`  (PE never reads it; matches Fortran's unused u2 in the gal path)
-
-The grid is the gal-native grid (inner→edge); `step` indexes the edge so `build_flux_matrix` derives the
-edge BC from `u_store[:,:,1,step]`.
-"""
-function gal_matched_odestate(gal_result::GalerkinResult, ffit::FourFitVars, intr::ForceFreeStatesInternal)
-    gal_result.match !== nothing || error("gal_matched_odestate: no match result (run with gal_match_flag=true)")
-    sol = gal_result.solution
-    m = gal_result.match
-    mpert = intr.numpert_total
-
-    # Drop the on-surface (issing) grid points — zero placeholders where the resonant series diverges.
-    keep = .!sol.issing
-    psi_f = sol.psi[keep]
-    q_f = sol.q[keep]
-    xi_f = m.xi[:, keep, :]          # (mpert, ngrid_f, mcoil)
-    dxi_f = m.xi_deriv[:, keep, :]
-    ngrid_f = length(psi_f)
-
-    u_store = zeros(ComplexF64, mpert, mpert, 2, ngrid_f)
-    du_store = zeros(ComplexF64, mpert, mpert, ngrid_f)
-    xi_s_store = zeros(ComplexF64, mpert, mpert, ngrid_f)
-
-    hint = Ref(1)
-    for ip in 1:ngrid_f
-        ξ = @view xi_f[:, ip, :]
-        ξ′ = @view dxi_f[:, ip, :]
-        @views u_store[:, :, 1, ip] .= ξ
-        @views du_store[:, :, ip] .= ξ′
-        # ξ_s = −A⁻¹(B·ξ′ + C·ξ), the same node quantity the Euler-Lagrange path computes.
-        @views compute_node_xi_s!(xi_s_store[:, :, ip], ξ′, ξ, ffit, psi_f[ip]; hint=hint)
-    end
-
-    # Derivatives here are the analytic galerkin ξ′, not recomputable from the ODE kernel.
-    return OdeState(; numpert_total=mpert, numunorms_init=1, msing=gal_result.msing, numsteps_init=ngrid_f,
-        step=ngrid_f, total_steps=ngrid_f, psi_store=psi_f, q_store=q_f, u_store=u_store, du_store=du_store,
-        xi_s_store=xi_s_store, du_store_populated=true)
 end
