@@ -94,6 +94,23 @@ end
             end
         end
 
+        # A gpec.h5 written before the integrator refactor embeds retired keys such as
+        # `use_parallel` in its gpec_toml_raw, so a replay must warn and drop them rather than
+        # failing on an unknown keyword. The override flag stands in for that stale blob.
+        @testset "retired ForceFreeStates keys are warned and ignored on replay" begin
+            mktempdir() do out_dir
+                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
+                @test inputs["ForceFreeStates"]["use_parallel"] == true
+
+                @test_logs (:warn,) GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(inputs["ForceFreeStates"], GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
+                @test !haskey(inputs["ForceFreeStates"], "use_parallel")
+
+                # With the key gone the control struct builds again, on the default integrator.
+                ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+                @test ctrl.integrator in ("forward", "riccati")
+            end
+        end
+
         @testset "rerun refuses to overwrite its own source" begin
             # Default output is `<basename>_rerun.h5`, so clobbering only happens if the user
             # routes the rerun back onto the source file; exercise that guard.

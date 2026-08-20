@@ -28,7 +28,7 @@ Coil settings (used when `forcing_data_format = "coil"`):
   - `nzeta_coil::Int` - Toroidal grid resolution; 0 = auto (32 × n)
   - `coil_sets_raw::Vector{Dict{String,Any}}` - Parsed `[[ForcingTerms.coil_set]]` TOML blocks
 """
-Base.@kwdef mutable struct ForcingTermsControl
+@kwdef struct ForcingTermsControl
     # Forcing data file settings (ascii/hdf5 formats)
     forcing_data_file::String = "forcing.dat"
     forcing_data_format::String = "ascii"
@@ -277,6 +277,121 @@ function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
     return forcing_modes
 end
 
-export ForcingTermsControl, ForcingMode, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
+"""
+    RMPField
+
+Abstract supertype of every external-forcing description the scripting API accepts: a
+resonant-magnetic-perturbation field, described by where it comes from and how strongly it
+drives. Whether the source is a forcing-mode file, a coil set with currents, or (future) a
+field given on a control surface, they are all just external fields — one type drives the
+perturbed-equilibrium stage.
+
+Nothing is read from disk or computed at construction — the modes are materialized against
+an equilibrium when the perturbed-equilibrium stage runs, so one `RMPField` can drive
+several solves.
+
+## Construction
+
+    RMPField(path; format=..., scale=1.0, kwargs...)
+    RMPField(coil_sets::Vector{Dict{String,Any}}; scale=1.0, kwargs...)
+    RMPField(ctrl::ForcingTermsControl; scale=1.0)
+
+The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
+or `.hdf5` extension and `"ascii"` otherwise. The second form takes TOML-shaped coil blocks
+(the `[[ForcingTerms.coil_set]]` layout) and selects the coil format. Remaining `kwargs` are
+[`ForcingTermsControl`](@ref) fields. All three return a single-source leaf
+([`RMPSource`](@ref)).
+
+## Algebra
+
+`RMPField`s form a vector space: `+`, `-` and multiplication by a scalar (real or complex —
+a complex factor phase-rotates the perturbation) build lazy linear combinations without
+materializing anything. The perturbed-equilibrium response is linear in the forcing, so
+materializing a combination equals combining the materialized sources: each term is
+evaluated on the control surface and the mode amplitudes are summed.
+
+```julia
+nominal = RMPField("nominal_efc.dat")
+weld_field = RMPField("weld_fields.h5"; scale=0.5)
+total = 2.0 * nominal + weld_field       # lazy: records terms and weights, computes nothing
+pe = perturbed_equilibrium(ffs, total)   # materializes each term, sums, drives PE
+```
+
+Amplitude lives with the forcing description itself: per-conductor currents for the coil
+format, per-mode `ForcingMode.amplitude` for the file formats. `scale` is NOT a physical
+amplitude — it is the source's weight in a linear combination, applied to the materialized
+control-surface spectrum uniformly across every toroidal mode (format-independent). Sources
+that are not scalar multiples of each other get their own description and the algebra: a
+coil set with a failed conductor is not `0.9 * nominal`, it is `nominal - failed_coil` (or
+its own source); a magnetic-material field should be computed at the operating point by the
+code that owns its physics, with the weight meaningful only for small linear excursions.
+A per-n weight dictionary is not supported yet; it needs an n-keyed concept ForcingTerms
+does not have.
+"""
+abstract type RMPField end
+
+"""
+    RMPSource
+
+A single-source [`RMPField`](@ref) leaf: one forcing description plus a complex weight.
+Built by the `RMPField` constructors; scalar multiplication rescales the weight.
+
+## Fields
+
+  - `ctrl::ForcingTermsControl` - The forcing source: format, file path or machine, and the raw coil-set blocks.
+  - `scale::ComplexF64` - The source's weight in a linear combination, applied to the materialized control-surface spectrum (complex = phase rotation). Not a physical amplitude.
+"""
+struct RMPSource <: RMPField
+    ctrl::ForcingTermsControl
+    scale::ComplexF64
+end
+
+"""
+    RMPFieldSum
+
+A lazy linear combination of [`RMPSource`](@ref) leaves, built by `+`/`-` on
+[`RMPField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
+the leaves. Materialization evaluates each term against the equilibrium and sums the mode
+amplitudes — valid because the perturbed-equilibrium response is linear in the forcing.
+
+## Fields
+
+  - `terms::Vector{RMPSource}` - The flattened weighted sources.
+"""
+struct RMPFieldSum <: RMPField
+    terms::Vector{RMPSource}
+end
+
+"""
+    _infer_format(path) -> String
+
+Forcing-data format implied by a file extension: `"hdf5"` for `.h5`/`.hdf5`, else `"ascii"`.
+"""
+_infer_format(path::AbstractString) = lowercase(splitext(path)[2]) in (".h5", ".hdf5") ? "hdf5" : "ascii"
+
+RMPField(ctrl::ForcingTermsControl; scale::Number=1.0) = RMPSource(ctrl, ComplexF64(scale))
+
+function RMPField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0, kwargs...)
+    ctrl = ForcingTermsControl(; forcing_data_file=abspath(path), forcing_data_format=format, kwargs...)
+    return RMPSource(ctrl, ComplexF64(scale))
+end
+
+function RMPField(coil_sets::Vector{Dict{String,Any}}; scale::Number=1.0, kwargs...)
+    ctrl = ForcingTermsControl(; forcing_data_format="coil", coil_sets_raw=coil_sets, kwargs...)
+    return RMPSource(ctrl, ComplexF64(scale))
+end
+
+"Flattened weighted-leaf list of any [`RMPField`](@ref)."
+_rmp_terms(f::RMPSource) = [f]
+_rmp_terms(f::RMPFieldSum) = f.terms
+
+Base.:+(a::RMPField, b::RMPField) = RMPFieldSum(vcat(_rmp_terms(a), _rmp_terms(b)))
+Base.:-(a::RMPField) = -1 * a
+Base.:-(a::RMPField, b::RMPField) = a + (-1 * b)
+Base.:*(c::Number, f::RMPSource) = RMPSource(f.ctrl, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::RMPFieldSum) = RMPFieldSum([c * t for t in f.terms])
+Base.:*(f::RMPField, c::Number) = c * f
+
+export ForcingTermsControl, ForcingMode, RMPField, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
 
 end # module ForcingTerms

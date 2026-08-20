@@ -2,7 +2,7 @@ using Pkg;
 Pkg.activate(joinpath(@__DIR__, "../.."))
 using GeneralizedPerturbedEquilibrium, Plots
 using GeneralizedPerturbedEquilibrium: Analysis
-using GeneralizedPerturbedEquilibrium: Equilibrium, ForceFreeStates
+using GeneralizedPerturbedEquilibrium: Equilibrium, ForceFreeStates, LocalStability
 using LaTeXStrings, TOML
 isinteractive() ? plotlyjs() : gr()
 
@@ -29,7 +29,7 @@ Plots.savefig(p_baloo, baloo_path)
 # ----------------------------------------------------------------------
 # Local stability: s-alpha profiles, D_I / ballooning Δ', and 2D s-alpha
 # maps (ported from the former Bal_salpha_delta_di_summary notebook).
-# These recompute directly from the equilibrium via the Ballooning.jl helpers
+# These recompute directly from the equilibrium via the LocalStability helpers
 # rather than reading gpec.h5, so the s-alpha scan can perturb (p', q').
 # ----------------------------------------------------------------------
 
@@ -66,7 +66,7 @@ for geqdsk_file in geqdsk_cases
     alpha_profile = fill(NaN, length(psi_norm))
     for i in eachindex(psi_norm)
         try
-            ref = ForceFreeStates.salpha_reference(i, equil)
+            ref = LocalStability.salpha_reference(i, equil)
             s_profile[i] = ref.s_ref
             alpha_profile[i] = ref.alpha_ref
         catch err
@@ -107,8 +107,7 @@ for geqdsk_file in geqdsk_cases
 
     # D_I (Mercier) and ballooning Δ' profiles
     locstab_fs = zeros(length(psi_norm), 5)
-    ctrl = ForceFreeStates.ForceFreeStatesControl(; verbose=false)
-    ForceFreeStates.compute_ballooning_stability!(ctrl, locstab_fs, equil; compute_delta_prime=true)
+    LocalStability.compute_ballooning_stability!(locstab_fs, equil; compute_delta_prime=true)
 
     delta_prime = Vector(locstab_fs[:, 4])
     di_profile = fill(NaN, length(psi_norm))
@@ -152,7 +151,7 @@ for geqdsk_file in geqdsk_cases
     psi_idx_scan = argmin(abs.(psi_norm .- psi_target))
     s_scales = collect(range(-5.0, 5.0; length=30))
     alpha_scales = collect(range(-5.0, 5.0; length=30))
-    scan = ForceFreeStates.scan_delta_prime_map(psi_idx_scan, equil; theta_k=0.0, s_scales=s_scales, alpha_scales=alpha_scales)
+    scan = LocalStability.scan_delta_prime_map(psi_idx_scan, equil; theta_k=0.0, s_scales=s_scales, alpha_scales=alpha_scales)
 
     scan_qprime = scan.dqdpsi_ref .* scan.s_scales
     scan_pprime = scan.pprime_ref .* scan.alpha_scales
@@ -210,8 +209,8 @@ for geqdsk_file in geqdsk_cases
     Plots.savefig(p_zero, zero_path)
 
     # BALOO-style α vs ψ stability boundaries (1st and 2nd) over the Δ'(ψ, α) map
-    bnd = ForceFreeStates.ballooning_alpha_boundaries(ctrl, equil)
-    dpmap = ForceFreeStates.ballooning_delta_prime_map(ctrl, equil)
+    bnd = LocalStability.ballooning_alpha_boundaries(equil)
+    dpmap = LocalStability.ballooning_delta_prime_map(equil)
     p_alpha_bnd = Analysis.ForceFreeStates.plot_ballooning_alpha_boundaries(bnd, dpmap)
     display(p_alpha_bnd)
     alpha_bnd_path = joinpath(@__DIR__, "alpha_stability_boundary_$(case_label).png")

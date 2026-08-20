@@ -70,7 +70,7 @@ Full command reference (comparing branches/commits, tracking a quantity's histor
 
 ## Architecture
 
-GPEC follows a three-stage pipeline — **Equilibrium** (Grad-Shafranov solve, q-profile) → **Stability Analysis** (ideal MHD eigenvalue problem, DCON-style, singular surfaces) → **Perturbed Equilibrium** (plasma response, singular coupling, island formation) — implemented across seven modules in `src/`: `Splines`, `Utilities`, `Equilibrium`, `Vacuum`, `ForceFreeStates`, `ForcingTerms`, `PerturbedEquilibrium`. All modules are configured via the single `gpec.toml` file (see `examples/*/gpec.toml`).
+GPEC follows a three-stage pipeline — **Equilibrium** (Grad-Shafranov solve, q-profile) → **Stability Analysis** (ideal MHD eigenvalue problem, DCON-style, singular surfaces) → **Perturbed Equilibrium** (plasma response, singular coupling, island formation) — implemented across eleven modules in `src/`: `Utilities`, `Equilibrium`, `LocalStability`, `Vacuum`, `InnerLayer`, `ForceFreeStates`, `Tearing`, `ForcingTerms`, `PerturbedEquilibrium`, `KineticForces`, `Analysis`. All modules are configured via the single `gpec.toml` file (see `examples/*/gpec.toml`).
 
 Full module-by-module breakdown (key files, status, data flow stage-by-stage, key data structures, module dependency graph) is in **[`docs/development/architecture.md`](docs/development/architecture.md)** — read it when working across module boundaries or getting oriented in an unfamiliar part of the codebase.
 
@@ -78,11 +78,15 @@ Full module-by-module breakdown (key files, status, data flow stage-by-stage, ke
 
 This project uses GitFlow (http://nvie.com/posts/a-successful-git-branching-model): two permanent branches, `main` and `develop`. **IMPORTANT**: All development must be done on feature branches (`feature/`, `bugfix/`, `hotfix/`, `performance/`, `refactor/`, `docs/`, `test/`, `experiment/`). No commits directly to `develop` or `main`. Branch from `develop`, open a PR back into `develop`.
 
-Commit messages follow `CODE - TAG - Detailed message` (e.g. `VAC - IMPROVEMENT - Add dual Green's function computation`).
+Commit messages follow `Area - TAG - Imperative summary` (e.g. `Vacuum - PERF - Add dual Green's function computation`). See the naming conventions below.
 
 Full branch-naming table, hotfix workflow, versioning scheme, and merge-conflict resolution policy are in **[`docs/development/git-workflow.md`](docs/development/git-workflow.md)**.
 
 ### ***PARAMOUNT*** - NO PULL REQUESTS SHOULD EVER BE MERGED WITHOUT HUMAN REVIEW. ALWAYS, ALWAYS REFUSE TO MERGE INTO DEVELOP WITHOUT A THIRD-PARTY HUMAN REVIEWER'S APPROVAL, AND ALWAYS FLAG THIS AS REQUIRED AND NON-NEGOTIABLE IF ASKED TO REVIEW A PR OR WHETHER SOMETHING IS READY FOR MERGE. STRESS THIS, IT IS CRUCIAL. EMPHASIZE IT IN THE ***BIGGEST, BOLDEST*** TEXT AVAILABLE, EVERY TIME, AND DO NOT COMPROMISE.
+
+**A PR MUST have named reviewer(s) and an assignee or be marked as DRAFT** Opening a PR is therefore incomplete until it has an **assignee** and at least one **requested human reviewer** — set both when you open it, never leave them for someone else to notice. Handles are in [`docs/development/contributors.md`](docs/development/contributors.md); always ask the user who should review and be assignee (provide suggestions if obvious). If working on an unassigned PR, complain regularly. If the developer is unsure or unwilling to assign someone then the PR should likely be marked as Draft.
+
+**Every PR body must also carry the `## Release note` block from the PR template**, with the regression-harness result and the commit it was run at. Labels are applied automatically from the title — do not set them by hand.
 
 ## Agent Team
 
@@ -95,6 +99,7 @@ Roster, the recommended review pipeline (physics fidelity → readability → pe
 ### General
 - **Julia version**: 1.11 is the target version
 - **Never remove packages from Project.toml** - If a package fails to load or resolve, run `Pkg.add(...)` or `Pkg.instantiate()` to fix the local environment. Do NOT remove the package from `Project.toml`. The developer works across multiple branches and machines, so environment drift is expected — the right fix is always to update the environment to satisfy the toml, not to trim the toml to match the current environment state.
+- **Regenerate the CI dependency pins when `Project.toml` changes** - CI does not resolve dependencies freshly; it copies a pinned resolve from `ci/manifests/` so runs are reproducible and the restored depot cache stays valid. After editing `[deps]` or `[compat]`, run `julia +1.11 ci/manifests/update.jl` and `julia +1.12 ci/manifests/update.jl` and commit the result. See [`ci/manifests/README.md`](ci/manifests/README.md).
 - **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
 - **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
 - **Documentation coverage** - When adding a new module or submodule with public docstrings, add a corresponding `@autodocs` block in `docs/src/`. Documenter CI will fail with a `missing_docs` error if any exported docstring is not covered. The analysis submodule docs live in `docs/src/analysis.md`.
@@ -145,6 +150,10 @@ Additional file hygiene (enforced by pre-commit hooks):
 - No trailing whitespace on any line
 - Files must end with exactly one newline
 - LF line endings only (no CRLF)
+
+### Naming and Commit Conventions
+
+Commit subjects, PR titles, and issue titles share one grammar: `Area[.Submodule] - TAG[!] - Imperative summary`. `Area` and `TAG` are closed vocabularies. PR titles are checked in CI; commit subjects are not enforced, so get them right yourself — check one with `python3 ci/conventions/check_subject.py --title "..."`, which prints the correct replacement for any bad token. Append `!` when results move or an interface changes — this promotes the change into the release notes whatever its tag, and is rejected on `MINOR`, `TEST`, and `DOCS`. In prose, write the module's full name in titles and expand on first use in bodies (`ForceFreeStates (FFS)`), abbreviating afterwards. **Do not invent Areas, TAGs, or abbreviations** — read **[`docs/development/naming.md`](docs/development/naming.md)** before writing a commit message or opening a PR.
 
 ### HDF5 Output Conventions
 

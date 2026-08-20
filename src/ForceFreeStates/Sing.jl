@@ -115,7 +115,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
-    intr.psilim = equil.config.psihigh
+    intr.psilim = equil.params.psihigh_resolved
 
     # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent). The cutoff reads
     # the *resolved* toroidal range on `intr`, so callers must assign intr.nlow / intr.nhigh
@@ -1185,7 +1185,7 @@ caller's interval-search accelerators, so concurrent callers just pass their own
 """
 @with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     kinetic::Bool, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
-    intr::ForceFreeStatesInternal, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
+    intr::ModeSpace, psieval::Float64, spline_hint::Base.RefValue{Int}, ffit_hint::Base.RefValue{Int})
 
     # Allocate temporary arrays from the pool
     Npert = intr.numpert_total
