@@ -38,5 +38,4 @@ scratch/
 
 # Local profiling scratch (one-off study scripts, not part of the package)
 profiling/
-examples/b_crit_standalone_example/
 src/Tearing/CriticalResonantField/CRF Dev/
