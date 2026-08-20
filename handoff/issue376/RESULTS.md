@@ -1333,6 +1333,41 @@ blocker, unchanged).
 Landed as **PR #414** (`feature/kinetic-axis-validity`, stacked on #408; #410 will rebase onto
 it). Review package: https://claude.ai/code/artifact/09745676-ff9b-49c6-a14b-74f093427d00
 
+## 30. The develop baseline: the DIII-D kinetic step explosion is a #398 regression, and suppression still wins
+
+User challenge (2026-08-20): compare against "the dumb way on develop" — ad-hoc auto grid, kinetic
+matrices on it, no adjustments. Measured (same FFS-only deck everywhere):
+
+| | grid / kernel evals | et[1] | nstep_total | FFS wall |
+|---|---|---|---|---|
+| develop c42d558ef | 554 / 554 | 1.006441 − 0.259620i | **7,972** | 427 s |
+| #398 only (de0db4f55) | 288 / 288 | 1.005545 − 0.259371i | 223,271 | 1079 s |
+| #398 + cap (0c17097b5) | 288 / 288 | identical to all digits | 223,271 | 1042 s |
+| stack suppressed (#414) | 288 / ~258 | 1.005298 − 0.259472i | **4,246** | 365 s |
+
+**Develop does not explode.** Bisection: #398 alone reproduces the full-stack 223,271 bit-for-bit
+(et to all printed digits); the cap adds nothing; the certified commits are exonerated (their
+knob-off inertness now verified on DIII-D kinetic too). The explosion is a **#398-introduced
+regression**, disclosed in that PR's body.
+
+**The mechanism is NOT any of the obvious candidates** — all checked and identical between
+develop and #398 at every stored digit: core grid (22 knots below ψ=0.01, same min Δψ=1.15e-4),
+near-axis kinetic increments (G: 1090→634→452, same ~ψ^−0.7 divergence), spline third-derivative
+jumps J (same to 2 digits), condition numbers of f0/A, integration start point (ψ=1.1268e-4,
+q=1.2044), crit (no zero crossings, same values), and solution norms. The grind is localized at
+ψ ≈ 0.0012–0.0015 (77k steps in two grid intervals; median step 9e-9 vs develop's 2e-6, min
+7e-12). dense_off (367-knot stack grid) still exploded, ruling out simple grid-size arguments.
+Open follow-up: the F-matrix spline (not written to gpec.h5) and the step-control internals are
+the remaining un-compared inputs; in-process instrumentation (log rejected steps and the
+error-dominating component) is the next probe.
+
+**Consequences**: (1) #414's narrative reframed — it cures a stack regression AND beats the
+develop baseline on every axis (steps 4,246 vs 7,972; kernel evals ~258 vs 554, develop spending
+45 evals below ψ_c on invalid physics; et within 1.1e-3 of develop). (2) A DIII-D
+kinetic-calculated FFS-only regression-harness case is needed — this whole class of regression
+was invisible to the suite. (3) The a10 A/B stands: suppression removes model-invalid damping
+(Im et[1] −0.0076 → −0.0000) with Re unchanged; high-ρ* machines need FOW physics.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
