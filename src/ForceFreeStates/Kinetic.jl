@@ -168,10 +168,18 @@ function make_kinetic_matrix(
     intr::ForceFreeStatesInternal,
     metric::MetricData;
     calculated_source::Union{Nothing,Function}=nothing,
-    resonance_psis::Vector{Float64}=Float64[]
+    resonance_psis::Vector{Float64}=Float64[],
+    axis_validity_psi_c::Float64=0.0
 )
     xs = metric.xs
     mpsi = length(xs)
+
+    # The near-axis validity envelope (KineticForces) has structure on the scale of the
+    # suppression boundary; coarse equilibrium grids cannot represent env·(increment), and the
+    # spline overshoot can land on a rational surface. Pin the band ends (the smoothstep is
+    # only C² there) and resolve the transition with a fixed set of knots.
+    band_knots(lo, hi) = axis_validity_psi_c > 0 ?
+                         [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=9) if lo < x < hi] : Float64[]
 
     # Get raw kinetic matrices (scaling is baked into each source)
     if ctrl.kinetic_source == "fixed"
@@ -203,6 +211,7 @@ function make_kinetic_matrix(
                 any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rats) && push!(seed, x)
             end
             append!(seed, filter(p -> lo < p < hi, resonance_psis))
+            append!(seed, band_knots(lo, hi))
             anchors = sort!(filter(r -> lo < r < hi, unique(rats)))
             spans = [lo; anchors; hi]
             nbetween = 4   # interior points per span: cubic-spline support everywhere before round one
@@ -233,7 +242,14 @@ function make_kinetic_matrix(
                 ideal_scales, ctrl.kinetic_grid_tol, rationals; verbose=ctrl.verbose)
             mpsi = length(xs)
         else
-            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
+            band = band_knots(xs[1], xs[end])
+            if isempty(band)
+                kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
+            else
+                xs = sort!(unique!(vcat(collect(xs), band)))
+                mpsi = length(xs)
+                kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit; psis=xs)
+            end
         end
         kw_flat .*= ctrl.kinetic_factor
         kt_flat .*= ctrl.kinetic_factor
