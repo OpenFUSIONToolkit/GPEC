@@ -71,7 +71,7 @@ the estimate degenerates. Panel placement only needs ~peak-width accuracy, so th
 estimates (single spline evaluations) are sufficient and no bounce averaging is performed.
 """
 function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
-                                     n::Int, nl::Int, zi::Int=1, mi::Int=2, electron::Bool=false, wdfac::Float64=1.0, xeval::Float64=2.5)
+    n::Int, nl::Int, zi::Int=1, mi::Int=2, electron::Bool=false, wdfac::Float64=1.0, xeval::Float64=2.5)
     chrg = electron ? -e : zi * e
     mass = electron ? me : mi * mp
     T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline
@@ -88,4 +88,58 @@ function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfil
 
     grid = filter(x -> x > 0, kinetic_profiles.xs)
     return _resonance_nodes_from_frequencies(wbhat_f, kinetic_profiles.omegaE_spline, wdhat_f, grid; n, nl, xeval)
+end
+
+"""
+    kinetic_axis_validity_psi(kinetic_profiles, equil; zi=1, mi=2, electron=false) → Float64
+
+ψ_N below which the zero-orbit-width drift-kinetic ordering fails: the outermost ψ on the
+kinetic-profile grid where any of the three thermal orbit-width scales reaches the local minor
+radius ⟨r⟩ — potato width `(q²ρ²R₀)^(1/3)`, banana width `q·ρ/√ε`, and poloidal gyroradius
+`q·ρ/ε` (ε = ⟨r⟩/⟨R⟩, clamped as in `kinetic_resonance_psi_nodes`; thermal gyroradius
+ρ = √(2·m·T)·/(Z·e·B₀) of the computed species). Inside this boundary trapped bananas become
+potato orbits with width comparable to r itself, so the bounce-averaged kinetic response is
+evaluated outside its validity domain (measured consequence: diverging kinetic increments and a
+pathological EL step count). Returns 0.0 when no criterion is met anywhere. The Fortran precedent
+(`ktanh_flag`, dcon/fourfit.F) suppressed the same region with four hand-tuned knobs; here the
+boundary is derived from the profiles with no user parameters.
+"""
+function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
+    zi::Int=1, mi::Int=2, electron::Bool=false)
+    chrg = electron ? e : zi * e
+    mass = electron ? me : mi * mp
+    T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline
+    q_spline = equil.profiles.q_spline
+    avg_r = equil.geometry.avg_r_spline
+    avg_R = equil.geometry.avg_R_spline
+    ro = abs(equil.ro)
+    bo = abs(equil.params.b0)
+    psi_c = 0.0
+    for psi in kinetic_profiles.xs
+        psi <= 0 && continue
+        r = avg_r(psi)
+        r <= 0 && continue
+        eps = max(r / avg_R(psi), 1e-6)
+        rho = mass * sqrt(2 * T_spline(psi) / mass) / (abs(chrg) * bo)
+        q = abs(q_spline(psi))
+        w_orbit = max(cbrt(q^2 * rho^2 * ro), q * rho / sqrt(eps), q * rho / eps)
+        w_orbit >= r && (psi_c = max(psi_c, psi))
+    end
+    return psi_c
+end
+
+"""
+    kinetic_axis_validity_envelope(psi, psi_c) → Float64
+
+C² quintic smoothstep for the near-axis kinetic suppression: 0 for ψ ≤ ψ_c (drift-kinetic model
+invalid; kernel evaluation may be skipped), rising over `[ψ_c, 2ψ_c]`, 1 above. The transition
+width is tied to ψ_c itself, so there is no independent width parameter. `psi_c ≤ 0` returns 1
+(no suppression).
+"""
+function kinetic_axis_validity_envelope(psi::Float64, psi_c::Float64)
+    psi_c <= 0 && return 1.0
+    t = (psi - psi_c) / psi_c
+    t <= 0 && return 0.0
+    t >= 1 && return 1.0
+    return t^3 * (10 + t * (6 * t - 15))
 end

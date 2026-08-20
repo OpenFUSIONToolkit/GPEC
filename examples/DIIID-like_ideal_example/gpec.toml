@@ -87,5 +87,6 @@ f0type = "maxwellian"                   # Equilibrium distribution
 moment = "pressure"                     # Pressure-moment NTV torque
 atol_xlmda = 1e-9                       # Absolute tolerance for inner pitch + energy integrations
 rtol_xlmda = 1e-5                       # Relative tolerance for inner pitch + energy integrations
+axis_validity_suppression = true        # Suppress kinetic terms where the zero-orbit-width ordering fails near the axis (profile-derived boundary, no tuning parameters)
 write_outputs_to_HDF5 = true            # Write outputs to the HDF5 file
 verbose = true                          # Enable verbose logging
