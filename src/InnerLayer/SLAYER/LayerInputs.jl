@@ -16,7 +16,7 @@
 using ..Utilities: KineticProfiles
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
     coulomb_log_e, nu_star_e
-using FastInterpolations: DerivOp
+using FastInterpolations: DerivOp, integrate
 
 """
     surface_minor_radius(equil, psi; theta=0.0) -> Float64
@@ -114,6 +114,20 @@ profiles, without an intermediate file round-trip.
     a prescribed value. (For `dc_type=:rfitzp` and `:lar`, dgeo_val is
     not consulted.)
   - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
+  - `rs_method` -- radial label defining `r_s` for the whole layer stack
+    (S, r-based shear, W_d, and the Δ' reference-length factor `k_ref` all
+    follow it together, so every choice is self-consistent). `:midplane`
+    (default): outboard-midplane chord from the magnetic axis — natural for
+    comparison with midplane diagnostics. `:halfwidth`: midplane half-chord
+    `(R_out − R_in)/2` — shift-free, the closest stand-in for the circular
+    flux label the Fitzpatrick layer formulas are derived in (reproduces the
+    cylindrical-theory label to ~1% on circular benchmark equilibria).
+    `:fsa`: θ-mean surface radius. `:volume`: cylinder-equivalent label
+    `√(V(ψ)/(2π²R₀))`, the Rutherford-literature convention. On shaped
+    equilibria the labels agree at low-q surfaces (~±3% in growth rate at
+    q=2) and diverge strongly near the edge, where the slab-layer matching
+    is label-ambiguous regardless of choice. Not exposed via TOML —
+    programmatic use only.
   - `theta`     -- poloidal angle at which to measure minor radius (default
     `0.0`, outboard midplane).
   - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`,
@@ -158,7 +172,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
     # Minor-radius extractor: `:midplane` = outboard-midplane chord
     # (original behavior); `:fsa` = θ-mean of √rzphi_rsquared, the
-    # flux-surface-averaged minor radius.
+    # flux-surface-averaged minor radius; `:halfwidth` = midplane half-chord
+    # (R_out − R_in)/2, the shift-free circular flux label; `:volume` = the
+    # cylinder-equivalent label r_V = √(V(ψ)/(2π²R₀)).
     _rs_at(ψ) =
         if rs_method === :fsa
             integrand(θ) = sqrt(equil.rzphi_rsquared((Float64(ψ), Float64(θ))))
@@ -168,11 +184,18 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
                 s += integrand((k - 0.5) / N)
             end
             s / N
+        elseif rs_method === :halfwidth
+            0.5 * (surface_minor_radius(equil, ψ; theta=0.0) +
+                   surface_minor_radius(equil, ψ; theta=0.5))
+        elseif rs_method === :volume
+            lo = 1e-4
+            V = integrate(equil.profiles.dVdpsi_spline, lo, Float64(ψ))
+            sqrt(max(V, 0.0) / (2π^2 * equil.ro))
         else
             surface_minor_radius(equil, ψ; theta=theta)
         end
     _da_dpsi_at(ψ) =
-        if rs_method === :fsa
+        if rs_method !== :midplane
             # central finite difference on _rs_at
             h = 1e-5
             lo = ψ - h
