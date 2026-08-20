@@ -87,3 +87,4 @@ f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p,
 
 [KineticForces]
 kinetic_file = "kinetic.dat"            # Kinetic profile file: psi_n, n_i, n_e, T_i, T_e, omega_E columns
+axis_validity_suppression = true        # Suppress kinetic terms where the zero-orbit-width ordering fails near the axis (profile-derived boundary, no tuning parameters)
