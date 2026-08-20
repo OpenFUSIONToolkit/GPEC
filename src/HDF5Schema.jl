@@ -151,7 +151,7 @@ const MAIN_H5_ANNOTATIONS = [
     "KineticForces/Validity/L_p" => (; long_name="pressure gradient scale length |p|/|dp/dr|", units="m", attach=(1 => "KineticForces/Validity/psi",)),
     "KineticForces/Validity/L_q" => (; long_name="safety-factor gradient scale length |q|/|dq/dr|", units="m", attach=(1 => "KineticForces/Validity/psi",)),
     "KineticForces/Validity/d_separatrix" => (; long_name="distance to the separatrix ⟨r⟩(1) − ⟨r⟩(ψ)", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/psi_c" => (; long_name="near-axis kinetic validity boundary: outermost ψ_N where a thermal orbit width reaches ⟨r⟩"),
+    "KineticForces/Validity/psi_c" => (; long_name="near-axis kinetic validity boundary: outermost ψ_N where a thermal orbit width reaches ⟨r⟩", units="1"),
     "KineticForces/Validity/envelope" =>
         (; long_name="near-axis suppression envelope applied to the calculated kinetic terms (1 = unsuppressed)", units="1", attach=(1 => "KineticForces/Validity/psi",)),
     "KineticForces/Validity/is_valid" => (;
