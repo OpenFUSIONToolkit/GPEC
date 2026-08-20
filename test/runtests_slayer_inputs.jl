@@ -158,6 +158,24 @@
         @test sl_var[1].P_perp ≈ sl_s[1].P_perp * 6.0 / 2.0 rtol = 1e-10
     end
 
+    @testset "build_slayer_inputs: rs_method radial labels are self-consistent" begin
+        sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
+        got = Dict{Symbol,Any}()
+        for rsm in (:midplane, :halfwidth, :fsa, :volume)
+            sl = build_slayer_inputs(equil, sings, profiles; bt=2.0, dr_val=0.0, rs_method=rsm)
+            got[rsm] = sl[1]
+            @test isfinite(sl[1].rs) && sl[1].rs > 0
+            @test isfinite(sl[1].k_ref) && sl[1].k_ref > 0
+            @test isfinite(sl[1].sval_r)
+        end
+        # The outboard-shifted axis compresses the outboard chord, so the shift-free
+        # half-chord is at least the outboard axis-to-edge distance.
+        @test got[:halfwidth].rs >= got[:midplane].rs
+        # Labels genuinely differ (each self-consistent set has its own rs, S, k_ref)
+        @test got[:fsa].rs != got[:midplane].rs
+        @test got[:volume].lu != got[:midplane].lu
+    end
+
     @testset "build_slayer_inputs: dc_type propagates and dr_val activates offset" begin
         sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
 
