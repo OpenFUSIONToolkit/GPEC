@@ -424,8 +424,16 @@ function main_from_inputs(
                 KineticForces.compute_calculated_kinetic_matrices(
                     c, e, i, m, f;
                     kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, psis=psis)
+        # Near-axis validity boundary for the calculated kinetic matrices: the envelope band
+        # must be resolved by the kernel grid, so make_kinetic_matrix needs its location.
+        axis_psi_c = 0.0
+        if ctrl.kinetic_source == "calculated" && kf_ctrl.axis_validity_suppression && kinetic_profiles !== nothing
+            axis_psi_c = KineticForces.kinetic_axis_validity_psi(
+                kinetic_profiles, equil;
+                zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron)
+        end
         make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
-            calculated_source=calculated_cb)
+            calculated_source=calculated_cb, axis_validity_psi_c=axis_psi_c)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
         # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;

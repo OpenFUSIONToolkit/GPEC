@@ -26,10 +26,18 @@ function make_kinetic_matrix(
     ffit::FourFitVars,
     intr::ForceFreeStatesInternal,
     metric::MetricData;
-    calculated_source::Union{Nothing,Function}=nothing
+    calculated_source::Union{Nothing,Function}=nothing,
+    axis_validity_psi_c::Float64=0.0
 )
     xs = metric.xs
     mpsi = length(xs)
+
+    # The near-axis validity envelope (KineticForces) has structure on the scale of the
+    # suppression boundary; coarse equilibrium grids cannot represent env·(increment), and the
+    # spline overshoot can land on a rational surface. Pin the band ends (the smoothstep is
+    # only C² there) and resolve the transition with a fixed set of knots.
+    band_knots(lo, hi) = axis_validity_psi_c > 0 ?
+                         [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=9) if lo < x < hi] : Float64[]
 
     # Get raw kinetic matrices (scaling is baked into each source)
     if ctrl.kinetic_source == "fixed"
@@ -41,7 +49,14 @@ function make_kinetic_matrix(
             "calling make_kinetic_matrix directly, or pass " *
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
         )
-        kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
+        band = band_knots(xs[1], xs[end])
+        if isempty(band)
+            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
+        else
+            xs = sort!(unique!(vcat(collect(xs), band)))
+            mpsi = length(xs)
+            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit; psis=xs)
+        end
         kw_flat .*= ctrl.kinetic_factor
         kt_flat .*= ctrl.kinetic_factor
     else
@@ -55,13 +70,13 @@ function make_kinetic_matrix(
     end
 
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
-    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
+    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
 
     return nothing
 end
 
 """
-    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
+    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
 
 Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and store as splines.
 This corresponds to `fourfit_kinetic_matrix` method=0 in the Fortran code (Fortran `fourfit.F` lines 1170-1260).
@@ -78,9 +93,9 @@ function _compute_fkg_matrices!(
     intr::ForceFreeStatesInternal,
     metric::MetricData,
     kw_flat::Array{ComplexF64,3},
-    kt_flat::Array{ComplexF64,3}
+    kt_flat::Array{ComplexF64,3};
+    xs::Vector{Float64}=metric.xs
 )
-    xs = metric.xs
     mpsi = length(xs)
     np = intr.numpert_total
     mpert = intr.mpert

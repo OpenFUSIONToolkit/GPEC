@@ -12,14 +12,15 @@ then write to gpec.h5 in a single pass.
 Write all KineticForces results to the "KineticForces" group in gpec.h5.
 
 # Arguments
-- `h5file::HDF5.File`: Open HDF5 file handle
-- `state::KineticForcesState`: Accumulated computation results
-- `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
-  written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
-  is directly available
+
+  - `h5file::HDF5.File`: Open HDF5 file handle
+  - `state::KineticForcesState`: Accumulated computation results
+  - `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
+    written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
+    is directly available
 """
 function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing)
-    g = create_group(h5file, "KineticForces")
+    g = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
 
     for (method_name, result) in state.method_results
         mg = create_group(g, method_name)
@@ -113,8 +114,9 @@ Write variable-length integration trajectory records using offset-indexed concat
 This is the standard HDF5 ragged array pattern for storing variable-length data.
 
 # Arguments
-- `mg::HDF5.Group`: HDF5 group for this method
-- `records::Vector{EnergyIntegrationResult}`: Integration records to write
+
+  - `mg::HDF5.Group`: HDF5 group for this method
+  - `records::Vector{EnergyIntegrationResult}`: Integration records to write
 """
 function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
     rg = create_group(mg, "EnergyIntegrals")
@@ -146,13 +148,14 @@ end
 Print a summary of KineticForces results to stdout.
 
 # Arguments
-- `state::KineticForcesState`: Accumulated computation results
-- `verbose::Bool`: Print detailed per-surface results
+
+  - `state::KineticForcesState`: Accumulated computation results
+  - `verbose::Bool`: Print detailed per-surface results
 """
 function print_summary(state::KineticForcesState; verbose::Bool=false)
     for (method_name, result) in state.method_results
         @printf("%-8s  T_phi = %11.3e   2n*dW_k = %11.3e\n",
-                method_name, real(result.total_torque), imag(result.total_torque))
+            method_name, real(result.total_torque), imag(result.total_torque))
     end
     if verbose
         for (method_name, _) in state.kinetic_matrices
