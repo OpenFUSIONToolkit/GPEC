@@ -20,7 +20,8 @@ constructor.
     Qmin::Float64 = -10.0
     Qmax::Float64 = 10.0
     n::Int = 200
-    angular_momentum_diffusivity::Union{Float64,Vector{Float64}} = 1.0
+    viscous_input_type::String = "angular_momentum_diffusivity" # Either "angular_momentum_diffusivity" or "magnetic_prandtl_number"
+    viscous_input::Any = 1.0
     store_scan::Bool = false
 end
 

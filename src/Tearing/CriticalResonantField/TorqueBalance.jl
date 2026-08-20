@@ -55,7 +55,7 @@ Returns the Q values, torque balance values, positive Q values, positive torque 
 the Q value at the peak, the critical resonant field, the index of the peak Q value, and the Δ values for each Q.
 """
 
-function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=20000)
+function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=2000)
     Qs = range(Qmin, Qmax; length=n)
     torque_out = [torque_balance_value(tb, q) for q in Qs]
     bal = [x[1] for x in torque_out]
@@ -100,16 +100,12 @@ function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=20000)
     bal_closest_Q_i = bal[idx_closest_Q_i]
 
     println(
-        "Local maxima indices: ",
-        idx_maxima,
-        " with values: ",
-        maxima,
-        " and corresponding Qs: ",
-        Qs_maxima,
-        " closest Q to Q_e: ",
-        q_closest_Q_e,
+        "Highest Qs: ",
+        [@sprintf("%.2f", q) for q in Qs_maxima],
+        ", Closest Q to Q_e: ",
+        @sprintf("%.2f", q_closest_Q_e),
         " closest Q to Q_i: ",
-        q_closest_Q_i
+        @sprintf("%.2f", q_closest_Q_i)
     )
 
     # check if 1st q_maxima is same as Q_e or Q_i from p
@@ -118,7 +114,7 @@ function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=20000)
             @warn "The first local maximum corresponds to a pole from Q_e or Q_i, but there is no second local maximum to select. Try increasing the number of Q samples scanned or adjusting the range."
             return Qs, bal, NaN, NaN, NaN, Δs
         end
-        println("Warning: The first local maximum may correspond to an electron or ion diamagnetic resonance. Selecting the second local maximum instead.")
+        @warn "The first local maximum may correspond to an electron or ion diamagnetic resonance. Selecting the second local maximum instead."
         if idx_maxima[2] == idx_closest_Q_e || idx_maxima[2] == idx_closest_Q_i
             @warn "Both the first and second local maxima correspond to poles from Q_e or Q_i. Unable to select a valid local maximum. Try increasing the number of Q samples scanned or adjusting the range."
             return Qs, bal, NaN, NaN, NaN, Δs
@@ -132,9 +128,22 @@ function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=20000)
         Qmaximum = Qs[idx_maximum]
     end
 
-    println("Selected local maximum index: ", idx_maximum, " with value: ", maximum, " and corresponding Q: ", Qmaximum)
-
     br_crit = sqrt(maximum / tb.lu * (tb.sval^2 / 2.0))
+
+    println(
+        "Critical Resonant Field at ",
+        tb.params.m,
+        "/",
+        tb.params.n,
+        " surface: ",
+        @sprintf("%.2e", br_crit),
+        " T at index: ",
+        idx_maximum,
+        " with value: ",
+        @sprintf("%.2f", maximum),
+        " and corresponding Q: ",
+        @sprintf("%.2f", Qmaximum)
+    )
 
     return Qs, bal, Qmaximum, br_crit, idx_maximum, Δs
 end

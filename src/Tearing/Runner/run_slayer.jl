@@ -359,13 +359,15 @@ end
     and the corresponding critical resoannt field values for each rational surface.
 """
 
-function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_result=nothing, profiles=nothing)
+function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_result=nothing, profiles=nothing, chi_prof=nothing)
+    slayer_ctrl = ctrl
+    ctrl = slayer_ctrl.critical_resonant_field
     ctrl.enabled || return empty_critical_resonant_field_result()
 
+    _eval(x, ψ) = x isa Real ? Float64(x) : Float64(x(ψ))
+
     profiles === nothing &&
-        throw(ArgumentError(
-            "CriticalResonantField requires kinetic profiles."
-        ))
+        throw(ArgumentError("CriticalResonantField requires kinetic profiles."))
 
     params = if slayer_result !== nothing && slayer_result.enabled && !isempty(slayer_result.params)
         slayer_result.params
@@ -382,28 +384,65 @@ function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_re
     Q0_vec = Float64[]
     P_vec = Float64[]
     scan_data = NamedTuple[]
-    # check if angular_momentum_diffusivity is list or value
 
-    if isa(ctrl.angular_momentum_diffusivity, AbstractArray)
-        chi_vec = ctrl.angular_momentum_diffusivity
+    if ctrl.viscous_input_type === "angular_momentum_diffusivity"
+        if ctrl.viscous_input === false
+            chi_vec = nothing
+            use_P = false
+        elseif ctrl.viscous_input isa AbstractArray
+            chi_vec = ctrl.viscous_input
+            use_P = false
+        elseif ctrl.viscous_input isa Number
+            chi_vec = fill(ctrl.viscous_input, length(params))
+            use_P = false
+        else
+            throw(ArgumentError("Invalid viscous_input for angular_momentum_diffusivity."))
+        end
+
+    elseif ctrl.viscous_input_type === "magnetic_prandtl_number"
+        chi_vec = nothing
+        use_P = true
+        if ctrl.viscous_input isa AbstractArray
+            P_vec = ctrl.viscous_input
+        elseif ctrl.viscous_input isa Number
+            P_vec = fill(ctrl.viscous_input, length(params))
+        elseif ctrl.viscous_input === false
+            use_P = false
+        else
+            throw(ArgumentError("Invalid viscous_input for magnetic_prandtl_number."))
+        end
+
     else
-        chi_vec = fill(ctrl.angular_momentum_diffusivity, length(params))
+        throw(ArgumentError(
+            "Invalid viscous_input_type: $(ctrl.viscous_input_type). " *
+            "Must be 'angular_momentum_diffusivity' or 'magnetic_prandtl_number'."
+        ))
     end
 
     for (isurf, p) in enumerate(params)
+
         psi_here = intr[isurf].psifac
         omega_here = profiles(psi_here).omega
         Q0_here = p.tauk * omega_here
-        eta_here = p.eta # resistivity at the rational surface
-        chi_here = chi_vec[isurf] # angular momentum diffusivity at the rational surface
+        eta_here = p.eta
 
-        # Note, P = τ_R / τ_V (Cole PoP 2006), τ_R = μ₀ r_s² / η, τ_V = ρ r_s² / μ
-        # Therefore, P = τ_R / τ_V = μ₀ μ / (η ρ), and with χ_φ = μ / ρ, P = μ₀ χ_φ / η
-
-        P_here = (4π * 1e-7) .* abs.(chi_here) ./ eta_here
+        if use_P
+            P_here = P_vec[isurf]
+        elseif chi_vec === nothing
+            try
+                chi_here = _eval(chi_prof, psi_here)
+            catch
+                @warn "CriticalResonantField: chi_prof is not provided, using control chi_perp as fallback."
+                chi_here = slayer_ctrl.chi_perp
+            end
+            P_here = (4π * 1e-7) * abs(chi_here) / eta_here
+        else
+            chi_here = chi_vec[isurf]
+            P_here = (4π * 1e-7) * abs(chi_here) / eta_here
+        end
 
         if P_here < 1
-            @warn("CriticalResonantField: P < 1 at surface $isurf (P = $P_here). The model is invalid for P < 1.")
+            @warn "CriticalResonantField: P < 1 at surface $isurf (P = $P_here)."
         end
 
         tb = TorqueBalance(
@@ -416,7 +455,12 @@ function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_re
         )
 
         Qs, bal, Qpeak, br_crit, Qpeak_ind, Δs =
-            torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
+            torque_balance_scan(
+                tb;
+                Qmin=ctrl.Qmin,
+                Qmax=ctrl.Qmax,
+                n=ctrl.n
+            )
 
         push!(surface_index, isurf)
         push!(Qpeak_vec, Qpeak)
@@ -424,23 +468,24 @@ function run_critical_resonant_field(equil, intr, ctrl; dir_path="./", slayer_re
         push!(Q0_vec, Q0_here)
         push!(P_vec, P_here)
 
-        scan_entry = (
-            surface=isurf,
-            Q=collect(Qs),
-            balance=collect(bal),
-            delta=collect(Δs),
-            Qpeak=Qpeak,
-            br_crit=br_crit,
-            Q0=Q0_here,
-            P=P_here,
-            lu=p.lu,
-            sval=p.sval_r,
-            m=p.m,
-            n=p.n,
-            params=p
+        push!(
+            scan_data,
+            (
+                surface=isurf,
+                Q=collect(Qs),
+                balance=collect(bal),
+                delta=collect(Δs),
+                Qpeak=Qpeak,
+                br_crit=br_crit,
+                Q0=Q0_here,
+                P=P_here,
+                lu=p.lu,
+                sval=p.sval_r,
+                m=p.m,
+                n=p.n,
+                params=p
+            )
         )
-        push!(scan_data, scan_entry)
-
     end
 
     return CriticalResonantFieldResult(
@@ -565,8 +610,8 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
     # include critical resonant filed workflow here
     if control.critical_resonant_field.enabled
         slayer_result = run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
-        crf_result = run_critical_resonant_field(equil, surfaces, control.critical_resonant_field;
-            dir_path=dir_path, slayer_result=slayer_result, profiles=profiles)
+        crf_result = run_critical_resonant_field(equil, surfaces, control;
+            dir_path=dir_path, slayer_result=slayer_result, profiles=profiles, chi_prof=chi_perp)
         combined_result = SLAYERResult(
             slayer_result.enabled,
             slayer_result.control,

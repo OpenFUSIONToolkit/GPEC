@@ -9,6 +9,7 @@ module CriticalResonantField
 
 using LinearAlgebra
 using StaticArrays
+using Printf
 
 using ..InnerLayer
 using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
