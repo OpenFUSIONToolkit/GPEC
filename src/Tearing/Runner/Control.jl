@@ -7,6 +7,41 @@
 #
 # `CriticalResonantFieldControl` holds the user-facing knobs that drive the critical resonant field
 # analysis. Populated either directly via the `@kwdef` constructor or by parsing the `[CriticalResonantField]` section of a `gpec.toml`.
+"""
+    CriticalResonantFieldControl
+
+Configuration for the critical resonant field analysis. All fields are
+user-facing: read from the `[CriticalResonantField]` TOML section of a `gpec.toml` via
+`critical_resonant_field_control_from_toml`, or built directly via the `@kwdef` keyword
+constructor.
+"""
+@kwdef struct CriticalResonantFieldControl
+    enabled::Bool = false
+    Qmin::Float64 = -10.0
+    Qmax::Float64 = 10.0
+    n::Int = 200
+    angular_momentum_diffusivity::Union{Float64,Vector{Float64}} = 1.0
+    store_scan::Bool = false
+end
+
+function critical_resonant_field_control_from_toml(section::AbstractDict)
+    flat = Dict{String,Any}()
+    for (k, v) in section
+        flat[k] = v
+    end
+
+    kwargs = Dict{Symbol,Any}()
+    for (k, v) in flat
+        sym = Symbol(k)
+        if sym in (:inner_model,)
+            kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
+        else
+            kwargs[sym] = v
+        end
+    end
+
+    return CriticalResonantFieldControl(; kwargs...)
+end
 
 """
     SLAYERControl
@@ -158,6 +193,9 @@ there is one consistent interface for resistive and kinetic profiles.
     profile_group::String = "/"
 
     store_scan::Bool = false
+
+    # Critical resonant field analysis. Enabled via `[SLAYER.CriticalResonantField]` TOML section.
+    critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
 end
 
 const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
@@ -227,6 +265,10 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "pole_threshold") && (flat["pole_threshold"] = v["pole_threshold"])
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
             haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
+        elseif k == "CriticalResonantField" && v isa AbstractDict
+            flat["critical_resonant_field"] =
+                critical_resonant_field_control_from_toml(v)
+
         else
             flat[k] = v
         end
@@ -270,42 +312,4 @@ function slayer_control_from_toml(section::AbstractDict)
         end
     end
     return validate(SLAYERControl(; kwargs...))
-end
-
-"""
-    CriticalResonantFieldControl
-
-Configuration for the critical resonant field analysis. All fields are
-user-facing: read from the `[CriticalResonantField]` TOML section of a `gpec.toml` via
-`critical_resonant_field_control_from_toml`, or built directly via the `@kwdef` keyword
-constructor.
-"""
-@kwdef struct CriticalResonantFieldControl
-    enabled::Bool = false
-    inner_model::Symbol = :slayer_fitzpatrick
-    Qmin::Float64 = -10.0
-    Qmax::Float64 = 10.0
-    n::Int = 200
-    profile_file::String = ""
-    profile_group::String = "/"
-    store_scan::Bool = false
-end
-
-function critical_resonant_field_control_from_toml(section::AbstractDict)
-    flat = Dict{String,Any}()
-    for (k, v) in section
-        flat[k] = v
-    end
-
-    kwargs = Dict{Symbol,Any}()
-    for (k, v) in flat
-        sym = Symbol(k)
-        if sym in (:inner_model,)
-            kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
-        else
-            kwargs[sym] = v
-        end
-    end
-
-    return CriticalResonantFieldControl(; kwargs...)
 end

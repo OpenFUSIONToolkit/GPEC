@@ -9,6 +9,37 @@
 # viscous torque, and electromagnetic torque are also stored for plotting.
 
 """
+    CriticalResonantFieldResult
+
+Output of `run_critical_resonant_field`. Carries both summary critical resonant field values and if `control.store_scan` is true, the full Q scan data, viscous torque, and electromagnetic torque for plotting.
+"""
+
+struct CriticalResonantFieldResult
+    enabled::Bool
+    params::AbstractVector{<:InnerLayerParameters}
+    surface_index::Vector{Int}
+    Qpeak::Vector{Float64}
+    br_crit::Vector{Float64}
+    Q0::Vector{Float64}
+    P::Vector{Float64}
+    scan_data::Vector{NamedTuple}
+end
+
+function empty_critical_resonant_field_result()
+    return CriticalResonantFieldResult(
+        false,
+        InnerLayerParameters[],
+        Int[],
+        Float64[],
+        Float64[],
+        Float64[],
+        Float64[],
+        NamedTuple[]
+    )
+end
+
+
+"""
     SLAYERResult
 
 Output of `run_slayer`. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
@@ -55,46 +86,18 @@ struct SLAYERResult
     coupled_extraction::Union{Nothing,GrowthRateResult}
     layer_widths::Vector{LayerWidths}
     scan_data::Vector{Union{ScanResult,AMRResult}}
+    critical_resonant_field::CriticalResonantFieldResult
 end
 
 # Empty result (enabled=false path)
 function empty_slayer_result(control::SLAYERControl)
     return SLAYERResult(false, control,
-                        SLAYERParameters[],
-                        Float64[], Float64[],
-                        zeros(ComplexF64, 0, 0),
-                        ComplexF64[], Float64[], Float64[],
-                        GrowthRateResult[], nothing,
-                        LayerWidths[],
-                        Union{ScanResult,AMRResult}[])
-end
-
-"""
-    CriticalResonantFieldResult
-
-Output of `run_critical_resonant_field`. Carries both summary critical resonant field values and if `control.store_scan` is true, the full Q scan data, viscous torque, and electromagnetic torque for plotting.
-"""
-
-struct CriticalResonantFieldResult
-    enabled::Bool
-    params::AbstractVector{<:InnerLayerParameters}
-    surface_index::Vector{Int}
-    Qpeak::Vector{Float64}
-    br_crit::Vector{Float64}
-    Q0::Vector{Float64}
-    P::Vector{Float64}
-    scan_data::Vector{NamedTuple}
-end
-
-function empty_critical_resonant_field_result()
-    return CriticalResonantFieldResult(
-        false,
-        InnerLayerParameters[],
-        Int[],
-        Float64[],
-        Float64[],
-        Float64[],
-        Float64[],
-        NamedTuple[]
-    )
+        SLAYERParameters[],
+        Float64[], Float64[],
+        zeros(ComplexF64, 0, 0),
+        ComplexF64[], Float64[], Float64[],
+        GrowthRateResult[], nothing,
+        LayerWidths[],
+        Union{ScanResult,AMRResult}[],
+        empty_critical_resonant_field_result())
 end

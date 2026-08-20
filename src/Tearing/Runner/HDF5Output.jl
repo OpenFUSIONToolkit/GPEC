@@ -38,6 +38,10 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     # disjoint field sets, so readers must not have to infer it from the schema.
     attrs(g)["layer_model"] = result.enabled ? _layer_model_token(eltype(result.params)) : "none"
 
+    if result.critical_resonant_field.enabled
+        write_critical_resonant_field_hdf5!(g, result.critical_resonant_field)
+    end
+
     if !result.enabled    # nothing else to write
         _annotate_tearing!(g)
         return g
@@ -60,10 +64,7 @@ end
 function write_critical_resonant_field_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     result::CriticalResonantFieldResult)
 
-    if !haskey(parent, "Tearing")
-        create_group(parent, "Tearing")
-    end
-    g = create_group(parent["Tearing"], "CriticalResonantField")
+    g = create_group(parent, "CriticalResonantField")
 
     g["surface_index"] = result.surface_index
     g["Qpeak"] = result.Qpeak
@@ -78,8 +79,6 @@ function write_critical_resonant_field_hdf5!(parent::Union{HDF5.File,HDF5.Group}
             sg["Q"] = d.Q
             sg["balance"] = d.balance
             sg["delta"] = d.delta
-            sg["Q_positive"] = d.Q_positive
-            sg["balance_positive"] = d.balance_positive
             sg["Qpeak"] = d.Qpeak
             sg["br_crit"] = d.br_crit
 

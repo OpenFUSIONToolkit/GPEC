@@ -55,7 +55,7 @@ Returns the Q values, torque balance values, positive Q values, positive torque 
 the Q value at the peak, the critical resonant field, the index of the peak Q value, and the Δ values for each Q.
 """
 
-function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=200)
+function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=20000)
     Qs = range(Qmin, Qmax; length=n)
     torque_out = [torque_balance_value(tb, q) for q in Qs]
     bal = [x[1] for x in torque_out]
@@ -63,24 +63,78 @@ function torque_balance_scan(tb; Qmin=-10.0, Qmax=10.0, n=200)
     positive = isfinite.(bal) .& (bal .> 0.0)
 
     if !any(positive)
-        return Qs, bal, [0.0], [0.0], 0.0, 0.0, NaN, Δs
+        @warn "No positive torque balance found in the specified range. Try increasing the number of Q samples scanned or adjusting the range."
+        return Qs, bal, NaN, NaN, NaN, Δs
     end
-    i = argmax(bal)
-    Qpeak_ind = i
-    Qpeak = Qs[i]
-    maxbal = bal[i]
 
-    Qs_positive = Qs[positive]
-    bal_positive = bal[positive]
+    # Find the highest point, then remove candidates within ΔQ of it.
+    idx_maxima = findall(isfinite.(bal) .& (bal .> 0))
+    sort!(idx_maxima; by=i -> bal[i], rev=true)
+    selected = Int[]
+    min_ΔQ = 0.001 * abs(Qmax - Qmin)
 
-    i = argmax(bal_positive)
-    #Qpeak = Qs_positive[i]
+    for i in idx_maxima
+        if all(abs(Qs[i] - Qs[j]) > min_ΔQ for j in selected)
+            push!(selected, i)
+        end
+        length(selected) == 2 && break
+    end
 
-    #maxbal = bal_positive[i]
+    if isempty(selected)
+        @warn "No usable positive torque-balance maximum found. Try increasing the number of Q samples scanned or adjusting the range."
+        return Qs, bal, NaN, NaN, NaN, Δs
+    end
 
-    br_crit = sqrt(maxbal / tb.lu * (tb.sval^2 / 2.0))
-    return Qs, bal, Qs_positive, bal_positive, Qpeak, br_crit, Qpeak_ind, Δs
+    idx_maxima = selected
+    maxima = bal[idx_maxima]
+    Qs_maxima = Qs[idx_maxima]
+
+    # find index, q val and bal val of the q closest to Q_e
+    idx_closest_Q_e = argmin(abs.(Qs .+ tb.params.Q_e)) # + Q_e since Q_e = -omega_e * Qconv
+    q_closest_Q_e = Qs[idx_closest_Q_e]
+    bal_closest_Q_e = bal[idx_closest_Q_e]
+
+    # find index, q val and bal val of the q closest to Q_i
+    idx_closest_Q_i = argmin(abs.(Qs .+ tb.params.Q_i)) # + Q_i since Q_i = -omega_i * Qconv
+    q_closest_Q_i = Qs[idx_closest_Q_i]
+    bal_closest_Q_i = bal[idx_closest_Q_i]
+
+    println(
+        "Local maxima indices: ",
+        idx_maxima,
+        " with values: ",
+        maxima,
+        " and corresponding Qs: ",
+        Qs_maxima,
+        " closest Q to Q_e: ",
+        q_closest_Q_e,
+        " closest Q to Q_i: ",
+        q_closest_Q_i
+    )
+
+    # check if 1st q_maxima is same as Q_e or Q_i from p
+    if idx_maxima[1] == idx_closest_Q_e || idx_maxima[1] == idx_closest_Q_i
+        if length(idx_maxima) < 2
+            @warn "The first local maximum corresponds to a pole from Q_e or Q_i, but there is no second local maximum to select. Try increasing the number of Q samples scanned or adjusting the range."
+            return Qs, bal, NaN, NaN, NaN, Δs
+        end
+        println("Warning: The first local maximum may correspond to an electron or ion diamagnetic resonance. Selecting the second local maximum instead.")
+        if idx_maxima[2] == idx_closest_Q_e || idx_maxima[2] == idx_closest_Q_i
+            @warn "Both the first and second local maxima correspond to poles from Q_e or Q_i. Unable to select a valid local maximum. Try increasing the number of Q samples scanned or adjusting the range."
+            return Qs, bal, NaN, NaN, NaN, Δs
+        end
+        idx_maximum = idx_maxima[2]
+        maximum = bal[idx_maximum]
+        Qmaximum = Qs[idx_maximum]
+    else
+        idx_maximum = idx_maxima[1]
+        maximum = bal[idx_maximum]
+        Qmaximum = Qs[idx_maximum]
+    end
+
+    println("Selected local maximum index: ", idx_maximum, " with value: ", maximum, " and corresponding Q: ", Qmaximum)
+
+    br_crit = sqrt(maximum / tb.lu * (tb.sval^2 / 2.0))
+
+    return Qs, bal, Qmaximum, br_crit, idx_maximum, Δs
 end
-
-# Need to fix and improve this function. The positive masking is not helpful.
-# Need to avoid poles from Q_e and Q_i.

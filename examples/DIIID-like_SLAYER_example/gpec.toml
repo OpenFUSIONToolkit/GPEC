@@ -30,7 +30,7 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
-local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+local_stability_flag = false    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
 psiedge = 0.99                 # Edge dW scan band: diagnostic dW(ψ) computed for ψ ∈ [psiedge, psilim]; integration domain set by qhigh / psihigh / dmlim
@@ -87,11 +87,11 @@ Q_im_range = [-0.5, 3.0]       # Scan box in the normalized Q plane, Im(Q) axis
 nre        = 41                # Grid resolution along the Re(Q) axis
 nim        = 31                # Grid resolution along the Im(Q) axis
 
-[CriticalResonantField]
+[SLAYER.CriticalResonantField]
 # CriticalResonantField used to find the critical resonant field sufficent for tearing onset at each rational surface.
 enabled = true # Run CriticalResonantField analysis
-inner_model = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
 Qmin = -10 # Minimum rotation scanned
 Qmax = 10 # Maximum rotation scanned
 n = 200 # Number of rotation points scanned
-profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (relative to the run dir), required when SLAYER is enabled
+angular_momentum_diffusivity = [1.0,1.0,1.0,1.0,1.0,1.0] # Toroidal momentum diffusivity (if nothing, falls back on chi_perp ~ chi_e, electron thermal diffusivity)
+store_scan = true # Per surface torque and inner layer quantities
