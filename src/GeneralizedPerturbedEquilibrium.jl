@@ -76,7 +76,7 @@ using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunc
 using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi")
+    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -419,20 +419,24 @@ function main_from_inputs(
         # Inject the KineticForces callback so the "calculated" source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
-        calculated_cb = (c, e, i, m, f; psis=nothing) ->
-            KineticForces.compute_calculated_kinetic_matrices(
-                c, e, i, m, f;
-                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, psis=psis)
+        calculated_cb =
+            (c, e, i, m, f; psis=nothing) ->
+                KineticForces.compute_calculated_kinetic_matrices(
+                    c, e, i, m, f;
+                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, psis=psis)
         # Locate the kinetic-resonance surfaces (Ω_ℓ = 0) that seed the certified matrix
         # grid -- the same nodes the NTV ψ quadrature panels at (one source of truth).
         resonance_psis = Float64[]
         if ctrl.kinetic_source == "calculated" && ctrl.kinetic_grid_tol > 0
             for n_res in intr.nlow:intr.nhigh
                 n_res == 0 && continue
-                append!(resonance_psis, KineticForces.kinetic_resonance_psi_nodes(
-                    kinetic_profiles, equil;
-                    n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
-                    electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac))
+                append!(
+                    resonance_psis,
+                    KineticForces.kinetic_resonance_psi_nodes(
+                        kinetic_profiles, equil;
+                        n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
+                        electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac)
+                )
             end
         end
         make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
@@ -507,6 +511,8 @@ function main_from_inputs(
             inputs,
             forcing_modes_snapshot,
             gal_data;
+            kinetic_profiles=kinetic_profiles,
+            kf_ctrl=kf_ctrl,
             locstab=locstab,
             ballooning_boundary=ballooning_boundary
         )
@@ -717,7 +723,9 @@ function write_outputs_to_HDF5(
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     gal_data::Union{GalerkinResult,Nothing}=nothing;
     locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
-    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
+    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[]),
+    kinetic_profiles=nothing,
+    kf_ctrl=nothing
 )
 
     # Idempotent: already done if a PerturbedEquilibrium stage ran. Leaves the stores empty
@@ -832,6 +840,28 @@ function write_outputs_to_HDF5(
         out_h5["$fwd/dxi_psidpsi"] = odet.du_store
         out_h5["$fwd/xi_s"] = odet.xi_s_store
         out_h5["$fwd/crit"] = odet.crit_store
+
+        # Kinetic-model validity diagnostics: orbit-width scales vs local geometry and profile
+        # gradient lengths, whenever kinetic profiles were used (self-consistent matrices or NTV
+        # post-processing). Diagnostic only — nothing outside the near-axis envelope is suppressed.
+        if kinetic_profiles !== nothing
+            kfc = kf_ctrl === nothing ? KineticForces.KineticForcesControl() : kf_ctrl
+            vp = KineticForces.kinetic_validity_profiles(kinetic_profiles, equil;
+                zi=kfc.zi, mi=kfc.mi, electron=kfc.electron)
+            vg = "KineticForces/Validity"
+            out_h5["$vg/psi"] = vp.psi
+            out_h5["$vg/rho_i"] = vp.rho_i
+            out_h5["$vg/rho_banana"] = vp.rho_banana
+            out_h5["$vg/rho_theta"] = vp.rho_theta
+            out_h5["$vg/w_potato"] = vp.w_potato
+            out_h5["$vg/r_minor"] = vp.r_minor
+            out_h5["$vg/L_p"] = vp.L_p
+            out_h5["$vg/L_q"] = vp.L_q
+            out_h5["$vg/d_separatrix"] = vp.d_separatrix
+            out_h5["$vg/psi_c"] = vp.psi_c
+            out_h5["$vg/envelope"] = kfc.axis_validity_suppression ? vp.envelope : ones(length(vp.psi))
+            out_h5["$vg/is_valid"] = Int8.(vp.is_valid)
+        end
 
         # Write edge stability scan data (only present when psiedge < psilim).
         # Generalized (W, N) pencil energies — power-normalized, Jacobian-invariant; these are

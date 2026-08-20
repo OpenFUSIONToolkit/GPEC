@@ -143,3 +143,70 @@ function kinetic_axis_validity_envelope(psi::Float64, psi_c::Float64)
     t >= 1 && return 1.0
     return t^3 * (10 + t * (6 * t - 15))
 end
+
+"""
+    kinetic_validity_profiles(kinetic_profiles, equil; zi=1, mi=2, electron=false) → NamedTuple
+
+Radial profiles of the drift-kinetic validity diagnostics, on the kinetic-profile ψ grid:
+`psi`; the thermal orbit-width scales `rho_i` (gyroradius √(2mT)/(Z·e·B₀)), `rho_banana`
+(q·ρ/√ε), `rho_theta` (poloidal gyroradius q·ρ/ε), `w_potato` ((q²ρ²R₀)^(1/3)); the local
+geometry `r_minor` (⟨r⟩) and `d_separatrix` (⟨r⟩(1) − ⟨r⟩(ψ)); the profile gradient lengths
+`L_p` and `L_q` (|X|·|dr/dψ|/|dX/dψ|, Inf where the profile is flat); the near-axis suppression
+boundary `psi_c` (`kinetic_axis_validity_psi`) with its `envelope`; and `is_valid` — true where
+every zero-orbit-width ordering holds at coefficient 1: max orbit width < r, ρ_banana < L_p and
+L_q, and max(ρ_i, ρ_banana, ρ_θ) < d_separatrix. Validity is diagnostic only — nothing outside
+the near-axis envelope is suppressed (the far edge and steep-gradient regions are flagged, not
+zeroed, since they can dominate the physical NTV).
+"""
+function kinetic_validity_profiles(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
+    zi::Int=1, mi::Int=2, electron::Bool=false)
+    chrg = electron ? e : zi * e
+    mass = electron ? me : mi * mp
+    T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline
+    q_spline, q_deriv = equil.profiles.q_spline, equil.profiles.q_deriv
+    P_spline, P_deriv = equil.profiles.P_spline, equil.profiles.P_deriv
+    avg_r = equil.geometry.avg_r_spline
+    avg_R = equil.geometry.avg_R_spline
+    r_deriv = deriv1(avg_r)
+    ro = abs(equil.ro)
+    bo = abs(equil.params.b0)
+    r_sep = avg_r(1.0)
+    psi_c = kinetic_axis_validity_psi(kinetic_profiles, equil; zi=zi, mi=mi, electron=electron)
+
+    psi = [x for x in kinetic_profiles.xs if 0 < x <= 1]
+    n = length(psi)
+    rho_i = zeros(n)
+    rho_banana = zeros(n)
+    rho_theta = zeros(n)
+    w_potato = zeros(n)
+    r_minor = zeros(n)
+    L_p = zeros(n)
+    L_q = zeros(n)
+    d_separatrix = zeros(n)
+    envelope = zeros(n)
+    is_valid = falses(n)
+    for (i, x) in pairs(psi)
+        r = avg_r(x)
+        eps = max(r / avg_R(x), 1e-6)
+        rho = mass * sqrt(2 * T_spline(x) / mass) / (abs(chrg) * bo)
+        q = abs(q_spline(x))
+        drdpsi = abs(r_deriv(x))
+        rho_i[i] = rho
+        rho_banana[i] = q * rho / sqrt(eps)
+        rho_theta[i] = q * rho / eps
+        w_potato[i] = cbrt(q^2 * rho^2 * ro)
+        r_minor[i] = r
+        d_separatrix[i] = max(r_sep - r, 0.0)
+        dP = abs(P_deriv(x))
+        L_p[i] = dP > 0 ? abs(P_spline(x)) * drdpsi / dP : Inf
+        dq = abs(q_deriv(x))
+        L_q[i] = dq > 0 ? q * drdpsi / dq : Inf
+        envelope[i] = kinetic_axis_validity_envelope(x, psi_c)
+        w_orbit = max(w_potato[i], rho_banana[i], rho_theta[i])
+        is_valid[i] = w_orbit < r && rho_banana[i] < L_p[i] && rho_banana[i] < L_q[i] &&
+                      max(rho_i[i], rho_banana[i], rho_theta[i]) < d_separatrix[i]
+    end
+    return (psi=psi, rho_i=rho_i, rho_banana=rho_banana, rho_theta=rho_theta, w_potato=w_potato,
+        r_minor=r_minor, L_p=L_p, L_q=L_q, d_separatrix=d_separatrix,
+        psi_c=psi_c, envelope=envelope, is_valid=is_valid)
+end

@@ -108,7 +108,7 @@ function compute_calculated_kinetic_matrices(
         if psi_c > 0
             env .= kinetic_axis_validity_envelope.(xs, psi_c)
             @info "Kinetic axis-validity suppression: psi_c=$(round(psi_c; sigdigits=3)), envelope reaches 1 at " *
-                  "psi=$(round(2 * psi_c; sigdigits=3)); $(count(iszero, env)) of $mpsi surfaces skipped"
+                  "psi=$(round(2 * psi_c; sigdigits=3)) (kernel evaluation skipped below psi_c)" maxlog = 1
         end
     end
 
