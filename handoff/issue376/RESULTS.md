@@ -1306,6 +1306,33 @@ Commits e1dc05e2b, 18f4507cc on performance/certified-kinetic-grid.
   level). #410's certificate redesign (local scale, certify post-Schur f0/K/G) remains necessary
   and is now cleanly separated from the physics fix.
 
+### Hardening, PR, and the two bugs the harness caught (2026-08-20, continued)
+
+The user extended the design mid-implementation: output the orbit-width scales plus L_p/L_q as
+profiles whenever KF is used, and flag (never suppress) far-edge and gradient-length validity —
+implemented as `KineticForces/Validity/` (ρ_i, ρ_banana, ρ_θ, w_potato, ⟨r⟩, L_p, L_q,
+d_separatrix, psi_c, envelope, is_valid). Scale decision: ψ_c from max(potato, banana, gyro), all
+coefficient 1 (the ½ dropped from banana for consistency).
+
+The mandated harness then caught two real bugs the smoke tests missed: (1) the NTV writer's
+`create_group("KineticForces")` collided with the new Validity group (crashed every NTV-running
+case); (2) on the m16 Solovev deck the envelope band [0.1, 0.2] contained the rational at
+ψ=0.1221 but only ~2 grid knots — the spline of envelope·increment overshot at the rational and
+corrupted the eigenvalues (et[1] → −1625). Fixed by open-or-create and by augmenting the kernel
+grid with nine knots across the band (ends pinned; the quintic smoothstep is only C² there).
+A third bug appeared during the PR split: the standalone cherry-pick missed B1's `xs` kwarg on
+`_compute_fkg_matrices!`, so the FKG derivation read 26-row arrays as 17-row (et[1]=7.87 vs
+1.7993) — caught by A/B against the stack and fixed; standalone now matches to all digits.
+
+Final harness (both branches, identical tables): diiid_n1 ideal 47/47 bit-identical; Solovev
+kinetic et[1] moves 0.01–0.07%, NTV torque 0.12% (quadrature domain starts at ψ_c), steps ≤2%.
+Final DIII-D (band-fixed): suppressed full grid et[1]=1.005298−0.259472i, nstep 4,246 (53×
+collapse), certified still 0.8397 (16% off — mid-radius certificate redesign remains #410's
+blocker, unchanged).
+
+Landed as **PR #414** (`feature/kinetic-axis-validity`, stacked on #408; #410 will rebase onto
+it). Review package: https://claude.ai/code/artifact/09745676-ff9b-49c6-a14b-74f093427d00
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
