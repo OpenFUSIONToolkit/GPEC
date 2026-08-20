@@ -1273,6 +1273,39 @@ validity: a local (per-region or solution-amplitude-weighted) certificate scale,
 post-Schur f0/K/G the ODE consumes, and dropping the ideal-derived Frobenius core floor for
 kinetic increments.
 
+## 29. The physics ruling implemented: axis-validity suppression fixes the pathology; the certified grid's failure was never the axis
+
+User's ruling (2026-08-20): do not chase kinetic physics noise near the axis — the model loses
+validity (Fortran precedent: `ktanh_flag`, dcon/fourfit.F:1117-1122, four hand-tuned knobs
+ktc/ktw/kinfac1/kinfac2 — adopted as supporting evidence, rejected as design). Chosen design:
+ψ_c = outermost ψ where max(potato width (q²ρ²R₀)^(1/3), banana width qρ/√ε, poloidal gyroradius
+qρ/ε) ≥ ⟨r⟩, all coefficient 1, computed from profiles at runtime (no user knobs; one Bool
+`axis_validity_suppression`, default true); C² quintic envelope, zero below ψ_c (kernel skipped),
+1 at 2ψ_c; same boundary/envelope applied to the NTV ψ quadrature. Also added
+`KineticForces/Validity/` output (ρ_i, ρ_banana, ρ_θ, w_potato, ⟨r⟩, L_p, L_q, d_separatrix,
+psi_c, envelope, is_valid) written whenever kinetic profiles are used; far edge and
+gradient-length violations are FLAGGED, never suppressed (edge can dominate physical NTV).
+Commits e1dc05e2b, 18f4507cc on performance/certified-kinetic-grid.
+
+**DIII-D verification (sup_off/sup_on, pre-registered in run_suppressed.sh):**
+
+| run | et[1] | nstep_total | wall |
+|---|---|---|---|
+| full grid, suppressed (ψ_c=0.04) | 1.005298 − 0.259472i | **3,590** | 397 s |
+| full grid, unsuppressed (§28) | 1.005545 − 0.259371i | 223,271 | 905 s |
+| certified 1e-3, suppressed | 0.840086 − 0.280205i | 8,275 | 382 s |
+
+- Prediction (a) CONFIRMED spectacularly: steps collapse 62× and et[1] is preserved to **2.5e-4**
+  — the invalid near-axis structure cost 98% of the ODE work while contributing ~nothing physical.
+  The DIII-D calculated-kinetic workflow is now practical (no more 17 GB dumps either).
+- Prediction (b) REFUTED: the certified grid still lands on ~the same wrong value (0.8401 vs
+  0.8391 unsuppressed) — its 16% error never came from the axis. With the core zeroed in both
+  runs, the discrepancy must live in the mid-radius rational-free span [0.08, 0.52] (4 seed
+  points; the global-scale certificate blind there too; the f0 ~2% deviation at ψ≈0.40 from §28's
+  localization was the live signal — the core deviations were a red herring at the eigenvalue
+  level). #410's certificate redesign (local scale, certify post-Schur f0/K/G) remains necessary
+  and is now cleanly separated from the physics fix.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
