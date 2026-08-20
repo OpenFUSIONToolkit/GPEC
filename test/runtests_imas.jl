@@ -115,8 +115,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         mock_et      = [0.4+0im, 0.7+0im, 1.1+0im]
         mock_n_idx   = [0, 0, 0]   # all belong to n=1 (j=0)
         mock_result  = (
-            free_energies = (et=mock_et, n_tor_idx=mock_n_idx),
-            intr     = (numpert_total=3, npert=1, nlow=1),
+            ffs = (integrator=:forward, free_boundary=(et=mock_et, n_tor_idx=mock_n_idx),
+                numpert_total=3, npert=1, nlow=1),
         )
 
         GeneralizedPerturbedEquilibrium.write_imas(dd, mock_result)
@@ -145,8 +145,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         mock_et    = [0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im]
         mock_n_idx = [0, 1, 0, 1]
         mock_result = (
-            free_energies = (et=mock_et, n_tor_idx=mock_n_idx),
-            intr     = (numpert_total=4, npert=2, nlow=1),
+            ffs = (integrator=:forward, free_boundary=(et=mock_et, n_tor_idx=mock_n_idx),
+                numpert_total=4, npert=2, nlow=1),
         )
 
         GeneralizedPerturbedEquilibrium.write_imas(dd, mock_result)
@@ -169,24 +169,24 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # Single n=1 run
         dd_single = IMASdd.dd()
         result_single = (
-            free_energies = (et=[0.3+0im, 0.6+0im], n_tor_idx=[0, 0]),
-            intr     = (numpert_total=2, npert=1, nlow=1),
+            ffs = (integrator=:forward, free_boundary=(et=[0.3+0im, 0.6+0im], n_tor_idx=[0, 0]),
+                numpert_total=2, npert=1, nlow=1),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_single, result_single)
 
         # Single n=2 run
         dd_single2 = IMASdd.dd()
         result_single2 = (
-            free_energies = (et=[0.5+0im, 0.7+0im], n_tor_idx=[0, 0]),
-            intr     = (numpert_total=2, npert=1, nlow=2),
+            ffs = (integrator=:forward, free_boundary=(et=[0.5+0im, 0.7+0im], n_tor_idx=[0, 0]),
+                numpert_total=2, npert=1, nlow=2),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_single2, result_single2)
 
         # Combined n=1,2 run (same eigenvalues, now interleaved)
         dd_multi = IMASdd.dd()
         result_multi = (
-            free_energies = (et=[0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im], n_tor_idx=[0, 1, 0, 1]),
-            intr     = (numpert_total=4, npert=2, nlow=1),
+            ffs = (integrator=:forward, free_boundary=(et=[0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im], n_tor_idx=[0, 1, 0, 1]),
+                numpert_total=4, npert=2, nlow=1),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_multi, result_multi)
 
@@ -198,6 +198,14 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test ts_multi.toroidal_mode[1].energy_perturbed == ts_single.toroidal_mode[1].energy_perturbed
         # n=2 energy from combined run must match the standalone n=2 run
         @test ts_multi.toroidal_mode[2].energy_perturbed == ts_single2.toroidal_mode[1].energy_perturbed
+    end
+
+    # Test 7: write_imas warns and skips when the run produced no free-boundary energies
+    @testset "write_imas: warn-and-skip without free-boundary energies" begin
+        dd = IMASdd.dd()
+        no_fb = (ffs=(integrator=:riccati, free_boundary=nothing, numpert_total=2, npert=1, nlow=1),)
+        @test_logs (:warn,) match_mode = :any GeneralizedPerturbedEquilibrium.write_imas(dd, no_fb)
+        @test isempty(dd.mhd_linear.time_slice)
     end
 
 end

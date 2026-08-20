@@ -38,6 +38,7 @@ using Roots
 import ..ForceFreeStates
 import ..Equilibrium
 import ..Utilities
+import ..PerturbedEquilibrium
 
 # Supporting data structures and utilities
 include("KineticForcesStructs.jl")
