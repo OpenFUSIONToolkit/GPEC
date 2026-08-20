@@ -209,7 +209,7 @@ function main_from_inputs(
 
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
-    kf_ctrl, kinetic_profiles = load_kinetic_context(inputs, intr, ctrl, equil)
+    kf_ctrl, kinetic_profiles, kf_species = load_kinetic_context(inputs, intr, ctrl, equil)
     equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
@@ -241,7 +241,7 @@ function main_from_inputs(
     ffs_start = time()
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
-    metric, ffit = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles)
+    metric, ffit = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles; species=kf_species)
     ffs_result = run_force_free_states(ctrl, equil, ffit, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
@@ -267,7 +267,7 @@ function main_from_inputs(
 
     pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
 
-    run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles)
+    run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles, kf_species)
 
     # SLAYER runs after PE so it appends to the PE output file; it falls back to the
     # ForceFreeStates file when PE did not run.
@@ -329,7 +329,7 @@ function resolve_mode_space!(intr::ForceFreeStatesInternal, ctrl::ForceFreeState
 end
 
 """
-    load_kinetic_context(inputs, intr, ctrl, equil) -> (kf_ctrl, kinetic_profiles)
+    load_kinetic_context(inputs, intr, ctrl, equil) -> (kf_ctrl, kinetic_profiles, species)
 
 Build the KineticForces control and load the kinetic profiles once for the whole run.
 `kinetic_profiles` is `nothing` when no stage asks for them.
@@ -352,6 +352,7 @@ function load_kinetic_context(
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
+    species = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
                              (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
@@ -363,9 +364,18 @@ function load_kinetic_context(
             density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
             ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
             chi1=2π * equil.psio)
+        if !isempty(kf_ctrl.ion_species) || kf_ctrl.electron
+            speclist = isempty(kf_ctrl.ion_species) ?
+                       [KineticForces.IonSpecies(; z=kf_ctrl.zi, m=kf_ctrl.mi, fraction=1.0)] : kf_ctrl.ion_species
+            species = Equilibrium.resolve_ntv_species(kinetic_file, speclist;
+                electron=kf_ctrl.electron, zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp,
+                density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+                ExB_rotation_factor=kf_ctrl.ExB_rotation_factor,
+                toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
+        end
     end
 
-    return kf_ctrl, kinetic_profiles
+    return kf_ctrl, kinetic_profiles, species
 end
 
 """
@@ -481,7 +491,8 @@ function prepare_force_free_states!(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     kf_ctrl::KineticForces.KineticForcesControl,
-    kinetic_profiles
+    kinetic_profiles;
+    species=nothing
 )
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
@@ -571,7 +582,7 @@ function prepare_force_free_states!(
         calculated_cb = (c, e, i, m, f) ->
             KineticForces.compute_calculated_kinetic_matrices(
                 c, e, i, m, f;
-                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
+                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species)
         make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
             calculated_source=calculated_cb)
 
@@ -910,7 +921,8 @@ function run_kinetic_forces(
     result::ForceFreeStatesResult,
     pe_state,
     kf_ctrl::KineticForces.KineticForcesControl,
-    kinetic_profiles
+    kinetic_profiles,
+    species=nothing
 )
     # ----------------------------------------------------------------
     # KineticForces (Neoclassical Toroidal Viscosity)
@@ -929,12 +941,39 @@ function run_kinetic_forces(
         kf_intr = KineticForces.KineticForcesInternal(result.equil; verbose=kf_ctrl.verbose)
         KineticForces.set_perturbation_data!(kf_intr, pe_state, result, result.equil, result.metric)
 
-        kf_state = KineticForces.KineticForcesState()
-        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles)
-
-        if kf_ctrl.write_outputs_to_HDF5
-            h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                KineticForces.write_to_hdf5!(h5file, kf_state; dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+        if species === nothing
+            kf_state = KineticForces.KineticForcesState()
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles)
+            if kf_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                    KineticForces.write_to_hdf5!(h5file, kf_state;
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                end
+            end
+        else
+            states = KineticForces.KineticForcesState[]
+            labels = String[]
+            for sp in species
+                # KineticForcesControl is immutable, so each species gets a fresh control
+                # built from the run's control with only its own identity overridden.
+                sctrl = KineticForces.KineticForcesControl(;
+                    (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
+                    zi=sp.z, mi=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
+                st = KineticForces.KineticForcesState()
+                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles)
+                push!(states, st)
+                push!(labels, sp.label)
+            end
+            kf_state = KineticForces.combine_species_states(states)
+            if kf_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                    for (st, label) in zip(states, labels)
+                        KineticForces.write_to_hdf5!(h5file, st;
+                            dVdpsi_spline=result.equil.profiles.dVdpsi_spline, species_label=label)
+                    end
+                    KineticForces.write_to_hdf5!(h5file, kf_state;
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                end
             end
         end
     end

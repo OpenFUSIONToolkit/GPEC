@@ -17,7 +17,7 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 
 - **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinIntegration/`).
 - **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root`, `pest3_Delta`, `2piF`).
-- **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), scan indices (`Surface_<k>`, `psi_<i>`).
+- **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), NTV species labels under `KineticForces/PerSpecies/` (`ion_z1_m2`, `impurity_z6_m12`, `electron` — charge and mass identify the species, with a numeric discriminator appended only if a run repeats a `(z, m)` pair), scan indices (`Surface_<k>`, `psi_<i>`).
 - **Word-valued names and boolean flags**: multi-word dataset names are snake_case English (`resonance_psi`, `trajectory_offsets`, `layer_widths`), never CamelCase — CamelCase is reserved for groups. A boolean flag is named for the state it asserts when true, with an `is_` prefix only where the bare word would read as a noun or collide with a data family: `is_rational` (bare `rational` would clash with the `rational_*` coordinate family) versus `enabled`, `truncated`, `no_root`, which already read as predicates.
 - **Literature capitalization for physics symbols**: names match the standard literature — `D_I`, `D_R`, `Delta_prime`, `tau_R`, `tau_A` (not `di`, `dr`, `delta_prime`, `taur`); lowercase stays where the literature is lowercase (`alpha`, `q`, `beta*`, `delta_s`).
 - **Scalar equilibrium parameters spell out the physics**: `R_axis`, `Z_axis`, `B_T_axis`, `a_mean`, `aspect_ratio`, `I_p`, `q_edge`, `beta_N`, `delta_upper`/`delta_lower`. The qualifier is a trailing subscript (`_axis`, `_edge`, `_wall`, `_min`, `_max`, `_upper`, `_lower`, `_extremum`), and a numbered literature definition keeps its number as the last subscript (`beta_p_1`, `l_i_2`). Fortran-era contractions (`bt0`, `amean`, `crnt`, `qa`, `betan`, `li1`) survive only as `Equilibrium.EquilibriumParameters` struct fields: `EQUIL_H5_NAMES` in `src/HDF5Schema.jl` maps each field to its dataset name, and `EQUIL_H5_SKIP` drops fields that duplicate another dataset or echo a control flag.
@@ -44,7 +44,7 @@ Top level (10 groups):
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
-| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`) |
+| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
 
