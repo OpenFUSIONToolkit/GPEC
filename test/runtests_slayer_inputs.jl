@@ -42,8 +42,8 @@
         @test r1 > 0
     end
 
-    @testset "surface_da_dpsi: FD agrees with numerical derivative" begin
-        # Reference via a tighter FD
+    @testset "surface_da_dpsi: agrees with FD reference" begin
+        # The analytic ψ-derivative must reproduce a tight FD of the minor radius.
         for psi in (0.1, 0.4, 0.7)
             h_ref = 1e-4
             r_p = surface_minor_radius(equil, psi + h_ref)
@@ -53,14 +53,22 @@
         end
     end
 
-    @testset "surface_da_dpsi: one-sided near boundaries" begin
-        # Near ψ=0 and ψ=1, the function falls back to one-sided FD and
-        # should still produce a finite positive number (minor radius is
-        # still increasing).
+    @testset "surface_da_dpsi: finite near the boundaries" begin
+        # The analytic form needs no clamping: near ψ=0 and ψ=1 it still returns a
+        # finite positive number (large near the axis, where a ~ √ψ).
         d_near_axis = surface_da_dpsi(equil, 1e-6)
         d_near_edge = surface_da_dpsi(equil, 1.0 - 1e-6)
         @test isfinite(d_near_axis) && d_near_axis > 0
         @test isfinite(d_near_edge) && d_near_edge > 0
+    end
+
+    @testset "radial_label: analytic derivatives match FD" begin
+        for rsm in (:midplane, :halfwidth, :fsa, :volume, :flux)
+            r_at, dr_at = radial_label(equil; rs_method=rsm)
+            h = 1e-5
+            ref = (r_at(0.5 + h) - r_at(0.5 - h)) / (2h)
+            @test dr_at(0.5) ≈ ref rtol = 1e-3
+        end
     end
 
     @testset "build_slayer_inputs: returns correct per-surface data" begin
@@ -161,7 +169,7 @@
     @testset "build_slayer_inputs: rs_method radial labels are self-consistent" begin
         sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
         got = Dict{Symbol,Any}()
-        for rsm in (:midplane, :halfwidth, :fsa, :volume)
+        for rsm in (:midplane, :halfwidth, :fsa, :volume, :flux)
             sl = build_slayer_inputs(equil, sings, profiles; bt=2.0, dr_val=0.0, rs_method=rsm)
             got[rsm] = sl[1]
             @test isfinite(sl[1].rs) && sl[1].rs > 0
@@ -174,6 +182,7 @@
         # Labels genuinely differ (each self-consistent set has its own rs, S, k_ref)
         @test got[:fsa].rs != got[:midplane].rs
         @test got[:volume].lu != got[:midplane].lu
+        @test got[:flux].rs != got[:midplane].rs
     end
 
     @testset "build_slayer_inputs: dc_type propagates and dr_val activates offset" begin
