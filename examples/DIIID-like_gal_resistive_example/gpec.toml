@@ -14,7 +14,7 @@ psihigh = 0.993                # Upper limit of normalized flux coordinate (0.99
 mpsi = 128                     # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
-newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-10                   # Error tolerance for equilibrium solver
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
@@ -50,16 +50,13 @@ save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th).
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
-# Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
-use_parallel        = true     # Run parallel FM-propagator BVP path (unlocks SingularSurfaces/delta_prime_matrix)
-parallel_threads    = 2        # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
-populate_dense_xi   = false    # Dense axis-basis ξ for the FFS HDF5 output. Not needed here: no [PerturbedEquilibrium] section, and the gal-matched path builds its own dense ξ. Set true only for a shooting-fed PE run.
+# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+integrator          = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim = false   # Keep psilim at psihigh (do not truncate at last_rational_q + dmlim)
 dmlim               = 0.2      # Truncate integration at (last_rational_q + dmlim) / n (only used when set_psilim_via_dmlim = true)
 
 # Outer-region singular Galerkin Δ′ solver with rpec coil columns.
 # This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
-gal_flag               = true  # Enable the outer-region singular Galerkin Δ′ solve
 gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element

@@ -60,7 +60,7 @@ Constructed via keyword arguments or from a TOML dict:
 ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
 """
-@kwdef mutable struct KineticForcesControl
+@kwdef struct KineticForcesControl
     # Moment type
     moment::String = "pressure"     # "heat" or "pressure"
 
@@ -295,7 +295,7 @@ function KineticForcesInternal(equil; verbose::Bool=false)
 end
 
 """
-    set_perturbation_data!(kf_intr, pe_state, ffs_intr, equil, metric)
+    set_perturbation_data!(kf_intr, pe_state, ffs, equil, metric)
 
 Populate perturbation data from PerturbedEquilibriumState into KineticForcesInternal.
 
@@ -310,23 +310,24 @@ The JBB deweighting algorithm (Fortran pentrc/inputs.f90:828-868):
 3. Divide by J·B² at each θ
 4. Forward DFT back to m-space
 """
-function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_intr,
+function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
+                                ffs::ForceFreeStates.ForceFreeStatesResult,
                                 equil::Equilibrium.PlasmaEquilibrium,
                                 metric::ForceFreeStates.MetricData)
     # Copy mode numbers from FFS
-    kf_intr.mlow = ffs_intr.mlow
-    kf_intr.mhigh = ffs_intr.mhigh
-    kf_intr.mpert = ffs_intr.mpert
-    kf_intr.nlow = ffs_intr.nlow
-    kf_intr.nhigh = ffs_intr.nhigh
-    kf_intr.npert = ffs_intr.npert
-    kf_intr.numpert_total = ffs_intr.numpert_total
-    kf_intr.mfac = collect(ffs_intr.mlow:ffs_intr.mhigh)
-    kf_intr.psilim = ffs_intr.psilim
+    kf_intr.mlow = ffs.mlow
+    kf_intr.mhigh = ffs.mhigh
+    kf_intr.mpert = ffs.mpert
+    kf_intr.nlow = ffs.nlow
+    kf_intr.nhigh = ffs.nhigh
+    kf_intr.npert = ffs.npert
+    kf_intr.numpert_total = ffs.numpert_total
+    kf_intr.mfac = collect(ffs.mlow:ffs.mhigh)
+    kf_intr.psilim = ffs.psilim
 
     # Rational-surface ψ locations (ideal + kinetic EL) become panel boundaries for the
     # outer ψ torque quadrature; dedupe against coincident points happens in psi_panel_points.
-    kf_intr.sing_psis = sort!(vcat([s.psifac for s in ffs_intr.sing], [s.psifac for s in ffs_intr.kinsing]))
+    kf_intr.sing_psis = sort!(vcat([s.psifac for s in ffs.surfaces], [s.psifac for s in ffs.kinetic.kinsing]))
 
     # Bail if no xi_modes available (PE didn't run or failed)
     if pe_state.xi_modes === nothing || isempty(pe_state.psi_grid)
@@ -337,7 +338,7 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     xi_modes = pe_state.xi_modes
     psi_grid = pe_state.psi_grid
     npsi = length(psi_grid)
-    mpert = ffs_intr.mpert
+    mpert = ffs.mpert
 
     # Build xs_m: 3 CubicSeriesInterpolants from Clebsch displacement matrices
     # xs_m[1] = ξ^ψ (unregularized), xs_m[2] = ∂ξ^ψ/∂ψ (regularized), xs_m[3] = ξ^α
@@ -350,11 +351,11 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_in
     kf_intr.xs_m = [xs_m_1, xs_m_2, xs_m_3]
 
     # Build geometric matrices (S,T,X,Y,Z) for JBB deweighting
-    geom_mats = ForceFreeStates.build_kinetic_metric_matrices(equil, ffs_intr, metric)
+    geom_mats = ForceFreeStates.build_kinetic_metric_matrices(equil, ffs, metric)
 
     # Build FourierTransform for the JBB deweighting DFT round-trip
     mthsurf = kf_intr.mthsurf
-    ft = Utilities.FourierTransforms.FourierTransform(mthsurf, mpert, ffs_intr.mlow)
+    ft = Utilities.FourierTransforms.FourierTransform(mthsurf, mpert, ffs.mlow)
 
     # JBB deweighting: convert Clebsch modes → physical δB/B and ∇·ξ⊥ modes
     dbob_m_data = zeros(ComplexF64, npsi, mpert)

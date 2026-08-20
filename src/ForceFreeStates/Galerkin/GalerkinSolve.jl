@@ -41,18 +41,17 @@ end
 
 """Empty `GalerkinResult` for a domain with no resonant surfaces."""
 function empty_galerkin_result()
-    empty2 = Matrix{ComplexF64}(undef, 0, 0)
-    return GalerkinResult(empty2, empty2, empty2, empty2, empty2, 0,
-        Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2, nothing, nothing)
+    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, nothing)
 end
 
 """
     galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
-                   intr::ForceFreeStatesInternal; wv=nothing) -> GalerkinResult
+                   intr::ForceFreeStatesInternal; wv=nothing) -> (GalerkinResult, Union{Nothing,DeltaPrimeData})
 
 Compute the outer-region Δ′ matching matrix by the singular Galerkin method. Port of `gal_solve`
-(gal.f). Single toroidal mode only (`intr.npert == 1`). Returns a `GalerkinResult`; if there
-are no resonant surfaces in the domain it returns an empty result.
+(gal.f). Single toroidal mode only (`intr.npert == 1`). Returns the solver internals as a
+`GalerkinResult` alongside the Δ′ payload as the shared [`DeltaPrimeData`](@ref); if there are no
+resonant surfaces in the domain it returns an empty result and `nothing`.
 
 `wv` is the vacuum energy matrix from `free_run`, which supplies the free-boundary edge term
 `wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge.
@@ -70,7 +69,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     msing = length(sings)
     if msing == 0
         ctrl.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
-        return empty_galerkin_result()
+        return empty_galerkin_result(), nothing
     end
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
@@ -173,8 +172,13 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     # from the right series — the left series reuses the same α via alpha_override above).
     di = [real(-asymps[i].right.alpha[1]^2) for i in 1:msing]
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
-    # Coil-response block (rpec_flag): rows 2*msing+1 : 2*msing+mpert of delta (empty otherwise).
-    delta_coil = ncoil > 0 ? delta[(2*msing+1):(2*msing+ncoil), :] : Matrix{ComplexF64}(undef, 0, 0)
+
+    # Pack the Δ′ payload in the shared layout: the raw D′ is the leading 2msing×2msing side-major
+    # block, and the coil-response rows 2*msing+1 : 2*msing+mpert (rpec_flag) transpose into the
+    # (surface-side × edge mode) orientation the Riccati BVP also produces.
+    dp_raw = delta[1:(2*msing), 1:(2*msing)]
+    dp_coil = ncoil > 0 ? permutedims(delta[(2*msing+1):(2*msing+ncoil), :]) : Matrix{ComplexF64}(undef, 0, 0)
+    dp = DeltaPrimeData(Deltap, dp_raw, dp_coil, Ap, Bp, Gammap)
 
     # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
@@ -185,21 +189,19 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     sing_q = [s.q for s in sings]
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
-    result = GalerkinResult(delta, Ap, Bp, Gammap, Deltap, msing,
-        sing_psi, sing_q, sing_m, sing_n, di, alpha, delta_coil, solution, nothing)
+    result = GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, nothing)
 
     # DRIVEN (RPEC) outer↔inner matching: build the coil-driven matched ξ/ξ′ (gal_match_rpec).
-    ctrl.gal_match_flag || return result
+    ctrl.gal_match_flag || return result, dp
     ctrl.gal_rpec_flag || error("galerkin_solve: gal_match_flag=true requires gal_rpec_flag=true")
     ctrl.verbose && @info(
         ctrl.gal_ideal_flag ?
         "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
         "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
     )
-    match = gal_match_rpec(ctrl, equil, intr, result)
+    match = gal_match_rpec(ctrl, equil, intr, result, dp)
     ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(match.residual)")
-    return GalerkinResult(delta, Ap, Bp, Gammap, Deltap, msing,
-        sing_psi, sing_q, sing_m, sing_n, di, alpha, delta_coil, solution, match)
+    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, match), dp
 end
 
 """
@@ -227,51 +229,44 @@ function gal_pest3_blocks(delta::Matrix{ComplexF64}, msing::Int)
 end
 
 """
-    write_galerkin!(out_h5, result::GalerkinResult)
+    write_galerkin!(out_h5, result::GalerkinResult; basis_output=false)
 
-Write the Galerkin outputs into the open HDF5 file. The integrator's solution functions and
-RPEC matching data go under `ForceFreeStates/Solutions/GalerkinIntegration/`; the per-surface
-Δ′/PEST-3 matching results consolidate with the other rational-surface stability results under
-`SingularSurfaces/GalerkinDeltaPrime/`. Replaces the Fortran `delta_gw`/`pest3_data`
-ASCII/binary outputs.
+Write the Galerkin solver outputs into the open HDF5 file, under
+`ForceFreeStates/Solutions/GalerkinIntegration/`: the matching diagnostics and the surface list
+the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
+rationals). The Δ′/PEST-3 matrices and the closed ξ profiles are NOT written here — both go to
+formalism-independent homes from the driver writer (`SingularSurfaces/` off `result.delta_prime`;
+the shared `Solutions/` profile layout off `result.solution`). With `basis_output` the raw
+outer-region basis functions (per-interval, unconstrained at the rationals — solver internals)
+are dumped under `Basis/` in the shared axis order. Replaces the Fortran
+`delta_gw`/`pest3_data` ASCII/binary outputs.
 """
-function write_galerkin!(out_h5, result::GalerkinResult)
+function write_galerkin!(out_h5, result::GalerkinResult; basis_output::Bool=false)
     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-    gdp = "SingularSurfaces/GalerkinDeltaPrime"
     out_h5["$gal/rational_count"] = result.msing
     if result.msing == 0
         annotate_galerkin!(out_h5)
         return nothing
     end
-    out_h5["$gdp/Delta_prime_raw"] = result.delta
-    out_h5["$gdp/pest3_A"] = result.Ap
-    out_h5["$gdp/pest3_B"] = result.Bp
-    out_h5["$gdp/pest3_Gamma"] = result.Gammap
-    out_h5["$gdp/pest3_Delta"] = result.Deltap
-    out_h5["$gdp/rational_psi"] = result.sing_psi
-    out_h5["$gdp/rational_q"] = result.sing_q
-    out_h5["$gdp/rational_m"] = result.sing_m
-    out_h5["$gdp/rational_n"] = result.sing_n
-    out_h5["$gdp/D_I"] = result.di
-    out_h5["$gdp/alpha"] = result.alpha
-    if !isempty(result.delta_coil)
-        out_h5["$gdp/Delta_coil"] = result.delta_coil
-    end
-    if result.solution !== nothing
+    out_h5["$gal/rational_psi"] = result.sing_psi
+    out_h5["$gal/rational_q"] = result.sing_q
+    out_h5["$gal/rational_m"] = result.sing_m
+    out_h5["$gal/rational_n"] = result.sing_n
+    out_h5["$gal/D_I"] = result.di
+    out_h5["$gal/alpha"] = result.alpha
+    if basis_output && result.solution !== nothing
         sol = result.solution
-        out_h5["$gal/Solution/psi"] = sol.psi
-        out_h5["$gal/Solution/is_rational"] = collect(sol.issing)
-        out_h5["$gal/Solution/xi_psi"] = sol.xi
-        out_h5["$gal/Solution/dxi_psidpsi"] = sol.xi_deriv
-        isempty(sol.xi_cut) || (out_h5["$gal/Solution/xi_psi_cut"] = sol.xi_cut)
-        isempty(sol.cut_range) || (out_h5["$gal/Solution/cut_range"] = sol.cut_range)
+        out_h5["$gal/Basis/psi"] = sol.psi
+        out_h5["$gal/Basis/is_rational"] = collect(sol.issing)
+        out_h5["$gal/Basis/xi_psi"] = permutedims(sol.xi, (1, 3, 2))
+        out_h5["$gal/Basis/dxi_psidpsi"] = permutedims(sol.xi_deriv, (1, 3, 2))
+        isempty(sol.xi_cut) || (out_h5["$gal/Basis/xi_psi_cut"] = permutedims(sol.xi_cut, (1, 3, 2)))
+        isempty(sol.cut_range) || (out_h5["$gal/Basis/cut_range"] = sol.cut_range)
     end
     if result.match !== nothing
         m = result.match
         out_h5["$gal/Match/cout"] = m.cout
         out_h5["$gal/Match/cin"] = m.cin
-        out_h5["$gal/Match/xi"] = m.xi
-        out_h5["$gal/Match/dxidpsi"] = m.xi_deriv
         out_h5["$gal/Match/Delta_r"] = m.deltar
         out_h5["$gal/Match/bpen"] = m.bpen
         out_h5["$gal/Match/rpec_eig"] = m.rpec_eig
@@ -300,35 +295,43 @@ end
 # metadata contract; see docs/development/hdf5-conventions.md).
 const GALERKIN_H5_ANNOTATIONS = [
     "ForceFreeStates/Solutions/GalerkinIntegration/rational_count" => (; long_name="number of rational (singular) surfaces in the Galerkin solve"),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi" => (; long_name="normalized poloidal flux ψ_N grid of the Galerkin solution", scale="psi"),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational" =>
-        (; long_name="flag: grid node lies on a rational surface", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi",)),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi" =>
-        (; long_name="Galerkin solution functions ξ^ψ (arbitrary amplitude; note the psi/solution axis order differs from ForwardIntegration)", dims=("mode", "psi", "solution")),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi" =>
-        (; long_name="ψ_N derivative of the Galerkin solution functions ξ^ψ (arbitrary amplitude)", dims=("mode", "psi", "solution")),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi_cut" =>
-        (; long_name="Galerkin solution functions ξ^ψ with the leading-order resonant response excised", dims=("mode", "psi", "solution")),
-    "ForceFreeStates/Solutions/GalerkinIntegration/Solution/cut_range" =>
+    "ForceFreeStates/Solutions/GalerkinIntegration/psi" => (; long_name="normalized poloidal flux ψ_N grid of the closed Galerkin solution", scale="psi_gal"),
+    "ForceFreeStates/Solutions/GalerkinIntegration/q" =>
+        (; long_name="safety factor q on the Galerkin solution grid", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi" =>
+        (; long_name="closed axis-to-edge ξ^ψ profiles (ideal or inner-layer closure; identity-at-edge basis)", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/dxi_psidpsi" =>
+        (; long_name="analytic ψ_N derivative of the closed ξ^ψ profiles", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/xi_s" =>
+        (; long_name="surface displacement ξ_s from the outer ideal-MHD relation", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Basis/psi" => (; long_name="normalized poloidal flux ψ_N grid of the raw Galerkin basis", scale="psi_gal_basis"),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Basis/is_rational" =>
+        (; long_name="flag: grid node lies on a rational surface", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/Basis/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Basis/xi_psi" =>
+        (; long_name="raw Galerkin outer-region basis functions ξ^ψ (per-interval, unconstrained at the rationals; debug output)", dims=("mode", "solution", "psi")),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Basis/dxi_psidpsi" =>
+        (; long_name="ψ_N derivative of the raw Galerkin basis functions (debug output)", dims=("mode", "solution", "psi")),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Basis/xi_psi_cut" =>
+        (; long_name="raw Galerkin basis functions with the leading-order resonant response excised (debug output)", dims=("mode", "solution", "psi")),
+    "ForceFreeStates/Solutions/GalerkinIntegration/Basis/cut_range" =>
         (; long_name="ψ_N bounds of the excised resonant + extension cells per surface", dims=("surface", "bound")),
-    "SingularSurfaces/GalerkinDeltaPrime/Delta_prime_raw" =>
-        (; long_name="outer-region Δ' matrix (2msing×2msing, side-major [L_s1, R_s1, ...])", dims=("surface_side_row", "surface_side_col")),
-    "SingularSurfaces/GalerkinDeltaPrime/pest3_A" => (; long_name="PEST-3 matching block A' (Galerkin outer region)", dims=("surface_row", "surface_col")),
-    "SingularSurfaces/GalerkinDeltaPrime/pest3_B" => (; long_name="PEST-3 matching block B' (Galerkin outer region)", dims=("surface_row", "surface_col")),
-    "SingularSurfaces/GalerkinDeltaPrime/pest3_Gamma" => (; long_name="PEST-3 matching block Γ' (Galerkin outer region)", dims=("surface_row", "surface_col")),
-    "SingularSurfaces/GalerkinDeltaPrime/pest3_Delta" => (; long_name="PEST-3 matching block Δ' (Galerkin outer region)", dims=("surface_row", "surface_col")),
-    "SingularSurfaces/GalerkinDeltaPrime/rational_psi" => (; long_name="normalized poloidal flux ψ_N of each rational surface", scale="psi_rational"),
-    "SingularSurfaces/GalerkinDeltaPrime/rational_q" =>
-        (; long_name="safety factor q = m/n at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/GalerkinDeltaPrime/rational_psi",)),
-    "SingularSurfaces/GalerkinDeltaPrime/rational_m" =>
-        (; long_name="resonant poloidal mode number m at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/GalerkinDeltaPrime/rational_psi",)),
-    "SingularSurfaces/GalerkinDeltaPrime/rational_n" =>
-        (; long_name="resonant toroidal mode number n at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/GalerkinDeltaPrime/rational_psi",)),
-    "SingularSurfaces/GalerkinDeltaPrime/D_I" =>
-        (; long_name="Mercier D_I at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/GalerkinDeltaPrime/rational_psi",)),
-    "SingularSurfaces/GalerkinDeltaPrime/alpha" =>
-        (; long_name="Frobenius small-solution exponent α at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/GalerkinDeltaPrime/rational_psi",)),
-    "SingularSurfaces/GalerkinDeltaPrime/Delta_coil" => (; long_name="edge coil-response matrix (edge mode × surface-side; RPEC columns)", dims=("mode", "surface_side"))
+    "ForceFreeStates/Solutions/GalerkinIntegration/rational_psi" =>
+        (; long_name="normalized poloidal flux ψ_N of each rational surface in the Galerkin solve", scale="psi_gal_rational"),
+    "ForceFreeStates/Solutions/GalerkinIntegration/rational_q" =>
+        (; long_name="safety factor q = m/n at each rational surface in the Galerkin solve", dims=("surface",),
+            attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/rational_psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/rational_m" =>
+        (; long_name="resonant poloidal mode number m at each rational surface in the Galerkin solve", dims=("surface",),
+            attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/rational_psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/rational_n" =>
+        (; long_name="resonant toroidal mode number n at each rational surface in the Galerkin solve", dims=("surface",),
+            attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/rational_psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/D_I" =>
+        (; long_name="Mercier D_I at each rational surface in the Galerkin solve", dims=("surface",),
+            attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/rational_psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/alpha" =>
+        (; long_name="Frobenius small-solution exponent α at each rational surface in the Galerkin solve", dims=("surface",),
+            attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/rational_psi",))
 ]
 
 # Attach long_name/units/dims + dimension scales (declared in-table) to everything
