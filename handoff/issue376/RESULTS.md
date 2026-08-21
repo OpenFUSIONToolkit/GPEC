@@ -1368,6 +1368,48 @@ kinetic-calculated FFS-only regression-harness case is needed — this whole cla
 was invisible to the suite. (3) The a10 A/B stands: suppression removes model-invalid damping
 (Im et[1] −0.0076 → −0.0000) with Re unchanged; high-ρ* machines need FOW physics.
 
+## 31. The redesign tested: resonance-pinned auto grid (Layer 0) suffices; adaptive layers not justified
+
+User redesign directives (2026-08-21): don't touch below ψ_c; capture missed kinetic resonances
+above it; test convergence above mψ=512 and a deliberately-parked mid-radius resonance.
+
+**Fixed-mψ convergence ladder** (suppressed, FFS-only, #414 head): fixed-512 → 0.988919−0.260490i
+(1.6% off); fixed-1024 → 1.004073−0.259566i (0.12% off auto-288). Five grids across three
+families (auto-288/auto-367/develop-554/fixed-512/fixed-1024) cluster at 0.1–0.2%; fixed grids
+converge slower than the auto grid; nothing approaches the parked certified grid's 0.84–0.86.
+The 16%-doubt is closed: the certified answer was the outlier against every grid family.
+
+**Rotation scan** (locator on loaded profiles vs toroidal_rotation_factor): factor=0.2 parks
+Ω_ℓ=0 nodes at ψ=0.578 and 0.812 (mid-radius, valid region, off-rational). Side discovery: the
+unscaled profiles have a node at ψ=0.021 — the previously mysterious "sharp increment feature at
+ψ≈0.022" (§28) is identified as this resonance (below ψ_c, suppressed by #414).
+
+**Layer 0 implemented** (feature/kinetic-resonance-knots, PR #422, stacked on #414, ~30 lines):
+`kinetic_resonance_psi_nodes` (>ψ_c) pinned into the two-pass auto grid via
+`merge_mandatory_nodes` — plain knots, inserted before rational bracketing so the Δ′
+clean-interval treatment wins locally. `refined_psi_grid` gains a `pinned` kwarg. DIII-D: 6
+nodes, +2 net knots, et[1] Δ2e-6, **EL steps −14%** (4,246→3,665; the ψ=0.17 resonance was
+previously unknown to the grid).
+
+**Resonance stress tests** (rot=0.2; gold = fixed 1024):
+| | et[1] | vs gold |
+|---|---|---|
+| gold (1025 knots) | 0.916212−0.196968i | — |
+| naive auto (304) | 0.917365−0.196802i | 1.24e-3 |
+| Layer-0 auto (305) | 0.917364−0.196803i | 1.24e-3 (≡ naive to 1e-6) |
+| collisionless gold (nufac=0.02) | 0.916516−0.195728i | — |
+| collisionless naive | 0.917670−0.195564i | 1.24e-3 |
+
+The naive-grid physics risk did not materialize even collisionless: the auto grid's
+profile-curvature term follows the reshaped ω_E and resolves the parked resonances at the
+convergence-scatter level. **Decision: ship Layer 0 as cheap insurance (+ the step win); Layers
+1–2 of the safety-net design (free post-hoc residual detector on consumed matrices with local
+scale; one bounded diagonal-probe refinement round) are recorded here as the revival path but NOT
+implemented — no test justifies them.** The diagonal-probe idea (O(m) integrand quantities vs
+O(m²) — the kernel packs 3m(m+1)/2+3m² quantities through the pitch/energy quadrature, so a
+diagonal-only eval is 10–30× cheaper and cannot miss a resonance whose denominator is common to
+all elements) is the correct fast primitive if ever needed, replacing the "max element" notion.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
