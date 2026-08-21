@@ -1410,6 +1410,34 @@ O(m²) — the kernel packs 3m(m+1)/2+3m² quantities through the pitch/energy q
 diagonal-only eval is 10–30× cheaper and cannot miss a resonance whose denominator is common to
 all elements) is the correct fast primitive if ever needed, replacing the "max element" notion.
 
+## 32. The torque cross-validation (user design): the sharpest grid diagnostic yet, and it fails
+
+The PE response torque (anti-Hermitian Λ on the EL grid; `Energies/toroidal_torque`) vs the
+post-PE KF NTV (`fgar/total_torque`, adaptive quadgk, grid-free) — the Fortran ldp-grid
+diagnostic, now runnable because suppression made the full chain affordable:
+
+| run | PE | KF | PE/KF |
+|---|---|---|---|
+| rot 1.0, auto 290 | 0.1831 | 0.7241 | 0.25 |
+| rot 1.0, fixed 1024 | 0.0830 | 0.7281 | 0.11 |
+| rot 0.2, auto 305 | 0.0946 | 0.1282 | 0.74 |
+| rot 0.2, fixed 1024 | 0.0950 | 0.1286 | 0.74 |
+
+KF grid-stable to 0.3–0.5% (the referee). Two distinct failure modes: (1) rot=1.0 PE torque is
+UNCONVERGED and moves away from KF with density — 92% of the torque accrues at ψ>0.9 where the
+ω_E sign flip sits in ~one grid cell and the rational brackets (0.893/0.968/0.993) clear knots;
+et[1] is converged to 0.1% through all of this, so the eigenvalue was never a sufficient grid
+referee for torque physics. (2) rot=0.2 PE torque is grid-converged but sits at a stable ~26%
+deficit — convention/factor audit, the unmerged PE Clebsch bug (#407), or a real
+discretization-vs-integrand physics difference. Filed as issue #423 with follow-ups (adopt the
+cross-check as a tracked harness quantity; audit conventions; investigate pedestal ω_E-crossing
+representation; consider porting the full torque response matrix).
+
+This partially rehabilitates the sharp-resonance concern that §31 bounded: the et-based stress
+tests were blind to exactly the quantity (pedestal anti-Hermitian structure) where the grid is
+genuinely inadequate. Any revived kinetic grid adaptation should certify against the TORQUE
+cross-check, not eigenvalues.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
