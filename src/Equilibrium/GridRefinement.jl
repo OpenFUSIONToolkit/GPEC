@@ -418,7 +418,7 @@ Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: measured-curv
 density (`_knot_density`), equidistribution, a global minimum-spacing floor
 (`enforce_min_spacing`), and rational-surface bracketing (`bracket_mandatory_nodes`). `tau` is
 the target interpolation accuracy (`psi_accuracy`); `kin` optionally supplies kinetic profiles
-whose pedestal gradients attract knots; `mandatory` lists rational-surface ψ values to bracket;
+whose pedestal gradients attract knots; `mandatory` lists rational-surface ψ values to bracket; `pinned` lists ψ values inserted as plain knots without a cleared zone (kinetic-resonance surfaces);
 `singfac_min` and `n_min` (smallest |n| in the run) set each surface's matching half-stencil
 `dpsi = singfac_min/(n_min·|q′|)`, and the bracket half-width is `bracket_coef·dpsi` (floored at
 `min_spacing`). Rational surfaces are bracketed, not pinned: a knot on the surface would make the
@@ -428,6 +428,7 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     tau::Float64,
     kin::Union{Nothing,KineticProfileSplines}=nothing,
     mandatory::Vector{Float64}=Float64[],
+    pinned::Vector{Float64}=Float64[],
     singfac_min::Float64=1e-4,
     n_min::Int=1,
     bracket_coef::Float64=BRACKET_COEF,
@@ -449,6 +450,11 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     N == N_cap && M_total > N_cap &&
         @warn "refined_psi_grid: knot count capped at $N_cap (density integral wants $(ceil(Int, M_total))); psi_accuracy=$tau may not be attainable"
     grid = enforce_min_spacing(_equidistribute(xs, rho, N), min_spacing)
+    # Pinned knots (e.g. kinetic-resonance surfaces): knot-at-node semantics via
+    # merge_mandatory_nodes — no cleared zone. Inserted before rational bracketing, so a
+    # pinned node inside a rational's bracket zone is cleared by it (the Δ′ clean-interval
+    # requirement wins locally; the rational's own dense floor resolves that neighbourhood).
+    grid = isempty(pinned) ? grid : merge_mandatory_nodes(grid, pinned)
     isempty(mandatory) && return grid
     min_half_widths = [max(bracket_coef * singfac_min / (n_min * abs(equil.profiles.q_deriv(m))), min_spacing) for m in mandatory]
     return bracket_mandatory_nodes(grid, mandatory, min_half_widths, min_spacing)
