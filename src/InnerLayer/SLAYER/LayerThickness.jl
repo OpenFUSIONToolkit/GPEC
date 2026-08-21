@@ -137,6 +137,26 @@ is built from, retained as a drift-scale reference.
   - `delta_s`   -- complex layer thickness `δ_s = dels_db · d_β` [m]
   - `delta_s_m` -- `|δ_s|`, the resistive layer thickness in meters (primary)
   - `d_beta`    -- β-weighted ion scale `c_β·d_i` in meters (drift reference)
+  - `delta_norm`  -- layer normalization length `r_s · S^(-1/3)` in meters, the
+    length by which Δ' is made dimensionless (`Δ̂' = Δ'·delta_norm`). Shared by all
+    four regimes of Burgess et al. (2026) Eqs. (10)-(13), not specific to any one
+    of them, and **not** the classic non-rotating Furth-Killeen-Rosenbluth (1963)
+    constant-ψ tearing width, which scales as `S^(-2/5)` and is not computed here.
+    Exactly the reciprocal of the `delta_n` Δ-normalization already carried on
+    `SLAYERParameters`, restated as a length for comparison with `delta_s_m`
+  - `delta_dr` -- diffusive-resistive layer thickness in meters, Fitzpatrick (2025)
+    Eq. (100). Strong magnetic shear near the separatrix forces every resonant layer in
+    that region into the diffusive-resistive (`nu = 1/4`) regime, so this is the width the
+    edge overlap criterion compares against surface spacing. In the paper's normalized
+    radius, `delta_hat = tau_A^(1/2) / (tau_R^(1/4) tau_E^(1/4) d_beta_hat^(1/2) (n|s|)^(1/2))`;
+    with `lu = tau_R/tau_A` and `P_perp = tau_R/tau_E` that is
+    `lu^(-1/2) P_perp^(1/4) / (d_beta_hat^(1/2) (n|s|)^(1/2))`, scaled by `rs` for meters.
+    Distinct from `delta_visco`, which is the 2/3 power of the same timescale grouping and
+    carries neither the `d_beta` nor the shear factor
+  - `delta_visco` -- viscous-resistive scale `delta_norm · P_perp^(1/6)` in meters,
+    from the `P^(1/6)` broadening of the VR-regime growth rate, Burgess et al.
+    (2026) Eq. (11). The paper gives the growth rate rather than an explicit width;
+    this is the corresponding length
 
 `delta_s_m` should sit within a few orders of magnitude of `d_beta` for a
 well-posed surface (`dels_db` is O(1)); a large gap flags a normalisation
@@ -150,6 +170,9 @@ struct LayerWidths
     delta_s::ComplexF64
     delta_s_m::Float64
     d_beta::Float64
+    delta_norm::Float64
+    delta_visco::Float64
+    delta_dr::Float64
 end
 
 """
@@ -161,11 +184,27 @@ surface.
 Runs [`riccati_del_s`](@ref) for the dimensionless `δ_s / d_β` and scales
 by `p.d_beta` to obtain `δ_s` in meters. Keyword arguments are forwarded
 to `riccati_del_s`.
+
+The two algebraic comparison scales `delta_norm` and `delta_visco` come from
+`p` directly and do not depend on the Riccati solve.
 """
 function slayer_layer_thickness(p::SLAYERParameters; kwargs...)
     dels_db = riccati_del_s(p; kwargs...)
     delta_s = dels_db * p.d_beta
+    # Layer normalization length: exactly 1/delta_n (delta_n = S^(1/3)/r_s), computed
+    # from rs and lu so it reads as a length. Burgess et al. (2026), the Δ̂' = Δ'/S^(1/3)
+    # normalization preceding Eq. (10).
+    delta_norm = p.rs * p.lu^(-1.0 / 3.0)
+    # Viscous-resistive broadening, P^(1/6) coefficient of Burgess et al. (2026) Eq. (11).
+    delta_visco = delta_norm * p.P_perp^(1.0 / 6.0)
+    # Diffusive-resistive width, Fitzpatrick (2025) Eq. (100), in meters. d_beta_hat is the
+    # normalized ion scale d_beta/rs; the shear is the r-based |s| SLAYER already carries.
+    # The paper's tau_A (its Eq. 74) carries no shear, whereas SLAYER's tau_h divides by n*s,
+    # so lu = tau_R/tau_h = (n|s|) * (tau_R/tau_A). Substituting that into Eq. (100) cancels its
+    # explicit (n|s|)^(-1/2) exactly, leaving no shear dependence in terms of lu.
+    d_beta_hat = p.d_beta / p.rs
+    delta_dr = d_beta_hat > 0 ? p.rs * p.lu^(-0.5) * p.P_perp^(0.25) / sqrt(d_beta_hat) : NaN
     return LayerWidths(p.ising, p.m, p.n,
         dels_db, delta_s, abs(delta_s),
-        p.d_beta)
+        p.d_beta, delta_norm, delta_visco, delta_dr)
 end
