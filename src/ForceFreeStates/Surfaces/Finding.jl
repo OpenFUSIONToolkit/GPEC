@@ -110,7 +110,8 @@ performed to find the corresponding `psilim` to integrate to.
 Note that the Newton iteration will be triggered if either `set_psilim_via_dmlim` is true
 or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
 """
-function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium;
+    psilim_cap::Union{Nothing,Real}=nothing)
 
     profiles = equil.profiles
 
@@ -118,6 +119,20 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.params.psihigh_resolved
+
+    # Resistive-layer overlap imposes an UPPER BOUND on the domain: past the first pair of
+    # overlapping layers no surface retains a well-separated inner region, so matched asymptotics
+    # is not defined out there. Applied as a cap on qlim rather than as psilim directly, so the
+    # dmlim / qhigh truncation below still selects the final surface from inside the bound.
+    # Never widens the domain: a cap beyond psihigh is inert by construction.
+    if psilim_cap !== nothing && psilim_cap < intr.psilim
+        q_cap = profiles.q_spline(Float64(psilim_cap))
+        if q_cap < intr.qlim
+            @info "Resistive-layer overlap caps the domain: qlim $(@sprintf("%.3f", intr.qlim)) -> " *
+                  "$(@sprintf("%.3f", q_cap)) (psi $(@sprintf("%.6f", intr.psilim)) -> $(@sprintf("%.6f", Float64(psilim_cap))))"
+            intr.qlim = q_cap
+        end
+    end
 
     # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent). The cutoff reads
     # the *resolved* toroidal range on `intr`, so callers must assign intr.nlow / intr.nhigh
