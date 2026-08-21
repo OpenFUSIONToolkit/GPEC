@@ -57,6 +57,86 @@ const CORE_MODEL_PSI_MAX = 0.03
 const EDGE_MODEL_PSI_MIN = 0.9
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
+# --- shared separatrix edge q-law -------------------------------------------------------------
+# Minimum knots in the edge band before a fit is attempted.
+const EDGE_FIT_MIN_KNOTS = 4
+# The diverging model must explain the edge q this well in absolute terms. Measured over the
+# shipped decks: DIII-D-like 0.9957 and 0.9989 (diverted, q -> inf at the separatrix) against
+# 0.972 for the a10 fixed-boundary case, 0.9035 for LAR and 0.7600 for Solovev (all limited,
+# finite edge q). Rejecting is the safe direction -- it only means no extrapolation.
+const EDGE_FIT_MIN_R2 = 0.99
+
+# Least-squares slope and coefficient of determination for y = a + b*x.
+function _linfit_r2(x::Vector{Float64}, y::Vector{Float64})
+    x_bar = sum(x) / length(x)
+    y_bar = sum(y) / length(y)
+    sxx = sum((x .- x_bar) .^ 2)
+    sxx > 0 || return (NaN, NaN, NaN, NaN)
+    b = sum((x .- x_bar) .* (y .- y_bar)) / sxx
+    ss_res = sum((y .- (y_bar .+ b .* (x .- x_bar))) .^ 2)
+    ss_tot = sum((y .- y_bar) .^ 2)
+    r2 = ss_tot > 0 ? 1 - ss_res / ss_tot : NaN
+    return (b, r2, x_bar, y_bar)
+end
+
+"""
+    edge_q_law(equil; psi_max, psi_min=EDGE_MODEL_PSI_MIN, min_knots=EDGE_FIT_MIN_KNOTS,
+               min_r2=EDGE_FIT_MIN_R2) -> nothing | (; A, q_bar, u_bar, n_knots, r2_log, r2_linear)
+
+Least-squares fit of the separatrix edge law `q = q̄ + A·(ln(1−ψ) − ū)` over the equilibrium's
+outer knots — the single shared statement of that model, used both by the grid-refinement edge
+density floor and by the resistive-layer overlap scan's out-of-grid surface search.
+
+Returns `nothing` when the diverging model does **not** describe this equilibrium's edge, so a
+plasma with finite edge q is never extrapolated as if q blew up:
+
+  - fewer than `min_knots` knots in the band;
+  - `A ≥ 0`, i.e. q not rising toward ψ = 1;
+  - `r2_log < min_r2` — the log law does not actually fit;
+  - `r2_log ≤ r2_linear` — a plain linear-in-ψ fit explains the edge q at least as well, which is
+    what a **limited** plasma looks like. This comparison carries no scale and is what separates
+    the shipped limited decks (Solovev 0.760 vs 0.9996 linear; LAR 0.904 vs 0.998) from the
+    diverted ones (DIII-D 0.996 vs 0.865, 0.999 vs 0.594).
+
+This is a test of the **model**, not a topology classification: it asks whether q diverges
+logarithmically here, not whether an x-point exists. Geometric x-point detection is
+[`classify_topology`](@ref), which is a separate concern.
+"""
+function edge_q_law(equil::PlasmaEquilibrium;
+    psi_max::Real=Float64(equil.profiles.xs[end]),
+    psi_min::Real=EDGE_MODEL_PSI_MIN,
+    min_knots::Int=EDGE_FIT_MIN_KNOTS,
+    min_r2::Real=EDGE_FIT_MIN_R2)
+    xs = collect(Float64, equil.profiles.xs)
+    band = findall(x -> x >= psi_min && x < psi_max, xs)
+    if length(band) < min_knots
+        n_tail = max(min_knots, length(xs) ÷ 10)
+        band = filter(i -> xs[i] < psi_max, collect(max(1, length(xs) - n_tail + 1):length(xs)))
+    end
+    length(band) >= min_knots || return nothing
+
+    q = [Float64(equil.profiles.q_spline(xs[i])) for i in band]
+    u = [log(1.0 - xs[i]) for i in band]
+    all(isfinite, u) && all(isfinite, q) || return nothing
+
+    A, r2_log, u_bar, q_bar = _linfit_r2(u, q)
+    _, r2_linear, _, _ = _linfit_r2([xs[i] for i in band], q)
+    (isfinite(A) && A < 0) || return nothing            # q must rise toward the edge
+    (isfinite(r2_log) && r2_log >= min_r2) || return nothing
+    (isfinite(r2_linear) && r2_log > r2_linear) || return nothing
+
+    return (A=A, q_bar=q_bar, u_bar=u_bar, n_knots=length(band), r2_log=r2_log, r2_linear=r2_linear)
+end
+
+"""
+ψ at which the edge law reaches `q_target`; closed form, no root-finding needed.
+"""
+edge_q_law_psi(fit, q_target::Real) = 1.0 - exp(fit.u_bar + (q_target - fit.q_bar) / fit.A)
+
+"""
+dq/dψ from the edge law: q = q̄ + A·ln(1−ψ) + const ⇒ dq/dψ = −A/(1−ψ).
+"""
+edge_q_law_dqdpsi(fit, psi::Real) = -fit.A / (1.0 - psi)
 # Rational-surface bracketing (Δ′ robustness). The ideal-MHD Δ′ asymptotic matching samples the
 # cubic equilibrium splines' 2nd/3rd derivatives across each rational ψ_s over the matching stencil
 # [ψ_s − dpsi, ψ_s + dpsi], dpsi = singfac_min/|n·q′|. A cubic 3rd derivative is piecewise constant
@@ -248,10 +328,15 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
     # nodal data of the smallest flux surfaces is dominated by integration and axis
     # extrapolation error, so measured curvature is not trusted below the core split.
     dlog = (4.0 * tau)^(1 / 3)
+    # The edge floor encodes the DIVERGING edge law q ≈ -A·ln(1-ψ), so it is applied only where
+    # that model actually describes the equilibrium. A limited plasma has finite edge q and must
+    # not be packed as if q blew up. The density itself stays A-independent (that is the point of
+    # the form: uniform relative q′ error regardless of A) -- the fit supplies validity, not slope.
+    edge_diverges = edge_q_law(equil) !== nothing
     @inbounds for i in 1:n
         if xs[i] <= CORE_MODEL_PSI_MAX
             rho_s[i] = 1.0 / (dlog * xs[i])
-        elseif xs[i] >= EDGE_MODEL_PSI_MIN
+        elseif edge_diverges && xs[i] >= EDGE_MODEL_PSI_MIN
             rho_s[i] = max(rho_s[i], 1.0 / (dlog * (1.0 - xs[i])))
         end
         rho_s[i] = max(rho_s[i], 1.0 / H_TARGET_MAX)
@@ -410,8 +495,32 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
 end
 
 """
+    _truncate_density(xs, rho, psihigh) -> (xs_t, rho_t)
+
+Restrict a measured knot density to `[xs[1], psihigh]`, linearly interpolating `rho` at the new
+outer endpoint so the density integral stays continuous in `psihigh`. Errors when `psihigh` lies
+outside the sampled grid, where the density is unmeasured.
+"""
+function _truncate_density(xs, rho::Vector{Float64}, psihigh::Float64)
+    xs_v = collect(Float64, xs)
+    psihigh > xs_v[1] ||
+        error("_truncate_density: psihigh=$psihigh must exceed the inner grid bound $(xs_v[1])")
+    psihigh <= xs_v[end] + 1e-12 ||
+        error(
+            "_truncate_density: psihigh=$psihigh exceeds the pass-1 grid end $(xs_v[end]); " *
+            "the knot density is unmeasured there — form the enlarged domain first, then refine against it"
+        )
+    psihigh >= xs_v[end] - 1e-12 && return (xs_v, rho)
+
+    k = searchsortedlast(xs_v, psihigh)
+    frac = (psihigh - xs_v[k]) / (xs_v[k+1] - xs_v[k])
+    rho_end = rho[k] + frac * (rho[k+1] - rho[k])
+    return (vcat(xs_v[1:k], psihigh), vcat(rho[1:k], rho_end))
+end
+
+"""
     refined_psi_grid(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[],
-                     singfac_min=1e-4, n_min=1, bracket_coef=BRACKET_COEF,
+                     psihigh=nothing, singfac_min=1e-4, n_min=1, bracket_coef=BRACKET_COEF,
                      min_spacing=MIN_KNOT_SPACING, N_cap=1024) -> Vector{Float64}
 
 Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: measured-curvature knot
@@ -423,11 +532,18 @@ whose pedestal gradients attract knots; `mandatory` lists rational-surface ψ va
 `dpsi = singfac_min/(n_min·|q′|)`, and the bracket half-width is `bracket_coef·dpsi` (floored at
 `min_spacing`). Rational surfaces are bracketed, not pinned: a knot on the surface would make the
 Δ′ extraction's cubic 3rd derivative jump mid-stencil (see `BRACKET_COEF`).
+
+`psihigh` builds the grid for a domain *smaller* than the one `equil` was formed on: the measured
+density is truncated there and the last node lands exactly on it. This lets a pass-1 equilibrium
+supply the density for a re-form on a reduced domain without an extra solve. Passing a `psihigh`
+beyond the pass-1 grid is an error — the density out there is unmeasured, so an enlarged domain
+must be formed first and refined against that.
 """
 function refined_psi_grid(equil::PlasmaEquilibrium;
     tau::Float64,
     kin::Union{Nothing,KineticProfileSplines}=nothing,
     mandatory::Vector{Float64}=Float64[],
+    psihigh::Union{Nothing,Real}=nothing,
     singfac_min::Float64=1e-4,
     n_min::Int=1,
     bracket_coef::Float64=BRACKET_COEF,
@@ -435,6 +551,9 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     N_cap::Int=REFINED_N_CAP)
     xs = equil.profiles.xs
     rho = _knot_density(equil; tau, kin)
+    if psihigh !== nothing
+        xs, rho = _truncate_density(xs, rho, Float64(psihigh))
+    end
     # Floor the density to a fixed (τ-independent) locally-uniform fine patch around each rational
     # so Δ′ has the resolution to sample 3rd derivatives there at any accuracy target (see
     # RATIONAL_RES_SPACING).
