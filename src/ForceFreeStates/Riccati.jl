@@ -1406,20 +1406,29 @@ function integrate_fm_with_ua_ic(
     u0 = zeros(ComplexF64, N, N, 2)
     u0[:, :, 1] .= ua[:, 1:N, 1]
     u0[:, :, 2] .= ua[:, 1:N, 2]
+    # Per-column absolute tolerance so a batch's largest column cannot set the error floor of its smallest:
+    # otherwise the resonant small-solution column inherits an absolute error set by the big solution's magnitude.
+    abstol_arr = similar(u0, Float64)
+    for j in 1:N
+        abstol_arr[:, j, :] .= max(maximum(abs, @view u0[:, j, :]), 1e-30) * rtol
+    end
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
     result[1:N, 1:N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, 1:N]  .= sol.u[end][:, :, 2]
 
     # Batch 2: columns N+1:2N of T (small solutions)
     u0[:, :, 1] .= ua[:, N+1:2N, 1]
     u0[:, :, 2] .= ua[:, N+1:2N, 2]
+    for j in 1:N
+        abstol_arr[:, j, :] .= max(maximum(abs, @view u0[:, j, :]), 1e-30) * rtol
+    end
     odet_proxy.spline_hint[] = 1
     odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
     result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, N+1:2N]  .= sol.u[end][:, :, 2]
 
