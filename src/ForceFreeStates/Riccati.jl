@@ -1265,6 +1265,7 @@ function _capture_right_crossing_data!(odet::OdeState, singp::SingType, sing_asy
         end
     end
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+    odet.ca_populated = true
 end
 
 # STUB: per-surface ca-based Δ' (not physically valid; see SingType.delta_prime docstring).

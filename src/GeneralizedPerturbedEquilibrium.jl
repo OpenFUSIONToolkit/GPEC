@@ -1205,8 +1205,10 @@ function write_outputs_to_HDF5(
         out_h5["SingularSurfaces/rational_psi"] = [sing.psifac for sing in result.surfaces]
         out_h5["SingularSurfaces/rational_q"] = [sing.q for sing in result.surfaces]
         out_h5["SingularSurfaces/dqdpsi"] = [sing.q1 for sing in result.surfaces]
-        out_h5["SingularSurfaces/ca_left"] = diag !== nothing ? diag.ca_l : ComplexF64[]
-        out_h5["SingularSurfaces/ca_right"] = diag !== nothing ? diag.ca_r : ComplexF64[]
+        # Kinetic and galerkin-matched runs never populate ca_l/ca_r (only ideal surface
+        # crossings do); emit zero-extent sentinels instead of unpopulated arrays.
+        out_h5["SingularSurfaces/ca_left"] = (diag !== nothing && diag.ca_populated) ? diag.ca_l : zeros(ComplexF64, 0, 0, 0, 0)
+        out_h5["SingularSurfaces/ca_right"] = (diag !== nothing && diag.ca_populated) ? diag.ca_r : zeros(ComplexF64, 0, 0, 0, 0)
 
         if msing > 0
             # Mode numbers at each surface (jagged — pad with 0 to max_modes width)

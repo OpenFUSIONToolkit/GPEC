@@ -641,6 +641,7 @@ function cross_ideal_singular_surf!(
     end
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+    odet.ca_populated = true
 
     # Δ' is NOT computed for the standard path. The physical Δ' requires the solution
     # columns to be in the Riccati gauge (U₂=I), maintained only by Riccati renormalization.
