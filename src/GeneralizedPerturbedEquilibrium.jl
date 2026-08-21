@@ -249,8 +249,32 @@ function main_from_inputs(
         # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
         # so the rational-surface brackets clear a zone large enough for every mode.
         n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
+        # Pin the located kinetic-resonance surfaces (Ω_ℓ = 0) as plain knots when the run
+        # builds calculated kinetic matrices — the ideal-driven grid criterion knows nothing
+        # about kinetic resonance locations. Nodes inside the near-axis validity region are
+        # suppressed anyway and not pinned.
+        pinned = Float64[]
+        if ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && kinetic_profiles !== nothing
+            for n_res in intr.nlow:intr.nhigh
+                n_res == 0 && continue
+                append!(
+                    pinned,
+                    KineticForces.kinetic_resonance_psi_nodes(
+                        kinetic_profiles, equil;
+                        n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
+                        electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac)
+                )
+            end
+            if kf_ctrl.axis_validity_suppression
+                psi_c_grid = KineticForces.kinetic_axis_validity_psi(kinetic_profiles, equil;
+                    zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron)
+                filter!(p -> p > psi_c_grid, pinned)
+            end
+            isempty(pinned) ||
+                @info "Pinning $(length(pinned)) kinetic-resonance surfaces into the ψ grid: $(round.(sort(pinned); digits=3))"
+        end
         psi_nodes = Equilibrium.refined_psi_grid(equil;
-            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory, pinned=pinned,
             singfac_min=ctrl.singfac_min, n_min=n_min)
         rerun_input = if additional_input !== nothing
             # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
