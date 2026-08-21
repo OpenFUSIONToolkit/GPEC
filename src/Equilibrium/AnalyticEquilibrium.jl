@@ -243,7 +243,7 @@ function tj_analytic_f1(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
         x2 = x * x
         return x2 * (1 - (nu-1)*x2/2 + (nu-1)*(nu-2)*x2*x2/6 -
-                      (nu-1)*(nu-2)*(nu-3)*x2*x2*x2/24) / qc
+                     (nu-1)*(nu-2)*(nu-3)*x2*x2*x2/24) / qc
     else
         return (1 - (1 - x*x)^nu) / (nu * qc)
     end
@@ -259,10 +259,10 @@ parameterization.
 function tj_analytic_f1p(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
         x2 = x * x
-        return 2*x * (1 - (nu-1)*x2 + (nu-1)*(nu-2)*x2*x2/2 -
-                       (nu-1)*(nu-2)*(nu-3)*x2*x2*x2/6) / qc
+        return 2 * x * (1 - (nu-1)*x2 + (nu-1)*(nu-2)*x2*x2/2 -
+                        (nu-1)*(nu-2)*(nu-3)*x2*x2*x2/6) / qc
     else
-        return 2*x * (1 - x*x)^(nu-1) / qc
+        return 2 * x * (1 - x*x)^(nu-1) / qc
     end
 end
 
@@ -273,10 +273,11 @@ GPEC adaptation of the analytic shape ODE used in R. Fitzpatrick's TJ code
 `tj_analytic_run_direct` call so both pipelines share identical numerics.
 
 Fields:
+
   - physical: a, R0, qc, mu, pc, B0
   - derived:  epsa2 = (a/R0)²
   - near-axis BC constants: rmin, x0 = rmin, r0 = rmin·a, f1c = 1/qc,
-                             p2ppc = d²p₂/dx²|_0 = −2·μ·pc
+    p2ppc = d²p₂/dx²|_0 = −2·μ·pc
 """
 struct TJAnalyticShapeParams
     a::Float64
@@ -293,15 +294,15 @@ struct TJAnalyticShapeParams
     p2ppc::Float64
 end
 
-function TJAnalyticShapeParams(tj::TJAnalyticConfig; rmin::Float64 = 1e-4)
+function TJAnalyticShapeParams(tj::TJAnalyticConfig; rmin::Float64=1e-4)
     a, R0 = tj.lar_a, tj.lar_r0
-    mu    = max(tj.mu, 1.001)
+    mu = max(tj.mu, 1.001)
     return TJAnalyticShapeParams(
         a, R0, tj.qc, mu, tj.pc, tj.B0,
         (a / R0)^2,
         rmin, rmin, rmin * a,
         1.0 / tj.qc,
-        -2.0 * mu * tj.pc,
+        -2.0 * mu * tj.pc
     )
 end
 
@@ -315,9 +316,9 @@ The params argument carries TJAnalyticShapeParams fields plus the current `nu`.
 """
 function tj_analytic_shape_rhs!(dy, y, params, r)
     (; a, B0, qc, mu, pc, epsa2, nu) = params
-    x    = r / a
+    x = r / a
     xfac = max(1 - x^2, 0.0)
-    f1   = tj_analytic_f1(x, nu, qc)
+    f1 = tj_analytic_f1(x, nu, qc)
     f1px = tj_analytic_f1p(x, nu, qc)
     p2px = -2 * mu * pc * x * xfac^(mu - 1)
 
@@ -340,16 +341,19 @@ function tj_analytic_shape_rhs!(dy, y, params, r)
     # f₃'(x) for Hₙ = Vₙ = 0 (n ≥ 2 harmonics rescaled to zero, as in the
     # TJ-analytic benchmark configuration of Fitzpatrick's TJ code).
     g2, f3 = y[2], y[5]
-    f3p_x = -f3 * f1px / f1 -
-             f1 * (3 * x^2 / 2 - 2 * x * H1p + H1p^2) / x +
-             f1px * (g2 - 3 * x^2 / 4 + H1 + 3 * H1p^2 / 2) +
-             x^2 * p2px * (g2 + x^2 / 2 - 3 * x * H1p - 2 * H1) / f1
+    f3p_x =
+        -f3 * f1px / f1 -
+        f1 * (3 * x^2 / 2 - 2 * x * H1p + H1p^2) / x +
+        f1px * (g2 - 3 * x^2 / 4 + H1 + 3 * H1p^2 / 2) +
+        x^2 * p2px * (g2 + x^2 / 2 - 3 * x * H1p - 2 * H1) / f1
     dy[5] = f3p_x / a
     return nothing
 end
 
-"""Initial conditions at x = x0, matching the TJ-analytic model's near-axis
-expansion (cf. R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ)."""
+"""
+Initial conditions at x = x0, matching the TJ-analytic model's near-axis
+expansion (cf. R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ).
+"""
 function tj_analytic_shape_initial(p::TJAnalyticShapeParams, nu::Float64)
     f1_0 = tj_analytic_f1(p.x0, nu, p.qc)
     y0 = zeros(5)
@@ -368,14 +372,14 @@ downstream Hₙ / ψ splines sit on uniform nodes); leave it `nothing` for
 the default adaptive save pattern used by `tj_analytic_run`.
 """
 function tj_analytic_shape_solve(p::TJAnalyticShapeParams, nu::Float64;
-                        reltol::Float64 = 1e-7, abstol::Float64 = 1e-8,
-                        saveat = nothing)
-    rhs_params = (; p.a, p.B0, p.qc, p.mu, p.pc, p.epsa2, nu = nu)
+    reltol::Float64=1e-7, abstol::Float64=1e-8,
+    saveat=nothing)
+    rhs_params = (; p.a, p.B0, p.qc, p.mu, p.pc, p.epsa2, nu=nu)
     prob = ODEProblem(tj_analytic_shape_rhs!, tj_analytic_shape_initial(p, nu), (p.r0, p.a), rhs_params)
     if saveat === nothing
-        return solve(prob, Vern9(); reltol, abstol, maxiters = 10000, dense = false)
+        return solve(prob, Vern9(); reltol, abstol, maxiters=10000, dense=false)
     else
-        return solve(prob, Vern9(); reltol, abstol, maxiters = 10000, saveat = saveat)
+        return solve(prob, Vern9(); reltol, abstol, maxiters=10000, saveat=saveat)
     end
 end
 
@@ -389,9 +393,9 @@ O(εa²) correction relative to the lowest-order guess ν = qa/qc, which
 matters for the TJ-analytic benchmark at large ε.  Falls back to the
 lowest-order ν if the bracket search diverges.
 """
-function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; reltol::Float64 = 1e-7)
+function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; reltol::Float64=1e-7)
     function q2_edge(nu::Float64)
-        sol   = tj_analytic_shape_solve(p, nu; reltol)
+        sol = tj_analytic_shape_solve(p, nu; reltol)
         g2end = sol.u[end][2]
         f3end = sol.u[end][5]
         f1end = tj_analytic_f1(1.0, nu, p.qc)
@@ -400,7 +404,7 @@ function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; relto
     nu_guess = qa_target / p.qc
     return try
         find_zero(nu -> q2_edge(nu) - qa_target, (0.5 * nu_guess, 2 * nu_guess);
-                  atol = 1e-8, rtol = 1e-10)
+            atol=1e-8, rtol=1e-10)
     catch err
         @warn "ν root-find failed for TJ-analytic equilibrium; falling back to lowest-order ν = qa/qc" error = err
         nu_guess
@@ -443,16 +447,16 @@ included; they are zero in the TJ-analytic benchmark scans.
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
 function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
-    a, R0  = tj.lar_a, tj.lar_r0
+    a, R0 = tj.lar_a, tj.lar_r0
     qc, mu = tj.qc, max(tj.mu, 1.001)
     pc, B0 = tj.pc, tj.B0
     ma, mtau = tj.ma, tj.mtau
     p = TJAnalyticShapeParams(tj)
-    epsa2     = p.epsa2
-    p00_phys  = B0^2 * epsa2 * pc          # μ₀P = B₀²·εa²·p₂ at axis
+    epsa2 = p.epsa2
+    p00_phys = B0^2 * epsa2 * pc          # μ₀P = B₀²·εa²·p₂ at axis
 
-    nu  = tj_analytic_find_nu(p, tj.qa; reltol = equil_input.etol)
-    sol = tj_analytic_shape_solve(p, nu; reltol = equil_input.etol)
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -468,7 +472,7 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
         xfac = max(1 - x^2, 0.0)
         f1 = tj_analytic_f1(x, nu, qc)
 
-        ψ  = y_mat[i, 1]
+        ψ = y_mat[i, 1]
         g2 = y_mat[i, 2]
         H1 = y_mat[i, 3]
         f3 = y_mat[i, 5]
@@ -507,7 +511,7 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
         f = spl(r; hint=hint)
         # f[1]=F, f[2]=P, f[3]=q, f[4]=ψ, f[5]=g₂, f[6]=H₁
 
-        sq_xs[ia]    = f[4] / psio
+        sq_xs[ia] = f[4] / psio
         sq_fs[ia, 1] = f[1]           # F
         sq_fs[ia, 2] = f[2]           # P
         sq_fs[ia, 3] = f[3]           # q
@@ -525,7 +529,7 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
         for itau in 1:(mtau+1)
             θ = 2π * (itau - 1) / mtau
             rzphi_fs_nodes[ia, itau, 1] = R0 + Δ + α * r * cos(θ)
-            rzphi_fs_nodes[ia, itau, 2] =          α * r * sin(θ)
+            rzphi_fs_nodes[ia, itau, 2] = α * r * sin(θ)
         end
     end
 
@@ -579,38 +583,38 @@ ODE (g₂, H₁, H₁', f₃), the `GetPSIvac` / `GetHHvac` vacuum extension, an
 EFIT-writer (R, Z) → (r, w) Newton inversion that this routine adapts.
 """
 function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticConfig;
-                       nrbox::Int = 257, nzbox::Int = 257, rc::Float64 = 1.2)
-    a, R0  = tj.lar_a, tj.lar_r0
+    nrbox::Int=257, nzbox::Int=257, rc::Float64=1.2)
+    a, R0 = tj.lar_a, tj.lar_r0
     qc, mu = tj.qc, max(tj.mu, 1.001)
     pc, B0 = tj.pc, tj.B0
     p = TJAnalyticShapeParams(tj)
     epsa, epsa2 = p.a / p.R0, p.epsa2
-    p00_phys    = B0^2 * epsa2 * pc
+    p00_phys = B0^2 * epsa2 * pc
 
     # ν root-find (cf. Fitzpatrick TJ's Setnu): q₂(1) = qa_target.
-    nu = tj_analytic_find_nu(p, tj.qa; reltol = equil_input.etol)
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
 
     # Dense saveat so the downstream splines (H₁, g₂, f₃, ψ) are evaluated on
     # a fine uniform r grid rather than the ~30 adaptive Vern9 steps — otherwise
     # the (R, Z) → (r, w) Newton iteration hits spline interpolation artifacts.
-    dense_r = collect(range(p.r0, p.a; length = 1024))
-    sol     = tj_analytic_shape_solve(p, nu; reltol = equil_input.etol,
-                              abstol = 1e-10, saveat = dense_r)
-    r_arr   = sol.t
-    y_mat   = reduce(hcat, sol.u)'
+    dense_r = collect(range(p.r0, p.a; length=1024))
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol,
+        abstol=1e-10, saveat=dense_r)
+    r_arr = sol.t
+    y_mat = reduce(hcat, sol.u)'
 
     # Radial splines in the TJ-analytic dimensionless x = r/a on a clean grid for H₁ etc.
     x_nodes = r_arr ./ a
-    ψ_of_r   = cubic_interp(r_arr, y_mat[:, 1]; extrap=ExtendExtrap())
-    H1_of_x  = cubic_interp(x_nodes, y_mat[:, 3]; extrap=ExtendExtrap())
+    ψ_of_r = cubic_interp(r_arr, y_mat[:, 1]; extrap=ExtendExtrap())
+    H1_of_x = cubic_interp(x_nodes, y_mat[:, 3]; extrap=ExtendExtrap())
     H1p_of_x = cubic_interp(x_nodes, y_mat[:, 4]; extrap=ExtendExtrap())
-    g2_of_x  = cubic_interp(x_nodes, y_mat[:, 2]; extrap=ExtendExtrap())
-    f3_of_x  = cubic_interp(x_nodes, y_mat[:, 5]; extrap=ExtendExtrap())
+    g2_of_x = cubic_interp(x_nodes, y_mat[:, 2]; extrap=ExtendExtrap())
+    f3_of_x = cubic_interp(x_nodes, y_mat[:, 5]; extrap=ExtendExtrap())
 
     # Edge values needed by GetPSIvac
-    f1a  = tj_analytic_f1(1.0, nu, qc)
-    f3a  = f3_of_x(1.0)
-    H1a  = H1_of_x(1.0)
+    f1a = tj_analytic_f1(1.0, nu, qc)
+    f3a = f3_of_x(1.0)
+    H1a = H1_of_x(1.0)
     H1ap = H1p_of_x(1.0)
     psio = ψ_of_r(a)   # ψ at r = a (boundary)
 
@@ -644,7 +648,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
             return f_R_shift(rc - 1e-8, w) * r^2 / rc^2
         end
         H1 = (r < 1.0) ? H1_of_x(r) : H1_vac(r)
-        L  = r^3 / 8 - r * H1 / 2
+        L = r^3 / 8 - r * H1 / 2
         return epsa2 * H1 + epsa2 * epsa * L * cos(w)
     end
     function f_Z_shift(r::Float64, w::Float64)
@@ -652,7 +656,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
             return f_Z_shift(rc - 1e-8, w) * r^2 / rc^2
         end
         H1 = (r < 1.0) ? H1_of_x(r) : H1_vac(r)
-        L  = r^3 / 8 - r * H1 / 2
+        L = r^3 / 8 - r * H1 / 2
         return -epsa2 * epsa * L * sin(w)
     end
 
@@ -699,9 +703,9 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     # Grid spans R₀ ± rc·a × ±rc·a (where rc is the vacuum-shell radius in
     # units of a), giving a comfortable margin for the separatrix finder.
     r_span = rc * a
-    psi_in_xs = collect(range(R0 - r_span, R0 + r_span; length = nrbox))
-    psi_in_ys = collect(range(-r_span, r_span; length = nzbox))
-    psi_rz    = zeros(Float64, nrbox, nzbox)
+    psi_in_xs = collect(range(R0 - r_span, R0 + r_span; length=nrbox))
+    psi_in_ys = collect(range(-r_span, r_span; length=nzbox))
+    psi_rz = zeros(Float64, nrbox, nzbox)
 
     for i in 1:nrbox, j in 1:nzbox
         R_norm = psi_in_xs[i] / R0
@@ -724,8 +728,10 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     # 1D profile spline, same layout as read_efit (4 columns).  Use the
     # TJ-analytic q₂ on the radial grid so that the prescribed q is
     # consistent with the ψ(R,Z) we just constructed.
-    psi_norm_grid = range(0.0, 1.0; length = nrbox)
-    F_nodes  = zeros(nrbox); P_nodes = zeros(nrbox); q_nodes = zeros(nrbox)
+    psi_norm_grid = range(0.0, 1.0; length=nrbox)
+    F_nodes = zeros(nrbox)
+    P_nodes = zeros(nrbox)
+    q_nodes = zeros(nrbox)
     for i in 1:nrbox
         ψN = psi_norm_grid[i]
         # Invert ψN = (ψ_plasma(r) - 0) / psio  ⇒  find r such that ψ_plasma(r) = ψN·psio.
@@ -746,7 +752,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
         F_nodes[i] = R0 * B0 * (1 + epsa2 * g2_val)
         P_nodes[i] = p00_phys * xfac^mu
         q_nodes[i] = (x > 1e-10) ? x^2 * (1 + epsa2 * g2_val) *
-                                    exp(-epsa2 * f3_val / f1) / f1 : qc
+                                   exp(-epsa2 * f3_val / f1) / f1 : qc
     end
     sq_fs_nodes = hcat(F_nodes, P_nodes, q_nodes, sqrt.(collect(psi_norm_grid)))
     sq_in = cubic_interp(collect(psi_norm_grid), Series(sq_fs_nodes); extrap=ExtendExtrap())
@@ -756,7 +762,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
 
     # Analytic: ingest=nothing — replay regenerates from the [TJ_ANALYTIC_INPUT] TOML section.
     return DirectRunInput(equil_input, sq_in, psi_in, psi_in_xs, psi_in_ys,
-                          rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1, nothing)
+        rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1, nothing)
 end
 
 """

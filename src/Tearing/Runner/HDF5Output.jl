@@ -1,6 +1,6 @@
 # HDF5Output.jl
 #
-# Write a `SLAYERResult` into an HDF5 group. Designed to be called by the
+# Write a `SLAYERResult` or `CriticalResonantFieldResult` into an HDF5 group. Designed to be called by the
 # existing `PerturbedEquilibrium.write_outputs_to_HDF5` path — the
 # top-level GPEC runner wires that up; this file only defines the pure
 # writer.
@@ -38,6 +38,10 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     # disjoint field sets, so readers must not have to infer it from the schema.
     attrs(g)["layer_model"] = result.enabled ? _layer_model_token(eltype(result.params)) : "none"
 
+    if result.critical_resonant_field.enabled
+        write_critical_resonant_field_hdf5!(g, result.critical_resonant_field)
+    end
+
     if !result.enabled    # nothing else to write
         _annotate_tearing!(g)
         return g
@@ -54,6 +58,40 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
         _write_scan_data!(g, result)
     end
     _annotate_tearing!(g)
+    return g
+end
+
+function write_critical_resonant_field_hdf5!(parent::Union{HDF5.File,HDF5.Group},
+    result::CriticalResonantFieldResult)
+
+    g = create_group(parent, "CriticalResonantField")
+
+    g["surface_index"] = result.surface_index
+    g["Qpeak"] = result.Qpeak
+    g["br_crit"] = result.br_crit
+    g["Q0"] = result.Q0
+    g["P"] = result.P
+
+    if !isempty(result.scan_data)
+        scan_group = create_group(g, "Scan")
+        for d in result.scan_data
+            sg = create_group(scan_group, "surface_$(d.surface)")
+            sg["Q"] = d.Q
+            sg["balance"] = d.balance
+            sg["delta"] = d.delta
+            sg["Qpeak"] = d.Qpeak
+            sg["br_crit"] = d.br_crit
+
+            # Save inputs for analysis in post
+            for field in (:Q0, :P, :lu, :sval, :m, :n)
+                if field in keys(d)
+                    sg[String(field)] = getfield(d, field)
+                end
+            end
+        end
+    end
+
+    attrs(g)["kind"] = "critical_resonant_field"
     return g
 end
 

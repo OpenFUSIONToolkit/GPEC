@@ -43,31 +43,31 @@ end
     fm = PE.field_space_response_matrices(Λ, L, P, ϱ, S, jarea)
 
     @testset "Flux recovery contract (round-trip via R = S·A)" begin
-        @test R * fm.permeability / R ≈ P                rtol = 1e-10
-        @test R * fm.surface_inductance * R' ≈ L         rtol = 1e-10
-        @test R * fm.plasma_inductance * R' ≈ Λ          rtol = 1e-10
-        @test (R') \ fm.reluctance / R ≈ ϱ               rtol = 1e-10
+        @test R * fm.permeability / R ≈ P rtol = 1e-10
+        @test R * fm.surface_inductance * R' ≈ L rtol = 1e-10
+        @test R * fm.plasma_inductance * R' ≈ Λ rtol = 1e-10
+        @test (R') \ fm.reluctance / R ≈ ϱ rtol = 1e-10
     end
 
     @testset "Area-weighted (b̄) recovery via S (= flux/A²)" begin
         # b̄-space inductance L_b̄ = S·L̃·S† = L/A² since S·R⁻¹ = A⁻¹·I.
-        @test S * fm.surface_inductance * S' ≈ L ./ jarea^2   rtol = 1e-10
-        @test S * fm.plasma_inductance * S' ≈ Λ ./ jarea^2    rtol = 1e-10
-        @test S * fm.permeability / S ≈ P                     rtol = 1e-10   # similarity: A cancels
+        @test S * fm.surface_inductance * S' ≈ L ./ jarea^2 rtol = 1e-10
+        @test S * fm.plasma_inductance * S' ≈ Λ ./ jarea^2 rtol = 1e-10
+        @test S * fm.permeability / S ≈ P rtol = 1e-10   # similarity: A cancels
     end
 
     @testset "Internal consistency of the b̃ transform rules" begin
-        @test fm.permeability ≈ fm.plasma_inductance / fm.surface_inductance      rtol = 1e-10
+        @test fm.permeability ≈ fm.plasma_inductance / fm.surface_inductance rtol = 1e-10
         L̃inv = inv(fm.surface_inductance)
-        @test fm.reluctance ≈ L̃inv * (fm.plasma_inductance - fm.surface_inductance) * L̃inv  rtol = 1e-10
+        @test fm.reluctance ≈ L̃inv * (fm.plasma_inductance - fm.surface_inductance) * L̃inv rtol = 1e-10
     end
 
     @testset "Energy-scalar invariance (flux ↔ b̃)" begin
         Φ = ComplexF64[cis(0.3k) / k for k in 1:n]
         b̃ = R \ Φ                          # root-area-weighted field
-        @test dot(Φ, L \ Φ) ≈ dot(b̃, fm.surface_inductance \ b̃)   rtol = 1e-10
-        @test dot(Φ, Λ \ Φ) ≈ dot(b̃, fm.plasma_inductance \ b̃)    rtol = 1e-10
-        @test dot(Φ, ϱ * Φ) ≈ dot(b̃, fm.reluctance * b̃)           rtol = 1e-10
+        @test dot(Φ, L \ Φ) ≈ dot(b̃, fm.surface_inductance \ b̃) rtol = 1e-10
+        @test dot(Φ, Λ \ Φ) ≈ dot(b̃, fm.plasma_inductance \ b̃) rtol = 1e-10
+        @test dot(Φ, ϱ * Φ) ≈ dot(b̃, fm.reluctance * b̃) rtol = 1e-10
     end
 
     @testset "Three-field vector relations (b, b̃, b̄; flux = A·b̄)" begin
@@ -75,9 +75,9 @@ end
         b̄ = S * b̃                          # area-weighted field
         b = (S .* sqrt(jarea)) \ b̃          # bare field b = Σ⁻¹·b̃
         Φ = R * b̃                           # poloidal flux
-        @test Φ ≈ jarea .* b̄               rtol = 1e-12   # Φ = A·b̄
-        @test b̄ ≈ Φ ./ jarea               rtol = 1e-12
-        @test (S .* sqrt(jarea)) * b ≈ b̃    rtol = 1e-12   # Σ·b = b̃
+        @test Φ ≈ jarea .* b̄ rtol = 1e-12   # Φ = A·b̄
+        @test b̄ ≈ Φ ./ jarea rtol = 1e-12
+        @test (S .* sqrt(jarea)) * b ≈ b̃ rtol = 1e-12   # Σ·b = b̃
     end
 end
 

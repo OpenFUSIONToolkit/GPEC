@@ -37,7 +37,8 @@ function read_equilibrium_ingest(in_h5)
     haskey(in_h5, group_path) || return nothing
     group = in_h5[group_path]
     kind = read(group, "ingest_kind")
-    T = kind == "direct" ? Equilibrium.DirectIngest :
+    T =
+        kind == "direct" ? Equilibrium.DirectIngest :
         kind == "inverse" ? Equilibrium.InverseIngest :
         error("Unknown equilibrium ingest_kind in gpec.h5: $kind (expected \"direct\" or \"inverse\")")
     # Positional reconstruction: relies on the default constructor, so `fieldnames(T)` order
@@ -75,8 +76,8 @@ numbers, booleans, and quoted strings without worrying about shell quoting.
 function parse_override_flag(expr::AbstractString)
     eqidx = findfirst(==('='), expr)
     eqidx === nothing && error("--override expects key=value, got: $expr")
-    lhs = String(strip(expr[1:eqidx-1]))
-    rhs = String(strip(expr[eqidx+1:end]))
+    lhs = String(strip(expr[1:(eqidx-1)]))
+    rhs = String(strip(expr[(eqidx+1):end]))
     isempty(lhs) && error("--override key cannot be empty: $expr")
 
     parts = split(lhs, '.')
@@ -97,7 +98,7 @@ function parse_override_flag(expr::AbstractString)
     # Build nested dict from dotted path.
     root = Dict{String,Any}()
     cursor = root
-    for p in parts[1:end-1]
+    for p in parts[1:(end-1)]
         cursor[String(p)] = Dict{String,Any}()
         cursor = cursor[String(p)]
     end
@@ -176,7 +177,7 @@ function resolve_rerun_output_path(source_h5::String, output_dir::String, output
     source_abs = abspath(source_h5)
     if output_name === nothing
         base = basename(source_abs)
-        stem = endswith(lowercase(base), ".h5") ? base[1:end-3] : base
+        stem = endswith(lowercase(base), ".h5") ? base[1:(end-3)] : base
         output_name = string(stem, "_rerun.h5")
     end
     if abspath(joinpath(output_dir, output_name)) == source_abs
@@ -281,9 +282,11 @@ function build_inputs_from_h5(args::Vector{String})
     elseif ingest isa Equilibrium.InverseIngest
         Equilibrium.build_inverse_from_ingest(eq_config, ingest)
     else
-        error("gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay. " *
-              "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one); a new analytic kind must be " *
-              "registered in Equilibrium.ANALYTIC_EQ.")
+        error(
+            "gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay. " *
+            "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one); a new analytic kind must be " *
+            "registered in Equilibrium.ANALYTIC_EQ."
+        )
     end
 
     return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils

@@ -3,6 +3,41 @@
 # `SLAYERResult` packages the output of a full SLAYER analysis run:
 # per-surface layer parameters, the extracted tearing eigenvalues, and (if
 # `control.store_scan`) the full Q-plane scan data for plotting.
+#
+# `CriticalResonantFieldResult` packages the output of the critical resonant field analysis run:
+# per-surface critical resoant field. If `control.store_scan` is true, the full Q scan data,
+# viscous torque, and electromagnetic torque are also stored for plotting.
+
+"""
+    CriticalResonantFieldResult
+
+Output of `run_critical_resonant_field`. Carries both summary critical resonant field values and if `control.store_scan` is true, the full Q scan data, viscous torque, and electromagnetic torque for plotting.
+"""
+
+struct CriticalResonantFieldResult
+    enabled::Bool
+    params::AbstractVector{<:InnerLayerParameters}
+    surface_index::Vector{Int}
+    Qpeak::Vector{Float64}
+    br_crit::Vector{Float64}
+    Q0::Vector{Float64}
+    P::Vector{Float64}
+    scan_data::Vector{NamedTuple}
+end
+
+function empty_critical_resonant_field_result()
+    return CriticalResonantFieldResult(
+        false,
+        InnerLayerParameters[],
+        Int[],
+        Float64[],
+        Float64[],
+        Float64[],
+        Float64[],
+        NamedTuple[]
+    )
+end
+
 
 """
     SLAYERResult
@@ -22,9 +57,9 @@ downstream inspection and HDF5 output.
     the surface list), in which case the HDF5 writer skips them.
   - `dp_matrix`           -- outer-region Δ' matrix used in the analysis
   - `Q_root`              -- tearing eigenvalue(s) in normalized Q
-    * length `nsurfaces` in `:uncoupled` mode
-    * length `1` in `:coupled` mode (global eigenvalue normalized by
-      `params[1].tauk`)
+      + length `nsurfaces` in `:uncoupled` mode
+      + length `1` in `:coupled` mode (global eigenvalue normalized by
+        `params[1].tauk`)
   - `omega_Hz`, `gamma_Hz` -- physical rotation frequency / growth rate
   - `per_surface_extraction` -- `Vector{GrowthRateResult}` of length
     `nsurfaces` in uncoupled mode (each includes polelines, pole list,
@@ -51,16 +86,18 @@ struct SLAYERResult
     coupled_extraction::Union{Nothing,GrowthRateResult}
     layer_widths::Vector{LayerWidths}
     scan_data::Vector{Union{ScanResult,AMRResult}}
+    critical_resonant_field::CriticalResonantFieldResult
 end
 
 # Empty result (enabled=false path)
 function empty_slayer_result(control::SLAYERControl)
     return SLAYERResult(false, control,
-                        SLAYERParameters[],
-                        Float64[], Float64[],
-                        zeros(ComplexF64, 0, 0),
-                        ComplexF64[], Float64[], Float64[],
-                        GrowthRateResult[], nothing,
-                        LayerWidths[],
-                        Union{ScanResult,AMRResult}[])
+        SLAYERParameters[],
+        Float64[], Float64[],
+        zeros(ComplexF64, 0, 0),
+        ComplexF64[], Float64[], Float64[],
+        GrowthRateResult[], nothing,
+        LayerWidths[],
+        Union{ScanResult,AMRResult}[],
+        empty_critical_resonant_field_result())
 end

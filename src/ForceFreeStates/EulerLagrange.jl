@@ -37,9 +37,9 @@ end
 # at the interval endpoints. Coefficients are ported from STRIDE's ode_itime cost model
 # (Fortran reference) and unchanged here. Tune only after re-fitting against a per-chunk
 # step-count sweep; touching these affects parallel-chunk load balancing.
-const ODE_COST_AXIS  = (a = 39695.0, b = 212830.0)
-const ODE_COST_RAT   = (a = 17147.0, b = 470710.0)
-const ODE_COST_EDGE  = (a =  1646.0, b =   4683.0)
+const ODE_COST_AXIS = (a=39695.0, b=212830.0)
+const ODE_COST_RAT = (a=17147.0, b=470710.0)
+const ODE_COST_EDGE = (a=1646.0, b=4683.0)
 
 """
     ode_itime_cost(psi1, psi2, intr) -> Float64
@@ -72,7 +72,7 @@ never from `Threads.nthreads()` — so the chunk list, and hence every Riccati o
 identical whatever thread count `julia -t` provides.
 
 Each split finds the equal-cost midpoint ψ_mid via bisection:
-  ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
+ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
 
 Sub-chunks inherit `needs_crossing=false` and `ising=0`. Only the LAST sub-chunk of
 each original chunk retains `needs_crossing=true` and the original `ising`, so the
@@ -131,10 +131,10 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
         psi_mid = (lo + hi) / 2.0
 
         left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
-                                  needs_crossing=false, ising=0, direction=1)
+            needs_crossing=false, ising=0, direction=1)
         right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
-                                   needs_crossing=chunk.needs_crossing, ising=chunk.ising,
-                                   direction=chunk.direction)
+            needs_crossing=chunk.needs_crossing, ising=chunk.ising,
+            direction=chunk.direction)
         splice!(result, best_idx, [left, right])
     end
 
@@ -284,20 +284,20 @@ is identified by dominant |U₁| component, giving the physically correct consta
 Frobenius solution and avoiding the spurious logarithmic irregularity.
 """
 function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplines,
-        intr::ForceFreeStatesInternal, psi_low::Float64)
-    N    = intr.numpert_total
+    intr::ForceFreeStatesInternal, psi_low::Float64)
+    N = intr.numpert_total
     hint = Ref(1)
 
     # Evaluate stability matrices at psi_low
     F_lower = zeros(ComplexF64, N, N)
-    kmat    = zeros(ComplexF64, N, N)
-    gmat    = zeros(ComplexF64, N, N)
+    kmat = zeros(ComplexF64, N, N)
+    gmat = zeros(ComplexF64, N, N)
     ffit.fmats_lower(vec(F_lower), psi_low; hint=hint)
-    ffit.kmats(vec(kmat),          psi_low; hint=hint)
-    ffit.gmats(vec(gmat),          psi_low; hint=hint)
+    ffit.kmats(vec(kmat), psi_low; hint=hint)
+    ffit.gmats(vec(gmat), psi_low; hint=hint)
 
     # singfac[j] = 1 / (m_j − n_j · q) for each mode j
-    q0      = profiles.q_spline(psi_low; hint=hint)
+    q0 = profiles.q_spline(psi_low; hint=hint)
     singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q0 .* (intr.nlow:intr.nhigh)'))
 
     # F̄⁻¹ = (F_lower · F_lower')⁻¹ via the Cholesky factor
@@ -311,15 +311,15 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
     for j in 1:N
         sf = singfac[j]
         fi = Finv[j, j]
-        k  = kmat[j, j]
+        k = kmat[j, j]
         kd = conj(k)          # K̄†[j,j]
-        g  = gmat[j, j]
+        g = gmat[j, j]
 
         # 2×2 ODE matrix block for mode j [Glasser 2016 Eq. 22-24, diagonal approximation]
         m11 = -sf * fi * k
-        m12 =  sf^2 * fi
-        m21 =  g - kd * fi * k
-        m22 =  sf * kd * fi
+        m12 = sf^2 * fi
+        m21 = g - kd * fi * k
+        m22 = sf * kd * fi
 
         # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
         #! format: off
@@ -346,7 +346,7 @@ function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplin
         if abs(v2) > Base.sqrt(Base.eps(Float64)) * abs(v1)
             U1_init[j, j] = v1 / v2
         else
-            U1_init[j, j] =  one(ComplexF64)
+            U1_init[j, j] = one(ComplexF64)
             U2_init[j, j] = zero(ComplexF64)
         end
     end
@@ -365,7 +365,7 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 Move ising_start logic to chunk_el_integration_bounds?
 """
 function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ffit::FourFitVars,
-        profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+    profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
     # Default psifac to minimum equilibrium psi value
     odet.psifac = profiles.xs[1]
@@ -542,7 +542,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                 psi_end=psi_end,
                 needs_crossing=true,
                 ising=ising_current,
-                direction = bidirectional ? -1 : 1
+                direction=bidirectional ? -1 : 1
             ))
 
             # After crossing, we jump to the other side of the singular surface
@@ -975,7 +975,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
+            mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
         # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
@@ -992,7 +992,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # and mfix + 1 is the for the region after the last fixup and before the edge
     transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        mul!(view(transforms,:,:,ifix), view(gauss,:,:,ifix), view(transforms,:,:,(ifix+1)))
+        mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, (ifix+1)))
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors

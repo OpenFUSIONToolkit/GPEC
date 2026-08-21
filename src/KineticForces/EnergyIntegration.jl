@@ -40,10 +40,10 @@ end
 
 Collision frequency ν(x) at normalized energy x = E/T.
 
-- `"zero"`: collisionless (ν = 0)
-- `"small"`: 1e-5 * we
-- `"krook"`: unmodified Krook operator
-- `"harmonic"`: (1 + (l/2)²) * krook * x^(-3/2)
+  - `"zero"`: collisionless (ν = 0)
+  - `"small"`: 1e-5 * we
+  - `"krook"`: unmodified Krook operator
+  - `"harmonic"`: (1 + (l/2)²) * krook * x^(-3/2)
 """
 @inline function _energy_collision_frequency(x::Float64, p::EnergyParams)::Float64
     nux = if p.nutype == "zero"
@@ -188,7 +188,7 @@ Writing `h(x) = N(x)·exp(-x)`, the limit is
 `Ω′ = leff·wb/(2√x) + n·wd`, `Ω″ = −leff·wb/(4·x^{3/2})`.
 """
 @inline function _real_pole_regular_part(xr::Float64, p::EnergyParams, leff::Float64,
-                                                 wb::Float64, n::Int, wd::Float64)::ComplexF64
+    wb::Float64, n::Int, wd::Float64)::ComplexF64
     sx = sqrt(xr)
     op = leff * wb / (2.0 * sx) + n * wd          # Ω′(x_res)
     opp = -leff * wb / (4.0 * xr * sx)            # Ω″(x_res)
@@ -211,8 +211,8 @@ add-back below), and its on-axis `0/0` window by the analytic regular-part limit
 # Real x-space resonant integrand with pole subtractions
 # Explicit function keeps memory allocation out of the QuadGK inner loop.
 @inline function _resonant_integrand(x::Float64, p::EnergyParams,
-        residues::Vector{ComplexF64}, x_poles::Vector{ComplexF64}, npole::Int,
-        leff::Float64, wb::Float64, n::Int, wd::Float64)::ComplexF64
+    residues::Vector{ComplexF64}, x_poles::Vector{ComplexF64}, npole::Int,
+    leff::Float64, wb::Float64, n::Int, wd::Float64)::ComplexF64
     val = _energy_integrand_real(x, p)
     @inbounds for k in 1:npole
         val -= residues[k] / (x - x_poles[k])
@@ -234,8 +234,8 @@ add-back below), and its on-axis `0/0` window by the analytic regular-part limit
 end
 
 function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
-                                        n::Int, we::Float64, wd::Float64,
-                                        atol::Float64, rtol::Float64, segbuf=nothing)::ComplexF64
+    n::Int, we::Float64, wd::Float64,
+    atol::Float64, rtol::Float64, segbuf=nothing)::ComplexF64
     x_res_list = find_resonance_energies(leff, wb, n, we, wd)   # ≤ 2 roots of a quadratic in √x
     x_poles = ComplexF64[]
     residues = ComplexF64[]
@@ -308,17 +308,18 @@ Distribution function types (`f0type`): `"maxwellian"`, `"jkp"`, `"cgl"`.
 poles are now handled analytically rather than by contour deformation.
 
 # Returns
-- `ComplexF64`: energy integral value
+
+  - `ComplexF64`: energy integral value
 """
 function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
-                              wb::Float64, nuk::Float64, ell::Int, leff::Float64,
-                              n::Int, psi::Float64, lambda::Float64, method::String;
-                              nutype::String="harmonic", f0type::String="maxwellian",
-                              nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
-                              atol::Float64=1e-7, rtol::Float64=1e-5, segbuf=nothing)::ComplexF64
+    wb::Float64, nuk::Float64, ell::Int, leff::Float64,
+    n::Int, psi::Float64, lambda::Float64, method::String;
+    nutype::String="harmonic", f0type::String="maxwellian",
+    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+    atol::Float64=1e-7, rtol::Float64=1e-5, segbuf=nothing)::ComplexF64
 
     p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
-                     nutype, f0type, nufac, ximag, qt)
+        nutype, f0type, nufac, ximag, qt)
 
     # CGL has no resonance denominator and no pole — integrate the physical
     # x-space integrand directly over the half line (QuadGK maps [0,∞) itself).
@@ -343,19 +344,20 @@ N(x)·exp(-x)/denom(x) at specified x = E/T values. Returns the integrand value
 integrand shape and verifying kinetic resonance resolution.
 
 # Example
+
 ```julia
-x = 10 .^ range(-2, stop=2, length=500)
+x = 10 .^ range(-2; stop=2, length=500)
 f = KineticForces.evaluate_energy_integrand(x; wn=1e3, wt=2e3, we=5e4,
-        wd=1e2, wb=3e4, nuk=1e3, leff=1.0, n=1)
-plot(x, real.(f); xscale=:log10, xlabel="x = E/T", ylabel="Re(integrand)")
+    wd=1e2, wb=3e4, nuk=1e3, leff=1.0, n=1)
+plot(x, real.(f); xscale=:log10, xlabel=\"x = E/T\", ylabel=\"Re(integrand)\")
 ```
 """
 function evaluate_energy_integrand(x_grid::AbstractVector{Float64};
-                                    wn::Float64, wt::Float64, we::Float64,
-                                    wd::Float64, wb::Float64, nuk::Float64,
-                                    leff::Float64, n::Int,
-                                    nutype::String="harmonic", f0type::String="maxwellian",
-                                    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false)
+    wn::Float64, wt::Float64, we::Float64,
+    wd::Float64, wb::Float64, nuk::Float64,
+    leff::Float64, n::Int,
+    nutype::String="harmonic", f0type::String="maxwellian",
+    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false)
     p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, ximag, qt)
     return [energy_integrand_scalar(x, p) for x in x_grid]
 end

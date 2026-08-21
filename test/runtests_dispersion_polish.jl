@@ -106,7 +106,7 @@
         r1 = 0.30 + 0.20im
         r2 = r1 + 0.002                          # second root 0.002 away
         f(Q) = (ComplexF64(Q) - r1) * (ComplexF64(Q) - r2)
-        pts = ComplexF64[r1 + 0.0003, r2 - 0.0003]   # coarse contour estimates
+        pts = ComplexF64[r1+0.0003, r2-0.0003]   # coarse contour estimates
         R1 = D._polish_trust_radius(pts, 1, 0.001)
         R2 = D._polish_trust_radius(pts, 2, 0.001)
         p1 = D._polish_root(f, pts[1], R1)[1]
@@ -124,7 +124,7 @@
         im_paths = [ComplexF64[0+0im, 0+0.1im]]            # segment length 0.1
         @test D._median_segment_length(re_paths, im_paths) ≈ 0.1   # median of [0.1,0.2,0.1]
         @test D._median_segment_length(Vector{Vector{ComplexF64}}(),
-                                       Vector{Vector{ComplexF64}}()) == 0.0
+            Vector{Vector{ComplexF64}}()) == 0.0
     end
 
     # ----------------------------------------------------------------

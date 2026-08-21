@@ -980,10 +980,12 @@ function _apply_rzphi_transform(
     # Per-thread scratch (the immutable `ft` functor and `geom` are shared read-only): θ-space
     # transform inputs/outputs (length mtheta) and mode-space forward-DFT outputs (length mpert),
     # so the DFTs run in place with no per-surface allocation.
-    bufs = [(R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta),
-             psi=zeros(ComplexF64, mtheta), th=zeros(ComplexF64, mtheta), ze=zeros(ComplexF64, mtheta),
-             Ro=zeros(ComplexF64, mpert), Zo=zeros(ComplexF64, mpert), Po=zeros(ComplexF64, mpert))
-            for _ in 1:Threads.maxthreadid()]
+    bufs = [
+        (R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta),
+            psi=zeros(ComplexF64, mtheta), th=zeros(ComplexF64, mtheta), ze=zeros(ComplexF64, mtheta),
+            Ro=zeros(ComplexF64, mpert), Zo=zeros(ComplexF64, mpert), Po=zeros(ComplexF64, mpert))
+        for _ in 1:Threads.maxthreadid()
+    ]
 
     Threads.@threads :static for ipsi in 1:npsi
         buf = bufs[Threads.threadid()]

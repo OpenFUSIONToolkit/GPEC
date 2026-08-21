@@ -109,7 +109,7 @@ end
 
 function _find_indexed2_float(text::String, name::String, i::Int, j::Int; default=nothing)
     m = match(Regex(
-            "\\b$(name)\\s*\\(\\s*$(i)\\s*,\\s*$(j)\\s*\\)\\s*=\\s*([+-]?[\\d.]+(?:[eE][+-]?\\d+)?)", "i"),
+        "\\b$(name)\\s*\\(\\s*$(i)\\s*,\\s*$(j)\\s*\\)\\s*=\\s*([+-]?[\\d.]+(?:[eE][+-]?\\d+)?)", "i"),
         text)
     isnothing(m) ? default : parse(Float64, m.captures[1])
 end
@@ -548,8 +548,8 @@ function compare_phix(
 
     grid = ForcingTerms.sample_boundary_grid(equil, p.mtheta_coil, p.nzeta_coil; psi=psilim)
     nobs = p.mtheta_coil * p.nzeta_coil
-    obs_R = zeros(nobs);
-    obs_phi = zeros(nobs);
+    obs_R = zeros(nobs)
+    obs_phi = zeros(nobs)
     obs_Z = zeros(nobs)
     for j in 1:p.nzeta_coil, i in 1:p.mtheta_coil
         idx = i + (j - 1) * p.mtheta_coil
@@ -557,8 +557,8 @@ function compare_phix(
         obs_phi[idx] = grid.phi_grid[j] + grid.phi_offset[i]
         obs_Z[idx] = grid.Z[i]
     end
-    B_R = zeros(nobs);
-    B_phi = zeros(nobs);
+    B_R = zeros(nobs)
+    B_phi = zeros(nobs)
     B_Z = zeros(nobs)
     ForcingTerms.compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
     bn = zeros(p.mtheta_coil, p.nzeta_coil)
@@ -639,9 +639,9 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
     push!(lines, "")
 
     push!(lines, "--- Mercier Criterion ---")
-    fdi = fort["di"];
+    fdi = fort["di"]
     fdr = fort["dr"]
-    jdi = julia["di"];
+    jdi = julia["di"]
     jdr = julia["dr"]
     if !isempty(jdi) && !isempty(fdi)
         jdi_on_fg = [_interp1(jq_psi, jdi, p) for p in fq_psi]
@@ -857,7 +857,7 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
 end
 
 function _interp1(x::AbstractVector, y::AbstractVector, xi::Real)
-    n = length(x);
+    n = length(x)
     n < 2 && return y[1]
     xi <= x[1] && return y[1]
     xi >= x[end] && return y[end]
@@ -1451,15 +1451,15 @@ function main(argv=ARGS)
     println()
     table_lines = build_comparison_table(fort, julia, fortran_dir, bench_dir, p.nn)
     for line in table_lines
-        ;
-        println(line);
+
+        println(line)
     end
 
     table_path = joinpath(bench_dir, "comparison_table.txt")
     open(table_path, "w") do io
         for line in table_lines
-            ;
-            println(io, line);
+
+            println(io, line)
         end
     end
     println("\nComparison table saved to: ", abspath(table_path))

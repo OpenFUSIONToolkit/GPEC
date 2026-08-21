@@ -6,6 +6,8 @@
 #   InnerLayer  -- pure physics: Δ_inner(Q) for GGJ or SLAYER models
 #   Dispersion  -- physics-agnostic scan + contour-intersection root
 #                  extraction (consumes any InnerLayerModel)
+#   CriticalResonantField -- physics-agnostic scan + torque-balance root
+#                  extraction (consumes any InnerLayerModel)
 #   Runner      -- user-facing orchestration: TOML config, profile
 #                  loading, HDF5 output, workflow hooks
 #
@@ -23,12 +25,14 @@ import ..InnerLayer as InnerLayer
 
 include("LayerInputs.jl")
 include("Dispersion/Dispersion.jl")
+include("CriticalResonantField/CriticalResonantField.jl")
 include("Runner/Runner.jl")
 
 import .Dispersion as Dispersion
+import .CriticalResonantField as CriticalResonantField
 import .Runner as Runner
 
-export InnerLayer, Dispersion, Runner
+export InnerLayer, Dispersion, CriticalResonantField, Runner
 export build_ggj_inputs
 
 end # module Tearing

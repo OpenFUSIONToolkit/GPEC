@@ -20,32 +20,32 @@ Fitzpatrick two-fluid drift-MHD SLAYER inner-layer model (Fitzpatrick
 de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 `D_norm` (not the older `pr`/`pe`/`ds` set).
 
-| field      | meaning                                                           |
-|:---------- |:----------------------------------------------------------------- |
-| `ising`    | Singular-surface index (traceability only)                        |
-| `m`, `n`   | Poloidal / toroidal mode numbers at this surface                  |
-| `tau`      | T_i / T_e                                                         |
-| `lu`       | Lundquist number S = τ_R / τ_H                                    |
-| `c_beta`   | Compressibility √(β_local / (1 + β_local))                        |
-| `D_norm`   | (d_β/r_s) · S^(1/3) · √(τ/(1+τ))  (Fitzpatrick normalized scale)  |
-| `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                            |
-| `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
-| `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
-| `Q_i`      | Normalized ion diamagnetic:      −tauk · ω_*i                     |
-| `iota_e`   | Q_e / (Q_e − Q_i)                                                 |
-| `tauk`     | Q-conversion factor S^(1/3) · τ_H  [s] — multiplies ω to get Q    |
-| `tau_r`    | Resistive diffusion time [s]                                      |
-| `delta_n`  | Δ-normalization factor S^(1/3) / r_s [m⁻¹]                        |
-| `rs`       | Minor radius at this surface [m]                                  |
-| `R0`       | Major radius [m]                                                  |
-| `bt`       | Toroidal field [T]                                                |
-| `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention) |
+| field      | meaning                                                                                                         |
+|:---------- |:--------------------------------------------------------------------------------------------------------------- |
+| `ising`    | Singular-surface index (traceability only)                                                                      |
+| `m`, `n`   | Poloidal / toroidal mode numbers at this surface                                                                |
+| `tau`      | T_i / T_e                                                                                                       |
+| `lu`       | Lundquist number S = τ_R / τ_H                                                                                  |
+| `c_beta`   | Compressibility √(β_local / (1 + β_local))                                                                      |
+| `D_norm`   | (d_β/r_s) · S^(1/3) · √(τ/(1+τ))  (Fitzpatrick normalized scale)                                                |
+| `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                                                                          |
+| `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                                                                  |
+| `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                                                                   |
+| `Q_i`      | Normalized ion diamagnetic:      −tauk · ω_*i                                                                   |
+| `iota_e`   | Q_e / (Q_e − Q_i)                                                                                               |
+| `tauk`     | Q-conversion factor S^(1/3) · τ_H  [s] — multiplies ω to get Q                                                  |
+| `tau_r`    | Resistive diffusion time [s]                                                                                    |
+| `delta_n`  | Δ-normalization factor S^(1/3) / r_s [m⁻¹]                                                                      |
+| `rs`       | Minor radius at this surface [m]                                                                                |
+| `R0`       | Major radius [m]                                                                                                |
+| `bt`       | Toroidal field [T]                                                                                              |
+| `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention)                                               |
 | `dr_val`   | Resistive interchange D_R = E + F + H² (critical-Δ input; auto-derived from GGJ coefficients unless overridden) |
-| `dgeo_val` | Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied) |
-| `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                |
-| `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
-| `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
-| `dc_type`  | Selector for `dc_tmp` formula                                     |
+| `dgeo_val` | Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied)                                         |
+| `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                                                              |
+| `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                                                                    |
+| `dc_tmp`   | Critical-Δ offset from chi_parallel matching                                                                    |
+| `dc_type`  | Selector for `dc_tmp` formula                                                                                   |
 
 The complex normalized growth rate `Q = ω + iγ` is **not** stored here;
 it is passed as a separate argument to `solve_inner`.

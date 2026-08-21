@@ -47,6 +47,7 @@ export Tearing
 # Backward-compat top-level aliases so callers can still reach these
 # directly; the canonical nested path is `Tearing.{Dispersion,Runner}`.
 import .Tearing.Dispersion as Dispersion
+import .Tearing.CriticalResonantField as CriticalResonantField
 import .Tearing.Runner as Runner
 export Dispersion, Runner
 

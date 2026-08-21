@@ -33,11 +33,13 @@ coefficients E, F, G, H, K, M, the local time scales τ_A (`taua`), τ_R (`taur`
 by total volume), and the surface index `ising`.
 
 # Required keyword arguments
+
   - `eta::Real` — plasma resistivity η at this surface [Ω·m]
   - `rho::Real` — mass density ρ at this surface [kg/m³]
   - `gamma::Real` — ratio of specific heats (enters G; physical thermodynamic value, e.g. 5/3)
 
 # Physics
+
 The six flux-surface averages (Fortran `avg(1:6)`) are
 `⟨B²/|∇ψ|²⟩, ⟨1/|∇ψ|²⟩, ⟨1/B²⟩, ⟨1/(B²|∇ψ|²)⟩, ⟨B²⟩, ⟨|∇ψ|²/B²⟩`, each weighted by `J/V′`
 and integrated over θ ∈ [0,1) — exactly the resist.f integrands. The timescales are
@@ -150,10 +152,10 @@ function resonant_match_rpec(delta_out_raw::AbstractMatrix, delta_coil_raw::Abst
     size(delta_coil_raw, 1) == 2msing || error("delta_coil_raw rows $(size(delta_coil_raw,1)) != 2msing")
 
     if ctrl.gal_ideal_flag   # ideal limit: no inner layer, no reconnection
-        return ResonantMatchResult(zeros(ComplexF64,2msing,ncoil), zeros(ComplexF64,2msing,ncoil),
-            zeros(ComplexF64,msing,2), zeros(ComplexF64,msing), Matrix{ComplexF64}(delta_coil_raw), empty_bpen, 0.0)
+        return ResonantMatchResult(zeros(ComplexF64, 2msing, ncoil), zeros(ComplexF64, 2msing, ncoil),
+            zeros(ComplexF64, msing, 2), zeros(ComplexF64, msing), Matrix{ComplexF64}(delta_coil_raw), empty_bpen, 0.0)
     end
-    for (nm,v) in (("gal_eta",ctrl.gal_eta),("gal_rho",ctrl.gal_rho),("gal_rotation",ctrl.gal_rotation))
+    for (nm, v) in (("gal_eta", ctrl.gal_eta), ("gal_rho", ctrl.gal_rho), ("gal_rotation", ctrl.gal_rotation))
         length(v) == msing || error("$nm length $(length(v)) != msing $msing")
     end
 
@@ -169,37 +171,47 @@ function resonant_match_rpec(delta_out_raw::AbstractMatrix, delta_coil_raw::Abst
         rpec_eig[i] = γ
         inner = InnerLayer.solve_inner_profile(InnerLayer.GGJModel(; solver=:galerkin), params, γ;
             xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx, nq=ctrl.gal_inner_nq, cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax)
-        deltar[i,1] = inner.Δ[1]; deltar[i,2] = inner.Δ[2]
+        deltar[i, 1] = inner.Δ[1]
+        deltar[i, 2] = inner.Δ[2]
         scale = -2π * chi1 * im * nn * sings[i].q1 * inner.dψdx   # b_m = −2πi·χ₁·n·q′·dψdx·rescale·Ψ (GalerkinMatch.jl)
-        pen[i,1] = scale * inner.Ψ[1,1] * inner.rescale          # parity 1 (Ψ(0)≠0)
-        pen[i,2] = scale * inner.Ψ[1,2] * inner.rescale          # parity 2 (Ψ(0)=0 ⇒ ~0)
+        pen[i, 1] = scale * inner.Ψ[1, 1] * inner.rescale          # parity 1 (Ψ(0)≠0)
+        pen[i, 2] = scale * inner.Ψ[1, 2] * inner.rescale          # parity 2 (Ψ(0)=0 ⇒ ~0)
     end
 
-    mat  = zeros(ComplexF64, 4msing, 4msing)
+    mat = zeros(ComplexF64, 4msing, 4msing)
     rmat = zeros(ComplexF64, 4msing, ncoil)
-    @views mat[2msing+1:4msing, 1:2msing] .= transpose(delta_out_raw)
-    @views rmat[2msing+1:4msing, :] .= .-delta_coil_raw
+    @views mat[(2msing+1):4msing, 1:2msing] .= transpose(delta_out_raw)
+    @views rmat[(2msing+1):4msing, :] .= .-delta_coil_raw
     for i in 1:msing
-        a=2i-1; b=2i; c=a+2msing; d=b+2msing
-        d1=deltar[i,1]; d2=deltar[i,2]
-        mat[a,a]=1;  mat[b,b]=1
-        mat[a,c]=-1; mat[a,d]=1
-        mat[b,c]=-1; mat[b,d]=-1
-        mat[c,c]=-d1; mat[c,d]=d2
-        mat[d,c]=-d1; mat[d,d]=-d2
+        a=2i-1
+        b=2i
+        c=a+2msing
+        d=b+2msing
+        d1=deltar[i, 1]
+        d2=deltar[i, 2]
+        mat[a, a]=1
+        mat[b, b]=1
+        mat[a, c]=-1
+        mat[a, d]=1
+        mat[b, c]=-1
+        mat[b, d]=-1
+        mat[c, c]=-d1
+        mat[c, d]=d2
+        mat[d, c]=-d1
+        mat[d, d]=-d2
     end
 
     cof = mat \ rmat
     residual = norm(mat*cof - rmat) / max(norm(rmat), 1e-300)
     cout = cof[1:2msing, :]
-    cin  = cof[2msing+1:4msing, :]
-    
+    cin = cof[(2msing+1):4msing, :]
+
     reconnected_flux = delta_coil_raw .+ transpose(delta_out_raw)*cout
     # Inner-layer penetrated (reconnected) resonant field per surface — ONE quantity per surface, read off
     # the inner solution at the layer center (match.f intotsol_b; GalerkinMatch.jl): bpen[i,j] = pen₁(i)·cin[2i,j] + pen₂(i)·cin[2i-1,j].
     bpen = zeros(ComplexF64, msing, ncoil)
     for i in 1:msing, j in 1:ncoil
-        bpen[i,j] = pen[i,1]*cin[2i,j] + pen[i,2]*cin[2i-1,j]
+        bpen[i, j] = pen[i, 1]*cin[2i, j] + pen[i, 2]*cin[2i-1, j]
     end
     return ResonantMatchResult(cout, cin, deltar, rpec_eig, reconnected_flux, bpen, residual)
 end

@@ -19,7 +19,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
-config_path  = joinpath(example_path, "gpec.toml")
+config_path = joinpath(example_path, "gpec.toml")
 
 psilow_values = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4]
 methods = ["efit", "efit_arclength", "efit_by_inversion"]
@@ -82,7 +82,7 @@ for method in methods
             raw_profile = Equilibrium.read_efit(cfg)
             psi_xs = pe.rzphi_xs
             mtheta = length(pe.rzphi_ys) - 1
-            psio   = pe.psio
+            psio = pe.psio
 
             # q0 extrapolated to axis (linear from innermost two grid points)
             q1 = pe.profiles.q_spline.y[1]
@@ -94,9 +94,9 @@ for method in methods
             for ipsi in 1:length(psi_xs)
                 psi_xs[ipsi] > 0.10 && break
                 ψ = psi_xs[ipsi]
-                for itheta in 1:8:mtheta+1
+                for itheta in 1:8:(mtheta+1)
                     θ = pe.rzphi_ys[itheta]
-                    r2  = pe.rzphi_rsquared((ψ, θ))
+                    r2 = pe.rzphi_rsquared((ψ, θ))
                     off = pe.rzphi_offset((ψ, θ))
                     rfac = sqrt(max(r2, 0.0))
                     η = 2π * (θ + off)

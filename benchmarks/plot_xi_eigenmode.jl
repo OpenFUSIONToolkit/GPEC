@@ -39,7 +39,7 @@ for ip in 1:nstep
     @views mul!(xi[:, ip], u1[:, :, ip], c)
 end
 
-ms = mlow .+ (0:mpert-1)
+ms = mlow .+ (0:(mpert-1))
 peak = [maximum(abs, @view xi[i, :]) for i in 1:mpert]
 order = sortperm(peak; rev=true)       # dominant harmonics first
 

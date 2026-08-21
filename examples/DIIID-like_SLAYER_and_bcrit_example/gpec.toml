@@ -1,7 +1,7 @@
-# DIII-D-like SLAYER tearing-mode growth-rate example.
+# DIII-D-like SLAYER tearing-mode growth-rate example with Critical Resonant Field calculations.
 # Reuses the equilibrium and H-mode kinetic profiles of the sibling
 # DIIID-like_ideal_example (geqdsk referenced by relative path; not
-# duplicated). Runs equilibrium + ForceFreeStates + SLAYER and skips
+# duplicated). Runs equilibrium + ForceFreeStates + SLAYER + CriticalResonantField and skips
 # PerturbedEquilibrium (ForceFreeStates.force_termination = true).
 
 [Equilibrium]
@@ -30,7 +30,7 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
-local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+local_stability_flag = false    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
 psiedge = 0.99                 # Edge dW scan band: diagnostic dW(ψ) computed for ψ ∈ [psiedge, psilim]; integration domain set by qhigh / psihigh / dmlim
@@ -86,3 +86,12 @@ Q_re_range = [-2.0, 2.0]       # Scan box in the normalized Q plane, Re(Q) axis
 Q_im_range = [-0.5, 3.0]       # Scan box in the normalized Q plane, Im(Q) axis
 nre        = 41                # Grid resolution along the Re(Q) axis
 nim        = 31                # Grid resolution along the Im(Q) axis
+
+[SLAYER.CriticalResonantField]                          # CriticalResonantField used to find the critical resonant field sufficent for tearing onset at each rational surface.
+enabled = true                                          # Run CriticalResonantField analysis
+Qmin = -10                                              # Minimum normalized rotation scanned
+Qmax = 10                                               # Maximum normalized rotation scanned
+n = 2000                                                # Number of rotation points scanned
+viscous_input_type = "magnetic_prandtl_number"          # "angular_momentum_diffusivity"     # Either "angular_momentum_diffusivity" or "magnetic_prandtl_number"
+viscous_input = "test_ang_mom_diff"                     # Either Prandlt number or angular momentum diffusivity (based on viscous_input_type). Takes in either a string name for the .h5 profile file, a single value for all, or false, which falls back on chi_perp ~ chi_e, electron thermal diffusivity.
+store_scan = true                                       # Per surface torque and inner layer quantities

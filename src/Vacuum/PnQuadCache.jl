@@ -26,7 +26,7 @@ const _PN_BGAUS = 2.5
 const (_PN_TG02, _PN_WANUMR) = let
     x32, w32 = gausslegendre(32)
     tg0 = [_PN_AGAUS + x32[i] * _PN_BGAUS for i in 1:32]
-    tg02   = NTuple{32,Float64}(t * t for t in tg0)
+    tg02 = NTuple{32,Float64}(t * t for t in tg0)
     wanumr = NTuple{32,Float64}(w32[i] * tg0[i] * exp(-tg0[i]^2) for i in 1:32)
     (tg02, wanumr)
 end
@@ -94,17 +94,19 @@ end
 
 function _make_pn_quad_entry(n::Int)
     @assert n >= 1 "PnQuadEntry is only defined for n ≥ 1 (Γ(1/2 - n) diverges at n = 0)"
-    inv_2n   = 1.0 / (2.0 * n)
+    inv_2n = 1.0 / (2.0 * n)
     inv_2np2 = 1.0 / (2.0 * n + 2.0)
-    sh  = Vector{Float64}(undef, 32)
-    ch  = Vector{Float64}(undef, 32)
+    sh = Vector{Float64}(undef, 32)
+    ch = Vector{Float64}(undef, 32)
     shp = Vector{Float64}(undef, 32)
     chp = Vector{Float64}(undef, 32)
     @inbounds for ig in 1:32
-        x  = _PN_TG02[ig] * inv_2n
+        x = _PN_TG02[ig] * inv_2n
         xp = _PN_TG02[ig] * inv_2np2
-        sh[ig]  = sinh(x);  ch[ig]  = cosh(x)
-        shp[ig] = sinh(xp); chp[ig] = cosh(xp)
+        sh[ig] = sinh(x)
+        ch[ig] = cosh(x)
+        shp[ig] = sinh(xp)
+        chp[ig] = cosh(xp)
     end
 
     # Compute the Gamma function Γ(1/2 - n) via the product formula.
@@ -117,7 +119,7 @@ function _make_pn_quad_entry(n::Int)
     # Combine into scale factors used in the final Legendre function assembly.
     # Pre-computing these once per n avoids repeating the Gamma product on every s-call.
     sqtwo = sqrt(2.0)
-    gauss_norm_n   = sqtwo / (n * sqpi * gamn)
+    gauss_norm_n = sqtwo / (n * sqpi * gamn)
     gauss_norm_np1 = sqtwo / ((n + 1.0) * sqpi * gamp)
 
     return PnQuadEntry(sh, ch, shp, chp, gauss_norm_n, gauss_norm_np1)

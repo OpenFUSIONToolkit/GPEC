@@ -140,8 +140,9 @@ Write variable-length integration trajectory records using offset-indexed concat
 This is the standard HDF5 ragged array pattern for storing variable-length data.
 
 # Arguments
-- `mg::HDF5.Group`: HDF5 group for this method
-- `records::Vector{EnergyIntegrationResult}`: Integration records to write
+
+  - `mg::HDF5.Group`: HDF5 group for this method
+  - `records::Vector{EnergyIntegrationResult}`: Integration records to write
 """
 function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
     rg = create_group(mg, "EnergyIntegrals")
@@ -173,13 +174,14 @@ end
 Print a summary of KineticForces results to stdout.
 
 # Arguments
-- `state::KineticForcesState`: Accumulated computation results
-- `verbose::Bool`: Print detailed per-surface results
+
+  - `state::KineticForcesState`: Accumulated computation results
+  - `verbose::Bool`: Print detailed per-surface results
 """
 function print_summary(state::KineticForcesState; verbose::Bool=false)
     for (method_name, result) in state.method_results
         @printf("%-8s  T_phi = %11.3e   2n*dW_k = %11.3e\n",
-                method_name, real(result.total_torque), imag(result.total_torque))
+            method_name, real(result.total_torque), imag(result.total_torque))
     end
     if verbose
         for (method_name, _) in state.kinetic_matrices

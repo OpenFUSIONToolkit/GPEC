@@ -494,7 +494,7 @@ end
         # materialize after the Gaussian fixups and free-boundary normalization rather than
         # transforming stored derivatives alongside u_store.
         npert = intr.numpert_total
-        T = Matrix{ComplexF64}(I, npert, npert) .+ 0.25 .* ComplexF64.(reshape(sin.(1:npert^2), npert, npert))
+        T = Matrix{ComplexF64}(I, npert, npert) .+ 0.25 .* ComplexF64.(reshape(sin.(1:(npert^2)), npert, npert))
         odet_t = deepcopy(odet_pristine)
         for istep in 1:odet_t.step
             odet_t.u_store[:, :, 1, istep] = odet_t.u_store[:, :, 1, istep] * T

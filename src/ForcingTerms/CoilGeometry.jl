@@ -265,7 +265,7 @@ function read_coil_dat(filepath::String)
             for l in 1:nsec
                 # Skip blank/comment lines between data rows
                 while row <= length(lines) &&
-                    (isempty(strip(lines[row])) || startswith(strip(lines[row]), "#"))
+                      (isempty(strip(lines[row])) || startswith(strip(lines[row]), "#"))
                     row += 1
                 end
                 row > length(lines) && error(
@@ -402,10 +402,12 @@ function make_window_pane_standoff(equil; standoff::Real, poloidal_angle::Real,
     # boundary along the normal is standoff - half*|sin(tilt)| — the tilt tips the legs toward the
     # surface, while tangential displacement leaves the normal clearance unchanged.
     clearance = standoff - half * abs(sin(deg2rad(poloidal_tilt)))
-    clearance > 0 || error("make_window_pane_standoff: coil intersects the plasma boundary " *
-                           "(standoff=$standoff, poloidal_length=$poloidal_length, poloidal_tilt=$poloidal_tilt); " *
-                           "an external coil must lie outside the control surface — increase standoff or reduce " *
-                           "poloidal_length/poloidal_tilt")
+    clearance > 0 || error(
+        "make_window_pane_standoff: coil intersects the plasma boundary " *
+        "(standoff=$standoff, poloidal_length=$poloidal_length, poloidal_tilt=$poloidal_tilt); " *
+        "an external coil must lie outside the control surface — increase standoff or reduce " *
+        "poloidal_length/poloidal_tilt"
+    )
 
     c1 = [Rc - half * uR, Zc - half * uZ]
     c2 = [Rc + half * uR, Zc + half * uZ]

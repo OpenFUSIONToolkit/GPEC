@@ -45,27 +45,30 @@ Build contiguous segment-vector and midpoint arrays for strand `(j,k)` of coil s
 function precompute_segments(cs::CoilSet, j::Int, k::Int, current_nw::Float64)
     nsec = cs.nsec
     nseg = nsec - 1
-    dlx  = Vector{Float64}(undef, nseg)
-    dly  = Vector{Float64}(undef, nseg)
-    dlz  = Vector{Float64}(undef, nseg)
+    dlx = Vector{Float64}(undef, nseg)
+    dly = Vector{Float64}(undef, nseg)
+    dlz = Vector{Float64}(undef, nseg)
     midx = Vector{Float64}(undef, nseg)
     midy = Vector{Float64}(undef, nseg)
     midz = Vector{Float64}(undef, nseg)
 
     @inbounds for l in 1:nseg
-        x1 = cs.x[j, k, l];   x2 = cs.x[j, k, l+1]
-        y1 = cs.y[j, k, l];   y2 = cs.y[j, k, l+1]
-        z1 = cs.z[j, k, l];   z2 = cs.z[j, k, l+1]
-        dlx[l]  = x2 - x1
-        dly[l]  = y2 - y1
-        dlz[l]  = z2 - z1
+        x1 = cs.x[j, k, l]
+        x2 = cs.x[j, k, l+1]
+        y1 = cs.y[j, k, l]
+        y2 = cs.y[j, k, l+1]
+        z1 = cs.z[j, k, l]
+        z2 = cs.z[j, k, l+1]
+        dlx[l] = x2 - x1
+        dly[l] = y2 - y1
+        dlz[l] = z2 - z1
         midx[l] = (x1 + x2) * 0.5
         midy[l] = (y1 + y2) * 0.5
         midz[l] = (z1 + z2) * 0.5
     end
 
     return PrecomputedSegments(dlx, dly, dlz, midx, midy, midz,
-                               MU0_OVER_4PI * current_nw, nseg)
+        MU0_OVER_4PI * current_nw, nseg)
 end
 
 """
@@ -74,15 +77,16 @@ end
 Accumulate the Biot-Savart contribution from one conductor strand onto observation point `i`.
 
 Uses midpoint-rule integration: each segment from point `l` to `l+1` contributes:
-  dB = μ₀/(4π) × current_nw × (dl⃗ × r⃗) / |r|³
+dB = μ₀/(4π) × current_nw × (dl⃗ × r⃗) / |r|³
 where `r⃗` is the displacement from the segment midpoint to the observer.
 
 ## Arguments
-- `Bx`, `By`, `Bz`: pre-allocated output arrays (Cartesian field, Tesla); updated in-place
-- `i`: observation point index
-- `obs_x/y/z`: observer Cartesian coordinates [m]
-- `xs`, `ys`, `zs`: strand point coordinates [nsec], Cartesian [m]
-- `current_nw`: effective current = I × nw [A⋅turns]
+
+  - `Bx`, `By`, `Bz`: pre-allocated output arrays (Cartesian field, Tesla); updated in-place
+  - `i`: observation point index
+  - `obs_x/y/z`: observer Cartesian coordinates [m]
+  - `xs`, `ys`, `zs`: strand point coordinates [nsec], Cartesian [m]
+  - `current_nw`: effective current = I × nw [A⋅turns]
 """
 function accumulate_strand_field!(
     Bx::AbstractVector{Float64},
@@ -98,7 +102,7 @@ function accumulate_strand_field!(
     nsec = length(xs)
     prefactor = MU0_OVER_4PI * current_nw
 
-    @inbounds for l in 1:(nsec - 1)
+    @inbounds for l in 1:(nsec-1)
         # Segment vector dl⃗
         dlx = xs[l+1] - xs[l]
         dly = ys[l+1] - ys[l]
@@ -109,7 +113,7 @@ function accumulate_strand_field!(
         ry = obs_y - (ys[l] + ys[l+1]) * 0.5
         rz = obs_z - (zs[l] + zs[l+1]) * 0.5
 
-        r2  = rx*rx + ry*ry + rz*rz
+        r2 = rx*rx + ry*ry + rz*rz
         r2 < BIOT_SAVART_MIN_DIST_SQ && continue  # avoid singularity (observer on conductor)
         inv_r3 = prefactor / (r2 * sqrt(r2))
 
@@ -146,8 +150,8 @@ cache efficiency.
         r2 = rx*rx + ry*ry + rz*rz
         # Guard: zero contribution if observer is on conductor (avoids Inf/NaN)
         safe_r2 = ifelse(r2 < BIOT_SAVART_MIN_DIST_SQ, one(r2), r2)
-        scale   = ifelse(r2 < BIOT_SAVART_MIN_DIST_SQ, zero(pf), pf)
-        inv_r3  = scale / (safe_r2 * sqrt(safe_r2))
+        scale = ifelse(r2 < BIOT_SAVART_MIN_DIST_SQ, zero(pf), pf)
+        inv_r3 = scale / (safe_r2 * sqrt(safe_r2))
 
         bx_acc += (seg.dly[l]*rz - seg.dlz[l]*ry) * inv_r3
         by_acc += (seg.dlz[l]*rx - seg.dlx[l]*rz) * inv_r3
@@ -172,9 +176,10 @@ Performance: segment vectors and midpoints are pre-computed once outside the
 observation-point loop, then accessed from contiguous arrays in the inner kernel.
 
 ## Arguments
-- `B_R`, `B_phi`, `B_Z`: output field arrays [Tesla], length `nobs`; overwritten
-- `obs_R`, `obs_phi`, `obs_Z`: observation point cylindrical coordinates [m, rad, m]
-- `coil_sets`: conductor geometry and current data
+
+  - `B_R`, `B_phi`, `B_Z`: output field arrays [Tesla], length `nobs`; overwritten
+  - `obs_R`, `obs_phi`, `obs_Z`: observation point cylindrical coordinates [m, rad, m]
+  - `coil_sets`: conductor geometry and current data
 """
 function compute_biot_savart_boundary!(
     B_R::AbstractVector{Float64},
@@ -204,8 +209,8 @@ function compute_biot_savart_boundary!(
     # Pre-compute sincos for cylindrical ↔ Cartesian conversion (avoids redundant trig)
     cos_phi = Vector{Float64}(undef, nobs)
     sin_phi = Vector{Float64}(undef, nobs)
-    obs_x   = Vector{Float64}(undef, nobs)
-    obs_y   = Vector{Float64}(undef, nobs)
+    obs_x = Vector{Float64}(undef, nobs)
+    obs_y = Vector{Float64}(undef, nobs)
 
     @inbounds for i in 1:nobs
         sp, cp = sincos(obs_phi[i])
@@ -218,7 +223,9 @@ function compute_biot_savart_boundary!(
     # Each thread writes exclusively to its own index i — no synchronization needed
     Threads.@threads for i in 1:nobs
         @inbounds begin
-            ox = obs_x[i]; oy = obs_y[i]; oz = obs_Z[i]
+            ox = obs_x[i]
+            oy = obs_y[i]
+            oz = obs_Z[i]
             bx_total = 0.0
             by_total = 0.0
             bz_total = 0.0
@@ -233,9 +240,9 @@ function compute_biot_savart_boundary!(
             # Convert Cartesian → cylindrical in-place
             cp = cos_phi[i]
             sp = sin_phi[i]
-            B_R[i]   =  bx_total * cp + by_total * sp
+            B_R[i] = bx_total * cp + by_total * sp
             B_phi[i] = -bx_total * sp + by_total * cp
-            B_Z[i]   =  bz_total
+            B_Z[i] = bz_total
         end
     end
 end

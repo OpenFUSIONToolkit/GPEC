@@ -40,9 +40,9 @@ makedocs(;
             "Tearing" => "inner_layer.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"
-       ],
+        ],
         "Citations" => "citations.md",
-        "Developer Notes" => "developer_notes.md",
+        "Developer Notes" => "developer_notes.md"
     ],
     checkdocs=:exports
 )

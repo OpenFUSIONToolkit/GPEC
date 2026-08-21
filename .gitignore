@@ -38,3 +38,4 @@ scratch/
 
 # Local profiling scratch (one-off study scripts, not part of the package)
 profiling/
+src/Tearing/CriticalResonantField/CRF Dev/

@@ -20,33 +20,37 @@ Reads all required metadata (mlow, nlow, mpert, npert) and spline data (ν) from
 the HDF5 file.
 
 # Arguments
-- `h5_file::String`: Path to gpec.h5 output file
-- `variable::String`: HDF5 dataset path, e.g. `"PerturbedEquilibrium/Response/xi_R"`
+
+  - `h5_file::String`: Path to gpec.h5 output file
+  - `variable::String`: HDF5 dataset path, e.g. `"PerturbedEquilibrium/Response/xi_R"`
 
 # Keyword arguments
-- `mtheta::Int`: theta grid resolution (default: `max(2*(|mlow|+mpert), 512)`)
-- `keep_sfl_phi::Bool`: if `true` (default), output in SFL toroidal angle;
-  if `false`, apply `exp(i*n*ν(ψ,θ))` to convert to machine toroidal angle
-  and conjugate if `helicity > 0` (matches Fortran `gpout_xbrzphifun`)
+
+  - `mtheta::Int`: theta grid resolution (default: `max(2*(|mlow|+mpert), 512)`)
+  - `keep_sfl_phi::Bool`: if `true` (default), output in SFL toroidal angle;
+    if `false`, apply `exp(i*n*ν(ψ,θ))` to convert to machine toroidal angle
+    and conjugate if `helicity > 0` (matches Fortran `gpout_xbrzphifun`)
 
 # Returns
-- `theta_data::Array{ComplexF64,3}`: `[npsi × mtheta × npert]`
-- `theta_grid::Vector{Float64}`: `[mtheta]` SFL theta ∈ [0, 1)
-- `n_vals::Vector{Int}`: `[npert]` toroidal mode numbers
+
+  - `theta_data::Array{ComplexF64,3}`: `[npsi × mtheta × npert]`
+  - `theta_grid::Vector{Float64}`: `[mtheta]` SFL theta ∈ [0, 1)
+  - `n_vals::Vector{Int}`: `[npert]` toroidal mode numbers
 
 !!! note
+
     When used on the cylindrical components `xi_R`, `xi_Z`, `xi_phi`, `b_R`, `b_Z`,
     `b_phi` these are currently in beta and show up to ~20% discrepancies vs Fortran.
 """
 function modes_to_theta(h5_file::String, variable::String;
-                        mtheta::Union{Int,Nothing}=nothing,
-                        keep_sfl_phi::Bool=true)
+    mtheta::Union{Int,Nothing}=nothing,
+    keep_sfl_phi::Bool=true)
     h5open(h5_file, "r") do f
         modes = read(f, variable)  # (npsi, numpert_total)
         npsi, numpert_total = size(modes)
 
-        mlow  = read(f, "Info/mlow")
-        nlow  = read(f, "Info/nlow")
+        mlow = read(f, "Info/mlow")
+        nlow = read(f, "Info/nlow")
         mpert = read(f, "Info/mpert")
         npert = read(f, "Info/npert")
         @assert numpert_total == mpert * npert "Expected numpert_total=$(mpert*npert), got $numpert_total"
@@ -58,7 +62,7 @@ function modes_to_theta(h5_file::String, variable::String;
 
         theta_data = zeros(ComplexF64, npsi, mth, npert)
         for k in 1:npert
-            col_range = (k-1)*mpert+1 : k*mpert
+            col_range = ((k-1)*mpert+1):(k*mpert)
             for ipsi in 1:npsi
                 theta_data[ipsi, :, k] .= inverse(ft, view(modes, ipsi, col_range))
             end
@@ -68,7 +72,7 @@ function modes_to_theta(h5_file::String, variable::String;
             # Reconstruct ν spline from stored grid + nodal values (FastInterpolations v0.4 API)
             rzphi_xs = read(f, "Equilibrium/Geometry/psi")
             rzphi_ys = read(f, "Equilibrium/Geometry/theta")
-            nu_vals  = read(f, "Equilibrium/Geometry/nu")
+            nu_vals = read(f, "Equilibrium/Geometry/nu")
             nu_spline = cubic_interp(
                 (rzphi_xs, rzphi_ys), nu_vals;
                 bc=(CubicFit(), PeriodicBC()),
@@ -77,8 +81,8 @@ function modes_to_theta(h5_file::String, variable::String;
 
             psi_grid = read(f, "ForceFreeStates/Solutions/ForwardIntegration/psi")
 
-            bt_sign  = haskey(f, "Equilibrium/B_T_sign") ? read(f, "Equilibrium/B_T_sign") : 1
-            crnt     = haskey(f, "Equilibrium/I_p")     ? read(f, "Equilibrium/I_p")    : 1.0
+            bt_sign = haskey(f, "Equilibrium/B_T_sign") ? read(f, "Equilibrium/B_T_sign") : 1
+            crnt = haskey(f, "Equilibrium/I_p") ? read(f, "Equilibrium/I_p") : 1.0
             helicity = bt_sign * Int(sign(crnt))
 
             hint = (Ref(1), Ref(1))
@@ -110,18 +114,21 @@ Extend theta-space data to a `(θ, φ)` grid via toroidal inverse DFT.
     f(θ, φ) = Σₙ fₙ(θ) exp(i·n·φ)
 
 # Arguments
-- `theta_data::Array{ComplexF64,3}`: `[npsi × mtheta × npert]` from `modes_to_theta`
-- `n_vals::Vector{Int}`: toroidal mode numbers
+
+  - `theta_data::Array{ComplexF64,3}`: `[npsi × mtheta × npert]` from `modes_to_theta`
+  - `n_vals::Vector{Int}`: toroidal mode numbers
 
 # Keyword arguments
-- `nphi::Int`: toroidal grid points (default: `max(4*maximum(abs.(n_vals)), 64)`)
+
+  - `nphi::Int`: toroidal grid points (default: `max(4*maximum(abs.(n_vals)), 64)`)
 
 # Returns
-- `full_data::Array{ComplexF64,3}`: `[npsi × mtheta × nphi]`
-- `phi_grid::Vector{Float64}`: `[nphi]` in radians ∈ [0, 2π)
+
+  - `full_data::Array{ComplexF64,3}`: `[npsi × mtheta × nphi]`
+  - `phi_grid::Vector{Float64}`: `[nphi]` in radians ∈ [0, 2π)
 """
 function theta_to_thetaphi(theta_data::Array{ComplexF64,3}, n_vals::Vector{Int};
-                           nphi::Union{Int,Nothing}=nothing)
+    nphi::Union{Int,Nothing}=nothing)
     npsi, mth, npert = size(theta_data)
     np = isnothing(nphi) ? max(4 * maximum(abs.(n_vals)), 64) : nphi
     phi_grid = [(j - 1) * 2π / np for j in 1:np]

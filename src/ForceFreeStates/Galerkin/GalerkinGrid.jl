@@ -20,7 +20,7 @@ function gal_pack(nx::Int, pfac::Float64, side::String)
     elseif side == "right"
         xi = collect(0:2nx) ./ (2nx)
     elseif side == "both"
-        xi = collect(-nx:nx) ./ nx
+        xi = collect((-nx):nx) ./ nx
     else
         error("gal_pack: unrecognized side = $side")
     end

@@ -35,7 +35,9 @@ const KF = GPE.KineticForces
 const Eq = GPE.Equilibrium
 const PE = GPE.PerturbedEquilibrium
 
-"Fortran GPEC DIII-D ideal example run directory, from the environment (no on-disk default)."
+"""
+Fortran GPEC DIII-D ideal example run directory, from the environment (no on-disk default).
+"""
 default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID, or pass the Fortran run directory as the first argument"),
     ENV, "GPEC_FORTRAN_DIIID")
 

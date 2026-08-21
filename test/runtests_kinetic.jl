@@ -26,7 +26,7 @@
         @testset "endpoint modes" begin
             pts_lower, _ = KF.powspace(0.0, 1.0, 2, 50, "lower")
             pts_upper, _ = KF.powspace(0.0, 1.0, 2, 50, "upper")
-            pts_both, _  = KF.powspace(0.0, 1.0, 2, 50, "both")
+            pts_both, _ = KF.powspace(0.0, 1.0, 2, 50, "both")
 
             # All modes should span the full range
             for pts in [pts_lower, pts_upper, pts_both]
@@ -194,11 +194,11 @@
             # independent reference for the u-substitution + pole-extraction result.
             wn, wt, we, wd, wb, nuk, leff, n = 0.5, 0.8, -2.0, 0.5, 1.0, 0.3, 1.0, 1
             p = KF.EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
-                                "harmonic", "maxwellian", 1.0, 0.0, false)
+                "harmonic", "maxwellian", 1.0, 0.0, false)
             x_res = KF.find_resonance_energies(leff, wb, n, we, wd)
             @test length(x_res) == 1   # this case has exactly one resonance
             reference, _ = KF.quadgk(x -> KF.energy_integrand_scalar(x, p),
-                                     0.0, x_res[1], Inf; rtol=1e-12, atol=1e-14)
+                0.0, x_res[1], Inf; rtol=1e-12, atol=1e-14)
             result = KF.integrate_energy(
                 wn, wt, we, wd, wb, nuk, 0, leff, n, 0.5, 0.5, "fgar";
                 nutype="harmonic", f0type="maxwellian", atol=1e-12, rtol=1e-10
@@ -317,7 +317,7 @@
         @test all(isfinite, vals)
         # Element-wise match against the scalar form documented in the docstring.
         p = KF.EnergyParams(0.5, 0.8, -2.0, 0.5, 1.0, 0.3, 1.0, 1,
-                            "harmonic", "maxwellian", 1.0, 0.0, false)
+            "harmonic", "maxwellian", 1.0, 0.0, false)
         @test vals ≈ [KF.energy_integrand_scalar(x, p) for x in x_grid]
     end
 

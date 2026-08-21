@@ -27,7 +27,7 @@ function compute_geometry_profiles(
     rzphi_rsquared::FastInterpolations.CubicInterpolantND,
     rzphi_offset::FastInterpolations.CubicInterpolantND,
     rzphi_jac::FastInterpolations.CubicInterpolantND,
-    ro::Float64,
+    ro::Float64
 )
     npsi = length(rzphi_xs)
     mthsurf = length(rzphi_ys) - 1     # skip the periodic duplicate at θ = 1
@@ -78,6 +78,6 @@ function compute_geometry_profiles(pe::PlasmaEquilibrium)
     return compute_geometry_profiles(
         pe.rzphi_xs, pe.rzphi_ys,
         pe.rzphi_rsquared, pe.rzphi_offset, pe.rzphi_jac,
-        pe.ro,
+        pe.ro
     )
 end

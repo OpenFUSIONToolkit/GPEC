@@ -39,7 +39,9 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
     return ws
 end
 
-"""Empty `GalerkinResult` for a domain with no resonant surfaces."""
+"""
+Empty `GalerkinResult` for a domain with no resonant surfaces.
+"""
 function empty_galerkin_result()
     return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, nothing)
 end
