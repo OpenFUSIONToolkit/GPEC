@@ -586,7 +586,7 @@ arrays leave natural gaps over always-stable surfaces without requiring explicit
 ### Arguments
 
   - `bnd`: NamedTuple with fields `psi`, `alpha`, `alpha_critical1`, `alpha_critical2`
-    (as returned by `ForceFreeStates.ballooning_alpha_boundaries`)
+    (as returned by `LocalStability.ballooning_alpha_boundaries`)
 
 ### Keyword arguments
 
@@ -619,7 +619,7 @@ end
     plot_ballooning_alpha_boundaries(bnd, dpmap; save_path=nothing, psi_min=0.0)
 
 Same diagram drawn over a heatmap of the signed Δ' from
-`ForceFreeStates.ballooning_delta_prime_map`: each surface's Δ'(α) is oriented by the
+`LocalStability.ballooning_delta_prime_map`: each surface's Δ'(α) is oriented by the
 sign of its α=0 (stable) value so that positive is stable everywhere, regridded from
 its native physical α = α_ref*scale onto a shared uniform α axis, and shown with the
 Δ'=0 contour, the extracted boundaries, and the scan cap `max_alpha_scale*α_exp`.

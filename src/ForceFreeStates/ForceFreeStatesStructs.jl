@@ -1,4 +1,15 @@
 """
+    ModeSpace
+
+Supertype for objects that carry the resolved (m, n) mode space — `mlow`, `mhigh`, `mpert`,
+`nlow`, `nhigh`, `npert`, `numpert_total`. Both the solve-time scratch
+[`ForceFreeStatesInternal`](@ref) and the published [`ForceFreeStatesResult`](@ref) are
+`ModeSpace`s, so kernels that need nothing but the mode indexing (`el_derivatives!`,
+`materialize_derivative_stores!`, `build_kinetic_metric_matrices`) accept either.
+"""
+abstract type ModeSpace end
+
+"""
     SingType
 
 A mutable struct holding data related to the singular surfaces in the equilibrium.
@@ -120,9 +131,11 @@ A mutable struct containing settings for debugging and benchmarking output.
 ## Fields
 
   - `output_benchmark_data::Bool` - Flag to output benchmark data for comparison between codes
+  - `gal_basis_output::Bool` - Write the raw Galerkin outer-region basis functions (per-interval, unconstrained at the rationals) under `GalerkinIntegration/Basis/`. Solver internals for development verification, not physics output.
 """
 @kwdef mutable struct DebugSettings
     output_benchmark_data::Bool = false
+    gal_basis_output::Bool = false
 end
 
 """
@@ -152,7 +165,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
-@kwdef mutable struct ForceFreeStatesInternal
+@kwdef mutable struct ForceFreeStatesInternal <: ModeSpace
     dir_path::String = ""
     mlow::Int = 0
     mhigh::Int = 0
@@ -202,7 +215,7 @@ A mutable struct holding internal state variables for stability calculations.
     via `pest3_decompose(dp_raw)` — needed for the full det(D' − D(γ)) = 0
     eigenvalue problem with Glasser stabilization.
 
-    Empty unless `ctrl.use_parallel` is true. No ½ prefactor is applied (matches
+    Empty unless the Riccati integrator was used. No ½ prefactor is applied (matches
     Fortran rdcon; Pletzer–Dewar paper multiplies by ½).
     """
     delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
@@ -240,7 +253,6 @@ gpec.toml.
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
-  - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [psiedge, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
   - `truncate_at_dW_peak::Bool` - When `true` and `psiedge < psilim`, the edge-dW scan's peak location is adopted as the new physical plasma edge — `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, AND the FM Δ' chunks/propagators are made self-consistent with the new boundary (the chunk that straddles the peak is rebuilt + re-integrated; any chunks past the peak are dropped). This reproduces the spirit of the original ode_record_edge heuristic from Fortran STRIDE while keeping Δ' and δW well-defined at the new boundary. The Δ' metric is still physically dependent on where the peak falls in the edge band, so use this flag deliberately when you mean to scan against the peak-defined edge (e.g. for studying edge-mode regimes); leave at `false` (default) for the full-domain Δ' at `qhigh` / `psihigh` / `dmlim`.
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
@@ -249,10 +261,8 @@ gpec.toml.
   - `HDF5_filename::String` - Name of HDF5 output file
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
-  - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
-  - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
-  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that can cause intermittent BVP divergence on numerically delicate equilibria. The parallel path produces bit-identical Δ′ across thread counts; `parallel_threads = 2` is about 20% faster than serial and saturates the speedup. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
-  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass after the propagator BVP so the returned `odet` carries dense axis-basis `u_store`/`du_store`/`xi_s_store` — the only convention PerturbedEquilibrium / FieldReconstruction consume correctly, and what fills HDF5 `ForceFreeStates/Solutions/ForwardIntegration/xi_*`.  Δ' (`SingularSurfaces/Delta_prime_matrix`) comes from the BVP and is identical either way; free-boundary energies (`ForceFreeStates/FreeBoundaryStability/eigenmode_*`) match a pure serial run when enabled (~0.12 % Riccati-vs-axis gap otherwise).  **Default `false`** (skips the extra serial pass, ~1× BVP wall-clock); **PerturbedEquilibrium-using configs must set it `true`** when `use_parallel = true`, else PE reads Riccati-basis garbage.  Auto-disabled when `force_termination = true`.
+  - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
+  - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
 @kwdef struct ForceFreeStatesControl
@@ -272,7 +282,7 @@ gpec.toml.
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
-    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for use_parallel path.
+    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
     set_psilim_via_dmlim::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
     dmlim::Float64 = 0.2
     sing_order::Int = 6
@@ -280,23 +290,19 @@ gpec.toml.
     kinetic_source::String = "fixed"
     kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
-    reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
-    parallel_threads::Int = 2
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
     save_interval::Int = 3
     force_termination::Bool = false
-    use_riccati::Bool = false
-    use_parallel::Bool = true    # Default on: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream.
-    populate_dense_xi::Bool = false  # When use_parallel=true, set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× parallel-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
+    integrator::String = "riccati"   # Default: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream. Use "forward" for dense ξ (PerturbedEquilibrium) or kinetic runs.
+    nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
 
-    # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port) ---
-    gal_flag::Bool = false          # enable outer-region Galerkin Δ′ solve
+    # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port); selected by integrator = "galerkin" ---
     gal_solver::String = "LU"       # "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs)
     gal_nx::Int = 256               # elements per interval between singular surfaces
     gal_nq::Int = 6                 # Gauss-Lobatto quadrature order per element
@@ -634,3 +640,46 @@ end
 
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
     OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+
+"""
+    DeltaPrimeData
+
+The solve's Δ′/outer-region matching payload, in one formalism-independent layout. The
+Riccati/STRIDE boundary-value problem and the RDCON Galerkin solve compute the same
+quantities in the same PEST-3 convention — the four parity blocks are the identical ±
+combination of the raw side-major matrix in both (`pest3_decompose`, Riccati.jl, and
+`gal_pest3_blocks`, GalerkinSolve.jl, both porting Fortran `gal_write_pest3_data`) — so
+consumers never branch on which integrator ran.
+
+Every matrix is indexed by the singular surfaces the producing formalism actually solved
+across, ordered core→edge: `result.surfaces` for Riccati, the in-domain in-band subset of
+it for Galerkin (`gal_resonant_surfaces`). Side-major orderings run
+`[L_s1, R_s1, L_s2, R_s2, …]`.
+
+## Fields
+
+  - `matrix::Matrix{ComplexF64}` - Inter-surface Δ′ of shape (msing × msing) in PEST3
+    convention, the tearing↔tearing parity projection of `raw`. Same as `Delta` of the
+    PEST-3 block set. Both formalisms.
+  - `raw::Matrix{ComplexF64}` - Raw outer-region matching matrix D′ of shape
+    (2msing × 2msing), side-major on both axes. Both formalisms.
+  - `coil::Matrix{ComplexF64}` - Edge coil-response matrix of shape
+    (2msing × numpert_total); column k is the resonant small-solution response at each
+    surface side to a unit source on edge poloidal mode k. Riccati fills it from the
+    vacuum-edge BVP, Galerkin from the `gal_rpec_flag` columns (transposed at pack time
+    from the (numpert_total × 2msing) block the Galerkin solve produces). Empty when
+    neither ran.
+  - `A::Union{Nothing,Matrix{ComplexF64}}` - PEST-3 interchange↔interchange block
+    (msing × msing). Galerkin only; `nothing` for Riccati, which persists only `raw` and
+    recovers the blocks on demand via `pest3_decompose`.
+  - `B::Union{Nothing,Matrix{ComplexF64}}` - PEST-3 interchange↔tearing block; see `A`.
+  - `Gamma::Union{Nothing,Matrix{ComplexF64}}` - PEST-3 tearing↔interchange block; see `A`.
+"""
+struct DeltaPrimeData
+    matrix::Matrix{ComplexF64}
+    raw::Matrix{ComplexF64}
+    coil::Matrix{ComplexF64}
+    A::Union{Nothing,Matrix{ComplexF64}}
+    B::Union{Nothing,Matrix{ComplexF64}}
+    Gamma::Union{Nothing,Matrix{ComplexF64}}
+end

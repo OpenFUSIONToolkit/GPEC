@@ -6,7 +6,7 @@ Conventions for the structure and naming of the `gpec.h5` output file. Every wri
 
 **The schema must be intuitive to a plasma physicist who is not a developer of this code.** The top level largely mirrors the TOML sections / major `src/` modules — which are themselves organized along physics lines — but **physics intuition wins whenever the two diverge**. Worked examples of that rule:
 
-- All per-rational-surface stability results consolidate under `SingularSurfaces/`, regardless of which algorithm produced them: the ideal BVP `delta_prime_matrix`, the GGJ coefficients, and the Galerkin outer-region Δ′/PEST-3 results (`GalerkinDeltaPrime/`) live side by side. Provenance is recorded in the subgroup name, not by scattering results across producer-owned groups.
+- All per-rational-surface stability results consolidate under `SingularSurfaces/`, regardless of which algorithm produced them: the GGJ coefficients sit beside the Δ′/PEST-3 matching results, and the Riccati BVP and the Galerkin outer-region solve write the *same* `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_*` paths rather than each owning a producer-named subgroup.
 - `EulerLagrangeMatrices` over a bare `Matrices` — group names must say what the data *is*, not which array it came from. Same reasoning renamed `records/` → `EnergyIntegrals/` and `matrices_<method>/` → `KineticMatrices/`.
 
 Physics-topic groups elevated to top level (rather than nested under their producer): `Info/`, `Input/`, `SingularSurfaces/`, `LocalStability/`, `SurfaceGeometries/`.
@@ -15,9 +15,9 @@ Physics-topic groups elevated to top level (rather than nested under their produ
 
 These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness-internal synthetic fixtures (e.g. the `ggj/*` reference files written by `regression-harness/src/runner.jl`) are out of scope.
 
-- **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinDeltaPrime/`).
+- **Groups are CamelCase at every level** (`ForceFreeStates/`, `PerSurface/`, `GalerkinIntegration/`).
 - **Datasets (leaves) are snake_case** (`eigenmode_energies`, `delta_prime_matrix`). Established physics symbols keep their natural case (`E`, `F`, `Q_root`, `pest3_Delta`, `2piF`).
-- **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), scan indices (`Surface_<k>`, `psi_<i>`).
+- **Data-driven tokens are stored verbatim**: coil-set names under `Input/RawInputs/Coils/`, KineticForces method tokens (`fgar`, …), NTV species labels under `KineticForces/PerSpecies/` (`ion_z1_m2`, `impurity_z6_m12`, `electron` — charge and mass identify the species, with a numeric discriminator appended only if a run repeats a `(z, m)` pair), scan indices (`Surface_<k>`, `psi_<i>`).
 - **Word-valued names and boolean flags**: multi-word dataset names are snake_case English (`resonance_psi`, `trajectory_offsets`, `layer_widths`), never CamelCase — CamelCase is reserved for groups. A boolean flag is named for the state it asserts when true, with an `is_` prefix only where the bare word would read as a noun or collide with a data family: `is_rational` (bare `rational` would clash with the `rational_*` coordinate family) versus `enabled`, `truncated`, `no_root`, which already read as predicates.
 - **Literature capitalization for physics symbols**: names match the standard literature — `D_I`, `D_R`, `Delta_prime`, `tau_R`, `tau_A` (not `di`, `dr`, `delta_prime`, `taur`); lowercase stays where the literature is lowercase (`alpha`, `q`, `beta*`, `delta_s`).
 - **Scalar equilibrium parameters spell out the physics**: `R_axis`, `Z_axis`, `B_T_axis`, `a_mean`, `aspect_ratio`, `I_p`, `q_edge`, `beta_N`, `delta_upper`/`delta_lower`. The qualifier is a trailing subscript (`_axis`, `_edge`, `_wall`, `_min`, `_max`, `_upper`, `_lower`, `_extremum`), and a numbered literature definition keeps its number as the last subscript (`beta_p_1`, `l_i_2`). Fortran-era contractions (`bt0`, `amean`, `crnt`, `qa`, `betan`, `li1`) survive only as `Equilibrium.EquilibriumParameters` struct fields: `EQUIL_H5_NAMES` in `src/HDF5Schema.jl` maps each field to its dataset name, and `EQUIL_H5_SKIP` drops fields that duplicate another dataset or echo a control flag.
@@ -25,7 +25,7 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 - **"rational" over "singular"** in dataset names (`rational_psi`, `rational_q`, `rational_m`, `rational_n`, `rational_index`, `rational_count`) — kinetic/resistive runs are not singular at the rationals. Specifier order is standardized specifier-first (`rational_psi`, never `psi_rational`).
 - **Vector components** follow `[d]<variable>[_<representation>]_<coordinate>[dpsi]` — the variable always comes first and the coordinate is always the trailing subscript. A bare coordinate suffix is the **contravariant** component (`xi_psi` = ξ^ψ), `_cov_` marks the **covariant** one (`b_cov_theta` = b_θ), a leading `J` marks a **Jacobian-weighted** component (`Jxi_theta` = J·ξ^θ), and other representations sit in the same slot (`xi_clebsch_psi`, `dxi_clebsch_psidpsi`). Never drop the variable: `clebsch_psi` is wrong because it does not say *what* is being represented. There is no HDF5/netCDF standard for super- vs subscripts — flat `_` names are universal — so the typeset form always appears in the dataset's `long_name`.
 - **Coordinates**: the radial abscissa is `psi` (normalized poloidal flux ψ_N) and the poloidal one is `theta` in every group; never `psi_n`, `xs`, or `ys`.
-- **One name per physical quantity**: a quantity written in several groups carries the identical leaf name everywhere (`rational_psi` in `SingularSurfaces/`, `GalerkinDeltaPrime/`, and `SingularCoupling/`; `Delta_prime_matrix` in `SingularSurfaces/` and `Tearing/PerSurface/`; `dVdpsi` in `Profiles/`, `SingularSurfaces/`, and `KineticForces/<method>/`) — the group supplies the context, the leaf supplies the identity.
+- **One name per physical quantity**: a quantity written in several groups carries the identical leaf name everywhere (`rational_psi` in `SingularSurfaces/`, `Solutions/GalerkinIntegration/`, and `SingularCoupling/`; `Delta_prime_matrix` in `SingularSurfaces/` and `Tearing/PerSurface/`; `dVdpsi` in `Profiles/`, `SingularSurfaces/`, and `KineticForces/<method>/`) — the group supplies the context, the leaf supplies the identity.
 
 ## Inputs live only under `Input/`
 
@@ -40,11 +40,11 @@ Top level (10 groups):
 | `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim` |
 | `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
 | `Equilibrium/` | Scalars (`beta_N`, `q_axis`, `q_95`, `I_p`, …) plus `Profiles/` (1-D on `psi`: 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D on `psi`×`theta`: rcoords, offset, nu, jac) |
-| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (`Solution/`, `Match/`, `msing`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, `Match/` diagnostics, the gal surface list, debug-gated `Basis/`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
-| `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`, `GalerkinDeltaPrime/`, `Kinetic/` |
+| `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
-| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`) |
+| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
 

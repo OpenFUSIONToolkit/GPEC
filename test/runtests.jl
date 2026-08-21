@@ -3,6 +3,7 @@ using Pkg
 using GeneralizedPerturbedEquilibrium.Vacuum
 using GeneralizedPerturbedEquilibrium.Equilibrium
 using GeneralizedPerturbedEquilibrium.ForceFreeStates
+using GeneralizedPerturbedEquilibrium.LocalStability
 using GeneralizedPerturbedEquilibrium.ForcingTerms
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.Utilities
@@ -29,6 +30,8 @@ else
     include("./runtests_eulerlagrange.jl")
     include("./runtests_riccati.jl")
     include("./runtests_parallel_integration.jl")
+    include("./runtests_result_struct.jl")
+    include("./runtests_solve_api.jl")
     include("./runtests_sing.jl")
     include("./runtests_innerlayer.jl")
     include("./runtests_tj_analytic.jl")
@@ -45,6 +48,7 @@ else
     include("./runtests_dispersion_polish.jl")
     include("./runtests_slayer_runner.jl")
     include("./runtests_kinetic.jl")
+    include("./runtests_multiion.jl")
     include("./runtests_fullruns.jl")
     include("./runtests_coils.jl")
     include("./runtests_imas.jl")
