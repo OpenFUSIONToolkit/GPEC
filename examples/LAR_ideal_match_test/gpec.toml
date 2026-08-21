@@ -50,16 +50,13 @@ ucrit                   = 1e4   # Maximum fraction of solutions allowed before r
 sing_order              = 6     # Power-series order for the singular-surface asymptotics
 save_interval           = 3     # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 
-use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks SingularSurfaces/delta_prime_matrix)
-parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 is about +20% speedup)
-populate_dense_xi     = false  # Dense axis-basis xi for the FFS HDF5 output. Not needed here: the gal-matched path builds its own dense xi.
+integrator            = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim  = false  # Keep psilim at psihigh (do not truncate at last_rational_q + dmlim)
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n (only used when set_psilim_via_dmlim = true)
 force_termination     = true   # Terminate after the stability stage (no perturbed-equilibrium section here)
 write_outputs_to_HDF5 = true   # Write stability outputs to HDF5
 
 # Outer-region singular Galerkin Delta-prime solver with rpec coil columns.
-gal_flag               = true  # Enable the outer-region singular Galerkin Delta-prime solve
 gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element

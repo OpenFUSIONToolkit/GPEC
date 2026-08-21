@@ -36,8 +36,8 @@ Covariant components from metric tensor contraction (matches Fortran gpeq_cova):
 
 """
     reconstruct_physical_fields(
-        response_vector, flux_matrix, ForceFreeStates_results,
-        equil, ffs_intr, intr, metric, ffit, ctrl
+        response_vector, flux_matrix, solution,
+        equil, ffs, intr, metric, ffit, ctrl
     ) -> (xi_modes, b_modes)
 
 Reconstruct displacement and perturbed magnetic field from eigenmode response.
@@ -69,16 +69,16 @@ Tuple of (xi_modes, b_modes) NamedTuples:
 function reconstruct_physical_fields(
     response_vector::Vector{ComplexF64},
     flux_matrix::Matrix{ComplexF64},
-    ForceFreeStates_results::OdeState,
+    solution::SolutionProfiles,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal,
+    ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
     metric::MetricData,
     ffit::FourFitVars,
     ctrl::PerturbedEquilibriumControl
 )
-    npsi = size(ForceFreeStates_results.u_store, 4)
-    psi_grid = ForceFreeStates_results.psi_store[1:npsi]
+    npsi = size(solution.u_store, 4)
+    psi_grid = solution.psi_store[1:npsi]
 
     # Pin BLAS to a single thread for the per-surface reconstruction below. Each threaded
     # loop over ψ calls only small BLAS kernels (per-surface mpert×mpert solves and mode
@@ -92,33 +92,33 @@ function reconstruct_physical_fields(
         xi_psi_modes, xi_psi1_modes, xi_s_modes = sum_eigenmode_contributions(
             response_vector,
             flux_matrix,
-            ForceFreeStates_results,
-            ffs_intr
+            solution,
+            ffs
         )
 
         # Compute perturbed field in mode space using ideal MHD relations
         # [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10]
         b_psi_modes, b_theta_modes, b_zeta_modes = compute_perturbed_field_modes(
             xi_psi_modes, xi_psi1_modes, xi_s_modes,
-            psi_grid, equil, ffs_intr
+            psi_grid, equil, ffs
         )
 
         # Compute Clebsch displacements with regularization (matches Fortran gpeq_sol + gpout_xclebsch)
         clebsch_psi, clebsch_psi1, clebsch_alpha = compute_clebsch_displacements(
             xi_psi_modes, xi_psi1_modes, xi_s_modes,
-            psi_grid, equil, ffs_intr, ffit, ctrl
+            psi_grid, equil, ffs, ffit, ctrl
         )
 
         # Compute regularized (modified) b-field components (matches Fortran gpeq_sol bmt/bmz)
         b_theta_reg, b_zeta_reg = compute_modified_field_modes(
             xi_psi_modes, clebsch_psi1, clebsch_alpha,
-            psi_grid, equil, ffs_intr
+            psi_grid, equil, ffs
         )
 
         # Compute contravariant displacement via Jacobian convolution (matches Fortran gpeq_contra)
         xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes = compute_contra_displacements(
             xi_psi_modes, clebsch_psi1, clebsch_alpha,
-            psi_grid, equil, ffs_intr, metric, ctrl
+            psi_grid, equil, ffs, metric, ctrl
         )
 
         # Compute covariant components via metric tensor contraction (matches Fortran gpeq_cova)
@@ -126,7 +126,7 @@ function reconstruct_physical_fields(
         bvp_modes, bvt_modes, bvz_modes = compute_cova_components(
             xwp_modes, xmt_modes, xmz_modes,
             b_psi_modes, b_theta_reg, b_zeta_reg,
-            psi_grid, ffs_intr, metric
+            psi_grid, ffs, metric
         )
 
         # Compute b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path
@@ -164,7 +164,7 @@ function reconstruct_physical_fields(
         # b: uses raw psi (bwp from gpeq_sol, no Jacobian convolution) and regularized theta (bmt)
         # Build the (ψ,θ) flux→cylindrical geometry once and reuse it for both ξ and b: the
         # transform matrices depend only on equilibrium geometry, not on the perturbed field.
-        mlow = ffs_intr.mlow
+        mlow = ffs.mlow
         mpert_rz = size(xi_psi_modes, 2)
         mtheta_rz = max(2 * (abs(mlow) + mpert_rz), 512)
         ft_rz = Utilities.FourierTransforms.FourierTransform(mtheta_rz, mpert_rz, mlow)
@@ -208,7 +208,7 @@ end
 
 """
     sum_eigenmode_contributions(
-        response_vector, flux_matrix, ForceFreeStates_results, ffs_intr
+        response_vector, flux_matrix, solution, ffs
     ) -> (xi_psi_modes, xi_psi1_modes, xi_s_modes)
 
 Sum eigenmode contributions weighted by response coefficients.
@@ -231,11 +231,11 @@ xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (toroidal, Glasser 2
 function sum_eigenmode_contributions(
     response_vector::Vector{ComplexF64},
     flux_matrix::Matrix{ComplexF64},
-    ForceFreeStates_results::OdeState,
-    ffs_intr::ForceFreeStatesInternal
+    solution::SolutionProfiles,
+    ffs::ForceFreeStatesResult
 )
-    mpert = ffs_intr.mpert
-    npsi = size(ForceFreeStates_results.u_store, 4)
+    mpert = ffs.mpert
+    npsi = size(solution.u_store, 4)
 
     # Convert mode-basis response (Phi_tot) to eigenmode amplitudes alpha
     # flux_matrix[mode, eigenmode], so: flux_matrix * alpha = response_vector
@@ -249,15 +249,15 @@ function sum_eigenmode_contributions(
         # u_store[:,:,1] = Ξ_ψ (radial displacement). @view avoids copying the mpert×mpert
         # eigenmode-matrix slice on every surface (mul! takes the view directly).
         mul!(view(xi_psi_modes, ipsi, :),
-            @view(ForceFreeStates_results.u_store[:, :, 1, ipsi]),
+            @view(solution.u_store[:, :, 1, ipsi]),
             alpha)
         # du_store = dΞ_ψ/dψ (radial derivative)
         mul!(view(xi_psi1_modes, ipsi, :),
-            @view(ForceFreeStates_results.du_store[:, :, ipsi]),
+            @view(solution.du_store[:, :, ipsi]),
             alpha)
         # xi_s_store = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
         mul!(view(xi_s_modes, ipsi, :),
-            @view(ForceFreeStates_results.xi_s_store[:, :, ipsi]),
+            @view(solution.xi_s_store[:, :, ipsi]),
             alpha)
     end
 
@@ -266,7 +266,7 @@ end
 
 """
     compute_perturbed_field_modes(
-        xi_psi_modes, xi_psi1_modes, xi_s_modes, psi_grid, equil, ffs_intr
+        xi_psi_modes, xi_psi1_modes, xi_s_modes, psi_grid, equil, ffs
     ) -> (b_psi_modes, b_theta_modes, b_zeta_modes)
 
 Compute contravariant perturbed B-field from displacement using ideal MHD relations.
@@ -283,7 +283,7 @@ function compute_perturbed_field_modes(
     xi_s_modes::Matrix{ComplexF64},
     psi_grid::Vector{Float64},
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal
+    ffs::ForceFreeStatesResult
 )
     npsi, mpert = size(xi_psi_modes)
 
@@ -291,8 +291,8 @@ function compute_perturbed_field_modes(
     b_theta_modes = zeros(ComplexF64, npsi, mpert)
     b_zeta_modes = zeros(ComplexF64, npsi, mpert)
 
-    mlow = ffs_intr.mlow
-    nn = ffs_intr.nlow
+    mlow = ffs.mlow
+    nn = ffs.nlow
     chi1 = 2π * equil.psio
 
     Threads.@threads :static for ipsi in 1:npsi
@@ -321,7 +321,7 @@ end
 """
     compute_clebsch_displacements(
         xi_psi_modes, xi_psi1_modes, xi_s_modes,
-        psi_grid, equil, ffs_intr, ffit, ctrl
+        psi_grid, equil, ffs, ffit, ctrl
     ) -> (clebsch_psi, clebsch_psi1, clebsch_alpha)
 
 Compute Clebsch displacement components for PENTRC output.
@@ -343,15 +343,15 @@ function compute_clebsch_displacements(
     xi_s_modes::Matrix{ComplexF64},
     psi_grid::Vector{Float64},
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal,
+    ffs::ForceFreeStatesResult,
     ffit::FourFitVars,
     ctrl::PerturbedEquilibriumControl
 )
     npsi, mpert = size(xi_psi_modes)
-    nn = ffs_intr.nlow
-    mlow = ffs_intr.mlow
+    nn = ffs.nlow
+    mlow = ffs.mlow
     chi1 = 2π * equil.psio
-    numpert_total = ffs_intr.numpert_total
+    numpert_total = ffs.numpert_total
 
     clebsch_psi = copy(xi_psi_modes)        # ξ^ψ (unregularized)
     clebsch_psi1 = copy(xi_psi1_modes)        # will be regularized below
@@ -420,7 +420,7 @@ end
 
 """
     compute_modified_field_modes(
-        xi_psi_modes, clebsch_psi1, clebsch_alpha, psi_grid, equil, ffs_intr
+        xi_psi_modes, clebsch_psi1, clebsch_alpha, psi_grid, equil, ffs
     ) -> (b_theta_reg, b_zeta_reg)
 
 Compute regularized (modified) contravariant B-field components.
@@ -437,11 +437,11 @@ function compute_modified_field_modes(
     clebsch_alpha::Matrix{ComplexF64},
     psi_grid::Vector{Float64},
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal
+    ffs::ForceFreeStatesResult
 )
     npsi, mpert = size(xi_psi_modes)
-    mlow = ffs_intr.mlow
-    nn = ffs_intr.nlow
+    mlow = ffs.mlow
+    nn = ffs.nlow
     chi1 = 2π * equil.psio
 
     b_theta_reg = zeros(ComplexF64, npsi, mpert)
@@ -469,7 +469,7 @@ end
 """
     compute_contra_displacements(
         xi_psi_modes, clebsch_psi1, clebsch_alpha,
-        psi_grid, equil, ffs_intr, metric, ctrl
+        psi_grid, equil, ffs, metric, ctrl
     ) -> (xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes)
 
 Compute contravariant displacement via Jacobian mode coupling convolution.
@@ -490,13 +490,13 @@ function compute_contra_displacements(
     clebsch_alpha::Matrix{ComplexF64},
     psi_grid::Vector{Float64},
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal,
+    ffs::ForceFreeStatesResult,
     metric::MetricData,
     ctrl::PerturbedEquilibriumControl
 )
     npsi, mpert = size(xi_psi_modes)
-    mlow = ffs_intr.mlow
-    nn = ffs_intr.nlow
+    mlow = ffs.mlow
+    nn = ffs.nlow
     chi1 = 2π * equil.psio
     reg_spot = ctrl.reg_spot
     fc = metric.fourier_coeffs
@@ -602,7 +602,7 @@ end
     compute_cova_components(
         xwp_modes, xmt_modes, xmz_modes,
         bwp_modes, bmt_modes, bmz_modes,
-        psi_grid, ffs_intr, metric
+        psi_grid, ffs, metric
     ) -> (xvp, xvt, xvz, bvp, bvt, bvz)
 
 Compute covariant displacement and B-field via metric tensor contraction.
@@ -621,11 +621,11 @@ function compute_cova_components(
     bmt_modes::Matrix{ComplexF64},
     bmz_modes::Matrix{ComplexF64},
     psi_grid::Vector{Float64},
-    ffs_intr::ForceFreeStatesInternal,
+    ffs::ForceFreeStatesResult,
     metric::MetricData
 )
     npsi, mpert = size(xwp_modes)
-    mlow = ffs_intr.mlow
+    mlow = ffs.mlow
     fc = metric.fourier_coeffs
 
     xvp_modes = zeros(ComplexF64, npsi, mpert)
@@ -742,7 +742,7 @@ end
 
 """
     compute_b_n_xi_n_modes(
-        xwp_modes, b_psi_modes, ForceFreeStates_results, equil, ffs_intr
+        xwp_modes, b_psi_modes, solution, equil, ffs
     ) -> (b_n_modes, xi_n_modes)
 
 Compute physical normal field b_n and displacement xi_n in mode space.
@@ -769,12 +769,12 @@ Tuple (b_n_modes, xi_n_modes), each [npsi, mpert] ComplexF64.
 function compute_b_n_xi_n_modes(
     xwp_modes::Matrix{ComplexF64},
     b_psi_modes::Matrix{ComplexF64},
-    ForceFreeStates_results::OdeState,
+    solution::SolutionProfiles,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal
+    ffs::ForceFreeStatesResult
 )
     npsi, mpert = size(b_psi_modes)
-    mlow = ffs_intr.mlow
+    mlow = ffs.mlow
     mthsurf = length(equil.rzphi_ys) - 1
     ro = equil.ro
     twopi = 2π
@@ -790,7 +790,7 @@ function compute_b_n_xi_n_modes(
     phase_back = [exp(-twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
 
     Threads.@threads :static for ipsi in 1:npsi
-        psi = ForceFreeStates_results.psi_store[ipsi]
+        psi = solution.psi_store[ipsi]
         hint2d_psi = (Ref(1), Ref(1))
 
         # IDFT: mode space → theta space
