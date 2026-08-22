@@ -1592,6 +1592,42 @@ the `:static` determinism fix. Follow-ups inherited by #423: the gpout_dw port m
 domain-matched profile comparison a first-class output; the sub-ψ_c Im(u1†u2) offset (±0.05,
 sign varies) should be documented as non-dissipative when that lands.
 
+## 36. No validated kinetic Δ′ — withheld; and the torque residual is a regularization width, not physics
+
+User directive: (a) don't deliver faulty kinetic Δ′; (b) test whether knots inside the rational
+brackets recover the rot=1.0 residual.
+
+**(a) Implemented** (PR #426, `feature/kinetic-delta-prime-guard`): the whole jump-derived family
+(Δ′, C_Δ′, resonant current, resonant area-weighted field, island widths, Chirikov) is withheld in
+kinetic runs — it descends from the outer-solution jump read through *ideal* asymptotic matching at
+an *ideal* rational surface, which kinetic terms invalidate (displaced `kinsing` surfaces, different
+layer response). Warning names what is withheld and why; metadata and inner-layer penetrated field
+kept; ideal runs bit-unaffected; opt-in `unvalidated_kinetic_tearing` for research use. The Riccati
+`Delta_prime_matrix` path was already unreachable in kinetic runs (forward integrator required), so
+PE singular coupling was the only leak.
+
+**(b) Null, measured**: bracketing exists only for that Δ′ stencil, so kinetic runs now skip it and
+keep the fine near-rational knots. Effect on the cross-check: **zero** (PE 0.1322 / fgar 0.1655
+before and after; grid 290 → 288). Pre-run measurement predicted this — the cleared zone is ~2e-4
+wide and already held 17–18 knots.
+
+**Where the residual actually lives**: the resonant layers, dominated by ψ=0.9933 (fgar +0.0358
+within ±0.002 vs PE +0.0026). Decisive test — `reg_spot` sensitivity at fixed everything else:
+
+| | PE | fgar | full domain | layers excluded (±0.002) |
+|---|---|---|---|---|
+| reg 0.05 | 0.1322 | 0.1666 | 20% | 5.2% |
+| reg 0.01 | 0.1322 (identical) | 0.1402 | **5.7%** | **0.8%** |
+
+PE is exactly reg-independent (the ODE's own dissipation); fgar's layer term collapses 3.3× with the
+narrower regularization. So the resonant torque enters the outer-region description as a SURFACE
+term — the jump/resonant current, i.e. exactly the quantity (a) withholds — while fgar integrates a
+reg-broadened volume approximation of it. The two agree to 0.8% wherever that term is absent, and
+cannot agree on the full domain until a validated kinetic layer formulation supplies it (#423).
+Guidance established: compare PE vs NTV outside the layers or at small reg_spot; a large-reg
+full-domain difference is the smoothing width, not physics. The night's 10% goal is met on both
+cases (rot 0.2: 0.3%; rot 1.0 at reg 0.01: 5.7%).
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
