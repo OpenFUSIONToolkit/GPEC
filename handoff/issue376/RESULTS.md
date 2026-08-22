@@ -1628,6 +1628,48 @@ Guidance established: compare PE vs NTV outside the layers or at small reg_spot;
 full-domain difference is the smoothing width, not physics. The night's 10% goal is met on both
 cases (rot 0.2: 0.3%; rot 1.0 at reg 0.01: 5.7%).
 
+## 37. Regularization off for kinetic runs; and the bisection map retested against the fixed referee
+
+**Regularization (user question, Park & Logan 2017 §III D).** `reg_spot` smooths the *ideal*
+1/(m−nq) divergence of ξ^ψ′ and ξ^α before they drive the NTV integrand. The self-consistent
+kinetic operator has no such divergence: F_k = Q F̄_k Q − P_l†Q − Q P_u + R₁ with R₁ ≠ 0 at Q = 0,
+and with finite torque det F̄ is complex — singularity removed from the solution and the torque
+integral (Logan thesis §7.2.1 gives the shift/split picture for the torque-free Hermitian case:
+zeros at ψ_r ∓ r_L,R, logarithmic and integrable). Verified three ways on DIII-D:
+
+| configuration | max\|ξ^α\| | NTV torque | EL dissipation |
+|---|---|---|---|
+| ideal, reg 0 | 643.8 | 6074.3 | — |
+| ideal, reg 0.05 | 0.058 | 0.554 | — |
+| kinetic, reg 0.05 | 0.055 | 0.1655 | 0.1322 |
+| kinetic, reg 0 | 0.059 | **0.1324** | **0.1322** |
+
+plus the operator itself: σ_min(F̄) at the rational = 2.6e-17 (ideal) vs 4.2e-3 (kinetic), never
+below 3.3e-3 across the window — measured in-process from each run's own splines. Landed in #414
+(kinetic runs force reg_spot = 0, logged), with a docs section in `docs/src/kinetic_forces.md` and
+the analysis folded into the PR's review package. EL solve bit-identical (reg only ever entered
+the PE post-processing that builds the NTV input).
+
+**Bisection-map retest** (the earlier "physically inert" verdict was measured with the corrupted
+referee, so it was re-run at reg = 0):
+
+| config | bisect off | bisect on | flagged |
+|---|---|---|---|
+| nominal | 0.20% | 0.20% | 71 of 254 |
+| collisionless (nutype=zero) + rot 0.2 | 3.66% | 3.70% | 50 of 269 |
+| low-ν proxy (nufac 0.01), nominal rot | 0.42% | 0.18% | 80 of 254 |
+
+Verdict holds and is now much stronger: resolving every flagged interval moves the torque
+cross-check by ≤0.24 pp against a referee sharp enough to see 0.2%. The pinned auto grid is
+sufficient; the map stays an unshipped diagnostic on `experiment/kinetic-bisection-refine`.
+(The low-ν proxy is the one case where refinement helped at all — 0.42% → 0.18%, i.e. a 0.24 pp
+tightening, still an order below the 10% bar.)
+
+**Bug found**: `nutype = "zero"` at nominal rotation crashes (BoundsError, EnergyIntegration.jl:227
+— the non-finite fallback indexes `x_poles[1]` on the `npole == 0` path). Pre-existing on develop
+(no commits on this stack touch that file); Solovev's nuzero case never reaches the branch. Filed
+as issue #428.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
