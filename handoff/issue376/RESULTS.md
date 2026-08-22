@@ -1487,6 +1487,33 @@ wt0/Λ construction, not the kinetic matrix splines). The mechanism's production
 MAP (a one-pass under-resolution warning that costs one kernel pass, catches coarse decks
 immediately) rather than the insertions. Branch kept as the trial record.
 
+## 34. Night mission: PE torque vs KF torque — root cause found (in progress)
+
+Goal (user): PE torque within 10% of KF on DIII-D. Chain of evidence, each step zero-cost from
+stored data until the fix:
+
+1. **User's downsampling diagnostic**: fgar's dT/dψ interpolated onto the 290-knot matrix grid
+   and trapezoid-integrated reproduces the quadgk total to 0.3% — grid representation of the
+   integrand is NOT the problem; domains match exactly ([ψ_c, psilim] both sides). The torque is
+   one spike: 86% in [0.90, 0.95] at the pedestal ω_E crossing.
+2. **gpout_dw reconstructed in post-processing** from stored fundamental solutions ×
+   `forcing_solution_weights`: physical ξ matches PE's to 1e-16, and the volume torque
+   −2n·Im(Σ conj(u1)u2)/(4μ₀) at psilim = 0.1830682 ≡ the boundary scalar to 7 digits — the δW
+   surface identity HOLDS numerically; PE is internally consistent.
+3. **Profile comparison**: EL and fgar torque densities agree 5–10% everywhere except the
+   resonant core [0.919, 0.926] (width ~2e-3): fgar peaks at 161 N·m/ψ, EL at 2.7. The EL grid
+   has ~2 knots across the core; fgar packed 40 adaptive samples into it. Explains dense-1024
+   being WORSE (0.083): uniform spacing straddles the core with different luck.
+4. **Matrix anti-Hermitian profile**: the resonance IS in the matrices (A-antiH 53→909→53 across
+   the layer) — but those are knot values; the inter-knot core is unresolved.
+5. **ftmm discriminator (decisive)**: the MXM matrix-method torque with fresh kernel evaluations
+   at adaptive quadrature nodes = 0.7238 vs fgar 0.7241 (0.04%) — the m×m discretization is
+   FAITHFUL. The entire PE deficit is the SPLINE of the matrices on the EL grid at the layer.
+6. **Fix implemented** (experiment/kinetic-bisection-refine, d2abb6fbd): resonant-layer knot
+   ladders — each located Ω_ℓ=0 node above the validity band gets ±[2.5e-4 … 8e-3] offsets
+   (~21 knots/node) in the KINETIC evaluation grid only (equilibrium/Δ′ grids untouched),
+   1e-4 snap guard. Trial run in progress; goal PE ≥ 0.65 N·m.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
