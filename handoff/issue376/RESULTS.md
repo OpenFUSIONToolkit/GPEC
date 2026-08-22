@@ -1514,6 +1514,45 @@ stored data until the fix:
    (~21 knots/node) in the KINETIC evaluation grid only (equilibrium/Δ′ grids untouched),
    1e-4 snap guard. Trial run in progress; goal PE ≥ 0.65 N·m.
 
+## 35. Night mission resolved: the torque discrepancy was fgar's inflated ξ^α input
+
+Continuation of §34's chain. After the ladder null (§34 fix trial: resolved matrix splines,
+PE torque unchanged to 4 digits) and step-size check (6–8 steps/layer — integrator fine), two
+parallel probes closed the case:
+
+- **In-process RHS probe**: the ODE's own barred-system dissipation density at the layer =
+  0.9–2.7 N·m/ψ (stored solution satisfies the RHS to 5e-5) — the EL system genuinely produces
+  ~2, not ~160, there. My earlier "FKG form = 109–172" comparison had used the un-barred h5
+  f0/K/G — invalid (the ODE evolves singfac-weighted barred matrices from eight spline families
+  not written to gpec.h5).
+- **fortran-physics-reviewer**: `_compute_fkg_matrices!` and the `el_derivatives!` kinetic branch
+  are exact sign-by-sign, adjoint-by-adjoint ports of fourfit.F:1153–1274 and sing.f:1096–1222 —
+  every dissipation carrier (paat, kkaat, r3, gaat, caat) verified. PASS.
+
+With both formulations faithful, the last inconsistency was the INPUT: `dbob_m`/`divx_m` fed to
+the NTV kernel were built from a ξ^α **re-solved from the IDEAL A,B,C** even in kinetic runs —
+inconsistent with the self-consistent kinetic tangential response exactly where resonant layers
+live. Fortran (gpeq.f kin_flag) instead scales the STORED ξ_s by the singfac regularization
+factor and inverts nothing — the same flaw #407 fixed on the MatrixSplines branch, present on
+ours in different clothing (our resolve used ideal matrices, valid Cholesky, wrong physics).
+
+**Fix applied** (experiment/kinetic-bisection-refine): kinetic runs regularize the stored ξ_s
+(kinetic-LU, self-consistent) — no matrix resolve. Result on DIII-D rot=1.0 full chain:
+
+| | PE torque | fgar torque | ratio |
+|---|---|---|---|
+| before | 0.1831 | 0.7241 | 0.25 |
+| after  | 0.1749 | 0.1513 | 1.16 |
+
+The phantom resonant-layer contribution in fgar collapsed (+0.622 → +0.033 in [0.90,0.95]):
+**the "missing" torque was never real — the perturbative NTV evaluation was driven by an
+ideal-reconstructed tangential displacement that ignores the kinetic layer response** (the
+self-consistent solution screens the resonance). PE's 0.18 was the right number all along;
+§32's framing ("PE deficient") is inverted. Agreement now 15.6%; residual candidates: the
+reg_spot suppression of near-rational drive (removed from the NTV input but legitimately kept
+by the EL solution — note PE now sits ABOVE fgar), under test via reg_spot=0.01 + the rot=0.2
+case (runs in flight).
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
