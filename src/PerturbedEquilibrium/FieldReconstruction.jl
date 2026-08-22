@@ -365,6 +365,25 @@ function compute_clebsch_displacements(
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
 
+    # Kinetic runs: mirror Fortran gpeq.f kin_flag — regularize the STORED self-consistent ξ_s
+    # by the same singfac factor and never re-solve from matrices. The ideal-matrix resolve is
+    # inconsistent with the kinetic solution's tangential response (the resonant layers live in
+    # exactly that dynamics), and the kinetic A is non-Hermitian and must not be re-inverted
+    # here. Kinetic-ness detected by populated kwmats splines (sentinel has 5 knots).
+    if length(ffit.kwmats[1].cache.x) > 8
+        for ipsi in 1:npsi
+            q = equil.profiles.q_spline(psi_grid[ipsi])
+            for ipert in 1:mpert
+                m = mlow + ipert - 1
+                singfac = m - nn * q
+                reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
+                clebsch_psi1[ipsi, ipert] = xi_psi1_modes[ipsi, ipert] * reg_factor
+                clebsch_alpha[ipsi, ipert] = xi_s_modes[ipsi, ipert] * reg_factor / chi1
+            end
+        end
+        return clebsch_psi, clebsch_psi1, clebsch_alpha
+    end
+
     # Per-thread workspaces: matrix ops and spline hints are not safe to share across threads.
     # Size by maxthreadid() and index by threadid() under :static scheduling (GPEC convention).
     nt = Threads.maxthreadid()
