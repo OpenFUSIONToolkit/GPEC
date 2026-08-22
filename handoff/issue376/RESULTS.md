@@ -1553,6 +1553,25 @@ reg_spot suppression of near-rational drive (removed from the NTV input but legi
 by the EL solution — note PE now sits ABOVE fgar), under test via reg_spot=0.01 + the rot=0.2
 case (runs in flight).
 
+### §35 addendum: a threading race found via the torque scatter — and the numbers remeasured
+
+Post-fix torque numbers initially scattered run-to-run (three runs of one identical rot=1.0 deck:
+et[1] = 1.0053, 1.1355, 0.9895 — nondeterministic at percent level; fgar 0.140–0.187). Root
+cause found: `CalculatedKineticMatrices.jl:123` was the ONLY threaded loop in the codebase using
+`Threads.@threads` WITHOUT `:static` while indexing per-thread scratch (thread_intrs + matrix
+buffers) by `threadid()` — dynamic-scheduling task migration lets two tasks share a buffer and
+corrupt kinetic matrix rows at rare-migration frequency. Every historical calculated-kinetic run
+carries this latent race (earlier bit-identical reproductions were migration-free luck; tonight's
+32-thread ladder runs tipped it). Fixed (`:static`, one word) on `bugfix/kinetic-clebsch-xi-s`
+alongside the ξ_s fix; deterministic remeasurement of the torque matrix in flight (pre-registered:
+identical decks now bit-identical; final PE-vs-fgar agreement re-quoted from clean runs only).
+
+Also correcting §35's provisional numbers: the "15.6% agreement" run (x407_rot1) was itself
+race-corrupted. The valid post-fix evidence so far: band-by-band profile agreement (resonant
+layer 0.0461 vs 0.0455) and domain-matched totals PE 0.1322/fgar 0.1397 (5.4%, reg 0.01) and
+PE 0.1456/fgar 0.1461 (0.3%, rot 0.2) — from runs whose EL matched the lad reference exactly;
+these await confirmation on the deterministic code.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
