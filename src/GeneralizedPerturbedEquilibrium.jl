@@ -609,8 +609,9 @@ function main_from_inputs(
         # det(F̄) is complex and nonzero at the rationals — so regularizing there suppresses a finite
         # physical response, and does so inconsistently (ξ^ψ is left unregularized, breaking the
         # near-resonance cancellation in δB/B). Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D.
-        if ctrl.kinetic_factor > 0 && get(pe_raw_in, "reg_spot", 0.0) != 0
-            @info "Self-consistent kinetic run: overriding reg_spot=$(pe_raw_in["reg_spot"]) with 0 " *
+        if ctrl.kinetic_factor > 0
+            prev = get(pe_raw_in, "reg_spot", PerturbedEquilibrium.PerturbedEquilibriumControl().reg_spot)
+            prev == 0 || @info "Self-consistent kinetic run: overriding reg_spot=$prev with 0 " *
                   "(the kinetic terms remove the ideal resonant singularity; see docs/src/kinetic_forces.md)"
             pe_raw_in = merge(pe_raw_in, Dict("reg_spot" => 0.0))
         end
