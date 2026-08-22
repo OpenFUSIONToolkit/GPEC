@@ -134,7 +134,7 @@ function _solution_at(
 
     # Same-side candidate nodes around the bracket, trimmed to the 4 nearest psi.
     side = sign(psi - psi_surf)
-    idxs = [j for j in max(1, il-3):min(nstep, ir+3) if sign(odet.psi_store[j] - psi_surf) == side]
+    idxs = [j for j in max(1, il - 3):min(nstep, ir + 3) if sign(odet.psi_store[j] - psi_surf) == side]
     while length(idxs) > 4
         abs(odet.psi_store[idxs[1]] - psi) > abs(odet.psi_store[idxs[end]] - psi) ? popfirst!(idxs) : pop!(idxs)
     end
@@ -307,7 +307,7 @@ function compute_singular_coupling_metrics!(
         state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     else
         state.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
-        @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog=1
+        @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog = 1
     end
     state.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
     state.rational_psi = zeros(Float64, n_rational)
@@ -492,6 +492,34 @@ function compute_singular_coupling_metrics!(
 
     # Phase 5: Island diagnostics from applied resonant vectors
     compute_island_diagnostics!(state, n_rational)
+
+    # Kinetic guard: every quantity above descends from the outer-solution jump across the
+    # rational surface, whose reading as a tearing index assumes ideal asymptotic matching at an
+    # ideal rational surface. Kinetic terms displace the surfaces (`kinsing`) and change the
+    # layer response, so that reading is unvalidated — withhold rather than deliver numbers with
+    # no established meaning. Surface metadata (ψ, q, m, n, area) and the inner-layer penetrated
+    # field are kept; they do not come from the jump.
+    if ffit.kinetic_populated && !ctrl.unvalidated_kinetic_tearing
+        state.C_delta_prime = zeros(ComplexF64, 0, 0)
+        state.delta_prime = ComplexF64[]
+        state.C_resonant_current = zeros(ComplexF64, 0, 0)
+        state.resonant_current = ComplexF64[]
+        state.C_resonant_area_weighted_field = zeros(ComplexF64, 0, 0)
+        state.resonant_area_weighted_field = ComplexF64[]
+        state.C_island_width_sq = zeros(ComplexF64, 0, 0)
+        state.island_width_sq = ComplexF64[]
+        state.island_half_width = Float64[]
+        state.chirikov_parameter = Float64[]
+        @warn "Kinetic run: withholding the jump-derived tearing diagnostics (Δ′, resonant current, " *
+              "resonant area-weighted field, island widths, Chirikov). Their extraction assumes ideal " *
+              "outer-region matching at an ideal rational surface, which kinetic terms invalidate; no " *
+              "validated kinetic formulation exists in this code. Set [PerturbedEquilibrium] " *
+              "unvalidated_kinetic_tearing = true to emit them anyway (research use, at your own risk)."
+    elseif ffit.kinetic_populated
+        @warn "Kinetic run with unvalidated_kinetic_tearing = true: Δ′ and the island/current diagnostics " *
+              "derived from the resonant-surface jump have NO validated kinetic formulation. Do not " *
+              "publish these numbers without independent verification."
+    end
 
     if ctrl.verbose
         max_island = isempty(state.island_half_width) ? 0.0 : maximum(state.island_half_width)

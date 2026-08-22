@@ -273,9 +273,19 @@ function main_from_inputs(
             isempty(pinned) ||
                 @info "Pinning $(length(pinned)) kinetic-resonance surfaces into the ψ grid: $(round.(sort(pinned); digits=3))"
         end
+        # Rational bracketing serves the ideal Δ′ stencil. Kinetic runs withhold that Δ′ (see
+        # PerturbedEquilibriumControl `unvalidated_kinetic_tearing`), so unless the user opts back
+        # in, skip the bracketing and let the fine near-rational knots resolve the kinetic
+        # matrices instead. Read from the raw inputs: the PE control struct is built later.
+        pe_raw = get(inputs, "PerturbedEquilibrium", Dict{String,Any}())
+        wants_kinetic_tearing = Bool(get(pe_raw, "unvalidated_kinetic_tearing", false))
+        bracket_mandatory = !(ctrl.kinetic_factor > 0) || wants_kinetic_tearing
+        bracket_mandatory ||
+            @info "Kinetic run: rational-surface bracketing disabled (the ideal Δ′ it serves is withheld); " *
+                  "near-rational knots retained for the kinetic matrices"
         psi_nodes = Equilibrium.refined_psi_grid(equil;
             tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory, pinned=pinned,
-            singfac_min=ctrl.singfac_min, n_min=n_min)
+            bracket_mandatory=bracket_mandatory, singfac_min=ctrl.singfac_min, n_min=n_min)
         rerun_input = if additional_input !== nothing
             # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
             # path re-runs read_imas, which must resolve the same psihigh both passes;
