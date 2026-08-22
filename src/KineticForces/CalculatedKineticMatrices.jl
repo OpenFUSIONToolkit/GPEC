@@ -120,7 +120,7 @@ function compute_calculated_kinetic_matrices(
     thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_block_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
 
-    Threads.@threads for ipsi in 1:mpsi
+    Threads.@threads :static for ipsi in 1:mpsi
         tid = Threads.threadid()
         intr_t = thread_intrs[tid]
         full_w = thread_full_w[tid]
