@@ -1,3 +1,69 @@
+
+"""
+    refine_grid_at_fbar_peaks(xs, kw, kt, evaluate, ffit, equil, intr, psi_c;
+                              ngrid=1000, relaxed_frac=0.01, target=3, max_add=24) → (xs, kw, kt)
+
+Insert kinetic evaluation knots across near-singular structure of F̄ that the grid does not
+resolve. Scans cond(F̄) (the same operator `find_kinetic_singular_surfaces!` searches — Park &
+Logan Eq. 70, so shifted and split resonances are included), takes peaks between
+`relaxed_frac`·threshold and the singular threshold, measures each peak's FWHM, and adds knots
+only where fewer than `target` knots lie inside it. New points respect `MIN_KNOT_SPACING`, stay
+above the near-axis validity band, and are capped at `max_add`; each costs one kernel evaluation
+and the existing values are reused. A well-resolved grid inserts nothing.
+"""
+function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3}, kt::Array{ComplexF64,3},
+    evaluate::Function, ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal, psi_c::Float64;
+    ngrid::Int=1000, relaxed_frac::Float64=0.01, target::Int=3, max_add::Int=24,
+    cond_threshold::Float64=1e8)
+
+    lo, hi = xs[1], xs[end]
+    scan = collect(range(lo, hi; length=ngrid))
+    hint = Ref(1)
+    cond_vals = [
+        try
+            evaluate_fbar_condition(x, ffit, equil, intr; hint=hint)
+        catch
+            Inf
+        end for x in scan
+    ]
+
+    add = Float64[]
+    for i in 2:(ngrid-1)
+        c = cond_vals[i]
+        (c > cond_vals[i-1] && c > cond_vals[i+1] && relaxed_frac * cond_threshold < c <= cond_threshold) || continue
+        l = i
+        while l > 1 && cond_vals[l] > c / 2
+            l -= 1
+        end
+        r = i
+        while r < ngrid && cond_vals[r] > c / 2
+            r += 1
+        end
+        inside = count(x -> scan[l] <= x <= scan[r], xs)
+        inside >= target && continue
+        w = (scan[r] - scan[l]) / 3
+        for x in (scan[i], scan[i] - w, scan[i] + w)
+            (lo < x < hi && x > 2 * psi_c) || continue
+            minimum(abs.(xs .- x)) < Equilibrium.MIN_KNOT_SPACING && continue
+            isempty(add) || minimum(abs.(add .- x)) >= Equilibrium.MIN_KNOT_SPACING || continue
+            push!(add, x)
+        end
+    end
+    isempty(add) && return xs, kw, kt
+    length(add) > max_add && (add = sort(add)[1:max_add])
+
+    sort!(add)
+    @info "Kinetic grid: $(length(add)) knot(s) added across unresolved near-singular F̄ structure at " *
+          "ψ=$(round.(add; digits=4)) (cond peaks below the singular threshold)"
+    kw_new, kt_new = evaluate(add)
+    allxs = vcat(xs, add)
+    perm = sortperm(allxs)
+    kw_all = cat(kw, kw_new; dims=1)[perm, :, :]
+    kt_all = cat(kt, kt_new; dims=1)[perm, :, :]
+    return allxs[perm], kw_all, kt_all
+end
+
 """
     make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
                         calculated_source=nothing)
@@ -71,6 +137,31 @@ function make_kinetic_matrix(
 
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
     _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+
+    # The FKG splines now exist, so F̄ can be scanned: add knots only where near-singular
+    # structure (shifted/split kinetic resonances) falls in an interval that does not resolve it.
+    if ctrl.kinetic_source == "calculated" && calculated_source !== nothing
+        xs2, kw_flat, kt_flat = refine_grid_at_fbar_peaks(
+            collect(xs), kw_flat, kt_flat,
+            psis -> begin
+                kwn, ktn = calculated_source(ctrl, equil, intr, metric, ffit; psis=psis)
+                (kwn .* ctrl.kinetic_factor, ktn .* ctrl.kinetic_factor)
+            end,
+            ffit, equil, intr, axis_validity_psi_c)
+        if length(xs2) != length(xs)
+            xs = xs2
+            # _compute_fkg_matrices! folds the kinetic increments into amats/bmats/cmats (saving the
+            # ideal copies), so restore those before recomputing or the increments are added twice.
+            ffit.amats = ffit.amats_ideal
+            ffit.bmats = ffit.bmats_ideal
+            ffit.cmats = ffit.cmats_ideal
+            for ic in 1:6
+                ffit.kwmats[ic] = cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); ffit.itp_opts...)
+                ffit.ktmats[ic] = cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...)
+            end
+            _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+        end
+    end
 
     return nothing
 end
