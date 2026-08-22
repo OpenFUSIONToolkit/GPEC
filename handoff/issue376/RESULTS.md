@@ -1451,6 +1451,16 @@ flag on wt0/plasma-inductance convergence near the pedestal ω_E crossing. Issue
 port gpout_dw(+_matrix) and adopt its ψ-integrated torque vs fgar as the tracked grid-logic
 referee.
 
+### §32 second correction (torque equivalence, user challenge)
+
+The reviewer's "need not agree even in exact arithmetic" was overdrawn and is retracted: for
+exact self-consistent solutions the boundary quadratic form equals the ψ-integrated gpout_dw
+torque (δW surface-term identity, modulo normalization) — two evaluations of the SAME
+EL-model torque, whose numerical difference is the grid/solution diagnostic. The genuinely
+independent number is the KF energy-space NTV; PE-vs-NTV tests model-discretization fidelity.
+Output delineation (struct docstring + HDF5 long_name + code comment) landed as PR #424 (draft,
+off develop); renames deferred to the gpout_dw port (#423).
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
