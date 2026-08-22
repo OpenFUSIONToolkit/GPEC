@@ -123,9 +123,11 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # strategy. Multi-n runs are not supported — the "outermost rational + dmlim/n" cutoff depends
     # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
     if ctrl.set_psilim_via_dmlim && intr.nlow <= 0
-        error("sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
-              "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
-              "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead.")
+        error(
+            "sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+            "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
+            "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead."
+        )
     elseif ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
         @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
     elseif ctrl.set_psilim_via_dmlim
@@ -266,7 +268,7 @@ function compute_sing_asymptotics(
 
     # This is the parameter α but for all modes - α = 0 for non-resonant modes
     power[ipert_res] .= -alpha
-    power[ipert_res .+ intr.numpert_total] .= alpha
+    power[ipert_res.+intr.numpert_total] .= alpha
 
     # Zeroth-order non-resonant solutions
     for ipert in 1:intr.numpert_total
@@ -303,7 +305,7 @@ function compute_sing_asymptotics(
         msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1, 2]), imag(m0mat[1, 2]))
         msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2, 1]), imag(m0mat[2, 1]))
         msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2, 2]), imag(m0mat[2, 2]))
-        di = m0mat[1, 1]*m0mat[2, 2] - m0mat[2, 1]*m0mat[1, 2]
+        di = m0mat[1, 1] * m0mat[2, 2] - m0mat[2, 1] * m0mat[1, 2]
         msg *= @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei\n", real(di), real(alpha[1]), imag(alpha[1]))
         msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
         msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0, 2, 1]), imag(vmat[ipert0, ipert0, 2, 1]))
@@ -771,7 +773,7 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
 
     # Restore powers (unshear v→u) — matches Fortran STRIDE sing_get_ua
     for i in eachindex(r1)
-        pfac = pfac_base ^ sing_asymp.alpha[i]  # dpsi^α
+        pfac = pfac_base^sing_asymp.alpha[i]  # dpsi^α
         ua[:, r2[2*i-1], :] ./= pfac  # big solution column: /dpsi^α
         ua[:, r2[2*i], :] .*= pfac    # small solution column: *dpsi^α
         ua[r1[i], :, 1] ./= sqrtfac   # resonant row ξ: /√dpsi
@@ -1430,6 +1432,19 @@ function find_kinetic_singular_surfaces!(ffit::FourFitVars, equil::Equilibrium.P
         if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1] && cond_vals[i] > cond_threshold
             push!(peak_indices, i)
         end
+    end
+
+    # Peaks below the threshold are not singular surfaces, but they mark where the kinetic F̄ comes
+    # closest to singular — the shifted/split resonances of Park & Logan Eq. (70). Report the
+    # strongest few so sharp kinetic structure is visible rather than silent (on a DIII-D-like case
+    # these track the NTV torque-density peaks at low collisionality/rotation).
+    subthreshold = [i for i in 2:(ngrid-1) if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1] &&
+                    cond_threshold / 100 < cond_vals[i] <= cond_threshold]
+    if !isempty(subthreshold)
+        top = sort(subthreshold; by=i -> -cond_vals[i])[1:min(3, length(subthreshold))]
+        @info "Kinetic F̄ near-singular structure below the singular threshold at " *
+              join(["ψ=$(round(psi_grid[i]; digits=4)) (cond=$(round(cond_vals[i]; sigdigits=3)))" for i in top], ", ") *
+              " — full scan in SingularSurfaces/Kinetic/scan_cond; check the ψ grid resolves these if results look grid-sensitive"
     end
 
     # Refine each peak to find the precise ψ location
