@@ -1461,6 +1461,32 @@ independent number is the KF energy-space NTV; PE-vs-NTV tests model-discretizat
 Output delineation (struct docstring + HDF5 long_name + code comment) landed as PR #424 (draft,
 off develop); renames deferred to the gpout_dw port (#423).
 
+## 33. The bisection safety net, tried (user design, experiment/kinetic-bisection-refine)
+
+One-round bisection refinement implemented (~90 lines): every interval midpoint above 2ψ_c
+kernel-evaluated in one threaded batch, compared against the increment splines with a
+PER-INTERVAL local scale (floored at 1% of family max), flagged midpoints inserted reusing their
+kernel values, residual map logged unconditionally. Knob `kinetic_grid_bisect` (default 0).
+
+Smoke (Solovev m16): 12/12 midpoints fail at 1e-2 (residuals 6–26%) — instantly re-derives §25's
+under-resolution verdict from one run.
+
+DIII-D trial (full chain, resonance-pinned grid, suppression, tol=1e-3):
+
+| case | midpoints | residual quantiles 50/90/99/100% | flagged | fgar Δ | PE-torque Δ | et Δ |
+|---|---|---|---|---|---|---|
+| rot 1.0 | 254 | 1.1e-4 / 6.3e-2 / 0.44 / 0.62 | 71 | +0.15% | +0.1% | 2.4e-4 |
+| rot 0.2 | 269 | 1.4e-4 / 5.0e-3 / 5.9e-2 / 7.2e-2 | 54 | +0.1% | 0 | 3e-5 |
+
+Verdict, both halves stated: (1) the map PROVES the ideal-driven grid misses real kinetic
+increment structure — locally up to 62%, concentrated at ψ≈0.885–0.94 (the pedestal ω_E crossing
+between the 0.893/0.968 rationals) and across mid-radius bands; (2) resolving all of it changes
+no referee beyond 2.4e-4 — the missed structure is physically inert on this case, and the PE
+boundary torque's grid instability is untouched (consistent with §32: that problem lives in
+wt0/Λ construction, not the kinetic matrix splines). The mechanism's production value is the
+MAP (a one-pass under-resolution warning that costs one kernel pass, catches coarse decks
+immediately) rather than the insertions. Branch kept as the trial record.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
