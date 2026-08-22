@@ -1572,6 +1572,26 @@ layer 0.0461 vs 0.0455) and domain-matched totals PE 0.1322/fgar 0.1397 (5.4%, r
 PE 0.1456/fgar 0.1461 (0.3%, rot 0.2) — from runs whose EL matched the lad reference exactly;
 these await confirmation on the deterministic code.
 
+### §35 final (deterministic remeasurement, PR #425)
+
+With `:static` restored, identical decks reproduce bit-identically (det_a ≡ det_b to every
+digit; et returns exactly to the pre-fix EL value, confirming both fixes leave the EL solve
+untouched). Final domain-matched PE vs fgar, DIII-D full chain:
+
+| case | PE | fgar | agreement |
+|---|---|---|---|
+| rot 0.2, reg 0.05 | 0.1456 | 0.1460 | **0.3%** |
+| rot 1.0, reg 0.05 | 0.1322 | 0.1655 | 20% |
+| rot 1.0, reg 0.01 | 0.1322 | 0.1397 | 5.4% |
+
+Where the comparison is reg-unambiguous the goal (≤10%) is exceeded by 30×; the rot=1.0
+residual sits inside fgar's own reg_spot sensitivity (18% between reg 0.05/0.01 — the
+acknowledged near-rational input ambiguity; PE is reg-independent by construction). Landed as
+draft PR #425 (`bugfix/kinetic-clebsch-xi-s`, stacked on #422): the ξ_s self-consistency fix +
+the `:static` determinism fix. Follow-ups inherited by #423: the gpout_dw port makes the
+domain-matched profile comparison a first-class output; the sub-ψ_c Im(u1†u2) offset (±0.05,
+sign varies) should be documented as non-dissipative when that lands.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
