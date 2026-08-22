@@ -99,7 +99,8 @@ function make_kinetic_matrix(
     intr::ForceFreeStatesInternal,
     metric::MetricData;
     calculated_source::Union{Nothing,Function}=nothing,
-    axis_validity_psi_c::Float64=0.0
+    axis_validity_psi_c::Float64=0.0,
+    resonance_psis::Vector{Float64}=Float64[]
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -108,6 +109,24 @@ function make_kinetic_matrix(
     # suppression boundary; coarse equilibrium grids cannot represent env·(increment), and the
     # spline overshoot can land on a rational surface. Pin the band ends (the smoothstep is
     # only C² there) and resolve the transition with a fixed set of knots.
+    # Resonant-layer ladder: the kinetic matrices are near-singular at the located Ω_ℓ = 0
+    # surfaces (measured core width ~2e-3 at the DIII-D pedestal ω_E crossing), so the kinetic
+    # evaluation grid gets a local knot ladder at each node — kinetic splines only; the
+    # equilibrium/Δ′ grids are untouched.
+    layer_offsets = [0.00025, 0.0005, 0.00075, 0.001, 0.0015, 0.002, 0.003, 0.0045, 0.006, 0.008]
+    function layer_knots(lo, hi)
+        out = Float64[]
+        for r in resonance_psis
+            r <= max(lo, 2 * axis_validity_psi_c) && continue
+            r >= hi && continue
+            push!(out, r)
+            for w in layer_offsets, sgn in (-1, 1)
+                x = r + sgn * w
+                lo < x < hi && push!(out, x)
+            end
+        end
+        return out
+    end
     band_knots(lo, hi) = axis_validity_psi_c > 0 ?
                          [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=9) if lo < x < hi] : Float64[]
 
@@ -121,12 +140,19 @@ function make_kinetic_matrix(
             "calling make_kinetic_matrix directly, or pass " *
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
         )
-        band = band_knots(xs[1], xs[end])
-        if isempty(band)
+        extra = vcat(band_knots(xs[1], xs[end]), layer_knots(xs[1], xs[end]))
+        if isempty(extra)
             kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
         else
-            xs = sort!(unique!(vcat(collect(xs), band)))
+            xs = collect(xs)
+            for x in sort!(extra)   # snap-guard: skip knots that would ring against existing ones
+                i = searchsortedfirst(xs, x)
+                ((i > 1 && x - xs[i-1] < 1e-4) || (i <= length(xs) && xs[i] - x < 1e-4)) && continue
+                insert!(xs, i, x)
+            end
             mpsi = length(xs)
+            isempty(resonance_psis) ||
+                @info "Kinetic evaluation grid: resonant-layer ladders at $(round.(filter(r -> r > 2 * axis_validity_psi_c, resonance_psis); digits=3)) -> $mpsi knots"
             kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit; psis=xs)
         end
         if ctrl.kinetic_grid_bisect > 0
