@@ -1438,6 +1438,19 @@ tests were blind to exactly the quantity (pedestal anti-Hermitian structure) whe
 genuinely inadequate. Any revived kinetic grid adaptation should certify against the TORQUE
 cross-check, not eigenvalues.
 
+### §32 correction (fortran-physics-reviewer consultation)
+
+The scalar `toroidal_torque` is a **faithful port** of gpout.f:1195–1201 (identical quadratic
+form, /4, total flux, −2n·Im factor) — but it is a *boundary* quadratic form of Λ, and the
+Fortran's apples-to-apples comparator for the fgar NTV — `gpout_dw`'s volume-resolved u1†·u2
+torque profile (gpout.f:2579–2650) and `gpout_dw_matrix`'s ψ×m×m response matrices (2655–2891) —
+is **not ported**. In exact arithmetic the boundary scalar and the volume integral need not
+agree, so §32's "mode 2 systematic deficit" is downgraded from defect-candidate to
+construction-difference; the rot=1.0 grid *instability* of the scalar stands as a genuine red
+flag on wt0/plasma-inductance convergence near the pedestal ω_E crossing. Issue #423 retargeted:
+port gpout_dw(+_matrix) and adopt its ψ-integrated torque vs fgar as the tracked grid-logic
+referee.
+
 ## Implications / ranked follow-ups
 
 1. **Use the two-pass auto grid** (`mpsi=0`, `psi_accuracy`) — already the example default; it
