@@ -26,7 +26,8 @@ Medium Priority (defer for MWE):
   - `singular_point_method::String` - Method for singular point treatment (default: "standard")
 
 Regularization:
-    # High Priority (MWE)
+# High Priority (MWE)
+
   - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
 @kwdef struct PerturbedEquilibriumControl
@@ -121,6 +122,7 @@ Metadata [n_rational] — identifies each (surface, n) row:
 
 Control-surface forcing/response spectra [numpert_total], in the three Pharr (2026) field
 representations (all tesla; no flux/weber is stored):
+
   - `forcing_b`/`response_b` - bare normal field b (Σ⁻¹·b̃)
   - `forcing_b_rootarea`/`response_b_rootarea` - root-area-weighted field b̃ (coordinate-invariant)
   - `forcing_b_area`/`response_b_area` - area-weighted field b̄ (= S·b̃; flux is Φ = A·b̄)
@@ -145,7 +147,14 @@ well-conditioned flux-space inductances L, Λ:
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
   - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")    # Response fields in mode space [npsi, mpert]
-  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
+  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 ) — the **boundary-response torque**:
+    the net toroidal torque implied by the anti-Hermitian part of the plasma inductance at the
+    control surface. For exact self-consistent solutions this equals the volume-integrated
+    kinetic torque of the same Euler-Lagrange model (the δW surface-term identity), so any
+    numerical difference from a ψ-resolved torque profile is a solution/grid-quality diagnostic,
+    not physics. It is a *distinct construction* from the NTV torque under `KineticForces/`
+    (independent energy-space bounce-average evaluation); agreement between the two tests whether
+    the EL matrices faithfully discretize the drift-kinetic operator. Zero for ideal (Hermitian) runs.
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
@@ -185,18 +194,18 @@ well-conditioned flux-space inductances L, Λ:
     rational_surface_idx::Vector{Int} = Int[]
 
     # Control-surface forcing/response spectra in the three weightings of field representations [numpert_total], tesla
-    forcing_b::Vector{ComplexF64}           = ComplexF64[]  # bare normal field b (forcing Φ_x)
-    forcing_b_rootarea::Vector{ComplexF64}  = ComplexF64[]  # root-area-weighted field b̃ (coordinate-invariant)
-    forcing_b_area::Vector{ComplexF64}      = ComplexF64[]  # area-weighted field b̄
-    response_b::Vector{ComplexF64}          = ComplexF64[]  # bare normal field b (response Φ_tot = P·Φ_x)
+    forcing_b::Vector{ComplexF64} = ComplexF64[]  # bare normal field b (forcing Φ_x)
+    forcing_b_rootarea::Vector{ComplexF64} = ComplexF64[]  # root-area-weighted field b̃ (coordinate-invariant)
+    forcing_b_area::Vector{ComplexF64} = ComplexF64[]  # area-weighted field b̄
+    response_b::Vector{ComplexF64} = ComplexF64[]  # bare normal field b (response Φ_tot = P·Φ_x)
     response_b_rootarea::Vector{ComplexF64} = ComplexF64[]  # root-area-weighted field b̃
-    response_b_area::Vector{ComplexF64}     = ComplexF64[]  # area-weighted field b̄
+    response_b_area::Vector{ComplexF64} = ComplexF64[]  # area-weighted field b̄
 
     # Control surface matrices [numpert_total × numpert_total], root-area-weighted field (b̃) space
-    plasma_inductance::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)  # Λ̃ (field space)
+    plasma_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # Λ̃ (field space)
     surface_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # L̃ (field space)
-    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P̃ = R⁻¹·Λ·L⁻¹·R
-    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # ϱ̃ = R†·L⁻¹·(Λ−L)·L⁻¹·R
+    permeability::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # P̃ = R⁻¹·Λ·L⁻¹·R
+    reluctance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # ϱ̃ = R†·L⁻¹·(Λ−L)·L⁻¹·R
     rootarea_to_area_weight::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # S = Σ/√A at psilim: b̃→b̄ recovery operator
     surface_area::Float64 = 0.0  # scalar control-surface area A = ∫J|∇ψ|dθ (flux: Φ = A·b̄; conform R = S·A)
 
