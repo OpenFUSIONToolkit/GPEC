@@ -364,6 +364,25 @@ function compute_clebsch_displacements(
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
 
+    # Kinetic runs: mirror Fortran gpeq.f kin_flag — regularize the STORED self-consistent ξ_s
+    # by the same singfac factor and never re-solve from matrices. The ideal-matrix resolve is
+    # inconsistent with the kinetic solution's tangential response (the resonant layers live in
+    # exactly that dynamics), and the kinetic A is non-Hermitian and must not be re-inverted
+    # here. Kinetic-ness detected by populated kwmats splines (sentinel has 5 knots).
+    if length(ffit.kwmats[1].cache.x) > 8
+        for ipsi in 1:npsi
+            q = equil.profiles.q_spline(psi_grid[ipsi])
+            for ipert in 1:mpert
+                m = mlow + ipert - 1
+                singfac = m - nn * q
+                reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
+                clebsch_psi1[ipsi, ipert] = xi_psi1_modes[ipsi, ipert] * reg_factor
+                clebsch_alpha[ipsi, ipert] = xi_s_modes[ipsi, ipert] * reg_factor / chi1
+            end
+        end
+        return clebsch_psi, clebsch_psi1, clebsch_alpha
+    end
+
     # Per-thread workspaces: matrix ops and spline hints are not safe to share across threads.
     # Size by maxthreadid() and index by threadid() under :static scheduling (GPEC convention).
     nt = Threads.maxthreadid()
@@ -404,7 +423,7 @@ function compute_clebsch_displacements(
         # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
-        mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
+        mul!(xms_vec, cmat_buf, xsp_vec, 1.0 + 0.0im, 1.0 + 0.0im)  # xms += C*xsp
         # amat is positive-definite by construction (Newcomb kinetic-energy form), so cholesky is
         # safe. cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
         # ffit.amats each surface), avoiding a fresh factorization allocation per surface.
@@ -980,10 +999,12 @@ function _apply_rzphi_transform(
     # Per-thread scratch (the immutable `ft` functor and `geom` are shared read-only): θ-space
     # transform inputs/outputs (length mtheta) and mode-space forward-DFT outputs (length mpert),
     # so the DFTs run in place with no per-surface allocation.
-    bufs = [(R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta),
-             psi=zeros(ComplexF64, mtheta), th=zeros(ComplexF64, mtheta), ze=zeros(ComplexF64, mtheta),
-             Ro=zeros(ComplexF64, mpert), Zo=zeros(ComplexF64, mpert), Po=zeros(ComplexF64, mpert))
-            for _ in 1:Threads.maxthreadid()]
+    bufs = [
+        (R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta),
+            psi=zeros(ComplexF64, mtheta), th=zeros(ComplexF64, mtheta), ze=zeros(ComplexF64, mtheta),
+            Ro=zeros(ComplexF64, mpert), Zo=zeros(ComplexF64, mpert), Po=zeros(ComplexF64, mpert))
+        for _ in 1:Threads.maxthreadid()
+    ]
 
     Threads.@threads :static for ipsi in 1:npsi
         buf = bufs[Threads.threadid()]
