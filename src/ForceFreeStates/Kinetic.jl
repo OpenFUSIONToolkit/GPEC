@@ -1,3 +1,75 @@
+
+"""
+    bisect_refine_kinetic_grid(xs, kw, kt, evaluate, tol, psi_c) → (xs, kw, kt)
+
+One bounded bisection-refinement round for the calculated kinetic matrix grid (experimental).
+Every interval midpoint above `2·psi_c` (outside the near-axis validity band) is kernel-evaluated
+in one threaded batch; for each family the increment spline on the current knots predicts the
+midpoint, and the max-element residual is normalized by a **per-interval local scale** (the max
+increment magnitude over the interval's endpoints and midpoint, floored at 1% of the family's
+global maximum — the local scale is the lesson from the parked global-scale certificate, the
+floor keeps near-zero crossings from flagging on noise). Midpoints whose worst-family residual
+exceeds `tol` become knots; their kernel values are reused, so the round costs exactly one extra
+kernel pass regardless of how many knots it inserts. The residual distribution is logged
+unconditionally — the map of what the ideal-driven grid misses is the diagnostic even when
+nothing is inserted.
+"""
+function bisect_refine_kinetic_grid(xs::Vector{Float64}, kw::Array{ComplexF64,3}, kt::Array{ComplexF64,3},
+    evaluate::Function, tol::Float64, psi_c::Float64)
+    lo = 2 * psi_c
+    cand = [i for i in 1:(length(xs)-1) if xs[i] >= lo]
+    isempty(cand) && return xs, kw, kt
+    mids = [0.5 * (xs[i] + xs[i+1]) for i in cand]
+    kw_m, kt_m = evaluate(mids)
+    np2 = size(kw, 2)
+    worst = zeros(length(mids))
+    buf = Vector{ComplexF64}(undef, np2)
+    for ic in 1:6
+        gscale_w = maximum(abs, @view(kw[:, :, ic]))
+        gscale_t = maximum(abs, @view(kt[:, :, ic]))
+        sp_w = cubic_interp(xs, Series(@view(kw[:, :, ic])))
+        sp_t = cubic_interp(xs, Series(@view(kt[:, :, ic])))
+        for (k, m) in pairs(mids)
+            i = cand[k]
+            for (sp, arr, arrm, gs) in ((sp_w, kw, kw_m, gscale_w), (sp_t, kt, kt_m, gscale_t))
+                gs == 0 && continue
+                sp(buf, m)
+                scale = max(maximum(abs, @view(arr[i, :, ic])), maximum(abs, @view(arr[i+1, :, ic])),
+                    maximum(abs, @view(arrm[k, :, ic])), 0.01 * gs)
+                r = maximum(abs(buf[j] - arrm[k, j, ic]) for j in 1:np2) / scale
+                worst[k] = max(worst[k], r)
+            end
+        end
+    end
+    q = [round(sort(worst)[max(1, ceil(Int, f * length(worst)))]; sigdigits=2) for f in (0.5, 0.9, 0.99, 1.0)]
+    ins = findall(>(tol), worst)
+    @info "Kinetic bisection map: $(length(mids)) midpoints probed, residual quantiles " *
+          "(50/90/99/100%) = $q; $(length(ins)) exceed tol=$tol" *
+          (isempty(ins) ? "" : " at ψ=$(round.(mids[ins]; digits=4))")
+    isempty(ins) && return xs, kw, kt
+    keep = sort(ins)
+    nnew = length(xs) + length(keep)
+    xs2 = Vector{Float64}(undef, nnew)
+    kw2 = Array{ComplexF64,3}(undef, nnew, np2, 6)
+    kt2 = Array{ComplexF64,3}(undef, nnew, np2, 6)
+    row = 0
+    ki = 1
+    for i in eachindex(xs)
+        row += 1
+        xs2[row] = xs[i]
+        kw2[row, :, :] .= kw[i, :, :]
+        kt2[row, :, :] .= kt[i, :, :]
+        while ki <= length(keep) && cand[keep[ki]] == i
+            row += 1
+            xs2[row] = mids[keep[ki]]
+            kw2[row, :, :] .= kw_m[keep[ki], :, :]
+            kt2[row, :, :] .= kt_m[keep[ki], :, :]
+            ki += 1
+        end
+    end
+    return xs2, kw2, kt2
+end
+
 """
     make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
                         calculated_source=nothing)
@@ -56,6 +128,13 @@ function make_kinetic_matrix(
             xs = sort!(unique!(vcat(collect(xs), band)))
             mpsi = length(xs)
             kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit; psis=xs)
+        end
+        if ctrl.kinetic_grid_bisect > 0
+            xs, kw_flat, kt_flat = bisect_refine_kinetic_grid(
+                collect(xs), kw_flat, kt_flat,
+                psis -> calculated_source(ctrl, equil, intr, metric, ffit; psis=psis),
+                ctrl.kinetic_grid_bisect, axis_validity_psi_c)
+            mpsi = length(xs)
         end
         kw_flat .*= ctrl.kinetic_factor
         kt_flat .*= ctrl.kinetic_factor
