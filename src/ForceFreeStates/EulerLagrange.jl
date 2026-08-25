@@ -84,6 +84,10 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
 
+  - `ca_populated::Bool` - True once an ideal singular-surface crossing has filled `ca_l`/`ca_r`; kinetic and
+    galerkin-matched runs never populate them and leave this false, and the HDF5 writer then emits zero-extent
+    `ca_left`/`ca_right` datasets instead of unpopulated arrays.
+
   - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
 
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
@@ -143,8 +147,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     u_store_el_basis::Bool = true
     du_store_populated::Bool = false
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
-    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
+    ca_r::Array{ComplexF64,4} = zeros(ComplexF64, numpert_total, numpert_total, 2, msing)
+    ca_l::Array{ComplexF64,4} = zeros(ComplexF64, numpert_total, numpert_total, 2, msing)
+    ca_populated::Bool = false
 
     # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     edge_scan::EdgeScanState = EdgeScanState(numpert_total, 0)
@@ -831,6 +836,7 @@ function cross_ideal_singular_surf!(
     end
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+    odet.ca_populated = true
 
     # Δ' is NOT computed for the standard path. The physical Δ' requires the solution
     # columns to be in the Riccati gauge (U₂=I), maintained only by Riccati renormalization.

@@ -153,6 +153,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         dT_s_dpsi = kinetic_profiles.Te_deriv(psi)
         nu_s      = kinetic_profiles.nue_spline(psi)
     else
+        # ni_spline / nui_spline carry THIS species' resonant density and its
+        # full-composition collisionality (per-species views built by the loader).
         n_s       = kinetic_profiles.ni_spline(psi)
         T_s       = kinetic_profiles.Ti_spline(psi)
         dn_s_dpsi = kinetic_profiles.ni_deriv(psi)

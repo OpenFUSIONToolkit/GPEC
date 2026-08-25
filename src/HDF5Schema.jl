@@ -181,9 +181,11 @@ const MAIN_H5_ANNOTATIONS = [
     "SingularSurfaces/D_I" =>
         (; long_name="Mercier D_I evaluated at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/ca_left" =>
-        (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface", dims=("mode", "solution", "large_small", "surface")),
+        (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface (zero-extent when not computed — ideal crossings only)",
+            dims=("mode", "solution", "large_small", "surface")),
     "SingularSurfaces/ca_right" =>
-        (; long_name="asymptotic large/small-solution coefficient matrices just right of each surface", dims=("mode", "solution", "large_small", "surface")),
+        (; long_name="asymptotic large/small-solution coefficient matrices just right of each surface (zero-extent when not computed — ideal crossings only)",
+            dims=("mode", "solution", "large_small", "surface")),
     "SingularSurfaces/E" =>
         (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/F" =>
