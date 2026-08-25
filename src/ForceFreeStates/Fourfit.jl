@@ -1,3 +1,80 @@
+@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
+    mpert::Int
+    numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
+
+    # Complex-valued CubicSeriesInterpolant for stability matrices
+    # Each matrix is flattened to (npsi × numpert_total^2) series
+    # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
+    # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
+    itp_opts::Opts = (; extrap=ExtendExtrap())
+
+    amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    # `dmats_prim`, `emats_prim` are the pre-Schur-reduction geometric forms
+    # (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)).
+    # The `_prim` suffix follows `fmats_prim`. Downstream kinetic FKG Schur complements
+    # consume these primitive forms; the alternate singular-layer path that would need
+    # kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
+    dmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    emats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
+    fmats_gal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)   # reduced Hermitian F̄ (un-factored) for the Galerkin solver
+    kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Ideal A,B,C splines preserved before kinetic overwrite
+    amats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Kinetic energy matrix splines: 6 components (A,B,C,D,E,H perturbations)
+    kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+    # Kinetic torque matrix splines: 6 components
+    ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+
+    kinetic_populated::Bool = false  # set by make_kinetic_matrix; the solution then obeys the FKG ODE, not the ideal EL relation
+
+    # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
+    f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    paats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r1mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r2mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r3mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Pre-allocated evaluation buffer for matrix output
+    _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+
+    # Shared hint for sequential evaluation (all splines evaluated at same psi)
+    _hint::Base.RefValue{Int} = Ref(1)
+
+    # Jacobian Fourier band ψ-spline (2·mpert−1 conjugate-symmetric coefficients per surface),
+    # used to assemble the power-normalization matrix N in Free.jl
+    jmats::S = _empty_series_interp_complex(2 * mpert - 1, itp_opts)
+end
+
+# Helper to create empty complex series interpolant for default initialization
+function _empty_series_interp_complex(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(ComplexF64, 5, n_series)
+    return cubic_interp(xs, Series(Y))
+end
+
+function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(ComplexF64, 5, n_series)
+    return cubic_interp(xs, Series(Y); itp_opts...)
+end
+
+# Convenience constructor
+FourFitVars(mpert::Int, numpert_total::Int) = FourFitVars(; mpert, numpert_total)
+
 """
     MetricData
 

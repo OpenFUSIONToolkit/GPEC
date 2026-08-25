@@ -1,4 +1,38 @@
 """
+    FreeBoundaryResult
+
+Result of the free-boundary calculation, returned by `free_run`. All matrices are in the ξ Fourier
+basis and are `numpert_total × numpert_total`; the energies are generalized (W, N) pencil values,
+power-normalized and invariant to the working (Jacobian) coordinate.
+
+## Fields
+
+  - `wt::Matrix{ComplexF64}` - Eigenvector matrix of W·v = λ·N·v. Columns are eigenmodes sorted most-unstable first, normalized to unit power norm v†·N·v = 1.
+  - `wt0::Matrix{ComplexF64}` - Total-energy matrix W = wp + wv before diagonalisation
+  - `wp::Matrix{ComplexF64}` - Plasma energy matrix
+  - `wv::Matrix{ComplexF64}` - Vacuum energy matrix, singfac-scaled at `qlim`
+  - `ep::Vector{ComplexF64}` - Plasma energy per eigenmode (power quotient v†·wp·v with v†·N·v = 1)
+  - `ev::Vector{ComplexF64}` - Vacuum energy per eigenmode (power quotient v†·wv·v with v†·N·v = 1)
+  - `et::Vector{ComplexF64}` - Total energy eigenvalues of the pencil (W, N); et = ep + ev per mode
+  - `n_tor_idx::Vector{Int}` - 0-based toroidal mode number index of each sorted eigenvalue
+  - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the pencil (wv, N), clamped to zero
+  - `plasma_pts`, `wall_pts::Matrix{Float64}` - Cartesian (x, y, z) surface coordinates, `numpoints × 3`, retained for HDF5 output
+"""
+struct FreeBoundaryResult
+    wt::Matrix{ComplexF64}
+    wt0::Matrix{ComplexF64}
+    wp::Matrix{ComplexF64}
+    wv::Matrix{ComplexF64}
+    ep::Vector{ComplexF64}
+    ev::Vector{ComplexF64}
+    et::Vector{ComplexF64}
+    n_tor_idx::Vector{Int}
+    vacuum_eigenvalue::Float64
+    plasma_pts::Matrix{Float64}
+    wall_pts::Matrix{Float64}
+end
+
+"""
     power_norm_matrix!(Nmat, jmat, mpert, npert, dV_dpsi) -> Nmat
 
 Assemble the power-normalization (surface-norm) matrix N from the conjugate-symmetric Jacobian

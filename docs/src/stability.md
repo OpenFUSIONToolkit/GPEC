@@ -292,7 +292,7 @@ The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separa
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "ForceFreeStatesStructs.jl", "Result.jl", "Resist.jl", "EulerLagrange.jl", "Sing.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/Resist.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
 
 ## Example usage

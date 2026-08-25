@@ -57,11 +57,14 @@ Splines are provided by the external `FastInterpolations` package rather than by
    - Solves ideal MHD eigenvalue problem with force-free boundary conditions
    - Identifies singular surfaces where ξ·∇ψ = 0
    - Key files:
-     - `ForceFreeStatesStructs.jl` - Core data structures
+     - `CoreTypes.jl` - Module-wide types (`ForceFreeStatesControl`, `ForceFreeStatesInternal`)
      - `Result.jl` - `ForceFreeStatesResult`, the published solve product every downstream stage reads
-     - `Ode.jl` - ODE solver for Euler-Lagrange equations
-     - `Sing.jl` - Singular point handling and layer analysis
-     - `Fourfit.jl` - Fourier fitting routines
+     - `EulerLagrange.jl` - ODE integration of the Euler-Lagrange equations (`OdeState`, derivative kernel)
+     - `Surfaces/` - Singular-surface finding, Frobenius asymptotics, and GGJ coefficients
+     - `Riccati/` - Chunked fundamental-matrix (STRIDE) driver and Δ' boundary-value problem
+     - `Galerkin/` - RDCON outer-region singular Galerkin Δ' solver
+     - `Matching/` - Outer↔inner resistive matching (`DeltaPrimeData`, `resonant_match_rpec`)
+     - `Fourfit.jl` - Fourier fitting routines (`FourFitVars`)
      - `FixedBoundaryStability.jl` - Fixed boundary analysis
      - `Free.jl` - Free boundary stability
    - Status: Stable, core DCON functionality implemented
