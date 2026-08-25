@@ -48,6 +48,7 @@ else
     include("./runtests_dispersion_polish.jl")
     include("./runtests_slayer_runner.jl")
     include("./runtests_kinetic.jl")
+    include("./runtests_multiion.jl")
     include("./runtests_fullruns.jl")
     include("./runtests_coils.jl")
     include("./runtests_imas.jl")

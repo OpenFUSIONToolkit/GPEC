@@ -360,6 +360,9 @@ read from `control.profile_file` (relative to `dir_path`) through the shared
 profiles they set χ⊥(ψ)/χ_φ(ψ), otherwise the scalar `control.chi_perp`/
 `chi_tor` fallbacks are used.
 
+The toroidal field comes from `control.bt`; leaving it unset (the default) makes
+`build_slayer_inputs` evaluate the physical `B_T = F(ψ)/(2π·R₀)` per surface.
+
 Returns an `enabled=false` `SLAYERResult` when `control.enabled` is
 false.
 """
@@ -394,7 +397,12 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
             resistivity_model=_build_resistivity_model(control.resistivity_model),
             lnLambda_form=control.lnLambda_form)
     else
-        bt = control.bt === nothing ? equil.config.b0exp : control.bt
+        # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
+        # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
+        # control value through instead: `nothing` makes build_slayer_inputs compute the
+        # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
+        # what its docstring already prescribes.
+        bt = control.bt
         # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
         chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
         chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
