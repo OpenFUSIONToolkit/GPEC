@@ -140,11 +140,11 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     du::Array{ComplexF64,3},
     u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
+        MatrixSplines,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64
 )
 
-    _, equil, ffit, intr, odet, _ = params
+    _, equil, mats, intr, odet, _ = params
 
     Npert = intr.numpert_total
     S  = @view u[:, :, 1]
@@ -167,9 +167,9 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     tmp  = similar!(pool, fmat_lower)  # scratch
 
     # Evaluate F̄ (Cholesky factor), K̄, Ḡ splines at current ψ
-    ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
-    ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
-    ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
+    mats.ideal.F_spline_lower(vec(fmat_lower), psieval; hint=mats._hint)
+    mats.ideal.K_spline(vec(kmat), psieval; hint=mats._hint)
+    mats.ideal.G_spline(vec(gmat), psieval; hint=mats._hint)
 
     # w = Q - K̄·S:  w[i,j] = singfac_vec[i]·δ_ij - (K̄·S)[i,j]
     # Q is DIAGONAL (singfac_vec[i] only on i==j), so we cannot broadcast singfac_vec
@@ -239,7 +239,7 @@ function riccati_integrator_callback!(integrator)
 end
 
 """
-    riccati_integrate_chunk!(odet, ctrl, equil, ffit, intr, chunk)
+    riccati_integrate_chunk!(odet, ctrl, equil, mats, intr, chunk)
 
 Integrate the dual Riccati ODE from `chunk.psi_start` to `chunk.psi_end`.
 
@@ -250,12 +250,12 @@ Ending state: u[:,:,1] = U₁, u[:,:,2] = U₂ (ratio S = U₁·U₂⁻¹ is the
 """
 function riccati_integrate_chunk!(
     odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk
+    mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk
 )
     cb = DiscreteCallback((u, t, integrator) -> true, riccati_integrator_callback!)
     rtol = ctrl.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
-                      (ctrl, equil, ffit, intr, odet, chunk))
+                      (ctrl, equil, mats, intr, odet, chunk))
     sol = solve(prob, Vern9(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
@@ -316,7 +316,7 @@ function renormalize_riccati_inplace!(u::Array{ComplexF64,3}, N::Int)
 end
 
 """
-    integrate_propagator_chunk!(prop, chunk, ctrl, equil, ffit, intr, odet_proxy)
+    integrate_propagator_chunk!(prop, chunk, ctrl, equil, mats, intr, odet_proxy)
 
 Compute the fundamental matrix (propagator) for one integration chunk by solving the
 EL ODE twice from identity-block initial conditions.
@@ -337,7 +337,7 @@ function integrate_propagator_chunk!(
     chunk::IntegrationChunk,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
     odet_proxy::OdeState
 )
@@ -349,7 +349,7 @@ function integrate_propagator_chunk!(
         (chunk.psi_start, chunk.psi_end) :
         (chunk.psi_end,   chunk.psi_start)
     rtol = ctrl.eulerlagrange_tolerance
-    params = (ctrl, equil, ffit, intr, odet_proxy, chunk)
+    params = (ctrl, equil, mats, intr, odet_proxy, chunk)
 
     # Upper block IC: U₁ = I, U₂ = 0
     u_upper = zeros(ComplexF64, N, N, 2)
@@ -357,7 +357,7 @@ function integrate_propagator_chunk!(
         u_upper[i, i, 1] = 1
     end
     odet_proxy.spline_hint[] = 1
-    odet_proxy.ffit_hint[] = 1
+    odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     prop.block_upper_ic .= sol.u[end]
@@ -369,7 +369,7 @@ function integrate_propagator_chunk!(
         u_lower[i, i, 2] = 1
     end
     odet_proxy.spline_hint[] = 1
-    odet_proxy.ffit_hint[] = 1
+    odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     prop.block_lower_ic .= sol.u[end]
@@ -377,7 +377,7 @@ function integrate_propagator_chunk!(
 end
 
 """
-    integrate_fm_with_ua_ic(chunks, chunk_range, ua, ctrl, equil, ffit, intr;
+    integrate_fm_with_ua_ic(chunks, chunk_range, ua, ctrl, equil, mats, intr;
                             backward=false) -> Matrix{ComplexF64}
 
 Re-integrate a span of chunks using ua (asymptotic solution) as initial conditions, matching
@@ -399,7 +399,7 @@ function integrate_fm_with_ua_ic(
     ua::Array{ComplexF64,3},
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
     backward::Bool = false,
     psi_ua::Float64 = NaN
@@ -422,7 +422,7 @@ function integrate_fm_with_ua_ic(
     result = zeros(ComplexF64, 2N, 2N)
     odet_proxy = OdeState(N, 1, 1, 0)
     dummy_chunk = IntegrationChunk(psi_start, psi_end, false, 0, backward ? -1 : 1)
-    params = (ctrl, equil, ffit, intr, odet_proxy, dummy_chunk)
+    params = (ctrl, equil, mats, intr, odet_proxy, dummy_chunk)
 
     # Batch 1: columns 1:N of T (big solutions)
     u0 = zeros(ComplexF64, N, N, 2)
@@ -435,7 +435,7 @@ function integrate_fm_with_ua_ic(
         abstol_arr[:, j, :] .= max(maximum(abs, @view u0[:, j, :]), 1e-30) * rtol
     end
     odet_proxy.spline_hint[] = 1
-    odet_proxy.ffit_hint[] = 1
+    odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
     result[1:N, 1:N]     .= sol.u[end][:, :, 1]
@@ -448,7 +448,7 @@ function integrate_fm_with_ua_ic(
         abstol_arr[:, j, :] .= max(maximum(abs, @view u0[:, j, :]), 1e-30) * rtol
     end
     odet_proxy.spline_hint[] = 1
-    odet_proxy.ffit_hint[] = 1
+    odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
     result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]

@@ -324,15 +324,15 @@ intr.mpert = intr.mhigh - intr.mlow + 1
 intr.numpert_total = intr.mpert * intr.npert
 
 metric = FFS.make_metric(equil, intr.mpert)
-ffit   = FFS.make_matrix(equil, intr, metric)
+mats   = FFS.build_matrix_splines(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
 # on ctrl.integrator and always returns a 4-tuple
 # (odet, propagators, chunks, S_at_surface_left).  The trailing three are `nothing`
 # on the forward path.
-odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
 
-vac = FFS.free_run(odet, ctrl, equil, ffit, intr)
+vac = FFS.free_run(odet, ctrl, equil, mats, intr)
 println("Energy eigenvalue et[1] = ", real(vac.et[1]))
 ```
 

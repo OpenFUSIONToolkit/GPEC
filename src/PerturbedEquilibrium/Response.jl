@@ -1,7 +1,7 @@
 """
     compute_plasma_response!(
         state, equil, solution, wt0, mthvac, ffs,
-        intr, ctrl, metric, ffit
+        intr, ctrl, metric, mats
     )
 
 Compute plasma response to external forcing using ForceFreeStates eigenmode solutions.
@@ -24,7 +24,7 @@ function compute_plasma_response!(
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
     metric::MetricData,
-    ffit::FourFitVars
+    mats::MatrixSplines
 )
     if ctrl.verbose
         @info "Computing plasma response (wt0-based inductance)"
@@ -99,7 +99,7 @@ function compute_plasma_response!(
 
     xi_modes, b_modes = reconstruct_physical_fields(
         response_flux, flux_matrix, solution, equil, ffs, intr,
-        metric, ffit, ctrl
+        metric, mats, ctrl
     )
 
     npsi = size(solution.u_store, 4)

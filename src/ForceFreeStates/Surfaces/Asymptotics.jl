@@ -1,7 +1,7 @@
 # Frobenius asymptotics and resonant-basis evaluation at singular surfaces.
 
 """
-    compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
 Calculate asymptotic vmat and mmat matrices for a singular surface.
 Formerly `sing_vmat!`. Returns a `SingAsymptotics` struct with the computed data instead of
@@ -24,7 +24,7 @@ function compute_sing_asymptotics(
     singp::SingType,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
     sig::Float64=1.0,
     alpha_override::Union{Nothing,Vector{ComplexF64}}=nothing,
@@ -49,7 +49,7 @@ function compute_sing_asymptotics(
     # Compute mmat Taylor coefficients with direction parameter sig.
     # Fortran computes separate mmatl (sig=-1) and mmatr (sig=+1) — the sig flips
     # odd derivatives of all input quantities (q, F, G, K splines).
-    compute_sing_mmat!(mmat, singp, ctrl, equil.profiles, ffit, intr; sig=sig, sing_order=sing_order)
+    compute_sing_mmat!(mmat, singp, ctrl, equil.profiles, mats, intr; sig=sig, sing_order=sing_order)
 
     # Extract direction-specific m0mat from zeroth-order mmat
     m0mat = if length(r1) == 1
@@ -131,7 +131,7 @@ function compute_sing_asymptotics(
 end
 
 """
-    compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
 Calculate asymptotic mmat matrix for a singular surface. Formerly `sing_mmat!`.
 Performs the same function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
@@ -166,7 +166,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     singp::SingType,
     ctrl::ForceFreeStatesControl,
     profiles::Equilibrium.ProfileSplines,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
     sig::Float64=1.0,
     sing_order::Int=ctrl.sing_order
@@ -200,28 +200,28 @@ Add a spline for F directly instead of the lower triangular factorization to avo
         q_d2(singp.psifac),
         sig * q_d3(singp.psifac))
 
-    # Evaluate fmats_lower and derivatives, applying sig to odd derivatives.
+    # Evaluate F_spline_lower and derivatives, applying sig to odd derivatives.
     # Fortran sing_mmat multiplies fmats_f1 and fmats_f3 by sig in the Taylor products.
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=mats._hint)
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
     @views f_lower_interp[:, :, 2] .*= sig  # 1st derivative
     @views f_lower_interp[:, :, 4] .*= sig  # 3rd derivative
 
-    # Evaluate gmats and derivatives, applying sig to odd derivatives
-    ffit.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    # Evaluate G_spline and derivatives, applying sig to odd derivatives
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=mats._hint)
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
     @views g_interp[:, :, 2] .*= sig
     @views g_interp[:, :, 4] .*= sig
 
-    # Evaluate kmats and derivatives, applying sig to odd derivatives
-    ffit.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    # Evaluate K_spline and derivatives, applying sig to odd derivatives
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=mats._hint)
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
     @views k_interp[:, :, 2] .*= sig
     @views k_interp[:, :, 4] .*= sig
 
@@ -807,13 +807,13 @@ sing_get_dua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
     sing_get_dua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
 
 """
-    sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua, dua) -> matvec
+    sing_matvec(mats::MatrixSplines, intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua, dua) -> matvec
 
 Apply the Euler-Lagrange residual operator `L u = -(F u' + K u)' + (K† u' + G u)` to the asymptotic
 solutions. Port of Fortran `sing_matvec` (sing.f). Returns `matvec`, shape
 `(numpert_total, size(ua,2))`.
 
-Uses the reduced (Schur-complemented) `ffit.kmats` (= K̄) and `ffit.gmats` (= Ḡ) directly, with the
+Uses the reduced (Schur-complemented) `mats.ideal.K_spline` (= K̄) and `mats.ideal.G_spline` (= Ḡ) directly, with the
 **direct** singular factor `singfac = m - n q` applied to `u' = dua[:,:,1]`. The second component
 `ua[:,:,2]` is the canonical momentum `F u' + K u`, so `-dua[:,:,2] = -(F u' + K u)'`.
 
@@ -822,7 +822,7 @@ Uses the reduced (Schur-complemented) `ffit.kmats` (= K̄) and `ffit.gmats` (= �
   - `psi`: flux coordinate; `q`: safety factor at `psi` (passed in to avoid re-evaluating the spline)
   - `ua`, `dua`: asymptotic solution and its ψ-derivative from `sing_get_ua`/`sing_get_dua`
 """
-function sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Float64, q::Float64,
+function sing_matvec(mats::MatrixSplines, intr::ForceFreeStatesInternal, psi::Float64, q::Float64,
     ua::Array{ComplexF64,3}, dua::Array{ComplexF64,3})
 
     N = intr.numpert_total
@@ -833,8 +833,8 @@ function sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Floa
 
     kmat = Matrix{ComplexF64}(undef, N, N)
     gmat = Matrix{ComplexF64}(undef, N, N)
-    ffit.kmats(vec(kmat), psi; hint=ffit._hint)
-    ffit.gmats(vec(gmat), psi; hint=ffit._hint)
+    mats.ideal.K_spline(vec(kmat), psi; hint=mats._hint)
+    mats.ideal.G_spline(vec(gmat), psi; hint=mats._hint)
     kdag = adjoint(kmat)
 
     matvec = zeros(ComplexF64, N, msol)
@@ -849,7 +849,7 @@ function sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Floa
 end
 
 """
-    sing_matvec!(matvec, kmat, gmat, d1, tmp, sfvec, ffit, intr, psi, q, ua, dua) -> matvec
+    sing_matvec!(matvec, kmat, gmat, d1, tmp, sfvec, mats, intr, psi, q, ua, dua) -> matvec
 
 Allocation-free, in-place form of [`sing_matvec`](@ref) for the hot resonant-quadrature integrand.
 All scratch is caller-owned: `kmat`/`gmat` are `N×N`, `d1`/`tmp`/`sfvec` are length-`N`, `matvec` is
@@ -859,7 +859,7 @@ All scratch is caller-owned: `kmat`/`gmat` are `N×N`, `d1`/`tmp`/`sfvec` are le
 1e-16 change into ~1e-3 in Δ′.
 """
 function sing_matvec!(matvec::AbstractMatrix{ComplexF64}, kmat::Matrix{ComplexF64}, gmat::Matrix{ComplexF64},
-    d1::Vector{ComplexF64}, tmp::Vector{ComplexF64}, sfvec::Vector{Float64}, ffit::FourFitVars,
+    d1::Vector{ComplexF64}, tmp::Vector{ComplexF64}, sfvec::Vector{Float64}, mats::MatrixSplines,
     intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua::AbstractArray{ComplexF64,3}, dua::AbstractArray{ComplexF64,3})
 
     N = intr.numpert_total
@@ -872,8 +872,8 @@ function sing_matvec!(matvec::AbstractMatrix{ComplexF64}, kmat::Matrix{ComplexF6
         sfvec[idx] = mm - q * nn
     end
 
-    ffit.kmats(vec(kmat), psi; hint=ffit._hint)
-    ffit.gmats(vec(gmat), psi; hint=ffit._hint)
+    mats.ideal.K_spline(vec(kmat), psi; hint=mats._hint)
+    mats.ideal.G_spline(vec(gmat), psi; hint=mats._hint)
     kdag = adjoint(kmat)
 
     for isol in 1:msol

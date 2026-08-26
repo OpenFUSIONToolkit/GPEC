@@ -36,7 +36,7 @@ end
     power_norm_matrix!(Nmat, jmat, mpert, npert, dV_dpsi) -> Nmat
 
 Assemble the power-normalization (surface-norm) matrix N from the conjugate-symmetric Jacobian
-Fourier band `jmat` (length 2·mpert−1, evaluated from the `ffit.jmats` spline), such that
+Fourier band `jmat` (length 2·mpert−1, evaluated from the `mats.ideal.J_spline` spline), such that
 
     ξ†·N·ξ = ∮ J |ξ(θ)|² dθ / (dV/dψ) = ⟨|ξ|²⟩
 
@@ -111,7 +111,7 @@ function compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.Plas
 end
 
 """
-    free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> FreeBoundaryResult
+    free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal) -> FreeBoundaryResult
 
 Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
 in the Fortran code.
@@ -119,7 +119,7 @@ in the Fortran code.
 Returns a `FreeBoundaryResult` struct containing the data needed for perturbed equilibrium
 calculations and data dumping.
 """
-@with_pool pool function free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+@with_pool pool function free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     # Initializations and allocations
     (; mpert, numpert_total, psilim, npert) = intr
@@ -140,7 +140,7 @@ calculations and data dumping.
     # The Jacobian band is evaluated at psilim (same surface as W), not at the last grid surface.
     Nmat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     jmat_edge = zeros!(pool, ComplexF64, 2 * mpert - 1)
-    ffit.jmats(jmat_edge, psilim; hint=ffit._hint)
+    mats.ideal.J_spline(jmat_edge, psilim; hint=mats._hint)
     power_norm_matrix!(Nmat, jmat_edge, mpert, npert, dV_dpsi)
 
     # Least stable eigenvalue of the vacuum matrix alone, power-normalized via the pencil
@@ -252,7 +252,7 @@ q-window minimum.
 end
 
 """
-    free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState) -> ComplexF64
+    free_compute_total(equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, odet::OdeState) -> ComplexF64
 
 Compute total complex energy eigenvalue (total1). This is a trimmed down version of `free_run`
 that only computes the total energy eigenvalue for the mode unstable mode, used in `findmax_dW_edge!`
@@ -260,7 +260,7 @@ which calls this function at each step in the psiedge -> psilim region of integr
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
 wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvmat` (a complex-valued spline).
 """
-@with_pool pool function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
+@with_pool pool function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, odet::OdeState)
 
     Npert = intr.numpert_total
     wp = zeros!(pool, ComplexF64, Npert, Npert)
@@ -290,7 +290,7 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
 
     # Local power-normalization matrix N(ψ) from the Jacobian Fourier band spline, so the
     # power quotient uses the same surface as W (see power_norm_matrix!)
-    ffit.jmats(jmat_local, odet.psifac; hint=ffit._hint)
+    mats.ideal.J_spline(jmat_local, odet.psifac; hint=mats._hint)
     power_norm_matrix!(Nmat, jmat_local, intr.mpert, intr.npert, dV_dpsi)
 
     # Total energy matrix and generalized eigen-decomposition of the pencil (W, N) — the
