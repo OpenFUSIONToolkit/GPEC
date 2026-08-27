@@ -356,9 +356,19 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s
         # and μ = √(−D_I) with D_I = E + F + H − 1/4 (Glasser-Greene-Johnson 1975).
-        # A Mercier-unstable surface (D_I ≥ 0) has no real exponent; μ → 0 there,
-        # which makes the conversion factor K^(2μ) → 1 continuously (Δ' left raw).
-        k_ref_k = da_dpsi == 0.0 ? 1.0 : rs / da_dpsi
+        # A Mercier-unstable surface (D_I ≥ 0) has exponents 1/2 ± i|μ|, so the factor is
+        # genuinely complex there; μ is clamped to 0, which leaves the Δ' diagonal raw and
+        # discards that phase. The off-diagonals still carry K_i^(1/2)·K_j^(−1/2).
+        # K = 1 (identity conversion) whenever da/dψ is not a usable positive number: zero
+        # or non-finite would zero or NaN the Δ' diagonal, and a negative base raises
+        # DomainError under the non-integer exponent.
+        k_ref_k = if isfinite(da_dpsi) && da_dpsi > 0.0
+            rs / da_dpsi
+        else
+            @warn("build_slayer_inputs: da/dψ = $da_dpsi at ψ = $psi is not usable; leaving " *
+                  "Δ' unconverted (k_ref = 1) at this surface.", maxlog=3)
+            1.0
+        end
         mu_k = if rg === nothing
             @warn("build_slayer_inputs: sing.restype not populated; using the " *
                   "slab Mercier exponent μ = 1/2 for the Δ' reference-length " *
