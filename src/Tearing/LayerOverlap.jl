@@ -294,8 +294,12 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
                 dr_val=0.0, dc_type=:none, theta=theta,
                 resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
         catch err
-            err isa ArgumentError || rethrow()
-            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): $(err.msg)")
+            # Any single-surface failure is recorded and skipped, never fatal. A DomainError is
+            # the common one: profiles that stop short of the extrapolated surfaces, or a
+            # negative-shear surface reaching a sqrt/fractional power in the layer parameters.
+            err isa Union{ArgumentError,DomainError} || rethrow()
+            msg = err isa ArgumentError ? err.msg : sprint(showerror, err)
+            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): skipped -- $(first(split(msg, '\n')))")
             continue
         end
 
