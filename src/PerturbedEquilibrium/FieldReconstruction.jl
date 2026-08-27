@@ -421,7 +421,7 @@ function compute_clebsch_displacements(
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
-        # factorize in-place to avoid allocations
+        # ideal A only; the kinetic A is non-Hermitian and is treated separately above
         amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
         xms_vec .*= -1                                     # xms = -A\(B*xmp1 + C*xsp)
