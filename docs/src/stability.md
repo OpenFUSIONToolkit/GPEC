@@ -363,8 +363,10 @@ end
 
 ## Notes
 
-- The standard path does not populate `delta_prime`; use `PerturbedEquilibrium.SingularCoupling`
-  for Δ' on the standard path (it reads `ca_l`/`ca_r` directly).
+- The standard path does not populate `delta_prime`; the canonical Δ' is the STRIDE BVP
+  `SingularSurfaces/Delta_prime_matrix` from the parallel FM path. `ca_l`/`ca_r` are filled
+  only by ideal surface crossings (kinetic and galerkin-matched runs emit zero-extent
+  `ca_left`/`ca_right` sentinels).
 - The Riccati and parallel FM paths compute Δ' inline at each crossing, using the
   direct diagonal formula (no GR permutation).  The result in `delta_prime_col[ipert_res, i]`
   equals `delta_prime[i]` to machine precision.

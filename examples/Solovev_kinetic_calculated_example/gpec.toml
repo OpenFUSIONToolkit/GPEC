@@ -1,7 +1,9 @@
 # Solovev analytical equilibrium — n=1 ideal stability with calculated kinetic matrices.
-# Exercises the real KineticForces (NTV) physics path at full strength; kinetic regression
-# fixture (et[1]≈1.894-1.525i). The equilibrium is generated analytically from the embedded
-# [SOL_INPUT] section, with n·T tied to the Solovev P₀≈4.27e4 Pa via the local kinetic.dat.
+# Exercises the real KineticForces (NTV) physics path at full strength, with the main ion
+# declared as a 50/50 D-T mix so the self-consistent kinetic matrices are accumulated over
+# the multi-ion species loop (pure plasma, n_i = n_e, so no impurity species arises). The
+# equilibrium is generated analytically from the embedded [SOL_INPUT] section, with n·T tied
+# to the Solovev P₀≈4.27e4 Pa via the local kinetic.dat.
 # Also the only deck that runs [PerturbedEquilibrium] on a kinetic solve, so it is what covers
 # the kinetic branch of compute_clebsch_displacements.
 
@@ -63,6 +65,19 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
 verbose = false               # Enable verbose logging
+
+[KineticForces]
+kinetic_file = "kinetic.dat"  # Kinetic profile file: psi_n, n_i, n_e, T_i, T_e, omega_E columns
+
+[[KineticForces.ion_species]]
+z = 1                         # Species charge (fundamental units)
+m = 2                         # Species mass (proton masses) — Deuterium
+fraction = 0.5                # This species' share of the total main-ion density n_i
+
+[[KineticForces.ion_species]]
+z = 1                         # Species charge (fundamental units)
+m = 3                         # Species mass (proton masses) — Tritium
+fraction = 0.5                # This species' share of the total main-ion density n_i
 
 # Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
 [SOL_INPUT]

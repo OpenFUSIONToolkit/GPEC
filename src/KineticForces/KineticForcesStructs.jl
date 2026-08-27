@@ -11,7 +11,7 @@ Single source of truth for the NTV calculation methods. Each entry is a NamedTup
 - `doc`   — one-line description printed in verbose output
 
 The method names/docs and the `Compute.jl` enable list are all derived from this
-tuple, and `Torque.jl` routes on `kind`, so the methods are enumerated in one place. 
+tuple, and `Torque.jl` routes on `kind`, so the methods are enumerated in one place.
 To add a method: append an entry here and add the matching `*_flag` field
 to `KineticForcesControl`.
 """
@@ -50,6 +50,27 @@ end
 
 
 """
+    IonSpecies(; z, m, fraction=NaN, density="")
+
+One main-ion species in a multi-ion NTV run. `z`/`m` are the charge (e) and mass (proton
+masses). The density is given by exactly one of `fraction` or `density`, which select a
+fraction of the total `n_i` profile or an explicit per-species profile in the kinetic file.
+"""
+struct IonSpecies
+    z::Int
+    m::Int
+    fraction::Float64
+    density::String
+end
+
+IonSpecies(; z::Integer, m::Integer, fraction=NaN, density="") =
+    IonSpecies(Int(z), Int(m), Float64(fraction), String(density))
+IonSpecies(d::AbstractDict) = IonSpecies(; (Symbol(k) => v for (k, v) in d)...)
+Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector) =
+    IonSpecies[x isa IonSpecies ? x : IonSpecies(x) for x in v]
+
+
+"""
     KineticForcesControl
 
 User-facing control parameters from the TOML `[KineticForces]` section.
@@ -59,6 +80,10 @@ Constructed via keyword arguments or from a TOML dict:
 ```julia
 ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
+
+Immutable: vary a field by building a new control rather than assigning to one (the
+multi-species loop does this per species, and `check_psi_quadrature_convergence`'s test
+builds a second control for its differing tolerance).
 """
 @kwdef struct KineticForcesControl
     # Moment type
@@ -89,7 +114,8 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     mi::Int = 2                     # Ion mass (proton masses)
     zimp::Int = 6                   # Impurity charge
     mimp::Int = 12                  # Impurity mass
-    electron::Bool = false          # Include electron contribution
+    electron::Bool = false          # Add electron NTV in addition to the ion species
+    ion_species::Vector{IonSpecies} = IonSpecies[]   # multi-main-ion set; empty ⇒ single ion
 
     # Mode numbers
     nn::Int = 1                     # Toroidal mode number
