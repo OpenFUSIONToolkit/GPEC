@@ -60,11 +60,13 @@ const THETA_STRIDE = 8
 # --- shared separatrix edge q-law -------------------------------------------------------------
 # Minimum knots in the edge band before a fit is attempted.
 const EDGE_FIT_MIN_KNOTS = 4
-# The diverging model must explain the edge q this well in absolute terms. Measured over the
-# shipped decks: DIII-D-like 0.9957 and 0.9989 (diverted, q -> inf at the separatrix) against
-# 0.972 for the a10 fixed-boundary case, 0.9035 for LAR and 0.7600 for Solovev (all limited,
-# finite edge q). Rejecting is the safe direction -- it only means no extrapolation.
-const EDGE_FIT_MIN_R2 = 0.99
+# Weak absolute floor on the diverging fit. The discrimination is done by the r2_log > r2_linear
+# comparison below, not by this number: measured EFIT/CAKE reconstructions of diverted DIII-D
+# plasmas fit the log law at r2 = 0.929-0.977 (reconstruction noise in the edge q), which overlaps
+# the 0.972 of the limited a10 fixed-boundary deck, so no absolute threshold separates the two
+# classes. The relative test does separate them cleanly (diverted 0.96 vs 0.75 linear; Solovev
+# 0.760 vs 0.9996 linear). This floor only rejects fits that describe nothing at all.
+const EDGE_FIT_MIN_R2 = 0.90
 
 # Least-squares slope and coefficient of determination for y = a + b*x.
 function _linfit_r2(x::Vector{Float64}, y::Vector{Float64})
