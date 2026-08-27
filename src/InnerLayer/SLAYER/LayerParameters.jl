@@ -146,11 +146,11 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     Wd = 0.1
     converged = false
     for _ in 1:max_iter
-        chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * sval_r * Wd)
+        chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * abs(sval_r) * Wd)
         chi_par = (chi_par_smfp * chi_par_lmfp) /
                   (chi_par_smfp + chi_par_lmfp)
         Wd_new = sqrt(8.0) * (chi_perp / chi_par)^0.25 *
-                 (1.0 / sqrt((rs / R0) * sval_r * n_tor))
+                 (1.0 / sqrt((rs / R0) * abs(sval_r) * n_tor))
         if abs(Wd_new - Wd) / max(abs(Wd), 1e-30) < tol
             Wd = Wd_new
             converged = true
@@ -160,13 +160,13 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     end
     converged || error("SLAYERParameters: Wd iteration failed to converge")
 
-    chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * sval_r * Wd)
+    chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * abs(sval_r) * Wd)
     chi_par = (chi_par_smfp * chi_par_lmfp) / (chi_par_smfp + chi_par_lmfp)
 
     if dc_type === :lar
         return 0.5 * (-dr_val) * π^1.5 *
                (chi_par / chi_perp)^0.25 *
-               sqrt((n_tor * sval_r) / (R0 * rs))
+               sqrt((n_tor * abs(sval_r)) / (R0 * rs))
     elseif dc_type === :rfitzp
         return -(sqrt(2.0) * π^1.5 * dr_val) / Wd
     elseif dc_type === :toroidal
@@ -318,8 +318,10 @@ function slayer_parameters(;
 
     # Alfven time uses minor-radius shear directly (sval enters the
     # b_l = (n/m) r_s sval bt / R0 expression and cancels through to
-    # tau_h = R0 sqrt(mu0 rho) / (n sval bt)).
-    tau_h = R0 * sqrt(MU_0 * rho) / (n * sval_r * bt)
+    # tau_h = R0 sqrt(mu0 rho) / (n sval bt)). Magnitude only: the layer timescales and
+    # widths depend on |dq/dr|, not its sign, and a reverse-shear surface would otherwise
+    # give tau_h < 0, hence lu < 0 and a DomainError in lu^(1/3) below.
+    tau_h = R0 * sqrt(MU_0 * rho) / (n * abs(sval_r) * bt)
     # Resistive diffusion time τ_R = μ₀ r_s² / η (Fitzpatrick 2023), with
     # the selected η closure — neoclassical by default — setting the
     # Lundquist number.
