@@ -127,3 +127,48 @@
     # The overlap region must move inward with n, which is the paper's reported scaling.
     @test psi4 < psi1
 end
+
+# Wiring of the overlap cap into the integration domain. The scan itself is checked against the
+# paper above; this checks that the cap reaches `sing_lim!` and behaves as an upper bound.
+@testset "Layer-overlap cap wiring" begin
+    using GeneralizedPerturbedEquilibrium.ForceFreeStates: sing_lim!, ForceFreeStatesInternal,
+        ForceFreeStatesControl
+    using GeneralizedPerturbedEquilibrium.Equilibrium
+    using TOML
+
+    dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
+    equil = Equilibrium.setup_equilibrium(
+        Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path),
+        Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+
+    _fresh() = (i = ForceFreeStatesInternal(); i.nlow = 1; i.nhigh = 1; i)
+    ctrl = ForceFreeStatesControl(; set_psilim_via_dmlim=false, qhigh=1e3)
+
+    # Baseline: no cap.
+    base = _fresh()
+    sing_lim!(base, ctrl, equil)
+
+    # A cap inside the domain must pull qlim down and move psilim inward.
+    inside = _fresh()
+    cap = 0.5 * (equil.profiles.xs[1] + base.psilim)
+    sing_lim!(inside, ctrl, equil; psilim_cap=cap)
+    @test inside.qlim < base.qlim
+    @test inside.psilim < base.psilim
+    @test isapprox(inside.psilim, cap; rtol=1e-6)
+
+    # A cap beyond psihigh is inert by construction -- the bound never widens the domain.
+    beyond = _fresh()
+    sing_lim!(beyond, ctrl, equil; psilim_cap=base.psilim + 1e-3)
+    @test beyond.qlim == base.qlim
+    @test beyond.psilim == base.psilim
+
+    # nothing is the same as not passing it at all.
+    none = _fresh()
+    sing_lim!(none, ctrl, equil; psilim_cap=nothing)
+    @test none.qlim == base.qlim
+    @test none.psilim == base.psilim
+
+    # The control flag exists and is opt-in.
+    @test ForceFreeStatesControl().psilim_from_layer_overlap == false
+end
