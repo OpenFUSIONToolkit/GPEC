@@ -60,9 +60,11 @@ dimensional error.
     strong shear near the separatrix forces every layer there into the DR regime
   - `extrapolated` -- true when the surface was located outside the
     equilibrium's ψ grid via the edge q-law
-  - `psihigh_delta_s`, `psihigh_visco` -- domain implied by each width channel,
-    `nothing` when that channel never overlaps within the scanned range
-  - `psihigh` -- the recommendation: the smaller of the two, or `nothing`
+  - `psihigh_delta_s`, `psihigh_visco`, `psihigh_dr` -- domain implied by each width
+    channel, `nothing` when that channel never overlaps within the scanned range
+  - `psihigh` -- the recommendation, equal to `psihigh_dr`: the DR width is the criterion
+    (Sect. 5.6 puts every near-separatrix layer in that regime). The other two channels are
+    reported for comparison and do not set the domain
   - `first_overlap` -- index of the first surface that overlaps its inner
     neighbour, `nothing` when none do
   - `notes` -- surfaces that were located but could not be scored, and why
@@ -151,10 +153,9 @@ same resistivity closure as the SLAYER analysis itself.
     missing an overlap that lies further out than the cap. Inverse equilibria ignore it: they
     have a prescribed boundary and the search runs to ψ = 1 on the real q.
 
-    Note the accuracy limit here is **not** `psi_cap` but `surface_da_dpsi`, which clamps its
-    finite-difference stencil to `1 - 1e-4`; surfaces closer than that to the boundary get
-    geometry evaluated at `1 - 1e-4` rather than at their own ψ (da/dψ = 0.348729 identically
-    for every ψ beyond it on the DIII-D-like deck). Their widths are therefore approximate
+    Geometry is evaluated at each surface's own ψ: `radial_label` derivatives are analytic
+    and valid under extrapolation, so no stencil clamp limits how close to the boundary a
+    width can be taken
   - `extrapolate` -- search past `psihigh_safe` on the edge q-law (default `true`)
   - `theta` -- poloidal angle for the minor-radius chord (default `0.0`)
   - `mu_i`, `zeff`, `chi_perp`, `chi_tor`, `resistivity_model`, `lnLambda_form`
@@ -308,10 +309,9 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
             push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): del_s Riccati did not converge")
             continue
         end
-        # Both widths must be finite. A NaN delta_visco would compare false against every
-        # neighbour in _first_overlap_limit, so the viscous criterion would silently report "no
-        # overlap" and `recommended` would quietly lose its more conservative half -- biasing the
-        # domain outward, which is the unsafe direction.
+        # Both widths must be finite. A NaN width compares false against every neighbour in
+        # _first_overlap_limit, so that channel would silently report "no overlap" rather than
+        # showing a gap -- the reported comparison between channels would be quietly wrong.
         if !isfinite(lw.delta_dr)
             push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): Eq. (100) width is not finite; " *
                          "surface excluded so the DR criterion cannot fail open")
@@ -348,13 +348,17 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         ph_dels, ph_visc, ph_dr, recommended, k_dr, notes)
 end
 
-# Walk outward and return (recommended psihigh, index of first overlapping surface).
-# Overlap at k means surfaces k and k-1 are both contaminated, so the domain is cut
-# at the inner edge of k-1.
+# Walk outward and return (recommended psilim, index of first overlapping surface).
+# Overlap at k puts the inner boundary of the overlap region at surface k-1, and the domain
+# limit is that surface's own position -- Fitzpatrick (2025) Sect. 5.9 retains the rational
+# surfaces in 0 < psi < 1 - eps_c, and psi[k-1] is 1 - eps_c. Deliberately not psi[k-1] -+
+# w[k-1]/2: subtracting drops the last clean surface the paper keeps, and adding can exceed
+# psi = 1 (measured on 4 of 10 real DIII-D reconstructions, where it also overshoots surface
+# k itself, the layers there being wider than their separation).
 function _first_overlap_limit(psi::Vector{Float64}, w::Vector{Float64})
     for k in 2:length(psi)
         if psi[k] - w[k] / 2 < psi[k-1] + w[k-1] / 2
-            return (psi[k-1] - w[k-1] / 2, k)
+            return (psi[k-1], k)
         end
     end
     return (nothing, nothing)
