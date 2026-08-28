@@ -95,8 +95,7 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
         R0f = Float64(equil.ro)
         psiof = Float64(equil.psio)
         xs_f = collect(Float64, equil.profiles.xs)
-        # g = F/(B0 R0) departs from 1 by ~3% on a DIII-D-like deck and ~0.8% on a circular
-        # one, so carry it rather than assuming g = 1: r² = 2∫(q/g)dψ_p/B0.
+        # Carry g = F/(B0 R0) rather than assuming g = 1: r² = 2∫(q/g)dψ_p/B0.
         _g_at(x) = Float64(equil.profiles.F_spline(x)) / (2π * b0f * R0f)
         qg = [Float64(equil.profiles.q_spline(x)) / _g_at(x) for x in xs_f]
         Phi = collect(Float64, cumulative_integrate(cubic_interp(xs_f, qg)))
@@ -122,6 +121,8 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
         elseif rs_method === :halfwidth
             0.5 * (_a_at(ψ, 0.0) + _a_at(ψ, 0.5))
         elseif rs_method === :volume
+            # Lower bound just off the axis, where dV/dψ is extrapolated; the omitted sliver
+            # of core volume is negligible for an edge-surface label.
             V = integrate(equil.profiles.dVdpsi_spline, 1e-4, Float64(ψ))
             sqrt(max(V, 0.0) / (2π^2 * equil.ro))
         elseif rs_method === :flux
@@ -354,14 +355,10 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             _eval(dgeo_val, psi)
         end
 
-        # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s
-        # and μ = √(−D_I) with D_I = E + F + H − 1/4 (Glasser-Greene-Johnson 1975).
-        # A Mercier-unstable surface (D_I ≥ 0) has exponents 1/2 ± i|μ|, so the factor is
-        # genuinely complex there; μ is clamped to 0, which leaves the Δ' diagonal raw and
-        # discards that phase. The off-diagonals still carry K_i^(1/2)·K_j^(−1/2).
-        # K = 1 (identity conversion) whenever da/dψ is not a usable positive number: zero
-        # or non-finite would zero or NaN the Δ' diagonal, and a negative base raises
-        # DomainError under the non-integer exponent.
+        # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s and
+        # μ = √(−D_I) (Glasser-Greene-Johnson 1975), with μ clamped to 0 on Mercier-unstable
+        # surfaces (the factor turns complex there) and K = 1 whenever da/dψ is not a usable
+        # positive number (zero/non-finite/negative would corrupt the Δ' diagonal).
         k_ref_k = if isfinite(da_dpsi) && da_dpsi > 0.0
             rs / da_dpsi
         else
