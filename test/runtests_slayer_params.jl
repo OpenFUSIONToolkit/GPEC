@@ -83,8 +83,9 @@
         @test p.P_perp ≈ p.P_tor
         @test p.P_perp > 0
 
-        # D_norm = (d_β/r_s)·S^(1/3)·√(τ/(1+τ))
-        D_norm_expected = (p.d_beta / p.rs) * p.lu^(1 / 3) * sqrt(p.tau / (1 + p.tau))
+        # D_norm = (d_β/r_s)·S^(1/3)·√ι_e — the electron share of the total
+        # diamagnetic frequency, not the temperature ratio.
+        D_norm_expected = (p.d_beta / p.rs) * p.lu^(1 / 3) * sqrt(p.iota_e)
         @test p.D_norm ≈ D_norm_expected rtol = 1e-12
 
         # delta_n = S^(1/3)/r_s
