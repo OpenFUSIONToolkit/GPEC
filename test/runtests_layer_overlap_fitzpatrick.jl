@@ -26,6 +26,7 @@
     psi_raw(r, am, ap) = quadgk(x -> x / q_any(x, am, ap), 0.0, r; rtol=1e-11)[1]
 
     am, ap = 1.0, 1.0
+    fp_converged = false
     for _ in 1:200
         psi_sep = psi_raw(1.0 - 1e-12, am, ap)
         r95 = find_zero(r -> psi_raw(r, am, ap) / psi_sep - 0.95, (0.5, 1 - 1e-9), Bisection())
@@ -34,13 +35,15 @@
         while hi < 1.40 && f105(hi) < 0     # q_out turns negative past r = sqrt(2)
             hi += 0.005
         end
-        r105 = hi >= 1.40 ? 1.20 : find_zero(f105, (1 + 1e-9, hi), Bisection())
+        hi < 1.40 || error("Fitzpatrick JET model: failed to bracket the Psi = 1.05 surface before q_out degenerates")
+        r105 = find_zero(f105, (1 + 1e-9, hi), Bisection())
         am_new = -(Q95 - Q0) / log(1 - r95^2)
         ap_new = -Q105 / log(r105^2 - 1)
-        converged = abs(am_new - am) < 1e-12 && abs(ap_new - ap) < 1e-12
+        fp_converged = abs(am_new - am) < 1e-12 && abs(ap_new - ap) < 1e-12
         am, ap = am_new, ap_new
-        converged && break
+        fp_converged && break
     end
+    fp_converged || error("Fitzpatrick JET model: the alpha-/alpha+ fixed point did not converge in 200 iterations")
     psi_sep = psi_raw(1.0 - 1e-12, am, ap)
     q_of(r) = q_any(r, am, ap)
     Psi_of(r) = r < 1 ? psi_raw(r, am, ap) / psi_sep :
@@ -171,4 +174,20 @@ end
 
     # The control flag exists and is opt-in.
     @test ForceFreeStatesControl().psilim_from_layer_overlap == false
+
+    # The no-surfaces path must return an empty scan with a note, not throw (m_max=0 with
+    # extrapolation off forces it deterministically).
+    @testset "resistive_layer_overlap: empty surface list" begin
+        using GeneralizedPerturbedEquilibrium: Tearing, Utilities
+        npsi = 8
+        psi_grid = collect(range(0.0, 1.0; length=npsi))
+        profs = Utilities.KineticProfiles(; psi=psi_grid,
+            n_e=fill(1.0e19, npsi), T_e=fill(500.0, npsi), T_i=fill(500.0, npsi),
+            omega=zeros(npsi), omega_e=zeros(npsi), omega_i=zeros(npsi))
+        scan = Tearing.resistive_layer_overlap(equil, profs; n_tor=1, m_max=0, extrapolate=false)
+        @test scan isa Tearing.LayerOverlapScan
+        @test isempty(scan.psi)
+        @test scan.psihigh === nothing && scan.first_overlap === nothing
+        @test any(contains("no q ="), scan.notes)
+    end
 end

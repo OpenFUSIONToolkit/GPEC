@@ -17,11 +17,9 @@
 # Surfaces beyond the equilibrium's own ψ grid are located on the separatrix edge
 # law q ≈ -A·ln(1-ψ), via the shared `Equilibrium.edge_q_law` helper that also gates
 # the grid-refinement edge density model -- one statement of the model, one fit, one
-# limited-plasma guard. The log form is the only one that survives the
-# extrapolation: a cubic in ψ (on q or on ι = 1/q) saturates instead of diverging. Measured on the DIII-D-like deck, extrapolating
-# from a grid ending at ψ=0.97 to the true q=8 surface at ψ=0.99976, the edge law
-# lands within 5% while a cubic ι undershoots by 18% — enough to miss the surface
-# entirely and report no overlap where there is one.
+# limited-plasma guard. The log form is the only one that survives the extrapolation:
+# a polynomial in ψ (on q or on ι = 1/q) saturates instead of diverging, undershooting
+# the outermost surfaces enough to report no overlap where there is one.
 #
 # The extrapolated surfaces inform the *choice* of domain only; the final
 # equilibrium is always re-formed and solved on the accepted domain.
@@ -137,27 +135,25 @@ same resistivity closure as the SLAYER analysis itself.
 
   - `n_tor` -- toroidal mode number; surfaces are q = m/`n_tor`
 
-  - `m_max` -- runaway backstop on the poloidal mode number (default `2000`). This is **not**
-    the physics limit: the outward search terminates when the edge law places a surface at or
-    beyond `psi_cap`, i.e. when it is indistinguishable from the separatrix. On a diverted
-    equilibrium rational surfaces accumulate without bound toward ψ = 1, so some cap is needed,
-    but it should never be what stops the scan — if it is, the scan says so in `notes`, because
-    "no overlap found" would otherwise be reported for a non-physical reason
+  - `m_max` -- runaway backstop on the poloidal mode number (default `2000`), **not** the
+    physics limit: the outward search should terminate at `psi_cap` (indistinguishable from
+    the separatrix), and if `m_max` is what stops it instead, the scan says so in `notes`
+    because "no overlap found" would then rest on a non-physical cutoff
+  - `max_layer_solves` -- bound on how many surfaces get a Riccati layer solve (default `64`,
+    innermost kept). The first overlap decides the answer, so surfaces far beyond it only cost
+    time; when the bound bites, `notes` records that a "no overlap" verdict is inconclusive
   - `psihigh_safe` -- treat this as the outer edge of trusted equilibrium data
     (default `equil.profiles.xs[end]`)
   - `psi_cap` -- never place a surface beyond this ψ on the **direct** path (default
-    `1 - 1e-9`). Purely numerical: it is not derived from the contour clamp or from any topology
-    test, and it stops the outward search from crowding indefinitely onto ψ = 1 where surfaces
-    become indistinguishable. Loosening it is cheap (1e-6 → 1e-9 adds ~5 surfaces on the
-    DIII-D-like deck at no measurable cost and does not change the answer) and guards against
-    missing an overlap that lies further out than the cap. Inverse equilibria ignore it: they
-    have a prescribed boundary and the search runs to ψ = 1 on the real q.
-
-    Geometry is evaluated at each surface's own ψ: `radial_label` derivatives are analytic
-    and valid under extrapolation, so no stencil clamp limits how close to the boundary a
-    width can be taken
+    `1 - 1e-9`, purely numerical: it stops the outward search from crowding indefinitely onto
+    ψ = 1 where surfaces become indistinguishable). Inverse equilibria ignore it: they have a
+    prescribed boundary and the search runs to ψ = 1 on the real q. Geometry needs no clamp of
+    its own -- `radial_label` derivatives are analytic and valid under extrapolation
   - `extrapolate` -- search past `psihigh_safe` on the edge q-law (default `true`)
   - `theta` -- poloidal angle for the minor-radius chord (default `0.0`)
+  - `rs_method` -- radial label the widths and their ψ-conversion Jacobian are taken in
+    (default `:midplane`; see `radial_label`). The caller wiring this scan into the domain
+    truncation passes `:flux`, the label Fitzpatrick Eq. (100) is anchored to
   - `mu_i`, `zeff`, `chi_perp`, `chi_tor`, `resistivity_model`, `lnLambda_form`
     -- passed through to `build_slayer_inputs`
 
@@ -252,17 +248,14 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
     end
 
     isempty(found) && return LayerOverlapScan(Int[], Int[], Float64[], Float64[], Float64[], Float64[],
-        Float64[], Bool[], nothing, nothing, nothing, nothing,
+        Float64[], Float64[], Bool[], nothing, nothing, nothing, nothing, nothing,
         push!(notes, "no q = m/$n_tor surfaces found"))
 
     ms, ns, psis, rss = Int[], Int[], Float64[], Float64[]
     dels_m, w_dels, w_visc, w_dr, extraps = Float64[], Float64[], Float64[], Float64[], Bool[]
 
-    # Overlap is decided by the first crossing walking outward, so surfaces far beyond it cannot
-    # change the answer -- but each one costs a Riccati layer solve, and this scan runs whenever
-    # kinetic profiles are readable, flag or no flag. Bound the work rather than only the m index,
-    # and say so when the bound bites, since a "no overlap" verdict from a truncated list is not
-    # conclusive.
+    # Bound the per-surface Riccati work, and say so when the bound bites: a "no overlap"
+    # verdict from a truncated list is not conclusive.
     if length(found) > max_layer_solves
         push!(notes,
             "surface list truncated from $(length(found)) to the innermost $max_layer_solves for " *
@@ -309,17 +302,14 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
             push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): del_s Riccati did not converge")
             continue
         end
-        # Both widths must be finite. A NaN width compares false against every neighbour in
-        # _first_overlap_limit, so that channel would silently report "no overlap" rather than
-        # showing a gap -- the reported comparison between channels would be quietly wrong.
+        # Every width channel must be finite: a NaN width compares false against every
+        # neighbour in _first_overlap_limit, silently turning that channel into "no overlap".
         if !isfinite(lw.delta_dr)
-            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): Eq. (100) width is not finite; " *
-                         "surface excluded so the DR criterion cannot fail open")
+            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): Eq. (100) width is not finite; surface excluded")
             continue
         end
         if !isfinite(lw.delta_visco)
-            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): viscous width is not finite; " *
-                         "surface excluded so the viscous criterion cannot fail open")
+            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): viscous width is not finite; surface excluded")
             continue
         end
 
@@ -349,12 +339,9 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
 end
 
 # Walk outward and return (recommended psilim, index of first overlapping surface).
-# Overlap at k puts the inner boundary of the overlap region at surface k-1, and the domain
-# limit is that surface's own position -- Fitzpatrick (2025) Sect. 5.9 retains the rational
-# surfaces in 0 < psi < 1 - eps_c, and psi[k-1] is 1 - eps_c. Deliberately not psi[k-1] -+
-# w[k-1]/2: subtracting drops the last clean surface the paper keeps, and adding can exceed
-# psi = 1 (measured on 4 of 10 real DIII-D reconstructions, where it also overshoots surface
-# k itself, the layers there being wider than their separation).
+# Overlap at k contaminates both k and k-1, so the limit is surface k-1's own position
+# (Fitzpatrick 2025 Sect. 5.9 retains 0 < psi < 1 - eps_c with psi[k-1] as 1 - eps_c);
+# offsetting by ±w[k-1]/2 either drops the last clean surface or can exceed psi = 1.
 function _first_overlap_limit(psi::Vector{Float64}, w::Vector{Float64})
     for k in 2:length(psi)
         if psi[k] - w[k] / 2 < psi[k-1] + w[k-1] / 2
