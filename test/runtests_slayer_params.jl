@@ -167,11 +167,10 @@
     end
 
     @testset "Test 3: reverse-shear invariance" begin
-        # The layer timescales and widths depend on |dq/dr|, not its sign, so a
-        # negative-shear rational surface must reduce to its positive-shear mirror.
-        # Only the recorded `sval_r` diagnostic keeps the sign. `dc_type=:lar`
-        # with a nonzero `dr_val` exercises the Wd iteration and the critical-Δ
-        # square roots as well as tau_h.
+        # The layer timescales and widths depend on |dq/dr|, not its sign: a negative-shear
+        # surface must reduce to its positive-shear mirror, with only the recorded sval_r
+        # diagnostic keeping the sign. dc_type=:lar with nonzero dr_val exercises the Wd
+        # iteration and the critical-Δ square roots as well as tau_h.
         base = _ref_kwargs(; dr_val=-0.1, dc_type=:lar)
         pos = slayer_parameters(; base...)
         neg = slayer_parameters(; merge(base, (; sval_r=-1.0))...)
@@ -187,8 +186,7 @@
             @test getfield(neg, f) == getfield(pos, f)
         end
 
-        # tau_h > 0 keeps the Lundquist number positive, so the S^(1/3) that
-        # used to raise a DomainError on a reverse-shear surface now evaluates.
+        # tau_h > 0 keeps the Lundquist number positive, so S^(1/3) is defined on reverse shear.
         @test neg.lu > 0
         @test neg.tauk > 0
     end
