@@ -9,6 +9,17 @@ description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis
 example_dir = "examples/DIIID-like_SLAYER_example"
 
 # Per-surface SLAYER layer parameters (geometry + dimensionless)
+# Which formalism produced the Δ′ this case's layer physics consumes. The Δ′ matrix lands on
+# one canonical SingularSurfaces/ path whichever integrator computed it, so pinning the deck's
+# declared choice is what keeps a BVP-derived gold from being compared against a Galerkin run.
+[quantities.integrator]
+h5path = "Input/gpec_toml_raw"
+type = "token"
+extract = "toml_key:ForceFreeStates.integrator"
+label = "integrator (Δ′ provenance)"
+noise_threshold = 0
+order = 1
+
 [quantities.slayer_ising]
 h5path = "Tearing/PerSurface/rational_index"
 type = "real_vector"
@@ -131,6 +142,52 @@ extract = "first_3"
 label = "SLAYER no_root flags [2/1,3/1,4/1]"
 noise_threshold = 0
 order = 34
+
+# Outer-region Δ' consumed by the SLAYER matching — the same STRIDE-like BVP (PEST3) matrix
+# the riccati case pins at source; tracked here too so a change in what SLAYER actually
+# ingests is caught even if the source case is not run.
+[quantities.slayer_delta_prime_diag]
+h5path = "Tearing/PerSurface/Delta_prime_matrix"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "Δ′ STRIDE-like BVP (PEST3) diagonal, as ingested by SLAYER"
+noise_threshold = 1e-8
+order = 40
+
+# Inner-layer solve outputs per surface (the resistive-layer Riccati solution itself, not the
+# outer matching). The adaptive-scan Δ(Q) sample arrays are deliberately NOT pinned: AMR sample
+# locations move under any refinement change, so they have no stable identity to pin.
+[quantities.slayer_delta_s]
+h5path = "Tearing/LayerWidths/delta_s"
+type = "complex_vector"
+extract = "all_complex"
+label = "SLAYER inner-layer thickness δ_s (complex, Riccati)"
+noise_threshold = 1e-10
+order = 41
+
+[quantities.slayer_delta_s_over_d_beta]
+h5path = "Tearing/LayerWidths/delta_s_over_d_beta"
+type = "complex_vector"
+extract = "all_complex"
+label = "SLAYER inner-layer δ_s/d_β (complex, dimensionless)"
+noise_threshold = 1e-10
+order = 42
+
+[quantities.slayer_delta_s_abs]
+h5path = "Tearing/LayerWidths/delta_s_abs"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER inner-layer physical thickness |δ_s| [m]"
+noise_threshold = 1e-12
+order = 43
+
+[quantities.slayer_d_beta]
+h5path = "Tearing/LayerWidths/d_beta"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER β-weighted ion drift scale d_β [m]"
+noise_threshold = 1e-12
+order = 44
 
 # Settings (catches accidental config drift)
 [quantities.slayer_enabled]
