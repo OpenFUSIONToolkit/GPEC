@@ -27,15 +27,17 @@ end
 Materialize the directory GPEC will actually run in.
 
 With no `overrides`, the example deck runs in place (returns it untouched). With overrides,
-the deck is copied to a throwaway temp dir and the named gpec.toml keys are patched there,
-so one shared example can serve several cases (e.g. a collisionless variant via
-`"KineticForces.nutype" => "zero"`). Override keys are dotted paths into the TOML; missing
-intermediate tables are created. Returns `(rundir, is_temp)`; the caller removes the temp
-tree when `is_temp`.
+the deck is copied to a throwaway sibling of the example dir and the named gpec.toml keys are
+patched there, so one shared example can serve several cases (e.g. a collisionless variant via
+`"KineticForces.nutype" => "zero"`). The copy sits beside the original so relative file
+references in the deck (e.g. `SLAYER.profile_file = "../<other_example>/..."`) still resolve.
+Override keys are dotted paths into the TOML; missing intermediate tables are created.
+Returns `(rundir, is_temp)`; the caller removes `rundir` when `is_temp`.
 """
 function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
     isempty(overrides) && return (example_path, false)
-    rundir = joinpath(mktempdir(), "deck")
+    rundir = joinpath(dirname(example_path), ".regress-override-" * basename(example_path))
+    rm(rundir; recursive=true, force=true)   # stale leftover from a crashed run
     cp(example_path, rundir)
     rm(joinpath(rundir, "gpec.h5"); force=true)   # drop any stale output copied along
     cfg = TOML.parsefile(joinpath(rundir, "gpec.toml"))
@@ -592,7 +594,8 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
             rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
-            rm(dirname(rundir); recursive=true, force=true)
+            # rundir sits beside the example; removing its parent would delete examples/ itself
+            rm(rundir; recursive=true, force=true)
         end
     end
 end
@@ -716,7 +719,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
-            rm(dirname(rundir); recursive=true, force=true)
+            # rundir sits beside the example; removing its parent would delete examples/ itself
+            rm(rundir; recursive=true, force=true)
         end
         if own_worktree && worktree_path !== nothing
             remove_worktree(worktree_path, repo_root)
