@@ -168,8 +168,8 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 - `bmax, bmin`: Max/min of B(θ) at this ψ
 - `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
 - `tspl`: Periodic poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
-- `B_extrap`: Endpoint-fit (non-periodic) cubic of B(θ) used for v_par and the
-  bounce-point roots (the Fortran `vspl` equivalent)
+- `B_extrap`: Periodic cubic of B(θ) used for v_par and the bounce-point roots
+  (the Fortran `vspl` equivalent)
 - `mfac`: Poloidal mode numbers [mlow:mhigh]
 - `chi1`: 2π·ψ₀ flux normalization
 - `ro`: Major radius [m]
@@ -409,12 +409,104 @@ end
 
 
 """
-Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` from the endpoint-fit cubic of B
+Fit the periodic magnetic-field spline used by both the parallel-velocity
+factor and its bounce-point roots.
+
+The sampled field closes at θ=0/1. A wrapped non-periodic endpoint fit is only
+C⁰ at that seam and can create false near-seam extrema and root pairs.
+"""
+@inline _fit_vpar_B_spline(xs, B_vals) =
+    cubic_interp(xs, B_vals; bc=PeriodicBC())
+
+
+"""
+Parallel-velocity factor `v_par = 1 − (λ/bo)·B(θ)` from the periodic cubic of B
 (`B_extrap`, built where the surface interpolants are constructed), keeping v_par
 consistent with the bounce-point roots as in Fortran's `vspl`.
 """
 @inline _vpar_from_extrap(B_extrap, lmda::Float64, bo::Float64, θ::Float64) =
     1.0 - (lmda / bo) * B_extrap(mod(θ, 1.0))
+
+
+"""
+Return every distinct bounce root on one closed poloidal turn in the descending
+order expected by the well-selection logic.
+
+Each knot interval is a cubic polynomial. Splitting it at its analytically
+computed stationary points makes every resulting interval monotone, so close
+root pairs cannot be skipped by a coarse heuristic scan. The inclusive
+endpoints represent one physical point, so a seam root is retained only at
+θ=0.
+"""
+@inline function _find_bounce_roots(B_extrap, lmda::Float64, bo::Float64)
+    vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
+    roots = Float64[]
+    xs = B_extrap.cache.x
+    ys = B_extrap.y
+    zs = B_extrap.z
+    value_tol = 64eps(Float64) * max(1.0, abs(lmda / bo) * maximum(abs, ys))
+    root_tol = 64eps(Float64)
+
+    function push_distinct!(root)
+        if isempty(roots) || abs(root - last(roots)) > root_tol
+            push!(roots, root)
+        end
+    end
+
+    function scan_monotone_interval(left, right)
+        fleft = vpar_fn(left)
+        fright = vpar_fn(right)
+        if abs(fleft) <= value_tol
+            push_distinct!(left)
+        elseif abs(fright) > value_tol && signbit(fleft) != signbit(fright)
+            push_distinct!(Roots.find_zero(vpar_fn, (left, right), Roots.Brent()))
+        end
+    end
+
+    for i in firstindex(xs):(lastindex(xs)-1)
+        left = xs[i]
+        right = xs[i+1]
+        h = right - left
+        zleft = zs[i]
+        zright = zs[i+1]
+        c1 = (ys[i+1] - ys[i]) / h - h * (2zleft + zright) / 6
+        c2 = zleft / 2
+        c3 = (zright - zleft) / (6h)
+
+        stationary = Float64[]
+        qa = 3c3
+        qb = 2c2
+        qc = c1
+        if iszero(qa)
+            if !iszero(qb)
+                push!(stationary, -qc / qb)
+            end
+        else
+            discriminant = muladd(-4qa, qc, qb^2)
+            if discriminant >= 0
+                sqrt_discriminant = sqrt(discriminant)
+                q = -0.5 * (qb + copysign(sqrt_discriminant, qb))
+                if iszero(q)
+                    push!(stationary, -qb / (2qa))
+                else
+                    push!(stationary, q / qa, qc / q)
+                end
+            end
+        end
+        filter!(u -> 0 < u < h, stationary)
+        sort!(unique!(stationary))
+
+        subleft = left
+        for u in stationary
+            subright = left + u
+            scan_monotone_interval(subleft, subright)
+            subleft = subright
+        end
+        scan_monotone_interval(subleft, right)
+    end
+
+    return sort!(roots; rev=true)
+end
 
 
 """
@@ -430,8 +522,7 @@ function _find_bounce_points_and_grid(
         # Bounce points: all roots of v_par(θ) = 1 − (λ/bo)·B_extrap(θ) in (0,1),
         # sorted descending — the same order as Fortran spline_roots, which the
         # marginally-trapped and deepest-well wrap logic below assume.
-        vpar_fn = θ -> _vpar_from_extrap(B_extrap, lmda, bo, θ)
-        bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
+        bpts = _find_bounce_roots(B_extrap, lmda, bo)
 
         nbpts = length(bpts)
         if nbpts < 1
@@ -550,7 +641,7 @@ function _bounce_integrate(
         jac = tspl_f[4]
         djdpsi = tspl_f[5]
 
-        # v_par from the endpoint-fit cubic (consistent with the bounce points);
+        # v_par from the periodic cubic (consistent with the bounce points);
         # the periodic tspl B_val remains the numerator field in the integrands.
         vpar = 1.0 - (lmda / bo) * B_extrap(θmod)
 
