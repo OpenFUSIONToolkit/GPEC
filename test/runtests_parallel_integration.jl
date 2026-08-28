@@ -134,11 +134,11 @@ using TOML
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         balanced = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
 
-        # Must mirror balance_integration_chunks' internal target_n formula for nchunks = 0
-        # (src/ForceFreeStates/EulerLagrange.jl). Keep this in sync. The formula reads only
-        # intr.msing — no thread count enters it, which is what makes Riccati outputs
-        # independent of how many threads `julia -t` provides.
-        target_n = max(2 * intr.msing + 3, 8 * (intr.msing + 1) + intr.msing)
+        # The nchunks = 0 target, from its single source. It reads only intr.msing — no
+        # thread count enters it, which is what makes Riccati outputs independent of how
+        # many threads `julia -t` provides.
+        target_n = GeneralizedPerturbedEquilibrium.ForceFreeStates.auto_chunk_target(intr.msing)
+        @test target_n == max(2 * intr.msing + 3, 8 * (intr.msing + 1) + intr.msing)
 
         # After balancing, chunk count equals target_n: the while-loop adds exactly one
         # chunk per iteration (a bisection split) and exits when length(result) >= target_n,
@@ -183,7 +183,7 @@ using TOML
         @test length(balanced_more) == target_n + 7
 
         # An nchunks below the singular-surface floor is clamped up, with a warning.
-        min_chunks = 2 * intr.msing + 3
+        min_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.min_crossing_chunks(intr.msing)
         ctrl_few = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., nchunks=1)
         balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
