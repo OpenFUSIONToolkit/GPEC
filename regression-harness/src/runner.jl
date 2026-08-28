@@ -126,9 +126,9 @@ end
 # The adaptive AMR scan samples in gpec.h5 cannot be pinned (sample locations move under any
 # refinement change), so this evaluates Δ(Q) on a fixed 4×4 grid over Re(Q), Im(Q) ∈ [-10, 10]
 # instead — a refinement-stable pin of the dispersion curve itself. The layer parameters are the
-# DIII-D-like SLAYER deck's own 2/1 surface values (Tearing/PerSurface, develop @ 1f193a6c),
-# quoted verbatim so the case is self-contained and probes the SOLVER alone: the parameter
-# chain that produces these numbers is pinned separately by the diiid_slayer_n1 case.
+# DIII-D-like SLAYER deck's own 2/1 surface values (Tearing/PerSurface), quoted so the case is
+# self-contained and probes the SOLVER alone (bt is a placeholder — the dispersion solve never
+# reads it); the parameter chain producing these numbers is pinned separately by diiid_slayer_n1.
 const COMPUTED_SLAYER_DELTA_PROBE_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -156,21 +156,12 @@ end
 %RUNINFO%
 """
 # External-reference validation: GPEC's del_s Riccati solver against Fitzpatrick, "Tearing Mode
-# Dynamics in Tokamak Plasmas" (IOP 2023), figures 6.2 and 6.3. Unlike every other case in this
-# suite -- which pins GPEC against its own previous output -- this one pins it against published
-# values, so a failure means "we no longer reproduce the textbook", not "we changed".
-#
-# riccati_del_s integrates the book's layer equations directly: E and F are (6.29)/(6.30), the
-# Riccati form is (6.38), and the returned dels_db is the plotted delta_s/d_beta. Prescribing the
-# normalized parameters (D_norm = 1, P_perp = P_tor = Phat, Q_e = Qhat/(1+1/tau)) makes the solver's
-# internal Q_hat equal the book's Qhat_*, so the grid below is exactly the figures' axes.
-#
-# tau is NOT stated in the figure captions; tau = 1 (table 5.1, low-field reactor) is pinned here as
-# an explicit assumption of the case, not inherited from a default that could drift.
-#
-# Phat = 0 is a singular edge of the model, not a hard case: alpha = sqrt(Phat_perp/(1+1/tau))
-# vanishes so the large-q boundary form degenerates, and F -> -i*Qhat at the origin. The grid starts
-# just inside so the pins record results rather than a modelling boundary.
+# Dynamics in Tokamak Plasmas" (IOP 2023), figures 6.2 and 6.3 — see the case TOML header for
+# the validation evidence. Prescribing the normalized parameters (D_norm = 1,
+# P_perp = P_tor = Phat, Q_e = Qhat/(1+1/tau)) makes the solver's internal Q_hat equal the
+# book's Qhat_*, so the grid below is exactly the figures' axes. tau = 1 is an explicit pinned
+# assumption (not stated in the captions). The grid starts just inside Phat = 0, which is a
+# singular edge of the model (alpha vanishes and the large-q boundary form degenerates).
 const COMPUTED_SLAYER_DELS_FITZPATRICK_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
