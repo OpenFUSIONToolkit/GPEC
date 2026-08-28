@@ -60,12 +60,9 @@ const THETA_STRIDE = 8
 # --- shared separatrix edge q-law -------------------------------------------------------------
 # Minimum knots in the edge band before a fit is attempted.
 const EDGE_FIT_MIN_KNOTS = 4
-# Weak absolute floor on the diverging fit. The discrimination is done by the r2_log > r2_linear
-# comparison below, not by this number: measured EFIT/CAKE reconstructions of diverted DIII-D
-# plasmas fit the log law at r2 = 0.929-0.977 (reconstruction noise in the edge q), which overlaps
-# the 0.972 of the limited a10 fixed-boundary deck, so no absolute threshold separates the two
-# classes. The relative test does separate them cleanly (diverted 0.96 vs 0.75 linear; Solovev
-# 0.760 vs 0.9996 linear). This floor only rejects fits that describe nothing at all.
+# Weak absolute floor on the diverging fit. The discrimination is the relative
+# r2_log > r2_linear comparison below (no absolute threshold separates diverted from limited
+# edges); this floor only rejects fits that describe nothing at all.
 const EDGE_FIT_MIN_R2 = 0.90
 
 # Least-squares slope and coefficient of determination for y = a + b*x.

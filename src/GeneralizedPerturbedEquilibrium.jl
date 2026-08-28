@@ -519,7 +519,7 @@ function _layer_overlap_scan(path::Union{Nothing,AbstractString},
         # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
         return Tearing.resistive_layer_overlap(equil, profiles; n_tor=intr.nlow, rs_method=:flux)
     catch err
-        @warn "Layer-overlap scan failed; the integration domain is untouched." exception = err
+        @warn "Layer-overlap scan failed; the integration domain is untouched." exception = (err, catch_backtrace())
         return nothing
     end
 end
@@ -1247,6 +1247,8 @@ function write_outputs_to_HDF5(
                 lo.psihigh === nothing ? NaN : lo.psihigh
             out_h5["ForceFreeStates/LayerOverlap/first_overlap_index"] =
                 lo.first_overlap === nothing ? -1 : lo.first_overlap
+            # "applied" records that the bound was active going into sing_lim!, not that it set
+            # the final psilim -- dmlim/qhigh may truncate deeper inside it.
             out_h5["ForceFreeStates/LayerOverlap/applied"] =
                 Int(ctrl.psilim_from_layer_overlap && lo.psihigh !== nothing &&
                     lo.psihigh < equil.params.psihigh_resolved)

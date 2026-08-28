@@ -160,7 +160,7 @@ const MAIN_H5_ANNOTATIONS = [
     "ForceFreeStates/LayerOverlap/first_overlap_index" =>
         (; long_name="index into this group's surface axis of the first surface overlapping its inner neighbour (-1 when none do)"),
     "ForceFreeStates/LayerOverlap/applied" =>
-        (; long_name="1 when the overlap limit actually constrained the integration domain; 0 when recorded only"),
+        (; long_name="1 when the overlap bound was handed to sing_lim! as an active cap on qlim (dmlim/qhigh may still truncate deeper); 0 when recorded only"),
     "LocalStability/ballooning_psi" =>
         (; long_name="normalized poloidal flux ψ_N of the ballooning α boundary scan", scale="psi_ballooning"),
     "LocalStability/alpha" =>
