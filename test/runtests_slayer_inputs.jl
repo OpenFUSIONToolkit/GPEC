@@ -185,12 +185,10 @@
     end
 
     @testset "build_slayer_inputs: omega_star carries the toroidal mode number" begin
-        # ω_* = k_θ·v_* scales with the poloidal mode number; written in flux
-        # coordinates the q is absorbed by dψ/dr = r·B_φ/q, leaving
-        # ω_* = n·(dp/dψ)/(e·n_e). Resolve the same surface at n = 1 and n = 2:
-        # Q/tauk = -ω_* must double, while iota_e = Q_e/(Q_e - Q_i) is a ratio
-        # and must not move. Asserted through the returned parameters so the
-        # check survives a refactor of where the factor is applied.
+        # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e): resolving the same surface at n = 1
+        # and n = 2 must double Q/tauk = -ω_*, while the ratio iota_e must not move.
+        # Asserted through the returned parameters so the check survives a refactor of
+        # where the factor is applied.
         s1 = [_mk_sing(psi=0.3, q=2.0, q1=1.5, m=2, n=1)]
         s2 = [_mk_sing(psi=0.3, q=2.0, q1=1.5, m=4, n=2)]
         sl1 = build_slayer_inputs(equil, s1, profiles; bt=2.0, dr_val=0.0)

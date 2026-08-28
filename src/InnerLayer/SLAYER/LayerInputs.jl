@@ -224,11 +224,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         n_res = sing.n[1]
 
         prof = profiles(psi)
-        # Override ω_*e, ω_*i with spline-derivative values when requested.
-        # ω_* = k_θ·v_* carries the poloidal mode number; writing it in flux
-        # coordinates absorbs q (dψ/dr = r·B_φ/q), leaving ω_* = n·(dp/dψ)/(e·n_e).
-        # `_omega_star_at` returns the n = 1 value, so restore the factor n here.
-        # Values supplied through `profiles` are taken to be physical already.
+        # Override ω_*e, ω_*i with spline-derivative values when requested. In flux coordinates
+        # ω_* = n·(dp/dψ)/(e·n_e); `_omega_star_at` returns the n = 1 value, so restore the
+        # factor n here. Values supplied through `profiles` are taken to be physical already.
         ω_e_use, ω_i_use = if compute_omega_star
             ωe1, ωi1 = _omega_star_at(psi)
             (n_res * ωe1, n_res * ωi1)
