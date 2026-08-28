@@ -86,10 +86,8 @@ jobs:
           fi
 
   test:
-    # The job name must stay byte-identical for the single-threaded legs: branch protection
-    # names these contexts as required checks, so renaming them would leave every pull request
-    # waiting forever on a status that never reports. The multi-threaded leg gets a distinct
-    # name and is therefore additive rather than breaking.
+    # Branch protection lists the single-threaded job names as required checks, so those must
+    # stay byte-identical; the multi-threaded leg gets a distinct name and is purely additive.
     name: runtests ${{ matrix.version }} - ${{ matrix.os }}${{ matrix.threads != '1' && format(' ({0} threads)', matrix.threads) || '' }}
     needs: changes
     if: needs.changes.outputs.julia == 'true'
@@ -106,10 +104,8 @@ jobs:
         threads:
           - '1'
         include:
-          # The Riccati chunk driver runs its chunks through Threads.@threads, which executes
-          # serially in a single-threaded session — so a single-threaded matrix never exercises
-          # threaded scheduling at all. This leg runs the suite multi-threaded, making the
-          # chunk-decomposition and boundary-pinning tests cover real concurrent execution.
+          # Threads.@threads executes serially at one thread, so a single-threaded matrix never
+          # exercises threaded scheduling; this leg covers real concurrent execution.
           - version: '1.11'
             os: ubuntu-latest
             threads: '4'
