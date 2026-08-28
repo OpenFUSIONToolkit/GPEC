@@ -257,6 +257,29 @@ function ode_itime_cost(psi1::Float64, psi2::Float64, intr::ForceFreeStatesInter
 end
 
 """
+    min_crossing_chunks(msing) -> Int
+
+Floor on the chunk count set by the `msing` rational-surface crossings; explicit `nchunks`
+requests below it are clamped up (with a warning) by `balance_integration_chunks`.
+"""
+min_crossing_chunks(msing::Integer) = 2 * msing + 3
+
+"""
+    auto_chunk_target(msing) -> Int
+
+The chunk-count target `balance_integration_chunks` resolves `nchunks = 0` to. Beyond the
+crossing floor, BVP propagator conditioning needs at least 8 non-crossing sub-chunks per
+segment (axis→surf₁, surfᵢ→surfᵢ₊₁, surfₙ→edge) plus the crossing chunks — without them,
+`assemble_fm_matrix(condition=true)` cannot keep accumulated products well-conditioned
+because single long-span propagators may already have cond ~ 10²⁴ (STRIDE uses 33 intervals
+for comparable problems). Derived from `msing` alone — never from the thread count — which
+is what keeps the chunk list, and hence every Riccati output, identical whatever `julia -t`
+provides. Tests that steer decompositions relative to the auto target call this instead of
+mirroring the formula.
+"""
+auto_chunk_target(msing::Integer) = max(min_crossing_chunks(msing), 8 * (msing + 1) + msing)
+
+"""
     balance_integration_chunks(chunks, ctrl, intr) -> Vector{IntegrationChunk}
 
 Sub-divide integration chunks to produce a load-balanced set for the Riccati BVP.
@@ -274,20 +297,14 @@ each original chunk retains `needs_crossing=true` and the original `ising`, so t
 rational surface crossing still fires at the correct ψ in the serial assembly phase.
 """
 function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
-    min_chunks = 2 * intr.msing + 3
-    # Ensure enough sub-chunks for BVP propagator conditioning: at least 5 non-crossing
-    # sub-chunks per segment (axis→surf₁, surfᵢ→surfᵢ₊₁, surfₙ→edge), plus crossing
-    # chunks. STRIDE uses 33 intervals for comparable problems. Without enough sub-chunks,
-    # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
-    # because single long-span propagators may already have cond ~ 10²⁴.
-    min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
+    min_chunks = min_crossing_chunks(intr.msing)
     if ctrl.nchunks > 0
         if ctrl.nchunks < min_chunks
             @warn "nchunks = $(ctrl.nchunks) is below the $min_chunks chunks required by $(intr.msing) singular surfaces; clamping up."
         end
         target_n = max(ctrl.nchunks, min_chunks)
     else
-        target_n = max(min_chunks, min_bvp_intervals)
+        target_n = auto_chunk_target(intr.msing)
     end
 
     result = collect(chunks)
