@@ -1,0 +1,173 @@
+# Regression case: DIII-D-like H-mode n=2 SLAYER tearing-mode growth rates.
+# Reuses the n=1 SLAYER deck via [overrides] at toroidal mode number 2, where the deck's
+# qmin = 1.204 puts the 3/2 surface in the plasma. Exists to guard the n-dependence of the
+# layer build — in particular the diamagnetic frequencies ω_* ∝ n feeding Q_e/Q_i, which
+# no n=1 case can constrain — with the inner rationals 3/2, 4/2, 5/2 as the tracked roots.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "diiid_slayer_n2"
+description = "DIII-D-like H-mode equilibrium, n=2, SLAYER tearing-mode analysis guarding the 3/2 surface and the n-scaling of Q_e/Q_i (reuses the n=1 deck via overrides)"
+example_dir = "examples/DIIID-like_SLAYER_example"
+
+# Run the shared SLAYER deck at n = 2 (no separate n=2 example directory).
+[overrides]
+"ForceFreeStates.nn_low" = 2
+"ForceFreeStates.nn_high" = 2
+
+# Per-surface SLAYER layer parameters (geometry + dimensionless)
+[quantities.slayer_ising]
+h5path = "Tearing/PerSurface/rational_index"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER surface indices"
+noise_threshold = 0
+order = 10
+
+[quantities.slayer_m]
+h5path = "Tearing/PerSurface/m"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER poloidal m"
+noise_threshold = 0
+order = 11
+
+[quantities.slayer_n]
+h5path = "Tearing/PerSurface/n"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER toroidal n"
+noise_threshold = 0
+order = 12
+
+[quantities.slayer_rs]
+h5path = "Tearing/PerSurface/rs"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER minor radius rs"
+noise_threshold = 1e-10
+order = 13
+
+[quantities.slayer_sval_r]
+h5path = "Tearing/PerSurface/sval_r"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER r-based shear"
+noise_threshold = 1e-10
+order = 14
+
+[quantities.slayer_lu]
+h5path = "Tearing/PerSurface/lu"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Lundquist S"
+noise_threshold = 1e-8
+order = 15
+
+[quantities.slayer_D_norm]
+h5path = "Tearing/PerSurface/D_norm"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER D_norm"
+noise_threshold = 1e-10
+order = 16
+
+[quantities.slayer_P_perp]
+h5path = "Tearing/PerSurface/P_perp"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER P_perp"
+noise_threshold = 1e-8
+order = 17
+
+[quantities.slayer_tauk]
+h5path = "Tearing/PerSurface/tau_k"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER tauk"
+noise_threshold = 1e-12
+order = 18
+
+[quantities.slayer_Q_e]
+h5path = "Tearing/PerSurface/Q_e"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Q_e"
+noise_threshold = 1e-12
+order = 20
+
+[quantities.slayer_Q_i]
+h5path = "Tearing/PerSurface/Q_i"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Q_i"
+noise_threshold = 1e-12
+order = 21
+
+[quantities.slayer_iota_e]
+h5path = "Tearing/PerSurface/iota_e"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER iota_e"
+noise_threshold = 1e-12
+order = 19
+
+# Tearing eigenvalue (coupled mode → length 1). The headline deliverable:
+# a real, nonzero growth rate on a realistic equilibrium. Root-extraction
+# is sensitive to the AMR cell topology and ODE solver, so the Q/ω/γ
+# thresholds are absolute and modestly loose; re-pin intentionally if a
+# solver/AMR change shifts the root inventory.
+# Growth-rate / frequency / root outputs. Pinned for the inner three rational
+# surfaces only (3/2, 4/2, 5/2) via `first_3`: the Δ'/γ contour search is
+# numerically unreliable on the outermost surfaces near the edge, so those are
+# deliberately not golden-tracked.
+[quantities.slayer_Q]
+h5path = "Tearing/Roots/Q_root"
+type = "complex_vector"
+extract = "first_3_complex"
+label = "SLAYER Q_root [3/2,4/2,5/2]"
+noise_threshold = 1e-4
+order = 30
+
+[quantities.slayer_omega_Hz]
+h5path = "Tearing/Roots/omega"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER ω_Hz [3/2,4/2,5/2]"
+noise_threshold = 1.0
+order = 32
+
+[quantities.slayer_gamma_Hz]
+h5path = "Tearing/Roots/gamma"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER γ_Hz [3/2,4/2,5/2]"
+noise_threshold = 1e-1
+order = 33
+
+# no_root flag (1 = extraction failed). Pinned for the inner three surfaces
+# so the 3/2, 4/2, 5/2 root inventory cannot drift silently.
+[quantities.slayer_no_root]
+h5path = "Tearing/Roots/no_root"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER no_root flags [3/2,4/2,5/2]"
+noise_threshold = 0
+order = 34
+
+# Settings (catches accidental config drift)
+[quantities.slayer_enabled]
+h5path = "Tearing/enabled"
+type = "int_scalar"
+extract = "value"
+label = "SLAYER enabled flag"
+noise_threshold = 0
+order = 90
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
