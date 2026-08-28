@@ -355,6 +355,7 @@ function slayer_parameters(;
 
     # Normalized beta-related width and Δ-normalization
     d_beta = c_beta * d_i
+    # D = S^(1/3)·iota_e^(1/2)·(d_beta/r_s), Fitzpatrick's ion-sound-radius normalization.
     # iota_e is the electron share of the total diamagnetic frequency; it reduces to
     # 1/(1+tau) only when the electron and ion pressure-gradient scale lengths match.
     D_norm = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(iota_e)
