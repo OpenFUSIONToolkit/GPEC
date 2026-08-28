@@ -525,6 +525,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
             rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
+            # rundir sits beside the example; removing its parent would delete examples/ itself
             rm(rundir; recursive=true, force=true)
         end
     end
@@ -649,6 +650,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
+            # rundir sits beside the example; removing its parent would delete examples/ itself
             rm(rundir; recursive=true, force=true)
         end
         if own_worktree && worktree_path !== nothing
