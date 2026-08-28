@@ -1,8 +1,9 @@
-# DIII-D-like H-mode DRIVEN resistive example: gal Δ′ + inner-layer matching → PerturbedEquilibrium.
-# Extends the sibling DIIID-like_gal_resistive_example with DIII-D C-coil forcing
-# (n=1 cosine phasing): the gal-matched resistive ξ is fed into PerturbedEquilibrium
-# for coil-driven singular coupling — island half-widths, Chirikov overlap, resonant flux.
-# Same equilibrium and Galerkin settings as the sibling; differences start at [ForcingTerms].
+# DIII-D-like H-mode DRIVEN resistive example: gal Δ′ + inner-layer matching, with DIII-D
+# C-coil forcing (n=1 cosine phasing) staged for PerturbedEquilibrium. The PE stage currently
+# warns and skips: it requires the free-boundary δW, which the Galerkin formalism does not
+# yet produce — the gal-matched resistive ξ and penetrated field are carried on the result
+# for when gal-side δW lands. Same equilibrium and Galerkin settings as the sibling
+# DIIID-like_gal_resistive_example; differences start at [ForcingTerms].
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
@@ -13,7 +14,7 @@ psihigh = 0.993                # Upper limit of normalized flux coordinate (0.99
 mpsi = 128                     # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
-newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-10                   # Error tolerance for equilibrium solver
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
@@ -50,13 +51,12 @@ singfac_min = 1e-4             # Fractional distance from rational q at which id
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
-integrator          = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
+integrator          = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim = false   # Keep psilim at psihigh (do not truncate at last_rational_q + dmlim)
 dmlim               = 0.2      # Truncate integration at (last_rational_q + dmlim) / n (only used when set_psilim_via_dmlim = true)
 
 # Outer-region singular Galerkin Δ′ solver with rpec coil columns.
 # This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
-gal_flag               = true  # Enable the outer-region singular Galerkin Δ′ solve
 gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element

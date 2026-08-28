@@ -102,6 +102,8 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--allow-env-mismatch` — reuse cached results produced in a different environment
 - `--fail-on-change` — exit non-zero when any tracked quantity changed
 
+GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, and the count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines). Thread count is deliberately not part of the cache key, so `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
+
 ## Making source code the only variable
 
 `Manifest.toml` is untracked, so a worktree checked out at an old commit used to resolve whatever
@@ -136,8 +138,7 @@ than leaving you to infer it from the numbers.
 Results cached before environment fingerprinting existed carry no environment and are therefore
 re-run once — those are exactly the entries whose provenance cannot be established.
 
-Thread counts are recorded but **not** forced: the harness does not silently change how your runs
-execute. If the two refs in a comparison ran under different thread counts, the report flags it.
+If the two refs in a comparison ran under different thread counts, the report flags it.
 
 ## Exit status
 

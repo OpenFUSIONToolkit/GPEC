@@ -44,6 +44,9 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     end
 
     _write_per_surface!(g, result.params, result.dp_matrix)
+    # Surface identity (absent when the analysis was built from bare parameters).
+    isempty(result.rational_psi) || (g["PerSurface/rational_psi"] = result.rational_psi)
+    isempty(result.rational_q) || (g["PerSurface/rational_q"] = result.rational_q)
     _write_roots!(g, result)
     _write_layer_widths!(g, result.layer_widths)
     _write_diagnostics!(g, result)
@@ -64,6 +67,8 @@ _layer_model_token(::Type{GGJParameters}) = "ggj"
 const TEARING_H5_ANNOTATIONS = [
     "enabled" => (; long_name="flag: SLAYER/tearing stage ran (1) or was disabled (0)"),
     "PerSurface/rational_index" => (; long_name="rational-surface index of each row", dims=("surface",)),
+    "PerSurface/rational_psi" => (; long_name="normalized poloidal flux ψ_N of each analyzed surface", dims=("surface",)),
+    "PerSurface/rational_q" => (; long_name="safety factor q = m/n of each analyzed surface", dims=("surface",)),
     "PerSurface/m" => (; long_name="resonant poloidal mode number m per surface", dims=("surface",)),
     "PerSurface/n" => (; long_name="resonant toroidal mode number n per surface", dims=("surface",)),
     "PerSurface/tau" => (; long_name="temperature ratio τ = T_i/T_e per surface", dims=("surface",)),

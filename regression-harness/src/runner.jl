@@ -53,6 +53,12 @@ function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
     return (rundir, true)
 end
 
+# Thread count for GPEC subprocesses ("auto" = all cores); GPEC's threaded kernels
+# (Riccati parallel FM, ballooning, field reconstruction, kinetic forces) otherwise
+# run single-threaded. Override with e.g. GPEC_REGRESS_THREADS=1. The actual count
+# is recorded in each run's environment fingerprint.
+const SUBPROCESS_THREADS = get(ENV, "GPEC_REGRESS_THREADS", "auto")
+
 const RUNNER_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -269,11 +275,11 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
     runinfo_file = tempname() * ".runinfo"
     try
         write(tmpscript, script_content)
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $runinfo_file`
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $runinfo_file`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $runinfo_file`;
-                stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
@@ -471,11 +477,11 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         runinfo_file = tempname() * ".runinfo"
         write(tmpscript, script_content)
 
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $runinfo_file`
         if verbose
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $runinfo_file`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $runinfo_file`;
-                stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
@@ -588,11 +594,11 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         # Run GPEC in subprocess
         project_root = worktree_path
 
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $runinfo_file`
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $runinfo_file`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $runinfo_file`;
-                stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")

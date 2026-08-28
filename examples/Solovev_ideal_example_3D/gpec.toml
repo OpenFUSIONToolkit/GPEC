@@ -10,7 +10,7 @@ psilow = 1e-4                           # Lower limit of normalized poloidal flu
 psihigh = 0.9995                        # Upper limit of normalized poloidal flux
 mpsi = 128                              # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
-newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
+newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
@@ -38,7 +38,7 @@ ucrit = 1e3                   # Column-norm threshold that triggers solution ren
 save_interval = 3             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
-integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
+integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim  = false  # FALSE for limited/analytical equilibria — rationals sparse, dmlim would chop too much edge
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
 

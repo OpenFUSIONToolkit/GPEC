@@ -54,16 +54,16 @@ end
 """
     _chord_solution_at(psi, resnum, odet, nstep) -> (u, du)
 
-Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution:
+Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored solution:
 cubic Hermite for the value, chord slope across the bracketing nodes for the derivative.
-Least accurate method, kept for solution paths outside the forward EL integrator
-(gal-matched, Riccati) whose stored derivatives cover only Ξ′.
+The least accurate of the Ξ′ evaluators, kept as the fallback for a solution whose stored
+Ξ′ cannot be trusted. Currently unused: every basis that reaches the singular-coupling
+loop carries a populated `du_store`, so the gal-native, ideal-EL and kinetic evaluators
+cover all of them.
 """
-function _chord_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
+function _chord_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, nstep::Int)
     isempty(odet.du_store) && error(
-        "_chord_solution_at: no derivative store. The solution is in a basis " *
-        "the Euler-Lagrange kernel cannot be re-applied to (sparse Riccati path); " *
-        "dense Ξ′ requires the Forward integrator."
+        "_chord_solution_at: no derivative store — the solution carries no usable Ξ′."
     )
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
@@ -81,7 +81,7 @@ end
 """
     _gal_solution_at(psi, resnum, odet, nstep) -> (u, du)
 
-Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` for a gal-matched `OdeState`:
+Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` for a gal-matched solution:
 cubic Hermite for the value, and the analytic Ξ′ carried in `du_store` for the
 derivative. Mirrors the `galsol%gal_flag` branch of Fortran `gpeq_sol`, which takes
 Ξ′ from the analytic galerkin derivative rather than differentiating the value
@@ -89,7 +89,7 @@ spline. Differencing `u_store` here would discard that analytic content, and
 near-cancellation in `bwp1` (singfac·Ξ′ against n q′·Ξ, with singfac → 0 at the
 surface) amplifies the resulting error into Δ′ at the outer surfaces.
 """
-function _gal_solution_at(psi::Float64, resnum::Int, odet::OdeState, nstep::Int)
+function _gal_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, nstep::Int)
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
 
@@ -118,7 +118,7 @@ function _solution_at(
     resnum::Int,
     m_res::Int,
     nn::Int,
-    odet::OdeState,
+    odet::SolutionProfiles,
     equil::Equilibrium.PlasmaEquilibrium,
     nstep::Int
 )
@@ -156,12 +156,12 @@ function _solution_at(
 end
 
 """
-    _el_solution_at(psi, resnum, odet, ffit, equil, ffs_intr, nstep) -> (u, du)
+    _el_solution_at(psi, resnum, odet, mats, equil, ffs, nstep) -> (u, du)
 
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution via the
 ideal Euler-Lagrange relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) [Glasser 2016 eqs. 22-24],
 with u₁, u₂ Hermite-interpolated to `psi`. Only valid for ideal runs where
-`ffit.fmats_lower` and `kmats` generated the solution.
+`mats.ideal.F_spline_lower` and `K_spline` generated the solution.
 
 The Hermite slopes need du₂ as well as du₁, and du₂ is not stored: both are evaluated here
 from the derivative kernel at the two bracketing nodes, which is where the handful of
@@ -170,13 +170,13 @@ resonant evaluation points actually need them.
 function _el_solution_at(
     psi::Float64,
     resnum::Int,
-    odet::OdeState,
-    ffit::FourFitVars,
+    odet::SolutionProfiles,
+    mats::MatrixSplines,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal,
+    ffs::ForceFreeStatesResult,
     nstep::Int
 )
-    npert = ffs_intr.numpert_total
+    npert = ffs.numpert_total
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
 
@@ -190,8 +190,8 @@ function _el_solution_at(
     q_hint = Ref(1)
     du_a = zeros(ComplexF64, npert, npert, 2)
     du_b = zeros(ComplexF64, npert, npert, 2)
-    ForceFreeStates.el_derivatives!(du_a, odet.u_store[:, :, :, il], false, equil, ffit, ffs_intr, psi_a, q_hint, hint)
-    ForceFreeStates.el_derivatives!(du_b, odet.u_store[:, :, :, ir], false, equil, ffit, ffs_intr, psi_b, q_hint, hint)
+    ForceFreeStates.el_derivatives!(du_a, odet.u_store[:, :, :, il], false, equil, mats, ffs, psi_a, q_hint, hint)
+    ForceFreeStates.el_derivatives!(du_b, odet.u_store[:, :, :, ir], false, equil, mats, ffs, psi_b, q_hint, hint)
     du1_a = @view du_a[:, :, 1]
     du1_b = @view du_b[:, :, 1]
     du2_a = @view du_a[:, :, 2]
@@ -204,10 +204,10 @@ function _el_solution_at(
 
     # Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) with Q⁻¹ = diag(1/(m − n·q))
     q_e = equil.profiles.q_spline(psi)
-    singfac_inv = vec([1.0 / (m - q_e * n) for m in ffs_intr.mlow:ffs_intr.mhigh, n in ffs_intr.nlow:ffs_intr.nhigh])
+    singfac_inv = vec([1.0 / (m - q_e * n) for m in ffs.mlow:ffs.mhigh, n in ffs.nlow:ffs.nhigh])
     fmat_lower = Matrix{ComplexF64}(undef, npert, npert)
-    ffit.fmats_lower(vec(fmat_lower), psi; hint=hint)
-    ffit.kmats(vec(kmat), psi; hint=hint)
+    mats.ideal.F_spline_lower(vec(fmat_lower), psi; hint=hint)
+    mats.ideal.K_spline(vec(kmat), psi; hint=hint)
     du1_e = u2_e .* singfac_inv
     du1_e .-= kmat * u1_e
     ldiv!(LowerTriangular(fmat_lower), du1_e)
@@ -221,12 +221,12 @@ end
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
         equil::Equilibrium.PlasmaEquilibrium,
-        ForceFreeStates_results::OdeState,
+        solution::SolutionProfiles,
         mthvac::Int,
-        ffs_intr::ForceFreeStatesInternal,
+        ffs::ForceFreeStatesResult,
         intr::PerturbedEquilibriumInternal,
         ctrl::PerturbedEquilibriumControl,
-        ffit::FourFitVars
+        mats::MatrixSplines
     )
 
 Compute singular layer coupling matrices and applied resonant vectors.
@@ -253,16 +253,17 @@ Metadata `[n_rational]`: `rational_psi`, `rational_q`, `rational_m_res`, `ration
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
-    ForceFreeStates_results::OdeState,
+    solution::SolutionProfiles,
     mthvac::Int,
-    ffs_intr::ForceFreeStatesInternal,
+    ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
-    ffit::FourFitVars
+    mats::MatrixSplines
 )
     ctrl.verbose && @info "Computing singular coupling metrics (GPEC method)"
 
-    (; msing, numpert_total, mlow, mhigh, nlow, nhigh) = ffs_intr
+    (; numpert_total, mlow, mhigh, nlow, nhigh) = ffs
+    msing = length(ffs.surfaces)
 
     if msing == 0
         ctrl.verbose && @info "No singular surfaces found. Skipping singular coupling calculation."
@@ -282,7 +283,7 @@ function compute_singular_coupling_metrics!(
     resonant_pairs = Tuple{Int,Int}[]
     for nn in nlow:nhigh
         for s in 1:msing
-            m_res_float = ffs_intr.sing[s].q * nn
+            m_res_float = ffs.surfaces[s].q * nn
             m_res = round(Int, m_res_float)
             abs(m_res_float - m_res) > 1e-6 && continue
             (m_res < mlow || m_res > mhigh) && continue
@@ -321,10 +322,10 @@ function compute_singular_coupling_metrics!(
     # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
     # where edge_mn_k[j] = plasma_response[j,k] / (chi1·singfac_lim[j]·2πi)
     # Matches Fortran gpout_resp: edge_mn = foutmn/(chi1·singfac·twopi·ifac)
-    psi_lim = ForceFreeStates_results.psi_store[ForceFreeStates_results.step]
+    psi_lim = solution.psi_store[solution.step]
     q_lim = equil.profiles.q_spline(psi_lim)
     singfac_lim = [intr.m_modes[j] - intr.n_modes[j] * q_lim for j in 1:numpert_total]
-    u_bnd = ForceFreeStates_results.u_store[:, :, 1, ForceFreeStates_results.step]
+    u_bnd = solution.u_store[:, :, 1, solution.step]
     # Divide each row j by singfac_lim[j] — reshape to column vector so Julia broadcasts row-wise, not column-wise.
     edge_mn = intr.plasma_response ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
     C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
@@ -339,17 +340,15 @@ function compute_singular_coupling_metrics!(
     # a `finally` so an exception in the loop cannot leak the pinned count into the session. The
     # loop is top-level: its threadid()-indexed state must never be nested inside another
     # @threads region.
-    nstep = ForceFreeStates_results.step
-    # ξ′ evaluation preference: ideal EL relation, then interpolated stored RHS for kinetic,
-    # then chord slope for solution paths outside the serial EL integrator.
-    use_du_store = ForceFreeStates_results.du_store_populated
-    use_el = use_du_store && !ffit.kinetic_populated
+    nstep = solution.step
+    # ξ′ evaluation preference: the ideal EL relation, or the interpolated stored RHS for kinetic runs.
+    use_el = mats.kinetic === nothing
     _blas_nthreads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
         Threads.@threads :static for row in 1:length(resonant_pairs)
             (s, nn) = resonant_pairs[row]
-            sing_surf = ffs_intr.sing[s]
+            sing_surf = ffs.surfaces[s]
             m_res = round(Int, sing_surf.q * nn)
 
             resnum = findfirst(j -> intr.m_modes[j] == m_res && intr.n_modes[j] == nn, 1:numpert_total)
@@ -384,20 +383,16 @@ function compute_singular_coupling_metrics!(
             # galerkin Ξ′, ideal runs the EL relation, kinetic runs the stored Ξ′.
             if intr.odet_from_gal
                 # interpolate u and the analytic galerkin dξ/dψ carried in du_store
-                u_l, ud_l = _gal_solution_at(lpsi, resnum, ForceFreeStates_results, nstep)
-                u_r, ud_r = _gal_solution_at(rpsi, resnum, ForceFreeStates_results, nstep)
-            elseif !use_du_store
-                # interpolate u and finite-difference dξ/dψ across the bracketing nodes
-                u_l, ud_l = _chord_solution_at(lpsi, resnum, ForceFreeStates_results, nstep)
-                u_r, ud_r = _chord_solution_at(rpsi, resnum, ForceFreeStates_results, nstep)
+                u_l, ud_l = _gal_solution_at(lpsi, resnum, solution, nstep)
+                u_r, ud_r = _gal_solution_at(rpsi, resnum, solution, nstep)
             elseif use_el
                 # interpolate u and evaluate dξ/dψ from the ideal EL relation
-                u_l, ud_l = _el_solution_at(lpsi, resnum, ForceFreeStates_results, ffit, equil, ffs_intr, nstep)
-                u_r, ud_r = _el_solution_at(rpsi, resnum, ForceFreeStates_results, ffit, equil, ffs_intr, nstep)
+                u_l, ud_l = _el_solution_at(lpsi, resnum, solution, mats, equil, ffs, nstep)
+                u_r, ud_r = _el_solution_at(rpsi, resnum, solution, mats, equil, ffs, nstep)
             else
                 # interpolate u and the stored dξ/dψ, weighted to remove the resonant pole
-                u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, ForceFreeStates_results, equil, nstep)
-                u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, ForceFreeStates_results, equil, nstep)
+                u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
+                u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
             end
 
             q_l = equil.profiles.q_spline(lpsi)
@@ -420,7 +415,7 @@ function compute_singular_coupling_metrics!(
             end
 
             # Inner-layer (cusp-free) penetrated field: bpen[s, j] is linear in the same identity-at-edge
-            # coil-drive columns as the OdeState solutions, so it contracts with C_coeffs exactly like
+            # coil-drive columns as the outer solution, so it contracts with C_coeffs exactly like
             # the outer solution values above (xsp = transpose(u) * ck); /area matches the area-weighted
             # convention of the pointwise row.
             if have_inner_bpen && s <= size(intr.inner_bpen, 1)
@@ -482,7 +477,7 @@ function compute_singular_coupling_metrics!(
     # R = S·A (Σ·√A) is the only place flux briefly appears; it is built from the b̃→b̄ operator S and
     # the scalar surface area A. Done after the applied-vector evaluation above so those physical
     # scalars carry no round-trip noise.
-    rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs_intr)
+    rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs)
     flux_conform = rootarea_to_area_weight .* surface_area
     state.C_resonant_area_weighted_field = state.C_resonant_area_weighted_field * flux_conform
     state.C_resonant_current = state.C_resonant_current * flux_conform

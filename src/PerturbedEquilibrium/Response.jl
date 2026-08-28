@@ -1,7 +1,7 @@
 """
     compute_plasma_response!(
-        state, equil, ForceFreeStates_results, wt0, mthvac, ffs_intr,
-        intr, ctrl, metric, ffit
+        state, equil, solution, wt0, mthvac, ffs,
+        intr, ctrl, metric, mats
     )
 
 Compute plasma response to external forcing using ForceFreeStates eigenmode solutions.
@@ -17,28 +17,28 @@ Implements resp_index=0 calculation from Fortran gpresp:
 function compute_plasma_response!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
-    ForceFreeStates_results::OdeState,
+    solution::SolutionProfiles,
     wt0::Matrix{ComplexF64},
     mthvac::Int,
-    ffs_intr::ForceFreeStatesInternal,
+    ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
     metric::MetricData,
-    ffit::FourFitVars
+    mats::MatrixSplines
 )
     if ctrl.verbose
         @info "Computing plasma response (wt0-based inductance)"
     end
 
     # Build flux matrix from ForceFreeStates eigenmodes [mode × eigenmode]
-    flux_matrix = build_flux_matrix(equil, ForceFreeStates_results, ffs_intr)
+    flux_matrix = build_flux_matrix(equil, solution, ffs)
 
     # Plasma inductance Lambda (wt0 formula, Fortran resp_induct_flag=TRUE default)
-    plasma_inductance = calc_plasma_inductance(wt0, ffs_intr, equil.psio)
+    plasma_inductance = calc_plasma_inductance(wt0, ffs, equil.psio)
 
     # Surface inductance L from vacuum surface-current matrix at psilim.
-    nn = ffs_intr.nlow
-    surface_inductance = calc_surface_inductance(equil, ffs_intr.psilim, mthvac, ffs_intr.mlow:ffs_intr.mhigh, nn)
+    nn = ffs.nlow
+    surface_inductance = calc_surface_inductance(equil, ffs.psilim, mthvac, ffs.mlow:ffs.mhigh, nn)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
@@ -55,7 +55,7 @@ function compute_plasma_response!(
     # field (b̃) space for output (issue #233 / Pharr 2026). Store the b̃→b̄ operator S = Σ/√A
     # and the scalar surface area A so users can recover the area-weighted field (b̄ = S·b̃) or
     # flux (Φ = A·b̄) — see Utils.jl output docs.
-    rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs_intr)
+    rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs)
     field_mats = field_space_response_matrices(plasma_inductance, surface_inductance, permeability, reluctance, rootarea_to_area_weight, surface_area)
     state.plasma_inductance = field_mats.plasma_inductance
     state.surface_inductance = field_mats.surface_inductance
@@ -67,7 +67,7 @@ function compute_plasma_response!(
     # Forcing and response on the control surface. Flux Φ appears only as a brief internal bridge:
     # forcing arrives as Φ_x, the field reconstruction below consumes Φ_tot, and the b̃ spectra are
     # formed via the conform operator R = S·A (Φ = R·b̃).
-    forcing_flux = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
+    forcing_flux = map_forcing_to_eigenmodes(intr.forcing_modes, ffs)
     response_flux = compute_plasma_response_vector(permeability, forcing_flux)
 
     # Output forcing/response in the three Pharr field representations (all tesla):
@@ -98,17 +98,17 @@ function compute_plasma_response!(
     state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(
-        response_flux, flux_matrix, ForceFreeStates_results, equil, ffs_intr, intr,
-        metric, ffit, ctrl
+        response_flux, flux_matrix, solution, equil, ffs, intr,
+        metric, mats, ctrl
     )
 
-    npsi = size(ForceFreeStates_results.u_store, 4)
-    state.psi_grid = ForceFreeStates_results.psi_store[1:npsi]
+    npsi = size(solution.u_store, 4)
+    state.psi_grid = solution.psi_store[1:npsi]
     state.xi_modes = xi_modes
     state.b_modes = b_modes
 
     b_n_modes, xi_n_modes = compute_b_n_xi_n_modes(
-        xi_modes.psi_J, b_modes.psi, ForceFreeStates_results, equil, ffs_intr
+        xi_modes.psi_J, b_modes.psi, solution, equil, ffs
     )
     state.b_n_modes = b_n_modes
     state.xi_n_modes = xi_n_modes
