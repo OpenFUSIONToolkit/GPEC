@@ -270,7 +270,7 @@ function compare_to_golden(q::NamedTuple, g::GoldenValue)
         (q.value_text === nothing || g.value_text === nothing) && return (false, NaN, "missing array")
         got = JSON.parse(q.value_text; allownan=true)
         gold = JSON.parse(g.value_text; allownan=true)
-        length(got) == length(gold) && return _compare_arrays(got, gold, g, within)
+        length(got) == length(gold) && return _compare_arrays(got, gold, g)
         return (false, NaN, "length $(length(gold)) → $(length(got))")
 
     elseif g.value_type == "token"
@@ -287,7 +287,7 @@ function compare_to_golden(q::NamedTuple, g::GoldenValue)
 end
 
 """Worst-element comparison for array quantities, shared by the real and complex encodings."""
-function _compare_arrays(got, gold, g::GoldenValue, within)
+function _compare_arrays(got, gold, g::GoldenValue)
     worst_rel = 0.0
     worst_idx = 0
     all_ok = true
@@ -295,7 +295,9 @@ function _compare_arrays(got, gold, g::GoldenValue, within)
         a = _json_element_abs(gold[i])
         d = _json_element_diff(gold[i], got[i])
         rel = a == 0.0 ? d : d / a
-        ok = d <= g.atol + g.rtol * a
+        # Same non-finite guard as the scalar path: Inf tolerances mean "recorded, never
+        # judged", and Inf*0 = NaN would otherwise mark a zero gold element as failing.
+        ok = !isfinite(g.atol) || !isfinite(g.rtol) || d <= g.atol + g.rtol * a
         ok || (all_ok = false)
         if rel > worst_rel
             worst_rel = rel
@@ -349,7 +351,7 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
             n_fail += 1
             continue
         end
-        # SQLite NULLs surface as , which the === nothing guards in compare_to_golden
+        # SQLite NULLs surface as `missing`, which the === nothing guards in compare_to_golden
         # never match; normalize here as the update path already does.
         q = (label=q_raw.label, value_real=_column(q_raw.value_real, nothing),
              value_int=_column(q_raw.value_int, nothing), value_text=_column(q_raw.value_text, nothing),
