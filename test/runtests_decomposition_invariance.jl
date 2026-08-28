@@ -4,15 +4,11 @@ using TOML
 # Decomposition invariance of the Riccati Δ′ path.
 #
 # The chunked propagator driver reassociates the fundamental-matrix products whenever the chunk
-# decomposition changes: ((A·B)·C)·D becomes (A·B)·(C·D). Floating-point matrix products do not
-# reassociate exactly in general, so Δ′ being reproducible requires more than thread-count
-# independence of the chunk *count* (which is structural: the nchunks=0 target is derived from
-# msing alone and pinned by unit tests in runtests_parallel_integration.jl). This file asserts
-# the end-to-end claim those unit tests cannot: the Δ′ matrix is bit-identical when the same
-# integration is cut into a genuinely different set of chunks.
-#
-# Driven through the public solve API rather than the internal stage sequence, so the test
-# exercises the same path production does instead of a copy of it that can drift from it.
+# decomposition changes, and floating-point products do not reassociate exactly in general — so
+# Δ′ reproducibility is a real end-to-end claim, beyond the structural chunk-count invariance
+# pinned by the unit tests in runtests_parallel_integration.jl. This file asserts it: the Δ′
+# matrix is bit-identical when the same integration is cut into a genuinely different set of
+# chunks. Driven through the public solve API so it exercises the production path itself.
 
 const GP_TI = GeneralizedPerturbedEquilibrium
 
@@ -53,32 +49,27 @@ end
     @test auto.delta_prime !== nothing
     msing = size(auto.delta_prime.matrix, 1)
 
-    # The nchunks=0 target, mirroring balance_integration_chunks' internal formula (the same
-    # mirroring runtests_parallel_integration.jl does). Invariance is asserted ABOVE this target
-    # only: requesting fewer chunks than the msing-derived minimum is not merely a different
-    # decomposition but a structurally deficient one -- measured, auto(53) vs 29 moves Δ′ by
-    # ~1e-6 relative on this deck, while auto(53) vs 64 is bit-identical. The floor exists to
-    # give the crossings room, so below it the comparison is not like-for-like.
+    # The nchunks=0 target, mirroring balance_integration_chunks' internal formula (as
+    # runtests_parallel_integration.jl does). Invariance is asserted ABOVE this floor only:
+    # fewer chunks than the msing-derived minimum is not a different decomposition but a
+    # structurally deficient one (the floor gives the rational-surface crossings room).
     auto_target = max(2 * msing + 3, 8 * (msing + 1) + msing)
     finer = _solve_at_nchunks(dir, auto_target + 11)
     @test finer.delta_prime !== nothing
 
-    # The premise: the two runs must be genuinely different computations, otherwise the equality
-    # below is vacuous and this file silently stops testing anything. et[1] is the witness —
-    # it is decomposition-SENSITIVE on the unified driver (measured 2.7e-8 relative), so its
-    # differing is evidence the decompositions differed. A failure here means either the chunk
-    # steering stopped taking effect, or exact et[1] invariance was restored; both want a look
-    # before this file is trusted again. (The value of et[1] is pinned by the regression
-    # harness, not here — this is a witness, not an assertion about the physics.)
+    # Premise check: the two runs must be genuinely different computations, or the equality
+    # below is vacuous. et[1] is decomposition-SENSITIVE on the unified driver, so its differing
+    # witnesses that the decompositions differed; a failure here means the chunk steering
+    # stopped taking effect (or et[1] invariance was restored) and wants a look. Its value is
+    # pinned by the regression harness, not here.
     @test auto.free_boundary !== nothing && finer.free_boundary !== nothing
     @test finer.free_boundary.et[1] != auto.free_boundary.et[1]
 
     @test size(finer.delta_prime.matrix) == size(auto.delta_prime.matrix)
 
-    # Δ′ is bit-identical, not approximate: a tolerance would hide exactly the reassociation
-    # drift this test exists to catch, and the measured behaviour is exact equality. The
-    # element-wise `===` is deliberately paired with the whole-matrix `==`: `===` holds for
-    # NaN === NaN, so the `==` is what fails if the computation degrades to NaN.
+    # Bit-identical, not approximate: a tolerance would hide exactly the reassociation drift
+    # this test exists to catch. The element-wise `===` pairs with the whole-matrix `==`
+    # because NaN === NaN — the `==` is what fails if the computation degrades to NaN.
     for j in 1:size(auto.delta_prime.matrix, 1)
         @test finer.delta_prime.matrix[j, j] === auto.delta_prime.matrix[j, j]
     end
