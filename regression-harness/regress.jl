@@ -268,6 +268,7 @@ function main(args=ARGS)
         n_failed = 0
         n_changed = 0
         n_golden_fail = 0
+        n_golden_crashed = 0
         n_untracked = 0
         n_checked = 0
         n_no_golden = 0
@@ -293,6 +294,7 @@ function main(args=ARGS)
             elseif opts.check
                 summary = report_golden_check(db, case_spec, resolved_refs[1].commit_hash)
                 n_golden_fail += summary.n_fail
+                n_golden_crashed += summary.n_run_failed
                 n_untracked += summary.n_untracked
                 has_golden(case_spec.name) ? (n_checked += 1) : (n_no_golden += 1)
             else
@@ -309,6 +311,10 @@ function main(args=ARGS)
 
         if n_failed > 0
             @error "$n_failed run(s) failed — see the reports above"
+            exit(1)
+        end
+        if n_golden_crashed > 0
+            @error "$n_golden_crashed case(s) crashed before producing results — see the reports above (a crash, not a tolerance failure)"
             exit(1)
         end
         if n_golden_fail > 0
