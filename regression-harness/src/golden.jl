@@ -311,9 +311,11 @@ end
 """
 Compare a case's fresh run against its golden file and print the report.
 
-Returns `(n_pass, n_fail, n_untracked, n_informational)`. Only gating classes can fail;
-`diagnostic` and `unconverged` quantities are shown with their deviation and marked as
-informational, so a reader sees them move without the run failing on them.
+Returns `(n_pass, n_fail, n_untracked, n_informational, n_run_failed)`. Only gating classes
+can fail; `diagnostic` and `unconverged` quantities are shown with their deviation and marked
+as informational, so a reader sees them move without the run failing on them. A run that
+crashed outright is counted in `n_run_failed`, never in `n_fail`, so the caller can exit with
+a crash message instead of a tolerance message.
 """
 function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::String)
     golden = load_golden(case_spec.name)
@@ -322,7 +324,7 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
     if golden === nothing
         println("  No golden file at $(golden_path(case_spec.name)) — nothing to check against.")
         println("  Generate one with:  regress --update-golden --cases $(case_spec.name) --reason \"...\"")
-        return (n_pass=0, n_fail=0, n_untracked=0, n_informational=0)
+        return (n_pass=0, n_fail=0, n_untracked=0, n_informational=0, n_run_failed=0)
     end
 
     quantities = get_quantities(db, commit_hash, case_spec.name)
@@ -330,7 +332,7 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
     if info !== nothing && !info.success
         println("  RUN FAILED — nothing to compare (this is a crash, not a tolerance failure):")
         println("  $(_short_err(info.error_msg))")
-        return (n_pass=0, n_fail=1, n_untracked=0, n_informational=0)
+        return (n_pass=0, n_fail=0, n_untracked=0, n_informational=0, n_run_failed=1)
     end
 
     rows = Vector{Vector{String}}()
@@ -419,7 +421,7 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
     n_untracked > 0 && push!(parts, "$n_untracked untracked")
     println("Summary: ", join(parts, ", "))
     println()
-    return (n_pass=n_pass, n_fail=n_fail, n_untracked=n_untracked, n_informational=n_informational)
+    return (n_pass=n_pass, n_fail=n_fail, n_untracked=n_untracked, n_informational=n_informational, n_run_failed=0)
 end
 
 """
