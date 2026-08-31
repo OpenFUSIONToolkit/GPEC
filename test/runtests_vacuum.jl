@@ -778,6 +778,50 @@
             @test isapprox(wv, wv', rtol=1e-12)
         end
 
+        @testset "compute_vacuum_response 3D compute_Iv=true" begin
+            num_modes(inp) = length(inp.m_modes) * length(inp.n_modes)
+            for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.3))
+                inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+                (; I_v) = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
+                @test size(I_v) == (num_modes(inputs), num_modes(inputs))
+                @test all(isfinite, I_v)
+                @test !all(iszero, I_v)
+                @test isapprox(I_v, I_v', rtol=1e-8)
+            end
+
+            # A reused buffer must not keep a stale I_v from an earlier compute_Iv=true solve
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            vac = GeneralizedPerturbedEquilibrium.Vacuum.VacuumResponse(inputs)
+            compute_vacuum_response!(vac, inputs, WallShapeSettings(shape="nowall"); compute_Iv=true)
+            @test !all(iszero, vac.I_v)
+            compute_vacuum_response!(vac, inputs, WallShapeSettings(shape="nowall"))
+            @test all(iszero, vac.I_v)
+        end
+
+        # The 3D interior operator is the 2D one shifted by the same scalar, D_int = D_ext - 2I, so an
+        # axisymmetric boundary driven through both paths must give the same Iᵛ. Tolerances are loose
+        # because Iᵛ is a difference of two solves, which amplifies the 3D toroidal discretization error
+        # (~8e-3 on wv here) by an order of magnitude; a wrong shift or sign gives O(1) instead.
+        @testset "compute_vacuum_response 3D I_v matches the 2D path" begin
+            mtheta = 48
+            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            # Up-down asymmetric so Iᵛ is genuinely complex and the θ_VAC → -θ_VAC conjugation is observable
+            R = 1.7 .+ 0.3 .* cos.(θ)
+            Z = 0.3 .* sin.(θ) .+ 0.08 .* sin.(2θ) .+ 0.08 .* cos.(θ)
+            # Arrays are reversed for VACUUM's CW θ, as the equilibrium-based constructor does
+            make(nzeta) = VacuumInput(x=collect(reverse(R)), z=collect(reverse(Z)), ν=zeros(mtheta),
+                mtheta_in=mtheta, nzeta_in=1, m_modes=[-2, -1, 0, 1, 2], n_modes=[1], mtheta=mtheta, nzeta=nzeta)
+            nowall = WallShapeSettings(shape="nowall")
+
+            r2d = compute_vacuum_response(make(1), nowall; compute_Iv=true)
+            r3d = compute_vacuum_response(make(mtheta), nowall; compute_Iv=true)
+
+            @test norm(r3d.wv - r2d.wv) / norm(r2d.wv) < 2e-2
+            @test norm(r3d.I_v - r2d.I_v) / norm(r2d.I_v) < 0.2
+            # The imaginary parts must agree in sign, not be opposed — this is what pins the conjugation
+            @test norm(imag.(r3d.I_v) - imag.(r2d.I_v)) < norm(imag.(r3d.I_v) + imag.(r2d.I_v))
+        end
+
         # Field-periodic (layer-2) reduction: an nfp-periodic boundary makes the boundary-integral
         # operators block-circulant, so the reduced per-residue-class solve must reproduce the full
         # torus result (the n_stride=1 bridge case spans several residue classes mod nfp).
@@ -848,6 +892,27 @@
 
             # Hermitian part is enforced after assembly on both paths
             @test isapprox(wv_red, wv_red', rtol=1e-12)
+
+            # The interior solve is a scalar shift of the exterior one, so it decomposes by the same
+            # residue class and Iᵛ must reduce exactly like wv does.
+            Iv_red = compute_vacuum_response(inputs_red, wall_settings; compute_Iv=true).I_v
+            Iv_full = compute_vacuum_response(inputs_full, wall_settings; compute_Iv=true).I_v
+            @test all(isfinite, Iv_red)
+            @test !all(iszero, Iv_red)
+            @test isapprox(Iv_red, Iv_full; rtol=1e-6, atol=1e-7)
+            for in1 in eachindex(n_modes), in2 in eachindex(n_modes)
+                if classes[in1] != classes[in2]
+                    @test all(iszero, Iv_red[((in1-1)*mpert+1):(in1*mpert), ((in2-1)*mpert+1):(in2*mpert)])
+                end
+            end
+
+            # A wall adds a second source block to the operator, so repeat the check with one present:
+            # the field-period fold has to land the wall columns in the right block for both to agree.
+            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            vac_red_wall = compute_vacuum_response(inputs_red, walled; compute_Iv=true)
+            vac_full_wall = compute_vacuum_response(inputs_full, walled; compute_Iv=true)
+            @test isapprox(vac_red_wall.wv, vac_full_wall.wv; rtol=1e-6, atol=1e-7)
+            @test isapprox(vac_red_wall.I_v, vac_full_wall.I_v; rtol=1e-6, atol=1e-7)
         end
 
         @testset "Kernel3D laplace_kernel" begin
