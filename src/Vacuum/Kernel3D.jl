@@ -321,7 +321,7 @@ function KernelWorkspace(PATCH_DIM::Int, RAD_DIM::Int, ANG_DIM::Int)
 end
 
 """
-    compute_3D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+    compute_3D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases)
 
 Compute boundary integral kernel matrices for 3D geometries with the singular correction
 algorithm from [Malhotra Plasma Phys. and Cont. Fusion 2019 024004].
@@ -334,7 +334,10 @@ grad_greenfunction is the double-layer kernel matrix, where each entry is
 ∇_{x_src} φ(x_obs, x_src) · n_src, and greenfunction is the single-layer kernel matrix,
 where each entry is φ(x_obs, x_src).
 
-Takes advantage of field periodicity to evaluate the kernel only over a single field period.
+Takes advantage of field periodicity to evaluate the kernel only over a single field period, in both
+the observer and the source index: a source in field period `d` is accumulated onto the period-0 column
+with weight `phases[d+1]`, so the block-circulant reduction is applied as the kernel is written and the
+full-torus source blocks are never stored.
 
 # Arguments
 
@@ -345,18 +348,21 @@ Takes advantage of field periodicity to evaluate the kernel only over a single f
   - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
   - `RAD_DIM`: Polar radial quadrature order. Angular order = 2 * RAD_DIM
   - `INTERP_ORDER`: Lagrange interpolation order, must be ≤ (2 * PATCH_RAD + 1)
+  - `phases`: Field-period phases `ω^{k d}` for `d = 0 … nfp-1`, with `nfp = length(phases)`. Pass the
+    real `[1.0]` for a single period, which keeps the output matrices real.
 """
 function compute_3D_kernel_matrices!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
+    grad_greenfunction::AbstractMatrix{<:Number},
+    greenfunction::AbstractMatrix{<:Number},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,
     RAD_DIM::Int,
-    INTERP_ORDER::Int
+    INTERP_ORDER::Int,
+    phases::AbstractVector{<:Number}
 )
     num_points = observer.mtheta * observer.nzeta
-    n_obs = size(greenfunction, 1) # num_points ÷ nfp
+    num_points_per_fp = num_points ÷ length(phases) # observer/source points in one field period
     dθdζ = 4π^2 / num_points
 
     # Get block of grad green function matrix
@@ -364,13 +370,15 @@ function compute_3D_kernel_matrices!(
     row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
     grad_greenfunction_block = view(
         grad_greenfunction,
-        ((row_index-1)*n_obs+1):(row_index*n_obs),
-        ((col_index-1)*num_points+1):(col_index*num_points)
+        ((row_index-1)*num_points_per_fp+1):(row_index*num_points_per_fp),
+        ((col_index-1)*num_points_per_fp+1):(col_index*num_points_per_fp)
     )
 
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry3D
-    populate_greenfunction && fill!(greenfunction, 0.0)
+    # All field periods fold onto the same columns, so every write below accumulates
+    fill!(grad_greenfunction_block, 0)
+    populate_greenfunction && fill!(greenfunction, 0)
 
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
     if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
@@ -387,7 +395,7 @@ function compute_3D_kernel_matrices!(
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
-    Threads.@threads for idx_obs in 1:n_obs
+    Threads.@threads for idx_obs in 1:num_points_per_fp
         # Get thread-local workspace
         ws = workspaces[Threads.threadid()]
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
@@ -408,11 +416,12 @@ function compute_3D_kernel_matrices!(
             n_src = @view source.normal[idx_src, :]
             far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], r_src[1], r_src[2], r_src[3], n_src[1], n_src[2], n_src[3])
 
-            # Apply weights (periodic trapezoidal rule = constant weights)
+            # Periodic trapezoidal rule (constant weights); fold this source's field period onto period 0
+            d, idx_col = fldmod1(idx_src, num_points_per_fp)
             if populate_greenfunction
-                greenfunction[idx_obs, idx_src] = far_single * dθdζ
+                greenfunction[idx_obs, idx_col] += phases[d] * (far_single * dθdζ)
             end
-            grad_greenfunction_block[idx_obs, idx_src] = far_double * dθdζ
+            grad_greenfunction_block[idx_obs, idx_col] += phases[d] * (far_double * dθdζ)
         end
 
         # ============================================================
@@ -458,6 +467,7 @@ function compute_3D_kernel_matrices!(
             idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
             idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
+            d, idx_col = fldmod1(idx_src, num_points_per_fp)
 
             # Remainder of far-field contribution on the singular grid: Gpou = -χ
             r_src = @view source.r[idx_src, :]
@@ -466,20 +476,20 @@ function compute_3D_kernel_matrices!(
 
             # Apply near + far contributions
             if populate_greenfunction
-                greenfunction[idx_obs, idx_src] += M_grid_single[i, j] + far_single * Gpou[i, j] * dθdζ
+                greenfunction[idx_obs, idx_col] += phases[d] * (M_grid_single[i, j] + far_single * Gpou[i, j] * dθdζ)
             end
-            grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double * Gpou[i, j] * dθdζ
+            grad_greenfunction_block[idx_obs, idx_col] += phases[d] * (M_grid_double[i, j] + far_double * Gpou[i, j] * dθdζ)
         end
     end
 
-    # Use the same normalization as in the 2D kernel so we can just add I to the diagonal
-    # This makes the grri logic identical to the 2D kernel.
+    # Normalize so the Green's-identity term below is a unit shift. The exterior/interior jump is
+    # then 2I, the same scalar shift the 2D kernel carries, so the grri logic is identical.
     grad_greenfunction_block ./= 2π
     populate_greenfunction && (greenfunction ./= 2π)
 
     # Add the term that comes from the volume integral of Green's identity
     if typeof(source) == typeof(observer)
-        for i in 1:n_obs
+        for i in 1:num_points_per_fp
             grad_greenfunction_block[i, i] += 1.0
         end
     end
