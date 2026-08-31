@@ -192,7 +192,7 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
     # Full-torus geometry for source surface; observers are restricted to one field period
     full = expand_field_periods(inputs)
     plasma_surf = PlasmaGeometry3D(full)
-    wall = WallGeometry3D(full, wall_settings)
+    wall = WallGeometry3D(full, plasma_surf, wall_settings)
 
     num_points_per_fp = mtheta * nzeta # points per field period
     num_points = num_points_per_fp * nfp # full-torus point count
