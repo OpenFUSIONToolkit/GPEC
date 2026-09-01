@@ -915,6 +915,84 @@
             @test isapprox(vac_red_wall.I_v, vac_full_wall.I_v; rtol=1e-6, atol=1e-7)
         end
 
+        @testset "compute_vacuum_response 3D stellarator symmetry" begin
+            # Rotating ellipse: R(-θ,-ζ) = R(θ,ζ) and Z(-θ,-ζ) = -Z(θ,ζ), so the surface is
+            # stellarator symmetric. Adding `odd` breaks that symmetry without changing anything else.
+            _stell_boundary(; mtheta, nzeta_p, nfp, R0=1.7, a=0.3, b=0.09, odd=0.0) = begin
+                X = Float64[]
+                Y = Float64[]
+                Z = Float64[]
+                for j in 1:nzeta_p
+                    ζ = (j - 1) * 2π / (nzeta_p * nfp)
+                    for i in 1:mtheta
+                        θi = (i - 1) * 2π / mtheta
+                        R = R0 + a * cos(θi) + b * cos(θi - nfp * ζ) + odd * sin(θi - nfp * ζ)
+                        push!(X, R * cos(ζ))
+                        push!(Y, R * sin(ζ))
+                        push!(Z, -a * sin(θi) + b * sin(θi - nfp * ζ) + odd * cos(2θi - nfp * ζ))
+                    end
+                end
+                return X, Y, Z
+            end
+            _stell_inputs(; mtheta, nzeta_p, nfp, n_modes, odd=0.0) = begin
+                X, Y, Z = _stell_boundary(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, odd=odd)
+                return VacuumInput(
+                    x=X, y=Y, z=Z,
+                    mtheta_in=mtheta, nzeta_in=nzeta_p,
+                    m_modes=collect(-1:1), n_modes=n_modes,
+                    mtheta=mtheta, nzeta=nzeta_p,
+                    nfp=nfp
+                )
+            end
+
+            mtheta, nzeta_p = 24, 8
+            nowall = WallShapeSettings(shape="nowall")
+            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+
+            # The whole item rests on the operator inheriting the involution, so assert it directly.
+            inputs = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1])
+            full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inputs)
+            plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(full)
+            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(full, plasma, walled)
+            npts = plasma.mtheta * plasma.nzeta
+            σ_full = [mod1(2 - mod1(p, plasma.mtheta), plasma.mtheta) +
+                      plasma.mtheta * (mod1(2 - ((p - 1) ÷ plasma.mtheta + 1), plasma.nzeta) - 1) for p in 1:npts]
+            D = zeros(npts, npts)
+            S = zeros(npts, npts)
+            GeneralizedPerturbedEquilibrium.Vacuum.compute_3D_kernel_matrices!([D], [S], plasma, plasma, 11, 20, 5, [1.0])
+            @test isapprox(D[σ_full, σ_full], D; rtol=1e-9, atol=1e-9 * maximum(abs, D))
+            @test isapprox(S[σ_full, σ_full], S; rtol=1e-9, atol=1e-9 * maximum(abs, S))
+
+            # Detection: symmetric surfaces are recognised, an odd-parity perturbation is not
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_involution(plasma, wall, 3) !== nothing
+            asym = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1], odd=0.07)
+            asym_full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(asym)
+            asym_plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(asym_full)
+            asym_wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(asym_full, asym_plasma, walled)
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_involution(asym_plasma, asym_wall, 3) === nothing
+
+            # The symmetry-adapted solve must reproduce the untransformed one. nfp = 1 and k = 0 split
+            # into two real half-size blocks; k ≠ 0 becomes real at full size; nfp = 4, k = 2 is the
+            # self-conjugate class that needs the signed involution rather than the half-twist.
+            for (nfp, n_modes, wall_settings) in [
+                (1, [1], nowall), (1, [1], walled),
+                (3, [0], walled), (3, [1], nowall), (3, [1], walled),
+                (3, [1, 2, 3], walled), (4, [2], walled), (2, [1], walled)
+            ]
+                inp = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=n_modes)
+                sym = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=true)
+                ref = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=false)
+                @test isapprox(sym.wv, ref.wv; rtol=1e-9, atol=1e-9 * maximum(abs, ref.wv))
+                @test isapprox(sym.I_v, ref.I_v; rtol=1e-9, atol=1e-9 * maximum(abs, ref.I_v))
+            end
+
+            # An asymmetric boundary must fall through to exactly the untransformed solve
+            sym = compute_vacuum_response(asym, walled; compute_Iv=true, use_symmetry=true)
+            ref = compute_vacuum_response(asym, walled; compute_Iv=true, use_symmetry=false)
+            @test sym.wv == ref.wv
+            @test sym.I_v == ref.I_v
+        end
+
         @testset "Kernel3D laplace_kernel" begin
             G, K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_kernel(1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             # Kernel returns 1/|r_obs - r_src| (4π factor applied elsewhere in BIE)

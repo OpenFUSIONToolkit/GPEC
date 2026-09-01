@@ -13,6 +13,7 @@ using ..Utilities.FourierTransforms: FourierTransform, compute_fourier_coefficie
 
 include("Utilities.jl")
 include("DataTypes.jl")
+include("Symmetry3D.jl")
 include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
@@ -131,7 +132,7 @@ Green's functions are internal scratch only.
             grad_green_interior .= grad_green
 
             # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); the solve gives
-            # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites grad_green to save memory.
+            # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites the block to save memory.
             ldiv!(lu!(grad_green), grre)
 
             # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
@@ -168,7 +169,7 @@ Green's functions are internal scratch only.
 end
 
 """
-    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true)
 
 3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction.
 
@@ -184,11 +185,23 @@ basis, `M = mtheta·nzeta`), so the routine loops over classes exactly as the 2D
 decoupled `n`. The phase sum is folded into the kernel write, so only the reduced `[nb·M × nb·M]`
 operator is ever stored; for `nfp == 1` every phase is unity and the operators stay real.
 
+When both surfaces are stellarator symmetric the class operator is additionally transformed by the
+[`StellaratorBasis`](@ref) for that class, which makes it real and — for a self-conjugate class —
+splits it into two blocks of roughly half the size. That halves the operator memory and the kernel
+work, and cuts the factorization ~2.6-2.8×. Pass `use_symmetry=false` to force the untransformed
+solve; a boundary that fails the symmetry test falls through to it automatically.
+
 With `compute_Iv=true` each class also solves the interior operator `D_int = D_ext - 2I`, as in 2D.
-That shift is block-diagonal in the field-period index, so it enters only the `d = 0` block and the
-reduction stays exact.
+That shift is block-diagonal in the field-period index and invariant under the basis change, so both
+reductions stay exact.
 """
-@with_pool pool function _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+@with_pool pool function _compute_vacuum_response_3d!(
+    vac_data::VacuumResponse,
+    inputs::VacuumInput,
+    wall_settings::WallShapeSettings;
+    compute_Iv::Bool=false,
+    use_symmetry::Bool=true
+)
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
@@ -212,66 +225,125 @@ reduction stays exact.
     RAD_DIM = 20
     INTERP_ORDER = 5
 
-    # Work matrices, real for nfp == 1 where every field-period phase is unity
-    T = nfp == 1 ? Float64 : ComplexF64
-    grad_green = zeros!(pool, T, n_obs, nb * num_points_per_fp) # reduced double-layer D̂ₖ (with +I on the diagonals)
-    green_temp = zeros!(pool, T, n_obs, num_points_per_fp)      # reduced single-layer Ŝₖ (plasma sources only)
+    # Stellarator symmetry halves both the operator and the kernel work when the surfaces allow it
+    σ = use_symmetry ? stellarator_involution(plasma_surf, wall, nfp) : nothing
+    classes = unique(mod.(n_modes, nfp))
+    bases = [σ === nothing ? nothing : StellaratorBasis(σ, mtheta, k, nfp) for k in classes]
+    block_sizes = [b === nothing ? [num_points_per_fp] : b.block_size for b in bases]
+
+    # One flat buffer per operator, carved into this class's blocks each pass. Sized for the widest
+    # class so the pool does not grow with the number of classes.
+    T = σ === nothing ? (nfp == 1 ? Float64 : ComplexF64) : Float64
+    grad_len = maximum(sum((nb * sz)^2 for sz in szs) for szs in block_sizes)
+    green_len = maximum(sum(nb * sz * sz for sz in szs) for szs in block_sizes)
+    grad_buffer = zeros!(pool, T, grad_len)
+    green_buffer = zeros!(pool, T, green_len)
+    interior_buffer = compute_Iv ? zeros!(pool, T, grad_len) : zeros!(pool, T, 0)
     grre = zeros!(pool, ComplexF64, n_obs, mpert * length(n_modes))
     grri = compute_Iv ? similar!(pool, grre) : zeros!(pool, ComplexF64, 0, 0)
-    grad_green_interior = compute_Iv ? similar!(pool, grad_green) : zeros!(pool, T, 0, 0)
+    basis_buffer = zeros!(pool, ComplexF64, mpert * length(n_modes), σ === nothing ? 0 : num_points_per_fp)
+
+    # Carve a flat buffer into this class's blocks; a reshaped contiguous view stays strided, so the
+    # factorizations and matrix products below stay on the BLAS path.
+    function carve(buffer, szs, ncols)
+        offsets = cumsum([0; [nb * sz * ncols(sz) for sz in szs]])
+        return [reshape(view(buffer, (offsets[i]+1):offsets[i+1]), nb * szs[i], ncols(szs[i])) for i in eachindex(szs)]
+    end
 
     # Loop over all decoupled toroidal residue classes
-    for k in unique(mod.(n_modes, nfp))
+    for (idx_k, k) in enumerate(classes)
         cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
         # A contiguous class (always so for nfp == 1) keeps the basis and output views strided, and so on the BLAS path
         mode_cols = length(cols) == cols[end] - cols[1] + 1 ? (cols[1]:cols[end]) : cols
         # Diagonal block of wv (and I_v when requested)
         wv_block = @view vac_data.wv[mode_cols, mode_cols]
         E = @view exp_mn_basis[mode_cols, :]
-        phases = T[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
-        grre_k = @view grre[:, 1:length(mode_cols)]
+        sym = bases[idx_k]
+        szs = block_sizes[idx_k]
+
+        # Phases are real whenever ω^k = ±1, which keeps the whole class on the real BLAS path
+        phases = if (σ === nothing ? nfp == 1 : mod(2k, nfp) == 0)
+            sgn = mod(2k, nfp) == 0 && isodd(2k ÷ nfp) ? -1.0 : 1.0
+            Float64[sgn^d for d in 0:(nfp-1)]
+        else
+            ComplexF64[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
+        end
+
+        grad_blocks = carve(grad_buffer, szs, sz -> nb * sz)
+        green_blocks = carve(green_buffer, szs, sz -> sz)
 
         # Plasma–Plasma block
-        compute_3D_kernel_matrices!(grad_green, view(green_temp, 1:num_points_per_fp, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases)
+        compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
 
         if !wall.nowall
             # Plasma–Wall block
-            compute_3D_kernel_matrices!(grad_green, view(green_temp, 1:num_points_per_fp, :), plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases)
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
             # Wall–Plasma block
-            compute_3D_kernel_matrices!(grad_green, view(green_temp, (num_points_per_fp+1):n_obs, :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases)
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
             # Wall–Wall block
-            compute_3D_kernel_matrices!(grad_green, view(green_temp, (num_points_per_fp+1):n_obs, :), wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases)
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
         end
 
-        # Project observers onto source basis exp(i(mθ-nζ)); D⁻¹ acts on rows, so this commutes with the solve
-        mul!(grre_k, green_temp, E')
+        # Mode basis in the symmetry-adapted basis; Ẽ = E·U carries the transform through the solve
+        mode_basis = if sym === nothing
+            [E]
+        else
+            mb = [view(basis_buffer, 1:length(mode_cols), (sum(szs[1:(i-1)])+1):sum(szs[1:i])) for i in eachindex(szs)]
+            transform_mode_basis!(mb, E, sym)
+            mb
+        end
+
+        interior_blocks = compute_Iv ? carve(interior_buffer, szs, sz -> nb * sz) : grad_blocks
+
+        row_offset = 0
+        for (b, sz) in enumerate(szs)
+            nrow = nb * sz
+            rows = (row_offset+1):(row_offset+nrow)
+            Ẽ = mode_basis[b]
+            grre_k = @view grre[rows, 1:length(mode_cols)]
+
+            # The mode basis acts on columns and D⁻¹ on rows, so (D⁻¹S)Eᴴ == D⁻¹(SEᴴ): projecting the
+            # RHS before the solve is exact and carries this class's modes instead of one column per point.
+            mul!(grre_k, green_blocks[b], Ẽ')
+
+            if compute_Iv
+                # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
+                grri_k = @view grri[rows, 1:length(mode_cols)]
+                grri_k .= grre_k
+                interior_blocks[b] .= grad_blocks[b]
+
+                # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); the solve gives
+                # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites the block to save memory.
+                ldiv!(lu!(grad_blocks[b]), grre_k)
+
+                # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
+                # boundary limits is 2I here, giving the vacuum-inside potential grri = χ^(vi).
+                for i in 1:nrow
+                    interior_blocks[b][i, i] -= 2.0
+                end
+                ldiv!(lu!(interior_blocks[b]), grri_k)
+
+                # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), accumulated over the parity blocks
+                g_diff = @view grri_k[1:sz, :]
+                g_diff .= @view(grre_k[1:sz, :]) .- g_diff
+                mul!(@view(vac_data.I_v[mode_cols, mode_cols]), Ẽ, g_diff, 1, 1)
+            else
+                # Only need exterior system for wv
+                ldiv!(lu!(grad_blocks[b]), grre_k)
+            end
+
+            # Project exterior kernel onto observer basis exp(-i(mθ-nζ)), summed over the blocks
+            mul!(wv_block, Ẽ, @view(grre_k[1:sz, :]), 1, 1)
+            row_offset += nrow
+        end
+        wv_block .*= 4π^2 / num_points_per_fp
 
         if compute_Iv
-            # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
-            grri_k = @view grri[:, 1:length(mode_cols)]
-            grri_k .= grre_k
-            grad_green_interior .= grad_green
-
-            # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); the solve gives
-            # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites grad_green to save memory.
-            ldiv!(lu!(grad_green), grre_k)
-
-            # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
-            # boundary limits is 2I here, giving the vacuum-inside potential grri = χ^(vi).
-            for i in 1:n_obs
-                grad_green_interior[i, i] -= 2.0
-            end
-            ldiv!(lu!(grad_green_interior), grri_k)
-
-            _fill_Iv_block!(@view(vac_data.I_v[mode_cols, mode_cols]), E, grre_k, grri_k, num_points_per_fp)
-        else
-            # Only need exterior system for wv
-            ldiv!(lu!(grad_green), grre_k)
+            # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame, and normalize
+            Iv_block = @view vac_data.I_v[mode_cols, mode_cols]
+            conj!(Iv_block)
+            Iv_block ./= num_points_per_fp
         end
-
-        # Project exterior kernel onto observer basis exp(-i(mθ-nζ)) and scale to get the response matrix
-        mul!(wv_block, E, @view(grre_k[1:num_points_per_fp, :]))
-        wv_block .*= 4π^2 / num_points_per_fp
     end
 
     # Remove any non-Hermitian residual from Hermitian matrices due to discretization
@@ -284,31 +356,31 @@ reduction stays exact.
 end
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false) -> VacuumResponse
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true) -> VacuumResponse
 
 Compute the vacuum response for the given inputs. Allocating wrapper around
 [`compute_vacuum_response!`](@ref); pass a preallocated [`VacuumResponse`](@ref) to that method
 instead when reusing storage across calls. Pass `compute_Iv=true` to additionally populate the
-surface-current matrix `I_v`.
+surface-current matrix `I_v`, and `use_symmetry=false` to skip the 3D stellarator-symmetry solve.
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false, use_symmetry::Bool=true)
     vac = VacuumResponse(inputs)
-    compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv)
+    compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv, use_symmetry)
     return vac
 end
 
 """
-    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true)
 
 In-place variant that populates the arrays of an existing [`VacuumResponse`](@ref). Dispatches on
 dimensionality only: 2D (`inputs.nzeta == 1`) routes to [`_compute_vacuum_response_2d!`], 3D to
-[`_compute_vacuum_response_3d!`].
+[`_compute_vacuum_response_3d!`]. `use_symmetry` applies to the 3D path only.
 """
-function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false, use_symmetry::Bool=true)
     if inputs.nzeta == 1
         _compute_vacuum_response_2d!(vac_data, inputs, wall_settings; compute_Iv)
     else
-        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings; compute_Iv)
+        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings; compute_Iv, use_symmetry)
     end
 end
 
