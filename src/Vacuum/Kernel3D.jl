@@ -121,9 +121,11 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
         x0 = 0.5 + 0.5 * qx[ir] * cos(dθ * (ia - 1))
         x1 = 0.5 + 0.5 * qx[ir] * sin(dθ * (ia - 1))
 
-        # Lower-left corner indices of INTERP_ORDER × INTERP_ORDER stencil centered on (x0,x1)
-        y0 = clamp(trunc(Int, x0 * (PATCH_DIM - 1) - (INTERP_ORDER - 1) ÷ 2), 0, PATCH_DIM - INTERP_ORDER)
-        y1 = clamp(trunc(Int, x1 * (PATCH_DIM - 1) - (INTERP_ORDER - 1) ÷ 2), 0, PATCH_DIM - INTERP_ORDER)
+        # Lower-left corner indices of INTERP_ORDER × INTERP_ORDER stencil centered on (x0,x1).
+        # Round to the nearest node before offsetting so the selection is equivariant under the patch's
+        # π-rotation, which is what lets a stellarator-symmetric surface produce a symmetric operator.
+        y0 = clamp(round(Int, x0 * (PATCH_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, PATCH_DIM - INTERP_ORDER)
+        y1 = clamp(round(Int, x1 * (PATCH_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, PATCH_DIM - INTERP_ORDER)
 
         # Local coordinates within INTERP_ORDER×INTERP_ORDER stencil, normalized to [0,1]
         z0 = (x0 * (PATCH_DIM - 1) - y0) * h
@@ -321,7 +323,7 @@ function KernelWorkspace(PATCH_DIM::Int, RAD_DIM::Int, ANG_DIM::Int)
 end
 
 """
-    compute_3D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+    compute_3D_kernel_matrices!(grad_blocks, green_blocks, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym=nothing)
 
 Compute boundary integral kernel matrices for 3D geometries with the singular correction
 algorithm from [Malhotra Plasma Phys. and Cont. Fusion 2019 024004].
@@ -334,43 +336,53 @@ grad_greenfunction is the double-layer kernel matrix, where each entry is
 ∇_{x_src} φ(x_obs, x_src) · n_src, and greenfunction is the single-layer kernel matrix,
 where each entry is φ(x_obs, x_src).
 
-Takes advantage of field periodicity to evaluate the kernel only over a single field period.
+Takes advantage of field periodicity to evaluate the kernel only over a single field period, in both
+the observer and the source index: a source in field period `d` is accumulated onto the period-0 column
+with weight `phases[d+1]`, so the block-circulant reduction is applied as the kernel is written and the
+full-torus source blocks are never stored.
 
 # Arguments
 
-  - `grad_greenfunction`: Double-layer kernel matrix (Nobs × Nsrc) filled in place
-  - `greenfunction`: Single-layer kernel matrix (Nobs × Nsrc); filled only when `source` is plasma
+  - `grad_blocks`: Double-layer operator as a list of blocks, filled in place. Without `sym` this is
+    a one-element list holding the whole `(Nobs × Nsrc)` matrix.
+  - `green_blocks`: Single-layer operator, same layout; filled only when `source` is plasma
   - `observer`: Observer geometry (PlasmaGeometry3D)
   - `source`: Source geometry (PlasmaGeometry3D)
   - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
   - `RAD_DIM`: Polar radial quadrature order. Angular order = 2 * RAD_DIM
   - `INTERP_ORDER`: Lagrange interpolation order, must be ≤ (2 * PATCH_RAD + 1)
+  - `phases`: Field-period phases `ω^{k d}` for `d = 0 … nfp-1`, with `nfp = length(phases)`. Pass the
+    real `[1.0]` for a single period, which keeps the output matrices real.
+  - `sym`: [`StellaratorBasis`](@ref) for this residue class, or `nothing` to build the untransformed
+    operator. When given, only the involution orbit representatives are evaluated — half the observer
+    points — and each row is emitted in the basis that makes the operator real and, for a
+    self-conjugate class, block diagonal.
 """
 function compute_3D_kernel_matrices!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
+    grad_blocks::AbstractVector{<:AbstractMatrix{<:Number}},
+    green_blocks::AbstractVector{<:AbstractMatrix{<:Number}},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,
     RAD_DIM::Int,
-    INTERP_ORDER::Int
+    INTERP_ORDER::Int,
+    phases::AbstractVector{<:Number},
+    sym::Union{Nothing,StellaratorBasis}=nothing
 )
     num_points = observer.mtheta * observer.nzeta
-    n_obs = size(greenfunction, 1) # num_points ÷ nfp
+    num_points_per_fp = num_points ÷ length(phases) # observer/source points in one field period
     dθdζ = 4π^2 / num_points
 
-    # Get block of grad green function matrix
+    # Surface sub-block of the operator this call fills
     col_index = (source isa PlasmaGeometry3D ? 1 : 2)
     row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
-    grad_greenfunction_block = view(
-        grad_greenfunction,
-        ((row_index-1)*n_obs+1):(row_index*n_obs),
-        ((col_index-1)*num_points+1):(col_index*num_points)
-    )
 
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry3D
-    populate_greenfunction && fill!(greenfunction, 0.0)
+
+    # With the symmetry the partner of each involution orbit follows from its representative, so only
+    # the representatives are evaluated
+    observers = sym === nothing ? (1:num_points_per_fp) : sym.orbit_rep
 
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
     if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
@@ -382,18 +394,29 @@ function compute_3D_kernel_matrices!(
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
 
-    # Allocate thread-local workspaces (one per thread)
+    # Allocate thread-local workspaces (one per thread). One operator row is accumulated at a time so
+    # the field-period fold and the basis change both happen before anything is stored.
     max_threadid = Threads.maxthreadid()
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
+    Trow = eltype(phases)
+    rows_double = [zeros(Trow, num_points_per_fp) for _ in 1:max_threadid]
+    rows_single = [zeros(Trow, num_points_per_fp) for _ in 1:max_threadid]
+    partner_rows = [zeros(ComplexF64, sym === nothing ? 0 : num_points_per_fp) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
-    Threads.@threads for idx_obs in 1:n_obs
+    Threads.@threads for i_orbit in eachindex(observers)
         # Get thread-local workspace
-        ws = workspaces[Threads.threadid()]
+        tid = Threads.threadid()
+        ws = workspaces[tid]
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
             n_polar, M_polar_single, M_polar_double, M_grid_single_flat, M_grid_double_flat) = ws
+        row_double = rows_double[tid]
+        row_single = rows_single[tid]
+        fill!(row_double, 0)
+        populate_greenfunction && fill!(row_single, 0)
 
         # Convert linear index to 2D indices
+        idx_obs = observers[i_orbit]
         i_obs = mod1(idx_obs, observer.mtheta)
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
         r_obs = @view observer.r[idx_obs, :]
@@ -408,11 +431,12 @@ function compute_3D_kernel_matrices!(
             n_src = @view source.normal[idx_src, :]
             far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], r_src[1], r_src[2], r_src[3], n_src[1], n_src[2], n_src[3])
 
-            # Apply weights (periodic trapezoidal rule = constant weights)
+            # Periodic trapezoidal rule (constant weights); fold this source's field period onto period 0
+            d, idx_col = fldmod1(idx_src, num_points_per_fp)
             if populate_greenfunction
-                greenfunction[idx_obs, idx_src] = far_single * dθdζ
+                row_single[idx_col] += phases[d] * (far_single * dθdζ)
             end
-            grad_greenfunction_block[idx_obs, idx_src] = far_double * dθdζ
+            row_double[idx_col] += phases[d] * (far_double * dθdζ)
         end
 
         # ============================================================
@@ -458,6 +482,7 @@ function compute_3D_kernel_matrices!(
             idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
             idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
+            d, idx_col = fldmod1(idx_src, num_points_per_fp)
 
             # Remainder of far-field contribution on the singular grid: Gpou = -χ
             r_src = @view source.r[idx_src, :]
@@ -466,21 +491,34 @@ function compute_3D_kernel_matrices!(
 
             # Apply near + far contributions
             if populate_greenfunction
-                greenfunction[idx_obs, idx_src] += M_grid_single[i, j] + far_single * Gpou[i, j] * dθdζ
+                row_single[idx_col] += phases[d] * (M_grid_single[i, j] + far_single * Gpou[i, j] * dθdζ)
             end
-            grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double * Gpou[i, j] * dθdζ
+            row_double[idx_col] += phases[d] * (M_grid_double[i, j] + far_double * Gpou[i, j] * dθdζ)
+        end
+
+        # Normalize so the Green's-identity term below is a unit shift. The exterior/interior jump is
+        # then 2I, the same scalar shift the 2D kernel carries, so the grri logic is identical.
+        row_double ./= 2π
+        populate_greenfunction && (row_single ./= 2π)
+
+        if sym === nothing
+            emit_plain_row!(grad_blocks, row_double, idx_obs, row_index, col_index)
+            populate_greenfunction && emit_plain_row!(green_blocks, row_single, idx_obs, row_index, 1)
+        else
+            partner = partner_rows[tid]
+            emit_symmetric_row!(grad_blocks, sym, row_double, partner, i_orbit, row_index, col_index)
+            populate_greenfunction && emit_symmetric_row!(green_blocks, sym, row_single, partner, i_orbit, row_index, 1)
         end
     end
 
-    # Use the same normalization as in the 2D kernel so we can just add I to the diagonal
-    # This makes the grri logic identical to the 2D kernel.
-    grad_greenfunction_block ./= 2π
-    populate_greenfunction && (greenfunction ./= 2π)
-
-    # Add the term that comes from the volume integral of Green's identity
+    # Add the term that comes from the volume integral of Green's identity. The identity is invariant
+    # under the basis change, so it is the same unit shift on each transformed block.
     if typeof(source) == typeof(observer)
-        for i in 1:n_obs
-            grad_greenfunction_block[i, i] += 1.0
+        for (b, H) in enumerate(grad_blocks)
+            nsize = sym === nothing ? num_points_per_fp : sym.block_size[b]
+            for i in 1:nsize
+                H[(row_index-1)*nsize+i, (col_index-1)*nsize+i] += 1.0
+            end
         end
     end
 end
