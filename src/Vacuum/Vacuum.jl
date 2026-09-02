@@ -169,7 +169,75 @@ Green's functions are internal scratch only.
 end
 
 """
-    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true)
+    _conjugate_groups(classes, nfp, enabled) -> Vector{Vector{Int}}
+
+Partition indices into `classes` so that each group is one class plus, when `enabled`, the conjugate
+class `mod(nfp - k, nfp)` if it is also present. Self-conjugate classes (`mod(2k, nfp) == 0`) never
+pair. With `enabled = false` every class is its own group.
+"""
+function _conjugate_groups(classes::AbstractVector{<:Integer}, nfp::Integer, enabled::Bool)
+    enabled || return [[i] for i in eachindex(classes)]
+    groups = Vector{Int}[]
+    taken = falses(length(classes))
+    for (i, k) in enumerate(classes)
+        taken[i] && continue
+        taken[i] = true
+        j = mod(2k, nfp) == 0 ? nothing : findfirst(==(mod(nfp - k, nfp)), classes)
+        if j === nothing || taken[j]
+            push!(groups, [i])
+        else
+            taken[j] = true
+            push!(groups, [i, j])
+        end
+    end
+    return groups
+end
+
+"""
+    _as_eltype(R, v)
+
+View the `Float64` storage `v` as a vector of element type `R`: the identity for `Float64`, a strided
+reinterpret for `ComplexF64`. Both remain `StridedArray`, so a matrix reshaped from either stays on
+the BLAS path.
+"""
+_as_eltype(::Type{Float64}, v::AbstractVector{Float64}) = v
+_as_eltype(::Type{ComplexF64}, v::AbstractVector{Float64}) = reinterpret(ComplexF64, v)
+
+"""
+    _split_project!(dest, S, Ẽ, basis_work) -> AbstractMatrix{Float64}
+
+Real form of `S·Ẽ'` for a real operator block `S` and a complex mode basis `Ẽ`, returned as the
+`[Re Im]` column pair written into `dest`.
+
+BLAS offers no mixed real/complex `gemm` or triangular solve, and the generic fallback for the solve
+is ~30x slower than a real one of twice the width. Because `S` and its factorization are real, the
+real and imaginary parts propagate through the solve independently; [`_unsplit!`](@ref) recombines
+them afterwards.
+"""
+function _split_project!(dest::AbstractMatrix{Float64}, S::AbstractMatrix{Float64}, Ẽ::AbstractMatrix{<:Complex}, basis_work::AbstractMatrix{Float64})
+    mc, sz = size(Ẽ)
+    adj = Ẽ'
+    Er = @view basis_work[1:sz, 1:(2mc)]
+    @views Er[:, 1:mc] .= real.(adj)
+    @views Er[:, (mc+1):(2mc)] .= imag.(adj)
+    out = @view dest[1:size(S, 1), 1:(2mc)]
+    mul!(out, S, Er)
+    return out
+end
+
+"""
+    _unsplit!(dest, split)
+
+Recombine the `[Re Im]` column pair of `split` into the complex `dest`.
+"""
+function _unsplit!(dest::AbstractMatrix{<:Complex}, split::AbstractMatrix{Float64})
+    mc = size(split, 2) ÷ 2
+    @views dest .= complex.(split[:, 1:mc], split[:, (mc+1):(2mc)])
+    return dest
+end
+
+"""
+    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true, use_conjugate_pairing=true)
 
 3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction.
 
@@ -183,7 +251,22 @@ with `D_d`, `S_d` the blocks coupling observers in field period 0 to sources in 
 needs one solve `wv[class k] = (4π²/M)·E_localᴴ·(D̂ₖ \\ Ŝₖ)|_plasma·E_local` (`E` the complex Fourier
 basis, `M = mtheta·nzeta`), so the routine loops over classes exactly as the 2D routine loops over
 decoupled `n`. The phase sum is folded into the kernel write, so only the reduced `[nb·M × nb·M]`
-operator is ever stored; for `nfp == 1` every phase is unity and the operators stay real.
+operator is ever stored.
+
+The operator element type is decided per class rather than per call. A self-conjugate class
+(`mod(2k, nfp) == 0`, i.e. `k = 0` and, for even `nfp`, `k = nfp/2`) has `ω^k = ±1`, so its phases and
+its blocks are real; every other class is complex. Both are carved from the same `Float64` backing
+store — the complex ones through a strided reinterpret — so the peak allocation is byte-for-byte that
+of a complex buffer when any class is complex, and half of it when every class is real (`nfp <= 2`, or
+any stellarator-symmetric run). A real class factorizes ~3.5x faster and, because BLAS has no mixed
+real/complex triangular solve, carries its complex right-hand side through the solve as a real
+`[Re Im]` pair (see [`_split_project!`](@ref)).
+
+The field-period blocks `D_d`, `S_d` are real for any boundary, so `D̂₋ₖ = conj(D̂ₖ)` and
+`Ŝ₋ₖ = conj(Ŝₖ)`: a class and its conjugate `mod(nfp - k, nfp)` share one assembly and one
+factorization, the partner differing only by conjugating its Fourier basis and its output block.
+Pass `use_conjugate_pairing=false` to solve every class independently. Self-conjugate classes
+(`mod(2k, nfp) == 0`, which is every class when `nfp <= 2`) are unaffected.
 
 When both surfaces are stellarator symmetric the class operator is additionally transformed by the
 [`StellaratorBasis`](@ref) for that class, which makes it real and — for a self-conjugate class —
@@ -200,7 +283,8 @@ reductions stay exact.
     inputs::VacuumInput,
     wall_settings::WallShapeSettings;
     compute_Iv::Bool=false,
-    use_symmetry::Bool=true
+    use_symmetry::Bool=true,
+    use_conjugate_pairing::Bool=true
 )
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
@@ -231,46 +315,71 @@ reductions stay exact.
     bases = [σ === nothing ? nothing : StellaratorBasis(σ, mtheta, k, nfp) for k in classes]
     block_sizes = [b === nothing ? [num_points_per_fp] : b.block_size for b in bases]
 
-    # One flat buffer per operator, carved into this class's blocks each pass. Sized for the widest
-    # class so the pool does not grow with the number of classes.
-    T = σ === nothing ? (nfp == 1 ? Float64 : ComplexF64) : Float64
+    # Group each class with its conjugate; the representative is the only one assembled and factored
+    groups = _conjugate_groups(classes, nfp, use_conjugate_pairing)
+    has_pairs = any(g -> length(g) > 1, groups)
+
+    # The operator element type is a per-class property. A self-conjugate class has ω^k = ±1, so its
+    # field-period phases and hence its blocks are real; the symmetry-adapted basis makes every class
+    # real. A real class halves the operator storage and cuts the factorization ~3.5x, so it is worth
+    # keeping off the complex path even though its neighbours in the loop are complex.
+    real_class(k) = σ !== nothing || mod(2k, nfp) == 0
+    reps = [classes[g[1]] for g in groups]
+    any_complex = any(k -> !real_class(k), reps)
+    any_real = any(k -> real_class(k), reps)
+
+    # One flat Float64 buffer per operator, carved into this class's blocks each pass and
+    # reinterpreted as complex for the classes that need it. Sizing the backing store in Float64
+    # rather than in the operator type keeps the peak allocation byte-for-byte identical to a complex
+    # buffer when any class is complex, and halves it when every class is real (nfp ≤ 2, or any
+    # stellarator-symmetric run), so the mixed-type solve below costs no memory.
     grad_len = maximum(sum((nb * sz)^2 for sz in szs) for szs in block_sizes)
     green_len = maximum(sum(nb * sz * sz for sz in szs) for szs in block_sizes)
-    grad_buffer = zeros!(pool, T, grad_len)
-    green_buffer = zeros!(pool, T, green_len)
-    interior_buffer = compute_Iv ? zeros!(pool, T, grad_len) : zeros!(pool, T, 0)
+    stride_T = any_complex ? 2 : 1
+    grad_buffer = zeros!(pool, Float64, stride_T * grad_len)
+    green_buffer = zeros!(pool, Float64, stride_T * green_len)
+    interior_buffer = compute_Iv ? zeros!(pool, Float64, stride_T * grad_len) : zeros!(pool, Float64, 0)
     grre = zeros!(pool, ComplexF64, n_obs, mpert * length(n_modes))
     grri = compute_Iv ? similar!(pool, grre) : zeros!(pool, ComplexF64, 0, 0)
-    basis_buffer = zeros!(pool, ComplexF64, mpert * length(n_modes), σ === nothing ? 0 : num_points_per_fp)
+    basis_buffer = zeros!(pool, ComplexF64, mpert * length(n_modes), (σ === nothing && !has_pairs) ? 0 : num_points_per_fp)
 
-    # Carve a flat buffer into this class's blocks; a reshaped contiguous view stays strided, so the
-    # factorizations and matrix products below stay on the BLAS path.
-    function carve(buffer, szs, ncols)
+    # Scratch for the real classes' split right-hand side (see `_split_project!`). Each is the size of
+    # one `grre`, negligible beside the O(N_p²) operator it lets us keep real.
+    rhs_cols = mpert * length(n_modes)
+    rhs_real = any_real ? zeros!(pool, Float64, n_obs, 2 * rhs_cols) : zeros!(pool, Float64, 0, 0)
+    rhs_real_int = (any_real && compute_Iv) ? similar!(pool, rhs_real) : zeros!(pool, Float64, 0, 0)
+    basis_real = any_real ? zeros!(pool, Float64, num_points_per_fp, 2 * rhs_cols) : zeros!(pool, Float64, 0, 0)
+
+    # Carve a flat buffer into this class's blocks. A reshaped contiguous view stays strided, and so
+    # does a complex reinterpret of one, so the factorizations and matrix products below stay on the
+    # BLAS path either way.
+    function carve(buffer, szs, ncols, ::Type{R}) where {R}
+        w = R === ComplexF64 ? 2 : 1
         offsets = cumsum([0; [nb * sz * ncols(sz) for sz in szs]])
-        return [reshape(view(buffer, (offsets[i]+1):offsets[i+1]), nb * szs[i], ncols(szs[i])) for i in eachindex(szs)]
+        return [reshape(_as_eltype(R, view(buffer, (w*offsets[i]+1):(w*offsets[i+1]))), nb * szs[i], ncols(szs[i])) for i in eachindex(szs)]
     end
 
-    # Loop over all decoupled toroidal residue classes
-    for (idx_k, k) in enumerate(classes)
-        cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
-        # A contiguous class (always so for nfp == 1) keeps the basis and output views strided, and so on the BLAS path
-        mode_cols = length(cols) == cols[end] - cols[1] + 1 ? (cols[1]:cols[end]) : cols
-        # Diagonal block of wv (and I_v when requested)
-        wv_block = @view vac_data.wv[mode_cols, mode_cols]
-        E = @view exp_mn_basis[mode_cols, :]
+    # Loop over the representatives of the conjugate-paired residue classes
+    for group in groups
+        idx_k = group[1]
+        k = classes[idx_k]
         sym = bases[idx_k]
         szs = block_sizes[idx_k]
 
-        # Phases are real whenever ω^k = ±1, which keeps the whole class on the real BLAS path
-        phases = if (σ === nothing ? nfp == 1 : mod(2k, nfp) == 0)
-            sgn = mod(2k, nfp) == 0 && isodd(2k ÷ nfp) ? -1.0 : 1.0
+        # Phases are real whenever ω^k = ±1, i.e. for a self-conjugate class, which keeps the whole
+        # class on the real BLAS path. Under the symmetry-adapted basis the operator is real for every
+        # class, so a complex phase there is still emitted into a real block by `emit_symmetric_row!`.
+        self_conj = mod(2k, nfp) == 0
+        phases = if self_conj
+            sgn = isodd(2k ÷ nfp) ? -1.0 : 1.0
             Float64[sgn^d for d in 0:(nfp-1)]
         else
             ComplexF64[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
         end
 
-        grad_blocks = carve(grad_buffer, szs, sz -> nb * sz)
-        green_blocks = carve(green_buffer, szs, sz -> sz)
+        Top = real_class(k) ? Float64 : ComplexF64
+        grad_blocks = carve(grad_buffer, szs, sz -> nb * sz, Top)
+        green_blocks = carve(green_buffer, szs, sz -> sz, Top)
 
         # Plasma–Plasma block
         compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
@@ -284,65 +393,115 @@ reductions stay exact.
             compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
         end
 
-        # Mode basis in the symmetry-adapted basis; Ẽ = E·U carries the transform through the solve
-        mode_basis = if sym === nothing
-            [E]
-        else
-            mb = [view(basis_buffer, 1:length(mode_cols), (sum(szs[1:(i-1)])+1):sum(szs[1:i])) for i in eachindex(szs)]
-            transform_mode_basis!(mb, E, sym)
-            mb
-        end
-
-        interior_blocks = compute_Iv ? carve(interior_buffer, szs, sz -> nb * sz) : grad_blocks
-
-        row_offset = 0
-        for (b, sz) in enumerate(szs)
-            nrow = nb * sz
-            rows = (row_offset+1):(row_offset+nrow)
-            Ẽ = mode_basis[b]
-            grre_k = @view grre[rows, 1:length(mode_cols)]
-
-            # The mode basis acts on columns and D⁻¹ on rows, so (D⁻¹S)Eᴴ == D⁻¹(SEᴴ): projecting the
-            # RHS before the solve is exact and carries this class's modes instead of one column per point.
-            mul!(grre_k, green_blocks[b], Ẽ')
-
-            if compute_Iv
-                # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
-                grri_k = @view grri[rows, 1:length(mode_cols)]
-                grri_k .= grre_k
+        interior_blocks = compute_Iv ? carve(interior_buffer, szs, sz -> nb * sz, Top) : grad_blocks
+        if compute_Iv
+            # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
+            # boundary limits is 2I here, giving the vacuum-inside potential. Copy before the
+            # factorization below overwrites the exterior block.
+            for (b, sz) in enumerate(szs)
                 interior_blocks[b] .= grad_blocks[b]
-
-                # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); the solve gives
-                # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites the block to save memory.
-                ldiv!(lu!(grad_blocks[b]), grre_k)
-
-                # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
-                # boundary limits is 2I here, giving the vacuum-inside potential grri = χ^(vi).
-                for i in 1:nrow
+                for i in 1:(nb*sz)
                     interior_blocks[b][i, i] -= 2.0
                 end
-                ldiv!(lu!(interior_blocks[b]), grri_k)
+            end
+        end
 
-                # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), accumulated over the parity blocks
-                g_diff = @view grri_k[1:sz, :]
-                g_diff .= @view(grre_k[1:sz, :]) .- g_diff
-                mul!(@view(vac_data.I_v[mode_cols, mode_cols]), Ẽ, g_diff, 1, 1)
+        # Factor once per group; the conjugate class reuses these factorizations. The exterior
+        # operator is D_ext = 2I + 𝒦 (Chance 1997 eq. 89). Overwrites the blocks to save memory.
+        lu_ext = [lu!(g) for g in grad_blocks]
+        lu_int = compute_Iv ? [lu!(g) for g in interior_blocks] : lu_ext
+
+        for (member, idx_class) in enumerate(group)
+            # The conjugate class solves conj(D̂ₖ)x = conj(Ŝₖ)Eᴴ; conjugating that identity turns it
+            # into the representative's operator acting on conj(E), with the result conjugated back.
+            partner = member > 1
+            cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == classes[idx_class] for idx_m in 1:mpert]
+            # A contiguous class (always so for nfp == 1) keeps the basis and output views strided, and so on the BLAS path
+            mode_cols = length(cols) == cols[end] - cols[1] + 1 ? (cols[1]:cols[end]) : cols
+            # Diagonal block of wv (and I_v when requested)
+            wv_block = @view vac_data.wv[mode_cols, mode_cols]
+            E = @view exp_mn_basis[mode_cols, :]
+
+            # Mode basis in the symmetry-adapted basis; Ẽ = E·U carries the transform through the solve
+            mode_basis = if sym !== nothing
+                mb = [view(basis_buffer, 1:length(mode_cols), (sum(szs[1:(i-1)])+1):sum(szs[1:i])) for i in eachindex(szs)]
+                transform_mode_basis!(mb, E, sym; conjugate=partner)
+                mb
+            elseif partner
+                Ec = @view basis_buffer[1:length(mode_cols), :]
+                Ec .= conj.(E)
+                [Ec]
             else
-                # Only need exterior system for wv
-                ldiv!(lu!(grad_blocks[b]), grre_k)
+                [E]
             end
 
-            # Project exterior kernel onto observer basis exp(-i(mθ-nζ)), summed over the blocks
-            mul!(wv_block, Ẽ, @view(grre_k[1:sz, :]), 1, 1)
-            row_offset += nrow
-        end
-        wv_block .*= 4π^2 / num_points_per_fp
+            row_offset = 0
+            for (b, sz) in enumerate(szs)
+                nrow = nb * sz
+                rows = (row_offset+1):(row_offset+nrow)
+                Ẽ = mode_basis[b]
+                grre_k = @view grre[rows, 1:length(mode_cols)]
 
-        if compute_Iv
-            # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame, and normalize
-            Iv_block = @view vac_data.I_v[mode_cols, mode_cols]
-            conj!(Iv_block)
-            Iv_block ./= num_points_per_fp
+                # The mode basis acts on columns and D⁻¹ on rows, so (D⁻¹S)Eᴴ == D⁻¹(SEᴴ): projecting the
+                # RHS before the solve is exact and carries this class's modes instead of one column per point.
+                # A real class carries the projection and both solves as a real [Re Im] pair, since BLAS
+                # has no mixed real/complex product or triangular solve.
+                if Top === Float64
+                    ext_split = _split_project!(rhs_real, green_blocks[b], Ẽ, basis_real)
+
+                    if compute_Iv
+                        grri_k = @view grri[rows, 1:length(mode_cols)]
+                        int_split = @view rhs_real_int[1:nrow, 1:size(ext_split, 2)]
+                        int_split .= ext_split
+
+                        # The exterior solve gives grre = -(2π)²χ^(vo), the vacuum-outside potential
+                        ldiv!(lu_ext[b], ext_split)
+                        ldiv!(lu_int[b], int_split)
+                        _unsplit!(grre_k, ext_split)
+                        _unsplit!(grri_k, int_split)
+                    else
+                        ldiv!(lu_ext[b], ext_split)
+                        _unsplit!(grre_k, ext_split)
+                    end
+                else
+                    mul!(grre_k, green_blocks[b], Ẽ')
+
+                    if compute_Iv
+                        # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
+                        grri_k = @view grri[rows, 1:length(mode_cols)]
+                        grri_k .= grre_k
+
+                        # The exterior solve gives grre = -(2π)²χ^(vo), the vacuum-outside potential
+                        ldiv!(lu_ext[b], grre_k)
+                        ldiv!(lu_int[b], grri_k)
+                    else
+                        # Only need exterior system for wv
+                        ldiv!(lu_ext[b], grre_k)
+                    end
+                end
+
+                if compute_Iv
+                    # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), accumulated over the parity blocks
+                    grri_k = @view grri[rows, 1:length(mode_cols)]
+                    g_diff = @view grri_k[1:sz, :]
+                    g_diff .= @view(grre_k[1:sz, :]) .- g_diff
+                    mul!(@view(vac_data.I_v[mode_cols, mode_cols]), Ẽ, g_diff, 1, 1)
+                end
+
+                # Project exterior kernel onto observer basis exp(-i(mθ-nζ)), summed over the blocks
+                mul!(wv_block, Ẽ, @view(grre_k[1:sz, :]), 1, 1)
+                row_offset += nrow
+            end
+            wv_block .*= 4π^2 / num_points_per_fp
+            partner && conj!(wv_block)
+
+            if compute_Iv
+                # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame, and normalize. For the
+                # conjugate class that flip and the conjugation of its result cancel.
+                Iv_block = @view vac_data.I_v[mode_cols, mode_cols]
+                partner || conj!(Iv_block)
+                Iv_block ./= num_points_per_fp
+            end
         end
     end
 
@@ -356,31 +515,39 @@ reductions stay exact.
 end
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true) -> VacuumResponse
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true, use_conjugate_pairing=true) -> VacuumResponse
 
 Compute the vacuum response for the given inputs. Allocating wrapper around
 [`compute_vacuum_response!`](@ref); pass a preallocated [`VacuumResponse`](@ref) to that method
 instead when reusing storage across calls. Pass `compute_Iv=true` to additionally populate the
-surface-current matrix `I_v`, and `use_symmetry=false` to skip the 3D stellarator-symmetry solve.
+surface-current matrix `I_v`, `use_symmetry=false` to skip the 3D stellarator-symmetry solve, and
+`use_conjugate_pairing=false` to solve conjugate residue classes independently.
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false, use_symmetry::Bool=true)
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false, use_symmetry::Bool=true, use_conjugate_pairing::Bool=true)
     vac = VacuumResponse(inputs)
-    compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv, use_symmetry)
+    compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv, use_symmetry, use_conjugate_pairing)
     return vac
 end
 
 """
-    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true)
+    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true, use_conjugate_pairing=true)
 
 In-place variant that populates the arrays of an existing [`VacuumResponse`](@ref). Dispatches on
 dimensionality only: 2D (`inputs.nzeta == 1`) routes to [`_compute_vacuum_response_2d!`], 3D to
-[`_compute_vacuum_response_3d!`]. `use_symmetry` applies to the 3D path only.
+[`_compute_vacuum_response_3d!`]. `use_symmetry` and `use_conjugate_pairing` apply to the 3D path only.
 """
-function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false, use_symmetry::Bool=true)
+function compute_vacuum_response!(
+    vac_data::VacuumResponse,
+    inputs::VacuumInput,
+    wall_settings::WallShapeSettings;
+    compute_Iv::Bool=false,
+    use_symmetry::Bool=true,
+    use_conjugate_pairing::Bool=true
+)
     if inputs.nzeta == 1
         _compute_vacuum_response_2d!(vac_data, inputs, wall_settings; compute_Iv)
     else
-        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings; compute_Iv, use_symmetry)
+        _compute_vacuum_response_3d!(vac_data, inputs, wall_settings; compute_Iv, use_symmetry, use_conjugate_pairing)
     end
 end
 
