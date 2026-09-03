@@ -42,6 +42,7 @@ supporting flux-surface averages.
 | `M`         | Mass factor                                          |
 | `avg_bsq_over_dpsisq` | ⟨B²/|∇ψ|²⟩ — needed for τ_R         |
 | `avg_bsq`   | ⟨B²⟩ — needed for τ_R                                |
+| `avg_dpsisq` | ⟨|∇ψ|²⟩ — needed for the toroidal critical-Δ factor |
 | `avg_B`     | ⟨B⟩ — needed for Lin-Liu-Miller f_t                  |
 | `B_max`, `B_min` | θ-extrema of B on the surface [T]               |
 | `f_trap`    | Lin-Liu & Miller 1995 trapped-particle fraction      |
@@ -69,6 +70,7 @@ struct ResistGeometry
     M::Float64
     avg_bsq_over_dpsisq::Float64
     avg_bsq::Float64
+    avg_dpsisq::Float64
     avg_B::Float64
     B_max::Float64
     B_min::Float64
@@ -121,11 +123,11 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     v2     = profiles.dVdpsi_deriv(psi_f)
     q      = profiles.q_spline(psi_f)
 
-    # Build the 6 GGJ θ-integrands plus a 7th (B) for the neoclassical
-    # resistivity f_t calculation, and accumulate running extrema of
+    # Build the 6 GGJ θ-integrands plus B (neoclassical resistivity f_t) and
+    # |∇ψ|² (toroidal critical-Δ factor), and accumulate running extrema of
     # (B, R) for Lin-Liu-Miller f_t and the local ε.
     ntheta = length(equil.rzphi_ys)
-    ff     = zeros(Float64, ntheta, 7)
+    ff     = zeros(Float64, ntheta, 8)
     B_max  = -Inf
     B_min  =  Inf
     R_max  = -Inf
@@ -163,6 +165,7 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
         ff[itheta, 5] = bsq
         ff[itheta, 6] = dpsisq / bsq
         ff[itheta, 7] = B_here
+        ff[itheta, 8] = dpsisq
         @views ff[itheta, :] .*= jac / v1
     end
 
@@ -190,7 +193,7 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
 
     return ResistGeometry(
         E_coef, F_coef, G_coef, H_coef, K_coef, M_coef,
-        avg[1], avg[5],
+        avg[1], avg[5], avg[8],
         avg_B, B_max, B_min, f_trap, R_major, eps_local,
         p, p1, v1,
     )

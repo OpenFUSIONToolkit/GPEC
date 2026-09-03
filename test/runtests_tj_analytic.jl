@@ -90,4 +90,55 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         R_out = R0 + 1.05   # plasma LCFS is at R ≈ R0 + 0.94
         @test inp.psi_in((R_out, 0.0)) < 0
     end
+
+    @testset "toroidal critical-Δ factor → √(n s r_s/R₀) at ε = 0.05" begin
+        # Connor et al. 2015 Eq. 59 in the r_s reference must reduce to the
+        # rfitzp factor on a large-aspect-ratio circular equilibrium.
+        using GeneralizedPerturbedEquilibrium.ForceFreeStates: resist_geometry
+        using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, r_based_shear,
+            surface_minor_radius, surface_da_dpsi
+        tj = TJAnalyticConfig(lar_r0 = 1.0 / 0.05, lar_a = 1.0,
+                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
+                              ma = 64, mtau = 64)
+        eq = EquilibriumConfig(eq_type = "tj_analytic",
+                               psilow = 0.01, psihigh = 0.995,
+                               mpsi = 64, mtheta = 128, etol = 1e-7)
+        pe = setup_equilibrium(eq, tj)
+        chi1 = 2π * pe.psio
+        for (psi_s, n) in ((0.3, 1), (0.6, 2))
+            q = pe.profiles.q_spline(psi_s)
+            q1 = pe.profiles.q_deriv(psi_s)
+            rg = resist_geometry(pe, psi_s, q1)
+            rs = surface_minor_radius(pe, psi_s)
+            da = surface_da_dpsi(pe, psi_s)
+            s_r = r_based_shear(rs, q, q1, da)
+            dgeo = toroidal_dgeo(; chi1=chi1, v1=rg.v1_local, q=q, q1=q1, n=n,
+                avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=rs / da)
+            @test dgeo ≈ sqrt(n * s_r * rs / pe.ro) rtol = 1e-2
+        end
+    end
+
+    @testset "toroidal critical-Δ factor is dimensionless (scale invariance)" begin
+        # The r_s-referenced Eq. 59 factor must be invariant under B₀ → B₀/2 and
+        # (a, R₀) → 2(a, R₀) at fixed ε; a missing power of ψ_t' in Λ breaks this.
+        using GeneralizedPerturbedEquilibrium.ForceFreeStates: resist_geometry
+        using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, surface_minor_radius, surface_da_dpsi
+        function _dgeo(a, B0, psi)
+            tj = TJAnalyticConfig(lar_r0 = a / 0.2, lar_a = a,
+                                  qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = B0,
+                                  ma = 64, mtau = 64)
+            eq = EquilibriumConfig(eq_type = "tj_analytic",
+                                   psilow = 0.01, psihigh = 0.995,
+                                   mpsi = 64, mtheta = 128, etol = 1e-7)
+            pe = setup_equilibrium(eq, tj)
+            q1 = pe.profiles.q_deriv(psi)
+            rg = resist_geometry(pe, psi, q1)
+            rs = surface_minor_radius(pe, psi)
+            return toroidal_dgeo(; chi1=2π * pe.psio, v1=rg.v1_local, q=pe.profiles.q_spline(psi), q1=q1, n=1,
+                avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=rs / surface_da_dpsi(pe, psi))
+        end
+        d_ref = _dgeo(1.0, 12.0, 0.5)
+        @test _dgeo(1.0, 6.0, 0.5) ≈ d_ref rtol = 1e-6
+        @test _dgeo(2.0, 12.0, 0.5) ≈ d_ref rtol = 1e-6
+    end
 end

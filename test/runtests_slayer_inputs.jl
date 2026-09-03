@@ -3,7 +3,7 @@
     using GeneralizedPerturbedEquilibrium.Equilibrium
     using GeneralizedPerturbedEquilibrium.Utilities
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.ForceFreeStates: SingType
+    using GeneralizedPerturbedEquilibrium.ForceFreeStates: SingType, resist_geometry
     using TOML
 
     # Load the Solovev analytic equilibrium shipped with the examples.
@@ -203,6 +203,49 @@
             bt=2.0, dc_type=:rfitzp, dr_val=0.01)
         @test sl_rf[1].dc_tmp < 0
         @test isfinite(sl_rf[1].dc_tmp)
+    end
+
+    @testset "build_slayer_inputs: toroidal dgeo_val derived from ResistGeometry" begin
+        psi_s, q_s, q1_s = 0.5, 2.4, 1.2
+        sing = _mk_sing(psi=psi_s, q=q_s, q1=q1_s, m=2, n=1)
+
+        # Without a ResistGeometry the toroidal factor cannot be derived.
+        @test_throws ArgumentError build_slayer_inputs(equil, [sing], profiles;
+            bt=2.0, dc_type=:toroidal, dr_val=0.01)
+
+        sing.restype = resist_geometry(equil, psi_s, q1_s)
+        p = build_slayer_inputs(equil, [sing], profiles;
+            bt=2.0, dc_type=:toroidal, dr_val=0.01)[1]
+        @test isfinite(p.dgeo_val) && p.dgeo_val > 0
+        @test isfinite(p.dc_tmp) && p.dc_tmp < 0
+
+        # Matches a direct evaluation of the r_s-referenced Eq. 59 factor.
+        rg = sing.restype
+        rs = surface_minor_radius(equil, psi_s)
+        k_ref = rs / surface_da_dpsi(equil, psi_s)
+        dgeo_ref = toroidal_dgeo(; chi1=2π * equil.psio, v1=rg.v1_local, q=q_s, q1=q1_s, n=1,
+            avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=k_ref)
+        @test p.dgeo_val ≈ dgeo_ref rtol = 1e-12
+        @test p.k_ref ≈ k_ref rtol = 1e-12
+
+        # An explicit dgeo_val still overrides the derivation.
+        p_fix = build_slayer_inputs(equil, [sing], profiles;
+            bt=2.0, dc_type=:toroidal, dr_val=0.01, dgeo_val=0.3)[1]
+        @test p_fix.dgeo_val == 0.3
+
+        # The factor is derived for every dc_type once a ResistGeometry is present.
+        p_rf = build_slayer_inputs(equil, [sing], profiles;
+            bt=2.0, dc_type=:rfitzp, dr_val=0.01)[1]
+        @test p_rf.dgeo_val ≈ dgeo_ref rtol = 1e-12
+
+        # The radial label enters the factor only through k_ref, the same ratio that
+        # converts Δ' to the r_s reference, so dgeo/k_ref is label-invariant.
+        for lab in (:flux, :volume)
+            p_lab = build_slayer_inputs(equil, [sing], profiles;
+                bt=2.0, dc_type=:toroidal, dr_val=0.01, rs_method=lab)[1]
+            @test p_lab.k_ref != p.k_ref
+            @test p_lab.dgeo_val / p_lab.k_ref ≈ p.dgeo_val / p.k_ref rtol = 1e-10
+        end
     end
 
     @testset "build_slayer_inputs: empty sings returns empty vector" begin
