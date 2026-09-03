@@ -356,7 +356,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         end
 
         # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s and
-        # μ = √(−D_I) (Glasser-Greene-Johnson 1975), with μ clamped to 0 on Mercier-unstable
+        # α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48), with α clamped to 0 on Mercier-unstable
         # surfaces (the factor turns complex there) and K = 1 whenever da/dψ is not a usable
         # positive number (zero/non-finite/negative would corrupt the Δ' diagonal).
         k_ref_k = if isfinite(da_dpsi) && da_dpsi > 0.0
@@ -366,9 +366,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
                   "Δ' unconverted (k_ref = 1) at this surface.", maxlog=3)
             1.0
         end
-        mu_k = if rg === nothing
+        alpha_k = if rg === nothing
             @warn("build_slayer_inputs: sing.restype not populated; using the " *
-                  "slab Mercier exponent μ = 1/2 for the Δ' reference-length " *
+                  "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
                   "conversion at all such surfaces.", maxlog=1)
             0.5
         else
@@ -392,7 +392,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             R_major_eff=R_major_eff,
             lnLambda_form=lnLambda_form,
             k_ref=k_ref_k,
-            mu_mercier=mu_k
+            alpha_mercier=alpha_k
         )
     end
     return out

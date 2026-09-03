@@ -96,8 +96,8 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
     "PerSurface/D_c_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
     "PerSurface/k_ref" => (; long_name="reference-length ratio K = r_s·(dψ_N/dr) at each surface", dims=("surface",)),
-    "PerSurface/mu_mercier" => (; long_name="Mercier exponent μ = √(−D_I) at each surface", dims=("surface",)),
-    "PerSurface/delta_prime_conversion" => (; long_name="ψ_N → r_s reference-length factor K^(2μ) applied to each Δ' diagonal", dims=("surface",)),
+    "PerSurface/alpha_mercier" => (; long_name="Mercier Frobenius exponent α = √(−D_I) at each surface (Glasser-Greene-Johnson 1975 Eq. 48)", dims=("surface",)),
+    "PerSurface/delta_prime_conversion" => (; long_name="ψ_N → r_s reference-length factor K^(2α) applied to each Δ' diagonal", dims=("surface",)),
     "PerSurface/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",)),
     "PerSurface/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",)),
     "PerSurface/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",)),
@@ -106,7 +106,8 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
     "PerSurface/tau_A" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
-    "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces, as used in the matching (SLAYER path: r_s-referenced via K^(2μ); the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
+    "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
+    "PerSurface/Delta_prime_matrix_rs" => (; long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
     "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
         (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root", units="rad/s", dims=("surface",)),
@@ -187,13 +188,15 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     ps["D_geo"] = Float64[p.dgeo_val for p in params]
     # Store dc_type per-surface as string array
     ps["D_c_type"] = String[String(p.dc_type) for p in params]
-    # Reference-length conversion applied to Δ' (ψ_N → r_s): K, μ, and the
-    # diagonal factor K^(2μ) actually multiplying each Δ'_kk.
+    # Reference-length conversion applied to Δ' (ψ_N → r_s): K, α, and the
+    # diagonal factor K^(2α) actually multiplying each Δ'_kk.
     ps["k_ref"] = Float64[p.k_ref for p in params]
-    ps["mu_mercier"] = Float64[p.mu_mercier for p in params]
-    ps["delta_prime_conversion"] = Float64[p.k_ref^(2 * p.mu_mercier) for p in params]
+    ps["alpha_mercier"] = Float64[p.alpha_mercier for p in params]
+    ps["delta_prime_conversion"] = Float64[p.k_ref^(2 * p.alpha_mercier) for p in params]
 
-    ps["Delta_prime_matrix"] = dp_matrix
+    # The converted matrix is a different quantity from the ψ_N-referenced BVP
+    # matrix, so it carries its own name.
+    ps["Delta_prime_matrix_rs"] = dp_matrix
     return nothing
 end
 

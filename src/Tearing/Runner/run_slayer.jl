@@ -163,24 +163,33 @@ the r_s-based `x̂ = (r − r_s)/r_s` reference the slab layer works in
 (Fitzpatrick 2023 convention — the same reference used by `dc_tmp` and by
 the `S^(1/3)` Δ(Q) scale, both built on r_s).
 
-Near surface `k` the tearing-parity outer solution is
-`A_L·|x|^(1/2−μ) + A_S·|x|^(1/2+μ)` with `μ = √(−D_I)` (Glasser, Wang &
-Park 2016, Eq. 26). Rescaling the radial variable `x_ψ = K·x̂` with
-`K = r_s·(dψ_N/dr)|_s` maps the coefficients as `Â_L = A_L·K^(1/2−μ)` and
-`Â_S = A_S·K^(1/2+μ)`, so the response matrix (small coefficient at surface
-`i` per unit large coefficient at surface `j`) transforms as
+Near surface `k` the outer solution combines the large and small Frobenius
+solutions with the Mercier exponent `α = √(−D_I)`, `D_I = E + F + H − 1/4`
+(Glasser, Greene & Johnson 1975, Eq. 48; STRIDE's `alpha`). The displacement
+scales as `|x|^(−1/2 ± α)` (Glasser, Wang & Park 2016, Eq. 26), so the
+flux-like variable `ψ ∝ x·ξ` of the slab Δ' definition scales as
+`A_L·|x|^(1/2−α) + A_S·|x|^(1/2+α)`. Rescaling the radial variable
+`x_ψ = K·x̂` with `K = r_s·(dψ_N/dr)|_s` maps the flux coefficients as
+`Â_L = A_L·K^(1/2−α)` and `Â_S = A_S·K^(1/2+α)`, so the response matrix
+(small coefficient at surface `i` per unit large coefficient at surface `j`)
+transforms as
 
-    Δ̂_ij = K_i^(1/2+μ_i) · Δ'_ij · K_j^(μ_j−1/2)
+    Δ̂_ij = K_i^(1/2+α_i) · Δ'_ij · K_j^(α_j−1/2)
 
-whose diagonal is `K^(2μ)·Δ'_kk`; at D_I = −1/4 (μ = 1/2) this reduces to
-the textbook `Δ̂ = r_s·Δ'_phys`. `K` and `μ` are carried per surface in
-`SLAYERParameters.k_ref` / `.mu_mercier`; hand-built parameters default to
-`k_ref = 1`, making the conversion the identity.
+whose diagonal is `K^(2α)·Δ'_kk`; at D_I = −1/4 (α = 1/2) this reduces to
+the textbook `Δ̂ = r_s·Δ'_phys`. The diagonal factor is the exponent gap and
+is the same whichever variable carries the coefficients; using the
+displacement instead shifts both exponents by one and changes the
+off-diagonal split by `K_i/K_j`, a diagonal similarity transform `D·Δ'·D⁻¹`
+that leaves every uncoupled and coupled dispersion root unchanged. `K` and
+`α` are carried per surface in `SLAYERParameters.k_ref` / `.alpha_mercier`;
+hand-built parameters default to `k_ref = 1`, making the conversion the
+identity.
 """
 function delta_prime_to_rs_reference(dp_matrix::AbstractMatrix,
     params::AbstractVector)
-    dl = [p.k_ref^(0.5 + p.mu_mercier) for p in params]
-    dr = [p.k_ref^(p.mu_mercier - 0.5) for p in params]
+    dl = [p.k_ref^(0.5 + p.alpha_mercier) for p in params]
+    dr = [p.k_ref^(p.alpha_mercier - 0.5) for p in params]
     return Diagonal(dl) * Matrix{ComplexF64}(dp_matrix) * Diagonal(dr)
 end
 

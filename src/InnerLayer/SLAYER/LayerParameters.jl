@@ -47,9 +47,9 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
 | `dc_type`  | Selector for `dc_tmp` formula                                     |
 | `k_ref`    | Reference-length ratio K = r_s · (dψ_N/dr) at this surface (1 = no Δ' conversion) |
-| `mu_mercier` | Mercier exponent μ = √(−D_I) governing the Δ' reference-length conversion (1/2 = slab/cylindrical value) |
+| `alpha_mercier` | Mercier Frobenius exponent α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48) governing the Δ' reference-length conversion (1/2 = slab/cylindrical value) |
 
-`k_ref` and `mu_mercier` feed the ψ_N → r_s reference-length conversion of
+`k_ref` and `alpha_mercier` feed the ψ_N → r_s reference-length conversion of
 the outer Δ' matrix (see `delta_prime_to_rs_reference` in the Tearing
 runner): the slab layer, its `dc_tmp` critical-Δ, and the `S^(1/3)` Δ(Q)
 scale are all referenced to unit `x̂ = (r−r_s)/r_s`, while the outer BVP Δ'
@@ -97,7 +97,7 @@ Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
 
     # Reference-length conversion inputs for the outer Δ' (ψ_N → r_s-based x̂)
     k_ref::Float64 = 1.0
-    mu_mercier::Float64 = 0.5
+    alpha_mercier::Float64 = 0.5
 end
 
 # Allowed dc_type values for the critical-Δ offset. `:none` is the default
@@ -219,7 +219,7 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
     used by the Tearing runner to convert the ψ_N-referenced outer Δ' to
     the r_s-referenced convention this layer works in (default `1.0`,
     i.e. no conversion; `build_slayer_inputs` fills it from the equilibrium)
-  - `mu_mercier` -- Mercier exponent μ = √(−D_I) for the same conversion
+  - `alpha_mercier` -- Mercier Frobenius exponent α = √(−D_I) for the same conversion
     (default `0.5`, the slab/cylindrical value at D_I = −1/4)
 
 # Resistivity kwargs
@@ -273,7 +273,7 @@ function slayer_parameters(;
     R_major_eff::Union{Real,Nothing}=nothing,
     lnLambda_form::Symbol=:nrl,
     k_ref::Real=1.0,
-    mu_mercier::Real=0.5)
+    alpha_mercier::Real=0.5)
 
     # Coulomb logarithm shared by the resistivity closure and τ_ee.
     lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
@@ -382,6 +382,6 @@ function slayer_parameters(;
         dr_val=dr_val, dgeo_val=dgeo_val,
         eta=eta, d_beta=d_beta,
         dc_tmp=dc_tmp, dc_type=dc_type,
-        k_ref=k_ref, mu_mercier=mu_mercier
+        k_ref=k_ref, alpha_mercier=alpha_mercier
     )
 end
