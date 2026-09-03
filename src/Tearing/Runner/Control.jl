@@ -41,7 +41,8 @@ constructor.
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `dr_val` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
-    toroidal geometric factor (required only by `dc_type=:toroidal`). Supply a
+    Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s` reference
+    (consumed only by `dc_type=:toroidal`). Supply a
     scalar only to override the auto-derivation; an explicit `0.0` disables the
     critical-Δ offset (Δ_crit ≡ 0)
   - `theta_sample` -- poloidal angle at which to sample minor radius
