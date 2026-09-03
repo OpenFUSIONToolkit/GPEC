@@ -155,6 +155,40 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
 end
 
 """
+    toroidal_dgeo(; chi1, v1, q, q1, n, avg_bsq, avg_dpsisq, k_ref) -> Float64
+
+Geometric factor of the toroidal critical-Δ, Connor, Ham, Hastie & Liu 2015
+(PPCF 57 065001) Eq. 59, `V_s·(α²Λ²/(⟨B²⟩⟨|∇V|²⟩))^{1/4}`, converted from the
+paper's `Y = (V−V_s)/V_s` reference to the `x̂ = (r−r_s)/r_s` reference shared
+by the slab layer, the `rfitzp` critical-Δ, and the reference-length-converted
+outer Δ'. In GPEC quantities, with `V` the flux-surface volume, `ψ_N` the
+normalized poloidal flux, and `'` = d/dV:
+
+  - `α = 2πn/χ'` with `χ' = chi1/v1` (`χ` the full poloidal flux,
+    `chi1 = 2π·psio`, `v1 = dV/dψ_N`)
+  - `Λ = ψ_t'²·(ι/2π)'` with `ψ_t' = q·chi1/v1` (toroidal flux) and
+    `(ι/2π)' = −q1/(q²·v1)` (`q1 = dq/dψ_N`)
+  - `⟨|∇V|²⟩ = v1²·⟨|∇ψ_N|²⟩`, both averages being normalized flux-surface
+    averages (⟨1⟩ = 1)
+  - the reference conversion `r_s·(dV/dr)/V_s = k_ref·v1/V_s` with
+    `k_ref = r_s·dψ_N/dr`, so `V_s` cancels and is never integrated.
+
+At large aspect ratio this reduces to `√(n·s·r_s/R₀)` with `s = (r_s/q)·dq/dr`,
+so `dc_type=:toroidal` coincides with `:rfitzp` there; the paper's own Eq. 61
+is recovered after dividing by `r_s`.
+"""
+function toroidal_dgeo(; chi1::Real, v1::Real, q::Real, q1::Real, n::Integer,
+    avg_bsq::Real, avg_dpsisq::Real, k_ref::Real)
+    v1 != 0 || throw(ArgumentError("toroidal_dgeo: dV/dψ must be non-zero"))
+    q != 0 || throw(ArgumentError("toroidal_dgeo: q must be non-zero"))
+    alpha = 2π * n * v1 / chi1
+    psit1 = q * chi1 / v1
+    lambda = psit1^2 * (-q1 / (q^2 * v1))
+    grad_v_sq = v1^2 * avg_dpsisq
+    return k_ref * v1 * (alpha^2 * lambda^2 / (avg_bsq * grad_v_sq))^0.25
+end
+
+"""
     build_slayer_inputs(equil, sings, profiles; …) -> Vector{SLAYERParameters}
 
 Build a `SLAYERParameters` for each rational surface in `sings`, pulling
@@ -199,13 +233,14 @@ profiles, without an intermediate file round-trip.
     NOT the Mercier index `D_I = E + F + H − 1/4`. The two differ by
     `(H − 1/2)²`, which is non-trivial on shaped equilibria (~factor 3 on
     DIII-D); this code uses the physically correct `D_R`.
-  - `dgeo_val`  -- Connor 2015 (PPCF 57 065001) Eq. 59 geometric factor
-    used by `dc_type=:toroidal`. When `nothing` (default), an error is
-    raised if `dc_type=:toroidal` is also requested — the auto-derived
-    formula additionally needs ⟨|∇ψ|²⟩ FSA which `ResistGeometry`
-    doesn't currently expose. Pass a scalar / vector / callable to use
-    a prescribed value. (For `dc_type=:rfitzp` and `:lar`, dgeo_val is
-    not consulted.)
+  - `dgeo_val`  -- Connor et al. 2015 (PPCF 57 065001) Eq. 59 geometric
+    factor of the toroidal critical-Δ, in the `r_s` reference (see
+    [`toroidal_dgeo`](@ref)). When `nothing` (default), it is derived
+    per-surface from the equilibrium through the surface's `ResistGeometry`
+    (`sing.restype`, populated by `ForceFreeStates.resist_eval_all!`); an
+    error is raised if `dc_type=:toroidal` is requested on a surface without
+    one. Pass a scalar / callable to use a prescribed value. Only
+    `dc_type=:toroidal` consumes it.
   - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
   - `rs_method` -- radial label defining `r_s` for the whole layer stack:
     `:midplane` (default), `:halfwidth`, `:fsa`, `:volume`, or `:flux`. See
@@ -336,27 +371,6 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             _eval(dr_val, psi)
         end
 
-        # dgeo_val: only used by dc_type=:toroidal (the Connor-Hastie-
-        # Helander 2015 formula). Auto-derivation requires ⟨|∇ψ|²⟩ FSA
-        # which the current `ResistGeometry` doesn't expose; for now we
-        # require an explicit value if the toroidal dc_type is selected.
-        dgeo_val_k = if dgeo_val === nothing
-            dc_type === :toroidal &&
-                throw(
-                    ArgumentError(
-                        "build_slayer_inputs: dc_type=:toroidal " *
-                        "needs `dgeo_val` (Connor 2015 PPCF 57 " *
-                        "065001 Eq. 59 geometric factor). " *
-                        "Auto-derivation from equilibrium not " *
-                        "yet implemented; pass a scalar / vector " *
-                        "/ callable explicitly."
-                    )
-                )
-            0.0
-        else
-            _eval(dgeo_val, psi)
-        end
-
         # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s and
         # α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48), with α clamped to 0 on Mercier-unstable
         # surfaces (the factor turns complex there) and K = 1 whenever da/dψ is not a usable
@@ -368,6 +382,29 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
                   "Δ' unconverted (k_ref = 1) at this surface.", maxlog=3)
             1.0
         end
+        # dgeo_val: Connor et al. 2015 Eq. 59 geometric factor in the r_s reference
+        # (see `toroidal_dgeo`), derived whenever the surface carries a ResistGeometry;
+        # only dc_type=:toroidal consumes it.
+        dgeo_val_k = if dgeo_val === nothing
+            if rg !== nothing
+                toroidal_dgeo(; chi1=chi1, v1=rg.v1_local, q=q, q1=q1, n=n_res,
+                    avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=k_ref_k)
+            elseif dc_type === :toroidal
+                throw(
+                    ArgumentError(
+                        "build_slayer_inputs: dc_type=:toroidal with " *
+                        "dgeo_val=nothing requires `sing.restype` populated " *
+                        "by ForceFreeStates.resist_eval_all!. " *
+                        "Surface k=$k has restype=nothing."
+                    )
+                )
+            else
+                0.0
+            end
+        else
+            _eval(dgeo_val, psi)
+        end
+
         alpha_k = if rg === nothing
             @warn("build_slayer_inputs: sing.restype not populated; using the " *
                   "slab Mercier exponent α = 1/2 for the Δ' reference-length " *

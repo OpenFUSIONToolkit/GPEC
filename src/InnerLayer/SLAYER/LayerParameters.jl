@@ -41,7 +41,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `bt`       | Toroidal field [T]                                                |
 | `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention) |
 | `dr_val`   | Resistive interchange D_R = E + F + H² (critical-Δ input; auto-derived from GGJ coefficients unless overridden) |
-| `dgeo_val` | Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied) |
+| `dgeo_val` | Connor et al. 2015 Eq. 59 toroidal critical-Δ geometric factor in the r_s reference (see `toroidal_dgeo`) |
 | `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                |
 | `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
 | `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
@@ -130,7 +130,7 @@ function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
 end
 
 # Internal: solve the Wd self-consistency loop for the chi_parallel-based
-# critical Δ (Connor-Hastie-Helander 2015). Returns dc_tmp as a Float64.
+# critical Δ (Connor et al. 2015, PPCF 57 065001). Returns dc_tmp as a Float64.
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
     rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
@@ -212,7 +212,9 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `zeff`    -- effective charge
   - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
-  - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
+  - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula: the resistive
+    interchange index `D_R` and the Connor et al. 2015 Eq. 59 geometric factor
+    in the `r_s` reference (`toroidal_dgeo`)
   - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
   - `k_ref`   -- reference-length ratio K = r_s·(dψ_N/dr) at the surface,
