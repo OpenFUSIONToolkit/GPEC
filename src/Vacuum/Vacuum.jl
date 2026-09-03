@@ -304,7 +304,9 @@ reductions stay exact.
     # Complex Fourier basis exp(-i(mθ-nζ)) on a single field period
     exp_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta * nfp, n_modes; nfp=nfp)
 
-    # Kernel parameters, hardcoded for now
+    # Singular quadrature: 23x23 patch, 20 radial / 40 angular polar nodes, 5-point Lagrange.
+    # Malhotra JCP 397 (2019) 108791 sec 3.2.2 grows these as N^(1/4); over the grids used here
+    # that spans M = 19..35 with no measured accuracy gain, so they are fixed.
     PATCH_RAD = 11
     RAD_DIM = 20
     INTERP_ORDER = 5
