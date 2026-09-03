@@ -61,7 +61,7 @@ mr = 384             # Number of radial grid zones in the tabulated psi(R,Z) map
 mz = 512             # Number of axial grid zones in the tabulated psi(R,Z) map
 ma = 256             # Number of flux grid zones for the F and mu0*p profile spline
 r0 = 1.0             # Major radius R0 in m
-b0 = 1.0             # Vacuum toroidal field at r0 in T
+b0 = 2.0             # Vacuum toroidal field at r0 in T
 epsilon = 0.32       # Inverse aspect ratio eps = a/R0
 kappa = 1.7          # Elongation kappa
 delta = 0.33         # Triangularity delta
