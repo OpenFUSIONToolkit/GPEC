@@ -40,6 +40,7 @@ else
     include("./runtests_slayer_params.jl")
     include("./runtests_slayer_riccati.jl")
     include("./runtests_slayer_inputs.jl")
+    include("./runtests_layer_overlap_fitzpatrick.jl")
     include("./runtests_dispersion_residual.jl")
     include("./runtests_dispersion_coupled.jl")
     include("./runtests_dispersion_coupled_full.jl")
