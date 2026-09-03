@@ -187,7 +187,7 @@ hand-built parameters default to `k_ref = 1`, making the conversion the
 identity.
 """
 function delta_prime_to_rs_reference(dp_matrix::AbstractMatrix,
-    params::AbstractVector)
+    params::AbstractVector{<:SLAYERParameters})
     dl = [p.k_ref^(0.5 + p.alpha_mercier) for p in params]
     dr = [p.k_ref^(p.alpha_mercier - 0.5) for p in params]
     return Diagonal(dl) * Matrix{ComplexF64}(dp_matrix) * Diagonal(dr)

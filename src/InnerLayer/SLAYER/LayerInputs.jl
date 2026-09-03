@@ -78,7 +78,9 @@ derivatives are analytic — no label carries a finite-difference stencil.
     Rutherford-literature convention.
   - `:flux` -- toroidal-flux label. Fitzpatrick, Nucl. Fusion (2025),
     Eq. 30: `dψ_p/dr = B₀ r g/q` integrates to `ψ_t = B₀r²/2`, so
-    `r = √(2ψ_t/B₀)` with `ψ_t = psio·∫₀^ψ (q/g) dψ′` and `g = F/(B₀R₀)`.
+    `r = √(2ψ_t/B₀)` with `ψ_t = psio·∫₀^ψ (q/g) dψ′` and `g = F/(B₀R₀)`,
+    `F = R·B_tor`. Note `profiles.F_spline` stores `2πF`, so the
+    implementation divides it by 2π to form `g`.
     Defined from flux alone, it carries no circular-cross-section assumption,
     and its derivative `dr/dψ ∝ q` grows toward a separatrix where the
     geometric labels' `da/dψ` collapses.
