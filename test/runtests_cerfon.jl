@@ -4,7 +4,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using GeneralizedPerturbedEquilibrium.Equilibrium: CerfonConfig, EquilibriumConfig, setup_equilibrium,
     cerfon_run, cerfon_basis, cerfon_basis_dx, cerfon_basis_dy, cerfon_basis_dxx, cerfon_basis_dyy,
     cerfon_basis_dxy, cerfon_psi_p, cerfon_dpsi_p_dx, cerfon_d2psi_p_dx2, cerfon_psihat, cerfon_grad,
-    cerfon_solve_coeffs, cerfon_find_axis, cerfon_null_point, cerfon_shape_points
+    cerfon_solve_coeffs, cerfon_find_axis, cerfon_null_point, cerfon_shape_points,
+    cerfon_flux_scale
 
 # Cerfon-Freidberg diverted analytic equilibrium (eq_type = "cerfon").
 #
@@ -84,6 +85,35 @@ end
         cdn, _ = cerfon_solve_coeffs(CerfonConfig(; null="dn"))
         @test all(abs.(cdn[8:12]) .< 1e-12)
         @test cerfon_find_axis(CerfonConfig(; null="dn"), cdn, -0.155)[2] ≈ 0 atol = 1e-9
+    end
+
+    @testset "the flux map and the F/p profiles satisfy Grad-Shafranov" begin
+        # The strongest invariant available: the tabulated profiles must reproduce the source
+        # of the flux map they are paired with. A sign slip in F² leaves the shape, the nulls
+        # and the q divergence all looking correct while breaking the equilibrium outright,
+        # and only this residual notices.
+        for null in ("lsn", "dn")
+            cfg = CerfonConfig(; null=null)
+            c, _ = cerfon_solve_coeffs(cfg)
+            A = cfg.a_solovev
+            xa, ya = cerfon_find_axis(cfg, c, A)
+            P = cerfon_flux_scale(cfg, c, A, xa, ya)
+            R0 = cfg.r0
+            psi_of = (x, y) -> -P * cerfon_psihat(x, y, c, A)
+            # Solov'ev source terms implied by ψ = −P·ψ̂ (see cerfon_run)
+            mu0_dpdpsi = P * (1 - A) / R0^4
+            FdFdpsi = A * P / R0^2
+            for (x, y) in ((0.85, -0.2), (1.05, 0.05), (1.25, 0.3), (0.95, 0.4))
+                h = 2e-4
+                # Δ* in normalized coordinates equals R0² Δ*_(R,Z)
+                dstar =
+                    (psi_of(x + h, y) - 2psi_of(x, y) + psi_of(x - h, y)) / h^2 -
+                    (psi_of(x + h, y) - psi_of(x - h, y)) / (2h) / x +
+                    (psi_of(x, y + h) - 2psi_of(x, y) + psi_of(x, y - h)) / h^2
+                residual = dstar + R0^2 * (mu0_dpdpsi * (R0 * x)^2 + FdFdpsi)
+                @test abs(residual) / abs(dstar) < 1e-5
+            end
+        end
     end
 
     @testset "unknown null topology is rejected" begin

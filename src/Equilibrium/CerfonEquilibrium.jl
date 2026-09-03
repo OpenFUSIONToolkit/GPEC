@@ -381,12 +381,17 @@ function cerfon_run(equil_inputs::EquilibriumConfig, cerfon_inputs::CerfonConfig
     psi_of = (x, y) -> -P * cerfon_psihat(x, y, c, A)
     psio = psi_of(xa, ya)
 
-    # Solov'ev profiles: μ₀p and F² are both linear in ψ, with ψ = psio(1 − ψ_N).
+    # Solov'ev profiles: μ₀p and F² are both linear in ψ, with ψ = psio(1 − ψ_N). Matching
+    # Δ*ψ = −μ₀R²p′ − FF′ against Δ*ψ = (C/R₀²)[(1−A)x² + A] gives μ₀p′ = −C(1−A)/R₀⁴ and
+    # FF′ = −CA/R₀², with C = −P the scale in ψ = C·ψ̂.
     psi_norm = [(ia / (cfg.ma + 1))^2 for ia in 1:(cfg.ma+1)]
     sqfs = zeros(cfg.ma + 1, 4)
     for (i, pn) in enumerate(psi_norm)
         psi = psio * (1 - pn)
-        f2 = (cfg.r0 * cfg.b0)^2 - 2 * A * P * psi / cfg.r0^2
+        # F² = F_edge² − 2CAψ/R₀² with C = −P, i.e. +2APψ/R₀². For A < 0 this makes the
+        # plasma diamagnetic. The opposite sign is not a cosmetic 3% shift in F — it breaks
+        # Grad-Shafranov outright, so `runtests_cerfon.jl` checks the residual directly.
+        f2 = (cfg.r0 * cfg.b0)^2 + 2 * A * P * psi / cfg.r0^2
         f2 <= 0 && error("Cerfon toroidal field vanishes at ψ_N = $pn (F² = $f2); reduce q0 or |a_solovev|.")
         sqfs[i, 1] = sqrt(f2)
         sqfs[i, 2] = P * (1 - A) * psi / cfg.r0^4
