@@ -39,9 +39,9 @@ constructor.
     Empty (default) means no rotation on any surface. Must be empty or have
     one entry per rational surface actually analysed
   - `tauk_rescale` -- direction of the inter-surface Q normalization in the
-    coupled determinant: `:legacy` (default, `Q·tauk_ref/tauk_k`) or `:direct`
-    (`Q·tauk_k/tauk_ref`, consistent with `ω = Re(Q)/tauk` and with TJ).
-    `:direct` moves every coupled growth rate, so it is opt-in
+    coupled determinant: `:direct` (default, `Q·tauk_k/tauk_ref`, consistent
+    with `Q = tauk·omega` and with TJ) or `:legacy` (`Q·tauk_ref/tauk_k`, the
+    pre-correction behaviour, for reproducing older results only)
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
@@ -170,10 +170,13 @@ there is one consistent interface for resistive and kinetic profiles.
     # error; pad with zeros to leave some surfaces static.
     omega_E_kHz::Vector{Float64} = Float64[]
 
-    # Inter-surface Q normalization in the coupled determinant: :legacy keeps
-    # Q·tauk_ref/tauk_k (every published result to date); :direct uses
-    # Q·tauk_k/tauk_ref, the direction implied by ω = Re(Q)/tauk and by TJ.
-    tauk_rescale::Symbol = :legacy
+    # Inter-surface Q normalization in the coupled determinant. `:direct`
+    # (default) uses Q·tauk_k/tauk_ref: Q is defined as tauk·omega, so one
+    # shared physical eigenvalue maps to surface k by MULTIPLYING by tauk_k.
+    # `:legacy` restores the previous Q·tauk_ref/tauk_k for reproducing results
+    # generated before the correction; it puts the scanned frequency and that
+    # surface's Q_e/Q_i on opposite tauk scalings inside the same layer solve.
+    tauk_rescale::Symbol = :direct
 
     profile_file::String = ""
     profile_group::String = "/"

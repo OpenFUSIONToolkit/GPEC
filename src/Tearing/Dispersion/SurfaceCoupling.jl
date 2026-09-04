@@ -73,8 +73,8 @@ number, `dc`, and the layer all share the `x̂ = (r−r_s)/r_s` reference
 length). `dp_diag` must already be in that same r_s reference — the Tearing
 runner converts the ψ_N-referenced BVP Δ' via `delta_prime_to_rs_reference`
 before building couplings. `tauk` is taken from `params.tauk` for use by
-`MultiSurfaceCoupling` Q rescaling. `q_shift` is the real Doppler offset on the
-layer's Q argument (`tauk * n * Omega`); it defaults to zero.
+`MultiSurfaceCoupling` Q rescaling. `q_shift` is the real E×B Doppler offset on
+the layer's Q argument (`-tauk * omega_E`); it defaults to zero.
 """
 function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
     dp_diag::Number; dc::Real=0.0, q_shift::Real=0.0)
@@ -99,7 +99,7 @@ meaningful only for tearing-only slab-layer approximations like SLAYER;
 for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
 struct's `dc` field is hard-wired to 0 here.
 
-`q_shift` is the real Doppler offset on the layer's Q argument. GGJ carries
+`q_shift` is the real E×B Doppler offset on the layer's Q argument. GGJ carries
 `tauk = 1`, so the caller must supply the shift already in GGJ's own Q units.
 """
 function surface_coupling(model::GGJModel, params::GGJParameters,
