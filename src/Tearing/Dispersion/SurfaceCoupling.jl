@@ -12,11 +12,13 @@
 # multi-surface `MultiSurfaceCoupling` to rescale Q between each surface's
 # normalization.
 #
-# `q_shift` is a real, additive offset on the layer's Q argument. Re(Q) is the
-# lab-frame mode frequency in this surface's normalization (omega = Re(Q)/tauk),
-# so `q_shift = tauk * n * Omega_k` imposes the Doppler shift of a surface
-# rotating at Omega_k on an otherwise common lab-frame eigenvalue. Zero
-# reproduces the static, all-surfaces-corotating case.
+# `q_shift` is a real, additive offset on the layer's Q argument, carrying the
+# E×B rotation of this surface. Fitzpatrick's TJ writes the layer eigenvalue as
+# `ĝ = i(Q_E − ω·tau_k)` with `Q_E = tau_k·omega_E` (TJ Documentation/Layer.tex,
+# "Calculation of Growth-Rate and Real Frequency"); with `ĝ = −i·Q` this is
+# `Q_k = tau_k·(omega − omega_E_k)`, i.e. the layer sees the mode frequency in
+# its own fluid frame. So `q_shift = −tau_k·omega_E_k`, and zero reproduces the
+# static, all-surfaces-corotating case.
 #
 # Constructor convenience: `surface_coupling(model, params, dp_diag; dc=0.0)`
 # auto-fills `scale` and `tauk` based on the model type — `scale = S^(1/3)`

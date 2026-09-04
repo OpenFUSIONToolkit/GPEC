@@ -82,24 +82,46 @@
         # Empty (default) means no shift anywhere.
         @test _q_shifts(SLAYERControl(), params, 2) == [0.0, 0.0]
 
-        ctrl = SLAYERControl(; omega_shift_kHz=[1.0, -2.0])
+        ctrl = SLAYERControl(; omega_E_kHz=[1.0, -2.0])
         got = _q_shifts(ctrl, params, 2)
-        @test got[1] ≈ p1.tauk * 2π * 1e3 * 1.0
-        @test got[2] ≈ p2.tauk * 2π * 1e3 * -2.0
+        # Sign is negative: TJ's ĝ = i(Q_E − ω·τ_k) maps to Q_k = τ_k(ω − ω_E).
+        @test got[1] ≈ -p1.tauk * 2π * 1e3 * 1.0
+        @test got[2] ≈ -p2.tauk * 2π * 1e3 * -2.0
 
         # Length must match the number of surfaces analysed.
-        @test_throws ArgumentError _q_shifts(SLAYERControl(; omega_shift_kHz=[1.0]),
+        @test_throws ArgumentError _q_shifts(SLAYERControl(; omega_E_kHz=[1.0]),
             params, 2)
     end
 
-    @testset "omega_shift_kHz parses and validates from TOML" begin
-        ctrl = slayer_control_from_toml(Dict("omega_shift_kHz" => [0, 3.0, -1.5]))
-        @test ctrl.omega_shift_kHz == [0.0, 3.0, -1.5]
-        @test eltype(ctrl.omega_shift_kHz) === Float64
+    @testset "omega_E_kHz and tauk_rescale parse and validate from TOML" begin
+        ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => [0, 3.0, -1.5]))
+        @test ctrl.omega_E_kHz == [0.0, 3.0, -1.5]
+        @test eltype(ctrl.omega_E_kHz) === Float64
         # Default stays empty so existing decks are untouched.
-        @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_shift_kHz)
+        @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_E_kHz)
         # A non-finite shift would silently poison every Q evaluation; the
         # validator rejects it (TOML cannot express NaN, so go through validate).
-        @test_throws ArgumentError validate(SLAYERControl(; omega_shift_kHz=[NaN]))
+        @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=[NaN]))
+
+        # tauk_rescale round-trips as a Symbol and rejects unknown values.
+        @test slayer_control_from_toml(Dict("tauk_rescale" => "direct")).tauk_rescale === :direct
+        @test SLAYERControl().tauk_rescale === :legacy
+        @test_throws ArgumentError validate(SLAYERControl(; tauk_rescale=:sideways))
+    end
+
+    @testset "tauk_rescale flips the inter-surface Q normalization" begin
+        sc1 = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0)
+        sc2 = surface_coupling(model, nothing, 2.0 + 0im; scale=1.0, tauk=2.0)
+        dp = ComplexF64[1.0 0.0; 0.0 2.0]
+        Q = 1.5 + 0.5im
+
+        leg = multi_surface_coupling([sc1, sc2], dp)
+        dir = multi_surface_coupling([sc1, sc2], dp; tauk_rescale=:direct)
+        @test leg.tauk_rescale === :legacy
+        # :legacy divides by tauk_k, :direct multiplies by it.
+        @test leg(Q) ≈ (1.0 - Q) * (2.0 - Q / 2)
+        @test dir(Q) ≈ (1.0 - Q) * (2.0 - 2Q)
+        @test_throws ArgumentError multi_surface_coupling([sc1, sc2], dp;
+            tauk_rescale=:sideways)
     end
 end
