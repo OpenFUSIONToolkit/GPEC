@@ -145,14 +145,9 @@ well-conditioned flux-space inductances L, Λ:
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
   - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")    # Response fields in mode space [npsi, mpert]
-  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 ) — the **boundary-response torque**:
-    the net toroidal torque implied by the anti-Hermitian part of the plasma inductance at the
-    control surface. For exact self-consistent solutions this equals the volume-integrated
-    kinetic torque of the same Euler-Lagrange model (the δW surface-term identity), so any
-    numerical difference from a ψ-resolved torque profile is a solution/grid-quality diagnostic,
-    not physics. It is a *distinct construction* from the NTV torque under `KineticForces/`
-    (independent energy-space bounce-average evaluation); agreement between the two tests whether
-    the EL matrices faithfully discretize the drift-kinetic operator. Zero for ideal (Hermitian) runs.
+  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 ) — the boundary-response torque, zero for ideal
+    (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
+    self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
