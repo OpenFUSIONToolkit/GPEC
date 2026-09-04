@@ -632,9 +632,13 @@ function _bounce_integrate(
         return 0.0, 0.0, 0.0, nothing
     end
 
-    # Bounce-averaged frequencies
+    # Bounce-averaged frequencies. wbbar already carries one factor of ro that its own
+    # normalization bhat = sqrt(2T/m)/ro cancels; reusing it inside wdbar imports that ro
+    # a third time while dhat = (T/q)/(bo·ro²) removes only the two written explicitly, so
+    # the drift prefactor takes ro, not ro². (Otherwise ω_D = wdbar·dhat carries a surplus
+    # length: 4π·(I₂/I₁)·(T/q) is already V/Wb = 1/s, so the extra ro leaves m/s.)
     wbbar = ro * twopi / ((2 - sigma) * total_wb)
-    wdbar = ro^2 * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
+    wdbar = ro * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
 
     # Phase factor pl_i = exp(-2πi·lnq·fsi_wb(θ_i)/((2-σ)·total_wb)), using the
     # cumulative spline integral of the bounce action.
