@@ -35,7 +35,14 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
               rex_override::Union{Nothing,Float64}=nothing,
               imx_override::Union{Nothing,Float64}=nothing,
-              atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
+              atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
+              atol_x::Float64=NaN, rtol_x::Float64=NaN,
+              nested_tolerance_margin::Float64=1e-2)
+
+    # The pitch integrand is itself the energy integral, so the energy level is resolved
+    # tighter than the pitch level (explicit atol_x/rtol_x override the derived values).
+    atol_energy = isnan(atol_x) ? nested_tolerance_margin * atol_xlmda : atol_x
+    rtol_energy = isnan(rtol_x) ? nested_tolerance_margin * rtol_xlmda : rtol_x
 
     # Enforce bounds
     if psi > 1
@@ -233,7 +240,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    B_vpar=B_vpar,
                                    smat=smat_f, tmat=tmat_f, xmat=xmat_f,
                                    ymat=ymat_f, zmat=zmat_f,
-                                   energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
+                                   energy_atol=atol_energy, energy_rtol=rtol_energy,
                                    pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
                                    rex_override=rex_override, imx_override=imx_override)
     end
@@ -897,7 +904,9 @@ function compute_kinetic_matrices_at_psi!(
     electron::Bool, equil, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
     nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
-    atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
+    atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
+    atol_x::Float64=NaN, rtol_x::Float64=NaN,
+    nested_tolerance_margin::Float64=1e-2)
 
     # Bypass ψ > 1 (no kinetic contribution outside plasma)
     if psi > 1
@@ -906,13 +915,17 @@ function compute_kinetic_matrices_at_psi!(
         return nothing
     end
 
+    # See tpsi!: the energy integral is the pitch integrand, so it is resolved tighter.
+    atol_energy = isnan(atol_x) ? nested_tolerance_margin * atol_xlmda : atol_x
+    rtol_energy = isnan(rtol_x) ? nested_tolerance_margin * rtol_xlmda : rtol_x
+
     state = _setup_surface_state(psi, zi, mi, electron,
                                   equil, intr, kinetic_profiles)
 
     kinetic_energy_matrices_for_euler_lagrange!(
         kwmat, ktmat, state, psi, n, l, wdfac, intr;
         nutype, f0type, nufac,
-        energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
+        energy_atol=atol_energy, energy_rtol=rtol_energy,
         pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
 
     return nothing
