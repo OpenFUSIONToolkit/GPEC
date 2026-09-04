@@ -217,19 +217,22 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         da_dpsi = _da_dpsi_at(psi)
         sval_r = r_based_shear(rs, q, q1, da_dpsi)
 
-        prof = profiles(psi)
-        # Override ω_*e, ω_*i with spline-derivative values when requested.
-        ω_e_use, ω_i_use = if compute_omega_star
-            _omega_star_at(psi)
-        else
-            (prof.omega_e, prof.omega_i)
-        end
-
         # Resonant (m, n): take the first element of the mode-number vectors.
         # Parallel-FM `sing.m`/`sing.n` hold exactly one entry each; ideal
         # DCON may hold multiple — we pick the first and document the choice.
         m_res = sing.m[1]
         n_res = sing.n[1]
+
+        prof = profiles(psi)
+        # Override ω_*e, ω_*i with spline-derivative values when requested. In flux coordinates
+        # ω_* = n·(dp/dψ)/(e·n_e); `_omega_star_at` returns the n = 1 value, so restore the
+        # factor n here. Values supplied through `profiles` are taken to be physical already.
+        ω_e_use, ω_i_use = if compute_omega_star
+            ωe1, ωi1 = _omega_star_at(psi)
+            (n_res * ωe1, n_res * ωi1)
+        else
+            (prof.omega_e, prof.omega_i)
+        end
 
         # Pull geometric trapped-fraction inputs from ResistGeometry when
         # available (populated by ForceFreeStates.resist_eval_all!); else
