@@ -292,7 +292,7 @@ The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separa
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "ForceFreeStatesStructs.jl", "Result.jl", "Resist.jl", "EulerLagrange.jl", "Sing.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/Resist.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
 
 ## Example usage
@@ -324,15 +324,15 @@ intr.mpert = intr.mhigh - intr.mlow + 1
 intr.numpert_total = intr.mpert * intr.npert
 
 metric = FFS.make_metric(equil, intr.mpert)
-ffit   = FFS.make_matrix(equil, intr, metric)
+mats   = FFS.build_matrix_splines(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
 # on ctrl.integrator and always returns a 4-tuple
 # (odet, propagators, chunks, S_at_surface_left).  The trailing three are `nothing`
 # on the forward path.
-odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
 
-vac = FFS.free_run(odet, ctrl, equil, ffit, intr)
+vac = FFS.free_run(odet, ctrl, equil, mats, intr)
 println("Energy eigenvalue et[1] = ", real(vac.et[1]))
 ```
 
@@ -363,8 +363,10 @@ end
 
 ## Notes
 
-- The standard path does not populate `delta_prime`; use `PerturbedEquilibrium.SingularCoupling`
-  for Δ' on the standard path (it reads `ca_l`/`ca_r` directly).
+- The standard path does not populate `delta_prime`; the canonical Δ' is the STRIDE BVP
+  `SingularSurfaces/Delta_prime_matrix` from the parallel FM path. `ca_l`/`ca_r` are filled
+  only by ideal surface crossings (kinetic and galerkin-matched runs emit zero-extent
+  `ca_left`/`ca_right` sentinels).
 - The Riccati and parallel FM paths compute Δ' inline at each crossing, using the
   direct diagonal formula (no GR permutation).  The result in `delta_prime_col[ipert_res, i]`
   equals `delta_prime[i]` to machine precision.

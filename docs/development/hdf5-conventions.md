@@ -67,6 +67,7 @@ Mechanism: writers stay table-driven — each writer keeps a `path => (; long_na
 
 - Complex quantities are stored as the native HDF5.jl compound type (readable by h5py as a compound dtype) — **never split into `*_real`/`*_imag` dataset pairs**. Sole sanctioned exception: `Input/RawInputs/ForcingTerms/amplitude_{real,imag}`, which mirrors the external forcing ingest-file format and keeps pre-existing snapshots replayable.
 - `NaN` is the not-computed sentinel in numeric datasets (e.g. auto-derived settings, rootless growth-rate entries).
+- A **zero-extent array** is the not-computed sentinel for whole datasets that a given run never produces (e.g. `SingularSurfaces/ca_left`/`ca_right` on kinetic or galerkin-matched runs, the free-boundary energies when `vac_flag=false`, the on-demand derivative stores). Never write unpopulated (`undef`) memory.
 - Ragged (variable-length) data uses the flat-plus-`offsets` companion pattern (`offsets[k+1] - offsets[k]` = length of row `k`) rather than HDF5 VLEN types, e.g. `KineticForces/<method>/EnergyIntegrals/` and `Tearing/Diagnostics/*`.
 
 ## Back-compatibility policy

@@ -28,6 +28,10 @@ using HDF5
             et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
             @test real(et[1]) > 0
+            # Kinetic runs never populate the asymptotic ca coefficients; the writer must
+            # emit deterministic zero-extent sentinels, not uninitialized memory.
+            @test isempty(read(h5["SingularSurfaces/ca_left"]))
+            @test isempty(read(h5["SingularSurfaces/ca_right"]))
         end
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true
