@@ -2,20 +2,20 @@
     CalculatedKineticMatrices
 
 Bridge from KineticForces' bounce-averaged matrix kernels into the kinetic-MHD
-stability path in ForceFreeStates. Used by `make_kinetic_matrix` when
+stability path in ForceFreeStates. Used by `build_kinetic_matrix_splines` when
 `ctrl.kinetic_source == "calculated"` (via the `calculated_source` callback
 injected from `GeneralizedPerturbedEquilibrium.main`).
 """
 
 """
-    compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, ffit;
+    compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, mats;
                                         kf_ctrl=KineticForcesControl(),
                                         kinetic_profiles)
         → (kw_flat, kt_flat)
 
 Drive the KineticForces matrix kernel over the ψ grid stored in `metric.xs` and
 return `(kw_flat, kt_flat)` arrays of shape `(mpsi, np^2, 6)` matching the
-contract that `ForceFreeStates._compute_fkg_matrices!` consumes.
+contract that `ForceFreeStates._compute_fkg_matrices` consumes.
 
 The arrays carry the six bounce-averaged kinetic energy / torque matrices
 (Logan 2015 Eqs 7.30–7.35) for every ψ on the equilibrium grid, packed as
@@ -36,7 +36,7 @@ section.
   - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
   - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
   - `metric`: MetricData (provides ψ grid via `metric.xs`)
-  - `ffit`: FourFitVars (used only for `numpert_total` cross-check)
+  - `mats`: MatrixSplines (used only for `numpert_total` cross-check)
 
 # Keyword arguments
 
@@ -56,7 +56,7 @@ function compute_calculated_kinetic_matrices(
     equil,
     ffs_intr,
     metric,
-    ffit;
+    mats;
     kf_ctrl::KineticForcesControl=KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
     species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing
@@ -66,8 +66,6 @@ function compute_calculated_kinetic_matrices(
     mpert = ffs_intr.mpert
     npert = ffs_intr.npert
     np = ffs_intr.numpert_total
-
-    @assert ffit.numpert_total == np "FourFitVars and ForceFreeStatesInternal disagree on numpert_total"
 
     kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
     kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
