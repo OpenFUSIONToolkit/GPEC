@@ -101,10 +101,12 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
 
     # Create periodic interpolant for poloidal quantities
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
-    # v_par and the bounce points use a separate endpoint-fit (non-periodic) cubic
-    # of B, like Fortran's vspl. The endpoint fit of 1−(λ/bo)B equals 1−(λ/bo)
-    # times the fit of B, so one B_extrap per surface serves every λ.
-    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
+    # v_par and the bounce points use a separate scalar cubic of B (Fortran's vspl).
+    # 1−(λ/bo)B is periodic on the closed θ interval, so the fit must be periodic too:
+    # a non-periodic endpoint fit is only C⁰ at the θ=0/1 seam and manufactures false
+    # near-seam extrema and root pairs there. The fit of 1−(λ/bo)B equals 1−(λ/bo)
+    # times the fit of B, so one B_vpar per surface serves every λ.
+    B_vpar = cubic_interp(xs, B_vals; bc=PeriodicBC())
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -235,7 +237,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    method, op_wmats;
                                    chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
                                    mpert=intr.mpert, theta_bmax=theta_bmax,
-                                   B_extrap=B_extrap,
+                                   B_vpar=B_vpar,
                                    smat=smat_f, tmat=tmat_f, xmat=xmat_f,
                                    ymat=ymat_f, zmat=zmat_f,
                                    energy_atol=atol_energy, energy_rtol=rtol_energy,
@@ -410,7 +412,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
                        dbob_m_f, divx_m_f, divxfac, wdfac, method, op_wmats;
                        chi1::Float64, ro::Float64, mfac::Vector{Int}, mpert::Int,
-                       theta_bmax::Float64, B_extrap,
+                       theta_bmax::Float64, B_vpar,
                        smat=nothing, tmat=nothing, xmat=nothing,
                        ymat=nothing, zmat=nothing,
                        nlmda::Int=128, ntheta::Int=128,
@@ -424,7 +426,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     # Bounce-averaged quantities per pitch angle
     bounce = compute_bounce_data(
         psi, n, l, q, bo, bmax, bmin, theta_bmax,
-        tspl, B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
+        tspl, B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
         mass, chrg, T_s, method;
         nlmda, ntheta, smat, tmat, xmat, ymat, zmat)
 
@@ -624,8 +626,9 @@ function _setup_surface_state(
     end
 
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
-    # Endpoint-fit (non-periodic) cubic of B for v_par and bounce points (Fortran vspl equivalent).
-    B_extrap = cubic_interp(xs, B_vals; bc=CubicFit())
+    # Periodic cubic of B for v_par and bounce points (Fortran vspl equivalent); 1−(λ/bo)B
+    # is periodic on the closed θ interval, so a non-periodic fit would break at the seam.
+    B_vpar = cubic_interp(xs, B_vals; bc=PeriodicBC())
 
     bmax = maximum(B_vals)
     ibmax = argmax(B_vals)
@@ -694,7 +697,7 @@ function _setup_surface_state(
 
     return (;
         chrg, mass,
-        tspl, B_extrap, bmax, bmin, theta_bmax,
+        tspl, B_vpar, bmax, bmin, theta_bmax,
         q, n_s, T_s, welec,
         wdian, wdiat, wtran, wgyro, nuk,
         epsr,
@@ -759,7 +762,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
 
     bounce = compute_bounce_data(
         psi, n, l, state.q, bo, state.bmax, state.bmin, state.theta_bmax,
-        state.tspl, state.B_extrap, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
+        state.tspl, state.B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
         state.mass, state.chrg, state.T_s, "fwmm";
         nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
 
