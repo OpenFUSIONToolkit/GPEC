@@ -36,7 +36,7 @@ The primary reference for the `ForceFreeStates` module. Derives the Euler-Lagran
 > *Physics of Plasmas* **25**, 032507 (2018).
 > DOI: [10.1063/1.5007042](https://doi.org/10.1063/1.5007042)
 
-Reformulates the DCON eigenvalue problem as a Riccati matrix ODE, enabling parallel integration across singular surfaces and faster computation. Implemented in `src/ForceFreeStates/Riccati.jl` and enabled via `integrator = "riccati"` in `[ForceFreeStates]`.
+Reformulates the DCON eigenvalue problem as a Riccati matrix ODE, enabling parallel integration across singular surfaces and faster computation. Implemented in `src/ForceFreeStates/Riccati/` and enabled via `integrator = "riccati"` in `[ForceFreeStates]`.
 
 ---
 

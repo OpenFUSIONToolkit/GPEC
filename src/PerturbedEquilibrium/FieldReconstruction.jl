@@ -37,7 +37,7 @@ Covariant components from metric tensor contraction (matches Fortran gpeq_cova):
 """
     reconstruct_physical_fields(
         response_vector, flux_matrix, solution,
-        equil, ffs, intr, metric, ffit, ctrl
+        equil, ffs, intr, metric, mats, ctrl
     ) -> (xi_modes, b_modes)
 
 Reconstruct displacement and perturbed magnetic field from eigenmode response.
@@ -74,7 +74,7 @@ function reconstruct_physical_fields(
     ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
     metric::MetricData,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     ctrl::PerturbedEquilibriumControl
 )
     npsi = size(solution.u_store, 4)
@@ -106,7 +106,7 @@ function reconstruct_physical_fields(
         # Compute Clebsch displacements with regularization (matches Fortran gpeq_sol + gpout_xclebsch)
         clebsch_psi, clebsch_psi1, clebsch_alpha = compute_clebsch_displacements(
             xi_psi_modes, xi_psi1_modes, xi_s_modes,
-            psi_grid, equil, ffs, ffit, ctrl
+            psi_grid, equil, ffs, mats, ctrl
         )
 
         # Compute regularized (modified) b-field components (matches Fortran gpeq_sol bmt/bmz)
@@ -321,7 +321,7 @@ end
 """
     compute_clebsch_displacements(
         xi_psi_modes, xi_psi1_modes, xi_s_modes,
-        psi_grid, equil, ffs, ffit, ctrl
+        psi_grid, equil, ffs, mats, ctrl
     ) -> (clebsch_psi, clebsch_psi1, clebsch_alpha)
 
 Compute Clebsch displacement components for PENTRC output.
@@ -335,7 +335,7 @@ Matches Fortran gpeq_sol regularization + gpout_xclebsch output convention:
 When reg_spot=0, clebsch_psi1 = xi_psi1 and clebsch_alpha = xi_s/χ₁ (no regularization).
 
 The regularized xms is computed as -A⁻¹(B·xmp1 + C·xsp) matching Fortran gpeq_sol,
-where A, B, C are the stability matrices evaluated at each ψ via ffit interpolants.
+where A, B, C are the stability matrices evaluated at each ψ from `mats`.
 """
 function compute_clebsch_displacements(
     xi_psi_modes::Matrix{ComplexF64},
@@ -344,7 +344,7 @@ function compute_clebsch_displacements(
     psi_grid::Vector{Float64},
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     ctrl::PerturbedEquilibriumControl
 )
     npsi, mpert = size(xi_psi_modes)
@@ -363,6 +363,9 @@ function compute_clebsch_displacements(
     if reg_spot == 0
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
+
+    # A/B/C of the active model, matching what the ODE integrated.
+    active_mats = mats.kinetic === nothing ? mats.ideal : mats.kinetic
 
     # Per-thread workspaces: matrix ops and spline hints are not safe to share across threads.
     # Size by maxthreadid() and index by threadid() under :static scheduling (GPEC convention).
@@ -397,17 +400,19 @@ function compute_clebsch_displacements(
 
         # Compute regularized xms = -A⁻¹(B·xmp1 + C·xsp) (matches Fortran gpeq_sol)
         # Evaluate stability matrices at this psi
-        ffit.amats(view(amat, :), psi_norm; hint=hint)
-        ffit.bmats(view(bmat, :), psi_norm; hint=hint)
-        ffit.cmats(view(cmat_buf, :), psi_norm; hint=hint)
+        active_mats.A_spline(view(amat, :), psi_norm; hint=hint)
+        active_mats.B_spline(view(bmat, :), psi_norm; hint=hint)
+        active_mats.C_spline(view(cmat_buf, :), psi_norm; hint=hint)
 
         # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
-        # amat is positive-definite by construction (Newcomb kinetic-energy form), so cholesky is
-        # safe. cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
-        # ffit.amats each surface), avoiding a fresh factorization allocation per surface.
+        # cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
+        # active_mats.A_spline each surface), avoiding a fresh factorization allocation per surface.
+        # NOTE: this assumes the ideal A (positive-definite Newcomb kinetic-energy form). The
+        # kinetic A is non-Hermitian and needs an LU, as compute_node_xi_s! does — see the
+        # `active_mats` binding above.
         amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
         xms_vec .*= -1                                     # xms = -A\(B*xmp1 + C*xsp)

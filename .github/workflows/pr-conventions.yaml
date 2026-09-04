@@ -124,9 +124,18 @@ jobs:
             }
 
             // Assignee and reviewer need a human decision, so comment rather than block.
+            // A reviewer counts as named whether or not they have acted yet. GitHub drops a
+            // reviewer from requested_reviewers the moment they submit a review, so the
+            // submitted reviews are what remember an assignment that has already been acted
+            // on; without them this nags precisely the pull requests that got reviewed.
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+            const reviewedByOther = reviews.some(r => r.user && r.user.login !== pr.user.login);
+
             const missing = [];
             if (!pr.assignees.length) missing.push('an **assignee**');
-            if (!pr.requested_reviewers.length && !pr.requested_teams.length) {
+            if (!pr.requested_reviewers.length && !pr.requested_teams.length && !reviewedByOther) {
               missing.push('a **reviewer**');
             }
 

@@ -11,7 +11,7 @@ using FastInterpolations
 # Import parent modules
 import ..Equilibrium
 import ..ForceFreeStates
-import ..ForceFreeStates: SolutionProfiles, ForceFreeStatesResult, FourFitVars, MetricData
+import ..ForceFreeStates: SolutionProfiles, ForceFreeStatesResult, MatrixSplines, MetricData
 import ..Vacuum
 import ..ForcingTerms
 import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization!
@@ -68,7 +68,7 @@ function compute_perturbed_equilibrium(
 
     state = PerturbedEquilibriumState()
     equil = ffs.equil
-    ffit = ffs.ffit
+    mats = ffs.mats
     mthvac = ffs.control.mthvac
 
     # Step 0: Initialize mode arrays for convenient indexing
@@ -92,14 +92,14 @@ function compute_perturbed_equilibrium(
     if ctrl.compute_response &&
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
-        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, ffit)
+        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, mats)
     end
 
     # Step 3: Compute singular coupling metrics
     if ctrl.compute_singular_coupling &&
        ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
        ForceFreeStates.require_solution(ffs, "singular coupling calculation")
-        compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, ffit)
+        compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, mats)
     end
 
     # Step 4: Output eigenmode fields (integrated into HDF5 output)
