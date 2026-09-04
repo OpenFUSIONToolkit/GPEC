@@ -75,13 +75,14 @@ mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deut
 zeff                    = 1.0        # Effective charge
 chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
-# Per-surface lab-frame frequency shift [kHz], core→edge (2/1, 3/1, 4/1, 5/1,
-# 6/1, 7/1 on this equilibrium). Entry k Dopplers surface k's inner layer by
-# ΔRe(Q_k) = τ_k·2π·1e3·Δf_k, so the surfaces no longer all corotate with the
-# eigenvalue. Empty (the default) is the static case; uncomment for a rotation
-# scan. τ_k here is 1.04e-4/6.25e-5/4.17e-5 s at the 2/1, 3/1, 4/1, so 1 kHz is
-# ΔRe(Q) = 0.65/0.39/0.26 respectively — check roots stay inside Q_re_range.
-# omega_shift_kHz       = [0.0, 3.0, 0.0, 0.0, 0.0, 0.0] # per-surface lab-frame frequency shift [kHz], core→edge
+# Per-surface E×B rotation frequency [kHz], core→edge (2/1, 3/1, 4/1, 5/1, 6/1,
+# 7/1 on this equilibrium). Entry k shifts surface k's inner layer by
+# ΔRe(Q_k) = -τ_k·2π·1e3·f_E, so each layer responds in its own fluid frame.
+# Empty (the default) is the static case; uncomment for a rotation scan. τ_k
+# here is 6.63e-5/4.01e-5/2.68e-5 s at the 2/1, 3/1, 4/1, so 1 kHz is
+# ΔRe(Q) = -0.42/-0.25/-0.17 — check roots stay inside Q_re_range.
+# omega_E_kHz           = [0.0, 3.0, 0.0, 0.0, 0.0, 0.0] # per-surface E×B rotation frequency [kHz], core→edge
+# tauk_rescale          = "legacy" # coupled inter-surface Q normalization: "legacy" or "direct" (TJ-consistent)
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
 filter_above_poles      = true       # Discard roots above the highest pole γ
 filter_outside_re       = true       # Condition the above-pole filter on the +γ step exiting the Re(Δ)=0 contour loop

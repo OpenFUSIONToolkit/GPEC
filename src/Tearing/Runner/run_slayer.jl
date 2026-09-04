@@ -151,22 +151,23 @@ function _build_surface_coupling(model::GGJModel, params::GGJParameters,
     return surface_coupling(model, params, dp_diag; q_shift=q_shift)
 end
 
-# Convert `control.omega_shift_kHz` (per-surface lab-frame frequency offsets in
-# kHz, core→edge) into the real Q-space offsets the inner layers consume. Re(Q)
-# at surface k is that surface's frequency scaled by its own `tauk`, so a
-# lab-frame Δf maps to ΔRe(Q_k) = tauk_k · 2π · 1e3 · Δf_k. Parameters without a
-# `tauk` (GGJ) carry no time normalization, so their entry is taken as already
-# dimensionless in GGJ's own Q units.
+# Convert `control.omega_E_kHz` (per-surface E×B rotation frequencies in kHz,
+# core→edge) into the real Q-space offsets the inner layers consume. TJ writes
+# the layer eigenvalue as ĝ = i(Q_E − ω·tau_k) with Q_E = tau_k·omega_E; with
+# ĝ = −i·Q that is Q_k = tau_k·(omega − omega_E_k), so the offset is
+# ΔRe(Q_k) = −tauk_k · 2π · 1e3 · omega_E_kHz[k] — the layer responds in its own
+# fluid frame. Parameters without a `tauk` (GGJ) carry no time normalization, so
+# their entry is taken as already dimensionless in GGJ's own Q units.
 function _q_shifts(control::SLAYERControl, params, n::Integer)
-    shifts = control.omega_shift_kHz
+    shifts = control.omega_E_kHz
     isempty(shifts) && return zeros(Float64, n)
     length(shifts) == n ||
-        throw(ArgumentError("run_slayer: omega_shift_kHz has $(length(shifts)) " *
+        throw(ArgumentError("run_slayer: omega_E_kHz has $(length(shifts)) " *
                             "entries but $n rational surfaces were analysed. " *
                             "Supply one entry per surface (pad with zeros to " *
-                            "shift only some), or leave it empty for no shift."))
+                            "leave some static), or leave it empty for no rotation."))
     return Float64[
-        (hasproperty(params[k], :tauk) ? params[k].tauk : 1.0) * 2π * 1e3 * shifts[k]
+        -(hasproperty(params[k], :tauk) ? params[k].tauk : 1.0) * 2π * 1e3 * shifts[k]
         for k in 1:n
     ]
 end
@@ -293,15 +294,12 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         )
     end
 
-    # Per-surface Doppler shift in Q units. `omega_shift_kHz[k]` is a
-    # lab-frame frequency offset in kHz; Re(Q) is that surface's frequency
-    # times its own tauk, so the Q-space offset is tauk_k · 2π · 1e3 · Δf_k.
-    # GGJ carries tauk = 1, so its shift is taken as already dimensionless.
+    # Per-surface E×B Doppler shift in Q units; see `_q_shifts`.
     q_shifts = _q_shifts(control, params, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     any(!iszero, q_shifts) && @info(
-        "SLAYER: applying per-surface rotation shift " *
-        "omega_shift_kHz=$(control.omega_shift_kHz) kHz " *
+        "SLAYER: applying per-surface E×B rotation " *
+        "omega_E_kHz=$(control.omega_E_kHz) kHz " *
         "→ ΔRe(Q)=$(round.(q_shifts; digits=4))")
 
     # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
@@ -364,7 +362,8 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
 
     elseif control.coupling_mode === :coupled
         m_use = min(control.msing_max, n)
-        mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use)
+        mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use,
+            tauk_rescale=control.tauk_rescale)
         scan = _run_scan(mc, control)
         pthr = _pole_threshold_for(scan)
         ref_tauk = scs[1].tauk

@@ -32,12 +32,16 @@ constructor.
   - `bt`       -- toroidal field `[T]`. `nothing` (default) resolves the physical
     `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
     callable of `psi` overrides it
-  - `omega_shift_kHz` -- per-surface lab-frame frequency shift in kHz,
-    ordered core→edge. Entry `k` Dopplers surface `k`'s inner layer by
-    `ΔRe(Q_k) = tauk_k · 2π · 1e3 · omega_shift_kHz[k]`, modelling a surface
-    rotating relative to the common lab-frame eigenvalue. Empty (default)
-    means no shift on any surface. Must be empty or have one entry per
-    rational surface actually analysed
+  - `omega_E_kHz` -- per-surface E×B rotation frequency in kHz, ordered
+    core→edge. Entry `k` shifts surface `k`'s inner-layer Q argument by
+    `ΔRe(Q_k) = −tauk_k · 2π · 1e3 · omega_E_kHz[k]`, so that layer responds to
+    the mode frequency in its own fluid frame (TJ's `ĝ = i(Q_E − ω·tau_k)`).
+    Empty (default) means no rotation on any surface. Must be empty or have
+    one entry per rational surface actually analysed
+  - `tauk_rescale` -- direction of the inter-surface Q normalization in the
+    coupled determinant: `:legacy` (default, `Q·tauk_ref/tauk_k`) or `:direct`
+    (`Q·tauk_k/tauk_ref`, consistent with `ω = Re(Q)/tauk` and with TJ).
+    `:direct` moves every coupled growth rate, so it is opt-in
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
@@ -158,14 +162,18 @@ there is one consistent interface for resistive and kinetic profiles.
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
 
-    # Per-surface lab-frame frequency shift [kHz], ordered core→edge to match
-    # the rational-surface list. Entry k Dopplers surface k's inner layer by
-    # ΔRe(Q_k) = tauk_k · 2π · 1e3 · omega_shift_kHz[k], so a common
-    # lab-frame eigenvalue is seen at a different frequency by each rotating
-    # surface. Empty (the default) means no shift anywhere — the static,
-    # all-surfaces-corotating case. A shorter-than-msing vector is an error;
-    # pad with zeros to shift only some surfaces.
-    omega_shift_kHz::Vector{Float64} = Float64[]
+    # Per-surface E×B rotation frequency [kHz], ordered core→edge to match the
+    # rational-surface list. Entry k shifts surface k's inner layer by
+    # ΔRe(Q_k) = −tauk_k · 2π · 1e3 · omega_E_kHz[k], so each rotating surface
+    # sees the common lab-frame eigenvalue in its own fluid frame. Empty (the
+    # default) means no rotation anywhere. A shorter-than-msing vector is an
+    # error; pad with zeros to leave some surfaces static.
+    omega_E_kHz::Vector{Float64} = Float64[]
+
+    # Inter-surface Q normalization in the coupled determinant: :legacy keeps
+    # Q·tauk_ref/tauk_k (every published result to date); :direct uses
+    # Q·tauk_k/tauk_ref, the direction implied by ω = Re(Q)/tauk and by TJ.
+    tauk_rescale::Symbol = :legacy
 
     profile_file::String = ""
     profile_group::String = "/"
@@ -179,6 +187,7 @@ const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
+const _VALID_TAUK_RESCALE = (:legacy, :direct)
 
 function validate(ctrl::SLAYERControl)
     ctrl.inner_model in _VALID_INNER_MODELS ||
@@ -201,9 +210,12 @@ function validate(ctrl::SLAYERControl)
                             "not in $(_VALID_LNLAMBDA_FORMS)"))
     ctrl.msing_max >= 1 ||
         throw(ArgumentError("SLAYERControl: msing_max=$(ctrl.msing_max) must be ≥ 1"))
-    all(isfinite, ctrl.omega_shift_kHz) ||
-        throw(ArgumentError("SLAYERControl: omega_shift_kHz contains a " *
-                            "non-finite entry: $(ctrl.omega_shift_kHz)"))
+    all(isfinite, ctrl.omega_E_kHz) ||
+        throw(ArgumentError("SLAYERControl: omega_E_kHz contains a " *
+                            "non-finite entry: $(ctrl.omega_E_kHz)"))
+    ctrl.tauk_rescale in _VALID_TAUK_RESCALE ||
+        throw(ArgumentError("SLAYERControl: tauk_rescale=$(ctrl.tauk_rescale) " *
+                            "must be one of $(_VALID_TAUK_RESCALE)"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
@@ -261,14 +273,14 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :dc_type,
-            :resistivity_model, :lnLambda_form)
+            :resistivity_model, :lnLambda_form, :tauk_rescale)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
         elseif sym in (:bt, :dr_val, :dgeo_val)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
-        elseif sym === :omega_shift_kHz
+        elseif sym === :omega_E_kHz
             kwargs[sym] = Float64[Float64(x) for x in v]
         elseif sym === :boxes
             # `boxes` is a Vector{NTuple{4,Float64}}; from TOML this comes
