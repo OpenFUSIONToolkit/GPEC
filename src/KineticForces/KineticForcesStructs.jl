@@ -86,6 +86,13 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
 Immutable: vary a field by building a new control rather than assigning to one (the
 multi-species loop does this per species, and `check_psi_quadrature_convergence`'s test
 builds a second control for its differing tolerance).
+
+  - `axis_validity_suppression::Bool` - Suppress the calculated kinetic terms where the
+    zero-orbit-width ordering fails near the axis: below ψ_c — the outermost ψ at which a thermal
+    orbit width of the widest-orbit species reaches ⟨r⟩, moved clear of any rational surface the
+    transition would otherwise cut through — the increments are zeroed and the kernel is skipped,
+    rising to full strength at 2ψ_c through a C² envelope. Boundary and envelope come from the
+    equilibrium and kinetic profiles; there are no tuning parameters. Default `true`.
 """
 @kwdef struct KineticForcesControl
     # Moment type
@@ -151,7 +158,7 @@ builds a second control for its differing tolerance).
 
     nufac::Float64 = 1.0           # Collisionality scaling
     divxfac::Float64 = 1.0         # div(xi_perp) scaling
-    axis_validity_suppression::Bool = true  # Suppress kinetic terms where the zero-orbit-width ordering fails near the axis (see kinetic_axis_validity_psi); envelope and boundary are profile-derived, no tuning parameters
+    axis_validity_suppression::Bool = true  # documented in the `## Fields` docstring
 
     # Energy integration parameters
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
@@ -334,9 +341,9 @@ The JBB deweighting algorithm (Fortran pentrc/inputs.f90:828-868):
  4. Forward DFT back to m-space
 """
 function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
-                                ffs::ForceFreeStates.ForceFreeStatesResult,
-                                equil::Equilibrium.PlasmaEquilibrium,
-                                metric::ForceFreeStates.MetricData)
+    ffs::ForceFreeStates.ForceFreeStatesResult,
+    equil::Equilibrium.PlasmaEquilibrium,
+    metric::ForceFreeStates.MetricData)
     # Copy mode numbers from FFS
     kf_intr.mlow = ffs.mlow
     kf_intr.mhigh = ffs.mhigh

@@ -1,4 +1,9 @@
 
+# Knots laid across the envelope's [ψ_c, 2ψ_c] transition. The envelope is a quintic smoothstep,
+# so a cubic spline needs several interior knots to follow it without overshoot; nine keeps the
+# residual below the kernel's own tolerance even on coarse decks.
+const BAND_KNOTS = 9
+
 """
     refine_grid_at_fbar_peaks(xs, kw, kt, evaluate, kin, equil, intr, psi_c;
                               ngrid=1000, relaxed_frac=0.01, target=3, max_add=24) → (xs, kw, kt)
@@ -14,8 +19,8 @@ and the existing values are reused. A well-resolved grid inserts nothing.
 function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3}, kt::Array{ComplexF64,3},
     evaluate::Function, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal, psi_c::Float64;
-    ngrid::Int=1000, relaxed_frac::Float64=0.01, target::Int=3, max_add::Int=24,
-    cond_threshold::Float64=1e8)
+    ngrid::Int=1000, relaxed_frac::Float64=KINETIC_RELAXED_FRAC, target::Int=3, max_add::Int=24,
+    cond_threshold::Float64=KINETIC_SINGULAR_COND)
 
     lo, hi = xs[1], xs[end]
     scan = collect(range(lo, hi; length=ngrid))
@@ -45,8 +50,8 @@ function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3},
         w = (scan[r] - scan[l]) / 3
         for x in (scan[i], scan[i] - w, scan[i] + w)
             (lo < x < hi && x > 2 * psi_c) || continue
-            minimum(abs.(xs .- x)) < Equilibrium.MIN_KNOT_SPACING && continue
-            isempty(add) || minimum(abs.(add .- x)) >= Equilibrium.MIN_KNOT_SPACING || continue
+            any(y -> abs(y - x) < Equilibrium.MIN_KNOT_SPACING, xs) && continue
+            any(y -> abs(y - x) < Equilibrium.MIN_KNOT_SPACING, add) && continue
             push!(add, x)
         end
     end
@@ -104,7 +109,7 @@ function build_kinetic_matrix_splines(
     # spline overshoot can land on a rational surface. Pin the band ends (the smoothstep is
     # only C² there) and resolve the transition with a fixed set of knots.
     band_knots(lo, hi) = axis_validity_psi_c > 0 ?
-                         [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=9) if lo < x < hi] : Float64[]
+                         [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=BAND_KNOTS) if lo < x < hi] : Float64[]
 
     # Get raw kinetic matrices (scaling is baked into each source)
     if ctrl.kinetic_source == "fixed"

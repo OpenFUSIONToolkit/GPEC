@@ -241,6 +241,11 @@ function evaluate_fbar_condition(psi::Float64, kin::KineticMatrices, equil::Equi
     return cond(fbar)
 end
 
+# Kinetic F̄ counts as singular above this condition number; structure within
+# KINETIC_RELAXED_FRAC of it is reported as near-singular (the shifted/split resonances).
+const KINETIC_SINGULAR_COND = 1.0e8
+const KINETIC_RELAXED_FRAC = 0.01
+
 """
     find_kinetic_singular_surfaces!(mats, equil, intr; ngrid=2000, cond_threshold=1e8)
 
@@ -259,7 +264,13 @@ Algorithm:
  3. Refine each peak with golden-section minimization of -cond
  4. Filter by threshold and resonance condition
 """
-function find_kinetic_singular_surfaces!(mats::MatrixSplines, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; ngrid::Int=2000, cond_threshold::Float64=1e8)
+function find_kinetic_singular_surfaces!(
+    mats::MatrixSplines,
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal;
+    ngrid::Int=2000,
+    cond_threshold::Float64=KINETIC_SINGULAR_COND
+)
     kin = mats.kinetic
     kin === nothing && error("find_kinetic_singular_surfaces! requires a kinetic fit; call build_kinetic_matrix_splines first")
     psilow = equil.profiles.xs[1]
@@ -284,21 +295,16 @@ function find_kinetic_singular_surfaces!(mats::MatrixSplines, equil::Equilibrium
     intr.kinsing_scan_threshold = cond_threshold
 
     # Find local maxima of cond(F̄): points where cond increases then decreases
-    peak_indices = Int[]
-    for i in 2:(ngrid-1)
-        if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1] && cond_vals[i] > cond_threshold
-            push!(peak_indices, i)
-        end
-    end
+    local_maxima = [i for i in 2:(ngrid-1) if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1]]
+    peak_indices = filter(i -> cond_vals[i] > cond_threshold, local_maxima)
 
     # Peaks below the threshold are not singular surfaces, but they mark where the kinetic F̄ comes
     # closest to singular — the shifted/split resonances of Park & Logan Eq. (70). Report the
     # strongest few so sharp kinetic structure is visible rather than silent (on a DIII-D-like case
     # these track the NTV torque-density peaks at low collisionality/rotation).
-    subthreshold = [i for i in 2:(ngrid-1) if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1] &&
-                    cond_threshold / 100 < cond_vals[i] <= cond_threshold]
+    subthreshold = filter(i -> KINETIC_RELAXED_FRAC * cond_threshold < cond_vals[i] <= cond_threshold, local_maxima)
     if !isempty(subthreshold)
-        top = sort(subthreshold; by=i -> -cond_vals[i])[1:min(3, length(subthreshold))]
+        top = sort(subthreshold; by=i -> cond_vals[i], rev=true)[1:min(3, length(subthreshold))]
         @info "Kinetic F̄ near-singular structure below the singular threshold at " *
               join(["ψ=$(round(psi_grid[i]; digits=4)) (cond=$(round(cond_vals[i]; sigdigits=3)))" for i in top], ", ") *
               " — full scan in SingularSurfaces/Kinetic/scan_cond; check the ψ grid resolves these if results look grid-sensitive"

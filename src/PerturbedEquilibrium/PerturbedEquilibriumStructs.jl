@@ -26,6 +26,7 @@ Medium Priority (defer for MWE):
   - `singular_point_method::String` - Method for singular point treatment (default: "standard")
 
 Regularization:
+
 # High Priority (MWE)
 
   - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0. Forced to 0 in self-consistent kinetic runs, whose Euler-Lagrange operator has no resonant singularity to smooth.
@@ -209,4 +210,24 @@ well-conditioned flux-space inductances L, Λ:
     surface_energy::Float64 = 0.0
     plasma_energy::Float64 = 0.0
     toroidal_torque::Float64 = 0.0
+end
+
+"""
+    kinetic_regularization_kwargs(ffs, kwargs) -> NamedTuple
+
+`reg_spot` smooths the **ideal** 1/(m−nq) divergence of ξ^ψ′ and ξ^α before they drive the NTV
+integrand. A self-consistent kinetic solve has no such divergence — det(F̄) is complex and nonzero
+at the rationals (Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D) — so regularizing there
+suppresses a finite physical response, and does so inconsistently, since ξ^ψ is never regularized.
+Force `reg_spot = 0` for kinetic solves and log the override; ideal solves keep their setting.
+"""
+function kinetic_regularization_kwargs(ffs::ForceFreeStatesResult, kwargs)
+    base = values(kwargs)
+    default_reg = PerturbedEquilibrium.PerturbedEquilibriumControl().reg_spot
+    prev = get(base, :reg_spot, default_reg)
+    kinetic = ffs.mats.kinetic !== nothing
+    kinetic && prev != 0 &&
+        @info "Self-consistent kinetic run: overriding reg_spot=$prev with 0 " *
+              "(the kinetic terms remove the ideal resonant singularity; see docs/src/kinetic_forces.md)"
+    return merge(base, (; reg_spot=kinetic ? 0.0 : prev))
 end

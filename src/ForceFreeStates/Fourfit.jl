@@ -443,6 +443,7 @@ rational's resolution window, preserving the Δ′-stencil structure the equilib
 (`Equilibrium.RATIONAL_RES_RADIUS`).
 """
 function core_capped_knots(xs::Vector{Float64}, rationals::Vector{Float64})::Vector{Int}
+    length(xs) < 3 && return collect(eachindex(xs))
     cap_edge = 0.1
     isempty(rationals) || (cap_edge = min(cap_edge, minimum(rationals) - Equilibrium.RATIONAL_RES_RADIUS))
     in_rational_window(x) = any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rationals)

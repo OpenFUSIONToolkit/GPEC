@@ -856,26 +856,6 @@ function run_perturbed_equilibrium(
 end
 
 """
-    kinetic_regularization_kwargs(ffs, kwargs) -> NamedTuple
-
-`reg_spot` smooths the **ideal** 1/(m−nq) divergence of ξ^ψ′ and ξ^α before they drive the NTV
-integrand. A self-consistent kinetic solve has no such divergence — det(F̄) is complex and nonzero
-at the rationals (Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D) — so regularizing there
-suppresses a finite physical response, and does so inconsistently, since ξ^ψ is never regularized.
-Force `reg_spot = 0` for kinetic solves and log the override; ideal solves keep their setting.
-"""
-function kinetic_regularization_kwargs(ffs::ForceFreeStatesResult, kwargs)
-    base = values(kwargs)
-    default_reg = PerturbedEquilibrium.PerturbedEquilibriumControl().reg_spot
-    prev = get(base, :reg_spot, default_reg)
-    kinetic = ffs.mats.kinetic !== nothing
-    kinetic && prev != 0 &&
-        @info "Self-consistent kinetic run: overriding reg_spot=$prev with 0 " *
-              "(the kinetic terms remove the ideal resonant singularity; see docs/src/kinetic_forces.md)"
-    return merge(base, (; reg_spot=kinetic ? 0.0 : prev))
-end
-
-"""
     perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, kwargs...) -> PerturbedEquilibriumState
 
 Compute the plasma response to the external field `rmp` on top of a force-free-states solve
@@ -901,7 +881,7 @@ function perturbed_equilibrium(
     kwargs...
 )
     ctrl = ffs.control
-    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; kinetic_regularization_kwargs(ffs, kwargs)...)
+    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; PerturbedEquilibrium.kinetic_regularization_kwargs(ffs, kwargs)...)
     pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
 
     # Inner-layer penetrated resonant field; zeros under ideal closure.
