@@ -30,7 +30,7 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
-              electron::Bool, method::String, equil, intr::KineticForcesInternal,
+              electron::Bool, method::String, equil::Equilibrium.PlasmaEquilibrium, intr::KineticForcesInternal,
               kinetic_profiles::Equilibrium.KineticProfileSplines;
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
               rex_override::Union{Nothing,Float64}=nothing,
@@ -891,7 +891,7 @@ function compute_kinetic_matrices_at_psi!(
     ktmat::Array{ComplexF64,3},
     psi::Float64, n::Int, l::Int,
     zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
-    electron::Bool, equil, intr::KineticForcesInternal,
+    electron::Bool, equil::Equilibrium.PlasmaEquilibrium, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
     nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
