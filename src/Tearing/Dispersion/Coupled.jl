@@ -35,13 +35,14 @@ M[i,j] = dp_matrix[i,j]      for i ≠ j        (off-diagonal Δ' couplings)
 
 A root of `mc` in the complex `Q` plane is a coupled tearing eigenvalue.
 
-`ratio_k` is `tauk_ref/tauk_k` under the default `tauk_rescale=:legacy` and
-`tauk_k/tauk_ref` under `:direct`. `:direct` is the direction implied by the
-extraction convention `ω = Re(Q)/tauk` (so `Q_k = tauk_k·ω` for one shared
-physical ω) and by Fitzpatrick's TJ, where the layer eigenvalue enters as
-`ĝ = i(Q_E − ω·tau_k)`. `:legacy` is retained as the default because every
-published coupled growth rate from this code was produced with it; switching
-moves results and is an explicit opt-in.
+`ratio_k` is `tauk_k/tauk_ref` under the default `tauk_rescale=:direct` and
+`tauk_ref/tauk_k` under `:legacy`. `:direct` is the direction implied by the
+definition `Q = tauk·ω` (so one shared physical ω gives `Q_k = tauk_k·ω`) and
+by Fitzpatrick's TJ, where the layer eigenvalue is `ĝ_k = tauk_k·g_k`. Under
+`:legacy` the scanned frequency scales as `1/tauk_k` while that surface's
+`Q_e`/`Q_i` scale as `tauk_k`, yet the layer equations add them (`ĝ + i·Q_e`),
+so the two are mis-scaled by `(tauk_k/tauk_ref)²`. `:legacy` is retained only
+to reproduce results generated before the correction.
 
 `q_shift_k` is the real, per-surface E×B Doppler offset carried on each
 `SurfaceCoupling` (zero by default, in which case every surface sees the same
@@ -81,7 +82,7 @@ function multi_surface_coupling(surfaces::AbstractVector{<:SurfaceCoupling},
     dp_matrix::AbstractMatrix;
     ref_idx::Integer=1,
     msing_max::Integer=min(3, length(surfaces)),
-    tauk_rescale::Symbol=:legacy)
+    tauk_rescale::Symbol=:direct)
     n = length(surfaces)
     tauk_rescale in (:legacy, :direct) ||
         throw(ArgumentError("multi_surface_coupling: tauk_rescale=" *
