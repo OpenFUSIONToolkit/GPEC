@@ -162,7 +162,13 @@ function direct_position!(raw_profile::DirectRunInput)
     # If we never exited early, the loop failed to find bz = 0
     !(bfield.bz >= 0) && error("Took too many iterations to get bz=0.")
 
-    # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0
+    # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0.
+    # The 2-D ψ spline's second derivatives are not reliable at every point near the
+    # axis (∂B_z/∂R can pass through zero at isolated R), and a single near-singular
+    # Hessian sends an undamped Newton step across the whole box. Cap each step at one
+    # march step: inactive for well-behaved iterations (their steps are ≲ dr/2), it
+    # only keeps a bad iterate inside the axis neighbourhood until the Hessian recovers.
+    step_cap = dr
     dr, dz = 0.0, 0.0
     for _ in 1:max_iterations
         direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
@@ -173,6 +179,11 @@ function direct_position!(raw_profile::DirectRunInput)
         # Δx = -J⁻¹ F
         dr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
         dz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
+        step = hypot(dr, dz)
+        if step > step_cap
+            dr *= step_cap / step
+            dz *= step_cap / step
+        end
         r += dr
         z += dz
         if abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r)
