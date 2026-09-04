@@ -53,10 +53,14 @@ end
     surface_coupling(model::SLAYERModel, params::SLAYERParameters,
                      dp_diag::Number; dc::Real=0.0) -> SurfaceCoupling
 
-SLAYER convenience constructor. `scale` is set to `params.lu^(1/3)` so that
-the dimensionless Δ from `riccati_f` is mapped to outer ψ-units before
-subtraction from the Δ' diagonal. `tauk` is taken from `params.tauk` for use
-by `MultiSurfaceCoupling` Q rescaling.
+SLAYER convenience constructor. `scale` is set to `params.lu^(1/3)`, which
+maps the dimensionless inner-layer Δ from `riccati_f` to the r_s-referenced
+outer convention (S^(1/3) with S = τ_R/τ_H built on r_s; the Lundquist
+number, `dc`, and the layer all share the `x̂ = (r−r_s)/r_s` reference
+length). `dp_diag` must already be in that same r_s reference — the Tearing
+runner converts the ψ_N-referenced BVP Δ' via `delta_prime_to_rs_reference`
+before building couplings. `tauk` is taken from `params.tauk` for use by
+`MultiSurfaceCoupling` Q rescaling.
 """
 function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
     dp_diag::Number; dc::Real=0.0)
