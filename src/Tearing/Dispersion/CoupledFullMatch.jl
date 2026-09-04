@@ -165,10 +165,11 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
         idx3 = idx1 + s2       # d^k_+
         idx4 = idx2 + s2       # d^k_-
 
-        # Per-surface Q shift: guess_modify = Q + i·n·rotation[k].
+        # Per-surface Q shift: guess_modify = Q + i·n·rotation[k], plus the
+        # real Doppler offset sc.q_shift carried on the SurfaceCoupling.
         # Also apply ref_tauk / sc.tauk rescaling (we keep the SurfaceCoupling
         # tauk normalization that SLAYER needs; GGJ has tauk=1 so it's a no-op).
-        Q_k = Qc * (ref_tauk / sc.tauk) + 1im * mc.ntor * mc.rotation[k]
+        Q_k = Qc * (ref_tauk / sc.tauk) + sc.q_shift + 1im * mc.ntor * mc.rotation[k]
         resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
         # delta1 = interchange (parity −), delta2 = tearing (parity +); named

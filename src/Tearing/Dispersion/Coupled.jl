@@ -15,10 +15,10 @@
 #   det = mc(Q::ComplexF64)
 #
 # At each evaluation, for k = 1 .. msing_max, the inner-layer Δ is computed
-# at a Q rescaled by `tauk_ref / tauk_k`, then subtracted (with the dc
-# offset) from the diagonal of an `msing_max × msing_max` upper-left
-# submatrix of `dp_matrix`. The off-diagonal Δ' couplings are passed
-# through unchanged.
+# at a Q rescaled by `tauk_ref / tauk_k` and offset by that surface's real
+# Doppler shift `q_shift`, then subtracted (with the dc offset) from the
+# diagonal of an `msing_max × msing_max` upper-left submatrix of `dp_matrix`.
+# The off-diagonal Δ' couplings are passed through unchanged.
 
 """
     MultiSurfaceCoupling{V<:AbstractVector{<:SurfaceCoupling}}
@@ -29,11 +29,15 @@ normalization), and the truncation `msing_max` (number of surfaces actually
 participating in the determinant). Calling `mc(Q)` returns `det(M(Q))` where
 
 ```
-M[k,k] = dp_matrix[k,k] - scale_k · Δ_inner_k(Q · tauk_ref / tauk_k) - dc_k
+M[k,k] = dp_matrix[k,k] - scale_k · Δ_inner_k(Q · tauk_ref / tauk_k + q_shift_k) - dc_k
 M[i,j] = dp_matrix[i,j]      for i ≠ j        (off-diagonal Δ' couplings)
 ```
 
 A root of `mc` in the complex `Q` plane is a coupled tearing eigenvalue.
+
+`q_shift_k` is the real, per-surface Doppler offset carried on each
+`SurfaceCoupling` (zero by default, in which case every surface sees the same
+lab-frame frequency and the determinant is unchanged from the static form).
 """
 struct MultiSurfaceCoupling{V<:AbstractVector{<:SurfaceCoupling}}
     surfaces::V
@@ -91,7 +95,9 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
     M = mc.dp_matrix[1:n, 1:n]
     @inbounds for k in 1:n
         sc = mc.surfaces[k]
-        Q_k = Qc * (ref_tauk / sc.tauk)
+        # Real q_shift Dopplers this surface's layer away from the common
+        # lab-frame frequency carried by the scanned Q.
+        Q_k = Qc * (ref_tauk / sc.tauk) + sc.q_shift
         # m×m scalar coupling: use only the tearing channel. The
         # interchange (Glasser-stabilization) channel is carried in the
         # full 4m×4m dispersion in `CoupledFullMatch.jl`; this reduced

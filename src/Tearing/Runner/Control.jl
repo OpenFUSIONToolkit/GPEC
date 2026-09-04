@@ -32,6 +32,12 @@ constructor.
   - `bt`       -- toroidal field `[T]`. `nothing` (default) resolves the physical
     `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
     callable of `psi` overrides it
+  - `omega_shift_kHz` -- per-surface lab-frame frequency shift in kHz,
+    ordered core→edge. Entry `k` Dopplers surface `k`'s inner layer by
+    `ΔRe(Q_k) = tauk_k · 2π · 1e3 · omega_shift_kHz[k]`, modelling a surface
+    rotating relative to the common lab-frame eigenvalue. Empty (default)
+    means no shift on any surface. Must be empty or have one entry per
+    rational surface actually analysed
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
@@ -152,6 +158,15 @@ there is one consistent interface for resistive and kinetic profiles.
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
 
+    # Per-surface lab-frame frequency shift [kHz], ordered core→edge to match
+    # the rational-surface list. Entry k Dopplers surface k's inner layer by
+    # ΔRe(Q_k) = tauk_k · 2π · 1e3 · omega_shift_kHz[k], so a common
+    # lab-frame eigenvalue is seen at a different frequency by each rotating
+    # surface. Empty (the default) means no shift anywhere — the static,
+    # all-surfaces-corotating case. A shorter-than-msing vector is an error;
+    # pad with zeros to shift only some surfaces.
+    omega_shift_kHz::Vector{Float64} = Float64[]
+
     profile_file::String = ""
     profile_group::String = "/"
 
@@ -186,6 +201,9 @@ function validate(ctrl::SLAYERControl)
                             "not in $(_VALID_LNLAMBDA_FORMS)"))
     ctrl.msing_max >= 1 ||
         throw(ArgumentError("SLAYERControl: msing_max=$(ctrl.msing_max) must be ≥ 1"))
+    all(isfinite, ctrl.omega_shift_kHz) ||
+        throw(ArgumentError("SLAYERControl: omega_shift_kHz contains a " *
+                            "non-finite entry: $(ctrl.omega_shift_kHz)"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
@@ -250,6 +268,8 @@ function slayer_control_from_toml(section::AbstractDict)
         elseif sym in (:bt, :dr_val, :dgeo_val)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
+        elseif sym === :omega_shift_kHz
+            kwargs[sym] = Float64[Float64(x) for x in v]
         elseif sym === :boxes
             # `boxes` is a Vector{NTuple{4,Float64}}; from TOML this comes
             # in as a list of 4-element arrays. Coerce each.
