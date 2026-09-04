@@ -345,7 +345,10 @@ const PE_H5_ANNOTATIONS = [
     "Energies/vacuum_energy" => (; long_name="perturbed vacuum energy", units="J"),
     "Energies/surface_energy" => (; long_name="perturbed surface energy", units="J"),
     "Energies/plasma_energy" => (; long_name="perturbed plasma energy", units="J"),
-    "Energies/toroidal_torque" => (; long_name="net toroidal torque on the plasma", units="N*m")
+    "Energies/toroidal_torque" => (;
+        long_name="boundary-response toroidal torque −2n·Im⟨Φ_tot,Λ⁻¹Φ_tot⟩/4: equals the volume-integrated Euler-Lagrange kinetic torque for converged self-consistent solutions; distinct construction from the KineticForces NTV torque",
+        units="N*m"
+    )
 ]
 
 # Attach long_name/units/dims + dimension scales (declared in-table) to the
