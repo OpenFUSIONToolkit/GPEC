@@ -165,4 +165,29 @@
         @test_throws ArgumentError r_based_shear(0.5, 2.0, 1.0, 0.0)
         @test_throws ArgumentError r_based_shear(0.5, 0.0, 1.0, 0.5)
     end
+
+    @testset "Test 3: reverse-shear invariance" begin
+        # The layer timescales and widths depend on |dq/dr|, not its sign: a negative-shear
+        # surface must reduce to its positive-shear mirror, with only the recorded sval_r
+        # diagnostic keeping the sign. dc_type=:lar with nonzero dr_val exercises the Wd
+        # iteration and the critical-Δ square roots as well as tau_h.
+        base = _ref_kwargs(; dr_val=-0.1, dc_type=:lar)
+        pos = slayer_parameters(; base...)
+        neg = slayer_parameters(; merge(base, (; sval_r=-1.0))...)
+
+        # The sign survives where it is a diagnostic, not a magnitude.
+        @test pos.sval_r == 1.0
+        @test neg.sval_r == -1.0
+
+        # Every normalized layer quantity is bit-identical: abs(-1.0) === 1.0,
+        # so the whole downstream chain reproduces exactly.
+        for f in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor, :Q_e, :Q_i,
+                  :iota_e, :tauk, :tau_r, :delta_n, :eta, :d_beta, :dc_tmp)
+            @test getfield(neg, f) == getfield(pos, f)
+        end
+
+        # tau_h > 0 keeps the Lundquist number positive, so S^(1/3) is defined on reverse shear.
+        @test neg.lu > 0
+        @test neg.tauk > 0
+    end
 end
