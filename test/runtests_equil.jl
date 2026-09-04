@@ -68,6 +68,39 @@
         @test all(>(0), B_nodes)
     end
 
+    @testset "Round-trip check sees inter-knot ringing" begin
+        EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+        # The rzphi splines interpolate exactly at their own knots, so an on-knot residual is
+        # blind to ringing between them. The check therefore samples the knot midpoints too and
+        # compares the two, and the ringing verdict is not consulted while the midpoint residual
+        # is still at the rounding floor, where the ratio would measure noise.
+        @test EQ.ROUNDTRIP_RINGING_FLOOR < EQ.ROUNDTRIP_TOL
+        @test EQ.ROUNDTRIP_RATIO_TOL > 1
+        @test 0 < EQ.ROUNDTRIP_EDGE_FRAC < 1
+
+        # False-positive control: a deck that traces cleanly must report both residuals and stay
+        # at Info. The DIII-D-like geqdsk is used because the CHEASE deck above is the case that
+        # already trips the pre-existing absolute tolerance on this path.
+        cfg = EQ.EquilibriumConfig(;
+            eq_filename=joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk"),
+            eq_type="efit_by_inversion",
+            jac_type="hamada",
+            grid_type="log_asymptotic",
+            psilow=1e-4,
+            psihigh=0.995,
+            mpsi=128,
+            mtheta=128
+        )
+        logs, _ = Test.collect_test_logs(; min_level=Logging.Info) do
+            EQ.setup_equilibrium(cfg)
+        end
+        rt = filter(l -> occursin("round-trip error at edge", string(l.message)), logs)
+        @test length(rt) == 1
+        @test rt[1].level == Logging.Info
+        @test occursin("at knot midpoints", string(rt[1].message))
+        @test occursin("ratio", string(rt[1].message))
+    end
+
     @testset "Resolved psihigh" begin
         # The config holds the user's request and is never written to; the value the
         # equilibrium is actually formed on rides on params.psihigh_resolved.
