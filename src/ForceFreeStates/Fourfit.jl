@@ -1,4 +1,123 @@
 """
+    IdealMatrices
+
+Ideal-MHD stability matrix ψ-splines assembled by [`build_matrix_splines`](@ref). Each field flattens a
+`numpert_total × numpert_total` matrix to `numpert_total^2` complex series (`J_spline` to `2·mpert−1`),
+following the appendix of Glasser Phys. Plasmas 2016 112506.
+
+Suffixes: `_prim` is a primitive (pre-Schur-complement) form, kept because the kinetic reduction
+needs the unreduced matrix; `_lower` is a Cholesky factor rather than the matrix itself; `_gal` is
+the Galerkin solver's variant of the same matrix.
+
+## Fields
+
+  - `A_spline`, `B_spline`, `C_spline` - the ideal A, B, C. In a kinetic run these are NOT what the
+    ODE integrates; see [`KineticMatrices`](@ref).
+  - `D_spline_prim`, `E_spline_prim` - pre-Schur-reduction geometric forms
+    (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)). Downstream
+    kinetic FKG Schur complements consume these primitive forms; the alternate singular-layer path
+    that would need kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
+  - `H_spline` - primitive Ḡ before the Schur complement (Ḡ = H − C†A⁻¹C), also consumed by the
+    kinetic reduction.
+  - `F_spline_lower` - reduced F̄ as its lower-triangular Cholesky factor L, F̄ = L·Lᴴ. The ideal
+    Euler-Lagrange kernel only ever solves against F̄, so the factor is stored instead of F̄ itself.
+  - `F_spline_prim` - primitive F before the Schur complement (for kinetic).
+  - `F_spline_gal` - reduced Hermitian F̄, un-factored, for the Galerkin solver, which needs F̄
+    directly rather than through a solve.
+  - `K_spline`, `G_spline` - reduced K̄ and Ḡ of the Euler-Lagrange system
+    d/dψ(F̄·ξ′ + K̄·ξ) = K̄†·ξ′ + Ḡ·ξ (Eqs A5-A7).
+  - `J_spline` - Jacobian Fourier band (2·mpert−1 conjugate-symmetric coefficients per surface), used
+    to assemble the power-normalization matrix N in Free.jl.
+"""
+@kwdef struct IdealMatrices{S<:CubicSeriesInterpolant}
+    A_spline::S
+    B_spline::S
+    C_spline::S
+    D_spline_prim::S
+    E_spline_prim::S
+    H_spline::S
+    F_spline_lower::S
+    F_spline_prim::S
+    F_spline_gal::S
+    K_spline::S
+    G_spline::S
+    J_spline::S
+end
+
+"""
+    KineticMatrices
+
+Kinetic-MHD matrix ψ-splines assembled by [`build_kinetic_matrix_splines`](@ref). Present on a
+[`MatrixSplines`](@ref) only for kinetic runs; its presence means the solution obeys the FKG ODE
+rather than the ideal Euler-Lagrange relation.
+
+The FKG system is non-Hermitian, so the adjoint side of each reduced block is a distinct matrix
+rather than a transpose of the forward one. The `_adj` suffix marks those adjoint-side counterparts
+(Fortran's `aat` arrays); they must be evaluated, never derived from their unsuffixed partner.
+
+## Fields
+
+  - `A_spline`, `B_spline`, `C_spline` - the kinetic-modified A, B, C consumed by `sing_der!`. Unlike their
+    ideal counterparts, A here is non-Hermitian and requires an LU rather than a Cholesky.
+  - `Kw_spline`, `Kt_spline` - kinetic energy (W) and torque (T) matrices, 6 components each
+    (A, B, C, D, E, H perturbations), indexed in that order.
+  - `F0_spline` - reduced F̄ of the kinetic system, F₀ = F_prim − D†A_kin⁻¹D.
+  - `P_spline`, `P_spline_adj` - P = (iD)†A_kin⁻¹B_k and its adjoint-side counterpart.
+  - `Kk_spline`, `Kk_spline_adj` - kinetic K̄ = E − (iD)†A_kin⁻¹C_kin and its adjoint-side counterpart.
+  - `R1_spline`, `R2_spline`, `R3_spline` - blocks built from the D- and E-perturbation kinetic
+    components (`Kw_spline[4:5]`, `Kt_spline[4:5]`), which have no ideal counterpart. R3 is the
+    adjoint-side partner of R2.
+  - `G_spline_adj` - adjoint-side Ḡ, Ḡ_adj = H_kin − C_adj†A_kin⁻¹C_kin.
+
+All nine reduced blocks are pre-computed per ψ by the FKG Schur complement
+(Logan 2015 Appendix C, Eqs C.1-C.11) so `sing_der!` can assemble the ODE right-hand side with
+explicit (m−nq) factors instead of 1/(m−nq).
+"""
+@kwdef struct KineticMatrices{S<:CubicSeriesInterpolant}
+    A_spline::S
+    B_spline::S
+    C_spline::S
+    Kw_spline::Vector{S}
+    Kt_spline::Vector{S}
+    F0_spline::S
+    P_spline::S
+    P_spline_adj::S
+    Kk_spline::S
+    Kk_spline_adj::S
+    R1_spline::S
+    R2_spline::S
+    R3_spline::S
+    G_spline_adj::S
+end
+
+"""
+    MatrixSplines
+
+Fourier-fitted stability matrices for one run. `kinetic === nothing` marks an ideal run; otherwise
+the kinetic matrices are authoritative for the ODE and the ideal ones remain available for output
+and for the Galerkin/vacuum paths that are defined only in the ideal basis.
+
+## Fields
+
+  - `ideal::IdealMatrices` - always present.
+  - `kinetic::Union{Nothing,KineticMatrices}` - present iff `ctrl.kinetic_factor > 0`.
+  - `_hint::Base.RefValue{Int}` - shared bracket-search hint for sequential (single-threaded)
+    evaluation. Not thread-safe: parallel paths must pass their own hint.
+"""
+@kwdef struct MatrixSplines{S<:CubicSeriesInterpolant}
+    ideal::IdealMatrices{S}
+    kinetic::Union{Nothing,KineticMatrices{S}} = nothing
+    _hint::Base.RefValue{Int} = Ref(1)
+end
+
+# Helper to create an empty complex series interpolant for default initialization
+function _empty_series_interp_complex(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(ComplexF64, 5, n_series)
+    return cubic_interp(xs, Series(Y))
+end
+
+"""
     MetricData
 
 A structure to hold the computed metric tensor components and their
@@ -143,7 +262,7 @@ each mapping ψ → flattened mpert² complex vector.
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
 function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
-    intr::ForceFreeStatesInternal,
+    intr::ModeSpace,
     metric::MetricData)
     (; mpert, nlow, nhigh, mlow, mhigh) = intr
     mpsi = metric.mpsi
@@ -192,7 +311,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             v[3, 3] = 2π * rs
 
             # Raw g^ij (Fortran dcon_interface.f:933-937)
-            g12 = v[1, 1]*v[2, 1] + v[1, 2]*v[2, 2] + v[1, 3]*v[2, 3]
+            g12 = v[1, 1] * v[2, 1] + v[1, 2] * v[2, 2] + v[1, 3] * v[2, 3]
             g13 = v[3, 3] * v[1, 3]
             g22 = v[2, 1]^2 + v[2, 2]^2 + v[2, 3]^2
             g23 = v[2, 3] * v[3, 3]
@@ -310,10 +429,37 @@ end
 
 
 """
-    make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> FourFitVars
+    core_capped_knots(xs, rationals) -> Vector{Int}
+
+Indices of `xs` the EL coefficient splines keep, decoupling their knots from the equilibrium grid
+in the packed core. A cubic spline's third-derivative jumps scale as (node error)/Δψ³, so
+equilibrium-grade core packing amplifies tolerance-level node error into jumps that slave the
+Euler-Lagrange step size. Near the axis every component is a Frobenius power law in ψ, and power
+laws are scale-free, so log-uniform sampling (Δψ ≥ 0.05·ψ) resolves them at constant relative
+accuracy — cubic interpolation of ψ^p on that grid errs by ~(0.05p)⁴/384, resolving even the
+steepest component (p = m_max/2) to ~2e-4, well below where the physics responds. The capped region
+ends at the innermost rational (or ψ = 0.1, whichever is smaller) and never drops a knot inside a
+rational's resolution window, preserving the Δ′-stencil structure the equilibrium grid encodes
+(`Equilibrium.RATIONAL_RES_RADIUS`).
+"""
+function core_capped_knots(xs::Vector{Float64}, rationals::Vector{Float64})::Vector{Int}
+    cap_edge = 0.1
+    isempty(rationals) || (cap_edge = min(cap_edge, minimum(rationals) - Equilibrium.RATIONAL_RES_RADIUS))
+    in_rational_window(x) = any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rationals)
+    keep = Int[1]
+    for i in 2:(length(xs)-1)
+        x = xs[i]
+        (x >= cap_edge || in_rational_window(x) || (x - xs[keep[end]]) >= 0.05 * x) && push!(keep, i)
+    end
+    push!(keep, length(xs))
+    return keep
+end
+
+"""
+    build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData) -> MatrixSplines
 
 Constructs main ForceFreeStates matrices for a given toroidal mode number and returns
-them as a new `FourFitVars` object. See the appendix of the Glasser Phys. Plasmas 2016 112506
+them as a new `MatrixSplines` object. See the appendix of the Glasser Phys. Plasmas 2016 112506
 DCON paper for details on the matrix definitions. Performs the same function
 as `fourfit_make_matrix` in the Fortran code, except F, G, and K are stored as dense
 matrices. The matrix F is stored in factorized form with the lower triangle only,
@@ -327,14 +473,9 @@ later (i.e. `sing_der!`).
 
 ### Returns
 
-  - `ffit::FourFitVars`: A struct holding cubic spline fits of the assembled matrices
-
-### TODOs
-
-Add kinetic metric tensor components for kinetic mode
-Set powers if necessary
+  - `mats::MatrixSplines`: A struct holding cubic spline fits of the assembled matrices
 """
-function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
+function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
 
     # --- Extract inputs ---
     profiles = equil.profiles
@@ -485,61 +626,31 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
-        # TODO: does F stay Hermitian in the 3D case, allowing us to use the lower representation?
         fmat .= cholesky(Hermitian(fmat)).L
-
-        # TODO: add kinetic matrices here
     end
 
     # --- Create Fourier coefficient splines (multi-quantity cubic interpolants) ---
-    ffit = FourFitVars(; mpert=intr.mpert, numpert_total=intr.numpert_total)
-
     # FastInterpolations now natively supports complex values - no need to split real/imag
     # Create complex series interpolants with per-column extrap BC
-    # Decouple the coefficient-spline knots from the equilibrium grid in the packed core:
-    # a cubic spline's third-derivative jumps scale as (node error)/dpsi^3, so equilibrium-grade
-    # core packing amplifies tolerance-level node error into jumps that slave the EL step size.
-    # Near the axis every component is a Frobenius power law in psi, and power laws are scale-free,
-    # so log-uniform sampling (dpsi >= c*psi) resolves them at constant relative accuracy: cubic
-    # interpolation of psi^p on that grid errs by ~(p*c)^4/384, so c = 0.05 resolves even the
-    # steepest spectrum component (p = mmax/2) to ~2e-4 while the physics responds far below that
-    # (the steep components carry vanishing solution amplitude). The capped region ends at the
-    # innermost rational surface (or psi = 0.1, whichever is smaller) and never removes a knot
-    # inside a rational's resolution window, preserving the Delta'-stencil structure the
-    # equilibrium grid encodes (GridRefinement RATIONAL_RES_RADIUS).
-    cap_edge = 0.1
-    rationals = [s.psifac for s in intr.sing]
-    isempty(rationals) || (cap_edge = min(cap_edge, minimum(rationals) - Equilibrium.RATIONAL_RES_RADIUS))
-    in_rational_window(x) = any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rationals)
-    keep = Int[1]
-    for i in 2:length(metric.xs)-1
-        x = metric.xs[i]
-        if x >= cap_edge || in_rational_window(x) || (x - metric.xs[keep[end]]) >= 0.05 * x
-            push!(keep, i)
-        end
-    end
-    push!(keep, length(metric.xs))
+    # TODO: set powers. Do we need this yet? Only called if power_flag = true
+    itp_opts = (; extrap=ExtendExtrap())
+    keep = core_capped_knots(metric.xs, [s.psifac for s in intr.sing])
     mxs = metric.xs[keep]
     length(mxs) < length(metric.xs) &&
         @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots after core density cap"
-
-    ffit.amats = cubic_interp(mxs, Series(amats_flat[keep, :]); ffit.itp_opts...)
-    ffit.bmats = cubic_interp(mxs, Series(bmats_flat[keep, :]); ffit.itp_opts...)
-    ffit.cmats = cubic_interp(mxs, Series(cmats_flat[keep, :]); ffit.itp_opts...)
-    ffit.dmats_prim = cubic_interp(mxs, Series(dmats_flat[keep, :]); ffit.itp_opts...)
-    ffit.emats_prim = cubic_interp(mxs, Series(emats_flat[keep, :]); ffit.itp_opts...)
-    ffit.hmats = cubic_interp(mxs, Series(hmats_flat[keep, :]); ffit.itp_opts...)
-    ffit.fmats_lower = cubic_interp(mxs, Series(fmats_lower_flat[keep, :]); ffit.itp_opts...)
-    ffit.fmats_prim = cubic_interp(mxs, Series(fmats_prim_flat[keep, :]); ffit.itp_opts...)
-    ffit.fmats_gal = cubic_interp(mxs, Series(fmats_gal_flat[keep, :]); ffit.itp_opts...)
-    ffit.gmats = cubic_interp(mxs, Series(gmats_flat[keep, :]); ffit.itp_opts...)
-    ffit.kmats = cubic_interp(mxs, Series(kmats_flat[keep, :]); ffit.itp_opts...)
-
-    # TODO: set powers
-    # Do we need this yet? Only called if power_flag = true
-
-    # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
-    ffit.jmats = cubic_interp(mxs, Series(jmats_flat[keep, :]); ffit.itp_opts...)
-
-    return ffit
+    ideal = IdealMatrices(;
+        A_spline=cubic_interp(mxs, Series(amats_flat[keep, :]); itp_opts...),
+        B_spline=cubic_interp(mxs, Series(bmats_flat[keep, :]); itp_opts...),
+        C_spline=cubic_interp(mxs, Series(cmats_flat[keep, :]); itp_opts...),
+        D_spline_prim=cubic_interp(mxs, Series(dmats_flat[keep, :]); itp_opts...),
+        E_spline_prim=cubic_interp(mxs, Series(emats_flat[keep, :]); itp_opts...),
+        H_spline=cubic_interp(mxs, Series(hmats_flat[keep, :]); itp_opts...),
+        F_spline_lower=cubic_interp(mxs, Series(fmats_lower_flat[keep, :]); itp_opts...),
+        F_spline_prim=cubic_interp(mxs, Series(fmats_prim_flat[keep, :]); itp_opts...),
+        F_spline_gal=cubic_interp(mxs, Series(fmats_gal_flat[keep, :]); itp_opts...),
+        G_spline=cubic_interp(mxs, Series(gmats_flat[keep, :]); itp_opts...),
+        K_spline=cubic_interp(mxs, Series(kmats_flat[keep, :]); itp_opts...),
+        # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
+        J_spline=cubic_interp(mxs, Series(jmats_flat[keep, :]); itp_opts...))
+    return MatrixSplines(; ideal)
 end

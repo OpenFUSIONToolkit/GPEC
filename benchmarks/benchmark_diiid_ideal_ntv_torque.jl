@@ -31,7 +31,6 @@ using Plots
 # Load GPEC
 using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
-const FFS = GPE.ForceFreeStates
 const KF = GPE.KineticForces
 const Eq = GPE.Equilibrium
 const PE = GPE.PerturbedEquilibrium
@@ -237,15 +236,12 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     _p("\n--- Equilibrium + ForceFreeStates (via main()) ---")
     t0 = time()
     result = GPE.main([tomldir])
-    equil = result.equil
-    intr = result.intr
-    ctrl = result.ctrl
+    ffs = result.ffs
+    equil = ffs.equil
+    metric = ffs.metric
 
     _pf("  FFS completed in %.1f s\n", time() - t0)
-    _pf("  mpert=%d, mlow=%d, mhigh=%d\n", intr.mpert, intr.mlow, intr.mhigh)
-
-    # Build metric (needed for JBB deweighting)
-    metric = FFS.make_metric(equil, intr.mpert)
+    _pf("  mpert=%d, mlow=%d, mhigh=%d\n", ffs.mpert, ffs.mlow, ffs.mhigh)
 
     # Load Fortran xclebsch data
     _p("\n--- Load Fortran xclebsch ---")
@@ -257,8 +253,8 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
         npsi_f, mpert_f, mlow_f)
     _pf("  ψ range: [%.6f, %.6f]\n", psi_grid_f[1], psi_grid_f[end])
 
-    if mpert_f != intr.mpert || mlow_f != intr.mlow
-        @warn "Mode ranges differ: Fortran mpert=$mpert_f,mlow=$mlow_f vs Julia mpert=$(intr.mpert),mlow=$(intr.mlow)"
+    if mpert_f != ffs.mpert || mlow_f != ffs.mlow
+        @warn "Mode ranges differ: Fortran mpert=$mpert_f,mlow=$mlow_f vs Julia mpert=$(ffs.mpert),mlow=$(ffs.mlow)"
     end
 
     # Build PE state from Fortran data and run JBB deweighting
@@ -291,7 +287,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     kf_intr = KF.KineticForcesInternal(equil; verbose=false)
 
     # Run set_perturbation_data! — builds dbob_m, divx_m, xs_m via JBB deweighting
-    KF.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
+    KF.set_perturbation_data!(kf_intr, pe_state, ffs, equil, metric)
 
     _pf("  JBB deweighting completed in %.1f s\n", time() - t1)
 

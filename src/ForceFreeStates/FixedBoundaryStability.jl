@@ -92,7 +92,7 @@ end
     compute_smallest_eigenvalue(u) -> crit, nonherm
 
 Form the inverse plasma response matrix W⁻¹ using the solution matrix `u` and
-returns its minimum eigenvalue by magnitude. Performs the same function as
+returns its signed eigenvalue of smallest magnitude. Performs the same function as
 `ode_output_get_crit` in the Fortran code, except we explicitly form W⁻¹ here
 from U₁ * U₂⁻¹ using Julia's right division operator `/` instead of
 adj(adj(U₂)⁻¹ * adj(U₁)) as done in Fortran. We have also added a check to
@@ -139,7 +139,8 @@ construction but may accumulate numerical noise during integration.
     # Enforce that W is Hermitian
     hermitianpart!(wp_inverse) # Overwrites W⁻¹ with (W⁻¹ + (W⁻¹)') / 2
 
-    # Compute eigenvalues and return the smallest
-    crit = findmin(abs, eigvals!(Hermitian(wp_inverse)))[1]
+    # Return the eigenvalue of smallest magnitude, keeping its sign so the caller can detect crossings
+    evals = eigvals!(Hermitian(wp_inverse))
+    crit = evals[findmin(abs, evals)[2]]
     return crit, nonherm
 end

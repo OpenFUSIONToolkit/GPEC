@@ -1,7 +1,7 @@
 """
     initialize_mode_arrays!(
         intr::PerturbedEquilibriumInternal,
-        ffs_intr::ForceFreeStatesInternal
+        ffs::ForceFreeStatesResult
     )
 
 Initialize mode number arrays for convenient indexing.
@@ -20,12 +20,12 @@ This matches the convention used in ForceFreeStates where modes are ordered as:
 """
 function initialize_mode_arrays!(
     intr::PerturbedEquilibriumInternal,
-    ffs_intr::ForceFreeStatesInternal
+    ffs::ForceFreeStatesResult
 )
-    numpert_total = ffs_intr.numpert_total
-    mpert = ffs_intr.mpert
-    mlow = ffs_intr.mlow
-    nlow = ffs_intr.nlow
+    numpert_total = ffs.numpert_total
+    mpert = ffs.mpert
+    mlow = ffs.mlow
+    nlow = ffs.nlow
 
     # Allocate arrays
     intr.m_modes = zeros(Int, numpert_total)
@@ -345,7 +345,10 @@ const PE_H5_ANNOTATIONS = [
     "Energies/vacuum_energy" => (; long_name="perturbed vacuum energy", units="J"),
     "Energies/surface_energy" => (; long_name="perturbed surface energy", units="J"),
     "Energies/plasma_energy" => (; long_name="perturbed plasma energy", units="J"),
-    "Energies/toroidal_torque" => (; long_name="net toroidal torque on the plasma", units="N*m")
+    "Energies/toroidal_torque" => (;
+        long_name="boundary-response toroidal torque −2n·Im⟨Φ_tot,Λ⁻¹Φ_tot⟩/4: equals the volume-integrated Euler-Lagrange kinetic torque for converged self-consistent solutions; distinct construction from the KineticForces NTV torque",
+        units="N*m"
+    )
 ]
 
 # Attach long_name/units/dims + dimension scales (declared in-table) to the

@@ -76,7 +76,7 @@ Internal state variables for perturbed equilibrium calculations.
     n_modes::Vector{Int} = Int[]
     # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer.
     inner_bpen::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
-    # True when the consumed OdeState came from gal matching, whose du_store carries the
+    # True when the consumed solution came from gal matching, whose du_store carries the
     # analytic galerkin Ξ′; selects the gal branch of the singular-coupling Ξ′ evaluation.
     odet_from_gal::Bool = false
 end
@@ -144,8 +144,10 @@ well-conditioned flux-space inductances L, Λ:
 
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
-  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")    # Response fields in mode space [npsi, mpert]
-  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
+  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")
+  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 ) — the boundary-response torque, zero for ideal
+    (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
+    self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
