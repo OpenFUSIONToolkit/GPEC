@@ -19,7 +19,7 @@ noise_threshold = 0
 order = 10
 
 [quantities.gal_sing_q]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/rational_q"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/rational_q"
 type = "real_vector"
 extract = "all_real"
 label = "gal singular q values"
@@ -28,25 +28,25 @@ order = 11
 
 # PEST-3 Δ matching matrix — per-surface diagonal (the physics-meaningful tearing Δ′)
 [quantities.gal_pest3_delta_diag]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/pest3_Delta"
+h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
 label = "gal PEST3 Δ diagonal"
 noise_threshold = 1e-6
 order = 20
 
-# Full outer Δ′ matrix (nsol × 2·msing) — Frobenius norm catches any element drift
+# Raw outer Δ′ matrix (2·msing × 2·msing) — Frobenius norm catches any element drift
 [quantities.gal_delta_norm]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/Delta_prime_raw"
+h5path = "SingularSurfaces/Delta_prime_raw"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal Δ′ matrix||"
 noise_threshold = 1e-6
 order = 21
 
-# rpec coil-response block (mpert × 2·msing) — Frobenius norm
+# rpec coil-response block (edge mode × surface-side) — Frobenius norm
 [quantities.gal_delta_coil_norm]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/Delta_coil"
+h5path = "SingularSurfaces/Delta_coil"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal Δ_coil block||"
@@ -55,7 +55,7 @@ order = 22
 
 # Mercier index per surface
 [quantities.gal_di]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/D_I"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/D_I"
 type = "real_vector"
 extract = "all_real"
 label = "gal D_I per surface"
@@ -64,7 +64,7 @@ order = 30
 
 # Resonant exponents α per surface
 [quantities.gal_alpha]
-h5path = "SingularSurfaces/GalerkinDeltaPrime/alpha"
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/alpha"
 type = "complex_vector"
 extract = "all_complex"
 label = "gal α per surface"

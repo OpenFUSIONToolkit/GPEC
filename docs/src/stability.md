@@ -45,10 +45,11 @@ finite across every rational surface.
 
 ## Integration methods
 
-Two integration drivers are available. Both solve the same EL system, but they differ in
-numerical strategy and in what they leave behind for the rest of the pipeline: the forward
-driver returns dense displacement profiles, the Riccati driver returns the inter-surface
-``\Delta'`` matrix.
+Three formalisms are available, selected by `integrator`. Forward and Riccati solve the same
+EL system and differ in numerical strategy and in what they leave behind for the rest of the
+pipeline: the forward driver returns dense displacement profiles, the Riccati driver returns
+the inter-surface ``\Delta'`` matrix. Galerkin solves the outer region variationally instead,
+and is documented in `docs/src/galerkin.md`.
 
 ### Forward integration
 
@@ -136,6 +137,22 @@ rational surface inherits `direction`, while the earlier sub-chunk always gets `
 **Accuracy** (N=26, DIIID-like example): energy eigenvalue within 2% of the forward path.
 The residual ~2% gap comes from the different crossing convention (Riccati-style direct
 zeroing vs GR), not from ODE tolerance; it is present at every thread count.
+
+### Galerkin
+
+`integrator = "galerkin"` solves the same EL system variationally instead of integrating it:
+the outer region is discretized on packed Hermite-cubic elements and solved as one global banded
+system, giving the RDCON resistive ``\Delta'`` matrix and the PEST-3 matching blocks.  It computes its own vacuum response and
+returns no free-boundary energies, no ODE trace, and no fixed-boundary `crit` scan.  With
+`gal_match_flag` it also matches the inner layer, producing a driven ``\xi`` solution that
+`PerturbedEquilibrium` consumes.  Kinetic runs are not supported.  See
+`docs/src/galerkin.md` for the solver and its `gal_*` knobs.
+
+Enable with:
+```toml
+[ForceFreeStates]
+integrator = "galerkin"
+```
 
 ## Local stability: Mercier and ballooning (s–α)
 
@@ -231,8 +248,10 @@ propagator blocks from bidirectional integration rather than the monolithic forw
 where ``\Phi_R[j]`` is the forward FM product from ``\psi_{R,j-1}`` to the junction, and
 ``\Phi_L[j]`` is the backward crossing FM from ``\psi_{L,j}`` to the junction.
 
-The matrix is only populated by the Riccati path and is written to the HDF5 output
-under `SingularSurfaces/Delta_prime_matrix`.
+The matrix is written to the HDF5 output under `SingularSurfaces/Delta_prime_matrix`.
+The Galerkin integrator computes the same quantity in the same PEST-3 convention and
+publishes it on the same path, so downstream consumers (SLAYER among them) never branch
+on which formalism ran.
 
 ## Configuration reference
 
@@ -241,7 +260,7 @@ All `ForceFreeStates` options are set in the `[ForceFreeStates]` section of `gpe
 ```toml
 [ForceFreeStates]
 # Integration driver
-integrator   = "riccati"  # "forward" for dense xi profiles and kinetic runs
+integrator   = "riccati"  # "forward" for dense xi profiles and kinetic runs; "galerkin" for the RDCON outer-region solve
 nchunks      = 0          # Riccati chunk-count target (0 = auto, from msing alone)
 
 # Mode space
@@ -273,7 +292,7 @@ The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separa
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "ForceFreeStatesStructs.jl", "Resist.jl", "EulerLagrange.jl", "Sing.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/Resist.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
 
 ## Example usage
@@ -305,15 +324,15 @@ intr.mpert = intr.mhigh - intr.mlow + 1
 intr.numpert_total = intr.mpert * intr.npert
 
 metric = FFS.make_metric(equil, intr.mpert)
-ffit   = FFS.make_matrix(equil, intr, metric)
+mats   = FFS.build_matrix_splines(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
 # on ctrl.integrator and always returns a 4-tuple
 # (odet, propagators, chunks, S_at_surface_left).  The trailing three are `nothing`
 # on the forward path.
-odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
 
-vac = FFS.free_run(odet, ctrl, equil, ffit, intr)
+vac = FFS.free_run(odet, ctrl, equil, mats, intr)
 println("Energy eigenvalue et[1] = ", real(vac.et[1]))
 ```
 
@@ -344,8 +363,10 @@ end
 
 ## Notes
 
-- The standard path does not populate `delta_prime`; use `PerturbedEquilibrium.SingularCoupling`
-  for Δ' on the standard path (it reads `ca_l`/`ca_r` directly).
+- The standard path does not populate `delta_prime`; the canonical Δ' is the STRIDE BVP
+  `SingularSurfaces/Delta_prime_matrix` from the parallel FM path. `ca_l`/`ca_r` are filled
+  only by ideal surface crossings (kinetic and galerkin-matched runs emit zero-extent
+  `ca_left`/`ca_right` sentinels).
 - The Riccati and parallel FM paths compute Δ' inline at each crossing, using the
   direct diagonal formula (no GR permutation).  The result in `delta_prime_col[ipert_res, i]`
   equals `delta_prime[i]` to machine precision.

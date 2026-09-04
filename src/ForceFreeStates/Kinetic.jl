@@ -1,6 +1,6 @@
 
 """
-    refine_grid_at_fbar_peaks(xs, kw, kt, evaluate, ffit, equil, intr, psi_c;
+    refine_grid_at_fbar_peaks(xs, kw, kt, evaluate, kin, equil, intr, psi_c;
                               ngrid=1000, relaxed_frac=0.01, target=3, max_add=24) → (xs, kw, kt)
 
 Insert kinetic evaluation knots across near-singular structure of F̄ that the grid does not
@@ -12,7 +12,7 @@ above the near-axis validity band, and are capped at `max_add`; each costs one k
 and the existing values are reused. A well-resolved grid inserts nothing.
 """
 function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3}, kt::Array{ComplexF64,3},
-    evaluate::Function, ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium,
+    evaluate::Function, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal, psi_c::Float64;
     ngrid::Int=1000, relaxed_frac::Float64=0.01, target::Int=3, max_add::Int=24,
     cond_threshold::Float64=1e8)
@@ -22,7 +22,7 @@ function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3},
     hint = Ref(1)
     cond_vals = [
         try
-            evaluate_fbar_condition(x, ffit, equil, intr; hint=hint)
+            evaluate_fbar_condition(x, kin, equil, intr; hint=hint)
         catch
             Inf
         end for x in scan
@@ -65,11 +65,12 @@ function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3},
 end
 
 """
-    make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+    build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
                         calculated_source=nothing)
 
-Construct kinetic energy (W) and torque (T) matrices, store as splines in `ffit`,
-and pre-compute the FKG derived matrices used by `sing_der!`.
+Construct kinetic energy (W) and torque (T) matrices and pre-compute the FKG derived
+matrices used by `sing_der!`, returning a new `MatrixSplines` carrying both alongside the
+ideal matrices of the input `mats`.
 
 Dispatches on `ctrl.kinetic_source`:
 
@@ -78,7 +79,7 @@ Dispatches on `ctrl.kinetic_source`:
   - `"calculated"`: Compute via the `calculated_source` callback. This is
     expected to be `KineticForces.compute_calculated_kinetic_matrices` injected
     by `GeneralizedPerturbedEquilibrium.main`. The callback receives
-    `(ctrl, equil, intr, metric, ffit)` and returns `(kw_flat, kt_flat)` of
+    `(ctrl, equil, intr, metric, mats)` and returns `(kw_flat, kt_flat)` of
     shape `(mpsi, np^2, 6)`. Callback injection is used because ForceFreeStates
     is loaded before KineticForces, so a direct import would invert the
     dependency order.
@@ -86,10 +87,10 @@ Dispatches on `ctrl.kinetic_source`:
 Both paths apply `ctrl.kinetic_factor` as a global scale before the FKG Schur
 reduction.
 """
-function make_kinetic_matrix(
+function build_kinetic_matrix_splines(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
     metric::MetricData;
     calculated_source::Union{Nothing,Function}=nothing,
@@ -107,21 +108,21 @@ function make_kinetic_matrix(
 
     # Get raw kinetic matrices (scaling is baked into each source)
     if ctrl.kinetic_source == "fixed"
-        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, mpsi, ctrl.kinetic_factor, intr.mlow, ffit, xs)
+        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, intr.numpert_total, mpsi, ctrl.kinetic_factor, intr.mlow, mats, xs)
     elseif ctrl.kinetic_source == "calculated"
         isnothing(calculated_source) && error(
             "kinetic_source=\"calculated\" requires the KineticForces callback. " *
             "Drive the run via `GeneralizedPerturbedEquilibrium.main` instead of " *
-            "calling make_kinetic_matrix directly, or pass " *
+            "calling build_kinetic_matrix_splines directly, or pass " *
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
         )
         band = band_knots(xs[1], xs[end])
         if isempty(band)
-            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
+            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats)
         else
             xs = sort!(unique!(vcat(collect(xs), band)))
             mpsi = length(xs)
-            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit; psis=xs)
+            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats; psis=xs)
         end
         kw_flat .*= ctrl.kinetic_factor
         kt_flat .*= ctrl.kinetic_factor
@@ -129,47 +130,33 @@ function make_kinetic_matrix(
         error("Unknown kinetic_source: $(ctrl.kinetic_source). Must be \"fixed\" or \"calculated\"")
     end
 
-    # Build splines for each of the 6 components
-    for ic in 1:6
-        ffit.kwmats[ic] = cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); ffit.itp_opts...)
-        ffit.ktmats[ic] = cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...)
-    end
-
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
-    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+    mats = _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat; xs=xs)
 
-    # The FKG splines now exist, so F̄ can be scanned: add knots only where near-singular
-    # structure (shifted/split kinetic resonances) falls in an interval that does not resolve it.
-    if ctrl.kinetic_source == "calculated" && calculated_source !== nothing
+    # The FKG splines now exist, so F̄ can be scanned: add knots only where near-singular structure
+    # (shifted/split kinetic resonances) falls in an interval that does not resolve it.
+    if ctrl.kinetic_source == "calculated" && calculated_source !== nothing && mats.kinetic !== nothing
         xs2, kw_flat, kt_flat = refine_grid_at_fbar_peaks(
             collect(xs), kw_flat, kt_flat,
             psis -> begin
-                kwn, ktn = calculated_source(ctrl, equil, intr, metric, ffit; psis=psis)
+                kwn, ktn = calculated_source(ctrl, equil, intr, metric, mats; psis=psis)
                 (kwn .* ctrl.kinetic_factor, ktn .* ctrl.kinetic_factor)
             end,
-            ffit, equil, intr, axis_validity_psi_c)
+            mats.kinetic, equil, intr, axis_validity_psi_c)
         if length(xs2) != length(xs)
             xs = xs2
-            # _compute_fkg_matrices! folds the kinetic increments into amats/bmats/cmats (saving the
-            # ideal copies), so restore those before recomputing or the increments are added twice.
-            ffit.amats = ffit.amats_ideal
-            ffit.bmats = ffit.bmats_ideal
-            ffit.cmats = ffit.cmats_ideal
-            for ic in 1:6
-                ffit.kwmats[ic] = cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); ffit.itp_opts...)
-                ffit.ktmats[ic] = cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...)
-            end
-            _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+            mats = _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat; xs=xs)
         end
     end
-
-    return nothing
+    return mats
 end
 
 """
-    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+    _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat) -> MatrixSplines
 
-Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and store as splines.
+Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and return a new `MatrixSplines`
+whose `kinetic` field holds them alongside the kinetic-modified A/B/C; `mats.ideal` is carried over
+unchanged.
 This corresponds to `fourfit_kinetic_matrix` method=0 in the Fortran code (Fortran `fourfit.F` lines 1170-1260).
 
 The 9 matrices computed are the Schur complement reductions of ideal (A,B,C,D,E,H) and kinetic (W,T)
@@ -178,8 +165,8 @@ Eqs C.1-C.11). These sub-matrices absorb the singfac dependence so that the ODE 
 can be assembled with explicit (m-nq) factors rather than 1/(m-nq), avoiding numerical blow-up at
 rational surfaces.
 """
-function _compute_fkg_matrices!(
-    ffit::FourFitVars,
+function _compute_fkg_matrices(
+    mats::MatrixSplines,
     equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal,
     metric::MetricData,
@@ -191,6 +178,7 @@ function _compute_fkg_matrices!(
     np = intr.numpert_total
     mpert = intr.mpert
     npert = intr.npert
+    ideal = mats.ideal
 
     # Allocate output arrays — kinetic-modified A/B/C stored for sing_der! FKG path
     ak_flat = zeros(ComplexF64, mpsi, np^2)
@@ -216,13 +204,13 @@ function _compute_fkg_matrices!(
         psi = xs[ipsi]
 
         # Evaluate ideal and kinetic matrices from splines (full np×np, block-diagonal in n)
-        amat_full = reshape(ffit.amats(psi; hint=hint), np, np)
-        bmat_full = reshape(ffit.bmats(psi; hint=hint), np, np)
-        cmat_full = reshape(ffit.cmats(psi; hint=hint), np, np)
-        dmat_full = reshape(ffit.dmats_prim(psi; hint=hint), np, np)
-        emat_full = reshape(ffit.emats_prim(psi; hint=hint), np, np)
-        hmat_full = reshape(ffit.hmats(psi; hint=hint), np, np)
-        fmat_prim_full = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
+        amat_full = reshape(ideal.A_spline(psi; hint=hint), np, np)
+        bmat_full = reshape(ideal.B_spline(psi; hint=hint), np, np)
+        cmat_full = reshape(ideal.C_spline(psi; hint=hint), np, np)
+        dmat_full = reshape(ideal.D_spline_prim(psi; hint=hint), np, np)
+        emat_full = reshape(ideal.E_spline_prim(psi; hint=hint), np, np)
+        hmat_full = reshape(ideal.H_spline(psi; hint=hint), np, np)
+        fmat_prim_full = reshape(ideal.F_spline_prim(psi; hint=hint), np, np)
 
         kwmat_full = zeros(ComplexF64, np, np, 6)
         ktmat_full = zeros(ComplexF64, np, np, 6)
@@ -343,27 +331,23 @@ function _compute_fkg_matrices!(
         end
     end
 
-    # Build FKG splines
-    ffit.f0mats = cubic_interp(xs, Series(f0_flat); ffit.itp_opts...)
-    ffit.pmats = cubic_interp(xs, Series(p_flat); ffit.itp_opts...)
-    ffit.paats = cubic_interp(xs, Series(pa_flat); ffit.itp_opts...)
-    ffit.kkmats = cubic_interp(xs, Series(kk_flat); ffit.itp_opts...)
-    ffit.kkaats = cubic_interp(xs, Series(kka_flat); ffit.itp_opts...)
-    ffit.r1mats = cubic_interp(xs, Series(r1_flat); ffit.itp_opts...)
-    ffit.r2mats = cubic_interp(xs, Series(r2_flat); ffit.itp_opts...)
-    ffit.r3mats = cubic_interp(xs, Series(r3_flat); ffit.itp_opts...)
-    ffit.gaats = cubic_interp(xs, Series(ga_flat); ffit.itp_opts...)
+    itp_opts = (; extrap=ExtendExtrap())
+    kinetic = KineticMatrices(;
+        # kinetic-modified A/B/C consumed by sing_der!; A is non-Hermitian here
+        A_spline=cubic_interp(xs, Series(ak_flat); itp_opts...),
+        B_spline=cubic_interp(xs, Series(bk_flat); itp_opts...),
+        C_spline=cubic_interp(xs, Series(ck_flat); itp_opts...),
+        Kw_spline=[cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); itp_opts...) for ic in 1:6],
+        Kt_spline=[cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); itp_opts...) for ic in 1:6],
+        F0_spline=cubic_interp(xs, Series(f0_flat); itp_opts...),
+        P_spline=cubic_interp(xs, Series(p_flat); itp_opts...),
+        P_spline_adj=cubic_interp(xs, Series(pa_flat); itp_opts...),
+        Kk_spline=cubic_interp(xs, Series(kk_flat); itp_opts...),
+        Kk_spline_adj=cubic_interp(xs, Series(kka_flat); itp_opts...),
+        R1_spline=cubic_interp(xs, Series(r1_flat); itp_opts...),
+        R2_spline=cubic_interp(xs, Series(r2_flat); itp_opts...),
+        R3_spline=cubic_interp(xs, Series(r3_flat); itp_opts...),
+        G_spline_adj=cubic_interp(xs, Series(ga_flat); itp_opts...))
 
-    # Preserve ideal A/B/C splines before overwrite
-    ffit.amats_ideal = ffit.amats
-    ffit.bmats_ideal = ffit.bmats
-    ffit.cmats_ideal = ffit.cmats
-
-    # Overwrite ideal A/B/C splines with kinetic-modified versions for sing_der!
-    ffit.amats = cubic_interp(xs, Series(ak_flat); ffit.itp_opts...)
-    ffit.bmats = cubic_interp(xs, Series(bk_flat); ffit.itp_opts...)
-    ffit.cmats = cubic_interp(xs, Series(ck_flat); ffit.itp_opts...)
-    ffit.kinetic_populated = true
-
-    return nothing
+    return MatrixSplines(mats.ideal, kinetic, mats._hint)
 end

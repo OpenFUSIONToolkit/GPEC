@@ -129,6 +129,22 @@ function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileS
 end
 
 """
+    kinetic_axis_validity_psi(species, equil) → Float64
+
+Near-axis validity boundary for a resolved multi-species set: the largest single-species ψ_c, so
+suppression covers every ψ where *any* species violates the zero-orbit-width ordering. Heavier or
+less-charged species carry wider orbits (ρ ∝ √(mT)/(Z e B₀)), so the maximum is normally set by the
+main ion; impurities move it only if their √m/Z exceeds the main ion's.
+"""
+function kinetic_axis_validity_psi(species::AbstractVector{<:Equilibrium.ResolvedNTVSpecies}, equil)::Float64
+    psi_c = 0.0
+    for sp in species
+        psi_c = max(psi_c, kinetic_axis_validity_psi(sp.profiles, equil; zi=sp.z, mi=sp.m, electron=sp.electron))
+    end
+    return psi_c
+end
+
+"""
     kinetic_axis_validity_envelope(psi, psi_c) → Float64
 
 C² quintic smoothstep for the near-axis kinetic suppression: 0 for ψ ≤ ψ_c (drift-kinetic model
@@ -209,4 +225,42 @@ function kinetic_validity_profiles(kinetic_profiles::Equilibrium.KineticProfileS
     return (psi=psi, rho_i=rho_i, rho_banana=rho_banana, rho_theta=rho_theta, w_potato=w_potato,
         r_minor=r_minor, L_p=L_p, L_q=L_q, d_separatrix=d_separatrix,
         psi_c=psi_c, envelope=envelope, is_valid=is_valid)
+end
+
+"""
+    axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil) → Float64
+
+ψ_c for a run: the widest-orbit species' near-axis validity boundary, or `0.0` when suppression is
+disabled or no kinetic profiles were loaded. Falls back to `kf_ctrl.zi`/`mi` when the resolved
+species set is unavailable.
+"""
+function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_profiles, equil)::Float64
+    (kf_ctrl.axis_validity_suppression && kinetic_profiles !== nothing) || return 0.0
+    species === nothing && return kinetic_axis_validity_psi(kinetic_profiles, equil;
+        zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron)
+    return kinetic_axis_validity_psi(species, equil)
+end
+
+"""
+    resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, species, equil, intr) → Vector{Float64}
+
+ψ_N locations to pin into the two-pass equilibrium grid for a self-consistent kinetic run: the
+located Ω_ℓ = 0 resonance surfaces for every toroidal mode in the run, outside the near-axis
+validity region (nodes there are suppressed anyway). Empty for ideal runs — the ideal grid
+criterion knows nothing about kinetic resonances, so this is the only thing that puts knots on
+them.
+"""
+function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profiles, species,
+    equil, intr)::Vector{Float64}
+    nodes = Float64[]
+    (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && kinetic_profiles !== nothing) || return nodes
+    for n_res in intr.nlow:intr.nhigh
+        n_res == 0 && continue
+        append!(nodes, kinetic_resonance_psi_nodes(kinetic_profiles, equil;
+            n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
+            electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac))
+    end
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil)
+    psi_c > 0 && filter!(p -> p > psi_c, nodes)
+    return nodes
 end

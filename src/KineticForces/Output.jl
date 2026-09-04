@@ -7,9 +7,10 @@ then write to gpec.h5 in a single pass.
 """
 
 """
-    write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing)
+    write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
+                   species_label=nothing)
 
-Write all KineticForces results to the "KineticForces" group in gpec.h5.
+Write KineticForces results to the "KineticForces" group in gpec.h5.
 
 # Arguments
 
@@ -18,12 +19,33 @@ Write all KineticForces results to the "KineticForces" group in gpec.h5.
   - `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
     written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
     is directly available
+  - `species_label`: `nothing` writes the run total to `KineticForces/<method>/`; a label
+    (e.g. `"ion_z1_m2"`, `"electron"`) writes one species' contribution to
+    `KineticForces/PerSpecies/<label>/<method>/`. A multi-species run calls this once per
+    species and once for the summed total, so the group is opened-or-created each time.
 """
-function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing)
-    g = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
+function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
+    species_label::Union{Nothing,AbstractString}=nothing)
+    root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
+    g = root
+    if species_label !== nothing
+        per = if haskey(root, "PerSpecies")
+            root["PerSpecies"]
+        else
+            p = create_group(root, "PerSpecies")
+            attributes(p)["long_name"] = "per-species NTV contributions; their sum is the KineticForces total"
+            p
+        end
+        g = create_group(per, species_label)
+    end
+
+    # Method groups actually written here, so the metadata pass annotates the method level
+    # and never mistakes the PerSpecies container for a method token.
+    method_names = String[]
 
     for (method_name, result) in state.method_results
         mg = create_group(g, method_name)
+        push!(method_names, method_name)
         mg["n"] = result.nn
         # Torque and kinetic energy are the two real physical quantities packed into the
         # complex T (Re = T_φ, Im = 2n·δW_k); total_energy stores δW_k = Im(T)/(2n).
@@ -57,7 +79,12 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
 
     # Write the six drift-kinetic coefficient matrices if present
     for (method_name, mat) in state.kinetic_matrices
-        method_g = haskey(g, method_name) ? g[method_name] : create_group(g, method_name)
+        method_g = if haskey(g, method_name)
+            g[method_name]
+        else
+            push!(method_names, method_name)
+            create_group(g, method_name)
+        end
         mat_g = create_group(method_g, "KineticMatrices")
         for (letter, k) in _KINETIC_MATRIX_LETTERS
             mat_g[letter] = mat[:, :, k]
@@ -65,7 +92,7 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
     end
 
     # Metadata pass: method tokens are data-driven, so annotate each method group.
-    for method_name in keys(g)
+    for method_name in method_names
         Utilities.HDF5Annotations.annotate!(g[method_name], KF_METHOD_H5_ANNOTATIONS)
     end
 end
@@ -162,4 +189,36 @@ function print_summary(state::KineticForcesState; verbose::Bool=false)
             println("  Kinetic matrices stored for: $method_name")
         end
     end
+end
+
+"""
+    write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil)
+
+Write `KineticForces/Validity`: the drift-kinetic validity diagnostics (orbit-width scales, local
+geometry, profile gradient lengths, the near-axis boundary and its applied envelope, and the
+`is_valid` flag). Diagnostic only — nothing outside the near-axis envelope is suppressed, so the
+far edge and steep-gradient regions are flagged rather than zeroed.
+"""
+function write_validity!(h5file::HDF5.File, kf_ctrl::KineticForcesControl, species,
+    kinetic_profiles, equil)
+    kinetic_profiles === nothing && return nothing
+    vp = kinetic_validity_profiles(kinetic_profiles, equil;
+        zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron)
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil)
+    root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
+    haskey(root, "Validity") && return nothing
+    g = create_group(root, "Validity")
+    g["psi"] = vp.psi
+    g["rho_i"] = vp.rho_i
+    g["rho_banana"] = vp.rho_banana
+    g["rho_theta"] = vp.rho_theta
+    g["w_potato"] = vp.w_potato
+    g["r_minor"] = vp.r_minor
+    g["L_p"] = vp.L_p
+    g["L_q"] = vp.L_q
+    g["d_separatrix"] = vp.d_separatrix
+    g["psi_c"] = psi_c
+    g["envelope"] = psi_c > 0 ? kinetic_axis_validity_envelope.(vp.psi, psi_c) : ones(length(vp.psi))
+    g["is_valid"] = Int8.(vp.is_valid)
+    return nothing
 end

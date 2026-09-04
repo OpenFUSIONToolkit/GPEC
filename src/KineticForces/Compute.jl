@@ -230,6 +230,63 @@ end
 # ============================================================================
 
 """
+    combine_species_states(states) -> KineticForcesState
+
+Sum per-species [`KineticForcesState`](@ref) results into a single total (τ = Σ_s τ_s). Per
+method: the scalar `total_torque`/`total_energy` are summed exactly; the dT/dψ profile is summed
+by linearly interpolating each species' own `(psi_grid, dtdpsi)` arrays onto the sorted union of
+the species ψ grids (zero outside a species' range), and the cumulative T(ψ) is re-integrated
+(trapezoid) from that summed profile. All species share the same ψ-integration range
+(`ctrl.psilims`), so the grids differ only in adaptive nodes. The interpolated/trapezoid
+`t_cumulative` is a diagnostic profile — its endpoint need not equal the exactly-summed
+Gauss-Kronrod `total_torque`, especially near sharp resonances. The combined `MethodResult`
+carries only the summed scalars and profile; per-species diagnostics (`torque_profile`, `records`,
+`panel_psis`, `resonance_psis`) are not aggregated and are left at their defaults.
+"""
+function combine_species_states(states::AbstractVector{KineticForcesState})
+    combined = KineticForcesState()
+    isempty(states) && return combined
+    method_names = sort(unique(Iterators.flatten(keys(s.method_results) for s in states)))
+    for mname in method_names
+        results = [s.method_results[mname] for s in states if haskey(s.method_results, mname)]
+        isempty(results) && continue
+        grid = sort(unique(reduce(vcat, (r.psi_grid for r in results); init=Float64[])))
+        # Sum each species' dT/dψ onto the union grid by linear interpolation of its own
+        # (psi_grid, dtdpsi) arrays (torque_profile interpolants are not populated here); zero
+        # outside a species' ψ range.
+        dtdpsi = zeros(ComplexF64, length(grid))
+        for r in results
+            length(r.psi_grid) >= 2 || continue
+            o = sortperm(r.psi_grid)
+            xs = r.psi_grid[o]
+            ys = r.dtdpsi[o]
+            for (k, ψ) in enumerate(grid)
+                (ψ < xs[1] || ψ > xs[end]) && continue
+                j = searchsortedlast(xs, ψ)
+                if j == length(xs) || xs[j+1] == xs[j]   # endpoint or duplicate node: no interpolation
+                    dtdpsi[k] += ys[j]
+                else
+                    t = (ψ - xs[j]) / (xs[j+1] - xs[j])
+                    dtdpsi[k] += (1 - t) * ys[j] + t * ys[j+1]
+                end
+            end
+        end
+        tcum = zeros(ComplexF64, length(grid))
+        for j in 2:length(grid)
+            tcum[j] = tcum[j-1] + 0.5 * (dtdpsi[j] + dtdpsi[j-1]) * (grid[j] - grid[j-1])
+        end
+        combined.method_results[mname] = MethodResult(;
+            method=mname, nn=first(results).nn,
+            total_torque=sum(r.total_torque for r in results),
+            total_energy=sum(r.total_energy for r in results),
+            psi_grid=grid, dtdpsi=dtdpsi, t_cumulative=tcum,
+            psi_nsteps=sum(r.psi_nsteps for r in results))
+    end
+    combined.completed = true
+    return combined
+end
+
+"""
     compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
                                 ctrl::KineticForcesControl, equil, kinetic_profiles)
 

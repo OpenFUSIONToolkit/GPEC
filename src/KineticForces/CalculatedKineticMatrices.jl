@@ -2,20 +2,20 @@
     CalculatedKineticMatrices
 
 Bridge from KineticForces' bounce-averaged matrix kernels into the kinetic-MHD
-stability path in ForceFreeStates. Used by `make_kinetic_matrix` when
+stability path in ForceFreeStates. Used by `build_kinetic_matrix_splines` when
 `ctrl.kinetic_source == "calculated"` (via the `calculated_source` callback
 injected from `GeneralizedPerturbedEquilibrium.main`).
 """
 
 """
-    compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, ffit;
+    compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, mats;
                                         kf_ctrl=KineticForcesControl(),
                                         kinetic_profiles)
         → (kw_flat, kt_flat)
 
 Drive the KineticForces matrix kernel over the ψ grid stored in `metric.xs` and
 return `(kw_flat, kt_flat)` arrays of shape `(mpsi, np^2, 6)` matching the
-contract that `ForceFreeStates._compute_fkg_matrices!` consumes.
+contract that `ForceFreeStates._compute_fkg_matrices` consumes.
 
 The arrays carry the six bounce-averaged kinetic energy / torque matrices
 (Logan 2015 Eqs 7.30–7.35) for every ψ on the equilibrium grid, packed as
@@ -36,7 +36,8 @@ section.
   - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
   - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
   - `metric`: MetricData (provides ψ grid via `metric.xs`)
-  - `ffit`: FourFitVars (used only for `numpert_total` cross-check)
+  - `mats`: MatrixSplines (used only for `numpert_total` cross-check)
+  - `psis`: ψ grid for the kernel; empty (default) evaluates on `metric.xs`
 
 # Keyword arguments
 
@@ -56,20 +57,19 @@ function compute_calculated_kinetic_matrices(
     equil,
     ffs_intr,
     metric,
-    ffit;
+    mats;
     kf_ctrl::KineticForcesControl=KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
-    psis::Union{Nothing,Vector{Float64}}=nothing
+    species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing,
+    psis::Vector{Float64}=Float64[]
 )
     # The kernel is a pure function of psi (it evaluates equilibrium splines), so it can be
     # driven over any knot list; default is the full equilibrium grid.
-    xs = psis === nothing ? metric.xs : psis
+    xs = isempty(psis) ? metric.xs : psis
     mpsi = length(xs)
     mpert = ffs_intr.mpert
     npert = ffs_intr.npert
     np = ffs_intr.numpert_total
-
-    @assert ffit.numpert_total == np "FourFitVars and ForceFreeStatesInternal disagree on numpert_total"
 
     kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
     kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
@@ -99,19 +99,6 @@ function compute_calculated_kinetic_matrices(
     # ipsi row of kw_flat/kt_flat. Per-thread copies of kf_intr provide isolated
     # tpsi_* θ-grid buffers and interpolant hint refs; geometric/profile splines
     # are read-only and safely shared through deepcopy semantics.
-    # Near-axis validity envelope: suppress the drift-kinetic increments where the
-    # zero-orbit-width ordering fails; kernel evaluation is skipped where it is identically 0.
-    env = ones(Float64, mpsi)
-    if kf_ctrl.axis_validity_suppression
-        psi_c = kinetic_axis_validity_psi(kinetic_profiles, equil;
-            zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron)
-        if psi_c > 0
-            env .= kinetic_axis_validity_envelope.(xs, psi_c)
-            @info "Kinetic axis-validity suppression: psi_c=$(round(psi_c; sigdigits=3)), envelope reaches 1 at " *
-                  "psi=$(round(2 * psi_c; sigdigits=3)) (kernel evaluation skipped below psi_c)" maxlog = 1
-        end
-    end
-
     nl = kf_ctrl.nl
     nthreads = Threads.maxthreadid()
     thread_intrs = [deepcopy(kf_intr) for _ in 1:nthreads]
@@ -120,39 +107,66 @@ function compute_calculated_kinetic_matrices(
     thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_block_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
 
-    Threads.@threads for ipsi in 1:mpsi
-        tid = Threads.threadid()
-        intr_t = thread_intrs[tid]
-        full_w = thread_full_w[tid]
-        full_t = thread_full_t[tid]
-        block_w = thread_block_w[tid]
-        block_t = thread_block_t[tid]
-        psi = xs[ipsi]
-        env[ipsi] == 0.0 && continue
-        for in_idx in 1:npert
-            n = ffs_intr.nlow + in_idx - 1
-            fill!(full_w, 0)
-            fill!(full_t, 0)
-            for ell in -nl:nl
-                fill!(block_w, 0)
-                fill!(block_t, 0)
-                compute_kinetic_matrices_at_psi!(
-                    block_w, block_t, psi, n, ell,
-                    kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.wdfac, kf_ctrl.divxfac,
-                    kf_ctrl.electron, equil, intr_t, kinetic_profiles;
-                    nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
-                    atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
-                )
-                full_w .+= block_w
-                full_t .+= block_t
-            end
+    # Species set summed into the kinetic matrices: the resolved multi-species set
+    # (main ions + neutrality impurity + electrons) when provided, else a single species
+    # from kf_ctrl. The kinetic W/torque matrices are additive over species, so we
+    # accumulate (+=) each species' block-diagonal contribution.
+    splist = species === nothing ?
+             [Equilibrium.ResolvedNTVSpecies(kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.electron, "single", kinetic_profiles)] : species
 
-            # Place the n-block on the diagonal of the full np×np matrix and flatten.
-            row_offset = (in_idx - 1) * mpert
-            for k in 1:6, j in 1:mpert, i in 1:mpert
-                idx = (row_offset + j - 1) * np + (row_offset + i)
-                kw_flat[ipsi, idx, k] = env[ipsi] * full_w[i, j, k]
-                kt_flat[ipsi, idx, k] = env[ipsi] * full_t[i, j, k]
+
+    # Near-axis validity envelope: suppress the drift-kinetic increments where the zero-orbit-width
+    # ordering fails, taking the widest-orbit species. Kernel evaluation is skipped where it is 0.
+    env = ones(Float64, mpsi)
+    if kf_ctrl.axis_validity_suppression
+        psi_c = kinetic_axis_validity_psi(splist, equil)
+        if psi_c > 0
+            env .= kinetic_axis_validity_envelope.(xs, psi_c)
+            @info "Kinetic axis-validity suppression: psi_c=$(round(psi_c; sigdigits=3)), envelope reaches 1 at " *
+                  "psi=$(round(2 * psi_c; sigdigits=3)) (kernel evaluation skipped below psi_c)" maxlog = 1
+        end
+    end
+
+    for sp in splist
+        # Hoisted per-species scalars: the closure then captures concrete values, not a
+        # union-typed `sp` (the ternary above mixes the resolved vector with the fallback).
+        z_s, m_s, el_s, prof_s = sp.z, sp.m, sp.electron, sp.profiles
+        # :static pins one task per thread so the threadid() buffer indexing below is sound
+        # (dynamic scheduling may migrate tasks at yield points, silently sharing buffers).
+        Threads.@threads :static for ipsi in 1:mpsi
+            tid = Threads.threadid()
+            intr_t = thread_intrs[tid]
+            full_w = thread_full_w[tid]
+            full_t = thread_full_t[tid]
+            block_w = thread_block_w[tid]
+            block_t = thread_block_t[tid]
+            psi = xs[ipsi]
+            env[ipsi] == 0.0 && continue   # inside the near-axis validity band: kernel skipped
+            for in_idx in 1:npert
+                n = ffs_intr.nlow + in_idx - 1
+                fill!(full_w, 0)
+                fill!(full_t, 0)
+                for ell in -nl:nl
+                    fill!(block_w, 0)
+                    fill!(block_t, 0)
+                    compute_kinetic_matrices_at_psi!(
+                        block_w, block_t, psi, n, ell,
+                        z_s, m_s, kf_ctrl.wdfac, kf_ctrl.divxfac,
+                        el_s, equil, intr_t, prof_s;
+                        nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
+                        atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
+                    )
+                    full_w .+= block_w
+                    full_t .+= block_t
+                end
+
+                # Place the n-block on the diagonal of the full np×np matrix and accumulate.
+                row_offset = (in_idx - 1) * mpert
+                for k in 1:6, j in 1:mpert, i in 1:mpert
+                    idx = (row_offset + j - 1) * np + (row_offset + i)
+                    kw_flat[ipsi, idx, k] += env[ipsi] * full_w[i, j, k]
+                    kt_flat[ipsi, idx, k] += env[ipsi] * full_t[i, j, k]
+                end
             end
         end
     end
