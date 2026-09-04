@@ -583,14 +583,18 @@ function prepare_force_free_states!(
         # Inject the KineticForces callback so the "calculated" source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
+        # One boundary for the whole run: the widest-orbit species, moved clear of any rational
+        # surface whose window the transition band would otherwise cut through.
+        axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
+            Float64[sng.psifac for sng in intr.sing])
         calculated_cb =
             (c, e, i, m, f; psis::Vector{Float64}=Float64[]) ->
                 KineticForces.compute_calculated_kinetic_matrices(
                     c, e, i, m, f;
-                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species, psis=psis)
+                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species, psis=psis,
+                    axis_psi_c=axis_psi_c)
         mats = build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
-            calculated_source=calculated_cb,
-            axis_validity_psi_c=KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil))
+            calculated_source=calculated_cb, axis_validity_psi_c=axis_psi_c)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
         # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
@@ -974,7 +978,8 @@ function run_kinetic_forces(
                 h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
                     KineticForces.write_to_hdf5!(h5file, kf_state;
                         dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
-                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil)
+                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil,
+                        Float64[sng.psifac for sng in result.surfaces])
                 end
             end
         else
@@ -1000,7 +1005,8 @@ function run_kinetic_forces(
                     end
                     KineticForces.write_to_hdf5!(h5file, kf_state;
                         dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
-                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil)
+                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil,
+                        Float64[sng.psifac for sng in result.surfaces])
                 end
             end
         end

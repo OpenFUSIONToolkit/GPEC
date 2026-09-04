@@ -91,6 +91,26 @@ function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfil
 end
 
 """
+    orbit_widths(psi, T_spline, q_spline, avg_r, avg_R, mass, chrg, ro, bo)
+
+Thermal orbit-width scales of one species at ψ: the minor radius ⟨r⟩ and inverse aspect ratio ε,
+the gyroradius ρ = √(2mT)/(Z·e·B₀), and the three widths that bound the zero-orbit-width ordering —
+potato (q²ρ²R₀)^(1/3), banana qρ/√ε, and poloidal gyroradius qρ/ε. Single source of truth for both
+the validity boundary and the diagnostic profiles.
+"""
+@inline function orbit_widths(psi::Float64, T_spline, q_spline, avg_r, avg_R,
+    mass::Float64, chrg::Float64, ro::Float64, bo::Float64)
+    r = avg_r(psi)
+    eps = max(r / avg_R(psi), 1e-6)
+    rho = sqrt(2 * mass * T_spline(psi)) / (abs(chrg) * bo)
+    q = abs(q_spline(psi))
+    return (; r, eps, rho,
+        w_potato=cbrt(q^2 * rho^2 * ro),
+        rho_banana=q * rho / sqrt(eps),
+        rho_theta=q * rho / eps)
+end
+
+"""
     kinetic_axis_validity_psi(kinetic_profiles, equil; zi=1, mi=2, electron=false) → Float64
 
 ψ_N below which the zero-orbit-width drift-kinetic ordering fails: the outermost ψ on the
@@ -117,13 +137,9 @@ function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileS
     psi_c = 0.0
     for psi in kinetic_profiles.xs
         psi <= 0 && continue
-        r = avg_r(psi)
-        r <= 0 && continue
-        eps = max(r / avg_R(psi), 1e-6)
-        rho = mass * sqrt(2 * T_spline(psi) / mass) / (abs(chrg) * bo)
-        q = abs(q_spline(psi))
-        w_orbit = max(cbrt(q^2 * rho^2 * ro), q * rho / sqrt(eps), q * rho / eps)
-        w_orbit >= r && (psi_c = max(psi_c, psi))
+        w = orbit_widths(psi, T_spline, q_spline, avg_r, avg_R, mass, chrg, ro, bo)
+        w.r <= 0 && continue
+        max(w.w_potato, w.rho_banana, w.rho_theta) >= w.r && (psi_c = max(psi_c, psi))
     end
     return psi_c
 end
@@ -203,14 +219,13 @@ function kinetic_validity_profiles(kinetic_profiles::Equilibrium.KineticProfileS
     is_valid = falses(n)
     for (i, x) in pairs(psi)
         r = avg_r(x)
-        eps = max(r / avg_R(x), 1e-6)
-        rho = mass * sqrt(2 * T_spline(x) / mass) / (abs(chrg) * bo)
+        w = orbit_widths(x, T_spline, q_spline, avg_r, avg_R, mass, chrg, ro, bo)
+        rho_i[i] = w.rho
+        rho_banana[i] = w.rho_banana
+        rho_theta[i] = w.rho_theta
+        w_potato[i] = w.w_potato
         q = abs(q_spline(x))
         drdpsi = abs(r_deriv(x))
-        rho_i[i] = rho
-        rho_banana[i] = q * rho / sqrt(eps)
-        rho_theta[i] = q * rho / eps
-        w_potato[i] = cbrt(q^2 * rho^2 * ro)
         r_minor[i] = r
         d_separatrix[i] = max(r_sep - r, 0.0)
         dP = abs(P_deriv(x))
@@ -228,17 +243,40 @@ function kinetic_validity_profiles(kinetic_profiles::Equilibrium.KineticProfileS
 end
 
 """
+    clear_rational_windows(psi_c, rationals) → Float64
+
+Move the near-axis validity boundary outward until no rational surface lies inside the envelope's
+transition band `[ψ_c, 2ψ_c]`. A rational sitting in the band gets its (near-singular) kinetic
+increments multiplied by a rapidly varying, near-zero envelope, which the matrix splines cannot
+represent — the resulting overshoot propagates NaNs into the stability solve. Where the orbit width
+already reaches ⟨r⟩ the resonance is not trustworthy anyway, so the boundary is pushed past the
+surface (suppressing it wholly) rather than cutting through it.
+"""
+function clear_rational_windows(psi_c::Float64, rationals::Vector{Float64})::Float64
+    psi_c <= 0 && return psi_c
+    for _ in 1:length(rationals)
+        inside = filter(r -> psi_c - Equilibrium.RATIONAL_RES_RADIUS <= r <= 2 * psi_c, rationals)
+        isempty(inside) && break
+        psi_c = maximum(inside) + Equilibrium.RATIONAL_RES_RADIUS
+    end
+    return psi_c
+end
+
+"""
     axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil) → Float64
 
 ψ_c for a run: the widest-orbit species' near-axis validity boundary, or `0.0` when suppression is
 disabled or no kinetic profiles were loaded. Falls back to `kf_ctrl.zi`/`mi` when the resolved
 species set is unavailable.
 """
-function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_profiles, equil)::Float64
+function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_profiles, equil,
+    rationals::Vector{Float64}=Float64[])::Float64
     (kf_ctrl.axis_validity_suppression && kinetic_profiles !== nothing) || return 0.0
-    species === nothing && return kinetic_axis_validity_psi(kinetic_profiles, equil;
-        zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron)
-    return kinetic_axis_validity_psi(species, equil)
+    psi_c =
+        species === nothing ?
+        kinetic_axis_validity_psi(kinetic_profiles, equil; zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron) :
+        kinetic_axis_validity_psi(species, equil)
+    return clear_rational_windows(psi_c, rationals)
 end
 
 """
@@ -260,7 +298,26 @@ function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profi
             n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
             electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac))
     end
-    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil)
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
+        Float64[sng.psifac for sng in intr.sing])
     psi_c > 0 && filter!(p -> p > psi_c, nodes)
     return nodes
+end
+
+"""
+    kinetic_validity_profiles(species, equil) → NamedTuple
+
+Validity diagnostics for a resolved multi-species set, computed for the species that sets the
+boundary (largest ψ_c). Reporting one species' profiles alongside another's ψ_c would make
+`is_valid` contradict `envelope` in the same output group.
+"""
+function kinetic_validity_profiles(species::AbstractVector{<:Equilibrium.ResolvedNTVSpecies}, equil)
+    isempty(species) && error("kinetic_validity_profiles: empty species set")
+    widest = species[1]
+    psi_c = -1.0
+    for sp in species
+        c = kinetic_axis_validity_psi(sp.profiles, equil; zi=sp.z, mi=sp.m, electron=sp.electron)
+        c > psi_c && (psi_c = c; widest = sp)
+    end
+    return kinetic_validity_profiles(widest.profiles, equil; zi=widest.z, mi=widest.m, electron=widest.electron)
 end

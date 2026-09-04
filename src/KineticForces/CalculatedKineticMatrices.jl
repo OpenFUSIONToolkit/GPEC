@@ -61,7 +61,8 @@ function compute_calculated_kinetic_matrices(
     kf_ctrl::KineticForcesControl=KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
     species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing,
-    psis::Vector{Float64}=Float64[]
+    psis::Vector{Float64}=Float64[],
+    axis_psi_c::Float64=0.0
 )
     # The kernel is a pure function of psi (it evaluates equilibrium splines), so it can be
     # driven over any knot list; default is the full equilibrium grid.
@@ -119,7 +120,7 @@ function compute_calculated_kinetic_matrices(
     # ordering fails, taking the widest-orbit species. Kernel evaluation is skipped where it is 0.
     env = ones(Float64, mpsi)
     if kf_ctrl.axis_validity_suppression
-        psi_c = kinetic_axis_validity_psi(splist, equil)
+        psi_c = axis_psi_c
         if psi_c > 0
             env .= kinetic_axis_validity_envelope.(xs, psi_c)
             @info "Kinetic axis-validity suppression: psi_c=$(round(psi_c; sigdigits=3)), envelope reaches 1 at " *

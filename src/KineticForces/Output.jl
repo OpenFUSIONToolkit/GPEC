@@ -200,11 +200,15 @@ geometry, profile gradient lengths, the near-axis boundary and its applied envel
 far edge and steep-gradient regions are flagged rather than zeroed.
 """
 function write_validity!(h5file::HDF5.File, kf_ctrl::KineticForcesControl, species,
-    kinetic_profiles, equil)
+    kinetic_profiles, equil, rationals::Vector{Float64}=Float64[])
     kinetic_profiles === nothing && return nothing
-    vp = kinetic_validity_profiles(kinetic_profiles, equil;
-        zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron)
-    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil)
+    # One species sets all three of psi_c, envelope and is_valid: the widest-orbit species when a
+    # resolved set is available, else the control's single species.
+    vp =
+        species === nothing ?
+        kinetic_validity_profiles(kinetic_profiles, equil; zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron) :
+        kinetic_validity_profiles(species, equil)
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
     root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
     haskey(root, "Validity") && return nothing
     g = create_group(root, "Validity")
