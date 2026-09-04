@@ -58,14 +58,15 @@
         mc = multi_surface_coupling([sc1, sc2], dp)
 
         Q = 1.5 + 0.5im
-        expected = (1.0 - (Q * (1.0 / 1.0) + s1)) * (2.0 - (Q * (1.0 / 2.0) + s2))
+        # Default :direct rescale: surface k sees Q·tauk_k/tauk_ref + q_shift_k.
+        expected = (1.0 - (Q * (1.0 / 1.0) + s1)) * (2.0 - (Q * (2.0 / 1.0) + s2))
         @test mc(Q) ≈ expected
 
-        # Zero shifts reproduce the pre-rotation determinant exactly.
+        # Zero shifts reproduce the un-rotated determinant exactly.
         sc1z = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0)
         sc2z = surface_coupling(model, nothing, 2.0 + 0im; scale=1.0, tauk=2.0)
         mcz = multi_surface_coupling([sc1z, sc2z], dp)
-        @test mcz(Q) ≈ (1.0 - Q) * (2.0 - Q / 2)
+        @test mcz(Q) ≈ (1.0 - Q) * (2.0 - 2Q)
     end
 
     @testset "_q_shifts converts kHz to Q units via tauk" begin
@@ -104,8 +105,8 @@
         @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=[NaN]))
 
         # tauk_rescale round-trips as a Symbol and rejects unknown values.
-        @test slayer_control_from_toml(Dict("tauk_rescale" => "direct")).tauk_rescale === :direct
-        @test SLAYERControl().tauk_rescale === :legacy
+        @test slayer_control_from_toml(Dict("tauk_rescale" => "legacy")).tauk_rescale === :legacy
+        @test SLAYERControl().tauk_rescale === :direct
         @test_throws ArgumentError validate(SLAYERControl(; tauk_rescale=:sideways))
     end
 
@@ -115,7 +116,7 @@
         dp = ComplexF64[1.0 0.0; 0.0 2.0]
         Q = 1.5 + 0.5im
 
-        leg = multi_surface_coupling([sc1, sc2], dp)
+        leg = multi_surface_coupling([sc1, sc2], dp; tauk_rescale=:legacy)
         dir = multi_surface_coupling([sc1, sc2], dp; tauk_rescale=:direct)
         @test leg.tauk_rescale === :legacy
         # :legacy divides by tauk_k, :direct multiplies by it.

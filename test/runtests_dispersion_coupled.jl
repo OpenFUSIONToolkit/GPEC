@@ -167,31 +167,40 @@
         end
     end
 
-    @testset "Per-surface Q rescaling via tauk_ref / tauk_k" begin
-        # Each surface evaluates its inner Δ at Q_k = Q · (tauk_ref/tauk_k).
-        # With Δ(Q) = Q (b=1, a=0), the diagonal modification is
-        #   M[k,k] = dp_diag_k - scale·Q·(tauk_ref/tauk_k)
-        # Verify against an explicit closed form with mismatched tauks.
+    @testset "Per-surface Q rescaling direction" begin
+        # Q is defined as tauk·ω, so one shared physical eigenvalue reaches
+        # surface k by MULTIPLYING by tauk_k: Q_k = Q · (tauk_k/tauk_ref).
+        # That is `:direct`, the default. `:legacy` is the pre-correction
+        # reciprocal, kept only to reproduce older results.
         sc1 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
                                0.0+0im; scale=1.0, tauk=2.0)   # ref tauk
         sc2 = surface_coupling(LinTestModel(0.0im, 1.0+0im), nothing,
-                               0.0+0im; scale=1.0, tauk=4.0)   # half rate
+                               0.0+0im; scale=1.0, tauk=4.0)
         dp = ComplexF64[0.0 0.0; 0.0 0.0]
+
         mc = multi_surface_coupling([sc1, sc2], dp; ref_idx=1)
+        @test mc.tauk_rescale === :direct
         for Q in (1.0+0im, 0.5+0.3im)
-            # M[1,1] = 0 - Q · (2/2) = -Q
-            # M[2,2] = 0 - Q · (2/4) = -Q/2
-            # det = M[1,1] · M[2,2] = Q·Q/2 = Q²/2
-            @test mc(Q) ≈ Q^2 / 2 rtol = 1e-12
+            # M[1,1] = -Q·(2/2) = -Q ; M[2,2] = -Q·(4/2) = -2Q ; det = 2Q²
+            @test mc(Q) ≈ 2 * Q^2 rtol = 1e-12
         end
 
-        # Switch ref_idx to surface 2
+        # Reference surface is a labelling choice, not physics: the ratio
+        # tauk_k/tauk_ref rescales the scanned Q, so switching ref_idx
+        # rescales the whole determinant by a known power of the tauk ratio.
         mc2 = multi_surface_coupling([sc1, sc2], dp; ref_idx=2)
         for Q in (1.0+0im, 0.5+0.3im)
-            # M[1,1] = -Q · (4/2) = -2Q
-            # M[2,2] = -Q · (4/4) = -Q
-            # det = 2Q · Q = 2Q²
-            @test mc2(Q) ≈ 2 * Q^2 rtol = 1e-12
+            # M[1,1] = -Q·(2/4) = -Q/2 ; M[2,2] = -Q·(4/4) = -Q ; det = Q²/2
+            @test mc2(Q) ≈ Q^2 / 2 rtol = 1e-12
+        end
+
+        # `:legacy` is the exact reciprocal of `:direct` on the diagonal, so
+        # for this 2-surface product it differs by (tauk_2/tauk_1)^2 = 4.
+        mcl = multi_surface_coupling([sc1, sc2], dp; ref_idx=1,
+            tauk_rescale=:legacy)
+        for Q in (1.0+0im, 0.5+0.3im)
+            @test mcl(Q) ≈ Q^2 / 2 rtol = 1e-12
+            @test mc(Q) ≈ 4 * mcl(Q) rtol = 1e-12
         end
     end
 
