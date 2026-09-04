@@ -27,7 +27,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `tau`      | T_i / T_e                                                         |
 | `lu`       | Lundquist number S = τ_R / τ_H                                    |
 | `c_beta`   | Compressibility √(β_local / (1 + β_local))                        |
-| `D_norm`   | (d_β/r_s) · S^(1/3) · √(τ/(1+τ))  (Fitzpatrick normalized scale)  |
+| `D_norm`   | (d_β/r_s) · S^(1/3) · √ι_e  (Fitzpatrick normalized scale)        |
 | `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                            |
 | `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
 | `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
@@ -329,6 +329,19 @@ function slayer_parameters(;
             )
         )
     iota_e = Q_e / Q_e_minus_Q_i
+    # D below takes sqrt(iota_e). iota_e lies in (0,1) whenever ω_*e and ω_*i have
+    # opposite signs — the physical case and the convention stated above. Surface a
+    # negative value as a clear error rather than a bare DomainError.
+    iota_e > 0 ||
+        throw(
+            ArgumentError(
+                "slayer_parameters: iota_e = Q_e/(Q_e - Q_i) = $iota_e is " *
+                "not positive, so the ion-sound-radius normalization " *
+                "D_norm = (d_beta/r_s)·S^(1/3)·sqrt(iota_e) is undefined. " *
+                "Check the diamagnetic-frequency inputs ω_*e, ω_*i — they " *
+                "are expected to carry opposite signs."
+            )
+        )
 
     # Plasma beta and compressibility
     lbeta = (5.0 / 3.0) * MU_0 * n_e * E_CHG * (t_e + t_i) / bt^2
@@ -342,7 +355,10 @@ function slayer_parameters(;
 
     # Normalized beta-related width and Δ-normalization
     d_beta = c_beta * d_i
-    D_norm = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(tau / (1.0 + tau))
+    # D = S^(1/3)·iota_e^(1/2)·(d_beta/r_s), Fitzpatrick's ion-sound-radius normalization.
+    # iota_e is the electron share of the total diamagnetic frequency; it reduces to
+    # 1/(1+tau) only when the electron and ion pressure-gradient scale lengths match.
+    D_norm = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(iota_e)
     delta_n = lu^(1.0 / 3.0) / rs
 
     # Critical-Δ offset from chi_parallel matching

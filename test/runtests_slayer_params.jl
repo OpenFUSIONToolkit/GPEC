@@ -9,7 +9,7 @@
     function _ref_kwargs(; dr_val=0.0, dc_type=:none)
         return (
             n_e=5.0e19, t_e=1000.0, t_i=1000.0,
-            omega=0.0, omega_e=1.0e4, omega_i=5.0e3,
+            omega=0.0, omega_e=-1.0e4, omega_i=5.0e3,
             qval=2.0, sval_r=1.0, bt=2.0,
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
             chi_perp=1.0, chi_tor=1.0,
@@ -36,13 +36,13 @@
 
         # Trivially exact ratios
         @test p.tau ≈ 1.0
-        # Q_e = −tauk·1e4 = negative; Q_i = −tauk·5e3 = negative
-        # Q_e − Q_i = −tauk·5e3 = Q_i (since Q_e = 2·Q_i) ⇒ iota_e = Q_e/Q_i = 2
-        @test p.iota_e ≈ 2.0
+        # Physical opposite-drift inputs: ω_*e < 0 < ω_*i, so Q = −tauk·ω gives
+        # Q_e > 0 > Q_i and iota_e = Q_e/(Q_e − Q_i) = 1e4/(1e4 + 5e3) = 2/3
+        @test p.iota_e ≈ 2 / 3
 
-        # Sign convention check (SLAYER layerinputs)
-        @test p.Q_e == -p.tauk * 1.0e4
-        @test p.Q_i == -p.tauk * 5.0e3    # SLAYER params convention: Q_i = −tauk·ω*i
+        # Sign convention check (SLAYER layerinputs): Q = −tauk·ω
+        @test p.Q_e == p.tauk * 1.0e4
+        @test p.Q_i == -p.tauk * 5.0e3
 
         # Default resistivity closure is neoclassical (Sauter F_33). The
         # trapped-particle correction raises η above plain Spitzer at the
@@ -83,8 +83,9 @@
         @test p.P_perp ≈ p.P_tor
         @test p.P_perp > 0
 
-        # D_norm = (d_β/r_s)·S^(1/3)·√(τ/(1+τ))
-        D_norm_expected = (p.d_beta / p.rs) * p.lu^(1 / 3) * sqrt(p.tau / (1 + p.tau))
+        # D_norm = (d_β/r_s)·S^(1/3)·√ι_e — the electron share of the total
+        # diamagnetic frequency, not the temperature ratio.
+        D_norm_expected = (p.d_beta / p.rs) * p.lu^(1 / 3) * sqrt(p.iota_e)
         @test p.D_norm ≈ D_norm_expected rtol = 1e-12
 
         # delta_n = S^(1/3)/r_s
