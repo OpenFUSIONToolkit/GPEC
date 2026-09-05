@@ -13,15 +13,16 @@ then write to gpec.h5 in a single pass.
 Write KineticForces results to the "KineticForces" group in gpec.h5.
 
 # Arguments
-- `h5file::HDF5.File`: Open HDF5 file handle
-- `state::KineticForcesState`: Accumulated computation results
-- `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
-  written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
-  is directly available
-- `species_label`: `nothing` writes the run total to `KineticForces/<method>/`; a label
-  (e.g. `"ion_z1_m2"`, `"electron"`) writes one species' contribution to
-  `KineticForces/PerSpecies/<label>/<method>/`. A multi-species run calls this once per
-  species and once for the summed total, so the group is opened-or-created each time.
+
+  - `h5file::HDF5.File`: Open HDF5 file handle
+  - `state::KineticForcesState`: Accumulated computation results
+  - `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
+    written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
+    is directly available
+  - `species_label`: `nothing` writes the run total to `KineticForces/<method>/`; a label
+    (e.g. `"ion_z1_m2"`, `"electron"`) writes one species' contribution to
+    `KineticForces/PerSpecies/<label>/<method>/`. A multi-species run calls this once per
+    species and once for the summed total, so the group is opened-or-created each time.
 """
 function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
     species_label::Union{Nothing,AbstractString}=nothing)
@@ -140,8 +141,9 @@ Write variable-length integration trajectory records using offset-indexed concat
 This is the standard HDF5 ragged array pattern for storing variable-length data.
 
 # Arguments
-- `mg::HDF5.Group`: HDF5 group for this method
-- `records::Vector{EnergyIntegrationResult}`: Integration records to write
+
+  - `mg::HDF5.Group`: HDF5 group for this method
+  - `records::Vector{EnergyIntegrationResult}`: Integration records to write
 """
 function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
     rg = create_group(mg, "EnergyIntegrals")
@@ -173,17 +175,54 @@ end
 Print a summary of KineticForces results to stdout.
 
 # Arguments
-- `state::KineticForcesState`: Accumulated computation results
-- `verbose::Bool`: Print detailed per-surface results
+
+  - `state::KineticForcesState`: Accumulated computation results
+  - `verbose::Bool`: Print detailed per-surface results
 """
 function print_summary(state::KineticForcesState; verbose::Bool=false)
     for (method_name, result) in state.method_results
         @printf("%-8s  T_phi = %11.3e   2n*dW_k = %11.3e\n",
-                method_name, real(result.total_torque), imag(result.total_torque))
+            method_name, real(result.total_torque), imag(result.total_torque))
     end
     if verbose
         for (method_name, _) in state.kinetic_matrices
             println("  Kinetic matrices stored for: $method_name")
         end
     end
+end
+
+"""
+    write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil)
+
+Write `KineticForces/Validity`: the drift-kinetic validity diagnostics (orbit-width scales, local
+geometry, profile gradient lengths, the near-axis boundary and its applied envelope, and the
+`is_valid` flag). Diagnostic only — nothing outside the near-axis envelope is suppressed, so the
+far edge and steep-gradient regions are flagged rather than zeroed.
+"""
+function write_validity!(h5file::HDF5.File, kf_ctrl::KineticForcesControl, species,
+    kinetic_profiles, equil, rationals::Vector{Float64}=Float64[])
+    kinetic_profiles === nothing && return nothing
+    # One species sets all three of psi_c, envelope and is_valid: the widest-orbit species when a
+    # resolved set is available, else the control's single species.
+    vp =
+        species === nothing ?
+        kinetic_validity_profiles(kinetic_profiles, equil; zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron) :
+        kinetic_validity_profiles(species, equil)
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
+    root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
+    haskey(root, "Validity") && return nothing
+    g = create_group(root, "Validity")
+    g["psi"] = vp.psi
+    g["rho_i"] = vp.rho_i
+    g["rho_banana"] = vp.rho_banana
+    g["rho_theta"] = vp.rho_theta
+    g["w_potato"] = vp.w_potato
+    g["r_minor"] = vp.r_minor
+    g["L_p"] = vp.L_p
+    g["L_q"] = vp.L_q
+    g["d_separatrix"] = vp.d_separatrix
+    g["psi_c"] = psi_c
+    g["envelope"] = psi_c > 0 ? kinetic_axis_validity_envelope.(vp.psi, psi_c) : ones(length(vp.psi))
+    g["is_valid"] = Int8.(vp.is_valid)
+    return nothing
 end

@@ -85,8 +85,8 @@ using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-                              "gal_flag")
+    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
+    "gal_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -210,7 +210,8 @@ function main_from_inputs(
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
     kf_ctrl, kinetic_profiles, kf_species = load_kinetic_context(inputs, intr, ctrl, equil)
-    equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles)
+    equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles;
+        pinned=KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, kf_species, equil, intr))
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -391,7 +392,8 @@ function maybe_reform_equilibrium(
     additional_input,
     intr::ForceFreeStatesInternal,
     ctrl::ForceFreeStatesControl,
-    kinetic_profiles
+    kinetic_profiles;
+    pinned::Vector{Float64}=Float64[]
 )
     Equilibrium.wants_two_pass(eq_config) || return equil
 
@@ -399,8 +401,10 @@ function maybe_reform_equilibrium(
     # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
     # so the rational-surface brackets clear a zone large enough for every mode.
     n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
+    isempty(pinned) ||
+        @info "Pinning $(length(pinned)) kinetic-resonance surfaces into the ψ grid: $(round.(sort(pinned); digits=3))"
     psi_nodes = Equilibrium.refined_psi_grid(equil;
-        tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+        tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory, pinned=pinned,
         singfac_min=ctrl.singfac_min, n_min=n_min)
     rerun_input = if additional_input !== nothing
         # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
@@ -579,12 +583,18 @@ function prepare_force_free_states!(
         # Inject the KineticForces callback so the "calculated" source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
-        calculated_cb = (c, e, i, m, f) ->
-            KineticForces.compute_calculated_kinetic_matrices(
-                c, e, i, m, f;
-                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species)
+        # One boundary for the whole run: the widest-orbit species, moved clear of any rational
+        # surface whose window the transition band would otherwise cut through.
+        axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
+            Float64[sng.psifac for sng in intr.sing])
+        calculated_cb =
+            (c, e, i, m, f; psis::Vector{Float64}=Float64[]) ->
+                KineticForces.compute_calculated_kinetic_matrices(
+                    c, e, i, m, f;
+                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species, psis=psis,
+                    axis_psi_c=axis_psi_c)
         mats = build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
-            calculated_source=calculated_cb)
+            calculated_source=calculated_cb, axis_validity_psi_c=axis_psi_c)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
         # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
@@ -740,10 +750,10 @@ runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]
 and errors here.
 
 ```julia
-eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
 prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
-ffs  = solve(prob, Riccati())
-ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+ffs = solve(prob, Riccati())
+ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
 function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
@@ -871,7 +881,7 @@ function perturbed_equilibrium(
     kwargs...
 )
     ctrl = ffs.control
-    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; kwargs...)
+    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; PerturbedEquilibrium.kinetic_regularization_kwargs(ffs, kwargs)...)
     pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
 
     # Inner-layer penetrated resonant field; zeros under ideal closure.
@@ -948,6 +958,8 @@ function run_kinetic_forces(
                 h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
                     KineticForces.write_to_hdf5!(h5file, kf_state;
                         dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil,
+                        Float64[sng.psifac for sng in result.surfaces])
                 end
             end
         else
@@ -973,6 +985,8 @@ function run_kinetic_forces(
                     end
                     KineticForces.write_to_hdf5!(h5file, kf_state;
                         dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil,
+                        Float64[sng.psifac for sng in result.surfaces])
                 end
             end
         end

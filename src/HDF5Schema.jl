@@ -141,6 +141,25 @@ const MAIN_H5_ANNOTATIONS = [
     "LocalStability/alpha_critical" =>
         (; long_name="critical normalized pressure gradient α for first ballooning stability", dims=("psi_ballooning",),
             attach=(1 => "LocalStability/ballooning_psi",)),
+    # --- KineticForces/Validity/ ---
+    "KineticForces/Validity/psi" => (; long_name="normalized poloidal flux ψ_N of the kinetic validity profiles", scale="psi"),
+    "KineticForces/Validity/rho_i" => (; long_name="thermal ion gyroradius √(2mT)/(Z·e·B₀)", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/rho_banana" => (; long_name="thermal banana orbit width q·ρ_i/√ε", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/rho_theta" => (; long_name="thermal poloidal gyroradius q·ρ_i/ε", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/w_potato" => (; long_name="potato orbit width (q²ρ_i²R₀)^(1/3)", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/r_minor" => (; long_name="surface-average minor radius ⟨r⟩", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/L_p" => (; long_name="pressure gradient scale length |p|/|dp/dr|", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/L_q" => (; long_name="safety-factor gradient scale length |q|/|dq/dr|", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/d_separatrix" => (; long_name="distance to the separatrix ⟨r⟩(1) − ⟨r⟩(ψ)", units="m", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/psi_c" => (; long_name="near-axis kinetic validity boundary: outermost ψ_N where a thermal orbit width reaches ⟨r⟩", units="1"),
+    "KineticForces/Validity/envelope" =>
+        (; long_name="near-axis suppression envelope applied to the calculated kinetic terms (1 = unsuppressed)", units="1", attach=(1 => "KineticForces/Validity/psi",)),
+    "KineticForces/Validity/is_valid" => (;
+        long_name="1 where every zero-orbit-width ordering holds: max orbit width < ⟨r⟩, ρ_banana < L_p and L_q, max orbit width < d_separatrix",
+        units="1",
+        attach=(1 => "KineticForces/Validity/psi",)
+    ),
+
     # --- ForceFreeStates/Solutions/ForwardIntegration/ ---
     "ForceFreeStates/Solutions/ForwardIntegration/nstep" => (; long_name="number of saved solution snapshots"),
     "ForceFreeStates/Solutions/ForwardIntegration/nstep_total" => (; long_name="total ODE solver steps taken"),
@@ -245,7 +264,7 @@ const MAIN_H5_ANNOTATIONS = [
     "SurfaceGeometries/Plasma/z" => (; long_name="Cartesian z of plasma-surface point cloud", units="m"),
     "SurfaceGeometries/Wall/x" => (; long_name="Cartesian x of wall point cloud", units="m"),
     "SurfaceGeometries/Wall/y" => (; long_name="Cartesian y of wall point cloud", units="m"),
-    "SurfaceGeometries/Wall/z" => (; long_name="Cartesian z of wall point cloud", units="m"),
+    "SurfaceGeometries/Wall/z" => (; long_name="Cartesian z of wall point cloud", units="m")
 ]
 
 # Euler-Lagrange operator matrices: same wording per letter, Ideal/ and Kinetic/ variants.
@@ -258,7 +277,7 @@ const _ELM_IDEAL_LETTERS = [
     ("H", "Euler-Lagrange primitive coefficient matrix H"),
     ("F", "Euler-Lagrange derived coefficient matrix F"),
     ("K", "Euler-Lagrange derived coefficient matrix K"),
-    ("G", "Euler-Lagrange derived coefficient matrix G"),
+    ("G", "Euler-Lagrange derived coefficient matrix G")
 ]
 # The kinetic branch overwrites only A, B, C, K, G and adds f0; D, E, H, F are shared
 # unchanged from the ideal set and are not re-emitted.
@@ -268,14 +287,19 @@ const _ELM_KINETIC_LETTERS = [
     ("C", "Euler-Lagrange primitive coefficient matrix C"),
     ("K", "Euler-Lagrange derived coefficient matrix K"),
     ("G", "Euler-Lagrange derived coefficient matrix G"),
-    ("f0", "raw kinetic component matrix f0"),
+    ("f0", "raw kinetic component matrix f0")
 ]
 const ELM_H5_ANNOTATIONS = vcat(
     ["ForceFreeStates/EulerLagrangeMatrices/psi" => (; long_name="normalized poloidal flux ψ_N grid of the operator matrices", scale="psi")],
-    ["ForceFreeStates/EulerLagrangeMatrices/Ideal/$l" =>
-        (; long_name="ideal " * d, dims=("psi", "mode_row", "mode_col"), attach=(1 => "ForceFreeStates/EulerLagrangeMatrices/psi",)) for (l, d) in _ELM_IDEAL_LETTERS],
-    ["ForceFreeStates/EulerLagrangeMatrices/Kinetic/$l" =>
-        (; long_name="kinetic-modified " * d, dims=("psi", "mode_row", "mode_col"), attach=(1 => "ForceFreeStates/EulerLagrangeMatrices/psi",)) for (l, d) in _ELM_KINETIC_LETTERS]
+    [
+        "ForceFreeStates/EulerLagrangeMatrices/Ideal/$l" =>
+            (; long_name="ideal " * d, dims=("psi", "mode_row", "mode_col"), attach=(1 => "ForceFreeStates/EulerLagrangeMatrices/psi",)) for (l, d) in _ELM_IDEAL_LETTERS
+    ],
+    [
+        "ForceFreeStates/EulerLagrangeMatrices/Kinetic/$l" =>
+            (; long_name="kinetic-modified " * d, dims=("psi", "mode_row", "mode_col"), attach=(1 => "ForceFreeStates/EulerLagrangeMatrices/psi",)) for
+        (l, d) in _ELM_KINETIC_LETTERS
+    ]
 )
 
 """

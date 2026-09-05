@@ -1,3 +1,74 @@
+
+# Knots laid across the envelope's [ψ_c, 2ψ_c] transition. The envelope is a quintic smoothstep,
+# so a cubic spline needs several interior knots to follow it without overshoot; nine keeps the
+# residual below the kernel's own tolerance even on coarse decks.
+const BAND_KNOTS = 9
+
+"""
+    refine_grid_at_fbar_peaks(xs, kw, kt, evaluate, kin, equil, intr, psi_c;
+                              ngrid=1000, relaxed_frac=0.01, target=3, max_add=24) → (xs, kw, kt)
+
+Insert kinetic evaluation knots across near-singular structure of F̄ that the grid does not
+resolve. Scans cond(F̄) (the same operator `find_kinetic_singular_surfaces!` searches — Park &
+Logan Eq. 70, so shifted and split resonances are included), takes peaks between
+`relaxed_frac`·threshold and the singular threshold, measures each peak's FWHM, and adds knots
+only where fewer than `target` knots lie inside it. New points respect `MIN_KNOT_SPACING`, stay
+above the near-axis validity band, and are capped at `max_add`; each costs one kernel evaluation
+and the existing values are reused. A well-resolved grid inserts nothing.
+"""
+function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3}, kt::Array{ComplexF64,3},
+    evaluate::Function, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal, psi_c::Float64;
+    ngrid::Int=1000, relaxed_frac::Float64=KINETIC_RELAXED_FRAC, target::Int=3, max_add::Int=24,
+    cond_threshold::Float64=KINETIC_SINGULAR_COND)
+
+    lo, hi = xs[1], xs[end]
+    scan = collect(range(lo, hi; length=ngrid))
+    hint = Ref(1)
+    cond_vals = [
+        try
+            evaluate_fbar_condition(x, kin, equil, intr; hint=hint)
+        catch
+            Inf
+        end for x in scan
+    ]
+
+    add = Float64[]
+    for i in 2:(ngrid-1)
+        c = cond_vals[i]
+        (c > cond_vals[i-1] && c > cond_vals[i+1] && relaxed_frac * cond_threshold < c <= cond_threshold) || continue
+        l = i
+        while l > 1 && cond_vals[l] > c / 2
+            l -= 1
+        end
+        r = i
+        while r < ngrid && cond_vals[r] > c / 2
+            r += 1
+        end
+        inside = count(x -> scan[l] <= x <= scan[r], xs)
+        inside >= target && continue
+        w = (scan[r] - scan[l]) / 3
+        for x in (scan[i], scan[i] - w, scan[i] + w)
+            (lo < x < hi && x > 2 * psi_c) || continue
+            any(y -> abs(y - x) < Equilibrium.MIN_KNOT_SPACING, xs) && continue
+            any(y -> abs(y - x) < Equilibrium.MIN_KNOT_SPACING, add) && continue
+            push!(add, x)
+        end
+    end
+    isempty(add) && return xs, kw, kt
+    length(add) > max_add && (add = sort(add)[1:max_add])
+
+    sort!(add)
+    @info "Kinetic grid: $(length(add)) knot(s) added across unresolved near-singular F̄ structure at " *
+          "ψ=$(round.(add; digits=4)) (cond peaks below the singular threshold)"
+    kw_new, kt_new = evaluate(add)
+    allxs = vcat(xs, add)
+    perm = sortperm(allxs)
+    kw_all = cat(kw, kw_new; dims=1)[perm, :, :]
+    kt_all = cat(kt, kt_new; dims=1)[perm, :, :]
+    return allxs[perm], kw_all, kt_all
+end
+
 """
     build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
                         calculated_source=nothing)
@@ -27,10 +98,18 @@ function build_kinetic_matrix_splines(
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
     metric::MetricData;
-    calculated_source::Union{Nothing,Function}=nothing
+    calculated_source::Union{Nothing,Function}=nothing,
+    axis_validity_psi_c::Float64=0.0
 )
     xs = metric.xs
     mpsi = length(xs)
+
+    # The near-axis validity envelope (KineticForces) has structure on the scale of the
+    # suppression boundary; coarse equilibrium grids cannot represent env·(increment), and the
+    # spline overshoot can land on a rational surface. Pin the band ends (the smoothstep is
+    # only C² there) and resolve the transition with a fixed set of knots.
+    band_knots(lo, hi) = axis_validity_psi_c > 0 ?
+                         [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=BAND_KNOTS) if lo < x < hi] : Float64[]
 
     # Get raw kinetic matrices (scaling is baked into each source)
     if ctrl.kinetic_source == "fixed"
@@ -42,7 +121,14 @@ function build_kinetic_matrix_splines(
             "calling build_kinetic_matrix_splines directly, or pass " *
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
         )
-        kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats)
+        band = band_knots(xs[1], xs[end])
+        if isempty(band)
+            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats)
+        else
+            xs = sort!(unique!(vcat(collect(xs), band)))
+            mpsi = length(xs)
+            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats; psis=xs)
+        end
         kw_flat .*= ctrl.kinetic_factor
         kt_flat .*= ctrl.kinetic_factor
     else
@@ -50,7 +136,24 @@ function build_kinetic_matrix_splines(
     end
 
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
-    return _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat)
+    mats = _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+
+    # The FKG splines now exist, so F̄ can be scanned: add knots only where near-singular structure
+    # (shifted/split kinetic resonances) falls in an interval that does not resolve it.
+    if ctrl.kinetic_source == "calculated" && calculated_source !== nothing && mats.kinetic !== nothing
+        xs2, kw_flat, kt_flat = refine_grid_at_fbar_peaks(
+            collect(xs), kw_flat, kt_flat,
+            psis -> begin
+                kwn, ktn = calculated_source(ctrl, equil, intr, metric, mats; psis=psis)
+                (kwn .* ctrl.kinetic_factor, ktn .* ctrl.kinetic_factor)
+            end,
+            mats.kinetic, equil, intr, axis_validity_psi_c)
+        if length(xs2) != length(xs)
+            xs = xs2
+            mats = _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+        end
+    end
+    return mats
 end
 
 """
@@ -73,9 +176,9 @@ function _compute_fkg_matrices(
     intr::ForceFreeStatesInternal,
     metric::MetricData,
     kw_flat::Array{ComplexF64,3},
-    kt_flat::Array{ComplexF64,3}
+    kt_flat::Array{ComplexF64,3};
+    xs::Vector{Float64}=metric.xs
 )
-    xs = metric.xs
     mpsi = length(xs)
     np = intr.numpert_total
     mpert = intr.mpert

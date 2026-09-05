@@ -59,3 +59,4 @@ nutype = "harmonic"            # Collision operator (zero, small, krook, harmoni
 f0type = "maxwellian"          # Distribution function (maxwellian, jkp, cgl)
 atol_xlmda = 1e-9              # Absolute tolerance for inner pitch + energy integrations
 rtol_xlmda = 1e-5              # Relative tolerance for inner pitch + energy integrations
+axis_validity_suppression = true        # Suppress kinetic terms where the zero-orbit-width ordering fails near the axis (profile-derived boundary, no tuning parameters)

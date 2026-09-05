@@ -37,6 +37,7 @@ section.
   - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
   - `metric`: MetricData (provides ψ grid via `metric.xs`)
   - `mats`: MatrixSplines (used only for `numpert_total` cross-check)
+  - `psis`: ψ grid for the kernel; empty (default) evaluates on `metric.xs`
 
 # Keyword arguments
 
@@ -59,9 +60,13 @@ function compute_calculated_kinetic_matrices(
     mats;
     kf_ctrl::KineticForcesControl=KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
-    species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing
+    species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing,
+    psis::Vector{Float64}=Float64[],
+    axis_psi_c::Float64=0.0
 )
-    xs = metric.xs
+    # The kernel is a pure function of psi (it evaluates equilibrium splines), so it can be
+    # driven over any knot list; default is the full equilibrium grid.
+    xs = isempty(psis) ? metric.xs : psis
     mpsi = length(xs)
     mpert = ffs_intr.mpert
     npert = ffs_intr.npert
@@ -110,6 +115,19 @@ function compute_calculated_kinetic_matrices(
     splist = species === nothing ?
              [Equilibrium.ResolvedNTVSpecies(kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.electron, "single", kinetic_profiles)] : species
 
+
+    # Near-axis validity envelope: suppress the drift-kinetic increments where the zero-orbit-width
+    # ordering fails, taking the widest-orbit species. Kernel evaluation is skipped where it is 0.
+    env = ones(Float64, mpsi)
+    if kf_ctrl.axis_validity_suppression
+        psi_c = axis_psi_c
+        if psi_c > 0
+            env .= kinetic_axis_validity_envelope.(xs, psi_c)
+            @info "Kinetic axis-validity suppression: psi_c=$(round(psi_c; sigdigits=3)), envelope reaches 1 at " *
+                  "psi=$(round(2 * psi_c; sigdigits=3)) (kernel evaluation skipped below psi_c)" maxlog = 1
+        end
+    end
+
     for sp in splist
         # Hoisted per-species scalars: the closure then captures concrete values, not a
         # union-typed `sp` (the ternary above mixes the resolved vector with the fallback).
@@ -124,6 +142,7 @@ function compute_calculated_kinetic_matrices(
             block_w = thread_block_w[tid]
             block_t = thread_block_t[tid]
             psi = xs[ipsi]
+            env[ipsi] == 0.0 && continue   # inside the near-axis validity band: kernel skipped
             for in_idx in 1:npert
                 n = ffs_intr.nlow + in_idx - 1
                 fill!(full_w, 0)
@@ -146,8 +165,8 @@ function compute_calculated_kinetic_matrices(
                 row_offset = (in_idx - 1) * mpert
                 for k in 1:6, j in 1:mpert, i in 1:mpert
                     idx = (row_offset + j - 1) * np + (row_offset + i)
-                    kw_flat[ipsi, idx, k] += full_w[i, j, k]
-                    kt_flat[ipsi, idx, k] += full_t[i, j, k]
+                    kw_flat[ipsi, idx, k] += env[ipsi] * full_w[i, j, k]
+                    kt_flat[ipsi, idx, k] += env[ipsi] * full_t[i, j, k]
                 end
             end
         end
