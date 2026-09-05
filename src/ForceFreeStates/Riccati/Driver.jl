@@ -76,10 +76,11 @@ After renormalization (at crossing or when norms exceed ucrit):
 This is compatible with downstream code (which uses U₁/U₂ ratio):
   - Free.jl:     wp = u[:,:,2] / u[:,:,1] = I · S⁻¹ = P  ✓  (post-renorm)
   - FixedBoundaryStability.jl: crit = min_eigval(u[:,:,1] / u[:,:,2]) = min_eigval(S)  ✓
-  - Axis init:   determined by `ctrl.fixed_axis`. When `true`, U₁=0, U₂=I → S(ψ₀)=0 (original
-    Glasser fixed-axis BC). When `false` (default), Frobenius eigenvalue init [Glasser 2016 Eq. 51]
-    sets U₂=I and U₁ to the regular Frobenius eigenvector per mode → S(ψ₀) = U₁_Frobenius is
-    nonzero in general. Riccati S-evolution remains well-defined either way.
+  - Axis init:   determined by `ctrl.fixed_axis`. When `true` (default), U₁=0, U₂=I → S(ψ₀)=0
+    (Glasser fixed-axis BC, identical to Fortran DCON). When `false` (opt-in), Frobenius
+    eigenvalue init [Glasser 2016 Eq. 51] sets U₂=I and U₁ to the regular Frobenius eigenvector
+    per mode → S(ψ₀) = U₁_Frobenius is nonzero in general. Riccati S-evolution remains
+    well-defined either way, but only the fixed-axis start reproduces DCON's crit(ψ) and W_p.
 
 ## Key Differences from Standard Integration
 
