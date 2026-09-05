@@ -30,6 +30,7 @@ else
     include("./runtests_coordinate_invariant.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_riccati.jl")
+    include("./runtests_fixed_axis.jl")
     include("./runtests_parallel_integration.jl")
     include("./runtests_result_struct.jl")
     include("./runtests_solve_api.jl")
