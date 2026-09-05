@@ -49,11 +49,10 @@ end
     @test auto.delta_prime !== nothing
     msing = size(auto.delta_prime.matrix, 1)
 
-    # The nchunks=0 target, mirroring balance_integration_chunks' internal formula (as
-    # runtests_parallel_integration.jl does). Invariance is asserted ABOVE this floor only:
-    # fewer chunks than the msing-derived minimum is not a different decomposition but a
-    # structurally deficient one (the floor gives the rational-surface crossings room).
-    auto_target = max(2 * msing + 3, 8 * (msing + 1) + msing)
+    # The nchunks=0 target, from its single source. Invariance is asserted ABOVE this floor
+    # only: fewer chunks than the msing-derived minimum is not a different decomposition but
+    # a structurally deficient one (the floor gives the rational-surface crossings room).
+    auto_target = GP_TI.ForceFreeStates.auto_chunk_target(msing)
     finer = _solve_at_nchunks(dir, auto_target + 11)
     @test finer.delta_prime !== nothing
 
