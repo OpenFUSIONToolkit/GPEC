@@ -552,4 +552,16 @@
             @test pe.params.li3 > 0
         end
     end
+
+    @testset "field-line ODE failure is an error, not silent truncation" begin
+        # A failed solve does not throw -- it returns a solution truncated wherever it gave up,
+        # which direct_fieldline_int used to consume as a closed flux surface. Both guards must
+        # be present: the retcode check, and the endpoint check (a solve can stop early via a
+        # callback-driven terminate and still report Success). Asserted against the source
+        # because a genuinely non-closing field line cannot be synthesized cheaply here; the
+        # EFIT testsets above are the standing positive control that neither guard false-fires.
+        src = read(joinpath(dirname(@__DIR__), "src", "Equilibrium", "DirectEquilibrium.jl"), String)
+        @test occursin("sol.retcode != ReturnCode.Success", src)
+        @test occursin("isapprox(sol.t[end], 2π", src)
+    end
 end
