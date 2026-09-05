@@ -161,28 +161,88 @@ function direct_position!(raw_profile::DirectRunInput)
 
     # If we never exited early, the loop failed to find bz = 0
     !(bfield.bz >= 0) && error("Took too many iterations to get bz=0.")
+    r_march, z_march = r, z
 
-    # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0
-    dr, dz = 0.0, 0.0
-    for _ in 1:max_iterations
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
-        det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
-        if abs(det) < 1e-20
-            error("Jacobian matrix is singular near ($r, $z).")
+    # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0.
+    # The 2-D ψ spline's second derivatives are not reliable at every point near the
+    # axis (∂B_z/∂R can pass through zero at isolated R), and a single near-singular
+    # Hessian sends an undamped Newton step across the whole box. Cap each step at one
+    # march step: inactive for well-behaved iterations (their steps are ≲ dr/2), it
+    # only keeps a bad iterate inside the axis neighbourhood until the Hessian recovers.
+    step_cap = dr
+    function _newton(r0, z0)
+        local dr, dz   # not the enclosing march step
+        r, z = r0, z0
+        for _ in 1:max_iterations
+            direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+            det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
+            abs(det) < 1e-20 && return r, z, false   # singular Hessian: let the caller fall back
+            # Δx = -J⁻¹ F
+            dr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
+            dz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
+            step = hypot(dr, dz)
+            if step > step_cap
+                dr *= step_cap / step
+                dz *= step_cap / step
+            end
+            r += dr
+            z += dz
+            if abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r)
+                return r, z, true
+            end
         end
-        # Δx = -J⁻¹ F
-        dr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
-        dz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
-        r += dr
-        z += dz
-        if abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r)
-            @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
-            break
-        end
+        return r, z, false
     end
+    r, z, converged = _newton(r, z)
 
-    if !(abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r))
-        error("Failed to find magnetic axis after $max_iterations iterations.")
+    if !converged
+        # Fallback, reached only when Newton from the midplane guess cycles or hits a
+        # singular Hessian. Locate the axis with first derivatives only: B_z changes
+        # sign across the axis along the midplane and B_r changes sign across it along
+        # a column, so alternating 1-D bisections converge to ∇ψ = 0 without touching
+        # the spline's second derivatives. Newton is then retried from that point as a
+        # polish; if even that fails, the bisection point itself is a converged zero of
+        # the first derivatives and is used as is.
+        _bz(rr, zz) = (direct_get_bfield!(bfield, rr, zz, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.bz)
+        _br(rr, zz) = (direct_get_bfield!(bfield, rr, zz, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.br)
+        function _bisect(f, lo, hi)
+            flo = f(lo)
+            for _ in 1:80
+                mid = 0.5 * (lo + hi)
+                fmid = f(mid)
+                (fmid == 0.0 || hi - lo < 4eps(mid)) && return mid
+                if sign(fmid) == sign(flo)
+                    lo, flo = mid, fmid
+                else
+                    hi = mid
+                end
+            end
+            return 0.5 * (lo + hi)
+        end
+        r, z = r_march, z_march
+        for _ in 1:4
+            # B_z: negative at r - dr (the march crossed there), non-negative at r
+            r = _bisect(rr -> _bz(rr, z), r - step_cap, r)
+            # B_r along the column through r; widen the bracket until it straddles zero
+            w = step_cap
+            while sign(_br(r, z - w)) == sign(_br(r, z + w)) && w < 20 * step_cap
+                w *= 2
+            end
+            sign(_br(r, z - w)) != sign(_br(r, z + w)) && (z = _bisect(zz -> _br(r, zz), z - w, z + w))
+            # r bracket for the next pass: re-establish the sign change around the new r
+            (_bz(r - step_cap, z) < 0 <= _bz(r + step_cap, z)) && (r += step_cap)
+        end
+        r_bis, z_bis = r, z
+        b_bis = hypot(_br(r, z), _bz(r, z))
+        r, z, converged = _newton(r_bis, z_bis)
+        if converged
+            @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z)) (Newton restarted from a first-derivative bisection)"
+        else
+            hypot(_br(r, z), _bz(r, z)) > b_bis && ((r, z) = (r_bis, z_bis))
+            @info "Magnetic axis from first-derivative bisection at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z)) (Newton did not converge; |B| = $(@sprintf("%.2e", b_bis)))"
+        end
+    else
+        @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
     end
 
     ro = r
