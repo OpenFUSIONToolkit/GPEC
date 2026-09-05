@@ -29,7 +29,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `c_beta`   | Compressibility √(β_local / (1 + β_local))                        |
 | `D_norm`   | (d_β/r_s) · S^(1/3) · √ι_e  (Fitzpatrick normalized scale)        |
 | `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                            |
-| `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
+| `P_tor`    | Momentum (magnetic) Prandtl number τ_R / τ_φ, τ_φ = r_s²/χ_φ      |
 | `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
 | `Q_i`      | Normalized ion diamagnetic:      −tauk · ω_*i                     |
 | `iota_e`   | Q_e / (Q_e − Q_i)                                                 |
@@ -210,7 +210,10 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `R0`      -- major radius [m]
   - `mu_i`    -- ion mass in proton-mass units (e.g. 2.0 for D)
   - `zeff`    -- effective charge
-  - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]
+  - `chi_perp` -- perpendicular energy diffusivity χ⊥ [m²/s]
+  - `chi_tor`  -- Fitzpatrick's χ_φ, the anomalous perpendicular ion momentum
+    diffusivity `[m²/s]` (a viscosity, not heat; TJ Layer.tex eqs. — enters the
+    vorticity and parallel-flow equations, τ_φ = r_s²/χ_φ)
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula: the resistive
     interchange index `D_R` and the Connor et al. 2015 Eq. 59 geometric factor

@@ -6,6 +6,7 @@ const HARNESS_DIR = @__DIR__
 const REPO_ROOT = abspath(joinpath(HARNESS_DIR, ".."))
 const DEFAULT_DB_PATH = joinpath(HARNESS_DIR, ".regress_cache.sqlite")
 const CASES_DIR = joinpath(HARNESS_DIR, "cases")
+const GOLDEN_DIR = joinpath(HARNESS_DIR, "golden")
 
 include("src/types.jl")
 include("src/env.jl")
@@ -15,6 +16,7 @@ include("src/utils.jl")
 include("src/extractor.jl")
 include("src/runner.jl")
 include("src/reporter.jl")
+include("src/golden.jl")
 
 function parse_args(args)
     cases = String[]
@@ -30,6 +32,9 @@ function parse_args(args)
     no_pin_manifest = false
     allow_env_mismatch = false
     fail_on_change = false
+    check = false
+    update_golden = false
+    reason = nothing
     help = false
 
     i = 1
@@ -59,6 +64,15 @@ function parse_args(args)
         elseif arg == "--fail-on-change"
             fail_on_change = true
             i += 1
+        elseif arg == "--check"
+            check = true
+            i += 1
+        elseif arg == "--update-golden"
+            update_golden = true
+            i += 1
+        elseif arg == "--reason" && i < length(args)
+            reason = args[i+1]
+            i += 2
         elseif arg == "--cases" && i < length(args)
             cases = split(args[i+1], ",") |> collect .|> strip
             i += 2
@@ -83,7 +97,7 @@ function parse_args(args)
     end
 
     return CLIOptions(cases, refs, ref_range, force, list_cases, show_qty, show_case, db_path, verbose,
-        no_instantiate, no_pin_manifest, allow_env_mismatch, fail_on_change, help)
+        no_instantiate, no_pin_manifest, allow_env_mismatch, fail_on_change, check, update_golden, reason, help)
 end
 
 const HELP_TEXT = """
@@ -117,15 +131,26 @@ Options:
                            re-running them
     --fail-on-change       Exit non-zero if any tracked quantity changed (for CI use; a failed
                            run always exits non-zero regardless)
+    --check                Run the working tree and compare against the committed golden values
+                           (regression-harness/golden/<case>.toml). This is the mode CI gates on.
+    --update-golden        Regenerate the golden values from a fresh run. Requires --reason.
+    --reason "..."         Why the goldens changed. Mandatory with --update-golden: a golden
+                           change is a claim about physics that a reviewer has to evaluate.
     --help                 Print this help message
 
 Environment:
     GPEC_REGRESS_THREADS   Threads for GPEC subprocesses (default "auto" = all cores);
                            the actual count is recorded in each run's env fingerprint
 
+Golden values:
+    A golden file pins each quantity together with the tolerance it must be reproduced within
+    and the evidence behind that tolerance. Tolerances are derived from measured convergence
+    plateau drift and cross-platform spread — never widened to make a check pass. A failing
+    --check is fixed by explaining the physics or fixing the regression, not by loosening rtol.
+
 Exit status:
     0  all runs completed (and, with --fail-on-change, nothing changed)
-    1  a run failed, or a quantity changed under --fail-on-change
+    1  a run failed, a quantity changed under --fail-on-change, or a golden check failed
 
 Examples:
     # Compare two refs
@@ -150,6 +175,13 @@ Examples:
     # Compare current working tree against develop
     julia --project=regression-harness regression-harness/regress.jl \\
         --cases solovev_n1 --refs develop,local
+
+    # Gate the working tree against the committed golden values
+    julia --project=regression-harness regression-harness/regress.jl --check --cases solovev_n1
+
+    # Regenerate goldens after an intended physics change
+    julia --project=regression-harness regression-harness/regress.jl \\
+        --update-golden --cases solovev_n1 --reason "two-point b1 fix changes resonant field"
 """
 
 function main(args=ARGS)
@@ -189,13 +221,28 @@ function main(args=ARGS)
             [all_cases[name] for name in opts.cases if haskey(all_cases, name) || error("Unknown case: $name")]
         end
 
-        # Resolve refs
+        golden_mode = opts.check || opts.update_golden
+        if opts.check && opts.update_golden
+            error("--check and --update-golden are mutually exclusive: one asserts the goldens, the other rewrites them")
+        end
+        if opts.update_golden && (opts.reason === nothing || isempty(strip(opts.reason)))
+            error("--update-golden requires --reason \"...\": a golden change is a claim about physics, " *
+                  "and the reviewer needs to know what changed and why")
+        end
+
+        # Resolve refs. Golden modes judge the working tree, so they default to it rather than
+        # requiring the caller to spell out --refs local.
         resolved_refs = if opts.ref_range !== nothing
             expand_ref_range(opts.ref_range, REPO_ROOT)
         elseif !isempty(opts.refs)
             [resolve_ref(ref, REPO_ROOT) for ref in opts.refs]
+        elseif golden_mode
+            [resolve_ref(LOCAL_REF, REPO_ROOT)]
         else
             error("Must specify --refs or --ref-range")
+        end
+        if golden_mode && length(resolved_refs) != 1
+            error("Golden modes compare one ref against the committed values; got $(length(resolved_refs)) refs")
         end
 
         if isempty(resolved_refs)
@@ -220,6 +267,11 @@ function main(args=ARGS)
 
         n_failed = 0
         n_changed = 0
+        n_golden_fail = 0
+        n_golden_crashed = 0
+        n_untracked = 0
+        n_checked = 0
+        n_no_golden = 0
 
         # Run every case against each ref, grouped by ref so cases sharing a commit share
         # one worktree (and one Pkg.instantiate/precompile) instead of paying for it per case.
@@ -236,19 +288,50 @@ function main(args=ARGS)
             println("Case: $(case_spec.name) — $(case_spec.description)")
             println("="^64)
 
-            summary = if length(resolved_refs) == 2
-                report_two_ref_comparison(db, case_spec,
-                    resolved_refs[1], resolved_refs[2])
+            if opts.update_golden
+                update_golden_from_run(db, case_spec, resolved_refs[1].commit_hash,
+                    String(opts.reason), REPO_ROOT)
+            elseif opts.check
+                summary = report_golden_check(db, case_spec, resolved_refs[1].commit_hash)
+                n_golden_fail += summary.n_fail
+                n_golden_crashed += summary.n_run_failed
+                n_untracked += summary.n_untracked
+                has_golden(case_spec.name) ? (n_checked += 1) : (n_no_golden += 1)
             else
-                report_multi_ref(db, case_spec, resolved_refs)
+                summary = if length(resolved_refs) == 2
+                    report_two_ref_comparison(db, case_spec,
+                        resolved_refs[1], resolved_refs[2])
+                else
+                    report_multi_ref(db, case_spec, resolved_refs)
+                end
+                n_failed += summary.n_failed
+                n_changed += summary.n_changed
             end
-            n_failed += summary.n_failed
-            n_changed += summary.n_changed
         end
 
         if n_failed > 0
             @error "$n_failed run(s) failed — see the reports above"
             exit(1)
+        end
+        if n_golden_crashed > 0
+            @error "$n_golden_crashed case(s) crashed before producing results — see the reports above (a crash, not a tolerance failure)"
+            exit(1)
+        end
+        if n_golden_fail > 0
+            @error "$n_golden_fail quantity/quantities are outside their golden tolerance"
+            exit(1)
+        end
+        if opts.check && n_checked == 0
+            # A green gate that checked nothing is worse than a red one: a deleted or
+            # typo-named golden file must not be indistinguishable from a passing check.
+            @error "--check ran $n_no_golden case(s) but found no golden file for any of them — nothing was actually gated"
+            exit(1)
+        end
+        if opts.check && n_no_golden > 0
+            @warn "$n_no_golden of $(n_no_golden + n_checked) requested case(s) have no golden file and were not gated"
+        end
+        if n_untracked > 0
+            @info "$n_untracked tracked quantity/quantities have no golden value yet (not gating)"
         end
         if opts.fail_on_change && n_changed > 0
             @error "$n_changed quantity/quantities changed (--fail-on-change)"

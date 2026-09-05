@@ -13,6 +13,18 @@ example_dir = "examples/DIIID-like_gal_resistive_pe_example"
 # FINITE, per-rational-surface singular-coupling scalars (the physics-meaningful driven quantities) — not
 # any whole-profile ξ/ξ′ norm (those diverge at the rationals and are ill-posed as benchmarks).
 
+# Which formalism produced the Galerkin Δ′ below. The Δ′ matrix is written to one canonical
+# SingularSurfaces/ path whichever integrator computed it, so the numbers alone cannot say whether
+# a gold pinned from the Galerkin solve is being compared against a BVP run. Pinning the deck's
+# declared choice makes a formalism swap a loud failure instead of a silent re-gold.
+[quantities.integrator]
+h5path = "Input/gpec_toml_raw"
+type = "token"
+extract = "toml_key:ForceFreeStates.integrator"
+label = "integrator (Δ′ provenance)"
+noise_threshold = 0
+order = 1
+
 # Surface locations / count (sanity)
 [quantities.pe_rational_q]
 h5path = "PerturbedEquilibrium/SingularCoupling/rational_q"
@@ -66,12 +78,14 @@ label = "penetrated b field"
 noise_threshold = 1e-8
 order = 32
 
-# Per-surface Δ' from the PE singular-coupling analysis
+# Per-surface driven-response Δ' from the PE singular-coupling jump (∂b^ψ/∂ψ across the
+# rational surface over 2π·χ₁, forced by the applied flux). This is a driven-response
+# diagnostic, NOT the tearing-stability Δ' of the STRIDE-like BVP or Galerkin RDCON solvers.
 [quantities.pe_delta_prime]
 h5path = "PerturbedEquilibrium/SingularCoupling/Delta_prime"
 type = "complex_vector"
 extract = "all_complex"
-label = "PE Δ' per surface"
+label = "PE driven-response Δ′ (SingularCoupling jump)"
 noise_threshold = 1e-8
 order = 33
 

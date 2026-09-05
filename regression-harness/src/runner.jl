@@ -123,6 +123,71 @@ end
 %RUNINFO%
 """
 
+
+# Fixed-Q probe of the SLAYER inner-layer dispersion Δ(Q) on the DIII-D-like 2/1 surface.
+# The adaptive AMR scan samples in gpec.h5 cannot be pinned (sample locations move under any
+# refinement change), so this evaluates Δ(Q) on a fixed 4×4 grid over Re(Q), Im(Q) ∈ [-10, 10]
+# instead — a refinement-stable pin of the dispersion curve itself. The layer parameters are the
+# DIII-D-like SLAYER deck's own 2/1 surface values (Tearing/PerSurface), quoted so the case is
+# self-contained and probes the SOLVER alone (bt is a placeholder — the dispersion solve never
+# reads it); the parameter chain producing these numbers is pinned separately by diiid_slayer_n1.
+const COMPUTED_SLAYER_DELTA_PROBE_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.InnerLayer
+using HDF5
+p = SLAYERParameters(;
+    tau=1.1975430647804235, lu=6.086905739791344e6, c_beta=0.22094021004591707,
+    D_norm=4.191469284125091, P_perp=50.2972642329308, P_tor=34.74437891503841,
+    Q_e=1.0915286815773122, Q_i=-1.6558720999124832, iota_e=0.39729503206497013,
+    tauk=0.00010358784131467763, tau_r=3.453343933553279, delta_n=504.745127277822,
+    rs=0.3617373814196757, R0=1.7433359412007365, bt=1.0, sval_r=1.260093929519795,
+    eta=4.761642777337999e-8, d_beta=0.011249087118484661)
+axis = range(-10.0, 10.0; length=4)
+Q = ComplexF64[re + im_ * 1im for im_ in axis for re in axis]
+t_start = time()
+Δ = ComplexF64[solve_inner(SLAYERModel(), p, q).tearing for q in Q]
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["slayer_probe/Q_re"]     = real.(Q)
+    fid["slayer_probe/Q_im"]     = imag.(Q)
+    fid["slayer_probe/Delta_re"] = real.(Δ)
+    fid["slayer_probe/Delta_im"] = imag.(Δ)
+end
+%RUNINFO%
+"""
+# External-reference validation: GPEC's del_s Riccati solver against Fitzpatrick, "Tearing Mode
+# Dynamics in Tokamak Plasmas" (IOP 2023), figures 6.2 and 6.3 — see the case TOML header for
+# the validation evidence. Prescribing the normalized parameters (D_norm = 1,
+# P_perp = P_tor = Phat, Q_e = Qhat/(1+1/tau)) makes the solver's internal Q_hat equal the
+# book's Qhat_*, so the grid below is exactly the figures' axes. tau = 1 is an explicit pinned
+# assumption (not stated in the captions). The grid starts just inside Phat = 0, which is a
+# singular edge of the model (alpha vanishes and the large-q boundary form degenerates).
+const COMPUTED_SLAYER_DELS_FITZPATRICK_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.InnerLayer
+using HDF5
+const TAU = 1.0
+probe(Q, P) = SLAYERParameters(; tau=TAU, lu=1.0, c_beta=0.0, D_norm=1.0,
+    P_perp=P, P_tor=P, Q_e=Q / (1 + 1/TAU), Q_i=0.0, iota_e=0.0, tauk=1.0,
+    tau_r=1.0, delta_n=1.0, rs=1.0, R0=1.0, bt=1.0, sval_r=1.0, eta=1.0, d_beta=1.0)
+axis = [0.02, 0.5, 1.0, 2.0, 4.0]
+QP = [(q, p) for p in axis for q in axis]
+t_start = time()
+dels = ComplexF64[riccati_del_s(probe(q, p)) for (q, p) in QP]
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["fitzpatrick/Q_hat"]  = Float64[q for (q, _) in QP]
+    fid["fitzpatrick/P_hat"]  = Float64[p for (_, p) in QP]
+    fid["fitzpatrick/dels_db_re"] = real.(dels)
+    fid["fitzpatrick/dels_db_im"] = imag.(dels)
+    fid["fitzpatrick/tau"] = TAU
+end
+%RUNINFO%
+"""
 # Self-contained separatrix-finder regression (PR #296). Loads a fixed-boundary EFIT whose
 # computational box hugs the LCFS (eps=0.05 TokaMaker aspect-scan g-file): outside the prescribed
 # LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
@@ -255,8 +320,12 @@ function _computed_script_template(case_spec::CaseSpec)
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
     elseif case_spec.name == "ggj_ray_q500i"
         return COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE
+    elseif case_spec.name == "slayer_delta_probe"
+        return COMPUTED_SLAYER_DELTA_PROBE_SCRIPT_TEMPLATE
     elseif case_spec.name == "efit_fixedbdy_separatrix"
         return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
+    elseif case_spec.name == "slayer_dels_fitzpatrick"
+        return COMPUTED_SLAYER_DELS_FITZPATRICK_SCRIPT_TEMPLATE
     end
     error("No computed-script template registered for case '$(case_spec.name)'")
 end
