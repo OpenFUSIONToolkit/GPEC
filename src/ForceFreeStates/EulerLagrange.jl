@@ -320,17 +320,27 @@ Only the Riccati branch populates `propagators` / `chunks` / `S_left`, which
 for all three.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
-
-    if ctrl.integrator == "riccati"
-        ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
-        return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
-    elseif ctrl.integrator == "forward"
-        return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
-    elseif ctrl.integrator == "galerkin"
+    ctrl.integrator == "galerkin" &&
         error("integrator = \"galerkin\" solves the Euler-Lagrange system variationally, not by ODE integration; " *
               "it is dispatched to galerkin_solve.")
+    ctrl.integrator in ("riccati", "forward") ||
+        error("Unknown integrator: $(ctrl.integrator). Expected \"forward\", \"riccati\", or \"galerkin\".")
+    ctrl.integrator == "riccati" && ctrl.kinetic_factor > 0 &&
+        error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
+
+    # The RHS works on mpert×mpert blocks, where multithreaded BLAS costs more in synchronization
+    # than it saves; pin BLAS to one thread for the sweep and restore it afterwards.
+    blas_threads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    try
+        if ctrl.integrator == "riccati"
+            return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
+        else
+            return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
+        end
+    finally
+        BLAS.set_num_threads(blas_threads)
     end
-    error("Unknown integrator: $(ctrl.integrator). Expected \"forward\", \"riccati\", or \"galerkin\".")
 end
 
 """
@@ -945,7 +955,7 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, el_ode_algorithm(ctrl); reltol=ctrl.eulerlagrange_tolerance, abstol=ctrl.ode_abstol, callback=cb, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,

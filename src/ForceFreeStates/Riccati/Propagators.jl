@@ -6,7 +6,7 @@
 # length chunks; the absolute floor catches short chunks where 5% of the span would be
 # smaller than the typical ODE step.
 const SAVE_NEAR_END_FRAC = 0.05
-const SAVE_NEAR_END_PSI  = 1e-4
+const SAVE_NEAR_END_PSI = 1e-4
 
 """
     assemble_fm_matrix(propagators, idx_range; condition=false) -> Matrix{ComplexF64}
@@ -16,6 +16,7 @@ in order for indices `idx_range`. Returns Φ_end * ... * Φ_start, so that the r
 maps the IC at the start of `idx_range[1]` to the state at the end of `idx_range[end]`.
 
 Each `ChunkPropagator` stores the 2N columns of Φ split into two N×N×2 blocks:
+
 ```
   block_upper_ic[:,:,1:2] ↔ Φ[:,1:N]     (result from IC=(I,0))
   block_lower_ic[:,:,1:2] ↔ Φ[:,N+1:2N]  (result from IC=(0,I))
@@ -33,8 +34,8 @@ means only U₂ ICs are needed. Do NOT use for inter-surface segments where both
 and U₂ components carry physical information.
 """
 function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range;
-                            condition::Bool=false,
-                            T_init::Union{Nothing,Matrix{ComplexF64}}=nothing)
+    condition::Bool=false,
+    T_init::Union{Nothing,Matrix{ComplexF64}}=nothing)
     # Determine matrix size from T_init if provided (lets us handle empty idx_range and even
     # an empty propagators list, provided T_init carries the dimension). Otherwise fall back
     # to the first propagator that actually exists in idx_range, with a final fallback to
@@ -123,7 +124,7 @@ end
     riccati_der!(du, u, params, psieval)
 
 Evaluate the explicit dual Riccati ODE right-hand side:
-  dS/dψ = w†·F̄⁻¹·w - S·Ḡ·S,   w = Q - K̄·S
+dS/dψ = w†·F̄⁻¹·w - S·Ḡ·S,   w = Q - K̄·S
 
 where Q = diag(1/(m - n·q)) is the diagonal singular factor matrix.
 The identity slice u[:,:,2] = I does not evolve (du[:,:,2] = 0).
@@ -147,7 +148,7 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     _, equil, mats, intr, odet, _ = params
 
     Npert = intr.numpert_total
-    S  = @view u[:, :, 1]
+    S = @view u[:, :, 1]
     dS = @view du[:, :, 1]
     @view(du[:, :, 2]) .= 0  # identity does not evolve
 
@@ -162,9 +163,9 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     fmat_lower = acquire!(pool, ComplexF64, Npert, Npert)
     kmat = similar!(pool, fmat_lower)
     gmat = similar!(pool, fmat_lower)
-    w    = similar!(pool, fmat_lower)  # w = Q - K̄·S
-    v    = similar!(pool, fmat_lower)  # v = F̄⁻¹·w (then reused for S·Ḡ·S)
-    tmp  = similar!(pool, fmat_lower)  # scratch
+    w = similar!(pool, fmat_lower)  # w = Q - K̄·S
+    v = similar!(pool, fmat_lower)  # v = F̄⁻¹·w (then reused for S·Ḡ·S)
+    tmp = similar!(pool, fmat_lower)  # scratch
 
     # Evaluate F̄ (Cholesky factor), K̄, Ḡ splines at current ψ
     mats.ideal.F_spline_lower(vec(fmat_lower), psieval; hint=mats._hint)
@@ -255,8 +256,8 @@ function riccati_integrate_chunk!(
     cb = DiscreteCallback((u, t, integrator) -> true, riccati_integrator_callback!)
     rtol = ctrl.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
-                      (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
+        (ctrl, equil, mats, intr, odet, chunk))
+    sol = solve(prob, el_ode_algorithm(ctrl); reltol=rtol, abstol=ctrl.ode_abstol, callback=cb, save_everystep=false, save_end=true)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
     # Renormalize end state to (S, I) convention for the next chunk.
@@ -273,8 +274,8 @@ end
     renormalize_riccati!(odet, intr)
 
 After a singular surface crossing, restore the canonical Riccati storage convention:
-  u[:,:,1] = S_new = U₁_new · U₂_new⁻¹
-  u[:,:,2] = I
+u[:,:,1] = S_new = U₁_new · U₂_new⁻¹
+u[:,:,2] = I
 
 `riccati_cross_ideal_singular_surf!` leaves u[:,:,1] = U₁_new and u[:,:,2] = U₂_new (not I),
 so this step is required before continuing the Riccati integration.
@@ -298,8 +299,8 @@ end
     renormalize_riccati_inplace!(u, N)
 
 In-place Riccati renormalization on an arbitrary N×N×2 array:
-  u[:,:,1] = U₁ · U₂⁻¹  (new S)
-  u[:,:,2] = I
+u[:,:,1] = U₁ · U₂⁻¹  (new S)
+u[:,:,2] = I
 
 Used in `riccati_integrator_callback!` to renormalize the integrator's live state
 when column norms grow beyond `ctrl.ucrit`, analogous to Gaussian reduction in the
@@ -346,8 +347,8 @@ function integrate_propagator_chunk!(
     # naturally. The resulting propagator maps state at psi_end → psi_start, which is
     # well-conditioned because exponentially growing solutions (forward) decay backward.
     tspan = chunk.direction == 1 ?
-        (chunk.psi_start, chunk.psi_end) :
-        (chunk.psi_end,   chunk.psi_start)
+            (chunk.psi_start, chunk.psi_end) :
+            (chunk.psi_end, chunk.psi_start)
     rtol = ctrl.eulerlagrange_tolerance
     params = (ctrl, equil, mats, intr, odet_proxy, chunk)
 
@@ -359,7 +360,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, el_ode_algorithm(ctrl); reltol=rtol, abstol=ctrl.ode_abstol, save_everystep=false, save_end=true)
     prop.block_upper_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept  # thread-local; summed into odet after the BVP barrier
 
@@ -371,7 +372,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve(prob, el_ode_algorithm(ctrl); reltol=rtol, abstol=ctrl.ode_abstol, save_everystep=false, save_end=true)
     prop.block_lower_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept
 end
@@ -401,12 +402,12 @@ function integrate_fm_with_ua_ic(
     equil::Equilibrium.PlasmaEquilibrium,
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
-    backward::Bool = false,
-    psi_ua::Float64 = NaN
+    backward::Bool=false,
+    psi_ua::Float64=NaN
 )
     N = intr.numpert_total
     psi_start = chunks[first(chunk_range)].psi_start
-    psi_end   = chunks[last(chunk_range)].psi_end
+    psi_end = chunks[last(chunk_range)].psi_end
     # Use stored ua ψ location if provided; otherwise fall back to chunk boundary.
     # The ua is evaluated at the inner-layer boundary (exact ψ from singular crossing),
     # which may differ slightly from the nearest chunk boundary.
@@ -437,9 +438,9 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
-    result[1:N, 1:N]     .= sol.u[end][:, :, 1]
-    result[N+1:2N, 1:N]  .= sol.u[end][:, :, 2]
+    sol = solve(prob, el_ode_algorithm(ctrl); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
+    result[1:N, 1:N] .= sol.u[end][:, :, 1]
+    result[N+1:2N, 1:N] .= sol.u[end][:, :, 2]
 
     # Batch 2: columns N+1:2N of T (small solutions)
     u0[:, :, 1] .= ua[:, N+1:2N, 1]
@@ -450,9 +451,9 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
-    result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]
-    result[N+1:2N, N+1:2N]  .= sol.u[end][:, :, 2]
+    sol = solve(prob, el_ode_algorithm(ctrl); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
+    result[1:N, N+1:2N] .= sol.u[end][:, :, 1]
+    result[N+1:2N, N+1:2N] .= sol.u[end][:, :, 2]
 
     return result
 end
@@ -464,8 +465,8 @@ Apply the chunk propagator `prop` to the current state `odet.u` in-place.
 
 The propagator acts as a linear map on the (U₁, U₂) pair:
 
-  U₁_new = block_upper_ic[:,:,1] · U₁_prev + block_lower_ic[:,:,1] · U₂_prev
-  U₂_new = block_upper_ic[:,:,2] · U₁_prev + block_lower_ic[:,:,2] · U₂_prev
+U₁_new = block_upper_ic[:,:,1] · U₁_prev + block_lower_ic[:,:,1] · U₂_prev
+U₂_new = block_upper_ic[:,:,2] · U₁_prev + block_lower_ic[:,:,2] · U₂_prev
 
 This correctly propagates any state (not just the identity), including the
 (S, I) form produced by Riccati-style crossings.
@@ -520,8 +521,8 @@ function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
     # Φ_bwd maps state at psi_end → psi_start (well-conditioned).
     # We want Φ_fwd = Φ_bwd⁻¹ to advance state from psi_start → psi_end.
     # Solving Φ_bwd · x = [U₁_old; U₂_old] gives x = Φ_bwd⁻¹ · [U₁_old; U₂_old].
-    u_old = [odet.u[:,:,1]; odet.u[:,:,2]]   # 2N × N
+    u_old = [odet.u[:, :, 1]; odet.u[:, :, 2]]   # 2N × N
     u_new = Φ \ u_old                         # LU solve, 2N × N
-    odet.u[:,:,1] .= u_new[1:N, :]
-    odet.u[:,:,2] .= u_new[N+1:2N, :]
+    odet.u[:, :, 1] .= u_new[1:N, :]
+    odet.u[:, :, 2] .= u_new[N+1:2N, :]
 end
