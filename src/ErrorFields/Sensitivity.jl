@@ -77,11 +77,12 @@ function compute_coil_sensitivities(
             second_norm[axis, col] = norm(plus .+ minus .- 2 .* b0)
         end
 
-        # A tap the set cannot feel (a vertical shift of an axisymmetric hoop at n ≥ 1) has a
-        # first difference at round-off; measure its curvature against the set's largest tap
-        # instead of dividing noise by noise.
-        floor = 1e-6 * maximum(first_norm)
-        resid = floor > 0 ? second_norm ./ max.(first_norm, floor) : zeros(3, 2)
+        # Curvature relative to the set's largest linear response: a tap whose first difference
+        # vanishes by symmetry (a vertical shift of an axisymmetric hoop, an in-plane shift of an
+        # n=1-phased array) still has a genuine second-order response, which only matters if it
+        # is comparable to the linear terms the tolerance model keeps.
+        scale = maximum(first_norm)
+        resid = scale > 0 ? second_norm ./ scale : zeros(3, 2)
         shift_resid[:, j] = resid[:, 1]
         tilt_resid[:, j] = resid[:, 2]
 

@@ -50,8 +50,9 @@ was evaluated with; `peak_current` and `winding_multiplier` let a user renormali
   - `nominal_field`: b̃ of each set as built, tesla `[numpert_total × ncoil_set]`
   - `shift_sensitivity`: ∂b̃/∂(Δx, Δy, Δz), tesla per metre `[numpert_total × 3 × ncoil_set]`
   - `tilt_sensitivity`: ∂b̃/∂(θx, θy, θz), tesla per degree `[numpert_total × 3 × ncoil_set]`
-  - `shift_linearity_residual`, `tilt_linearity_residual`: ‖b̃(+h) + b̃(−h) − 2b̃(0)‖ relative to
-    ‖b̃(+h) − b̃(−h)‖ for each tap, a window-independent measure of how linear the response is at
+  - `shift_linearity_residual`, `tilt_linearity_residual`: ‖b̃(+h) + b̃(−h) − 2b̃(0)‖ of each tap
+    relative to the set's largest first difference ‖b̃(+h) − b̃(−h)‖ over all six taps, a
+    window-independent measure of how much second-order response the linearization drops at
     the step taken `[3 × ncoil_set]`
   - `peak_current`: largest conductor current magnitude of each set, amperes `[ncoil_set]`
   - `winding_multiplier`: turns per conductor element of each set `[ncoil_set]`

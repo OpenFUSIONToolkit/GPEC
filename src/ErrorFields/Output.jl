@@ -15,8 +15,10 @@ const EF_H5_ANNOTATIONS = [
     "nominal_field" => (; long_name="root-area-weighted control-surface field b̃ of each coil set as built", units="T", dims=("mode", "coil_set")),
     "shift_sensitivity" => (; long_name="∂b̃/∂(Δx, Δy, Δz) of each coil set under a rigid Cartesian shift", units="T/m", dims=("mode", "axis", "coil_set")),
     "tilt_sensitivity" => (; long_name="∂b̃/∂(θx, θy, θz) of each coil set under a rigid rotation about the machine axes", units="T/deg", dims=("mode", "axis", "coil_set")),
-    "shift_linearity_residual" => (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖/‖b̃(+h)−b̃(−h)‖ of each shift tap", dims=("axis", "coil_set")),
-    "tilt_linearity_residual" => (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖/‖b̃(+h)−b̃(−h)‖ of each tilt tap", dims=("axis", "coil_set")),
+    "shift_linearity_residual" =>
+        (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖ of each shift tap relative to the set's largest first difference", dims=("axis", "coil_set")),
+    "tilt_linearity_residual" =>
+        (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖ of each tilt tap relative to the set's largest first difference", dims=("axis", "coil_set")),
     "peak_current" => (; long_name="largest conductor current magnitude of each coil set at which the spectra were evaluated", units="A"),
     "winding_multiplier" => (; long_name="turns per conductor element of each coil set"),
     "DominantMode/delta_nominal" => (; long_name="overlap δ = Vᴴ₁·b̃ / B_T0 of each coil set with the full-window dominant mode"),
