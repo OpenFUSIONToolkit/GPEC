@@ -131,6 +131,26 @@ Every key is checked against the schema, so a misspelled key is an error rather 
 default. `read_tolerance_toml` parses a file into a `ToleranceSet`, and `validate_tolerances`
 checks its names against a run's coil sets.
 
+## Sampling a tolerance
+
+A tolerance is one number, the radius of the disk the coil centre may lie in; the direction is
+random and the radial density is a `RadialDistribution`: `Flat` (uniform in radius, the OMFIT
+tool's `flat`), `UniformArea` (uniform over the disk), `Hollow` (peaked toward the edge, the
+OMFIT default), `Ring` (always on the edge), or `PowerLaw(p)`. `sample_disk` draws a point as
+`Δx + iΔy`, `sample_uncertainty` adds the Gaussian uncertainty on where the coil actually sits,
+and the two tolerance models combine them: `sample_additive` draws a shift (metres) and a tilt
+(degrees) independently, while `sample_cylinder` confines the coil's axis line to a cylinder
+of radius `R` and half-height `z_top`, drawing its two endpoints and deriving the correlated
+midplane shift and lean. Tilts are the rotation angles `θx + iθy` about the machine axes in
+the sense `apply_transforms` uses. Every sampler takes the random generator and optional fixed
+directions, so coherent groups sharing a direction pass one phase and draw their own radii.
+
+```julia
+rng = Random.Xoshiro(1)
+Δ = EF.sample_disk(rng, 0.5e-3, EF.Hollow())          # a point in a 0.5 mm disk, m
+Δ, θ = EF.sample_cylinder(rng, 0.5e-3, 1.5, EF.randpow(EF.Flat()))   # correlated shift [m] and tilt [deg]
+```
+
 ## Analysis after the run
 
 Window the coupling to any range of rational surfaces and project onto any singular mode
