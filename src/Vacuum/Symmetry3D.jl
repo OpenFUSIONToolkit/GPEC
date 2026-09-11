@@ -243,18 +243,20 @@ function emit_plain_row!(dest::AbstractVector{<:AbstractMatrix}, row::AbstractVe
 end
 
 """
-    transform_mode_basis!(dest, basis_matrix, sym)
+    transform_mode_basis!(dest, basis_matrix, sym; conjugate=false)
 
 Express the Fourier mode basis in the symmetry-adapted basis, `Ẽ = E·U`, writing block `b` into
 `dest[b]`. Substituting `Ẽ` for `E` carries the change of basis through the right-hand side, the
-`wv` projection and `I_v` unchanged, since `U` is unitary.
+`wv` projection and `I_v` unchanged, since `U` is unitary. With `conjugate=true` the input basis is
+conjugated first, giving `conj(E)·U` — what the conjugate partner of this class needs.
 """
-function transform_mode_basis!(dest::AbstractVector{<:AbstractMatrix{ComplexF64}}, basis_matrix::AbstractMatrix, sym::StellaratorBasis)
+function transform_mode_basis!(dest::AbstractVector{<:AbstractMatrix{ComplexF64}}, basis_matrix::AbstractMatrix, sym::StellaratorBasis; conjugate::Bool=false)
+    f = conjugate ? conj : identity
     for c in eachindex(sym.block)
         out = @view dest[sym.block[c]][:, sym.slot[c]]
         p, q = sym.col_p[c], sym.col_q[c]
-        @views out .= sym.col_cp[c] .* basis_matrix[:, p]
-        q != p && (@views out .+= sym.col_cq[c] .* basis_matrix[:, q])
+        @views out .= sym.col_cp[c] .* f.(basis_matrix[:, p])
+        q != p && (@views out .+= sym.col_cq[c] .* f.(basis_matrix[:, q]))
     end
     return nothing
 end

@@ -993,6 +993,84 @@
             @test sym.I_v == ref.I_v
         end
 
+        @testset "compute_vacuum_response 3D conjugate class pairing" begin
+            _cg = GeneralizedPerturbedEquilibrium.Vacuum._conjugate_groups
+
+            # k pairs with mod(nfp - k, nfp) when that class is present and k is not self-conjugate
+            @test _cg([0, 1, 2], 3, true) == [[1], [2, 3]]
+            @test _cg([0, 1, 2], 3, false) == [[1], [2], [3]]
+            @test _cg([1, 2, 3], 5, true) == [[1], [2, 3]]   # class 4 absent, so 1 stays alone
+            @test _cg([0, 1], 2, true) == [[1], [2]]         # both self-conjugate when nfp = 2
+            @test _cg([2], 4, true) == [[1]]                 # k = nfp/2 is self-conjugate
+            @test _cg([0], 1, true) == [[1]]
+
+            # Rotating ellipse, stellarator symmetric so both operator paths are reachable; `odd`
+            # breaks the symmetry and forces the untransformed path while pairing still applies.
+            _pair_boundary(; mtheta, nzeta_p, nfp, odd=0.0) = begin
+                R0, a, b = 1.7, 0.3, 0.09
+                X = Float64[]
+                Y = Float64[]
+                Z = Float64[]
+                for j in 1:nzeta_p
+                    ζ = (j - 1) * 2π / (nzeta_p * nfp)
+                    for i in 1:mtheta
+                        θi = (i - 1) * 2π / mtheta
+                        R = R0 + a * cos(θi) + b * cos(θi - nfp * ζ) + odd * sin(θi - nfp * ζ)
+                        push!(X, R * cos(ζ))
+                        push!(Y, R * sin(ζ))
+                        push!(Z, -a * sin(θi) + b * sin(θi - nfp * ζ) + odd * cos(2θi - nfp * ζ))
+                    end
+                end
+                return X, Y, Z
+            end
+            _pair_inputs(; mtheta, nzeta_p, nfp, n_modes, odd=0.0) = begin
+                X, Y, Z = _pair_boundary(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, odd=odd)
+                return VacuumInput(
+                    x=X, y=Y, z=Z,
+                    mtheta_in=mtheta, nzeta_in=nzeta_p,
+                    m_modes=collect(-1:1), n_modes=n_modes,
+                    mtheta=mtheta, nzeta=nzeta_p,
+                    nfp=nfp
+                )
+            end
+
+            mtheta, nzeta_p = 24, 8
+            nowall = WallShapeSettings(shape="nowall")
+            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+
+            # D̂₋ₖ = conj(D̂ₖ), so serving the conjugate class from the representative's factorization
+            # must reproduce an independent solve. Agreement is to roundoff, not bitwise: the two
+            # paths build the class phases from different arguments.
+            for (nfp, n_modes, wall_settings) in [
+                (3, [1, 2, 3, 4], walled), (5, collect(1:4), nowall), (5, [2, 3], walled)
+            ]
+                for use_symmetry in (false, true)
+                    inp = _pair_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=n_modes)
+                    pair = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=use_symmetry, use_conjugate_pairing=true)
+                    ref = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=use_symmetry, use_conjugate_pairing=false)
+                    @test isapprox(pair.wv, ref.wv; rtol=1e-9, atol=1e-9 * maximum(abs, ref.wv))
+                    @test isapprox(pair.I_v, ref.I_v; rtol=1e-9, atol=1e-9 * maximum(abs, ref.I_v))
+                end
+            end
+
+            # Pairing is independent of stellarator symmetry: an asymmetric boundary still pairs
+            asym = _pair_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1, 2, 3, 4], odd=0.07)
+            pair = compute_vacuum_response(asym, walled; compute_Iv=true, use_conjugate_pairing=true)
+            ref = compute_vacuum_response(asym, walled; compute_Iv=true, use_conjugate_pairing=false)
+            @test isapprox(pair.wv, ref.wv; rtol=1e-9, atol=1e-9 * maximum(abs, ref.wv))
+            @test isapprox(pair.I_v, ref.I_v; rtol=1e-9, atol=1e-9 * maximum(abs, ref.I_v))
+
+            # No class can pair when nfp ≤ 2 or when the modes form a single family, so those runs
+            # must take exactly the unpaired code path
+            for (nfp, n_modes) in [(1, [1]), (2, [1, 2]), (5, [1, 6])]
+                inp = _pair_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=n_modes)
+                pair = compute_vacuum_response(inp, walled; compute_Iv=true, use_conjugate_pairing=true)
+                ref = compute_vacuum_response(inp, walled; compute_Iv=true, use_conjugate_pairing=false)
+                @test pair.wv == ref.wv
+                @test pair.I_v == ref.I_v
+            end
+        end
+
         @testset "Kernel3D laplace_kernel" begin
             G, K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_kernel(1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             # Kernel returns 1/|r_obs - r_src| (4π factor applied elsewhere in BIE)
