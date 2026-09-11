@@ -62,6 +62,10 @@ include("KineticForces/KineticForces.jl")
 import .KineticForces as KineticForces
 export KineticForces
 
+include("ErrorFields/ErrorFields.jl")
+import .ErrorFields as ErrorFields
+export ErrorFields
+
 include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
@@ -85,8 +89,8 @@ using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-                              "gal_flag")
+    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
+    "gal_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -262,12 +266,14 @@ function main_from_inputs(
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result)
+        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, coil_sensitivities=nothing)
     end
 
     pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
 
     run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles, kf_species)
+
+    coil_sensitivities = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets)
 
     # SLAYER runs after PE so it appends to the PE output file; it falls back to the
     # ForceFreeStates file when PE did not run.
@@ -286,7 +292,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result)
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, coil_sensitivities)
 
 end
 
@@ -740,10 +746,10 @@ runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]
 and errors here.
 
 ```julia
-eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
 prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
-ffs  = solve(prob, Riccati())
-ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+ffs = solve(prob, Riccati())
+ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
 function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
@@ -819,19 +825,7 @@ function run_perturbed_equilibrium(
     # Check for PerturbedEquilibrium section and run if present
     pe_state = nothing
     if "PerturbedEquilibrium" in keys(inputs)
-        # Read ForcingTerms control parameters
-        if "ForcingTerms" in keys(inputs)
-            forcing_raw = inputs["ForcingTerms"]
-            # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
-            # kwarg splatting and passed as the explicit coil_sets_raw keyword
-            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
-            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
-            ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw
-            )
-        else
-            ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
-        end
+        ft_ctrl = forcing_terms_control(inputs)
 
         # The deck's forcing block is an unscaled RMPField, so the TOML path and the
         # scripting API share one stage.
@@ -981,6 +975,66 @@ function run_kinetic_forces(
     @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
 
     return nothing
+end
+
+"""
+    forcing_terms_control(inputs) -> ForcingTermsControl
+
+The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent. The
+`[[ForcingTerms.coil_set]]` array of tables is passed through as `coil_sets_raw` rather than
+splatted with the scalar keys.
+"""
+function forcing_terms_control(inputs::Dict{String,Any})
+    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl()
+    forcing_raw = inputs["ForcingTerms"]
+    coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+    scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
+    return ForcingTerms.ForcingTermsControl(; (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw)
+end
+
+"""
+    run_error_fields(inputs, result, pe_state, preloaded_coil_sets) -> CoilSensitivities or nothing
+
+Linearize every coil set's resonant drive with respect to its rigid shifts and tilts and write
+`ErrorFields/CoilSensitivities/` when the deck carries an `[ErrorFields]` section. Needs the
+perturbed-equilibrium state's singular-coupling matrix and coil-format forcing, and errors
+otherwise: a deck asking for error-field sensitivities without them is a misconfiguration, not a
+case to skip silently. Coil geometry is rebuilt from the deck unless a replay injected it.
+"""
+function run_error_fields(
+    inputs::Dict{String,Any},
+    result::ForceFreeStatesResult,
+    pe_state,
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}
+)
+    ("ErrorFields" in keys(inputs)) || return nothing
+
+    @info "\n  ErrorFields\n$_SECTION"
+    ef_start = time()
+
+    ef_ctrl = ErrorFields.ErrorFieldsControl(; (Symbol(k) => v for (k, v) in inputs["ErrorFields"])...)
+    pe_state === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section with compute_singular_coupling = true")
+    ft_ctrl = forcing_terms_control(inputs)
+    ft_ctrl.forcing_data_format == "coil" ||
+        error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(ft_ctrl.forcing_data_format)\")")
+
+    cfg = ForcingTerms.CoilConfig(ft_ctrl)
+    coil_sets = preloaded_coil_sets === nothing ? ForcingTerms.load_coil_sets(cfg, result.nlow; equil=result.equil) : preloaded_coil_sets
+    rc = PerturbedEquilibrium.ResonantCoupling(pe_state, result)
+    sens = ErrorFields.compute_coil_sensitivities(coil_sets, rc, result.equil, cfg, ef_ctrl;
+        psi=result.psilim, b_t0=result.equil.params.bt0)
+
+    if ef_ctrl.write_outputs_to_HDF5
+        output_file = isempty(ef_ctrl.output_filename) ? result.control.HDF5_filename : ef_ctrl.output_filename
+        h5open(joinpath(result.dir_path, output_file), "cw") do h5file
+            ErrorFields.write_to_hdf5!(h5file, sens, PerturbedEquilibrium.dominant_coupling(rc))
+        end
+        @info "Results written to $output_file"
+    end
+
+    @info "ErrorFields completed in $(@sprintf("%.3f", time() - ef_start)) s"
+
+    return sens
 end
 
 """

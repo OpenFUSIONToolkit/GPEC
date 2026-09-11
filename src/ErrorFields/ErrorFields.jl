@@ -1,0 +1,44 @@
+module ErrorFields
+
+"""
+ErrorFields - Error-field sensitivity of a perturbed equilibrium to coil misalignment
+
+Given one perturbed-equilibrium solve and its coil sets, the module linearizes the resonant
+drive of each named coil set with respect to its rigid-body degrees of freedom, so that any
+tolerance question downstream (Monte Carlo over manufacturing tolerances, locking risk,
+allowable-tolerance scans) reduces to cheap linear algebra on a small table instead of a new
+plasma solve or a new Biot-Savart integration.
+
+## Module Structure
+
+- `ErrorFieldsStructs.jl`: `ErrorFieldsControl` (the `[ErrorFields]` TOML section),
+  `CoilSensitivities` (the cached linearization: nominal spectra and their derivatives),
+  `SensitivityTable` (that linearization projected onto one dominant coupling mode)
+- `Sensitivity.jl`: `compute_coil_sensitivities` (central-difference sweep of every rigid
+  shift and tilt of every coil set on one shared boundary grid), `sensitivity_table`
+- `Output.jl`: HDF5 writer under `ErrorFields/CoilSensitivities/` and the matching reader
+
+The stored primitive is the derivative of each coil set's root-area-weighted control-surface
+spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
+the mode index, and the field normalization stay post-hoc analysis choices.
+"""
+
+using LinearAlgebra
+using HDF5
+using Printf
+
+import ..Equilibrium
+import ..ForcingTerms
+import ..ForcingTerms: CoilSet, CoilSetConfig, CoilConfig, ForcingMode, CoilForcingGrid, coil_forcing_modes, apply_transforms
+import ..PerturbedEquilibrium
+import ..PerturbedEquilibrium: ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap
+import ..Utilities
+
+include("ErrorFieldsStructs.jl")
+include("Sensitivity.jl")
+include("Output.jl")
+
+export ErrorFieldsControl, CoilSensitivities, SensitivityTable
+export compute_coil_sensitivities, sensitivity_table, cancelling_offset
+
+end # module ErrorFields
