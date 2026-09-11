@@ -653,8 +653,7 @@ Expects a full-torus boundary — call [`expand_field_periods`](@ref) first when
 
 # Notes
 
-  - Axisymmetric boundaries (`nzeta_in == 1`) support nowall, conformal, elliptical, dee, mod_dee and
-    from_file; non-axisymmetric boundaries support nowall and conformal
+  - A non-axisymmetric boundary supports only nowall and conformal
   - The conformal wall for a non-axisymmetric boundary displaces each plasma point along its own normal,
     which keeps wall grid index `(i, j)` the closest wall point to plasma index `(i, j)` — the
     correspondence the near-field patch of `compute_3D_kernel_matrices!` assumes
@@ -711,7 +710,7 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         # Displace every plasma point outward along its own normal
         wall_settings.equal_arc_wall && @warn "equal_arc_wall is ignored for non-axisymmetric (nzeta_in > 1) walls: it re-parameterizes a 2D contour and would break the plasma/wall index alignment the near-field patch relies on."
 
-        # Same logic as 2D
+        # Gap scales with the plasma's radial extent, as in the 2D conformal wall
         R_plasma = [hypot(plasma_surf.r[idx, 1], plasma_surf.r[idx, 2]) for idx in axes(plasma_surf.r, 1)]
         offset_gap = wall_settings.a * 0.5 * (maximum(R_plasma) - minimum(R_plasma))
         @info "Calculating conformal wall shape $((@sprintf "%.2e" offset_gap)) m from plasma surface."
@@ -749,8 +748,7 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
 
     # Fold check needs a pointwise normal offset (same-index pair) - equal_arc_wall re-parameterizes and breaks that pairing
     if wall_settings.shape == "conformal" && (inputs.nzeta_in > 1 || !wall_settings.equal_arc_wall)
-        # Offset stays regular while wall and plasma normals stay aligned and the area element has not collapsed
-        # Both fail when the gap exceeds the local concave radius of curvature.
+        # The offset stays regular while the normals stay aligned and the area element has not collapsed; both fail past the local concave radius of curvature
         min_align = Inf # min n̂_wall · n̂_plasma_outward; +1 healthy, ≤0 folded
         min_area_ratio = Inf # min ||n_wall||/||n_plasma||; →0 at a caustic
         @inbounds for idx in axes(normal, 1)

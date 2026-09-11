@@ -1,3 +1,5 @@
+const INV_SQRT2 = 1 / √2
+
 """
 Column `cp·e_p + cq·e_q` of the symmetry-adapted basis, at `slot` of `block`. A grid point the
 reflection fixes has `q == p` and `cq == 0`.
@@ -12,201 +14,241 @@ struct SymmetryColumn
 end
 
 """
-    StellaratorBasis
+    StellSymBasis
 
-Unitary change of basis `U` for toroidal residue class `k` making `U†D̂ₖU` real, and block diagonal
-when the class is self-conjugate. Both Laplace kernels depend only on `|r_obs − r_src|` and
-`n_src·(r_obs − r_src)`, so a stellarator-symmetric boundary gives
+Unitary change of basis `U` for residue class `k` making `U†D̂ₖU` real, and block-diagonal when the
+class is self-conjugate. Both Laplace kernels depend only on `|r_obs − r_src|` and `n_src·(r_obs − r_src)`,
+so a stellarator-symmetric boundary gives
 
     D̂ₖ[σp, σq] = ω^{k(a_p − a_q)} · conj(D̂ₖ[p, q]),   ω = exp(-2πi/nfp),
 
-with `σ` the within-period reflection `(θ, ζ) → (−θ, −ζ)` and `a_p = 0` on the `ζ = 0` symmetry
-plane, `1` elsewhere. Pairing `p` with `σp` into a symmetric and an antisymmetric column makes the
-result real; a self-conjugate class (`mod(2k, nfp) == 0`) has real `D̂ₖ` and splits further by the
-sign of `ω^{k a_p}`.
+with `σ` the within-period reflection `(θ, ζ) → (−θ, −ζ)` and `a_p = 0` on the `ζ = 0` plane, `1`
+elsewhere. Pairing `p` with `σp` into a symmetric and an antisymmetric column makes the result real;
+a self-conjugate class ([`is_self_conjugate`](@ref)) has real `D̂ₖ` and splits by the sign of `ω^{k a_p}`.
 
 ## Fields
 
-  - `mirror`: `σ` as a grid-index map of `1:num_points_per_fp`
-  - `phase`: `ω^{k a_p}`, the factor relating a pair's two operator rows
-  - `pairs`: the two grid points of each reflection pair, equal at a fixed point
-  - `columns`, `pair_columns`: the basis columns, and the range each pair contributes
-  - `block_size`: columns per surface in each block, so `length` is 1 or 2
+  - `σ_map`: `σ` as a grid-index map of `1:num_points_per_fp`
+  - `σ_phase`: `ω^{k a_p}`, relating a pair's two operator rows
+  - `pair_reps`: one grid index per reflection pair (partner is `σ_map[p]`)
+  - `columns`, `pair_columns`: basis columns, and the range each pair contributes
+  - `block_sizes`: columns per surface in each block (`length` is 1 or 2)
 """
-struct StellaratorBasis
-    mirror::Vector{Int}
-    phase::Vector{ComplexF64}
-    pairs::Vector{Tuple{Int,Int}}
+struct StellSymBasis
+    σ_map::Vector{Int}
+    σ_phase::Vector{ComplexF64}
+    pair_reps::Vector{Int}
     columns::Vector{SymmetryColumn}
     pair_columns::Vector{UnitRange{Int}}
-    block_size::Vector{Int}
+    block_sizes::Vector{Int}
 end
 
-"""
-    stellarator_mirror(plasma, wall, nfp) -> Union{Vector{Int},Nothing}
+"""Whether residue class `k` is its own conjugate (`ω^k = ±1`), so `D̂ₖ` and the field-period phases are real."""
+is_self_conjugate(k::Integer, nfp::Integer) = mod(2k, nfp) == 0
 
-Within-period grid-index map of `(θ, ζ) → (−θ, −ζ)` if both surfaces are stellarator symmetric,
-`nothing` otherwise. A symmetric boundary matches to round-off and an asymmetric one is off by a
-fraction of the minor radius, so the threshold is not delicate.
 """
-function stellarator_mirror(plasma::PlasmaGeometry3D, wall::WallGeometry3D, nfp::Int)
-    mtheta, nzeta_full = plasma.mtheta, plasma.nzeta
-    nzeta_full % nfp == 0 || return nothing
-    num_points = mtheta * nzeta_full
-    reflected = [mod1(2 - mod1(p, mtheta), mtheta) + mtheta * (mod1(2 - ((p - 1) ÷ mtheta + 1), nzeta_full) - 1) for p in 1:num_points]
+    get_conjugate_groups(classes, nfp) -> Vector{Vector{Int}}
 
-    function symmetric(r)
-        tol = 1e-10 * maximum(abs, r)
-        return all(p -> abs(r[reflected[p], 1] - r[p, 1]) ≤ tol && abs(r[reflected[p], 2] + r[p, 2]) ≤ tol && abs(r[reflected[p], 3] + r[p, 3]) ≤ tol, 1:num_points)
+Each class is a mode family `k = mod(n, nfp)`. Group each with its conjugate family
+`mod(nfp - k, nfp)` when that class is present. Self-conjugate families
+([`is_self_conjugate`](@ref)) never pair.
+
+Returns a vector of groups; each group is a vector of indices into `classes`, with the
+representative first and its conjugate partner second when paired (`[i]` or `[i, j]`).
+"""
+function get_conjugate_groups(classes::AbstractVector{<:Integer}, nfp::Integer)
+    groups = Vector{Int}[]
+    taken = falses(length(classes))
+    for (i, k) in enumerate(classes)
+        taken[i] && continue
+        taken[i] = true
+        j = is_self_conjugate(k, nfp) ? nothing : findfirst(==(mod(nfp - k, nfp)), classes)
+        if j === nothing || taken[j]
+            push!(groups, [i])
+        else
+            taken[j] = true
+            push!(groups, [i, j])
+        end
     end
-    symmetric(plasma.r) || return nothing
-    (wall.nowall || symmetric(wall.r)) || return nothing
-
-    # Within one field period the reflection is composed with a field-period rotation, so the ζ = 0
-    # line maps to itself and every other line reflects about it.
-    nzeta = nzeta_full ÷ nfp
-    return [mod1(2 - mod1(p, mtheta), mtheta) + mtheta * (mod1(nzeta + 2 - ((p - 1) ÷ mtheta + 1), nzeta) - 1) for p in 1:(mtheta*nzeta)]
+    return groups
 end
 
 """
-    StellaratorBasis(mirror, mtheta, k, nfp)
+Grid index of `(θ, ζ) → (−θ, −ζ)` for the linear index `p = i_θ + mtheta·(i_ζ − 1)`.
+"""
+function reflect_index(p::Int, mtheta::Int, nzeta::Int)
+    i_θ, i_ζ = mod1(p, mtheta), (p - 1) ÷ mtheta + 1
+    return mod1(2 - i_θ, mtheta) + mtheta * (mod1(2 - i_ζ, nzeta) - 1)
+end
+
+"""
+    stell_sym_map(plasma, wall, nfp) -> Union{Vector{Int},Nothing}
+
+Within-period map of `(θ, ζ) → (−θ, −ζ)` if both surfaces are stellarator symmetric, `nothing`
+otherwise. A symmetric boundary matches to round-off; an asymmetric one is off by a fraction of the
+minor radius, so the threshold is not delicate.
+"""
+function stell_sym_map(plasma::PlasmaGeometry3D, wall::WallGeometry3D, nfp::Int)
+    # This must be called after expand_field_periods, so nzeta_full is the full-torus nzeta
+    mtheta, nzeta_full = plasma.mtheta, plasma.nzeta
+    @assert nzeta_full % nfp == 0 "full-torus nzeta ($nzeta_full) must be divisible by nfp ($nfp)"
+    num_points_full = mtheta * nzeta_full
+    reflected = [reflect_index(p, mtheta, nzeta_full) for p in 1:num_points_full]
+
+    function is_symmetric(r)
+        # Cartesian x is even under (θ,ζ) → (−θ,−ζ); y and z are odd.
+        tol = 1e-10 * maximum(abs, r)
+        return all(p -> abs(r[reflected[p], 1] - r[p, 1]) ≤ tol && abs(r[reflected[p], 2] + r[p, 2]) ≤ tol && abs(r[reflected[p], 3] + r[p, 3]) ≤ tol, 1:num_points_full)
+    end
+
+    # Check if the boundary(s) are stellarator symmetric
+    # return the mapping if so, otherwise return nothing
+    if is_symmetric(plasma.r) && (wall.nowall || is_symmetric(wall.r))
+        nzeta = nzeta_full ÷ nfp
+        return [reflect_index(p, mtheta, nzeta) for p in 1:(mtheta*nzeta)]
+    else
+        return nothing
+    end
+end
+
+"""
+    StellSymBasis(σ_map, mtheta, k, nfp)
 
 Build the symmetry-adapted basis for toroidal residue class `k`.
 """
-function StellaratorBasis(mirror::Vector{Int}, mtheta::Int, k::Int, nfp::Int)
-    npts = length(mirror)
-    self_conjugate = mod(2k, nfp) == 0
+function StellSymBasis(σ_map::Vector{Int}, mtheta::Int, k::Int, nfp::Int)
+    npts = length(σ_map)
+    self_conjugate = is_self_conjugate(k, nfp)
     ωk = cis(-2π * k / nfp)
 
-    # The ζ = 0 plane is the symmetry plane and carries no twist; every other line carries one.
-    a(p) = ((p - 1) ÷ mtheta + 1) == 1 ? 0 : 1
-    phase = ComplexF64[self_conjugate ? round(real(ωk))^a(p) : ωk^a(p) for p in 1:npts]
+    # a_p tags the field-period twist in D̂ₖ[σp,σq] = ω^{k(a_p−a_q)} conj(D̂ₖ[p,q]): 0 on ζ=0, else 1
+    a(p) = p ≤ mtheta ? 0 : 1
+    # Exact ±1 when self-conjugate
+    ω = self_conjugate ? ComplexF64(round(real(ωk))) : ωk
+    # relative phase between rows p and σp under the reflection identity
+    σ_phase = ComplexF64[ω^a(p) for p in 1:npts]
 
-    # Half-twist ω^{k a_p / 2}, which makes a non-self-conjugate class real. A self-conjugate class is
-    # real already and instead splits by the sign of `phase`, so it takes no twist.
+    # Column prefactor: half-twist ω^{k a_p/2} makes U†D̂ₖU real when k is not self-conjugate
     twist(p) = self_conjugate ? ComplexF64(1) : cis(-π * k * a(p) / nfp)
 
-    pairs = Tuple{Int,Int}[]
-    seen = falses(npts)
-    for p in 1:npts
-        seen[p] && continue
-        seen[p] = seen[mirror[p]] = true
-        push!(pairs, (p, mirror[p]))
-    end
+    # Get one representative from each reflection pair
+    pair_reps = [p for p in 1:npts if p ≤ σ_map[p]]
 
-    # Symmetric column first, antisymmetric second. Self-conjugate blocks are assigned so that each
-    # block collects one eigenvalue of the reflection, which is what makes the operator block diagonal.
+    # Build orthonormal columns of U: symmetric first, antisymmetric second; slot numbered within block
     columns = SymmetryColumn[]
     pair_columns = UnitRange{Int}[]
-    rt = 1 / √2
-    for (p, q) in pairs
+    filled = zeros(Int, self_conjugate ? 2 : 1)  # one block, or two reflection-eigenvalue blocks
+    add_column!(p, q, cp, cq, block) = (filled[block] += 1; push!(columns, SymmetryColumn(p, q, cp, cq, block, filled[block])))
+    for p in pair_reps
+        q = σ_map[p]
         first_col = length(columns) + 1
-        # A non-self-conjugate class has a single block; a self-conjugate one sends the symmetric and
-        # antisymmetric columns to opposite blocks, swapped where `phase` is negative.
-        negative = self_conjugate && real(phase[p]) < 0
+        
+        # Self-conjugate: put ± reflection eigenvalues in opposite blocks; flip assignment if σ_phase < 0
+        negative = self_conjugate && real(σ_phase[p]) < 0
         sym_block = negative ? 2 : 1
-        anti_block = self_conjugate ? (negative ? 1 : 2) : 1
-        c = twist(p)
+        anti_block = self_conjugate ? (negative ? 1 : 2) : 1  # non-self-conjugate: everything in block 1
+        
+        twist_p = twist(p)
         if q == p
-            push!(columns, SymmetryColumn(p, p, c, 0, sym_block, 0))
+            # Fixed point of σ: single column twist_p · e_p (cq = 0)
+            add_column!(p, p, twist_p, 0, sym_block)
         else
-            push!(columns, SymmetryColumn(p, q, c * rt, c * rt, sym_block, 0))
-            c2 = self_conjugate ? ComplexF64(rt) : im * c * rt
-            push!(columns, SymmetryColumn(p, q, c2, -c2, anti_block, 0))
+            # Symmetric combination (e_p + e_q)/√2, times the half-twist
+            add_column!(p, q, twist_p * INV_SQRT2, twist_p * INV_SQRT2, sym_block)
+            # Antisymmetric (e_p − e_q)/√2; im·twist keeps non-self-conjugate columns orthonormal and U†DU real
+            anti_coeff = self_conjugate ? ComplexF64(INV_SQRT2) : im * twist_p * INV_SQRT2
+            add_column!(p, q, anti_coeff, -anti_coeff, anti_block)
         end
+        # Columns this pair owns — store_kernel_row! only transforms those when writing the pair's rows
         push!(pair_columns, first_col:length(columns))
     end
-
-    # Number the columns within their block
-    nblocks = self_conjugate ? 2 : 1
-    filled = zeros(Int, nblocks)
-    for (c, col) in enumerate(columns)
-        filled[col.block] += 1
-        columns[c] = SymmetryColumn(col.p, col.q, col.cp, col.cq, col.block, filled[col.block])
-    end
-    return StellaratorBasis(mirror, phase, pairs, columns, pair_columns, copy(filled))
+    return StellSymBasis(σ_map, σ_phase, pair_reps, columns, pair_columns, filled)
 end
 
 """
-    emit_row!(dest, sym, row, work, pair, idx_obs, row_index, col_index)
+    store_kernel_row!(blocks, sym_basis, kernel_row, scratch, i_pair, row_index, col_index)
 
-Write one accumulated operator row into `dest`, with `row_index`/`col_index` (1 = plasma, 2 = wall)
-selecting the surface sub-block. With `sym === nothing` the row goes in untransformed and `dest`
-holds the whole matrix. With a [`StellaratorBasis`](@ref) the row belongs to reflection pair `pair`
-and its partner follows from the symmetry, so the caller evaluates only half the observer points;
-`work` is then complex scratch of at least `3·length(row)`.
+Write one accumulated kernel row into `blocks`. With a [`StellSymBasis`](@ref), reconstruct the
+partner row from the reflection identity and emit `U†DU`; `sym_basis === nothing` stores the row
+as-is. `i_pair` indexes the observer list (every period-0 point, or one representative per pair).
+`row_index`/`col_index` are 1 = plasma, 2 = wall. `scratch` needs `2·npts` when a basis is present.
 """
-function emit_row!(dest::AbstractVector{<:AbstractMatrix}, ::Nothing, row::AbstractVector{<:Number}, work, pair::Int, idx_obs::Int, row_index::Int, col_index::Int)
-    H = dest[1]
-    npts = length(row)
-    r = (row_index - 1) * npts + idx_obs
-    col_offset = (col_index - 1) * npts
-    @inbounds for x in eachindex(row)
-        H[r, col_offset+x] = row[x]
-    end
-    return nothing
-end
-
-function emit_row!(
-    dest::AbstractVector{<:AbstractMatrix{Float64}},
-    basis::StellaratorBasis,
-    row::AbstractVector{<:Number},
-    work::AbstractVector{ComplexF64},
-    pair::Int,
-    idx_obs::Int,
+function store_kernel_row!(
+    blocks::AbstractVector{<:AbstractMatrix},
+    sym_basis::Union{Nothing,StellSymBasis},
+    kernel_row::AbstractVector{<:Number},
+    scratch::AbstractVector{ComplexF64},
+    i_pair::Int,
     row_index::Int,
     col_index::Int
 )
-    (; mirror, phase, pairs, columns, pair_columns, block_size) = basis
-    p, _ = pairs[pair]
-    npts = length(row)
-    rep = @view work[1:npts]                # this pair's representative row
-    partner = @view work[(npts+1):(2npts)]  # its mirror partner, reconstructed
-    combined = @view work[(2npts+1):(3npts)]
-
-    @inbounds for x in 1:npts
-        rep[x] = row[x]
-        partner[x] = phase[p] * conj(phase[x]) * conj(row[mirror[x]])
+    npts = length(kernel_row)
+    if sym_basis === nothing
+        # No basis: copy the row into the single untransformed block
+        H = blocks[1]
+        r = (row_index - 1) * npts + i_pair
+        @views H[r, ((col_index-1)*npts+1):(col_index*npts)] .= kernel_row
+        return
     end
 
-    # Form U†DU for the columns this pair owns
-    for c in pair_columns[pair]
-        rc = columns[c]
-        H = dest[rc.block]
-        nsize = block_size[rc.block]
-        r = (row_index - 1) * nsize + rc.slot
+    (; σ_map, σ_phase, pair_reps, columns, pair_columns, block_sizes) = sym_basis
+    p = pair_reps[i_pair]
+    partner = @view scratch[1:npts]
+    combined = @view scratch[(npts+1):(2npts)]
+    pair_phase = σ_phase[p]
+
+    # Partner row at σp via D̂ₖ[σp, σq] = ω^{k(a_p−a_q)} conj(D̂ₖ[p, q]) — avoids quadrature at σp
+    @inbounds for x in 1:npts
+        partner[x] = pair_phase * conj(σ_phase[x]) * conj(kernel_row[σ_map[x]])
+    end
+
+    # Emit U†DU only for the (≤2) columns this reflection pair owns
+    for c in pair_columns[i_pair]
+        row_col = columns[c]
+        H = blocks[row_col.block]
+        nsize = block_sizes[row_col.block]
+        r = (row_index - 1) * nsize + row_col.slot
         col_offset = (col_index - 1) * nsize
 
-        # Left factor U†: combine the pair's two rows with this column's conjugated coefficients
-        cp, cq = conj(rc.cp), conj(rc.cq)
+        # Left U†: mix rows p and σp with this column's conjugated coefficients
+        cp, cq = conj(row_col.cp), conj(row_col.cq)
         @inbounds for x in 1:npts
-            combined[x] = cp * rep[x] + cq * partner[x]
+            combined[x] = cp * kernel_row[x] + cq * partner[x]
         end
 
-        # Right factor U: read off each column the same way. Only the diagonal block survives.
-        @inbounds for cc in columns
-            cc.block == rc.block || continue
-            val = cc.cp * combined[cc.p]
-            cc.q != cc.p && (val += cc.cq * combined[cc.q])
-            H[r, col_offset+cc.slot] = real(val)
+        # Right U on the same block only; real(·) drops a ~0 imaginary residual
+        @inbounds for src_col in columns
+            src_col.block == row_col.block || continue
+            val = src_col.cp * combined[src_col.p]
+            src_col.q != src_col.p && (val += src_col.cq * combined[src_col.q])
+            H[r, col_offset+src_col.slot] = real(val)
         end
     end
-    return nothing
 end
 
 """
-    transform_mode_basis!(dest, mode_basis, sym; conjugate=false)
+    transform_mode_basis!(E_out, E, sym_basis; conjugate=false)
 
-Write `Ẽ = E·U` into `dest[b]` per block. `U` is unitary, so substituting `Ẽ` for `E` leaves the
-right-hand side, the `wv` projection and `I_v` unchanged. `conjugate=true` gives `conj(E)·U`, what
-this class's conjugate partner needs.
+Write `E_out = E·U` into `E_out[b]` per block. `U` is unitary, so substituting `E_out` for `E` leaves the
+RHS, the `wv` projection and `I_v` unchanged. `conjugate=true` gives `conj(E)·U` for this class's
+conjugate partner. `sym_basis === nothing` is the identity.
 """
-function transform_mode_basis!(dest::AbstractVector{<:AbstractMatrix{ComplexF64}}, mode_basis::AbstractMatrix, sym::StellaratorBasis; conjugate::Bool=false)
-    f = conjugate ? conj : identity
-    for col in sym.columns
-        out = @view dest[col.block][:, col.slot]
-        @views out .= col.cp .* f.(mode_basis[:, col.p])
-        col.q != col.p && (@views out .+= col.cq .* f.(mode_basis[:, col.q]))
+function transform_mode_basis!(
+    E_out::AbstractVector{<:AbstractMatrix{ComplexF64}},
+    E::AbstractMatrix,
+    sym_basis::Union{Nothing,StellSymBasis};
+    conjugate::Bool=false
+)
+    # No stellarator basis: identity U, optionally conj(E) for the conjugate partner class
+    if sym_basis === nothing
+        E_out[1] .= conjugate ? conj.(E) : E
+        return
     end
-    return nothing
+    maybe_conj = conjugate ? conj : identity
+    # Each SymmetryColumn is one column of U: E_out[:, slot] = cp·f(E[:,p]) + cq·f(E[:,q])
+    for col in sym_basis.columns
+        out = @view E_out[col.block][:, col.slot]
+        @views out .= col.cp .* maybe_conj.(E[:, col.p])
+        col.q != col.p && (@views out .+= col.cq .* maybe_conj.(E[:, col.q]))
+    end
 end

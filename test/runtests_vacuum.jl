@@ -618,10 +618,8 @@
             @test all(isfinite, wall.normal)
         end
 
-        # Corrugated torus on a genuinely periodic (endpoint-excluded) grid. The shared
-        # _make_3d_nonaxis_inputs helper samples range(0, 2π, length=n), which repeats the seam
-        # point and leaves the surface non-smooth there — harmless for a nowall response, but it
-        # makes the offset surface fold, so the wall tests build their own boundary.
+        # Corrugated torus on an endpoint-excluded grid. `_make_3d_nonaxis_inputs` repeats the seam point, which is
+        # harmless for a nowall response but leaves a kink that folds the offset surface, so wall tests need their own.
         _make_3d_periodic_inputs(; mtheta=24, nzeta=24, mtheta_in=16, nzeta_in=16) = begin
             θ_in = range(; start=0, length=mtheta_in, step=2π/mtheta_in)
             ζ_in = range(; start=0, length=nzeta_in, step=2π/nzeta_in)
@@ -657,8 +655,7 @@
             R_plasma = [hypot(plasma.r[i, 1], plasma.r[i, 2]) for i in 1:num_points]
             @test maximum(R_wall) > maximum(R_plasma)
 
-            # The offset point is the closest wall point to its own plasma point, which is the
-            # index alignment the near-field patch assumes.
+            # Each offset point is the closest wall point to its own plasma point — the index alignment the near-field patch assumes
             for i in (1, 300, num_points)
                 @test offsets[i] ≈ minimum(norm(wall.r[j, :] - plasma.r[i, :]) for j in 1:num_points)
             end
@@ -798,10 +795,9 @@
             @test all(iszero, vac.I_v)
         end
 
-        # The 3D interior operator is the 2D one shifted by the same scalar, D_int = D_ext - 2I, so an
-        # axisymmetric boundary driven through both paths must give the same Iᵛ. Tolerances are loose
-        # because Iᵛ is a difference of two solves, which amplifies the 3D toroidal discretization error
-        # (~8e-3 on wv here) by an order of magnitude; a wrong shift or sign gives O(1) instead.
+        # The 3D interior operator is the 2D one shifted by the same scalar, D_int = D_ext - 2I, so an axisymmetric boundary
+        # must give the same Iᵛ through both paths. Tolerances are loose because Iᵛ differences two solves and so amplifies
+        # the 3D toroidal discretization error (~8e-3 on wv here) tenfold; a wrong shift or sign gives O(1) instead.
         @testset "compute_vacuum_response 3D I_v matches the 2D path" begin
             mtheta = 48
             θ = range(; start=0, length=mtheta, step=2π/mtheta)
@@ -946,7 +942,6 @@
             end
 
             mtheta, nzeta_p = 24, 8
-            nowall = WallShapeSettings(shape="nowall")
             walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
 
             # The whole item rests on the operator inheriting the reflection symmetry, so assert it directly.
@@ -964,110 +959,60 @@
             @test isapprox(S[σ_full, σ_full], S; rtol=1e-9, atol=1e-9 * maximum(abs, S))
 
             # Detection: symmetric surfaces are recognised, an odd-parity perturbation is not
-            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_mirror(plasma, wall, 3) !== nothing
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stell_sym_map(plasma, wall, 3) !== nothing
             asym = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1], odd=0.07)
             asym_full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(asym)
             asym_plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(asym_full)
             asym_wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(asym_full, asym_plasma, walled)
-            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_mirror(asym_plasma, asym_wall, 3) === nothing
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stell_sym_map(asym_plasma, asym_wall, 3) === nothing
 
-            # The symmetry-adapted solve must reproduce the untransformed one. nfp = 1 and k = 0 split
-            # into two real half-size blocks; k ≠ 0 becomes real at full size; nfp = 4, k = 2 is the
-            # self-conjugate class that needs the signed reflection rather than the half-twist.
-            for (nfp, n_modes, wall_settings) in [
-                (1, [1], nowall), (1, [1], walled),
-                (3, [0], walled), (3, [1], nowall), (3, [1], walled),
-                (3, [1, 2, 3], walled), (4, [2], walled), (2, [1], walled)
-            ]
-                inp = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=n_modes)
-                sym = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=true)
-                ref = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=false)
-                @test isapprox(sym.wv, ref.wv; rtol=1e-9, atol=1e-9 * maximum(abs, ref.wv))
-                @test isapprox(sym.I_v, ref.I_v; rtol=1e-9, atol=1e-9 * maximum(abs, ref.I_v))
-            end
-
-            # An asymmetric boundary must fall through to exactly the untransformed solve
-            sym = compute_vacuum_response(asym, walled; compute_Iv=true, use_symmetry=true)
-            ref = compute_vacuum_response(asym, walled; compute_Iv=true, use_symmetry=false)
-            @test sym.wv == ref.wv
-            @test sym.I_v == ref.I_v
-        end
-
-        @testset "compute_vacuum_response 3D conjugate class pairing" begin
-            _cg = GeneralizedPerturbedEquilibrium.Vacuum._conjugate_groups
-
-            # k pairs with mod(nfp - k, nfp) when that class is present and k is not self-conjugate
-            @test _cg([0, 1, 2], 3, true) == [[1], [2, 3]]
-            @test _cg([0, 1, 2], 3, false) == [[1], [2], [3]]
-            @test _cg([1, 2, 3], 5, true) == [[1], [2, 3]]   # class 4 absent, so 1 stays alone
-            @test _cg([0, 1], 2, true) == [[1], [2]]         # both self-conjugate when nfp = 2
-            @test _cg([2], 4, true) == [[1]]                 # k = nfp/2 is self-conjugate
-            @test _cg([0], 1, true) == [[1]]
-
-            # Rotating ellipse, stellarator symmetric so both operator paths are reachable; `odd`
-            # breaks the symmetry and forces the untransformed path while pairing still applies.
-            _pair_boundary(; mtheta, nzeta_p, nfp, odd=0.0) = begin
-                R0, a, b = 1.7, 0.3, 0.09
-                X = Float64[]
-                Y = Float64[]
-                Z = Float64[]
-                for j in 1:nzeta_p
-                    ζ = (j - 1) * 2π / (nzeta_p * nfp)
-                    for i in 1:mtheta
-                        θi = (i - 1) * 2π / mtheta
-                        R = R0 + a * cos(θi) + b * cos(θi - nfp * ζ) + odd * sin(θi - nfp * ζ)
-                        push!(X, R * cos(ζ))
-                        push!(Y, R * sin(ζ))
-                        push!(Z, -a * sin(θi) + b * sin(θi - nfp * ζ) + odd * cos(2θi - nfp * ζ))
-                    end
+            # Columns of U: grid point `p` (and its partner `q`) with coefficients `cp`, `cq`.
+            _basis_U(sym_basis) = begin
+                nfp_pts = length(sym_basis.σ_map)
+                Us = [zeros(ComplexF64, nfp_pts, sz) for sz in sym_basis.block_sizes]
+                for col in sym_basis.columns
+                    U = Us[col.block]
+                    U[col.p, col.slot] = col.cp
+                    col.q != col.p && (U[col.q, col.slot] = col.cq)
                 end
-                return X, Y, Z
-            end
-            _pair_inputs(; mtheta, nzeta_p, nfp, n_modes, odd=0.0) = begin
-                X, Y, Z = _pair_boundary(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, odd=odd)
-                return VacuumInput(
-                    x=X, y=Y, z=Z,
-                    mtheta_in=mtheta, nzeta_in=nzeta_p,
-                    m_modes=collect(-1:1), n_modes=n_modes,
-                    mtheta=mtheta, nzeta=nzeta_p,
-                    nfp=nfp
-                )
+                return Us
             end
 
-            mtheta, nzeta_p = 24, 8
-            nowall = WallShapeSettings(shape="nowall")
-            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            # D̂_sym = U† D̂ U. nfp = 1 and k = 0 split into two real half-size blocks, k ≠ 0 becomes real at full size, and
+            # nfp = 4, k = 2 is the self-conjugate class that needs the signed reflection rather than the half-twist.
+            for (nfp, k) in [(1, 1), (3, 0), (3, 1), (4, 2), (2, 1)]
+                inp = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=[k])
+                geom = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inp)
+                plas = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(geom)
+                wal = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(geom, plas, WallShapeSettings(shape="nowall"))
+                mirror = GeneralizedPerturbedEquilibrium.Vacuum.stell_sym_map(plas, wal, nfp)
+                @test mirror !== nothing
+                nfp_pts = plas.mtheta * plas.nzeta ÷ nfp
+                ω = ComplexF64[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
+                phases = GeneralizedPerturbedEquilibrium.Vacuum.is_self_conjugate(k, nfp) ? round.(real.(ω)) : ω
+                T = eltype(phases)
+                D_k = [zeros(T, nfp_pts, nfp_pts)]
+                S_k = [zeros(T, nfp_pts, nfp_pts)]
+                GeneralizedPerturbedEquilibrium.Vacuum.compute_3D_kernel_matrices!(D_k, S_k, plas, plas, 11, 20, 5, phases, nothing)
 
-            # D̂₋ₖ = conj(D̂ₖ), so serving the conjugate class from the representative's factorization
-            # must reproduce an independent solve. Agreement is to roundoff, not bitwise: the two
-            # paths build the class phases from different arguments.
-            for (nfp, n_modes, wall_settings) in [
-                (3, [1, 2, 3, 4], walled), (5, collect(1:4), nowall), (5, [2, 3], walled)
-            ]
-                for use_symmetry in (false, true)
-                    inp = _pair_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=n_modes)
-                    pair = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=use_symmetry, use_conjugate_pairing=true)
-                    ref = compute_vacuum_response(inp, wall_settings; compute_Iv=true, use_symmetry=use_symmetry, use_conjugate_pairing=false)
-                    @test isapprox(pair.wv, ref.wv; rtol=1e-9, atol=1e-9 * maximum(abs, ref.wv))
-                    @test isapprox(pair.I_v, ref.I_v; rtol=1e-9, atol=1e-9 * maximum(abs, ref.I_v))
+                sym_basis = GeneralizedPerturbedEquilibrium.Vacuum.StellSymBasis(mirror, mtheta, k, nfp)
+                Ds = [zeros(Float64, sz, sz) for sz in sym_basis.block_sizes]
+                Ss = [zeros(Float64, sz, sz) for sz in sym_basis.block_sizes]
+                GeneralizedPerturbedEquilibrium.Vacuum.compute_3D_kernel_matrices!(Ds, Ss, plas, plas, 11, 20, 5, phases, sym_basis)
+
+                Us = _basis_U(sym_basis)
+                for (b, U) in enumerate(Us)
+                    Dt = U' * (D_k[1] * U)
+                    St = U' * (S_k[1] * U)
+                    @test isapprox(real.(Dt), Ds[b]; rtol=1e-9, atol=1e-9 * maximum(abs, Ds[b]))
+                    @test isapprox(real.(St), Ss[b]; rtol=1e-9, atol=1e-9 * maximum(abs, Ss[b]))
+                    @test maximum(abs, imag.(Dt)) ≤ 1e-9 * maximum(abs, Dt)
+                    @test maximum(abs, imag.(St)) ≤ 1e-9 * maximum(abs, St)
                 end
-            end
-
-            # Pairing is independent of stellarator symmetry: an asymmetric boundary still pairs
-            asym = _pair_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1, 2, 3, 4], odd=0.07)
-            pair = compute_vacuum_response(asym, walled; compute_Iv=true, use_conjugate_pairing=true)
-            ref = compute_vacuum_response(asym, walled; compute_Iv=true, use_conjugate_pairing=false)
-            @test isapprox(pair.wv, ref.wv; rtol=1e-9, atol=1e-9 * maximum(abs, ref.wv))
-            @test isapprox(pair.I_v, ref.I_v; rtol=1e-9, atol=1e-9 * maximum(abs, ref.I_v))
-
-            # No class can pair when nfp ≤ 2 or when the modes form a single family, so those runs
-            # must take exactly the unpaired code path
-            for (nfp, n_modes) in [(1, [1]), (2, [1, 2]), (5, [1, 6])]
-                inp = _pair_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=n_modes)
-                pair = compute_vacuum_response(inp, walled; compute_Iv=true, use_conjugate_pairing=true)
-                ref = compute_vacuum_response(inp, walled; compute_Iv=true, use_conjugate_pairing=false)
-                @test pair.wv == ref.wv
-                @test pair.I_v == ref.I_v
+                if length(Us) == 2
+                    cross = Us[1]' * (D_k[1] * Us[2])
+                    @test maximum(abs, cross) ≤ 1e-9 * maximum(abs, D_k[1])
+                end
             end
         end
 
