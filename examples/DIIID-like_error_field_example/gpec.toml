@@ -1,0 +1,210 @@
+# DIII-D-like H-mode equilibrium — n=1 error-field sensitivity of the poloidal-field coils.
+# Same free-boundary ideal solve as DIIID-like_ideal_example, with the DIII-D C-coil supplying
+# the nominal n=1 forcing and every F coil (F1A–F9B) added as a single-filament hoop at the
+# centroid of its winding pack, from OpenFUSIONToolkit's TokaMaker DIIID_geom.json. An
+# axisymmetric hoop drives no n=1 field as built, so each F coil's error-field content is
+# entirely its sensitivity to misalignment: the [ErrorFields] stage linearizes every coil set's
+# resonant drive with respect to rigid shifts and tilts, and analyze_example.jl ranks them.
+
+[Equilibrium]
+eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
+eq_type = "efit"               # Type of the input 2D equilibrium file
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "auto"             # Radial grid packing type ("auto" = two-pass measured-curvature grid)
+psilow = 1e-4                  # Lower limit of normalized poloidal flux
+psihigh = 0.995                # Upper limit of normalized poloidal flux (captures q=6 at this Ip)
+mpsi = 0                       # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
+mtheta = 256                   # Number of poloidal grid points
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
+etol = 1e-10                   # Error tolerance for equilibrium solver
+force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
+
+[Wall]
+shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.2415                     # Distance from plasma (conformal) or shape parameter
+aw = 0.05                      # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                       # Elongation parameter for wall shapes
+cw = 0                         # Offset of wall center from major radius
+dw = 0.5                       # Triangularity parameter for wall shapes
+tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true          # Equal arc length distribution of nodes on wall
+
+[ForceFreeStates]
+local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
+
+psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
+sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
+
+nn_low = 1                     # Smallest toroidal mode number to include
+nn_high = 1                    # Largest toroidal mode number to include
+delta_mlow = 8                 # Expands lower bound of Fourier harmonics
+delta_mhigh = 8                # Expands upper bound of Fourier harmonics
+mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+
+kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
+kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
+eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
+save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
+ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+
+# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+integrator            = "forward" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
+set_psilim_via_dmlim  = true   # Truncate at (last_rational_q + dmlim)/n — TRUE for diverted equilibria (q → ∞ at separatrix)
+dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
+
+[ForcingTerms]
+forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
+machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
+mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
+nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
+
+[[ForcingTerms.coil_set]]
+name = "c"                              # Coil set; resolves to coil_geometries/d3d_c.dat (DIII-D C-coil, 6 coils): the nominal n=1 source
+currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
+
+[[ForcingTerms.coil_set]]
+name = "F1A"                            # DIII-D F coil F1A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8608                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 0.1683                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F2A"                            # DIII-D F coil F2A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8614                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 0.5081                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F3A"                            # DIII-D F coil F3A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8628                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 0.8491                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F4A"                            # DIII-D F coil F4A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8611                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 1.1899                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F5A"                            # DIII-D F coil F5A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 1.0041                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 1.5169                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F6A"                            # DIII-D F coil F6A: 55-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 2.6124                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 0.4376                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F7A"                            # DIII-D F coil F7A: 55-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 2.3733                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 1.1171                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F8A"                            # DIII-D F coil F8A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 1.2518                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 1.6019                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F9A"                            # DIII-D F coil F9A: 55-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 1.6890                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = 1.5874                         # Hoop height: centroid Z of the pack cross-section [m]
+currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F1B"                            # DIII-D F coil F1B: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8608                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -0.1737                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F2B"                            # DIII-D F coil F2B: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8607                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -0.5135                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F3B"                            # DIII-D F coil F3B: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8610                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -0.8543                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F4B"                            # DIII-D F coil F4B: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 0.8630                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -1.1957                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F5B"                            # DIII-D F coil F5B: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 1.0025                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -1.5169                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F6B"                            # DIII-D F coil F6B: 55-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 2.6124                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -0.4376                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F7B"                            # DIII-D F coil F7B: 55-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 2.3834                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -1.1171                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F8B"                            # DIII-D F coil F8B: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 1.2524                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -1.6027                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [58000.0]                    # 1 kA per turn × 58 turns; sensitivities scale linearly with current [A]
+
+[[ForcingTerms.coil_set]]
+name = "F9B"                            # DIII-D F coil F9B: 55-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
+source = "pf_hoop"                      # Single-filament horizontal hoop approximation of the winding pack
+radius = 1.6889                         # Hoop major radius: centroid R of the pack cross-section [m]
+height = -1.5780                        # Hoop height: centroid Z of the pack cross-section [m]
+currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
+
+[PerturbedEquilibrium]
+fixed_boundary = false                  # Use fixed boundary conditions
+output_eigenmodes = true                # Output eigenmode fields as b-fields
+compute_response = true                 # Compute plasma response to forcing
+compute_singular_coupling = true        # Compute singular layer coupling metrics
+verbose = false                         # Enable verbose logging
+write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
+reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
+
+[ErrorFields]
+fd_step_shift_m = 1e-3                  # Central-difference step for the rigid shifts [m]
+fd_step_tilt_deg = 0.1                  # Central-difference step for the rigid tilts [degrees]
+rotation_center = "conductor"           # Tilt pivot: each conductor's own centre ("conductor") or the whole set's ("set")
+write_outputs_to_HDF5 = true            # Write ErrorFields/CoilSensitivities/ to the output file
+verbose = true                          # Log per-coil-set progress and linearity diagnostics

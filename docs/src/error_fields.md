@@ -57,6 +57,14 @@ curvature diagnostic per tap, the current pattern the spectra were evaluated at,
 its shift and tilt sensitivities, their direction-averaged in-plane magnitudes, and the in-plane
 shift and tilt that would cancel `delta_nominal`).
 
+`examples/DIIID-like_error_field_example/` is a complete case: the DIII-D-like equilibrium with
+the C-coil as the nominal n = 1 source and the eighteen DIII-D F coils added as single-filament
+hoops at the centroids of their winding packs (from OpenFUSIONToolkit's TokaMaker
+`DIIID_geom.json`). An axisymmetric hoop drives no n = 1 field as built, so each F coil's
+error-field content is entirely its sensitivity to misalignment; `analyze_example.jl` ranks the
+coils by error field per millimetre of shift and per tenth of a degree of tilt, over all
+rational surfaces and over the edge only.
+
 The tilt pivot matters for multi-filament winding packs: `"conductor"` rotates each filament
 about its own arc-length centre, the Fortran `coil_read` convention inherited by the OMFIT
 tolerance tool, while `"set"` rotates the pack rigidly about its common centre, which is what
