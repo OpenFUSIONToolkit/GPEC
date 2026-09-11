@@ -949,7 +949,7 @@
             nowall = WallShapeSettings(shape="nowall")
             walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
 
-            # The whole item rests on the operator inheriting the involution, so assert it directly.
+            # The whole item rests on the operator inheriting the reflection symmetry, so assert it directly.
             inputs = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1])
             full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inputs)
             plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(full)
@@ -964,16 +964,16 @@
             @test isapprox(S[σ_full, σ_full], S; rtol=1e-9, atol=1e-9 * maximum(abs, S))
 
             # Detection: symmetric surfaces are recognised, an odd-parity perturbation is not
-            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_involution(plasma, wall, 3) !== nothing
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_mirror(plasma, wall, 3) !== nothing
             asym = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1], odd=0.07)
             asym_full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(asym)
             asym_plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(asym_full)
             asym_wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(asym_full, asym_plasma, walled)
-            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_involution(asym_plasma, asym_wall, 3) === nothing
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stellarator_mirror(asym_plasma, asym_wall, 3) === nothing
 
             # The symmetry-adapted solve must reproduce the untransformed one. nfp = 1 and k = 0 split
             # into two real half-size blocks; k ≠ 0 becomes real at full size; nfp = 4, k = 2 is the
-            # self-conjugate class that needs the signed involution rather than the half-twist.
+            # self-conjugate class that needs the signed reflection rather than the half-twist.
             for (nfp, n_modes, wall_settings) in [
                 (1, [1], nowall), (1, [1], walled),
                 (3, [0], walled), (3, [1], nowall), (3, [1], walled),

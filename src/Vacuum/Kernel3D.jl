@@ -336,27 +336,23 @@ grad_greenfunction is the double-layer kernel matrix, where each entry is
 ∇_{x_src} φ(x_obs, x_src) · n_src, and greenfunction is the single-layer kernel matrix,
 where each entry is φ(x_obs, x_src).
 
-Takes advantage of field periodicity to evaluate the kernel only over a single field period, in both
-the observer and the source index: a source in field period `d` is accumulated onto the period-0 column
-with weight `phases[d+1]`, so the block-circulant reduction is applied as the kernel is written and the
-full-torus source blocks are never stored.
+Field periodicity is exploited in both the observer and the source index: a source in field period
+`d` is accumulated onto the period-0 column with weight `phases[d+1]`, so the block-circulant
+reduction happens as the kernel is written and the full-torus source blocks are never stored.
+
+The operators are filled in place as a list of blocks — one element holding the whole matrix unless
+`sym` splits it. `green_blocks` is filled only when `source` is the plasma.
 
 # Arguments
 
-  - `grad_blocks`: Double-layer operator as a list of blocks, filled in place. Without `sym` this is
-    a one-element list holding the whole `(Nobs × Nsrc)` matrix.
-  - `green_blocks`: Single-layer operator, same layout; filled only when `source` is plasma
-  - `observer`: Observer geometry (PlasmaGeometry3D)
-  - `source`: Source geometry (PlasmaGeometry3D)
   - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
   - `RAD_DIM`: Polar radial quadrature order. Angular order = 2 * RAD_DIM
   - `INTERP_ORDER`: Lagrange interpolation order, must be ≤ (2 * PATCH_RAD + 1)
-  - `phases`: Field-period phases `ω^{k d}` for `d = 0 … nfp-1`, with `nfp = length(phases)`. Pass the
-    real `[1.0]` for a single period, which keeps the output matrices real.
-  - `sym`: [`StellaratorBasis`](@ref) for this residue class, or `nothing` to build the untransformed
-    operator. When given, only the involution orbit representatives are evaluated — half the observer
-    points — and each row is emitted in the basis that makes the operator real and, for a
-    self-conjugate class, block diagonal.
+  - `phases`: Field-period phases `ω^{k d}` for `d = 0 … nfp-1`. Pass the real `[1.0]` for a single
+    period, which keeps the output real.
+  - `sym`: [`StellaratorBasis`](@ref) for this class, or `nothing` for the untransformed operator.
+    When given, only one point of each reflection pair is evaluated and each row is emitted in the
+    basis that makes the operator real.
 """
 function compute_3D_kernel_matrices!(
     grad_blocks::AbstractVector{<:AbstractMatrix{<:Number}},
@@ -380,19 +376,20 @@ function compute_3D_kernel_matrices!(
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry3D
 
-    # With the symmetry the partner of each involution orbit follows from its representative, so only
-    # the representatives are evaluated
-    observers = sym === nothing ? (1:num_points_per_fp) : sym.orbit_rep
+    # With the symmetry each reflection pair's second row follows from its first, so only the
+    # representatives are evaluated
+    observers = sym === nothing ? (1:num_points_per_fp) : first.(sym.pairs)
 
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
-    if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
-        @warn "PATCH_RAD=$(PATCH_RAD) is greater than half the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $((min(source.mtheta, source.nzeta) - 1) ÷ 2), be sure to check if outputs are converged. This can be avoided by setting mtheta and nzeta to be greater than $(2 * PATCH_RAD + 1)."
-        PATCH_RAD = (min(source.mtheta, source.nzeta) - 1) ÷ 2
+    # Assigned once: a variable reassigned inside a branch would be boxed by the threaded closure below
+    patch_rad = min(PATCH_RAD, (min(source.mtheta, source.nzeta) - 1) ÷ 2)
+    if patch_rad < PATCH_RAD
+        @warn "PATCH_RAD=$(PATCH_RAD) is greater than half the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $(patch_rad), be sure to check if outputs are converged. This can be avoided by setting mtheta and nzeta to be greater than $(2 * PATCH_RAD + 1)."
     end
 
     # Initialize quadrature data
-    quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
-    (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
+    quad_data = get_singular_quadrature(patch_rad, RAD_DIM, INTERP_ORDER)
+    (; PATCH_DIM, ANG_DIM, Ppou, Gpou, P2G) = quad_data
 
     # Allocate thread-local workspaces (one per thread). One operator row is accumulated at a time so
     # the field-period fold and the basis change both happen before anything is stored.
@@ -401,10 +398,12 @@ function compute_3D_kernel_matrices!(
     Trow = eltype(phases)
     rows_double = [zeros(Trow, num_points_per_fp) for _ in 1:max_threadid]
     rows_single = [zeros(Trow, num_points_per_fp) for _ in 1:max_threadid]
-    partner_rows = [zeros(ComplexF64, sym === nothing ? 0 : num_points_per_fp) for _ in 1:max_threadid]
+    # `emit_row!` needs three rows of scratch: the representative, its partner, and their combination
+    sym_work = [zeros(ComplexF64, sym === nothing ? 0 : 3 * num_points_per_fp) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
-    Threads.@threads for i_orbit in eachindex(observers)
+    # :static pins each task to its thread, so the threadid()-indexed scratch below stays private
+    Threads.@threads :static for i_pair in eachindex(observers)
         # Get thread-local workspace
         tid = Threads.threadid()
         ws = workspaces[tid]
@@ -416,7 +415,7 @@ function compute_3D_kernel_matrices!(
         populate_greenfunction && fill!(row_single, 0)
 
         # Convert linear index to 2D indices
-        idx_obs = observers[i_orbit]
+        idx_obs = observers[i_pair]
         i_obs = mod1(idx_obs, observer.mtheta)
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
         r_obs = @view observer.r[idx_obs, :]
@@ -479,8 +478,8 @@ function compute_3D_kernel_matrices!(
         # POU correction: singular correction + (1 + Gpou) * far-field terms
         @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
             # Map back to global indices
-            idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
-            idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
+            idx_pol = periodic_wrap(i_obs - patch_rad + i - 1, source.mtheta)
+            idx_tor = periodic_wrap(j_obs - patch_rad + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
             d, idx_col = fldmod1(idx_src, num_points_per_fp)
 
@@ -501,14 +500,9 @@ function compute_3D_kernel_matrices!(
         row_double ./= 2π
         populate_greenfunction && (row_single ./= 2π)
 
-        if sym === nothing
-            emit_plain_row!(grad_blocks, row_double, idx_obs, row_index, col_index)
-            populate_greenfunction && emit_plain_row!(green_blocks, row_single, idx_obs, row_index, 1)
-        else
-            partner = partner_rows[tid]
-            emit_symmetric_row!(grad_blocks, sym, row_double, partner, i_orbit, row_index, col_index)
-            populate_greenfunction && emit_symmetric_row!(green_blocks, sym, row_single, partner, i_orbit, row_index, 1)
-        end
+        scratch = sym_work[tid]
+        emit_row!(grad_blocks, sym, row_double, scratch, i_pair, idx_obs, row_index, col_index)
+        populate_greenfunction && emit_row!(green_blocks, sym, row_single, scratch, i_pair, idx_obs, row_index, 1)
     end
 
     # Add the term that comes from the volume integral of Green's identity. The identity is invariant

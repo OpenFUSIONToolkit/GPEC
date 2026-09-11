@@ -51,24 +51,6 @@ function _warn_and_symmetrize!(mat::AbstractMatrix, name::String)
 end
 
 """
-    _fill_Iv_block!(I_v_block, basis, grre, grri, num_points)
-
-Surface-current matrix Iᵛ from the exterior and interior potentials, Park 2007 eq. 21b:
-`μ₀I^v = χ^(vi) - χ^(vo)`. Overwrites the plasma-observer rows of `grri`.
-
-The difference is taken as `grre - grri` and the result conjugated because VACUUM builds the
-operators in its CW-θ frame while GPEC uses CCW-θ, flipping the outward-normal sign.
-"""
-function _fill_Iv_block!(I_v_block::AbstractMatrix, basis::AbstractMatrix, grre::AbstractMatrix, grri::AbstractMatrix, num_points::Int)
-    g_diff = @view grri[1:num_points, :]
-    g_diff .= @view(grre[1:num_points, :]) .- g_diff
-    mul!(I_v_block, basis, g_diff)
-    conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
-    I_v_block ./= num_points
-    return I_v_block
-end
-
-"""
     _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
 2D (axisymmetric) vacuum response calculation.
@@ -142,7 +124,13 @@ Green's functions are internal scratch only.
             end
             ldiv!(lu!(grad_green_interior), grri)
 
-            _fill_Iv_block!(@view(vac_data.I_v[block_idx, block_idx]), ft.basis, grre, grri, num_points_surf)
+            # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b). Overwrites the plasma-observer rows of grri.
+            g_diff = @view grri[1:num_points_surf, :]
+            g_diff .= @view(grre[1:num_points_surf, :]) .- g_diff
+            I_v_block = @view vac_data.I_v[block_idx, block_idx]
+            mul!(I_v_block, ft.basis, g_diff)
+            conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
+            I_v_block ./= num_points_surf
         else
             # Only need exterior system for wv
             ldiv!(lu!(grad_green), grre)
@@ -171,9 +159,8 @@ end
 """
     _conjugate_groups(classes, nfp, enabled) -> Vector{Vector{Int}}
 
-Partition indices into `classes` so that each group is one class plus, when `enabled`, the conjugate
-class `mod(nfp - k, nfp)` if it is also present. Self-conjugate classes (`mod(2k, nfp) == 0`) never
-pair. With `enabled = false` every class is its own group.
+Group each class with its conjugate `mod(nfp - k, nfp)` when `enabled` and that class is present.
+Self-conjugate classes (`mod(2k, nfp) == 0`) never pair; with `enabled = false` nothing pairs.
 """
 function _conjugate_groups(classes::AbstractVector{<:Integer}, nfp::Integer, enabled::Bool)
     enabled || return [[i] for i in eachindex(classes)]
@@ -194,30 +181,16 @@ function _conjugate_groups(classes::AbstractVector{<:Integer}, nfp::Integer, ena
 end
 
 """
-    _as_eltype(R, v)
+    _split_project!(dest, S, Ẽ, work) -> AbstractMatrix{Float64}
 
-View the `Float64` storage `v` as a vector of element type `R`: the identity for `Float64`, a strided
-reinterpret for `ComplexF64`. Both remain `StridedArray`, so a matrix reshaped from either stays on
-the BLAS path.
+Real `[Re Im]` form of `S·Ẽ'` for a real block `S`, written into `dest`. BLAS has no mixed
+real/complex product or triangular solve, so the two halves go through the solve independently and
+[`_unsplit!`](@ref) recombines them.
 """
-_as_eltype(::Type{Float64}, v::AbstractVector{Float64}) = v
-_as_eltype(::Type{ComplexF64}, v::AbstractVector{Float64}) = reinterpret(ComplexF64, v)
-
-"""
-    _split_project!(dest, S, Ẽ, basis_work) -> AbstractMatrix{Float64}
-
-Real form of `S·Ẽ'` for a real operator block `S` and a complex mode basis `Ẽ`, returned as the
-`[Re Im]` column pair written into `dest`.
-
-BLAS offers no mixed real/complex `gemm` or triangular solve, and the generic fallback for the solve
-is ~30x slower than a real one of twice the width. Because `S` and its factorization are real, the
-real and imaginary parts propagate through the solve independently; [`_unsplit!`](@ref) recombines
-them afterwards.
-"""
-function _split_project!(dest::AbstractMatrix{Float64}, S::AbstractMatrix{Float64}, Ẽ::AbstractMatrix{<:Complex}, basis_work::AbstractMatrix{Float64})
+function _split_project!(dest::AbstractMatrix{Float64}, S::AbstractMatrix{Float64}, Ẽ::AbstractMatrix{<:Complex}, work::AbstractMatrix{Float64})
     mc, sz = size(Ẽ)
     adj = Ẽ'
-    Er = @view basis_work[1:sz, 1:(2mc)]
+    Er = @view work[1:sz, 1:(2mc)]
     @views Er[:, 1:mc] .= real.(adj)
     @views Er[:, (mc+1):(2mc)] .= imag.(adj)
     out = @view dest[1:size(S, 1), 1:(2mc)]
@@ -237,46 +210,114 @@ function _unsplit!(dest::AbstractMatrix{<:Complex}, split::AbstractMatrix{Float6
 end
 
 """
-    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false, use_symmetry=true, use_conjugate_pairing=true)
+    _class_mode_columns(n_modes, nfp, k, mpert)
+
+Columns of `wv` for residue class `k`; a range when contiguous, which keeps views of it strided.
+"""
+function _class_mode_columns(n_modes::AbstractVector{<:Integer}, nfp::Integer, k::Integer, mpert::Integer)
+    cols = [idx_m + (idx_n - 1) * mpert for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
+    return length(cols) == cols[end] - cols[1] + 1 ? (cols[1]:cols[end]) : cols
+end
+
+"""
+    _solve_residue_class!(vac_data, mode_cols, mode_basis, op, work, nb, num_points, compute_Iv, partner)
+
+Solve one residue class against the already-factored `op`, accumulating its diagonal blocks of `wv`
+and `I_v`. `mode_basis` is this class's Fourier basis per operator block, already carrying the
+symmetry transform and, for a conjugate `partner`, the conjugation.
+"""
+function _solve_residue_class!(
+    vac_data::VacuumResponse,
+    mode_cols,
+    mode_basis::AbstractVector{<:AbstractMatrix},
+    op::NamedTuple,
+    work::NamedTuple,
+    nb::Int,
+    num_points::Int,
+    compute_Iv::Bool,
+    partner::Bool
+)
+    # Accumulate into dense scratch rather than straight into `vac_data`: a class whose modes are not
+    # contiguous gives a non-strided view, which drops the projections below off BLAS entirely.
+    ncols = length(mode_cols)
+    wv_block = @view work.wv_acc[1:ncols, 1:ncols]
+    Iv_block = @view work.Iv_acc[1:ncols, 1:ncols]
+    fill!(wv_block, 0)
+    compute_Iv && fill!(Iv_block, 0)
+
+    row_offset = 0
+    for (b, sz) in enumerate(op.sizes)
+        nrow = nb * sz
+        rows = (row_offset+1):(row_offset+nrow)
+        row_offset += nrow
+        Ẽ = mode_basis[b]
+        grre_k = @view work.grre[rows, 1:ncols]
+        grri_k = @view work.grri[rows, 1:ncols]
+
+        # The mode basis acts on columns and D⁻¹ on rows, so (D⁻¹S)Ẽᴴ == D⁻¹(SẼᴴ): projecting the RHS
+        # before the solve is exact and carries this class's modes instead of one column per point.
+        # The exterior solve gives grre = -(2π)²χ^(vo), the vacuum-outside potential.
+        if eltype(op.green[b]) === Float64
+            ext = _split_project!(work.rhs_real, op.green[b], Ẽ, work.basis_real)
+            int = @view work.rhs_real_int[1:nrow, 1:size(ext, 2)]
+            compute_Iv && (int .= ext)
+            ldiv!(op.lu_ext[b], ext)
+            _unsplit!(grre_k, ext)
+            if compute_Iv
+                ldiv!(op.lu_int[b], int)
+                _unsplit!(grri_k, int)
+            end
+        else
+            mul!(grre_k, op.green[b], Ẽ')
+            compute_Iv && (grri_k .= grre_k)
+            ldiv!(op.lu_ext[b], grre_k)
+            compute_Iv && ldiv!(op.lu_int[b], grri_k)
+        end
+
+        if compute_Iv
+            # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), accumulated over the blocks
+            g_diff = @view grri_k[1:sz, :]
+            g_diff .= @view(grre_k[1:sz, :]) .- g_diff
+            mul!(Iv_block, Ẽ, g_diff, 1, 1)
+        end
+
+        # Project the exterior kernel onto the observer basis exp(-i(mθ-nζ)), summed over the blocks
+        mul!(wv_block, Ẽ, @view(grre_k[1:sz, :]), 1, 1)
+    end
+
+    wv_block .*= 4π^2 / num_points
+    # A partner solved the conjugated system, so its block conjugates back here
+    partner && conj!(wv_block)
+    @views vac_data.wv[mode_cols, mode_cols] .= wv_block
+
+    if compute_Iv
+        # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame, and normalize. For a partner that
+        # flip and the conjugation of its result cancel.
+        partner || conj!(Iv_block)
+        Iv_block ./= num_points
+        @views vac_data.I_v[mode_cols, mode_cols] .= Iv_block
+    end
+end
+
+"""
+    _compute_vacuum_response_3d!(vac_data, inputs, wall_settings; compute_Iv=false, use_symmetry=true, use_conjugate_pairing=true)
 
 3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction.
 
-The `nfp`-periodic boundary makes the single-/double-layer operators `S`, `D` block-circulant in the
-field-period index, so the problem block-diagonalizes by toroidal residue class `k = mod(n, nfp)`:
-modes with different `k` do not couple, and within a class
+The `nfp`-periodic boundary makes the layer operators block-circulant in the field-period index, so
+the problem block-diagonalizes by toroidal residue class `k = mod(n, nfp)`:
 
     D̂ₖ = Σ_d D_d ω^{k d},   Ŝₖ = Σ_d S_d ω^{k d},   ω = exp(-2πi/nfp),
 
-with `D_d`, `S_d` the blocks coupling observers in field period 0 to sources in period `d`. Each class
-needs one solve `wv[class k] = (4π²/M)·E_localᴴ·(D̂ₖ \\ Ŝₖ)|_plasma·E_local` (`E` the complex Fourier
-basis, `M = mtheta·nzeta`), so the routine loops over classes exactly as the 2D routine loops over
-decoupled `n`. The phase sum is folded into the kernel write, so only the reduced `[nb·M × nb·M]`
-operator is ever stored.
+with `D_d`, `S_d` coupling observers in field period 0 to sources in period `d`. Each class needs one
+solve `wv[k] = (4π²/M)·Ẽᴴ·(D̂ₖ \\ Ŝₖ)|_plasma·Ẽ`, so this loops over classes exactly as the 2D routine
+loops over decoupled `n`. The phase sum is folded into the kernel write, so only the reduced operator
+is stored.
 
-The operator element type is decided per class rather than per call. A self-conjugate class
-(`mod(2k, nfp) == 0`, i.e. `k = 0` and, for even `nfp`, `k = nfp/2`) has `ω^k = ±1`, so its phases and
-its blocks are real; every other class is complex. Both are carved from the same `Float64` backing
-store — the complex ones through a strided reinterpret — so the peak allocation is byte-for-byte that
-of a complex buffer when any class is complex, and half of it when every class is real (`nfp <= 2`, or
-any stellarator-symmetric run). A real class factorizes ~3.5x faster and, because BLAS has no mixed
-real/complex triangular solve, carries its complex right-hand side through the solve as a real
-`[Re Im]` pair (see [`_split_project!`](@ref)).
-
-The field-period blocks `D_d`, `S_d` are real for any boundary, so `D̂₋ₖ = conj(D̂ₖ)` and
-`Ŝ₋ₖ = conj(Ŝₖ)`: a class and its conjugate `mod(nfp - k, nfp)` share one assembly and one
-factorization, the partner differing only by conjugating its Fourier basis and its output block.
-Pass `use_conjugate_pairing=false` to solve every class independently. Self-conjugate classes
-(`mod(2k, nfp) == 0`, which is every class when `nfp <= 2`) are unaffected.
-
-When both surfaces are stellarator symmetric the class operator is additionally transformed by the
-[`StellaratorBasis`](@ref) for that class, which makes it real and — for a self-conjugate class —
-splits it into two blocks of roughly half the size. That halves the operator memory and the kernel
-work, and cuts the factorization ~2.6-2.8×. Pass `use_symmetry=false` to force the untransformed
-solve; a boundary that fails the symmetry test falls through to it automatically.
-
-With `compute_Iv=true` each class also solves the interior operator `D_int = D_ext - 2I`, as in 2D.
-That shift is block-diagonal in the field-period index and invariant under the basis change, so both
-reductions stay exact.
+Two optional reductions apply on top. `use_symmetry` gives a stellarator-symmetric boundary a
+[`StellaratorBasis`](@ref), making the class operator real and splitting a self-conjugate class into
+two half-size blocks. `use_conjugate_pairing` exploits real `D_d`, `S_d`, so `D̂₋ₖ = conj(D̂ₖ)` and
+class `mod(nfp - k, nfp)` reuses this class's factorization with a conjugated mode basis.
 """
 @with_pool pool function _compute_vacuum_response_3d!(
     vac_data::VacuumResponse,
@@ -300,88 +341,66 @@ reductions stay exact.
     mpert = length(m_modes)
     nb = wall.nowall ? 1 : 2            # surface blocks: plasma, or [plasma; wall]
     n_obs = nb * num_points_per_fp      # observer rows: plasma (and wall) points of one field period
+    num_modes = mpert * length(n_modes)
 
     # Complex Fourier basis exp(-i(mθ-nζ)) on a single field period
     exp_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta * nfp, n_modes; nfp=nfp)
 
     # Singular quadrature: 23x23 patch, 20 radial / 40 angular polar nodes, 5-point Lagrange.
-    # Malhotra JCP 397 (2019) 108791 sec 3.2.2 grows these as N^(1/4); over the grids used here
+    # Malhotra JCP 397 (2019) 108791 sec 3.2.2 grows these as N^(1/4); over our grids,
     # that spans M = 19..35 with no measured accuracy gain, so they are fixed.
     PATCH_RAD = 11
     RAD_DIM = 20
     INTERP_ORDER = 5
 
-    # Stellarator symmetry halves both the operator and the kernel work when the surfaces allow it
-    σ = use_symmetry ? stellarator_involution(plasma_surf, wall, nfp) : nothing
+    # One symmetry basis per class when both surfaces allow it; `nothing` falls through untransformed
+    mirror = use_symmetry ? stellarator_mirror(plasma_surf, wall, nfp) : nothing
     classes = unique(mod.(n_modes, nfp))
-    bases = [σ === nothing ? nothing : StellaratorBasis(σ, mtheta, k, nfp) for k in classes]
+    bases = [mirror === nothing ? nothing : StellaratorBasis(mirror, mtheta, k, nfp) for k in classes]
     block_sizes = [b === nothing ? [num_points_per_fp] : b.block_size for b in bases]
 
     # Group each class with its conjugate; the representative is the only one assembled and factored
     groups = _conjugate_groups(classes, nfp, use_conjugate_pairing)
-    has_pairs = any(g -> length(g) > 1, groups)
 
-    # The operator element type is a per-class property. A self-conjugate class has ω^k = ±1, so its
-    # field-period phases and hence its blocks are real; the symmetry-adapted basis makes every class
-    # real. A real class halves the operator storage and cuts the factorization ~3.5x, so it is worth
-    # keeping off the complex path even though its neighbours in the loop are complex.
-    real_class(k) = σ !== nothing || mod(2k, nfp) == 0
-    reps = [classes[g[1]] for g in groups]
-    any_complex = any(k -> !real_class(k), reps)
-    any_real = any(k -> real_class(k), reps)
+    # The operator is real under the symmetry basis, and also when every class is self-conjugate
+    # (`ω^k = ±1`, so the field-period phases are real). That halves its storage and cuts the
+    # factorization ~3.5x, at the cost of carrying the complex right-hand side as an [Re Im] pair.
+    T = (mirror !== nothing || all(k -> mod(2k, nfp) == 0, classes)) ? Float64 : ComplexF64
 
-    # One flat Float64 buffer per operator, carved into this class's blocks each pass and
-    # reinterpreted as complex for the classes that need it. Sizing the backing store in Float64
-    # rather than in the operator type keeps the peak allocation byte-for-byte identical to a complex
-    # buffer when any class is complex, and halves it when every class is real (nfp ≤ 2, or any
-    # stellarator-symmetric run), so the mixed-type solve below costs no memory.
-    grad_len = maximum(sum((nb * sz)^2 for sz in szs) for szs in block_sizes)
-    green_len = maximum(sum(nb * sz * sz for sz in szs) for szs in block_sizes)
-    stride_T = any_complex ? 2 : 1
-    grad_buffer = zeros!(pool, Float64, stride_T * grad_len)
-    green_buffer = zeros!(pool, Float64, stride_T * green_len)
-    interior_buffer = compute_Iv ? zeros!(pool, Float64, stride_T * grad_len) : zeros!(pool, Float64, 0)
-    grre = zeros!(pool, ComplexF64, n_obs, mpert * length(n_modes))
-    grri = compute_Iv ? similar!(pool, grre) : zeros!(pool, ComplexF64, 0, 0)
-    basis_buffer = zeros!(pool, ComplexF64, mpert * length(n_modes), (σ === nothing && !has_pairs) ? 0 : num_points_per_fp)
-
-    # Scratch for the real classes' split right-hand side (see `_split_project!`). Each is the size of
-    # one `grre`, negligible beside the O(N_p²) operator it lets us keep real.
-    rhs_cols = mpert * length(n_modes)
-    rhs_real = any_real ? zeros!(pool, Float64, n_obs, 2 * rhs_cols) : zeros!(pool, Float64, 0, 0)
-    rhs_real_int = (any_real && compute_Iv) ? similar!(pool, rhs_real) : zeros!(pool, Float64, 0, 0)
-    basis_real = any_real ? zeros!(pool, Float64, num_points_per_fp, 2 * rhs_cols) : zeros!(pool, Float64, 0, 0)
-
-    # Carve a flat buffer into this class's blocks. A reshaped contiguous view stays strided, and so
-    # does a complex reinterpret of one, so the factorizations and matrix products below stay on the
-    # BLAS path either way.
-    function carve(buffer, szs, ncols, ::Type{R}) where {R}
-        w = R === ComplexF64 ? 2 : 1
-        offsets = cumsum([0; [nb * sz * ncols(sz) for sz in szs]])
-        return [reshape(_as_eltype(R, view(buffer, (w*offsets[i]+1):(w*offsets[i+1]))), nb * szs[i], ncols(szs[i])) for i in eachindex(szs)]
-    end
+    # `grre`/`grri` hold the exterior and interior solves; both are O(n_obs · num_modes), small beside
+    # the O(n_obs²) operator, so they are allocated unconditionally to keep the solve branch-free.
+    grre = zeros!(pool, ComplexF64, n_obs, num_modes)
+    grri = zeros!(pool, ComplexF64, n_obs, num_modes)
+    # Holds this class's mode basis, symmetry-transformed and/or conjugated as the class requires
+    basis_buffer = zeros!(pool, ComplexF64, num_modes, num_points_per_fp)
+    # Scratch for a real operator's split right-hand side, each the size of one `grre`
+    # Dense per-class accumulators for the wv / I_v projections (see `_solve_residue_class!`)
+    wv_acc = zeros!(pool, ComplexF64, num_modes, num_modes)
+    Iv_acc = zeros!(pool, ComplexF64, num_modes, num_modes)
+    rhs_real = zeros!(pool, Float64, T === Float64 ? n_obs : 0, 2 * num_modes)
+    rhs_real_int = zeros!(pool, Float64, T === Float64 ? n_obs : 0, 2 * num_modes)
+    basis_real = zeros!(pool, Float64, T === Float64 ? num_points_per_fp : 0, 2 * num_modes)
+    work = (; grre, grri, rhs_real, rhs_real_int, basis_real, wv_acc, Iv_acc)
 
     # Loop over the representatives of the conjugate-paired residue classes
     for group in groups
-        idx_k = group[1]
-        k = classes[idx_k]
-        sym = bases[idx_k]
-        szs = block_sizes[idx_k]
+        # This class's operator is the only large allocation; rewind at the end of the pass so the
+        # next class reuses the same memory and peak usage stays at one class.
+        checkpoint!(pool)
+        idx_rep = group[1]
+        k = classes[idx_rep]
+        sym = bases[idx_rep]
+        szs = block_sizes[idx_rep]
+        offsets = cumsum([0; szs])
+        block_ranges = [(offsets[i]+1):offsets[i+1] for i in eachindex(szs)]
 
-        # Phases are real whenever ω^k = ±1, i.e. for a self-conjugate class, which keeps the whole
-        # class on the real BLAS path. Under the symmetry-adapted basis the operator is real for every
-        # class, so a complex phase there is still emitted into a real block by `emit_symmetric_row!`.
-        self_conj = mod(2k, nfp) == 0
-        phases = if self_conj
-            sgn = isodd(2k ÷ nfp) ? -1.0 : 1.0
-            Float64[sgn^d for d in 0:(nfp-1)]
-        else
-            ComplexF64[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
-        end
+        # Field-period phases ω^{k d}. Exactly ±1 when 2k ≡ 0 (mod nfp), and taking them real there
+        # keeps a self-conjugate class off the complex path.
+        ω = ComplexF64[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
+        phases = mod(2k, nfp) == 0 ? round.(real.(ω)) : ω
 
-        Top = real_class(k) ? Float64 : ComplexF64
-        grad_blocks = carve(grad_buffer, szs, sz -> nb * sz, Top)
-        green_blocks = carve(green_buffer, szs, sz -> sz, Top)
+        grad_blocks = [zeros!(pool, T, nb * sz, nb * sz) for sz in szs]
+        green_blocks = [zeros!(pool, T, nb * sz, sz) for sz in szs]
 
         # Plasma–Plasma block
         compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
@@ -389,122 +408,49 @@ reductions stay exact.
         if !wall.nowall
             # Plasma–Wall block
             compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
-            # Wall–Plasma block
-            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
             # Wall–Wall block
             compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
+            # Wall–Plasma block
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym)
         end
 
-        interior_blocks = compute_Iv ? carve(interior_buffer, szs, sz -> nb * sz, Top) : grad_blocks
-        if compute_Iv
-            # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
-            # boundary limits is 2I here, giving the vacuum-inside potential. Copy before the
-            # factorization below overwrites the exterior block.
+        # Factor once per group; the conjugate partner reuses these factorizations. The exterior
+        # operator is D_ext = 2I + 𝒦 (Chance 1997 eq. 89). Factoring overwrites the blocks, so the
+        # interior operator D_int = D_ext - 2I is copied off first (2D comment explains the shift).
+        lu_int = if compute_Iv
+            interior = [zeros!(pool, T, nb * sz, nb * sz) for sz in szs]
             for (b, sz) in enumerate(szs)
-                interior_blocks[b] .= grad_blocks[b]
+                interior[b] .= grad_blocks[b]
                 for i in 1:(nb*sz)
-                    interior_blocks[b][i, i] -= 2.0
+                    interior[b][i, i] -= 2
                 end
             end
+            [lu!(g) for g in interior]
+        else
+            LU{T,Matrix{T},Vector{Int}}[]
         end
-
-        # Factor once per group; the conjugate class reuses these factorizations. The exterior
-        # operator is D_ext = 2I + 𝒦 (Chance 1997 eq. 89). Overwrites the blocks to save memory.
         lu_ext = [lu!(g) for g in grad_blocks]
-        lu_int = compute_Iv ? [lu!(g) for g in interior_blocks] : lu_ext
+        op = (; green=green_blocks, lu_ext, lu_int, sizes=szs)
 
         for (member, idx_class) in enumerate(group)
             # The conjugate class solves conj(D̂ₖ)x = conj(Ŝₖ)Eᴴ; conjugating that identity turns it
             # into the representative's operator acting on conj(E), with the result conjugated back.
             partner = member > 1
-            cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == classes[idx_class] for idx_m in 1:mpert]
-            # A contiguous class (always so for nfp == 1) keeps the basis and output views strided, and so on the BLAS path
-            mode_cols = length(cols) == cols[end] - cols[1] + 1 ? (cols[1]:cols[end]) : cols
-            # Diagonal block of wv (and I_v when requested)
-            wv_block = @view vac_data.wv[mode_cols, mode_cols]
+            mode_cols = _class_mode_columns(n_modes, nfp, classes[idx_class], mpert)
             E = @view exp_mn_basis[mode_cols, :]
 
-            # Mode basis in the symmetry-adapted basis; Ẽ = E·U carries the transform through the solve
-            mode_basis = if sym !== nothing
-                mb = [view(basis_buffer, 1:length(mode_cols), (sum(szs[1:(i-1)])+1):sum(szs[1:i])) for i in eachindex(szs)]
-                transform_mode_basis!(mb, E, sym; conjugate=partner)
-                mb
-            elseif partner
-                Ec = @view basis_buffer[1:length(mode_cols), :]
-                Ec .= conj.(E)
-                [Ec]
+            # Ẽ = conj?(E)·U carries the change of basis through the solve. U is unitary, so the
+            # right-hand side, the wv projection and I_v are all unchanged by it.
+            mode_basis = [view(basis_buffer, 1:length(mode_cols), r) for r in block_ranges]
+            if sym === nothing
+                mode_basis[1] .= partner ? conj.(E) : E
             else
-                [E]
+                transform_mode_basis!(mode_basis, E, sym; conjugate=partner)
             end
 
-            row_offset = 0
-            for (b, sz) in enumerate(szs)
-                nrow = nb * sz
-                rows = (row_offset+1):(row_offset+nrow)
-                Ẽ = mode_basis[b]
-                grre_k = @view grre[rows, 1:length(mode_cols)]
-
-                # The mode basis acts on columns and D⁻¹ on rows, so (D⁻¹S)Eᴴ == D⁻¹(SEᴴ): projecting the
-                # RHS before the solve is exact and carries this class's modes instead of one column per point.
-                # A real class carries the projection and both solves as a real [Re Im] pair, since BLAS
-                # has no mixed real/complex product or triangular solve.
-                if Top === Float64
-                    ext_split = _split_project!(rhs_real, green_blocks[b], Ẽ, basis_real)
-
-                    if compute_Iv
-                        grri_k = @view grri[rows, 1:length(mode_cols)]
-                        int_split = @view rhs_real_int[1:nrow, 1:size(ext_split, 2)]
-                        int_split .= ext_split
-
-                        # The exterior solve gives grre = -(2π)²χ^(vo), the vacuum-outside potential
-                        ldiv!(lu_ext[b], ext_split)
-                        ldiv!(lu_int[b], int_split)
-                        _unsplit!(grre_k, ext_split)
-                        _unsplit!(grri_k, int_split)
-                    else
-                        ldiv!(lu_ext[b], ext_split)
-                        _unsplit!(grre_k, ext_split)
-                    end
-                else
-                    mul!(grre_k, green_blocks[b], Ẽ')
-
-                    if compute_Iv
-                        # Copy RHS before exterior solve overwrites grre; keep a kernel copy for interior
-                        grri_k = @view grri[rows, 1:length(mode_cols)]
-                        grri_k .= grre_k
-
-                        # The exterior solve gives grre = -(2π)²χ^(vo), the vacuum-outside potential
-                        ldiv!(lu_ext[b], grre_k)
-                        ldiv!(lu_int[b], grri_k)
-                    else
-                        # Only need exterior system for wv
-                        ldiv!(lu_ext[b], grre_k)
-                    end
-                end
-
-                if compute_Iv
-                    # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), accumulated over the parity blocks
-                    grri_k = @view grri[rows, 1:length(mode_cols)]
-                    g_diff = @view grri_k[1:sz, :]
-                    g_diff .= @view(grre_k[1:sz, :]) .- g_diff
-                    mul!(@view(vac_data.I_v[mode_cols, mode_cols]), Ẽ, g_diff, 1, 1)
-                end
-
-                # Project exterior kernel onto observer basis exp(-i(mθ-nζ)), summed over the blocks
-                mul!(wv_block, Ẽ, @view(grre_k[1:sz, :]), 1, 1)
-                row_offset += nrow
-            end
-            wv_block .*= 4π^2 / num_points_per_fp
-            partner && conj!(wv_block)
-
-            if compute_Iv
-                # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame, and normalize. For the
-                # conjugate class that flip and the conjugation of its result cancel.
-                Iv_block = @view vac_data.I_v[mode_cols, mode_cols]
-                partner || conj!(Iv_block)
-                Iv_block ./= num_points_per_fp
-            end
+            _solve_residue_class!(vac_data, mode_cols, mode_basis, op, work, nb, num_points_per_fp, compute_Iv, partner)
         end
+        rewind!(pool)
     end
 
     # Remove any non-Hermitian residual from Hermitian matrices due to discretization
