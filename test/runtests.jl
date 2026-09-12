@@ -37,6 +37,7 @@ else
     include("./runtests_tolerance_toml.jl")
     include("./runtests_sampling.jl")
     include("./runtests_monte_carlo.jl")
+    include("./runtests_risk.jl")
     include("./runtests_sing.jl")
     include("./runtests_innerlayer.jl")
     include("./runtests_tj_analytic.jl")

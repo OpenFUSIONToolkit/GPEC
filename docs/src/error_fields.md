@@ -189,6 +189,45 @@ mc.pdf_efc                     # corrected
 mc.mean_abs_delta, mc.delta_nominal
 ```
 
+## Locking risk and allowable tolerance
+
+An overlap distribution becomes a locking risk through the empirical ITPA penetration-threshold
+scalings (n = 1: Logan et al., *Plasma Phys. Control. Fusion* **62**, 084001 (2020); n = 2:
+Logan et al., *Nucl. Fusion* **60**, 086010 (2020)):
+`δ_thresh = 10^α_c · n_e^α_n · B_T^α_B · R_0^α_R · (β_N/l_i)^α_β`. Sampling the fitted exponents
+within their standard errors turns the threshold into a distribution; its cumulative
+distribution is the probability that an overlap `δ` locks, and the locking probability of the
+assembled machine is `100 ∫ pdf(δ) P(lock|δ) dδ` over the Monte Carlo bins, per batch. The
+operating point is an `[ErrorFields.scenario]` table: density must be given (it is not an
+equilibrium output); field, major radius, β_N and l_i default from the equilibrium.
+
+```toml
+[ErrorFields.scenario]
+n_e = 5.0                       # Electron density for the threshold scaling [1e19 m^-3]
+
+[ErrorFields.Risk]
+dataset = "O,L"                 # ITPA dataset of the threshold fit: "O,L" or "O,L,H" (n = 1); "O,L", "O,L,-C", "O,L,N" (n = 2)
+fit = "WLS"                     # Fitting method: "OLS", "DSOLS", or "WLS"
+distribution = "normal"         # How the fit exponents are sampled: "normal", "flat", or "normal_truncated"
+nsample_threshold = 1000000     # Threshold samples
+seed = 1                        # Seed of the threshold sampling
+scan_scales = [0.25, 0.5, 1.0, 2.0, 4.0]   # Tolerance multipliers of the allowable-tolerance scan (empty: no scan)
+```
+
+`ErrorFields/Risk/` holds the threshold density and `P(lock|δ)` on the Monte Carlo grid, the
+locking probability of the intrinsic and corrected distributions (with per-batch values), the
+as-designed risk, and the sharp-threshold risk; `ErrorFields/Risk/ToleranceScan/` the risk
+against tolerance scale. The scan is the stored quantity; the allowable tolerance for a target
+risk is a post-hoc inversion, and every window or fit choice is re-evaluated from the file:
+
+```julia
+scan = EF.ToleranceScan("gpec.h5")
+EF.allowable_tolerance(scan, 1.0)                  # tolerance multiplier at 1 % locking risk
+EF.allowable_tolerance(scan, 1.0; corrected=true)  # with error-field correction
+risk = EF.locking_risk("gpec.h5"; n_e=5.0, psi_low=0.7, risk_ctrl=EF.RiskControl(; dataset="O,L,H"))
+scan2 = EF.tolerance_scan("gpec.h5"; n_e=5.0, scales=[0.5, 1, 2, 4], coil_subset=["F6A", "F7A"])
+```
+
 ## Analysis after the run
 
 Window the coupling to any range of rational surfaces and project onto any singular mode
