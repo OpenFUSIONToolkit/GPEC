@@ -266,7 +266,7 @@ function main_from_inputs(
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, coil_sensitivities=nothing, monte_carlo=nothing)
+        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, coil_sensitivities=nothing, monte_carlo=nothing, locking_risk=nothing)
     end
 
     pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
@@ -274,7 +274,7 @@ function main_from_inputs(
     run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles, kf_species)
 
     error_fields = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets)
-    coil_sensitivities, monte_carlo = error_fields === nothing ? (nothing, nothing) : error_fields
+    coil_sensitivities, monte_carlo, locking_risk = error_fields === nothing ? (nothing, nothing, nothing) : error_fields
 
     # SLAYER runs after PE so it appends to the PE output file; it falls back to the
     # ForceFreeStates file when PE did not run.
@@ -293,7 +293,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, coil_sensitivities, monte_carlo)
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, coil_sensitivities, monte_carlo, locking_risk)
 
 end
 
@@ -994,13 +994,15 @@ function forcing_terms_control(inputs::Dict{String,Any})
 end
 
 """
-    run_error_fields(inputs, result, pe_state, preloaded_coil_sets) -> (sensitivities, monte_carlo) or nothing
+    run_error_fields(inputs, result, pe_state, preloaded_coil_sets) -> (sensitivities, monte_carlo, risk) or nothing
 
 Linearize every coil set's resonant drive with respect to its rigid shifts and tilts and write
 `ErrorFields/CoilSensitivities/` when the deck carries an `[ErrorFields]` section. When the
 section names a `tolerance_file`, read, validate and echo it, then run the tolerance Monte
 Carlo on the full-window dominant mode with the `[ErrorFields.MonteCarlo]` settings and write
-`ErrorFields/MonteCarlo/`; `monte_carlo` is `nothing` otherwise. Needs the
+`ErrorFields/MonteCarlo/`; with an `[ErrorFields.scenario]` table as well, evaluate the locking
+risk (and the tolerance scan when `[ErrorFields.Risk]` names `scan_scales`) and write
+`ErrorFields/Risk/`. Stages not requested return `nothing`. Needs the
 perturbed-equilibrium state's singular-coupling matrix and coil-format forcing, and errors
 otherwise: a deck asking for error-field sensitivities without them is a misconfiguration, not a
 case to skip silently. Coil geometry is rebuilt from the deck unless a replay injected it.
@@ -1016,10 +1018,14 @@ function run_error_fields(
     @info "\n  ErrorFields\n$_SECTION"
     ef_start = time()
 
-    # [ErrorFields.MonteCarlo] is a nested table, excluded from the control-struct splat.
+    # [ErrorFields.MonteCarlo], [ErrorFields.Risk] and [ErrorFields.scenario] are nested tables,
+    # excluded from the control-struct splat.
     ef_raw = inputs["ErrorFields"]
-    ef_ctrl = ErrorFields.ErrorFieldsControl(; (Symbol(k) => v for (k, v) in ef_raw if k != "MonteCarlo")...)
+    nested = ("MonteCarlo", "Risk", "scenario")
+    ef_ctrl = ErrorFields.ErrorFieldsControl(; (Symbol(k) => v for (k, v) in ef_raw if !(k in nested))...)
     mc_ctrl = ErrorFields.MonteCarloControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "MonteCarlo", Dict{String,Any}()))...)
+    risk_ctrl = ErrorFields.RiskControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "Risk", Dict{String,Any}()))...)
+    scenario_raw = get(ef_raw, "scenario", nothing)
     pe_state === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section with compute_singular_coupling = true")
     ft_ctrl = forcing_terms_control(inputs)
     ft_ctrl.forcing_data_format == "coil" ||
@@ -1051,6 +1057,26 @@ function run_error_fields(
               "(nominal $(@sprintf("%.3e", monte_carlo.delta_nominal)))"
     end
 
+    # Locking risk needs the operating point: [ErrorFields.scenario] with at least n_e.
+    risk = nothing
+    scan = nothing
+    if monte_carlo !== nothing && scenario_raw !== nothing
+        haskey(scenario_raw, "n_e") || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
+        scen = ErrorFields.ScenarioParameters(result.equil; (Symbol(k) => v for (k, v) in scenario_raw)...)
+        sc = ErrorFields.threshold_scaling(; n=result.nlow, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
+        risk_start = time()
+        risk = ErrorFields.locking_risk(monte_carlo, sc, scen; ctrl=risk_ctrl)
+        @info "Locking risk ($(sc.dataset) $(sc.fit), n=$(sc.n)): threshold $(@sprintf("%.3e", risk.threshold_nominal)); " *
+              "P_lock = $(@sprintf("%.2f", risk.plock)) % intrinsic, $(@sprintf("%.2f", risk.plock_efc)) % corrected, " *
+              "$(@sprintf("%.2f", risk.plock_nominal)) % as designed ($(@sprintf("%.2f", time() - risk_start)) s)"
+        if !isempty(risk_ctrl.scan_scales)
+            scan_start = time()
+            scan = ErrorFields.tolerance_scan(ErrorFields.sensitivity_table(sens, dom), tolerances, coil_sets, mc_ctrl, sc, scen;
+                scales=risk_ctrl.scan_scales, risk_ctrl)
+            @info "Tolerance scan over $(length(scan.scale)) scales in $(@sprintf("%.2f", time() - scan_start)) s"
+        end
+    end
+
     if ef_ctrl.write_outputs_to_HDF5
         output_file = isempty(ef_ctrl.output_filename) ? result.control.HDF5_filename : ef_ctrl.output_filename
         h5open(joinpath(result.dir_path, output_file), "cw") do h5file
@@ -1058,13 +1084,14 @@ function run_error_fields(
             # Raw echo of the tolerance input for replay (read back by ErrorFields.read_tolerance_snapshot).
             tolerances === nothing || ErrorFields.write_tolerance_snapshot!(h5file, tolerances)
             monte_carlo === nothing || ErrorFields.write_to_hdf5!(h5file, monte_carlo)
+            risk === nothing || ErrorFields.write_to_hdf5!(h5file, risk; scan)
         end
         @info "Results written to $output_file"
     end
 
     @info "ErrorFields completed in $(@sprintf("%.3f", time() - ef_start)) s"
 
-    return sens, monte_carlo
+    return sens, monte_carlo, risk
 end
 
 """
