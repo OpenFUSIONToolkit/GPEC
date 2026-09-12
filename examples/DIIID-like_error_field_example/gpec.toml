@@ -1,6 +1,6 @@
 # DIII-D-like H-mode equilibrium — n=1 error-field sensitivity of the poloidal-field coils.
 # Same free-boundary ideal solve as DIIID-like_ideal_example, with the DIII-D C-coil supplying
-# the nominal n=1 forcing and every F coil (F1A–F9B) added as a single-filament hoop at the
+# a small intrinsic n=1 error field and every F coil (F1A–F9B) added as a single-filament hoop at the
 # centroid of its winding pack, from OpenFUSIONToolkit's TokaMaker DIIID_geom.json. An
 # axisymmetric hoop drives no n=1 field as built, so each F coil's error-field content is
 # entirely its sensitivity to misalignment: the [ErrorFields] stage linearizes every coil set's
@@ -67,7 +67,7 @@ nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
 
 [[ForcingTerms.coil_set]]
 name = "c"                              # Coil set; resolves to coil_geometries/d3d_c.dat (DIII-D C-coil, 6 coils): the nominal n=1 source
-currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
+currents = [20.0, 10.0, -10.0, -20.0, -10.0, 10.0]  # n=1 cosine phasing, 20 A peak: an intrinsic error field just below the penetration threshold [A]
 
 [[ForcingTerms.coil_set]]
 name = "F1A"                            # DIII-D F coil F1A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
@@ -213,7 +213,16 @@ verbose = true                          # Log per-coil-set progress and linearit
 tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the run directory
 
 [ErrorFields.MonteCarlo]
-nsample = 1000000                       # Samples per batch
+nsample = 200000                        # Samples per batch
 nbatch = 10                             # Independent batches; their spread is the statistical error bar
 seed = 1                                # Base seed; batch b uses Xoshiro(hash((seed, b)))
 nbins = 300                             # Histogram bins, linear on [0, delta_max]
+
+[ErrorFields.scenario]
+n_e = 5.0                               # Electron density for the threshold scaling [1e19 m^-3]
+
+[ErrorFields.Risk]
+dataset = "O,L"                         # ITPA dataset of the threshold fit: "O,L" or "O,L,H" (n = 1)
+fit = "WLS"                             # Fitting method: "OLS", "DSOLS", or "WLS"
+nsample_threshold = 1000000             # Threshold samples
+scan_scales = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]   # Tolerance multipliers of the allowable-tolerance scan
