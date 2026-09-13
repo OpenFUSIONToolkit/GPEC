@@ -145,42 +145,6 @@ _scan_values(c::EFCCoupling, field::Symbol) =
     field === :full ? c.torque_full_scan :
     throw(ArgumentError("field must be :residual or :full, got $field"))
 
-"""
-    torque_at(c::EFCCoupling, Δω; field=:residual) -> Float64
-
-The tabulated torque, N·m per kAt², at rotation shift `Δω` by linear interpolation of the scan;
-`NaN` outside the scanned span. Without a scan the nominal torque, for any shift.
-"""
-function torque_at(c::EFCCoupling, Δω::Real; field::Symbol=:residual)
-    T = _scan_values(c, field)
-    x = c.rotation_shift
-    length(x) == 1 && return T[1]
-    (Δω < x[1] || Δω > x[end]) && return NaN
-    i = clamp(searchsortedlast(x, Δω), 1, length(x) - 1)
-    t = (Δω - x[i]) / (x[i+1] - x[i])
-    return (1 - t) * T[i] + t * T[i+1]
-end
-
-"""
-    torque_zero_crossings(c::EFCCoupling; field=:residual) -> Vector{Float64}
-
-Rotation shifts at which the tabulated torque changes sign (linear interpolation between scan
-points): the neoclassical offsets of this field, as found rather than estimated.
-"""
-function torque_zero_crossings(c::EFCCoupling; field::Symbol=:residual)
-    T = _scan_values(c, field)
-    x = c.rotation_shift
-    out = Float64[]
-    for i in 1:(length(x)-1)
-        if T[i] * T[i+1] < 0
-            push!(out, x[i] - T[i] * (x[i+1] - x[i]) / (T[i+1] - T[i]))
-        elseif T[i] == 0 && (i == 1 || T[i-1] != 0)
-            push!(out, x[i])
-        end
-    end
-    return out
-end
-
 # Bisection of a continuous g on [a, b] with g(a)·g(b) ≤ 0, to relative width `rtol`.
 function _bisect(g, a::Float64, b::Float64; rtol::Float64=1e-10, maxiter::Int=200)
     ga, gb = g(a), g(b)
@@ -199,6 +163,47 @@ function _bisect(g, a::Float64, b::Float64; rtol::Float64=1e-10, maxiter::Int=20
     end
     return 0.5 * (a + b)
 end
+
+# Cubic spline of a tabulated torque against the rotation shift (the code base's interpolant).
+_scan_spline(c::EFCCoupling, field::Symbol) = cubic_interp(c.rotation_shift, _scan_values(c, field))
+
+"""
+    torque_at(c::EFCCoupling, Δω; field=:residual) -> Float64
+
+The tabulated torque, N·m per kAt², at rotation shift `Δω` from a cubic spline through the scan
+points; `NaN` outside the scanned span. Without a scan the nominal torque, for any shift.
+"""
+function torque_at(c::EFCCoupling, Δω::Real; field::Symbol=:residual)
+    T = _scan_values(c, field)
+    x = c.rotation_shift
+    length(x) == 1 && return T[1]
+    (Δω < x[1] || Δω > x[end]) && return NaN
+    return _scan_spline(c, field)(Float64(Δω))
+end
+
+"""
+    torque_zero_crossings(c::EFCCoupling; field=:residual) -> Vector{Float64}
+
+Rotation shifts at which the tabulated torque changes sign: each sign change between scan
+points is bracketed and the zero of the cubic spline found inside it. These are the
+neoclassical offsets of this field, as found rather than estimated.
+"""
+function torque_zero_crossings(c::EFCCoupling; field::Symbol=:residual)
+    T = _scan_values(c, field)
+    x = c.rotation_shift
+    length(x) == 1 && return Float64[]
+    s = _scan_spline(c, field)
+    out = Float64[]
+    for i in 1:(length(x)-1)
+        if T[i] * T[i+1] < 0
+            push!(out, _bisect(s, x[i], x[i+1]))
+        elseif T[i] == 0 && (i == 1 || T[i-1] != 0)
+            push!(out, x[i])
+        end
+    end
+    return out
+end
+
 
 """
     rotation_shift(c::EFCCoupling, current; torque_budget, omega_reference=c.omega_reference, field=:residual) -> Float64
@@ -230,7 +235,7 @@ function rotation_shift(c::EFCCoupling, current::Real; torque_budget::Real, omeg
         if g(a) * g(b) <= 0
             root = _bisect(g, min(a, b), max(a, b))
             # A restoring balance needs the torque falling through the crossing in the sense of the shift.
-            slope = (torque_at(c, b; field) - torque_at(c, a; field)) / (b - a)
+            slope = deriv1(_scan_spline(c, field))(root)
             TORQUE_ROTATION_SIGN * slope * sign(omega_reference) > 0 &&
                 @warn "rotation_shift: the torque of $(c.coil_name) grows with the rotation at the balance point Δω = $(root) rad/s; check TORQUE_ROTATION_SIGN against the kernel's convention" maxlog =
                     1

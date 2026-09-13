@@ -84,7 +84,12 @@ using HDF5
         @test EF.has_rotation_scan(scanned) && !EF.has_rotation_scan(c)
         @test EF.torque_at(scanned, 0.0) == 0.02
         @test EF.torque_at(scanned, ω_off) ≈ 0 atol = 1e-12
-        @test EF.torque_at(scanned, 1.23e4) ≈ Tlin(1.23e4)                     # linear table interpolates exactly
+        @test EF.torque_at(scanned, 1.23e4) ≈ Tlin(1.23e4)                     # a linear table is reproduced exactly
+        # The cubic spline reproduces a quadratic table exactly between the knots, and finds its zero.
+        Tq(Δ) = 0.02 * (1 - Δ / ω_off) * (1 + Δ / 1.0e5)
+        quad = EF.EFCCoupling("quad", 2.0e-5, 40.0, 0.05, 0.02, Δ, 2.5 .* Tq.(Δ), Tq.(Δ), ω_ref, ω_off, Float64[], zeros(0, 1), zeros(0, 1))
+        @test EF.torque_at(quad, 1.23e4) ≈ Tq(1.23e4) rtol = 1e-10
+        @test EF.torque_zero_crossings(quad) ≈ [ω_off] rtol = 1e-8
         @test isnan(EF.torque_at(scanned, 7e4)) && EF.torque_at(c, 1e9) == c.torque_residual_per_kat2
         @test EF.torque_at(scanned, 0.0; field=:full) == 0.05
         @test EF.torque_zero_crossings(scanned) ≈ [ω_off] atol = 1e-9

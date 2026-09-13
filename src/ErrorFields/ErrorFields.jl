@@ -41,6 +41,7 @@ using Printf
 using TOML
 using Random
 import Random: AbstractRNG
+using FastInterpolations: cubic_interp, deriv1
 
 import ..Equilibrium
 import ..ForcingTerms

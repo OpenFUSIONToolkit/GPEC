@@ -1194,17 +1194,13 @@ function efc_couplings(
         T = real(r.total_torque)
         prof = zeros(Float64, length(ψk))
         if length(r.psi_grid) >= 2
-            tc = real.(r.t_cumulative)
+            # Cubic spline of the cumulative torque on the quadrature's own ψ points (deduplicated), zero
+            # inside the first point and the total beyond the last.
+            keep = [i == 1 || r.psi_grid[i] > r.psi_grid[i-1] for i in eachindex(r.psi_grid)]
+            pg, tc = r.psi_grid[keep], real.(r.t_cumulative[keep])
+            spl = length(pg) >= 4 ? cubic_interp(pg, tc) : nothing
             for (k, ψ) in enumerate(ψk)
-                if ψ <= r.psi_grid[1]
-                    prof[k] = 0.0
-                elseif ψ >= r.psi_grid[end]
-                    prof[k] = tc[end]
-                else
-                    i = searchsortedlast(r.psi_grid, ψ)
-                    t = (ψ - r.psi_grid[i]) / (r.psi_grid[i+1] - r.psi_grid[i])
-                    prof[k] = (1 - t) * tc[i] + t * tc[i+1]
-                end
+                prof[k] = ψ <= pg[1] ? 0.0 : ψ >= pg[end] ? tc[end] : spl === nothing ? tc[searchsortedlast(pg, ψ)] : spl(ψ)
             end
         end
         return T, prof
