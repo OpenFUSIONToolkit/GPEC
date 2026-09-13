@@ -70,5 +70,6 @@ export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, ScenarioPar
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
 export PhasingMap, phasing_map, extreme_phasing
 export NTVControl, EFCCoupling, residual_spectrum, correction_current, max_correctable_overlap, efc_current_curve, read_efc_couplings
+export has_rotation_scan, rotation_scan_span, torque_at, torque_zero_crossings, rotation_shift, threshold_factor
 
 end # module ErrorFields

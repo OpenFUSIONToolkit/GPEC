@@ -261,23 +261,44 @@ end
 
 Correction current against intrinsic overlap for each correction array of a run
 (`ErrorFields/NTV/`): the linear single-mode current and the NTV-limited current whose residual
-torque lowers the threshold, with the largest correctable overlap marked. `delta_threshold`
-defaults to the run's nominal penetration threshold (`ErrorFields/Risk/threshold_nominal`);
-`torque_budget` is the torque, N·m, the rotation can afford to lose.
+torque lowers the threshold, with the largest correctable overlap marked; when the run
+tabulated the torques against rotation, a second panel shows those tables with the offsets
+found and the reference rotation, and the curve uses the torque balance (`model`,
+`rotation_exponent` as in `efc_current_curve`). `delta_threshold` defaults to the run's nominal
+penetration threshold (`ErrorFields/Risk/threshold_nominal`); `torque_budget` is the torque,
+N·m, that would bring the reference rotation to rest.
 """
 function plot_efc_ntv_limits(couplings::Vector{EF.EFCCoupling}; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0,
-    delta_max::Real=15, save_path=nothing)
+    delta_max::Real=15, model::Symbol=:auto, rotation_exponent::Real=1.0, save_path=nothing)
     p = plot(; xlabel="intrinsic overlap δ_EF / δ_thresh", ylabel="correction current [kAt]", legend=:topleft,
         title="Error-field correction against its own NTV torque (budget $(torque_budget) N·m)", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
     for (j, c) in enumerate(couplings)
-        curve = EF.efc_current_curve(c; delta_threshold, torque_budget, safety_factor, delta_max)
+        curve = EF.efc_current_curve(c; delta_threshold, torque_budget, safety_factor, delta_max, model, rotation_exponent)
         x = curve.delta_ef ./ delta_threshold
+        tag = curve.model === :torque_balance ? "torque balance" : "linear budget"
         plot!(p, x, curve.current_linear; lw=2, c=j, label="$(c.coil_name) single-mode")
-        plot!(p, x, curve.current_ntv; lw=2, ls=:dash, c=j, label="$(c.coil_name) with residual NTV")
+        plot!(p, x, curve.current_ntv; lw=2, ls=:dash, c=j, label="$(c.coil_name) with residual NTV ($tag)")
         isfinite(curve.with_ntv) && vline!(p, [curve.with_ntv / delta_threshold]; ls=:dot, c=j, label="$(c.coil_name) NTV limit")
-        isfinite(curve.torque_only) && scatter!(p, [curve.torque_only / delta_threshold], [0.0]; marker=:star5, ms=9, c=j, label="$(c.coil_name) torque-budget limit")
+        isfinite(curve.torque_only) && scatter!(p, [curve.torque_only / delta_threshold], [0.0]; marker=:star5, ms=9, c=j, label="$(c.coil_name) whole-field limit")
     end
-    return _save(p, save_path)
+    scanned = filter(EF.has_rotation_scan, couplings)
+    isempty(scanned) && return _save(p, save_path)
+    # The tabulated torques against the rotation shift, with the balance's reference rotation and the found offsets.
+    q = plot(; xlabel="E×B rotation shift Δω [krad/s]", ylabel="NTV torque per kAt² [N·m]", legend=:topright, title="Torque against rotation",
+        left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    hline!(q, [0.0]; c=:gray, label="")
+    for (j, c) in enumerate(scanned)
+        x = c.rotation_shift ./ 1e3
+        plot!(q, x, c.torque_full_scan; lw=2, c=j, marker=:circle, ms=3, label="$(c.coil_name) whole field")
+        plot!(q, x, c.torque_residual_scan; lw=2, ls=:dash, c=j, marker=:diamond, ms=3, label="$(c.coil_name) residual")
+        for z in EF.torque_zero_crossings(c)
+            vline!(q, [z / 1e3]; ls=:dot, c=j, label="")
+        end
+        isfinite(c.omega_offset_estimate) &&
+            vline!(q, [-abs(c.omega_offset_estimate) / 1e3, abs(c.omega_offset_estimate) / 1e3]; ls=:dashdot, c=:gray, label=j == 1 ? "±|rough offset| (offset_factor·ω_*T)" : "")
+        isfinite(c.omega_reference) && vline!(q, [-c.omega_reference / 1e3]; ls=:solid, c=:black, alpha=0.4, label=j == 1 ? "rotation brought to rest (−ω_ref)" : "")
+    end
+    return _save(plot(p, q; layout=(1, 2), size=(1500, 550)), save_path)
 end
 function plot_efc_ntv_limits(h5path::AbstractString; torque_budget::Real, delta_threshold=nothing, kwargs...)
     couplings = EF.read_efc_couplings(h5path)
