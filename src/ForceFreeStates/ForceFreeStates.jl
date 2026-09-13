@@ -6,6 +6,17 @@ using LinearAlgebra.LAPACK
 using TOML
 using FFTW
 using OrdinaryDiffEq
+
+"""
+    el_ode_algorithm(ctrl) -> OrdinaryDiffEq algorithm
+
+The solver named by `ctrl.ode_solver`, instantiated for the Euler-Lagrange `solve` calls.
+"""
+function el_ode_algorithm(ctrl)
+    isdefined(OrdinaryDiffEq, Symbol(ctrl.ode_solver)) ||
+        error("ode_solver = \"$(ctrl.ode_solver)\" is not an OrdinaryDiffEq algorithm name (e.g. \"Vern7\", \"Vern9\", \"DP8\")")
+    return getfield(OrdinaryDiffEq, Symbol(ctrl.ode_solver))()
+end
 using HDF5
 using JLD2
 using FastInterpolations

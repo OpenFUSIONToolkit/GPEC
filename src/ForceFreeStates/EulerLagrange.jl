@@ -45,75 +45,49 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
 
   - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
-
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
-
   - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
-
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
-
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
-
   - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
-
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
-
   - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
     `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
     except on the galerkin-matched path which supplies the analytic derivative at construction.
     du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
-
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
     shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
-
   - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
     derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
     are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
-
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
     (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
     galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
     sparse parallel path whose solution is in the Riccati basis.
-
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
-
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-
   - `ca_populated::Bool` - True once an ideal singular-surface crossing has filled `ca_l`/`ca_r`; kinetic and
     galerkin-matched runs never populate them and leave this false, and the HDF5 writer then emits zero-extent
     `ca_left`/`ca_right` datasets instead of unpopulated arrays.
-
   - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
-
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
-
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
-
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
-
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
-
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
-
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
-
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
     # Initialization parameters
-
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
-
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
 
     # Saved data throughout integration
-
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
 
 # Total ODE solver steps taken (all steps, not just saved ones)
@@ -122,11 +96,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
-
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
-
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
-
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
 @kwdef mutable struct OdeState
@@ -232,9 +203,9 @@ end
 # at the interval endpoints. Coefficients are ported from STRIDE's ode_itime cost model
 # (Fortran reference) and unchanged here. Tune only after re-fitting against a per-chunk
 # step-count sweep; touching these affects parallel-chunk load balancing.
-const ODE_COST_AXIS  = (a = 39695.0, b = 212830.0)
-const ODE_COST_RAT   = (a = 17147.0, b = 470710.0)
-const ODE_COST_EDGE  = (a =  1646.0, b =   4683.0)
+const ODE_COST_AXIS = (a=39695.0, b=212830.0)
+const ODE_COST_RAT = (a=17147.0, b=470710.0)
+const ODE_COST_EDGE = (a=1646.0, b=4683.0)
 
 """
     ode_itime_cost(psi1, psi2, intr) -> Float64
@@ -267,7 +238,7 @@ never from `Threads.nthreads()` — so the chunk list, and hence every Riccati o
 identical whatever thread count `julia -t` provides.
 
 Each split finds the equal-cost midpoint ψ_mid via bisection:
-  ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
+ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
 
 Sub-chunks inherit `needs_crossing=false` and `ising=0`. Only the LAST sub-chunk of
 each original chunk retains `needs_crossing=true` and the original `ising`, so the
@@ -326,10 +297,10 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
         psi_mid = (lo + hi) / 2.0
 
         left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
-                                  needs_crossing=false, ising=0, direction=1)
+            needs_crossing=false, ising=0, direction=1)
         right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
-                                   needs_crossing=chunk.needs_crossing, ising=chunk.ising,
-                                   direction=chunk.direction)
+            needs_crossing=chunk.needs_crossing, ising=chunk.ising,
+            direction=chunk.direction)
         splice!(result, best_idx, [left, right])
     end
 
@@ -349,17 +320,27 @@ Only the Riccati branch populates `propagators` / `chunks` / `S_left`, which
 for all three.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
-
-    if ctrl.integrator == "riccati"
-        ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
-        return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
-    elseif ctrl.integrator == "forward"
-        return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
-    elseif ctrl.integrator == "galerkin"
+    ctrl.integrator == "galerkin" &&
         error("integrator = \"galerkin\" solves the Euler-Lagrange system variationally, not by ODE integration; " *
               "it is dispatched to galerkin_solve.")
+    ctrl.integrator in ("riccati", "forward") ||
+        error("Unknown integrator: $(ctrl.integrator). Expected \"forward\", \"riccati\", or \"galerkin\".")
+    ctrl.integrator == "riccati" && ctrl.kinetic_factor > 0 &&
+        error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
+
+    # The RHS works on mpert×mpert blocks, where multithreaded BLAS costs more in synchronization
+    # than it saves; pin BLAS to one thread for the sweep and restore it afterwards.
+    blas_threads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    try
+        if ctrl.integrator == "riccati"
+            return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
+        else
+            return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
+        end
+    finally
+        BLAS.set_num_threads(blas_threads)
     end
-    error("Unknown integrator: $(ctrl.integrator). Expected \"forward\", \"riccati\", or \"galerkin\".")
 end
 
 """
@@ -479,20 +460,20 @@ is identified by dominant |U₁| component, giving the physically correct consta
 Frobenius solution and avoiding the spurious logarithmic irregularity.
 """
 function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSplines,
-        intr::ForceFreeStatesInternal, psi_low::Float64)
-    N    = intr.numpert_total
+    intr::ForceFreeStatesInternal, psi_low::Float64)
+    N = intr.numpert_total
     hint = Ref(1)
 
     # Evaluate stability matrices at psi_low
     F_lower = zeros(ComplexF64, N, N)
-    kmat    = zeros(ComplexF64, N, N)
-    gmat    = zeros(ComplexF64, N, N)
+    kmat = zeros(ComplexF64, N, N)
+    gmat = zeros(ComplexF64, N, N)
     mats.ideal.F_spline_lower(vec(F_lower), psi_low; hint=hint)
-    mats.ideal.K_spline(vec(kmat),          psi_low; hint=hint)
-    mats.ideal.G_spline(vec(gmat),          psi_low; hint=hint)
+    mats.ideal.K_spline(vec(kmat), psi_low; hint=hint)
+    mats.ideal.G_spline(vec(gmat), psi_low; hint=hint)
 
     # singfac[j] = 1 / (m_j − n_j · q) for each mode j
-    q0      = profiles.q_spline(psi_low; hint=hint)
+    q0 = profiles.q_spline(psi_low; hint=hint)
     singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q0 .* (intr.nlow:intr.nhigh)'))
 
     # F̄⁻¹ = (F_lower · F_lower')⁻¹ via the Cholesky factor
@@ -506,15 +487,15 @@ function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSpl
     for j in 1:N
         sf = singfac[j]
         fi = Finv[j, j]
-        k  = kmat[j, j]
+        k = kmat[j, j]
         kd = conj(k)          # K̄†[j,j]
-        g  = gmat[j, j]
+        g = gmat[j, j]
 
         # 2×2 ODE matrix block for mode j [Glasser 2016 Eq. 22-24, diagonal approximation]
         m11 = -sf * fi * k
-        m12 =  sf^2 * fi
-        m21 =  g - kd * fi * k
-        m22 =  sf * kd * fi
+        m12 = sf^2 * fi
+        m21 = g - kd * fi * k
+        m22 = sf * kd * fi
 
         # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
         #! format: off
@@ -541,7 +522,7 @@ function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSpl
         if abs(v2) > Base.sqrt(Base.eps(Float64)) * abs(v1)
             U1_init[j, j] = v1 / v2
         else
-            U1_init[j, j] =  one(ComplexF64)
+            U1_init[j, j] = one(ComplexF64)
             U2_init[j, j] = zero(ComplexF64)
         end
     end
@@ -560,7 +541,7 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 Move ising_start logic to chunk_el_integration_bounds?
 """
 function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, mats::MatrixSplines,
-        profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+    profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
     # Default psifac to minimum equilibrium psi value
     odet.psifac = profiles.xs[1]
@@ -737,7 +718,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                 psi_end=psi_end,
                 needs_crossing=true,
                 ising=ising_current,
-                direction = bidirectional ? -1 : 1
+                direction=bidirectional ? -1 : 1
             ))
 
             # After crossing, we jump to the other side of the singular surface
@@ -966,7 +947,7 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, el_ode_algorithm(ctrl); reltol=ctrl.eulerlagrange_tolerance, abstol=ctrl.ode_abstol, callback=cb, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
@@ -1171,7 +1152,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
+            mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
         # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
@@ -1188,7 +1169,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # and mfix + 1 is the for the region after the last fixup and before the edge
     transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        mul!(view(transforms,:,:,ifix), view(gauss,:,:,ifix), view(transforms,:,:,(ifix+1)))
+        mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, (ifix + 1)))
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
@@ -1448,4 +1429,3 @@ non-Hermitian contributions and needs an LU.
     xi_s .-= tmp_mat
     return xi_s
 end
-
