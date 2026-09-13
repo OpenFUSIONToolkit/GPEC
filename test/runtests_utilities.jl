@@ -13,6 +13,11 @@
         # The zero crossing of the second component is bracketed by neighbours closer than the initial spacing.
         i = findfirst(k -> y[k, 2] * y[k+1, 2] <= 0, 1:(length(x)-1))
         @test i !== nothing && x[i+1] - x[i] < 0.25
+        # The same peak riding on a background ten times its height, as one component: the tails are
+        # below rtol of the range, so only the scale-free feature trigger can find it.
+        g(x) = [1 / (1 + ((x - 0.37) / 0.03)^2) + 5 * (x - 0.2)]
+        xg, yg = adaptive_sample(g, range(-1, 1; length=9); max_points=41, rtol=0.02)
+        @test maximum(yg[:, 1] .- 5 .* (xg .- 0.2)) > 0.9
         # A smooth function on a fine grid stops immediately.
         x2, y2 = adaptive_sample(x -> [x^2], range(0, 1; length=11); max_points=41, rtol=0.05)
         @test length(x2) == 11

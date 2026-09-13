@@ -105,6 +105,9 @@ EFCCoupling(coil_name, delta_per_kat, overlap_percent, torque_full_per_kat2, tor
     EFCCoupling(coil_name, delta_per_kat, overlap_percent, torque_full_per_kat2, torque_residual_per_kat2,
         [0.0], [Float64(torque_full_per_kat2)], [Float64(torque_residual_per_kat2)], NaN, NaN, Float64[], zeros(0, 1), zeros(0, 1))
 
+# Field-wise equality (the default falls back to identity for the array fields); NaN equals NaN.
+Base.:(==)(a::EFCCoupling, b::EFCCoupling) = all(isequal(getfield(a, f), getfield(b, f)) for f in fieldnames(EFCCoupling))
+
 """
     has_rotation_scan(c::EFCCoupling) -> Bool
 

@@ -59,7 +59,8 @@ include("h5_metadata_check.jl")
                 # Density chosen so the ITPA threshold sits near the fixture's nominal overlap: risk neither 0 nor saturated.
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
-                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"]))
+                # The smallest rotation scan that exercises the table path (three shifts, no refinement).
+                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"], "rotation_scan_points" => 3, "rotation_scan_max_points" => 3))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
