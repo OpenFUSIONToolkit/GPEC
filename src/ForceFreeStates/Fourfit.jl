@@ -311,7 +311,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             v[3, 3] = 2π * rs
 
             # Raw g^ij (Fortran dcon_interface.f:933-937)
-            g12 = v[1, 1]*v[2, 1] + v[1, 2]*v[2, 2] + v[1, 3]*v[2, 3]
+            g12 = v[1, 1] * v[2, 1] + v[1, 2] * v[2, 2] + v[1, 3] * v[2, 3]
             g13 = v[3, 3] * v[1, 3]
             g22 = v[2, 1]^2 + v[2, 2]^2 + v[2, 3]^2
             g23 = v[2, 3] * v[3, 3]
@@ -427,6 +427,33 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
     return (; smats, tmats, xmats, ymats, zmats)
 end
 
+
+"""
+    core_capped_knots(xs, rationals) -> Vector{Int}
+
+Indices of `xs` the EL coefficient splines keep, decoupling their knots from the equilibrium grid
+in the packed core. A cubic spline's third-derivative jumps scale as (node error)/Δψ³, so
+equilibrium-grade core packing amplifies tolerance-level node error into jumps that slave the
+Euler-Lagrange step size. Near the axis every component is a Frobenius power law in ψ, and power
+laws are scale-free, so log-uniform sampling (Δψ ≥ 0.05·ψ) resolves them at constant relative
+accuracy — cubic interpolation of ψ^p on that grid errs by ~(0.05p)⁴/384, resolving even the
+steepest component (p = m_max/2) to ~2e-4, well below where the physics responds. The capped region
+ends at the innermost rational (or ψ = 0.1, whichever is smaller) and never drops a knot inside a
+rational's resolution window, preserving the Δ′-stencil structure the equilibrium grid encodes
+(`Equilibrium.RATIONAL_RES_RADIUS`).
+"""
+function core_capped_knots(xs::Vector{Float64}, rationals::Vector{Float64})::Vector{Int}
+    cap_edge = 0.1
+    isempty(rationals) || (cap_edge = min(cap_edge, minimum(rationals) - Equilibrium.RATIONAL_RES_RADIUS))
+    in_rational_window(x) = any(abs(x - r) <= Equilibrium.RATIONAL_RES_RADIUS for r in rationals)
+    keep = Int[1]
+    for i in 2:(length(xs)-1)
+        x = xs[i]
+        (x >= cap_edge || in_rational_window(x) || (x - xs[keep[end]]) >= 0.05 * x) && push!(keep, i)
+    end
+    push!(keep, length(xs))
+    return keep
+end
 
 """
     build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData) -> MatrixSplines
@@ -607,19 +634,23 @@ function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceF
     # Create complex series interpolants with per-column extrap BC
     # TODO: set powers. Do we need this yet? Only called if power_flag = true
     itp_opts = (; extrap=ExtendExtrap())
+    keep = core_capped_knots(metric.xs, [s.psifac for s in intr.sing])
+    mxs = metric.xs[keep]
+    length(mxs) < length(metric.xs) &&
+        @info "EL coefficient-spline grid: $(length(metric.xs)) -> $(length(mxs)) knots after core density cap"
     ideal = IdealMatrices(;
-        A_spline=cubic_interp(metric.xs, Series(amats_flat); itp_opts...),
-        B_spline=cubic_interp(metric.xs, Series(bmats_flat); itp_opts...),
-        C_spline=cubic_interp(metric.xs, Series(cmats_flat); itp_opts...),
-        D_spline_prim=cubic_interp(metric.xs, Series(dmats_flat); itp_opts...),
-        E_spline_prim=cubic_interp(metric.xs, Series(emats_flat); itp_opts...),
-        H_spline=cubic_interp(metric.xs, Series(hmats_flat); itp_opts...),
-        F_spline_lower=cubic_interp(metric.xs, Series(fmats_lower_flat); itp_opts...),
-        F_spline_prim=cubic_interp(metric.xs, Series(fmats_prim_flat); itp_opts...),
-        F_spline_gal=cubic_interp(metric.xs, Series(fmats_gal_flat); itp_opts...),
-        G_spline=cubic_interp(metric.xs, Series(gmats_flat); itp_opts...),
-        K_spline=cubic_interp(metric.xs, Series(kmats_flat); itp_opts...),
+        A_spline=cubic_interp(mxs, Series(amats_flat[keep, :]); itp_opts...),
+        B_spline=cubic_interp(mxs, Series(bmats_flat[keep, :]); itp_opts...),
+        C_spline=cubic_interp(mxs, Series(cmats_flat[keep, :]); itp_opts...),
+        D_spline_prim=cubic_interp(mxs, Series(dmats_flat[keep, :]); itp_opts...),
+        E_spline_prim=cubic_interp(mxs, Series(emats_flat[keep, :]); itp_opts...),
+        H_spline=cubic_interp(mxs, Series(hmats_flat[keep, :]); itp_opts...),
+        F_spline_lower=cubic_interp(mxs, Series(fmats_lower_flat[keep, :]); itp_opts...),
+        F_spline_prim=cubic_interp(mxs, Series(fmats_prim_flat[keep, :]); itp_opts...),
+        F_spline_gal=cubic_interp(mxs, Series(fmats_gal_flat[keep, :]); itp_opts...),
+        G_spline=cubic_interp(mxs, Series(gmats_flat[keep, :]); itp_opts...),
+        K_spline=cubic_interp(mxs, Series(kmats_flat[keep, :]); itp_opts...),
         # Jacobian Fourier band ψ-spline, used for the power normalization in Free.jl
-        J_spline=cubic_interp(metric.xs, Series(jmats_flat); itp_opts...))
+        J_spline=cubic_interp(mxs, Series(jmats_flat[keep, :]); itp_opts...))
     return MatrixSplines(; ideal)
 end
