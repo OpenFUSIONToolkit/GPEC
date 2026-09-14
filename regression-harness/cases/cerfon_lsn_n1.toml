@@ -1,9 +1,12 @@
 # Regression case: Cerfon-Freidberg diverted analytic equilibrium, n=1 ideal stability.
 # Lower single null with the magnetic null on the plasma boundary, so q is unbounded as
-# psi_N -> 1 and the run is truncated by psihigh rather than by a finite q_edge. That makes
+# psi_N -> 1 and the run is truncated by psihigh rather than by a finite edge q. That makes
 # this the fixture that notices changes in edge/truncation handling: anything touching the
 # radial grid near psihigh, the flux-surface tracer, or the singular-surface search moves
-# q_edge and the outermost rational here long before it shows up in the limited fixtures.
+# q at the truncation surface and the outermost rational here long before it shows up in the
+# limited fixtures. The deck sits at a wall-stabilized operating point (n=1 stable with the
+# conformal wall, unstable without), so a sign change in the energies is a real signal, not
+# a marginal case wobbling about zero.
 [case]
 name = "cerfon_lsn_n1"
 description = "Cerfon-Freidberg diverted (LSN) equilibrium, n=1, ideal stability"

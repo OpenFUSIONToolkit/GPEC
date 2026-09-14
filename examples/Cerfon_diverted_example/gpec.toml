@@ -1,9 +1,12 @@
 # Cerfon-Freidberg diverted analytic equilibrium — n=1 ideal stability, lower single null.
 # The plasma boundary carries a magnetic null, so q diverges logarithmically as psi_N -> 1
 # and no choice of psihigh converges. This is the truncation-sensitivity fixture: raise
-# psihigh by a decade and q at the edge climbs by a fixed increment forever (about 0.23 per
-# decade here, and twice that with null = "dn"). The equilibrium is generated analytically
-# from the embedded [CERFON_INPUT] section.
+# psihigh by a decade and q at the TRUNCATION SURFACE climbs by a fixed increment forever
+# (about 0.31 per decade here, and twice that with null = "dn"). q at psi_N = 1 is infinite
+# in every configuration — it is never reached, psihigh always cuts the profile short.
+# q0 = 1.5 is a wall-stabilized operating point: n=1 is unstable with no wall and stable
+# with the conformal wall out to a gap of about 0.46, so a = 0.25 sits at roughly half the
+# critical gap. The equilibrium is generated analytically from the [CERFON_INPUT] section.
 
 [Equilibrium]
 eq_type = "cerfon"                      # Type of the input 2D equilibrium file
@@ -66,7 +69,7 @@ epsilon = 0.32       # Inverse aspect ratio eps = a/R0
 kappa = 1.7          # Elongation kappa
 delta = 0.33         # Triangularity delta
 a_solovev = -0.155   # Solov'ev parameter A setting the p'/FF' split (0 = pressure-driven only)
-q0 = 1.1             # Target safety factor on axis; fixes the flux scale
+q0 = 1.5             # Target safety factor on axis; fixes the flux scale
 null = "lsn"         # Null topology: "lsn" (lower single null) or "dn" (double null)
 xsep = 1.1           # Places the null at (1 - xsep*delta*eps, -xsep*kappa*eps)
 box_margin = 0.12    # psi(R,Z) box padding beyond the boundary, in units of eps
