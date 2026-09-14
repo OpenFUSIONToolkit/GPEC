@@ -176,6 +176,13 @@ normalized poloidal flux, and `'` = d/dV:
 At large aspect ratio this reduces to `√(n·s·r_s/R₀)` with `s = (r_s/q)·dq/dr`,
 so `dc_type=:toroidal` coincides with `:rfitzp` there; the paper's own Eq. 61
 is recovered after dividing by `r_s`.
+
+The reference conversion is deliberately linear (Frobenius exponent ½, the
+paper's H = 0 ordering): the critical-Δ is a layer-side quantity like the slab
+Δ̂(Q) and W_d, whereas the outer Δ' is converted with `K^(2α)` because it
+genuinely carries the Mercier exponent α. Converting the offset with `c^(2α)`
+instead would multiply it by `c^(2α−1)`, 5–13 % at the DIII-D-like 3/2–4/1
+surfaces, without support from the derivation.
 """
 function toroidal_dgeo(; chi1::Real, v1::Real, q::Real, q1::Real, n::Integer,
     avg_bsq::Real, avg_dpsisq::Real, k_ref::Real)
