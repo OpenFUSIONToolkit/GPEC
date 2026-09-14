@@ -477,6 +477,15 @@ For m≠0 the regular eigenvector has a negligible U₁ component (~ψ_low^(|m|/
 the Glasser [0, I] limit as ψ_low → 0. For m=0 (degenerate a≈0), the regular eigenvector
 is identified by dominant |U₁| component, giving the physically correct constant-displacement
 Frobenius solution and avoiding the spurious logarithmic irregularity.
+
+!!! warning "Not the default"
+    Measured at `psilow = 0.01` on a diverted DIII-D-like equilibrium (n = 1, m = −14…27) the
+    returned U₁ diagonal is 0.11…0.23 for m = −14…−3 and +6.1, −9.8, −13.7 for m = 3, 4, 5 —
+    not the ~ψ_low^(|m|/2) limit stated above — and the downstream signed critical eigenvalue
+    of W_p⁻¹ then disagrees with Fortran DCON from the first stored step onward (see the
+    `fixed_axis` docstring in `CoreTypes.jl`). Whether the discrepancy is in the diagonal 2×2
+    truncation of A₀, in the regular-branch selection, or in the asymptotics claimed here has
+    not been established. Used only when `fixed_axis = false`.
 """
 function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSplines,
         intr::ForceFreeStatesInternal, psi_low::Float64)
@@ -591,16 +600,20 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ma
     end
 
     if ctrl.fixed_axis
-        # Original Glasser initialization: U₁=0, U₂=I [Glasser 2016 §VI].
-        # Constrains the axis displacement ξ^ψ=0 for all modes (fixed magnetic axis).
-        # Retained as a reference/comparison option; the default (fixed_axis=false) is Frobenius.
+        # Default. Glasser initialization: U₁=0, U₂=I [Glasser 2016 §VI] — the DCON axis
+        # condition (dcon/ode.f, ode_axis_init): ξ^ψ=0 for all modes (fixed magnetic axis).
+        # This is the condition against which the free-boundary energies are validated;
+        # see the `fixed_axis` docstring in CoreTypes.jl for why the Frobenius state below
+        # is not the default.
         for ipert in 1:intr.numpert_total
             odet.u[ipert, ipert, 2] = 1
         end
     else
-        # Frobenius initialization [Glasser 2016 §VI Eq. 51]: selects the regular
-        # (non-logarithmic) solution for each mode, including the correct constant
-        # displacement solution for the degenerate m=0 case (free magnetic axis).
+        # Opt-in. Frobenius initialization [Glasser 2016 §VI Eq. 51]: selects the regular
+        # (non-logarithmic) solution for each mode, including the constant-displacement
+        # solution for the degenerate m=0 case (free magnetic axis). At practical psilow
+        # the returned U₁ is O(0.1–10), not the documented ψ_low^(|m|/2) limit, and the
+        # resulting crit(ψ) / W_p disagree with DCON — retained for comparison only.
         U1_init, U2_init = compute_axis_init(mats, profiles, intr, odet.psifac)
         odet.u[:, :, 1] .= U1_init
         odet.u[:, :, 2] .= U2_init

@@ -1,0 +1,54 @@
+# --- julia_GPEC API migration (2026-07, feature/thread-invariance) ---
+# Removed from ForceFreeStatesControl and therefore deleted here:
+#   thmax0, bal_flag, delta_mband  -> passing them raises MethodError.
+# Deprecated + ignored upstream (warning asks for removal), deleted here:
+#   mer_flag, ode_flag, mat_flag, use_parallel, force_wv_symmetry.
+# None is a convergence criterion; eulerlagrange_tolerance is UNCHANGED.
+# New upstream defaults now in force: integrator="riccati" (required for the
+# Delta_prime_matrix path) and extended_precision_bvp=true (Complex{Double64};
+# upstream notes Float64 drifts Im(Delta') by 2-5x on DIII-D-class cases).
+# Elongation+Ip scan — julia_GPEC ideal-stability inputs (n=1).
+# Purpose: per-equilibrium BVP total energy et[1] (ideal-kink dW; Re<0 => unstable)
+# and the Delta' matrix across the n=1 rational surfaces.
+# SLAYER inner-layer dispersion is DISABLED here — we only need the
+# ForceFreeStates BVP (dW) + Delta'.
+#
+# Wall: nowall (CONVENTIONS.md §6 — required for valid Delta').
+# use_parallel: true  (CONVENTIONS.md §7 — false silently invalidates Delta').
+
+[Equilibrium]
+eq_type = "efit"
+eq_filename = "eq.geqdsk"
+jac_type = "hamada"
+grid_type = "ldp"
+psilow = 0.01
+psihigh = 0.995
+mpsi = 128
+mtheta = 256
+
+[Wall]
+shape = "nowall"
+a = 20.0
+
+[ForceFreeStates]
+vac_flag = true                      # enables vacuum/BVP energy et[]
+psiedge = 0.99
+qlow = 1.02
+qhigh = 1e3
+set_psilim_via_dmlim = true
+dmlim = 0.2
+sing_start = 0
+nn_low = 1
+nn_high = 1
+delta_mlow = 10
+delta_mhigh = 10
+mthvac = 480
+eulerlagrange_tolerance = 1e-12
+singfac_min = 1e-4
+sing_order = 6
+ucrit = 1e3
+save_interval = 3
+write_outputs_to_HDF5 = false
+
+[SLAYER]
+enabled = false
