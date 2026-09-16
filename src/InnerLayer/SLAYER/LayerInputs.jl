@@ -375,7 +375,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         out[k] = slayer_parameters(;
             n_e=prof.n_e, t_e=prof.T_e, t_i=prof.T_i,
-            omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
+            omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
             rs=rs, R0=R0_use, mu_i=mu_i, zeff=zeff,
             chi_perp=_eval(chi_perp, psi),
