@@ -44,10 +44,8 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     end
 
     _write_per_surface!(g, result.params, result.dp_matrix)
-    # Applied per-surface rotation Doppler in Q units (all-zero unless
-    # control.omega_E_kHz was set); derived, so it belongs here rather than
-    # under Input/ where the raw kHz values are echoed.
-    g["PerSurface/q_shift"] = _q_shifts(result.control, result.params, length(result.params))
+    # E×B Doppler offset actually applied to each surface's inner-layer Q (zero outside coupled mode).
+    g["PerSurface/q_shift"] = result.q_shift
     # Surface identity (absent when the analysis was built from bare parameters).
     isempty(result.rational_psi) || (g["PerSurface/rational_psi"] = result.rational_psi)
     isempty(result.rational_q) || (g["PerSurface/rational_q"] = result.rational_q)
@@ -87,7 +85,7 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/tau_k" =>
         (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = τ_k·ω; diamagnetic inputs Q_e, Q_i carry the opposite sign by convention)", units="s", dims=("surface",)),
     "PerSurface/q_shift" =>
-        (; long_name="real E×B Doppler offset ΔRe(Q) = −τ_k·2π·1e3·omega_E_kHz on each surface's inner-layer Q (0 = corotates with the eigenvalue)", dims=("surface",)),
+        (; long_name="real E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E applied to each surface's inner-layer Q in the coupled determinant (0 in uncoupled mode)", dims=("surface",)),
     "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface", units="s", dims=("surface",)),
     "PerSurface/Delta_prime_norm" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
     "PerSurface/rs" => (; long_name="minor radius of each rational surface", units="m", dims=("surface",)),

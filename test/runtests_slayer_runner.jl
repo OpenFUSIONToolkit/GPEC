@@ -136,6 +136,33 @@
         end
     end
 
+    @testset "run_slayer_from_inputs: E×B rotation enters only the coupled determinant" begin
+        params = [_mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, n=1, ising=1),
+            _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, n=1, ising=2)]
+        dpm = ComplexF64[-2.0 0.0; 0.0 -3.0]
+        Ω_E = [2.0e3, -1.0e3]
+        grid = (; enabled=true, scan_mode=:brute_force, Q_re_range=(-1.0, 1.0), Q_im_range=(-0.5, 0.8),
+            nre=8, nim=8, pole_threshold=1e5)
+
+        # Uncoupled layers are solved in their own plasma frame: no shift, even when supplied.
+        r_unc = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...); omega_E=Ω_E)
+        @test r_unc.q_shift == [0.0, 0.0]
+
+        # Coupled: the kinetic-file Ω_E Dopplers each surface by −τ_k·n·Ω_E.
+        r_cpl = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=Ω_E)
+        @test r_cpl.q_shift ≈ [-1.0e-4 * 1 * Ω_E[1], -1.2e-4 * 1 * Ω_E[2]]
+
+        # omega_E_kHz takes precedence over the file.
+        r_ovr = run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=[1.0, 0.0], grid...); omega_E=Ω_E)
+        @test r_ovr.q_shift ≈ [-1.0e-4 * 2π * 1e3, 0.0]
+
+        # A Doppler offset beyond the scan box is flagged rather than silently losing the root:
+        # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].
+        @test_logs (:warn, r"outside Q_re_range") match_mode=:any run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[3.0e4, 0.0])
+    end
+
     @testset "run_slayer_from_inputs: disabled path is a no-op" begin
         c = SLAYERControl(; enabled=false)
         params = [_mk_params()]
