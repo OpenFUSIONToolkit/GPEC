@@ -53,6 +53,7 @@ struct SLAYERResult
     per_surface_extraction::Vector{GrowthRateResult}
     coupled_extraction::Union{Nothing,GrowthRateResult}
     layer_widths::Vector{LayerWidths}
+    q_shift::Vector{Float64}
     scan_data::Vector{Union{ScanResult,AMRResult}}
 end
 
@@ -65,5 +66,6 @@ function empty_slayer_result(control::SLAYERControl)
                         ComplexF64[], Float64[], Float64[],
                         GrowthRateResult[], nothing,
                         LayerWidths[],
+                        Float64[],
                         Union{ScanResult,AMRResult}[])
 end

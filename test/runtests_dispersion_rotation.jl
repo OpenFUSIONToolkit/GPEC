@@ -69,29 +69,67 @@
         @test mcz(Q) ≈ (1.0 - Q) * (2.0 - 2Q)
     end
 
-    @testset "_q_shifts converts kHz to Q units via tauk" begin
-        p1 = slayer_parameters(n_e=5.0e19, t_e=1000.0, t_i=1000.0,
+    @testset "_q_shifts: kinetic-file Ω_E by default, omega_E_kHz override, n-scaled" begin
+        mk(; qval, rs, m, n) = slayer_parameters(n_e=5.0e19, t_e=1000.0, t_i=1000.0,
             omega_e=1.0e4, omega_i=5.0e3,
-            qval=2.0, sval_r=1.0, bt=2.0, rs=0.5, R0=1.7,
-            mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=2, n=1)
-        p2 = slayer_parameters(n_e=5.0e19, t_e=1000.0, t_i=1000.0,
-            omega_e=1.0e4, omega_i=5.0e3,
-            qval=3.0, sval_r=1.5, bt=2.0, rs=0.6, R0=1.7,
-            mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=3, n=1)
-        params = [p1, p2]
+            qval=qval, sval_r=1.0, bt=2.0, rs=rs, R0=1.7,
+            mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=n)
+        params = [mk(; qval=1.5, rs=0.5, m=3, n=2), mk(; qval=2.0, rs=0.6, m=4, n=2)]
+        Ω_file = [3.0e4, -1.0e4]   # rad/s per unit n, as carried by the kinetic file
 
-        # Empty (default) means no shift anywhere.
+        # No file rotation and no override: no shift anywhere.
         @test _q_shifts(SLAYERControl(), params, 2) == [0.0, 0.0]
 
-        ctrl = SLAYERControl(; omega_E_kHz=[1.0, -2.0])
-        got = _q_shifts(ctrl, params, 2)
-        # Sign is negative: TJ's ĝ = i(Q_E − ω·τ_k) maps to Q_k = τ_k(ω − ω_E).
-        @test got[1] ≈ -p1.tauk * 2π * 1e3 * 1.0
-        @test got[2] ≈ -p2.tauk * 2π * 1e3 * -2.0
+        # File rotation by default. The mode sees n·Ω_E, and ĝ = i(Q_E − ω·τ_k) gives
+        # Q_k = τ_k·(ω − n·Ω_E), so the offset is −τ_k·n·Ω_E.
+        got = _q_shifts(SLAYERControl(), params, 2; omega_E=Ω_file)
+        @test got ≈ [-params[1].tauk * 2 * Ω_file[1], -params[2].tauk * 2 * Ω_file[2]]
 
-        # Length must match the number of surfaces analysed.
-        @test_throws ArgumentError _q_shifts(SLAYERControl(; omega_E_kHz=[1.0]),
-            params, 2)
+        # A non-empty omega_E_kHz replaces the file values, in the same per-unit-n convention.
+        ovr = _q_shifts(SLAYERControl(; omega_E_kHz=[1.0, -2.0]), params, 2; omega_E=Ω_file)
+        @test ovr ≈ [-params[1].tauk * 2 * 2π * 1e3 * 1.0, -params[2].tauk * 2 * 2π * 1e3 * -2.0]
+
+        # Either source must supply exactly one value per analysed surface.
+        @test_throws ArgumentError _q_shifts(SLAYERControl(; omega_E_kHz=[1.0]), params, 2)
+        @test_throws ArgumentError _q_shifts(SLAYERControl(), params, 2; omega_E=[1.0])
+    end
+
+    @testset "Coupled roots do not depend on the reference surface" begin
+        # Diagonal Δ′ decouples the surfaces, so each coupled root must be that surface's own
+        # root in physical units whichever surface normalizes Q.
+        d = ComplexF64[1.0+1.0im, 3.0+2.0im]
+        tauk = [2.0e-4, 5.0e-4]
+        scs = [surface_coupling(model, nothing, d[k]; scale=1.0, tauk=tauk[k]) for k in 1:2]
+        # Δ(Q) = Q makes surface k's own root Q_k = d_k, i.e. ω + iγ = d_k/τ_k.
+        expected = sort(d ./ tauk; by=real)
+        for ref in 1:2
+            mc = multi_surface_coupling(scs, diagm(d); ref_idx=ref, msing_max=2)
+            # det is quadratic in Q: recover it from three samples and solve.
+            xs = ComplexF64[0, 1, 2]
+            c = [x^j for x in xs, j in 0:2] \ [mc(x) for x in xs]
+            disc = sqrt(c[2]^2 - 4c[3] * c[1])
+            roots = [(-c[2] + disc) / (2c[3]), (-c[2] - disc) / (2c[3])]
+            @test sort(roots ./ tauk[ref]; by=real) ≈ expected rtol = 1e-10
+        end
+    end
+
+    @testset "Rigid E×B rotation shifts ω by n·Ω_E and leaves γ unchanged" begin
+        d = ComplexF64[1.0+1.0im, 3.0+2.0im]
+        tauk = [2.0e-4, 5.0e-4]
+        nΩ = 700.0
+        static = [surface_coupling(model, nothing, d[k]; scale=1.0, tauk=tauk[k]) for k in 1:2]
+        rigid = [surface_coupling(model, nothing, d[k]; scale=1.0, tauk=tauk[k], q_shift=-tauk[k] * nΩ)
+                 for k in 1:2]
+        function physical_roots(scs)
+            mc = multi_surface_coupling(scs, diagm(d); ref_idx=1, msing_max=2)
+            xs = ComplexF64[0, 1, 2]
+            c = [x^j for x in xs, j in 0:2] \ [mc(x) for x in xs]
+            disc = sqrt(c[2]^2 - 4c[3] * c[1])
+            return sort([(-c[2] + disc) / (2c[3]), (-c[2] - disc) / (2c[3])] ./ tauk[1]; by=real)
+        end
+        r0, r1 = physical_roots(static), physical_roots(rigid)
+        @test real.(r1) ≈ real.(r0) .+ nΩ rtol = 1e-10
+        @test imag.(r1) ≈ imag.(r0) rtol = 1e-10
     end
 
     @testset "omega_E_kHz and tauk_rescale parse and validate from TOML" begin

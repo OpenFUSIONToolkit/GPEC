@@ -32,12 +32,14 @@ constructor.
   - `bt`       -- toroidal field `[T]`. `nothing` (default) resolves the physical
     `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
     callable of `psi` overrides it
-  - `omega_E_kHz` -- per-surface E×B rotation frequency in kHz, ordered
-    core→edge. Entry `k` shifts surface `k`'s inner-layer Q argument by
-    `ΔRe(Q_k) = −tauk_k · 2π · 1e3 · omega_E_kHz[k]`, so that layer responds to
-    the mode frequency in its own fluid frame (TJ's `ĝ = i(Q_E − ω·tau_k)`).
-    Empty (default) means no rotation on any surface. Must be empty or have
-    one entry per rational surface actually analysed
+  - `omega_E_kHz` -- optional override of the per-surface E×B rotation, as the
+    frequency Ω_E/2π per unit toroidal mode number in kHz (the kinetic file's
+    `omega_E` convention), ordered core→edge. Empty (default) takes Ω_E from the
+    kinetic file at each rational surface. Rotation enters only the coupled
+    determinant: surface `k`'s inner-layer Q is Doppler-shifted by
+    `ΔRe(Q_k) = −tauk_k · n · Ω_E,k`, so each layer sees the mode in its own E×B
+    frame (TJ's `ĝ = i(Q_E − ω·tau_k)`). Must be empty or have one entry per
+    rational surface actually analysed
   - `tauk_rescale` -- direction of the inter-surface Q normalization in the
     coupled determinant: `:direct` (default, `Q·tauk_k/tauk_ref`, consistent
     with `Q = tauk·omega` and with TJ) or `:legacy` (`Q·tauk_ref/tauk_k`, the
@@ -161,12 +163,8 @@ there is one consistent interface for resistive and kinetic profiles.
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
 
-    # Per-surface E×B rotation frequency [kHz], ordered core→edge to match the
-    # rational-surface list. Entry k shifts surface k's inner layer by
-    # ΔRe(Q_k) = −tauk_k · 2π · 1e3 · omega_E_kHz[k], so each rotating surface
-    # sees the common lab-frame eigenvalue in its own fluid frame. Empty (the
-    # default) means no rotation anywhere. A shorter-than-msing vector is an
-    # error; pad with zeros to leave some surfaces static.
+    # Override for the per-surface E×B rotation Ω_E/2π per unit n [kHz], core→edge. Empty takes
+    # Ω_E from the kinetic file; either way it only Doppler-shifts the coupled determinant.
     omega_E_kHz::Vector{Float64} = Float64[]
 
     # Inter-surface Q normalization in the coupled determinant. `:direct`
