@@ -140,6 +140,14 @@
         @test p.ising == 0
     end
 
+    @testset "Test 1d: reject diamagnetic frequencies that leave D undefined" begin
+        # iota_e = ω_*e/(ω_*e − ω_*i) must be finite and positive for D ∝ √iota_e.
+        _drifts(ωe, ωi) = merge(_ref_kwargs(), (omega_e=ωe, omega_i=ωi))
+        @test_throws ArgumentError slayer_parameters(; _drifts(-1.0e4, -1.0e4)...)   # degenerate: iota_e singular
+        @test_throws ArgumentError slayer_parameters(; _drifts(-1.0e4, -2.0e4)...)   # same sign, |ω_*i| > |ω_*e|: iota_e = -1
+        @test_throws ArgumentError slayer_parameters(; _drifts(0.0, 5.0e3)...)       # no electron drift: iota_e = 0
+    end
+
     @testset "Test 2: r-based shear conversion" begin
         # Direct application of r_s · (dq/dψ) / (q · da/dψ).
         @test r_based_shear(0.5, 2.0, 4.0, 0.5) ≈ 2.0
