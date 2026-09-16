@@ -1,9 +1,9 @@
 """
     SingularQuadratureData
 
-Precomputed polar singular-correction quadrature (BIEST / Malhotra). `P2G` maps polar samples to
-the Cartesian patch (`grid = P2G * polar`, `polar = P2G' * patch`). `Gpou`/`Ppou` are the Cartesian
-and polar partitions of unity; `Gpou = -χ`.
+Precomputed polar singular-correction quadrature. `P2G` maps polar samples to
+the Cartesian patch (`grid = P2G * polar`, `polar = P2G' * patch`). `Gpou`/`Ppou`
+are the Cartesian and polar partitions of unity; `Gpou = -χ`.
 
 ## Fields
 
@@ -62,7 +62,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
     qx = (qx_raw .+ 1) ./ 2  # [-1, 1] → [0, 1]
     qw = qw_raw ./ 2         # Adjust weights for interval change
 
-    # χ(r) = exp(-36 r^p), p from PATCH_DIM (BIEST)
+    # χ(r) = exp(-36 r^p), p from PATCH_DIM
     pou_power = PATCH_DIM > 45 ? 10 : (PATCH_DIM > 20 ? 8 : 6)
     pou(r) = r ≥ 1.0 ? 0.0 : exp(-36.0 * r^pou_power)
 
