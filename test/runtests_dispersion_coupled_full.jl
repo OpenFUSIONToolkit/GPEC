@@ -31,8 +31,7 @@
         @test size(mc.dp_raw) == (4, 4)
         @test mc.msing_max == 2
         @test mc.ref_idx == 1
-        @test mc.rotation == [0.0, 0.0]
-        @test mc.ntor == 1
+        @test mc.tauk_rescale === :direct
 
         # Wrong outer dim
         @test_throws ArgumentError multi_surface_coupling_full([sc1, sc2],
@@ -45,9 +44,9 @@
             dp_raw; msing_max=0)
         @test_throws ArgumentError multi_surface_coupling_full([sc1, sc2],
             dp_raw; msing_max=3)
-        # Wrong rotation length
+        # Unknown inter-surface Q normalization
         @test_throws ArgumentError multi_surface_coupling_full([sc1, sc2],
-            dp_raw; rotation=[0.0])
+            dp_raw; tauk_rescale=:bogus)
     end
 
     @testset "1-surface 4×4 det matches hand computation" begin
@@ -120,20 +119,9 @@
         @test det_jl ≈ det(M) atol = 1e-12 * abs(det(M))
     end
 
-    @testset "Rotation shift applies i·ntor·rotation to inner Q argument" begin
-        # Ensure the per-surface rotation enters the inner-layer argument.
-        # Use a linear Δ_t model so Q-dependence is tractable.
-        dp_raw = ComplexF64[1.0 0; 0 1.0]
-        # Δ_t(Q) = Q (pure linear), Δ_i(Q) = 0
-        sc = surface_coupling(_LinearInnerF(0 + 0im, 1 + 0im, 0 + 0im, 0 + 0im),
-            nothing, 0 + 0im; scale=1.0, tauk=1.0, dc=0.0)
-        # Case A: rotation=0, Q=2+0im → inner sees 2+0im → Δ_t=2, Δ_i=0
-        mc0 = multi_surface_coupling_full([sc], dp_raw; rotation=[0.0], ntor=1)
-        # Case B: rotation=3, Q=2+0im → inner sees 2 + 1j*1*3 = 2+3i → Δ_t=2+3i
-        mcR = multi_surface_coupling_full([sc], dp_raw; rotation=[3.0], ntor=1)
-        @test mc0(2.0 + 0.0im) ≠ mcR(2.0 + 0.0im)
-
-        # Check by hand. Both with the same outer matrix:
+    @testset "Each surface sees Q·tauk_k/tauk_ref plus its real q_shift" begin
+        # Linear Δ_t(Q) = Q, Δ_i = 0. With block-diagonal dp_raw the 8×8 matching matrix is a
+        # symmetric permutation of two per-surface 4×4 blocks, so det factorizes.
         function detAt(Δ_t, Δ_i)
             M = ComplexF64[
                 1 0 -1 1;
@@ -142,8 +130,26 @@
                 0 1 -Δ_i -Δ_t]
             return det(M)
         end
-        @test mc0(2.0 + 0.0im) ≈ detAt(2.0 + 0.0im, 0.0 + 0.0im)
-        @test mcR(2.0 + 0.0im) ≈ detAt(2.0 + 3.0im, 0.0 + 0.0im)
+        lin = _LinearInnerF(0 + 0im, 1 + 0im, 0 + 0im, 0 + 0im)
+        s1, s2 = 0.25, -0.75
+        sc1 = surface_coupling(lin, nothing, 0 + 0im; scale=1.0, tauk=2.0, dc=0.0, q_shift=s1)
+        sc2 = surface_coupling(lin, nothing, 0 + 0im; scale=1.0, tauk=4.0, dc=0.0, q_shift=s2)
+        dp_raw = Matrix{ComplexF64}(I, 4, 4)
+        Q = 1.5 + 0.5im
+
+        mc = multi_surface_coupling_full([sc1, sc2], dp_raw)
+        @test mc.tauk_rescale === :direct
+        @test mc(Q) ≈ detAt(Q * (2.0 / 2.0) + s1, 0im) * detAt(Q * (4.0 / 2.0) + s2, 0im)
+
+        mcl = multi_surface_coupling_full([sc1, sc2], dp_raw; tauk_rescale=:legacy)
+        @test mcl(Q) ≈ detAt(Q * (2.0 / 2.0) + s1, 0im) * detAt(Q * (2.0 / 4.0) + s2, 0im)
+
+        # The shift is real: it moves the layer argument along Re(Q) only.
+        mc0 = multi_surface_coupling_full([surface_coupling(lin, nothing, 0 + 0im; scale=1.0, tauk=1.0, dc=0.0)],
+            Matrix{ComplexF64}(I, 2, 2))
+        mcs = multi_surface_coupling_full([surface_coupling(lin, nothing, 0 + 0im; scale=1.0, tauk=1.0, dc=0.0, q_shift=3.0)],
+            Matrix{ComplexF64}(I, 2, 2))
+        @test mcs(2.0 + 0.0im) ≈ mc0(5.0 + 0.0im)
     end
 
     @testset "SurfaceCoupling scale multiplies both inner channels" begin
