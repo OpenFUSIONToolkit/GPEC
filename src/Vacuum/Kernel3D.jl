@@ -4,6 +4,21 @@
 Precomputed polar singular-correction quadrature (BIEST / Malhotra). `P2G` maps polar samples to
 the Cartesian patch (`grid = P2G * polar`, `polar = P2G' * patch`). `Gpou`/`Ppou` are the Cartesian
 and polar partitions of unity; `Gpou = -χ`.
+
+## Fields
+
+    - `qx::Vector{Float64}`: Radial quadrature points in [0,1]
+    - `qw::Vector{Float64}`: Radial quadrature weights
+    - `Gpou::Matrix{Float64}`: Partition of unity on Cartesian grid (PATCH_DIM × PATCH_DIM)
+    - `Ppou::Matrix{Float64}`: Partition of unity on polar grid (RAD_DIM × ANG_DIM)
+    - `P2G::SparseMatrixCSC{Float64,Int}`: Sparse interpolation matrix (Ngrid × Npolar) mapping polar quadrature points to Cartesian grid
+        - Forward (patch→polar): `polar = P2G' * patch`
+        - Backward (polar→grid): `grid = P2G * polar`.
+    - `PATCH_DIM::Int`: Patch dimension (odd integer)
+    - `PATCH_RAD::Int`: Patch radius (number of points adjacent to source point treated as singular)
+    - `ANG_DIM::Int`: Number of angular quadrature points
+    - `RAD_DIM::Int`: Number of radial quadrature points
+    - `INTERP_ORDER::Int`: Lagrange interpolation order
 """
 struct SingularQuadratureData
     qx::Vector{Float64}
@@ -23,16 +38,29 @@ end
 
 Build the polar quadrature, partitions of unity, and Lagrange interpolant for the singular patch.
 `ANG_DIM = 2 * RAD_DIM`. `INTERP_ORDER` must be `≤ 2 * PATCH_RAD + 1`.
+
+# Arguments
+
+  - `PATCH_RAD::Int`: Number of points adjacent to source point to treat as singular
+  - `RAD_DIM::Int`: Radial quadrature order
+  - `INTERP_ORDER::Int`: Lagrange interpolation order
+
+# Returns
+
+  - `SingularQuadratureData`: Precomputed quadrature data
 """
 function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
 
+    # Total size of square patch extracted around singular point (odd number: 2*PATCH_RAD+1)
     PATCH_DIM = 2 * PATCH_RAD + 1
     @assert INTERP_ORDER <= PATCH_DIM "Must have INTERP_ORDER <= PATCH_DIM, got INTERP_ORDER=$INTERP_ORDER, PATCH_DIM=$PATCH_DIM"
+    # Number of angular quadrature nodes in polar coordinates (uniformly distributed around circle)
     ANG_DIM = 2 * RAD_DIM
 
-    qx_raw, qw_raw = gausslegendre(RAD_DIM)
+    # Setup radial quadrature
+    qx_raw, qw_raw = gausslegendre(RAD_DIM) # points on [-1,1]
     qx = (qx_raw .+ 1) ./ 2  # [-1, 1] → [0, 1]
-    qw = qw_raw ./ 2
+    qw = qw_raw ./ 2         # Adjust weights for interval change
 
     # χ(r) = exp(-36 r^p), p from PATCH_DIM (BIEST)
     pou_power = PATCH_DIM > 45 ? 10 : (PATCH_DIM > 20 ? 8 : 6)
@@ -54,8 +82,11 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
         Ppou[i, j] = pou(qx[i]) * dr * rdθ
     end
 
+    # Spacing between Lagrange interpolation nodes in [0,1] for INTERP_ORDER-point stencil
     h = 1.0 / (INTERP_ORDER - 1)
 
+    # Compute 2D tensor-product Lagrange basis function at (x0, x1) in local
+    # stencil coordinates for basis node (i0, i1) on uniform grid with spacing h
     @inline function lagrange_interp(x0::Float64, x1::Float64, i0::Int, i1::Int)
         Lx = Ly = 1.0
         ξ0 = x0 / h
@@ -72,6 +103,10 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
     # grid = P2G * polar, polar = P2G' * grid; each column is the INTERP_ORDER² Lagrange stencil
     Ngrid = PATCH_DIM * PATCH_DIM
     Npolar = RAD_DIM * ANG_DIM
+
+    # Preallocate COO storage:
+    #   I_coo[k], J_coo[k] = (row, column) index of kth nonzero
+    #   V_coo[k]           = interpolation weight
     nnz_per_polar = INTERP_ORDER^2
     I_coo = Vector{Int}(undef, Npolar * nnz_per_polar)
     J_coo = Vector{Int}(undef, Npolar * nnz_per_polar)
@@ -79,18 +114,25 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
 
     idx = 1
     for ir in 1:RAD_DIM, ia in 1:ANG_DIM
+        # Map polar node to unit square: x0, x1 ∈ [0,1] × [0,1]
         x0 = 0.5 + 0.5 * qx[ir] * cos(dθ * (ia - 1))
         x1 = 0.5 + 0.5 * qx[ir] * sin(dθ * (ia - 1))
 
+        # Lower-left corner indices of INTERP_ORDER × INTERP_ORDER stencil centered on (x0,x1).
         # Round, don't truncate: the stencil must be equivariant under the patch's π-rotation or stellarator symmetry is lost.
         y0 = clamp(round(Int, x0 * (PATCH_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, PATCH_DIM - INTERP_ORDER)
         y1 = clamp(round(Int, x1 * (PATCH_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, PATCH_DIM - INTERP_ORDER)
 
+        # Local coordinates within INTERP_ORDER×INTERP_ORDER stencil, normalized to [0,1]
         z0 = (x0 * (PATCH_DIM - 1) - y0) * h
         z1 = (x1 * (PATCH_DIM - 1) - y1) * h
+
+        # Polar point index (column in P2G)
         j_polar = ir + RAD_DIM * (ia - 1)
 
+        # Populate stencil contributions for this polar node
         for i0 in 1:INTERP_ORDER, i1 in 1:INTERP_ORDER
+            # Grid point index (row in P2G), using column-major layout
             i_grid = (y0 + i0) + PATCH_DIM * (y1 + i1 - 1)
             I_coo[idx] = i_grid
             J_coo[idx] = j_polar
@@ -99,6 +141,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
         end
     end
 
+    # Assemble sparse interpolation matrix
     P2G = sparse(I_coo, J_coo, V_coo, Ngrid, Npolar)
 
     return SingularQuadratureData(qx, qw, Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, INTERP_ORDER)
@@ -146,7 +189,9 @@ Fused Laplace kernels: `single = 1/r`, `double = (Δx·n)/r³`. Shares `√(r²)
     return (single, double)
 end
 
-"""Extract a periodically wrapped `PATCH_DIM × PATCH_DIM` patch centered at `(idx_pol_center, idx_tor_center)`."""
+"""
+Extract a periodically wrapped `PATCH_DIM × PATCH_DIM` patch centered at `(idx_pol_center, idx_tor_center)`.
+"""
 function extract_patch!(patch::Array{Float64,3}, data::Matrix{Float64}, idx_pol_center::Int, idx_tor_center::Int, npol::Int, ntor::Int, PATCH_DIM::Int)
     PATCH_RAD = (PATCH_DIM - 1) ÷ 2
     @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
@@ -159,7 +204,9 @@ function extract_patch!(patch::Array{Float64,3}, data::Matrix{Float64}, idx_pol_
     end
 end
 
-"""Interpolate a Cartesian patch onto polar quadrature nodes: `polar = P2G' * patch`."""
+"""
+Interpolate a Cartesian patch onto polar quadrature nodes: `polar = P2G' * patch`.
+"""
 function interpolate_to_polar!(polar_data::Array{Float64,3}, patch::Array{Float64,3}, P2G::SparseMatrixCSC{Float64,Int})
     patch_flat = reshape(patch, :, size(patch, 3))
     mul!(reshape(polar_data, :, size(patch, 3)), P2G', patch_flat)
@@ -180,7 +227,9 @@ function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,
     n_polar .*= normal_orient
 end
 
-"""Thread-local scratch for `compute_3D_kernel_matrices!`. One instance per thread so the parallel observer loop does not race."""
+"""
+Thread-local scratch for `compute_3D_kernel_matrices!`. One instance per thread so the parallel observer loop does not race.
+"""
 struct KernelWorkspace
     r_patch::Array{Float64,3}
     dr_dθ_patch::Array{Float64,3}

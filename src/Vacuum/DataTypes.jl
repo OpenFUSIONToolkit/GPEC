@@ -201,7 +201,10 @@ Struct containing input settings for vacuum wall geometry.
     A non-axisymmetric boundary (`nzeta_in > 1`) supports `"nowall"` and `"conformal"`; the others
     are poloidal contours that get revolved and so need `nzeta_in == 1`.
 
-  - `a::Float64`: Distance of wall from plasma in units of major radius (conformal), or shape parameter (others)
+  - `a::Float64`: Distance of wall from plasma in units of the minor radius `0.5(max R - min R)`
+    (conformal), or shape parameter (others). On a non-axisymmetric boundary the extrema are taken
+    over the whole torus, so `a` scales with half the global R-extent rather than a cross-section
+    minor radius; it reduces to the axisymmetric definition when the boundary is axisymmetric.
 
   - `aw::Float64`: Half-thickness parameter for Dee-shaped walls
 
@@ -639,7 +642,8 @@ wall shape settings. This is the 3D counterpart of [`WallGeometry`](@ref) and se
 way: an axisymmetric boundary builds the 2D poloidal contour and revolves it, so every shape
 [`WallGeometry`](@ref) offers is available; a non-axisymmetric boundary offsets the plasma surface.
 
-Expects a full-torus boundary — call [`expand_field_periods`](@ref) first when `nfp > 1`.
+Expects a full-torus boundary on the same `mtheta`/`nzeta` grid as `plasma_surf`, and `nfp == 1`;
+[`expand_field_periods`](@ref) produces both from a per-period non-axisymmetric boundary.
 
 # Arguments
 
@@ -653,12 +657,17 @@ Expects a full-torus boundary — call [`expand_field_periods`](@ref) first when
 
 # Notes
 
-  - A non-axisymmetric boundary supports only nowall and conformal
-  - The conformal wall for a non-axisymmetric boundary displaces each plasma point along its own normal,
-    which keeps wall grid index `(i, j)` the closest wall point to plasma index `(i, j)` — the
-    correspondence the near-field patch of `compute_3D_kernel_matrices!` assumes
+  - Axisymmetric boundaries (`nzeta_in == 1`) support nowall, conformal, elliptical, dee, mod_dee and
+    from_file; non-axisymmetric boundaries support nowall and conformal
+  - The non-axisymmetric conformal wall displaces each plasma point along its own normal, so wall grid
+    index `(i, j)` is the closest wall point to plasma index `(i, j)` — the correspondence the near-field
+    patch of `compute_3D_kernel_matrices!` assumes. The revolved branch does not share it: the wall sits
+    on the geometric angle ϕ while `PlasmaGeometry3D` places the plasma on ζ = ϕ − ν(θ), and
+    `equal_arc_wall` re-parameterizes poloidally on top of that
   - Rejects a conformal offset that folds the surface, and warns when the plasma–wall gap is smaller
-    than one cell of the coarser grid (the double-layer near-field quadrature cannot resolve it)
+    than one cell of the coarser grid (the double-layer near-field quadrature cannot resolve it).
+    Both fold tests are local, so a global self-intersection between distant lobes — where the offset
+    surface meets itself with aligned normals and a positive area element — passes them
 """
 function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall_settings::WallShapeSettings)
 
@@ -667,6 +676,21 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
     is_closed_toroidal = true
 
     (; mtheta, nzeta) = inputs
+
+    # Both surfaces are indexed together throughout, and a mismatch would run off the end of one of them
+    (plasma_surf.mtheta, plasma_surf.nzeta) == (mtheta, nzeta) || error(
+        "Plasma and wall must be built on the same grid: plasma_surf is $(plasma_surf.mtheta)×$(plasma_surf.nzeta) " *
+        "but this wall is $(mtheta)×$(nzeta). Build both from the same VacuumInput."
+    )
+
+    # expand_field_periods tiles a non-axisymmetric boundary to the full torus and returns nfp = 1, so
+    # nfp > 1 reaches here only from an axisymmetric boundary, which has no field periodicity to declare.
+    inputs.nfp > 1 && error(
+        "3D wall geometry requires nfp = 1 on an axisymmetric (nzeta_in = 1) boundary: an axisymmetric " *
+        "surface has no field periodicity, and nfp > 1 leaves the solve reading $(mtheta)×$(nzeta) points " *
+        "as a full torus of $(mtheta)×$(nzeta * inputs.nfp)."
+    )
+
     dθ = 2π / mtheta
     dζ = 2π / nzeta
     θ_grid = range(; start=0, length=mtheta, step=dθ)
@@ -695,9 +719,8 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         )
     end
 
-    # expand_field_periods leaves an axisymmetric boundary alone, so nfp > 1 can only arrive here with
-    # per-period counts that the rest of the 3D solve reads as full-torus ones.
-    inputs.nfp > 1 && error("3D wall geometry requires a full-torus boundary. Call expand_field_periods(inputs) first, or supply the whole torus with nfp = 1.")
+    # Plasma-wall separation at each grid point, measured the way each branch makes exact
+    gap = zeros(num_points)
 
     if inputs.nzeta_in == 1
         # Axisymmetric boundary: build the 2D poloidal contour and revolve it toroidally
@@ -706,22 +729,34 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         for i in 1:mtheta, (j, ϕ) in enumerate(ϕ_grid)
             r[i+mtheta*(j-1), :] .= [wall_2D.x[i] * cos(ϕ), wall_2D.x[i] * sin(ϕ), wall_2D.z[i]]
         end
+
+        # The revolved wall is axisymmetric while the plasma sits on ζ = ϕ − ν(θ), so the same-index pair
+        # is not the closest one. The separation is a 2D minimum over the wall contour in the plasma's own plane.
+        for idx in axes(plasma_surf.r, 1)
+            R_p = hypot(plasma_surf.r[idx, 1], plasma_surf.r[idx, 2])
+            Z_p = plasma_surf.r[idx, 3]
+            gap[idx] = minimum(hypot(R_p - wall_2D.x[i], Z_p - wall_2D.z[i]) for i in 1:mtheta)
+        end
     elseif wall_settings.shape == "conformal"
         # Displace every plasma point outward along its own normal
-        wall_settings.equal_arc_wall && @warn "equal_arc_wall is ignored for non-axisymmetric (nzeta_in > 1) walls: it re-parameterizes a 2D contour and would break the plasma/wall index alignment the near-field patch relies on."
+        wall_settings.equal_arc_wall &&
+            @info "equal_arc_wall is ignored for non-axisymmetric (nzeta_in > 1) walls: it re-parameterizes a 2D contour and would break the plasma/wall index alignment the near-field patch relies on."
 
-        # Gap scales with the plasma's radial extent, as in the 2D conformal wall
+        # Same logic as 2D, with the extrema taken over the whole torus (see WallShapeSettings.a)
         R_plasma = [hypot(plasma_surf.r[idx, 1], plasma_surf.r[idx, 2]) for idx in axes(plasma_surf.r, 1)]
         offset_gap = wall_settings.a * 0.5 * (maximum(R_plasma) - minimum(R_plasma))
         @info "Calculating conformal wall shape $((@sprintf "%.2e" offset_gap)) m from plasma surface."
 
         # Plasma normal points into the plasma, so the displacement is along -normal
-        @inbounds for idx in axes(plasma_surf.r, 1)
+        for idx in axes(plasma_surf.r, 1)
             scale = -offset_gap / sqrt(plasma_surf.normal[idx, 1]^2 + plasma_surf.normal[idx, 2]^2 + plasma_surf.normal[idx, 3]^2)
             for k in 1:3
                 r[idx, k] = plasma_surf.r[idx, k] + scale * plasma_surf.normal[idx, k]
             end
         end
+
+        # Every point moves exactly offset_gap along its own normal, so the separation needs no search
+        fill!(gap, offset_gap)
     else
         error("Wall shape $(wall_settings.shape) is not available for a non-axisymmetric boundary (nzeta_in > 1).")
     end
@@ -743,15 +778,12 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
     normal_orient = normal[idx, 1] > 0 ? 1 : -1
     @views normal .*= normal_orient
 
-    # Same-index plasma–wall separation: the near-field patch is centred on this pair.
-    gap = minimum(hypot(r[idx, 1] - plasma_surf.r[idx, 1], r[idx, 2] - plasma_surf.r[idx, 2], r[idx, 3] - plasma_surf.r[idx, 3]) for idx in axes(r, 1))
-
     # Fold check needs a pointwise normal offset (same-index pair) - equal_arc_wall re-parameterizes and breaks that pairing
     if wall_settings.shape == "conformal" && (inputs.nzeta_in > 1 || !wall_settings.equal_arc_wall)
         # The offset stays regular while the normals stay aligned and the area element has not collapsed; both fail past the local concave radius of curvature
         min_align = Inf # min n̂_wall · n̂_plasma_outward; +1 healthy, ≤0 folded
         min_area_ratio = Inf # min ||n_wall||/||n_plasma||; →0 at a caustic
-        @inbounds for idx in axes(normal, 1)
+        for idx in axes(normal, 1)
             norm_wall = sqrt(normal[idx, 1]^2 + normal[idx, 2]^2 + normal[idx, 3]^2)
             norm_plasma = sqrt(plasma_surf.normal[idx, 1]^2 + plasma_surf.normal[idx, 2]^2 + plasma_surf.normal[idx, 3]^2)
             # Plasma n in, wall n out of vacuum → healthy offset dots to −1; store −cosine so +1 is aligned.
@@ -761,21 +793,29 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         end
 
         min_align <= 0.0 && error(
-            "Conformal wall offset of $((@sprintf "%.2e" gap)) m self-intersects: it exceeds the local concave radius " *
+            "Conformal wall offset of $((@sprintf "%.2e" minimum(gap))) m self-intersects: it exceeds the local concave radius " *
             "of curvature of the plasma surface somewhere, folding the offset surface. Reduce the wall distance a."
         )
         (min_align < 0.5 || min_area_ratio < 0.5) &&
             @warn "Conformal wall is close to folding: min(n̂_wall·n̂_plasma)=$((@sprintf "%.3f" min_align)), min area-element ratio=$((@sprintf "%.3f" min_area_ratio)). Reduce the wall distance a."
     end
 
-    # The 3D singular quadrature resolves the double-layer kernel well only while the plasma-wall gap spans a grid cell or more
-    h_θ = max(sqrt(sum(abs2, dr_dθ) / num_points), sqrt(sum(abs2, plasma_surf.dr_dθ) / num_points)) * dθ
-    h_ζ = max(sqrt(sum(abs2, dr_dζ) / num_points), sqrt(sum(abs2, plasma_surf.dr_dζ) / num_points)) * dζ
-    cells = gap / max(h_θ, h_ζ)
+    # The 3D singular quadrature resolves the double-layer kernel well only while the plasma-wall gap spans a
+    # grid cell or more. Taken pointwise, so an under-resolved patch is not averaged away by the rest of the surface.
+    node_norm(A, idx) = hypot(A[idx, 1], A[idx, 2], A[idx, 3])
+    cells_per_point = [
+        gap[idx] / max(
+            max(node_norm(dr_dθ, idx), node_norm(plasma_surf.dr_dθ, idx)) * dθ,
+            max(node_norm(dr_dζ, idx), node_norm(plasma_surf.dr_dζ, idx)) * dζ
+        ) for idx in axes(r, 1)
+    ]
+    cells, worst = findmin(cells_per_point)
     if cells < 1.0
-        @warn "Plasma–wall gap $((@sprintf "%.2e" gap)) m spans only $((@sprintf "%.2f" cells)) cells of the coarser grid " *
-                "(h_θ=$((@sprintf "%.2e" h_θ)) m, h_ζ=$((@sprintf "%.2e" h_ζ)) m). The double-layer near-field quadrature is inaccurate " *
-                "below one cell. Refine the coarser of mtheta/nzeta, or move the wall out."
+        h_θ = max(node_norm(dr_dθ, worst), node_norm(plasma_surf.dr_dθ, worst)) * dθ
+        h_ζ = max(node_norm(dr_dζ, worst), node_norm(plasma_surf.dr_dζ, worst)) * dζ
+        @warn "Plasma–wall gap $((@sprintf "%.2e" gap[worst])) m spans only $((@sprintf "%.2f" cells)) cells of the coarser grid " *
+              "at its worst-resolved point (h_θ=$((@sprintf "%.2e" h_θ)) m, h_ζ=$((@sprintf "%.2e" h_ζ)) m). The double-layer " *
+              "near-field quadrature is inaccurate below one cell. Refine the coarser of mtheta/nzeta, or move the wall out."
     end
 
     return WallGeometry3D(

@@ -43,7 +43,9 @@ struct StellSymBasis
     block_sizes::Vector{Int}
 end
 
-"""Whether residue class `k` is its own conjugate (`ω^k = ±1`), so `D̂ₖ` and the field-period phases are real."""
+"""
+Whether residue class `k` is its own conjugate (`ω^k = ±1`), so `D̂ₖ` and the field-period phases are real.
+"""
 is_self_conjugate(k::Integer, nfp::Integer) = mod(2k, nfp) == 0
 
 """
@@ -142,12 +144,12 @@ function StellSymBasis(σ_map::Vector{Int}, mtheta::Int, k::Int, nfp::Int)
     for p in pair_reps
         q = σ_map[p]
         first_col = length(columns) + 1
-        
+
         # Self-conjugate: put ± reflection eigenvalues in opposite blocks; flip assignment if σ_phase < 0
         negative = self_conjugate && real(σ_phase[p]) < 0
         sym_block = negative ? 2 : 1
         anti_block = self_conjugate ? (negative ? 1 : 2) : 1  # non-self-conjugate: everything in block 1
-        
+
         twist_p = twist(p)
         if q == p
             # Fixed point of σ: single column twist_p · e_p (cq = 0)

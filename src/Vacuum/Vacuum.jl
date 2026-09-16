@@ -258,7 +258,7 @@ class operator real and splitting a self-conjugate class into two half-size bloc
 
     # Shared within-period reflection when both surfaces allow it; `nothing` leaves the operator untransformed
     σ_map = stell_sym_map(plasma_surf, wall, nfp)
-    
+
     # Find all mode families that share one vacuum operator D̂ₖ, and group them by conjugate pairs
     classes = unique(mod.(n_modes, nfp))
     groups = get_conjugate_groups(classes, nfp)
