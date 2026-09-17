@@ -238,7 +238,6 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     dgeo_val=nothing,
     dc_type::Symbol=:none,
     theta::Real=0.0,
-    compute_omega_star::Bool=true,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl)
     R0_use = R0 === nothing ? equil.ro : Float64(R0)
@@ -257,10 +256,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
     _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta)
 
-    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline
-    # derivatives. When `compute_omega_star=true` we override any ω_*e/ω_*i
-    # carried in `profiles`. Main-ion density is
-    # taken equal to the electron density (quasi-neutrality, matching the
+    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives. Main-ion
+    # density is taken equal to the electron density (quasi-neutrality, matching the
     # staging step).
     chi1 = 2π * equil.psio
     _omega_star_at(ψ) = begin
@@ -286,12 +283,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         sval_r = r_based_shear(rs, q, q1, da_dpsi)
 
         prof = profiles(psi)
-        # Override ω_*e, ω_*i with spline-derivative values when requested.
-        ω_e_use, ω_i_use = if compute_omega_star
-            _omega_star_at(psi)
-        else
-            (prof.omega_e, prof.omega_i)
-        end
+        ω_e_use, ω_i_use = _omega_star_at(psi)
 
         # Resonant (m, n): take the first element of the mode-number vectors.
         # Parallel-FM `sing.m`/`sing.n` hold exactly one entry each; ideal
