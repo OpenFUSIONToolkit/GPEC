@@ -145,7 +145,7 @@ end
 
 """
     sensitivity_table(sens::CoilSensitivities, dom::DominantCoupling; mode=1) -> SensitivityTable
-    sensitivity_table(h5path; psi_low=0.0, psi_high=1.0, mode=1) -> SensitivityTable
+    sensitivity_table(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1) -> SensitivityTable
 
 Project a coil linearization onto singular mode `mode` of `dom` and normalize by the axis
 toroidal field: `δ = dot(V[:, mode], b̃) / B_T0` for the nominal spectrum and each derivative,
@@ -172,7 +172,7 @@ function sensitivity_table(sens::CoilSensitivities, dom::DominantCoupling; mode:
         inplane_rms(shift), inplane_rms(tilt), cancelling(shift), cancelling(tilt))
 end
 
-function sensitivity_table(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=1.0, mode::Int=1)
+function sensitivity_table(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1)
     rc = ResonantCoupling(h5path)
     dom = dominant_coupling(rc; psi_low, psi_high)
     return sensitivity_table(CoilSensitivities(h5path), dom; mode)
