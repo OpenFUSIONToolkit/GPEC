@@ -7,12 +7,10 @@ isinteractive() ? plotlyjs() : gr()
 h5path = joinpath(@__DIR__, "gpec.h5")
 
 # The run stored every coil set's spectrum linearization. Project it onto the dominant
-# resonant-coupling mode twice — over all rational surfaces and over the edge only — to see
-# which coils matter and how much that ranking depends on the window (an analysis choice).
+# resonant-coupling mode over the core window (ψ_N ≤ 0.9, the default) to see which coils matter.
 rc = PerturbedEquilibrium.ResonantCoupling(h5path)
 sens = ErrorFields.CoilSensitivities(h5path)
 full = ErrorFields.sensitivity_table(sens, PerturbedEquilibrium.dominant_coupling(rc))
-edge = ErrorFields.sensitivity_table(sens, PerturbedEquilibrium.dominant_coupling(rc; psi_low=0.7))
 
 names = full.coil_names
 fcoils = findall(startswith("F"), names)
@@ -25,14 +23,12 @@ end
 
 # Error field per millimetre of in-plane shift and per 0.1° of tilt, F coils only. Axisymmetric
 # hoops have no nominal n=1 drive, so the sensitivities are their whole error-field story.
-p_shift = bar(names[fcoils], 1e-3 .* full.shift_rms[fcoils]; label="all rational surfaces", alpha=0.75,
+p_shift = bar(names[fcoils], 1e-3 .* full.shift_rms[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
     ylabel="|∂δ/∂Δ| per mm", title="Dominant-mode error field per mm of F-coil shift", xrotation=45, xticks=(1:length(fcoils), names[fcoils]),
     left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
-bar!(p_shift, names[fcoils], 1e-3 .* edge.shift_rms[fcoils]; label="ψ_N ≥ 0.7", alpha=0.75)
-p_tilt = bar(names[fcoils], 0.1 .* full.tilt_rms[fcoils]; label="all rational surfaces", alpha=0.75,
+p_tilt = bar(names[fcoils], 0.1 .* full.tilt_rms[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
     ylabel="|∂δ/∂θ| per 0.1°", title="Dominant-mode error field per 0.1° of F-coil tilt", xrotation=45, xticks=(1:length(fcoils), names[fcoils]),
     left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
-bar!(p_tilt, names[fcoils], 0.1 .* edge.tilt_rms[fcoils]; label="ψ_N ≥ 0.7", alpha=0.75)
 p_sens = plot(p_shift, p_tilt; layout=(2, 1), size=(900, 700))
 display(p_sens)
 sens_path = joinpath(@__DIR__, "fcoil_sensitivities.png")

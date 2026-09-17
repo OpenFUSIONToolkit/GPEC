@@ -118,20 +118,28 @@ struct DominantCoupling
 end
 
 """
-    dominant_coupling(rc::ResonantCoupling; psi_low=0.0, psi_high=1.0) -> DominantCoupling
-    dominant_coupling(C, rational_psi; psi_low=0.0, psi_high=1.0) -> DominantCoupling
+Upper edge of the core window, ψ_N = 0.9, the default window of the dominant-mode SVD.
+Rational surfaces closer to the edge couple strongly to the applied field on any tokamak and
+would dominate the decomposition, while the locking physics the overlap feeds concerns the core.
+"""
+const CORE_PSI_HIGH = 0.9
+
+"""
+    dominant_coupling(rc::ResonantCoupling; psi_low=0.0, psi_high=CORE_PSI_HIGH) -> DominantCoupling
+    dominant_coupling(C, rational_psi; psi_low=0.0, psi_high=CORE_PSI_HIGH) -> DominantCoupling
 
 Singular-value decomposition of the resonant coupling matrix restricted to the rational
-surfaces with `psi_low ≤ ψ_N ≤ psi_high`. With `C_w = U·diag(σ)·Vᴴ` on the retained rows, the
-right singular vectors `V[:, k]` are the applied-field spectra ordered by how strongly they drive
-resonant field inside the window, and the singular values are coordinate-invariant. The overlap
-of an applied spectrum `b̃` with mode `k` is `dot(V[:, k], b̃)` — see [`coupling_overlap`](@ref) —
-and the resonant field it drives is `σ[k]` times that coefficient; `k = 1` is the dominant mode
+surfaces with `psi_low ≤ ψ_N ≤ psi_high`, by default the core window `ψ_N ≤ 0.9`
+([`CORE_PSI_HIGH`](@ref)). With `C_w = U·diag(σ)·Vᴴ` on the retained rows, the right singular
+vectors `V[:, k]` are the applied-field spectra ordered by how strongly they drive resonant
+field inside the window, and the singular values are coordinate-invariant. The overlap of an
+applied spectrum `b̃` with mode `k` is `dot(V[:, k], b̃)` — see [`coupling_overlap`](@ref) — and
+the resonant field it drives is `σ[k]` times that coefficient; `k = 1` is the dominant mode
 [Park 2007b]. The window is an analysis choice, so re-evaluate it freely on the same `rc`.
 
 Throws `ArgumentError` when the window contains no rational surface.
 """
-function dominant_coupling(C::AbstractMatrix{ComplexF64}, rational_psi::AbstractVector{<:Real}; psi_low::Real=0.0, psi_high::Real=1.0)
+function dominant_coupling(C::AbstractMatrix{ComplexF64}, rational_psi::AbstractVector{<:Real}; psi_low::Real=0.0, psi_high::Real=CORE_PSI_HIGH)
     size(C, 1) == length(rational_psi) ||
         throw(DimensionMismatch("C has $(size(C, 1)) rows but rational_psi has $(length(rational_psi)) entries"))
     rational_index = findall(ψ -> psi_low <= ψ <= psi_high, rational_psi)
@@ -157,10 +165,10 @@ coupling_overlap(dom::DominantCoupling, rc::ResonantCoupling, modes) = coupling_
 """
     compute_dominant_coupling!(state, ctrl)
 
-Store the full-window dominant resonant-coupling decomposition of
-`state.C_resonant_area_weighted_field` on `state` as a run summary, with the applied forcing's
-coefficients on each mode when the response spectrum is available. Windowed analyses are done
-post hoc on a [`ResonantCoupling`](@ref). Returns without change when no coupling matrix exists.
+Store the dominant resonant-coupling decomposition of `state.C_resonant_area_weighted_field`
+over the core window (`ψ_N ≤ CORE_PSI_HIGH`) on `state` as a run summary, with the applied
+forcing's coefficients on each mode when the response spectrum is available. Other windows are
+evaluated post hoc on a [`ResonantCoupling`](@ref). Returns without change when no coupling matrix exists.
 """
 function compute_dominant_coupling!(state::PerturbedEquilibriumState, ctrl::PerturbedEquilibriumControl)
     isempty(state.C_resonant_area_weighted_field) && return nothing
