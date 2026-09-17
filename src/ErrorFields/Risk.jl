@@ -248,13 +248,21 @@ function locking_risk(mc::MonteCarloResult, thresholds::AbstractVector{<:Real}, 
 end
 
 """
-    locking_risk(h5path; n_e, psi_low=0.0, psi_high=1.0, mode=1, risk_ctrl=RiskControl(), kwargs...) -> RiskResult
+    locking_risk(h5path; n_e, psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, risk_ctrl=RiskControl(), kwargs...) -> RiskResult
 
 Post-hoc locking risk from a run: the Monte Carlo is re-run from the file for the given window
 and mode with [`MonteCarloControl`](@ref) `kwargs`, the threshold fit is chosen by `risk_ctrl`
 for the run's toroidal mode number, and the scenario is the run's equilibrium at density `n_e`.
 """
-function locking_risk(h5path::AbstractString; n_e::Real, psi_low::Real=0.0, psi_high::Real=1.0, mode::Int=1, risk_ctrl::RiskControl=RiskControl(), kwargs...)
+function locking_risk(
+    h5path::AbstractString;
+    n_e::Real,
+    psi_low::Real=0.0,
+    psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH,
+    mode::Int=1,
+    risk_ctrl::RiskControl=RiskControl(),
+    kwargs...
+)
     mc = run_monte_carlo(h5path; psi_low, psi_high, mode, kwargs...)
     n = h5open(f -> Int(read(f["Info/nlow"])), h5path, "r")
     sc = threshold_scaling(; n, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
@@ -285,7 +293,7 @@ end
 
 """
     tolerance_scan(table, ts, coil_sets, mc_ctrl, sc, scen; scales, risk_ctrl=RiskControl()) -> ToleranceScan
-    tolerance_scan(h5path; scales, psi_low=0.0, psi_high=1.0, mode=1, n_e, kwargs...) -> ToleranceScan
+    tolerance_scan(h5path; scales, psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, n_e, kwargs...) -> ToleranceScan
 
 Run the Monte Carlo once per tolerance multiplier in `scales` and evaluate the locking risk of
 each with one threshold sampling. The file form takes the run's tolerances, coil geometry and
@@ -315,7 +323,7 @@ function tolerance_scan(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
     return ToleranceScan(Float64.(collect(scales)), plock, plock_efc, spread, spread_efc, nominal)
 end
 
-function tolerance_scan(h5path::AbstractString; scales::AbstractVector{<:Real}, psi_low::Real=0.0, psi_high::Real=1.0, mode::Int=1,
+function tolerance_scan(h5path::AbstractString; scales::AbstractVector{<:Real}, psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1,
     n_e::Real, risk_ctrl::RiskControl=RiskControl(), kwargs...)
     ts = read_tolerance_snapshot(h5path)
     ts === nothing && throw(ArgumentError("$h5path carries no tolerance snapshot (the run named no tolerance_file)"))
