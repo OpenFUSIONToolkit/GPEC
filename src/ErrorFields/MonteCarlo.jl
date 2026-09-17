@@ -124,7 +124,7 @@ end
 
 """
     run_monte_carlo(table, tolerances, coil_sets, ctrl=MonteCarloControl()) -> MonteCarloResult
-    run_monte_carlo(h5path; psi_low=0.0, psi_high=1.0, mode=1, kwargs...) -> MonteCarloResult
+    run_monte_carlo(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, kwargs...) -> MonteCarloResult
 
 Sample every coil set's misalignment within its tolerance and histogram the dominant-mode
 overlap. Per sample and coil set `c` with sensitivities `S = (S_x, S_y)` per metre and
@@ -204,7 +204,7 @@ function run_monte_carlo(table::SensitivityTable, ts::ToleranceSet, coil_sets::V
         sum(clamped) / total, ctrl.nsample, ctrl.nbatch, ctrl.seed)
 end
 
-function run_monte_carlo(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=1.0, mode::Int=1, kwargs...)
+function run_monte_carlo(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1, kwargs...)
     ts = read_tolerance_snapshot(h5path)
     ts === nothing && throw(ArgumentError("$h5path carries no tolerance snapshot (the run named no tolerance_file)"))
     table = sensitivity_table(h5path; psi_low, psi_high, mode)

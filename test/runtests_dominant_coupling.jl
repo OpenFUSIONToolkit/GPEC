@@ -33,8 +33,11 @@ include("h5_metadata_check.jl")
         @test C[2:3, :] * V[:, 1] ≈ σ[1] .* U[:, 1]
         @test PE.coupling_overlap(dom, V[:, 1]) ≈ [1, 0] atol = 1e-12
 
-        # The full window reproduces the plain SVD; an empty window is an error.
-        full = PE.dominant_coupling(C, rational_psi)
+        # The default is the core window ψ_N ≤ 0.9; the full window reproduces the plain SVD; an empty window is an error.
+        core = PE.dominant_coupling(C, rational_psi)
+        @test core.rational_index == [1, 2, 3] && PE.CORE_PSI_HIGH == 0.9   # all three surfaces are inside the core here
+        @test isempty(PE.dominant_coupling(C, [0.2, 0.5, 0.95]).rational_index ∩ [3])
+        full = PE.dominant_coupling(C, rational_psi; psi_high=1.0)
         @test full.rational_index == [1, 2, 3]
         @test full.singular_values ≈ svd(C).S
         @test_throws ArgumentError PE.dominant_coupling(C, rational_psi; psi_low=0.9)
@@ -63,7 +66,7 @@ include("h5_metadata_check.jl")
             pe, ffs = run.pe, run.ffs
             h5path = joinpath(dir, "gpec.h5")
 
-            # Run summary: the full-window decomposition, rebuilt into the stored applied resonant
+            # Run summary: the core-window decomposition, rebuilt into the stored applied resonant
             # field (which the writer evaluates before conforming the matrix to b̃ space).
             @test !isempty(pe.dominant_singular_values)
             rank = length(pe.dominant_singular_values)
