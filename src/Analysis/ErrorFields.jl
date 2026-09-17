@@ -220,7 +220,7 @@ end
 plot_dominant_mode_spectrum(h5path::AbstractString; kwargs...) = plot_dominant_mode_spectrum(_sources(h5path); kwargs...)
 
 """
-    plot_phasing_map(h5path, coil_names; psi_low=0.0, psi_high=1.0, mode=1, nphase=180, quantity=:delta_per_kat, save_path=nothing)
+    plot_phasing_map(h5path, coil_names; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, nphase=180, quantity=:delta_per_kat, save_path=nothing)
     plot_phasing_map(map::EF.PhasingMap; quantity=:delta_per_kat, save_path=nothing)
 
 Contour map of the dominant-mode overlap per kilo-ampere-turn (`:delta_per_kat`) or of the
@@ -250,7 +250,7 @@ function plot_phasing_map(map::EF.PhasingMap; quantity::Symbol=:delta_per_kat, s
     end
     return _save(p, save_path)
 end
-function plot_phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:AbstractString}; psi_low::Real=0.0, psi_high::Real=1.0, mode::Int=1,
+function plot_phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:AbstractString}; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1,
     nphase::Int=180, quantity::Symbol=:delta_per_kat, save_path=nothing)
     return plot_phasing_map(EF.phasing_map(h5path, coil_names; psi_low, psi_high, mode, nphase); quantity, save_path)
 end
