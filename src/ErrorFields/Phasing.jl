@@ -36,7 +36,7 @@ end
 
 """
     phasing_map(sens::CoilSensitivities, dom::DominantCoupling, coil_names; mode=1, nphase=180) -> PhasingMap
-    phasing_map(h5path, coil_names; psi_low=0.0, psi_high=1.0, mode=1, nphase=180) -> PhasingMap
+    phasing_map(h5path, coil_names; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, nphase=180) -> PhasingMap
 
 Scan the relative phases of the current patterns of the named coil arrays and evaluate, at
 each grid point, the dominant-mode overlap per kilo-ampere-turn and the resonant fraction of
@@ -86,7 +86,14 @@ function phasing_map(sens::CoilSensitivities, dom::DominantCoupling, coil_names:
     return PhasingMap(String.(collect(coil_names)), [copy(grid) for _ in 1:N-1], delta_map, overlap_map, abs.(deltas))
 end
 
-function phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:AbstractString}; psi_low::Real=0.0, psi_high::Real=1.0, mode::Int=1, nphase::Int=180)
+function phasing_map(
+    h5path::AbstractString,
+    coil_names::AbstractVector{<:AbstractString};
+    psi_low::Real=0.0,
+    psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH,
+    mode::Int=1,
+    nphase::Int=180
+)
     dom = dominant_coupling(ResonantCoupling(h5path); psi_low, psi_high)
     return phasing_map(CoilSensitivities(h5path), dom, coil_names; mode, nphase)
 end
