@@ -86,7 +86,9 @@ jobs:
           fi
 
   test:
-    name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    # Branch protection lists the single-threaded job names as required checks, so those must
+    # stay byte-identical; the multi-threaded leg gets a distinct name and is purely additive.
+    name: runtests ${{ matrix.version }} - ${{ matrix.os }}${{ matrix.threads != '1' && format(' ({0} threads)', matrix.threads) || '' }}
     needs: changes
     if: needs.changes.outputs.julia == 'true'
     runs-on: ${{ matrix.os }}
@@ -99,8 +101,17 @@ jobs:
           - '1.x'  # latest (currently 1.12)
         os:
           - ubuntu-latest
+        threads:
+          - '1'
+        include:
+          # Threads.@threads executes serially at one thread, so a single-threaded matrix never
+          # exercises threaded scheduling; this leg covers real concurrent execution.
+          - version: '1.11'
+            os: ubuntu-latest
+            threads: '4'
 
     env:
+      JULIA_NUM_THREADS: ${{ matrix.threads }}
       DEPOT_PATHS: |
         ~/.julia/artifacts
         ~/.julia/packages
