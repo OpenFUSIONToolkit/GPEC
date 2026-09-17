@@ -18,13 +18,13 @@ ksel = length(ARGS) >= 3 ? ARGS[3] : "highest"
 
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
-et, wt, u1, psiE, gxi, psiG, issing, mlow, sing_psi = h5open(h5path) do f
+et, wt, u1, psiE, gxi, psiG, mlow, sing_psi = h5open(h5path) do f
     (to_c(read(f["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])),
         to_c(read(f["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"])),
         to_c(read(f["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"])), read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
-        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/xi"])), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]),
-        Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"])), read(f["Info/mlow"]),
-        read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
+        to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/xi_psi"])), read(f["ForceFreeStates/Solutions/GalerkinIntegration/psi"]),
+        read(f["Info/mlow"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]))
 end
 
 mpert = size(u1, 1)
@@ -38,10 +38,10 @@ w = wt[:, k]
 cEL = u1[:, :, end] \ w
 xiE = reduce(hcat, (u1[:, :, ip] * cEL for ip in 1:size(u1, 3)))   # (mpert, nE)
 
-# gal ideal profile (identity-at-edge ⇒ coefficient = w); drop on-surface points
-keep = .!issing
-psiGk = psiG[keep]
-xiG = reduce(hcat, (gxi[:, ip, :] * w for ip in findall(keep)))    # (mpert, nGk)
+# gal ideal profile (identity-at-edge ⇒ coefficient = w); the closed-profile grid
+# already excludes on-surface points
+psiGk = psiG
+xiG = reduce(hcat, (gxi[:, :, ip] * w for ip in eachindex(psiG)))    # (mpert, nGk)
 
 ms = mlow .+ (0:mpert-1)
 peak = [maximum(abs, @view xiE[i, :]) for i in 1:mpert]

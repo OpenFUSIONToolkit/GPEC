@@ -49,20 +49,17 @@ Tags are applied to merge commits on `main`.
 ## Commit Message Format
 
 ```
-CODE - TAG - Detailed message
+Area[.Submodule] - TAG[!] - Imperative summary
 ```
 
-Where:
-- **CODE**: Module name (EQUIL, VAC, VACUUM, ForceFreeStates, PERTURBED EQUILIBRIUM, etc.)
-- **TAG**: Type descriptor (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, REFACTOR, CLEANUP, etc.)
-
 Examples:
-- `PERTURBED EQUILIBRIUM - NEW FEATURE - Implement singular coupling diagnostics`
-- `VAC - IMPROVEMENT - Add dual Green's function computation`
-- `EQUIL - BUG FIX - Fixed separatrix finding for high kappa`
-- `ForceFreeStates - REFACTOR - Unified singular surface data structure`
 
-This format is used for compiling release notes, so tags should be human-readable and descriptive.
+- `PerturbedEquilibrium - FEATURE - Implement singular coupling diagnostics`
+- `Vacuum - PERF - Add dual Green's function computation`
+- `Equilibrium - BUGFIX! - Fix separatrix finding for high kappa`
+- `ForceFreeStates - REFACTOR - Unify singular surface data structure`
+
+The Area and TAG vocabularies are closed — do not invent new ones. Pull request titles use the same grammar and are checked in CI; commit subjects are not, so follow this by hand. Every pull request body also carries a release-note block, which is what the release notes are compiled from. The full grammar, the Area list, and the abbreviations to use in prose are in [`naming.md`](naming.md).
 
 ## Merge Conflict Resolution Policy
 

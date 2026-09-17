@@ -17,7 +17,7 @@ to MHD stability through torque and energy deposition calculations.
 - `Compute.jl`: Orchestration routines
   - compute_torque_all_methods!()
 - `CalculatedKineticMatrices.jl`: compute_calculated_kinetic_matrices()
-  ← Callback registered with ForceFreeStates.make_kinetic_matrix when
+  ← Callback registered with ForceFreeStates.build_kinetic_matrix_splines when
   kinetic_source="calculated"
 
 ### Supporting Functions
@@ -38,6 +38,7 @@ using Roots
 import ..ForceFreeStates
 import ..Equilibrium
 import ..Utilities
+import ..PerturbedEquilibrium
 
 # Supporting data structures and utilities
 include("KineticForcesStructs.jl")

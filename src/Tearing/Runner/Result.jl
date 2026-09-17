@@ -16,7 +16,14 @@ downstream inspection and HDF5 output.
   - `enabled`             -- `true` only when the analysis actually ran
   - `control`             -- the `SLAYERControl` used (frozen snapshot)
   - `params`              -- `Vector{SLAYERParameters}`, one per surface
-  - `dp_matrix`           -- outer-region Δ' matrix used in the analysis
+  - `rational_psi`, `rational_q` -- normalized poloidal flux ψ_N and safety
+    factor q of each analyzed surface, aligned with `params`. Empty when the
+    analysis was built from bare parameters (`run_slayer_from_inputs` without
+    the surface list), in which case the HDF5 writer skips them.
+  - `dp_matrix`           -- outer-region Δ' matrix used in the analysis.
+    SLAYER path: r_s-referenced (the ψ_N BVP matrix transformed by
+    `delta_prime_to_rs_reference`, written as `PerSurface/Delta_prime_matrix_rs`);
+    GGJ path: the ψ_N matrix unchanged (written as `PerSurface/Delta_prime_matrix`)
   - `Q_root`              -- tearing eigenvalue(s) in normalized Q
     * length `nsurfaces` in `:uncoupled` mode
     * length `1` in `:coupled` mode (global eigenvalue normalized by
@@ -37,6 +44,8 @@ struct SLAYERResult
     enabled::Bool
     control::SLAYERControl
     params::AbstractVector{<:InnerLayerParameters}
+    rational_psi::Vector{Float64}
+    rational_q::Vector{Float64}
     dp_matrix::Matrix{ComplexF64}
     Q_root::Vector{ComplexF64}
     omega_Hz::Vector{Float64}
@@ -51,6 +60,7 @@ end
 function empty_slayer_result(control::SLAYERControl)
     return SLAYERResult(false, control,
                         SLAYERParameters[],
+                        Float64[], Float64[],
                         zeros(ComplexF64, 0, 0),
                         ComplexF64[], Float64[], Float64[],
                         GrowthRateResult[], nothing,

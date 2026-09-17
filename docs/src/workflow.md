@@ -179,7 +179,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 | `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |
-| `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ' matrices (`GalerkinDeltaPrime/`), kinetic surfaces (`Kinetic/`) |
+| `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ'/PEST-3 matching matrices, kinetic surfaces (`Kinetic/`) |
 | `PerturbedEquilibrium/` | Plasma response: `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/` |
 | `KineticForces/` | NTV torque per method: energy integrals, kinetic matrices |
 | `Tearing/` | SLAYER/GGJ inner-layer growth rates: `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `Scan/` |

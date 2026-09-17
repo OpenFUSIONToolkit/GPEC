@@ -5,3 +5,4 @@
 - [KineticForces (NTV) Audit Checklist](kinetic_ntv_map.md) — pentrc->KineticForces map, Logan 2015 matrices, what to verify
 - [InnerLayer (Resistive) Audit Checklist](resistive_layer_map.md) — rmatch->InnerLayer map, GGJ Wasow basis / Δ′, what to verify
 - [Galerkin Δ′ Assembly Map](galerkin_assembly_map.md) — gal.f<->GalerkinAssembly.jl; resonant sign chain verified; PASS
+- [reg_spot vs singfac_min audit](reg_spot_regularization.md) — reg_spot field-recon smoothing CORRECT; distinct from singfac_min ODE gate

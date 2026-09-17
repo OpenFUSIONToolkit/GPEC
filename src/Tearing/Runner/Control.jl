@@ -29,7 +29,9 @@ constructor.
 
 # Physics knobs
 
-  - `bt`       -- toroidal field [T]. `nothing` → use `equil.config.b0exp`
+  - `bt`       -- toroidal field `[T]`. `nothing` (default) resolves the physical
+    `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
+    callable of `psi` overrides it
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat

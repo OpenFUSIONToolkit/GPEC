@@ -8,9 +8,17 @@ a single global banded system.  Cells adjacent to each rational surface ("resona
 singular behavior is built into the basis rather than resolved numerically.
 
 The solve produces the inter-surface Δ′ matrix and the PEST-3 matching blocks
-(``A'``, ``B'``, ``\Gamma'``, ``\Delta'``), written to the HDF5 output under the `SingularSurfaces/GalerkinDeltaPrime/`
-group.  These are the outer-region inputs to resistive matched-asymptotic stability analysis
+(``A'``, ``B'``, ``\Gamma'``, ``\Delta'``), written to the HDF5 output under the same
+`SingularSurfaces/` paths the Riccati Δ′ uses (`Delta_prime_matrix`, `Delta_prime_raw`,
+`Delta_coil`, `pest3_A`, `pest3_B`, `pest3_Gamma`) — one set of names per quantity,
+whichever formalism produced it.  These are the outer-region inputs to resistive matched-asymptotic stability analysis
 [Glasser 2016, Phys. Plasmas **23**, 072505].
+
+Select it with `integrator = "galerkin"` in `[ForceFreeStates]`. It replaces the radial ODE
+integration rather than supplementing it: the run computes its own vacuum response at the
+control surface (when `vac_flag`) and produces no free-boundary energies or ODE trace.
+Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution that
+`PerturbedEquilibrium` consumes in place of a forward solution.
 
 The implementation lives in `src/ForceFreeStates/Galerkin/`:
 
@@ -20,7 +28,7 @@ The implementation lives in `src/ForceFreeStates/Galerkin/`:
 | `GalerkinGrid.jl` | Packed grid construction and local→global DOF mapping |
 | `GalerkinAssembly.jl` | Element-level assembly: Hermite basis, Gauss-Lobatto stiffness, resonant and extension cells, boundary conditions |
 | `GalerkinSolution.jl` | Reconstruct ξ(ψ) and analytic ξ′(ψ) on the gal-native grid |
-| `GalerkinMatch.jl` | DRIVEN/RPEC outer↔inner asymptotic matching and the matched `OdeState` for PerturbedEquilibrium |
+| `GalerkinMatch.jl` | DRIVEN/RPEC outer↔inner asymptotic matching, whose matched solution PerturbedEquilibrium consumes |
 | `GalerkinSolve.jl` | Top-level driver `galerkin_solve`, banded solve, Δ′ extraction, PEST-3 blocks, HDF5 output |
 
 ## API Reference

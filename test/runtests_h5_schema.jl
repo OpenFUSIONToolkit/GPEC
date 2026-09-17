@@ -13,6 +13,11 @@ _is_camelcase(name) = occursin(r"^[A-Z][A-Za-z0-9]*$", name)
 function _group_name_ok(parent_path, name)
     startswith(parent_path, "Input/") && return true
     parent_path == "KineticForces" && return true
+    # Multi-ion runs nest KineticForces/PerSpecies/<species>/<method>/: the species label
+    # (ion_z1_m2, impurity_z6_m12, electron) and the method token are both data-driven.
+    # Exactly those two levels — anything deeper (EnergyIntegrals/, KineticMatrices/) is
+    # a normal group and still has to be CamelCase.
+    occursin(r"^KineticForces/PerSpecies(/[^/]+)?$", parent_path) && return true
     occursin(r"^Surface_\d+$", name) && return true
     return _is_camelcase(name)
 end
@@ -90,6 +95,13 @@ end
             fwd = "ForceFreeStates/Solutions/ForwardIntegration"
             @test HDF5.API.h5ds_is_scale(h5["$fwd/psi"])
             @test HDF5.API.h5ds_is_attached(h5["$fwd/q"], h5["$fwd/psi"], 0)
+
+            # Ideal run with rational surfaces: the asymptotic ca coefficients are
+            # populated and finite (the kinetic/galerkin not-computed case emits
+            # zero-extent sentinels instead — asserted in runtests_fullruns.jl).
+            ca_l = read(h5["SingularSurfaces/ca_left"])
+            @test !isempty(ca_l)
+            @test all(isfinite, ca_l)
         end
     end
 end

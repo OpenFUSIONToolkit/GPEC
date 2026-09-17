@@ -44,6 +44,9 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     end
 
     _write_per_surface!(g, result.params, result.dp_matrix)
+    # Surface identity (absent when the analysis was built from bare parameters).
+    isempty(result.rational_psi) || (g["PerSurface/rational_psi"] = result.rational_psi)
+    isempty(result.rational_q) || (g["PerSurface/rational_q"] = result.rational_q)
     _write_roots!(g, result)
     _write_layer_widths!(g, result.layer_widths)
     _write_diagnostics!(g, result)
@@ -64,12 +67,14 @@ _layer_model_token(::Type{GGJParameters}) = "ggj"
 const TEARING_H5_ANNOTATIONS = [
     "enabled" => (; long_name="flag: SLAYER/tearing stage ran (1) or was disabled (0)"),
     "PerSurface/rational_index" => (; long_name="rational-surface index of each row", dims=("surface",)),
+    "PerSurface/rational_psi" => (; long_name="normalized poloidal flux ψ_N of each analyzed surface", dims=("surface",)),
+    "PerSurface/rational_q" => (; long_name="safety factor q = m/n of each analyzed surface", dims=("surface",)),
     "PerSurface/m" => (; long_name="resonant poloidal mode number m per surface", dims=("surface",)),
     "PerSurface/n" => (; long_name="resonant toroidal mode number n per surface", dims=("surface",)),
     "PerSurface/tau" => (; long_name="temperature ratio τ = T_i/T_e per surface", dims=("surface",)),
     "PerSurface/lu" => (; long_name="Lundquist number S per surface", dims=("surface",)),
     "PerSurface/c_beta" => (; long_name="compressibility factor c_β = √(β_local/(1+β_local)) per surface", dims=("surface",)),
-    "PerSurface/D_norm" => (; long_name="Fitzpatrick normalized ion-sound/drift scale D = (d_β/r_s)·S^(1/3)·√(τ/(1+τ)) per surface", dims=("surface",)),
+    "PerSurface/D_norm" => (; long_name="Fitzpatrick normalized ion-sound/drift scale D = (d_β/r_s)·S^(1/3)·√ι_e per surface", dims=("surface",)),
     "PerSurface/P_perp" => (; long_name="perpendicular magnetic Prandtl number per surface", dims=("surface",)),
     "PerSurface/P_tor" => (; long_name="toroidal (momentum) magnetic Prandtl number per surface", dims=("surface",)),
     "PerSurface/Q_e" => (; long_name="normalized electron diamagnetic frequency Q_e per surface", dims=("surface",)),
@@ -90,6 +95,9 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
     "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
     "PerSurface/D_c_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
+    "PerSurface/k_ref" => (; long_name="reference-length ratio K = r_s·(dψ_N/dr) at each surface", dims=("surface",)),
+    "PerSurface/alpha_mercier" => (; long_name="Mercier Frobenius exponent α = √(−D_I) at each surface (Glasser-Greene-Johnson 1975 Eq. 48)", dims=("surface",)),
+    "PerSurface/delta_prime_conversion" => (; long_name="ψ_N → r_s reference-length factor K^(2α) applied to each Δ' diagonal", dims=("surface",)),
     "PerSurface/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",)),
     "PerSurface/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",)),
     "PerSurface/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",)),
@@ -98,7 +106,8 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
     "PerSurface/tau_A" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
-    "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces", dims=("surface_row", "surface_col")),
+    "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
+    "PerSurface/Delta_prime_matrix_rs" => (; long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
     "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
         (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root", units="rad/s", dims=("surface",)),
@@ -179,8 +188,15 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     ps["D_geo"] = Float64[p.dgeo_val for p in params]
     # Store dc_type per-surface as string array
     ps["D_c_type"] = String[String(p.dc_type) for p in params]
+    # Reference-length conversion applied to Δ' (ψ_N → r_s): K, α, and the
+    # diagonal factor K^(2α) actually multiplying each Δ'_kk.
+    ps["k_ref"] = Float64[p.k_ref for p in params]
+    ps["alpha_mercier"] = Float64[p.alpha_mercier for p in params]
+    ps["delta_prime_conversion"] = Float64[p.k_ref^(2 * p.alpha_mercier) for p in params]
 
-    ps["Delta_prime_matrix"] = dp_matrix
+    # The converted matrix is a different quantity from the ψ_N-referenced BVP
+    # matrix, so it carries its own name.
+    ps["Delta_prime_matrix_rs"] = dp_matrix
     return nothing
 end
 

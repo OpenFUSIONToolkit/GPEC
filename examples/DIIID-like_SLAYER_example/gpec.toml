@@ -52,7 +52,7 @@ singfac_min = 1e-4             # Fractional distance from rational q at which id
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
-integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic) or "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix)
+integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n
 
@@ -61,8 +61,11 @@ dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmli
 # Runs in the force_termination path (PE skipped). Kinetic profiles (incl. the
 # χ⊥/χ_φ heat/momentum diffusivities) are read from the standardized HDF5
 # kinetic file shared with the kinetic/NTV physics. Per-surface (uncoupled)
-# analysis: the headline is the unstable 2/1; the validity gate drops surfaces
-# with no real root (e.g. the 5/1, whose Δ' BVP yields a huge uncancellable Δ').
+# analysis: track the 2/1, 3/1, and 4/1 (the headline is the unstable 2/1).
+# The 5/1 and 6/1 sit near the edge (ψ_N ≥ 0.97), far from the core where the
+# slab-layer approximation holds; their Δ' are excessively large and likely
+# invalid, no Re/Im contour crossing polishes to a true zero, and the validity
+# gate correctly reports them as no_root rather than a spurious growth rate.
 enabled                 = true       # Run the SLAYER tearing-mode analysis
 inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
 scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive refinement) or "brute_force"

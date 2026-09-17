@@ -11,10 +11,13 @@ This project uses [GitFlow](http://nvie.com/posts/a-successful-git-branching-mod
 ## Commit Message Format
 
 ```
-CODE - TAG - Detailed message
+Area[.Submodule] - TAG[!] - Imperative summary
 ```
 
-Where CODE is the module name (EQUIL, ForceFreeStates, VAC, PERTURBED EQUILIBRIUM, etc.) and TAG describes the type of change (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, REFACTOR, CLEANUP, etc.). This format is used for compiling release notes — tags should be human-readable but are not enforced to a fixed set.
+`Area` is a module name such as `Equilibrium` or `ForceFreeStates`, or a repository area such as `Docs` or `CI`. `TAG` is one of `FEATURE`, `BUGFIX`, `PERF`, `API`, `DEPRECATION`, `DOCS` (which appear in release notes) or `MINOR`, `REFACTOR`, `TEST` (which do not). Append `!` when results move or an interface changes, for example `Equilibrium - BUGFIX! - Correct bp0 edge quadrature`.
+
+Both vocabularies are closed — do not invent new ones. Pull request titles use the same grammar and are checked in CI; commit subjects follow it by convention rather than enforcement. Pull request bodies carry a release-note block, which is what the changelog is compiled from. The full grammar, the abbreviations to use in prose, and the release-note block are documented in
+[`docs/development/naming.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/development/naming.md).
 
 ## Documentation standard
 

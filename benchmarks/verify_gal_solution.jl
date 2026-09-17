@@ -1,5 +1,6 @@
 # Piece 1 verification: reconstructed gal ξ(ψ) and analytic ξ′(ψ).
-#   1. shapes / finiteness sanity of ForceFreeStates/Solutions/GalerkinIntegration/Solution arrays
+#   1. shapes / finiteness sanity of the raw-basis dump (GalerkinIntegration/Basis; requires
+#      [DEBUG] gal_basis_output = true in the deck)
 #   2. analytic ξ′ vs centered finite-difference of ξ — agree in the smooth interior, diverge at the
 #      packed edge (the spline-endpoint-derivative artifact we deliberately avoid)
 # Usage: julia --project=. verify_gal_solution.jl [path/to/gpec.h5]
@@ -9,20 +10,20 @@ h5path = length(ARGS) >= 1 ? ARGS[1] : "examples/DIIID-like_gal_resistive_exampl
 @info "Reading $h5path"
 
 psi, issing, xi, dxi, sing_psi = h5open(h5path) do f
-    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/psi"]),
-        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/is_rational"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/xi_psi"]),
-        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Solution/dxi_psidpsi"]), read(f["SingularSurfaces/GalerkinDeltaPrime/rational_psi"]))
+    (read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/psi"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/is_rational"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/xi_psi"]),
+        read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/dxi_psidpsi"]), read(f["ForceFreeStates/Solutions/GalerkinIntegration/rational_psi"]))
 end
 issing = Bool.(issing)
-mpert, ngrid, nsol = size(xi)
+mpert, nsol, ngrid = size(xi)
 @printf("grid: mpert=%d  ngrid=%d  nsol=%d   psi∈[%.4f, %.4f]\n", mpert, ngrid, nsol, psi[1], psi[end])
 @printf("singular surfaces at psi = %s\n", join((@sprintf("%.4f", p) for p in sing_psi), ", "))
 
 # --- finiteness (skip on-surface points, which are intentionally left zero) ---
 good = .!issing
-nbad = count(!isfinite, xi[:, good, :]) + count(!isfinite, dxi[:, good, :])
+nbad = count(!isfinite, xi[:, :, good]) + count(!isfinite, dxi[:, :, good])
 @printf("non-finite entries (off-surface): %d   |xi|max=%.3e  |dxi|max=%.3e\n",
-    nbad, maximum(abs, xi[:, good, :]), maximum(abs, dxi[:, good, :]))
+    nbad, maximum(abs, xi[:, :, good]), maximum(abs, dxi[:, :, good]))
 
 # --- analytic ξ′ vs centered finite difference of ξ ---
 # For each column, centered diff at interior grid points (using off-surface neighbours), compared to the
@@ -40,8 +41,8 @@ for isol in 1:nsol
         (h1 <= 0 || h2 <= 0) && continue
         for m in 1:mpert
             # nonuniform centered difference
-            fd = (xi[m, ip+1, isol] - xi[m, ip-1, isol]) / (h2 + h1)
-            an = dxi[m, ip, isol]
+            fd = (xi[m, isol, ip+1] - xi[m, isol, ip-1]) / (h2 + h1)
+            an = dxi[m, isol, ip]
             scale = max(abs(an), abs(fd), 1e-30)
             push!(relerr, abs(fd - an) / scale)
             push!(dsurf, dist_sing(psi[ip]))

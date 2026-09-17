@@ -2,7 +2,7 @@
     FixedKineticMatrices
 
 Test fixtures: synthetic X-shaped kinetic energy matrices keyed off the ideal
-matrices' Frobenius norms. Used by `make_kinetic_matrix` when
+matrices' Frobenius norms. Used by `build_kinetic_matrix_splines` when
 `ctrl.kinetic_source == "fixed"` to exercise the kinetic-MHD code path before
 the calculated NTV pipeline (see `KineticForces.compute_calculated_kinetic_matrices`)
 is wired in.
@@ -43,7 +43,7 @@ function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=
 end
 
 """
-    fixed_kinetic_matrices(mpert, mpsi, sigma, mlow, ffit, xs)
+    fixed_kinetic_matrices(mpert, np, mpsi, sigma, mlow, mats, xs)
 
 Build X-shaped fixed kinetic energy matrices for testing all 6 components.
 
@@ -69,16 +69,15 @@ Torque matrices (T) are all zero (torque requires finite rotation frequency).
 Returns `(kw_flat, kt_flat)` where each is `(mpsi, mpert^2, 6)`.
 """
 function fixed_kinetic_matrices(
-    mpert::Int, mpsi::Int, sigma::Float64, mlow::Int,
-    ffit::FourFitVars, xs::Vector{Float64}
+    mpert::Int, np::Int, mpsi::Int, sigma::Float64, mlow::Int,
+    mats::MatrixSplines, xs::Vector{Float64}
 )
-    np = ffit.numpert_total
     kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
     kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
 
     # Map component index → ideal matrix spline and Hermiticity
     # (component_index, ideal_spline, is_hermitian)
-    ideal_splines = [ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats_prim, ffit.emats_prim, ffit.hmats]
+    ideal_splines = [mats.ideal.A_spline, mats.ideal.B_spline, mats.ideal.C_spline, mats.ideal.D_spline_prim, mats.ideal.E_spline_prim, mats.ideal.H_spline]
     # Ak, Dk, Hk are Hermitian: X†X is trivially self-adjoint.
     # The thesis (Logan 2015 p.169) lists "Ak, Ck, Hk" but this appears to be a typo
     # for "Ak, Dk, Hk" — confirmed by inspecting Fortran PENTRC output where Ck ≠ Ck†.
@@ -100,7 +99,7 @@ function fixed_kinetic_matrices(
             # Scale: σ × ‖ideal(ψ)‖_F × unit X-pattern
             # For multi-n, tile the mpert×mpert X-pattern into the np×np block
             W = zeros(ComplexF64, np, np)
-            for jn in 0:(ffit.numpert_total÷mpert-1)
+            for jn in 0:(np÷mpert-1)
                 offset = jn * mpert
                 W[(offset+1):(offset+mpert), (offset+1):(offset+mpert)] .= X
             end
