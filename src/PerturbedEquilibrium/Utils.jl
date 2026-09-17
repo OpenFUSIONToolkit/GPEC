@@ -94,7 +94,7 @@ PerturbedEquilibrium/
 │   ├── rational_q
 │   ├── rational_m
 │   ├── rational_n
-│   └── DominantMode/        # SVD U·diag(σ)·Vᴴ of C_resonant_area_weighted_field over the retained rational surfaces
+│   └── DominantMode/        # SVD U·diag(σ)·Vᴴ of C_resonant_area_weighted_field over the core-window rational surfaces (ψ_N ≤ 0.9)
 │       ├── singular_values          # σ, descending [rank]
 │       ├── right_singular_vectors   # V: applied-b̃ spectra ranked by resonant drive [numpert_total × rank]
 │       ├── left_singular_vectors    # U: resonant-field patterns over the retained surfaces [n_retained × rank]
@@ -361,7 +361,10 @@ const PE_H5_ANNOTATIONS = [
         (; long_name="resonant toroidal mode number n at each rational surface",
             dims=("surface",), attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
     "SingularCoupling/DominantMode/singular_values" =>
-        (; long_name="singular values σ (descending) of the applied-b̃ → resonant-field coupling matrix over the retained rational surfaces", dims=("rank",)),
+        (;
+            long_name="singular values σ (descending) of the applied-b̃ → resonant-field coupling matrix over the retained rational surfaces (core window ψ_N ≤ 0.9)",
+            dims=("rank",)
+        ),
     "SingularCoupling/DominantMode/right_singular_vectors" =>
         (; long_name="right singular vectors V: applied root-area-weighted field spectra ranked by resonant drive; overlap of b̃ with mode k is dot(V[:,k], b̃)",
             dims=("mode", "rank")),
