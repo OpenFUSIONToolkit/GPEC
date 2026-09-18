@@ -75,7 +75,7 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 """
 @with_pool pool function arclength_fieldline_int(
     psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64
-)::Tuple{Matrix{Float64},DirectBField}
+)::Tuple{Matrix{Float64},DirectBField,Nothing}
 
     psi0_guess = raw_profile.psio * (1.0 - psifac)
     r = ro + sqrt(psifac) * (rs2 - ro)
@@ -142,6 +142,6 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     end
 
     # bfield at the starting point carries F and P for the surface-averaged quantities
-    return y_out, bfield
+    return y_out, bfield, nothing
 end
 
