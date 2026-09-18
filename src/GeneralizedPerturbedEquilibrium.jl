@@ -553,6 +553,16 @@ function prepare_force_free_states!(
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil; psilim_cap=psilim_cap)
 
+    # Fires whether or not the cap was applied: past the overlap point no surface retains a
+    # well-separated inner region, so a domain reaching beyond it is worth flagging even when
+    # the user did not opt in to the cap.
+    if overlap !== nothing && overlap.psihigh !== nothing && intr.psilim > overlap.psihigh
+        @warn "Integration domain extends past the resistive-layer overlap point: psilim = " *
+              "$(@sprintf("%.6f", intr.psilim)) > $(@sprintf("%.6f", overlap.psihigh)). Adjacent resistive " *
+              "layers overlap there, so the matched-asymptotic treatment is not defined. " *
+              "Set psilim_from_layer_overlap = true to cap the domain at that point."
+    end
+
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 

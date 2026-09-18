@@ -172,6 +172,36 @@ end
     @test none.qlim == base.qlim
     @test none.psilim == base.psilim
 
+    # With dmlim on, the (last rational + dmlim)/n offset must never step past qhigh or the cap.
+    ctrl_dm = ForceFreeStatesControl(; set_psilim_via_dmlim=true, dmlim=0.2, qhigh=1e3)
+    dm_base = _fresh()
+    sing_lim!(dm_base, ctrl_dm, equil)
+    N = floor(Int, equil.params.qmax - 0.15)
+    @test N >= 2
+    for qh in (Float64(N), N + 0.1)
+        c = ForceFreeStatesControl(; set_psilim_via_dmlim=true, dmlim=0.2, qhigh=qh)
+        i = _fresh()
+        sing_lim!(i, c, equil)
+        @test i.qlim ≈ N - 1 + 0.2
+        @test i.qlim <= qh
+    end
+
+    # A cap placed exactly on a rational must exclude it on either side of the float knife-edge.
+    q_of = equil.profiles.q_spline
+    lo, hi = equil.profiles.xs[1], equil.params.psihigh_resolved
+    for _ in 1:200
+        mid = 0.5 * (lo + hi)
+        q_of(mid) < N ? (lo = mid) : (hi = mid)
+    end
+    psi_N = 0.5 * (lo + hi)
+    for cap_k in (prevfloat(psi_N, 1000), psi_N, nextfloat(psi_N, 1000))
+        i = _fresh()
+        sing_lim!(i, ctrl_dm, equil; psilim_cap=cap_k)
+        @test i.qlim ≈ N - 1 + 0.2
+        @test i.psilim <= cap_k
+    end
+    @test dm_base.qlim > N - 1 + 0.2
+
     # The control flag exists and is opt-in.
     @test ForceFreeStatesControl().psilim_from_layer_overlap == false
 
