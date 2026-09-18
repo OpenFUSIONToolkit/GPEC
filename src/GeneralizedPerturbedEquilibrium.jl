@@ -495,33 +495,51 @@ function _overlap_profile_path(inputs, kf_ctrl::KineticForces.KineticForcesContr
     return nothing
 end
 
-# Run the resistive-layer overlap scan for the run's toroidal mode number, or return `nothing`
-# when it cannot be run (no kinetic file, multi-n, or the scan itself refuses). Reads the kinetic
-# file directly rather than reusing `kinetic_profiles`, which is a `KineticProfileSplines` built
-# for the NTV path and carries a different field set than the layer builders take.
+# Read the kinetic profiles the layer builders take, or `nothing` with a warning when the file
+# cannot be read or lacks n_e/T_e/T_i. Reads the file directly rather than reusing
+# `kinetic_profiles`, a `KineticProfileSplines` built for the NTV path with a different field set.
+function _overlap_profiles(path::AbstractString)
+    # Guards only the file read: the scan is an optional diagnostic, so an unreadable input skips
+    # it rather than aborting the run. The scan call itself is not wrapped, so a code error surfaces.
+    data = try
+        Equilibrium.read_kinetic_file(path)
+    catch err
+        @warn "Layer-overlap scan skipped: could not read kinetic file $path." exception = err
+        return nothing
+    end
+    if data.n_e === nothing || data.T_e === nothing || data.T_i === nothing
+        @warn "Layer-overlap scan skipped: $path lacks n_e, T_e or T_i."
+        return nothing
+    end
+    npsi = length(data.psi)
+    omega = data.omega_E === nothing ? zeros(npsi) : collect(Float64, data.omega_E)
+    return Utilities.KineticProfiles(; psi=collect(Float64, data.psi),
+        n_e=collect(Float64, data.n_e), T_e=collect(Float64, data.T_e),
+        T_i=collect(Float64, data.T_i), omega=omega,
+        omega_e=zeros(npsi), omega_i=zeros(npsi))
+end
+
+# The binding scan across toroidal mode numbers: the one with the innermost overlap point, since
+# the domain must stop before the first overlap of any n. Scans that find no overlap do not bind;
+# when none overlap, the first scan is returned so its surfaces are still recorded.
+function _binding_overlap(scans)
+    overlapping = filter(sc -> sc.psihigh !== nothing, scans)
+    isempty(overlapping) && return first(scans)
+    return overlapping[argmin([sc.psihigh for sc in overlapping])]
+end
+
+# Run the resistive-layer overlap scan for each toroidal mode number of the run and return the
+# binding one, or `nothing` when there is no readable kinetic file. Physics refusals (a surface
+# that cannot be scored, a limited edge) are handled inside the scan and recorded in its `notes`.
 function _layer_overlap_scan(path::Union{Nothing,AbstractString},
     intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     (path === nothing || !isfile(path)) && return nothing
-    if intr.nlow != intr.nhigh
-        @info "Layer-overlap scan skipped: the overlap point depends on n, and this is a multi-n run (nn_low=$(intr.nlow), nn_high=$(intr.nhigh))."
-        return nothing
-    end
-    try
-        data = Equilibrium.read_kinetic_file(path)
-        (data.n_e === nothing || data.T_e === nothing || data.T_i === nothing) && return nothing
-        npsi = length(data.psi)
-        omega = data.omega_E === nothing ? zeros(npsi) : collect(Float64, data.omega_E)
-        profiles = Utilities.KineticProfiles(; psi=collect(Float64, data.psi),
-            n_e=collect(Float64, data.n_e), T_e=collect(Float64, data.T_e),
-            T_i=collect(Float64, data.T_i), omega=omega,
-            omega_e=zeros(npsi), omega_i=zeros(npsi))
-        # Eq. (100) is not covariant -- it is anchored to the toroidal-flux label of the paper's
-        # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
-        return Tearing.resistive_layer_overlap(equil, profiles; n_tor=intr.nlow, rs_method=:flux)
-    catch err
-        @warn "Layer-overlap scan failed; the integration domain is untouched." exception = (err, catch_backtrace())
-        return nothing
-    end
+    profiles = _overlap_profiles(path)
+    profiles === nothing && return nothing
+    # Eq. (100) is not covariant -- it is anchored to the toroidal-flux label of the paper's
+    # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
+    scans = [Tearing.resistive_layer_overlap(equil, profiles; n_tor=n, rs_method=:flux) for n in intr.nlow:intr.nhigh]
+    return _binding_overlap(scans)
 end
 
 """

@@ -136,6 +136,7 @@ end
 @testset "Layer-overlap cap wiring" begin
     using GeneralizedPerturbedEquilibrium.ForceFreeStates: sing_lim!, ForceFreeStatesInternal,
         ForceFreeStatesControl
+    using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.Equilibrium
     using TOML
 
@@ -204,6 +205,17 @@ end
 
     # The control flag exists and is opt-in.
     @test ForceFreeStatesControl().psilim_from_layer_overlap == false
+
+    # Multi-n: the innermost overlap point binds; scans with no overlap never do.
+    Scan = GeneralizedPerturbedEquilibrium.Tearing.LayerOverlapScan
+    mkscan(ph) = Scan(Int[], Int[], Float64[], Float64[], Float64[], Float64[], Float64[], Float64[], Bool[],
+        nothing, nothing, ph, ph, ph === nothing ? nothing : 1, String[])
+    binding = GeneralizedPerturbedEquilibrium._binding_overlap
+    s1, s2, s_none = mkscan(0.9997), mkscan(0.9952), mkscan(nothing)
+    @test binding([s1, s2, s_none]) === s2
+    @test binding([s_none, s1]) === s1
+    @test binding([s_none, mkscan(nothing)]) === s_none
+    @test binding([s1]) === s1
 
     # The no-surfaces path must return an empty scan with a note, not throw (m_max=0 with
     # extrapolation off forces it deterministically).
