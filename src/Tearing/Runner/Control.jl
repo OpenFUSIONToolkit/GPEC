@@ -34,10 +34,13 @@ constructor.
     callable of `psi` overrides it
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
-  - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
-    diffusivity [m²/s], used only when the kinetic file carries no usable
-    `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
-    file's χ⊥(ψ)/χ_φ(ψ) take precedence
+  - `chi_perp`, `chi_tor` -- fallback scalars [m²/s], used only when the
+    kinetic file carries no usable `chi_e`/`chi_phi` profile (dataset absent
+    or all-zero); otherwise the file's χ⊥(ψ)/χ_φ(ψ) take precedence.
+    `chi_perp` is the perpendicular ENERGY diffusivity χ⊥; `chi_tor` is
+    Fitzpatrick's χ_φ, the anomalous perpendicular ion MOMENTUM diffusivity
+    (a viscosity: it enters the vorticity and parallel-flow equations, TJ
+    Layer.tex — not a heat diffusivity)
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `dr_val` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the

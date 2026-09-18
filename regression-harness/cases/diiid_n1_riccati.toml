@@ -10,13 +10,25 @@ name = "diiid_n1_riccati"
 description = "DIII-D-like equilibrium, n=1, Riccati integrator Δ' matrix"
 example_dir = "examples/DIIID-like_riccati_deltaprime_example"
 
+# Which formalism produced the Δ′ below. The Δ′ matrix is written to one canonical
+# SingularSurfaces/ path whichever integrator computed it, so the numbers alone cannot say
+# whether a gold pinned from the BVP is being compared against a Galerkin run. Pinning the
+# deck's declared choice makes a formalism swap a loud failure instead of a silent re-gold.
+[quantities.integrator]
+h5path = "Input/gpec_toml_raw"
+type = "token"
+extract = "toml_key:ForceFreeStates.integrator"
+label = "integrator (Δ′ provenance)"
+noise_threshold = 0
+order = 1
+
 # Tearing stability Δ' — the msing×msing BVP matrix diagonal, and the raw side-major
 # outer-region matrix it is projected from.
 [quantities.delta_prime]
 h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
-label = "delta prime (BVP diagonal)"
+label = "Δ′ STRIDE-like BVP (PEST3) diagonal"
 noise_threshold = 1e-8
 order = 10
 
@@ -24,7 +36,7 @@ order = 10
 h5path = "SingularSurfaces/Delta_prime_raw"
 type = "complex_matrix"
 extract = "all_complex"
-label = "delta prime (raw side-major)"
+label = "Δ′ STRIDE-like BVP (PEST3) raw side-major"
 noise_threshold = 1e-8
 order = 11
 

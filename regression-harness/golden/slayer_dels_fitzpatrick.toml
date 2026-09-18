@@ -1,0 +1,59 @@
+[meta]
+blas_threads = 2
+case = "slayer_dels_fitzpatrick"
+commit = "af3e4492"
+generated_at = "2026-08-18"
+golden_version = 1
+julia_version = "1.11.6"
+manifest_sha = "7e5c34ad1722fa6addf94f7387b972fa8ac17ff86166793819b158496d495132"
+nthreads = 2
+os_arch = "arm64-apple-darwin24.0.0"
+reason = "Initial pin: validated against Fitzpatrick 2023 figs 6.2/6.3 at eight contour points"
+
+[values.dels_db_im]
+atol = 0.0
+class = "physics_converged"
+rtol = 1.0e-6
+tolerance_basis = "class-default (provisional)"
+value_text = "[-0.03903669609227284,-0.7097932061530505,-1.0865009301031268,-1.5690999603536648,-2.2242340056733148,-0.011118192607611124,-0.35424388489008746,-0.776484631542084,-1.416939644030615,-2.2250603072320665,-0.008402000357094586,-0.23928032159546678,-0.5666784684880879,-1.241924594739638,-2.1750391797697133,-0.006297613829213364,-0.1657149360631757,-0.3716832232708168,-0.9092532037784165,-1.9732264855758332,-0.004682490543220957,-0.11916296976842101,-0.2502562086693129,-0.578522722631012,-1.4658508790642786]"
+value_type = "json_array"
+
+[values.dels_db_re]
+atol = 0.0
+class = "physics_converged"
+rtol = 1.0e-6
+tolerance_basis = "class-default (provisional)"
+value_text = "[0.46252746222290736,0.7691732891864712,1.0821020639186198,1.5537655127977916,2.2130417549691974,0.9838377906344368,0.9426353501706125,1.017567466663986,1.35072260354625,2.0080394342246684,1.1484429925403958,1.1069495858506195,1.0754748077370269,1.2328881423647,1.8273926389542299,1.336215433387759,1.3118923623802783,1.259193827055807,1.2120466712964955,1.540405108811276,1.5494641775774003,1.5373751336175125,1.5040680534472435,1.4084024975856595,1.350103015944749]"
+value_type = "json_array"
+
+[values.p_hat]
+atol = 0.0
+class = "physics_converged"
+rtol = 1.0e-6
+tolerance_basis = "class-default (provisional)"
+value_text = "[0.02,0.02,0.02,0.02,0.02,0.5,0.5,0.5,0.5,0.5,1.0,1.0,1.0,1.0,1.0,2.0,2.0,2.0,2.0,2.0,4.0,4.0,4.0,4.0,4.0]"
+value_type = "json_array"
+
+[values.q_hat]
+atol = 0.0
+class = "physics_converged"
+rtol = 1.0e-6
+tolerance_basis = "class-default (provisional)"
+value_text = "[0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0]"
+value_type = "json_array"
+
+[values.runtime]
+atol = +inf
+class = "diagnostic"
+rtol = +inf
+tolerance_basis = "class-default (provisional)"
+value = 1.2057960033416748
+value_type = "real"
+
+[values.tau]
+atol = 0.0
+class = "physics_converged"
+rtol = 1.0e-6
+tolerance_basis = "class-default (provisional)"
+value = 1.0
+value_type = "real"

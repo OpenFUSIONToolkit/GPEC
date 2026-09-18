@@ -9,6 +9,18 @@ name = "gal_resistive_diiid"
 description = "DIII-D-like, n=1, RDCON outer-region Galerkin Δ′ with rpec coil columns (delta_coil)"
 example_dir = "examples/DIIID-like_gal_resistive_example"
 
+# Which formalism produced the Galerkin Δ′ below. The Δ′ matrix is written to one canonical
+# SingularSurfaces/ path whichever integrator computed it, so the numbers alone cannot say whether
+# a gold pinned from the Galerkin solve is being compared against a BVP run. Pinning the deck's
+# declared choice makes a formalism swap a loud failure instead of a silent re-gold.
+[quantities.integrator]
+h5path = "Input/gpec_toml_raw"
+type = "token"
+extract = "toml_key:ForceFreeStates.integrator"
+label = "integrator (Δ′ provenance)"
+noise_threshold = 0
+order = 1
+
 # Number of resonant surfaces in the gal domain
 [quantities.gal_msing]
 h5path = "ForceFreeStates/Solutions/GalerkinIntegration/rational_count"
@@ -31,7 +43,7 @@ order = 11
 h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
-label = "gal PEST3 Δ diagonal"
+label = "Δ′ Galerkin RDCON (PEST3) diagonal"
 noise_threshold = 1e-6
 order = 20
 
@@ -40,7 +52,7 @@ order = 20
 h5path = "SingularSurfaces/Delta_prime_raw"
 type = "complex_matrix"
 extract = "norm"
-label = "||gal Δ′ matrix||"
+label = "||Δ′ Galerkin RDCON (PEST3) matrix||"
 noise_threshold = 1e-6
 order = 21
 
