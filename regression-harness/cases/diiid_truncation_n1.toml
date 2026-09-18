@@ -1,0 +1,111 @@
+# Regression case: DIII-D-like n=1 truncation-only run with the resistive-layer overlap cap enabled.
+# psihigh = 0.9999 puts the overlap point (psi ~ 0.99976) inside the domain, so the cap binds: qlim
+# is pulled from 8.35 to 8.0 and dmlim then steps back to 7.2, excluding the q=8 surface. This is the
+# only case where psilim_from_layer_overlap changes the domain; every shipped deck leaves it off or
+# inert. Ideal fixed-boundary stability only (no vacuum, local stability, forcing or PE).
+[case]
+name = "diiid_truncation_n1"
+description = "DIII-D-like, n=1, psihigh=0.9999 with the resistive-layer overlap cap binding (truncation only)"
+example_dir = "examples/DIIID-like_truncation_example"
+
+# Layer-overlap scan output. applied = 1 means the overlap bound was active going into sing_lim!;
+# psilim_overlap is the last clean surface before adjacent Eq. (100) layers first touch.
+[quantities.overlap_applied]
+h5path = "ForceFreeStates/LayerOverlap/applied"
+type = "int_scalar"
+extract = "value"
+label = "layer-overlap cap applied"
+noise_threshold = 0
+order = 10
+
+[quantities.psilim_overlap]
+h5path = "ForceFreeStates/LayerOverlap/psilim_overlap"
+type = "real_scalar"
+extract = "value"
+label = "layer-overlap psilim"
+noise_threshold = 1e-8
+order = 11
+
+[quantities.first_overlap_index]
+h5path = "ForceFreeStates/LayerOverlap/first_overlap_index"
+type = "int_scalar"
+extract = "value"
+label = "first overlapping surface index"
+noise_threshold = 0
+order = 12
+
+[quantities.width_dr]
+h5path = "ForceFreeStates/LayerOverlap/width_dr"
+type = "real_vector"
+extract = "all_real"
+label = "diffusive-resistive layer widths (Δψ)"
+noise_threshold = 1e-8
+order = 13
+
+# Final integration domain after the cap and the dmlim offset.
+[quantities.qlim]
+h5path = "Info/qlim"
+type = "real_scalar"
+extract = "value"
+label = "qlim"
+noise_threshold = 1e-12
+order = 20
+
+[quantities.psilim]
+h5path = "Info/psilim"
+type = "real_scalar"
+extract = "value"
+label = "psilim"
+noise_threshold = 1e-10
+order = 21
+
+[quantities.mpert]
+h5path = "Info/mpert"
+type = "int_scalar"
+extract = "value"
+label = "mpert"
+noise_threshold = 0
+order = 22
+
+# Singular surfaces retained inside the capped domain (q=8 must be excluded).
+[quantities.msing]
+h5path = "SingularSurfaces/rational_count"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+order = 30
+
+[quantities.sing_q]
+h5path = "SingularSurfaces/rational_q"
+type = "real_vector"
+extract = "all_real"
+label = "singular q values"
+noise_threshold = 1e-8
+order = 31
+
+[quantities.sing_psi]
+h5path = "SingularSurfaces/rational_psi"
+type = "real_vector"
+extract = "all_real"
+label = "singular psi locations"
+noise_threshold = 1e-8
+order = 32
+
+# Plasma energy on the capped domain — the physics the truncation actually moves.
+[quantities.ep_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "plasma energy Re(ep[1])"
+noise_threshold = 1e-10
+order = 40
+
+# Runtime
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
