@@ -1,0 +1,86 @@
+# Regression case: DIII-D-like H-mode n=1 SLAYER coupled-determinant growth rate.
+# Reuses the n=1 SLAYER deck via [overrides] in coupled mode, the only harness coverage of the
+# multi-surface determinant: its inter-surface Q normalization and the per-surface E×B Doppler
+# shift taken from the kinetic file's omega_E. The Re(Q) window is widened because that shift
+# moves the coupled root to the lab frame (Re(Q) ≈ 2.06 here, outside the deck's [-2, 2]).
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "diiid_slayer_n1_coupled"
+description = "DIII-D-like H-mode equilibrium, n=1, SLAYER coupled multi-surface determinant with kinetic-file E×B rotation (reuses the n=1 deck via overrides)"
+example_dir = "examples/DIIID-like_SLAYER_example"
+
+# Run the shared SLAYER deck through the coupled determinant.
+[overrides]
+"SLAYER.coupling_mode" = "coupled"
+"SLAYER.Q_re_range" = [-4.0, 6.0]
+
+# Per-surface inputs to the determinant
+[quantities.slayer_tauk]
+h5path = "Tearing/PerSurface/tau_k"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER tauk"
+noise_threshold = 1e-12
+order = 10
+
+# Applied E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E per surface
+[quantities.slayer_q_shift]
+h5path = "Tearing/PerSurface/q_shift"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER q_shift"
+noise_threshold = 1e-10
+order = 11
+
+# Coupled eigenvalue (one root for the whole determinant). The coupled path has no root
+# polishing, so the thresholds match the uncoupled case's absolute, modestly loose floors.
+[quantities.slayer_Q_coupled]
+h5path = "Tearing/Roots/Q_root"
+type = "complex_vector"
+extract = "all_complex"
+label = "SLAYER coupled Q_root"
+noise_threshold = 1e-4
+order = 30
+
+[quantities.slayer_omega_coupled]
+h5path = "Tearing/Roots/omega"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER coupled ω"
+noise_threshold = 1.0
+order = 32
+
+[quantities.slayer_gamma_coupled]
+h5path = "Tearing/Roots/gamma"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER coupled γ"
+noise_threshold = 1e-1
+order = 33
+
+# no_root flag (1 = extraction failed); guards that the coupled root stays inside the window.
+[quantities.slayer_no_root_coupled]
+h5path = "Tearing/Roots/no_root"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER coupled no_root flag"
+noise_threshold = 0
+order = 34
+
+# Settings (catches accidental config drift)
+[quantities.slayer_enabled]
+h5path = "Tearing/enabled"
+type = "int_scalar"
+extract = "value"
+label = "SLAYER enabled flag"
+noise_threshold = 0
+order = 90
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
