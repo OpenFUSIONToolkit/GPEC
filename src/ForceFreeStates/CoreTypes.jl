@@ -130,6 +130,8 @@ gpec.toml.
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
+  - `ode_abstol::Float64` - Absolute tolerance for the same integration. Default `1e-8`: the OrdinaryDiffEq default of `1e-6` lets small state entries escape the relative control, so the error stops responding to `eulerlagrange_tolerance` below about `1e-8`.
+  - `ode_solver::String` - OrdinaryDiffEq explicit Runge-Kutta method used for every Euler-Lagrange solve (propagator chunks, Riccati outer plasma, forward sweep, Δ′ shooting). Default `"Vern7"`: on the DIII-D corpus it reaches the same δW and a closer Δ′ than `"Vern9"` for about half the RHS evaluations, because the ninth-order method rejects most of its steps near the rational surfaces. Any name in `OrdinaryDiffEq` that accepts complex states is allowed (`"Vern6"`, `"Vern9"`, `"DP8"`, ...).
   - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e4` empirically keeps max(|U₁|, |U₂|) in O(1)–O(10⁴) over the integration domain on DIII-D / Solovev sweeps; lower triggers excess renorms without accuracy gain, higher risks overflow before the next renorm.
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
@@ -167,6 +169,8 @@ gpec.toml.
     nstep::Int = typemax(Int)
     ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-8
+    ode_abstol::Float64 = 1e-8
+    ode_solver::String = "Vern7"
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
