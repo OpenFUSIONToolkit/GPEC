@@ -54,13 +54,14 @@ w(θ) = √(J·|∇ψ|).
 
 Operationally, sqrtamat is the mode-space √weight operator: for a field b with
 Fourier coefficients b_fft, it satisfies the identity
-`‖sqrtamat·b_fft‖² = N² · ∫ |b|² · J|∇ψ| dθ`
-which is Jacobian-invariant on a given flux surface (see
-`scripts/test_power_norm_invariance.jl`).
+`‖sqrtamat·b_fft‖² = ∫ |b|² · J|∇ψ| dθ`  (θ normalized to [0, 1))
+which is Jacobian-invariant on a given flux surface. Its diagonal is the θ-average of
+√(J|∇ψ|), so `sqrtamat/√jarea` has a diagonal close to (and never above) one; this is the
+matrix Fortran GPEC writes as `J_surf_2` after that division.
 
-The backward step uses exp(−imθ)/(1/N) normalization paired with the Julia
-forward FT exp(+imθ) so that round-trip = identity and the convolution
-structure is correct.
+Each column is the unit mode e^{+i m_k θ} taken to θ-space with `FourierTransforms.inverse`,
+weighted pointwise, and brought back with the forward transform `ft(...)`, the same pair whose
+round trip is the identity, so the convolution structure is correct.
 """
 function compute_sqrtamat(
     equil::PlasmaEquilibrium,
@@ -78,8 +79,8 @@ function compute_sqrtamat(
         e_k .= 0.0
         e_k[k] = 1.0 + 0.0im
 
-        # Standard backward FT: f(θ_j) = (1/N) Σ_m c_m exp(-imθ_j) = (transpose(basis) * c) / N
-        theta_vec = (transpose(ft.basis) * e_k) ./ mtheta
+        # Inverse FT of the unit mode, f(θ_j) = exp(+i m_k θ_j), through the library's own inverse
+        theta_vec = Utilities.FourierTransforms.inverse(ft, e_k)
 
         # Multiply pointwise by √(J·|∇ψ|) in theta-space
         theta_vec .*= sqrt_jdp
