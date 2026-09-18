@@ -253,6 +253,60 @@ The Galerkin integrator computes the same quantity in the same PEST-3 convention
 publishes it on the same path, so downstream consumers (SLAYER among them) never branch
 on which formalism ran.
 
+## Integration domain truncation
+
+The Euler–Lagrange integration runs from the axis out to `psilim`, which is set from the
+target safety factor `qlim`:
+
+- `qlim` starts at `min(qmax, qhigh)`, where `qmax` is q at the equilibrium's `psihigh`.
+- With `set_psilim_via_dmlim = true` (the default, for diverted equilibria where q → ∞ at the
+  separatrix), `qlim` moves to `(last rational + dmlim) / n`, so the integration ends a fixed
+  fraction of a rational spacing past the last surface instead of close to one. The offset is
+  then stepped back by `1/n` until it no longer exceeds the bound it started from, so `dmlim`
+  never extends the domain past `qmax`, `qhigh`, or the layer-overlap cap below. A bound that
+  falls on a rational, or less than `dmlim / n` above one, therefore excludes it: with
+  `dmlim = 0.2`, both `qhigh = 4.0` and `qhigh = 4.1` give `qlim = 3.2`.
+- With `set_psilim_via_dmlim = false` (limited or analytic equilibria with finite edge q),
+  `qhigh` and `psihigh` set the domain directly.
+
+### Resistive-layer overlap
+
+Near the separatrix the rational surfaces crowd together faster than their resistive layers
+narrow, so eventually adjacent layers overlap. Past that point no surface keeps a
+well-separated inner region and the matched-asymptotic treatment is not defined; Sect. 5.9 of
+Fitzpatrick (2025), listed under [InnerLayer Module](@ref) in the citations, restricts the
+response calculation to the region inside it.
+
+GPEC locates that point with a scan of the rational surfaces of each toroidal mode number in
+the run; for multi-`n` runs the innermost overlap point, over all `n`, is the one used. Each surface gets a layer solve from the kinetic profiles, and its
+diffusive-resistive width (Fitzpatrick 2025, Eq. 100) is converted to a normalized-flux width
+so it can be compared with the spacing between neighbouring surfaces. Surfaces beyond the
+equilibrium grid are located by extrapolating the separatrix law `q ∝ −ln(1 − ψ)` fitted to
+the outer knots; an equilibrium whose edge q does not follow that law (a limited plasma) is
+not extrapolated. The cut is placed at the last surface before two adjacent layers first
+touch.
+
+The scan runs whenever kinetic profiles are available (a `[KineticForces]` `kinetic_file`,
+or the `[SLAYER]` `profile_file`). Its result is always written to
+`ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
+`psilim_from_layer_overlap = true`. It then caps `qlim` before the `dmlim` step, so `dmlim`
+still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
+
+The flag is off by default. On the shipped DIII-D-like decks the overlap point sits near
+ψ ≈ 0.9997, beyond every deck's `psihigh`, so enabling it would change nothing there;
+`examples/DIIID-like_truncation_example` raises `psihigh` to 0.9999 so the cap binds and
+excludes the q = 8 surface. Whenever `psilim` lands past the overlap point, with the flag on
+or off, GPEC warns.
+
+| Dataset | Contents |
+|---|---|
+| `psi`, `m`, `n`, `r_s` | scanned surfaces and their minor radius |
+| `delta_s_abs`, `width_delta_s` | Riccati layer thickness, in metres and as a Δψ width |
+| `width_visco`, `width_dr` | visco-resistive and diffusive-resistive (Eq. 100) Δψ widths; `width_dr` sets the cut |
+| `extrapolated` | 1 where the surface lies beyond the equilibrium grid |
+| `psilim_overlap`, `first_overlap_index` | the cut, and the first surface whose layer overlaps its neighbour |
+| `applied` | 1 when the cap was passed to the truncation (`dmlim` / `qhigh` may still cut deeper) |
+
 ## Configuration reference
 
 All `ForceFreeStates` options are set in the `[ForceFreeStates]` section of `gpec.toml`.
