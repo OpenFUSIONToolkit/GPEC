@@ -78,7 +78,9 @@ derivatives are analytic — no label carries a finite-difference stencil.
     Rutherford-literature convention.
   - `:flux` -- toroidal-flux label. Fitzpatrick, Nucl. Fusion (2025),
     Eq. 30: `dψ_p/dr = B₀ r g/q` integrates to `ψ_t = B₀r²/2`, so
-    `r = √(2ψ_t/B₀)` with `ψ_t = psio·∫₀^ψ (q/g) dψ′` and `g = F/(B₀R₀)`.
+    `r = √(2ψ_t/B₀)` with `ψ_t = psio·∫₀^ψ (q/g) dψ′` and `g = F/(B₀R₀)`,
+    `F = R·B_tor`. Note `profiles.F_spline` stores `2πF`, so the
+    implementation divides it by 2π to form `g`.
     Defined from flux alone, it carries no circular-cross-section assumption,
     and its derivative `dr/dψ ∝ q` grows toward a separatrix where the
     geometric labels' `da/dψ` collapses.
@@ -95,8 +97,7 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
         R0f = Float64(equil.ro)
         psiof = Float64(equil.psio)
         xs_f = collect(Float64, equil.profiles.xs)
-        # g = F/(B0 R0) departs from 1 by ~3% on a DIII-D-like deck and ~0.8% on a circular
-        # one, so carry it rather than assuming g = 1: r² = 2∫(q/g)dψ_p/B0.
+        # Carry g = F/(B0 R0) rather than assuming g = 1: r² = 2∫(q/g)dψ_p/B0.
         _g_at(x) = Float64(equil.profiles.F_spline(x)) / (2π * b0f * R0f)
         qg = [Float64(equil.profiles.q_spline(x)) / _g_at(x) for x in xs_f]
         Phi = collect(Float64, cumulative_integrate(cubic_interp(xs_f, qg)))
@@ -122,6 +123,8 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
         elseif rs_method === :halfwidth
             0.5 * (_a_at(ψ, 0.0) + _a_at(ψ, 0.5))
         elseif rs_method === :volume
+            # Lower bound just off the axis, where dV/dψ is extrapolated; the omitted sliver
+            # of core volume is negligible for an edge-surface label.
             V = integrate(equil.profiles.dVdpsi_spline, 1e-4, Float64(ψ))
             sqrt(max(V, 0.0) / (2π^2 * equil.ro))
         elseif rs_method === :flux
@@ -254,21 +257,20 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
     _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta)
 
-    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline
-    # derivatives. When `compute_omega_star=true` we override any ω_*e/ω_*i
-    # carried in `profiles`. Main-ion density is
-    # taken equal to the electron density (quasi-neutrality, matching the
-    # staging step).
+    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
+    # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode
+    # number enters here. Main-ion density is taken equal to the electron density
+    # (quasi-neutrality, matching the staging step).
     chi1 = 2π * equil.psio
-    _omega_star_at(ψ) = begin
+    _omega_star_at(ψ, n_tor) = begin
         n_e = Float64(profiles.n_e(ψ))
         dn_e = Float64(profiles.n_e(ψ; deriv=DerivOp(1)))
         T_e = Float64(profiles.T_e(ψ))
         dT_e = Float64(profiles.T_e(ψ; deriv=DerivOp(1)))
         T_i = Float64(profiles.T_i(ψ))
         dT_i = Float64(profiles.T_i(ψ; deriv=DerivOp(1)))
-        ω_star_e = (2π / chi1) * (T_e * dn_e / n_e + dT_e)
-        ω_star_i = -(2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
+        ω_star_e = n_tor * (2π / chi1) * (T_e * dn_e / n_e + dT_e)
+        ω_star_i = -n_tor * (2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
         return (ω_star_e, ω_star_i)
     end
 
@@ -282,19 +284,16 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         da_dpsi = _da_dpsi_at(psi)
         sval_r = r_based_shear(rs, q, q1, da_dpsi)
 
-        prof = profiles(psi)
-        # Override ω_*e, ω_*i with spline-derivative values when requested.
-        ω_e_use, ω_i_use = if compute_omega_star
-            _omega_star_at(psi)
-        else
-            (prof.omega_e, prof.omega_i)
-        end
-
         # Resonant (m, n): take the first element of the mode-number vectors.
         # Parallel-FM `sing.m`/`sing.n` hold exactly one entry each; ideal
         # DCON may hold multiple — we pick the first and document the choice.
         m_res = sing.m[1]
         n_res = sing.n[1]
+
+        prof = profiles(psi)
+        # Take ω_*e, ω_*i from the spline derivatives, or from `profiles` when the caller
+        # supplies them directly. `run_slayer` supplies zeros, so the latter is a library path.
+        ω_e_use, ω_i_use = compute_omega_star ? _omega_star_at(psi, n_res) : (prof.omega_e, prof.omega_i)
 
         # Pull geometric trapped-fraction inputs from ResistGeometry when
         # available (populated by ForceFreeStates.resist_eval_all!); else
@@ -354,14 +353,10 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             _eval(dgeo_val, psi)
         end
 
-        # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s
-        # and μ = √(−D_I) with D_I = E + F + H − 1/4 (Glasser-Greene-Johnson 1975).
-        # A Mercier-unstable surface (D_I ≥ 0) has exponents 1/2 ± i|μ|, so the factor is
-        # genuinely complex there; μ is clamped to 0, which leaves the Δ' diagonal raw and
-        # discards that phase. The off-diagonals still carry K_i^(1/2)·K_j^(−1/2).
-        # K = 1 (identity conversion) whenever da/dψ is not a usable positive number: zero
-        # or non-finite would zero or NaN the Δ' diagonal, and a negative base raises
-        # DomainError under the non-integer exponent.
+        # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s and
+        # α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48), with α clamped to 0 on Mercier-unstable
+        # surfaces (the factor turns complex there) and K = 1 whenever da/dψ is not a usable
+        # positive number (zero/non-finite/negative would corrupt the Δ' diagonal).
         k_ref_k = if isfinite(da_dpsi) && da_dpsi > 0.0
             rs / da_dpsi
         else
@@ -369,9 +364,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
                   "Δ' unconverted (k_ref = 1) at this surface.", maxlog=3)
             1.0
         end
-        mu_k = if rg === nothing
+        alpha_k = if rg === nothing
             @warn("build_slayer_inputs: sing.restype not populated; using the " *
-                  "slab Mercier exponent μ = 1/2 for the Δ' reference-length " *
+                  "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
                   "conversion at all such surfaces.", maxlog=1)
             0.5
         else
@@ -395,7 +390,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             R_major_eff=R_major_eff,
             lnLambda_form=lnLambda_form,
             k_ref=k_ref_k,
-            mu_mercier=mu_k
+            alpha_mercier=alpha_k
         )
     end
     return out

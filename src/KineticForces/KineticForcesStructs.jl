@@ -121,11 +121,20 @@ builds a second control for its differing tolerance).
     nn::Int = 1                     # Toroidal mode number
     nl::Int = 1                     # Bounce harmonic number
 
-    # Tolerances.
-    # *_xlmda: shared tolerances for inner λ (pitch) and x (energy) integrations
-    # *_psi:   tolerances for outer ψ quadrature
-    atol_xlmda::Float64 = 1e-8     # Absolute tolerance for inner pitch + energy integrations
-    rtol_xlmda::Float64 = 1e-5     # Relative tolerance for inner pitch + energy integrations
+    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy).
+    # Each level must be resolved more tightly than the one enclosing it, or the outer
+    # integrator chases its integrand's own quadrature noise instead of converging.
+    # *_xlmda: tolerances for the λ (pitch) integration
+    # *_x:     tolerances for the x (energy) integration nested inside it; NaN ⇒ derive as
+    #          nested_tolerance_margin × the pitch tolerances
+    # *_psi:   tolerances for the outer ψ quadrature
+    atol_xlmda::Float64 = 1e-8     # Absolute tolerance for the inner pitch integration
+    rtol_xlmda::Float64 = 1e-5     # Relative tolerance for the inner pitch integration
+    atol_x::Float64 = NaN          # Absolute tolerance for the energy integration (NaN ⇒ derived)
+    rtol_x::Float64 = NaN          # Relative tolerance for the energy integration (NaN ⇒ derived)
+    # The pitch integrand IS the energy integral, so the energy level is resolved this much
+    # tighter than the pitch level by default.
+    nested_tolerance_margin::Float64 = 1e-2   # Factor relating derived energy tolerances to the pitch ones
     # rtol_psi is the primary convergence knob: ~2 significant figures matches the validity
     # of the NTV model approximations. Do not set it tighter than the noise floor of the
     # inner integrals (keep rtol_psi ≳ 10 × rtol_xlmda).

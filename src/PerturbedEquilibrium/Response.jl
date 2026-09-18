@@ -95,6 +95,8 @@ function compute_plasma_response!(
     state.vacuum_energy = real(vy)
     state.surface_energy = real(sy)
     state.plasma_energy = real(py)              # Fortran's "total energy" is this pengy
+    # Boundary-response torque: distinct construction from the KineticForces NTV torque —
+    # see the PerturbedEquilibriumState docstring for the delineation of GPEC torque outputs.
     state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(
