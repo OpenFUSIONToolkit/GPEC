@@ -160,11 +160,13 @@ include("h5_metadata_check.jl")
             for (name, fn) in (("sens", AEF.plot_coil_sensitivities), ("pdf", AEF.plot_tolerance_pdf), ("risk", AEF.plot_locking_risk),
                 ("thr", AEF.plot_threshold_scaling), ("mode", AEF.plot_dominant_mode_spectrum))
                 png = joinpath(dir, "plot_$name.png")
-                p = fn(h5path; save_path=png)
-                @test p isa Plots.Plot
+                @test fn(h5path; save_path=png) isa Plots.Plot
                 @test isfile(png)
-                name == "mode" && @test all(ser -> ser[:seriestype] === :steppre, p.series_list)
             end
+            # The spectrum plot draws the stored dominant mode, padded to zero at both ends by the step convention.
+            spec = AEF.plot_dominant_mode_spectrum(h5path)
+            @test maximum(spec.series_list[1][:y]) ≈ maximum(abs.(dom.right_singular_vectors[:, 1])) rtol = 1e-10
+            @test spec.series_list[1][:y][1] == 0.0 && spec.series_list[1][:y][end] == 0.0
             @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt)[1][:yaxis][:guide] == "|∂δ/∂θ| per 0.1°"
             @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; quantity=:bogus)
             # The target risk adds its own line and the allowable-tolerance markers.
