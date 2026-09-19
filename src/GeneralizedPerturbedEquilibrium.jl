@@ -211,7 +211,7 @@ function main_from_inputs(
 
     kf_ctrl, kinetic_profiles, kf_species = load_kinetic_context(inputs, intr, ctrl, equil)
     equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles;
-        pinned=KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, kf_species, equil, intr))
+        kf_ctrl=kf_ctrl, kf_species=kf_species)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -255,6 +255,15 @@ function main_from_inputs(
             ballooning_boundary=ballooning_boundary
         )
         @info "Results written to $(ctrl.HDF5_filename)"
+    end
+
+    # Validity describes the kinetic model, not the torque contraction, so it is written wherever
+    # kinetic profiles were loaded — including FFS-only runs that never reach run_kinetic_forces.
+    if ctrl.write_outputs_to_HDF5 && kinetic_profiles !== nothing
+        h5open(joinpath(ffs_result.dir_path, ctrl.HDF5_filename), "cw") do h5file
+            KineticForces.write_validity!(h5file, kf_ctrl, kf_species, kinetic_profiles, equil,
+                Float64[sng.psifac for sng in intr.sing])
+        end
     end
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
@@ -380,7 +389,8 @@ function load_kinetic_context(
 end
 
 """
-    maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles) -> equil
+    maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles;
+                             kf_ctrl=nothing, kf_species=nothing) -> equil
 
 Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, kinetic
 profiles), pin knots on rational surfaces, and re-form on the refined grid from the in-memory
@@ -393,11 +403,16 @@ function maybe_reform_equilibrium(
     intr::ForceFreeStatesInternal,
     ctrl::ForceFreeStatesControl,
     kinetic_profiles;
-    pinned::Vector{Float64}=Float64[]
+    kf_ctrl::Union{Nothing,KineticForces.KineticForcesControl}=nothing,
+    kf_species=nothing
 )
     Equilibrium.wants_two_pass(eq_config) || return equil
 
     mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+    # Kinetic-resonance nodes are located here rather than at the call site so the validity
+    # boundary that filters them is cleared against this pass's rationals (intr.sing is empty yet).
+    pinned = kf_ctrl === nothing ? Float64[] :
+             KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, kf_species, equil, intr; rationals=mandatory)
     # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
     # so the rational-surface brackets clear a zone large enough for every mode.
     n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
@@ -942,6 +957,10 @@ function run_kinetic_forces(
     @info "\n  KineticForces\n$_SECTION"
     kf_start = time()
 
+    # One boundary for the whole run, shared with the EL kinetic matrices and the Validity output.
+    axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, result.equil,
+        Float64[sng.psifac for sng in result.surfaces])
+
     # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
     # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
     if pe_state === nothing
@@ -953,13 +972,12 @@ function run_kinetic_forces(
 
         if species === nothing
             kf_state = KineticForces.KineticForcesState()
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles)
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles;
+                axis_psi_c=axis_psi_c)
             if kf_ctrl.write_outputs_to_HDF5
                 h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
                     KineticForces.write_to_hdf5!(h5file, kf_state;
                         dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
-                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil,
-                        Float64[sng.psifac for sng in result.surfaces])
                 end
             end
         else
@@ -972,7 +990,8 @@ function run_kinetic_forces(
                     (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
                     zi=sp.z, mi=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
                 st = KineticForces.KineticForcesState()
-                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles)
+                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles;
+                    axis_psi_c=axis_psi_c)
                 push!(states, st)
                 push!(labels, sp.label)
             end
@@ -985,8 +1004,6 @@ function run_kinetic_forces(
                     end
                     KineticForces.write_to_hdf5!(h5file, kf_state;
                         dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
-                    KineticForces.write_validity!(h5file, kf_ctrl, species, kinetic_profiles, result.equil,
-                        Float64[sng.psifac for sng in result.surfaces])
                 end
             end
         end

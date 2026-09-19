@@ -117,10 +117,9 @@ end
 kinetic-profile grid where any of the three thermal orbit-width scales reaches the local minor
 radius ⟨r⟩ — potato width `(q²ρ²R₀)^(1/3)`, banana width `q·ρ/√ε`, and poloidal gyroradius
 `q·ρ/ε` (ε = ⟨r⟩/⟨R⟩, clamped as in `kinetic_resonance_psi_nodes`; thermal gyroradius
-ρ = √(2·m·T)·/(Z·e·B₀) of the computed species). Inside this boundary trapped bananas become
-potato orbits with width comparable to r itself, so the bounce-averaged kinetic response is
-evaluated outside its validity domain (measured consequence: diverging kinetic increments and a
-pathological EL step count). Returns 0.0 when no criterion is met anywhere. The Fortran precedent
+ρ = √(2·m·T)·/(Z·e·B₀) of the computed species). Inside this boundary trapped bananas become potato
+orbits of width comparable to r itself, so the bounce-averaged kinetic response is evaluated outside
+its validity domain. Returns 0.0 when no criterion is met anywhere. The Fortran precedent
 (`ktanh_flag`, dcon/fourfit.F) suppressed the same region with four hand-tuned knobs; here the
 boundary is derived from the profiles with no user parameters.
 """
@@ -134,13 +133,23 @@ function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileS
     avg_R = equil.geometry.avg_R_spline
     ro = abs(equil.ro)
     bo = abs(equil.params.b0)
+    # Only the region contiguous with the axis counts: q is not monotonic, so an edge q rise or a
+    # pedestal gradient can re-trigger the criterion far out, where the model has not lost validity.
     psi_c = 0.0
+    psi_outer = 0.0
+    contiguous = true
     for psi in kinetic_profiles.xs
         psi <= 0 && continue
         w = orbit_widths(psi, T_spline, q_spline, avg_r, avg_R, mass, chrg, ro, bo)
         w.r <= 0 && continue
-        max(w.w_potato, w.rho_banana, w.rho_theta) >= w.r && (psi_c = max(psi_c, psi))
+        if max(w.w_potato, w.rho_banana, w.rho_theta) >= w.r
+            contiguous ? (psi_c = psi) : (psi_outer = max(psi_outer, psi))
+        else
+            contiguous = false
+        end
     end
+    psi_outer > 0 && @warn "kinetic_axis_validity_psi: orbit widths also reach ⟨r⟩ out to ψ=$(round(psi_outer; sigdigits=3)), " *
+                           "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed"
     return psi_c
 end
 
@@ -242,22 +251,39 @@ function kinetic_validity_profiles(kinetic_profiles::Equilibrium.KineticProfileS
         psi_c=psi_c, envelope=envelope, is_valid=is_valid)
 end
 
+# Bound on how far clearing rationals out of the envelope band may push ψ_c, as a multiple of the
+# orbit-width boundary; beyond it the uncleared boundary is kept (see `clear_rational_windows`).
+const VALIDITY_CLEAR_MAX_FACTOR = 1.5
+
 """
     clear_rational_windows(psi_c, rationals) → Float64
 
 Move the near-axis validity boundary outward until no rational surface lies inside the envelope's
-transition band `[ψ_c, 2ψ_c]`. A rational sitting in the band gets its (near-singular) kinetic
-increments multiplied by a rapidly varying, near-zero envelope, which the matrix splines cannot
-represent — the resulting overshoot propagates NaNs into the stability solve. Where the orbit width
-already reaches ⟨r⟩ the resonance is not trustworthy anyway, so the boundary is pushed past the
-surface (suppressing it wholly) rather than cutting through it.
+transition band, tested over `[ψ_c - RATIONAL_RES_RADIUS, 2ψ_c]` so a surface just inside the band
+edge is cleared too. A rational sitting in the band gets its (near-singular) kinetic increments
+multiplied by a rapidly varying, near-zero envelope, which the matrix splines cannot represent —
+the resulting overshoot propagates NaNs into the stability solve. Where the orbit width already
+reaches ⟨r⟩ the resonance is not trustworthy anyway, so the boundary is pushed past the surface
+(suppressing it wholly) rather than cutting through it.
+
+The band widens as ψ_c moves, so clearing can cascade through a rational-dense core. The move is
+capped at `VALIDITY_CLEAR_MAX_FACTOR`× the orbit-width boundary; past that the uncleared boundary
+is kept with a warning, since suppressing a large fraction of the plasma is worse than a band that
+cuts a rational (which the band knots resolve).
 """
 function clear_rational_windows(psi_c::Float64, rationals::Vector{Float64})::Float64
     psi_c <= 0 && return psi_c
+    psi_c0 = psi_c
+    limit = VALIDITY_CLEAR_MAX_FACTOR * psi_c0
     for _ in 1:length(rationals)
         inside = filter(r -> psi_c - Equilibrium.RATIONAL_RES_RADIUS <= r <= 2 * psi_c, rationals)
         isempty(inside) && break
         psi_c = maximum(inside) + Equilibrium.RATIONAL_RES_RADIUS
+        if psi_c > limit
+            @warn "clear_rational_windows: clearing the envelope band of rationals would push ψ_c from " *
+                  "$(round(psi_c0; sigdigits=3)) past $(round(limit; sigdigits=3)); keeping the orbit-width boundary"
+            return psi_c0
+        end
     end
     return psi_c
 end
@@ -286,10 +312,11 @@ end
 located Ω_ℓ = 0 resonance surfaces for every toroidal mode in the run, outside the near-axis
 validity region (nodes there are suppressed anyway). Empty for ideal runs — the ideal grid
 criterion knows nothing about kinetic resonances, so this is the only thing that puts knots on
-them.
+them. `rationals` is the pass-1 rational-surface list the boundary is cleared against; the caller
+supplies it because `intr.sing` is not populated until after the grid is built.
 """
 function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profiles, species,
-    equil, intr)::Vector{Float64}
+    equil, intr; rationals::Vector{Float64}=Float64[])::Vector{Float64}
     nodes = Float64[]
     (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && kinetic_profiles !== nothing) || return nodes
     for n_res in intr.nlow:intr.nhigh
@@ -298,8 +325,7 @@ function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profi
             n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
             electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac))
     end
-    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
-        Float64[sng.psifac for sng in intr.sing])
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
     psi_c > 0 && filter!(p -> p > psi_c, nodes)
     return nodes
 end

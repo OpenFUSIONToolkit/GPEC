@@ -116,8 +116,9 @@ function compute_calculated_kinetic_matrices(
              [Equilibrium.ResolvedNTVSpecies(kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.electron, "single", kinetic_profiles)] : species
 
 
-    # Near-axis validity envelope: suppress the drift-kinetic increments where the zero-orbit-width
-    # ordering fails, taking the widest-orbit species. Kernel evaluation is skipped where it is 0.
+    # Near-axis validity envelope: suppresses the drift-kinetic increments where the zero-orbit-width
+    # ordering fails (kernel evaluation skipped where it is 0). The same real scalar must scale kw and
+    # kt at the same ψ — that is what keeps the blocks Hermitian and the energy/torque relation intact.
     env = ones(Float64, mpsi)
     if kf_ctrl.axis_validity_suppression
         psi_c = axis_psi_c

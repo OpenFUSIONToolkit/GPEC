@@ -83,7 +83,7 @@ function integrate_psi_quadgk(
     wdfac::Float64, divxfac::Float64, electron::Bool,
     method::String, equil, intr::KineticForcesInternal, ctrl::KineticForcesControl,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
-    psi_min::Float64=0.0, psi_max::Float64=1.0
+    psi_min::Float64=0.0, psi_max::Float64=1.0, axis_psi_c::Float64=0.0
 )
     is_matrix_method = occursin("mm", method)
     mpert = intr.mpert
@@ -100,11 +100,10 @@ function integrate_psi_quadgk(
             panel_psis=Float64[], resonance_psis=Float64[])
     end
 
-    # Near-axis validity suppression: same boundary and envelope as the EL kinetic
-    # matrices (one source of truth), applied to the torque density; the quadrature
-    # domain starts at the boundary since the integrand is identically zero below it.
-    psi_c = ctrl.axis_validity_suppression ?
-            kinetic_axis_validity_psi(kinetic_profiles, equil; zi=zi, mi=mi, electron=electron) : 0.0
+    # Near-axis validity suppression on the torque density. `axis_psi_c` is the run's single
+    # boundary (widest-orbit species, cleared of rationals), so the quadrature domain matches the
+    # EL kinetic matrices and the Validity output; below it the integrand is identically zero.
+    psi_c = ctrl.axis_validity_suppression ? axis_psi_c : 0.0
     x0 = max(x0, psi_c)
     if x0 >= xout
         return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0,
@@ -305,10 +304,13 @@ block-diagonal kinetic matrices.
   - `ctrl::KineticForcesControl`: Control parameters specifying which methods to run
   - `equil`: PlasmaEquilibrium with 2D interpolants
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
+  - `axis_psi_c`: the run's near-axis validity boundary, suppressing the torque density below it
+    (`KineticForces.axis_validity_boundary`); 0 disables the suppression
 """
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
     ctrl::KineticForcesControl, equil,
-    kinetic_profiles::Equilibrium.KineticProfileSplines)
+    kinetic_profiles::Equilibrium.KineticProfileSplines;
+    axis_psi_c::Float64=0.0)
 
     for entry in METHOD_REGISTRY
         getfield(ctrl, entry.flag) || continue
@@ -351,7 +353,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                 n, ctrl.nl, ctrl.zi, ctrl.mi,
                 ctrl.wdfac, ctrl.divxfac, ctrl.electron,
                 method, equil, intr, ctrl, kinetic_profiles;
-                psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
+                psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2], axis_psi_c=axis_psi_c)
 
             total_torque += result.total
             psi_nsteps_total += result.psi_nsteps
