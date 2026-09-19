@@ -25,6 +25,8 @@ plasma solve or a new Biot-Savart integration.
   with a `ToleranceSet` into intrinsic and corrected `|δ|` histograms
 - `Risk.jl`: the ITPA penetration-threshold scalings, `locking_risk` (the overlap distribution
   convolved with the threshold distribution), `tolerance_scan` and `allowable_tolerance`
+- `Phasing.jl`: `phasing_map`, the closed-form overlap of several coil arrays against their
+  relative current-pattern phases
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface
 spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
@@ -51,6 +53,7 @@ include("ToleranceTOML.jl")
 include("Sampling.jl")
 include("MonteCarlo.jl")
 include("Risk.jl")
+include("Phasing.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
@@ -62,5 +65,6 @@ export disk_radius, sample_disk, sample_uncertainty, sample_additive, sample_cyl
 export MonteCarloControl, MonteCarloResult, run_monte_carlo
 export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, ScenarioParameters, nominal_threshold, threshold_samples
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
+export PhasingMap, phasing_map, extreme_phasing
 
 end # module ErrorFields

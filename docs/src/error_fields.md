@@ -228,6 +228,34 @@ risk = EF.locking_risk("gpec.h5"; n_e=5.0, psi_low=0.7, risk_ctrl=EF.RiskControl
 scan2 = EF.tolerance_scan("gpec.h5"; n_e=5.0, scales=[0.5, 1, 2, 4], coil_subset=["F6A", "F7A"])
 ```
 
+## Plots and coil-array phasing
+
+`Analysis.ErrorFields` plots everything above from `gpec.h5`, and every function takes a list
+of `label => path` pairs so coil-design revisions overplot on one axis:
+
+```julia
+AEF = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields
+AEF.plot_coil_sensitivities(["rev A" => "revA/gpec.h5", "rev B" => "revB/gpec.h5"]; quantity=:shift)
+AEF.plot_tolerance_pdf("gpec.h5"; corrected=true)
+AEF.plot_locking_risk("gpec.h5"; target_percent=1.0)     # marks the allowable scale
+AEF.plot_threshold_scaling("gpec.h5")
+AEF.plot_dominant_mode_spectrum("gpec.h5")
+AEF.plot_error_field_summary("gpec.h5"; save_path="error_field_summary.png")
+```
+
+When several independently powered coil arrays share the job of correcting the error field,
+the relative phases of their current patterns decide how much dominant-mode field they can
+drive per ampere-turn. `phasing_map` evaluates `|Σ_k δ_k e^{iφ_k}|` per kilo-ampere-turn and
+the resonant fraction of the applied field on a grid of the `N − 1` relative phases from the
+stored nominal spectra, a closed form with no optimizer, and `plot_phasing_map` draws it (a
+line for two arrays, a contour for three):
+
+```julia
+pmap = EF.phasing_map("gpec.h5", ["EFCC_L", "EFCC_M", "EFCC_U"]; psi_low=0.5)
+EF.extreme_phasing(pmap)                        # best |δ| per kAt and the phases giving it
+AEF.plot_phasing_map(pmap; quantity=:overlap_percent)
+```
+
 ## Analysis after the run
 
 Window the coupling to any range of rational surfaces and project onto any singular mode

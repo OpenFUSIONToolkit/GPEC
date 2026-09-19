@@ -78,7 +78,8 @@ println("Saved: ", abspath(pdf_path))
 # Locking risk: the threshold distribution against the overlap distribution, and the risk against
 # tolerance scale with the allowable tolerance for a 1 % target read off the scan.
 scan = ErrorFields.ToleranceScan(h5path)
-risk_nominal = h5open(f -> (read(f["ErrorFields/Risk/plock_percent"]), read(f["ErrorFields/Risk/plock_efc_percent"]),
+risk_nominal = h5open(
+    f -> (read(f["ErrorFields/Risk/plock_percent"]), read(f["ErrorFields/Risk/plock_efc_percent"]),
         read(f["ErrorFields/Risk/threshold_nominal"]), read(f["ErrorFields/Risk/threshold_pdf"]), read(f["ErrorFields/Risk/p_lock_given_delta"])), h5path, "r")
 plock, plock_efc, thr_nom, thr_pdf, p_given = risk_nominal
 p_thr = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright, xscale=:log10,
@@ -102,3 +103,8 @@ Plots.savefig(p_risk, risk_path)
 println("Saved: ", abspath(risk_path))
 @printf("P_lock = %.2f %% intrinsic, %.2f %% corrected at the design tolerances; allowable scale for 1 %%: %.2f (intrinsic), %.2f (corrected)\n",
     plock, plock_efc, ErrorFields.allowable_tolerance(scan, 1.0), ErrorFields.allowable_tolerance(scan, 1.0; corrected=true))
+
+# The same figures through the Analysis module, which overplots design revisions when given
+# several `label => gpec.h5` pairs.
+p_summary = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields.plot_error_field_summary(h5path; save_path=joinpath(@__DIR__, "error_field_summary.png"))
+display(p_summary)

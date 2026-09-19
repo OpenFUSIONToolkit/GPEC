@@ -1,0 +1,272 @@
+"""
+    ErrorFields
+
+Plots for the error-field assessment stored under `ErrorFields/` of a GPEC HDF5 output:
+per-coil sensitivities, the tolerance Monte Carlo distributions, the locking risk and its
+dependence on tolerance, the threshold scaling, the dominant coupling mode, and coil-array
+phasing maps. Every plot takes a list of `label => h5path` pairs so design revisions can be
+overplotted, with a single-path convenience method for the common case.
+"""
+module ErrorFields
+
+using HDF5
+using Plots
+using LinearAlgebra
+
+import ...ErrorFields as EF
+import ...PerturbedEquilibrium as PE
+
+const Sources = Vector{Pair{String,String}}
+
+_sources(h5path::AbstractString) = [basename(dirname(abspath(h5path))) => String(h5path)]
+
+# Everything the plots read, `nothing` where the run did not produce it.
+function _load(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        has(k) = haskey(f, k)
+        cs = "ErrorFields/CoilSensitivities"
+        mc = "ErrorFields/MonteCarlo"
+        rk = "ErrorFields/Risk"
+        (
+            coil_names=has(cs) ? read(f["$cs/coil_name"]) : nothing,
+            delta_nominal=has(cs) ? read(f["$cs/DominantMode/delta_nominal"]) : nothing,
+            shift_rms=has(cs) ? read(f["$cs/DominantMode/shift_rms"]) : nothing,
+            tilt_rms=has(cs) ? read(f["$cs/DominantMode/tilt_rms"]) : nothing,
+            shift_sensitivity=has(cs) ? read(f["$cs/DominantMode/shift_sensitivity"]) : nothing,
+            tilt_sensitivity=has(cs) ? read(f["$cs/DominantMode/tilt_sensitivity"]) : nothing,
+            bin_edges=has(mc) ? read(f["$mc/bin_edges"]) : nothing,
+            pdf=has(mc) ? read(f["$mc/pdf"]) : nothing,
+            pdf_efc=has(mc) ? read(f["$mc/pdf_efc"]) : nothing,
+            mc_delta_nominal=has(mc) ? read(f["$mc/delta_nominal"]) : nothing,
+            threshold_pdf=has(rk) ? read(f["$rk/threshold_pdf"]) : nothing,
+            p_lock_given_delta=has(rk) ? read(f["$rk/p_lock_given_delta"]) : nothing,
+            threshold_nominal=has(rk) ? read(f["$rk/threshold_nominal"]) : nothing,
+            plock=has(rk) ? read(f["$rk/plock_percent"]) : nothing,
+            plock_efc=has(rk) ? read(f["$rk/plock_efc_percent"]) : nothing,
+            scan_scale=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/scale"]) : nothing,
+            scan_plock=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_percent"]) : nothing,
+            scan_plock_efc=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_efc_percent"]) : nothing,
+            scan_spread=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_spread_percent"]) : nothing,
+            scan_spread_efc=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_efc_spread_percent"]) : nothing,
+            dominant_v=has("PerturbedEquilibrium/SingularCoupling/DominantMode") ? read(f["PerturbedEquilibrium/SingularCoupling/DominantMode/right_singular_vectors"]) : nothing,
+            singular_values=has("PerturbedEquilibrium/SingularCoupling/DominantMode") ? read(f["PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values"]) : nothing,
+            mn_index=has("Info/mn_index") ? read(f["Info/mn_index"]) : nothing
+        )
+    end
+end
+
+_centers(edges) = (edges[1:end-1] .+ edges[2:end]) ./ 2
+_step_series(m, a) = (vcat(m[1] - 1, m, m[end] + 1), vcat(0.0, a, 0.0))
+_empty(msg) = plot(; title=msg, legend=false)
+
+function _save(p, save_path)
+    if save_path !== nothing
+        Plots.savefig(p, save_path)
+        println("Saved: ", abspath(save_path))
+    end
+    return p
+end
+
+"""
+    plot_coil_sensitivities(sources; quantity=:shift, per_mm=true, coils=nothing, save_path=nothing)
+    plot_coil_sensitivities(h5path; kwargs...)
+
+Grouped bars of the per-coil-set dominant-mode sensitivity across runs, matched by coil set
+name: `quantity = :shift` (in-plane RMS `|∂δ/∂Δ|`, per mm when `per_mm`), `:tilt` (per 0.1°),
+or `:nominal` (`|δ_nominal|`). `coils` restricts and orders the coil sets shown.
+"""
+function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, per_mm::Bool=true, coils=nothing, save_path=nothing)
+    data = [(lbl, _load(path)) for (lbl, path) in sources]
+    any(d -> d[2].coil_names === nothing, data) && return _empty("No ErrorFields/CoilSensitivities data — run with an [ErrorFields] section")
+    names = coils === nothing ? data[1][2].coil_names : String.(collect(coils))
+    value(d, nm) = begin
+        i = findfirst(==(nm), d.coil_names)
+        i === nothing && return NaN
+        quantity === :shift ? (per_mm ? 1e-3 : 1.0) * d.shift_rms[i] :
+        quantity === :tilt ? 0.1 * d.tilt_rms[i] :
+        quantity === :nominal ? abs(d.delta_nominal[i]) : throw(ArgumentError("quantity must be :shift, :tilt, or :nominal"))
+    end
+    ylabel = quantity === :shift ? (per_mm ? "|∂δ/∂Δ| per mm" : "|∂δ/∂Δ| per m") : quantity === :tilt ? "|∂δ/∂θ| per 0.1°" : "|δ_nominal|"
+    title = quantity === :shift ? "Dominant-mode error field per shift" : quantity === :tilt ? "Dominant-mode error field per tilt" : "Nominal dominant-mode overlap"
+    n = length(names)
+    k = length(data)
+    width = 0.8 / k
+    p = plot(; xlabel="coil set", ylabel=ylabel, title=title, xticks=(1:n, names), xrotation=45, legend=:topright,
+        left_margin=12Plots.mm, bottom_margin=8Plots.mm)
+    for (j, (lbl, d)) in enumerate(data)
+        x = (1:n) .+ (j - (k + 1) / 2) * width
+        bar!(p, x, [value(d, nm) for nm in names]; bar_width=width, label=lbl, alpha=0.8)
+    end
+    return _save(p, save_path)
+end
+plot_coil_sensitivities(h5path::AbstractString; kwargs...) = plot_coil_sensitivities(_sources(h5path); kwargs...)
+
+"""
+    plot_tolerance_pdf(sources; corrected=true, normalize=false, xscale=:identity, save_path=nothing)
+    plot_tolerance_pdf(h5path; kwargs...)
+
+The Monte Carlo distributions of the dominant-mode overlap `|δ|` of each run, intrinsic and
+(when `corrected`) with error-field correction, with the as-designed overlap marked.
+"""
+function plot_tolerance_pdf(sources::Sources; corrected::Bool=true, normalize::Bool=false, xscale::Symbol=:identity, save_path=nothing)
+    p = plot(; xlabel="dominant-mode overlap |δ|", ylabel=normalize ? "probability density (normalized)" : "probability density",
+        title="Tolerance Monte Carlo: |δ| over sampled misalignments", legend=:topright, xscale=xscale,
+        left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    any_data = false
+    for (j, (lbl, path)) in enumerate(sources)
+        d = _load(path)
+        d.pdf === nothing && continue
+        any_data = true
+        c = _centers(d.bin_edges)
+        keep = xscale === :log10 ? c .> 0 : trues(length(c))
+        scale = normalize ? maximum(d.pdf) : 1.0
+        plot!(p, c[keep], d.pdf[keep] ./ scale; lw=2, c=j, label="$lbl intrinsic")
+        corrected && plot!(p, c[keep], d.pdf_efc[keep] ./ (normalize ? maximum(d.pdf_efc) : 1.0); lw=2, ls=:dash, c=j, label="$lbl corrected")
+        vline!(p, [d.mc_delta_nominal]; ls=:dot, c=j, label="$lbl as designed")
+    end
+    any_data || return _empty("No ErrorFields/MonteCarlo data — run with a tolerance_file")
+    return _save(p, save_path)
+end
+plot_tolerance_pdf(h5path::AbstractString; kwargs...) = plot_tolerance_pdf(_sources(h5path); kwargs...)
+
+"""
+    plot_locking_risk(sources; corrected=true, target_percent=nothing, save_path=nothing)
+    plot_locking_risk(h5path; kwargs...)
+
+Locking probability against tolerance scale from each run's `ErrorFields/Risk/ToleranceScan/`,
+intrinsic and (when `corrected`) with error-field correction, batch spread as error bars, and
+the allowable scale at `target_percent` marked where the scan reaches it.
+"""
+function plot_locking_risk(sources::Sources; corrected::Bool=true, target_percent=nothing, save_path=nothing)
+    p = plot(; xlabel="tolerance scale", ylabel="locking probability [%]", xscale=:log10, yscale=:log10, legend=:topleft,
+        title="Locking risk vs tolerance scale", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    any_data = false
+    floor = 1e-4
+    for (j, (lbl, path)) in enumerate(sources)
+        d = _load(path)
+        d.scan_scale === nothing && continue
+        any_data = true
+        plot!(p, d.scan_scale, max.(d.scan_plock, floor); yerror=d.scan_spread ./ 2, marker=:circle, lw=2, c=j, label="$lbl intrinsic")
+        corrected && plot!(p, d.scan_scale, max.(d.scan_plock_efc, floor); yerror=d.scan_spread_efc ./ 2, marker=:square, lw=2, ls=:dash, c=j, label="$lbl corrected")
+        if target_percent !== nothing
+            scan = EF.ToleranceScan(d.scan_scale, d.scan_plock, d.scan_plock_efc, d.scan_spread, d.scan_spread_efc, 0.0)
+            for (corr, mk) in ((false, :diamond), (true, :star5))
+                (corr && !corrected) && continue
+                s = EF.allowable_tolerance(scan, target_percent; corrected=corr)
+                isnan(s) || scatter!(p, [s], [target_percent]; marker=mk, ms=8, c=j, label="$lbl allowable ($(corr ? "corrected" : "intrinsic"))")
+            end
+        end
+    end
+    any_data || return _empty("No ErrorFields/Risk/ToleranceScan data — set scan_scales in [ErrorFields.Risk]")
+    target_percent === nothing || hline!(p, [target_percent]; ls=:dash, c=:gray, label="target $(target_percent) %")
+    return _save(p, save_path)
+end
+plot_locking_risk(h5path::AbstractString; kwargs...) = plot_locking_risk(_sources(h5path); kwargs...)
+
+"""
+    plot_threshold_scaling(sources; save_path=nothing)
+    plot_threshold_scaling(h5path; kwargs...)
+
+The sampled penetration-threshold density and `P(lock|δ)` of each run against its overlap
+distributions, on a logarithmic `|δ|` axis, with the nominal threshold marked.
+"""
+function plot_threshold_scaling(sources::Sources; save_path=nothing)
+    p = plot(; xlabel="dominant-mode overlap |δ|", ylabel="normalized density  /  P(lock | δ)", xscale=:log10, legend=:topleft,
+        title="Overlap distribution vs penetration threshold", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    any_data = false
+    for (j, (lbl, path)) in enumerate(sources)
+        d = _load(path)
+        d.threshold_pdf === nothing && continue
+        any_data = true
+        c = _centers(d.bin_edges)
+        keep = c .> 0
+        plot!(p, c[keep], d.pdf[keep] ./ maximum(d.pdf); lw=2, c=j, label="$lbl intrinsic |δ|")
+        plot!(p, c[keep], d.pdf_efc[keep] ./ maximum(d.pdf_efc); lw=2, ls=:dash, c=j, label="$lbl corrected |δ|")
+        plot!(p, c[keep], d.threshold_pdf[keep] ./ maximum(d.threshold_pdf); lw=2, ls=:dot, c=j, label="$lbl threshold")
+        plot!(p, d.bin_edges[2:end], d.p_lock_given_delta[2:end]; lw=1.5, ls=:dashdot, c=j, label="$lbl P(lock | δ)")
+        vline!(p, [d.threshold_nominal]; ls=:dot, c=:black, label=j == 1 ? "nominal threshold" : "")
+    end
+    any_data || return _empty("No ErrorFields/Risk data — run with an [ErrorFields.scenario] table")
+    return _save(p, save_path)
+end
+plot_threshold_scaling(h5path::AbstractString; kwargs...) = plot_threshold_scaling(_sources(h5path); kwargs...)
+
+"""
+    plot_dominant_mode_spectrum(sources; mode=1, save_path=nothing)
+    plot_dominant_mode_spectrum(h5path; kwargs...)
+
+The right singular vector of the full-window dominant coupling mode of each run, `|V[m, mode]|`
+against poloidal mode number (one series per toroidal mode), from
+`PerturbedEquilibrium/SingularCoupling/DominantMode/`.
+"""
+function plot_dominant_mode_spectrum(sources::Sources; mode::Int=1, save_path=nothing)
+    p = plot(; xlabel="poloidal mode m", ylabel="|V[m, $mode]|", title="Dominant resonant-coupling mode spectrum", legend=:topright,
+        left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    any_data = false
+    for (j, (lbl, path)) in enumerate(sources)
+        d = _load(path)
+        (d.dominant_v === nothing || d.mn_index === nothing) && continue
+        any_data = true
+        mode <= size(d.dominant_v, 2) || continue
+        for n in unique(d.mn_index[:, 2])
+            rows = findall(==(n), d.mn_index[:, 2])
+            me, ae = _step_series(d.mn_index[rows, 1], abs.(d.dominant_v[rows, mode]))
+            plot!(p, me, ae; seriestype=:steppre, lw=2, c=j, label="$lbl n=$n (σ = $(round(d.singular_values[mode]; sigdigits=3)))")
+        end
+    end
+    any_data || return _empty("No PerturbedEquilibrium/SingularCoupling/DominantMode data")
+    return _save(p, save_path)
+end
+plot_dominant_mode_spectrum(h5path::AbstractString; kwargs...) = plot_dominant_mode_spectrum(_sources(h5path); kwargs...)
+
+"""
+    plot_phasing_map(h5path, coil_names; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, nphase=180, quantity=:delta_per_kat, save_path=nothing)
+    plot_phasing_map(map::EF.PhasingMap; quantity=:delta_per_kat, save_path=nothing)
+
+Contour map of the dominant-mode overlap per kilo-ampere-turn (`:delta_per_kat`) or of the
+resonant fraction of the applied field (`:overlap_percent`) against the relative phases of two
+or three coil arrays (`EF.phasing_map`). Two arrays give a line, three a filled contour whose
+axes are the phase of the middle array relative to the first and of the third relative to the
+middle; the extreme is marked.
+"""
+function plot_phasing_map(map::EF.PhasingMap; quantity::Symbol=:delta_per_kat, save_path=nothing)
+    arr =
+        quantity === :delta_per_kat ? map.delta_per_kat :
+        quantity === :overlap_percent ? map.overlap_percent :
+        throw(ArgumentError("quantity must be :delta_per_kat or :overlap_percent"))
+    label = quantity === :delta_per_kat ? "|δ| per kAt" : "resonant fraction [%]"
+    names = map.coil_names
+    if length(map.phase_deg) == 1
+        p = plot(map.phase_deg[1], vec(arr); lw=2, xlabel="Δφ($(names[2]) − $(names[1])) [deg]", ylabel=label, legend=false,
+            title="Two-array phasing", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    elseif length(map.phase_deg) == 2
+        p = contourf(map.phase_deg[1], map.phase_deg[2], permutedims(arr); levels=12, xlabel="Δφ($(names[2]) − $(names[1])) [deg]",
+            ylabel="Δφ($(names[3]) − $(names[2])) [deg]", title="Three-array phasing: $label", colorbar_title=label, aspect_ratio=:equal,
+            left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(720, 640))
+        v, ph = EF.extreme_phasing(map; quantity)
+        scatter!(p, [ph[1]], [ph[2]]; marker=:star5, ms=10, c=:white, label="max $(round(v; sigdigits=3))")
+    else
+        throw(ArgumentError("plot_phasing_map draws maps of one or two relative phases (two or three arrays)"))
+    end
+    return _save(p, save_path)
+end
+function plot_phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:AbstractString}; psi_low::Real=0.0, psi_high::Real=PE.CORE_PSI_HIGH, mode::Int=1,
+    nphase::Int=180, quantity::Symbol=:delta_per_kat, save_path=nothing)
+    return plot_phasing_map(EF.phasing_map(h5path, coil_names; psi_low, psi_high, mode, nphase); quantity, save_path)
+end
+
+"""
+    plot_error_field_summary(h5path; save_path=nothing)
+
+Four panels of a run's error-field assessment: coil sensitivities to shift, the tolerance
+Monte Carlo distributions, the overlap distribution against the threshold, and the locking
+risk against tolerance scale. Panels whose data the run did not produce say so.
+"""
+function plot_error_field_summary(h5path::AbstractString; save_path=nothing)
+    src = _sources(h5path)
+    p = plot(plot_coil_sensitivities(src), plot_tolerance_pdf(src), plot_threshold_scaling(src), plot_locking_risk(src);
+        layout=(2, 2), size=(1400, 1000))
+    return _save(p, save_path)
+end
+
+end # module ErrorFields
