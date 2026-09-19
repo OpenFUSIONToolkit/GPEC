@@ -51,11 +51,15 @@ include("h5_metadata_check.jl")
                 "compute_response" => true, "compute_singular_coupling" => true,
                 "verbose" => false, "write_outputs_to_HDF5" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
+            # Kinetic profiles consistent with this Solovev pressure, for the NTV torque couplings.
+            cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), joinpath(dir, "kinetic.dat"))
+            inputs["KineticForces"] = Dict{String,Any}("kinetic_file" => "kinetic.dat", "verbose" => false, "write_outputs_to_HDF5" => true)
             inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
                 "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100),
                 # Density chosen so the ITPA threshold sits near the fixture's nominal overlap: risk neither 0 nor saturated.
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
-                "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]))
+                "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
+                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"]))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -200,6 +204,29 @@ include("h5_metadata_check.jl")
             @test post_hoc.nominal_field ≈ sens.nominal_field rtol = 1e-10
             @test post_hoc.shift_sensitivity ≈ sens.shift_sensitivity rtol = 1e-10
             @test post_hoc.tilt_sensitivity ≈ sens.tilt_sensitivity rtol = 1e-10
+
+            # Correction-coil couplings: the tilted hoop as the correction array. Its overlap per kAt is
+            # the table's nominal overlap over its ampere-turns; the residual field carries no dominant
+            # mode; the torques are finite and written with the metadata contract.
+            couplings = res.efc_couplings
+            @test couplings isa Vector{EF.EFCCoupling} && length(couplings) == 1
+            c = couplings[1]
+            kat = sets[1].nw * 2.0e3 / 1e3
+            @test c.coil_name == "hoop_tilted"
+            @test c.delta_per_kat ≈ abs(table.delta_nominal[1]) / kat rtol = 1e-6
+            @test 0 < c.overlap_percent <= 100
+            @test isfinite(c.torque_full_per_kat2) && isfinite(c.torque_residual_per_kat2)
+            @test abs(dot(dom.right_singular_vectors[:, 1], EF.residual_spectrum(dom, sens.nominal_field[:, 1]))) < 1e-12
+            @test EF.read_efc_couplings(h5path)[1] == c
+            h5open(h5path, "r") do f
+                @test haskey(f, "ErrorFields/NTV/torque_residual_per_kat2")
+                @test isempty(_collect_metadata_violations(f))
+            end
+            curve = EF.efc_current_curve(c; delta_threshold=risk.threshold_nominal, torque_budget=1.0)
+            @test length(curve.delta_ef) == 500 && all(curve.current_linear .>= 0)
+            ntv_plot = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png"))
+            @test length(ntv_plot.series_list) >= 2                        # the single-mode and NTV-limited currents
+            @test_throws ErrorException GPEC.efc_couplings(ffs, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl(), nothing)
 
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,

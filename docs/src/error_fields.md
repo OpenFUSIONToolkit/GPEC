@@ -256,6 +256,37 @@ EF.extreme_phasing(pmap)                        # best |δ| per kAt and the phas
 AEF.plot_phasing_map(pmap; quantity=:overlap_percent)
 ```
 
+## NTV limits of error-field correction
+
+A correction coil cancels the dominant-mode overlap at `C_c` per kilo-ampere-turn, but the
+non-resonant remainder of its field drives a neoclassical toroidal viscosity (NTV) torque
+`T·I²` that a perfect correction does not remove. With a torque budget `T_0` and the threshold
+taken to fall in proportion to the torque spent, the current that corrects an intrinsic overlap
+`δ_EF` solves `δ_EF − C_c I = s δ_thresh (1 − T_residual I²/T_0)`, and real roots exist only up
+to a largest correctable overlap. `[ErrorFields.NTV]` names the correction arrays; the run
+evaluates each one's `C_c`, resonant fraction, and NTV torque per kAt² for its whole field and
+for its field with the dominant mode projected out — two plasma-response evaluations of the
+unit-current spectrum followed by the kinetic torque, which needs a `[KineticForces]` section —
+and writes `ErrorFields/NTV/`. The spectrum is evaluated on the run's `[ForcingTerms]` boundary
+grid and normalized by the magnitude of the array's ampere-turns, `|nw| × max|I|`, so the winding
+sense and current pattern of the deck stay the phase reference; the torques are stored with their
+sign, and the limits consume the budget with their magnitude (the sign depends on the rotation
+and on conventions, so a negative torque is never read as no torque). Torque budget, threshold
+and safety factor are analysis choices:
+
+```toml
+[ErrorFields.NTV]
+efc_coils = ["d3d_c"]           # Coil set names of the correction arrays to evaluate
+method = "fgar"                 # KineticForces torque method (must be enabled in [KineticForces])
+```
+
+```julia
+couplings = EF.read_efc_couplings("gpec.h5")
+curve = EF.efc_current_curve(couplings[1]; delta_threshold=1.4e-4, torque_budget=4.0)
+EF.max_correctable_overlap(couplings[1]; delta_threshold=1.4e-4, torque_budget=4.0)
+AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0)   # threshold from the run's Risk/ group
+```
+
 ## Analysis after the run
 
 Window the coupling to any range of rational surfaces and project onto any singular mode

@@ -242,3 +242,51 @@ function ToleranceScan(h5path::AbstractString)
             read(g["plock_efc_spread_percent"]), read(f[_RISK_GROUP*"/plock_nominal_percent"]))
     end
 end
+
+const _NTV_GROUP = "ErrorFields/NTV"
+
+# Metadata table for ErrorFields/NTV/ (paths relative to the group): per correction-coil array,
+# per kilo-ampere-turn of its current pattern.
+const NTV_H5_ANNOTATIONS = [
+    "coil_name" => (; long_name="name of each correction coil array"),
+    "delta_per_kat" => (; long_name="dominant-mode overlap |δ| of each array per kilo-ampere-turn", units="1/kAt"),
+    "overlap_percent" => (; long_name="resonant fraction of each array's field, 100·|Vᴴb̃|/‖b̃‖", units="%"),
+    "torque_full_per_kat2" => (; long_name="NTV torque of each array's whole field per kilo-ampere-turn squared", units="N*m/kAt^2"),
+    "torque_residual_per_kat2" => (; long_name="NTV torque of each array's field with the dominant mode projected out, per kilo-ampere-turn squared", units="N*m/kAt^2")
+]
+
+"""
+    write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
+
+Write the correction-coil couplings to `ErrorFields/NTV/`. The torque budget, threshold and
+safety factor that turn them into a correction-current curve are analysis choices left to
+[`efc_current_curve`](@ref). An existing group is replaced.
+"""
+function write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
+    haskey(h5file, _NTV_GROUP) && delete_object(h5file, _NTV_GROUP)
+    g = create_group(h5file, _NTV_GROUP)
+    g["coil_name"] = [c.coil_name for c in couplings]
+    g["delta_per_kat"] = [c.delta_per_kat for c in couplings]
+    g["overlap_percent"] = [c.overlap_percent for c in couplings]
+    g["torque_full_per_kat2"] = [c.torque_full_per_kat2 for c in couplings]
+    g["torque_residual_per_kat2"] = [c.torque_residual_per_kat2 for c in couplings]
+    Utilities.HDF5Annotations.annotate!(g, NTV_H5_ANNOTATIONS)
+    return g
+end
+
+"""
+    read_efc_couplings(h5path::AbstractString) -> Vector{EFCCoupling}
+
+Read a run's correction-coil couplings back from `ErrorFields/NTV/`.
+"""
+function read_efc_couplings(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        haskey(f, _NTV_GROUP) || throw(ArgumentError("$h5path has no $_NTV_GROUP group (set efc_coils in [ErrorFields.NTV])"))
+        g = f[_NTV_GROUP]
+        names = read(g["coil_name"])
+        return [
+            EFCCoupling(names[i], read(g["delta_per_kat"])[i], read(g["overlap_percent"])[i], read(g["torque_full_per_kat2"])[i], read(g["torque_residual_per_kat2"])[i])
+            for i in eachindex(names)
+        ]
+    end
+end

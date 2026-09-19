@@ -108,3 +108,13 @@ println("Saved: ", abspath(risk_path))
 # several `label => gpec.h5` pairs.
 p_summary = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields.plot_error_field_summary(h5path; save_path=joinpath(@__DIR__, "error_field_summary.png"))
 display(p_summary)
+
+# How much intrinsic error field the C-coil could correct before its own NTV torque, at a
+# 4 N·m budget, costs the rotation that holds the penetration threshold up.
+p_ntv = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=4.0, save_path=joinpath(@__DIR__, "efc_ntv_limits.png"))
+display(p_ntv)
+for c in ErrorFields.read_efc_couplings(h5path)
+    lim = ErrorFields.max_correctable_overlap(c; delta_threshold=thr_nom, torque_budget=4.0)
+    @printf("%s: |δ| = %.3e per kAt, resonant fraction %.1f %%, torque %.3e (full) / %.3e (residual) N·m per kAt²; correctable up to %.2f × threshold\n",
+        c.coil_name, c.delta_per_kat, c.overlap_percent, c.torque_full_per_kat2, c.torque_residual_per_kat2, lim.with_ntv / thr_nom)
+end

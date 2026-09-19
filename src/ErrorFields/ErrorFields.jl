@@ -27,6 +27,8 @@ plasma solve or a new Biot-Savart integration.
   convolved with the threshold distribution), `tolerance_scan` and `allowable_tolerance`
 - `Phasing.jl`: `phasing_map`, the closed-form overlap of several coil arrays against their
   relative current-pattern phases
+- `NTVLimits.jl`: how much error field a correction coil can cancel before its own NTV torque
+  costs the rotation that holds the threshold up (`EFCCoupling`, `correction_current`)
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface
 spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
@@ -54,6 +56,7 @@ include("Sampling.jl")
 include("MonteCarlo.jl")
 include("Risk.jl")
 include("Phasing.jl")
+include("NTVLimits.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
@@ -66,5 +69,6 @@ export MonteCarloControl, MonteCarloResult, run_monte_carlo
 export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, ScenarioParameters, nominal_threshold, threshold_samples
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
 export PhasingMap, phasing_map, extreme_phasing
+export NTVControl, EFCCoupling, residual_spectrum, correction_current, max_correctable_overlap, efc_current_curve, read_efc_couplings
 
 end # module ErrorFields

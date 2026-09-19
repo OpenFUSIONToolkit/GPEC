@@ -256,6 +256,36 @@ function plot_phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:A
 end
 
 """
+    plot_efc_ntv_limits(h5path; torque_budget, delta_threshold=nothing, safety_factor=1.0, delta_max=15, save_path=nothing)
+    plot_efc_ntv_limits(couplings::Vector{EF.EFCCoupling}; delta_threshold, torque_budget, kwargs...)
+
+Correction current against intrinsic overlap for each correction array of a run
+(`ErrorFields/NTV/`): the linear single-mode current and the NTV-limited current whose residual
+torque lowers the threshold, with the largest correctable overlap marked. `delta_threshold`
+defaults to the run's nominal penetration threshold (`ErrorFields/Risk/threshold_nominal`);
+`torque_budget` is the torque, N·m, the rotation can afford to lose.
+"""
+function plot_efc_ntv_limits(couplings::Vector{EF.EFCCoupling}; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0,
+    delta_max::Real=15, save_path=nothing)
+    p = plot(; xlabel="intrinsic overlap δ_EF / δ_thresh", ylabel="correction current [kAt]", legend=:topleft,
+        title="Error-field correction against its own NTV torque (budget $(torque_budget) N·m)", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    for (j, c) in enumerate(couplings)
+        curve = EF.efc_current_curve(c; delta_threshold, torque_budget, safety_factor, delta_max)
+        x = curve.delta_ef ./ delta_threshold
+        plot!(p, x, curve.current_linear; lw=2, c=j, label="$(c.coil_name) single-mode")
+        plot!(p, x, curve.current_ntv; lw=2, ls=:dash, c=j, label="$(c.coil_name) with residual NTV")
+        isfinite(curve.with_ntv) && vline!(p, [curve.with_ntv / delta_threshold]; ls=:dot, c=j, label="$(c.coil_name) NTV limit")
+        isfinite(curve.torque_only) && scatter!(p, [curve.torque_only / delta_threshold], [0.0]; marker=:star5, ms=9, c=j, label="$(c.coil_name) torque-budget limit")
+    end
+    return _save(p, save_path)
+end
+function plot_efc_ntv_limits(h5path::AbstractString; torque_budget::Real, delta_threshold=nothing, kwargs...)
+    couplings = EF.read_efc_couplings(h5path)
+    δt = delta_threshold === nothing ? h5open(f -> read(f["ErrorFields/Risk/threshold_nominal"]), h5path, "r") : delta_threshold
+    return plot_efc_ntv_limits(couplings; delta_threshold=δt, torque_budget, kwargs...)
+end
+
+"""
     plot_error_field_summary(h5path; save_path=nothing)
 
 Four panels of a run's error-field assessment: coil sensitivities to shift, the tolerance
