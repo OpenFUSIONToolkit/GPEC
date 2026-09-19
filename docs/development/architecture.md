@@ -98,6 +98,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
        - Island half-widths and Chirikov parameters
        - Green's functions at interior flux surfaces
        - Surface inductance for singular surfaces
+     - `ResonantCoupling.jl` - `ResonantCoupling` (in-memory or from gpec.h5): windowed SVD for the dominant applied-field mode, and the normalization/overlap helpers that project coil spectra onto it
      - `Utils.jl` - Helper functions
    - Status: Core plasma response and singular coupling calculations implemented; active area of development
 
