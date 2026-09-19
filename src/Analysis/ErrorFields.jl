@@ -250,7 +250,7 @@ function plot_phasing_map(map::EF.PhasingMap; quantity::Symbol=:delta_per_kat, s
     end
     return _save(p, save_path)
 end
-function plot_phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:AbstractString}; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1,
+function plot_phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:AbstractString}; psi_low::Real=0.0, psi_high::Real=PE.CORE_PSI_HIGH, mode::Int=1,
     nphase::Int=180, quantity::Symbol=:delta_per_kat, save_path=nothing)
     return plot_phasing_map(EF.phasing_map(h5path, coil_names; psi_low, psi_high, mode, nphase); quantity, save_path)
 end
