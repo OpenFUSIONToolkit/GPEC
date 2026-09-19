@@ -13,15 +13,16 @@ then write to gpec.h5 in a single pass.
 Write KineticForces results to the "KineticForces" group in gpec.h5.
 
 # Arguments
-- `h5file::HDF5.File`: Open HDF5 file handle
-- `state::KineticForcesState`: Accumulated computation results
-- `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
-  written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
-  is directly available
-- `species_label`: `nothing` writes the run total to `KineticForces/<method>/`; a label
-  (e.g. `"ion_z1_m2"`, `"electron"`) writes one species' contribution to
-  `KineticForces/PerSpecies/<label>/<method>/`. A multi-species run calls this once per
-  species and once for the summed total, so the group is opened-or-created each time.
+
+  - `h5file::HDF5.File`: Open HDF5 file handle
+  - `state::KineticForcesState`: Accumulated computation results
+  - `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
+    written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
+    is directly available
+  - `species_label`: `nothing` writes the run total to `KineticForces/<method>/`; a label
+    (e.g. `"ion_z1_m2"`, `"electron"`) writes one species' contribution to
+    `KineticForces/PerSpecies/<label>/<method>/`. A multi-species run calls this once per
+    species and once for the summed total, so the group is opened-or-created each time.
 """
 function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
     species_label::Union{Nothing,AbstractString}=nothing)
@@ -140,8 +141,9 @@ Write variable-length integration trajectory records using offset-indexed concat
 This is the standard HDF5 ragged array pattern for storing variable-length data.
 
 # Arguments
-- `mg::HDF5.Group`: HDF5 group for this method
-- `records::Vector{EnergyIntegrationResult}`: Integration records to write
+
+  - `mg::HDF5.Group`: HDF5 group for this method
+  - `records::Vector{EnergyIntegrationResult}`: Integration records to write
 """
 function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
     rg = create_group(mg, "EnergyIntegrals")
@@ -173,13 +175,14 @@ end
 Print a summary of KineticForces results to stdout.
 
 # Arguments
-- `state::KineticForcesState`: Accumulated computation results
-- `verbose::Bool`: Print detailed per-surface results
+
+  - `state::KineticForcesState`: Accumulated computation results
+  - `verbose::Bool`: Print detailed per-surface results
 """
 function print_summary(state::KineticForcesState; verbose::Bool=false)
     for (method_name, result) in state.method_results
         @printf("%-8s  T_phi = %11.3e   2n*dW_k = %11.3e\n",
-                method_name, real(result.total_torque), imag(result.total_torque))
+            method_name, real(result.total_torque), imag(result.total_torque))
     end
     if verbose
         for (method_name, _) in state.kinetic_matrices
@@ -187,3 +190,63 @@ function print_summary(state::KineticForcesState; verbose::Bool=false)
         end
     end
 end
+
+"""
+    write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil)
+
+Write `KineticForces/Validity`: the drift-kinetic validity diagnostics (orbit-width scales, local
+geometry, profile gradient lengths, the near-axis boundary and its applied envelope, and the
+`is_valid` flag). Diagnostic only — nothing outside the near-axis envelope is suppressed, so the
+far edge and steep-gradient regions are flagged rather than zeroed.
+"""
+function write_validity!(h5file::HDF5.File, kf_ctrl::KineticForcesControl, species,
+    kinetic_profiles, equil, rationals::Vector{Float64}=Float64[])
+    kinetic_profiles === nothing && return nothing
+    # One species sets all three of psi_c, envelope and is_valid: the widest-orbit species when a
+    # resolved set is available, else the control's single species.
+    vp =
+        species === nothing ?
+        kinetic_validity_profiles(kinetic_profiles, equil; zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron) :
+        kinetic_validity_profiles(species, equil)
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
+    root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
+    haskey(root, "Validity") && return nothing
+    g = create_group(root, "Validity")
+    g["psi"] = vp.psi
+    g["rho_i"] = vp.rho_i
+    g["rho_banana"] = vp.rho_banana
+    g["rho_theta"] = vp.rho_theta
+    g["w_potato"] = vp.w_potato
+    g["r_minor"] = vp.r_minor
+    g["L_p"] = vp.L_p
+    g["L_q"] = vp.L_q
+    g["d_separatrix"] = vp.d_separatrix
+    g["psi_c"] = psi_c
+    g["envelope"] = psi_c > 0 ? kinetic_axis_validity_envelope.(vp.psi, psi_c) : ones(length(vp.psi))
+    g["is_valid"] = Int8.(vp.is_valid)
+    Utilities.HDF5Annotations.annotate!(g, KF_VALIDITY_H5_ANNOTATIONS)
+    return nothing
+end
+
+# Metadata table for KineticForces/Validity/ (paths relative to the group). It lives here, not in
+# HDF5Schema, because this group is written after the main writer's annotation pass has run.
+const KF_VALIDITY_H5_ANNOTATIONS = [
+    "psi" => (; long_name="normalized poloidal flux ψ_N of the kinetic validity profiles", scale="psi"),
+    "rho_i" => (; long_name="thermal ion gyroradius √(2mT)/(Z·e·B₀)", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "rho_banana" => (; long_name="thermal banana orbit width q·ρ_i/√ε", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "rho_theta" => (; long_name="thermal poloidal gyroradius q·ρ_i/ε", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "w_potato" => (; long_name="potato orbit width (q²ρ_i²R₀)^(1/3)", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "r_minor" => (; long_name="surface-average minor radius ⟨r⟩", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "L_p" => (; long_name="pressure gradient scale length |p|/|dp/dr|", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "L_q" => (; long_name="safety-factor gradient scale length |q|/|dq/dr|", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "d_separatrix" => (; long_name="distance to the separatrix ⟨r⟩(1) − ⟨r⟩(ψ)", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "psi_c" => (; long_name="near-axis kinetic validity boundary: outermost ψ_N where a thermal orbit width reaches ⟨r⟩", units="1"),
+    "envelope" =>
+        (; long_name="near-axis suppression envelope applied to the calculated kinetic terms (1 = unsuppressed)", units="1", dims=("psi",), attach=(1 => "psi",)),
+    "is_valid" => (;
+        long_name="1 where every zero-orbit-width ordering holds: max orbit width < ⟨r⟩, ρ_banana < L_p and L_q, max orbit width < d_separatrix",
+        units="1",
+        dims=("psi",),
+        attach=(1 => "psi",)
+    )
+]

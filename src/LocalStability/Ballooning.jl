@@ -1180,7 +1180,7 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
         problem_left,
         DP5();
         reltol=TOLERANCE,
-        abstol=TOLERANCE^2,
+        abstol=TOLERANCE,
         dtmin=MINIMUM_STEP,
         adaptive=true,
         save_everystep=false,
@@ -1201,7 +1201,7 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
         problem_right,
         DP5();
         reltol=TOLERANCE,
-        abstol=TOLERANCE^2,
+        abstol=TOLERANCE,
         dtmin=MINIMUM_STEP,
         adaptive=true,
         save_everystep=false,
