@@ -41,7 +41,7 @@ using Printf
 using TOML
 using Random
 import Random: AbstractRNG
-using FastInterpolations: cubic_interp, deriv1
+using FastInterpolations: cubic_interp, linear_interp, deriv1
 using Roots: find_zero, Brent
 
 import ..Equilibrium

@@ -154,8 +154,11 @@ function _bracketed_zero(g, a::Float64, b::Float64)
     return find_zero(g, (a, b), Brent())
 end
 
-# Cubic spline of a tabulated torque against the rotation shift (the code base's interpolant).
-_scan_spline(c::EFCCoupling, field::Symbol) = cubic_interp(c.rotation_shift, _scan_values(c, field))
+# Spline of a tabulated torque against the rotation shift; a scan too short for a cubic falls back to linear.
+function _scan_spline(c::EFCCoupling, field::Symbol)
+    x, y = c.rotation_shift, _scan_values(c, field)
+    return length(x) >= 4 ? cubic_interp(x, y) : linear_interp(x, y)
+end
 
 """
     torque_at(c::EFCCoupling, Δω; field=:residual) -> Float64
