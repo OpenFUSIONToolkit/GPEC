@@ -51,7 +51,10 @@ include("h5_metadata_check.jl")
                 "verbose" => false, "write_outputs_to_HDF5" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
             inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
-                "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100))
+                "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100),
+                # Density chosen so the ITPA threshold sits near the fixture's nominal overlap: risk neither 0 nor saturated.
+                "scenario" => Dict{String,Any}("n_e" => 12.0),
+                "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -122,6 +125,33 @@ include("h5_metadata_check.jl")
             @test rerun.pdf == mc.pdf
             windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[end], nsample=5_000, nbatch=1, seed=5, nbins=50)
             @test windowed_mc.delta_nominal ≈ abs(sum(windowed.delta_nominal))
+
+            # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
+            risk = res.locking_risk
+            @test risk isa EF.RiskResult
+            @test risk.scaling.n == 1 && risk.scaling.dataset == "O,L" && risk.scaling.fit == "WLS"
+            @test risk.threshold_nominal == EF.nominal_threshold(risk.scaling, EF.ScenarioParameters(ffs.equil; n_e=12.0))
+            @test 0 <= risk.plock_efc <= risk.plock <= 100
+            @test length(risk.plock_batches) == 2
+            h5open(h5path, "r") do f
+                @test haskey(f, "ErrorFields/Risk/plock_percent") && haskey(f, "ErrorFields/Risk/ToleranceScan/scale")
+                @test read(f["ErrorFields/Risk/plock_percent"]) == risk.plock
+                @test isempty(_collect_metadata_violations(f))
+            end
+            scan = EF.ToleranceScan(h5path)
+            @test scan.scale == [0.5, 1.0, 2.0]
+            @test all(diff(scan.plock) .>= -0.5)                          # risk grows with tolerance (to Monte Carlo noise)
+            @test 0 < risk.plock < 100                                     # neither empty nor saturated at this density
+            @test scan.plock[2] ≈ risk.plock rtol = 1e-12                # the scale-1 point is the run's own Monte Carlo
+            again = EF.locking_risk(h5path; n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
+                risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
+            @test again.plock == risk.plock
+            # The scan's own file entry point at unit scale is that same re-run.
+            rescan = EF.tolerance_scan(h5path; scales=[1.0], n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
+                risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
+            @test rescan.scale == [1.0]
+            @test rescan.plock[1] == again.plock
+            @test rescan.plock_efc[1] == again.plock_efc
             from_file = EF.CoilSensitivities(h5path)
             @test from_file.coil_names == sens.coil_names
             @test from_file.m_modes == sens.m_modes && from_file.n_modes == sens.n_modes

@@ -1,5 +1,5 @@
 # Illustrative manufacturing tolerances for the DIII-D F coils of DIIID-like_error_field_example:
-# every coil may sit anywhere within 1 mm of its nominal centre and tilt up to 0.05°, sampled
+# every coil may sit anywhere within 0.1 mm of its nominal centre and tilt up to 0.005°, sampled
 # with the hollow radial shape; the upper and lower outboard pairs are also bound into coherent
 # groups standing in for a common support, and an unattributed 1 G budget is carried. These are
 # round numbers for the example, not DIII-D engineering data.
@@ -11,107 +11,107 @@ tolerance_model = "additive"      # "additive" (independent shift and tilt) or "
 
 [[ErrorFields.coil]]
 name = "F1A"                      # DIII-D F coil F1A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F2A"                      # DIII-D F coil F2A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F3A"                      # DIII-D F coil F3A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F4A"                      # DIII-D F coil F4A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F5A"                      # DIII-D F coil F5A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F6A"                      # DIII-D F coil F6A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F7A"                      # DIII-D F coil F7A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F8A"                      # DIII-D F coil F8A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F9A"                      # DIII-D F coil F9A; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F1B"                      # DIII-D F coil F1B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F2B"                      # DIII-D F coil F2B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F3B"                      # DIII-D F coil F3B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F4B"                      # DIII-D F coil F4B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F5B"                      # DIII-D F coil F5B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F6B"                      # DIII-D F coil F6B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F7B"                      # DIII-D F coil F7B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F8B"                      # DIII-D F coil F8B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coil]]
 name = "F9B"                      # DIII-D F coil F9B; must match the [[ForcingTerms.coil_set]] name
-shift_tol_mm = 1.0                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.05                   # Tilt tolerance, in tilt_units
+shift_tol_mm = 0.1                # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.005                  # Tilt tolerance, in tilt_units
 
 [[ErrorFields.coherent_group]]
 name = "outboard_upper"           # Label of the coherently moving group
 members = ["F6A", "F7A"]          # Coil sets sharing one random draw per sample
-shift_tol_mm = 0.5                # Coherent shift amplitude shared by the group [mm]
-tilt_tol = 0.02                   # Coherent tilt amplitude shared by the group, in tilt_units
+shift_tol_mm = 0.05               # Coherent shift amplitude shared by the group [mm]
+tilt_tol = 0.002                  # Coherent tilt amplitude shared by the group, in tilt_units
 phase_group = "outboard"          # Groups naming the same phase_group share the random direction
 rotation_center_z_m = 0.0         # Height of the pivot of the group's rigid rotation on the machine axis [m]
 
 [[ErrorFields.coherent_group]]
 name = "outboard_lower"           # Label of the coherently moving group
 members = ["F6B", "F7B"]          # Coil sets sharing one random draw per sample
-shift_tol_mm = 0.5                # Coherent shift amplitude shared by the group [mm]
-tilt_tol = 0.02                   # Coherent tilt amplitude shared by the group, in tilt_units
+shift_tol_mm = 0.05               # Coherent shift amplitude shared by the group [mm]
+tilt_tol = 0.002                  # Coherent tilt amplitude shared by the group, in tilt_units
 phase_group = "outboard"          # Groups naming the same phase_group share the random direction
 rotation_center_z_m = 0.0         # Height of the pivot of the group's rigid rotation on the machine axis [m]
 

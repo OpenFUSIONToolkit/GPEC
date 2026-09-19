@@ -173,3 +173,72 @@ function MonteCarloResult(h5path::AbstractString)
             read(g["clamped_fraction"]), ctrl.nsample, size(pdf_batches, 2), ctrl.seed)
     end
 end
+
+const _RISK_GROUP = "ErrorFields/Risk"
+
+# Metadata table for ErrorFields/Risk/ (paths relative to the group). Percentages are stored as
+# such; the threshold density and P(lock|δ) share the Monte Carlo's |δ| grid.
+const RISK_H5_ANNOTATIONS = [
+    "threshold_pdf" => (; long_name="probability density of the sampled ITPA penetration threshold on the Monte Carlo |δ| bins", dims=("delta_bin",)),
+    "p_lock_given_delta" => (; long_name="probability that an overlap equal to each Monte Carlo bin edge locks (threshold cumulative distribution)", dims=("delta_edge",)),
+    "threshold_nominal" => (; long_name="ITPA penetration threshold at the fitted exponents"),
+    "plock_percent" => (; long_name="locking probability of the intrinsic overlap distribution, 100 ∫ pdf(δ) P(lock|δ) dδ, batch average", units="%"),
+    "plock_efc_percent" => (; long_name="locking probability of the corrected overlap distribution, batch average", units="%"),
+    "plock_batches_percent" => (; long_name="locking probability of the intrinsic distribution per Monte Carlo batch", units="%"),
+    "plock_efc_batches_percent" => (; long_name="locking probability of the corrected distribution per Monte Carlo batch", units="%"),
+    "plock_nominal_percent" => (; long_name="locking probability of the as-designed machine, 100 P(lock|δ_nominal)", units="%"),
+    "plock_sharp_percent" => (; long_name="locking probability if the threshold were exactly its nominal value, 100 P(|δ| > threshold_nominal)", units="%"),
+    "ToleranceScan/scale" => (; long_name="multiplier applied to every shift and tilt tolerance"),
+    "ToleranceScan/plock_percent" => (; long_name="locking probability of the intrinsic distribution at each tolerance scale", units="%", dims=("scale",)),
+    "ToleranceScan/plock_efc_percent" => (; long_name="locking probability of the corrected distribution at each tolerance scale", units="%", dims=("scale",)),
+    "ToleranceScan/plock_spread_percent" => (; long_name="range of the intrinsic locking probability over the Monte Carlo batches at each scale", units="%", dims=("scale",)),
+    "ToleranceScan/plock_efc_spread_percent" =>
+        (; long_name="range of the corrected locking probability over the Monte Carlo batches at each scale", units="%", dims=("scale",))
+]
+
+"""
+    write_to_hdf5!(h5file::HDF5.File, risk::RiskResult; scan=nothing)
+
+Write the locking risk to `ErrorFields/Risk/`, with the tolerance scan under
+`ErrorFields/Risk/ToleranceScan/` when given. The threshold fit, scenario and sampling settings
+live in the run's `[ErrorFields.Risk]` and `[ErrorFields.scenario]` tables under
+`Input/gpec_toml_raw`. An existing group is replaced.
+"""
+function write_to_hdf5!(h5file::HDF5.File, risk::RiskResult; scan::Union{Nothing,ToleranceScan}=nothing)
+    haskey(h5file, _RISK_GROUP) && delete_object(h5file, _RISK_GROUP)
+    g = create_group(h5file, _RISK_GROUP)
+    g["threshold_pdf"] = risk.threshold_pdf
+    g["p_lock_given_delta"] = risk.p_lock_given_delta
+    g["threshold_nominal"] = risk.threshold_nominal
+    g["plock_percent"] = risk.plock
+    g["plock_efc_percent"] = risk.plock_efc
+    g["plock_batches_percent"] = risk.plock_batches
+    g["plock_efc_batches_percent"] = risk.plock_efc_batches
+    g["plock_nominal_percent"] = risk.plock_nominal
+    g["plock_sharp_percent"] = risk.plock_sharp
+    if scan !== nothing
+        sg = create_group(g, "ToleranceScan")
+        sg["scale"] = scan.scale
+        sg["plock_percent"] = scan.plock
+        sg["plock_efc_percent"] = scan.plock_efc
+        sg["plock_spread_percent"] = scan.plock_spread
+        sg["plock_efc_spread_percent"] = scan.plock_efc_spread
+    end
+    Utilities.HDF5Annotations.annotate!(g, RISK_H5_ANNOTATIONS)
+    return g
+end
+
+"""
+    ToleranceScan(h5path::AbstractString)
+
+Read a run's tolerance scan back from `ErrorFields/Risk/ToleranceScan/`.
+"""
+function ToleranceScan(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        path = _RISK_GROUP * "/ToleranceScan"
+        haskey(f, path) || throw(ArgumentError("$h5path has no $path group (set scan_scales in [ErrorFields.Risk])"))
+        g = f[path]
+        return ToleranceScan(read(g["scale"]), read(g["plock_percent"]), read(g["plock_efc_percent"]), read(g["plock_spread_percent"]),
+            read(g["plock_efc_spread_percent"]), read(f[_RISK_GROUP*"/plock_nominal_percent"]))
+    end
+end

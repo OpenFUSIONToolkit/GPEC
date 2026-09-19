@@ -1,6 +1,6 @@
 using Pkg;
 Pkg.activate(joinpath(@__DIR__, "../.."))
-using GeneralizedPerturbedEquilibrium, Plots, Printf
+using GeneralizedPerturbedEquilibrium, Plots, Printf, HDF5
 using GeneralizedPerturbedEquilibrium: PerturbedEquilibrium, ErrorFields
 isinteractive() ? plotlyjs() : gr()
 
@@ -46,7 +46,7 @@ p_spec = plot(; xlabel="poloidal mode m", ylabel="|b̃| [T]", yscale=:log10, leg
     left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
 c = findfirst(==("d3d_c"), names)   # file-based sets are named machine_name
 me, ae = step_series(m, max.(abs.(sens.nominal_field[:, c]), 1e-30))
-plot!(p_spec, me, ae; seriestype=:steppre, lw=2, label="C-coil nominal (1 kA)")
+plot!(p_spec, me, ae; seriestype=:steppre, lw=2, label="C-coil nominal (20 A)")
 for j in picks
     me, ae = step_series(m, max.(1e-3 .* abs.(sens.shift_sensitivity[:, 1, j]), 1e-30))
     plot!(p_spec, me, ae; seriestype=:steppre, lw=2, label="$(names[j]) ∂b̃/∂Δx · 1 mm")
@@ -74,3 +74,31 @@ println("Saved: ", abspath(pdf_path))
 @printf("⟨|δ|⟩ = %.3e intrinsic, %.3e corrected; as designed %.3e; batch spread of ⟨|δ|⟩ ≈ %.1e\n",
     mc.mean_abs_delta, mc.mean_abs_delta_efc, mc.delta_nominal,
     maximum(abs.(vec(sum(mc.pdf_batches .* centers(mc) .* diff(mc.bin_edges); dims=1)) .- mc.mean_abs_delta)))
+
+# Locking risk: the threshold distribution against the overlap distribution, and the risk against
+# tolerance scale with the allowable tolerance for a 1 % target read off the scan.
+scan = ErrorFields.ToleranceScan(h5path)
+risk_nominal = h5open(f -> (read(f["ErrorFields/Risk/plock_percent"]), read(f["ErrorFields/Risk/plock_efc_percent"]),
+        read(f["ErrorFields/Risk/threshold_nominal"]), read(f["ErrorFields/Risk/threshold_pdf"]), read(f["ErrorFields/Risk/p_lock_given_delta"])), h5path, "r")
+plock, plock_efc, thr_nom, thr_pdf, p_given = risk_nominal
+p_thr = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright, xscale=:log10,
+    title="Overlap distribution vs ITPA penetration threshold", left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
+c = centers(mc)
+keep = c .> 0
+plot!(p_thr, c[keep], mc.pdf[keep] ./ maximum(mc.pdf); lw=2, label="intrinsic |δ| (normalized)")
+plot!(p_thr, c[keep], mc.pdf_efc[keep] ./ maximum(mc.pdf_efc); lw=2, label="corrected |δ| (normalized)")
+plot!(p_thr, c[keep], thr_pdf[keep] ./ maximum(thr_pdf); lw=2, c=:black, label="threshold density (normalized)")
+plot!(p_thr, mc.bin_edges[2:end], p_given[2:end]; lw=1.5, ls=:dash, c=:red, label="P(lock | δ)")
+vline!(p_thr, [thr_nom]; ls=:dot, c=:black, label="nominal threshold")
+p_scan = plot(; xlabel="tolerance scale (× tolerances.toml)", ylabel="locking probability [%]", xscale=:log10, yscale=:log10,
+    legend=:topleft, title="Risk vs tolerance scale", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+plot!(p_scan, scan.scale, max.(scan.plock, 1e-4); marker=:circle, lw=2, label="intrinsic")
+plot!(p_scan, scan.scale, max.(scan.plock_efc, 1e-4); marker=:square, lw=2, label="corrected")
+hline!(p_scan, [1.0]; ls=:dash, c=:gray, label="1 % target")
+p_risk = plot(p_thr, p_scan; layout=(2, 1), size=(900, 760))
+display(p_risk)
+risk_path = joinpath(@__DIR__, "locking_risk.png")
+Plots.savefig(p_risk, risk_path)
+println("Saved: ", abspath(risk_path))
+@printf("P_lock = %.2f %% intrinsic, %.2f %% corrected at the design tolerances; allowable scale for 1 %%: %.2f (intrinsic), %.2f (corrected)\n",
+    plock, plock_efc, ErrorFields.allowable_tolerance(scan, 1.0), ErrorFields.allowable_tolerance(scan, 1.0; corrected=true))
