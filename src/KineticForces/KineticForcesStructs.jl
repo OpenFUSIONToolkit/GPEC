@@ -130,32 +130,19 @@ builds a second control for its differing tolerance).
     nn::Int = 1                     # Toroidal mode number
     nl::Int = 1                     # Bounce harmonic number
 
-    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy).
-    # Each level must be resolved more tightly than the one enclosing it, or the outer
-    # integrator chases its integrand's own quadrature noise instead of converging.
-    # *_xlmda: tolerances for the λ (pitch) integration
-    # *_x:     tolerances for the x (energy) integration nested inside it; NaN ⇒ derive as
-    #          nested_tolerance_margin × the pitch tolerances
-    # *_psi:   tolerances for the outer ψ quadrature
+    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy); each level must
+    # resolve tighter than the one enclosing it, or the outer integrator chases quadrature noise.
     atol_xlmda::Float64 = 1e-8     # Absolute tolerance for the inner pitch integration
     rtol_xlmda::Float64 = 1e-5     # Relative tolerance for the inner pitch integration
     atol_x::Float64 = NaN          # Absolute tolerance for the energy integration (NaN ⇒ derived)
     rtol_x::Float64 = NaN          # Relative tolerance for the energy integration (NaN ⇒ derived)
-    # The pitch integrand IS the energy integral, so the energy level is resolved this much
-    # tighter than the pitch level by default.
+    # Energy tolerances default to this fraction of the pitch ones (the pitch integrand is itself an energy integral).
     nested_tolerance_margin::Float64 = 1e-2   # Factor relating derived energy tolerances to the pitch ones
-    # rtol_psi is the primary convergence knob: ~2 significant figures matches the validity
-    # of the NTV model approximations. Do not set it tighter than the noise floor of the
-    # inner integrals (keep rtol_psi ≳ 10 × rtol_xlmda).
+    # Primary convergence knob (~2 sig figs matches NTV model validity); keep rtol_psi ≳ 10 × rtol_xlmda or it chases inner-integral noise.
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
-    # atol_psi is in N·m and therefore amplitude-sensitive: NTV scales as δB², so a 10×
-    # weaker applied field gives a 100× smaller torque and any fixed absolute tolerance can
-    # silently dominate termination with O(1) relative error. Default 0 (rtol-only); a
-    # nonzero value is an expert opt-out for near-net-zero-torque cases and triggers a
-    # warning when it dominates.
+    # Amplitude-sensitive (NTV ∝ δB²); default 0 (rtol-only). Nonzero is an expert opt-out for near-zero-torque cases and warns when it dominates.
     atol_psi::Float64 = 0.0        # Absolute tolerance for outer ψ quadrature [N·m]
-    # Runaway guard for the outer quadrature (e.g. sign-cancelling torque density with tiny
-    # net torque under rtol-only control); a convergence warning fires when hit.
+    # Runaway guard for rtol-only control (e.g. sign-cancelling torque density); warns when hit.
     maxevals_psi::Int = 2000       # Max integrand evaluations for outer ψ quadrature
 
     # Scaling factors
