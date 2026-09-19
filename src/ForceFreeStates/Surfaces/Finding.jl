@@ -257,12 +257,8 @@ Mirrors the intent of Fortran `ksing_find` (`sing.f:1486-1616`) which finds zero
 det(F̄) via adaptive bisection. Here we use condition number peaks instead of
 determinant zeros for better numerical robustness and scale invariance.
 
-Algorithm:
-
- 1. Evaluate cond(F̄) on a dense ψ grid
- 2. Find local maxima (peaks where gradient changes from + to -)
- 3. Refine each peak with golden-section minimization of -cond
- 4. Filter by threshold and resonance condition
+Evaluates cond(F̄) on a dense ψ grid, finds its local maxima, refines each with golden-section
+minimization of -cond, then filters by threshold and resonance condition.
 """
 function find_kinetic_singular_surfaces!(
     mats::MatrixSplines,
@@ -298,10 +294,8 @@ function find_kinetic_singular_surfaces!(
     local_maxima = [i for i in 2:(ngrid-1) if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1]]
     peak_indices = filter(i -> cond_vals[i] > cond_threshold, local_maxima)
 
-    # Peaks below the threshold are not singular surfaces, but they mark where the kinetic F̄ comes
-    # closest to singular — the shifted/split resonances of Park & Logan Eq. (70). Report the
-    # strongest few so sharp kinetic structure is visible rather than silent (on a DIII-D-like case
-    # these track the NTV torque-density peaks at low collisionality/rotation).
+    # Peaks below threshold mark near-singular structure (the shifted/split resonances of Park &
+    # Logan Eq. 70); report the strongest few so sharp kinetic structure is visible rather than silent.
     subthreshold = filter(i -> KINETIC_RELAXED_FRAC * cond_threshold < cond_vals[i] <= cond_threshold, local_maxima)
     if !isempty(subthreshold)
         top = sort(subthreshold; by=i -> cond_vals[i], rev=true)[1:min(3, length(subthreshold))]

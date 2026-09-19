@@ -153,26 +153,19 @@ kinetic composite matrix as ``F_k = Q \bar F_k Q - P_l^\dagger Q - Q P_u + R_1``
 real ``\psi`` axis, and the singularity is removed from both the solution and the torque
 integral. (Torque-free kinetic energy principles instead *shift and split* the zeros to
 ``\psi_r \mp r_{L,R}``, where the singularity is logarithmic and integrable — still not a case
-for smoothing.)
+for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmetries* (PhD thesis,
+Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
+notation.
 
 GPEC therefore **forces `reg_spot = 0` whenever `kinetic_factor > 0`**, logging the override.
 Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
 is never regularized, so damping the other two breaks their near-resonance cancellation in
 ``\delta B/B`` and leaves a spurious residue driving the NTV integrand.
 
-Measured on the DIII-D-like H-mode case (n = 1, C-coil drive), comparing the NTV torque against
-the Euler–Lagrange solution's own dissipation ``-2n\,\mathrm{Im}\langle \xi, u_2\rangle/4\mu_0``
-— two independent calculations of the same quantity:
-
-| configuration | max ``|\xi^\alpha|`` | NTV torque [N·m] | EL dissipation [N·m] |
-|---|---|---|---|
-| ideal, `reg_spot = 0` | 643.8 | 6074.3 | — |
-| ideal, `reg_spot = 0.05` | 0.058 | 0.554 | — |
-| kinetic, `reg_spot = 0.05` | 0.055 | 0.1655 | 0.1322 |
-| kinetic, `reg_spot = 0` | 0.059 | **0.1324** | **0.1322** |
-
-The ideal rows show why the knob exists; the kinetic rows show why it must be off there — the
-two independent torques agree to 0.15 % with no regularization, and to 20 % with it.
+The check that this is right is that the NTV torque and the Euler–Lagrange solution's own
+dissipation ``-2n\,\mathrm{Im}\langle \xi, u_2\rangle/4\mu_0`` — two independent calculations
+of the same quantity — agree to a fraction of a percent with the regularization off, and disagree
+by tens of percent with it on.
 
 ## HDF5 outputs: complex torque convention and the EnergyIntegrals layout
 

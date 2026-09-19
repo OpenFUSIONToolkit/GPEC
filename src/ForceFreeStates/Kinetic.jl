@@ -1,7 +1,6 @@
 
-# Knots laid across the envelope's [ψ_c, 2ψ_c] transition. The envelope is a quintic smoothstep,
-# so a cubic spline needs several interior knots to follow it without overshoot; nine keeps the
-# residual below the kernel's own tolerance even on coarse decks.
+# Knots across the envelope's [ψ_c, 2ψ_c] quintic-smoothstep transition, enough for a cubic spline
+# to follow it without overshoot even on coarse decks.
 const BAND_KNOTS = 9
 
 """
@@ -104,10 +103,8 @@ function build_kinetic_matrix_splines(
     xs = metric.xs
     mpsi = length(xs)
 
-    # The near-axis validity envelope (KineticForces) has structure on the scale of the
-    # suppression boundary; coarse equilibrium grids cannot represent env·(increment), and the
-    # spline overshoot can land on a rational surface. Pin the band ends (the smoothstep is
-    # only C² there) and resolve the transition with a fixed set of knots.
+    # Coarse equilibrium grids cannot represent env·(increment) across the validity band, and the
+    # spline overshoot can land on a rational; pin the band ends (C² there) and resolve the middle.
     band_knots(lo, hi) = axis_validity_psi_c > 0 ?
                          [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=BAND_KNOTS) if lo < x < hi] : Float64[]
 
