@@ -17,6 +17,8 @@ plasma solve or a new Biot-Savart integration.
 - `Sensitivity.jl`: `compute_coil_sensitivities` (central-difference sweep of every rigid
   shift and tilt of every coil set on one shared boundary grid), `sensitivity_table`
 - `Output.jl`: HDF5 writer under `ErrorFields/CoilSensitivities/` and the matching reader
+- `ToleranceTOML.jl`: the tolerance input file — `read_tolerance_toml`, `ToleranceSet`,
+  `validate_tolerances`, and the tilt unit conversion `tilt_tolerance_deg`
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface
 spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
@@ -26,6 +28,7 @@ the mode index, and the field normalization stay post-hoc analysis choices.
 using LinearAlgebra
 using HDF5
 using Printf
+using TOML
 
 import ..Equilibrium
 import ..ForcingTerms
@@ -36,9 +39,12 @@ import ..Utilities
 
 include("ErrorFieldsStructs.jl")
 include("Sensitivity.jl")
+include("ToleranceTOML.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
 export compute_coil_sensitivities, sensitivity_table, cancelling_offset
+export ToleranceSet, CoilTolerance, CoherentGroupTolerance, OtherFieldBudget
+export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tolerance_deg
 
 end # module ErrorFields

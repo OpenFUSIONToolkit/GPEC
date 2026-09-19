@@ -402,10 +402,12 @@ function make_window_pane_standoff(equil; standoff::Real, poloidal_angle::Real,
     # boundary along the normal is standoff - half*|sin(tilt)| — the tilt tips the legs toward the
     # surface, while tangential displacement leaves the normal clearance unchanged.
     clearance = standoff - half * abs(sin(deg2rad(poloidal_tilt)))
-    clearance > 0 || error("make_window_pane_standoff: coil intersects the plasma boundary " *
-                           "(standoff=$standoff, poloidal_length=$poloidal_length, poloidal_tilt=$poloidal_tilt); " *
-                           "an external coil must lie outside the control surface — increase standoff or reduce " *
-                           "poloidal_length/poloidal_tilt")
+    clearance > 0 || error(
+        "make_window_pane_standoff: coil intersects the plasma boundary " *
+        "(standoff=$standoff, poloidal_length=$poloidal_length, poloidal_tilt=$poloidal_tilt); " *
+        "an external coil must lie outside the control surface — increase standoff or reduce " *
+        "poloidal_length/poloidal_tilt"
+    )
 
     c1 = [Rc - half * uR, Zc - half * uZ]
     c2 = [Rc + half * uR, Zc + half * uZ]
@@ -743,6 +745,44 @@ function convert_coil_h5_to_dat(h5_path::String, dat_path::String;
 end
 
 """
+    nominal_major_radius(x, y, z) -> Float64
+    nominal_major_radius(cs::CoilSet) -> Float64
+
+Arc-length-weighted major radius √(x²+y²) of a strand, or of every strand of a coil set: the
+radius through which a rim displacement in metres converts to a tilt angle, `asin(t / R_nom)`,
+as `apply_transforms` does for `tilt_in_meters`. A strand with no length returns 1.
+"""
+function nominal_major_radius(x::AbstractVector, y::AbstractVector, z::AbstractVector)
+    weighted_r, total_len = _weighted_major_radius(x, y, z)
+    return total_len > 0 ? weighted_r / total_len : 1.0
+end
+
+function nominal_major_radius(cs::CoilSet)
+    weighted_r = 0.0
+    total_len = 0.0
+    for j in 1:cs.ncoil, k in 1:cs.s
+        w, l = _weighted_major_radius(view(cs.x, j, k, :), view(cs.y, j, k, :), view(cs.z, j, k, :))
+        weighted_r += w
+        total_len += l
+    end
+    return total_len > 0 ? weighted_r / total_len : 1.0
+end
+
+# Arc-length-weighted major radius sum and total arc length of one strand.
+function _weighted_major_radius(x::AbstractVector, y::AbstractVector, z::AbstractVector)
+    total_len = 0.0
+    weighted_r = 0.0
+    for l in 1:(length(x)-1)
+        xm = (x[l] + x[l+1]) / 2
+        ym = (y[l] + y[l+1]) / 2
+        dl = sqrt((x[l+1] - x[l])^2 + (y[l+1] - y[l])^2 + (z[l+1] - z[l])^2)
+        weighted_r += sqrt(xm^2 + ym^2) * dl
+        total_len += dl
+    end
+    return weighted_r, total_len
+end
+
+"""
     _arc_length_center(x, y, z) -> (x0, y0, z0)
 
 Compute the arc-length-weighted centroid of a strand (1D array of points).
@@ -833,22 +873,8 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
                 (x0, y0, z0)
             end
 
-            # Compute nominal radius for tilt_in_meters conversion
-            r_nom = if cfg.tilt_in_meters
-                total_len = 0.0
-                weighted_r = 0.0
-                for l in 1:(nsec-1)
-                    xm = (cs.x[j, k, l] + cs.x[j, k, l+1]) / 2
-                    ym = (cs.y[j, k, l] + cs.y[j, k, l+1]) / 2
-                    dl = sqrt((cs.x[j, k, l+1] - cs.x[j, k, l])^2 + (cs.y[j, k, l+1] - cs.y[j, k, l])^2 +
-                              (cs.z[j, k, l+1] - cs.z[j, k, l])^2)
-                    weighted_r += sqrt(xm^2 + ym^2) * dl
-                    total_len += dl
-                end
-                total_len > 0 ? weighted_r / total_len : 1.0
-            else
-                1.0  # not used
-            end
+            # Nominal radius for the tilt_in_meters conversion
+            r_nom = cfg.tilt_in_meters ? nominal_major_radius(view(cs.x, j, k, :), view(cs.y, j, k, :), view(cs.z, j, k, :)) : 1.0
 
             # Convert tilt to radians
             dtor = π / 180.0
@@ -1032,7 +1058,7 @@ function load_coil_sets(cfg::CoilConfig, n_tilt::Int; equil=nothing)
 end
 
 export CoilSet, CoilSetConfig, CoilConfig
-export read_coil_dat, apply_transforms, load_coil_sets
+export read_coil_dat, apply_transforms, load_coil_sets, nominal_major_radius
 export make_pf_hoop, make_window_pane, make_helical
 export make_window_pane_standoff, surface_point_and_normal
 export read_coil_h5, write_coil_h5, write_coil_dat, save_coils_to_h5, load_coils_from_h5_group!

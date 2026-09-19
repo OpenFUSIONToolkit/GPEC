@@ -71,6 +71,66 @@ tolerance tool, while `"set"` rotates the pack rigidly about its common centre, 
 an engineering axis-line tolerance constrains. Single-conductor sets give identical results
 either way.
 
+## Tolerance input
+
+Manufacturing tolerances are engineering data, reviewed and versioned independently of any
+run, so they live in their own TOML file named by `tolerance_file` in `[ErrorFields]` (a path
+relative to the run directory). The run validates the file, echoes its text into
+`Input/RawInputs/ErrorFields/tolerance_toml_raw` for replay, and leaves the device numbers
+where they belong: outside the repository. The sampling and Monte Carlo stages that consume
+these tolerances follow in later releases; this release fixes the format.
+
+```toml
+# Fallbacks for keys a coil block leaves out (every key optional)
+[ErrorFields.defaults]
+shift_sigma_mm = 0.0             # Gaussian uncertainty added to the sampled shift [mm]
+tilt_sigma = 0.0                 # Gaussian uncertainty added to the sampled tilt, in tilt_units
+tilt_units = "deg"               # "deg", or "m" for a rim displacement converted through the nominal radius
+radial_shape = "hollow"          # Radial sampling density on the disk: flat, uniform_area, hollow, or ring
+tolerance_model = "additive"     # "additive" (independent shift and tilt) or "cylinder" (correlated axis line)
+cylinder_half_height_m = 0.0     # Cylinder half-height for the cylinder model [m]
+
+# One block per coil set that moves on its own
+[[ErrorFields.coil]]
+name = "PF1U"                    # Coil set name; must match a [[ForcingTerms.coil_set]] of the run
+shift_tol_mm = 0.5               # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.019                 # Tilt tolerance, in tilt_units
+tolerance_model = "cylinder"     # Axis line confined to a cylinder; shift and tilt drawn together
+cylinder_half_height_m = 1.5     # Cylinder half-height; sets the tilt reachable at the given radius [m]
+
+# Coil sets that move together: one shared draw per sample
+[[ErrorFields.coherent_group]]
+name = "upper_pf_brace"          # Label of the coherently moving group
+members = ["PF1U", "PF2U"]       # Coil sets sharing the draw
+shift_tol_mm = 2.0               # Coherent shift amplitude shared by the group [mm]
+tilt_tol = 0.0                   # Coherent tilt amplitude shared by the group, in tilt_units
+phase_group = "braces"           # Groups naming the same phase_group share the random direction
+rotation_center_z_m = 0.0        # Height of the pivot of the group's rigid rotation on the machine axis [m]
+
+[ErrorFields.correctability]
+uncorrectable_coils = ["EFCC_U"] # Coil sets the error-field correction cannot reduce
+efc_factor = 2.0                 # Divisor applied to correctable contributions under error-field correction
+
+[ErrorFields.other_field]
+magnitude = 8.2e-6               # Overlap budget of sources not attributed to any coil
+sigma = 0.0                      # Gaussian uncertainty on that budget
+radial_shape = "ring"            # Radial sampling density of the budget magnitude
+```
+
+The shift tolerance is one number, the radius of the disk the coil centre may sit in; the
+direction is sampled. A tilt may be given in degrees or, as legacy tolerance tables do, as a
+rim displacement in metres, which `tilt_tolerance_deg` converts through the coil set's
+arc-length-weighted major radius exactly as the coil loader's `tilt_in_meters` does. A coherent
+group's tilt is a rigid rotation of all its members about a pivot on the machine axis at
+`rotation_center_z_m`, so a member at height `z` also shifts laterally by `(z − z_pivot)·θ`.
+Groups sharing a `phase_group` label draw the same random direction with independent
+amplitudes. A group is correctable only if none of its members is listed as uncorrectable.
+Coil sets of the run without a tolerance block contribute their nominal overlap only.
+
+Every key is checked against the schema, so a misspelled key is an error rather than a silent
+default. `read_tolerance_toml` parses a file into a `ToleranceSet`, and `validate_tolerances`
+checks its names against a run's coil sets.
+
 ## Analysis after the run
 
 Window the coupling to any range of rational surfaces and project onto any singular mode

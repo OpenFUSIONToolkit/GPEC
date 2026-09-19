@@ -85,3 +85,30 @@ function CoilSensitivities(h5path::AbstractString)
         )
     end
 end
+
+const _TOLERANCE_SNAPSHOT = "Input/RawInputs/ErrorFields/tolerance_toml_raw"
+
+"""
+    write_tolerance_snapshot!(h5file, ts::ToleranceSet)
+
+Echo the tolerance file's text into `Input/RawInputs/ErrorFields/tolerance_toml_raw`, the raw
+input snapshot a replay reads back with [`read_tolerance_snapshot`](@ref). Replaces an existing echo.
+"""
+function write_tolerance_snapshot!(h5file::HDF5.File, ts::ToleranceSet)
+    haskey(h5file, _TOLERANCE_SNAPSHOT) && delete_object(h5file, _TOLERANCE_SNAPSHOT)
+    h5file[_TOLERANCE_SNAPSHOT] = ts.raw
+    return h5file
+end
+
+"""
+    read_tolerance_snapshot(h5path) -> ToleranceSet
+
+The tolerance set a run used, parsed from the raw echo in its `gpec.h5`; `nothing` when the run
+named no tolerance file.
+"""
+function read_tolerance_snapshot(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        haskey(f, _TOLERANCE_SNAPSHOT) || return nothing
+        return parse_tolerance_toml(read(f[_TOLERANCE_SNAPSHOT]))
+    end
+end

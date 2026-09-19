@@ -49,7 +49,8 @@ include("h5_metadata_check.jl")
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
                 "compute_response" => true, "compute_singular_coupling" => true,
                 "verbose" => false, "write_outputs_to_HDF5" => true)
-            inputs["ErrorFields"] = Dict{String,Any}("verbose" => false)
+            cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
+            inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml")
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -99,7 +100,13 @@ include("h5_metadata_check.jl")
             h5open(h5path, "r") do f
                 @test haskey(f, "ErrorFields/CoilSensitivities/DominantMode/delta_nominal")
                 @test isempty(_collect_metadata_violations(f))
+                @test haskey(f, "Input/RawInputs/ErrorFields/tolerance_toml_raw")
             end
+            # The tolerance file was validated against these coil sets and echoed verbatim.
+            snapshot = EF.read_tolerance_snapshot(h5path)
+            @test snapshot isa EF.ToleranceSet
+            @test snapshot.raw == read(joinpath(dir, "tolerances.toml"), String)
+            @test [c.name for c in snapshot.coils] == ["hoop_tilted", "hoop_axi"]
             from_file = EF.CoilSensitivities(h5path)
             @test from_file.coil_names == sens.coil_names
             @test from_file.m_modes == sens.m_modes && from_file.n_modes == sens.n_modes
