@@ -6,10 +6,12 @@ suitable for the perturbed equilibrium pipeline.
 
 ## Pipeline
 - `sample_boundary_grid` — evaluate (R, Z) and unit-norm metric on the plasma boundary
+- `CoilForcingGrid` — the boundary grid with its observation points laid out, shared by every coil evaluation
 - `compute_biot_savart_boundary!` (BiotSavart.jl) — compute B at all grid points
 - `project_normal_flux!` — compute flux Φ_x = 2π×R×(B_R ∂Z/∂θ − B_Z ∂R/∂θ)
 - `fourier_decompose_bn` — 2D Fourier decompose to get bmn amplitudes
-- `compute_coil_forcing_modes!` — top-level entry point combining all steps
+- `coil_forcing_modes` — Biot-Savart → projection → decomposition for any coil set(s) on a `CoilForcingGrid`
+- `compute_coil_forcing_modes!` — top-level entry point combining all steps for a whole assembly
 """
 
 using FastInterpolations: cubic_interp, PeriodicBC, DerivOp
@@ -107,7 +109,7 @@ For positive-helicity machines (Bt > 0, Ip > 0 → helicity = +1): phi decreases
 function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int, nzeta::Int;
     psi::Float64=equil.rzphi_xs[end])
     # Build uniform theta grid (same convention as equil.rzphi_ys, but potentially finer)
-    theta_grid = range(0; length=mtheta, step=1.0/mtheta)
+    theta_grid = range(0; length=mtheta, step=1.0 / mtheta)
 
     R_arr = zeros(mtheta)
     Z_arr = zeros(mtheta)
@@ -139,7 +141,7 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
     bt_sign = !isnothing(equil.params.bt_sign) ? equil.params.bt_sign : 1
     ip_sign = !isnothing(equil.params.crnt) ? Int(sign(equil.params.crnt)) : 1
     helicity = bt_sign * ip_sign
-    phi_grid = collect(range(0; length=nzeta, step=(-helicity * 2π/nzeta)))
+    phi_grid = collect(range(0; length=nzeta, step=(-helicity * 2π / nzeta)))
 
     # Toroidal angle offset ν(ψ, θ_SFL): in SFL coordinates the physical toroidal angle at
     # grid point (θ_SFL, ζ_SFL) is  φ_phys = -helicity*(2π*ζ_SFL + ν(ψ,θ_SFL)).
@@ -241,18 +243,95 @@ function fourier_decompose_bn(
 end
 
 """
-    compute_coil_forcing_modes!(forcing_modes, coil_sets, equil, cfg, n, m_low, m_high; verbose)
+    CoilForcingGrid
 
-Top-level entry point: compute Fourier mode amplitudes of the normal magnetic
-flux from all coil sets on the plasma boundary.
+The plasma-boundary sampling that every coil-field evaluation for one equilibrium and
+toroidal mode number shares: the `BoundaryGrid` at the control surface and its observation
+points laid out in cylindrical `(R, φ, Z)`. Build it once and evaluate any number of coil
+sets against it with [`coil_forcing_modes`](@ref).
 
-## Pipeline
+## Fields
 
-  - Build boundary grid at (mtheta × nzeta) resolution, with helicity from `equil.params`
-  - Lay out observation points in (R, φ, Z) for all (θ, ζ) combinations
-  - Run threaded Biot-Savart summation over all coil sets (matches Fortran `field_bs_psi`)
-  - Project B field onto plasma boundary normal flux (`project_normal_flux!`)
-  - 2D Fourier decompose to get bmn amplitudes for mode range
+  - `grid::BoundaryGrid` - boundary geometry and unit-norm metric
+  - `obs_R`, `obs_phi`, `obs_Z` - observation points `[mtheta × nzeta]`, θ-major, with the
+    SFL toroidal offset applied
+"""
+struct CoilForcingGrid
+    grid::BoundaryGrid
+    obs_R::Vector{Float64}
+    obs_phi::Vector{Float64}
+    obs_Z::Vector{Float64}
+end
+
+"""
+    CoilForcingGrid(equil, cfg, n; psi=equil.rzphi_xs[end])
+
+Sample the control surface `psi` at `cfg.mtheta_coil × nzeta` points, with `nzeta` taken
+from `cfg.nzeta_coil` or `NZETA_POINTS_PER_PERIOD` per toroidal period of `n`. Pass
+`psi = psilim` whenever a solve is at hand (see `sample_boundary_grid`).
+"""
+function CoilForcingGrid(equil::Equilibrium.PlasmaEquilibrium, cfg::CoilConfig, n::Int; psi::Float64=equil.rzphi_xs[end])
+    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * max(1, abs(n))
+    grid = sample_boundary_grid(equil, cfg.mtheta_coil, nzeta; psi)
+
+    # Lay out observation points: (theta_i, zeta_j) → cylindrical (R, phi, Z)
+    nobs = grid.mtheta * grid.nzeta
+    obs_R = zeros(nobs)
+    obs_phi = zeros(nobs)
+    obs_Z = zeros(nobs)
+    for j in 1:grid.nzeta
+        for i in 1:grid.mtheta
+            idx = i + (j - 1) * grid.mtheta
+            obs_R[idx] = grid.R[i]
+            obs_phi[idx] = grid.phi_grid[j] + grid.phi_offset[i]
+            obs_Z[idx] = grid.Z[i]
+        end
+    end
+    return CoilForcingGrid(grid, obs_R, obs_phi, obs_Z)
+end
+
+"""
+    coil_forcing_modes(coil_sets, forcing_grid::CoilForcingGrid, n, m_low, m_high; verbose=false) -> Vector{ForcingMode}
+
+Fourier mode amplitudes, in the unit-norm `Φ_x` convention, of the normal flux that
+`coil_sets` — a `Vector{CoilSet}` or a single `CoilSet` — drive on the boundary sampled by
+`forcing_grid`: threaded Biot-Savart at every observation point, projection onto the boundary
+normal, then the 2D decomposition for toroidal mode `n` and `m_low:m_high`. The field is
+linear in the coils, so evaluating sets one at a time on the same grid gives each set's own
+spectrum, and the sum of those is the spectrum of the assembly.
+"""
+function coil_forcing_modes(
+    coil_sets::Vector{CoilSet},
+    forcing_grid::CoilForcingGrid,
+    n::Int,
+    m_low::Int,
+    m_high::Int;
+    verbose::Bool=false
+)
+    nobs = length(forcing_grid.obs_R)
+    B_R = zeros(nobs)
+    B_phi = zeros(nobs)
+    B_Z = zeros(nobs)
+    compute_biot_savart_boundary!(B_R, B_phi, B_Z, forcing_grid.obs_R, forcing_grid.obs_phi, forcing_grid.obs_Z, coil_sets)
+
+    verbose && @info "  Max |B_R| = $(maximum(abs, B_R)) T, Max |B_Z| = $(maximum(abs, B_Z)) T"
+
+    bn = zeros(forcing_grid.grid.mtheta, forcing_grid.grid.nzeta)
+    project_normal_flux!(bn, B_R, B_Z, forcing_grid.grid)
+
+    verbose && @info "  Max |bn| = $(maximum(abs, bn)) T·m²"
+
+    return fourier_decompose_bn(bn, forcing_grid.grid, n, m_low, m_high)
+end
+
+coil_forcing_modes(coil_set::CoilSet, forcing_grid::CoilForcingGrid, args...; kwargs...) = coil_forcing_modes([coil_set], forcing_grid, args...; kwargs...)
+
+"""
+    compute_coil_forcing_modes!(forcing_modes, coil_sets, equil, cfg, n, m_low, m_high; psi, verbose)
+
+Top-level entry point: compute Fourier mode amplitudes of the normal magnetic flux from all
+coil sets on the plasma boundary — a [`CoilForcingGrid`](@ref) at `psi` followed by
+[`coil_forcing_modes`](@ref) over the whole assembly in one Biot-Savart pass.
 
 Output amplitudes are in unit-norm convention (= Fortran `Phi_x`).
 No normalization conversion is needed when using these modes with `compute_plasma_response!`.
@@ -270,41 +349,10 @@ function compute_coil_forcing_modes!(
     psi::Float64=equil.rzphi_xs[end],   # outermost computed surface (psihigh), not ψ_N=1 — see sample_boundary_grid
     verbose::Bool=false
 )
-    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * max(1, abs(n))
-    mtheta = cfg.mtheta_coil
+    forcing_grid = CoilForcingGrid(equil, cfg, n; psi)
+    verbose && @info "Computing coil forcing modes: mtheta=$(forcing_grid.grid.mtheta), nzeta=$(forcing_grid.grid.nzeta), n=$n, m=$m_low:$m_high, psi=$psi"
 
-    verbose && @info "Computing coil forcing modes: mtheta=$mtheta, nzeta=$nzeta, n=$n, m=$m_low:$m_high, psi=$psi"
-
-    grid = sample_boundary_grid(equil, mtheta, nzeta; psi)
-
-    # Lay out observation points: (theta_i, zeta_j) → cylindrical (R, phi, Z)
-    nobs = mtheta * nzeta
-    obs_R = zeros(nobs)
-    obs_phi = zeros(nobs)
-    obs_Z = zeros(nobs)
-
-    for j in 1:nzeta
-        for i in 1:mtheta
-            idx = i + (j - 1) * mtheta
-            obs_R[idx] = grid.R[i]
-            obs_phi[idx] = grid.phi_grid[j] + grid.phi_offset[i]
-            obs_Z[idx] = grid.Z[i]
-        end
-    end
-
-    B_R = zeros(nobs)
-    B_phi = zeros(nobs)
-    B_Z = zeros(nobs)
-    compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
-
-    verbose && @info "  Max |B_R| = $(maximum(abs, B_R)) T, Max |B_Z| = $(maximum(abs, B_Z)) T"
-
-    bn = zeros(mtheta, nzeta)
-    project_normal_flux!(bn, B_R, B_Z, grid)
-
-    verbose && @info "  Max |bn| = $(maximum(abs, bn)) T·m²"
-
-    modes = fourier_decompose_bn(bn, grid, n, m_low, m_high)
+    modes = coil_forcing_modes(coil_sets, forcing_grid, n, m_low, m_high; verbose)
 
     empty!(forcing_modes)
     append!(forcing_modes, modes)
@@ -407,5 +455,6 @@ end
 
 export BoundaryGrid, sample_boundary_grid
 export project_normal_flux!, fourier_decompose_bn
+export CoilForcingGrid, coil_forcing_modes
 export compute_coil_forcing_modes!
 export convert_forcing_normalization!

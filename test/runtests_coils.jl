@@ -299,6 +299,20 @@ end
     # Dominant mode should be in the resonant range for DIII-D geometry
     dominant_m = forcing_modes[argmax(amplitudes)].m
     @test m_low <= dominant_m <= m_high
+
+    # Per-set evaluation on one shared grid: the assembly through the shared path is the same
+    # numbers as the top-level entry point, and the field's linearity in the coils makes the
+    # per-set spectra sum to it.
+    forcing_grid = ForcingTerms.CoilForcingGrid(equil, cfg, n_test)
+    @test length(forcing_grid.obs_R) == cfg.mtheta_coil * cfg.nzeta_coil
+    both = ForcingTerms.coil_forcing_modes([il_set, iu_set], forcing_grid, n_test, m_low, m_high)
+    @test [m.amplitude for m in both] == [m.amplitude for m in forcing_modes]
+    il_modes = ForcingTerms.coil_forcing_modes(il_set, forcing_grid, n_test, m_low, m_high)
+    iu_modes = ForcingTerms.coil_forcing_modes(iu_set, forcing_grid, n_test, m_low, m_high)
+    @test [m.m for m in il_modes] == [m.m for m in forcing_modes]
+    summed = [a.amplitude + b.amplitude for (a, b) in zip(il_modes, iu_modes)]
+    @test summed ≈ [m.amplitude for m in forcing_modes] rtol = 1e-12
+    @test maximum(abs.(getfield.(il_modes, :amplitude))) > 1e-6
 end
 
 # ---------------------------------------------------------------------------
