@@ -112,3 +112,64 @@ function read_tolerance_snapshot(h5path::AbstractString)
         return parse_tolerance_toml(read(f[_TOLERANCE_SNAPSHOT]))
     end
 end
+
+const _MC_GROUP = "ErrorFields/MonteCarlo"
+
+# Metadata table for ErrorFields/MonteCarlo/ (paths relative to the group). bin_edges has one
+# more entry than the densities, so it is documented rather than attached as a dimension scale.
+const MC_H5_ANNOTATIONS = [
+    "bin_edges" => (; long_name="|δ| bin edges of the overlap histograms (nbins + 1); samples beyond the last edge are counted in the last bin"),
+    "pdf" => (; long_name="probability density of the intrinsic dominant-mode overlap |δ| over the sampled misalignments, batch average", dims=("delta_bin",)),
+    "pdf_efc" => (; long_name="probability density of the corrected overlap |δ| (correctable terms divided by efc_factor), batch average", dims=("delta_bin",)),
+    "pdf_batches" => (; long_name="probability density of the intrinsic overlap |δ| per batch", dims=("delta_bin", "batch")),
+    "pdf_efc_batches" => (; long_name="probability density of the corrected overlap |δ| per batch", dims=("delta_bin", "batch")),
+    "delta_nominal" => (; long_name="|Σ δ_nominal|, the as-designed overlap with every coil set at its nominal position"),
+    "delta_worst" => (; long_name="worst-case alignment bound Σ(|δ_nominal| + tolerance × |sensitivity|) used to size the histogram"),
+    "mean_abs_delta" => (; long_name="sample mean of the intrinsic overlap |δ|"),
+    "mean_abs_delta_efc" => (; long_name="sample mean of the corrected overlap |δ|"),
+    "clamped_fraction" => (; long_name="fraction of samples beyond the last bin edge")
+]
+
+"""
+    write_to_hdf5!(h5file::HDF5.File, mc::MonteCarloResult)
+
+Write the tolerance Monte Carlo histograms to `ErrorFields/MonteCarlo/`. The sampling settings
+(`nsample`, `nbatch`, `seed`) live in the run's `[ErrorFields.MonteCarlo]` table under
+`Input/gpec_toml_raw`; the tolerances in `Input/RawInputs/ErrorFields/tolerance_toml_raw`.
+An existing group is replaced.
+"""
+function write_to_hdf5!(h5file::HDF5.File, mc::MonteCarloResult)
+    haskey(h5file, _MC_GROUP) && delete_object(h5file, _MC_GROUP)
+    g = create_group(h5file, _MC_GROUP)
+    g["bin_edges"] = mc.bin_edges
+    g["pdf"] = mc.pdf
+    g["pdf_efc"] = mc.pdf_efc
+    g["pdf_batches"] = mc.pdf_batches
+    g["pdf_efc_batches"] = mc.pdf_efc_batches
+    g["delta_nominal"] = mc.delta_nominal
+    g["delta_worst"] = mc.delta_worst
+    g["mean_abs_delta"] = mc.mean_abs_delta
+    g["mean_abs_delta_efc"] = mc.mean_abs_delta_efc
+    g["clamped_fraction"] = mc.clamped_fraction
+    Utilities.HDF5Annotations.annotate!(g, MC_H5_ANNOTATIONS)
+    return g
+end
+
+"""
+    MonteCarloResult(h5path::AbstractString)
+
+Read the tolerance Monte Carlo of a run back from its `gpec.h5`, with the sampling settings
+from the `[ErrorFields.MonteCarlo]` table of the stored deck.
+"""
+function MonteCarloResult(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        haskey(f, _MC_GROUP) || throw(ArgumentError("$h5path has no $_MC_GROUP group (run with a tolerance_file)"))
+        g = f[_MC_GROUP]
+        inputs = TOML.parse(read(f["Input/gpec_toml_raw"]))
+        ctrl = MonteCarloControl(; (Symbol(k) => v for (k, v) in get(get(inputs, "ErrorFields", Dict{String,Any}()), "MonteCarlo", Dict{String,Any}()))...)
+        pdf_batches = read(g["pdf_batches"])
+        return MonteCarloResult(read(g["bin_edges"]), read(g["pdf"]), read(g["pdf_efc"]), pdf_batches, read(g["pdf_efc_batches"]),
+            read(g["delta_nominal"]), read(g["delta_worst"]), read(g["mean_abs_delta"]), read(g["mean_abs_delta_efc"]),
+            read(g["clamped_fraction"]), ctrl.nsample, size(pdf_batches, 2), ctrl.seed)
+    end
+end

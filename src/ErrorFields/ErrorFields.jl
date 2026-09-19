@@ -21,6 +21,8 @@ plasma solve or a new Biot-Savart integration.
   `validate_tolerances`, and the tilt unit conversion `tilt_tolerance_deg`
 - `Sampling.jl`: random misalignment draws within a tolerance — the `RadialDistribution`
   shapes, `sample_disk`, `sample_uncertainty`, and the additive and cylinder tolerance models
+- `MonteCarlo.jl`: `run_monte_carlo`, the batched, seeded recombination of a `SensitivityTable`
+  with a `ToleranceSet` into intrinsic and corrected `|δ|` histograms
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface
 spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
@@ -45,6 +47,7 @@ include("ErrorFieldsStructs.jl")
 include("Sensitivity.jl")
 include("ToleranceTOML.jl")
 include("Sampling.jl")
+include("MonteCarlo.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
@@ -53,5 +56,6 @@ export ToleranceSet, CoilTolerance, CoherentGroupTolerance, OtherFieldBudget
 export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tolerance_deg
 export RadialDistribution, Flat, UniformArea, Hollow, Ring, PowerLaw, randpow, radial_distribution
 export disk_radius, sample_disk, sample_uncertainty, sample_additive, sample_cylinder
+export MonteCarloControl, MonteCarloResult, run_monte_carlo
 
 end # module ErrorFields

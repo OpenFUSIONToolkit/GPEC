@@ -55,3 +55,22 @@ display(p_spec)
 spec_path = joinpath(@__DIR__, "fcoil_spectra.png")
 Plots.savefig(p_spec, spec_path)
 println("Saved: ", abspath(spec_path))
+
+# The tolerance Monte Carlo: the intrinsic and corrected |δ| distributions the run wrote (full
+# window, dominant mode), and a post-hoc re-run over the edge window with the same tolerances.
+mc = ErrorFields.MonteCarloResult(h5path)
+mc_edge = ErrorFields.run_monte_carlo(h5path; psi_low=0.7, nsample=200_000, nbatch=4, seed=1)
+centers(m) = (m.bin_edges[1:end-1] .+ m.bin_edges[2:end]) ./ 2
+p_pdf = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright,
+    title="Tolerance Monte Carlo: |δ| over sampled misalignments", left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
+plot!(p_pdf, centers(mc), mc.pdf; lw=2, label="intrinsic, all rational surfaces")
+plot!(p_pdf, centers(mc), mc.pdf_efc; lw=2, label="corrected (efc_factor = 2)")
+plot!(p_pdf, centers(mc_edge), mc_edge.pdf; lw=2, ls=:dash, label="intrinsic, ψ_N ≥ 0.7")
+vline!(p_pdf, [mc.delta_nominal]; ls=:dot, c=:black, label="as designed")
+display(p_pdf)
+pdf_path = joinpath(@__DIR__, "tolerance_pdf.png")
+Plots.savefig(p_pdf, pdf_path)
+println("Saved: ", abspath(pdf_path))
+@printf("⟨|δ|⟩ = %.3e intrinsic, %.3e corrected; as designed %.3e; batch spread of ⟨|δ|⟩ ≈ %.1e\n",
+    mc.mean_abs_delta, mc.mean_abs_delta_efc, mc.delta_nominal,
+    maximum(abs.(vec(sum(mc.pdf_batches .* centers(mc) .* diff(mc.bin_edges); dims=1)) .- mc.mean_abs_delta)))
