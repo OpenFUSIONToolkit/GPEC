@@ -77,10 +77,7 @@ function compute_coil_sensitivities(
             second_norm[axis, col] = norm(plus .+ minus .- 2 .* b0)
         end
 
-        # Curvature relative to the set's largest linear response: a tap whose first difference
-        # vanishes by symmetry (a vertical shift of an axisymmetric hoop, an in-plane shift of an
-        # n=1-phased array) still has a genuine second-order response, which only matters if it
-        # is comparable to the linear terms the tolerance model keeps.
+        # Curvature relative to the set's largest linear response, so a tap whose first difference vanishes by symmetry is judged against the terms the model keeps.
         scale = maximum(first_norm)
         resid = scale > 0 ? second_norm ./ scale : zeros(3, 2)
         shift_resid[:, j] = resid[:, 1]
@@ -90,7 +87,8 @@ function compute_coil_sensitivities(
         worst > 1e-2 &&
             @warn "Coil set \"$(cs.name)\": finite-difference curvature $(@sprintf("%.2e", worst)) of the first difference; reduce fd_step_shift_m / fd_step_tilt_deg"
         ctrl.verbose &&
-            @info "  $(cs.name): |b̃| = $(@sprintf("%.3e", norm(b0))) T, max |∂b̃/∂x| = $(@sprintf("%.3e", maximum(norm, eachslice(shift[:, :, j]; dims=2)))) T/m, " *
+            @info "  $(cs.name): |b̃| = $(@sprintf("%.3e", norm(b0))) T, " *
+                  "max |∂b̃/∂x| = $(@sprintf("%.3e", maximum(norm, eachslice(shift[:, :, j]; dims=2)))) T/m, " *
                   "max |∂b̃/∂θ| = $(@sprintf("%.3e", maximum(norm, eachslice(tilt[:, :, j]; dims=2)))) T/deg, curvature $(@sprintf("%.1e", worst)) ($(@sprintf("%.2f", time() - t_start)) s)"
     end
 

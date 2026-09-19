@@ -293,7 +293,7 @@ end
 
 """
     tolerance_scan(table, ts, coil_sets, mc_ctrl, sc, scen; scales, risk_ctrl=RiskControl()) -> ToleranceScan
-    tolerance_scan(h5path; scales, psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, n_e, kwargs...) -> ToleranceScan
+    tolerance_scan(h5path; scales, psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, n_e, risk_ctrl=RiskControl(), kwargs...) -> ToleranceScan
 
 Run the Monte Carlo once per tolerance multiplier in `scales` and evaluate the locking risk of
 each with one threshold sampling. The file form takes the run's tolerances, coil geometry and
