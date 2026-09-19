@@ -160,12 +160,16 @@ include("h5_metadata_check.jl")
             for (name, fn) in (("sens", AEF.plot_coil_sensitivities), ("pdf", AEF.plot_tolerance_pdf), ("risk", AEF.plot_locking_risk),
                 ("thr", AEF.plot_threshold_scaling), ("mode", AEF.plot_dominant_mode_spectrum))
                 png = joinpath(dir, "plot_$name.png")
-                @test fn(h5path; save_path=png) isa Plots.Plot
+                p = fn(h5path; save_path=png)
+                @test p isa Plots.Plot
                 @test isfile(png)
+                name == "mode" && @test all(ser -> ser[:seriestype] === :steppre, p.series_list)
             end
-            @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt) isa Plots.Plot
-            @test AEF.plot_locking_risk(h5path; target_percent=1.0) isa Plots.Plot
-            @test AEF.plot_error_field_summary(h5path; save_path=joinpath(dir, "summary.png")) isa Plots.Plot
+            @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt)[1][:yaxis][:guide] == "|∂δ/∂θ| per 0.1°"
+            @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; quantity=:bogus)
+            # The target risk adds its own line and the allowable-tolerance markers.
+            @test length(AEF.plot_locking_risk(h5path; target_percent=1.0).series_list) > length(AEF.plot_locking_risk(h5path).series_list)
+            @test length(AEF.plot_error_field_summary(h5path; save_path=joinpath(dir, "summary.png")).subplots) == 4
             pmap = EF.phasing_map(h5path, ["hoop_tilted", "hoop_axi"]; nphase=36)
             @test length(pmap.phase_deg) == 1 && size(pmap.delta_per_kat) == (36,)
             kat = sens.winding_multiplier .* sens.peak_current ./ 1e3
