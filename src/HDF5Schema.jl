@@ -44,6 +44,7 @@ const EQUIL_H5_NAMES = Dict(
     :li2 => "l_i_2",
     :li3 => "l_i_3",
     :bt_sign => "B_T_sign",
+    :ip_sign => "I_p_sign",
     :psio => "psi_total"
 )
 const EQUIL_H5_SKIP = Set([:psi0, :psi_axis, :psi_axis_norm, :zsep, :verbose, :diagnose_src, :diagnose_maxima])
@@ -98,6 +99,7 @@ const MAIN_H5_ANNOTATIONS = [
     "Equilibrium/l_i_3" => (; long_name="internal inductance (definition 3)"),
     "Equilibrium/volume" => (; long_name="plasma volume", units="m^3"),
     "Equilibrium/B_T_sign" => (; long_name="sign of the toroidal field"),
+    "Equilibrium/I_p_sign" => (; long_name="sign of the plasma current as stated by the equilibrium file"),
     "Equilibrium/psi_norm" => (; long_name="normalized poloidal flux at the magnetic axis (0 by definition of ψ_N)"),
     "Equilibrium/psi_boundary" => (; long_name="poloidal flux at the plasma boundary in the internal normalized convention (1 by construction, not a Wb/rad datum)"),
     "Equilibrium/psi_boundary_norm" => (; long_name="normalized poloidal flux at the plasma boundary (1 by definition of ψ_N)"),

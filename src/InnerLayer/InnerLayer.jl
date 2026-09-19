@@ -25,7 +25,7 @@ import .GGJ: delta_convergence, solution_profile, asymptotic_profile, q4_surface
 
 import .SLAYER: SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 import .SLAYER: riccati_del_s, slayer_layer_thickness, LayerWidths
-import .SLAYER: surface_minor_radius, surface_da_dpsi, build_slayer_inputs
+import .SLAYER: surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs
 
 export InnerLayerModel, InnerLayerParameters, InnerLayerResponse, solve_inner, solve_inner_profile
 export GGJ, GGJModel, GGJParameters
@@ -37,6 +37,6 @@ export delta_convergence, solution_profile, asymptotic_profile, q4_surface_bench
 
 export SLAYER, SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 export riccati_del_s, slayer_layer_thickness, LayerWidths
-export surface_minor_radius, surface_da_dpsi, build_slayer_inputs
+export surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs
 
 end # module InnerLayer
