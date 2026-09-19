@@ -146,6 +146,12 @@ include("h5_metadata_check.jl")
             again = EF.locking_risk(h5path; n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
                 risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
             @test again.plock == risk.plock
+            # The scan's own file entry point at unit scale is that same re-run.
+            rescan = EF.tolerance_scan(h5path; scales=[1.0], n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
+                risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
+            @test rescan.scale == [1.0]
+            @test rescan.plock[1] == again.plock
+            @test rescan.plock_efc[1] == again.plock_efc
             from_file = EF.CoilSensitivities(h5path)
             @test from_file.coil_names == sens.coil_names
             @test from_file.m_modes == sens.m_modes && from_file.n_modes == sens.n_modes
