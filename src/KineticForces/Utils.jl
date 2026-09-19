@@ -149,7 +149,7 @@ function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileS
         end
     end
     psi_outer > 0 && @warn "kinetic_axis_validity_psi: orbit widths also reach ⟨r⟩ out to ψ=$(round(psi_outer; sigdigits=3)), " *
-                           "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed"
+                           "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed" maxlog = 1
     return psi_c
 end
 
@@ -267,9 +267,11 @@ reaches ⟨r⟩ the resonance is not trustworthy anyway, so the boundary is push
 (suppressing it wholly) rather than cutting through it.
 
 The band widens as ψ_c moves, so clearing can cascade through a rational-dense core. The move is
-capped at `VALIDITY_CLEAR_MAX_FACTOR`× the orbit-width boundary; past that the uncleared boundary
-is kept with a warning, since suppressing a large fraction of the plasma is worse than a band that
-cuts a rational (which the band knots resolve).
+capped at `VALIDITY_CLEAR_MAX_FACTOR`× the orbit-width boundary; past that the uncleared boundary is
+kept with a warning. That reinstates the hazard this function exists to remove — the band knots
+alone did not prevent it — so the warning says so: suppressing a large fraction of the plasma is the
+worse failure, but the capped run needs `axis_validity_suppression = false` or a finer ψ grid if the
+solve then produces NaNs.
 """
 function clear_rational_windows(psi_c::Float64, rationals::Vector{Float64})::Float64
     psi_c <= 0 && return psi_c
@@ -281,7 +283,9 @@ function clear_rational_windows(psi_c::Float64, rationals::Vector{Float64})::Flo
         psi_c = maximum(inside) + Equilibrium.RATIONAL_RES_RADIUS
         if psi_c > limit
             @warn "clear_rational_windows: clearing the envelope band of rationals would push ψ_c from " *
-                  "$(round(psi_c0; sigdigits=3)) past $(round(limit; sigdigits=3)); keeping the orbit-width boundary"
+                  "$(round(psi_c0; sigdigits=3)) past $(round(limit; sigdigits=3)); keeping the orbit-width boundary. " *
+                  "A rational then sits in the transition band — if the stability solve produces NaNs, set " *
+                  "axis_validity_suppression = false or refine the ψ grid there."
             return psi_c0
         end
     end

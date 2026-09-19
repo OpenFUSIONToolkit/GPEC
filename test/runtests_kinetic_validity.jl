@@ -83,11 +83,10 @@
 
         # Same profile with a narrow q spike far from the axis. The spike re-triggers the criterion,
         # but the model has not lost validity there, so the boundary must not jump out to it.
+        # The accompanying @warn carries maxlog=1, so whether it fires here depends on what ran
+        # earlier in the suite; the boundary itself is the contract worth asserting.
         q_spiked(psi) = q_smooth(psi) + 400.0 * exp(-((psi - 0.9) / 0.01)^2)
-        local psi_c_spiked
-        @test_logs (:warn,) match_mode = :any begin
-            psi_c_spiked = KF.kinetic_axis_validity_psi(mock_profiles(xs, Ti), mock_equil(q_spiked, r_of, R_of))
-        end
+        psi_c_spiked = KF.kinetic_axis_validity_psi(mock_profiles(xs, Ti), mock_equil(q_spiked, r_of, R_of))
         @test psi_c_spiked ≈ psi_c
         @test psi_c_spiked < 0.5
     end

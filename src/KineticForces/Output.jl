@@ -224,5 +224,29 @@ function write_validity!(h5file::HDF5.File, kf_ctrl::KineticForcesControl, speci
     g["psi_c"] = psi_c
     g["envelope"] = psi_c > 0 ? kinetic_axis_validity_envelope.(vp.psi, psi_c) : ones(length(vp.psi))
     g["is_valid"] = Int8.(vp.is_valid)
+    Utilities.HDF5Annotations.annotate!(g, KF_VALIDITY_H5_ANNOTATIONS)
     return nothing
 end
+
+# Metadata table for KineticForces/Validity/ (paths relative to the group). It lives here, not in
+# HDF5Schema, because this group is written after the main writer's annotation pass has run.
+const KF_VALIDITY_H5_ANNOTATIONS = [
+    "psi" => (; long_name="normalized poloidal flux ψ_N of the kinetic validity profiles", scale="psi"),
+    "rho_i" => (; long_name="thermal ion gyroradius √(2mT)/(Z·e·B₀)", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "rho_banana" => (; long_name="thermal banana orbit width q·ρ_i/√ε", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "rho_theta" => (; long_name="thermal poloidal gyroradius q·ρ_i/ε", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "w_potato" => (; long_name="potato orbit width (q²ρ_i²R₀)^(1/3)", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "r_minor" => (; long_name="surface-average minor radius ⟨r⟩", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "L_p" => (; long_name="pressure gradient scale length |p|/|dp/dr|", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "L_q" => (; long_name="safety-factor gradient scale length |q|/|dq/dr|", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "d_separatrix" => (; long_name="distance to the separatrix ⟨r⟩(1) − ⟨r⟩(ψ)", units="m", dims=("psi",), attach=(1 => "psi",)),
+    "psi_c" => (; long_name="near-axis kinetic validity boundary: outermost ψ_N where a thermal orbit width reaches ⟨r⟩", units="1"),
+    "envelope" =>
+        (; long_name="near-axis suppression envelope applied to the calculated kinetic terms (1 = unsuppressed)", units="1", dims=("psi",), attach=(1 => "psi",)),
+    "is_valid" => (;
+        long_name="1 where every zero-orbit-width ordering holds: max orbit width < ⟨r⟩, ρ_banana < L_p and L_q, max orbit width < d_separatrix",
+        units="1",
+        dims=("psi",),
+        attach=(1 => "psi",)
+    )
+]

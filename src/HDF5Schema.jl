@@ -143,25 +143,6 @@ const MAIN_H5_ANNOTATIONS = [
     "LocalStability/alpha_critical" =>
         (; long_name="critical normalized pressure gradient α for first ballooning stability", dims=("psi_ballooning",),
             attach=(1 => "LocalStability/ballooning_psi",)),
-    # --- KineticForces/Validity/ ---
-    "KineticForces/Validity/psi" => (; long_name="normalized poloidal flux ψ_N of the kinetic validity profiles", scale="psi"),
-    "KineticForces/Validity/rho_i" => (; long_name="thermal ion gyroradius √(2mT)/(Z·e·B₀)", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/rho_banana" => (; long_name="thermal banana orbit width q·ρ_i/√ε", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/rho_theta" => (; long_name="thermal poloidal gyroradius q·ρ_i/ε", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/w_potato" => (; long_name="potato orbit width (q²ρ_i²R₀)^(1/3)", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/r_minor" => (; long_name="surface-average minor radius ⟨r⟩", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/L_p" => (; long_name="pressure gradient scale length |p|/|dp/dr|", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/L_q" => (; long_name="safety-factor gradient scale length |q|/|dq/dr|", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/d_separatrix" => (; long_name="distance to the separatrix ⟨r⟩(1) − ⟨r⟩(ψ)", units="m", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/psi_c" => (; long_name="near-axis kinetic validity boundary: outermost ψ_N where a thermal orbit width reaches ⟨r⟩", units="1"),
-    "KineticForces/Validity/envelope" =>
-        (; long_name="near-axis suppression envelope applied to the calculated kinetic terms (1 = unsuppressed)", units="1", attach=(1 => "KineticForces/Validity/psi",)),
-    "KineticForces/Validity/is_valid" => (;
-        long_name="1 where every zero-orbit-width ordering holds: max orbit width < ⟨r⟩, ρ_banana < L_p and L_q, max orbit width < d_separatrix",
-        units="1",
-        attach=(1 => "KineticForces/Validity/psi",)
-    ),
-
     # --- ForceFreeStates/Solutions/ForwardIntegration/ ---
     "ForceFreeStates/Solutions/ForwardIntegration/nstep" => (; long_name="number of saved solution snapshots"),
     "ForceFreeStates/Solutions/ForwardIntegration/nstep_total" => (; long_name="total ODE solver steps taken"),
