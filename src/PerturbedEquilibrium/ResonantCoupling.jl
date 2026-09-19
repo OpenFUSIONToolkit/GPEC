@@ -179,6 +179,7 @@ function compute_dominant_coupling!(state::PerturbedEquilibriumState, ctrl::Pert
     state.dominant_rational_index = dom.rational_index
     isempty(state.forcing_b_rootarea) || (state.dominant_forcing_overlap = coupling_overlap(dom, state.forcing_b_rootarea))
     ctrl.verbose &&
-        @info "Dominant resonant coupling: $(length(dom.singular_values)) modes over $(length(dom.rational_index)) rational surfaces, σ₁ = $(@sprintf("%.3e", dom.singular_values[1]))"
+        @info "Dominant resonant coupling: $(length(dom.singular_values)) modes over " *
+              "$(length(dom.rational_index)) rational surfaces, σ₁ = $(@sprintf("%.3e", dom.singular_values[1]))"
     return nothing
 end
