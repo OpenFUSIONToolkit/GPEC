@@ -182,5 +182,23 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         equil2 = GridRef.setup_equilibrium(eq_config, sol_config; override_psi_nodes=grid)
         @test equil2.profiles.xs == grid
         @test equil2.rzphi_xs == grid
+
+        # Solovev has finite edge q, so the auto grid must classify it as limited: no separatrix
+        # log law, on either pass, even with the absolute r² floor disabled (the relative
+        # log-vs-linear comparison is what rejects it).
+        @test GridRef.edge_q_law(equil1) === nothing
+        @test GridRef.edge_q_law(equil2) === nothing
+        @test GridRef.edge_q_law(equil1; min_r2=-Inf) === nothing
+    end
+
+    @testset "edge_q_law accepts a diverted edge" begin
+        using TOML
+        dir_path = joinpath(dirname(@__DIR__), "examples", "DIIID-like_ideal_example")
+        inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
+        equil = GridRef.setup_equilibrium(GridRef.EquilibriumConfig(inputs["Equilibrium"], dir_path), nothing)
+        fit = GridRef.edge_q_law(equil)
+        @test fit !== nothing
+        @test fit.A < 0
+        @test fit.r2_log > fit.r2_linear
     end
 end

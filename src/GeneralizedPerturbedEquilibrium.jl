@@ -241,7 +241,9 @@ function main_from_inputs(
     ffs_start = time()
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
-    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles; species=kf_species)
+    metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles;
+        species=kf_species,
+        overlap_profile_file=_overlap_profile_path(inputs, kf_ctrl, intr.dir_path))
     ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
@@ -251,7 +253,8 @@ function main_from_inputs(
             inputs=inputs,
             forcing_modes=forcing_modes_snapshot,
             locstab=locstab,
-            ballooning_boundary=ballooning_boundary
+            ballooning_boundary=ballooning_boundary,
+            layer_overlap=layer_overlap
         )
         @info "Results written to $(ctrl.HDF5_filename)"
     end
@@ -479,8 +482,68 @@ function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.Pl
     return locstab, ballooning_boundary
 end
 
+# Kinetic profiles for the overlap scan can come from either the NTV path
+# (`[KineticForces] kinetic_file`) or the tearing path (`[SLAYER] profile_file`); the shipped
+# DIII-D SLAYER deck carries only the latter. Prefer whichever exists on disk.
+function _overlap_profile_path(inputs, kf_ctrl::KineticForces.KineticForcesControl, dir_path::AbstractString)
+    _resolve(f) = isempty(f) ? nothing : (isabspath(f) ? String(f) : joinpath(dir_path, f))
+    for cand in (_resolve(kf_ctrl.kinetic_file),
+        (inputs isa AbstractDict && haskey(inputs, "SLAYER")) ?
+        _resolve(get(inputs["SLAYER"], "profile_file", "")) : nothing)
+        cand !== nothing && isfile(cand) && return cand
+    end
+    return nothing
+end
+
+# Read the kinetic profiles the layer builders take, or `nothing` with a warning when the file
+# cannot be read or lacks n_e/T_e/T_i. Reads the file directly rather than reusing
+# `kinetic_profiles`, a `KineticProfileSplines` built for the NTV path with a different field set.
+function _overlap_profiles(path::AbstractString)
+    # Guards only the file read: the scan is an optional diagnostic, so an unreadable input skips
+    # it rather than aborting the run. The scan call itself is not wrapped, so a code error surfaces.
+    data = try
+        Equilibrium.read_kinetic_file(path)
+    catch err
+        @warn "Layer-overlap scan skipped: could not read kinetic file $path." exception = err
+        return nothing
+    end
+    if data.n_e === nothing || data.T_e === nothing || data.T_i === nothing
+        @warn "Layer-overlap scan skipped: $path lacks n_e, T_e or T_i."
+        return nothing
+    end
+    npsi = length(data.psi)
+    omega = data.omega_E === nothing ? zeros(npsi) : collect(Float64, data.omega_E)
+    return Utilities.KineticProfiles(; psi=collect(Float64, data.psi),
+        n_e=collect(Float64, data.n_e), T_e=collect(Float64, data.T_e),
+        T_i=collect(Float64, data.T_i), omega=omega,
+        omega_e=zeros(npsi), omega_i=zeros(npsi))
+end
+
+# The binding scan across toroidal mode numbers: the one with the innermost overlap point, since
+# the domain must stop before the first overlap of any n. Scans that find no overlap do not bind;
+# when none overlap, the first scan is returned so its surfaces are still recorded.
+function _binding_overlap(scans)
+    overlapping = filter(sc -> sc.psihigh !== nothing, scans)
+    isempty(overlapping) && return first(scans)
+    return overlapping[argmin([sc.psihigh for sc in overlapping])]
+end
+
+# Run the resistive-layer overlap scan for each toroidal mode number of the run and return the
+# binding one, or `nothing` when there is no readable kinetic file. Physics refusals (a surface
+# that cannot be scored, a limited edge) are handled inside the scan and recorded in its `notes`.
+function _layer_overlap_scan(path::Union{Nothing,AbstractString},
+    intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    (path === nothing || !isfile(path)) && return nothing
+    profiles = _overlap_profiles(path)
+    profiles === nothing && return nothing
+    # Eq. (100) is not covariant -- it is anchored to the toroidal-flux label of the paper's
+    # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
+    scans = [Tearing.resistive_layer_overlap(equil, profiles; n_tor=n, rs_method=:flux) for n in intr.nlow:intr.nhigh]
+    return _binding_overlap(scans)
+end
+
 """
-    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, mats)
+    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, mats, overlap)
 
 Set up the force-free-states solve on `intr`: integration limits, the surviving singular
 surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
@@ -492,10 +555,31 @@ function prepare_force_free_states!(
     equil::Equilibrium.PlasmaEquilibrium,
     kf_ctrl::KineticForces.KineticForcesControl,
     kinetic_profiles;
-    species=nothing
+    species=nothing,
+    overlap_profile_file::Union{Nothing,AbstractString}=nothing
 )
+    # Resistive-layer overlap: locate where adjacent rational surfaces' layers run into each
+    # other, and use it as an upper bound on the integration domain. The scan runs whenever
+    # kinetic profiles are readable so `ForceFreeStates/LayerOverlap/` always records the point,
+    # but it only constrains the domain when the user opts in.
+    overlap = _layer_overlap_scan(overlap_profile_file, intr, equil)
+    psilim_cap = (ctrl.psilim_from_layer_overlap && overlap !== nothing) ? overlap.psihigh : nothing
+    if ctrl.psilim_from_layer_overlap && overlap === nothing
+        @warn "psilim_from_layer_overlap = true but no layer-overlap scan was available; the domain is untouched."
+    end
+
     # Determine psilim and qlim (where we will integrate to)
-    sing_lim!(intr, ctrl, equil)
+    sing_lim!(intr, ctrl, equil; psilim_cap=psilim_cap)
+
+    # Fires whether or not the cap was applied: past the overlap point no surface retains a
+    # well-separated inner region, so a domain reaching beyond it is worth flagging even when
+    # the user did not opt in to the cap.
+    if overlap !== nothing && overlap.psihigh !== nothing && intr.psilim > overlap.psihigh
+        @warn "Integration domain extends past the resistive-layer overlap point: psilim = " *
+              "$(@sprintf("%.6f", intr.psilim)) > $(@sprintf("%.6f", overlap.psihigh)). Adjacent resistive " *
+              "layers overlap there, so the matched-asymptotic treatment is not defined. " *
+              "Set psilim_from_layer_overlap = true to cap the domain at that point."
+    end
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
@@ -594,7 +678,7 @@ function prepare_force_free_states!(
         end
     end
 
-    return metric, mats
+    return metric, mats, overlap
 end
 
 """
@@ -776,7 +860,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     end
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
-    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
+    metric, mats, _ = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
     result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
@@ -1051,7 +1135,8 @@ function write_outputs_to_HDF5(
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
-    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
+    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[]),
+    layer_overlap=nothing
 )
 
     ctrl = result.control
@@ -1172,6 +1257,30 @@ function write_outputs_to_HDF5(
         out_h5["LocalStability/ballooning_psi"] = ballooning_boundary.psi
         out_h5["LocalStability/alpha"] = ballooning_boundary.alpha
         out_h5["LocalStability/alpha_critical"] = ballooning_boundary.alpha_critical
+
+        # Resistive-layer overlap scan. Written whenever the scan ran, whether or not it
+        # constrained the domain, so a run always shows where layer physics would have cut.
+        if layer_overlap !== nothing
+            lo = layer_overlap
+            out_h5["ForceFreeStates/LayerOverlap/m"] = lo.m
+            out_h5["ForceFreeStates/LayerOverlap/n"] = lo.n
+            out_h5["ForceFreeStates/LayerOverlap/psi"] = lo.psi
+            out_h5["ForceFreeStates/LayerOverlap/r_s"] = lo.rs
+            out_h5["ForceFreeStates/LayerOverlap/delta_s_abs"] = lo.delta_s_m
+            out_h5["ForceFreeStates/LayerOverlap/width_delta_s"] = lo.width_delta_s
+            out_h5["ForceFreeStates/LayerOverlap/width_visco"] = lo.width_visco
+            out_h5["ForceFreeStates/LayerOverlap/width_dr"] = lo.width_dr
+            out_h5["ForceFreeStates/LayerOverlap/extrapolated"] = Int.(lo.extrapolated)
+            out_h5["ForceFreeStates/LayerOverlap/psilim_overlap"] =
+                lo.psihigh === nothing ? NaN : lo.psihigh
+            out_h5["ForceFreeStates/LayerOverlap/first_overlap_index"] =
+                lo.first_overlap === nothing ? -1 : lo.first_overlap
+            # "applied" records that the bound was active going into sing_lim!, not that it set
+            # the final psilim -- dmlim/qhigh may truncate deeper inside it.
+            out_h5["ForceFreeStates/LayerOverlap/applied"] =
+                Int(ctrl.psilim_from_layer_overlap && lo.psihigh !== nothing &&
+                    lo.psihigh < equil.params.psihigh_resolved)
+        end
 
         # Write integration data: the ψ trace and integrator diagnostics from the raw ODE state,
         # the ξ profiles from the solution. Either may be absent (Galerkin has no ODE state;
