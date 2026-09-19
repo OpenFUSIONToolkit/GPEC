@@ -81,12 +81,8 @@ include("h5_metadata_check.jl")
             # These coils are the run's forcing: the nominal spectra sum to the run's own b̃.
             @test vec(sum(sens.nominal_field; dims=2)) ≈ pe.forcing_b_rootarea rtol = 1e-10
 
-            # Axisymmetric hoop at n = 1: no nominal drive; a vertical shift or a rotation about
-            # the machine axis changes nothing; a shift along y is the x shift rotated a quarter
-            # turn toroidally, which multiplies the n = 1 mode by −i under the SFL toroidal angle
-            # φ = −helicity·(2πζ + ν) (this fixture has helicity +1). The y tilt of
-            # `apply_transforms` rotates x toward z, the left-handed sense about +y, so the tilt
-            # pair carries the opposite sign.
+            # Axisymmetric hoop at n = 1: no nominal drive, nothing from a vertical shift or a rotation
+            # about the machine axis, and S_y = −i·S_x, with the tilt pair in the opposite sense.
             Sx, Sy, Sz = (sens.shift_sensitivity[:, a, 2] for a in 1:3)
             Tx, Ty, Tz = (sens.tilt_sensitivity[:, a, 2] for a in 1:3)
             @test norm(sens.nominal_field[:, 2]) < 1e-10 * norm(Sx)
@@ -106,6 +102,7 @@ include("h5_metadata_check.jl")
                 @test abs(table.delta_nominal[j] + table.shift[1, j] * table.cancelling_shift[1, j] + table.shift[2, j] * table.cancelling_shift[2, j]) < 1e-12
             end
             @test_throws ArgumentError EF.sensitivity_table(sens, dom; mode=length(dom.singular_values) + 1)
+            @test_throws DimensionMismatch EF.sensitivity_table(sens, PE.dominant_coupling(rc.C[:, 1:(end-1)], rc.rational_psi))
             windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[end]))
             @test length(windowed.delta_nominal) == 2
 
@@ -155,6 +152,12 @@ include("h5_metadata_check.jl")
             again = EF.locking_risk(h5path; n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
                 risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
             @test again.plock == risk.plock
+            # The scan's own file entry point at unit scale is that same re-run.
+            rescan = EF.tolerance_scan(h5path; scales=[1.0], n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
+                risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
+            @test rescan.scale == [1.0]
+            @test rescan.plock[1] == again.plock
+            @test rescan.plock_efc[1] == again.plock_efc
 
             # Analysis plots: every ErrorFields plot renders from the file and saves; the phasing map
             # of the two hoops is the closed form on their stored spectra.
@@ -162,12 +165,16 @@ include("h5_metadata_check.jl")
             for (name, fn) in (("sens", AEF.plot_coil_sensitivities), ("pdf", AEF.plot_tolerance_pdf), ("risk", AEF.plot_locking_risk),
                 ("thr", AEF.plot_threshold_scaling), ("mode", AEF.plot_dominant_mode_spectrum))
                 png = joinpath(dir, "plot_$name.png")
-                @test fn(h5path; save_path=png) isa Plots.Plot
+                p = fn(h5path; save_path=png)
+                @test p isa Plots.Plot
                 @test isfile(png)
+                name == "mode" && @test all(ser -> ser[:seriestype] === :steppre, p.series_list)
             end
-            @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt) isa Plots.Plot
-            @test AEF.plot_locking_risk(h5path; target_percent=1.0) isa Plots.Plot
-            @test AEF.plot_error_field_summary(h5path; save_path=joinpath(dir, "summary.png")) isa Plots.Plot
+            @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt)[1][:yaxis][:guide] == "|∂δ/∂θ| per 0.1°"
+            @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; quantity=:bogus)
+            # The target risk adds its own line and the allowable-tolerance markers.
+            @test length(AEF.plot_locking_risk(h5path; target_percent=1.0).series_list) > length(AEF.plot_locking_risk(h5path).series_list)
+            @test length(AEF.plot_error_field_summary(h5path; save_path=joinpath(dir, "summary.png")).subplots) == 4
             pmap = EF.phasing_map(h5path, ["hoop_tilted", "hoop_axi"]; nphase=36)
             @test length(pmap.phase_deg) == 1 && size(pmap.delta_per_kat) == (36,)
             kat = sens.winding_multiplier .* sens.peak_current ./ 1e3
@@ -216,7 +223,8 @@ include("h5_metadata_check.jl")
             end
             curve = EF.efc_current_curve(c; delta_threshold=risk.threshold_nominal, torque_budget=1.0)
             @test length(curve.delta_ef) == 500 && all(curve.current_linear .>= 0)
-            @test GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png")) isa Plots.Plot
+            ntv_plot = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png"))
+            @test length(ntv_plot.series_list) >= 2                        # the single-mode and NTV-limited currents
             @test_throws ErrorException GPEC.efc_couplings(ffs, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl(), nothing)
 
             # Central differences: doubling the step moves the derivatives at O(h²).
@@ -233,6 +241,7 @@ include("h5_metadata_check.jl")
             # Guards: a current-free set, a bad pivot name, a non-positive step.
             dead = FT.CoilSet(sets[1].name, sets[1].ncoil, sets[1].s, sets[1].nw, sets[1].nsec, sets[1].x, sets[1].y, sets[1].z, zeros(sets[1].ncoil))
             @test_throws ArgumentError EF.compute_coil_sensitivities([dead], rc, ffs.equil, cfg; psi=ffs.psilim, b_t0=sens.b_t0)
+            @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg; psi=ffs.psilim, b_t0=0.0)
             @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; rotation_center="pack"); psi=ffs.psilim, b_t0=sens.b_t0)
             @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
