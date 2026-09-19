@@ -44,6 +44,22 @@ include("h5_metadata_check.jl")
         @test_throws DimensionMismatch PE.dominant_coupling(C, rational_psi[1:2])
     end
 
+    @testset "the file entry point's guards fire in order" begin
+        tmp = tempname() * ".h5"
+        h5open(tmp, "w") do f
+        end
+        @test_throws ArgumentError PE.ResonantCoupling(tmp)                       # no coupling matrix
+        h5open(tmp, "cw") do f
+            f["PerturbedEquilibrium/SingularCoupling/C_resonant_area_weighted_field"] = zeros(ComplexF64, 2, 3)
+        end
+        @test_throws ArgumentError PE.ResonantCoupling(tmp)                       # no conform operator
+        h5open(tmp, "cw") do f
+            f["PerturbedEquilibrium/ResponseMatrices/rootarea_to_area_weight_operator"] = zeros(ComplexF64, 3, 3)
+        end
+        @test_throws ArgumentError PE.ResonantCoupling(tmp)                       # no mode labels
+        rm(tmp)
+    end
+
     @testset "perturbed-equilibrium run: summary, ResonantCoupling, and normalization" begin
         template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
@@ -64,6 +80,8 @@ include("h5_metadata_check.jl")
 
             run = GPEC.main([dir])
             pe, ffs = run.pe, run.ffs
+            # The in-memory entry point needs a coupling matrix on the state.
+            @test_throws ArgumentError PE.ResonantCoupling(PE.PerturbedEquilibriumState(), ffs)
             h5path = joinpath(dir, "gpec.h5")
 
             # Run summary: the core-window decomposition, rebuilt into the stored applied resonant
