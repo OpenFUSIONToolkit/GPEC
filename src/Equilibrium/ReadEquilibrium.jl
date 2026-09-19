@@ -441,6 +441,7 @@ internal COCOS 2 convention:
 ## Arguments
 
   - `config`: `EquilibriumConfig` with `eq_type = "imas"` and `imas_cocos` set.
+
   - `dd`: populated `IMASdd.dd` with `dd.equilibrium.time_slice[]` containing:
 
       + `global_quantities.psi_axis`, `global_quantities.psi_boundary`
@@ -486,8 +487,9 @@ function read_imas(config::EquilibriumConfig, dd)
     bt_sign = isempty(f_1d) ? 1 : Int(sign(f_1d[end]))
     bt_sign == 0 && (bt_sign = 1)
     # Plasma-current sign from the IMAS global quantity (missing or zero → +1).
-    ip_imas = hasproperty(eqt.global_quantities, :ip) ? eqt.global_quantities.ip : 0.0
-    ip_sign = ismissing(ip_imas) || ip_imas == 0 ? 1 : Int(sign(ip_imas))
+    # The current is optional in IMAS, and reading an absent one throws rather than returning missing.
+    ip_imas = getproperty(eqt.global_quantities, :ip, 0.0)
+    ip_sign = ip_imas == 0 ? 1 : Int(sign(ip_imas))
 
     nw = length(psi_1d)
     psi_norm_grid = range(0.0, 1.0; length=nw)
