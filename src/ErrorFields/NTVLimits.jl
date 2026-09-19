@@ -83,7 +83,7 @@ The couplings of one correction coil array, per kilo-ampere-turn of its current 
   - `psi`: kinetic ψ_N grid of the torque profiles (empty without a scan)
   - `torque_full_profile`, `torque_residual_profile`: cumulative torque `T(ψ)` at each shift, `length(psi) × length(rotation_shift)`, N·m per kAt²
 
-The five-argument constructor builds a coupling with no scan, the nominal torques only.
+The constructor that omits the rotation-scan fields builds a coupling with no scan, the nominal torques only.
 """
 struct EFCCoupling
     coil_name::String
@@ -145,23 +145,13 @@ _scan_values(c::EFCCoupling, field::Symbol) =
     field === :full ? c.torque_full_scan :
     throw(ArgumentError("field must be :residual or :full, got $field"))
 
-# Bisection of a continuous g on [a, b] with g(a)·g(b) ≤ 0, to relative width `rtol`.
-function _bisect(g, a::Float64, b::Float64; rtol::Float64=1e-10, maxiter::Int=200)
+# Zero of a continuous g inside [a, b]; NaN when the interval does not bracket one.
+function _bracketed_zero(g, a::Float64, b::Float64)
     ga, gb = g(a), g(b)
     ga == 0 && return a
     gb == 0 && return b
     ga * gb < 0 || return NaN
-    for _ in 1:maxiter
-        m = 0.5 * (a + b)
-        gm = g(m)
-        (gm == 0 || abs(b - a) <= rtol * max(abs(a), abs(b), 1e-300)) && return m
-        if ga * gm < 0
-            b, gb = m, gm
-        else
-            a, ga = m, gm
-        end
-    end
-    return 0.5 * (a + b)
+    return find_zero(g, (a, b), Brent())
 end
 
 # Cubic spline of a tabulated torque against the rotation shift (the code base's interpolant).
@@ -196,14 +186,13 @@ function torque_zero_crossings(c::EFCCoupling; field::Symbol=:residual)
     out = Float64[]
     for i in 1:(length(x)-1)
         if T[i] * T[i+1] < 0
-            push!(out, _bisect(s, x[i], x[i+1]))
+            push!(out, _bracketed_zero(s, x[i], x[i+1]))
         elseif T[i] == 0 && (i == 1 || T[i-1] != 0)
             push!(out, x[i])
         end
     end
     return out
 end
-
 
 """
     rotation_shift(c::EFCCoupling, current; torque_budget, omega_reference=c.omega_reference, field=:residual) -> Float64
@@ -233,12 +222,11 @@ function rotation_shift(c::EFCCoupling, current::Real; torque_budget::Real, omeg
     while 1 <= i + step <= length(x)
         a, b = x[i], x[i+step]
         if g(a) * g(b) <= 0
-            root = _bisect(g, min(a, b), max(a, b))
+            root = _bracketed_zero(g, min(a, b), max(a, b))
             # A restoring balance needs the torque falling through the crossing in the sense of the shift.
             slope = deriv1(_scan_spline(c, field))(root)
             TORQUE_ROTATION_SIGN * slope * sign(omega_reference) > 0 &&
-                @warn "rotation_shift: the torque of $(c.coil_name) grows with the rotation at the balance point Δω = $(root) rad/s; check TORQUE_ROTATION_SIGN against the kernel's convention" maxlog =
-                    1
+                @warn "rotation_shift: $(c.coil_name)'s torque grows with the rotation at the balance point; check TORQUE_ROTATION_SIGN" maxlog = 1
             return root
         end
         i += step
@@ -305,14 +293,14 @@ function correction_current(δ_ef::Real, c::EFCCoupling; delta_threshold::Real, 
     I_lin = excess / c.delta_per_kat
     h_lin = h(I_lin)
     isnan(h_lin) && return NaN                      # the linear current alone already collapses the rotation
-    h_lin <= 0 && return _bisect(h, 0.0, I_lin)     # an accelerating torque: less current than the linear one
+    h_lin <= 0 && return _bracketed_zero(h, 0.0, I_lin)     # an accelerating torque: less current than the linear one
     # A braking torque: the root lies above the linear current, before the balance fails. Find the minimum of h
     # there (the root is a tangency at the correctable limit) and bisect down to the smaller root.
     I_hi = _largest_finite(I -> threshold_factor(c, I; torque_budget, rotation_exponent, omega_reference, model), I_lin, 1e3 * I_lin)
     isinf(I_hi) && (I_hi = 1e3 * I_lin)
     I_star = _argmin_unimodal(h, I_lin, I_hi)
     h(I_star) > 0 && return NaN
-    return _bisect(h, I_lin, I_star)
+    return _bracketed_zero(h, I_lin, I_star)
 end
 
 # Golden-section minimum of a unimodal g on [a, b]; NaN values count as +Inf.
