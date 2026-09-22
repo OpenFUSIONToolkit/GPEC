@@ -85,8 +85,8 @@ using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-                              "gal_flag")
+    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
+    "gal_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -177,9 +177,11 @@ is enabled) so it still ends up in `Input/RawInputs/ForcingTerms/`.
 against the current equilibrium) without the original `.dat`/`.h5` files. The coil
 geometry actually used by the run is always written back into `Input/RawInputs/Coils/`.
 
-Returns `(; ffs, pe, slayer)`: the `ForceFreeStates.ForceFreeStatesResult`, the
-`PerturbedEquilibriumState` (`nothing` when that stage did not run) and the SLAYER result
-(`nothing` when that stage did not run or failed). An equilibrium-only run
+Returns `(; ffs, pe, slayer, energy)`: the `ForceFreeStates.ForceFreeStatesResult`, the
+`PerturbedEquilibriumState` (`nothing` when that stage did not run), the SLAYER result
+(`nothing` when that stage did not run or failed) and the `EnergyDecompositionResult`
+(`nothing` without an `[EnergyDecomposition]` section or when the solve cannot supply its
+inputs). An equilibrium-only run
 (`force_termination` in `[Equilibrium]`) returns `nothing` — it never reaches the solve.
 """
 function main_from_inputs(
@@ -258,11 +260,13 @@ function main_from_inputs(
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
+    energy_result = run_energy_decomposition(ffs_result, inputs)
+
     # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result)
+        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, energy=energy_result)
     end
 
     pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
@@ -286,7 +290,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result)
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, energy=energy_result)
 
 end
 
@@ -740,10 +744,10 @@ runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]
 and errors here.
 
 ```julia
-eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+eq = PlasmaEquilibrium(\"input.geqdsk\"; jac_type=\"hamada\")
 prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
-ffs  = solve(prob, Riccati())
-ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+ffs = solve(prob, Riccati())
+ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
 function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
@@ -846,6 +850,50 @@ function run_perturbed_equilibrium(
 end
 
 """
+    run_energy_decomposition(result, inputs) -> EnergyDecompositionResult or nothing
+
+Decompose the plasma energy of the free-boundary eigenmodes named in the `[EnergyDecomposition]`
+section against a published force-free-states `result` and write the group into the run's
+`gpec.h5`. Returns `nothing` when the deck has no such section, or when the solve carries no
+dense ξ solution or no free-boundary eigenmodes (warned and skipped, like every optional stage).
+"""
+function run_energy_decomposition(result::ForceFreeStatesResult, inputs::Dict{String,Any})
+    "EnergyDecomposition" in keys(inputs) || return nothing
+    @info "\n  Energy Decomposition\n$_SECTION"
+    ed_start = time()
+    ed_ctrl = PerturbedEquilibrium.EnergyDecompositionControl(; (Symbol(k) => v for (k, v) in inputs["EnergyDecomposition"])...)
+    ForceFreeStates.require_solution(result, "energy decomposition") || return nothing
+    ForceFreeStates.require(result, :free_boundary, "energy decomposition") || return nothing
+    energy = energy_decomposition(result; eigenmodes=ed_ctrl.eigenmodes, effective_field_form=ed_ctrl.effective_field_form,
+        standard_form=ed_ctrl.standard_form, write_densities=ed_ctrl.write_densities)
+    @info "Energy Decomposition completed in $(@sprintf("%.3f", time() - ed_start)) s"
+    return energy
+end
+
+"""
+    energy_decomposition(ffs; kwargs...) -> EnergyDecompositionResult
+
+Decompose the plasma energy of free-boundary eigenmodes of a forward solve `ffs` and write the
+result to the run's `gpec.h5` when the solve wrote its outputs. Keyword arguments are the
+`PerturbedEquilibrium.EnergyDecompositionControl` fields plus `verbose`.
+
+```julia
+energy = energy_decomposition(ffs; eigenmodes=[1, 2])
+```
+"""
+function energy_decomposition(ffs::ForceFreeStatesResult; kwargs...)
+    ctrl = ffs.control
+    energy = PerturbedEquilibrium.decompose_energy(ffs; kwargs...)
+    if ctrl.write_outputs_to_HDF5
+        h5open(joinpath(ffs.dir_path, ctrl.HDF5_filename), "cw") do h5
+            PerturbedEquilibrium.write_energy_decomposition!(h5, energy)
+        end
+        @info "Energy decomposition written to $(ctrl.HDF5_filename)"
+    end
+    return energy
+end
+
+"""
     perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, kwargs...) -> PerturbedEquilibriumState
 
 Compute the plasma response to the external field `rmp` on top of a force-free-states solve
@@ -860,7 +908,7 @@ flows through.
 already-built coil geometry, both bypassing the corresponding read.
 
 ```julia
-pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
+pe = perturbed_equilibrium(ffs, RMPField(\"forcing.dat\"))
 ```
 """
 function perturbed_equilibrium(
