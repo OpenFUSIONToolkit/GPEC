@@ -243,7 +243,7 @@ function main_from_inputs(
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles;
         species=kf_species,
-        overlap_profile_file=_overlap_profile_path(inputs, kf_ctrl, intr.dir_path))
+        overlap_inputs=_overlap_slayer_inputs(inputs, intr.dir_path))
     ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
@@ -482,41 +482,24 @@ function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.Pl
     return locstab, ballooning_boundary
 end
 
-# Kinetic profiles for the overlap scan can come from either the NTV path
-# (`[KineticForces] kinetic_file`) or the tearing path (`[SLAYER] profile_file`); the shipped
-# DIII-D SLAYER deck carries only the latter. Prefer whichever exists on disk.
-function _overlap_profile_path(inputs, kf_ctrl::KineticForces.KineticForcesControl, dir_path::AbstractString)
-    _resolve(f) = isempty(f) ? nothing : (isabspath(f) ? String(f) : joinpath(dir_path, f))
-    for cand in (_resolve(kf_ctrl.kinetic_file),
-        (inputs isa AbstractDict && haskey(inputs, "SLAYER")) ?
-        _resolve(get(inputs["SLAYER"], "profile_file", "")) : nothing)
-        cand !== nothing && isfile(cand) && return cand
-    end
-    return nothing
-end
-
-# Read the kinetic profiles the layer builders take, or `nothing` with a warning when the file
-# cannot be read or lacks n_e/T_e/T_i. Reads the file directly rather than reusing
-# `kinetic_profiles`, a `KineticProfileSplines` built for the NTV path with a different field set.
-function _overlap_profiles(path::AbstractString)
-    # Guards only the file read: the scan is an optional diagnostic, so an unreadable input skips
-    # it rather than aborting the run. The scan call itself is not wrapped, so a code error surfaces.
-    data = try
-        Equilibrium.read_kinetic_file(path)
+# Kinetic profiles for the overlap scan come from the [SLAYER] section, through the same control
+# and loader the SLAYER analysis itself uses, so the scan sees the same profiles, the same HDF5
+# group and the same chi(psi). Returns `nothing` when there is no usable [SLAYER] profile_file.
+function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
+    (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
+    ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+    isempty(ctrl.profile_file) && return nothing
+    loaded = try
+        Runner._load_profiles(ctrl, dir_path)
     catch err
-        @warn "Layer-overlap scan skipped: could not read kinetic file $path." exception = err
+        @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
         return nothing
     end
-    if data.n_e === nothing || data.T_e === nothing || data.T_i === nothing
-        @warn "Layer-overlap scan skipped: $path lacks n_e, T_e or T_i."
-        return nothing
-    end
-    npsi = length(data.psi)
-    omega = data.omega_E === nothing ? zeros(npsi) : collect(Float64, data.omega_E)
-    return Utilities.KineticProfiles(; psi=collect(Float64, data.psi),
-        n_e=collect(Float64, data.n_e), T_e=collect(Float64, data.T_e),
-        T_i=collect(Float64, data.T_i), omega=omega,
-        omega_e=zeros(npsi), omega_i=zeros(npsi))
+    # chi(psi) from the file where it carries one, else the control's scalar fallback -- the same
+    # precedence run_slayer uses.
+    return (; profiles=loaded.profiles,
+        chi_perp=loaded.chi_perp === nothing ? ctrl.chi_perp : loaded.chi_perp,
+        chi_tor=loaded.chi_tor === nothing ? ctrl.chi_tor : loaded.chi_tor)
 end
 
 # The binding scan across toroidal mode numbers: the one with the innermost overlap point, since
@@ -530,21 +513,22 @@ function _binding_overlap(scans)
 end
 
 # Run the resistive-layer overlap scan for each toroidal mode number of the run and return the
-# binding one, or `nothing` when there is no readable kinetic file. Physics refusals (a surface
-# that cannot be scored, a limited edge) are handled inside the scan and recorded in its `notes`.
-function _layer_overlap_scan(path::Union{Nothing,AbstractString},
-    intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
-    (path === nothing || !isfile(path)) && return nothing
-    profiles = _overlap_profiles(path)
-    profiles === nothing && return nothing
+# binding one, or `nothing` when there are no [SLAYER] profiles. Physics refusals (a surface that
+# cannot be scored, a limited edge) are handled inside the scan and recorded in its `notes`.
+function _layer_overlap_scan(overlap_inputs, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    overlap_inputs === nothing && return nothing
     # Eq. (100) is not covariant -- it is anchored to the toroidal-flux label of the paper's
     # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
-    scans = [Tearing.resistive_layer_overlap(equil, profiles; n_tor=n, rs_method=:flux) for n in intr.nlow:intr.nhigh]
+    scans = [
+        Tearing.resistive_layer_overlap(equil, overlap_inputs.profiles; n_tor=n, rs_method=:flux,
+            chi_perp=overlap_inputs.chi_perp, chi_tor=overlap_inputs.chi_tor)
+        for n in intr.nlow:intr.nhigh
+    ]
     return _binding_overlap(scans)
 end
 
 """
-    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, mats, overlap)
+    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles; overlap_inputs=nothing) -> (metric, mats, overlap)
 
 Set up the force-free-states solve on `intr`: integration limits, the surviving singular
 surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
@@ -557,13 +541,13 @@ function prepare_force_free_states!(
     kf_ctrl::KineticForces.KineticForcesControl,
     kinetic_profiles;
     species=nothing,
-    overlap_profile_file::Union{Nothing,AbstractString}=nothing
+    overlap_inputs=nothing
 )
     # Resistive-layer overlap: locate where adjacent rational surfaces' layers run into each
     # other, and use it as an upper bound on the integration domain. The scan runs whenever
     # kinetic profiles are readable so `ForceFreeStates/LayerOverlap/` always records the point,
     # but it only constrains the domain when the user opts in.
-    overlap = _layer_overlap_scan(overlap_profile_file, intr, equil)
+    overlap = _layer_overlap_scan(overlap_inputs, intr, equil)
     psilim_cap = (ctrl.psilim_from_layer_overlap && overlap !== nothing) ? overlap.psihigh : nothing
     if ctrl.psilim_from_layer_overlap && overlap === nothing
         @warn "psilim_from_layer_overlap = true but no layer-overlap scan was available; the domain is untouched."
