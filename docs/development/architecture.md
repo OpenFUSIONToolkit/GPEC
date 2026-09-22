@@ -98,6 +98,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
        - Island half-widths and Chirikov parameters
        - Green's functions at interior flux surfaces
        - Surface inductance for singular surfaces
+     - `EnergyDecomposition.jl` - δW_p of free-boundary eigenmodes on the (ψ,θ) grid in the effective-field and standard forms, run as its own `[EnergyDecomposition]` stage
      - `Utils.jl` - Helper functions
    - Status: Core plasma response and singular coupling calculations implemented; active area of development
 
