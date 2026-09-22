@@ -43,7 +43,9 @@ function read_equilibrium_ingest(in_h5)
         error("Unknown equilibrium ingest_kind in gpec.h5: $kind (expected \"direct\" or \"inverse\")")
     # Positional reconstruction: relies on the default constructor, so `fieldnames(T)` order
     # must match the struct definition and the field-by-field write in write_outputs_to_HDF5.
-    return T((read(group, String(f)) for f in fieldnames(T))...)
+    # Files written before the plasma-current sign was stored carry no ip_sign; they were all
+    # positive-current runs in effect, so that field defaults to +1.
+    return T((haskey(group, String(f)) ? read(group, String(f)) : (f == :ip_sign ? 1 : error("missing equilibrium ingest field $f in gpec.h5")) for f in fieldnames(T))...)
 end
 
 """
