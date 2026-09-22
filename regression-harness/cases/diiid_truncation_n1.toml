@@ -1,8 +1,7 @@
 # Regression case: DIII-D-like n=1 truncation-only run with the resistive-layer overlap cap enabled.
-# psihigh = 0.9999 puts the overlap point (psi ~ 0.99976) inside the domain, so the cap binds: qlim
-# is pulled from 8.35 to 8.0 and dmlim then steps back to 7.2, excluding the q=8 surface. This is the
-# only case where psilim_from_layer_overlap changes the domain; every shipped deck leaves it off or
-# inert. Ideal free-boundary stability only (no local stability, forcing or PE). Tracks the domain
+# psihigh = 0.9999 puts the overlap point (psi ~ 0.99851) inside the domain, so the cap binds: qlim
+# is pulled from 8.35 to 7.0 and dmlim then steps back to 6.2, excluding the q=7 and q=8 surfaces. This is the
+# only case where psilim_from_layer_overlap changes the domain; every shipped deck leaves it off. Ideal free-boundary stability only (no local stability, forcing or PE). Tracks the domain
 # selection, the scan's layer widths, and the energies on the capped domain, so a change in what the
 # truncation does to the physics cannot pass unnoticed.
 [case]

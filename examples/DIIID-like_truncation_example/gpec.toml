@@ -1,8 +1,8 @@
 # DIII-D-like H-mode equilibrium — n=1 truncation-only case for the resistive-layer overlap cap.
 # Reuses the equilibrium and kinetic profiles of the sibling DIIID-like_ideal_example (referenced
-# by relative path; not duplicated). psihigh is pushed past the layer-overlap point (psi ~ 0.9997,
-# where adjacent resistive layers first touch), so psilim_from_layer_overlap binds: dmlim then
-# truncates just past q=7 instead of q=8. Ideal free-boundary stability only, with no local
+# by relative path; not duplicated). psihigh is pushed well past the layer-overlap point (psi ~ 0.9985,
+# where adjacent resistive layers first touch), so psilim_from_layer_overlap binds: the cap pulls qlim
+# to 7 and dmlim steps back to 6.2, excluding q=7 and q=8. Ideal free-boundary stability only, with no local
 # stability, forcing or perturbed equilibrium: the energies are kept so a regression case can pin
 # what the capped domain does to the physics, not just to the bookkeeping.
 
@@ -12,7 +12,7 @@ eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "auto"             # Radial grid packing type ("auto" = two-pass measured-curvature grid)
 psilow = 1e-4                  # Lower limit of normalized poloidal flux
-psihigh = 0.9999               # Upper limit of normalized poloidal flux (past the psi ~ 0.9997 layer-overlap point, so the cap binds)
+psihigh = 0.9999               # Upper limit of normalized poloidal flux (past the psi ~ 0.9985 layer-overlap point, so the cap binds)
 mpsi = 0                       # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
@@ -43,5 +43,8 @@ set_psilim_via_dmlim      = true   # Truncate at (last_rational_q + dmlim)/n —
 dmlim                     = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
 psilim_from_layer_overlap = true   # Cap psilim where adjacent resistive layers overlap (the scan is recorded either way)
 
-[KineticForces]
-kinetic_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # GPEC HDF5 kinetic schema; here only feeds the layer-overlap scan (force_termination skips NTV)
+[SLAYER]
+# The growth-rate analysis is not run here; the section is present because the layer-overlap scan
+# takes its kinetic profiles, and its chi_perp(psi), from the SLAYER profile_file.
+enabled = false                # Run the SLAYER tearing-mode analysis
+profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (relative to the run dir), required when SLAYER is enabled
