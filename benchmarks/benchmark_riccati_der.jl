@@ -42,19 +42,19 @@ function setup_solovev()
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
     metric = FFS.make_metric(equil, intr.mpert)
-    ffit = FFS.make_matrix(equil, intr, metric)
-    return ctrl, equil, ffit, intr
+    mats = FFS.build_matrix_splines(equil, intr, metric)
+    return ctrl, equil, mats, intr
 end
 
 # Evaluate the Riccati RHS explicitly from splines: dS = w†·F̄⁻¹·w - S·Ḡ·S
-function riccati_rhs_manual(S, psi, equil, ffit, intr)
+function riccati_rhs_manual(S, psi, equil, mats, intr)
     N = intr.numpert_total
     L = zeros(ComplexF64, N, N)
     Kmat = zeros(ComplexF64, N, N)
     Gmat = zeros(ComplexF64, N, N)
-    ffit.fmats_lower(vec(L), psi; hint=ffit._hint)
-    ffit.kmats(vec(Kmat), psi; hint=ffit._hint)
-    ffit.gmats(vec(Gmat), psi; hint=ffit._hint)
+    mats.ideal.F_spline_lower(vec(L), psi; hint=mats._hint)
+    mats.ideal.K_spline(vec(Kmat), psi; hint=mats._hint)
+    mats.ideal.G_spline(vec(Gmat), psi; hint=mats._hint)
 
     q = equil.profiles.q_spline(psi)
     singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)'))
@@ -77,7 +77,7 @@ println("\n=== riccati_der! formula verification ===")
 println("Verifies riccati_der! output matches manual evaluation of Glasser 2018 Eq. 19.")
 println("Test state: Hermitian S (physical constraint). Expected error: ~machine epsilon.\n")
 
-ctrl, equil, ffit, intr = setup_solovev()
+ctrl, equil, mats, intr = setup_solovev()
 N = intr.numpert_total
 
 odet = FFS.OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -101,7 +101,7 @@ max_err = let max_err = 0.0
         S = (A + A') / 2   # Hermitian by construction
 
         # Manual RHS
-        dS_manual = riccati_rhs_manual(S, psi, equil, ffit, intr)
+        dS_manual = riccati_rhs_manual(S, psi, equil, mats, intr)
 
         # riccati_der! RHS
         u_ric = zeros(ComplexF64, N, N, 2)
@@ -109,7 +109,7 @@ max_err = let max_err = 0.0
         u_ric[:, :, 1] .= S
         u_ric[:, :, 2] .= Matrix{ComplexF64}(I, N, N)
         dummy_chunk = FFS.IntegrationChunk(psi, psi, false, 0, 1)
-        params = (ctrl, equil, ffit, intr, odet, dummy_chunk)
+        params = (ctrl, equil, mats, intr, odet, dummy_chunk)
         FFS.riccati_der!(du_ric, u_ric, params, psi)
         dS_ric = du_ric[:, :, 1]
 

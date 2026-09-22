@@ -155,7 +155,7 @@ modes on the high side as `delta_mlow` does on the low side.
 
 ### Why Positive ``m`` Is Always Resonant
 
-Resonant surfaces are found by `sing_find!` (`src/ForceFreeStates/Sing.jl`), which locates flux
+Resonant surfaces are found by `sing_find!` (`src/ForceFreeStates/Surfaces/Finding.jl`), which locates flux
 surfaces where ``m = n\,q(\psi)``. Since ``n > 0`` by convention and ``q > 0`` for a standard
 tokamak, the resonant ``m`` is always positive:
 

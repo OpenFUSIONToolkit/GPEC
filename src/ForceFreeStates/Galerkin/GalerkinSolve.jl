@@ -6,13 +6,13 @@
 # (gal.f). The DRIVEN/RPEC inner-layer matching is wired in via gal_match_rpec (GalerkinMatch.jl).
 
 """
-    gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)
+    gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
 
 Assemble the global banded matrix and RHS. For each cell: Gauss-Lobatto Hermite stiffness
 (`gal_gauss_quad!`), then the resonant (`gal_resonant!`) or extension (`gal_extension!`) contributions;
 then the boundary conditions and the scatter into `ws.mat`/`ws.rhs`. Port of `gal_make_arrays`.
 """
-function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
+function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
     intr::ForceFreeStatesInternal, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
     nn::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
 
@@ -24,11 +24,11 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
     for ising in 0:msing
         for (ix, cell) in enumerate(ws.intvl[ising+1].cells)
             swap_edge = (ising == msing && ix == ws.nx)
-            gal_gauss_quad!(cell, ffit, profiles, intr, nodes, weights, swap_edge)
+            gal_gauss_quad!(cell, mats, profiles, intr, nodes, weights, swap_edge)
             if cell.etype == GCT_RES
-                gal_resonant!(cell, ising, ffit, profiles, intr, asymps, sings, nn, ctrl.gal_tol, ctrl.gal_gnstep, ctrl.verbose)
+                gal_resonant!(cell, ising, mats, profiles, intr, asymps, sings, nn, ctrl.gal_tol, ctrl.gal_gnstep, ctrl.verbose)
             elseif cell.etype == GCT_EXT || cell.etype == GCT_EXT1 || cell.etype == GCT_EXT2
-                gal_extension!(cell, ising, ffit, profiles, intr, asymps, sings, nn, nodes, weights)
+                gal_extension!(cell, ising, mats, profiles, intr, asymps, sings, nn, nodes, weights)
             end
         end
     end
@@ -45,7 +45,7 @@ function empty_galerkin_result()
 end
 
 """
-    galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
+    galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
                    intr::ForceFreeStatesInternal; wv=nothing) -> (GalerkinResult, Union{Nothing,DeltaPrimeData})
 
 Compute the outer-region Δ′ matching matrix by the singular Galerkin method. Port of `gal_solve`
@@ -56,7 +56,7 @@ resonant surfaces in the domain it returns an empty result and `nothing`.
 `wv` is the vacuum energy matrix from `free_run`, which supplies the free-boundary edge term
 `wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge.
 """
-function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
+function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
     intr::ForceFreeStatesInternal; wv=nothing)
 
     intr.npert == 1 || error("galerkin_solve: only single-n (npert == 1) is supported")
@@ -81,15 +81,15 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     asymps = GalSingAsymp[]
     for s in sings
         sing_order = ctrl.gal_sing_order
-        ar = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=1.0, sing_order=sing_order)
+        ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
         if ctrl.gal_sing_order_ceiling
             order = ctrl.gal_sing_order + ceil(Int, 2 * real(ar.alpha[1]))
             if order > ctrl.gal_sing_order
                 sing_order = order
-                ar = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=1.0, sing_order=sing_order)
+                ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
             end
         end
-        al = compute_sing_asymptotics(s, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=ar.alpha, sing_order=sing_order)
+        al = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=-1.0, alpha_override=ar.alpha, sing_order=sing_order)
         push!(asymps, GalSingAsymp(ar, al))
     end
 
@@ -128,7 +128,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
         wv_edge = Matrix{ComplexF64}(wv .* equil.psio^2)
     end
 
-    gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)
+    gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
 
     if ctrl.verbose
         offdbg = ws.solver == "LU" ? ws.kl + ws.ku + 1 : 1

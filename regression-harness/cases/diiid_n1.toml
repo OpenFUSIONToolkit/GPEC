@@ -411,3 +411,14 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+
+# Root-area-weighted (coordinate-invariant) forcing field b̃ on the control surface: the
+# applied coil spectrum pushed through the √(J|∇ψ|) weight operator. Tracks the field-space
+# conversion that every ResponseMatrices/ field-space output depends on.
+[quantities.forcing_b_rootarea_norm]
+h5path = "PerturbedEquilibrium/forcing_b_root_area"
+type = "complex_vector"
+extract = "norm"
+label = "||forcing b~|| (root-area-weighted)"
+noise_threshold = 1e-10
+order = 1000

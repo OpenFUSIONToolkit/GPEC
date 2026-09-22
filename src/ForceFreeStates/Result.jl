@@ -54,7 +54,7 @@ so bpen and closure are always present.
   - `dir_path::String` - Working directory of the run.
   - `wall_settings::Vacuum.WallShapeSettings` - Wall shape used by the vacuum calculation.
   - `debug_settings::DebugSettings` - Diagnostic dump settings (the `[DEBUG]` deck section / `debug=` API keyword).
-  - `metric::MetricData`, `ffit::FourFitVars` - Metric data and Euler-Lagrange matrix interpolants.
+  - `metric::MetricData`, `mats::MatrixSplines` - Metric data and Euler-Lagrange matrix interpolants.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
   - `closure::Symbol` - How the basis is closed at the rationals: `:ideal` (the ideal jump
@@ -76,7 +76,7 @@ so bpen and closure are always present.
     diagnostics, including the RPEC inner-layer match when requested. Its Δ′ payload lives
     in `delta_prime`, not here.
 """
-struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:FourFitVars} <: ModeSpace
+struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} <: ModeSpace
     integrator::Symbol
     control::ForceFreeStatesControl
     equil::E
@@ -99,7 +99,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:FourFitVars} <:
 
     # Assembly products, always present.
     metric::MetricData
-    ffit::F
+    mats::F
     surfaces::Vector{SingType}
     kinetic::@NamedTuple{kmsing::Int, kinsing::Vector{SingType}, scan_psi::Vector{Float64}, scan_cond::Vector{Float64}, scan_threshold::Float64}
 
@@ -147,7 +147,7 @@ end
 # analytic Galerkin derivative rather than a differenced value spline, and
 # Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) is the same outer ideal-MHD relation `sing_der!` uses. The grid runs
 # inner→edge, so the last node is the control surface and carries the edge boundary condition.
-function _matched_gal_profiles(gal_result::GalerkinResult, ffit::FourFitVars, intr::ModeSpace)
+function _matched_gal_profiles(gal_result::GalerkinResult, mats::MatrixSplines, intr::ModeSpace)
     sol = gal_result.solution
     m = gal_result.match
     npert = intr.numpert_total
@@ -171,14 +171,14 @@ function _matched_gal_profiles(gal_result::GalerkinResult, ffit::FourFitVars, in
         ξ′ = @view dxi_f[:, ip, :]
         @views u_store[:, :, 1, ip] .= ξ
         @views du_store[:, :, ip] .= ξ′
-        @views compute_node_xi_s!(xi_s_store[:, :, ip], ξ′, ξ, ffit, psi_f[ip]; hint=hint)
+        @views compute_node_xi_s!(xi_s_store[:, :, ip], ξ′, ξ, mats, psi_f[ip]; hint=hint)
     end
 
     return SolutionProfiles(:gal_native, ngrid_f, psi_f, q_f, u_store, du_store, xi_s_store)
 end
 
 """
-    build_result(integrator, ctrl, equil, intr, metric, ffit, odet, free_energies, gal_data, gal_dp)
+    build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
         -> ForceFreeStatesResult
 
 Assemble the published result once the solve is finished — the one place that decides what a
@@ -197,7 +197,7 @@ function build_result(
     equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal,
     metric::MetricData,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     odet::Union{Nothing,OdeState},
     free_energies::Union{Nothing,FreeBoundaryResult},
     gal_data::Union{Nothing,GalerkinResult},
@@ -208,11 +208,11 @@ function build_result(
     # The forward sweep is the only formalism whose stores need materializing; doing it here
     # keeps `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
     solution = if integrator === :forward && odet !== nothing
-        materialize_derivative_stores!(odet, equil, ffit, intr)
+        materialize_derivative_stores!(odet, equil, mats, intr)
         SolutionProfiles(:el_axis, odet.step, odet.psi_store, odet.q_store,
             odet.u_store, odet.du_store, odet.xi_s_store)
     elseif matched
-        _matched_gal_profiles(gal_data, ffit, intr)
+        _matched_gal_profiles(gal_data, mats, intr)
     else
         nothing
     end
@@ -249,7 +249,7 @@ function build_result(
         integrator, ctrl, equil,
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
         intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
-        metric, ffit, intr.sing, kinetic,
+        metric, mats, intr.sing, kinetic,
         closure, bpen,
         solution, odet, wp, free_energies, delta_prime, gal_data
     )
