@@ -1,32 +1,22 @@
 # LayerOverlap.jl
 #
-# Resistive-layer overlap scan: how far out in ψ the equilibrium domain needs
-# to extend before adjacent rational surfaces' resistive layers run into each
-# other. Once two neighbouring layers overlap, neither surface has a
-# well-separated inner region, so the matched-asymptotic treatment stops being
-# meaningful there and extending `psihigh` past that point buys nothing.
-# Criterion: Fitzpatrick, Nucl. Fusion 2025 (doi 10.1088/1741-4326/ae4fdd) Sect. 5.9 —
-# retain surfaces with psi < 1 - eps_c, where overlap is judged with the
-# diffusive-resistive layer width of its Eq. (100), the regime strong shear forces
-# near the separatrix.
+# Resistive-layer overlap scan: where adjacent rational surfaces' resistive layers run into each
+# other. Past that point neither surface keeps a well-separated inner region, so the
+# matched-asymptotic treatment is not defined there. Criterion: Fitzpatrick, Nucl. Fusion 2025
+# (doi 10.1088/1741-4326/ae4fdd) Sect. 5.9, judged with the diffusive-resistive width of its
+# Eq. (100). How the result is used is documented in the integration-domain truncation section of
+# docs/src/stability.md.
 #
-# Lives in `Tearing` rather than `InnerLayer/SLAYER` for the same reason
-# `build_ggj_inputs` does: it needs `ForceFreeStates._find_rational_surfaces`,
-# and `InnerLayer` loads before `ForceFreeStates`.
+# Lives in `Tearing` rather than `InnerLayer/SLAYER` because it needs
+# `ForceFreeStates._find_rational_surfaces`, and `InnerLayer` loads before `ForceFreeStates`.
 #
-# Surfaces beyond the equilibrium's own ψ grid are located on the separatrix edge
-# law q ≈ -A·ln(1-ψ), via the shared `Equilibrium.edge_q_law` helper that also gates
-# the grid-refinement edge density model -- one statement of the model, one fit, one
-# limited-plasma guard. The log form is the only one that survives the extrapolation:
-# a polynomial in ψ (on q or on ι = 1/q) saturates instead of diverging, undershooting
-# the outermost surfaces enough to report no overlap where there is one.
-#
-# The extrapolated surfaces inform the *choice* of domain only; the final
-# equilibrium is always re-formed and solved on the accepted domain.
-
+# Surfaces beyond the equilibrium's own ψ grid are located on the separatrix law
+# q ≈ -A·ln(1-ψ) through the shared `Equilibrium.edge_q_law` helper, which also gates the
+# grid-refinement edge density model: one statement of the model, one fit, one limited-plasma
+# guard. The scan only recommends a domain; nothing here re-forms the equilibrium.
 using ..Utilities: KineticProfiles
 using ..ForceFreeStates: _find_rational_surfaces, SingType
-using ..InnerLayer.SLAYER: SLAYERParameters, build_slayer_inputs, slayer_layer_thickness,
+using ..InnerLayer.SLAYER: SLAYERParameters, build_slayer_inputs, slayer_algebraic_widths, riccati_del_s,
     surface_minor_radius, surface_da_dpsi, radial_label
 using ..Utilities.NeoclassicalResistivity: NeoResistivityModel, SauterNeoModel
 using ..Equilibrium: edge_q_law, edge_q_law_psi, edge_q_law_dqdpsi, InverseIngest
@@ -60,9 +50,8 @@ dimensional error.
     equilibrium's ψ grid via the edge q-law
   - `psihigh_delta_s`, `psihigh_visco`, `psihigh_dr` -- domain implied by each width
     channel, `nothing` when that channel never overlaps within the scanned range
-  - `psihigh` -- the recommendation, equal to `psihigh_dr`: the DR width is the criterion
-    (Sect. 5.6 puts every near-separatrix layer in that regime). The other two channels are
-    reported for comparison and do not set the domain
+  - `psihigh` -- the recommendation, equal to `psihigh_dr`; the other two channels are reported
+    for comparison and do not set the domain
   - `first_overlap` -- index of the first surface that overlaps its inner
     neighbour, `nothing` when none do
   - `notes` -- surfaces that were located but could not be scored, and why
@@ -85,15 +74,19 @@ struct LayerOverlapScan
     notes::Vector{String}
 end
 
-# Inverse equilibria (CHEASE) are solved on a PRESCRIBED boundary: `InverseIngest.sq_xs` spans
-# [0, 1] and `sq_fs[:, 3]` is the code's own q there, finite at ψ = 1 (6.90 on the shipped
-# fixture). So beyond `psihigh` there is nothing to model -- the real q is already known, and the
-# scan reads it instead of extrapolating. That also means the search runs all the way to ψ = 1
-# rather than stopping short of a separatrix that a fixed-boundary equilibrium does not have.
-#
-# The direct/EFIT path cannot do this: a g-file also carries q on [0, 1], but it is the
-# reconstruction's q, which goes to a finite qa where a diverted plasma's q diverges. GPEC
-# recomputes q by field-line tracing out to psihigh, and past that nothing has been traced.
+# Keyword constructor: the positional form takes 15 arguments in a fixed order, which is how an
+# earlier empty-scan return came to pass 13 of them.
+LayerOverlapScan(; m=Int[], n=Int[], psi=Float64[], rs=Float64[], delta_s_m=Float64[],
+    width_delta_s=Float64[], width_visco=Float64[], width_dr=Float64[], extrapolated=Bool[],
+    psihigh_delta_s=nothing, psihigh_visco=nothing, psihigh_dr=nothing, psihigh=nothing,
+    first_overlap=nothing, notes=String[]) =
+    LayerOverlapScan(m, n, psi, rs, delta_s_m, width_delta_s, width_visco, width_dr, extrapolated,
+        psihigh_delta_s, psihigh_visco, psihigh_dr, psihigh, first_overlap, notes)
+
+# An inverse equilibrium is solved on a prescribed boundary and carries its own q out to ψ = 1,
+# so the scan reads the real q there instead of extrapolating, and searches to ψ = 1 rather than
+# stopping short of a separatrix it does not have. The direct/EFIT path cannot: GPEC recomputes q
+# by field-line tracing only out to psihigh.
 _inverse_q_spline(ingest::InverseIngest) =
     cubic_interp(collect(Float64, ingest.sq_xs), collect(Float64, ingest.sq_fs[:, 3]);
         extrap=ExtendExtrap())
@@ -122,9 +115,10 @@ separatrix edge law `q ≈ -A·ln(1-ψ)` fitted over the outer knots when
 the one it was handed. See the file header for why a cubic extrapolation is not
 usable here.
 
-Layer widths come from [`slayer_layer_thickness`](@ref) via
+Layer widths come from [`slayer_algebraic_widths`](@ref) via
 [`build_slayer_inputs`](@ref), so the scan uses the same plasma inputs and the
-same resistivity closure as the SLAYER analysis itself.
+same resistivity closure as the SLAYER analysis itself. The criterion channel needs no
+Riccati solve; `delta_s` is solved per surface as a reported comparison only.
 
 # Arguments
 
@@ -195,10 +189,11 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
     # Surfaces past the grid. An inverse equilibrium already knows its real q out to ψ = 1, so
     # it is read rather than modelled; only the direct path needs the edge law.
     edge_fit = nothing
-    inv_q = (getfield(equil, :ingest) isa InverseIngest) ? _inverse_q_spline(equil.ingest) : nothing
+    inv_q = (equil.ingest isa InverseIngest) ? _inverse_q_spline(equil.ingest) : nothing
     if extrapolate && inv_q !== nothing
         psi_top = 1.0                      # a prescribed boundary, not a separatrix
         m_start = isempty(found) ? 1 : maximum(s.m for s in found) + 1
+        n_before = length(found)
         reached_end = false
         for m in m_start:Int(m_max)
             psi_m = _real_q_surface(inv_q, m / n_tor, psihigh_safe, psi_top)
@@ -213,8 +208,9 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
             push!(notes,
                 "outward search stopped at the m_max = $m_max backstop rather than at the boundary " *
                 "q; a \"no overlap\" result here is not conclusive -- raise m_max")
-        push!(notes, "inverse equilibrium: surfaces beyond ψ = $(@sprintf("%.6f", psihigh_safe)) " *
-                     "read from the real q profile out to ψ = 1 (no edge-law extrapolation)")
+        length(found) > n_before &&
+            push!(notes, "inverse equilibrium: surfaces beyond ψ = $(@sprintf("%.6f", psihigh_safe)) " *
+                         "read from the real q profile out to ψ = 1 (no edge-law extrapolation)")
     elseif extrapolate && psihigh_safe < psi_cap
         edge_fit = edge_q_law(equil; psi_max=psihigh_safe)
         if edge_fit === nothing
@@ -247,9 +243,10 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         end
     end
 
-    isempty(found) && return LayerOverlapScan(Int[], Int[], Float64[], Float64[], Float64[], Float64[],
-        Float64[], Float64[], Bool[], nothing, nothing, nothing, nothing, nothing,
-        push!(notes, "no q = m/$n_tor surfaces found"))
+    if isempty(found)
+        push!(notes, "no q = m/$n_tor surfaces found")
+        return LayerOverlapScan(; notes=notes)
+    end
 
     ms, ns, psis, rss = Int[], Int[], Float64[], Float64[]
     dels_m, w_dels, w_visc, w_dr, extraps = Float64[], Float64[], Float64[], Float64[], Bool[]
@@ -297,24 +294,34 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
             continue
         end
 
-        lw = slayer_layer_thickness(params[1])
-        if !isfinite(lw.delta_s_m)
-            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): del_s Riccati did not converge")
+        # The criterion needs only the algebraic DR width, so the Riccati solve never gates it:
+        # dropping a surface here would leave _first_overlap_limit comparing its neighbours across
+        # a gap twice the physical one, which hides an overlap and reports too wide a domain.
+        alg = slayer_algebraic_widths(params[1])
+        if !isfinite(alg.delta_dr)
+            push!(
+                notes,
+                "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): Eq. (100) width is not finite, so this " *
+                "surface could not be scored; a \"no overlap\" result here is not conclusive"
+            )
             continue
         end
-        # Every width channel must be finite: a NaN width compares false against every
-        # neighbour in _first_overlap_limit, silently turning that channel into "no overlap".
-        if !isfinite(lw.delta_dr)
-            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): Eq. (100) width is not finite; surface excluded")
-            continue
+        # delta_s is reported for comparison only. A failure leaves it NaN, which makes its own
+        # channel report no overlap, and leaves the DR criterion untouched.
+        delta_s_m = try
+            w = abs(riccati_del_s(params[1]) * params[1].d_beta)
+            isfinite(w) || push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): del_s Riccati did not converge; " *
+                                        "delta_s channel only, criterion unaffected")
+            w
+        catch err
+            err isa Union{ArgumentError,DomainError} || rethrow()
+            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): del_s Riccati failed; delta_s channel only, " *
+                         "criterion unaffected")
+            NaN
         end
-        if !isfinite(lw.delta_visco)
-            push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): viscous width is not finite; surface excluded")
-            continue
-        end
+        lw = (; delta_s_m=delta_s_m, delta_dr=alg.delta_dr, delta_visco=alg.delta_visco)
 
-        # Metres → normalized flux. This conversion is the whole reason the scan
-        # can compare a layer width against a surface separation.
+        # Metres → normalized flux, so widths and surface separations are comparable.
         push!(ms, s.m)
         push!(ns, Int(n_tor))
         push!(psis, s.psi)
@@ -326,12 +333,11 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         push!(extraps, s.extrap)
     end
 
-    ph_dels, k_dels = _first_overlap_limit(psis, w_dels)
-    ph_visc, k_visc = _first_overlap_limit(psis, w_visc)
+    ph_dels, _ = _first_overlap_limit(psis, w_dels)
+    ph_visc, _ = _first_overlap_limit(psis, w_visc)
     ph_dr, k_dr = _first_overlap_limit(psis, w_dr)
-    # The DR width is the criterion: near the separatrix the shear is strong enough that
-    # Fitzpatrick (2025) Sect. 5.6 puts every layer in that regime. The delta_s ODE and the
-    # viscous scale stay reported so the three can be compared, but they do not set the domain.
+    # The DR channel is the criterion (see the `width_dr` field above); the other two are
+    # reported for comparison only.
     recommended = ph_dr
 
     return LayerOverlapScan(ms, ns, psis, rss, dels_m, w_dels, w_visc, w_dr, extraps,

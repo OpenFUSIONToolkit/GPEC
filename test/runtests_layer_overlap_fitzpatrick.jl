@@ -9,7 +9,7 @@
 # against GPEC's own history.
 @testset "Layer overlap vs Fitzpatrick (2025) JET model" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER: slayer_parameters,
-        slayer_layer_thickness, SpitzerHarmModel
+        slayer_layer_thickness, slayer_algebraic_widths, SpitzerHarmModel
     using QuadGK: quadgk
     using Roots: find_zero, Bisection
 
@@ -64,8 +64,9 @@
     te_of = make_tanh(400.0, 100.0, 600.0, 20.0)
     ne_of = make_tanh(3.5e19, 1.2e19, 5.0e19, 3.0e18)
 
-    # Width in units of rhat, through the shipped code path.
-    function width_hat(r, n)
+    # Width in units of rhat, through the shipped code path. Eq. (100) is algebraic, so this takes
+    # the no-ODE path; the two are asserted equal once below.
+    function params_at(r, n)
         P = Psi_of(r)
         te = te_of(P)
         ne = ne_of(P)
@@ -75,7 +76,15 @@
             rs=r * A_MIN, R0=R0, mu_i=MNUM, zeff=ZEFF,
             chi_perp=CHI, chi_tor=CHI, m=1, n=n,
             resistivity_model=SpitzerHarmModel(), lnLambda_form=:nrl)
-        return slayer_layer_thickness(p).delta_dr / A_MIN
+        return p
+    end
+    width_hat(r, n) = slayer_algebraic_widths(params_at(r, n)).delta_dr / A_MIN
+
+    # The scan's criterion channel must be exactly what the full width routine reports, so the
+    # no-ODE path cannot drift from it.
+    let p = params_at(0.9, 1)
+        @test slayer_algebraic_widths(p).delta_dr == slayer_layer_thickness(p).delta_dr
+        @test slayer_algebraic_widths(p).delta_visco == slayer_layer_thickness(p).delta_visco
     end
 
     function surfaces(n; rmin=0.90, rmax=1.35)
@@ -208,8 +217,7 @@ end
 
     # Multi-n: the innermost overlap point binds; scans with no overlap never do.
     Scan = GeneralizedPerturbedEquilibrium.Tearing.LayerOverlapScan
-    mkscan(ph) = Scan(Int[], Int[], Float64[], Float64[], Float64[], Float64[], Float64[], Float64[], Bool[],
-        nothing, nothing, ph, ph, ph === nothing ? nothing : 1, String[])
+    mkscan(ph) = Scan(; psihigh_dr=ph, psihigh=ph, first_overlap=(ph === nothing ? nothing : 1))
     binding = GeneralizedPerturbedEquilibrium._binding_overlap
     s1, s2, s_none = mkscan(0.9997), mkscan(0.9952), mkscan(nothing)
     @test binding([s1, s2, s_none]) === s2

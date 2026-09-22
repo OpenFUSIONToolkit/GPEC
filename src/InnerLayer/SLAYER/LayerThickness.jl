@@ -176,21 +176,12 @@ struct LayerWidths
 end
 
 """
-    slayer_layer_thickness(p::SLAYERParameters; kwargs...) -> LayerWidths
+    slayer_algebraic_widths(p::SLAYERParameters) -> (; delta_norm, delta_visco, delta_dr)
 
-Compute the resistive inner-layer thickness in meters at one rational
-surface.
-
-Runs [`riccati_del_s`](@ref) for the dimensionless `δ_s / d_β` and scales
-by `p.d_beta` to obtain `δ_s` in meters. Keyword arguments are forwarded
-to `riccati_del_s`.
-
-The two algebraic comparison scales `delta_norm` and `delta_visco` come from
-`p` directly and do not depend on the Riccati solve.
+The three comparison scales that follow from `p` alone, with no Riccati solve. `delta_dr` is
+the channel the resistive-layer overlap criterion uses, so a scan needs only this.
 """
-function slayer_layer_thickness(p::SLAYERParameters; kwargs...)
-    dels_db = riccati_del_s(p; kwargs...)
-    delta_s = dels_db * p.d_beta
+function slayer_algebraic_widths(p::SLAYERParameters)
     # Layer normalization length: exactly 1/delta_n (delta_n = S^(1/3)/r_s), computed
     # from rs and lu so it reads as a length. Burgess et al. (2026), the Δ̂' = Δ'/S^(1/3)
     # normalization preceding Eq. (10).
@@ -200,11 +191,32 @@ function slayer_layer_thickness(p::SLAYERParameters; kwargs...)
     # Diffusive-resistive width, Fitzpatrick (2025) Eq. (100), in meters. d_beta_hat is the
     # normalized ion scale d_beta/rs; the shear is the r-based |s| SLAYER already carries.
     # The paper's tau_A (its Eq. 74) carries no shear, whereas SLAYER's tau_h divides by n*s,
-    # so lu = tau_R/tau_h = (n|s|) * (tau_R/tau_A). Substituting that into Eq. (100) cancels its
-    # explicit (n|s|)^(-1/2) exactly, leaving no shear dependence in terms of lu.
+    # so lu = tau_R/tau_h = (n|s|) * (tau_R/tau_A) supplies Eq. (100)'s explicit (n|s|)^(-1/2),
+    # leaving no separate shear factor in terms of lu.
     d_beta_hat = p.d_beta / p.rs
     delta_dr = d_beta_hat > 0 ? p.rs * p.lu^(-0.5) * p.P_perp^(0.25) / sqrt(d_beta_hat) : NaN
+    return (; delta_norm, delta_visco, delta_dr)
+end
+
+"""
+    slayer_layer_thickness(p::SLAYERParameters; kwargs...) -> LayerWidths
+
+Compute the resistive inner-layer thickness in meters at one rational
+surface.
+
+Runs [`riccati_del_s`](@ref) for the dimensionless `δ_s / d_β` and scales
+by `p.d_beta` to obtain `δ_s` in meters. Keyword arguments are forwarded
+to `riccati_del_s`.
+
+The algebraic comparison scales `delta_norm`, `delta_visco` and `delta_dr` come from `p`
+directly and do not depend on the Riccati solve; [`slayer_algebraic_widths`](@ref) returns
+just those, for callers that do not need `delta_s`.
+"""
+function slayer_layer_thickness(p::SLAYERParameters; kwargs...)
+    dels_db = riccati_del_s(p; kwargs...)
+    delta_s = dels_db * p.d_beta
+    w = slayer_algebraic_widths(p)
     return LayerWidths(p.ising, p.m, p.n,
         dels_db, delta_s, abs(delta_s),
-        p.d_beta, delta_norm, delta_visco, delta_dr)
+        p.d_beta, w.delta_norm, w.delta_visco, w.delta_dr)
 end

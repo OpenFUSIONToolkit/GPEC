@@ -523,6 +523,7 @@ end
 # the domain must stop before the first overlap of any n. Scans that find no overlap do not bind;
 # when none overlap, the first scan is returned so its surfaces are still recorded.
 function _binding_overlap(scans)
+    isempty(scans) && return nothing
     overlapping = filter(sc -> sc.psihigh !== nothing, scans)
     isempty(overlapping) && return first(scans)
     return overlapping[argmin([sc.psihigh for sc in overlapping])]
