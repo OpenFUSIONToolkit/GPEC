@@ -118,7 +118,7 @@ function reconstruct_physical_fields(
         # Compute contravariant displacement via Jacobian convolution (matches Fortran gpeq_contra)
         xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes = compute_contra_displacements(
             xi_psi_modes, clebsch_psi1, clebsch_alpha,
-            psi_grid, equil, ffs, metric, ctrl
+            psi_grid, equil, ffs, metric; reg_spot=ctrl.reg_spot
         )
 
         # Compute covariant components via metric tensor contraction (matches Fortran gpeq_cova)
@@ -474,7 +474,7 @@ end
 """
     compute_contra_displacements(
         xi_psi_modes, clebsch_psi1, clebsch_alpha,
-        psi_grid, equil, ffs, metric, ctrl
+        psi_grid, equil, ffs, metric; reg_spot
     ) -> (xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes)
 
 Compute contravariant displacement via Jacobian mode coupling convolution.
@@ -487,7 +487,8 @@ Matches Fortran `gpeq_contra`:
 Uses regularized xmp1 and xms for the theta/zeta components, then optionally applies
 additional regularization to get xmt/xmz.
 
-Returns both unregularized (xwt, xwz) and regularized (xmt, xmz) versions.
+Returns both unregularized (xwt, xwz) and regularized (xmt, xmz) versions. `reg_spot` is the
+regularization width applied to xmt/xmz (0 disables it).
 """
 function compute_contra_displacements(
     xi_psi_modes::Matrix{ComplexF64},
@@ -496,14 +497,13 @@ function compute_contra_displacements(
     psi_grid::Vector{Float64},
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
-    metric::MetricData,
-    ctrl::PerturbedEquilibriumControl
+    metric::MetricData;
+    reg_spot::Float64
 )
     npsi, mpert = size(xi_psi_modes)
     mlow = ffs.mlow
     nn = ffs.nlow
     chi1 = 2π * equil.psio
-    reg_spot = ctrl.reg_spot
     fc = metric.fourier_coeffs
 
     xwp_modes = zeros(ComplexF64, npsi, mpert)
@@ -985,10 +985,12 @@ function _apply_rzphi_transform(
     # Per-thread scratch (the immutable `ft` functor and `geom` are shared read-only): θ-space
     # transform inputs/outputs (length mtheta) and mode-space forward-DFT outputs (length mpert),
     # so the DFTs run in place with no per-surface allocation.
-    bufs = [(R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta),
-             psi=zeros(ComplexF64, mtheta), th=zeros(ComplexF64, mtheta), ze=zeros(ComplexF64, mtheta),
-             Ro=zeros(ComplexF64, mpert), Zo=zeros(ComplexF64, mpert), Po=zeros(ComplexF64, mpert))
-            for _ in 1:Threads.maxthreadid()]
+    bufs = [
+        (R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta),
+            psi=zeros(ComplexF64, mtheta), th=zeros(ComplexF64, mtheta), ze=zeros(ComplexF64, mtheta),
+            Ro=zeros(ComplexF64, mpert), Zo=zeros(ComplexF64, mpert), Po=zeros(ComplexF64, mpert))
+        for _ in 1:Threads.maxthreadid()
+    ]
 
     Threads.@threads :static for ipsi in 1:npsi
         buf = bufs[Threads.threadid()]
