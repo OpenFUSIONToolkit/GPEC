@@ -245,7 +245,9 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     zeroth::Bool = false
 end
 
-"Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table."
+"""
+Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table.
+"""
 function LargeAspectRatioConfig(input_dict::Dict{String,Any})
     return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
 end
@@ -285,7 +287,9 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
-"Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table."
+"""
+Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table.
+"""
 function TJAnalyticConfig(input_dict::Dict{String,Any})
     return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
@@ -321,7 +325,9 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
     f0fac::Float64 = 1       # scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 end
 
-"Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table."
+"""
+Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table.
+"""
 function SolovevConfig(input_dict::Dict{String,Any})
     return SolovevConfig(; symbolize_keys(input_dict)...)
 end
@@ -346,6 +352,7 @@ not serializable; they are reconstructed from these nodes by `build_direct_from_
   - `rmin/rmax/zmin/zmax::Float64` — computational-grid bounds [m]
   - `psio::Float64` — total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
   - `bt_sign::Int` — sign of the toroidal field (+1 or -1)
+  - `ip_sign::Int` — sign of the plasma current (+1 or -1) as the source file states it
 """
 struct DirectIngest
     sq_xs::Vector{Float64}
@@ -359,6 +366,7 @@ struct DirectIngest
     zmax::Float64
     psio::Float64
     bt_sign::Int
+    ip_sign::Int
 end
 
 """
@@ -438,6 +446,10 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
   - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
+  - `ip_sign::Int` — Sign of the plasma current (+1 or -1); read from the `current` header value
+    in EFIT g-files and `global_quantities.ip` in IMAS. The internal flux is always made
+    positive at the axis, so the sign is kept here (never recovered from the computed current)
+    and fixes the SFL→machine toroidal-angle handedness `helicity = bt_sign × ip_sign`.
   - `ingest::EquilibriumIngest` — captured raw arrays for the `gpec.h5` rerun snapshot
     (a [`DirectIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
   - `psihigh_resolved::Float64` — outer flux limit the equilibrium is formed on: `config.psihigh`
@@ -459,6 +471,7 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
     bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
+    ip_sign::Int     # Sign of the plasma current: +1 or -1 (from the g-file current / IMAS ip)
     ingest::EquilibriumIngest
     psihigh_resolved::Float64
 end
@@ -466,9 +479,9 @@ end
 # Readers construct without a resolved psihigh; it starts at the request and `resolve_psihigh!`
 # clamps it for efit-family equilibria.
 DirectRunInput(config::EquilibriumConfig, sq_in, psi_in, psi_in_xs, psi_in_ys,
-    rmin, rmax, zmin, zmax, psio, bt_sign, ingest) =
+    rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest) =
     DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys,
-        rmin, rmax, zmin, zmax, psio, bt_sign, ingest, config.psihigh)
+        rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest, config.psihigh)
 
 """
     InverseRunInput(...)
@@ -610,6 +623,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
     crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
     bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
+    ip_sign::Int = 1 # Sign of the plasma current as the source file states it: +1 or -1 (crnt is always positive)
     bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
     verbose::Bool = false # Whether to print verbose output
     diagnose_src::Bool = false # Whether to diagnose source data
@@ -749,7 +763,7 @@ function GeometryProfileSplines(xs::Vector{Float64},
 
     GeometryProfileSplines{typeof(area_spline)}(
         xs, npts, npts - 1,
-        area_spline, avg_r_spline, avg_R_spline,
+        area_spline, avg_r_spline, avg_R_spline
     )
 end
 
@@ -828,7 +842,7 @@ function KineticProfileSplines(xs::Vector{Float64},
         xs, npts, npts - 1,
         ni_spline, ne_spline, Ti_spline, Te_spline,
         omegaE_spline, loglam_spline, nui_spline, nue_spline, zeff_spline,
-        ni_deriv, ne_deriv, Ti_deriv, Te_deriv,
+        ni_deriv, ne_deriv, Ti_deriv, Te_deriv
     )
 end
 

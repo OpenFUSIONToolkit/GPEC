@@ -37,12 +37,15 @@ function read_equilibrium_ingest(in_h5)
     haskey(in_h5, group_path) || return nothing
     group = in_h5[group_path]
     kind = read(group, "ingest_kind")
-    T = kind == "direct" ? Equilibrium.DirectIngest :
+    T =
+        kind == "direct" ? Equilibrium.DirectIngest :
         kind == "inverse" ? Equilibrium.InverseIngest :
         error("Unknown equilibrium ingest_kind in gpec.h5: $kind (expected \"direct\" or \"inverse\")")
     # Positional reconstruction: relies on the default constructor, so `fieldnames(T)` order
     # must match the struct definition and the field-by-field write in write_outputs_to_HDF5.
-    return T((read(group, String(f)) for f in fieldnames(T))...)
+    # Files written before the plasma-current sign was stored carry no ip_sign; they were all
+    # positive-current runs in effect, so that field defaults to +1.
+    return T((haskey(group, String(f)) ? read(group, String(f)) : (f == :ip_sign ? 1 : error("missing equilibrium ingest field $f in gpec.h5")) for f in fieldnames(T))...)
 end
 
 """
@@ -90,7 +93,7 @@ function parse_override_flag(expr::AbstractString)
         # Warn instead of silently stringifying a bare word, which would otherwise only fail
         # much later where the field expects a number/bool.
         @warn "Could not parse --override value as a TOML literal; storing it as a string. " *
-              "Quote it explicitly if a string was intended." key=lhs value=rhs error=e
+              "Quote it explicitly if a string was intended." key = lhs value = rhs error = e
         rhs
     end
 
@@ -281,9 +284,11 @@ function build_inputs_from_h5(args::Vector{String})
     elseif ingest isa Equilibrium.InverseIngest
         Equilibrium.build_inverse_from_ingest(eq_config, ingest)
     else
-        error("gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay. " *
-              "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one); a new analytic kind must be " *
-              "registered in Equilibrium.ANALYTIC_EQ.")
+        error(
+            "gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay. " *
+            "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one); a new analytic kind must be " *
+            "registered in Equilibrium.ANALYTIC_EQ."
+        )
     end
 
     return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils
