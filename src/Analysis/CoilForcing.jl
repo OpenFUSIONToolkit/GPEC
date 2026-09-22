@@ -238,11 +238,7 @@ function plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_pat
 end
 
 # Helicity = sign(Bt)·sign(Ip); the SFL→machine toroidal-angle handedness.
-function _equil_helicity(equil)
-    bt = isnothing(equil.params.bt_sign) ? 1 : Int(sign(equil.params.bt_sign))
-    ip = isnothing(equil.params.crnt) ? 1 : Int(sign(equil.params.crnt))
-    return bt * ip
-end
+_equil_helicity(equil) = equil.params.bt_sign * equil.params.ip_sign
 
 # Unpack `modes` (a Vector of ForcingMode-like objects filtered to toroidal mode `n`,
 # or a `(m_vals, amplitudes)` tuple) into parallel m and complex-amplitude vectors.

@@ -594,7 +594,7 @@
 
         @testset "WallGeometry3D nowall" begin
             inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="nowall"))
+            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs), WallShapeSettings(shape="nowall"))
             @test wall.nowall == true
             @test wall.mtheta == 32
             @test wall.nzeta == 32
@@ -603,7 +603,11 @@
 
         @testset "WallGeometry3D conformal" begin
             inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="conformal", a=0.2))
+            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                inputs,
+                GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs),
+                WallShapeSettings(shape="conformal", a=0.2)
+            )
             @test wall.nowall == false
             @test wall.mtheta == 32
             @test wall.nzeta == 32
@@ -612,6 +616,137 @@
             @test size(wall.normal) == (num_points, 3)
             @test all(isfinite, wall.r)
             @test all(isfinite, wall.normal)
+        end
+
+        # Corrugated torus on a genuinely periodic (endpoint-excluded) grid. The shared
+        # _make_3d_nonaxis_inputs helper samples range(0, 2π, length=n), which repeats the seam
+        # point and leaves the surface non-smooth there — harmless for a nowall response, but it
+        # makes the offset surface fold, so the wall tests build their own boundary.
+        _make_3d_periodic_inputs(; mtheta=24, nzeta=24, mtheta_in=16, nzeta_in=16, eps=0.05) = begin
+            θ_in = range(; start=0, length=mtheta_in, step=2π/mtheta_in)
+            ζ_in = range(; start=0, length=nzeta_in, step=2π/nzeta_in)
+            X = zeros(mtheta_in, nzeta_in)
+            Y = similar(X)
+            Z = similar(X)
+            for (i, θ) in enumerate(θ_in), (j, ζ) in enumerate(ζ_in)
+                R = 1.7 + 0.3 * cos(θ) + eps * cos(2ζ) * cos(θ)
+                X[i, j] = R * cos(ζ)
+                Y[i, j] = R * sin(ζ)
+                Z[i, j] = 0.3 * sin(θ) + eps * sin(2ζ) * sin(θ)
+            end
+            VacuumInput(x=vec(X), y=vec(Y), z=vec(Z), mtheta_in=mtheta_in, nzeta_in=nzeta_in,
+                m_modes=[1, 2], n_modes=[0, 1], mtheta=mtheta, nzeta=nzeta)
+        end
+
+        @testset "WallGeometry3D conformal, non-axisymmetric input" begin
+            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24)
+            settings = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
+            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, settings)
+
+            num_points = 24 * 24
+            @test wall.nowall == false
+            @test size(wall.r) == (num_points, 3)
+            @test all(isfinite, wall.r) && all(isfinite, wall.normal)
+
+            # Uniform offset along the plasma normal: every point moves the same distance, outward.
+            offsets = [norm(wall.r[i, :] - plasma.r[i, :]) for i in 1:num_points]
+            @test maximum(offsets) - minimum(offsets) < 1e-12
+            # Each wall point stays on its own plasma point's side of the machine axis (hypot > 0 cannot fail)
+            @test all(wall.r[i, 1] * plasma.r[i, 1] + wall.r[i, 2] * plasma.r[i, 2] > 0 for i in 1:num_points)
+            R_wall = [hypot(wall.r[i, 1], wall.r[i, 2]) for i in 1:num_points]
+            R_plasma = [hypot(plasma.r[i, 1], plasma.r[i, 2]) for i in 1:num_points]
+            @test maximum(R_wall) > maximum(R_plasma)
+
+            # The offset point is the closest wall point to its own plasma point, which is the
+            # index alignment the near-field patch assumes.
+            for i in (1, 300, num_points)
+                @test offsets[i] ≈ minimum(norm(wall.r[j, :] - plasma.r[i, :]) for j in 1:num_points)
+            end
+
+            # Wall normals face out of the vacuum region, opposite the inward plasma normals.
+            aligns = [dot(wall.normal[i, :], plasma.normal[i, :]) for i in 1:num_points]
+            @test all(aligns .< 0)
+        end
+
+        @testset "WallGeometry3D conformal matches the analytic offset of a circular cross-section" begin
+            # A circular cross-section has an exact conformal wall: 0.5(max R - min R) is the minor radius
+            # exactly, so every plane offsets to a circle of radius r_minor(1 + a) about the same centre.
+            # Pins the offset direction, magnitude and orientation at once, which a uniform-offset check cannot.
+            r_minor, R0 = 0.3, 1.7
+            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24, mtheta_in=32, nzeta_in=16, eps=0.0)
+            plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
+            for a in (0.2, 0.5)
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, WallShapeSettings(shape="conformal", a=a, equal_arc_wall=false))
+                radii = [hypot(hypot(wall.r[i, 1], wall.r[i, 2]) - R0, wall.r[i, 3]) for i in axes(wall.r, 1)]
+                # Residual is the 32 -> 24 poloidal resampling of the boundary spline, not the offset
+                @test all(isapprox(rad, r_minor * (1 + a); atol=5e-4) for rad in radii)
+            end
+        end
+
+        @testset "WallGeometry3D non-axisymmetric error paths" begin
+            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24)
+            plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
+            for shape in ("elliptical", "dee", "mod_dee", "some_wall_file.dat")
+                @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, WallShapeSettings(shape=shape))
+            end
+            # equal_arc_wall has no meaning without a 2D contour and is ignored with a notice. It defaults to
+            # true, so this fires on runs that never set it: @info, not @warn.
+            @test_logs (:info, r"equal_arc_wall is ignored") match_mode=:any GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                inputs,
+                plasma,
+                WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=true)
+            )
+            # nfp > 1 can only reach the constructor from an axisymmetric boundary, and is rejected there
+            per_period = VacuumInput(x=inputs.x, y=inputs.y, z=inputs.z, mtheta_in=16, nzeta_in=16,
+                m_modes=inputs.m_modes, n_modes=inputs.n_modes, mtheta=24, nzeta=24, nfp=3)
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(per_period, plasma, WallShapeSettings(shape="conformal", a=0.2))
+            # nowall does not skip that guard
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(per_period, plasma, WallShapeSettings(shape="nowall"))
+            # a plasma surface from a different grid is rejected rather than indexed off the end
+            other_grid = _make_3d_periodic_inputs(mtheta=16, nzeta=16)
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                inputs,
+                GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(other_grid),
+                WallShapeSettings(shape="conformal", a=0.2)
+            )
+            # an offset that folds the surface is rejected rather than silently returned
+            folded = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12)
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                folded,
+                GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(folded),
+                WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            )
+        end
+
+        @testset "WallGeometry3D shape selection" begin
+            # Every shape reaches the right builder through the same chain WallGeometry uses in 2D.
+            # elongated so the elliptical branch has a well-defined focal distance
+            θ_eq = range(0, 2π, length=33)[1:32]
+            axi = VacuumInput(mtheta_in=32, nzeta_in=1, x=collect(1.7 .+ 0.3 .* cos.(θ_eq)),
+                z=collect(0.45 .* sin.(θ_eq)), ν=zeros(32), m_modes=[1, 2], n_modes=[0, 1],
+                mtheta=32, nzeta=32)
+            for (shape, settings) in (("elliptical", WallShapeSettings(shape="elliptical", a=0.5)),
+                ("dee", WallShapeSettings(shape="dee", a=0.3)),
+                ("mod_dee", WallShapeSettings(shape="mod_dee", a=0.5, cw=1.7)))
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(axi, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(axi), settings)
+                @test size(wall.r) == (32 * 32, 3)
+                @test all(isfinite, wall.normal)
+                # revolved shapes are axisymmetric: R and Z repeat from one toroidal plane to the next
+                @test hypot(wall.r[1, 1], wall.r[1, 2]) ≈ hypot(wall.r[1+32, 1], wall.r[1+32, 2])
+                @test wall.r[1, 3] ≈ wall.r[1+32, 3]
+            end
+            # Gap warning uses the measured same-index separation, not a conformal-only offset that
+            # is 0 for these shapes. a = 1 m sits well outside one coarser cell, so no sub-cell warning.
+            @test_logs min_level=Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                axi, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(axi), WallShapeSettings(shape="elliptical", a=1.0)
+            )
+            # an unreadable wall file is still reported by the 2D reader
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                axi,
+                GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(axi),
+                WallShapeSettings(shape="no_such_wall.dat")
+            )
         end
 
         @testset "compute_vacuum_response 3D nowall" begin
@@ -667,6 +802,31 @@
             # Wall and plasma should differ (conformal wall offset from plasma)
             @test !isapprox(plasma_pts, wall_pts)
             @test isapprox(wv, wv', rtol=1e-12)
+        end
+
+        @testset "compute_vacuum_response 3D conformal wall on a non-axisymmetric boundary" begin
+            # The "3D conformal wall" testset above uses _make_3d_inputs (nzeta_in = 1), so it exercises the
+            # revolved branch. This is the only response-level coverage of the offset branch.
+            # a = 2.5 sits above the one-cell resolution floor (1.11 cells) while keeping mtheta, nzeta > 23 so
+            # the near-field patch keeps its full PATCH_RAD. On a 24 x 24 grid those two demands cannot be met
+            # by a close wall: h_ζ ~ 2π R0 / nzeta is 0.45 m here.
+            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24)
+            settings = WallShapeSettings(shape="conformal", a=2.5, equal_arc_wall=false)
+
+            wv = compute_vacuum_response(inputs, settings).wv
+            @test all(isfinite, wv)
+            @test isapprox(wv, wv', rtol=1e-12)
+
+            # A conducting wall is stabilizing, so Wᵛ must exceed the nowall value. Catches a flipped normal
+            # or an offset built on the wrong side, which finiteness and Hermiticity both pass.
+            @test real(wv[1, 1]) > real(compute_vacuum_response(inputs, WallShapeSettings(shape="nowall")).wv[1, 1])
+
+            # This configuration clears the one-cell floor, so it draws no sub-cell or near-fold warning
+            @test_logs min_level=Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                inputs,
+                GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs),
+                settings
+            )
         end
 
         # Field-periodic (layer-2) reduction: an nfp-periodic boundary makes the boundary-integral
