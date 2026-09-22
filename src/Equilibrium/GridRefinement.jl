@@ -60,10 +60,16 @@ const THETA_STRIDE = 8
 # --- shared separatrix edge q-law -------------------------------------------------------------
 # Minimum knots in the edge band before a fit is attempted.
 const EDGE_FIT_MIN_KNOTS = 4
-# Weak absolute floor on the diverging fit. The discrimination is the relative
-# r2_log > r2_linear comparison below (no absolute threshold separates diverted from limited
-# edges); this floor only rejects fits that describe nothing at all.
-const EDGE_FIT_MIN_R2 = 0.90
+# Weak absolute backstop against a fit that describes nothing at all. It is deliberately not a
+# discriminator: no absolute r2 separates diverted from limited edges (real reconstructions fit the
+# log law at 0.929-0.977, the limited a10 deck at 0.972), so the discrimination is the relative
+# r2_log > r2_linear comparison, and the pathology guard is the shear consistency below.
+const EDGE_FIT_MIN_R2 = 0.5
+# `A` in q = q_bar + A*(ln(1-psi) - u_bar) is the local logarithmic shear, so the fit must satisfy
+# A = -(1-psi)*q'(psi) on the knots it was fitted to. Accept a factor of this much disagreement
+# between the fitted slope and the measured one; a fit driven by edge noise, or one describing an
+# edge that does not actually diverge, misses by far more.
+const EDGE_FIT_SHEAR_RATIO = 2.0
 
 # Least-squares slope and coefficient of determination for y = a + b*x.
 function _linfit_r2(x::Vector{Float64}, y::Vector{Float64})
@@ -80,7 +86,8 @@ end
 
 """
     edge_q_law(equil; psi_max, psi_min=EDGE_MODEL_PSI_MIN, min_knots=EDGE_FIT_MIN_KNOTS,
-               min_r2=EDGE_FIT_MIN_R2) -> nothing | (; A, q_bar, u_bar, n_knots, r2_log, r2_linear)
+               min_r2=EDGE_FIT_MIN_R2, shear_ratio=EDGE_FIT_SHEAR_RATIO)
+        -> nothing | (; A, q_bar, u_bar, n_knots, r2_log, r2_linear)
 
 Least-squares fit of the separatrix edge law `q = q̄ + A·(ln(1−ψ) − ū)` over the equilibrium's
 outer knots — the single shared statement of that model, used both by the grid-refinement edge
@@ -91,7 +98,7 @@ plasma with finite edge q is never extrapolated as if q blew up:
 
   - fewer than `min_knots` knots in the band;
   - `A ≥ 0`, i.e. q not rising toward ψ = 1;
-  - `r2_log < min_r2` — the log law does not actually fit;
+  - `r2_log < min_r2` — a weak backstop; the log law describes nothing at all;
   - `r2_log ≤ r2_linear` — a plain linear-in-ψ fit explains the edge q at least as well, which is
     what a **limited** plasma looks like. This comparison carries no scale and is what separates
     the shipped limited decks (Solovev 0.760 vs 0.9996 linear; LAR 0.904 vs 0.998) from the
@@ -105,7 +112,8 @@ function edge_q_law(equil::PlasmaEquilibrium;
     psi_max::Real=Float64(equil.profiles.xs[end]),
     psi_min::Real=EDGE_MODEL_PSI_MIN,
     min_knots::Int=EDGE_FIT_MIN_KNOTS,
-    min_r2::Real=EDGE_FIT_MIN_R2)
+    min_r2::Real=EDGE_FIT_MIN_R2,
+    shear_ratio::Real=EDGE_FIT_SHEAR_RATIO)
     xs = collect(Float64, equil.profiles.xs)
     band = findall(x -> x >= psi_min && x < psi_max, xs)
     if length(band) < min_knots
@@ -123,6 +131,14 @@ function edge_q_law(equil::PlasmaEquilibrium;
     (isfinite(A) && A < 0) || return nothing            # q must rise toward the edge
     (isfinite(r2_log) && r2_log >= min_r2) || return nothing
     (isfinite(r2_linear) && r2_log > r2_linear) || return nothing
+
+    # Shear consistency: the fitted slope is the local logarithmic shear, so it must match the
+    # profile's own -(1-psi)*q' over the same knots.
+    hint = Ref(1)
+    A_meas = median([-(1.0 - xs[i]) * Float64(equil.profiles.q_deriv(xs[i]; hint=hint)) for i in band])
+    isfinite(A_meas) && A_meas < 0 || return nothing
+    ratio = A / A_meas
+    (ratio >= inv(shear_ratio) && ratio <= shear_ratio) || return nothing
 
     return (A=A, q_bar=q_bar, u_bar=u_bar, n_knots=length(band), r2_log=r2_log, r2_linear=r2_linear)
 end

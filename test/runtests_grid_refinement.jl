@@ -200,5 +200,8 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         @test fit !== nothing
         @test fit.A < 0
         @test fit.r2_log > fit.r2_linear
+        # The shear-consistency check is live: this fit's slope is ~5% off the measured
+        # -(1-psi)q', so a tolerance tighter than that must reject it.
+        @test GridRef.edge_q_law(equil; shear_ratio=1.01) === nothing
     end
 end
