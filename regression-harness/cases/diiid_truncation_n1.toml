@@ -2,8 +2,9 @@
 # psihigh = 0.9999 puts the overlap point (psi ~ 0.99976) inside the domain, so the cap binds: qlim
 # is pulled from 8.35 to 8.0 and dmlim then steps back to 7.2, excluding the q=8 surface. This is the
 # only case where psilim_from_layer_overlap changes the domain; every shipped deck leaves it off or
-# inert. Ideal fixed-boundary stability only (no vacuum, local stability, forcing or PE), which
-# writes no energies, so the case pins the domain selection and the scan's layer widths.
+# inert. Ideal free-boundary stability only (no local stability, forcing or PE). Tracks the domain
+# selection, the scan's layer widths, and the energies on the capped domain, so a change in what the
+# truncation does to the physics cannot pass unnoticed.
 [case]
 name = "diiid_truncation_n1"
 description = "DIII-D-like, n=1, psihigh=0.9999 with the resistive-layer overlap cap binding (truncation only)"
@@ -92,6 +93,23 @@ extract = "all_real"
 label = "singular psi locations"
 noise_threshold = 1e-8
 order = 32
+
+# Energies on the capped domain — what the truncation does to the physics, not just the bookkeeping.
+[quantities.ep_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "plasma energy Re(ep[1])"
+noise_threshold = 1e-10
+order = 40
+
+[quantities.et_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+order = 41
 
 # Runtime
 [quantities.runtime]

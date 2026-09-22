@@ -2,8 +2,9 @@
 # Reuses the equilibrium and kinetic profiles of the sibling DIIID-like_ideal_example (referenced
 # by relative path; not duplicated). psihigh is pushed past the layer-overlap point (psi ~ 0.9997,
 # where adjacent resistive layers first touch), so psilim_from_layer_overlap binds: dmlim then
-# truncates just past q=7 instead of q=8. Ideal stability only, with no local stability, vacuum,
-# forcing or perturbed equilibrium, so the run is dominated by the domain selection it exercises.
+# truncates just past q=7 instead of q=8. Ideal free-boundary stability only, with no local
+# stability, forcing or perturbed equilibrium: the energies are kept so a regression case can pin
+# what the capped domain does to the physics, not just to the bookkeeping.
 
 [Equilibrium]
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
@@ -21,7 +22,7 @@ force_termination = false      # Terminate after equilibrium setup (skip stabili
 
 [ForceFreeStates]
 local_stability_flag = false   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
-vac_flag = false               # Compute plasma, vacuum, and total energies for free-boundary modes
+vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 force_termination = true       # Terminate after force-free states (skip perturbed equilibrium calculations)
 
 psiedge = 1.0                  # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
