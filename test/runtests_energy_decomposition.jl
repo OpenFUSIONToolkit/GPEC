@@ -46,3 +46,27 @@ const _ED_FFS = _ED_RES.ffs
     @test xwt_r == xwt
     @test xmt_r != xwt_r
 end
+
+@testset "EnergyDecomposition: surface geometry" begin
+    equil = _ED_FFS.equil
+    mtheta = length(equil.rzphi_ys) - 1
+    thetas = [(k - 1) / mtheta for k in 1:mtheta]
+    geom = PerturbedEquilibrium.SurfaceGeometry(mtheta)
+    psi = 0.5
+    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas)
+    hint = (Ref(1), Ref(1))
+    for k in 1:mtheta
+        m = Equilibrium.flux_surface_metric(equil, psi, thetas[k]; hint=hint)
+        @test geom.jac[k] ≈ m.jac rtol = 1e-12
+        @test sqrt(geom.delpsi2[k]) ≈ m.delpsi rtol = 1e-12
+        @test hypot(geom.R[k] - equil.ro, geom.Z[k] - equil.zo)^2 ≈ equil.rzphi_rsquared((psi, thetas[k]); hint=hint) rtol = 1e-10
+    end
+    @test all(geom.bsq .> 0)
+    @test all(geom.g22 .> 0) && all(geom.g33 .> 0)
+    @test all(geom.g22 .* geom.g33 .- geom.g23 .^ 2 .> 0)
+    @test all(isfinite, geom.jac_psi) && all(isfinite, geom.bsq_psi) && all(isfinite, geom.bsq_theta)
+    ctrl = PerturbedEquilibrium.EnergyDecompositionControl()
+    @test ctrl.eigenmodes == [1] && ctrl.effective_field_form && ctrl.standard_form && !ctrl.write_densities
+    res = PerturbedEquilibrium.EnergyDecompositionResult()
+    @test isempty(res.psi) && isempty(res.dW_plasma) && isempty(res.effective_b_squared_density)
+end

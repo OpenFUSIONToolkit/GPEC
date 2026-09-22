@@ -26,6 +26,7 @@ include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
 include("Utils.jl")
+include("EnergyDecomposition.jl")
 
 # Export main types
 export PerturbedEquilibriumControl
@@ -36,6 +37,8 @@ export ForcingMode
 # Export main functions
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
+export EnergyDecompositionControl, EnergyDecompositionResult
+export decompose_energy, write_energy_decomposition!
 
 """
     compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
