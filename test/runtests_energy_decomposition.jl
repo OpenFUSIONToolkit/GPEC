@@ -210,3 +210,60 @@ end
     @test_throws ArgumentError PerturbedEquilibrium.decompose_energy(ffs; eigenmodes=[0])
     @test_throws ArgumentError PerturbedEquilibrium.decompose_energy(ffs; eigenmodes=[size(ffs.free_boundary.wt, 2) + 1])
 end
+
+# Every dataset under `g` must carry long_name and units, and rank ≥ 2 datasets a dims string.
+function _ed_metadata_violations(g)
+    bad = String[]
+    for name in keys(g)
+        obj = g[name]
+        if obj isa HDF5.Group
+            append!(bad, _ed_metadata_violations(obj))
+        else
+            a = attrs(obj)
+            haskey(a, "long_name") || push!(bad, "$(HDF5.name(obj)): long_name")
+            haskey(a, "units") || push!(bad, "$(HDF5.name(obj)): units")
+            ndims(obj) >= 2 && !haskey(a, "dims") && push!(bad, "$(HDF5.name(obj)): dims")
+        end
+    end
+    return bad
+end
+
+@testset "EnergyDecomposition: HDF5 writer" begin
+    ffs = _ED_FFS
+    res = PerturbedEquilibrium.decompose_energy(ffs; eigenmodes=[1], write_densities=true, verbose=false)
+    path = joinpath(mktempdir(), "energy.h5")
+    h5open(path, "w") do h5
+        PerturbedEquilibrium.write_energy_decomposition!(h5, res)
+        # A second write replaces the group instead of failing on existing datasets.
+        PerturbedEquilibrium.write_energy_decomposition!(h5, res)
+    end
+    h5open(path, "r") do h5
+        g = h5["ForceFreeStates/EnergyDecomposition"]
+        for name in ("psi", "eigenmode_index", "effective_b_squared", "shear_current", "b_squared", "current_coupling",
+            "dW_cumulative", "dW_cumulative_standard_form", "dW_plasma", "dW_plasma_standard_form", "dW_plasma_reference",
+            "dW_plasma_relative_error", "dW_plasma_standard_form_relative_error", "effective_b_curl_residual_max",
+            "effective_b_curl_residual_rms", "effective_b_curl_residual_relative", "Densities/theta", "Densities/R",
+            "Densities/effective_b_squared_density", "Densities/current_coupling_density")
+            @test haskey(g, name)
+        end
+        @test read(g["dW_plasma"]) == res.dW_plasma
+        @test read(g["current_coupling"]) == res.current_coupling
+        @test isempty(_ed_metadata_violations(g))
+        @test HDF5.API.h5ds_is_scale(g["psi"])
+        @test HDF5.API.h5ds_is_attached(g["effective_b_squared"], g["psi"], 1)
+        @test HDF5.API.h5ds_is_attached(g["Densities/effective_b_squared_density"], g["Densities/theta"], 1)
+        @test attrs(g["Densities/R"])["units"] == "m"
+    end
+    # A disabled form writes zero-extent datasets, never missing ones.
+    only_eff = PerturbedEquilibrium.decompose_energy(ffs; standard_form=false, verbose=false)
+    path2 = joinpath(mktempdir(), "energy2.h5")
+    h5open(path2, "w") do h5
+        PerturbedEquilibrium.write_energy_decomposition!(h5, only_eff)
+    end
+    h5open(path2, "r") do h5
+        g = h5["ForceFreeStates/EnergyDecomposition"]
+        @test length(read(g["dW_plasma_standard_form"])) == 0
+        @test length(read(g["b_squared"])) == 0
+        @test !haskey(g, "Densities")
+    end
+end

@@ -876,3 +876,88 @@ function print_energy_decomposition_summary(res::EnergyDecompositionResult, ik::
     @info join(lines, "\n")
     return nothing
 end
+
+# Datasets of the group, in write order; names are the struct fields.
+const _ED_MAIN_FIELDS = (:psi, :eigenmode_index, :effective_b_squared, :effective_b_squared_psi, :effective_b_squared_theta,
+    :effective_b_squared_zeta, :shear_current, :parallel_current_squared, :pressure_curvature, :b_squared, :current_coupling,
+    :pressure_compression, :dW_cumulative, :dW_cumulative_standard_form, :dW_plasma, :dW_plasma_standard_form, :dW_plasma_reference,
+    :dW_plasma_relative_error, :dW_plasma_standard_form_relative_error, :effective_b_curl_residual_max, :effective_b_curl_residual_rms,
+    :effective_b_curl_residual_relative)
+const _ED_DENSITY_FIELDS = (:effective_b_squared_density, :effective_b_squared_psi_density, :effective_b_squared_theta_density,
+    :effective_b_squared_zeta_density, :shear_current_density, :parallel_current_squared_density, :pressure_curvature_density,
+    :effective_b_curl_residual_density, :b_squared_density, :current_coupling_density, :pressure_compression_density)
+
+# Empty result arrays are written zero-extent (the file's not-computed sentinel).
+_h5_value(x::AbstractArray) = isempty(x) ? similar(x, 0) : x
+
+const _ED_NORM = "power-normalized like eigenmode_plasma_energies (per unit ⟨|ξ|²⟩, scaled by 2μ₀/ψ₀²)"
+const _ED_PROFILE = (; dims=("psi", "eigenmode"), attach=(1 => "psi",))
+const _ED_DENSITY = (; dims=("psi", "theta", "eigenmode"), attach=(1 => "psi", 2 => "Densities/theta"))
+
+# Metadata table for ForceFreeStates/EnergyDecomposition/ (paths relative to the group).
+const ENERGY_DECOMPOSITION_H5_ANNOTATIONS = [
+    "psi" => (; long_name="normalized poloidal flux ψ_N of the decomposition nodes (equilibrium knots plus the solution edge)", scale="psi"),
+    "eigenmode_index" => (; long_name="free-boundary eigenmode index of each decomposed mode (1 = least stable)", dims=("eigenmode",)),
+    "effective_b_squared" => (; long_name="∮J|b_eff|²/μ₀ dθ with b_eff = b + ξ_n μ₀ j×n̂, $_ED_NORM", _ED_PROFILE...),
+    "effective_b_squared_psi" => (; long_name="ψ-component contribution Re[(J b_eff^ψ)* b_eff,ψ]/(μ₀J) to effective_b_squared", _ED_PROFILE...),
+    "effective_b_squared_theta" => (; long_name="θ-component contribution Re[(J b_eff^θ)* b_eff,θ]/(μ₀J) to effective_b_squared", _ED_PROFILE...),
+    "effective_b_squared_zeta" => (; long_name="ζ-component contribution Re[(J b_eff^ζ)* b_eff,ζ]/(μ₀J) to effective_b_squared", _ED_PROFILE...),
+    "shear_current" => (; long_name="∮J K1|ξ_n|² dθ with K1 = |∇ψ|²σS (shear-current coupling), $_ED_NORM", _ED_PROFILE...),
+    "parallel_current_squared" => (; long_name="∮J K2|ξ_n|² dθ with K2 = μ₀B²σ² (parallel current squared), $_ED_NORM", _ED_PROFILE...),
+    "pressure_curvature" => (; long_name="∮J K3|ξ_n|² dθ with K3 = 2p'κ_ψ (pressure-curvature drive), $_ED_NORM", _ED_PROFILE...),
+    "b_squared" => (; long_name="standard form: ∮J|b|²/μ₀ dθ, $_ED_NORM", _ED_PROFILE...),
+    "current_coupling" => (; long_name="standard form: ∮J j·(b×ξ*) dθ (imaginary part is roundoff), $_ED_NORM", _ED_PROFILE...),
+    "pressure_compression" => (; long_name="standard form: ∮J (∇·ξ)*(ξ·∇p) dθ (imaginary part is roundoff), $_ED_NORM", _ED_PROFILE...),
+    "dW_cumulative" => (; long_name="running ½∫dψ [effective_b_squared − shear_current − parallel_current_squared − pressure_curvature]", _ED_PROFILE...),
+    "dW_cumulative_standard_form" => (; long_name="running ½∫dψ [b_squared − current_coupling + pressure_compression]", _ED_PROFILE...),
+    "dW_plasma" => (; long_name="plasma potential energy δW_p in the effective-field form, $_ED_NORM", dims=("eigenmode",)),
+    "dW_plasma_standard_form" => (; long_name="plasma potential energy δW_p in the standard form (imaginary part is roundoff), $_ED_NORM", dims=("eigenmode",)),
+    "dW_plasma_reference" => (; long_name="eigenmode_plasma_energies entry of the same eigenmode, the reference for both forms", dims=("eigenmode",)),
+    "dW_plasma_relative_error" => (; long_name="(dW_plasma − dW_plasma_reference)/|dW_plasma_reference|", dims=("eigenmode",)),
+    "dW_plasma_standard_form_relative_error" => (; long_name="(Re dW_plasma_standard_form − dW_plasma_reference)/|dW_plasma_reference|", dims=("eigenmode",)),
+    "effective_b_curl_residual_max" =>
+        (; long_name="max over the equilibrium knots and θ of |(∇×b_eff)·∇ψ|, which vanishes for a consistent effective field", dims=("eigenmode",)),
+    "effective_b_curl_residual_rms" => (; long_name="rms over the equilibrium knots and θ of |(∇×b_eff)·∇ψ|", dims=("eigenmode",)),
+    "effective_b_curl_residual_relative" => (; long_name="effective_b_curl_residual_max divided by max|∂_θ b_eff,ζ/J|, the size of the cancelling terms", dims=("eigenmode",)),
+    "Densities/theta" => (; long_name="poloidal angle θ ∈ [0,1) of the density grid", scale="theta"),
+    "Densities/R" => (; long_name="major radius of the (ψ,θ) grid points", units="m", dims=("psi", "theta"), attach=(1 => "psi", 2 => "Densities/theta")),
+    "Densities/Z" => (; long_name="vertical position of the (ψ,θ) grid points", units="m", dims=("psi", "theta"), attach=(1 => "psi", 2 => "Densities/theta")),
+    "Densities/effective_b_squared_density" => (; long_name="|b_eff|²/μ₀ per point (profile = Σ density·J/mtheta), $_ED_NORM", _ED_DENSITY...),
+    "Densities/effective_b_squared_psi_density" => (; long_name="ψ-component of |b_eff|²/μ₀ per point", _ED_DENSITY...),
+    "Densities/effective_b_squared_theta_density" => (; long_name="θ-component of |b_eff|²/μ₀ per point", _ED_DENSITY...),
+    "Densities/effective_b_squared_zeta_density" => (; long_name="ζ-component of |b_eff|²/μ₀ per point", _ED_DENSITY...),
+    "Densities/shear_current_density" => (; long_name="K1|ξ_n|² per point, K1 = |∇ψ|²σS", _ED_DENSITY...),
+    "Densities/parallel_current_squared_density" => (; long_name="K2|ξ_n|² per point, K2 = μ₀B²σ²", _ED_DENSITY...),
+    "Densities/pressure_curvature_density" => (; long_name="K3|ξ_n|² per point, K3 = 2p'κ_ψ", _ED_DENSITY...),
+    "Densities/effective_b_curl_residual_density" => (; long_name="(∇×b_eff)·∇ψ per point", _ED_DENSITY...),
+    "Densities/b_squared_density" => (; long_name="standard form: |b|²/μ₀ per point", _ED_DENSITY...),
+    "Densities/current_coupling_density" => (; long_name="standard form: j·(b×ξ*) per point", _ED_DENSITY...),
+    "Densities/pressure_compression_density" => (; long_name="standard form: (∇·ξ)*(ξ·∇p) per point", _ED_DENSITY...)
+]
+
+"""
+    write_energy_decomposition!(h5, res) -> nothing
+
+Write `res` to `ForceFreeStates/EnergyDecomposition/` of the open file `h5`, replacing the group
+if it exists, and apply the metadata table. Fields of a disabled form are written zero-extent;
+`Densities/` appears only when the densities were requested.
+"""
+function write_energy_decomposition!(h5::HDF5.File, res::EnergyDecompositionResult)
+    ffs_group = haskey(h5, "ForceFreeStates") ? h5["ForceFreeStates"] : create_group(h5, "ForceFreeStates")
+    haskey(ffs_group, "EnergyDecomposition") && delete_object(ffs_group, "EnergyDecomposition")
+    g = create_group(ffs_group, "EnergyDecomposition")
+    for name in _ED_MAIN_FIELDS
+        g[String(name)] = _h5_value(getfield(res, name))
+    end
+    if !isempty(res.theta)
+        d = create_group(g, "Densities")
+        d["theta"] = res.theta
+        d["R"] = res.R
+        d["Z"] = res.Z
+        for name in _ED_DENSITY_FIELDS
+            d[String(name)] = _h5_value(getfield(res, name))
+        end
+    end
+    Utilities.HDF5Annotations.annotate!(g, ENERGY_DECOMPOSITION_H5_ANNOTATIONS)
+    return nothing
+end
