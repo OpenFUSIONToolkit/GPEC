@@ -189,3 +189,71 @@ function surface_geometry!(geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquil
     end
     return geom
 end
+
+"""
+    CurvatureKernel(mtheta)
+
+Per-θ pieces of the destabilizing kernel on one surface, filled by `curvature_kernel!`:
+the DCON shear `shear` = S, the curvature projection `curvature` = κ_ψ = κ·∇ψ, the parallel
+current density ratio `sigma` = j·B/B², and K1 = |∇ψ|²σS, K2 = μ₀B²σ², K3 = 2p'κ_ψ.
+"""
+struct CurvatureKernel
+    shear::Vector{Float64}
+    curvature::Vector{Float64}
+    sigma::Vector{Float64}
+    K1::Vector{Float64}
+    K2::Vector{Float64}
+    K3::Vector{Float64}
+end
+
+CurvatureKernel(mtheta::Int) = CurvatureKernel((zeros(Float64, mtheta) for _ in 1:6)...)
+
+"""
+    curvature_kernel!(kern, geom, equil, psi, thetas_ext; hint=Ref(1)) -> kern
+
+Fill the curvature kernel at `psi` from the geometry `geom` of the periodic θ points
+`thetas_ext[1:end-1]` (`thetas_ext` closes the period at 1.0). Fortran `gpeq_shear`,
+`gpeq_curvature`, `gpeq_K`; main.tex §"Expression of K in DCON coordinates":
+
+    S   = (χ'²/J) [ q' + ∂_θ( (q ∇ψ·∇θ − ∇ψ·∇ζ)/|∇ψ|² ) ]      (periodic cubic-spline derivative)
+    κ_ψ = (|∇ψ|²/B²) [ (μ₀p)' + ½∂_ψB² + ½∂_θB² (∇ψ·∇θ)/|∇ψ|² ]
+    σ   = j·B/B²  with  j^θ = −F'/(μ₀J),  j^ζ = q j^θ − p'/χ',  B^θ = χ'/J,  B^ζ = qχ'/J
+
+where F' = d(2πF)/dψ and p' = (μ₀p)'/μ₀ come from the equilibrium profile splines.
+"""
+function curvature_kernel!(kern::CurvatureKernel, geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquilibrium, psi::Float64,
+    thetas_ext::Vector{Float64}; hint=Ref(1))
+    profiles = equil.profiles
+    q = profiles.q_spline(psi; hint=hint)
+    q1 = profiles.q_deriv(psi; hint=hint)
+    F1 = profiles.F_deriv(psi; hint=hint)
+    mu0p1 = profiles.P_deriv(psi; hint=hint)
+    p1 = mu0p1 / MU_0
+    chi1 = 2π * equil.psio
+    mtheta = length(geom.jac)
+
+    # Shear geometry term on the closed θ grid; its θ-derivative comes from a periodic cubic spline.
+    ratio = Vector{Float64}(undef, mtheta + 1)
+    for k in 1:mtheta
+        ratio[k] = (q * geom.dpdt[k] - geom.dpdz[k]) / geom.delpsi2[k]
+    end
+    ratio[mtheta+1] = ratio[1]
+    dratio = deriv1(cubic_interp(thetas_ext, ratio; bc=PeriodicBC()))
+
+    for k in 1:mtheta
+        jac = geom.jac[k]
+        kern.shear[k] = (chi1^2 / jac) * (q1 + dratio(thetas_ext[k]))
+        kern.curvature[k] = (geom.delpsi2[k] / geom.bsq[k]) * (mu0p1 + 0.5 * geom.bsq_psi[k] + 0.5 * geom.bsq_theta[k] * geom.dpdt[k] / geom.delpsi2[k])
+        jt = -F1 / (jac * MU_0)
+        jz = q * jt - p1 / chi1
+        bt = chi1 / jac
+        bz = q * chi1 / jac
+        jdotb = geom.g22[k] * bt * jt + geom.g33[k] * bz * jz + geom.g23[k] * (bt * jz + bz * jt)
+        sigma = jdotb / geom.bsq[k]
+        kern.sigma[k] = sigma
+        kern.K1[k] = geom.delpsi2[k] * sigma * kern.shear[k]
+        kern.K2[k] = MU_0 * geom.bsq[k] * sigma^2
+        kern.K3[k] = 2.0 * p1 * kern.curvature[k]
+    end
+    return kern
+end

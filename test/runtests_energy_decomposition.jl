@@ -70,3 +70,26 @@ end
     res = PerturbedEquilibrium.EnergyDecompositionResult()
     @test isempty(res.psi) && isempty(res.dW_plasma) && isempty(res.effective_b_squared_density)
 end
+
+@testset "EnergyDecomposition: curvature kernel" begin
+    equil = _ED_FFS.equil
+    thetas_ext = collect(equil.rzphi_ys)
+    mtheta = length(thetas_ext) - 1
+    geom = PerturbedEquilibrium.SurfaceGeometry(mtheta)
+    kern = PerturbedEquilibrium.CurvatureKernel(mtheta)
+    psi = 0.5
+    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas_ext[1:mtheta])
+    PerturbedEquilibrium.curvature_kernel!(kern, geom, equil, psi, thetas_ext)
+    @test all(isfinite, kern.shear) && all(isfinite, kern.curvature) && all(isfinite, kern.sigma)
+    @test kern.K2 ≈ PerturbedEquilibrium.MU_0 .* geom.bsq .* kern.sigma .^ 2
+    @test kern.K1 ≈ geom.delpsi2 .* kern.sigma .* kern.shear
+    # p' = (μ₀p)'/μ₀ on this surface; K3 = 2 p' κ_ψ
+    p1 = equil.profiles.P_deriv(psi) / PerturbedEquilibrium.MU_0
+    @test kern.K3 ≈ 2 .* p1 .* kern.curvature
+    # The Solovev equilibrium carries a finite parallel current: σ must not vanish identically.
+    @test maximum(abs, kern.sigma) > 0
+    # Flux-surface average of the shear geometry term vanishes, so ⟨J S⟩/χ'² reduces to q' ⟨1⟩.
+    chi1 = 2π * equil.psio
+    q1 = equil.profiles.q_deriv(psi)
+    @test sum(kern.shear .* geom.jac) / mtheta ≈ chi1^2 * q1 rtol = 1e-6
+end
