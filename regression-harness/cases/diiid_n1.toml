@@ -403,6 +403,49 @@ label = "ballooning Delta' profile (checksum)"
 noise_threshold = 0
 order = 74
 
+# Energy decomposition of the least-stable free-boundary eigenmode — the two δW_p route totals
+# (power-normalized like eigenmode_plasma_energies), their mismatch against ep[1], and the
+# (∇×b_eff)·∇ψ consistency residual.
+[quantities.energy_dW_plasma]
+h5path = "ForceFreeStates/EnergyDecomposition/dW_plasma"
+type = "real_vector"
+extract = "all_real"
+label = "energy decomposition dW_p (effective field)"
+noise_threshold = 1e-10
+order = 80
+
+[quantities.energy_dW_plasma_standard_form]
+h5path = "ForceFreeStates/EnergyDecomposition/dW_plasma_standard_form"
+type = "complex_vector"
+extract = "all_complex"
+label = "energy decomposition dW_p (standard form)"
+noise_threshold = 1e-10
+order = 81
+
+[quantities.energy_dW_relative_error]
+h5path = "ForceFreeStates/EnergyDecomposition/dW_plasma_relative_error"
+type = "real_vector"
+extract = "all_real"
+label = "energy decomposition rel. error vs ep"
+noise_threshold = 1e-10
+order = 82
+
+[quantities.energy_dW_standard_form_relative_error]
+h5path = "ForceFreeStates/EnergyDecomposition/dW_plasma_standard_form_relative_error"
+type = "real_vector"
+extract = "all_real"
+label = "energy decomposition std-form rel. error vs ep"
+noise_threshold = 1e-10
+order = 83
+
+[quantities.energy_curl_residual]
+h5path = "ForceFreeStates/EnergyDecomposition/effective_b_curl_residual_relative"
+type = "real_vector"
+extract = "all_real"
+label = "energy decomposition curl residual (relative)"
+noise_threshold = 1e-9
+order = 84
+
 # Runtime
 [quantities.runtime]
 h5path = ""
