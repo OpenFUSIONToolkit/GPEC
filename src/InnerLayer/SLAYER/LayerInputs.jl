@@ -9,14 +9,14 @@
 # Geometry extraction:
 #   - Minor radius at the outboard midplane (θ = 0) via
 #     `equil.rzphi_rsquared((ψ, 0.0))`.
-#   - `da/dψ` via central finite difference on the same bicubic.
+#   - `da/dψ` from the interpolant's own analytic ψ-derivative.
 #   - r-based magnetic shear via `r_based_shear(rs, q, q1, da/dψ)` (defined
 #     in LayerParameters.jl).
 
 using ..Utilities: KineticProfiles
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
     coulomb_log_e, nu_star_e
-using FastInterpolations: DerivOp
+using FastInterpolations: DerivOp, integrate, cubic_interp, cumulative_integrate, ExtendExtrap
 
 """
     surface_minor_radius(equil, psi; theta=0.0) -> Float64
@@ -32,33 +32,126 @@ function surface_minor_radius(equil, psi::Real; theta::Real=0.0)
 end
 
 """
-    surface_da_dpsi(equil, psi; theta=0.0, h=1e-5) -> Float64
+    surface_da_dpsi(equil, psi; theta=0.0) -> Float64
 
-Central finite-difference approximation of `d(minor radius)/dψ` at `psi`.
-Falls back to one-sided differences near the flux-coordinate boundaries
-(0 or 1).
+Analytic ψ-derivative of the minor radius at `psi` and poloidal angle
+`theta`, taken from the `rzphi_rsquared` interpolant's own ψ-derivative as
+`da/dψ = (∂r²/∂ψ) / (2a)`. Valid wherever the interpolant is, including
+under extrapolation past the ψ grid. Diverges at the magnetic axis, where
+`a ~ √ψ`; callers evaluating near `ψ = 0` must check `isfinite`.
 """
-function surface_da_dpsi(equil, psi::Real; theta::Real=0.0, h::Real=1e-5)
-    psi_f = Float64(psi)
-    # Clamp to safe sampling range within (0, 1)
-    eps_edge = 10 * h
-    lo = psi_f - h
-    hi = psi_f + h
-    if lo < eps_edge
-        # one-sided forward
-        a0 = surface_minor_radius(equil, max(psi_f, eps_edge); theta=theta)
-        a1 = surface_minor_radius(equil, max(psi_f, eps_edge) + h; theta=theta)
-        return (a1 - a0) / h
-    elseif hi > 1.0 - eps_edge
-        # one-sided backward
-        a0 = surface_minor_radius(equil, min(psi_f, 1.0 - eps_edge) - h; theta=theta)
-        a1 = surface_minor_radius(equil, min(psi_f, 1.0 - eps_edge); theta=theta)
-        return (a1 - a0) / h
+function surface_da_dpsi(equil, psi::Real; theta::Real=0.0)
+    return _da_dpsi_at_theta(equil, Float64(psi), Float64(theta))
+end
+
+# d(√r²)/dψ at one (ψ, θ) from the interpolant's own ψ-derivative. Shared by all radial-label
+# conventions so none carries its own stencil.
+@inline function _da_dpsi_at_theta(equil, psi::Float64, theta::Float64)
+    r_sq = equil.rzphi_rsquared((psi, theta))
+    a = sqrt(max(r_sq, 0.0))
+    a > 0 || return Inf   # magnetic axis: a ~ √ψ, so da/dψ genuinely diverges
+    return equil.rzphi_rsquared((psi, theta); deriv=DerivOp(1, 0)) / (2a)
+end
+
+"""
+    radial_label(equil; rs_method=:midplane, theta=0.0) -> (r_at, dr_dpsi_at)
+
+Build the pair of closures `r_at(ψ)` and `dr_dpsi_at(ψ)` defining one radial
+label for the layer stack. Both closures must come from the same label,
+because the r-based shear `(r/q)dq/dr`, `τ_R = μ₀r²/η`, `τ_E = r²/χ`, the
+`d_β/r` normalization, the Δ' reference-length factor `k_ref = r_s/(da/dψ)`,
+and any metre-to-ψ width conversion all have to live in one coordinate; a
+mismatched `r` and `dr/dψ` silently corrupts every one of them. All
+derivatives are analytic — no label carries a finite-difference stencil.
+
+# Labels
+
+  - `:midplane` -- outboard-midplane chord from the magnetic axis at `theta`
+    (historical default), natural for comparison with midplane diagnostics.
+  - `:halfwidth` -- midplane half-chord, the mean of the outboard and inboard
+    chords at `θ = 0` and `θ = 0.5`; shift-free. Coincides with the flux label
+    on circular equilibria but is its own convention on shaped ones.
+  - `:fsa` -- θ-mean surface radius, a 128-point midpoint mean of the local
+    minor radius; the closest geometric approximation to `:flux` at interior
+    surfaces of shaped equilibria.
+  - `:volume` -- cylinder-equivalent label `√(V(ψ)/(2π²R₀))`, the
+    Rutherford-literature convention.
+  - `:flux` -- toroidal-flux label. Fitzpatrick, Nucl. Fusion (2025),
+    Eq. 30: `dψ_p/dr = B₀ r g/q` integrates to `ψ_t = B₀r²/2`, so
+    `r = √(2ψ_t/B₀)` with `ψ_t = psio·∫₀^ψ (q/g) dψ′` and `g = F/(B₀R₀)`,
+    `F = R·B_tor`. Note `profiles.F_spline` stores `2πF`, so the
+    implementation divides it by 2π to form `g`.
+    Defined from flux alone, it carries no circular-cross-section assumption,
+    and its derivative `dr/dψ ∝ q` grows toward a separatrix where the
+    geometric labels' `da/dψ` collapses.
+
+On shaped equilibria the labels agree at low-q surfaces and diverge strongly
+near the edge, where the slab-layer matching is label-ambiguous regardless of
+choice. The label is selected programmatically; it is not exposed via TOML.
+"""
+function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
+    theta_f = Float64(theta)
+
+    _flux_r, _flux_dr = if rs_method === :flux
+        b0f = Float64(equil.params.b0)
+        R0f = Float64(equil.ro)
+        psiof = Float64(equil.psio)
+        xs_f = collect(Float64, equil.profiles.xs)
+        # Carry g = F/(B0 R0) rather than assuming g = 1: r² = 2∫(q/g)dψ_p/B0.
+        _g_at(x) = Float64(equil.profiles.F_spline(x)) / (2π * b0f * R0f)
+        qg = [Float64(equil.profiles.q_spline(x)) / _g_at(x) for x in xs_f]
+        Phi = collect(Float64, cumulative_integrate(cubic_interp(xs_f, qg)))
+        r_knots = sqrt.(max.(2 .* psiof .* Phi ./ b0f, 0.0))
+        rspl = cubic_interp(xs_f, r_knots; extrap=ExtendExtrap())
+        (ψ -> Float64(rspl(Float64(ψ))),
+            ψ -> psiof * Float64(equil.profiles.q_spline(Float64(ψ))) /
+                 (b0f * _g_at(Float64(ψ)) * max(Float64(rspl(Float64(ψ))), eps())))
     else
-        a_plus = surface_minor_radius(equil, psi_f + h; theta=theta)
-        a_minus = surface_minor_radius(equil, psi_f - h; theta=theta)
-        return (a_plus - a_minus) / (2h)
+        (nothing, nothing)
     end
+
+    _a_at(ψ, θ) = sqrt(max(equil.rzphi_rsquared((Float64(ψ), Float64(θ))), 0.0))
+
+    _rs_at(ψ) =
+        if rs_method === :fsa
+            N = 128
+            s = 0.0
+            @inbounds for k in 1:N
+                s += _a_at(ψ, (k - 0.5) / N)
+            end
+            s / N
+        elseif rs_method === :halfwidth
+            0.5 * (_a_at(ψ, 0.0) + _a_at(ψ, 0.5))
+        elseif rs_method === :volume
+            # Lower bound just off the axis, where dV/dψ is extrapolated; the omitted sliver
+            # of core volume is negligible for an edge-surface label.
+            V = integrate(equil.profiles.dVdpsi_spline, 1e-4, Float64(ψ))
+            sqrt(max(V, 0.0) / (2π^2 * equil.ro))
+        elseif rs_method === :flux
+            _flux_r(ψ)
+        else
+            surface_minor_radius(equil, ψ; theta=theta_f)
+        end
+
+    _da_dpsi_at(ψ) =
+        if rs_method === :fsa
+            N = 128
+            s = 0.0
+            @inbounds for k in 1:N
+                s += _da_dpsi_at_theta(equil, Float64(ψ), (k - 0.5) / N)
+            end
+            s / N
+        elseif rs_method === :halfwidth
+            0.5 * (_da_dpsi_at_theta(equil, Float64(ψ), 0.0) + _da_dpsi_at_theta(equil, Float64(ψ), 0.5))
+        elseif rs_method === :volume
+            Float64(equil.profiles.dVdpsi_spline(ψ)) / (4π^2 * equil.ro * max(_rs_at(ψ), eps()))
+        elseif rs_method === :flux
+            _flux_dr(ψ)
+        else
+            _da_dpsi_at_theta(equil, Float64(ψ), theta_f)
+        end
+
+    return (_rs_at, _da_dpsi_at)
 end
 
 """
@@ -114,6 +207,12 @@ profiles, without an intermediate file round-trip.
     a prescribed value. (For `dc_type=:rfitzp` and `:lar`, dgeo_val is
     not consulted.)
   - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
+  - `rs_method` -- radial label defining `r_s` for the whole layer stack:
+    `:midplane` (default), `:halfwidth`, `:fsa`, `:volume`, or `:flux`. See
+    [`radial_label`](@ref) for the definitions. S, the r-based shear, W_d,
+    and the Δ' reference-length factor `k_ref` all follow the choice
+    together, so every option is self-consistent. Not exposed via TOML —
+    programmatic use only.
   - `theta`     -- poloidal angle at which to measure minor radius (default
     `0.0`, outboard midplane).
   - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`,
@@ -156,54 +255,22 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             Float64(bt(ψ))
         end
 
-    # Minor-radius extractor: `:midplane` = outboard-midplane chord
-    # (original behavior); `:fsa` = θ-mean of √rzphi_rsquared, the
-    # flux-surface-averaged minor radius.
-    _rs_at(ψ) =
-        if rs_method === :fsa
-            integrand(θ) = sqrt(equil.rzphi_rsquared((Float64(ψ), Float64(θ))))
-            N = 128
-            s = 0.0
-            @inbounds for k in 1:N
-                s += integrand((k - 0.5) / N)
-            end
-            s / N
-        else
-            surface_minor_radius(equil, ψ; theta=theta)
-        end
-    _da_dpsi_at(ψ) =
-        if rs_method === :fsa
-            # central finite difference on _rs_at
-            h = 1e-5
-            lo = ψ - h
-            hi = ψ + h
-            eps_edge = 10h
-            if lo < eps_edge
-                (_rs_at(max(ψ, eps_edge) + h) - _rs_at(max(ψ, eps_edge))) / h
-            elseif hi > 1.0 - eps_edge
-                (_rs_at(min(ψ, 1.0 - eps_edge)) - _rs_at(min(ψ, 1.0 - eps_edge) - h)) / h
-            else
-                (_rs_at(ψ + h) - _rs_at(ψ - h)) / (2h)
-            end
-        else
-            surface_da_dpsi(equil, ψ; theta=theta)
-        end
+    _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta)
 
-    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline
-    # derivatives. When `compute_omega_star=true` we override any ω_*e/ω_*i
-    # carried in `profiles`. Main-ion density is
-    # taken equal to the electron density (quasi-neutrality, matching the
-    # staging step).
+    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
+    # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode
+    # number enters here. Main-ion density is taken equal to the electron density
+    # (quasi-neutrality, matching the staging step).
     chi1 = 2π * equil.psio
-    _omega_star_at(ψ) = begin
+    _omega_star_at(ψ, n_tor) = begin
         n_e = Float64(profiles.n_e(ψ))
         dn_e = Float64(profiles.n_e(ψ; deriv=DerivOp(1)))
         T_e = Float64(profiles.T_e(ψ))
         dT_e = Float64(profiles.T_e(ψ; deriv=DerivOp(1)))
         T_i = Float64(profiles.T_i(ψ))
         dT_i = Float64(profiles.T_i(ψ; deriv=DerivOp(1)))
-        ω_star_e = (2π / chi1) * (T_e * dn_e / n_e + dT_e)
-        ω_star_i = -(2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
+        ω_star_e = n_tor * (2π / chi1) * (T_e * dn_e / n_e + dT_e)
+        ω_star_i = -n_tor * (2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
         return (ω_star_e, ω_star_i)
     end
 
@@ -217,19 +284,16 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         da_dpsi = _da_dpsi_at(psi)
         sval_r = r_based_shear(rs, q, q1, da_dpsi)
 
-        prof = profiles(psi)
-        # Override ω_*e, ω_*i with spline-derivative values when requested.
-        ω_e_use, ω_i_use = if compute_omega_star
-            _omega_star_at(psi)
-        else
-            (prof.omega_e, prof.omega_i)
-        end
-
         # Resonant (m, n): take the first element of the mode-number vectors.
         # Parallel-FM `sing.m`/`sing.n` hold exactly one entry each; ideal
         # DCON may hold multiple — we pick the first and document the choice.
         m_res = sing.m[1]
         n_res = sing.n[1]
+
+        prof = profiles(psi)
+        # Take ω_*e, ω_*i from the spline derivatives, or from `profiles` when the caller
+        # supplies them directly. `run_slayer` supplies zeros, so the latter is a library path.
+        ω_e_use, ω_i_use = compute_omega_star ? _omega_star_at(psi, n_res) : (prof.omega_e, prof.omega_i)
 
         # Pull geometric trapped-fraction inputs from ResistGeometry when
         # available (populated by ForceFreeStates.resist_eval_all!); else
@@ -289,6 +353,26 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             _eval(dgeo_val, psi)
         end
 
+        # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s and
+        # α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48), with α clamped to 0 on Mercier-unstable
+        # surfaces (the factor turns complex there) and K = 1 whenever da/dψ is not a usable
+        # positive number (zero/non-finite/negative would corrupt the Δ' diagonal).
+        k_ref_k = if isfinite(da_dpsi) && da_dpsi > 0.0
+            rs / da_dpsi
+        else
+            @warn("build_slayer_inputs: da/dψ = $da_dpsi at ψ = $psi is not usable; leaving " *
+                  "Δ' unconverted (k_ref = 1) at this surface.", maxlog=3)
+            1.0
+        end
+        alpha_k = if rg === nothing
+            @warn("build_slayer_inputs: sing.restype not populated; using the " *
+                  "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
+                  "conversion at all such surfaces.", maxlog=1)
+            0.5
+        else
+            sqrt(max(-(rg.E + rg.F + rg.H - 0.25), 0.0))
+        end
+
         out[k] = slayer_parameters(;
             n_e=prof.n_e, t_e=prof.T_e, t_i=prof.T_i,
             omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
@@ -304,7 +388,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             f_trap=f_trap_kw,
             nu_e_star=nu_e_star_kw,
             R_major_eff=R_major_eff,
-            lnLambda_form=lnLambda_form
+            lnLambda_form=lnLambda_form,
+            k_ref=k_ref_k,
+            alpha_mercier=alpha_k
         )
     end
     return out
