@@ -160,3 +160,53 @@ end
     PerturbedEquilibrium.surface_densities!(den, geom, kern, sf, eff, equil, psi, ffs.nlow; effective_field_form=true, standard_form=false)
     @test all(iszero, den.b_squared)
 end
+
+@testset "EnergyDecomposition: decompose_energy totals, checks, and toggles" begin
+    ffs = _ED_FFS
+    res = PerturbedEquilibrium.decompose_energy(ffs; eigenmodes=[1], write_densities=true, verbose=false)
+    npsi = length(res.psi)
+    mtheta = length(ffs.equil.rzphi_ys) - 1
+    @test res.eigenmode_index == [1]
+    @test res.psi == first(PerturbedEquilibrium.decomposition_grid(ffs))
+    @test res.effective_b_curl_residual_relative[1] < 1e-8
+    @test res.effective_b_curl_residual_rms[1] <= res.effective_b_curl_residual_max[1]
+    @test res.dW_plasma_reference[1] ≈ real(ffs.free_boundary.ep[1])
+    # mpsi = 16 fixture: 1.4 % / 1.2 % observed; both forms converge to 2e-3 / 3e-4 at mpsi = 128.
+    @test abs(res.dW_plasma_relative_error[1]) < 0.03
+    @test abs(res.dW_plasma_standard_form_relative_error[1]) < 0.03
+    @test res.dW_cumulative[1, 1] == 0.0
+    @test res.dW_cumulative[end, 1] ≈ res.dW_plasma[1]
+    @test res.dW_cumulative_standard_form[end, 1] ≈ res.dW_plasma_standard_form[1]
+    @test res.effective_b_squared ≈ res.effective_b_squared_psi .+ res.effective_b_squared_theta .+ res.effective_b_squared_zeta
+    @test size(res.effective_b_squared_density) == (npsi, mtheta, 1)
+    @test size(res.current_coupling_density) == (npsi, mtheta, 1)
+    @test size(res.R) == (npsi, mtheta)
+    @test res.theta == [(k - 1) / mtheta for k in 1:mtheta]
+    ipsi = npsi ÷ 2
+    jac = [ffs.equil.rzphi_jac((res.psi[ipsi], t)) for t in res.theta]
+    @test sum(res.effective_b_squared_density[ipsi, :, 1] .* jac) / mtheta ≈ res.effective_b_squared[ipsi, 1] rtol = 1e-10
+    @test sum(res.b_squared_density[ipsi, :, 1] .* jac) / mtheta ≈ res.b_squared[ipsi, 1] rtol = 1e-10
+
+    plain = PerturbedEquilibrium.decompose_energy(ffs; verbose=false)
+    @test isempty(plain.theta) && isempty(plain.R) && isempty(plain.effective_b_squared_density)
+    @test plain.dW_plasma == res.dW_plasma
+
+    only_eff = PerturbedEquilibrium.decompose_energy(ffs; standard_form=false, verbose=false)
+    @test isempty(only_eff.b_squared) && isempty(only_eff.dW_plasma_standard_form) && isempty(only_eff.dW_cumulative_standard_form)
+    @test only_eff.dW_plasma == res.dW_plasma
+
+    only_std = PerturbedEquilibrium.decompose_energy(ffs; effective_field_form=false, verbose=false)
+    @test isempty(only_std.dW_plasma) && isempty(only_std.effective_b_squared) && isempty(only_std.effective_b_curl_residual_max)
+    @test only_std.dW_plasma_standard_form == res.dW_plasma_standard_form
+
+    two = PerturbedEquilibrium.decompose_energy(ffs; eigenmodes=[1, 2], verbose=false)
+    @test size(two.effective_b_squared) == (npsi, 2)
+    @test two.dW_plasma[1] == res.dW_plasma[1]
+    @test two.dW_plasma_reference[2] ≈ real(ffs.free_boundary.ep[2])
+    # mpsi = 16 fixture: 3.3 % observed for the second mode; 1e-3 at mpsi = 128.
+    @test abs(two.dW_plasma_relative_error[2]) < 0.07
+
+    @test_throws ArgumentError PerturbedEquilibrium.decompose_energy(ffs; effective_field_form=false, standard_form=false)
+    @test_throws ArgumentError PerturbedEquilibrium.decompose_energy(ffs; eigenmodes=[0])
+    @test_throws ArgumentError PerturbedEquilibrium.decompose_energy(ffs; eigenmodes=[size(ffs.free_boundary.wt, 2) + 1])
+end

@@ -106,8 +106,8 @@ end
 
 Equilibrium geometry of one flux surface on the periodic θ grid, filled by
 `surface_geometry!`. Cylindrical `R`, `Z`; Jacobian `jac` and its ψ-derivative `jac_psi`;
-`delpsi2` = |∇ψ|², `dpdt` = ∇ψ·∇θ, `dpdz` = ∇ψ·∇ζ; covariant metric `g22`, `g23`, `g33` of the
-tangent basis e_i = ∂x/∂q^i; `bsq` = B² with its ψ- and θ-derivatives `bsq_psi`, `bsq_theta`.
+`delpsi2` = |∇ψ|², `dpdt` = ∇ψ·∇θ, `dpdz` = ∇ψ·∇ζ; covariant metric `g11`, `g12`, `g13`, `g22`,
+`g23`, `g33` of the tangent basis e_i = ∂x/∂q^i; `bsq` = B² with its ψ- and θ-derivatives `bsq_psi`, `bsq_theta`.
 """
 struct SurfaceGeometry
     R::Vector{Float64}
@@ -117,6 +117,9 @@ struct SurfaceGeometry
     delpsi2::Vector{Float64}
     dpdt::Vector{Float64}
     dpdz::Vector{Float64}
+    g11::Vector{Float64}
+    g12::Vector{Float64}
+    g13::Vector{Float64}
     g22::Vector{Float64}
     g23::Vector{Float64}
     g33::Vector{Float64}
@@ -125,7 +128,7 @@ struct SurfaceGeometry
     bsq_theta::Vector{Float64}
 end
 
-SurfaceGeometry(mtheta::Int) = SurfaceGeometry((zeros(Float64, mtheta) for _ in 1:13)...)
+SurfaceGeometry(mtheta::Int) = SurfaceGeometry((zeros(Float64, mtheta) for _ in 1:16)...)
 
 """
     surface_geometry!(geom, equil, psi, thetas; hint=(Ref(1), Ref(1))) -> geom
@@ -167,7 +170,10 @@ function surface_geometry!(geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquil
         w31 = (2π * R * rfac / jac) * (deta_x * nu_y - nu_x * (1.0 + deta_y))
         w32 = (R / (2.0 * rfac * jac)) * (nu_x * r2_y - r2_x * nu_y)
 
-        # Tangent basis e_θ, e_ζ without the Jacobian factor (Fortran gpeq_c v-matrix).
+        # Tangent basis e_ψ, e_θ, e_ζ without the Jacobian factor (Fortran gpeq_c v-matrix).
+        v11 = r2_x / (2.0 * rfac)
+        v12 = deta_x * 2π * rfac
+        v13 = nu_x * R
         v21 = r2_y / (2.0 * rfac)
         v22 = (1.0 + deta_y) * 2π * rfac
         v23 = nu_y * R
@@ -180,6 +186,9 @@ function surface_geometry!(geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquil
         geom.delpsi2[k] = w11^2 + w12^2
         geom.dpdt[k] = w11 * w21 + w12 * w22
         geom.dpdz[k] = w11 * w31 + w12 * w32
+        geom.g11[k] = v11^2 + v12^2 + v13^2
+        geom.g12[k] = v11 * v21 + v12 * v22 + v13 * v23
+        geom.g13[k] = v13 * v33
         geom.g22[k] = v21^2 + v22^2 + v23^2
         geom.g23[k] = v23 * v33
         geom.g33[k] = v33^2
@@ -285,8 +294,8 @@ end
 
 Mode-space displacement and perturbed field of free-boundary eigenmode `k` on the radial nodes
 `psi`, `(length(psi) × mpert)` matrices named after the gpeq arrays: `xi_psi` = ξ^ψ,
-`xi_psi1` = ∂ξ^ψ/∂ψ, `Jxi_psi/theta/zeta` = Jξ^i, `Jb_psi/theta/zeta` = Jb^i,
-`b_cov_psi/theta/zeta` = b_i. The edge boundary condition is the eigenvector `wt[:, k]` (unit
+`xi_psi1` = ∂ξ^ψ/∂ψ, `Jxi_psi/theta/zeta` = Jξ^i, `Jb_psi/theta/zeta` = Jb^i (the covariant
+components are formed per surface in `surface_fields!`). The edge boundary condition is the eigenvector `wt[:, k]` (unit
 power norm); ξ and ξ' are cubic-spline interpolated from the ξ solution grid and ξ_s is
 recomputed at every node as −A⁻¹(Bξ' + Cξ) from the ideal Euler-Lagrange matrices there
 (Fortran `gpeq_sol`), which keeps the fields algebraically consistent with the metric at the
@@ -331,17 +340,16 @@ function eigenmode_modes(ffs::ForceFreeStatesResult, k::Int, psi::Vector{Float64
     chi1 = 2π * equil.psio
     Jb_psi, Jb_theta, Jb_zeta = compute_perturbed_field_modes(xi_psi, xi_psi1, xi_s, psi, equil, ffs)
     Jxi_psi, Jxi_theta, Jxi_zeta, _, _ = compute_contra_displacements(xi_psi, xi_psi1, xi_s ./ chi1, psi, equil, ffs, ffs.metric; reg_spot=0.0)
-    _, _, _, b_cov_psi, b_cov_theta, b_cov_zeta = compute_cova_components(Jxi_psi, Jxi_theta, Jxi_zeta, Jb_psi, Jb_theta, Jb_zeta, psi, ffs, ffs.metric)
-    return (; xi_psi, xi_psi1, Jxi_psi, Jxi_theta, Jxi_zeta, Jb_psi, Jb_theta, Jb_zeta, b_cov_psi, b_cov_theta, b_cov_zeta)
+    return (; xi_psi, xi_psi1, Jxi_psi, Jxi_theta, Jxi_zeta, Jb_psi, Jb_theta, Jb_zeta)
 end
 
 """
     SurfaceFields(mtheta)
 
 θ-space eigenmode fields on one surface: the inverse transform of one row of
-`eigenmode_modes` (same names), `dJxi_theta` = ∂_θ(Jξ^θ), and the normal displacement
-`xi_n` = Jξ^ψ/(J|∇ψ|) band-limited to the mode range like the Fortran `xno_mn`. Filled by
-`surface_fields!`.
+`eigenmode_modes` (same names), `dJxi_theta` = ∂_θ(Jξ^θ), the covariant field `b_cov_*` = g_ij Jb^j/J
+formed pointwise with the exact local metric, and the normal displacement `xi_n` = Jξ^ψ/(J|∇ψ|).
+Filled by `surface_fields!`.
 """
 struct SurfaceFields
     xi_psi::Vector{ComplexF64}
@@ -366,13 +374,17 @@ SurfaceFields(mtheta::Int) = SurfaceFields((zeros(ComplexF64, mtheta) for _ in 1
 
 Inverse-transform row `ipsi` of every matrix in `modes` onto the θ grid of `ft`, take the
 θ-derivative of Jξ^θ spectrally (2πi m per mode, exact for the band-limited field where the
-Fortran `gpeq_firstform` fits a periodic spline), and form ξ_n from Jξ^ψ and the geometry
-`geom` with the Fortran `gpeq_normal` round trip through mode space. `work_modes` is an
-`mpert` scratch vector.
+Fortran `gpeq_firstform` fits a periodic spline), lower the field with the exact local metric of
+`geom` (b_i = g_ij Jb^j/J), and form Jξ^ψ = J·ξ^ψ and ξ_n = ξ^ψ/|∇ψ| pointwise. The Fortran
+`gpeq_contra`, `gpeq_cova` and `gpeq_normal` instead truncate Jξ^ψ, b_i and ξ_n to the mode range;
+the pointwise products keep every harmonic, which is what lets |V|² and K₂|ξ_n|² cancel exactly
+in the effective-field form (the truncated versions leave a resolution-independent few-percent
+deficit on the Solovev fixture).
+`work_modes` is an `mpert` scratch vector.
 """
 function surface_fields!(sf::SurfaceFields, ft::Utilities.FourierTransforms.FourierTransform, modes::NamedTuple, ipsi::Int,
     mvals::Vector{Int}, geom::SurfaceGeometry, work_modes::Vector{ComplexF64})
-    for name in (:xi_psi, :xi_psi1, :Jxi_psi, :Jxi_theta, :Jxi_zeta, :Jb_psi, :Jb_theta, :Jb_zeta, :b_cov_psi, :b_cov_theta, :b_cov_zeta)
+    for name in (:xi_psi, :xi_psi1, :Jxi_theta, :Jxi_zeta, :Jb_psi, :Jb_theta, :Jb_zeta)
         Utilities.FourierTransforms.inverse_transform!(getfield(sf, name), ft, view(getfield(modes, name), ipsi, :))
     end
     for i in eachindex(mvals)
@@ -380,10 +392,13 @@ function surface_fields!(sf::SurfaceFields, ft::Utilities.FourierTransforms.Four
     end
     Utilities.FourierTransforms.inverse_transform!(sf.dJxi_theta, ft, work_modes)
     for k in eachindex(geom.jac)
-        sf.xi_n[k] = sf.Jxi_psi[k] / (geom.jac[k] * sqrt(geom.delpsi2[k]))
+        jac = geom.jac[k]
+        sf.Jxi_psi[k] = jac * sf.xi_psi[k]
+        sf.b_cov_psi[k] = (geom.g11[k] * sf.Jb_psi[k] + geom.g12[k] * sf.Jb_theta[k] + geom.g13[k] * sf.Jb_zeta[k]) / jac
+        sf.b_cov_theta[k] = (geom.g12[k] * sf.Jb_psi[k] + geom.g22[k] * sf.Jb_theta[k] + geom.g23[k] * sf.Jb_zeta[k]) / jac
+        sf.b_cov_zeta[k] = (geom.g13[k] * sf.Jb_psi[k] + geom.g23[k] * sf.Jb_theta[k] + geom.g33[k] * sf.Jb_zeta[k]) / jac
+        sf.xi_n[k] = sf.Jxi_psi[k] / (jac * sqrt(geom.delpsi2[k]))
     end
-    Utilities.FourierTransforms.transform!(work_modes, ft, sf.xi_n)
-    Utilities.FourierTransforms.inverse_transform!(sf.xi_n, ft, work_modes)
     return sf
 end
 
@@ -550,4 +565,314 @@ function surface_integral(density::AbstractVector, jac::AbstractVector{Float64})
         acc += density[k] * jac[k]
     end
     return acc / length(density)
+end
+
+# Relative (∇×b_eff)·∇ψ residual above which the effective field is reported as inconsistent.
+const _CURL_RESIDUAL_WARN_TOL = 1e-8
+# Relative mismatch between a reconstructed δW_p and eigenmode_plasma_energies that triggers a warning.
+const _ENERGY_MISMATCH_WARN_TOL = 0.05
+
+# Scale from the Bernstein integrals (2μ₀δW form) to the normalization of eigenmode_plasma_energies.
+_energy_scale(equil::Equilibrium.PlasmaEquilibrium) = 2 * MU_0 / equil.psio^2
+
+# Cubic-spline integral over ψ with the running value at every node (Fortran recon_int = "spline").
+# Repeated ψ nodes are collapsed for the fit and the running value is carried across them.
+function _radial_integral(psi::Vector{Float64}, y::AbstractVector{<:Real})
+    keep = trues(length(psi))
+    for i in 2:length(psi)
+        keep[i] = psi[i] > psi[i-1]
+    end
+    itp = cubic_interp(psi[keep], Float64.(y[keep]); bc=CubicFit())
+    total = FastInterpolations.integrate(itp)
+    cum_keep = vec(FastInterpolations.cumulative_integrate(itp))
+    cum = Vector{Float64}(undef, length(psi))
+    j = 0
+    for i in eachindex(psi)
+        j += keep[i]
+        cum[i] = cum_keep[j]
+    end
+    return total, cum
+end
+
+function _radial_integral(psi::Vector{Float64}, y::AbstractVector{<:Complex})
+    tr, cr = _radial_integral(psi, real.(y))
+    ti, ci = _radial_integral(psi, imag.(y))
+    return complex(tr, ti), complex.(cr, ci)
+end
+
+# Allocate the result arrays of the enabled forms; disabled forms keep their empty defaults.
+function _allocate_result!(res::EnergyDecompositionResult, npsi::Int, mtheta::Int, nk::Int, thetas::Vector{Float64},
+    effective_field_form::Bool, standard_form::Bool, write_densities::Bool)
+    res.dW_plasma_reference = zeros(nk)
+    if effective_field_form
+        for f in (:effective_b_squared, :effective_b_squared_psi, :effective_b_squared_theta, :effective_b_squared_zeta, :shear_current,
+            :parallel_current_squared, :pressure_curvature, :dW_cumulative)
+            setfield!(res, f, zeros(npsi, nk))
+        end
+        for f in (:dW_plasma, :dW_plasma_relative_error, :effective_b_curl_residual_max, :effective_b_curl_residual_rms, :effective_b_curl_residual_relative)
+            setfield!(res, f, zeros(nk))
+        end
+    end
+    if standard_form
+        res.b_squared = zeros(npsi, nk)
+        res.current_coupling = zeros(ComplexF64, npsi, nk)
+        res.pressure_compression = zeros(ComplexF64, npsi, nk)
+        res.dW_cumulative_standard_form = zeros(ComplexF64, npsi, nk)
+        res.dW_plasma_standard_form = zeros(ComplexF64, nk)
+        res.dW_plasma_standard_form_relative_error = zeros(nk)
+    end
+    if write_densities
+        res.theta = copy(thetas)
+        res.R = zeros(npsi, mtheta)
+        res.Z = zeros(npsi, mtheta)
+        if effective_field_form
+            for f in (:effective_b_squared_density, :effective_b_squared_psi_density, :effective_b_squared_theta_density,
+                :effective_b_squared_zeta_density, :shear_current_density, :parallel_current_squared_density, :pressure_curvature_density)
+                setfield!(res, f, zeros(npsi, mtheta, nk))
+            end
+            res.effective_b_curl_residual_density = zeros(ComplexF64, npsi, mtheta, nk)
+        end
+        if standard_form
+            res.b_squared_density = zeros(npsi, mtheta, nk)
+            res.current_coupling_density = zeros(ComplexF64, npsi, mtheta, nk)
+            res.pressure_compression_density = zeros(ComplexF64, npsi, mtheta, nk)
+        end
+    end
+    return res
+end
+
+"""
+    decompose_energy(ffs; eigenmodes=[1], effective_field_form=true, standard_form=true, write_densities=false, verbose=ffs.control.verbose)
+        -> EnergyDecompositionResult
+
+Decompose the plasma potential energy of the free-boundary eigenmodes `eigenmodes` of a forward
+ForceFreeStates solve on the (ψ,θ) grid (Fortran `gpout_recon` and `gpout_recon2`). For each
+eigenmode the unregularized gpeq chain gives ξ and b in mode space on the radial nodes of
+`decomposition_grid`; every node is transformed to θ space, the effective field
+b_eff = b + ξ_n(μ₀ j × n̂) and the curvature kernel K are built, and the per-surface integrals of
+the enabled forms are integrated in ψ with a cubic spline. All energies are scaled by 2μ₀/ψ₀² so
+`dW_plasma` reads in the normalization of `eigenmode_plasma_energies`, whose entry `ep[k]` is
+stored as `dW_plasma_reference`. Two checks run every time: the relative (∇×b_eff)·∇ψ residual
+over the equilibrium knots and the relative mismatch of each total against the reference; both
+warn above their tolerance and are stored as data.
+
+Requires the dense ξ solution (`integrator = "forward"`), the free-boundary eigenmodes
+(`vac_flag = true`), an ideal solve, a single toroidal mode number, and at least one enabled
+form; anything else throws an `ArgumentError`.
+"""
+function decompose_energy(ffs::ForceFreeStatesResult; eigenmodes::Vector{Int}=[1], effective_field_form::Bool=true, standard_form::Bool=true,
+    write_densities::Bool=false, verbose::Bool=ffs.control.verbose)
+    (effective_field_form || standard_form) || throw(ArgumentError("EnergyDecomposition: enable at least one of effective_field_form and standard_form"))
+    ffs.solution === nothing && throw(ArgumentError("EnergyDecomposition needs the dense ξ solution of a forward run (integrator = \"forward\")"))
+    ffs.free_boundary === nothing && throw(ArgumentError("EnergyDecomposition needs the free-boundary eigenmodes (vac_flag = true)"))
+    ffs.nlow == ffs.nhigh || throw(ArgumentError("EnergyDecomposition handles a single toroidal mode number (nn_low == nn_high)"))
+    ffs.mats.kinetic === nothing || throw(ArgumentError("EnergyDecomposition decomposes ideal eigenmodes only (kinetic_factor = 0)"))
+    free = ffs.free_boundary
+    equil = ffs.equil
+    nmodes = size(free.wt, 2)
+    for k in eigenmodes
+        1 <= k <= nmodes || throw(ArgumentError("EnergyDecomposition: eigenmode $k is outside 1:$nmodes"))
+    end
+
+    psi, is_knot = decomposition_grid(ffs)
+    npsi = length(psi)
+    thetas_ext = collect(equil.rzphi_ys)
+    mtheta = length(thetas_ext) - 1
+    thetas = thetas_ext[1:mtheta]
+    mpert = ffs.mpert
+    mvals = collect(ffs.mlow:ffs.mhigh)
+    nn = ffs.nlow
+    scale = _energy_scale(equil)
+    nk = length(eigenmodes)
+
+    res = EnergyDecompositionResult(; psi=copy(psi), eigenmode_index=copy(eigenmodes))
+    _allocate_result!(res, npsi, mtheta, nk, thetas, effective_field_form, standard_form, write_densities)
+
+    # Per-thread scratch; the ψ loop is threaded :static so threadid() indexes it safely.
+    ft = Utilities.FourierTransforms.FourierTransform(mtheta, mpert, ffs.mlow)
+    nt = Threads.maxthreadid()
+    geoms = [SurfaceGeometry(mtheta) for _ in 1:nt]
+    kerns = [CurvatureKernel(mtheta) for _ in 1:nt]
+    sfs = [SurfaceFields(mtheta) for _ in 1:nt]
+    effs = [EffectiveField(mtheta) for _ in 1:nt]
+    dens = [SurfaceDensities(mtheta) for _ in 1:nt]
+    curls = [zeros(ComplexF64, mtheta) for _ in 1:nt]
+    mode_bufs = [(zeros(ComplexF64, mpert), zeros(ComplexF64, mpert), zeros(ComplexF64, mpert)) for _ in 1:nt]
+    fun_bufs = [zeros(ComplexF64, mtheta) for _ in 1:nt]
+    hints2d = [(Ref(1), Ref(1)) for _ in 1:nt]
+    hints1d = [Ref(1) for _ in 1:nt]
+
+    # Per-surface integrals of the current eigenmode, unscaled, filled by the threaded loop.
+    eb = zeros(npsi)
+    eb_p = zeros(npsi)
+    eb_t = zeros(npsi)
+    eb_z = zeros(npsi)
+    k1 = zeros(npsi)
+    k2 = zeros(npsi)
+    k3 = zeros(npsi)
+    b2 = zeros(npsi)
+    cc = zeros(ComplexF64, npsi)
+    pc = zeros(ComplexF64, npsi)
+    curl_max = zeros(npsi)
+    curl_sumsq = zeros(npsi)
+    curl_scale = zeros(npsi)
+
+    # The θ transforms are small BLAS matvecs; one BLAS thread per Julia thread avoids oversubscription.
+    blas_threads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    try
+        for (ik, k) in enumerate(eigenmodes)
+            modes = eigenmode_modes(ffs, k, psi)
+            Threads.@threads :static for ipsi in 1:npsi
+                tid = Threads.threadid()
+                geom = geoms[tid]
+                kern = kerns[tid]
+                sf = sfs[tid]
+                eff = effs[tid]
+                den = dens[tid]
+                theta_modes, zeta_modes, work_modes = mode_bufs[tid]
+                psi_i = psi[ipsi]
+                surface_geometry!(geom, equil, psi_i, thetas; hint=hints2d[tid])
+                surface_fields!(sf, ft, modes, ipsi, mvals, geom, work_modes)
+                if effective_field_form
+                    curvature_kernel!(kern, geom, equil, psi_i, thetas_ext; hint=hints1d[tid])
+                    effective_field!(eff, geom, equil, psi_i, sf; hint=hints1d[tid])
+                    curl_scale[ipsi] = curl_residual!(curls[tid], ft, eff, geom, mvals, nn, theta_modes, zeta_modes, work_modes, fun_bufs[tid])
+                    curl_max[ipsi] = maximum(abs, curls[tid])
+                    curl_sumsq[ipsi] = sum(abs2, curls[tid])
+                end
+                surface_densities!(den, geom, kern, sf, eff, equil, psi_i, nn; effective_field_form, standard_form, hint=hints1d[tid])
+                if effective_field_form
+                    eb[ipsi] = surface_integral(den.effective_b_squared, geom.jac)
+                    eb_p[ipsi] = surface_integral(den.effective_b_squared_psi, geom.jac)
+                    eb_t[ipsi] = surface_integral(den.effective_b_squared_theta, geom.jac)
+                    eb_z[ipsi] = surface_integral(den.effective_b_squared_zeta, geom.jac)
+                    k1[ipsi] = surface_integral(den.shear_current, geom.jac)
+                    k2[ipsi] = surface_integral(den.parallel_current_squared, geom.jac)
+                    k3[ipsi] = surface_integral(den.pressure_curvature, geom.jac)
+                end
+                if standard_form
+                    b2[ipsi] = surface_integral(den.b_squared, geom.jac)
+                    cc[ipsi] = surface_integral(den.current_coupling, geom.jac)
+                    pc[ipsi] = surface_integral(den.pressure_compression, geom.jac)
+                end
+                if write_densities
+                    if ik == 1
+                        res.R[ipsi, :] .= geom.R
+                        res.Z[ipsi, :] .= geom.Z
+                    end
+                    if effective_field_form
+                        res.effective_b_squared_density[ipsi, :, ik] .= scale .* den.effective_b_squared
+                        res.effective_b_squared_psi_density[ipsi, :, ik] .= scale .* den.effective_b_squared_psi
+                        res.effective_b_squared_theta_density[ipsi, :, ik] .= scale .* den.effective_b_squared_theta
+                        res.effective_b_squared_zeta_density[ipsi, :, ik] .= scale .* den.effective_b_squared_zeta
+                        res.shear_current_density[ipsi, :, ik] .= scale .* den.shear_current
+                        res.parallel_current_squared_density[ipsi, :, ik] .= scale .* den.parallel_current_squared
+                        res.pressure_curvature_density[ipsi, :, ik] .= scale .* den.pressure_curvature
+                        res.effective_b_curl_residual_density[ipsi, :, ik] .= curls[tid]
+                    end
+                    if standard_form
+                        res.b_squared_density[ipsi, :, ik] .= scale .* den.b_squared
+                        res.current_coupling_density[ipsi, :, ik] .= scale .* den.current_coupling
+                        res.pressure_compression_density[ipsi, :, ik] .= scale .* den.pressure_compression
+                    end
+                end
+            end
+
+            reference = real(free.ep[k])
+            res.dW_plasma_reference[ik] = reference
+            if effective_field_form
+                res.effective_b_squared[:, ik] .= scale .* eb
+                res.effective_b_squared_psi[:, ik] .= scale .* eb_p
+                res.effective_b_squared_theta[:, ik] .= scale .* eb_t
+                res.effective_b_squared_zeta[:, ik] .= scale .* eb_z
+                res.shear_current[:, ik] .= scale .* k1
+                res.parallel_current_squared[:, ik] .= scale .* k2
+                res.pressure_curvature[:, ik] .= scale .* k3
+                tot_eb, cum_eb = _radial_integral(psi, @view res.effective_b_squared[:, ik])
+                tot_k1, cum_k1 = _radial_integral(psi, @view res.shear_current[:, ik])
+                tot_k2, cum_k2 = _radial_integral(psi, @view res.parallel_current_squared[:, ik])
+                tot_k3, cum_k3 = _radial_integral(psi, @view res.pressure_curvature[:, ik])
+                res.dW_cumulative[:, ik] .= 0.5 .* (cum_eb .- cum_k1 .- cum_k2 .- cum_k3)
+                res.dW_plasma[ik] = 0.5 * (tot_eb - tot_k1 - tot_k2 - tot_k3)
+                res.dW_plasma_relative_error[ik] = (res.dW_plasma[ik] - reference) / abs(reference)
+                res.effective_b_curl_residual_max[ik] = maximum(curl_max[is_knot])
+                res.effective_b_curl_residual_rms[ik] = sqrt(sum(curl_sumsq[is_knot]) / (count(is_knot) * mtheta))
+                res.effective_b_curl_residual_relative[ik] = res.effective_b_curl_residual_max[ik] / maximum(curl_scale[is_knot])
+            end
+            if standard_form
+                res.b_squared[:, ik] .= scale .* b2
+                res.current_coupling[:, ik] .= scale .* cc
+                res.pressure_compression[:, ik] .= scale .* pc
+                tot_b2, cum_b2 = _radial_integral(psi, @view res.b_squared[:, ik])
+                tot_cc, cum_cc = _radial_integral(psi, @view res.current_coupling[:, ik])
+                tot_pc, cum_pc = _radial_integral(psi, @view res.pressure_compression[:, ik])
+                res.dW_cumulative_standard_form[:, ik] .= 0.5 .* (cum_b2 .- cum_cc .+ cum_pc)
+                res.dW_plasma_standard_form[ik] = 0.5 * (tot_b2 - tot_cc + tot_pc)
+                res.dW_plasma_standard_form_relative_error[ik] = (real(res.dW_plasma_standard_form[ik]) - reference) / abs(reference)
+            end
+
+            verbose && print_energy_decomposition_summary(res, ik)
+            if effective_field_form
+                rel = res.effective_b_curl_residual_relative[ik]
+                rel > _CURL_RESIDUAL_WARN_TOL &&
+                    @warn "EnergyDecomposition: (∇×b_eff)·∇ψ of eigenmode $k does not vanish (relative residual $(@sprintf("%.2e", rel)) > $(_CURL_RESIDUAL_WARN_TOL))"
+                err = res.dW_plasma_relative_error[ik]
+                abs(err) > _ENERGY_MISMATCH_WARN_TOL &&
+                    @warn "EnergyDecomposition: effective-field δW_p of eigenmode $k differs from eigenmode_plasma_energies by $(@sprintf("%.2f", 100 * err)) %"
+            end
+            if standard_form
+                err = res.dW_plasma_standard_form_relative_error[ik]
+                abs(err) > _ENERGY_MISMATCH_WARN_TOL &&
+                    @warn "EnergyDecomposition: standard-form δW_p of eigenmode $k differs from eigenmode_plasma_energies by $(@sprintf("%.2f", 100 * err)) %"
+            end
+        end
+    finally
+        BLAS.set_num_threads(blas_threads)
+    end
+    return res
+end
+
+# Total of a stored profile over ψ (the profiles are already scaled).
+_profile_total(res::EnergyDecompositionResult, profile::AbstractMatrix, ik::Int) = first(_radial_integral(res.psi, @view profile[:, ik]))
+
+"""
+    print_energy_decomposition_summary(res, ik)
+
+Log the totals of decomposed eigenmode number `ik` of `res` and the two consistency checks.
+"""
+function print_energy_decomposition_summary(res::EnergyDecompositionResult, ik::Int)
+    k = res.eigenmode_index[ik]
+    lines = ["Energy decomposition of free-boundary eigenmode $k (power-normalized, per unit ⟨|ξ|²⟩)"]
+    if !isempty(res.dW_plasma)
+        eb = _profile_total(res, res.effective_b_squared, ik)
+        kk = _profile_total(res, res.shear_current, ik) + _profile_total(res, res.parallel_current_squared, ik) + _profile_total(res, res.pressure_curvature, ik)
+        push!(lines, @sprintf("  |b_eff|²/μ₀ = %+.4e   K|ξ_n|² = %+.4e   δW_p = %+.4e", eb, kk, res.dW_plasma[ik]))
+        push!(
+            lines,
+            @sprintf("  shear = %+.4e   parallel = %+.4e   curvature = %+.4e",
+                _profile_total(res, res.shear_current, ik), _profile_total(res, res.parallel_current_squared, ik), _profile_total(res, res.pressure_curvature, ik))
+        )
+    end
+    if !isempty(res.dW_plasma_standard_form)
+        push!(
+            lines,
+            @sprintf("  standard form: |b|²/μ₀ = %+.4e   current coupling = %+.4e   pressure = %+.4e   δW_p = %+.4e",
+                _profile_total(res, res.b_squared, ik), real(_profile_total(res, res.current_coupling, ik)),
+                real(_profile_total(res, res.pressure_compression, ik)), real(res.dW_plasma_standard_form[ik]))
+        )
+    end
+    ref_line = @sprintf("  ForceFreeStates ep[%d] = %+.4e", k, res.dW_plasma_reference[ik])
+    isempty(res.dW_plasma) || (ref_line *= @sprintf("   relative difference = %.2e", res.dW_plasma_relative_error[ik]))
+    isempty(res.dW_plasma_standard_form) || (ref_line *= @sprintf("   (standard form %.2e)", res.dW_plasma_standard_form_relative_error[ik]))
+    push!(lines, ref_line)
+    if !isempty(res.effective_b_curl_residual_max)
+        push!(
+            lines,
+            @sprintf("  (∇×b_eff)·∇ψ residual: max %.2e, rms %.2e, relative %.2e",
+                res.effective_b_curl_residual_max[ik], res.effective_b_curl_residual_rms[ik], res.effective_b_curl_residual_relative[ik])
+        )
+    end
+    @info join(lines, "\n")
+    return nothing
 end
