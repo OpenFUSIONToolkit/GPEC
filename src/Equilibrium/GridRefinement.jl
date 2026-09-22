@@ -494,32 +494,8 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
 end
 
 """
-    _truncate_density(xs, rho, psihigh) -> (xs_t, rho_t)
-
-Restrict a measured knot density to `[xs[1], psihigh]`, linearly interpolating `rho` at the new
-outer endpoint so the density integral stays continuous in `psihigh`. Errors when `psihigh` lies
-outside the sampled grid, where the density is unmeasured.
-"""
-function _truncate_density(xs, rho::Vector{Float64}, psihigh::Float64)
-    xs_v = collect(Float64, xs)
-    psihigh > xs_v[1] ||
-        error("_truncate_density: psihigh=$psihigh must exceed the inner grid bound $(xs_v[1])")
-    psihigh <= xs_v[end] + 1e-12 ||
-        error(
-            "_truncate_density: psihigh=$psihigh exceeds the pass-1 grid end $(xs_v[end]); " *
-            "the knot density is unmeasured there — form the enlarged domain first, then refine against it"
-        )
-    psihigh >= xs_v[end] - 1e-12 && return (xs_v, rho)
-
-    k = searchsortedlast(xs_v, psihigh)
-    frac = (psihigh - xs_v[k]) / (xs_v[k+1] - xs_v[k])
-    rho_end = rho[k] + frac * (rho[k+1] - rho[k])
-    return (vcat(xs_v[1:k], psihigh), vcat(rho[1:k], rho_end))
-end
-
-"""
     refined_psi_grid(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[],
-                     psihigh=nothing, singfac_min=1e-4, n_min=1, bracket_coef=BRACKET_COEF,
+                     singfac_min=1e-4, n_min=1, bracket_coef=BRACKET_COEF,
                      min_spacing=MIN_KNOT_SPACING, N_cap=1024) -> Vector{Float64}
 
 Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: measured-curvature knot
@@ -531,18 +507,11 @@ whose pedestal gradients attract knots; `mandatory` lists rational-surface ψ va
 `dpsi = singfac_min/(n_min·|q′|)`, and the bracket half-width is `bracket_coef·dpsi` (floored at
 `min_spacing`). Rational surfaces are bracketed, not pinned: a knot on the surface would make the
 Δ′ extraction's cubic 3rd derivative jump mid-stencil (see `BRACKET_COEF`).
-
-`psihigh` builds the grid for a domain *smaller* than the one `equil` was formed on: the measured
-density is truncated there and the last node lands exactly on it. This lets a pass-1 equilibrium
-supply the density for a re-form on a reduced domain without an extra solve. Passing a `psihigh`
-beyond the pass-1 grid is an error — the density out there is unmeasured, so an enlarged domain
-must be formed first and refined against that.
 """
 function refined_psi_grid(equil::PlasmaEquilibrium;
     tau::Float64,
     kin::Union{Nothing,KineticProfileSplines}=nothing,
     mandatory::Vector{Float64}=Float64[],
-    psihigh::Union{Nothing,Real}=nothing,
     singfac_min::Float64=1e-4,
     n_min::Int=1,
     bracket_coef::Float64=BRACKET_COEF,
@@ -550,9 +519,6 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     N_cap::Int=REFINED_N_CAP)
     xs = equil.profiles.xs
     rho = _knot_density(equil; tau, kin)
-    if psihigh !== nothing
-        xs, rho = _truncate_density(xs, rho, Float64(psihigh))
-    end
     # Floor the density to a fixed (τ-independent) locally-uniform fine patch around each rational
     # so Δ′ has the resolution to sample 3rd derivatives there at any accuracy target (see
     # RATIONAL_RES_SPACING).
