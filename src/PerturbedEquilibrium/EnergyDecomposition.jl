@@ -257,3 +257,213 @@ function curvature_kernel!(kern::CurvatureKernel, geom::SurfaceGeometry, equil::
     end
     return kern
 end
+
+"""
+    decomposition_grid(ffs) -> (psi, is_knot)
+
+Radial nodes of the decomposition: the equilibrium ψ knots inside the ξ solution domain, where
+the metric coefficients, the Euler-Lagrange matrices and the geometry are all exact (the Fortran
+`gpout_recon` loops over the same knots), plus the solution edge appended when the last knot
+falls short of it so the radial integral reaches the plasma edge. `is_knot` marks the exact
+nodes; the (∇×b_eff)·∇ψ residual is an algebraic identity there and is reported on them only.
+"""
+function decomposition_grid(ffs::ForceFreeStatesResult)
+    solution = ffs.solution
+    psi_lo = solution.psi_store[1]
+    psi_hi = solution.psi_store[solution.step]
+    psi = [x for x in ffs.equil.rzphi_xs if psi_lo <= x <= psi_hi]
+    is_knot = trues(length(psi))
+    if isempty(psi) || psi[end] < psi_hi - 1e-10
+        push!(psi, psi_hi)
+        push!(is_knot, false)
+    end
+    return psi, is_knot
+end
+
+"""
+    eigenmode_modes(ffs, k, psi) -> NamedTuple
+
+Mode-space displacement and perturbed field of free-boundary eigenmode `k` on the radial nodes
+`psi`, `(length(psi) × mpert)` matrices named after the gpeq arrays: `xi_psi` = ξ^ψ,
+`xi_psi1` = ∂ξ^ψ/∂ψ, `Jxi_psi/theta/zeta` = Jξ^i, `Jb_psi/theta/zeta` = Jb^i,
+`b_cov_psi/theta/zeta` = b_i. The edge boundary condition is the eigenvector `wt[:, k]` (unit
+power norm); ξ and ξ' are cubic-spline interpolated from the ξ solution grid and ξ_s is
+recomputed at every node as −A⁻¹(Bξ' + Cξ) from the ideal Euler-Lagrange matrices there
+(Fortran `gpeq_sol`), which keeps the fields algebraically consistent with the metric at the
+equilibrium knots. The rest of the chain is the unregularized (`reg_spot = 0`) one
+`reconstruct_physical_fields` runs for a forced response.
+"""
+function eigenmode_modes(ffs::ForceFreeStatesResult, k::Int, psi::Vector{Float64})
+    solution = ffs.solution
+    equil = ffs.equil
+    mats = ffs.mats
+    nsol = solution.step
+    psi_store = solution.psi_store[1:nsol]
+    u1_edge = Matrix(@view solution.u_store[:, :, 1, nsol])
+    edge = Vector{ComplexF64}(@view ffs.free_boundary.wt[:, k])
+    xi_sol, xi1_sol, _ = sum_eigenmode_contributions(edge, u1_edge, solution, ffs)
+    itp_xi = cubic_interp(psi_store, Series(xi_sol); bc=CubicFit(), extrap=ExtendExtrap())
+    itp_xi1 = cubic_interp(psi_store, Series(xi1_sol); bc=CubicFit(), extrap=ExtendExtrap())
+
+    nnode = length(psi)
+    mpert = ffs.mpert
+    N = ffs.numpert_total
+    xi_psi = zeros(ComplexF64, nnode, mpert)
+    xi_psi1 = zeros(ComplexF64, nnode, mpert)
+    xi_s = zeros(ComplexF64, nnode, mpert)
+    amat = zeros(ComplexF64, N, N)
+    bmat = zeros(ComplexF64, N, N)
+    cmat = zeros(ComplexF64, N, N)
+    rhs = zeros(ComplexF64, N)
+    hint = Ref(1)
+    for (i, p) in enumerate(psi)
+        xi_psi[i, :] .= itp_xi(p)
+        xi_psi1[i, :] .= itp_xi1(p)
+        mats.ideal.A_spline(view(amat, :), p; hint=hint)
+        mats.ideal.B_spline(view(bmat, :), p; hint=hint)
+        mats.ideal.C_spline(view(cmat, :), p; hint=hint)
+        mul!(rhs, bmat, view(xi_psi1, i, :))
+        mul!(rhs, cmat, view(xi_psi, i, :), 1.0 + 0.0im, 1.0 + 0.0im)
+        ldiv!(cholesky!(Hermitian(amat, :L)), rhs)
+        xi_s[i, :] .= .-rhs
+    end
+
+    chi1 = 2π * equil.psio
+    Jb_psi, Jb_theta, Jb_zeta = compute_perturbed_field_modes(xi_psi, xi_psi1, xi_s, psi, equil, ffs)
+    Jxi_psi, Jxi_theta, Jxi_zeta, _, _ = compute_contra_displacements(xi_psi, xi_psi1, xi_s ./ chi1, psi, equil, ffs, ffs.metric; reg_spot=0.0)
+    _, _, _, b_cov_psi, b_cov_theta, b_cov_zeta = compute_cova_components(Jxi_psi, Jxi_theta, Jxi_zeta, Jb_psi, Jb_theta, Jb_zeta, psi, ffs, ffs.metric)
+    return (; xi_psi, xi_psi1, Jxi_psi, Jxi_theta, Jxi_zeta, Jb_psi, Jb_theta, Jb_zeta, b_cov_psi, b_cov_theta, b_cov_zeta)
+end
+
+"""
+    SurfaceFields(mtheta)
+
+θ-space eigenmode fields on one surface: the inverse transform of one row of
+`eigenmode_modes` (same names), `dJxi_theta` = ∂_θ(Jξ^θ), and the normal displacement
+`xi_n` = Jξ^ψ/(J|∇ψ|) band-limited to the mode range like the Fortran `xno_mn`. Filled by
+`surface_fields!`.
+"""
+struct SurfaceFields
+    xi_psi::Vector{ComplexF64}
+    xi_psi1::Vector{ComplexF64}
+    Jxi_psi::Vector{ComplexF64}
+    Jxi_theta::Vector{ComplexF64}
+    Jxi_zeta::Vector{ComplexF64}
+    dJxi_theta::Vector{ComplexF64}
+    Jb_psi::Vector{ComplexF64}
+    Jb_theta::Vector{ComplexF64}
+    Jb_zeta::Vector{ComplexF64}
+    b_cov_psi::Vector{ComplexF64}
+    b_cov_theta::Vector{ComplexF64}
+    b_cov_zeta::Vector{ComplexF64}
+    xi_n::Vector{ComplexF64}
+end
+
+SurfaceFields(mtheta::Int) = SurfaceFields((zeros(ComplexF64, mtheta) for _ in 1:13)...)
+
+"""
+    surface_fields!(sf, ft, modes, ipsi, mvals, geom, work_modes) -> sf
+
+Inverse-transform row `ipsi` of every matrix in `modes` onto the θ grid of `ft`, take the
+θ-derivative of Jξ^θ spectrally (2πi m per mode, exact for the band-limited field where the
+Fortran `gpeq_firstform` fits a periodic spline), and form ξ_n from Jξ^ψ and the geometry
+`geom` with the Fortran `gpeq_normal` round trip through mode space. `work_modes` is an
+`mpert` scratch vector.
+"""
+function surface_fields!(sf::SurfaceFields, ft::Utilities.FourierTransforms.FourierTransform, modes::NamedTuple, ipsi::Int,
+    mvals::Vector{Int}, geom::SurfaceGeometry, work_modes::Vector{ComplexF64})
+    for name in (:xi_psi, :xi_psi1, :Jxi_psi, :Jxi_theta, :Jxi_zeta, :Jb_psi, :Jb_theta, :Jb_zeta, :b_cov_psi, :b_cov_theta, :b_cov_zeta)
+        Utilities.FourierTransforms.inverse_transform!(getfield(sf, name), ft, view(getfield(modes, name), ipsi, :))
+    end
+    for i in eachindex(mvals)
+        work_modes[i] = 2π * im * mvals[i] * modes.Jxi_theta[ipsi, i]
+    end
+    Utilities.FourierTransforms.inverse_transform!(sf.dJxi_theta, ft, work_modes)
+    for k in eachindex(geom.jac)
+        sf.xi_n[k] = sf.Jxi_psi[k] / (geom.jac[k] * sqrt(geom.delpsi2[k]))
+    end
+    Utilities.FourierTransforms.transform!(work_modes, ft, sf.xi_n)
+    Utilities.FourierTransforms.inverse_transform!(sf.xi_n, ft, work_modes)
+    return sf
+end
+
+"""
+    EffectiveField(mtheta)
+
+θ-space components of the effective field b_eff = b + ξ_n(μ₀ j × n̂) on one surface:
+Jacobian-weighted contravariant `Jc_psi/theta/zeta` = J b_eff^i and covariant
+`c_cov_psi/theta/zeta` = b_eff,i. Filled by `effective_field!`.
+"""
+struct EffectiveField
+    Jc_psi::Vector{ComplexF64}
+    Jc_theta::Vector{ComplexF64}
+    Jc_zeta::Vector{ComplexF64}
+    c_cov_psi::Vector{ComplexF64}
+    c_cov_theta::Vector{ComplexF64}
+    c_cov_zeta::Vector{ComplexF64}
+end
+
+EffectiveField(mtheta::Int) = EffectiveField((zeros(ComplexF64, mtheta) for _ in 1:6)...)
+
+"""
+    effective_field!(eff, geom, equil, psi, sf; hint=Ref(1)) -> eff
+
+Build b_eff = b + ξ_n(μ₀ j × n̂) from the perturbed field and Jξ^ψ of `sf` (Fortran `gpeq_c`,
+main.tex Eqs. 148–151), with μ₀j^θ = −F'/J and μ₀j^ζ = −(μ₀p)'/χ' − qF'/J:
+
+    J b_eff^ψ = J b^ψ
+    J b_eff^θ = J b^θ + (Jξ^ψ)/(J|∇ψ|²) [ μ₀j^θ g_θζ + μ₀j^ζ g_ζζ ]
+    J b_eff^ζ = J b^ζ − (Jξ^ψ)/(J|∇ψ|²) [ μ₀j^θ g_θθ + μ₀j^ζ g_θζ ]
+    b_eff,ψ   = b_ψ + (Jξ^ψ)/|∇ψ|² [ μ₀j^θ (∇ψ·∇ζ) − μ₀j^ζ (∇ψ·∇θ) ]
+    b_eff,θ   = b_θ + (Jξ^ψ) μ₀j^ζ
+    b_eff,ζ   = b_ζ − (Jξ^ψ) μ₀j^θ
+"""
+function effective_field!(eff::EffectiveField, geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquilibrium, psi::Float64, sf::SurfaceFields;
+    hint=Ref(1))
+    profiles = equil.profiles
+    F1 = profiles.F_deriv(psi; hint=hint)
+    mu0p1 = profiles.P_deriv(psi; hint=hint)
+    q = profiles.q_spline(psi; hint=hint)
+    chi1 = 2π * equil.psio
+    for k in eachindex(geom.jac)
+        jac = geom.jac[k]
+        mu0jt = -F1 / jac
+        mu0jz = -mu0p1 / chi1 - F1 * q / jac
+        d2 = geom.delpsi2[k]
+        xw = sf.Jxi_psi[k]
+        eff.Jc_psi[k] = sf.Jb_psi[k]
+        eff.Jc_theta[k] = sf.Jb_theta[k] + xw / (d2 * jac) * (mu0jt * geom.g23[k] + mu0jz * geom.g33[k])
+        eff.Jc_zeta[k] = sf.Jb_zeta[k] - xw / (d2 * jac) * (mu0jt * geom.g22[k] + mu0jz * geom.g23[k])
+        eff.c_cov_psi[k] = sf.b_cov_psi[k] + xw / d2 * (mu0jt * geom.dpdz[k] - mu0jz * geom.dpdt[k])
+        eff.c_cov_theta[k] = sf.b_cov_theta[k] + xw * mu0jz
+        eff.c_cov_zeta[k] = sf.b_cov_zeta[k] - xw * mu0jt
+    end
+    return eff
+end
+
+"""
+    curl_residual!(res, ft, eff, geom, mvals, n, theta_modes, zeta_modes, work_modes, work_fun) -> scale
+
+Evaluate (∇×b_eff)·∇ψ = (∂_θ b_eff,ζ − ∂_ζ b_eff,θ)/J on the θ grid into `res` (Fortran
+`gpeq_cveri`): the covariant θ and ζ components are transformed to mode space, differentiated
+exactly (∂_θ → 2πi m, ∂_ζ → −2πi n), transformed back and divided by J. Returns
+max|∂_θ b_eff,ζ/J|, the size of the cancelling terms, for the relative residual. The four
+trailing arguments are scratch buffers (`mpert`, `mpert`, `mpert`, `mtheta`).
+"""
+function curl_residual!(res::Vector{ComplexF64}, ft::Utilities.FourierTransforms.FourierTransform, eff::EffectiveField, geom::SurfaceGeometry,
+    mvals::Vector{Int}, n::Int, theta_modes::Vector{ComplexF64}, zeta_modes::Vector{ComplexF64}, work_modes::Vector{ComplexF64},
+    work_fun::Vector{ComplexF64})
+    Utilities.FourierTransforms.transform!(theta_modes, ft, eff.c_cov_theta)
+    Utilities.FourierTransforms.transform!(zeta_modes, ft, eff.c_cov_zeta)
+    for i in eachindex(mvals)
+        work_modes[i] = 2π * im * (mvals[i] * zeta_modes[i] + n * theta_modes[i])
+    end
+    Utilities.FourierTransforms.inverse_transform!(res, ft, work_modes)
+    res ./= geom.jac
+    for i in eachindex(mvals)
+        work_modes[i] = 2π * im * mvals[i] * zeta_modes[i]
+    end
+    Utilities.FourierTransforms.inverse_transform!(work_fun, ft, work_modes)
+    work_fun ./= geom.jac
+    return maximum(abs, work_fun)
+end

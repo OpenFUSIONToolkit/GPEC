@@ -93,3 +93,34 @@ end
     q1 = equil.profiles.q_deriv(psi)
     @test sum(kern.shear .* geom.jac) / mtheta ≈ chi1^2 * q1 rtol = 1e-6
 end
+
+@testset "EnergyDecomposition: effective field satisfies (∇×b_eff)·∇ψ = 0" begin
+    ffs = _ED_FFS
+    equil = ffs.equil
+    psi, is_knot = PerturbedEquilibrium.decomposition_grid(ffs)
+    @test all(diff(psi) .> 0)
+    @test psi[end] == ffs.solution.psi_store[ffs.solution.step]
+    @test count(is_knot) >= 2
+    modes = PerturbedEquilibrium.eigenmode_modes(ffs, 1, psi)
+    @test size(modes.Jxi_psi) == (length(psi), ffs.mpert)
+    thetas_ext = collect(equil.rzphi_ys)
+    mtheta = length(thetas_ext) - 1
+    mvals = collect(ffs.mlow:ffs.mhigh)
+    ft = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms.FourierTransform(mtheta, ffs.mpert, ffs.mlow)
+    geom = PerturbedEquilibrium.SurfaceGeometry(mtheta)
+    sf = PerturbedEquilibrium.SurfaceFields(mtheta)
+    eff = PerturbedEquilibrium.EffectiveField(mtheta)
+    res = zeros(ComplexF64, mtheta)
+    bufs = (zeros(ComplexF64, ffs.mpert), zeros(ComplexF64, ffs.mpert), zeros(ComplexF64, ffs.mpert), zeros(ComplexF64, mtheta))
+    worst = 0.0
+    for i in findall(is_knot)
+        PerturbedEquilibrium.surface_geometry!(geom, equil, psi[i], thetas_ext[1:mtheta])
+        PerturbedEquilibrium.surface_fields!(sf, ft, modes, i, mvals, geom, bufs[3])
+        PerturbedEquilibrium.effective_field!(eff, geom, equil, psi[i], sf)
+        @test eff.Jc_psi == sf.Jb_psi
+        scale = PerturbedEquilibrium.curl_residual!(res, ft, eff, geom, mvals, ffs.nlow, bufs...)
+        @test scale > 0
+        worst = max(worst, maximum(abs, res) / scale)
+    end
+    @test worst < 1e-8
+end
