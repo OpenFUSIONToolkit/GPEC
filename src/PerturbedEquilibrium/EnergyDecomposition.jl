@@ -131,15 +131,17 @@ end
 SurfaceGeometry(mtheta::Int) = SurfaceGeometry((zeros(Float64, mtheta) for _ in 1:16)...)
 
 """
-    surface_geometry!(geom, equil, psi, thetas; hint=(Ref(1), Ref(1))) -> geom
+    surface_geometry!(geom, equil, psi, thetas; bsq=nothing, hint=(Ref(1), Ref(1))) -> geom
 
 Fill `geom` at flux surface `psi` on the θ points `thetas`. The gradient basis (∇ψ, ∇θ, ∇ζ)
-and the tangent basis (e_θ, e_ζ) are the `w` and `v` matrices of the Fortran `gpeq_c`; |∇ψ| and
-the Jacobian agree with `Equilibrium.flux_surface_metric`. Derivatives are with respect to
-normalized ψ_N, as in the Fortran bicubic evaluations.
+and the tangent basis (e_ψ, e_θ, e_ζ) are the `w` and `v` matrices of the Fortran `gpeq_c`; |∇ψ|
+and the Jacobian agree with `Equilibrium.flux_surface_metric`. Derivatives are with respect to
+normalized ψ_N, as in the Fortran bicubic evaluations. `bsq` is a bicubic interpolant of B² on
+the equilibrium grid, normally `metric_bsq_interpolant(equil)`; when it is `nothing` the B²
+entries of `geom` are left untouched.
 """
 function surface_geometry!(geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquilibrium, psi::Float64, thetas::AbstractVector{Float64};
-    hint=(Ref(1), Ref(1)))
+    bsq=nothing, hint=(Ref(1), Ref(1)))
     ro = equil.ro
     zo = equil.zo
     for (k, theta) in enumerate(thetas)
@@ -154,9 +156,6 @@ function surface_geometry!(geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquil
         nu_y = equil.rzphi_nu(pt; deriv=DerivOp(0, 1), hint=hint)
         jac = equil.rzphi_jac(pt; hint=hint)
         jac_x = equil.rzphi_jac(pt; deriv=DerivOp(1, 0), hint=hint)
-        B = equil.eqfun_B(pt; hint=hint)
-        B_x = equil.eqfun_B(pt; deriv=DerivOp(1, 0), hint=hint)
-        B_y = equil.eqfun_B(pt; deriv=DerivOp(0, 1), hint=hint)
 
         rfac = sqrt(abs(r2))
         eta = 2π * (theta + deta)
@@ -192,11 +191,42 @@ function surface_geometry!(geom::SurfaceGeometry, equil::Equilibrium.PlasmaEquil
         geom.g22[k] = v21^2 + v22^2 + v23^2
         geom.g23[k] = v23 * v33
         geom.g33[k] = v33^2
-        geom.bsq[k] = B^2
-        geom.bsq_psi[k] = 2.0 * B * B_x
-        geom.bsq_theta[k] = 2.0 * B * B_y
+        if bsq !== nothing
+            geom.bsq[k] = bsq(pt; hint=hint)
+            geom.bsq_psi[k] = bsq(pt; deriv=DerivOp(1, 0), hint=hint)
+            geom.bsq_theta[k] = bsq(pt; deriv=DerivOp(0, 1), hint=hint)
+        end
     end
     return geom
+end
+
+"""
+    metric_bsq_interpolant(equil) -> CubicInterpolantND
+
+Bicubic interpolant of B² = (χ'/J)² (g_θθ + 2q g_θζ + q² g_ζζ) on the equilibrium (ψ,θ) grid, the
+field strength implied by the straight-field-line metric that the Euler-Lagrange matrices and the
+perturbed field are built from. The equilibrium's own `eqfun_B` (B_p² + B_φ² from ψ₀|∇ψ| and F)
+agrees with it only to the accuracy of the coordinate transformation, and using it for σ, K₂ and
+κ_ψ leaves the |V|² and K₂|ξ_n|² pieces of the effective-field form inconsistent (1 % of δW_p on
+the Solovev example); the metric B² keeps both forms consistent.
+"""
+function metric_bsq_interpolant(equil::Equilibrium.PlasmaEquilibrium)
+    xs = collect(equil.rzphi_xs)
+    ys = collect(equil.rzphi_ys)
+    mtheta = length(ys) - 1
+    geom = SurfaceGeometry(mtheta)
+    vals = zeros(length(xs), length(ys))
+    chi1 = 2π * equil.psio
+    hint = (Ref(1), Ref(1))
+    for (i, p) in enumerate(xs)
+        surface_geometry!(geom, equil, p, ys[1:mtheta]; hint=hint)
+        q = equil.profiles.q_spline(p)
+        for k in 1:mtheta
+            vals[i, k] = (chi1 / geom.jac[k])^2 * (geom.g22[k] + 2.0 * q * geom.g23[k] + q^2 * geom.g33[k])
+        end
+        vals[i, mtheta+1] = vals[i, 1]
+    end
+    return cubic_interp((xs, ys), vals; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 end
 
 """
@@ -684,6 +714,7 @@ function decompose_energy(ffs::ForceFreeStatesResult; eigenmodes::Vector{Int}=[1
     nn = ffs.nlow
     scale = _energy_scale(equil)
     nk = length(eigenmodes)
+    bsq = metric_bsq_interpolant(equil)
 
     res = EnergyDecompositionResult(; psi=copy(psi), eigenmode_index=copy(eigenmodes))
     _allocate_result!(res, npsi, mtheta, nk, thetas, effective_field_form, standard_form, write_densities)
@@ -732,7 +763,7 @@ function decompose_energy(ffs::ForceFreeStatesResult; eigenmodes::Vector{Int}=[1
                 den = dens[tid]
                 theta_modes, zeta_modes, work_modes = mode_bufs[tid]
                 psi_i = psi[ipsi]
-                surface_geometry!(geom, equil, psi_i, thetas; hint=hints2d[tid])
+                surface_geometry!(geom, equil, psi_i, thetas; bsq, hint=hints2d[tid])
                 surface_fields!(sf, ft, modes, ipsi, mvals, geom, work_modes)
                 if effective_field_form
                     curvature_kernel!(kern, geom, equil, psi_i, thetas_ext; hint=hints1d[tid])

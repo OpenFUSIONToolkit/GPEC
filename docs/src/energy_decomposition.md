@@ -55,8 +55,12 @@ The eigenmode is built from the free-boundary eigenvector ``\mathbf w_k`` of the
 is. Every stored energy is scaled by ``2\mu_0/\psi_0^2`` so that `dW_plasma` reads in the same
 normalization, and `dW_plasma_reference` holds the corresponding entry ``e_{p,k}``. The relative
 mismatch of each form against the reference is stored and, above 5 %, reported with a warning.
-On the Solovev example the standard form reproduces ``e_{p,1}`` to 1e-5 and the effective-field
-form to 1 %, the same order the Fortran reports for DIII-D.
+On the Solovev decks both forms reproduce ``e_{p,k}`` to better than 1 % (between 1e-5 and 1e-2
+depending on the radial resolution). The effective-field form needs the metric-consistent
+``B^2 = (\chi'/\mathcal J)^2(g_{\theta\theta} + 2q g_{\theta\zeta} + q^2 g_{\zeta\zeta})`` for
+``\sigma``, ``K_2`` and ``\kappa_\psi`` rather than the equilibrium's separate ``|B|`` spline, and
+it depends on derivatives of the metric (the shear and the curvature) that the standard form does
+not, so its residual mismatch tracks the coordinate accuracy of the equilibrium.
 
 ## Running it
 

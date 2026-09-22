@@ -27,6 +27,7 @@ end
 
 const _ED_DIR, _ED_RES = _run_energy_fixture()
 const _ED_FFS = _ED_RES.ffs
+const _ED_BSQ = PerturbedEquilibrium.metric_bsq_interpolant(_ED_FFS.equil)
 
 @testset "EnergyDecomposition: contra displacements take reg_spot as a keyword" begin
     ffs = _ED_FFS
@@ -54,7 +55,7 @@ end
     thetas = [(k - 1) / mtheta for k in 1:mtheta]
     geom = PerturbedEquilibrium.SurfaceGeometry(mtheta)
     psi = 0.5
-    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas)
+    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas; bsq=_ED_BSQ)
     hint = (Ref(1), Ref(1))
     for k in 1:mtheta
         m = Equilibrium.flux_surface_metric(equil, psi, thetas[k]; hint=hint)
@@ -79,7 +80,7 @@ end
     geom = PerturbedEquilibrium.SurfaceGeometry(mtheta)
     kern = PerturbedEquilibrium.CurvatureKernel(mtheta)
     psi = 0.5
-    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas_ext[1:mtheta])
+    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas_ext[1:mtheta]; bsq=_ED_BSQ)
     PerturbedEquilibrium.curvature_kernel!(kern, geom, equil, psi, thetas_ext)
     @test all(isfinite, kern.shear) && all(isfinite, kern.curvature) && all(isfinite, kern.sigma)
     @test kern.K2 ≈ PerturbedEquilibrium.MU_0 .* geom.bsq .* kern.sigma .^ 2
@@ -115,7 +116,7 @@ end
     bufs = (zeros(ComplexF64, ffs.mpert), zeros(ComplexF64, ffs.mpert), zeros(ComplexF64, ffs.mpert), zeros(ComplexF64, mtheta))
     worst = 0.0
     for i in findall(is_knot)
-        PerturbedEquilibrium.surface_geometry!(geom, equil, psi[i], thetas_ext[1:mtheta])
+        PerturbedEquilibrium.surface_geometry!(geom, equil, psi[i], thetas_ext[1:mtheta]; bsq=_ED_BSQ)
         PerturbedEquilibrium.surface_fields!(sf, ft, modes, i, mvals, geom, bufs[3])
         PerturbedEquilibrium.effective_field!(eff, geom, equil, psi[i], sf)
         @test eff.Jc_psi == sf.Jb_psi
@@ -143,7 +144,7 @@ end
     work = zeros(ComplexF64, ffs.mpert)
     ipsi = length(psi_grid) ÷ 2
     psi = psi_grid[ipsi]
-    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas_ext[1:mtheta])
+    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas_ext[1:mtheta]; bsq=_ED_BSQ)
     PerturbedEquilibrium.curvature_kernel!(kern, geom, equil, psi, thetas_ext)
     PerturbedEquilibrium.surface_fields!(sf, ft, modes, ipsi, mvals, geom, work)
     PerturbedEquilibrium.effective_field!(eff, geom, equil, psi, sf)
