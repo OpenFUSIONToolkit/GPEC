@@ -286,19 +286,38 @@ the outer knots; an equilibrium whose edge q does not follow that law (a limited
 not extrapolated. The cut is placed at the last surface before two adjacent layers first
 touch.
 
-The scan runs whenever kinetic profiles are available (a `[KineticForces]` `kinetic_file`,
-or the `[SLAYER]` `profile_file`). Because it resolves that file from the run's TOML, it only runs
-on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path has no inputs to resolve
-it from, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
+The scan takes its kinetic profiles from the `[SLAYER]` `profile_file`, through the same control
+and loader the SLAYER analysis uses, so both see the same profiles, the same HDF5 group and the
+same χ⊥(ψ) — the layer widths cannot disagree between them. A deck without a `[SLAYER]`
+`profile_file` does not get the scan. Because the file is resolved from the run's TOML, the scan
+only runs on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path has no inputs to
+resolve it from, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
 `ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
 `psilim_from_layer_overlap = true`. It then caps `qlim` before the `dmlim` step, so `dmlim`
 still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
 
-The flag is off by default. On the shipped DIII-D-like decks the overlap point sits near
-ψ ≈ 0.9997, beyond every deck's `psihigh`, so enabling it would change nothing there;
-`examples/DIIID-like_truncation_example` raises `psihigh` to 0.9999 so the cap binds and
-excludes the q = 8 surface. Whenever `psilim` lands past the overlap point, with the flag on
-or off, GPEC warns.
+The flag is off by default, so every shipped deck is unchanged by it. With the shipped
+DIII-D-like profiles the overlap point is ψ ≈ 0.9985: outside the ideal and Riccati decks'
+`psihigh = 0.995`, where the cap could not bind even if enabled, but inside the SLAYER deck's
+0.9995, where enabling it would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
+raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and q = 8, and the resulting
+domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen `psihigh = 0.995` of the
+ideal deck. Whenever `psilim` lands past the overlap point, with the flag on or off, GPEC warns;
+on the shipped decks that includes the SLAYER deck.
+
+**Which perpendicular diffusivity.** The two formulas that take `chi_perp` want different
+quantities. The layer width goes through `P_perp = τ_R/τ_E` with `τ_E = r²/χ_E`, and χ_E is the
+one-fluid perpendicular *energy* diffusivity, the gradient-weighted combination of the electron and
+ion channels, `χ_E = (n_e χ_e ∇T_e + n_i χ_i ∇T_i)/(n_e ∇T_e + n_i ∇T_i)`. The critical-Δ island
+width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature flattening against an electron parallel
+conductivity, so its χ_⊥ is the electron channel. GPEC currently feeds both from one profile, the
+kinetic file's `chi_e`, which in the shipped DIII-D-like data is the electron power-balance
+diffusivity: the right channel for the critical Δ, and a proxy for χ_E in the layer width. This is
+the same single-χ convention as Fitzpatrick's TJ code, which also assumes `T_e = T_i`.
+Separating the two is deferred: it needs an ion `chi_i` in the kinetic-profile schema, and the
+power-balance ion diffusivity available upstream is not yet usable (it comes back negative across
+most of the radius on the cases checked). Since both widths scale as `χ^{1/4}`, a factor-2 error in
+χ moves them by about 19%, but that can be enough to move the overlap cut by a surface.
 
 | Dataset | Contents |
 |---|---|
