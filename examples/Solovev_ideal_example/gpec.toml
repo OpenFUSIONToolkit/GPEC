@@ -75,6 +75,13 @@ save_interval = 3             # Save every Nth ODE step (1=all). Always saves ne
 integrator            = "forward" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 set_psilim_via_dmlim  = false  # FALSE for limited/analytical equilibria — rationals sparse, dmlim would chop too much edge
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
+
+[EnergyDecomposition]
+eigenmodes = [1]              # Free-boundary eigenmodes to decompose (1 = least stable)
+effective_field_form = true   # Decompose δW_p in the effective-field form ½∫[|b_eff|²/μ₀ − K|ξ_n|²]
+standard_form = true          # Decompose δW_p in the standard form ½∫[|b|²/μ₀ − j·(b×ξ*) + (∇·ξ)*(ξ·∇p)]
+write_densities = false       # Also store the per-(ψ,θ) energy densities with R,Z for 2-D maps
+
 # Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
 [SOL_INPUT]
 mr = 128       # Number of radial grid zones
