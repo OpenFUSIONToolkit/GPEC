@@ -72,8 +72,8 @@ integrator = "forward"
 
 `riccati_eulerlagrange_integration` (the default) is our implementation of the STRIDE
 approach [Glasser 2018b], built on the dual Riccati reformulation [Glasser 2018a].  It
-decomposes the radial domain into
-independent chunks, integrates each chunk's fundamental-matrix (FM) propagator in parallel
+decomposes the radial domain into independent chunks, integrates each chunk's
+fundamental-matrix (FM) propagator in parallel
 using `Threads.@threads`, then multiplies the propagators in order and applies each
 singular-surface crossing serially.  It is the only driver that produces the inter-surface
 ``\Delta'`` matrix.  Because chunk endpoints are all it stores, `u_store` is sparse and stays
@@ -287,7 +287,9 @@ not extrapolated. The cut is placed at the last surface before two adjacent laye
 touch.
 
 The scan runs whenever kinetic profiles are available (a `[KineticForces]` `kinetic_file`,
-or the `[SLAYER]` `profile_file`). Its result is always written to
+or the `[SLAYER]` `profile_file`). Because it resolves that file from the run's TOML, it only runs
+on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path has no inputs to resolve
+it from, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
 `ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
 `psilim_from_layer_overlap = true`. It then caps `qlim` before the `dmlim` step, so `dmlim`
 still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
