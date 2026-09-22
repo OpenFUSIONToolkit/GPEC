@@ -124,3 +124,39 @@ end
     end
     @test worst < 1e-8
 end
+
+@testset "EnergyDecomposition: surface densities" begin
+    ffs = _ED_FFS
+    equil = ffs.equil
+    psi_grid, _ = PerturbedEquilibrium.decomposition_grid(ffs)
+    modes = PerturbedEquilibrium.eigenmode_modes(ffs, 1, psi_grid)
+    thetas_ext = collect(equil.rzphi_ys)
+    mtheta = length(thetas_ext) - 1
+    mvals = collect(ffs.mlow:ffs.mhigh)
+    ft = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms.FourierTransform(mtheta, ffs.mpert, ffs.mlow)
+    geom = PerturbedEquilibrium.SurfaceGeometry(mtheta)
+    kern = PerturbedEquilibrium.CurvatureKernel(mtheta)
+    sf = PerturbedEquilibrium.SurfaceFields(mtheta)
+    eff = PerturbedEquilibrium.EffectiveField(mtheta)
+    den = PerturbedEquilibrium.SurfaceDensities(mtheta)
+    work = zeros(ComplexF64, ffs.mpert)
+    ipsi = length(psi_grid) ÷ 2
+    psi = psi_grid[ipsi]
+    PerturbedEquilibrium.surface_geometry!(geom, equil, psi, thetas_ext[1:mtheta])
+    PerturbedEquilibrium.curvature_kernel!(kern, geom, equil, psi, thetas_ext)
+    PerturbedEquilibrium.surface_fields!(sf, ft, modes, ipsi, mvals, geom, work)
+    PerturbedEquilibrium.effective_field!(eff, geom, equil, psi, sf)
+    PerturbedEquilibrium.surface_densities!(den, geom, kern, sf, eff, equil, psi, ffs.nlow; effective_field_form=true, standard_form=true)
+    @test den.effective_b_squared ≈ den.effective_b_squared_psi .+ den.effective_b_squared_theta .+ den.effective_b_squared_zeta
+    @test all(den.effective_b_squared .>= 0)
+    @test all(den.b_squared .>= 0)
+    @test all(den.parallel_current_squared .>= 0)
+    @test PerturbedEquilibrium.surface_integral(den.effective_b_squared, geom.jac) ≈ sum(den.effective_b_squared .* geom.jac) / mtheta
+    # The standard-form current term is real up to roundoff at the surface-integral level.
+    cc = PerturbedEquilibrium.surface_integral(den.current_coupling, geom.jac)
+    @test abs(imag(cc)) < 1e-8 * max(abs(real(cc)), 1e-300)
+    # Disabling a form leaves its densities untouched (zero).
+    fill!(den.b_squared, 0.0)
+    PerturbedEquilibrium.surface_densities!(den, geom, kern, sf, eff, equil, psi, ffs.nlow; effective_field_form=true, standard_form=false)
+    @test all(iszero, den.b_squared)
+end

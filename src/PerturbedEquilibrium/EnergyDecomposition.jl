@@ -467,3 +467,87 @@ function curl_residual!(res::Vector{ComplexF64}, ft::Utilities.FourierTransforms
     work_fun ./= geom.jac
     return maximum(abs, work_fun)
 end
+
+"""
+    SurfaceDensities(mtheta)
+
+Per-θ energy densities on one surface (integral = Σ density·J/mtheta, see `surface_integral`),
+filled by `surface_densities!`: the effective-field pieces `effective_b_squared`
+(= |b_eff|²/μ₀, with its `_psi/_theta/_zeta` contributions), `shear_current`,
+`parallel_current_squared`, `pressure_curvature` (= K_i|ξ_n|²), and the standard-form pieces
+`b_squared` (= |b|²/μ₀), `current_coupling` (= j·(b×ξ*)), `pressure_compression`
+(= (∇·ξ)*(ξ·∇p)).
+"""
+struct SurfaceDensities
+    effective_b_squared::Vector{Float64}
+    effective_b_squared_psi::Vector{Float64}
+    effective_b_squared_theta::Vector{Float64}
+    effective_b_squared_zeta::Vector{Float64}
+    shear_current::Vector{Float64}
+    parallel_current_squared::Vector{Float64}
+    pressure_curvature::Vector{Float64}
+    b_squared::Vector{Float64}
+    current_coupling::Vector{ComplexF64}
+    pressure_compression::Vector{ComplexF64}
+end
+
+SurfaceDensities(mtheta::Int) = SurfaceDensities((zeros(Float64, mtheta) for _ in 1:8)..., zeros(ComplexF64, mtheta), zeros(ComplexF64, mtheta))
+
+"""
+    surface_densities!(den, geom, kern, sf, eff, equil, psi, n; effective_field_form, standard_form, hint=Ref(1)) -> den
+
+|b_eff|² = Re[(J b_eff^i)* b_eff,i]/J and |b|² = Re[(J b^i)* b_i]/J; the current term is
+j·(b×ξ*) = [ −μ₀j^θ (Jb^ψ (Jξ^ζ)* − Jb^ζ (Jξ^ψ)*) + μ₀j^ζ (Jb^ψ (Jξ^θ)* − Jb^θ (Jξ^ψ)*) ]/(μ₀J), and
+∇·ξ = ∂_ψξ^ψ + (∂_ψJ/J)ξ^ψ + [∂_θ(Jξ^θ) − 2πi n Jξ^ζ]/J with ξ·∇p = p'ξ^ψ.
+"""
+function surface_densities!(den::SurfaceDensities, geom::SurfaceGeometry, kern::CurvatureKernel, sf::SurfaceFields, eff::EffectiveField,
+    equil::Equilibrium.PlasmaEquilibrium, psi::Float64, n::Int; effective_field_form::Bool, standard_form::Bool, hint=Ref(1))
+    profiles = equil.profiles
+    F1 = profiles.F_deriv(psi; hint=hint)
+    mu0p1 = profiles.P_deriv(psi; hint=hint)
+    q = profiles.q_spline(psi; hint=hint)
+    p1 = mu0p1 / MU_0
+    chi1 = 2π * equil.psio
+    for k in eachindex(geom.jac)
+        jac = geom.jac[k]
+        if effective_field_form
+            dpsi = real(conj(eff.Jc_psi[k]) * eff.c_cov_psi[k]) / (MU_0 * jac)
+            dthe = real(conj(eff.Jc_theta[k]) * eff.c_cov_theta[k]) / (MU_0 * jac)
+            dzet = real(conj(eff.Jc_zeta[k]) * eff.c_cov_zeta[k]) / (MU_0 * jac)
+            den.effective_b_squared_psi[k] = dpsi
+            den.effective_b_squared_theta[k] = dthe
+            den.effective_b_squared_zeta[k] = dzet
+            den.effective_b_squared[k] = dpsi + dthe + dzet
+            xin2 = abs2(sf.xi_n[k])
+            den.shear_current[k] = kern.K1[k] * xin2
+            den.parallel_current_squared[k] = kern.K2[k] * xin2
+            den.pressure_curvature[k] = kern.K3[k] * xin2
+        end
+        if standard_form
+            mu0jt = -F1 / jac
+            mu0jz = -mu0p1 / chi1 - F1 * q / jac
+            den.b_squared[k] = real(conj(sf.Jb_psi[k]) * sf.b_cov_psi[k] + conj(sf.Jb_theta[k]) * sf.b_cov_theta[k] + conj(sf.Jb_zeta[k]) * sf.b_cov_zeta[k]) / (MU_0 * jac)
+            det_term =
+                -mu0jt * (sf.Jb_psi[k] * conj(sf.Jxi_zeta[k]) - sf.Jb_zeta[k] * conj(sf.Jxi_psi[k])) +
+                mu0jz * (sf.Jb_psi[k] * conj(sf.Jxi_theta[k]) - sf.Jb_theta[k] * conj(sf.Jxi_psi[k]))
+            den.current_coupling[k] = det_term / (MU_0 * jac)
+            divxi = sf.xi_psi1[k] + (geom.jac_psi[k] / jac) * sf.xi_psi[k] + sf.dJxi_theta[k] / jac - (2π * im * n) * sf.Jxi_zeta[k] / jac
+            den.pressure_compression[k] = conj(divxi) * (p1 * sf.xi_psi[k])
+        end
+    end
+    return den
+end
+
+"""
+    surface_integral(density, jac) -> Number
+
+∮ J·density dθ over the periodic θ grid as the Riemann sum Σ density·J/mtheta, exact for the
+band-limited integrands of the decomposition and identical to the Fortran sums.
+"""
+function surface_integral(density::AbstractVector, jac::AbstractVector{Float64})
+    acc = zero(eltype(density))
+    for k in eachindex(density)
+        acc += density[k] * jac[k]
+    end
+    return acc / length(density)
+end
