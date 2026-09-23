@@ -31,6 +31,28 @@ const D3D_IL = joinpath(COIL_DIR, "d3d_il.dat")
 end
 
 # ---------------------------------------------------------------------------
+@testset "CoilGeometry: conductors" begin
+    cs = ForcingTerms.read_coil_dat(D3D_IL)
+    parts = ForcingTerms.conductors(cs)
+
+    @test length(parts) == cs.ncoil
+    @test all(p -> p.ncoil == 1, parts)
+    @test [p.name for p in parts] == ["$(cs.name)_$j" for j in 1:cs.ncoil]
+
+    for (j, p) in enumerate(parts)
+        @test p.x[1, :, :] == cs.x[j, :, :]
+        @test p.y[1, :, :] == cs.y[j, :, :]
+        @test p.z[1, :, :] == cs.z[j, :, :]
+        @test p.currents == [cs.currents[j]]
+        @test (p.s, p.nw, p.nsec) == (cs.s, cs.nw, cs.nsec)
+    end
+
+    # A set that already holds one conductor is handed back untouched.
+    single = ForcingTerms.make_pf_hoop(; radius=1.5, height=0.3)
+    @test ForcingTerms.conductors(single)[1] === single
+end
+
+# ---------------------------------------------------------------------------
 @testset "CoilGeometry: apply_transforms — shift" begin
     cs = ForcingTerms.read_coil_dat(D3D_IL)
     # Assign unit currents
@@ -202,6 +224,34 @@ end
 end
 
 # ---------------------------------------------------------------------------
+@testset "CoilFourier: reconstruct_bn inverts the decomposition" begin
+    # A wrong sign in the reconstruction basis mirrors the pattern in zeta instead of failing,
+    # so compare against the analytic signal the modes came from rather than against itself.
+    mtheta, nzeta, m0, n0 = 128, 64, 5, 2
+    theta_grid = range(0; length=mtheta, step=2π / mtheta)
+    zeta_grid = range(0; length=nzeta, step=2π / nzeta)
+    bn = [cos(m0 * θ - n0 * ζ) for θ in theta_grid, ζ in zeta_grid]
+    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta, ones(mtheta), zeros(mtheta),
+        collect(zeta_grid), zeros(mtheta), ones(mtheta), zeros(mtheta))
+    modes = ForcingTerms.fourier_decompose_bn(bn, grid, n0, 1, 10)
+
+    rec = ForcingTerms.reconstruct_bn(modes; ntheta=48, nzeta=36, theta_range=(0, 2π))
+    expected = [cos(m0 * θ - n0 * ζ) for θ in rec.theta, ζ in rec.zeta]
+    @test size(rec.bn) == (48, 36)
+    @test rec.bn ≈ expected atol = 1e-10
+
+    # Reversing the toroidal sign is the failure this test exists to catch.
+    mirrored = [cos(m0 * θ + n0 * ζ) for θ in rec.theta, ζ in rec.zeta]
+    @test !isapprox(rec.bn, mirrored; atol=1e-3)
+
+    # The default window centres the outboard midplane rather than cutting it at the edges.
+    centred = ForcingTerms.reconstruct_bn(modes; ntheta=16, nzeta=8)
+    @test centred.theta[1] ≈ -π && centred.theta[end] ≈ π
+
+    @test_throws DimensionMismatch ForcingTerms.reconstruct_bn([1.0 + 0im], [1, 2], [1, 1])
+end
+
+# ---------------------------------------------------------------------------
 @testset "CoilFourier: project_normal_flux! R-factor" begin
     # A uniform vertical field B_Z = B0 on a circular boundary of radius `a`
     # centred at major radius R0.  In unit-norm convention the flux element is:
@@ -314,6 +364,14 @@ end
     summed = [a.amplitude + b.amplitude for (a, b) in zip(il_modes, iu_modes)]
     @test summed ≈ [m.amplitude for m in forcing_modes] rtol = 1e-12
     @test maximum(abs.(getfield.(il_modes, :amplitude))) > 1e-6
+
+    # Splitting a multi-conductor set the same way: each conductor keeps its own current, so the
+    # per-conductor spectra sum back to the whole set's.
+    part_sum = zeros(ComplexF64, length(il_modes))
+    for p in ForcingTerms.conductors(il_set)
+        part_sum .+= [m.amplitude for m in ForcingTerms.coil_forcing_modes(p, forcing_grid, n_test, m_low, m_high)]
+    end
+    @test part_sum ≈ [m.amplitude for m in il_modes] rtol = 1e-12
 end
 
 # ---------------------------------------------------------------------------

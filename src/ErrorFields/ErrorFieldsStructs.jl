@@ -60,6 +60,8 @@ was evaluated with; `peak_current` and `winding_multiplier` let a user renormali
     the step taken `[3 × ncoil_set]`
   - `peak_current`: largest conductor current magnitude of each set, amperes `[ncoil_set]`
   - `winding_multiplier`: turns per conductor element of each set `[ncoil_set]`
+  - `nominal_radius`: arc-length-weighted major radius of each set, metres `[ncoil_set]` — the lever
+    arm that turns a tilt angle into the rim displacement engineering tolerances are written in
 """
 struct CoilSensitivities
     coil_names::Vector{String}
@@ -73,6 +75,7 @@ struct CoilSensitivities
     tilt_linearity_residual::Matrix{Float64}
     peak_current::Vector{Float64}
     winding_multiplier::Vector{Float64}
+    nominal_radius::Vector{Float64}
 end
 
 """
@@ -93,8 +96,11 @@ only magnitudes and relative phases within one table are meaningful.
   - `delta_nominal`: overlap of each set as built `[ncoil_set]`
   - `shift`: ∂δ/∂(Δx, Δy, Δz), per metre `[3 × ncoil_set]`
   - `tilt`: ∂δ/∂(θx, θy, θz), per degree `[3 × ncoil_set]`
-  - `shift_rms`, `tilt_rms`: direction-averaged in-plane magnitude `√((|S_x|² + |S_y|²)/2)` of the
-    shift and tilt sensitivities `[ncoil_set]` — the single-number sensitivity the OMFIT tool used
+  - `delta_per_mm_shift`: direction-averaged in-plane magnitude `√((|S_x|² + |S_y|²)/2)` of the
+    shift sensitivity, per millimetre `[ncoil_set]` — the single-number sensitivity to placement
+  - `delta_per_deg_tilt`: the same average over the tilt sensitivities, per degree `[ncoil_set]`
+  - `delta_per_mm_rim`: that tilt sensitivity expressed as rim displacement at `nominal_radius`,
+    per millimetre `[ncoil_set]` — the unit mechanical tolerances usually arrive in
   - `cancelling_shift`: the in-plane shift `(Δx, Δy)` that cancels `delta_nominal`, metres
     `[2 × ncoil_set]`, see [`cancelling_offset`](@ref)
   - `cancelling_tilt`: the in-plane tilt `(θx, θy)` that cancels `delta_nominal`, degrees `[2 × ncoil_set]`
@@ -105,8 +111,9 @@ struct SensitivityTable
     delta_nominal::Vector{ComplexF64}
     shift::Matrix{ComplexF64}
     tilt::Matrix{ComplexF64}
-    shift_rms::Vector{Float64}
-    tilt_rms::Vector{Float64}
+    delta_per_mm_shift::Vector{Float64}
+    delta_per_deg_tilt::Vector{Float64}
+    delta_per_mm_rim::Vector{Float64}
     cancelling_shift::Matrix{Float64}
     cancelling_tilt::Matrix{Float64}
 end
