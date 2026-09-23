@@ -495,8 +495,11 @@ function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash:
     println()
     println("Golden update: $(case_spec.name)  (v$(previous === nothing ? 0 : previous.meta.golden_version) → v$(meta.golden_version))")
     if existing !== nothing
+        runtime_names = Set(s.name for s in case_spec.quantities if s.type == "runtime")
         for name in sort(collect(keys(existing)))
-            if !haskey(values, name)
+            if name in runtime_names
+                println(@sprintf("  %-34s REMOVED — runtimes are no longer pinned", name))
+            elseif !haskey(values, name)
                 println(
                     @sprintf(
                         "  %-34s REMOVED — extraction returned missing (renamed h5 path?) or the quantity left the case. This deletes its gate; confirm it is intentional.",
