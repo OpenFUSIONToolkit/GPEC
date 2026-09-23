@@ -124,13 +124,8 @@ end
 """
 
 
-# Fixed-Q probe of the SLAYER inner-layer dispersion Δ(Q) on the DIII-D-like 2/1 surface.
-# The adaptive AMR scan samples in gpec.h5 cannot be pinned (sample locations move under any
-# refinement change), so this evaluates Δ(Q) on a fixed 4×4 grid over Re(Q), Im(Q) ∈ [-10, 10]
-# instead — a refinement-stable pin of the dispersion curve itself. The layer parameters are the
-# DIII-D-like SLAYER deck's own 2/1 surface values (Tearing/PerSurface), quoted so the case is
-# self-contained and probes the SOLVER alone (bt is a placeholder — the dispersion solve never
-# reads it); the parameter chain producing these numbers is pinned separately by diiid_slayer_n1.
+# SLAYER dispersion Δ(Q) on a fixed 4×4 Q grid at the DIII-D-like 2/1 surface's layer parameters,
+# a refinement-stable pin of the solver alone (AMR sample locations cannot be pinned; bt is unread).
 const COMPUTED_SLAYER_DELTA_PROBE_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -157,13 +152,9 @@ h5open(ARGS[1], "w") do fid
 end
 %RUNINFO%
 """
-# External-reference validation: GPEC's del_s Riccati solver against Fitzpatrick, "Tearing Mode
-# Dynamics in Tokamak Plasmas" (IOP 2023), figures 6.2 and 6.3 — see the case TOML header for
-# the validation evidence. Prescribing the normalized parameters (D_norm = 1,
-# P_perp = P_tor = Phat, Q_e = Qhat/(1+1/tau)) makes the solver's internal Q_hat equal the
-# book's Qhat_*, so the grid below is exactly the figures' axes. tau = 1 is an explicit pinned
-# assumption (not stated in the captions). The grid starts just inside Phat = 0, which is a
-# singular edge of the model (alpha vanishes and the large-q boundary form degenerates).
+# del_s over Fitzpatrick (IOP 2023) figs 6.2/6.3's (Qhat, Phat) axes: D_norm = 1, P_perp = P_tor = Phat
+# and Q_e = Qhat/(1+1/tau) make the solver's Q_hat the book's. tau = 1 is assumed; Phat starts just
+# inside 0, a singular edge of the model.
 const COMPUTED_SLAYER_DELS_FITZPATRICK_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
