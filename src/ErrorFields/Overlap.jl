@@ -40,12 +40,16 @@ function applied_spectrum(cs::CoilSet, rc::ResonantCoupling, grids::AbstractVect
 end
 
 """
-    PostHocContext
+    ResonantDriveContext
 
-Everything a post-hoc coil analysis needs about a finished run, gathered once: the rebuilt
+The surface a finished run offers for judging coil geometry on, gathered once: the rebuilt
 equilibrium, the control surface it integrated to, the coil-grid configuration, the resonant
 coupling, the dominant mode over the chosen ψ window, the axis toroidal field, and the boundary
-grids. Build it with the `gpec.h5` constructor and hand it to [`coil_overlaps`](@ref) or
+grids. Everything needed to ask how much resonant field a coil drives, and nothing that depends on
+which coils they are — so the expensive half is built once and any number of geometries are
+evaluated against it.
+
+Build it with the `gpec.h5` constructor and hand it to [`coil_overlaps`](@ref) or
 [`compute_coil_sensitivities`](@ref).
 
 ## Fields
@@ -59,7 +63,7 @@ grids. Build it with the `gpec.h5` constructor and hand it to [`coil_overlaps`](
   - `b_t0`: axis toroidal field magnitude, tesla
   - `grids`: one boundary sampling per toroidal mode, shared by every coil set evaluated
 """
-struct PostHocContext
+struct ResonantDriveContext
     equil::Equilibrium.PlasmaEquilibrium
     inputs::Dict{String,Any}
     psilim::Float64
@@ -87,9 +91,9 @@ function regrid(cfg::CoilConfig; mtheta_coil=nothing, nzeta_coil=nothing, dat_di
 end
 
 """
-    PostHocContext(equil, rc, cfg, psilim, b_t0; psi_low=0.0, psi_high=CORE_PSI_HIGH,
+    ResonantDriveContext(equil, rc, cfg, psilim, b_t0; psi_low=0.0, psi_high=CORE_PSI_HIGH,
                    mtheta_coil=nothing, nzeta_coil=nothing, inputs=Dict{String,Any}())
-    PostHocContext(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mtheta_coil=nothing,
+    ResonantDriveContext(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mtheta_coil=nothing,
                    nzeta_coil=nothing, dat_dir=nothing)
 
 Assemble the context. The ψ window selects which rational surfaces the dominant mode is built from.
@@ -98,7 +102,7 @@ otherwise inherited silently; the toroidal grid is checked against [`MIN_NZETA_P
 and warns when it is coarser. The `h5path` method lives in `Rerun.jl`, where the equilibrium is
 rebuilt from the file.
 """
-function PostHocContext(
+function ResonantDriveContext(
     equil::Equilibrium.PlasmaEquilibrium,
     rc::ResonantCoupling,
     cfg::CoilConfig,
@@ -110,12 +114,12 @@ function PostHocContext(
     nzeta_coil=nothing,
     inputs::Dict{String,Any}=Dict{String,Any}()
 )
-    b_t0 > 0 || throw(ArgumentError("PostHocContext: b_t0 must be a positive field magnitude (got $b_t0)"))
+    b_t0 > 0 || throw(ArgumentError("ResonantDriveContext: b_t0 must be a positive field magnitude (got $b_t0)"))
     cfg = regrid(cfg; mtheta_coil, nzeta_coil)
     _warn_coarse_toroidal_grid(cfg, rc)
     dom = dominant_coupling(rc; psi_low, psi_high)
     grids = forcing_grids(rc, equil, cfg; psi=Float64(psilim))
-    return PostHocContext(equil, inputs, Float64(psilim), cfg, rc, dom, Float64(b_t0), grids)
+    return ResonantDriveContext(equil, inputs, Float64(psilim), cfg, rc, dom, Float64(b_t0), grids)
 end
 
 function _warn_coarse_toroidal_grid(cfg::CoilConfig, rc::ResonantCoupling)
@@ -159,18 +163,18 @@ struct CoilOverlap
 end
 
 """
-    coil_overlaps(ctx::PostHocContext, coil_sets; mode=1) -> Vector{CoilOverlap}
+    coil_overlaps(ctx::ResonantDriveContext, coil_sets; mode=1) -> Vector{CoilOverlap}
     coil_overlaps(h5path, coil_sets; mode=1, kwargs...) -> Vector{CoilOverlap}
 
 Resonant overlap of each coil set against a finished run, evaluated on the run's own control
 surface. `coil_sets` is any geometry, not necessarily the run's, so swapping in a new coil revision
 costs one Biot-Savart pass per set and no stability or perturbed-equilibrium solve.
 
-The `h5path` method takes [`PostHocContext`](@ref)'s keywords and lives in `Rerun.jl`. For
+The `h5path` method takes [`ResonantDriveContext`](@ref)'s keywords and lives in `Rerun.jl`. For
 sensitivities to rigid motion as well, use [`compute_coil_sensitivities`](@ref) instead; this is the
 cheaper path when only the overlaps are wanted.
 """
-function coil_overlaps(ctx::PostHocContext, coil_sets::AbstractVector{CoilSet}; mode::Int=1)
+function coil_overlaps(ctx::ResonantDriveContext, coil_sets::AbstractVector{CoilSet}; mode::Int=1)
     1 <= mode <= length(ctx.dom.singular_values) ||
         throw(ArgumentError("mode $mode is outside the $(length(ctx.dom.singular_values)) singular modes of the decomposition"))
     return map(coil_sets) do cs
@@ -181,7 +185,7 @@ function coil_overlaps(ctx::PostHocContext, coil_sets::AbstractVector{CoilSet}; 
     end
 end
 
-coil_overlaps(ctx::PostHocContext, cs::CoilSet; kwargs...) = coil_overlaps(ctx, [cs]; kwargs...)
+coil_overlaps(ctx::ResonantDriveContext, cs::CoilSet; kwargs...) = coil_overlaps(ctx, [cs]; kwargs...)
 
 """
     combine_overlaps(overlaps, "A" => 20.0, "B" => -15.0; name="combined") -> CoilOverlap

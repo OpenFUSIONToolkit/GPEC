@@ -97,10 +97,10 @@ table = EF.sensitivity_table(run.coil_sensitivities, dom; mode=1)
 
 Assessing a *new* coil design against an existing run costs one Biot-Savart pass per coil set and
 no plasma solve: the equilibrium, the control surface and the resonant coupling all come from the
-stored file. Gather them once with [`PostHocContext`](@ref) and hand it whatever geometry you like.
+stored file. Gather them once with [`ResonantDriveContext`](@ref) and hand it whatever geometry you like.
 
 ```julia
-ctx = EF.PostHocContext("gpec.h5")                    # nzeta_coil=…, dat_dir=… override the deck
+ctx = EF.ResonantDriveContext("gpec.h5")                    # nzeta_coil=…, dat_dir=… override the deck
 old = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(old_cfg, 1))
 new = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(new_cfg, 1))
 
