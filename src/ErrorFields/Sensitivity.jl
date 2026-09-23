@@ -91,12 +91,12 @@ function compute_coil_sensitivities(
 end
 
 """
-    compute_coil_sensitivities(ctx::PostHocContext, coil_sets, ctrl=ErrorFieldsControl()) -> CoilSensitivities
+    compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets, ctrl=ErrorFieldsControl()) -> CoilSensitivities
 
-Sweep `coil_sets` against an already-assembled [`PostHocContext`](@ref), reusing its boundary grids.
+Sweep `coil_sets` against an already-assembled [`ResonantDriveContext`](@ref), reusing its boundary grids.
 Equivalent to the five-argument method and the way to apply a grid or ψ-window override.
 """
-function compute_coil_sensitivities(ctx::PostHocContext, coil_sets::Vector{CoilSet}, ctrl::ErrorFieldsControl=ErrorFieldsControl())
+function compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets::Vector{CoilSet}, ctrl::ErrorFieldsControl=ErrorFieldsControl())
     return compute_coil_sensitivities(coil_sets, ctx.rc, ctx.equil, ctx.cfg, ctrl; psi=ctx.psilim, b_t0=ctx.b_t0)
 end
 

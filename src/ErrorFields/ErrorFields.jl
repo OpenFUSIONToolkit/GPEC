@@ -41,7 +41,7 @@ include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
 export compute_coil_sensitivities, sensitivity_table, cancelling_offset
-export PostHocContext, CoilOverlap, coil_overlaps, combine_overlaps
+export ResonantDriveContext, CoilOverlap, coil_overlaps, combine_overlaps
 export applied_spectrum, forcing_grids, regrid, MIN_NZETA_PER_PERIOD
 
 end # module ErrorFields
