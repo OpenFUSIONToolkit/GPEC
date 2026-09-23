@@ -1,14 +1,14 @@
 [meta]
-blas_threads = 2
+blas_threads = 8
 case = "slayer_dels_fitzpatrick"
-commit = "af3e4492"
-generated_at = "2026-08-18"
-golden_version = 1
+commit = "67a2c40cb"
+generated_at = "2026-09-23"
+golden_version = 2
 julia_version = "1.11.6"
 manifest_sha = "7e5c34ad1722fa6addf94f7387b972fa8ac17ff86166793819b158496d495132"
-nthreads = 2
+nthreads = 8
 os_arch = "arm64-apple-darwin24.0.0"
-reason = "Initial pin: validated against Fitzpatrick 2023 figs 6.2/6.3 at eight contour points"
+reason = "Regenerate on the branch after the second adversarial review: scan axes and tau now topological, runtime no longer pinned; values unchanged from the Fitzpatrick-validated state"
 
 [values.dels_db_im]
 atol = 0.0
@@ -28,32 +28,24 @@ value_type = "json_array"
 
 [values.p_hat]
 atol = 0.0
-class = "physics_converged"
-rtol = 1.0e-6
+class = "topological"
+rtol = 0.0
 tolerance_basis = "class-default (provisional)"
 value_text = "[0.02,0.02,0.02,0.02,0.02,0.5,0.5,0.5,0.5,0.5,1.0,1.0,1.0,1.0,1.0,2.0,2.0,2.0,2.0,2.0,4.0,4.0,4.0,4.0,4.0]"
 value_type = "json_array"
 
 [values.q_hat]
 atol = 0.0
-class = "physics_converged"
-rtol = 1.0e-6
+class = "topological"
+rtol = 0.0
 tolerance_basis = "class-default (provisional)"
 value_text = "[0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0,0.02,0.5,1.0,2.0,4.0]"
 value_type = "json_array"
 
-[values.runtime]
-atol = +inf
-class = "diagnostic"
-rtol = +inf
-tolerance_basis = "class-default (provisional)"
-value = 1.2057960033416748
-value_type = "real"
-
 [values.tau]
 atol = 0.0
-class = "physics_converged"
-rtol = 1.0e-6
+class = "topological"
+rtol = 0.0
 tolerance_basis = "class-default (provisional)"
 value = 1.0
 value_type = "real"
