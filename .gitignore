@@ -38,3 +38,6 @@ scratch/
 
 # Local profiling scratch (one-off study scripts, not part of the package)
 profiling/
+
+# Override-case rundirs materialized beside their example by the regression harness
+.regress-override-*
