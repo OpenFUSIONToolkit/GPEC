@@ -41,7 +41,7 @@ include("h5_metadata_check.jl")
 
         # Every threshold above the distribution: nothing ever locks.
         @test EF.locking_risk(mc, fill(1.0, 100), sc, scen).plock == 0
-        # Every threshold below it: everything locks.
+        # Every threshold below it: everything locks, to the width of the bin the zero edge pins.
         @test EF.locking_risk(mc, fill(1.0e-12, 100), sc, scen).plock ≈ 100 atol = 0.5
         # Thresholds spread uniformly across the distribution: a flat δ against a flat threshold
         # gives half, since P(δ > threshold) = 1/2 for two independent uniforms on the same range.
@@ -167,7 +167,7 @@ include("h5_metadata_check.jl")
             @test all(diff(scan.plock) .>= -0.5)                          # risk grows with tolerance (to Monte Carlo noise)
             # Two 2 kA hoops on a toy equilibrium drive an overlap around 1e-5, two orders below the
             # ITPA threshold at any plausible density, so zero risk is the right answer here and the
-            # scan is flat. The convolution itself is pinned by its own testset below, on a
+            # scan is flat. The convolution itself is pinned by its own testset above, on a
             # distribution built to straddle a threshold.
             @test risk.plock == 0
             @test scan.plock[2] ≈ risk.plock rtol = 1e-12                # the scale-1 point is the run's own Monte Carlo
