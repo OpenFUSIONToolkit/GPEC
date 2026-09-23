@@ -1,5 +1,4 @@
 @testset "Direct equilibrium: magnetic-axis search robustness" begin
-    using Logging
     using GeneralizedPerturbedEquilibrium.Equilibrium
     using GeneralizedPerturbedEquilibrium.Equilibrium: EquilibriumConfig, read_efit, direct_position!
 
@@ -24,7 +23,7 @@
     @testset "well-behaved geqdsk takes the plain Newton path" begin
         cfg = EquilibriumConfig(; eq_filename=joinpath(data_dir, "CHEASE_test_data", "EQDSK_COCOS_02"), eq_type="efit")
         rp = read_efit(cfg)
-        ro, zo, _, _ = @test_logs min_level = Logging.Warn direct_position!(rp)
+        ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
         @test 6.5 < ro < 7.5
         @test isfinite(zo)
     end
