@@ -394,8 +394,8 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
         # above zero), so |det|-based polishing is a no-op and the residual-scale
         # gate is unreliable. A σ_min-based coupled refinement is a dev follow-up;
-        # for now the coupled determinant uses the raw contour extraction (the
-        # BLAS pin in the scan still makes it thread-deterministic).
+        # for now the coupled root is the raw contour intersection, so it carries the
+        # triangulation's interpolation error (~0.7% in γ on the DIII-D-like deck).
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
             filter_above_poles=control.filter_above_poles,

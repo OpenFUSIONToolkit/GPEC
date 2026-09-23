@@ -22,6 +22,7 @@
 
 using Contour
 using DelaunayTriangulation
+using Random: Xoshiro
 
 # ---------------------------------------------------------------------
 # Public result struct + main entry point.
@@ -955,7 +956,9 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
         throw(ArgumentError("_extract_growth_rates_amr: need ≥ 3 points to triangulate"))
 
     pts = [(real(q), imag(q)) for q in Q]
-    tri = triangulate(pts)
+    # AMR grids are full of cocircular points, where the Delaunay triangulation is not unique and
+    # the randomized insertion order picks the diagonals; a fixed seed makes the contours reproducible.
+    tri = triangulate(pts; rng=Xoshiro(0))
 
     # Segment types (carry complementary-field value at each endpoint)
     re_segs = NamedTuple{(:p1, :p2, :a1, :a2),
