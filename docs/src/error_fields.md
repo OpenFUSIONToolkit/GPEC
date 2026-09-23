@@ -313,7 +313,7 @@ table = EF.sensitivity_table(run.coil_sensitivities, dom; mode=1)
 
 Assessing a *new* coil design against an existing run costs one Biot-Savart pass per coil set and
 no plasma solve: the equilibrium, the control surface and the resonant coupling all come from the
-stored file. Gather them once with [`ResonantDriveContext`](@ref) and hand it whatever geometry you like.
+stored file. Gather them once with `ResonantDriveContext` and hand it whatever geometry you like.
 
 ```julia
 ctx = EF.ResonantDriveContext("gpec.h5")                    # nzeta_coil=…, dat_dir=… override the deck
@@ -325,7 +325,7 @@ new[1].fraction_percent    # how much of this coil's own spectrum is resonant
 new[1].spectrum            # b̃ itself, for the diagnostics below
 ```
 
-Every normalization the quantity is quoted in travels on the [`CoilOverlap`](@ref), so a caller
+Every normalization the quantity is quoted in travels on the `CoilOverlap`, so a caller
 never has to work out which one a bare number was in.
 
 A revision can rename or split coils. Because the field is linear in the currents, a design current
