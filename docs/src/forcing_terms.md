@@ -60,7 +60,7 @@ amplitudes directly — no conversion is applied.
 
 Required datasets:
 - `n`: integer array of toroidal mode numbers
-- `m`: integer array of poloidal mode numbers  
+- `m`: integer array of poloidal mode numbers
 - `amplitude_real`: float array of real parts
 - `amplitude_imag`: float array of imaginary parts (optional)
 
@@ -89,6 +89,17 @@ The coil pipeline:
 2. `compute_biot_savart_boundary!`: compute B at all grid points via Biot-Savart law
 3. `project_normal_flux!`: compute Phi_x = 2π×R×(B_R ∂Z/∂θ_norm − B_Z ∂R/∂θ_norm)
 4. `fourier_decompose_bn`: Fourier decompose to get bmn in unit-norm (= Phi_x) convention
+
+Steps 2–4 are linear in the coils, so a `CoilForcingGrid` (step 1 plus the observation-point
+layout, built once per equilibrium and `n`) can be reused to evaluate coil sets one at a time
+with `coil_forcing_modes`; the per-set spectra sum to the assembly's. Use this when many coil
+variants must be compared against one plasma — moved or re-wound coils, or one coil at a time —
+without re-sampling the boundary:
+
+```julia
+forcing_grid = CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)
+spectra = [coil_forcing_modes(cs, forcing_grid, n, m_low, m_high) for cs in coil_sets]
+```
 
 The toroidal angle for each observation point at SFL grid coordinate (θ_i, ζ_j) is:
 ```
