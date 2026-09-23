@@ -147,7 +147,7 @@ gpec.toml.
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
-  - `write_el_matrices::Bool` - Write the Euler-Lagrange matrices (`ForceFreeStates/EulerLagrangeMatrices`: the ideal A-K and, on a kinetic run, the kinetic set) sampled on the ψ grid. Each is `mpert × mpert × npsi` complex, so the group scales as mpert²·npsi and dominates the file — 98 of 104 MB on a DIII-D n=1 Riccati run. Nothing downstream reads it back; it is a diagnostic for inspecting the coefficient system. Default `false`.
+  - `write_el_matrices::Bool` - Write the Euler-Lagrange matrices (`ForceFreeStates/EulerLagrangeMatrices`: the ideal A-K and, on a kinetic run, the kinetic set) sampled on the ψ grid. Each is `mpert × mpert × npsi` complex, so the group scales as mpert²·npsi and dominates the file size. Default `false`.
   - `HDF5_filename::String` - Name of HDF5 output file
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)

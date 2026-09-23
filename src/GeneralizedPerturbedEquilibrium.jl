@@ -1310,8 +1310,7 @@ function write_outputs_to_HDF5(
         out_h5["SurfaceGeometries/Wall/y"] = free_energies !== nothing ? free_energies.wall_pts[:, 2] : Float64[]
         out_h5["SurfaceGeometries/Wall/z"] = free_energies !== nothing ? free_energies.wall_pts[:, 3] : Float64[]
 
-        # Write the Euler-Lagrange matrices on the ψ grid. Off by default: the group scales as
-        # mpert²·npsi and is the bulk of the file, and nothing downstream reads it back.
+        # Euler-Lagrange matrices on the ψ grid; opt-in since the group scales as mpert²·npsi.
         if ctrl.write_el_matrices
             xs = equil.rzphi_xs
             npsi = length(xs)
