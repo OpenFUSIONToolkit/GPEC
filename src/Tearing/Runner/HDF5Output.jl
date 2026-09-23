@@ -93,7 +93,7 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/D_geo" => (; long_name="Connor et al. 2015 Eq. 59 toroidal critical-Δ geometric factor in the r_s reference (0 when no ResistGeometry)", dims=("surface",)),
     "PerSurface/eta" => (; long_name="parallel resistivity at each surface", units="Ohm*m", dims=("surface",)),
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
-    "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
+    "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor, Ham, Hastie & Liu 2015 Eq. 59)", dims=("surface",)),
     "PerSurface/D_c_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
     "PerSurface/k_ref" => (; long_name="reference-length ratio K = r_s·(dψ_N/dr) at each surface", dims=("surface",)),
     "PerSurface/alpha_mercier" => (; long_name="Mercier Frobenius exponent α = √(−D_I) at each surface (Glasser-Greene-Johnson 1975 Eq. 48)", dims=("surface",)),
@@ -106,8 +106,14 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
     "PerSurface/tau_A" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
-    "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
-    "PerSurface/Delta_prime_matrix_rs" => (; long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
+    "PerSurface/Delta_prime_matrix" => (;
+        long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)",
+        dims=("surface_row", "surface_col")
+    ),
+    "PerSurface/Delta_prime_matrix_rs" => (;
+        long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)",
+        dims=("surface_row", "surface_col")
+    ),
     "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
         (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root", units="rad/s", dims=("surface",)),

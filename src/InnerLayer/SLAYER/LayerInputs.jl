@@ -179,15 +179,13 @@ is recovered after dividing by `r_s`.
 
 The reference conversion is deliberately linear (Frobenius exponent ½, the
 paper's H = 0 ordering): the critical-Δ is a layer-side quantity like the slab
-Δ̂(Q) and W_d, whereas the outer Δ' is converted with `K^(2α)` because it
-genuinely carries the Mercier exponent α. Converting the offset with `c^(2α)`
-instead would multiply it by `c^(2α−1)`, 5–13 % at the DIII-D-like 3/2–4/1
-surfaces, without support from the derivation.
+Δ̂(Q) and W_d, whereas the outer Δ' carries the Mercier exponent `α_M = √(−D_I)`
+and is converted with `K^(2α_M)`.
 """
 function toroidal_dgeo(; chi1::Real, v1::Real, q::Real, q1::Real, n::Integer,
     avg_bsq::Real, avg_dpsisq::Real, k_ref::Real)
-    v1 != 0 || throw(ArgumentError("toroidal_dgeo: dV/dψ must be non-zero"))
-    q != 0 || throw(ArgumentError("toroidal_dgeo: q must be non-zero"))
+    v1 > 0 || throw(ArgumentError("toroidal_dgeo: dV/dψ_N must be positive, got $v1"))
+    chi1 != 0 || throw(ArgumentError("toroidal_dgeo: chi1 must be non-zero"))
     alpha = 2π * n * v1 / chi1
     psit1 = q * chi1 / v1
     lambda = psit1^2 * (-q1 / (q^2 * v1))
@@ -231,9 +229,9 @@ profiles, without an intermediate file round-trip.
     (`:lar`, `:rfitzp`, `:toroidal`). When `nothing` (default), Julia
     derives it per-surface from the equilibrium as
     `dr_val_k = D_R(ψ_k) = E_k + F_k + H_k²`,
-    consistent with Connor-Hastie-Helander 2015 (PPCF 57 065001) Eq. 59
-    which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar /
-    vector / callable to override.
+    consistent with Connor, Ham, Hastie & Liu 2015 (PPCF 57 065001) Eq. 59,
+    which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar or a
+    callable of `psi` to override.
 
     **NOTE**: the χ_‖-matching critical-Δ requires the resistive
     interchange index `D_R = E + F + H²` (Glasser-Greene-Johnson 1975),
@@ -246,8 +244,10 @@ profiles, without an intermediate file round-trip.
     per-surface from the equilibrium through the surface's `ResistGeometry`
     (`sing.restype`, populated by `ForceFreeStates.resist_eval_all!`); an
     error is raised if `dc_type=:toroidal` is requested on a surface without
-    one. Pass a scalar / callable to use a prescribed value. Only
-    `dc_type=:toroidal` consumes it.
+    one. Pass a scalar or a callable of `psi` to prescribe it; a prescribed
+    value must already be in the `r_s` reference, i.e. Eq. 59's own value
+    times `k_ref·v1/V_s` (≈ 2 at large aspect ratio). Only `dc_type=:toroidal`
+    consumes it.
   - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
   - `rs_method` -- radial label defining `r_s` for the whole layer stack:
     `:midplane` (default), `:halfwidth`, `:fsa`, `:volume`, or `:flux`. See
@@ -355,7 +355,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         # dr_val: per-surface resistive interchange index D_R = E + F + H²
         # (Glasser-Greene-Johnson 1975). Used by `_solve_dc_tmp` to compute
-        # the χ_‖-matching critical-Δ via Connor-Hastie-Helander 2015 Eq. 59,
+        # the χ_‖-matching critical-Δ via Connor, Ham, Hastie & Liu 2015 Eq. 59,
         # which has `(−D_R)` as a multiplier. NOT the Mercier index
         # D_I = E + F + H − 1/4 (see this function's docstring); we use the
         # physically correct D_R here.
@@ -382,7 +382,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             rs / da_dpsi
         else
             @warn("build_slayer_inputs: da/dψ = $da_dpsi at ψ = $psi is not usable; leaving " *
-                  "Δ' unconverted (k_ref = 1) at this surface.", maxlog=3)
+                  "Δ' and the toroidal critical-Δ unconverted (k_ref = 1) at this surface.", maxlog = 3)
             1.0
         end
 
@@ -410,9 +410,10 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         end
 
         alpha_k = if rg === nothing
-            @warn("build_slayer_inputs: sing.restype not populated; using the " *
-                  "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
-                  "conversion at all such surfaces.", maxlog=1)
+            @warn(
+                "build_slayer_inputs: sing.restype not populated; using the " *
+                "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
+                "conversion at all such surfaces.", maxlog = 1)
             0.5
         else
             sqrt(max(-(rg.E + rg.F + rg.H - 0.25), 0.0))
