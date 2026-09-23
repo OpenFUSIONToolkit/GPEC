@@ -308,6 +308,23 @@ function make_pf_hoop(; radius::Real, height::Real, nsec::Int=361, name::String=
 end
 
 """
+    conductors(cs::CoilSet) -> Vector{CoilSet}
+
+Split a coil set into one single-conductor set per conductor, each carrying that conductor's own
+current and named `"<name>_<index>"`. A set that already holds one conductor is returned unchanged
+in a one-element vector.
+
+Legacy geometry files often pack several physically separate coils into one file, so comparing
+against a design that names them separately needs them one at a time. Evaluating a split set costs
+only its own conductor, where zeroing the other currents would compute and discard their fields.
+"""
+function conductors(cs::CoilSet)
+    cs.ncoil == 1 && return [cs]
+    return [CoilSet("$(cs.name)_$j", 1, cs.s, cs.nw, cs.nsec,
+        cs.x[j:j, :, :], cs.y[j:j, :, :], cs.z[j:j, :, :], [cs.currents[j]]) for j in 1:cs.ncoil]
+end
+
+"""
     surface_point_and_normal(equil, theta_cyl; psi=equil.rzphi_xs[end]) -> (R, Z, nR, nZ)
 
 Locate the control-surface point at cylindrical poloidal angle `theta_cyl` (radians) and return
