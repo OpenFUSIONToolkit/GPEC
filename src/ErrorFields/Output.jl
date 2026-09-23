@@ -21,11 +21,13 @@ const EF_H5_ANNOTATIONS = [
         (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖ of each tilt tap relative to the set's largest first difference", dims=("axis", "coil_set")),
     "peak_current" => (; long_name="largest conductor current magnitude of each coil set at which the spectra were evaluated", units="A"),
     "winding_multiplier" => (; long_name="turns per conductor element of each coil set"),
+    "nominal_radius" => (; long_name="arc-length-weighted major radius of each coil set, the lever arm converting a tilt angle to rim displacement", units="m"),
     "DominantMode/delta_nominal" => (; long_name="overlap δ = Vᴴ₁·b̃ / B_T0 of each coil set with the full-window dominant mode"),
     "DominantMode/shift_sensitivity" => (; long_name="∂δ/∂(Δx, Δy, Δz) on the full-window dominant mode", units="1/m", dims=("axis", "coil_set")),
     "DominantMode/tilt_sensitivity" => (; long_name="∂δ/∂(θx, θy, θz) on the full-window dominant mode", units="1/deg", dims=("axis", "coil_set")),
-    "DominantMode/shift_rms" => (; long_name="direction-averaged in-plane shift sensitivity √((|∂δ/∂Δx|²+|∂δ/∂Δy|²)/2)", units="1/m"),
-    "DominantMode/tilt_rms" => (; long_name="direction-averaged in-plane tilt sensitivity √((|∂δ/∂θx|²+|∂δ/∂θy|²)/2)", units="1/deg"),
+    "DominantMode/delta_per_mm_shift" => (; long_name="direction-averaged in-plane shift sensitivity √((|∂δ/∂Δx|²+|∂δ/∂Δy|²)/2)", units="1/mm"),
+    "DominantMode/delta_per_deg_tilt" => (; long_name="direction-averaged in-plane tilt sensitivity √((|∂δ/∂θx|²+|∂δ/∂θy|²)/2)", units="1/deg"),
+    "DominantMode/delta_per_mm_rim" => (; long_name="the same tilt sensitivity as rim displacement at nominal_radius", units="1/mm"),
     "DominantMode/cancelling_shift" => (; long_name="in-plane shift (Δx, Δy) that cancels delta_nominal to linear order", units="m", dims=("axis", "coil_set")),
     "DominantMode/cancelling_tilt" => (; long_name="in-plane tilt (θx, θy) that cancels delta_nominal to linear order", units="deg", dims=("axis", "coil_set"))
 ]
@@ -49,14 +51,16 @@ function write_to_hdf5!(h5file::HDF5.File, sens::CoilSensitivities, dom::Dominan
     g["tilt_linearity_residual"] = sens.tilt_linearity_residual
     g["peak_current"] = sens.peak_current
     g["winding_multiplier"] = sens.winding_multiplier
+    g["nominal_radius"] = sens.nominal_radius
 
     table = sensitivity_table(sens, dom; mode=1)
     d = create_group(g, "DominantMode")
     d["delta_nominal"] = table.delta_nominal
     d["shift_sensitivity"] = table.shift
     d["tilt_sensitivity"] = table.tilt
-    d["shift_rms"] = table.shift_rms
-    d["tilt_rms"] = table.tilt_rms
+    d["delta_per_mm_shift"] = table.delta_per_mm_shift
+    d["delta_per_deg_tilt"] = table.delta_per_deg_tilt
+    d["delta_per_mm_rim"] = table.delta_per_mm_rim
     d["cancelling_shift"] = table.cancelling_shift
     d["cancelling_tilt"] = table.cancelling_tilt
 
@@ -81,7 +85,7 @@ function CoilSensitivities(h5path::AbstractString)
             read(g["coil_name"]), mn[:, 1], mn[:, 2], Float64(read(f["Equilibrium/B_T_axis"])),
             read(g["nominal_field"]), read(g["shift_sensitivity"]), read(g["tilt_sensitivity"]),
             read(g["shift_linearity_residual"]), read(g["tilt_linearity_residual"]),
-            read(g["peak_current"]), read(g["winding_multiplier"])
+            read(g["peak_current"]), read(g["winding_multiplier"]), read(g["nominal_radius"])
         )
     end
 end

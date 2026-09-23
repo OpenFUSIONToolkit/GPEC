@@ -344,9 +344,41 @@ the run's — are swept on the run's own control surface. Keyword arguments are
 `[ForcingTerms]` section when present. Nothing is written.
 """
 function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_sets::Vector{ForcingTerms.CoilSet}; kwargs...)
-    ctrl = ErrorFields.ErrorFieldsControl(; kwargs...)
+    ctrl_fields = fieldnames(ErrorFields.ErrorFieldsControl)
+    ctrl = ErrorFields.ErrorFieldsControl(; (k => v for (k, v) in kwargs if k in ctrl_fields)...)
+    ctx = ErrorFields.PostHocContext(h5path; (k => v for (k, v) in kwargs if !(k in ctrl_fields))...)
+    return ErrorFields.compute_coil_sensitivities(ctx, coil_sets, ctrl)
+end
+
+"""
+    ErrorFields.PostHocContext(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1,
+                               mtheta_coil=nothing, nzeta_coil=nothing, dat_dir=nothing) -> PostHocContext
+
+Gather everything a post-hoc coil analysis needs from a finished run: the resonant coupling read
+from `gpec.h5`, the equilibrium rebuilt by [`equilibrium_from_h5`](@ref), the deck's coil
+configuration, and the boundary grids. Nothing is written.
+
+A stored deck records the absolute path its own machine read coil files from, which need not exist
+here, so a missing `dat_dir` is warned about rather than failing later inside the loader; pass
+`dat_dir` to point somewhere else. `mtheta_coil` and `nzeta_coil` override the boundary resolution
+the deck supplies, which is otherwise inherited silently.
+"""
+function ErrorFields.PostHocContext(h5path::AbstractString; dat_dir=nothing, kwargs...)
     rc = PerturbedEquilibrium.ResonantCoupling(h5path)
     equil, inputs, psilim = equilibrium_from_h5(h5path)
     cfg = ForcingTerms.CoilConfig(forcing_terms_control(inputs))
-    return ErrorFields.compute_coil_sensitivities(coil_sets, rc, equil, cfg, ctrl; psi=psilim, b_t0=equil.params.bt0)
+    cfg = ErrorFields.regrid(cfg; dat_dir)
+    isempty(cfg.dat_dir) || isdir(cfg.dat_dir) ||
+        @warn "Coil geometry directory from the stored deck does not exist here: $(cfg.dat_dir). Pass dat_dir to point at a local copy."
+    return ErrorFields.PostHocContext(equil, rc, cfg, psilim, equil.params.bt0; inputs, kwargs...)
+end
+
+"""
+    ErrorFields.coil_overlaps(h5path, coil_sets; mode=1, kwargs...) -> Vector{CoilOverlap}
+
+Resonant overlap of each coil set against a finished run, with the context built from `h5path`.
+Keyword arguments beyond `mode` are [`ErrorFields.PostHocContext`](@ref)'s.
+"""
+function ErrorFields.coil_overlaps(h5path::AbstractString, coil_sets::AbstractVector{ForcingTerms.CoilSet}; mode::Int=1, kwargs...)
+    return ErrorFields.coil_overlaps(ErrorFields.PostHocContext(h5path; kwargs...), coil_sets; mode)
 end
