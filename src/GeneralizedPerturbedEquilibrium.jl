@@ -474,7 +474,9 @@ function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.Pl
     if ctrl.local_stability_flag
         locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
         # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
-        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
+        if ctrl.alpha_boundary_scan
+            ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
+        end
     end
     return locstab, ballooning_boundary
 end

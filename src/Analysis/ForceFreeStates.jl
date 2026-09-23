@@ -400,7 +400,7 @@ function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
         read(fid["LocalStability/ballooning_psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
     end
 
-    isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
+    isempty(alpha) && return plot(; title="No α-boundary data (set local_stability_flag and alpha_boundary_scan)", legend=false)
 
     p = plot(;
         xlims=(psi_min, 1),
