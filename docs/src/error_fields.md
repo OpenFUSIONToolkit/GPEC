@@ -143,7 +143,8 @@ EF = GeneralizedPerturbedEquilibrium.ErrorFields
 # From the file: the coupling is rebuilt, windowed to 0.5 ≤ ψ_N ≤ 1, and projected onto mode 1
 table = EF.sensitivity_table("gpec.h5"; psi_low=0.5)
 table.delta_nominal            # complex overlap of each coil set
-table.shift_rms                # direction-averaged |∂δ/∂Δ| per metre of shift, per coil set
+table.delta_per_mm_shift       # direction-averaged |∂δ/∂Δ| per millimetre of shift, per coil set
+table.delta_per_mm_rim         # the same for tilt, as rim displacement at the coil's major radius
 table.tilt[1, :]               # ∂δ/∂θx per degree, per coil set
 
 # In memory, from the run's returned state (no I/O)
@@ -152,19 +153,44 @@ dom = PerturbedEquilibrium.dominant_coupling(rc; psi_low=0.5)
 table = EF.sensitivity_table(run.coil_sensitivities, dom; mode=1)
 ```
 
-To assess a *new* coil design against an existing run — a moved or re-wound coil — sweep the
-new geometry on the stored solve's own control surface. The equilibrium is rebuilt from the
-file; no plasma solve is repeated:
+## Comparing coil revisions
+
+Assessing a *new* coil design against an existing run costs one Biot-Savart pass per coil set and
+no plasma solve: the equilibrium, the control surface and the resonant coupling all come from the
+stored file. Gather them once with [`ResonantDriveContext`](@ref) and hand it whatever geometry you like.
 
 ```julia
-new_sets = ForcingTerms.load_coil_sets(cfg, 1)   # any CoilSet vector
-sens  = EF.compute_coil_sensitivities("gpec.h5", new_sets; rotation_center="set")
-table = EF.sensitivity_table(sens, PerturbedEquilibrium.dominant_coupling(PerturbedEquilibrium.ResonantCoupling("gpec.h5")))
+ctx = EF.ResonantDriveContext("gpec.h5")                    # nzeta_coil=…, dat_dir=… override the deck
+old = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(old_cfg, 1))
+new = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(new_cfg, 1))
+
+new[1].delta               # dimensionless overlap δ = Vᴴb̃ / B_T0
+new[1].fraction_percent    # how much of this coil's own spectrum is resonant
+new[1].spectrum            # b̃ itself, for the diagnostics below
 ```
 
-A coil set's spectrum is proportional to its currents, so the table is specific to the current
-pattern it was evaluated with; `peak_current` and `winding_multiplier` are stored so a user can
-renormalize per ampere-turn when comparing designs.
+Every normalization the quantity is quoted in travels on the [`CoilOverlap`](@ref), so a caller
+never has to work out which one a bare number was in.
+
+A revision can rename or split coils. Because the field is linear in the currents, a design current
+pattern is applied afterwards rather than by re-running the geometry, and a split is written as the
+combination it is:
+
+```julia
+sets = ForcingTerms.conductors(ForcingTerms.read_coil_dat("old_pair.dat"))   # one file, two coils
+ovs  = EF.coil_overlaps(ctx, sets)                                          # each at 1 kA, say
+
+EF.combine_overlaps(ovs, "old_pair_1" => 20.0, "old_pair_2" => -15.0)       # weights in kA
+```
+
+Weights multiply each spectrum as it was evaluated; they are not absolute currents, since the sets
+may have been swept at any current. Evaluating every conductor at 1 kA and weighting by the design
+current in kA is the idiom that makes them read as currents. An unmatched name raises rather than
+contributing zero, so a coil renamed between revisions cannot quietly drop out of a comparison.
+
+For sensitivities to rigid motion as well, `compute_coil_sensitivities` takes the same context.
+It costs thirteen spectrum evaluations per coil set instead of one, so reach for `coil_overlaps`
+when only the overlaps are wanted.
 
 ## API Reference
 

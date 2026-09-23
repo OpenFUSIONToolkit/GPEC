@@ -155,7 +155,12 @@ dominant_coupling(rc::ResonantCoupling; kwargs...) = dominant_coupling(rc.C, rc.
     coupling_overlap(dom, rc::ResonantCoupling, modes) -> Vector{ComplexF64}
 
 Coefficients `Vᴴ·b̃` of an applied root-area-weighted field on the singular modes of `dom`; the
-first entry is the overlap with the dominant mode. `dom.singular_values .* coupling_overlap(dom, b̃)`
+first entry is the overlap with the dominant mode.
+
+**These are unnormalized**, in the units of `b̃` itself. The dimensionless overlap δ that the
+error-field literature quotes divides by the axis toroidal field, and the resonant *fraction* of a
+coil's own spectrum divides by `‖b̃‖` instead. `ErrorFields.CoilOverlap` carries all three together
+so a caller never has to know which normalization a bare number was in. `dom.singular_values .* coupling_overlap(dom, b̃)`
 is the resonant field each mode drives, with `dom.left_singular_vectors` giving its pattern over the
 retained surfaces. The second form conforms `modes` through [`rootarea_field`](@ref) first.
 """
