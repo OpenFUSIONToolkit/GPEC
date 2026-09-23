@@ -361,6 +361,23 @@ See the example directories for complete configuration file templates.
 
 ## Developer Tips
 
+### Precompile workload
+
+Building the package runs a small Solovev case through the solver so that a fresh Julia process
+skips most first-call compilation (a DIII-D run's first `main()` drops from about 108 s to 25 s,
+at the cost of a longer one-time build). Code compiled into the package image can round
+differently in the last bit from code compiled on first use, and near-marginal quantities such as
+Δ′ amplify that to the percent level, so results are reproducible only within one build mode. The
+regression harness runs with the workload disabled. To disable it yourself (for a faster build, or
+to match harness numbers), set the preference once in the project and rebuild:
+
+```julia
+using Preferences, GeneralizedPerturbedEquilibrium
+set_preferences!(GeneralizedPerturbedEquilibrium, "precompile_workload" => false; force=true)
+```
+
+This writes `LocalPreferences.toml` next to the active `Project.toml`; delete the entry to re-enable.
+
 ### Revise.jl
 
 When iterating on code, use [Revise.jl](https://timholy.github.io/Revise.jl/stable/) to avoid full recompilation on every change. It tracks source file modifications and recompiles only the affected code.

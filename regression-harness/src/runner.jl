@@ -61,6 +61,24 @@ end
 # is recorded in each run's environment fingerprint.
 const SUBPROCESS_THREADS = get(ENV, "GPEC_REGRESS_THREADS", "auto")
 
+const GPEC_UUID = "462872dd-e066-4d2e-b993-6468b5239634"
+const _PREFS_ENVS = Dict{Bool,String}()
+
+"""
+Launch `cmd` with GPEC's `precompile_workload` preference set from `case_spec`, via a small
+environment stacked on the load path so no file is written into the run's project.
+"""
+function with_workload_preference(cmd::Cmd, case_spec::CaseSpec)
+    workload = case_spec.precompile_workload
+    env = get!(_PREFS_ENVS, workload) do
+        dir = mktempdir()
+        write(joinpath(dir, "Project.toml"), "[extras]\nGeneralizedPerturbedEquilibrium = \"$GPEC_UUID\"\n")
+        write(joinpath(dir, "LocalPreferences.toml"), "[GeneralizedPerturbedEquilibrium]\nprecompile_workload = $workload\n")
+        return dir
+    end
+    return addenv(cmd, "JULIA_LOAD_PATH" => "@:$env:@v#.#:@stdlib")
+end
+
 const RUNNER_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
@@ -277,7 +295,7 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
     runinfo_file = tempname() * ".runinfo"
     try
         write(tmpscript, script_content)
-        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $runinfo_file`
+        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $runinfo_file`, case_spec)
         if verbose
             run(pipeline(cmd))
         else
@@ -479,7 +497,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         runinfo_file = tempname() * ".runinfo"
         write(tmpscript, script_content)
 
-        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $runinfo_file`
+        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $runinfo_file`, case_spec)
         if verbose
             run(pipeline(cmd))
         else
@@ -597,7 +615,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         # Run GPEC in subprocess
         project_root = worktree_path
 
-        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $runinfo_file`
+        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $runinfo_file`, case_spec)
         if verbose
             run(pipeline(cmd))
         else

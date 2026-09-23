@@ -10,6 +10,7 @@ function load_case(filepath::String)::CaseSpec
     description = get(case_section, "description", "")
     kind = get(case_section, "kind", "gpec_run")
     example_dir = get(case_section, "example_dir", "")
+    precompile_workload = get(case_section, "precompile_workload", false)
 
     quantities = QuantitySpec[]
     if haskey(data, "quantities")
@@ -37,7 +38,7 @@ function load_case(filepath::String)::CaseSpec
         end
     end
 
-    return CaseSpec(name, description, example_dir, quantities, kind, overrides)
+    return CaseSpec(name, description, example_dir, quantities, kind, overrides, precompile_workload)
 end
 
 function load_all_cases(cases_dir::String)::Dict{String,CaseSpec}

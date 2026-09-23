@@ -27,6 +27,8 @@ Available regression cases:
 regress --cases diiid_n1 --refs develop,feature/kinetic-damping
 ```
 
+**Build mode.** Every case runs with GPEC's PrecompileTools workload disabled (the harness sets the `precompile_workload` preference per subprocess), so results compare code compiled on first use. `diiid_n1_riccati_precompiled` sets `precompile_workload = true` in its `[case]` table to track the precompiled build users get by default; the two builds can differ at the percent level in Δ′, so compare that case only against itself.
+
 All cases requested in a single invocation share one git worktree (and one `Pkg.instantiate`/precompile) per commit, so `--cases a,b,c` in one command is substantially faster than three separate runs.
 ```
 ================================================================
