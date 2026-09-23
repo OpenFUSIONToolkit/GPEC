@@ -1,11 +1,12 @@
 # Regression case: GPEC's del_s Riccati layer-width solver against Fitzpatrick, "Tearing Mode
 # Dynamics in Tokamak Plasmas" (IOP 2023), figures 6.2 and 6.3 (p. 6-10).
 #
-# This is the suite's only case pinned to an EXTERNAL published reference rather than to GPEC's own
-# previous output: a failure means we no longer reproduce the textbook. Verified at eight points
-# against the published contour bands, e.g. (Q,P) = (4.0, 0.5) -> Re 2.008 against the 1.9-2.1
-# contours, (0.5, 4.0) -> Re 1.537 against the 1.5 contour. The magnitudes also match the book's
-# table 6.2 reactor estimates (|delta_s| 2.95-4.69 mm) at DIII-D-like parameters.
+# Verified by hand at eight points against the book's published contour bands, e.g. (Q,P) =
+# (4.0, 0.5) -> Re 2.008 against the 1.9-2.1 contours, (0.5, 4.0) -> Re 1.537 against the 1.5
+# contour; the magnitudes also match its table 6.2 reactor estimates (|delta_s| 2.95-4.69 mm) at
+# DIII-D-like parameters. The golden file pins GPEC's output at that validated state to a
+# provisional class-default tolerance: a failure means the validated numbers moved, and any re-pin
+# must be re-checked against the figures, since the gate itself is not the contour-band agreement.
 #
 # Pure ODE: no equilibrium, no geqdsk, no kinetic file. Sub-second, so it is fast-tier eligible, and
 # it carries no equilibrium dependence -- its golden values survive equilibrium-side re-baselining.
@@ -16,7 +17,7 @@ name = "slayer_dels_fitzpatrick"
 description = "del_s Riccati layer width vs Fitzpatrick 2023 figs 6.2/6.3 over (Q_hat, P_hat)"
 kind = "computed"
 
-# The scan axes, pinned so a silently reshaped grid is a failure rather than a re-gold.
+# The scan axes, pinned exactly so a silently reshaped grid is a failure rather than a re-gold.
 [quantities.q_hat]
 h5path = "fitzpatrick/Q_hat"
 type = "real_vector"
@@ -24,6 +25,7 @@ extract = "all_real"
 label = "grid Q_hat (= Q_*/D^4)"
 noise_threshold = 0
 order = 10
+class = "topological" # exact input, not a converged output
 
 [quantities.p_hat]
 h5path = "fitzpatrick/P_hat"
@@ -32,6 +34,7 @@ extract = "all_real"
 label = "grid P_hat (= P/D^6)"
 noise_threshold = 0
 order = 11
+class = "topological" # exact input, not a converged output
 
 # tau is not stated in the book's figure captions; tau = 1 (table 5.1, low-field reactor) is the
 # assumption this reproduction rests on, so it is pinned rather than left implicit.
@@ -42,6 +45,7 @@ extract = "value"
 label = "tau (assumed; not given in the figure captions)"
 noise_threshold = 0
 order = 12
+class = "topological" # exact input, not a converged output
 
 [quantities.dels_db_re]
 h5path = "fitzpatrick/dels_db_re"

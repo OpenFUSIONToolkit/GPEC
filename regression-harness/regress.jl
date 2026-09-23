@@ -133,7 +133,8 @@ Options:
                            run always exits non-zero regardless)
     --check                Run the working tree and compare against the committed golden values
                            (regression-harness/golden/<case>.toml). This is the mode CI gates on.
-    --update-golden        Regenerate the golden values from a fresh run. Requires --reason.
+    --update-golden        Regenerate the golden values from a fresh run. Requires --cases and
+                           --reason, and refuses a working tree with uncommitted changes.
     --reason "..."         Why the goldens changed. Mandatory with --update-golden: a golden
                            change is a claim about physics that a reviewer has to evaluate.
     --help                 Print this help message
@@ -144,9 +145,11 @@ Environment:
 
 Golden values:
     A golden file pins each quantity together with the tolerance it must be reproduced within
-    and the evidence behind that tolerance. Tolerances are derived from measured convergence
-    plateau drift and cross-platform spread — never widened to make a check pass. A failing
-    --check is fixed by explaining the physics or fixing the regression, not by loosening rtol.
+    and the evidence behind that tolerance. Tolerances must come from measured convergence
+    plateau drift and cross-platform spread; until measured they are provisional class defaults
+    and say so. A quantity's class is declared in its case file (`class = ...`) or inferred,
+    never set in the golden file. A failing --check is fixed by explaining the physics or
+    fixing the regression, not by loosening rtol.
 
 Exit status:
     0  all runs completed (and, with --fail-on-change, nothing changed)
@@ -229,6 +232,9 @@ function main(args=ARGS)
             error("--update-golden requires --reason \"...\": a golden change is a claim about physics, " *
                   "and the reviewer needs to know what changed and why")
         end
+        if opts.update_golden && isempty(opts.cases)
+            error("--update-golden requires --cases: goldens are regenerated one deliberate case at a time")
+        end
 
         # Resolve refs. Golden modes judge the working tree, so they default to it rather than
         # requiring the caller to spell out --refs local.
@@ -296,7 +302,7 @@ function main(args=ARGS)
                 n_golden_fail += summary.n_fail
                 n_golden_crashed += summary.n_run_failed
                 n_untracked += summary.n_untracked
-                has_golden(case_spec.name) ? (n_checked += 1) : (n_no_golden += 1)
+                summary.n_pass + summary.n_fail > 0 ? (n_checked += 1) : (n_no_golden += 1)
             else
                 summary = if length(resolved_refs) == 2
                     report_two_ref_comparison(db, case_spec,
@@ -324,11 +330,11 @@ function main(args=ARGS)
         if opts.check && n_checked == 0
             # A green gate that checked nothing is worse than a red one: a deleted or
             # typo-named golden file must not be indistinguishable from a passing check.
-            @error "--check ran $n_no_golden case(s) but found no golden file for any of them — nothing was actually gated"
+            @error "--check ran $n_no_golden case(s) but none has a gating golden entry — nothing was actually gated"
             exit(1)
         end
         if opts.check && n_no_golden > 0
-            @warn "$n_no_golden of $(n_no_golden + n_checked) requested case(s) have no golden file and were not gated"
+            @warn "$n_no_golden of $(n_no_golden + n_checked) requested case(s) have no gating golden entry and were not gated"
         end
         if n_untracked > 0
             @info "$n_untracked tracked quantity/quantities have no golden value yet (not gating)"

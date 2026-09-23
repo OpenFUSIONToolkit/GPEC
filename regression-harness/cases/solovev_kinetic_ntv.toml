@@ -26,6 +26,7 @@ extract = "value"
 label = "NTV ψ quadrature evaluations"
 noise_threshold = 0
 order = 11
+class = "diagnostic" # adaptive step count: describes the numerics, never gates
 
 # Stability anchors — confirm the upstream FFS/PE stages feeding the NTV diagnostic.
 [quantities.et_real]

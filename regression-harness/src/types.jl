@@ -4,6 +4,9 @@ Shared data structures for the regression harness.
 
 """
 Specification for a single quantity to extract from gpec.h5.
+
+`class` is the golden tolerance class declared in the case file, or empty to let `infer_class`
+choose; declaring it is the only way to make a quantity non-gating that inference would gate.
 """
 struct QuantitySpec
     name::String
@@ -14,16 +17,18 @@ struct QuantitySpec
     label::String           # Human-readable label for reports
     noise_threshold::Float64 # Absolute changes below this are noise
     order::Int              # Display order in reports (lower = earlier)
+    class::String           # Declared golden tolerance class; empty = inferred
 end
 
 """
 Specification for a test case: what to run and what to extract.
 
 `kind` selects the runner backend:
+
   - "gpec_run"  (default) — run GPEC end-to-end on `example_dir`, extract from `gpec.h5`
   - "computed"  — run a self-contained Julia computation that writes a small h5
-                  (no `example_dir` required); used for analytic/reference cases
-                  like the GGJ inner-layer benchmark.
+    (no `example_dir` required); used for analytic/reference cases
+    like the GGJ inner-layer benchmark.
 """
 struct CaseSpec
     name::String

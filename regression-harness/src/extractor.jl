@@ -113,13 +113,8 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif startswith(spec.extract, "toml_key:")
-        # "toml_key:<dotted.path>": pin a deck's declared control value, read out of the
-        # `Input/gpec_toml_raw` rerun snapshot. Used to record which formalism a case asked
-        # for, because the Δ′ matrix is written to one canonical `SingularSurfaces/` path
-        # whichever integrator produced it, so the numbers alone no longer say. Reading it
-        # from `Input/` respects the schema rule that control values live nowhere else.
-        # A key the deck leaves unset pins as "<unset>", so a deck that starts or stops
-        # declaring one is itself a change rather than being silently absorbed.
+        # Pin a deck's declared control value from the Input/ snapshot; an unset key pins as
+        # "<unset>" so starting or stopping to declare it is itself a change.
         keypath = spec.extract[(length("toml_key:")+1):end]
         table = TOML.parse(raw isa AbstractString ? raw : String(raw))
         node = table
@@ -150,6 +145,7 @@ function _json_element_diff(a, b)::Float64
         (isnan(Float64(a)) && isnan(Float64(b))) && return 0.0
         return abs(Float64(a) - Float64(b))
     elseif a isa Vector && b isa Vector
+        length(a) == length(b) || return Inf
         return sqrt(sum(_json_element_diff(ai, bi)^2 for (ai, bi) in zip(a, b)))
     else
         return Inf

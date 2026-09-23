@@ -10,7 +10,6 @@ name = "diiid_slayer_n1"
 description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis (uncoupled per-surface, AMR, validity-gated)"
 example_dir = "examples/DIIID-like_SLAYER_example"
 
-# Per-surface SLAYER layer parameters (geometry + dimensionless)
 # Which formalism produced the Δ′ this case's layer physics consumes. The Δ′ matrix lands on
 # one canonical SingularSurfaces/ path whichever integrator computed it, so pinning the deck's
 # declared choice is what keeps a BVP-derived gold from being compared against a Galerkin run.
@@ -22,6 +21,7 @@ label = "integrator (Δ′ provenance)"
 noise_threshold = 0
 order = 1
 
+# Per-surface SLAYER layer parameters (geometry + dimensionless)
 [quantities.slayer_ising]
 h5path = "Tearing/PerSurface/rational_index"
 type = "real_vector"

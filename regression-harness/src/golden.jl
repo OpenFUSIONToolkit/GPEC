@@ -8,16 +8,18 @@ of every quantity plus the tolerance it must be reproduced within and the eviden
 tolerance.
 
 The tolerance policy is the load-bearing part. A tolerance is a claim about how much a quantity
-may legitimately move, so it is *derived* — from the residual drift at a convergence plateau and
-from the spread measured across platforms — never chosen to make a check pass. `update_golden`
-refuses to write a tolerance below the recorded platform spread, and a failing check is fixed by
-explaining the physics or fixing the regression, not by widening the bound.
+may legitimately move, so it must come from measurement — the residual drift at a convergence
+plateau and the spread across platforms — never be chosen to make a check pass. Until measured, an
+entry carries a provisional class default and is stamped as such. `save_golden` and `load_golden`
+refuse a tolerance below either recorded measurement, and a failing check is fixed by explaining
+the physics or fixing the regression, not by widening the bound.
 """
 
 """
 How strictly a quantity must reproduce, and why.
 
-  - `topological` — integer counts and mode numbers; exact equality
+  - `topological` — integer counts, mode numbers, and exact inputs such as echoed scan grids;
+    exact equality
   - `equilibrium_scalar` — spline/quadrature outputs with no adaptive branching; very tight
   - `physics_converged` — the quantities golden values exist for (δW, Δ′, torque, growth
     rates); tolerance comes from the measured convergence plateau and platform spread
@@ -25,10 +27,15 @@ How strictly a quantity must reproduce, and why.
     describe the numerics rather than the physics
   - `unconverged` — measured and found to have no plateau; tracked differentially, never pinned,
     so that a known-unconverged quantity is visibly excluded instead of quietly given a wide bound
+
+A quantity's class comes from its case file (an explicit `class` key, else `infer_class`), never
+from the golden file, so demoting a gate to a non-gating class is a reviewed case-file change.
 """
 const TOLERANCE_CLASSES = ("topological", "equilibrium_scalar", "physics_converged", "diagnostic", "unconverged")
 
-"""Classes whose failure fails the run. `diagnostic` and `unconverged` are reported only."""
+"""
+Classes whose failure fails the run. `diagnostic` and `unconverged` are reported only.
+"""
 const GATING_CLASSES = ("topological", "equilibrium_scalar", "physics_converged")
 
 """
@@ -56,8 +63,8 @@ One quantity's pinned value and the terms it is judged by.
   - `value_real` / `value_int` / `value_text` — the pinned value in its stored form
   - `rtol` / `atol` — pass when `|x - gold| <= atol + rtol*|gold|`
   - `class` — one of `TOLERANCE_CLASSES`
-  - `tolerance_basis` — how the tolerance was arrived at: "measured" or
-    "class-default (provisional)"
+  - `tolerance_basis` — how the tolerance was arrived at: "measured" (requires a recorded
+    `plateau_drift` or `platform_spread`) or "class-default (provisional)"
   - `plateau_drift` — relative movement over the final refinement of the convergence scan; NaN
     when not measured
   - `platform_spread` — relative disagreement between reference platforms; NaN when not measured
@@ -80,6 +87,28 @@ struct GoldenValue
 end
 
 is_gating(g::GoldenValue) = g.class in GATING_CLASSES
+
+"""
+Refuse an entry that would gate more quietly than its evidence allows. Run on every load as well as
+every save, so a hand edit or a merge taking the wrong side is caught as surely as a bad write.
+"""
+function validate_golden_value(g::GoldenValue, where::AbstractString)
+    g.class in TOLERANCE_CLASSES || error("$where: quantity '$(g.name)' has unknown class '$(g.class)'")
+    if is_gating(g)
+        (isfinite(g.rtol) && g.rtol >= 0 && isfinite(g.atol) && g.atol >= 0) ||
+            error("$where: gating quantity '$(g.name)' needs a finite, non-negative rtol and atol (got rtol=$(g.rtol), atol=$(g.atol))")
+        for (label, m) in (("platform_spread", g.platform_spread), ("plateau_drift", g.plateau_drift))
+            isfinite(m) && g.rtol < m &&
+                error(
+                    "$where: quantity '$(g.name)' has rtol $(g.rtol) below its measured $label $m. " *
+                    "Widen it deliberately, with the measurement recorded, or reduce the $label before pinning."
+                )
+        end
+    end
+    g.tolerance_basis == "measured" && !isfinite(g.plateau_drift) && !isfinite(g.platform_spread) &&
+        error("$where: quantity '$(g.name)' claims a measured tolerance but records neither plateau_drift nor platform_spread")
+    return nothing
+end
 
 """
 Provenance for a whole golden file: what produced these numbers and why they last changed.
@@ -123,17 +152,7 @@ function load_golden(case_name::AbstractString)
     )
     values = Dict{String,GoldenValue}()
     for (name, v) in get(data, "values", Dict{String,Any}())
-        class = get(v, "class", "physics_converged")
-        class in TOLERANCE_CLASSES || error("Golden file $path: quantity '$name' has unknown class '$class'")
-        # Enforced on every load, not only at write time: a hand edit or a merge taking the
-        # wrong side must not produce a gate quieter than the one save_golden refused to write.
-        if class in GATING_CLASSES
-            rt = Float64(get(v, "rtol", NaN))
-            (isfinite(rt) && rt >= 0) || error("Golden file $path: gating quantity '$name' has no finite rtol — malformed or hand-edited entry")
-            sp = Float64(get(v, "platform_spread", NaN))
-            isfinite(sp) && rt < sp && error("Golden file $path: quantity '$name' has rtol $rt below its recorded platform_spread $sp")
-        end
-        values[name] = GoldenValue(
+        g = GoldenValue(
             name,
             get(v, "value_type", "real"),
             haskey(v, "value") && v["value"] isa Real ? Float64(v["value"]) : nothing,
@@ -141,12 +160,14 @@ function load_golden(case_name::AbstractString)
             haskey(v, "value_text") ? String(v["value_text"]) : nothing,
             Float64(get(v, "rtol", NaN)),
             Float64(get(v, "atol", 0.0)),
-            class,
+            get(v, "class", "physics_converged"),
             get(v, "tolerance_basis", "unspecified"),
             Float64(get(v, "plateau_drift", NaN)),
             Float64(get(v, "platform_spread", NaN)),
             get(v, "converged_at", "")
         )
+        validate_golden_value(g, "Golden file $path")
+        values[name] = g
     end
     return (meta=meta, values=values)
 end
@@ -154,23 +175,20 @@ end
 """
 Write a golden file.
 
-Refuses to emit a tolerance tighter than a recorded platform spread: a pin that no second
-platform can reproduce is a broken gate, and silently loosening it later is exactly the failure
-this whole mechanism exists to prevent. Raising the tolerance to cover a measured spread is a
-deliberate act the caller performs, not something this function does behind the caller's back.
+Refuses any entry `validate_golden_value` rejects, and any entry with no value. Raising a
+tolerance to cover a measured spread is a deliberate act the caller performs, never something this
+function does behind the caller's back.
 """
 function save_golden(meta::GoldenMeta, values::Dict{String,GoldenValue})
     for g in Base.values(values)
         if g.value_real === nothing && g.value_int === nothing && g.value_text === nothing
-            error("Quantity '$(g.name)': refusing to write a golden entry with no value (the run " *
-                  "produced NaN or nothing) — a valueless gating entry fails forever and regenerating " *
-                  "reproduces it. Exclude the quantity or fix the extraction.")
+            error(
+                "Quantity '$(g.name)': refusing to write a golden entry with no value (the run " *
+                "produced NaN or nothing) — a valueless gating entry fails forever and regenerating " *
+                "reproduces it. Exclude the quantity or fix the extraction."
+            )
         end
-        if isfinite(g.platform_spread) && isfinite(g.rtol) && g.rtol < g.platform_spread
-            error("Quantity '$(g.name)': rtol $(g.rtol) is tighter than the measured platform " *
-                  "spread $(g.platform_spread). Widen it deliberately, with the measurement recorded, or " *
-                  "reduce the spread before pinning.")
-        end
+        validate_golden_value(g, "Refusing to write golden for $(meta.case)")
     end
     mkpath(GOLDEN_DIR)
     out = Dict{String,Any}(
@@ -215,22 +233,25 @@ end
 Classify a quantity from its case spec, so a new case gets sensible defaults without every
 tolerance having to be written by hand.
 
-Integer counts are topological; runtimes and step counts describe the numerics rather than the
-physics and so are diagnostic; everything else is assumed to be a physics quantity that must be
-converged, which is the conservative assumption — it gates.
+An explicit `class` in the case file wins. Otherwise integer counts are topological; runtimes and
+step counts describe the numerics rather than the physics and so are diagnostic; everything else
+is assumed to be a physics quantity that must be converged, which is the conservative assumption —
+it gates.
 """
 function infer_class(spec::QuantitySpec)::String
+    if !isempty(spec.class)
+        spec.class in TOLERANCE_CLASSES || error("Quantity '$(spec.name)': unknown class '$(spec.class)' in its case file")
+        return spec.class
+    end
     spec.type == "runtime" && return "diagnostic"
     spec.name in ("nstep", "nstep_total") && return "diagnostic"
     spec.type == "int_scalar" && return "topological"
-    # A declared control token is an exact-match gate, like a count: there is no tolerance
-    # that means anything between "riccati" and "galerkin".
+    # A control token has no meaningful tolerance between "riccati" and "galerkin".
     startswith(spec.extract, "toml_key:") && return "topological"
     name = spec.name
-    # sing_psi / sing_q are deliberately absent: singular-surface locations come from a root
-    # search, not pure spline/quadrature, so they take the measured physics_converged path.
+    # sing_psi / sing_q are absent on purpose: they come from a root search, not pure quadrature.
     equilibrium_names = ("q0", "q95", "betat", "betan", "betap1", "betap2", "betap3", "betaj",
-        "li1", "li2", "li3", "volume", "crnt", "bt0", "bwall", "aratio", "kappa")
+        "li1", "li2", "li3", "volume", "crnt", "bt0", "bwall", "aratio", "kappa", "psio")
     name in equilibrium_names && return "equilibrium_scalar"
     return "physics_converged"
 end
@@ -243,10 +264,8 @@ the golden value is zero) and `detail` is a human-readable reason on failure. Ar
 pass only when every element is within tolerance; the reported deviation is the worst element.
 """
 function compare_to_golden(q::NamedTuple, g::GoldenValue)
-    # Non-finite tolerances mean "recorded, never judged" (diagnostic/unconverged); without this
-    # guard, gold == 0 turns atol + rtol*|gold| into Inf + NaN and the comparison is false.
-    within = (x, gold) -> !isfinite(g.atol) || !isfinite(g.rtol) ||
-        abs(x - gold) <= g.atol + g.rtol * abs(gold)
+    # Non-gating classes are recorded, never judged; gating ones are validated finite on load.
+    within = (x, gold) -> !is_gating(g) || abs(x - gold) <= g.atol + g.rtol * abs(gold)
 
     if q.value_type != g.value_type
         return (false, NaN, "type changed: golden $(g.value_type), got $(q.value_type)")
@@ -274,10 +293,7 @@ function compare_to_golden(q::NamedTuple, g::GoldenValue)
         return (false, NaN, "length $(length(gold)) → $(length(got))")
 
     elseif g.value_type == "token"
-        # A token names a discrete choice (which integrator produced the Δ′), so there is no
-        # tolerance to apply: it matches or the run is answering a different question than the
-        # gold does. Deviation is reported as 1.0 on mismatch rather than NaN so it sorts as a
-        # real failure in reports.
+        # Discrete choice, so no tolerance; deviation 1.0 (not NaN) on mismatch sorts as a failure.
         (q.value_text === nothing || g.value_text === nothing) && return (false, NaN, "missing token")
         matched = q.value_text == g.value_text
         return (matched, matched ? 0.0 : 1.0, matched ? "" : "$(g.value_text) → $(q.value_text)")
@@ -286,7 +302,9 @@ function compare_to_golden(q::NamedTuple, g::GoldenValue)
     return (false, NaN, "unsupported value type $(g.value_type)")
 end
 
-"""Worst-element comparison for array quantities, shared by the real and complex encodings."""
+"""
+Worst-element comparison for array quantities, shared by the real and complex encodings.
+"""
 function _compare_arrays(got, gold, g::GoldenValue)
     worst_rel = 0.0
     worst_idx = 0
@@ -294,12 +312,11 @@ function _compare_arrays(got, gold, g::GoldenValue)
     for i in eachindex(gold)
         a = _json_element_abs(gold[i])
         d = _json_element_diff(gold[i], got[i])
-        rel = a == 0.0 ? d : d / a
-        # Same non-finite guard as the scalar path: Inf tolerances mean "recorded, never
-        # judged", and Inf*0 = NaN would otherwise mark a zero gold element as failing.
-        ok = !isfinite(g.atol) || !isfinite(g.rtol) || d <= g.atol + g.rtol * a
+        # A NaN on one side counts as the worst possible element, so the detail points at it.
+        rel = isnan(d) ? Inf : (a == 0.0 ? d : d / a)
+        ok = !is_gating(g) || d <= g.atol + g.rtol * a
         ok || (all_ok = false)
-        if rel > worst_rel
+        if rel > worst_rel || (worst_idx == 0 && !ok)
             worst_rel = rel
             worst_idx = i
         end
@@ -341,8 +358,7 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
     for spec in case_spec.quantities
         g = get(golden.values, spec.name, nothing)
         if g === nothing
-            # Runtime and checksums are structurally un-goldenable (no tolerance semantics), so
-            # they must not inflate the untracked count that flags genuinely unpinned physics.
+            # Runtimes and checksums are never pinned, so they do not count as untracked physics.
             (spec.type == "runtime" || spec.extract == "checksum") && continue
             n_untracked += 1
             continue
@@ -353,11 +369,17 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
             n_fail += 1
             continue
         end
-        # SQLite NULLs surface as `missing`, which the === nothing guards in compare_to_golden
-        # never match; normalize here as the update path already does.
+        # The golden file's class must be the one the case declares, so a demotion cannot hide there.
+        declared = infer_class(spec)
+        if g.class != declared
+            push!(rows, [spec.label, g.class, "CLASS", "—", "** FAIL **  case declares $declared; regenerate goldens"])
+            n_fail += 1
+            continue
+        end
+        # SQLite NULLs surface as `missing`; normalize them to nothing as the update path does.
         q = (label=q_raw.label, value_real=_column(q_raw.value_real, nothing),
-             value_int=_column(q_raw.value_int, nothing), value_text=_column(q_raw.value_text, nothing),
-             value_type=q_raw.value_type, noise_threshold=q_raw.noise_threshold)
+            value_int=_column(q_raw.value_int, nothing), value_text=_column(q_raw.value_text, nothing),
+            value_type=q_raw.value_type, noise_threshold=q_raw.noise_threshold)
         passed, deviation, detail = compare_to_golden(q, g)
         gating = is_gating(g)
         status = if !gating
@@ -379,10 +401,7 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
         push!(rows, [spec.label, g.class, dev, tol, status * (isempty(detail) ? "" : "  $detail")])
     end
 
-    # Golden entries with no matching case quantity fail regardless of class: a renamed or
-    # removed quantity would otherwise silently delete its gate (the new name enters as merely
-    # "untracked"), and a check that quietly stops checking something is worse than one that
-    # fails. The fix is to regenerate the goldens for the reshaped case, with a reason.
+    # An orphaned entry fails regardless of class: a renamed quantity must not silently drop its gate.
     spec_names = Set(spec.name for spec in case_spec.quantities)
     for name in sort(collect(keys(golden.values)))
         name in spec_names && continue
@@ -425,23 +444,41 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
 end
 
 """
+Uncommitted changes to tracked files under `repo_root`, ignoring `exclude_dir` (the goldens themselves).
+"""
+function uncommitted_changes(repo_root::AbstractString, exclude_dir::AbstractString)
+    rel = relpath(exclude_dir, repo_root)
+    return String(strip(read(`git -C $repo_root status --porcelain --untracked-files=no -- . ":(exclude)$rel"`, String)))
+end
+
+"""
 Regenerate a case's golden file from a completed run, reporting what moved.
 
-Prints an old→new delta for every quantity whose value changed, so the diff a reviewer sees in
-git is accompanied by the size of each move.
+Prints an old→new delta for every quantity whose value or class changed, flagging any move that
+the old tolerance would have failed, so the diff a reviewer sees in git comes with the size and
+significance of each move. Refuses a working tree with uncommitted changes outside the golden
+directory, because the recorded commit is what a reviewer uses to reproduce a disputed number.
 """
 function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash::String,
-                                reason::String, repo_root::String)
+    reason::String, repo_root::String)
     info = get_run_info(db, commit_hash, case_spec.name)
     (info === nothing || !info.success) && error("Cannot update goldens for '$(case_spec.name)': the run did not succeed")
+    if commit_hash == LOCAL_REF
+        dirty = uncommitted_changes(repo_root, GOLDEN_DIR)
+        isempty(dirty) || error(
+            "Cannot update goldens for '$(case_spec.name)': the working tree has uncommitted " *
+            "changes, so the recorded commit would not reproduce these values. Commit first.\n$dirty"
+        )
+    end
 
-    # SQLite NULLs come back as `missing`, which the Union{...,Nothing} fields reject; `_column`
-    # normalizes both absent forms to nothing.
     extracted = ExtractedQuantity[]
     for (name, q) in get_quantities(db, commit_hash, case_spec.name)
-        push!(extracted, ExtractedQuantity(name, String(_column(q.label, name)),
-            _column(q.value_real, nothing), _column(q.value_int, nothing),
-            _column(q.value_text, nothing), q.value_type, q.noise_threshold))
+        push!(
+            extracted,
+            ExtractedQuantity(name, String(_column(q.label, name)),
+                _column(q.value_real, nothing), _column(q.value_int, nothing),
+                _column(q.value_text, nothing), q.value_type, q.noise_threshold)
+        )
     end
 
     previous = load_golden(case_spec.name)
@@ -452,71 +489,93 @@ function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash:
     meta = GoldenMeta(case_spec.name,
         previous === nothing ? 1 : previous.meta.golden_version + 1,
         Dates.format(Dates.now(), "yyyy-mm-dd"),
-        strip(read(`git -C $repo_root rev-parse --short HEAD`, String)),
+        strip(read(`git -C $repo_root rev-parse --short $(commit_hash == LOCAL_REF ? "HEAD" : commit_hash)`, String)),
         reason, fp.julia_version, fp.os_arch, fp.manifest_sha, fp.nthreads, fp.blas_threads)
-    if commit_hash == LOCAL_REF && !isempty(strip(read(`git -C $repo_root status --porcelain`, String)))
-        # The numbers came from uncommitted source; a clean HEAD checkout will not reproduce
-        # them, and the commit field is the one a reviewer uses to reproduce a disputed number.
-        meta = GoldenMeta(meta.case, meta.golden_version, meta.generated_at,
-            meta.commit * "-dirty", meta.reason, meta.julia_version, meta.os_arch,
-            meta.manifest_sha, meta.nthreads, meta.blas_threads)
-        @warn "Working tree is dirty: golden provenance recorded as $(meta.commit). Commit first if these values are meant to be reproducible."
-    end
 
     println()
     println("Golden update: $(case_spec.name)  (v$(previous === nothing ? 0 : previous.meta.golden_version) → v$(meta.golden_version))")
     if existing !== nothing
         for name in sort(collect(keys(existing)))
             if !haskey(values, name)
-                println(@sprintf("  %-34s REMOVED — extraction returned missing (renamed h5 path?) or the quantity left the case. This deletes its gate; confirm it is intentional.", name))
+                println(
+                    @sprintf(
+                        "  %-34s REMOVED — extraction returned missing (renamed h5 path?) or the quantity left the case. This deletes its gate; confirm it is intentional.",
+                        name
+                    )
+                )
             end
         end
         for (name, g) in sort(collect(values); by=first)
             old = get(existing, name, nothing)
             old === nothing && (println(@sprintf("  %-34s NEW", name)); continue)
-            if g.value_real !== nothing && old.value_real !== nothing && g.value_real != old.value_real
-                rel = old.value_real == 0 ? Inf : abs(g.value_real - old.value_real) / abs(old.value_real)
-                println(@sprintf("  %-34s %.9g → %.9g   (rel %.2e)", name, old.value_real, g.value_real, rel))
-            elseif g.value_text !== nothing && old.value_text !== nothing && g.value_text != old.value_text
-                println(@sprintf("  %-34s array changed", name))
-            end
+            old.class == g.class ||
+                println(@sprintf("  %-34s class %s → %s (tolerances reset to provisional)", name, old.class, g.class))
+            line = describe_golden_change(old, g)
+            line === nothing || println(@sprintf("  %-34s %s", name, line))
         end
     end
     path = save_golden(meta, values)
     println("Wrote $path  ($(length(values)) quantities)")
     provisional = count(g -> startswith(g.tolerance_basis, "class-default"), Base.values(values))
-    provisional > 0 && println("  $provisional quantity/quantities still carry provisional class-default tolerances — " *
-                               "replace them with measured plateau drift and platform spread before relying on this as a gate.")
+    provisional > 0 && println(
+        "  $provisional quantity/quantities still carry provisional class-default tolerances — " *
+        "replace them with measured plateau drift and platform spread before relying on this as a gate."
+    )
     println()
     return path
 end
 
 """
+Describe how a regenerated entry's value moved from the old one, or `nothing` if it did not.
+
+The deviation is the one `compare_to_golden` computes against the old entry, and a move the old
+tolerance would have failed is flagged so it cannot pass unnoticed as a routine re-pin.
+"""
+function describe_golden_change(old::GoldenValue, new::GoldenValue)
+    old.value_type == new.value_type || return "type $(old.value_type) → $(new.value_type)"
+    (old.value_real, old.value_int, old.value_text) == (new.value_real, new.value_int, new.value_text) && return nothing
+    q = (value_real=new.value_real, value_int=new.value_int, value_text=new.value_text, value_type=new.value_type)
+    passed, dev, _ = compare_to_golden(q, old)
+    what = if new.value_type == "real"
+        @sprintf("%.9g → %.9g", something(old.value_real, NaN), something(new.value_real, NaN))
+    elseif new.value_type == "integer"
+        "$(old.value_int) → $(new.value_int)"
+    elseif new.value_type == "token"
+        "$(old.value_text) → $(new.value_text)"
+    else
+        "array[$(length(JSON.parse(new.value_text; allownan=true)))] changed"
+    end
+    rel = isnan(dev) ? "—" : @sprintf("%.2e", dev)
+    flag = is_gating(old) && !passed ? "   ** EXCEEDS the old tolerance: a regression unless --reason explains it **" : ""
+    return "$what   (rel $rel)$flag"
+end
+
+"""
 Build golden entries from a set of freshly extracted quantities.
 
-`existing` carries forward the tolerance, class, and evidence already recorded for a quantity, so
+`existing` carries forward the tolerance and evidence already recorded for a quantity, so
 regenerating values after a physics change does not silently reset hard-won measurements to
-provisional defaults.
+provisional defaults. A change of value type or of the case-declared class invalidates them.
 """
 function build_golden_values(extracted::Vector{ExtractedQuantity}, specs::Vector{QuantitySpec},
-                             existing::Union{Dict{String,GoldenValue},Nothing})
+    existing::Union{Dict{String,GoldenValue},Nothing})
     spec_by_name = Dict(s.name => s for s in specs)
     values = Dict{String,GoldenValue}()
     for eq in extracted
         eq.value_type == "missing" && continue
         spec = get(spec_by_name, eq.name, nothing)
         spec === nothing && continue
+        # Checksums have no notion of "close" and runtimes are wall-clock, so neither is pinned.
+        (eq.value_type == "checksum" || spec.type == "runtime") && continue
+        class = infer_class(spec)
         prior = existing === nothing ? nothing : get(existing, eq.name, nothing)
         if prior !== nothing && prior.value_type != eq.value_type
-            # A type change invalidates the class and every measurement made under the old type;
-            # carrying a topological rtol=0 onto a float (or a float rtol onto a count) mis-gates.
-            @warn "Golden '$(eq.name)': value_type changed $(prior.value_type) → $(eq.value_type); resetting class and tolerances to provisional"
+            @warn "Golden '$(eq.name)': value_type changed $(prior.value_type) → $(eq.value_type); resetting tolerances to provisional"
+            prior = nothing
+        elseif prior !== nothing && prior.class != class
+            @warn "Golden '$(eq.name)': class changed $(prior.class) → $class; resetting tolerances to provisional"
             prior = nothing
         end
-        class = prior === nothing ? infer_class(spec) : prior.class
-        # Checksums have no notion of "close", so they cannot carry a tolerance; they stay a
-        # same-machine differential tool rather than a golden gate.
-        eq.value_type == "checksum" && continue
         if prior === nothing
             defaults = CLASS_DEFAULT_TOLERANCE[class]
             rtol, atol, basis = defaults.rtol, defaults.atol, "class-default (provisional)"
