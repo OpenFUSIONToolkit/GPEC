@@ -15,13 +15,47 @@ using LinearAlgebra
 
 import ...ErrorFields as EF
 import ...PerturbedEquilibrium as PE
+import ...ForcingTerms as FT
 
-const Sources = Vector{Pair{String,String}}
+"""
+A label paired with something to plot: a `gpec.h5` path, or a result already in memory
+(`ErrorFields.SensitivityTable`, `MonteCarloResult`, `RiskResult`, or a vector of `CoilOverlap`).
+Analysing coil geometry that was never part of a run produces the latter, so the plots accept both.
+"""
+const Sources = AbstractVector{<:Pair{String,<:Any}}
 
-_sources(h5path::AbstractString) = [basename(dirname(abspath(h5path))) => String(h5path)]
+"""A single unlabelled source: a `gpec.h5` path, or one in-memory result."""
+const SingleSource = Union{AbstractString,EF.SensitivityTable,EF.MonteCarloResult,EF.RiskResult,AbstractVector{EF.CoilOverlap}}
 
-# Everything the plots read, `nothing` where the run did not produce it.
-function _load(h5path::AbstractString)
+_sources(source) = [_default_label(source) => source]
+_default_label(h5path::AbstractString) = basename(dirname(abspath(h5path)))
+_default_label(_) = "in memory"
+
+# Every field the plots read. One template so the HDF5 and in-memory loaders cannot drift apart.
+const _BLANK = (; coil_names=nothing, delta_nominal=nothing, delta_per_mm_shift=nothing,
+    delta_per_deg_tilt=nothing, delta_per_mm_rim=nothing, shift_sensitivity=nothing, tilt_sensitivity=nothing,
+    bin_edges=nothing, pdf=nothing, pdf_efc=nothing, mc_delta_nominal=nothing, threshold_pdf=nothing,
+    p_lock_given_delta=nothing, threshold_nominal=nothing, plock=nothing, plock_efc=nothing,
+    scan_scale=nothing, scan_plock=nothing, scan_plock_efc=nothing, scan_spread=nothing,
+    scan_spread_efc=nothing, dominant_v=nothing, singular_values=nothing, mn_index=nothing)
+
+_load(d::NamedTuple) = merge(_BLANK, d)
+_load(h5path::AbstractString) = _load(_load_h5(h5path))
+
+_load(t::EF.SensitivityTable) = _load((; coil_names=t.coil_names, delta_nominal=t.delta_nominal,
+    delta_per_mm_shift=t.delta_per_mm_shift, delta_per_deg_tilt=t.delta_per_deg_tilt,
+    delta_per_mm_rim=t.delta_per_mm_rim, shift_sensitivity=t.shift, tilt_sensitivity=t.tilt))
+
+_load(r::EF.MonteCarloResult) = _load((; bin_edges=r.bin_edges, pdf=r.pdf, pdf_efc=r.pdf_efc,
+    mc_delta_nominal=r.delta_nominal))
+
+_load(r::EF.RiskResult) = _load((; threshold_pdf=r.threshold_pdf, p_lock_given_delta=r.p_lock_given_delta,
+    plock=r.plock, plock_efc=r.plock_efc))
+
+_load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name for o in ovs],
+    delta_nominal=[o.delta for o in ovs]))
+
+function _load_h5(h5path::AbstractString)
     h5open(h5path, "r") do f
         has(k) = haskey(f, k)
         cs = "ErrorFields/CoilSensitivities"
@@ -30,8 +64,9 @@ function _load(h5path::AbstractString)
         (
             coil_names=has(cs) ? read(f["$cs/coil_name"]) : nothing,
             delta_nominal=has(cs) ? read(f["$cs/DominantMode/delta_nominal"]) : nothing,
-            shift_rms=has(cs) ? read(f["$cs/DominantMode/shift_rms"]) : nothing,
-            tilt_rms=has(cs) ? read(f["$cs/DominantMode/tilt_rms"]) : nothing,
+            delta_per_mm_shift=has(cs) ? read(f["$cs/DominantMode/delta_per_mm_shift"]) : nothing,
+            delta_per_deg_tilt=has(cs) ? read(f["$cs/DominantMode/delta_per_deg_tilt"]) : nothing,
+            delta_per_mm_rim=has(cs) ? read(f["$cs/DominantMode/delta_per_mm_rim"]) : nothing,
             shift_sensitivity=has(cs) ? read(f["$cs/DominantMode/shift_sensitivity"]) : nothing,
             tilt_sensitivity=has(cs) ? read(f["$cs/DominantMode/tilt_sensitivity"]) : nothing,
             bin_edges=has(mc) ? read(f["$mc/bin_edges"]) : nothing,
@@ -68,26 +103,33 @@ function _save(p, save_path)
 end
 
 """
-    plot_coil_sensitivities(sources; quantity=:shift, per_mm=true, coils=nothing, save_path=nothing)
-    plot_coil_sensitivities(h5path; kwargs...)
+    plot_coil_sensitivities(sources; quantity=:shift, coils=nothing, save_path=nothing)
+    plot_coil_sensitivities(source; kwargs...)
 
-Grouped bars of the per-coil-set dominant-mode sensitivity across runs, matched by coil set
-name: `quantity = :shift` (in-plane RMS `|∂δ/∂Δ|`, per mm when `per_mm`), `:tilt` (per 0.1°),
-or `:nominal` (`|δ_nominal|`). `coils` restricts and orders the coil sets shown.
+Grouped bars of the per-coil-set dominant-mode sensitivity across runs, matched by coil set name.
+`quantity` is `:shift` (per millimetre of rigid in-plane shift), `:tilt` (per degree), `:rim` (the
+same tilt as rim displacement, the unit mechanical tolerances arrive in), or `:nominal` (`|δ|` as
+built). `coils` restricts and orders the coil sets shown.
+
+Each source is a `gpec.h5` path or a `SensitivityTable` already in memory, so a sweep of coil
+geometry that was never part of a run plots the same way a stored run does.
 """
-function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, per_mm::Bool=true, coils=nothing, save_path=nothing)
-    data = [(lbl, _load(path)) for (lbl, path) in sources]
+function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, coils=nothing, save_path=nothing)
+    data = [(lbl, _load(src)) for (lbl, src) in sources]
     any(d -> d[2].coil_names === nothing, data) && return _empty("No ErrorFields/CoilSensitivities data — run with an [ErrorFields] section")
     names = coils === nothing ? data[1][2].coil_names : String.(collect(coils))
+    field = quantity === :shift ? :delta_per_mm_shift : quantity === :tilt ? :delta_per_deg_tilt :
+            quantity === :rim ? :delta_per_mm_rim : quantity === :nominal ? :delta_nominal :
+            throw(ArgumentError("quantity must be :shift, :tilt, :rim, or :nominal"))
     value(d, nm) = begin
         i = findfirst(==(nm), d.coil_names)
-        i === nothing && return NaN
-        quantity === :shift ? (per_mm ? 1e-3 : 1.0) * d.shift_rms[i] :
-        quantity === :tilt ? 0.1 * d.tilt_rms[i] :
-        quantity === :nominal ? abs(d.delta_nominal[i]) : throw(ArgumentError("quantity must be :shift, :tilt, or :nominal"))
+        (i === nothing || getfield(d, field) === nothing) && return NaN
+        abs(getfield(d, field)[i])
     end
-    ylabel = quantity === :shift ? (per_mm ? "|∂δ/∂Δ| per mm" : "|∂δ/∂Δ| per m") : quantity === :tilt ? "|∂δ/∂θ| per 0.1°" : "|δ_nominal|"
-    title = quantity === :shift ? "Dominant-mode error field per shift" : quantity === :tilt ? "Dominant-mode error field per tilt" : "Nominal dominant-mode overlap"
+    ylabel = quantity === :shift ? "|δ| per mm of shift" : quantity === :tilt ? "|δ| per degree of tilt" :
+             quantity === :rim ? "|δ| per mm of rim displacement" : "|δ_nominal|"
+    per = quantity === :shift ? "shift" : quantity === :tilt ? "tilt" : "rim displacement"
+    title = quantity === :nominal ? "Nominal dominant-mode overlap" : "Dominant-mode error field per $per"
     n = length(names)
     k = length(data)
     width = 0.8 / k
@@ -99,7 +141,7 @@ function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, per_
     end
     return _save(p, save_path)
 end
-plot_coil_sensitivities(h5path::AbstractString; kwargs...) = plot_coil_sensitivities(_sources(h5path); kwargs...)
+plot_coil_sensitivities(source::SingleSource; kwargs...) = plot_coil_sensitivities(_sources(source); kwargs...)
 
 """
     plot_tolerance_pdf(sources; corrected=true, normalize=false, xscale=:identity, save_path=nothing)
@@ -127,7 +169,7 @@ function plot_tolerance_pdf(sources::Sources; corrected::Bool=true, normalize::B
     any_data || return _empty("No ErrorFields/MonteCarlo data — run with a tolerance_file")
     return _save(p, save_path)
 end
-plot_tolerance_pdf(h5path::AbstractString; kwargs...) = plot_tolerance_pdf(_sources(h5path); kwargs...)
+plot_tolerance_pdf(source::SingleSource; kwargs...) = plot_tolerance_pdf(_sources(source); kwargs...)
 
 """
     plot_locking_risk(sources; corrected=true, target_percent=nothing, save_path=nothing)
@@ -161,7 +203,7 @@ function plot_locking_risk(sources::Sources; corrected::Bool=true, target_percen
     target_percent === nothing || hline!(p, [target_percent]; ls=:dash, c=:gray, label="target $(target_percent) %")
     return _save(p, save_path)
 end
-plot_locking_risk(h5path::AbstractString; kwargs...) = plot_locking_risk(_sources(h5path); kwargs...)
+plot_locking_risk(source::SingleSource; kwargs...) = plot_locking_risk(_sources(source); kwargs...)
 
 """
     plot_threshold_scaling(sources; save_path=nothing)
@@ -189,7 +231,7 @@ function plot_threshold_scaling(sources::Sources; save_path=nothing)
     any_data || return _empty("No ErrorFields/Risk data — run with an [ErrorFields.scenario] table")
     return _save(p, save_path)
 end
-plot_threshold_scaling(h5path::AbstractString; kwargs...) = plot_threshold_scaling(_sources(h5path); kwargs...)
+plot_threshold_scaling(source::SingleSource; kwargs...) = plot_threshold_scaling(_sources(source); kwargs...)
 
 """
     plot_dominant_mode_spectrum(sources; mode=1, save_path=nothing)
@@ -217,7 +259,115 @@ function plot_dominant_mode_spectrum(sources::Sources; mode::Int=1, save_path=no
     any_data || return _empty("No PerturbedEquilibrium/SingularCoupling/DominantMode data")
     return _save(p, save_path)
 end
-plot_dominant_mode_spectrum(h5path::AbstractString; kwargs...) = plot_dominant_mode_spectrum(_sources(h5path); kwargs...)
+plot_dominant_mode_spectrum(source::SingleSource; kwargs...) = plot_dominant_mode_spectrum(_sources(source); kwargs...)
+
+"""
+    plot_applied_spectra(ctx, overlaps; normalize=true, save_path=nothing)
+    plot_applied_spectra(h5path, coil_sets; normalize=true, save_path=nothing, kwargs...)
+
+Each coil set's applied spectrum against the dominant resonant mode.
+
+Both views answer different questions and the plot shows whichever is asked for: `normalize = true`
+scales every curve to its own peak, which says whether a coil drives a *different* part of the
+spectrum; `false` leaves the amplitudes, which says whether it simply drives *less*. A coil that
+couples weakly for the first reason needs a geometry change; one that couples weakly for the second
+may just be further away.
+"""
+function plot_applied_spectra(ctx::EF.ResonantDriveContext, overlaps::AbstractVector{EF.CoilOverlap};
+    normalize::Bool=true, save_path=nothing)
+    isempty(overlaps) && return _empty("No coil overlaps to plot")
+    m = ctx.rc.m_modes
+    mode = first(overlaps).mode
+    p = plot(; xlabel="poloidal mode m", ylabel=normalize ? "amplitude / own peak" : "|b̃| (T)",
+        title="Applied spectra against the dominant resonant mode", legend=:topright,
+        left_margin=13Plots.mm, bottom_margin=7Plots.mm)
+    v = abs.(ctx.dom.right_singular_vectors[:, mode])
+    mv, av = _step_series(m, v ./ maximum(v))
+    normalize && plot!(p, mv, av; seriestype=:steppre, lw=3, c=:black, fillrange=0, fillalpha=0.12, label="dominant mode |V|")
+    for (j, o) in enumerate(overlaps)
+        a = abs.(o.spectrum)
+        scale = normalize ? maximum(a) : 1.0
+        ms, as = _step_series(m, scale > 0 ? a ./ scale : a)
+        plot!(p, ms, as; seriestype=:steppre, lw=2, c=j, label=o.coil_name)
+    end
+    return _save(p, save_path)
+end
+
+"""
+    plot_overlap_contributions(ctx, overlaps; save_path=nothing)
+    plot_overlap_contributions(h5path, coil_sets; save_path=nothing, kwargs...)
+
+Which poloidal harmonics produced each coil set's overlap, as `conj(V[m])·b̃[m]` rotated so that
+the coil's own total is real. The bars therefore sum to its resonant fraction, printed in the
+legend.
+
+This is what separates a coil that drives the resonant harmonics weakly from one that drives them
+strongly and cancels against itself. The single complex overlap cannot tell those apart.
+"""
+function plot_overlap_contributions(ctx::EF.ResonantDriveContext, overlaps::AbstractVector{EF.CoilOverlap}; save_path=nothing)
+    isempty(overlaps) && return _empty("No coil overlaps to plot")
+    m = ctx.rc.m_modes
+    v = ctx.dom.right_singular_vectors[:, first(overlaps).mode]
+    p = plot(; xlabel="poloidal mode m", ylabel="contribution to overlap",
+        title="Per-harmonic contribution, aligned to each coil's own overlap phase", legend=:topleft,
+        left_margin=13Plots.mm, bottom_margin=7Plots.mm)
+    for (j, o) in enumerate(overlaps)
+        o.spectrum_norm > 0 || continue
+        c = real.(conj.(v) .* o.spectrum .* cis(-angle(o.raw))) ./ o.spectrum_norm
+        ms, as = _step_series(m, c)
+        plot!(p, ms, as; seriestype=:steppre, lw=2, c=j,
+            label="$(o.coil_name)  (sums to $(round(o.fraction_percent; digits=1))%)")
+    end
+    hline!(p, [0]; c=:black, ls=:dot, label="")
+    return _save(p, save_path)
+end
+
+"""
+    plot_surface_overlay(ctx, overlaps; ntheta=256, nzeta=180, levels=4, save_path=nothing)
+    plot_surface_overlay(h5path, coil_sets; save_path=nothing, kwargs...)
+
+Each coil set's applied normal field on the control surface, with contours of the dominant resonant
+mode over it. One panel per coil, each scaled to its own peak so the shapes are comparable.
+
+This is the view that makes a weak overlap physical rather than numerical: a coil driving a
+different poloidal region from the one the dominant mode occupies couples poorly however strong it
+is. The poloidal angle is cut at 180° so the outboard midplane sits in the middle of each panel
+rather than being split across its edges.
+"""
+function plot_surface_overlay(ctx::EF.ResonantDriveContext, overlaps::AbstractVector{EF.CoilOverlap};
+    ntheta::Int=256, nzeta::Int=180, levels::Int=4, save_path=nothing)
+    isempty(overlaps) && return _empty("No coil overlaps to plot")
+    m, n = ctx.rc.m_modes, ctx.rc.n_modes
+    v = ctx.dom.right_singular_vectors[:, first(overlaps).mode]
+    vmap = FT.reconstruct_bn(v, m, n; ntheta, nzeta)
+    vpeak = maximum(abs, vmap.bn)
+    lv = vpeak > 0 ? range(-0.7, 0.7; length=levels + 2)[2:(end-1)] : [0.0]
+
+    k = length(overlaps)
+    rows = ceil(Int, k / 2)
+    p = plot(; layout=(rows, min(k, 2)), size=(575 * min(k, 2), 430 * rows),
+        left_margin=13Plots.mm, bottom_margin=8Plots.mm)
+    for (j, o) in enumerate(overlaps)
+        bmap = FT.reconstruct_bn(o.spectrum, m, n; ntheta, nzeta)
+        peak = maximum(abs, bmap.bn)
+        heatmap!(p[j], rad2deg.(bmap.zeta), rad2deg.(bmap.theta), peak > 0 ? bmap.bn ./ peak : bmap.bn;
+            c=:balance, clims=(-1, 1), colorbar=false, yticks=-180:90:180,
+            xlabel="toroidal angle φ (deg)", ylabel="poloidal angle θ (deg), 0 = outboard midplane",
+            title="$(o.coil_name)   (peak $(round(peak; sigdigits=3)) T)")
+        vpeak > 0 && contour!(p[j], rad2deg.(vmap.zeta), rad2deg.(vmap.theta), vmap.bn ./ vpeak;
+            levels=lv, c=:black, lw=1.2, colorbar=false)
+    end
+    return _save(p, save_path)
+end
+
+for fn in (:plot_applied_spectra, :plot_overlap_contributions, :plot_surface_overlay)
+    @eval function $fn(h5path::AbstractString, coil_sets::AbstractVector{FT.CoilSet}; mode::Int=1,
+        psi_low::Real=0.0, psi_high::Real=PE.CORE_PSI_HIGH, nzeta_coil=nothing, mtheta_coil=nothing,
+        dat_dir=nothing, kwargs...)
+        ctx = EF.ResonantDriveContext(h5path; psi_low, psi_high, nzeta_coil, mtheta_coil, dat_dir)
+        return $fn(ctx, EF.coil_overlaps(ctx, coil_sets; mode); kwargs...)
+    end
+end
 
 """
     plot_phasing_map(h5path, coil_names; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, nphase=180, quantity=:delta_per_kat, save_path=nothing)
