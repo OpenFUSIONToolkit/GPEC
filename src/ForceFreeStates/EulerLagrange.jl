@@ -401,14 +401,16 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
         saved_psifac, saved_u = odet.psifac, copy(odet.u)
         peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
         if ctrl.truncate_at_dW_peak
-            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
+            # Adopt the dW peak as the plasma edge. transform_u! then ignores the reductions
+            # recorded beyond it, and adopt_plasma_edge! brings q1lim and the rational surfaces in.
             odet.step = peak_step
             trim_storage!(odet)
             intr.psilim = odet.psi_store[end]
             intr.qlim = odet.q_store[end]
             odet.u .= odet.u_store[:, :, :, end]
+            adopt_plasma_edge!(intr, odet, equil)
             if verbose
-                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
+                @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
             end
         else
             odet.psifac = saved_psifac
@@ -1127,10 +1129,23 @@ for a chosen force-free solution, which can be done in postprocessing.
 """
 function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
+    # Only fixups whose reference step is still stored take part. A fixup records
+    # fixstep = step - 1, the last already-stored step, which is in its pre-fixup basis; steps past
+    # that are post-fixup. So the last stored step receives the identity transform only if every
+    # retained fixup satisfies fixstep < step. The comparison must be strict: a fixup landing
+    # exactly on the last stored step left that step in its pre-fixup basis.
+    #
+    # This is a no-op on a full integration, where a step is always stored after every fixup. It
+    # matters when the store has been truncated behind a fixup, as truncate_at_dW_peak does: the
+    # reductions recorded beyond the new edge include the zeroed column of any singular surface
+    # crossed out there, which is a projection rather than a change of basis and would leave the
+    # edge solution rank deficient.
+    nfix = count(i -> odet.fixstep[i] < odet.step, 1:odet.ifix)
+
     # Gaussian reduction matrices for each fixup
-    gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
-    # Transformation matrices for each region between fixups (ifix + 1 regions)
-    transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
+    gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, nfix)
+    # Transformation matrices for each region between fixups (nfix + 1 regions)
+    transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, nfix + 1)
     # Temporary workspace matrices
     gauss_buffer = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
     identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
@@ -1138,7 +1153,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     mask = trues(intr.numpert_total)
 
     # Construct gaussian reduction matrices for each fixup
-    for ifix in 1:odet.ifix
+    for ifix in 1:nfix
         gauss[:, :, ifix] .= identity
         mask .= true
         for isol in 1:intr.numpert_total
@@ -1164,21 +1179,18 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # Concatenate gaussian reduction matrix to form transform matrix for each region
     # Here, the i'th region is between the (i-1)'th and i'th fixup e.g. transforms[:, :, 1]
     # is the transform matrix for the region between init and first fixup
-    # and mfix + 1 is the for the region after the last fixup and before the edge
+    # and nfix + 1 is the for the region after the last fixup and before the edge
     transforms[:, :, end] .= identity
-    for ifix in odet.ifix:-1:1
+    for ifix in nfix:-1:1
         mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, (ifix + 1)))
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
     # "undoing" the Gaussian reductions to get the true solution vectors
     jfix = 1
-    for ifix in 1:(odet.ifix+1)
+    for ifix in 1:(nfix+1)
         # If after the last fixup, go to the end of integration.
-        # Cap kfix at odet.step: fixstep entries from fixups AFTER the peak (set during integration
-        # before trim_storage!) can exceed the trimmed storage size and must be clamped.
-        kfix = ifix != odet.ifix + 1 ? min(odet.fixstep[ifix], odet.step) : odet.step
-        jfix > odet.step && break
+        kfix = ifix != nfix + 1 ? odet.fixstep[ifix] : odet.step
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
             mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])
