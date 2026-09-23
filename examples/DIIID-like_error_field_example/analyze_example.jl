@@ -15,20 +15,21 @@ full = ErrorFields.sensitivity_table(sens, PerturbedEquilibrium.dominant_couplin
 names = full.coil_names
 fcoils = findall(startswith("F"), names)
 
-println("coil       |δ_nom|    |∂δ/∂Δ| per mm   |∂δ/∂θ| per 0.1°   curvature")
+println("coil       |δ_nom|    per mm of shift   per mm of rim    curvature")
 for (j, nm) in enumerate(names)
-    @printf("%-8s %10.3e   %12.3e   %14.3e   %9.1e\n", nm, abs(full.delta_nominal[j]), 1e-3 * full.shift_rms[j],
-        0.1 * full.tilt_rms[j], max(maximum(sens.shift_linearity_residual[:, j]), maximum(sens.tilt_linearity_residual[:, j])))
+    @printf("%-8s %10.3e   %13.3e   %13.3e   %9.1e\n", nm, abs(full.delta_nominal[j]), full.delta_per_mm_shift[j],
+        full.delta_per_mm_rim[j], max(maximum(sens.shift_linearity_residual[:, j]), maximum(sens.tilt_linearity_residual[:, j])))
 end
 
-# Error field per millimetre of in-plane shift and per 0.1° of tilt, F coils only. Axisymmetric
-# hoops have no nominal n=1 drive, so the sensitivities are their whole error-field story.
-p_shift = bar(names[fcoils], 1e-3 .* full.shift_rms[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
-    ylabel="|∂δ/∂Δ| per mm", title="Dominant-mode error field per mm of F-coil shift", xrotation=45, xticks=(1:length(fcoils), names[fcoils]),
+# Error field per millimetre of in-plane shift and per millimetre of rim displacement from tilt,
+# F coils only, both in the units mechanical tolerances arrive in. Axisymmetric hoops have no
+# nominal n=1 drive, so the sensitivities are their whole error-field story.
+p_shift = bar(names[fcoils], full.delta_per_mm_shift[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
+    ylabel="|δ| per mm", title="Dominant-mode error field per mm of F-coil shift", xrotation=45, xticks=(1:length(fcoils), names[fcoils]),
     left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
-p_tilt = bar(names[fcoils], 0.1 .* full.tilt_rms[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
-    ylabel="|∂δ/∂θ| per 0.1°", title="Dominant-mode error field per 0.1° of F-coil tilt", xrotation=45, xticks=(1:length(fcoils), names[fcoils]),
-    left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
+p_tilt = bar(names[fcoils], full.delta_per_mm_rim[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
+    ylabel="|δ| per mm of rim", title="Dominant-mode error field per mm of F-coil rim displacement", xrotation=45,
+    xticks=(1:length(fcoils), names[fcoils]), left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
 p_sens = plot(p_shift, p_tilt; layout=(2, 1), size=(900, 700))
 display(p_sens)
 sens_path = joinpath(@__DIR__, "fcoil_sensitivities.png")
@@ -39,7 +40,7 @@ println("Saved: ", abspath(sens_path))
 # sensitive F coils under a 1 mm shift along x, against the C-coil's nominal spectrum.
 step_series(m, a) = (vcat(m[1] - 1, m, m[end] + 1), vcat(0.0, a, 0.0))
 m = sens.m_modes
-order = sortperm(full.shift_rms[fcoils]; rev=true)
+order = sortperm(full.delta_per_mm_shift[fcoils]; rev=true)
 picks = [fcoils[order[1]], fcoils[order[end]]]
 p_spec = plot(; xlabel="poloidal mode m", ylabel="|b̃| [T]", yscale=:log10, legend=:topleft,
     title="Root-area-weighted spectra: C-coil as built vs F coils shifted 1 mm in x",
@@ -117,4 +118,38 @@ for c in ErrorFields.read_efc_couplings(h5path)
     lim = ErrorFields.max_correctable_overlap(c; delta_threshold=thr_nom, torque_budget=4.0)
     @printf("%s: |δ| = %.3e per kAt, resonant fraction %.1f %%, torque %.3e (full) / %.3e (residual) N·m per kAt²; correctable up to %.2f × threshold\n",
         c.coil_name, c.delta_per_kat, c.overlap_percent, c.torque_full_per_kat2, c.torque_residual_per_kat2, lim.with_ntv / thr_nom)
+end
+
+# ---------------------------------------------------------------------------------------------
+# Comparing a coil revision against this run, without re-solving the plasma.
+#
+# The context holds everything that does not depend on which coils are being judged, so any
+# geometry can be swept against it. Here the example's own coils, shifted a millimetre, stand in
+# for a second revision.
+AEF = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields
+FT = GeneralizedPerturbedEquilibrium.ForcingTerms
+
+ctx = ErrorFields.ResonantDriveContext(h5path)
+sets = FT.load_coil_sets(ctx.cfg, 1; equil=ctx.equil)      # the deck's own coils, rebuilt from the file
+as_built = ErrorFields.coil_overlaps(ctx, sets)
+moved = ErrorFields.coil_overlaps(ctx, [FT.apply_transforms(cs, FT.CoilSetConfig(; shiftx=fill(1e-3, cs.ncoil)); n_tilt=0) for cs in sets])
+
+println("\ncoil            |δ| as built    |δ| shifted 1 mm   resonant fraction")
+for (a, b) in zip(as_built, moved)
+    @printf("%-14s %12.4e   %14.4e   %14.1f %%\n", a.coil_name, abs(a.delta), abs(b.delta), a.fraction_percent)
+end
+
+# Currents are applied afterwards by scaling, so a pair driven in opposition is one call. An
+# unmatched name raises rather than contributing zero, which is what a renamed coil would do.
+pair = ErrorFields.combine_overlaps(as_built, as_built[1].coil_name => 1.0, as_built[end].coil_name => -1.0; name="opposed pair")
+@printf("opposed pair: |δ| = %.4e, resonant fraction %.1f %%\n", abs(pair.delta), pair.fraction_percent)
+
+# Why a coil couples as it does, which the per-coil bars above cannot answer. The first says
+# whether it drives a different part of the spectrum or simply drives less; the second decomposes
+# the overlap into the harmonics that produced it; the third puts both on the control surface
+# against the dominant mode.
+for (name, fn) in (("applied_spectra", AEF.plot_applied_spectra), ("overlap_contributions", AEF.plot_overlap_contributions),
+    ("surface_overlay", AEF.plot_surface_overlay))
+    path = joinpath(@__DIR__, "$name.png")
+    display(fn(ctx, as_built; save_path=path))
 end
