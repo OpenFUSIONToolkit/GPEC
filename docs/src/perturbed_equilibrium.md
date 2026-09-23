@@ -35,7 +35,7 @@ the same way from a finished run in memory or from its `gpec.h5`:
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 
 rc = ResonantCoupling("gpec.h5")                 # post hoc; or ResonantCoupling(pe_state, ffs) in memory
-dom = dominant_coupling(rc; psi_low=0.3, psi_high=0.95)   # SVD over the surfaces in the window
+dom = dominant_coupling(rc; psi_low=0.3, psi_high=0.9)   # SVD over the surfaces in the window
 
 b̃ = rootarea_field(rc, coil_modes)               # unit-norm forcing modes → root-area-weighted field
 c = coupling_overlap(dom, b̃)                     # Vᴴ·b̃: c[1] is the overlap with the dominant mode
