@@ -92,7 +92,7 @@ include("h5_metadata_check.jl")
             table = EF.sensitivity_table(sens, dom)
             @test table.mode == 1
             @test sum(table.delta_nominal) ≈ pe.dominant_forcing_overlap[1] / sens.b_t0 rtol = 1e-10
-            @test table.shift_rms[2] ≈ abs(table.shift[1, 2])  # axisymmetric: |S_y| = |S_x|
+            @test table.delta_per_mm_shift[2] ≈ 1e-3 * abs(table.shift[1, 2])  # axisymmetric: |S_y| = |S_x|
             for j in 1:2
                 @test abs(table.delta_nominal[j] + table.shift[1, j] * table.cancelling_shift[1, j] + table.shift[2, j] * table.cancelling_shift[2, j]) < 1e-12
             end
@@ -211,6 +211,58 @@ include("h5_metadata_check.jl")
             set_pivot = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; rotation_center="set"); psi=ffs.psilim, b_t0=sens.b_t0)
             @test set_pivot.tilt_sensitivity ≈ sens.tilt_sensitivity rtol = 1e-10
+
+            # The one-call overlap path. Built in memory from the same coupling the table used, so
+            # the comparison is exact rather than up to an SVD phase.
+            ctx = EF.ResonantDriveContext(ffs.equil, rc, cfg, ffs.psilim, sens.b_t0)
+            @test ctx.psilim == ffs.psilim && ctx.b_t0 == sens.b_t0
+            @test length(ctx.grids) == length(unique(rc.n_modes))
+            ovs = EF.coil_overlaps(ctx, sets)
+            @test [o.coil_name for o in ovs] == sens.coil_names
+
+            m_low, m_high = extrema(rc.m_modes)
+            for (j, o) in enumerate(ovs)
+                # The chain assembled by hand: a change on either side now has to be deliberate.
+                hand_modes = FT.ForcingMode[]
+                for (n, g) in ctx.grids
+                    append!(hand_modes, FT.coil_forcing_modes(sets[j], g, n, m_low, m_high))
+                end
+                hand = PE.rootarea_field(rc, hand_modes)
+                @test o.spectrum ≈ hand rtol = 1e-12
+                @test o.raw ≈ PE.coupling_overlap(dom, hand)[1] rtol = 1e-12
+                @test o.delta ≈ o.raw / o.b_t0
+                @test o.spectrum_norm ≈ norm(hand)
+                @test o.fraction_percent ≈ 100 * abs(o.raw) / norm(hand)
+                # And it is the same number the sensitivity sweep gets for its nominal tap.
+                @test o.delta ≈ table.delta_nominal[j] rtol = 1e-10
+            end
+
+            # Combining these sets at unit weight is the run's own forcing, which the run wrote out.
+            whole = EF.combine_overlaps(ovs, (o.coil_name => 1.0 for o in ovs)...; name="assembly")
+            @test whole.coil_name == "assembly"
+            @test whole.spectrum ≈ pe.forcing_b_rootarea rtol = 1e-10
+            @test whole.delta ≈ pe.dominant_forcing_overlap[1] / sens.b_t0 rtol = 1e-10
+            @test whole.fraction_percent ≈ 100 * abs(whole.raw) / whole.spectrum_norm
+
+            # Weights scale the spectrum, and an unmatched name is an error, not a silent zero.
+            doubled = EF.combine_overlaps(ovs, ovs[1].coil_name => 2.0)
+            @test doubled.raw ≈ 2 * ovs[1].raw rtol = 1e-12
+            @test doubled.spectrum_norm ≈ 2 * ovs[1].spectrum_norm rtol = 1e-12
+            @test_throws ArgumentError EF.combine_overlaps(ovs, "no_such_coil" => 1.0)
+            @test_throws ArgumentError EF.combine_overlaps(ovs)
+            @test_throws ArgumentError EF.coil_overlaps(ctx, sets; mode=length(ctx.dom.singular_values) + 1)
+
+            # Rebuilt from the file instead: same magnitudes, up to the singular vectors' free phase.
+            from_h5 = EF.coil_overlaps(h5path, sets)
+            @test abs.(getfield.(from_h5, :delta)) ≈ abs.(getfield.(ovs, :delta)) rtol = 1e-8
+            @test getfield.(from_h5, :fraction_percent) ≈ getfield.(ovs, :fraction_percent) rtol = 1e-8
+
+            # The grid override, and the warning when a deck is coarser than the converged default.
+            @test EF.MIN_NZETA_PER_PERIOD == FT.NZETA_POINTS_PER_PERIOD
+            coarse_cfg = EF.regrid(cfg; nzeta_coil=8)
+            @test coarse_cfg.nzeta_coil == 8 && coarse_cfg.mtheta_coil == cfg.mtheta_coil
+            @test EF.regrid(cfg).nzeta_coil == cfg.nzeta_coil
+            @test_logs (:warn, r"points per period") match_mode = :any EF.ResonantDriveContext(ffs.equil, rc, coarse_cfg, ffs.psilim, sens.b_t0)
 
             # Guards: a current-free set, a bad pivot name, a non-positive step.
             dead = FT.CoilSet(sets[1].name, sets[1].ncoil, sets[1].s, sets[1].nw, sets[1].nsec, sets[1].x, sets[1].y, sets[1].z, zeros(sets[1].ncoil))

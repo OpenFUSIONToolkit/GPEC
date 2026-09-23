@@ -39,18 +39,8 @@ function compute_coil_sensitivities(
 
     N = length(rc.m_modes)
     nset = length(coil_sets)
-    m_low, m_high = extrema(rc.m_modes)
-    grids = [(n, CoilForcingGrid(equil, cfg, n; psi)) for n in sort(unique(rc.n_modes))]
-
-    # One Biot-Savart pass per coil-set geometry, every toroidal mode on its own grid, placed
-    # and conformed to b̃ on rc's column ordering.
-    function spectrum(cs::CoilSet)
-        modes = ForcingMode[]
-        for (n, grid) in grids
-            append!(modes, coil_forcing_modes(cs, grid, n, m_low, m_high))
-        end
-        return rootarea_field(rc, modes)
-    end
+    grids = forcing_grids(rc, equil, cfg; psi)
+    spectrum(cs::CoilSet) = applied_spectrum(cs, rc, grids)
 
     nominal = zeros(ComplexF64, N, nset)
     shift = zeros(ComplexF64, N, 3, nset)
@@ -95,8 +85,19 @@ function compute_coil_sensitivities(
     return CoilSensitivities(
         [cs.name for cs in coil_sets], copy(rc.m_modes), copy(rc.n_modes), b_t0,
         nominal, shift, tilt, shift_resid, tilt_resid,
-        [maximum(abs, cs.currents) for cs in coil_sets], [cs.nw for cs in coil_sets]
+        [maximum(abs, cs.currents) for cs in coil_sets], [cs.nw for cs in coil_sets],
+        [ForcingTerms.nominal_major_radius(cs) for cs in coil_sets]
     )
+end
+
+"""
+    compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets, ctrl=ErrorFieldsControl()) -> CoilSensitivities
+
+Sweep `coil_sets` against an already-assembled [`ResonantDriveContext`](@ref), reusing its boundary grids.
+Equivalent to the five-argument method and the way to apply a grid or ψ-window override.
+"""
+function compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets::Vector{CoilSet}, ctrl::ErrorFieldsControl=ErrorFieldsControl())
+    return compute_coil_sensitivities(coil_sets, ctx.rc, ctx.equil, ctx.cfg, ctrl; psi=ctx.psilim, b_t0=ctx.b_t0)
 end
 
 """
@@ -166,8 +167,13 @@ function sensitivity_table(sens::CoilSensitivities, dom::DominantCoupling; mode:
     inplane_rms(S) = [sqrt((abs2(S[1, j]) + abs2(S[2, j])) / 2) for j in 1:nset]
     cancelling(S) = [cancelling_offset(delta_nominal[j], S[1, j], S[2, j])[i] for i in 1:2, j in 1:nset]
 
+    per_deg = inplane_rms(tilt)
+    # A tilt of one degree sweeps the rim through r·π/180 metres, the form mechanical tolerances take.
+    mm_per_deg = [sens.nominal_radius[j] * pi / 180 * 1000 for j in 1:nset]
+    per_mm_rim = [mm_per_deg[j] > 0 ? per_deg[j] / mm_per_deg[j] : 0.0 for j in 1:nset]
+
     return SensitivityTable(copy(sens.coil_names), mode, delta_nominal, shift, tilt,
-        inplane_rms(shift), inplane_rms(tilt), cancelling(shift), cancelling(tilt))
+        1e-3 .* inplane_rms(shift), per_deg, per_mm_rim, cancelling(shift), cancelling(tilt))
 end
 
 function sensitivity_table(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1)
