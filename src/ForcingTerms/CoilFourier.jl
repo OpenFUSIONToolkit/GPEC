@@ -242,6 +242,47 @@ function fourier_decompose_bn(
 end
 
 """
+    reconstruct_bn(amplitudes, m_modes, n_modes; ntheta=256, nzeta=180, theta_range=(-pi, pi)) -> (; theta, zeta, bn)
+    reconstruct_bn(modes::AbstractVector{ForcingMode}; kwargs...) -> (; theta, zeta, bn)
+
+Evaluate the real normal-flux pattern `bn(θ, ζ)` of a spectrum on an arbitrary angular grid,
+inverting the basis of [`fourier_decompose_bn`](@ref):
+
+    bn(θ, ζ) = Re Σ_k amplitudes[k] × exp(+i(m_k×θ - n_k×ζ))
+
+The real part rather than a sum over ±m is what the decomposition's factor of 2 already accounts
+for: each retained `(m, n)` stands for itself and its conjugate partner `(-m, -n)`.
+
+`theta_range` defaults to `(-π, π)` so the outboard midplane falls in the middle of a map rather
+than being cut in half at its edges. The grid is independent of the one the spectrum was measured
+on, so a coarse decomposition can still be drawn smoothly.
+"""
+function reconstruct_bn(
+    amplitudes::AbstractVector{<:Number},
+    m_modes::AbstractVector{<:Integer},
+    n_modes::AbstractVector{<:Integer};
+    ntheta::Int=256,
+    nzeta::Int=180,
+    theta_range::Tuple{Real,Real}=(-pi, pi)
+)
+    length(amplitudes) == length(m_modes) == length(n_modes) ||
+        throw(DimensionMismatch("reconstruct_bn: amplitudes, m_modes and n_modes must have equal length"))
+    (ntheta > 0 && nzeta > 0) || throw(ArgumentError("reconstruct_bn: ntheta and nzeta must be positive"))
+
+    theta = collect(range(theta_range[1], theta_range[2]; length=ntheta))
+    zeta = collect(range(0, 2pi; length=nzeta))
+    bn = zeros(ntheta, nzeta)
+    for k in eachindex(amplitudes), (j, z) in enumerate(zeta)
+        @. bn[:, j] += real(amplitudes[k] * cis(m_modes[k] * theta - n_modes[k] * z))
+    end
+    return (; theta, zeta, bn)
+end
+
+function reconstruct_bn(modes::AbstractVector{ForcingMode}; kwargs...)
+    return reconstruct_bn([m.amplitude for m in modes], [m.m for m in modes], [m.n for m in modes]; kwargs...)
+end
+
+"""
     CoilForcingGrid
 
 The plasma-boundary sampling that every coil-field evaluation for one equilibrium and

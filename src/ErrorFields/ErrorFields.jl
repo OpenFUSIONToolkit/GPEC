@@ -46,6 +46,7 @@ import ..PerturbedEquilibrium: ResonantCoupling, DominantCoupling, dominant_coup
 import ..Utilities
 
 include("ErrorFieldsStructs.jl")
+include("Overlap.jl")
 include("Sensitivity.jl")
 include("ToleranceTOML.jl")
 include("Sampling.jl")
@@ -55,6 +56,8 @@ include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
 export compute_coil_sensitivities, sensitivity_table, cancelling_offset
+export ResonantDriveContext, CoilOverlap, coil_overlaps, combine_overlaps
+export applied_spectrum, forcing_grids, regrid, MIN_NZETA_PER_PERIOD
 export ToleranceSet, CoilTolerance, CoherentGroupTolerance, OtherFieldBudget
 export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tolerance_deg
 export RadialDistribution, Flat, UniformArea, Hollow, Ring, PowerLaw, randpow, radial_distribution
