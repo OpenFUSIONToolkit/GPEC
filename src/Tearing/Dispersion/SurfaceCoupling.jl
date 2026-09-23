@@ -12,13 +12,9 @@
 # multi-surface `MultiSurfaceCoupling` to rescale Q between each surface's
 # normalization.
 #
-# `q_shift` is a real, additive offset on the layer's Q argument, carrying the
-# E×B rotation of this surface. Fitzpatrick's TJ writes the layer eigenvalue as
-# `ĝ = i(Q_E − ω·tau_k)` with `Q_E = tau_k·omega_E` (TJ Documentation/Layer.tex,
-# "Calculation of Growth-Rate and Real Frequency"); with `ĝ = −i·Q` this is
-# `Q_k = tau_k·(omega − omega_E_k)`, i.e. the layer sees the mode frequency in
-# its own fluid frame. So `q_shift = −tau_k·omega_E_k`, and zero reproduces the
-# static, all-surfaces-corotating case.
+# `q_shift = −tau_k·omega_E_k` is a real, additive offset on the layer's Q argument that puts
+# the mode frequency in this surface's E×B frame, `Q_k = tau_k·(omega − omega_E_k)`; zero is
+# the static, all-surfaces-corotating case.
 #
 # Constructor convenience: `surface_coupling(model, params, dp_diag; dc=0.0)`
 # auto-fills `scale` and `tauk` based on the model type — `scale = S^(1/3)`
@@ -29,8 +25,7 @@
 """
     SurfaceCoupling{M<:InnerLayerModel, P}
 
-Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk,
-q_shift)`. Calling `sc(Q)` returns the complex residual
+Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk, q_shift)`. Calling `sc(Q)` returns the complex residual
 
 ```
 r(Q) = dp_diag - scale * solve_inner(model, params, Q + q_shift).tearing - dc
@@ -97,15 +92,12 @@ interchange channel, which provides Glasser (Mercier) stabilization
 natively. A Δ_crit proxy (χ_parallel-matching offset on the diagonal) is
 meaningful only for tearing-only slab-layer approximations like SLAYER;
 for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
-struct's `dc` field is hard-wired to 0 here.
-
-`q_shift` is the real E×B Doppler offset on the layer's Q argument. GGJ carries
-`tauk = 1`, so the caller must supply the shift already in GGJ's own Q units.
+struct's `dc` field is hard-wired to 0 here, and so is `q_shift`: with no time
+normalization, a physical E×B rotation has no image in GGJ's Q.
 """
-function surface_coupling(model::GGJModel, params::GGJParameters,
-    dp_diag::Number; q_shift::Real=0.0)
+function surface_coupling(model::GGJModel, params::GGJParameters, dp_diag::Number)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        0.0, 1.0, 1.0, Float64(q_shift))
+        0.0, 1.0, 1.0, 0.0)
 end
 
 """

@@ -137,26 +137,28 @@ end
 # ---------------------------------------------------------------------
 # SLAYER: scale = lu^(1/3), tauk from the surface, dc from the χ‖ proxy.
 function _build_surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-    dp_diag, q_shift::Real=0.0)
+    dp_diag, q_shift::Real)
     return surface_coupling(model, params, dp_diag; dc=params.dc_tmp, q_shift=q_shift)
 end
 
 # GGJ: scale = 1.0 (rescale_delta applied inside solve_inner), tauk = 1.0,
 # dc = 0 (the 4m×4m Pletzer-Dewar residual carries interchange stabilization
-# natively). See the GGJ `surface_coupling` method.
-function _build_surface_coupling(model::GGJModel, params::GGJParameters,
-    dp_diag, q_shift::Real=0.0)
-    return surface_coupling(model, params, dp_diag; q_shift=q_shift)
-end
+# natively), and no E×B shift. See the GGJ `surface_coupling` method.
+_build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
+    surface_coupling(model, params, dp_diag)
 
 # Per-surface E×B angular frequency Ω_E per unit n [rad/s]: `control.omega_E_kHz` when set,
 # otherwise the kinetic file's `omega_E` sampled at each rational surface.
 function _omega_E_per_surface(control::SLAYERControl, n::Integer, omega_E_file::AbstractVector{<:Real})
     if !isempty(control.omega_E_kHz)
         length(control.omega_E_kHz) == n ||
-            throw(ArgumentError("run_slayer: omega_E_kHz has $(length(control.omega_E_kHz)) " *
-                                "entries but $n rational surfaces were analysed. Supply one " *
-                                "entry per surface, or leave it empty to use the kinetic file."))
+            throw(
+                ArgumentError(
+                    "run_slayer: omega_E_kHz has $(length(control.omega_E_kHz)) " *
+                    "entries but $n rational surfaces were analysed. Supply one " *
+                    "entry per surface, or leave it empty to use the kinetic file."
+                )
+            )
         return 2π * 1e3 .* control.omega_E_kHz
     end
     isempty(omega_E_file) && return zeros(Float64, n)
@@ -166,17 +168,12 @@ function _omega_E_per_surface(control::SLAYERControl, n::Integer, omega_E_file::
     return Float64.(omega_E_file)
 end
 
-# Real Doppler offset on a surface's inner-layer Q. TJ writes ĝ = i(Q_E − ω·τ_k) with
-# Q_E = τ_k·ω_E and ω_E = (m/r_s)·V_E ∝ n·Ω_E; with ĝ = −i·Q this is Q_k = τ_k·(ω − n·Ω_E).
+# Real Doppler offset on a surface's inner-layer Q: Q_k = τ_k·(ω − n·Ω_E) in its E×B frame.
 _q_shift(p::SLAYERParameters, Ω_E::Real) = -p.tauk * p.n * Ω_E
 # GGJ carries no time normalization (tauk = 1), so a physical rotation has no Q-space image.
 _q_shift(::InnerLayerParameters, ::Real) = 0.0
 
-function _q_shifts(control::SLAYERControl, params, n::Integer; omega_E::AbstractVector{<:Real}=Float64[])
-    Ω_E = _omega_E_per_surface(control, n, omega_E)
-    return Float64[_q_shift(params[k], Ω_E[k]) for k in 1:n]
-end
-
+_q_shifts(params, Ω_E::AbstractVector{<:Real}) = Float64[_q_shift(params[k], Ω_E[k]) for k in eachindex(Ω_E)]
 
 # ---------------------------------------------------------------------
 # Reference-length conversion of the outer Δ' for the slab layer
@@ -307,11 +304,12 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
     coupled = control.coupling_mode === :coupled
     !coupled && !isempty(control.omega_E_kHz) && @warn(
-        "SLAYER: omega_E_kHz is ignored with coupling_mode=:uncoupled; rotation only enters " *
-        "the coupled determinant.")
-    coupled && _is_ggj(model) && any(!iszero, _omega_E_per_surface(control, n, omega_E)) && @warn(
-        "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
-    q_shifts = coupled ? _q_shifts(control, params, n; omega_E=omega_E) : zeros(Float64, n)
+            "SLAYER: omega_E_kHz is ignored with coupling_mode=:uncoupled; rotation only enters " *
+            "the coupled determinant.")
+    Ω_E = coupled ? _omega_E_per_surface(control, n, omega_E) : zeros(Float64, n)
+    coupled && _is_ggj(model) && any(!iszero, Ω_E) && @warn(
+            "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
+    q_shifts = _q_shifts(params, Ω_E)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # In the scanned (reference-normalized) Q, surface k's layer response moves by τ_ref·n·Ω_E,k.
     # A shift outside the scan box silently turns the coupled root into :no_root.
@@ -388,8 +386,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
 
     elseif control.coupling_mode === :coupled
         m_use = min(control.msing_max, n)
-        mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use,
-            tauk_rescale=control.tauk_rescale)
+        mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use)
         scan = _run_scan(mc, control)
         pthr = _pole_threshold_for(scan)
         ref_tauk = scs[1].tauk

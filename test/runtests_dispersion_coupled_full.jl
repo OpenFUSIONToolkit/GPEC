@@ -31,7 +31,6 @@
         @test size(mc.dp_raw) == (4, 4)
         @test mc.msing_max == 2
         @test mc.ref_idx == 1
-        @test mc.tauk_rescale === :direct
 
         # Wrong outer dim
         @test_throws ArgumentError multi_surface_coupling_full([sc1, sc2],
@@ -44,9 +43,6 @@
             dp_raw; msing_max=0)
         @test_throws ArgumentError multi_surface_coupling_full([sc1, sc2],
             dp_raw; msing_max=3)
-        # Unknown inter-surface Q normalization
-        @test_throws ArgumentError multi_surface_coupling_full([sc1, sc2],
-            dp_raw; tauk_rescale=:bogus)
     end
 
     @testset "1-surface 4×4 det matches hand computation" begin
@@ -138,11 +134,7 @@
         Q = 1.5 + 0.5im
 
         mc = multi_surface_coupling_full([sc1, sc2], dp_raw)
-        @test mc.tauk_rescale === :direct
         @test mc(Q) ≈ detAt(Q * (2.0 / 2.0) + s1, 0im) * detAt(Q * (4.0 / 2.0) + s2, 0im)
-
-        mcl = multi_surface_coupling_full([sc1, sc2], dp_raw; tauk_rescale=:legacy)
-        @test mcl(Q) ≈ detAt(Q * (2.0 / 2.0) + s1, 0im) * detAt(Q * (2.0 / 4.0) + s2, 0im)
 
         # The shift is real: it moves the layer argument along Re(Q) only.
         mc0 = multi_surface_coupling_full([surface_coupling(lin, nothing, 0 + 0im; scale=1.0, tauk=1.0, dc=0.0)],

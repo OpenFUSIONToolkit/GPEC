@@ -3,7 +3,7 @@
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
     using GeneralizedPerturbedEquilibrium.Dispersion
     using GeneralizedPerturbedEquilibrium.Tearing.Runner: SLAYERControl,
-        slayer_control_from_toml, validate, _q_shifts
+        slayer_control_from_toml, validate, _q_shifts, _omega_E_per_surface
     using LinearAlgebra
 
     # Linear inner layer Δ(Q) = a + b·Q makes the applied Q offset readable
@@ -48,7 +48,7 @@
     end
 
     @testset "Coupled determinant applies each surface's own shift" begin
-        # Diagonal Δ', so det = Π_k (dp_kk - Δ_k(Q·tauk_ref/tauk_k + shift_k)).
+        # Diagonal Δ', so det = Π_k (dp_kk - Δ_k(Q·tauk_k/tauk_ref + shift_k)).
         s1, s2 = 0.5, -1.25
         sc1 = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0,
             q_shift=s1)
@@ -70,28 +70,29 @@
     end
 
     @testset "_q_shifts: kinetic-file Ω_E by default, omega_E_kHz override, n-scaled" begin
-        mk(; qval, rs, m, n) = slayer_parameters(n_e=5.0e19, t_e=1000.0, t_i=1000.0,
+        mk(; qval, rs, m, n) = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0,
             omega_e=1.0e4, omega_i=5.0e3,
             qval=qval, sval_r=1.0, bt=2.0, rs=rs, R0=1.7,
             mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=n)
         params = [mk(; qval=1.5, rs=0.5, m=3, n=2), mk(; qval=2.0, rs=0.6, m=4, n=2)]
         Ω_file = [3.0e4, -1.0e4]   # rad/s per unit n, as carried by the kinetic file
+        qs(ctrl; omega_E=Float64[]) = _q_shifts(params, _omega_E_per_surface(ctrl, 2, omega_E))
 
         # No file rotation and no override: no shift anywhere.
-        @test _q_shifts(SLAYERControl(), params, 2) == [0.0, 0.0]
+        @test qs(SLAYERControl()) == [0.0, 0.0]
 
-        # File rotation by default. The mode sees n·Ω_E, and ĝ = i(Q_E − ω·τ_k) gives
-        # Q_k = τ_k·(ω − n·Ω_E), so the offset is −τ_k·n·Ω_E.
-        got = _q_shifts(SLAYERControl(), params, 2; omega_E=Ω_file)
+        # File rotation by default. The mode sees n·Ω_E, so Q_k = τ_k·(ω − n·Ω_E) and the offset
+        # is −τ_k·n·Ω_E.
+        got = qs(SLAYERControl(); omega_E=Ω_file)
         @test got ≈ [-params[1].tauk * 2 * Ω_file[1], -params[2].tauk * 2 * Ω_file[2]]
 
         # A non-empty omega_E_kHz replaces the file values, in the same per-unit-n convention.
-        ovr = _q_shifts(SLAYERControl(; omega_E_kHz=[1.0, -2.0]), params, 2; omega_E=Ω_file)
+        ovr = qs(SLAYERControl(; omega_E_kHz=[1.0, -2.0]); omega_E=Ω_file)
         @test ovr ≈ [-params[1].tauk * 2 * 2π * 1e3 * 1.0, -params[2].tauk * 2 * 2π * 1e3 * -2.0]
 
         # Either source must supply exactly one value per analysed surface.
-        @test_throws ArgumentError _q_shifts(SLAYERControl(; omega_E_kHz=[1.0]), params, 2)
-        @test_throws ArgumentError _q_shifts(SLAYERControl(), params, 2; omega_E=[1.0])
+        @test_throws ArgumentError qs(SLAYERControl(; omega_E_kHz=[1.0]))
+        @test_throws ArgumentError qs(SLAYERControl(); omega_E=[1.0])
     end
 
     @testset "Coupled roots do not depend on the reference surface" begin
@@ -132,7 +133,7 @@
         @test imag.(r1) ≈ imag.(r0) rtol = 1e-10
     end
 
-    @testset "omega_E_kHz and tauk_rescale parse and validate from TOML" begin
+    @testset "omega_E_kHz parses and validates from TOML" begin
         ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => [0, 3.0, -1.5]))
         @test ctrl.omega_E_kHz == [0.0, 3.0, -1.5]
         @test eltype(ctrl.omega_E_kHz) === Float64
@@ -141,26 +142,5 @@
         # A non-finite shift would silently poison every Q evaluation; the
         # validator rejects it (TOML cannot express NaN, so go through validate).
         @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=[NaN]))
-
-        # tauk_rescale round-trips as a Symbol and rejects unknown values.
-        @test slayer_control_from_toml(Dict("tauk_rescale" => "legacy")).tauk_rescale === :legacy
-        @test SLAYERControl().tauk_rescale === :direct
-        @test_throws ArgumentError validate(SLAYERControl(; tauk_rescale=:sideways))
-    end
-
-    @testset "tauk_rescale flips the inter-surface Q normalization" begin
-        sc1 = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0)
-        sc2 = surface_coupling(model, nothing, 2.0 + 0im; scale=1.0, tauk=2.0)
-        dp = ComplexF64[1.0 0.0; 0.0 2.0]
-        Q = 1.5 + 0.5im
-
-        leg = multi_surface_coupling([sc1, sc2], dp; tauk_rescale=:legacy)
-        dir = multi_surface_coupling([sc1, sc2], dp; tauk_rescale=:direct)
-        @test leg.tauk_rescale === :legacy
-        # :legacy divides by tauk_k, :direct multiplies by it.
-        @test leg(Q) ≈ (1.0 - Q) * (2.0 - Q / 2)
-        @test dir(Q) ≈ (1.0 - Q) * (2.0 - 2Q)
-        @test_throws ArgumentError multi_surface_coupling([sc1, sc2], dp;
-            tauk_rescale=:sideways)
     end
 end

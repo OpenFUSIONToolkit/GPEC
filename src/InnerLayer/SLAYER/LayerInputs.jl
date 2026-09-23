@@ -290,8 +290,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         n_res = sing.n[1]
 
         prof = profiles(psi)
-        # Take ω_*e, ω_*i from the spline derivatives, or from `profiles` when the caller
-        # supplies them directly. `run_slayer` supplies zeros, so the latter is a library path.
+        # ω_*e, ω_*i from the density and temperature spline derivatives, at this surface's n.
         ω_e_use, ω_i_use = _omega_star_at(psi, n_res)
 
         # Pull geometric trapped-fraction inputs from ResistGeometry when

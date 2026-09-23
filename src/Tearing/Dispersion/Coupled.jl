@@ -15,7 +15,7 @@
 #   det = mc(Q::ComplexF64)
 #
 # At each evaluation, for k = 1 .. msing_max, the inner-layer Δ is computed
-# at a Q rescaled by `tauk_ref / tauk_k` and offset by that surface's real
+# at a Q rescaled by `tauk_k / tauk_ref` and offset by that surface's real
 # Doppler shift `q_shift`, then subtracted (with the dc offset) from the
 # diagonal of an `msing_max × msing_max` upper-left submatrix of `dp_matrix`.
 # The off-diagonal Δ' couplings are passed through unchanged.
@@ -35,14 +35,8 @@ M[i,j] = dp_matrix[i,j]      for i ≠ j        (off-diagonal Δ' couplings)
 
 A root of `mc` in the complex `Q` plane is a coupled tearing eigenvalue.
 
-`ratio_k` is `tauk_k/tauk_ref` under the default `tauk_rescale=:direct` and
-`tauk_ref/tauk_k` under `:legacy`. `:direct` is the direction implied by the
-definition `Q = tauk·ω` (so one shared physical ω gives `Q_k = tauk_k·ω`) and
-by Fitzpatrick's TJ, where the layer eigenvalue is `ĝ_k = tauk_k·g_k`. Under
-`:legacy` the scanned frequency scales as `1/tauk_k` while that surface's
-`Q_e`/`Q_i` scale as `tauk_k`, yet the layer equations add them (`ĝ + i·Q_e`),
-so the two are mis-scaled by `(tauk_k/tauk_ref)²`. `:legacy` is retained only
-to reproduce results generated before the correction.
+`ratio_k = tauk_k/tauk_ref`: `Q` is defined as `tauk·ω`, so one shared physical
+ω reaches surface `k` as `Q_k = tauk_k·ω`, on the same scaling as its `Q_e`/`Q_i`.
 
 `q_shift_k` is the real, per-surface E×B Doppler offset carried on each
 `SurfaceCoupling` (zero by default, in which case every surface sees the same
@@ -53,7 +47,6 @@ struct MultiSurfaceCoupling{V<:AbstractVector{<:SurfaceCoupling}}
     dp_matrix::Matrix{ComplexF64}
     ref_idx::Int
     msing_max::Int
-    tauk_rescale::Symbol
 end
 
 """
@@ -81,12 +74,8 @@ length `length(surfaces)` (it is the same matrix returned by
 function multi_surface_coupling(surfaces::AbstractVector{<:SurfaceCoupling},
     dp_matrix::AbstractMatrix;
     ref_idx::Integer=1,
-    msing_max::Integer=min(3, length(surfaces)),
-    tauk_rescale::Symbol=:direct)
+    msing_max::Integer=min(3, length(surfaces)))
     n = length(surfaces)
-    tauk_rescale in (:legacy, :direct) ||
-        throw(ArgumentError("multi_surface_coupling: tauk_rescale=" *
-                            "$tauk_rescale must be :legacy or :direct"))
     size(dp_matrix) == (n, n) ||
         throw(ArgumentError("multi_surface_coupling: dp_matrix size " *
                             "$(size(dp_matrix)) ≠ ($n, $n)"))
@@ -98,7 +87,7 @@ function multi_surface_coupling(surfaces::AbstractVector{<:SurfaceCoupling},
                             "out of range 1:$n"))
     return MultiSurfaceCoupling(surfaces,
         Matrix{ComplexF64}(dp_matrix),
-        Int(ref_idx), Int(msing_max), tauk_rescale)
+        Int(ref_idx), Int(msing_max))
 end
 
 function (mc::MultiSurfaceCoupling)(Q::Number)
@@ -111,9 +100,7 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
         sc = mc.surfaces[k]
         # Real q_shift Dopplers this surface's layer away from the common
         # lab-frame frequency carried by the scanned Q.
-        ratio = mc.tauk_rescale === :direct ? (sc.tauk / ref_tauk) :
-                (ref_tauk / sc.tauk)
-        Q_k = Qc * ratio + sc.q_shift
+        Q_k = Qc * (sc.tauk / ref_tauk) + sc.q_shift
         # m×m scalar coupling: use only the tearing channel. The
         # interchange (Glasser-stabilization) channel is carried in the
         # full 4m×4m dispersion in `CoupledFullMatch.jl`; this reduced

@@ -110,11 +110,21 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
     "PerSurface/tau_A" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
     "PerSurface/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
-    "PerSurface/Delta_prime_matrix" => (; long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
-    "PerSurface/Delta_prime_matrix_rs" => (; long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)", dims=("surface_row", "surface_col")),
+    "PerSurface/Delta_prime_matrix" => (;
+        long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)",
+        dims=("surface_row", "surface_col")
+    ),
+    "PerSurface/Delta_prime_matrix_rs" => (;
+        long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)",
+        dims=("surface_row", "surface_col")
+    ),
     "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
-        (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root", units="rad/s", dims=("surface",)),
+        (;
+            long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root: each surface's E×B frame when uncoupled, the lab frame when coupled",
+            units="rad/s",
+            dims=("surface",)
+        ),
     "Roots/gamma" =>
         (; long_name="growth rate γ = Im(Q)/τ_k of each root, positive = unstable (an e-folding rate, so no 2π distinction applies)", units="1/s", dims=("surface",)),
     "Roots/no_root" => (; long_name="flag: no usable dispersion root found (Q_root is NaN, ω/γ are placeholders)", dims=("surface",)),

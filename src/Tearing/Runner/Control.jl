@@ -38,12 +38,8 @@ constructor.
     kinetic file at each rational surface. Rotation enters only the coupled
     determinant: surface `k`'s inner-layer Q is Doppler-shifted by
     `ΔRe(Q_k) = −tauk_k · n · Ω_E,k`, so each layer sees the mode in its own E×B
-    frame (TJ's `ĝ = i(Q_E − ω·tau_k)`). Must be empty or have one entry per
+    frame. Must be empty or have one entry per
     rational surface actually analysed
-  - `tauk_rescale` -- direction of the inter-surface Q normalization in the
-    coupled determinant: `:direct` (default, `Q·tauk_k/tauk_ref`, consistent
-    with `Q = tauk·omega` and with TJ) or `:legacy` (`Q·tauk_ref/tauk_k`, the
-    pre-correction behaviour, for reproducing older results only)
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
@@ -167,14 +163,6 @@ there is one consistent interface for resistive and kinetic profiles.
     # Ω_E from the kinetic file; either way it only Doppler-shifts the coupled determinant.
     omega_E_kHz::Vector{Float64} = Float64[]
 
-    # Inter-surface Q normalization in the coupled determinant. `:direct`
-    # (default) uses Q·tauk_k/tauk_ref: Q is defined as tauk·omega, so one
-    # shared physical eigenvalue maps to surface k by MULTIPLYING by tauk_k.
-    # `:legacy` restores the previous Q·tauk_ref/tauk_k for reproducing results
-    # generated before the correction; it puts the scanned frequency and that
-    # surface's Q_e/Q_i on opposite tauk scalings inside the same layer solve.
-    tauk_rescale::Symbol = :direct
-
     profile_file::String = ""
     profile_group::String = "/"
 
@@ -187,7 +175,6 @@ const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
-const _VALID_TAUK_RESCALE = (:legacy, :direct)
 
 function validate(ctrl::SLAYERControl)
     ctrl.inner_model in _VALID_INNER_MODELS ||
@@ -213,9 +200,6 @@ function validate(ctrl::SLAYERControl)
     all(isfinite, ctrl.omega_E_kHz) ||
         throw(ArgumentError("SLAYERControl: omega_E_kHz contains a " *
                             "non-finite entry: $(ctrl.omega_E_kHz)"))
-    ctrl.tauk_rescale in _VALID_TAUK_RESCALE ||
-        throw(ArgumentError("SLAYERControl: tauk_rescale=$(ctrl.tauk_rescale) " *
-                            "must be one of $(_VALID_TAUK_RESCALE)"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
@@ -273,7 +257,7 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :dc_type,
-            :resistivity_model, :lnLambda_form, :tauk_rescale)
+            :resistivity_model, :lnLambda_form)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)

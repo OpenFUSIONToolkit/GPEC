@@ -71,15 +71,12 @@ studies use the reduced m × m `MultiSurfaceCoupling` instead.
   - `dp_raw::Matrix{ComplexF64}` — 2m × 2m outer-region matrix (side-major).
   - `ref_idx::Int`              — reference surface for Q rescaling (1-based).
   - `msing_max::Int`            — number of surfaces to include (truncates).
-  - `tauk_rescale::Symbol`      — inter-surface Q normalization, `:direct` or `:legacy`
-    (see `multi_surface_coupling`).
 """
 struct MultiSurfaceCouplingFull{V<:AbstractVector{<:SurfaceCoupling},K<:NamedTuple}
     surfaces::V
     dp_raw::Matrix{ComplexF64}
     ref_idx::Int
     msing_max::Int
-    tauk_rescale::Symbol
     inner_kwargs::K    # kwargs forwarded to solve_inner; e.g. (pfac=0.1, nx=128, nq=5)
 end
 
@@ -87,7 +84,6 @@ end
     multi_surface_coupling_full(surfaces, dp_raw;
                                 ref_idx=1,
                                 msing_max=length(surfaces),
-                                tauk_rescale=:direct,
                                 inner_kwargs=NamedTuple()) -> MultiSurfaceCouplingFull
 
 Construct the 4m × 4m dispersion matrix driver. `dp_raw` must be the
@@ -105,8 +101,6 @@ Riccati path). Surface k's inner layer is evaluated at `Q·ratio_k + q_shift_k`,
     matching matrix becomes 4·msing_max × 4·msing_max, built from the
     corresponding 2·msing_max × 2·msing_max submatrix of `dp_raw`.
     Defaults to `length(surfaces)`.
-  - `tauk_rescale` — `:direct` (default, `Q·tauk_k/tauk_ref`) or `:legacy`
-    (`Q·tauk_ref/tauk_k`, only for reproducing pre-correction results).
   - `inner_kwargs` — NamedTuple of kwargs forwarded to `solve_inner` at
     every Q evaluation, e.g. `(pfac=0.1, xfac=10.0, nx=128, nq=5)` for
     Galerkin grid tuning. Defaults to `NamedTuple()`.
@@ -115,7 +109,6 @@ function multi_surface_coupling_full(surfaces::AbstractVector{<:SurfaceCoupling}
     dp_raw::AbstractMatrix;
     ref_idx::Integer=1,
     msing_max::Integer=length(surfaces),
-    tauk_rescale::Symbol=:direct,
     inner_kwargs::NamedTuple=NamedTuple())
     m = length(surfaces)
     size(dp_raw) == (2m, 2m) ||
@@ -127,13 +120,9 @@ function multi_surface_coupling_full(surfaces::AbstractVector{<:SurfaceCoupling}
     1 <= msing_max <= m ||
         throw(ArgumentError("multi_surface_coupling_full: msing_max=$msing_max " *
                             "out of range 1:$m"))
-    tauk_rescale in (:legacy, :direct) ||
-        throw(ArgumentError("multi_surface_coupling_full: tauk_rescale=" *
-                            "$tauk_rescale must be :legacy or :direct"))
     return MultiSurfaceCouplingFull(surfaces,
         Matrix{ComplexF64}(dp_raw),
         Int(ref_idx), Int(msing_max),
-        tauk_rescale,
         inner_kwargs)
 end
 
@@ -162,8 +151,7 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
 
         # Map the shared scanned Q onto this surface's normalization, then Doppler it into
         # the surface's E×B frame (GGJ carries tauk = 1, so the ratio is a no-op there).
-        ratio = mc.tauk_rescale === :direct ? (sc.tauk / ref_tauk) : (ref_tauk / sc.tauk)
-        Q_k = Qc * ratio + sc.q_shift
+        Q_k = Qc * (sc.tauk / ref_tauk) + sc.q_shift
         resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
         # delta1 = interchange (parity −), delta2 = tearing (parity +); named
