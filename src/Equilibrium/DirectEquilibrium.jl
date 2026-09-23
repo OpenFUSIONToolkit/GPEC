@@ -122,7 +122,10 @@ end
 Finds the key geometric locations of the equilibrium: the magnetic axis (O-point)
 and the inboard/outboard separatrix crossings on the midplane. It also updates the
 spline representing the poloidal flux `ψ(R,Z)` based on the new magnetic axis location.
-This function performs the same overall function as the Fortran `direct_position`
+The axis is Newton's root of `∇ψ = 0` from a midplane guess; if that fails, Newton is
+restarted (with capped steps) from a first-derivative bisection and a warning is issued,
+and if the restart fails too, it is an error. Either way the axis meets the same
+step-size convergence test. This function performs the same overall function as the Fortran `direct_position`
 subroutine with better iteration control and error handling. We have also added a
 helper function for separatrix finding.
 
@@ -163,87 +166,70 @@ function direct_position!(raw_profile::DirectRunInput)
     !(bfield.bz >= 0) && error("Took too many iterations to get bz=0.")
     r_march, z_march = r, z
 
-    # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0.
-    # The 2-D ψ spline's second derivatives are not reliable at every point near the
-    # axis (∂B_z/∂R can pass through zero at isolated R), and a single near-singular
-    # Hessian sends an undamped Newton step across the whole box. Cap each step at one
-    # march step: inactive for well-behaved iterations (their steps are ≲ dr/2), it
-    # only keeps a bad iterate inside the axis neighbourhood until the Hessian recovers.
-    step_cap = dr
-    function _newton(r0, z0)
-        local dr, dz   # not the enclosing march step
-        r, z = r0, z0
+    # Newton iteration for the O-point (magnetic axis), where B_r = B_z = 0, with each step capped
+    # at `cap`. Every attempt uses the same convergence test on the step size.
+    function _axis_newton(r, z, cap)
         for _ in 1:max_iterations
             direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
             det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
-            abs(det) < 1e-20 && return r, z, false   # singular Hessian: let the caller fall back
+            abs(det) < 1e-20 && return r, z, false
             # Δx = -J⁻¹ F
-            dr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
-            dz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
-            step = hypot(dr, dz)
-            if step > step_cap
-                dr *= step_cap / step
-                dz *= step_cap / step
-            end
-            r += dr
-            z += dz
-            if abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r)
-                return r, z, true
-            end
+            δr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
+            δz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
+            step = hypot(δr, δz)
+            step > cap && ((δr, δz) = (δr * cap / step, δz * cap / step))
+            r += δr
+            z += δz
+            abs(δr) <= 1e-12 * abs(r) && abs(δz) <= 1e-12 * abs(r) && return r, z, true
         end
         return r, z, false
     end
-    r, z, converged = _newton(r, z)
+    r, z, converged = _axis_newton(r_march, z_march, Inf)
 
     if !converged
-        # Fallback, reached only when Newton from the midplane guess cycles or hits a
-        # singular Hessian. Locate the axis with first derivatives only: B_z changes
-        # sign across the axis along the midplane and B_r changes sign across it along
-        # a column, so alternating 1-D bisections converge to ∇ψ = 0 without touching
-        # the spline's second derivatives. Newton is then retried from that point as a
-        # polish; if even that fails, the bisection point itself is a converged zero of
-        # the first derivatives and is used as is.
+        # Newton from the midplane guess met a singular or indefinite Hessian, which means ψ is not
+        # smooth near the axis. Restart it, with each step capped at one march step, from an axis
+        # located by alternating 1-D bisections on B_z (along R) and B_r (along Z).
         _bz(rr, zz) = (direct_get_bfield!(bfield, rr, zz, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.bz)
         _br(rr, zz) = (direct_get_bfield!(bfield, rr, zz, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.br)
+        # Root of f in [lo, hi], or `nothing` when f does not change sign there.
         function _bisect(f, lo, hi)
             flo = f(lo)
+            flo == 0 && return lo
+            sign(flo) == sign(f(hi)) && return nothing
             for _ in 1:80
-                mid = 0.5 * (lo + hi)
+                mid = (lo + hi) / 2
                 fmid = f(mid)
-                (fmid == 0.0 || hi - lo < 4eps(mid)) && return mid
-                if sign(fmid) == sign(flo)
-                    lo, flo = mid, fmid
-                else
-                    hi = mid
-                end
+                (fmid == 0 || hi - lo < 4eps(mid)) && return mid
+                sign(fmid) == sign(flo) ? ((lo, flo) = (mid, fmid)) : (hi = mid)
             end
-            return 0.5 * (lo + hi)
+            return (lo + hi) / 2
         end
-        r, z = r_march, z_march
-        for _ in 1:4
-            # B_z: negative at r - dr (the march crossed there), non-negative at r
-            r = _bisect(rr -> _bz(rr, z), r - step_cap, r)
-            # B_r along the column through r; widen the bracket until it straddles zero
-            w = step_cap
-            while sign(_br(r, z - w)) == sign(_br(r, z + w)) && w < 20 * step_cap
+        # Nearest sign change of f around x, doubling the half-width w up to the grid edges.
+        function _bracketed_root(f, x, w, xmin, xmax)
+            while true
+                lo, hi = max(x - w, xmin), min(x + w, xmax)
+                root = _bisect(f, lo, hi)
+                (root !== nothing || (lo == xmin && hi == xmax)) && return root
                 w *= 2
             end
-            sign(_br(r, z - w)) != sign(_br(r, z + w)) && (z = _bisect(zz -> _br(r, zz), z - w, z + w))
-            # r bracket for the next pass: re-establish the sign change around the new r
-            (_bz(r - step_cap, z) < 0 <= _bz(r + step_cap, z)) && (r += step_cap)
         end
-        r_bis, z_bis = r, z
-        b_bis = hypot(_br(r, z), _bz(r, z))
-        r, z, converged = _newton(r_bis, z_bis)
-        if converged
-            @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z)) (Newton restarted from a first-derivative bisection)"
-        else
-            hypot(_br(r, z), _bz(r, z)) > b_bis && ((r, z) = (r_bis, z_bis))
-            @info "Magnetic axis from first-derivative bisection at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z)) (Newton did not converge; |B| = $(@sprintf("%.2e", b_bis)))"
+        rb, zb = r_march, z_march
+        for _ in 1:4
+            rb = _bracketed_root(rr -> _bz(rr, zb), rb, dr, raw_profile.rmin, raw_profile.rmax)
+            rb === nothing && error("Failed to find magnetic axis: B_z has no sign change along Z = $zb.")
+            zb = _bracketed_root(zz -> _br(rb, zz), zb, dr, raw_profile.zmin, raw_profile.zmax)
+            zb === nothing && error("Failed to find magnetic axis: B_r has no sign change along R = $rb.")
         end
-    else
-        @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
+        r, z, converged = _axis_newton(rb, zb, dr)
+        converged || error(
+            "Failed to find magnetic axis: Newton did not converge from the midplane guess or from " *
+            "the bisected point ($rb, $zb). ψ is likely not smooth near the axis; check the equilibrium file."
+        )
+        @warn "Magnetic axis found only by restarting Newton from a first-derivative bisection; " *
+              "ψ is likely not smooth near the axis, so check the equilibrium file."
     end
+    @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
 
     ro = r
     zo = z
