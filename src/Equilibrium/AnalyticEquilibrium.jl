@@ -140,7 +140,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=1e-8, maxiters=10000, dense=false)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=min(equil_input.etol, 1e-8), maxiters=10000, dense=false)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -372,7 +372,7 @@ downstream Hₙ / ψ splines sit on uniform nodes); leave it `nothing` for
 the default adaptive save pattern used by `tj_analytic_run`.
 """
 function tj_analytic_shape_solve(p::TJAnalyticShapeParams, nu::Float64;
-    reltol::Float64=1e-7, abstol::Float64=1e-8,
+    reltol::Float64=1e-7, abstol::Float64=min(reltol, 1e-8),
     saveat=nothing)
     rhs_params = (; p.a, p.B0, p.qc, p.mu, p.pc, p.epsa2, nu=nu)
     prob = ODEProblem(tj_analytic_shape_rhs!, tj_analytic_shape_initial(p, nu), (p.r0, p.a), rhs_params)
@@ -599,7 +599,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     # the (R, Z) → (r, w) Newton iteration hits spline interpolation artifacts.
     dense_r = collect(range(p.r0, p.a; length=1024))
     sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol,
-        abstol=1e-10, saveat=dense_r)
+        abstol=min(equil_input.etol, 1e-10), saveat=dense_r)
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
 
