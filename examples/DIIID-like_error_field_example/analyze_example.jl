@@ -109,3 +109,37 @@ println("Saved: ", abspath(risk_path))
 # several `label => gpec.h5` pairs.
 p_summary = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields.plot_error_field_summary(h5path; save_path=joinpath(@__DIR__, "error_field_summary.png"))
 display(p_summary)
+
+# ---------------------------------------------------------------------------------------------
+# Comparing a coil revision against this run, without re-solving the plasma.
+#
+# The context holds everything that does not depend on which coils are being judged, so any
+# geometry can be swept against it. Here the example's own coils, shifted a millimetre, stand in
+# for a second revision.
+AEF = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields
+FT = GeneralizedPerturbedEquilibrium.ForcingTerms
+
+ctx = ErrorFields.ResonantDriveContext(h5path)
+sets = FT.load_coil_sets(ctx.cfg, 1; equil=ctx.equil)      # the deck's own coils, rebuilt from the file
+as_built = ErrorFields.coil_overlaps(ctx, sets)
+moved = ErrorFields.coil_overlaps(ctx, [FT.apply_transforms(cs, FT.CoilSetConfig(; shiftx=fill(1e-3, cs.ncoil)); n_tilt=0) for cs in sets])
+
+println("\ncoil            |δ| as built    |δ| shifted 1 mm   resonant fraction")
+for (a, b) in zip(as_built, moved)
+    @printf("%-14s %12.4e   %14.4e   %14.1f %%\n", a.coil_name, abs(a.delta), abs(b.delta), a.fraction_percent)
+end
+
+# Currents are applied afterwards by scaling, so a pair driven in opposition is one call. An
+# unmatched name raises rather than contributing zero, which is what a renamed coil would do.
+pair = ErrorFields.combine_overlaps(as_built, as_built[1].coil_name => 1.0, as_built[end].coil_name => -1.0; name="opposed pair")
+@printf("opposed pair: |δ| = %.4e, resonant fraction %.1f %%\n", abs(pair.delta), pair.fraction_percent)
+
+# Why a coil couples as it does, which the per-coil bars above cannot answer. The first says
+# whether it drives a different part of the spectrum or simply drives less; the second decomposes
+# the overlap into the harmonics that produced it; the third puts both on the control surface
+# against the dominant mode.
+for (name, fn) in (("applied_spectra", AEF.plot_applied_spectra), ("overlap_contributions", AEF.plot_overlap_contributions),
+    ("surface_overlay", AEF.plot_surface_overlay))
+    path = joinpath(@__DIR__, "$name.png")
+    display(fn(ctx, as_built; save_path=path))
+end

@@ -29,6 +29,30 @@ include("h5_metadata_check.jl")
         @test 1.0 + Δx + 2Δy ≈ 0 atol = 1e-14
     end
 
+    @testset "locking risk convolution" begin
+        # A flat |δ| distribution on [0, 2δ₀] against thresholds spread across it. Both halves are
+        # constructed, so the answer is arithmetic rather than whatever a fixture happens to produce.
+        edges = collect(range(0, 2.0e-4; length=201))
+        pdf = fill(1 / (edges[end] - edges[1]), length(edges) - 1)
+        mc = EF.MonteCarloResult(edges, pdf, pdf, reshape(pdf, :, 1), reshape(pdf, :, 1),
+            1.0e-4, 2.0e-4, 1.0e-4, 1.0e-4, 0.0, 1000, 1, 1)
+        sc = EF.threshold_scaling(; n=1)
+        scen = EF.ScenarioParameters(5.0, 2.0, 1.7, 1.0, 1.0)
+
+        # Every threshold above the distribution: nothing ever locks.
+        @test EF.locking_risk(mc, fill(1.0, 100), sc, scen).plock == 0
+        # Every threshold below it: everything locks.
+        @test EF.locking_risk(mc, fill(1.0e-12, 100), sc, scen).plock ≈ 100 atol = 0.5
+        # Thresholds spread uniformly across the distribution: a flat δ against a flat threshold
+        # gives half, since P(δ > threshold) = 1/2 for two independent uniforms on the same range.
+        straddling = EF.locking_risk(mc, collect(range(0, 2.0e-4; length=20_001)), sc, scen)
+        @test 0 < straddling.plock < 100
+        @test straddling.plock ≈ 50 atol = 1.0
+        # Shifting the thresholds down can only raise the risk.
+        lower = EF.locking_risk(mc, collect(range(0, 1.0e-4; length=20_001)), sc, scen)
+        @test lower.plock > straddling.plock
+    end
+
     @testset "coil-forced Solovev run: identities, output, and post-hoc entry point" begin
         template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
@@ -53,7 +77,6 @@ include("h5_metadata_check.jl")
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
             inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
                 "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100),
-                # Density chosen so the ITPA threshold sits near the fixture's nominal overlap: risk neither 0 nor saturated.
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]))
             open(io -> TOML.print(io, inputs), toml_path, "w")
@@ -142,7 +165,11 @@ include("h5_metadata_check.jl")
             scan = EF.ToleranceScan(h5path)
             @test scan.scale == [0.5, 1.0, 2.0]
             @test all(diff(scan.plock) .>= -0.5)                          # risk grows with tolerance (to Monte Carlo noise)
-            @test 0 < risk.plock < 100                                     # neither empty nor saturated at this density
+            # Two 2 kA hoops on a toy equilibrium drive an overlap around 1e-5, two orders below the
+            # ITPA threshold at any plausible density, so zero risk is the right answer here and the
+            # scan is flat. The convolution itself is pinned by its own testset below, on a
+            # distribution built to straddle a threshold.
+            @test risk.plock == 0
             @test scan.plock[2] ≈ risk.plock rtol = 1e-12                # the scale-1 point is the run's own Monte Carlo
             again = EF.locking_risk(h5path; n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
                 risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
@@ -167,8 +194,39 @@ include("h5_metadata_check.jl")
             spec = AEF.plot_dominant_mode_spectrum(h5path)
             @test maximum(spec.series_list[1][:y]) ≈ maximum(abs.(dom.right_singular_vectors[:, 1])) rtol = 1e-10
             @test spec.series_list[1][:y][1] == 0.0 && spec.series_list[1][:y][end] == 0.0
-            @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt)[1][:yaxis][:guide] == "|∂δ/∂θ| per 0.1°"
+            @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt)[1][:yaxis][:guide] == "|δ| per degree of tilt"
+            @test AEF.plot_coil_sensitivities(h5path; quantity=:rim)[1][:yaxis][:guide] == "|δ| per mm of rim displacement"
             @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; quantity=:bogus)
+
+            # An in-memory table plots the same way a stored run does, which is the whole point of
+            # the dual entry points: coil geometry that was never part of a run has no file to read.
+            in_memory = AEF.plot_coil_sensitivities(table)
+            @test in_memory isa Plots.Plot
+            @test AEF.plot_coil_sensitivities(["file" => h5path, "memory" => table]) isa Plots.Plot
+            @test isequal(in_memory.series_list[1][:y], AEF.plot_coil_sensitivities(h5path).series_list[1][:y])
+
+            # The three coil diagnostics, from a context and from a file.
+            ctx_plot = EF.ResonantDriveContext(h5path)
+            plot_sets = FT.load_coil_sets(ctx_plot.cfg, 1; equil=ctx_plot.equil)
+            ovs_plot = EF.coil_overlaps(ctx_plot, plot_sets)
+            for (name, fn) in (("spectra", AEF.plot_applied_spectra), ("contrib", AEF.plot_overlap_contributions),
+                ("surface", AEF.plot_surface_overlay))
+                png = joinpath(dir, "diag_$name.png")
+                @test fn(ctx_plot, ovs_plot; save_path=png) isa Plots.Plot
+                @test isfile(png)
+            end
+            @test AEF.plot_applied_spectra(h5path, plot_sets) isa Plots.Plot
+            @test AEF.plot_applied_spectra(ctx_plot, ovs_plot; normalize=false)[1][:yaxis][:guide] == "|b̃| (T)"
+            @test length(AEF.plot_surface_overlay(ctx_plot, ovs_plot; ntheta=32, nzeta=24).subplots) == length(ovs_plot)
+
+            # The per-harmonic contributions the plot draws sum to each coil's resonant fraction,
+            # which is what makes them readable as a decomposition. Asserted on the numbers rather
+            # than the rendered series: the step recipe expands every point into two vertices.
+            v_plot = ctx_plot.dom.right_singular_vectors[:, 1]
+            for o in ovs_plot
+                bars = real.(conj.(v_plot) .* o.spectrum .* cis(-angle(o.raw))) ./ o.spectrum_norm
+                @test 100 * sum(bars) ≈ o.fraction_percent rtol = 1e-10
+            end
             # The target risk adds its own line and the allowable-tolerance markers.
             @test length(AEF.plot_locking_risk(h5path; target_percent=1.0).series_list) > length(AEF.plot_locking_risk(h5path).series_list)
             @test length(AEF.plot_error_field_summary(h5path; save_path=joinpath(dir, "summary.png")).subplots) == 4
