@@ -1,0 +1,71 @@
+# Regression case: DIII-D-like H-mode n=1 SLAYER with the toroidal critical-Δ offset.
+# Same deck as diiid_slayer_n1 with dc_type = "toroidal", so the geometric factor D_geo derived
+# from each surface's ResistGeometry feeds the χ_‖-matching offset D_c and, through it, the roots.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "diiid_slayer_n1_toroidal"
+description = "DIII-D-like H-mode, n=1, SLAYER with the toroidal critical-Δ offset (dc_type = toroidal)"
+example_dir = "examples/DIIID-like_SLAYER_example"
+
+[overrides]
+"SLAYER.dc_type" = "toroidal"
+
+# Critical-Δ inputs and offset: the resistive interchange index, the geometric factor, and D_c.
+[quantities.slayer_dr_val]
+h5path = "Tearing/PerSurface/D_R"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER resistive interchange D_R"
+noise_threshold = 1e-10
+order = 10
+
+[quantities.slayer_D_geo]
+h5path = "Tearing/PerSurface/D_geo"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER toroidal critical-Δ factor D_geo"
+noise_threshold = 1e-10
+order = 11
+
+[quantities.slayer_D_c_offset]
+h5path = "Tearing/PerSurface/D_c_offset"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER critical-Δ offset D_c"
+noise_threshold = 1e-10
+order = 12
+
+# Roots for the inner three rational surfaces, with the same floors as diiid_slayer_n1: the
+# outermost surfaces' contour search is unreliable, so they are not tracked.
+[quantities.slayer_Q]
+h5path = "Tearing/Roots/Q_root"
+type = "complex_vector"
+extract = "first_3_complex"
+label = "SLAYER Q_root [2/1,3/1,4/1]"
+noise_threshold = 1e-4
+order = 30
+
+[quantities.slayer_gamma_Hz]
+h5path = "Tearing/Roots/gamma"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER γ_Hz [2/1,3/1,4/1]"
+noise_threshold = 1e-1
+order = 33
+
+[quantities.slayer_no_root]
+h5path = "Tearing/Roots/no_root"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER no_root flags [2/1,3/1,4/1]"
+noise_threshold = 0
+order = 34
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
