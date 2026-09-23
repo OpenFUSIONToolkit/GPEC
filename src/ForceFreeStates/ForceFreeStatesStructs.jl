@@ -262,7 +262,7 @@ gpec.toml.
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
-  - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
+  - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone ([`auto_chunk_target`](@ref)), enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below [`min_crossing_chunks`](@ref) is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
   - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
 @kwdef struct ForceFreeStatesControl
@@ -493,71 +493,46 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
 
   - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
-
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
-
   - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
-
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
-
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
-
   - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
-
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
-
   - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
     `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
     except on the galerkin-matched path which supplies the analytic derivative at construction.
     du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
-
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
     shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
-
   - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
     derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
     are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
-
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
     (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
     galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
     sparse parallel path whose solution is in the Riccati basis.
-
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
-
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-
   - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
-
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
-
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
-
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
-
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
-
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
-
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
-
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
     # Initialization parameters
-
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
-
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
 
     # Saved data throughout integration
-
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
 
 # Total ODE solver steps taken (all steps, not just saved ones)
@@ -566,11 +541,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
-
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
-
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
-
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
 @kwdef mutable struct OdeState

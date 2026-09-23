@@ -108,9 +108,9 @@ nchunks    = 0         # 0 = auto: derived from the singular-surface count alone
 #### Chunking and thread independence
 
 `balance_integration_chunks` splits the base chunks until the count reaches a target derived
-from the number of singular surfaces, `max(2 m_s + 3, 8(m_s + 1) + m_s)`, where ``m_s`` is
-`msing`.  Setting `nchunks` overrides that target; a value below the ``2 m_s + 3`` floor is
-clamped up with a warning.  The target never consults `Threads.nthreads()`, and every chunk
+from the number of singular surfaces alone ([`auto_chunk_target`](@ref)).  Setting `nchunks`
+overrides that target; a value below the [`min_crossing_chunks`](@ref) floor is clamped up with a
+warning.  The target never consults `Threads.nthreads()`, and every chunk
 integrates independently from identity initial conditions, so the results do not depend on how
 many threads `julia -t` provides — threads change wall-clock only.
 

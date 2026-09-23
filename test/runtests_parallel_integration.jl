@@ -28,8 +28,8 @@ using TOML
 
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
 
-        @test odet.u[:, :, 1] ≈ u1_in rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_in rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_in rtol = 1e-12
+        @test odet.u[:, :, 2] ≈ u2_in rtol = 1e-12
     end
 
     @testset "apply_propagator! linearity" begin
@@ -65,8 +65,8 @@ using TOML
         u1_expected = U1_upper * u1_in + U1_lower * u2_in
         u2_expected = U2_upper * u1_in + U2_lower * u2_in
 
-        @test odet.u[:, :, 1] ≈ u1_expected rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_expected rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_expected rtol = 1e-12
+        @test odet.u[:, :, 2] ≈ u2_expected rtol = 1e-12
     end
 
     @testset "apply_propagator_inverse! is inverse of apply_propagator!" begin
@@ -100,13 +100,13 @@ using TOML
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator_inverse!(odet, prop)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
 
-        @test odet.u[:, :, 1] ≈ u1_in rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_in rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_in rtol = 1e-12
+        @test odet.u[:, :, 2] ≈ u2_in rtol = 1e-12
     end
 
     @testset "balance_integration_chunks produces target count" begin
-        # Verify that balance_integration_chunks creates at least
-        # max(2*msing+3, 8*(msing+1)+msing) chunks from a small set of base chunks.
+        # Verify that balance_integration_chunks reaches auto_chunk_target(msing) chunks from a
+        # small set of base chunks.
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
@@ -114,9 +114,12 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+            eq_config,
+            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        )
+        intr.nlow = ctrl.nn_low
+        intr.nhigh = ctrl.nn_high
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -134,11 +137,11 @@ using TOML
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         balanced = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
 
-        # The nchunks = 0 target, from its single source. It reads only intr.msing — no
-        # thread count enters it, which is what makes Riccati outputs independent of how
-        # many threads `julia -t` provides.
-        target_n = GeneralizedPerturbedEquilibrium.ForceFreeStates.auto_chunk_target(intr.msing)
-        @test target_n == max(2 * intr.msing + 3, 8 * (intr.msing + 1) + intr.msing)
+        # nchunks = 0 target, pinned by value so a formula change is a visible spec change.
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        @test FFS.auto_chunk_target.((0, 1, 5)) == (8, 17, 53)
+        @test FFS.min_crossing_chunks.((0, 1, 5)) == (3, 5, 13)
+        target_n = FFS.auto_chunk_target(intr.msing)
 
         # After balancing, chunk count equals target_n: the while-loop adds exactly one
         # chunk per iteration (a bisection split) and exits when length(result) >= target_n,
@@ -156,7 +159,7 @@ using TOML
         # gap of ≈2·singfac_min/|n·q1| between the pre-crossing and post-crossing intervals.
         for i in eachindex(balanced)[2:end]
             if !balanced[i-1].needs_crossing
-                @test balanced[i].psi_start ≈ balanced[i-1].psi_end rtol=1e-10
+                @test balanced[i].psi_start ≈ balanced[i-1].psi_end rtol = 1e-10
             else
                 # Inner-layer gap: post-crossing chunk starts AFTER the rational surface
                 @test balanced[i].psi_start > balanced[i-1].psi_end
@@ -186,7 +189,7 @@ using TOML
         min_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.min_crossing_chunks(intr.msing)
         ctrl_few = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., nchunks=1)
-        balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
+        balanced_few = @test_logs (:warn,) match_mode = :any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
         @test length(balanced_few) == max(min_chunks, length(base_chunks))
     end
 
@@ -201,9 +204,12 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+            eq_config,
+            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        )
+        intr.nlow = ctrl.nn_low
+        intr.nhigh = ctrl.nn_high
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -262,11 +268,14 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+                eq_config,
+                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            )
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            intr.nlow = ctrl.nn_low;
-            intr.nhigh = ctrl.nn_high;
+            intr.nlow = ctrl.nn_low
+            intr.nhigh = ctrl.nn_high
             intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -311,7 +320,10 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+                eq_config,
+                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            )
             # Apply the two-pass auto grid exactly as the main driver does (the example ships
             # grid_type="auto", mpsi=0): measured-curvature refinement with rational surfaces
             # pinned as mandatory knots, re-formed from the captured ingest. The pinned values
@@ -324,8 +336,8 @@ using TOML
             end
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            intr.nlow = ctrl.nn_low;
-            intr.nhigh = ctrl.nn_high;
+            intr.nlow = ctrl.nn_low
+            intr.nhigh = ctrl.nn_high
             intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -372,9 +384,12 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+            eq_config,
+            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        )
+        intr.nlow = ctrl.nn_low
+        intr.nhigh = ctrl.nn_high
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -423,11 +438,14 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+                eq_config,
+                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            )
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            intr.nlow = ctrl.nn_low;
-            intr.nhigh = ctrl.nn_high;
+            intr.nlow = ctrl.nn_low
+            intr.nhigh = ctrl.nn_high
             intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -476,7 +494,10 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+            eq_config,
+            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        )
         # Apply the two-pass auto grid (measured-curvature refinement, rational surfaces pinned
         # as mandatory knots) exactly as the main driver does (see the FM testset above); the
         # pinned values below are for this grid, the production default.
@@ -488,8 +509,8 @@ using TOML
         end
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
             (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
+        intr.nlow = ctrl.nn_low
+        intr.nhigh = ctrl.nn_high
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
