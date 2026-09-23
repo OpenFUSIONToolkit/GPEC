@@ -707,8 +707,12 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
             psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min /
                                                         abs(minimum(intr.sing[ising_current].n) * intr.sing[ising_current].q1)
 
-            # Validate chunk bounds
-            @assert psi_current < psi_end "Invalid chunk bounds: psi_start=$psi_current >= psi_end=$psi_end"
+            # A standoff reaching past the previous boundary means |q'| is too small here (e.g. near a q extremum).
+            if psi_end <= psi_current
+                sg = intr.sing[ising_current]
+                error("Singular surface q=$(sg.q) at ψ=$(sg.psifac) (q'=$(sg.q1)): its singfac_min standoff reaches past ψ=$psi_current. " *
+                      "Crossings this close to a q extremum cannot be resolved; reduce singfac_min or move q_min away from this rational.")
+            end
             @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"
 
             push!(chunks, IntegrationChunk(;

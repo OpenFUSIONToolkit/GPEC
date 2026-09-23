@@ -42,24 +42,24 @@ end
     rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
 
 Unique ψ_N locations of all rational surfaces q = m/n for n in `nlow:nhigh`, sorted
-increasing. Used as mandatory knots for the two-pass equilibrium grid refinement. A surface
-is identified by its ψ, not by its q: the same physical surface reached through several
-(m, n) pairs collapses to one node, while a reverse-shear profile that crosses the same
-rational on both sides of its q minimum keeps both crossings.
+increasing. Used as mandatory knots for the two-pass equilibrium grid refinement. Roots
+are deduplicated by (q, ψ), so several (m, n) of equal ratio collapse to one node while the
+two crossings of one rational on a reverse-shear profile stay distinct.
 """
 function rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
     surfaces = _find_rational_surfaces(equil, nlow, nhigh)
-    nodes = Float64[]
+    kept = @NamedTuple{q::Float64, psifac::Float64}[]
     for s in surfaces
-        any(psi -> _same_surface(psi, s.psifac), nodes) && continue
-        push!(nodes, s.psifac)
+        q = s.m / s.n
+        any(k -> _same_surface(k.q, k.psifac, q, s.psifac), kept) && continue
+        push!(kept, (q=q, psifac=s.psifac))
     end
-    return sort!(nodes)
+    return sort!([k.psifac for k in kept])
 end
 
-# Two rational-surface roots are the same physical surface when they sit at the same ψ.
-const SURFACE_PSI_TOLERANCE = 1e-8
-_same_surface(psi_a::Float64, psi_b::Float64) = isapprox(psi_a, psi_b; atol=SURFACE_PSI_TOLERANCE)
+# Two rational-surface roots are one physical surface when both q and ψ agree.
+const SURFACE_TOLERANCE = 1e-8
+_same_surface(q_a, psi_a, q_b, psi_b) = isapprox(q_a, q_b; atol=SURFACE_TOLERANCE) && isapprox(psi_a, psi_b; atol=SURFACE_TOLERANCE)
 
 """
     sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
@@ -74,10 +74,8 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 
     for s in _find_rational_surfaces(equil, intr.nlow, intr.nhigh)
         m, n, psifac = s.m, s.n, s.psifac
-        # One physical surface can be resonant with several (m, n) of equal ratio in a multi-n run;
-        # it is identified by ψ, so the two crossings of one rational on a reverse-shear profile
-        # (q1 < 0 inside the q minimum, q1 > 0 outside) stay separate surfaces.
-        idx = findfirst(sg -> _same_surface(sg.psifac, psifac), intr.sing)
+        # Merge equal-ratio (m, n) at one surface; reverse-shear crossings of one rational stay separate.
+        idx = findfirst(sg -> _same_surface(sg.q, sg.psifac, m / n, psifac), intr.sing)
         if idx !== nothing
             push!(intr.sing[idx].m, m)
             push!(intr.sing[idx].n, n)
