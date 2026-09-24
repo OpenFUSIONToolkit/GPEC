@@ -308,6 +308,23 @@ function make_pf_hoop(; radius::Real, height::Real, nsec::Int=361, name::String=
 end
 
 """
+    conductors(cs::CoilSet) -> Vector{CoilSet}
+
+Split a coil set into one single-conductor set per conductor, each carrying that conductor's own
+current and named `"<name>_<index>"`. A set that already holds one conductor is returned unchanged
+in a one-element vector.
+
+Legacy geometry files often pack several physically separate coils into one file, so comparing
+against a design that names them separately needs them one at a time. Evaluating a split set costs
+only its own conductor, where zeroing the other currents would compute and discard their fields.
+"""
+function conductors(cs::CoilSet)
+    cs.ncoil == 1 && return [cs]
+    return [CoilSet("$(cs.name)_$j", 1, cs.s, cs.nw, cs.nsec,
+        cs.x[j:j, :, :], cs.y[j:j, :, :], cs.z[j:j, :, :], [cs.currents[j]]) for j in 1:cs.ncoil]
+end
+
+"""
     surface_point_and_normal(equil, theta_cyl; psi=equil.rzphi_xs[end]) -> (R, Z, nR, nZ)
 
 Locate the control-surface point at cylindrical poloidal angle `theta_cyl` (radians) and return
@@ -768,6 +785,44 @@ function _arc_length_center(x::AbstractVector, y::AbstractVector, z::AbstractVec
     end
     total_length > 0 || return (x[1], y[1], z[1])
     return (x0 / total_length, y0 / total_length, z0 / total_length)
+end
+
+"""
+    nominal_major_radius(x, y, z) -> Float64
+    nominal_major_radius(cs::CoilSet) -> Float64
+
+Arc-length-weighted major radius √(x²+y²) of a strand, or of every strand of a coil set: the
+radius through which a rim displacement in metres converts to a tilt angle, `asin(t / R_nom)`,
+as `apply_transforms` does for `tilt_in_meters`. A strand with no length returns 1.
+"""
+function nominal_major_radius(x::AbstractVector, y::AbstractVector, z::AbstractVector)
+    weighted_r, total_len = _weighted_major_radius(x, y, z)
+    return total_len > 0 ? weighted_r / total_len : 1.0
+end
+
+function nominal_major_radius(cs::CoilSet)
+    weighted_r = 0.0
+    total_len = 0.0
+    for j in 1:cs.ncoil, k in 1:cs.s
+        w, l = _weighted_major_radius(view(cs.x, j, k, :), view(cs.y, j, k, :), view(cs.z, j, k, :))
+        weighted_r += w
+        total_len += l
+    end
+    return total_len > 0 ? weighted_r / total_len : 1.0
+end
+
+# Arc-length-weighted major radius sum and total arc length of one strand.
+function _weighted_major_radius(x::AbstractVector, y::AbstractVector, z::AbstractVector)
+    total_len = 0.0
+    weighted_r = 0.0
+    for l in 1:(length(x)-1)
+        xm = (x[l] + x[l+1]) / 2
+        ym = (y[l] + y[l+1]) / 2
+        dl = sqrt((x[l+1] - x[l])^2 + (y[l+1] - y[l])^2 + (z[l+1] - z[l])^2)
+        weighted_r += sqrt(xm^2 + ym^2) * dl
+        total_len += dl
+    end
+    return weighted_r, total_len
 end
 
 """
