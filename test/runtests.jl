@@ -33,6 +33,7 @@ else
     include("./runtests_result_struct.jl")
     include("./runtests_solve_api.jl")
     include("./runtests_dominant_coupling.jl")
+    include("./runtests_error_fields.jl")
     include("./runtests_sing.jl")
     include("./runtests_innerlayer.jl")
     include("./runtests_tj_analytic.jl")

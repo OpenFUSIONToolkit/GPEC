@@ -35,7 +35,7 @@ include("h5_metadata_check.jl")
 
         # The default is the core window ψ_N ≤ 0.9; the full window reproduces the plain SVD; an empty window is an error.
         core = PE.dominant_coupling(C, rational_psi)
-        @test core.rational_index == [1, 2, 3] && PE.CORE_PSI_HIGH == 0.9   # all three surfaces are inside the core here
+        @test core.rational_index == [1, 2, 3] && PE.CORE_PSI_LOW == 0.0 && PE.CORE_PSI_HIGH == 0.9   # all three surfaces are inside the core here
         @test isempty(PE.dominant_coupling(C, [0.2, 0.5, 0.95]).rational_index ∩ [3])
         full = PE.dominant_coupling(C, rational_psi; psi_high=1.0)
         @test full.rational_index == [1, 2, 3]
