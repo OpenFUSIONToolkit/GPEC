@@ -351,7 +351,7 @@ function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_set
 end
 
 """
-    ErrorFields.ResonantDriveContext(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1,
+    ErrorFields.ResonantDriveContext(h5path; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH,
                                mtheta_coil=nothing, nzeta_coil=nothing, dat_dir=nothing) -> ResonantDriveContext
 
 Gather everything a post-hoc coil analysis needs from a finished run: the resonant coupling read
@@ -370,7 +370,7 @@ function ErrorFields.ResonantDriveContext(h5path::AbstractString; dat_dir=nothin
     cfg = ErrorFields.regrid(cfg; dat_dir)
     isempty(cfg.dat_dir) || isdir(cfg.dat_dir) ||
         @warn "Coil geometry directory from the stored deck does not exist here: $(cfg.dat_dir). Pass dat_dir to point at a local copy."
-    return ErrorFields.ResonantDriveContext(equil, rc, cfg, psilim, equil.params.bt0; inputs, kwargs...)
+    return ErrorFields.ResonantDriveContext(equil, rc, cfg; psilim, b_t0=equil.params.bt0, inputs, kwargs...)
 end
 
 """
