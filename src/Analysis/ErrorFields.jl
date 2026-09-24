@@ -49,8 +49,21 @@ _load(t::EF.SensitivityTable) = _load((; coil_names=t.coil_names, delta_nominal=
 _load(r::EF.MonteCarloResult) = _load((; bin_edges=r.bin_edges, pdf=r.pdf, pdf_efc=r.pdf_efc,
     mc_delta_nominal=r.delta_nominal))
 
-_load(r::EF.RiskResult) = _load((; threshold_pdf=r.threshold_pdf, p_lock_given_delta=r.p_lock_given_delta,
+_load(r::EF.RiskResult) = _load((; bin_edges=r.bin_edges, threshold_pdf=r.threshold_pdf,
+    p_lock_given_delta=r.p_lock_given_delta, threshold_nominal=r.threshold_nominal,
     plock=r.plock, plock_efc=r.plock_efc))
+
+# Drop the unset entries of a loaded source so two of them can be combined without one's blanks
+# erasing the other's values.
+_present(d::NamedTuple) = NamedTuple(k => v for (k, v) in pairs(d) if v !== nothing)
+
+"""
+The overlap distribution lives on the Monte Carlo result and the penetration threshold on the risk
+result, so a plot that draws both against each other needs the pair. Pass them together as a tuple
+rather than separately, which would leave each half unable to find the other.
+"""
+_load(pair::Tuple{EF.MonteCarloResult,EF.RiskResult}) =
+    _load(merge(_present(_load(pair[1])), _present(_load(pair[2]))))
 
 _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name for o in ovs],
     delta_nominal=[o.delta for o in ovs]))
@@ -58,9 +71,10 @@ _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name fo
 function _load_h5(h5path::AbstractString)
     h5open(h5path, "r") do f
         has(k) = haskey(f, k)
-        cs = "ErrorFields/CoilSensitivities"
-        mc = "ErrorFields/MonteCarlo"
-        rk = "ErrorFields/Risk"
+        # Take the group paths from the writer's own constants rather than repeating them here:
+        # two spellings of the schema drift apart silently, and a renamed group would surface as an
+        # empty plot rather than an error.
+        cs, mc, rk = EF._H5_GROUP, EF._MC_GROUP, EF._RISK_GROUP
         (
             coil_names=has(cs) ? read(f["$cs/coil_name"]) : nothing,
             delta_nominal=has(cs) ? read(f["$cs/DominantMode/delta_nominal"]) : nothing,
@@ -183,13 +197,13 @@ function plot_locking_risk(sources::Sources; corrected::Bool=true, target_percen
     p = plot(; xlabel="tolerance scale", ylabel="locking probability [%]", xscale=:log10, yscale=:log10, legend=:topleft,
         title="Locking risk vs tolerance scale", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
     any_data = false
-    floor = 1e-4
+    risk_floor = 1e-4   # named to avoid shadowing Base.floor inside this function
     for (j, (lbl, path)) in enumerate(sources)
         d = _load(path)
         d.scan_scale === nothing && continue
         any_data = true
-        plot!(p, d.scan_scale, max.(d.scan_plock, floor); yerror=d.scan_spread ./ 2, marker=:circle, lw=2, c=j, label="$lbl intrinsic")
-        corrected && plot!(p, d.scan_scale, max.(d.scan_plock_efc, floor); yerror=d.scan_spread_efc ./ 2, marker=:square, lw=2, ls=:dash, c=j, label="$lbl corrected")
+        plot!(p, d.scan_scale, max.(d.scan_plock, risk_floor); yerror=d.scan_spread ./ 2, marker=:circle, lw=2, c=j, label="$lbl intrinsic")
+        corrected && plot!(p, d.scan_scale, max.(d.scan_plock_efc, risk_floor); yerror=d.scan_spread_efc ./ 2, marker=:square, lw=2, ls=:dash, c=j, label="$lbl corrected")
         if target_percent !== nothing
             scan = EF.ToleranceScan(d.scan_scale, d.scan_plock, d.scan_plock_efc, d.scan_spread, d.scan_spread_efc, 0.0)
             for (corr, mk) in ((false, :diamond), (true, :star5))
@@ -218,7 +232,9 @@ function plot_threshold_scaling(sources::Sources; save_path=nothing)
     any_data = false
     for (j, (lbl, path)) in enumerate(sources)
         d = _load(path)
-        d.threshold_pdf === nothing && continue
+        # Needs the overlap distribution and the threshold together; an in-memory source carrying
+        # only one of the two is skipped rather than indexed into a nothing.
+        (d.threshold_pdf === nothing || d.pdf === nothing || d.bin_edges === nothing) && continue
         any_data = true
         c = _centers(d.bin_edges)
         keep = c .> 0

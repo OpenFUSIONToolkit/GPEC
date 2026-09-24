@@ -1,3 +1,4 @@
+using HDF5
 using Random
 using Statistics
 
@@ -10,7 +11,7 @@ using Statistics
     EF = GPEC.ErrorFields
     FT = GPEC.ForcingTerms
 
-    scen = EF.ScenarioParameters(2.0, 2.0, 1.7, 1.8, 1.0)   # n_e [1e19], B_T [T], R_0 [m], β_N, l_i
+    scen = EF.ScenarioParameters(; n_e=2.0, b_t0=2.0, r_0=1.7, beta_n=1.8, l_i=1.0)   # 1e19 m^-3, T, m, -, -
 
     @testset "scaling table and nominal threshold" begin
         sc = EF.threshold_scaling(; n=1, dataset="O,L", fit="WLS")
@@ -21,7 +22,9 @@ using Statistics
         @test length(EF.ITPA_THRESHOLD_SCALINGS) == 9
         # n=2 "O,L,N" is the n=1 O,L WLS fit doubled: 10^(-3.16) ≈ 2·10^(-3.46).
         @test 10^EF.threshold_scaling(; n=2, dataset="O,L,N").alpha_c[1] ≈ 2 * 10^EF.threshold_scaling(; n=1, dataset="O,L").alpha_c[1] rtol = 5e-3
-        @test_throws ArgumentError EF.ScenarioParameters(0.0, 2.0, 1.7, 1.8, 1.0)
+        @test_throws ArgumentError EF.ScenarioParameters(; n_e=0.0, b_t0=2.0, r_0=1.7, beta_n=1.8, l_i=1.0)
+        # Five positive scalars of similar size: a positional form would take them in any order.
+        @test_throws MethodError EF.ScenarioParameters(2.0, 2.0, 1.7, 1.8, 1.0)
         # Sampled thresholds: median near the nominal, log-normal-ish spread from the exponent errors.
         t = EF.threshold_samples(Xoshiro(1), sc, scen; nsample=100_000)
         @test abs(log10(median(t)) - log10(EF.nominal_threshold(sc, scen))) < 0.01
@@ -72,7 +75,10 @@ using Statistics
         # One coil, S real, δ_nominal = 0, Flat 1 mm tolerance: |δ| uniform on [0, |S|·scale·1e-3].
         # With a sharp threshold the risk is analytic: P = 1 − δ_t / (|S|·scale·1e-3) once the edge passes δ_t.
         S = 0.2
-        table = EF.SensitivityTable(["a"], 1, [0.0im], ComplexF64[S; -im*S; 0.0;;], zeros(ComplexF64, 3, 1), [S], [0.0], zeros(2, 1), zeros(2, 1))
+        # Columns are delta_per_mm_shift, delta_per_deg_tilt, delta_per_mm_rim; this coil has no
+        # tilt sensitivity, so the last two are zero.
+        table = EF.SensitivityTable(["a"], 1, [0.0im], ComplexF64[S; -im*S; 0.0;;], zeros(ComplexF64, 3, 1),
+            [S], [0.0], [0.0], zeros(2, 1), zeros(2, 1))
         ts = EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\nshift_tol_mm = 1.0\nradial_shape = \"flat\"\n")
         sets = [FT.make_pf_hoop(; radius=1.5, height=0.0, name="a")]
         mc_ctrl = EF.MonteCarloControl(; nsample=100_000, nbatch=2, seed=7, nbins=200)
@@ -95,5 +101,25 @@ using Statistics
         @test isnan(EF.allowable_tolerance(scan, 99.0))     # never reached within the scan
         @test_throws ArgumentError EF.allowable_tolerance(scan, 0.0)
         @test_throws ArgumentError EF.tolerance_scan(table, ts, sets, mc_ctrl, sharp, scen; scales=Float64[])
+    end
+
+    @testset "a threshold scaling describes one toroidal mode number" begin
+        # The ITPA fits are per n, but a dominant mode spans every n the run carried. Silently
+        # taking the lowest would apply an n = 1 threshold to a partly n = 2 mode.
+        mktempdir() do dir
+            single = joinpath(dir, "single.h5")
+            HDF5.h5open(single, "w") do f
+                f["Info/nlow"] = 1
+                f["Info/nhigh"] = 1
+            end
+            @test EF.scaling_toroidal_mode(single) == 1
+
+            multi = joinpath(dir, "multi.h5")
+            HDF5.h5open(multi, "w") do f
+                f["Info/nlow"] = 1
+                f["Info/nhigh"] = 2
+            end
+            @test_throws ArgumentError EF.scaling_toroidal_mode(multi)
+        end
     end
 end
