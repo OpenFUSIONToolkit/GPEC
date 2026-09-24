@@ -139,7 +139,7 @@ the resonant field it drives is `σ[k]` times that coefficient; `k = 1` is the d
 
 Throws `ArgumentError` when the window contains no rational surface.
 """
-function dominant_coupling(C::AbstractMatrix{ComplexF64}, rational_psi::AbstractVector{<:Real}; psi_low::Real=0.0, psi_high::Real=CORE_PSI_HIGH)
+function dominant_coupling(C::AbstractMatrix{ComplexF64}, rational_psi::AbstractVector{<:Real}; psi_low::Real=CORE_PSI_LOW, psi_high::Real=CORE_PSI_HIGH)
     size(C, 1) == length(rational_psi) ||
         throw(DimensionMismatch("C has $(size(C, 1)) rows but rational_psi has $(length(rational_psi)) entries"))
     rational_index = findall(ψ -> psi_low <= ψ <= psi_high, rational_psi)
