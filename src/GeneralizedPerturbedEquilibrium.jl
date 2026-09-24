@@ -85,8 +85,8 @@ using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag")
+                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
+                              "gal_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -177,11 +177,9 @@ is enabled) so it still ends up in `Input/RawInputs/ForcingTerms/`.
 against the current equilibrium) without the original `.dat`/`.h5` files. The coil
 geometry actually used by the run is always written back into `Input/RawInputs/Coils/`.
 
-Returns `(; ffs, pe, slayer, energy)`: the `ForceFreeStates.ForceFreeStatesResult`, the
-`PerturbedEquilibriumState` (`nothing` when that stage did not run), the SLAYER result
-(`nothing` when that stage did not run or failed) and the `EnergyDecompositionResult`
-(`nothing` without an `[EnergyDecomposition]` section or when the solve cannot supply its
-inputs). An equilibrium-only run
+Returns `(; ffs, pe, slayer)`: the `ForceFreeStates.ForceFreeStatesResult`, the
+`PerturbedEquilibriumState` (`nothing` when that stage did not run) and the SLAYER result
+(`nothing` when that stage did not run or failed). An equilibrium-only run
 (`force_termination` in `[Equilibrium]`) returns `nothing` — it never reaches the solve.
 """
 function main_from_inputs(
@@ -260,13 +258,13 @@ function main_from_inputs(
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
-    energy_result = run_energy_decomposition(ffs_result, inputs)
+    run_energy_decomposition(ffs_result, inputs)
 
     # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, energy=energy_result)
+        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result)
     end
 
     pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
@@ -290,7 +288,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, energy=energy_result)
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result)
 
 end
 
@@ -744,10 +742,10 @@ runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]
 and errors here.
 
 ```julia
-eq = PlasmaEquilibrium(\"input.geqdsk\"; jac_type=\"hamada\")
+eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
 prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
-ffs = solve(prob, Riccati())
-ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+ffs  = solve(prob, Riccati())
+ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
 function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
@@ -908,7 +906,7 @@ flows through.
 already-built coil geometry, both bypassing the corresponding read.
 
 ```julia
-pe = perturbed_equilibrium(ffs, RMPField(\"forcing.dat\"))
+pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
 ```
 """
 function perturbed_equilibrium(
@@ -1463,7 +1461,7 @@ function write_imas(dd, result)
 end
 
 export main, write_imas
-export solve, perturbed_equilibrium
+export solve, perturbed_equilibrium, energy_decomposition
 export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
 
 end # module GeneralizedPerturbedEquilibrium

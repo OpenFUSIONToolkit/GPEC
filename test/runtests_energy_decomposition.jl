@@ -272,14 +272,12 @@ end
 
 @testset "EnergyDecomposition: main stage from the TOML section" begin
     # The fixture deck carries [EnergyDecomposition] with write_densities = true.
-    @test haskey(_ED_RES, :energy)
-    energy = _ED_RES.energy
-    @test energy isa PerturbedEquilibrium.EnergyDecompositionResult
-    @test energy.eigenmode_index == [1]
-    @test !isempty(energy.theta)
+    # main keeps its (ffs, pe, slayer) shape; the stage's result lives in gpec.h5 only.
+    @test keys(_ED_RES) == (:ffs, :pe, :slayer)
     h5open(joinpath(_ED_DIR, "gpec.h5"), "r") do h5
         g = h5["ForceFreeStates/EnergyDecomposition"]
-        @test read(g["dW_plasma"]) == energy.dW_plasma
+        @test read(g["eigenmode_index"]) == [1]
+        @test length(read(g["dW_plasma"])) == 1
         @test haskey(g, "Densities/R")
         @test isempty(_ed_metadata_violations(g))
     end
