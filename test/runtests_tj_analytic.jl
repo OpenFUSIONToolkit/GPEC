@@ -19,12 +19,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
 @testset "TJ-analytic model" begin
     @testset "tj_analytic_run (inverse) — basic invariants at ε = 0.25" begin
         # Keep ε, mpsi, mtheta modest so the whole block runs in ~1 s.
-        tj = TJAnalyticConfig(lar_r0 = 1.0 / 0.25, lar_a = 1.0,
-                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
-                              ma = 64, mtau = 64)
-        eq = EquilibriumConfig(eq_type = "tj_analytic",
-                               psilow = 0.01, psihigh = 0.995,
-                               mpsi = 64, mtheta = 128, etol = 1e-7)
+        tj = TJAnalyticConfig(; lar_r0=1.0 / 0.25, lar_a=1.0,
+            qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0,
+            ma=64, mtau=64)
+        eq = EquilibriumConfig(; eq_type="tj_analytic",
+            psilow=0.01, psihigh=0.995,
+            mpsi=64, mtheta=128, etol=1e-7)
         pe = setup_equilibrium(eq, tj)
 
         # psio is a physical-scale ψ; regressions in the a→a² normalization
@@ -33,12 +33,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         @test isfinite(pe.psio)
 
         # ν root-find pins q₂(x=1) = qa; qmax at psihigh=0.995 lands ~0.04 below.
-        @test pe.params.q0 ≈ 1.5  rtol = 1e-3
+        @test pe.params.q0 ≈ 1.5 rtol = 1e-3
         @test pe.params.qmax > 3.5
         @test pe.params.qmax < 3.7
 
         # Magnetic axis at R = R0, Z = 0 for the shifted-circle benchmark.
-        @test pe.ro ≈ 4.0  rtol = 1e-3
+        @test pe.ro ≈ 4.0 rtol = 1e-3
         @test abs(pe.zo) < 1e-8
     end
 
@@ -46,12 +46,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # ε = 0.60 sits on the stable side of the ideal-external-kink pole at
         # ε ≈ 0.665 for this (qc, qa, pc, μ) combination.  Pole-approach shape
         # (δW_t small, Δ' > 0 and growing) is the Option B success criterion.
-        tj = TJAnalyticConfig(lar_r0 = 1.0 / 0.60, lar_a = 1.0,
-                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
-                              ma = 64, mtau = 64)
-        eq = EquilibriumConfig(eq_type = "tj_analytic_direct",
-                               psilow = 0.01, psihigh = 0.995,
-                               mpsi = 64, mtheta = 128, etol = 1e-7)
+        tj = TJAnalyticConfig(; lar_r0=1.0 / 0.60, lar_a=1.0,
+            qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0,
+            ma=64, mtau=64)
+        eq = EquilibriumConfig(; eq_type="tj_analytic_direct",
+            psilow=0.01, psihigh=0.995,
+            mpsi=64, mtheta=128, etol=1e-7)
         pe = setup_equilibrium(eq, tj)
 
         @test pe.psio > 0
@@ -59,13 +59,13 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
 
         # Direct-GS line integration at ε=0.60 gives qmax between 3.8 and 4.0.
         # If the εa³·L shape terms in f_R / f_Z regress, qmax jumps above 5.
-        @test pe.params.q0  ≈ 1.5  rtol = 1e-2
+        @test pe.params.q0 ≈ 1.5 rtol = 1e-2
         @test pe.params.qmax > 3.75
         @test pe.params.qmax < 4.1
 
         # Magnetic axis at R = R0.  Shafranov shift of the O-point itself is
         # zero by construction (H₁(0) = 0).
-        @test pe.ro ≈ (1.0 / 0.60)  rtol = 1e-3
+        @test pe.ro ≈ (1.0 / 0.60) rtol = 1e-3
         @test abs(pe.zo) < 1e-4
     end
 
@@ -73,48 +73,53 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # At the magnetic axis ψ_in should equal psio (axis convention: ψ
         # positive at axis, zero at LCFS); sampling well outside the LCFS should
         # give a negative value (the vacuum branch of psi_rz).
-        tj = TJAnalyticConfig(lar_r0 = 1.0 / 0.25, lar_a = 1.0,
-                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
-                              ma = 64, mtau = 64)
-        eq = EquilibriumConfig(eq_type = "tj_analytic_direct",
-                               psilow = 0.01, psihigh = 0.995,
-                               mpsi = 64, mtheta = 128, etol = 1e-7)
+        tj = TJAnalyticConfig(; lar_r0=1.0 / 0.25, lar_a=1.0,
+            qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0,
+            ma=64, mtau=64)
+        eq = EquilibriumConfig(; eq_type="tj_analytic_direct",
+            psilow=0.01, psihigh=0.995,
+            mpsi=64, mtheta=128, etol=1e-7)
         inp = tj_analytic_run_direct(eq, tj)
 
         # ψ at the geometric axis matches psio (see DirectRunInput docstring for
         # the sign convention: psi_in is positive at axis, zero at LCFS).
         R0 = 1.0 / 0.25
-        @test inp.psi_in((R0, 0.0)) ≈ inp.psio  rtol = 1e-3
+        @test inp.psi_in((R0, 0.0)) ≈ inp.psio rtol = 1e-3
 
         # Well outside the LCFS → negative ψ_in (vacuum branch of the grid).
         R_out = R0 + 1.05   # plasma LCFS is at R ≈ R0 + 0.94
         @test inp.psi_in((R_out, 0.0)) < 0
     end
 
-    @testset "toroidal critical-Δ factor → √(n s r_s/R₀) at ε = 0.05" begin
-        # Connor et al. 2015 Eq. 59 in the r_s reference must reduce to the
-        # rfitzp factor on a large-aspect-ratio circular equilibrium.
+    @testset "toroidal critical-Δ factor → √(n s r_s/R₀) as ε → 0" begin
+        # Connor et al. 2015 Eq. 59 in the r_s reference must reduce to the rfitzp factor at large
+        # aspect ratio. The residual is a genuine O(ε) toroidal correction, so it is bounded by the
+        # local r_s/R₀ (measured coefficient 0.15–0.18) and must halve with ε (measured 0.49–0.50);
+        # a wrong O(1) factor would not shrink.
         using GeneralizedPerturbedEquilibrium.ForceFreeStates: resist_geometry
         using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, r_based_shear,
             surface_minor_radius, surface_da_dpsi
-        tj = TJAnalyticConfig(lar_r0 = 1.0 / 0.05, lar_a = 1.0,
-                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
-                              ma = 64, mtau = 64)
-        eq = EquilibriumConfig(eq_type = "tj_analytic",
-                               psilow = 0.01, psihigh = 0.995,
-                               mpsi = 64, mtheta = 128, etol = 1e-7)
-        pe = setup_equilibrium(eq, tj)
-        chi1 = 2π * pe.psio
-        for (psi_s, n) in ((0.3, 1), (0.6, 2))
+        function _lar_equilibrium(eps)
+            tj = TJAnalyticConfig(; lar_r0=1.0 / eps, lar_a=1.0, qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0, ma=64, mtau=64)
+            eq = EquilibriumConfig(; eq_type="tj_analytic", psilow=0.01, psihigh=0.995, mpsi=64, mtheta=128, etol=1e-7)
+            return setup_equilibrium(eq, tj)
+        end
+        function _lar_deviation(pe, psi_s, n)
             q = pe.profiles.q_spline(psi_s)
             q1 = pe.profiles.q_deriv(psi_s)
             rg = resist_geometry(pe, psi_s, q1)
             rs = surface_minor_radius(pe, psi_s)
             da = surface_da_dpsi(pe, psi_s)
-            s_r = r_based_shear(rs, q, q1, da)
-            dgeo = toroidal_dgeo(; chi1=chi1, v1=rg.v1_local, q=q, q1=q1, n=n,
+            dgeo = toroidal_dgeo(; chi1=2π * pe.psio, v1=rg.v1_local, q=q, q1=q1, n=n,
                 avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=rs / da)
-            @test dgeo ≈ sqrt(n * s_r * rs / pe.ro) rtol = 1e-2
+            return dgeo / sqrt(n * r_based_shear(rs, q, q1, da) * rs / pe.ro) - 1, rs / pe.ro
+        end
+        pe, pe_half = _lar_equilibrium(0.05), _lar_equilibrium(0.025)
+        for (psi_s, n) in ((0.3, 1), (0.6, 2))
+            dev, eps_local = _lar_deviation(pe, psi_s, n)
+            @test abs(dev) <= eps_local
+            dev_half, _ = _lar_deviation(pe_half, psi_s, n)
+            @test dev_half / dev ≈ 0.5 rtol = 0.1
         end
     end
 
@@ -124,12 +129,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         using GeneralizedPerturbedEquilibrium.ForceFreeStates: resist_geometry
         using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, surface_minor_radius, surface_da_dpsi
         function _dgeo(a, B0, psi)
-            tj = TJAnalyticConfig(lar_r0 = a / 0.2, lar_a = a,
-                                  qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = B0,
-                                  ma = 64, mtau = 64)
-            eq = EquilibriumConfig(eq_type = "tj_analytic",
-                                   psilow = 0.01, psihigh = 0.995,
-                                   mpsi = 64, mtheta = 128, etol = 1e-7)
+            tj = TJAnalyticConfig(; lar_r0=a / 0.2, lar_a=a,
+                qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=B0,
+                ma=64, mtau=64)
+            eq = EquilibriumConfig(; eq_type="tj_analytic",
+                psilow=0.01, psihigh=0.995,
+                mpsi=64, mtheta=128, etol=1e-7)
             pe = setup_equilibrium(eq, tj)
             q1 = pe.profiles.q_deriv(psi)
             rg = resist_geometry(pe, psi, q1)
