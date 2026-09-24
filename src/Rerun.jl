@@ -351,7 +351,7 @@ function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_set
 end
 
 """
-    ErrorFields.ResonantDriveContext(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1,
+    ErrorFields.ResonantDriveContext(h5path; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH, mode=1,
                                mtheta_coil=nothing, nzeta_coil=nothing, dat_dir=nothing) -> ResonantDriveContext
 
 Gather everything a post-hoc coil analysis needs from a finished run: the resonant coupling read
