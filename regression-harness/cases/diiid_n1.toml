@@ -303,6 +303,25 @@ extract = "all_complex"
 label = "resonant area-weighted field b^r"
 noise_threshold = 1e-8
 
+# Dominant resonant-coupling mode: singular values of the b̃-space coupling matrix over every
+# rational surface (coordinate-invariant), and the applied forcing's magnitude on the dominant
+# mode. Singular vectors carry an arbitrary phase, so only the magnitude is tracked.
+[quantities.dominant_singular_values]
+h5path = "PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values"
+type = "real_vector"
+extract = "all_real"
+label = "dominant-coupling singular values"
+noise_threshold = 1e-8
+order = 84
+
+[quantities.dominant_forcing_overlap]
+h5path = "PerturbedEquilibrium/SingularCoupling/DominantMode/forcing_overlap"
+type = "complex_vector"
+extract = "abs_first"
+label = "|forcing overlap with dominant mode|"
+noise_threshold = 1e-8
+order = 85
+
 # Perturbed equilibrium: energies
 [quantities.pe_plasma_energy]
 h5path = "PerturbedEquilibrium/Energies/plasma_energy"
@@ -402,6 +421,34 @@ extract = "checksum"
 label = "ballooning Delta' profile (checksum)"
 noise_threshold = 0
 order = 74
+
+# Error fields — per-coil-set overlap with the full-window dominant mode and its rigid shift/tilt
+# sensitivities. Singular vectors carry an arbitrary phase, so only magnitudes are tracked; the
+# in-plane components of a whole n=1-phased array vanish by symmetry, so the norms track the
+# vertical shift and axial tilt that survive.
+[quantities.ef_delta_nominal]
+h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_nominal"
+type = "complex_vector"
+extract = "abs_first"
+label = "|delta_nominal| of coil set 1"
+noise_threshold = 1e-10
+order = 86
+
+[quantities.ef_shift_sensitivity]
+h5path = "ErrorFields/CoilSensitivities/DominantMode/shift_sensitivity"
+type = "complex_vector"
+extract = "norm"
+label = "||ddelta/d(shift)|| over coil sets"
+noise_threshold = 1e-10
+order = 87
+
+[quantities.ef_tilt_sensitivity]
+h5path = "ErrorFields/CoilSensitivities/DominantMode/tilt_sensitivity"
+type = "complex_vector"
+extract = "norm"
+label = "||ddelta/d(tilt)|| over coil sets"
+noise_threshold = 1e-10
+order = 88
 
 # Runtime
 [quantities.runtime]

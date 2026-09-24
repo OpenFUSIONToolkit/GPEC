@@ -165,6 +165,7 @@ Setting `force_termination = true` in any section stops the pipeline after that 
 Example configuration files are provided in:
 - `examples/Solov'ev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
+- `examples/DIIID-like_error_field_example/gpec.toml` (coil-forced run with the `[ErrorFields]` sensitivity stage)
 
 ---
 

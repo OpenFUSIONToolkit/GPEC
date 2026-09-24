@@ -269,14 +269,27 @@ function build_inputs_from_h5(args::Vector{String})
           "  source: $(abspath(source_h5))\n" *
           "  output: $(abspath(joinpath(output_dir, output_name)))\n$_BANNER"
 
+    eq_config, additional_input = rebuild_equilibrium_inputs(inputs, ingest, output_dir)
+
+    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils
+end
+
+"""
+    rebuild_equilibrium_inputs(inputs, ingest, output_dir) -> (eq_config, additional_input)
+
+The equilibrium configuration and the input `setup_equilibrium` consumes, rebuilt from a stored
+TOML `inputs` dict and the equilibrium `ingest` read from a `gpec.h5`. Analytic kinds regenerate
+from their TOML section; file-based kinds rebuild splines from the stored ingest. A file-based
+run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Mutates `inputs`
+only to drop deprecated equilibrium keys.
+"""
+function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir::AbstractString)
     _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
     # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))
-    eq_config = Equilibrium.EquilibriumConfig(equil_dict, output_dir)
+    eq_config = Equilibrium.EquilibriumConfig(equil_dict, String(output_dir))
 
-    # Analytic kinds regenerate from their TOML section; file-based kinds rebuild splines from
-    # the stored ingest. A file-based run with no ingest can only come from a pre-ingest gpec.h5.
     additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
         build_analytic_config(eq_config.eq_type, inputs)
     elseif ingest isa Equilibrium.DirectIngest
@@ -290,6 +303,82 @@ function build_inputs_from_h5(args::Vector{String})
             "registered in Equilibrium.ANALYTIC_EQ."
         )
     end
+    return eq_config, additional_input
+end
 
-    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils
+"""
+    equilibrium_from_h5(h5path) -> (; equil, inputs, psilim)
+
+Rebuild the `PlasmaEquilibrium` of a finished run from its `gpec.h5` alone — the stored TOML
+and equilibrium ingest, through `setup_equilibrium` on the ψ_N grid the run ended with
+(`Equilibrium/Geometry/psi`) — without running any stage or writing anything. `inputs` is the
+parsed TOML the run used and `psilim` the control surface the solve integrated to
+(`Info/psilim`), so post-hoc analyses can evaluate new coil geometry on the surface the stored
+response matrices describe.
+
+Rebuilding on the stored grid reproduces the run's equilibrium exactly, including a two-pass
+run (`mpsi = 0`) that re-formed its equilibrium on a refined grid.
+"""
+function equilibrium_from_h5(h5path::AbstractString)
+    isfile(h5path) || error("HDF5 file not found: $h5path")
+    toml_raw, ingest, psilim, psi_nodes = h5open(h5path, "r") do f
+        haskey(f, "Input/gpec_toml_raw") || error("$h5path has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
+        haskey(f, "Info/psilim") || error("$h5path has no Info/psilim")
+        nodes = haskey(f, "Equilibrium/Geometry/psi") ? Vector{Float64}(read(f, "Equilibrium/Geometry/psi")) : nothing
+        read(f, "Input/gpec_toml_raw"), read_equilibrium_ingest(f), Float64(read(f, "Info/psilim")), nodes
+    end
+    inputs = TOML.parse(toml_raw)
+    eq_config, additional_input = rebuild_equilibrium_inputs(inputs, ingest, dirname(abspath(h5path)))
+    equil = Equilibrium.setup_equilibrium(eq_config, additional_input; override_psi_nodes=psi_nodes)
+    return (; equil, inputs, psilim)
+end
+
+"""
+    ErrorFields.compute_coil_sensitivities(h5path, coil_sets; kwargs...) -> CoilSensitivities
+
+Post-hoc coil linearization against a finished run: the resonant coupling and control-surface
+conform come from `gpec.h5` ([`PerturbedEquilibrium.ResonantCoupling`](@ref)), the equilibrium
+is rebuilt with [`equilibrium_from_h5`](@ref), and `coil_sets` — any geometry, not necessarily
+the run's — are swept on the run's own control surface. Keyword arguments are
+`ErrorFields.ErrorFieldsControl` fields; the boundary-grid resolution follows the run's
+`[ForcingTerms]` section when present. Nothing is written.
+"""
+function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_sets::Vector{ForcingTerms.CoilSet}; kwargs...)
+    ctrl_fields = fieldnames(ErrorFields.ErrorFieldsControl)
+    ctrl = ErrorFields.ErrorFieldsControl(; (k => v for (k, v) in kwargs if k in ctrl_fields)...)
+    ctx = ErrorFields.ResonantDriveContext(h5path; (k => v for (k, v) in kwargs if !(k in ctrl_fields))...)
+    return ErrorFields.compute_coil_sensitivities(ctx, coil_sets, ctrl)
+end
+
+"""
+    ErrorFields.ResonantDriveContext(h5path; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH,
+                               mtheta_coil=nothing, nzeta_coil=nothing, dat_dir=nothing) -> ResonantDriveContext
+
+Gather everything a post-hoc coil analysis needs from a finished run: the resonant coupling read
+from `gpec.h5`, the equilibrium rebuilt by [`equilibrium_from_h5`](@ref), the deck's coil
+configuration, and the boundary grids. Nothing is written.
+
+A stored deck records the absolute path its own machine read coil files from, which need not exist
+here, so a missing `dat_dir` is warned about rather than failing later inside the loader; pass
+`dat_dir` to point somewhere else. `mtheta_coil` and `nzeta_coil` override the boundary resolution
+the deck supplies, which is otherwise inherited silently.
+"""
+function ErrorFields.ResonantDriveContext(h5path::AbstractString; dat_dir=nothing, kwargs...)
+    rc = PerturbedEquilibrium.ResonantCoupling(h5path)
+    equil, inputs, psilim = equilibrium_from_h5(h5path)
+    cfg = ForcingTerms.CoilConfig(forcing_terms_control(inputs))
+    cfg = ErrorFields.regrid(cfg; dat_dir)
+    isempty(cfg.dat_dir) || isdir(cfg.dat_dir) ||
+        @warn "Coil geometry directory from the stored deck does not exist here: $(cfg.dat_dir). Pass dat_dir to point at a local copy."
+    return ErrorFields.ResonantDriveContext(equil, rc, cfg; psilim, b_t0=equil.params.bt0, inputs, kwargs...)
+end
+
+"""
+    ErrorFields.coil_overlaps(h5path, coil_sets; mode=1, kwargs...) -> Vector{CoilOverlap}
+
+Resonant overlap of each coil set against a finished run, with the context built from `h5path`.
+Keyword arguments beyond `mode` are [`ErrorFields.ResonantDriveContext`](@ref)'s.
+"""
+function ErrorFields.coil_overlaps(h5path::AbstractString, coil_sets::AbstractVector{ForcingTerms.CoilSet}; mode::Int=1, kwargs...)
+    return ErrorFields.coil_overlaps(ErrorFields.ResonantDriveContext(h5path; kwargs...), coil_sets; mode)
 end
