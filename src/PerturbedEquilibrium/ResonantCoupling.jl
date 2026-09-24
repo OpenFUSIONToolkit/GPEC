@@ -109,12 +109,36 @@ rational surfaces, produced by [`dominant_coupling`](@ref).
   - `right_singular_vectors` - V: applied-b̃ spectra ranked by resonant drive `[numpert_total × rank]`
   - `left_singular_vectors` - U: resonant-field patterns over the retained surfaces `[n_retained × rank]`
   - `rational_index` - rows of the coupling matrix (and its `rational_*` labels) that were retained `[n_retained]`
+  - `m_modes`, `n_modes` - the (m, n) basis `V` is expressed on, copied from the coupling it came
+    from `[numpert_total]`; empty when built from a bare matrix, which carries no labels
 """
 struct DominantCoupling
     singular_values::Vector{Float64}
     right_singular_vectors::Matrix{ComplexF64}
     left_singular_vectors::Matrix{ComplexF64}
     rational_index::Vector{Int}
+    m_modes::Vector{Int}
+    n_modes::Vector{Int}
+end
+
+DominantCoupling(s, V, U, idx) = DominantCoupling(s, V, U, idx, Int[], Int[])
+
+"""
+    check_mode_basis(dom::DominantCoupling, m_modes, n_modes, what::AbstractString)
+
+Error when `dom` was decomposed on a different (m, n) ordering than the spectrum being projected.
+
+`V` is only meaningful against the ordering it was decomposed on, and a decomposition from another
+equilibrium or another `mlow` can carry the same number of columns while meaning something else —
+so a length check passes and the projection returns a plausible number. A no-op when `dom` carries
+no basis, which is the bare-matrix construction.
+"""
+function check_mode_basis(dom::DominantCoupling, m_modes::AbstractVector{Int}, n_modes::AbstractVector{Int}, what::AbstractString)
+    isempty(dom.m_modes) && return nothing
+    (dom.m_modes == m_modes && dom.n_modes == n_modes) && return nothing
+    throw(ArgumentError("$what: the decomposition is on a different (m, n) basis than the spectrum — " *
+                        "m $(extrema(dom.m_modes)) vs $(extrema(m_modes)), n $(extrema(dom.n_modes)) vs $(extrema(n_modes)). " *
+                        "Decompose the same ResonantCoupling the spectrum was built from."))
 end
 
 """
@@ -148,7 +172,12 @@ function dominant_coupling(C::AbstractMatrix{ComplexF64}, rational_psi::Abstract
     return DominantCoupling(F.S, Matrix(F.V), Matrix(F.U), rational_index)
 end
 
-dominant_coupling(rc::ResonantCoupling; kwargs...) = dominant_coupling(rc.C, rc.rational_psi; kwargs...)
+function dominant_coupling(rc::ResonantCoupling; kwargs...)
+    d = dominant_coupling(rc.C, rc.rational_psi; kwargs...)
+    # Carry the basis so a later projection can be checked rather than assumed.
+    return DominantCoupling(d.singular_values, d.right_singular_vectors, d.left_singular_vectors,
+        d.rational_index, copy(rc.m_modes), copy(rc.n_modes))
+end
 
 """
     coupling_overlap(dom::DominantCoupling, b̃) -> Vector{ComplexF64}
