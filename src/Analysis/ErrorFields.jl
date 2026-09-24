@@ -71,9 +71,10 @@ _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name fo
 function _load_h5(h5path::AbstractString)
     h5open(h5path, "r") do f
         has(k) = haskey(f, k)
-        cs = "ErrorFields/CoilSensitivities"
-        mc = "ErrorFields/MonteCarlo"
-        rk = "ErrorFields/Risk"
+        # Take the group paths from the writer's own constants rather than repeating them here:
+        # two spellings of the schema drift apart silently, and a renamed group would surface as an
+        # empty plot rather than an error.
+        cs, mc, rk = EF._H5_GROUP, EF._MC_GROUP, EF._RISK_GROUP
         (
             coil_names=has(cs) ? read(f["$cs/coil_name"]) : nothing,
             delta_nominal=has(cs) ? read(f["$cs/DominantMode/delta_nominal"]) : nothing,
@@ -196,13 +197,13 @@ function plot_locking_risk(sources::Sources; corrected::Bool=true, target_percen
     p = plot(; xlabel="tolerance scale", ylabel="locking probability [%]", xscale=:log10, yscale=:log10, legend=:topleft,
         title="Locking risk vs tolerance scale", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
     any_data = false
-    floor = 1e-4
+    risk_floor = 1e-4   # named to avoid shadowing Base.floor inside this function
     for (j, (lbl, path)) in enumerate(sources)
         d = _load(path)
         d.scan_scale === nothing && continue
         any_data = true
-        plot!(p, d.scan_scale, max.(d.scan_plock, floor); yerror=d.scan_spread ./ 2, marker=:circle, lw=2, c=j, label="$lbl intrinsic")
-        corrected && plot!(p, d.scan_scale, max.(d.scan_plock_efc, floor); yerror=d.scan_spread_efc ./ 2, marker=:square, lw=2, ls=:dash, c=j, label="$lbl corrected")
+        plot!(p, d.scan_scale, max.(d.scan_plock, risk_floor); yerror=d.scan_spread ./ 2, marker=:circle, lw=2, c=j, label="$lbl intrinsic")
+        corrected && plot!(p, d.scan_scale, max.(d.scan_plock_efc, risk_floor); yerror=d.scan_spread_efc ./ 2, marker=:square, lw=2, ls=:dash, c=j, label="$lbl corrected")
         if target_percent !== nothing
             scan = EF.ToleranceScan(d.scan_scale, d.scan_plock, d.scan_plock_efc, d.scan_spread, d.scan_spread_efc, 0.0)
             for (corr, mk) in ((false, :diamond), (true, :star5))
