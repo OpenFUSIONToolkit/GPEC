@@ -258,6 +258,8 @@ function main_from_inputs(
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
+    run_energy_decomposition(ffs_result, inputs)
+
     # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing)
@@ -846,6 +848,50 @@ function run_perturbed_equilibrium(
 end
 
 """
+    run_energy_decomposition(result, inputs) -> EnergyDecompositionResult or nothing
+
+Decompose the plasma energy of the free-boundary eigenmodes named in the `[EnergyDecomposition]`
+section against a published force-free-states `result` and write the group into the run's
+`gpec.h5`. Returns `nothing` when the deck has no such section, or when the solve carries no
+dense ξ solution or no free-boundary eigenmodes (warned and skipped, like every optional stage).
+"""
+function run_energy_decomposition(result::ForceFreeStatesResult, inputs::Dict{String,Any})
+    "EnergyDecomposition" in keys(inputs) || return nothing
+    @info "\n  Energy Decomposition\n$_SECTION"
+    ed_start = time()
+    ed_ctrl = PerturbedEquilibrium.EnergyDecompositionControl(; (Symbol(k) => v for (k, v) in inputs["EnergyDecomposition"])...)
+    ForceFreeStates.require_solution(result, "energy decomposition") || return nothing
+    ForceFreeStates.require(result, :free_boundary, "energy decomposition") || return nothing
+    energy = energy_decomposition(result; eigenmodes=ed_ctrl.eigenmodes, effective_field_form=ed_ctrl.effective_field_form,
+        standard_form=ed_ctrl.standard_form, write_densities=ed_ctrl.write_densities)
+    @info "Energy Decomposition completed in $(@sprintf("%.3f", time() - ed_start)) s"
+    return energy
+end
+
+"""
+    energy_decomposition(ffs; kwargs...) -> EnergyDecompositionResult
+
+Decompose the plasma energy of free-boundary eigenmodes of a forward solve `ffs` and write the
+result to the run's `gpec.h5` when the solve wrote its outputs. Keyword arguments are the
+`PerturbedEquilibrium.EnergyDecompositionControl` fields plus `verbose`.
+
+```julia
+energy = energy_decomposition(ffs; eigenmodes=[1, 2])
+```
+"""
+function energy_decomposition(ffs::ForceFreeStatesResult; kwargs...)
+    ctrl = ffs.control
+    energy = PerturbedEquilibrium.decompose_energy(ffs; kwargs...)
+    if ctrl.write_outputs_to_HDF5
+        h5open(joinpath(ffs.dir_path, ctrl.HDF5_filename), "cw") do h5
+            PerturbedEquilibrium.write_energy_decomposition!(h5, energy)
+        end
+        @info "Energy decomposition written to $(ctrl.HDF5_filename)"
+    end
+    return energy
+end
+
+"""
     perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, kwargs...) -> PerturbedEquilibriumState
 
 Compute the plasma response to the external field `rmp` on top of a force-free-states solve
@@ -1415,7 +1461,7 @@ function write_imas(dd, result)
 end
 
 export main, write_imas
-export solve, perturbed_equilibrium
+export solve, perturbed_equilibrium, energy_decomposition
 export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
 
 end # module GeneralizedPerturbedEquilibrium

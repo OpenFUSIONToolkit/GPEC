@@ -54,6 +54,12 @@ integrator            = "forward" # Integration formalism: "forward" (dense ξ, 
 set_psilim_via_dmlim  = true   # Truncate at (last_rational_q + dmlim)/n — TRUE for diverted equilibria (q → ∞ at separatrix)
 dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
 
+[EnergyDecomposition]
+eigenmodes = [1]              # Free-boundary eigenmodes to decompose (1 = least stable)
+effective_field_form = true   # Decompose δW_p in the effective-field form ½∫[|b_eff|²/μ₀ − K|ξ_n|²]
+standard_form = true          # Decompose δW_p in the standard form ½∫[|b|²/μ₀ − j·(b×ξ*) + (∇·ξ)*(ξ·∇p)]
+write_densities = false       # Also store the per-(ψ,θ) energy densities with R,Z for 2-D maps
+
 [ForcingTerms]
 forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat

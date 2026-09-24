@@ -68,6 +68,30 @@ The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calc
   - Published: Physics of Plasmas **24**, 032505 (2017)
   - Describes: Self-consistent coupling with neoclassical effects
 
+The energy decomposition of free-boundary eigenmodes (`EnergyDecomposition.jl`) follows:
+
+- **Bernstein et al. (1958)**: "An energy principle for hydromagnetic stability problems"
+  - Location: not in `docs/resources/`
+  - Published: Proceedings of the Royal Society A **244**, 17 (1958)
+  - Link: https://doi.org/10.1098/rspa.1958.0023
+  - Describes: The ideal-MHD energy principle; the standard form of δW_p evaluated by the energy decomposition
+
+- **Bernstein (1983)**: in *Basic Plasma Physics I*, Handbook of Plasma Physics Vol. 1, edited by A. A. Galeev and R. N. Sudan (North-Holland, Amsterdam), p. 421
+  - Location: not in `docs/resources/`
+  - Describes: Derivation of the effective-field (Bernstein) form |δB_eff|²/μ₀ − K|ξ_n|² of δW_p
+
+- **Chance et al. (1992)**: "MHD stability of tokamak plasmas"
+  - Location: not in `docs/resources/`
+  - Published: PPPL-CFP-2687, 2nd Symposium on Plasma Dynamics, Trieste (1992)
+  - Link: https://www.osti.gov/biblio/7234275
+  - Describes: Both forms of δW_p (Eqs. 12a–12c) and the kernel K = K₁ + K₂ + K₃ (Eqs. 15–17): shear–current |∇ψ|²σS, parallel current μ₀B²σ², pressure–curvature 2p'κ_ψ
+
+- **Boozer (2004)**: "Physics of magnetically confined plasmas"
+  - Location: not in `docs/resources/`
+  - Published: Reviews of Modern Physics **76**, 1071 (2004)
+  - Link: https://doi.org/10.1103/RevModPhys.76.1071
+  - Describes: Sec. V.C, the energy principle, the effective field C = δB + ξ_n(μ₀ j × n̂) (Eq. 98), the (∇×C)·∇ψ = 0 constraint (Eq. 99) and w = C²/2μ₀ − w_d (Eq. 100)
+
 ## Resistive MHD Stability Analysis (Future Work)
 
 GPEC will eventually implement resistive MHD stability analysis based on:

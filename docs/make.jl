@@ -37,6 +37,7 @@ makedocs(;
             "KineticForces" => "kinetic_forces.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
+            "Energy Decomposition" => "energy_decomposition.md",
             "Tearing" => "inner_layer.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"

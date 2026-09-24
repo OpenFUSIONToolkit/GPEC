@@ -51,6 +51,7 @@ else
     include("./runtests_kinetic.jl")
     include("./runtests_multiion.jl")
     include("./runtests_fullruns.jl")
+    include("./runtests_energy_decomposition.jl")
     include("./runtests_coils.jl")
     include("./runtests_imas.jl")
     include("./runtests_rerun_from_h5.jl")
