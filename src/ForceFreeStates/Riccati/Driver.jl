@@ -26,7 +26,7 @@ Setting w = Q - K̄·S (shape N×N) and v = F̄⁻¹·w (Cholesky solve), this s
 
 `riccati_der!` evaluates the explicit Riccati RHS `dS/dψ = w†F̄⁻¹w − S·Ḡ·S` correctly,
 but this ODE is **quadratic** in S. Near a rational surface, S grows large, so the quadratic
-term `-SGS` dominates and the RHS grows as |S|². Explicit adaptive solvers (Vern9) use
+term `-SGS` dominates and the RHS grows as |S|². Explicit adaptive solvers use
 *relative* error control: they accept a step when |Δu|/|u| < reltol. When |S| is large,
 the absolute error |ΔS| can be enormous while the relative error stays within tolerance.
 The solver takes large steps through what is effectively a near-blowup — no amount of
@@ -40,8 +40,8 @@ recover S = U₁·U₂⁻¹ by renormalization. This achieves the same Riccati t
 **no accuracy loss**:
 
 - `sing_der!` evaluates the exact EL RHS — no approximation.
-- Vern9 integrates (U₁, U₂) to **9th-order accuracy** with the adaptive step-size
-  controller enforcing the configured reltol at every accepted step.
+- The explicit Runge-Kutta method (`ode_solver`, default Vern7) integrates (U₁, U₂) with its
+  adaptive step-size controller enforcing the configured tolerances at every accepted step.
 - Renormalization `S = U₁·U₂⁻¹` is **exact** (a change of variables, not an approximation).
 - The global error is the same as the standard EL path — controlled by the ODE solver
   reltol, not by the renormalization frequency.
@@ -56,12 +56,14 @@ solver — exactly analogous to Gaussian reduction in the standard ODE.
 
 To verify the method is consistent with the Riccati ODE, consider a single step from (S, I):
 
-  After one step: U₁_new = S + (A·S + B)·Δψ + O(Δψ²),  U₂_new = I + (C·S + D)·Δψ + O(Δψ²)
-  Renorm:         S_new = U₁_new · U₂_new⁻¹ = S + (B + A·S − S·D − S·C·S)·Δψ + O(Δψ²) ✓
+```
+After one step: U₁_new = S + (A·S + B)·Δψ + O(Δψ²),  U₂_new = I + (C·S + D)·Δψ + O(Δψ²)
+Renorm:         S_new = U₁_new · U₂_new⁻¹ = S + (B + A·S − S·D − S·C·S)·Δψ + O(Δψ²) ✓
+```
 
 The leading term matches the Riccati ODE exactly. This is a local consistency check only —
-it does not imply the integration is first-order. In practice Vern9 captures all higher-order
-terms through its internal stages, achieving 9th-order global accuracy at the configured reltol.
+it does not imply the integration is first-order: the Runge-Kutta stages capture the higher-order
+terms, to the method's order at the configured tolerances.
 
 ## Storage Convention
 

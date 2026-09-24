@@ -124,7 +124,10 @@ end
     riccati_der!(du, u, params, psieval)
 
 Evaluate the explicit dual Riccati ODE right-hand side:
+
+```
 dS/dψ = w†·F̄⁻¹·w - S·Ḡ·S,   w = Q - K̄·S
+```
 
 where Q = diag(1/(m - n·q)) is the diagonal singular factor matrix.
 The identity slice u[:,:,2] = I does not evolve (du[:,:,2] = 0).
@@ -274,8 +277,11 @@ end
     renormalize_riccati!(odet, intr)
 
 After a singular surface crossing, restore the canonical Riccati storage convention:
+
+```
 u[:,:,1] = S_new = U₁_new · U₂_new⁻¹
 u[:,:,2] = I
+```
 
 `riccati_cross_ideal_singular_surf!` leaves u[:,:,1] = U₁_new and u[:,:,2] = U₂_new (not I),
 so this step is required before continuing the Riccati integration.
@@ -465,8 +471,10 @@ Apply the chunk propagator `prop` to the current state `odet.u` in-place.
 
 The propagator acts as a linear map on the (U₁, U₂) pair:
 
+```
 U₁_new = block_upper_ic[:,:,1] · U₁_prev + block_lower_ic[:,:,1] · U₂_prev
 U₂_new = block_upper_ic[:,:,2] · U₁_prev + block_lower_ic[:,:,2] · U₂_prev
+```
 
 This correctly propagates any state (not just the identity), including the
 (S, I) form produced by Riccati-style crossings.

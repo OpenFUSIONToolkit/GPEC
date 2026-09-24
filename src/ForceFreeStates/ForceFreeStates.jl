@@ -6,17 +6,6 @@ using LinearAlgebra.LAPACK
 using TOML
 using FFTW
 using OrdinaryDiffEq
-
-"""
-    el_ode_algorithm(ctrl) -> OrdinaryDiffEq algorithm
-
-The solver named by `ctrl.ode_solver`, instantiated for the Euler-Lagrange `solve` calls.
-"""
-function el_ode_algorithm(ctrl)
-    isdefined(OrdinaryDiffEq, Symbol(ctrl.ode_solver)) ||
-        error("ode_solver = \"$(ctrl.ode_solver)\" is not an OrdinaryDiffEq algorithm name (e.g. \"Vern7\", \"Vern9\", \"DP8\")")
-    return getfield(OrdinaryDiffEq, Symbol(ctrl.ode_solver))()
-end
 using HDF5
 using JLD2
 using FastInterpolations
@@ -26,6 +15,23 @@ using FastGaussQuadrature: gausslobatto
 using QuadGK: quadgk, quadgk!
 
 import ..Equilibrium
+
+"""
+Explicit Runge-Kutta methods benchmarked for the Euler-Lagrange solves; `ode_solver` must name one.
+"""
+const EL_ODE_SOLVERS = (Vern6=Vern6(), Vern7=Vern7(), Vern8=Vern8(), Vern9=Vern9(), DP8=DP8())
+
+"""
+    el_ode_algorithm(ctrl) -> OrdinaryDiffEq algorithm
+
+The solver named by `ctrl.ode_solver`, from [`EL_ODE_SOLVERS`](@ref).
+"""
+function el_ode_algorithm(ctrl)
+    name = Symbol(ctrl.ode_solver)
+    haskey(EL_ODE_SOLVERS, name) ||
+        throw(ArgumentError("ode_solver = \"$(ctrl.ode_solver)\" is not one of the benchmarked Euler-Lagrange solvers $(keys(EL_ODE_SOLVERS))"))
+    return EL_ODE_SOLVERS[name]
+end
 import ..Utilities
 import ..Vacuum
 import ..InnerLayer
