@@ -10,6 +10,20 @@ Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 
 import Contour as Ctr
 
+# Round-trip (ψ,θ)→(R,Z)→ψ residual above which the traced edge geometry is not trusted.
+const ROUNDTRIP_TOL = 2e-3
+# Fraction of the radial grid treated as "the edge" for the round-trip check.
+const ROUNDTRIP_EDGE_FRAC = 0.9
+# How much larger the midpoint residual may be than the on-knot one before the rzphi splines are
+# judged to be ringing between knots. Grid-invariant, being a ratio of two residuals measured the
+# same way. Calibrated on a DIII-D-like psihigh ladder, where it reads 1.2 while the ForceFreeStates
+# energies are sound and 10^2-10^3 once they are not; a separation that wide leaves the exact
+# threshold uncritical.
+const ROUNDTRIP_RATIO_TOL = 10.0
+# Midpoint residual below which the ratio is not consulted, since both residuals are then at the
+# rounding floor and their ratio measures noise rather than ringing.
+const ROUNDTRIP_RINGING_FLOOR = ROUNDTRIP_TOL / 20
+
 """
     _is_closed_curve(curve)
 
@@ -692,27 +706,46 @@ function equilibrium_solver_by_inversion(
 
     pe = equilibrium_solver(inv_input; override_psi_nodes)
 
-    # Round-trip validation: (ψ,θ) → (R,Z) → ψ_spline − ψ_target.
-    # Checks 4 angles at the outermost surface and at 75% of the radial grid.
-    # A large error indicates that Contour.jl resolution was insufficient near the
-    # x-point and the traced surface positions are inaccurate.
-    max_rt_err = 0.0
-    for ψ_check in (pe.rzphi_xs[end], pe.rzphi_xs[max(1, length(pe.rzphi_xs) * 3 ÷ 4)])
-        for θ_check in (0.0, 0.25, 0.5, 0.75)
+    # Round-trip validation: (ψ,θ) → (R,Z) → ψ_spline − ψ_target, over 4 angles on the outer
+    # ROUNDTRIP_EDGE_FRAC of the radial grid. A large residual means Contour.jl resolution was
+    # insufficient near the x-point and the traced surface positions are inaccurate.
+    #
+    # Measured twice, at the ψ knots and at the knot midpoints, because the rzphi splines
+    # interpolate exactly at their own knots: an on-knot residual cannot see inter-knot ringing
+    # at all, and stays flat at ~1e-6 on a psihigh ladder whose stability energies degrade by
+    # six orders of magnitude. The midpoint residual tracks that degradation, and their RATIO is
+    # the usable signal — dimensionless, so it needs no per-grid calibration.
+    rt_residual(ψ_samples) = maximum(
+        begin
             r2 = pe.rzphi_rsquared((ψ_check, θ_check))
             off = pe.rzphi_offset((ψ_check, θ_check))
             rfac = sqrt(max(r2, 0.0))
             η = 2π * (θ_check + off)
-            R = pe.ro + rfac * cos(η)
-            Z = pe.zo + rfac * sin(η)
-            ψ_rt = 1.0 - raw_profile.psi_in((R, Z)) / psio
-            max_rt_err = max(max_rt_err, abs(ψ_rt - ψ_check))
+            abs((1.0 - raw_profile.psi_in((pe.ro + rfac * cos(η), pe.zo + rfac * sin(η))) / psio) - ψ_check)
         end
-    end
-    if max_rt_err > 2e-3
-        @warn "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) > 2e-3; accuracy near psihigh may be limited. Consider reducing psihigh or increasing resolution_factor."
+        for ψ_check in ψ_samples, θ_check in (0.0, 0.25, 0.5, 0.75))
+
+    xs = pe.rzphi_xs
+    knots = @view xs[max(1, ceil(Int, length(xs) * ROUNDTRIP_EDGE_FRAC)):end]
+    max_rt_err = rt_residual(knots)
+    mids = [(knots[i] + knots[i+1]) / 2 for i in 1:(length(knots)-1)]
+    rt_mid = isempty(mids) ? NaN : rt_residual(mids)
+    rt_ratio = rt_mid / max(max_rt_err, eps())
+
+    # The ratio only means something once the midpoint residual is above the noise it would
+    # otherwise be measuring: on a clean grid both residuals sit near 1e-6, where their ratio is
+    # dominated by rounding rather than by ringing.
+    ringing = rt_mid > ROUNDTRIP_RINGING_FLOOR && rt_ratio > ROUNDTRIP_RATIO_TOL
+    too_large = max_rt_err > ROUNDTRIP_TOL || rt_mid > ROUNDTRIP_TOL
+    msg =
+        "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) on knots, " *
+        "$(@sprintf("%.2e", rt_mid)) at knot midpoints (ratio $(@sprintf("%.1f", rt_ratio)))"
+    if too_large
+        @warn "$msg; exceeds $(ROUNDTRIP_TOL), so accuracy near psihigh may be limited. Consider reducing psihigh or increasing resolution_factor."
+    elseif ringing
+        @warn "$msg; the midpoint residual is $(@sprintf("%.0f", rt_ratio))x the on-knot one, so the rzphi splines are ringing between knots even though both residuals are small. Consider reducing psihigh or increasing resolution_factor."
     else
-        @info "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err))"
+        @info msg
     end
 
     return pe
