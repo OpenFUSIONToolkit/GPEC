@@ -123,7 +123,7 @@ Rational surfaces closer to the edge couple strongly to the applied field on any
 would dominate the decomposition, while the locking physics the overlap feeds concerns the core.
 """
 const CORE_PSI_HIGH = 0.9
-
+const CORE_PSI_LOW = 0.0
 """
     dominant_coupling(rc::ResonantCoupling; psi_low=0.0, psi_high=CORE_PSI_HIGH) -> DominantCoupling
     dominant_coupling(C, rational_psi; psi_low=0.0, psi_high=CORE_PSI_HIGH) -> DominantCoupling
