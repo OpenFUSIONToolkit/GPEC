@@ -126,7 +126,7 @@ const CORE_PSI_HIGH = 0.9
 const CORE_PSI_LOW = 0.0
 """
     dominant_coupling(rc::ResonantCoupling; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH) -> DominantCoupling
-    dominant_coupling(C, rational_psi; psi_low=0.0, psi_high=CORE_PSI_HIGH) -> DominantCoupling
+    dominant_coupling(C, rational_psi; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH) -> DominantCoupling
 
 Singular-value decomposition of the resonant coupling matrix restricted to the rational
 surfaces with `psi_low ≤ ψ_N ≤ psi_high`, by default the core window `ψ_N ≤ 0.9`
