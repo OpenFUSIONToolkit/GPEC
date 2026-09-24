@@ -85,7 +85,10 @@ struct ScenarioParameters
     r_0::Float64
     beta_n::Float64
     l_i::Float64
-    function ScenarioParameters(n_e, b_t0, r_0, beta_n, l_i)
+    # Keyword-only: all five are positive scalars of comparable magnitude, so a positional form
+    # accepts them transposed and the all-positive guard sees nothing wrong — swapping B_T0 and R_0
+    # alone moves the threshold by (R/B)^(α_B − α_R).
+    function ScenarioParameters(; n_e, b_t0, r_0, beta_n, l_i)
         all(>(0), (n_e, b_t0, r_0, beta_n, l_i)) || throw(ArgumentError("scenario parameters must be positive (got n_e=$n_e, B_T0=$b_t0, R_0=$r_0, β_N=$beta_n, l_i=$l_i)"))
         return new(n_e, b_t0, r_0, beta_n, l_i)
     end
@@ -100,7 +103,7 @@ density supplied and any other parameter overridable.
 """
 function ScenarioParameters(equil::Equilibrium.PlasmaEquilibrium; n_e::Real, b_t0::Real=equil.params.bt0, r_0::Real=equil.ro,
     beta_n::Real=equil.params.betan, l_i::Real=equil.params.li1)
-    return ScenarioParameters(n_e, b_t0, r_0, beta_n, l_i)
+    return ScenarioParameters(; n_e, b_t0, r_0, beta_n, l_i)
 end
 
 function ScenarioParameters(h5path::AbstractString; n_e::Real, kwargs...)
@@ -108,7 +111,7 @@ function ScenarioParameters(h5path::AbstractString; n_e::Real, kwargs...)
         (b_t0=read(f["Equilibrium/B_T_axis"]), r_0=read(f["Equilibrium/R_axis"]), beta_n=read(f["Equilibrium/beta_N"]), l_i=read(f["Equilibrium/l_i_1"]))
     end
     merged = merge(vals, values(kwargs))
-    return ScenarioParameters(n_e, merged.b_t0, merged.r_0, merged.beta_n, merged.l_i)
+    return ScenarioParameters(; n_e, b_t0=merged.b_t0, r_0=merged.r_0, beta_n=merged.beta_n, l_i=merged.l_i)
 end
 
 _threshold(sc::ThresholdScaling, scen::ScenarioParameters, αc, αn, αb, αr, αβ) =
@@ -264,9 +267,29 @@ function locking_risk(
     kwargs...
 )
     mc = run_monte_carlo(h5path; psi_low, psi_high, mode, kwargs...)
-    n = h5open(f -> Int(read(f["Info/nlow"])), h5path, "r")
+    n = scaling_toroidal_mode(h5path)
     sc = threshold_scaling(; n, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
     return locking_risk(mc, sc, ScenarioParameters(h5path; n_e); ctrl=risk_ctrl)
+end
+
+"""
+    scaling_toroidal_mode(h5path) -> Int
+
+The toroidal mode number whose ITPA threshold scaling applies to a run.
+
+The scalings are fitted per `n`, but a dominant-mode decomposition spans every `n` the run carried,
+so a single scaling only describes the result when the run carried one. Taking the lowest `n` and
+saying nothing would apply an n = 1 threshold to a mode that is partly n = 2.
+"""
+function scaling_toroidal_mode(h5path::AbstractString)
+    return h5open(h5path, "r") do f
+        nlow, nhigh = Int(read(f["Info/nlow"])), Int(read(f["Info/nhigh"]))
+        nlow == nhigh || throw(ArgumentError(
+            "$h5path carries n = $nlow:$nhigh, but a locking-threshold scaling is fitted for one " *
+            "toroidal mode number. Re-run the assessment for a single n, or project onto one n's " *
+            "coupling before asking for a risk."))
+        nlow
+    end
 end
 
 """
@@ -328,12 +351,13 @@ function tolerance_scan(h5path::AbstractString; scales::AbstractVector{<:Real}, 
     ts = read_tolerance_snapshot(h5path)
     ts === nothing && throw(ArgumentError("$h5path carries no tolerance snapshot (the run named no tolerance_file)"))
     table = sensitivity_table(h5path; psi_low, psi_high, mode)
-    coil_sets, n = h5open(h5path, "r") do f
+    coil_sets, _ = h5open(h5path, "r") do f
         haskey(f, "Input/RawInputs/Coils") || throw(ArgumentError("$h5path has no Input/RawInputs/Coils snapshot"))
         sets = CoilSet[]
         ForcingTerms.load_coils_from_h5_group!(sets, f["Input/RawInputs/Coils"])
-        sets, Int(read(f["Info/nlow"]))
+        sets, nothing
     end
+    n = scaling_toroidal_mode(h5path)
     sc = threshold_scaling(; n, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
     scen = ScenarioParameters(h5path; n_e)
     return tolerance_scan(table, ts, coil_sets, MonteCarloControl(; kwargs...), sc, scen; scales, risk_ctrl)
