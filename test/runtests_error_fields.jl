@@ -205,6 +205,16 @@ include("h5_metadata_check.jl")
             @test AEF.plot_coil_sensitivities(["file" => h5path, "memory" => table]) isa Plots.Plot
             @test isequal(in_memory.series_list[1][:y], AEF.plot_coil_sensitivities(h5path).series_list[1][:y])
 
+            # The threshold plot needs the overlap distribution and the penetration threshold, which
+            # live on two different result types. A lone RiskResult cannot supply the distribution,
+            # so it must be skipped rather than indexed into a missing field; the pair must work.
+            @test AEF.plot_threshold_scaling(["pair" => (mc, risk)]) isa Plots.Plot
+            paired = AEF.plot_threshold_scaling(["pair" => (mc, risk)])
+            @test !isempty(paired.series_list)
+            @test AEF.plot_threshold_scaling(["risk only" => risk]) isa Plots.Plot
+            @test isequal(AEF.plot_threshold_scaling(["f" => h5path]).series_list[1][:y],
+                AEF.plot_threshold_scaling(["p" => (mc, risk)]).series_list[1][:y])
+
             # The three coil diagnostics, from a context and from a file.
             ctx_plot = EF.ResonantDriveContext(h5path)
             plot_sets = FT.load_coil_sets(ctx_plot.cfg, 1; equil=ctx_plot.equil)

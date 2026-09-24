@@ -49,8 +49,21 @@ _load(t::EF.SensitivityTable) = _load((; coil_names=t.coil_names, delta_nominal=
 _load(r::EF.MonteCarloResult) = _load((; bin_edges=r.bin_edges, pdf=r.pdf, pdf_efc=r.pdf_efc,
     mc_delta_nominal=r.delta_nominal))
 
-_load(r::EF.RiskResult) = _load((; threshold_pdf=r.threshold_pdf, p_lock_given_delta=r.p_lock_given_delta,
+_load(r::EF.RiskResult) = _load((; bin_edges=r.bin_edges, threshold_pdf=r.threshold_pdf,
+    p_lock_given_delta=r.p_lock_given_delta, threshold_nominal=r.threshold_nominal,
     plock=r.plock, plock_efc=r.plock_efc))
+
+# Drop the unset entries of a loaded source so two of them can be combined without one's blanks
+# erasing the other's values.
+_present(d::NamedTuple) = NamedTuple(k => v for (k, v) in pairs(d) if v !== nothing)
+
+"""
+The overlap distribution lives on the Monte Carlo result and the penetration threshold on the risk
+result, so a plot that draws both against each other needs the pair. Pass them together as a tuple
+rather than separately, which would leave each half unable to find the other.
+"""
+_load(pair::Tuple{EF.MonteCarloResult,EF.RiskResult}) =
+    _load(merge(_present(_load(pair[1])), _present(_load(pair[2]))))
 
 _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name for o in ovs],
     delta_nominal=[o.delta for o in ovs]))
@@ -218,7 +231,9 @@ function plot_threshold_scaling(sources::Sources; save_path=nothing)
     any_data = false
     for (j, (lbl, path)) in enumerate(sources)
         d = _load(path)
-        d.threshold_pdf === nothing && continue
+        # Needs the overlap distribution and the threshold together; an in-memory source carrying
+        # only one of the two is skipped rather than indexed into a nothing.
+        (d.threshold_pdf === nothing || d.pdf === nothing || d.bin_edges === nothing) && continue
         any_data = true
         c = _centers(d.bin_edges)
         keep = c .> 0
