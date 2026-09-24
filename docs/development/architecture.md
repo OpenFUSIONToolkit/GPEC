@@ -92,13 +92,13 @@ Splines are provided by the external `FastInterpolations` package rather than by
      - `ResponseMatrices.jl` - Permeability matrix calculation
      - `FieldReconstruction.jl` - Mode-space field reconstruction
      - `Response.jl` - Plasma response computation
+     - `EnergyDecomposition.jl` - δW_p of free-boundary eigenmodes on the (ψ,θ) grid in the effective-field and standard forms, run as its own `[EnergyDecomposition]` stage
      - `SingularCoupling.jl` - **Singular surface analysis** including:
        - Delta prime (Δ') tearing stability parameter
        - Resonant flux and currents at rational surfaces
        - Island half-widths and Chirikov parameters
        - Green's functions at interior flux surfaces
        - Surface inductance for singular surfaces
-     - `EnergyDecomposition.jl` - δW_p of free-boundary eigenmodes on the (ψ,θ) grid in the effective-field and standard forms, run as its own `[EnergyDecomposition]` stage
      - `Utils.jl` - Helper functions
    - Status: Core plasma response and singular coupling calculations implemented; active area of development
 

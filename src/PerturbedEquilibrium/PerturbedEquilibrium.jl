@@ -23,22 +23,22 @@ import DelimitedFiles: readdlm
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
 include("FieldReconstruction.jl")
+include("EnergyDecomposition.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
 include("Utils.jl")
-include("EnergyDecomposition.jl")
 
 # Export main types
 export PerturbedEquilibriumControl
 export PerturbedEquilibriumInternal
 export PerturbedEquilibriumState
 export ForcingMode
+export EnergyDecompositionControl, EnergyDecompositionResult
+export decompose_energy, write_energy_decomposition!
 
 # Export main functions
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
-export EnergyDecompositionControl, EnergyDecompositionResult
-export decompose_energy, write_energy_decomposition!
 
 """
     compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
