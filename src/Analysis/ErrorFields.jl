@@ -431,7 +431,18 @@ function plot_efc_ntv_limits(couplings::Vector{EF.EFCCoupling}; delta_threshold:
 end
 function plot_efc_ntv_limits(h5path::AbstractString; torque_budget::Real, delta_threshold=nothing, kwargs...)
     couplings = EF.read_efc_couplings(h5path)
-    δt = delta_threshold === nothing ? h5open(f -> read(f["ErrorFields/Risk/threshold_nominal"]), h5path, "r") : delta_threshold
+    # A run may carry [ErrorFields.NTV] without [ErrorFields.scenario], in which case there is no
+    # stored threshold. Say what to do about it rather than letting HDF5 raise a bare KeyError.
+    δt = delta_threshold
+    if δt === nothing
+        key = "$(EF._RISK_GROUP)/threshold_nominal"
+        δt = h5open(h5path, "r") do f
+            haskey(f, key) || throw(ArgumentError(
+                "$h5path has no $key, so there is no nominal penetration threshold to scale by. " *
+                "Pass delta_threshold, or re-run with an [ErrorFields.scenario] table."))
+            read(f[key])
+        end
+    end
     return plot_efc_ntv_limits(couplings; delta_threshold=δt, torque_budget, kwargs...)
 end
 
