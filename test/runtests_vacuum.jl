@@ -618,10 +618,8 @@
             @test all(isfinite, wall.normal)
         end
 
-        # Corrugated torus on a genuinely periodic (endpoint-excluded) grid. The shared
-        # _make_3d_nonaxis_inputs helper samples range(0, 2π, length=n), which repeats the seam
-        # point and leaves the surface non-smooth there — harmless for a nowall response, but it
-        # makes the offset surface fold, so the wall tests build their own boundary.
+        # Corrugated torus on an endpoint-excluded grid. `_make_3d_nonaxis_inputs` repeats the seam point, which is
+        # harmless for a nowall response but leaves a kink that folds the offset surface, so wall tests need their own.
         _make_3d_periodic_inputs(; mtheta=24, nzeta=24, mtheta_in=16, nzeta_in=16, eps=0.05) = begin
             θ_in = range(; start=0, length=mtheta_in, step=2π/mtheta_in)
             ζ_in = range(; start=0, length=nzeta_in, step=2π/nzeta_in)
@@ -658,8 +656,7 @@
             R_plasma = [hypot(plasma.r[i, 1], plasma.r[i, 2]) for i in 1:num_points]
             @test maximum(R_wall) > maximum(R_plasma)
 
-            # The offset point is the closest wall point to its own plasma point, which is the
-            # index alignment the near-field patch assumes.
+            # Each offset point is the closest wall point to its own plasma point — the index alignment the near-field patch assumes
             for i in (1, 300, num_points)
                 @test offsets[i] ≈ minimum(norm(wall.r[j, :] - plasma.r[i, :]) for j in 1:num_points)
             end
@@ -804,6 +801,46 @@
             @test isapprox(wv, wv', rtol=1e-12)
         end
 
+        @testset "compute_vacuum_response 3D compute_Iv=true" begin
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            # Both wall branches: I_v was left zeroed in 3D before, and the wall adds a second source block
+            for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.3))
+                (; I_v) = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
+                @test all(isfinite, I_v)
+                @test !all(iszero, I_v)
+            end
+
+            # A reused buffer must not keep a stale I_v from an earlier compute_Iv=true solve
+            vac = GeneralizedPerturbedEquilibrium.Vacuum.VacuumResponse(inputs)
+            compute_vacuum_response!(vac, inputs, WallShapeSettings(shape="nowall"); compute_Iv=true)
+            @test !all(iszero, vac.I_v)
+            compute_vacuum_response!(vac, inputs, WallShapeSettings(shape="nowall"))
+            @test all(iszero, vac.I_v)
+        end
+
+        # The 3D interior operator is the 2D one shifted by the same scalar, D_int = D_ext - 2I, so an axisymmetric boundary
+        # must give the same Iᵛ through both paths. Tolerances are loose because Iᵛ differences two solves and so amplifies
+        # the 3D toroidal discretization error (~8e-3 on wv here) tenfold; a wrong shift or sign gives O(1) instead.
+        @testset "compute_vacuum_response 3D I_v matches the 2D path" begin
+            mtheta = 48
+            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            # Up-down asymmetric so Iᵛ is genuinely complex and the θ_VAC → -θ_VAC conjugation is observable
+            R = 1.7 .+ 0.3 .* cos.(θ)
+            Z = 0.3 .* sin.(θ) .+ 0.08 .* sin.(2θ) .+ 0.08 .* cos.(θ)
+            # Arrays are reversed for VACUUM's CW θ, as the equilibrium-based constructor does
+            make(nzeta) = VacuumInput(x=collect(reverse(R)), z=collect(reverse(Z)), ν=zeros(mtheta),
+                mtheta_in=mtheta, nzeta_in=1, m_modes=[-2, -1, 0, 1, 2], n_modes=[1], mtheta=mtheta, nzeta=nzeta)
+            nowall = WallShapeSettings(shape="nowall")
+
+            r2d = compute_vacuum_response(make(1), nowall; compute_Iv=true)
+            r3d = compute_vacuum_response(make(mtheta), nowall; compute_Iv=true)
+
+            @test norm(r3d.wv - r2d.wv) / norm(r2d.wv) < 2e-2
+            @test norm(r3d.I_v - r2d.I_v) / norm(r2d.I_v) < 0.2
+            # The imaginary parts must agree in sign, not be opposed — this is what pins the conjugation
+            @test norm(imag.(r3d.I_v) - imag.(r2d.I_v)) < norm(imag.(r3d.I_v) + imag.(r2d.I_v))
+        end
+
         @testset "compute_vacuum_response 3D conformal wall on a non-axisymmetric boundary" begin
             # The "3D conformal wall" testset above uses _make_3d_inputs (nzeta_in = 1), so it exercises the
             # revolved branch. This is the only response-level coverage of the offset branch.
@@ -899,6 +936,127 @@
 
             # Hermitian part is enforced after assembly on both paths
             @test isapprox(wv_red, wv_red', rtol=1e-12)
+
+            # The interior solve is a scalar shift of the exterior one, so it decomposes by the same
+            # residue class and Iᵛ must reduce exactly like wv does.
+            Iv_red = compute_vacuum_response(inputs_red, wall_settings; compute_Iv=true).I_v
+            Iv_full = compute_vacuum_response(inputs_full, wall_settings; compute_Iv=true).I_v
+            # Guards the degenerate case the isapprox below would pass: both paths returning zeros
+            @test !all(iszero, Iv_red)
+            @test isapprox(Iv_red, Iv_full; rtol=1e-6, atol=1e-7)
+
+            # A wall adds a second source block to the operator, so repeat the check with one present:
+            # the field-period fold has to land the wall columns in the right block for both to agree.
+            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            vac_red_wall = compute_vacuum_response(inputs_red, walled; compute_Iv=true)
+            vac_full_wall = compute_vacuum_response(inputs_full, walled; compute_Iv=true)
+            @test isapprox(vac_red_wall.wv, vac_full_wall.wv; rtol=1e-6, atol=1e-7)
+            @test isapprox(vac_red_wall.I_v, vac_full_wall.I_v; rtol=1e-6, atol=1e-7)
+        end
+
+        @testset "compute_vacuum_response 3D stellarator symmetry" begin
+            # Rotating ellipse: R(-θ,-ζ) = R(θ,ζ) and Z(-θ,-ζ) = -Z(θ,ζ), so the surface is
+            # stellarator symmetric. Adding `odd` breaks that symmetry without changing anything else.
+            _stell_boundary(; mtheta, nzeta_p, nfp, R0=1.7, a=0.3, b=0.09, odd=0.0) = begin
+                X = Float64[]
+                Y = Float64[]
+                Z = Float64[]
+                for j in 1:nzeta_p
+                    ζ = (j - 1) * 2π / (nzeta_p * nfp)
+                    for i in 1:mtheta
+                        θi = (i - 1) * 2π / mtheta
+                        R = R0 + a * cos(θi) + b * cos(θi - nfp * ζ) + odd * sin(θi - nfp * ζ)
+                        push!(X, R * cos(ζ))
+                        push!(Y, R * sin(ζ))
+                        push!(Z, -a * sin(θi) + b * sin(θi - nfp * ζ) + odd * cos(2θi - nfp * ζ))
+                    end
+                end
+                return X, Y, Z
+            end
+            _stell_inputs(; mtheta, nzeta_p, nfp, n_modes, odd=0.0) = begin
+                X, Y, Z = _stell_boundary(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, odd=odd)
+                return VacuumInput(
+                    x=X, y=Y, z=Z,
+                    mtheta_in=mtheta, nzeta_in=nzeta_p,
+                    m_modes=collect(-1:1), n_modes=n_modes,
+                    mtheta=mtheta, nzeta=nzeta_p,
+                    nfp=nfp
+                )
+            end
+
+            mtheta, nzeta_p = 24, 8
+            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+
+            # The whole item rests on the operator inheriting the reflection symmetry, so assert it directly.
+            inputs = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1])
+            full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inputs)
+            plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(full)
+            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(full, plasma, walled)
+            npts = plasma.mtheta * plasma.nzeta
+            σ_full = [mod1(2 - mod1(p, plasma.mtheta), plasma.mtheta) +
+                      plasma.mtheta * (mod1(2 - ((p - 1) ÷ plasma.mtheta + 1), plasma.nzeta) - 1) for p in 1:npts]
+            D = zeros(npts, npts)
+            S = zeros(npts, npts)
+            GeneralizedPerturbedEquilibrium.Vacuum.compute_3D_kernel_matrices!([D], [S], plasma, plasma, 11, 20, 5, [1.0])
+            @test isapprox(D[σ_full, σ_full], D; rtol=1e-9, atol=1e-9 * maximum(abs, D))
+            @test isapprox(S[σ_full, σ_full], S; rtol=1e-9, atol=1e-9 * maximum(abs, S))
+
+            # Detection: symmetric surfaces are recognised, an odd-parity perturbation is not
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stell_sym_map(plasma, wall, 3) !== nothing
+            asym = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1], odd=0.07)
+            asym_full = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(asym)
+            asym_plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(asym_full)
+            asym_wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(asym_full, asym_plasma, walled)
+            @test GeneralizedPerturbedEquilibrium.Vacuum.stell_sym_map(asym_plasma, asym_wall, 3) === nothing
+
+            # Columns of U: grid point `p` (and its partner `q`) with coefficients `cp`, `cq`.
+            _basis_U(sym_basis) = begin
+                nfp_pts = length(sym_basis.σ_map)
+                Us = [zeros(ComplexF64, nfp_pts, sz) for sz in sym_basis.block_sizes]
+                for col in sym_basis.columns
+                    U = Us[col.block]
+                    U[col.p, col.slot] = col.cp
+                    col.q != col.p && (U[col.q, col.slot] = col.cq)
+                end
+                return Us
+            end
+
+            # D̂_sym = U† D̂ U. nfp = 1 and k = 0 split into two real half-size blocks, k ≠ 0 becomes real at full size, and
+            # nfp = 4, k = 2 is the self-conjugate class that needs the signed reflection rather than the half-twist.
+            for (nfp, k) in [(1, 1), (3, 0), (3, 1), (4, 2), (2, 1)]
+                inp = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=[k])
+                geom = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inp)
+                plas = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(geom)
+                wal = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(geom, plas, WallShapeSettings(shape="nowall"))
+                mirror = GeneralizedPerturbedEquilibrium.Vacuum.stell_sym_map(plas, wal, nfp)
+                @test mirror !== nothing
+                nfp_pts = plas.mtheta * plas.nzeta ÷ nfp
+                ω = ComplexF64[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
+                phases = GeneralizedPerturbedEquilibrium.Vacuum.is_self_conjugate(k, nfp) ? round.(real.(ω)) : ω
+                T = eltype(phases)
+                D_k = [zeros(T, nfp_pts, nfp_pts)]
+                S_k = [zeros(T, nfp_pts, nfp_pts)]
+                GeneralizedPerturbedEquilibrium.Vacuum.compute_3D_kernel_matrices!(D_k, S_k, plas, plas, 11, 20, 5, phases, nothing)
+
+                sym_basis = GeneralizedPerturbedEquilibrium.Vacuum.StellSymBasis(mirror, mtheta, k, nfp)
+                Ds = [zeros(Float64, sz, sz) for sz in sym_basis.block_sizes]
+                Ss = [zeros(Float64, sz, sz) for sz in sym_basis.block_sizes]
+                GeneralizedPerturbedEquilibrium.Vacuum.compute_3D_kernel_matrices!(Ds, Ss, plas, plas, 11, 20, 5, phases, sym_basis)
+
+                Us = _basis_U(sym_basis)
+                for (b, U) in enumerate(Us)
+                    Dt = U' * (D_k[1] * U)
+                    St = U' * (S_k[1] * U)
+                    @test isapprox(real.(Dt), Ds[b]; rtol=1e-9, atol=1e-9 * maximum(abs, Ds[b]))
+                    @test isapprox(real.(St), Ss[b]; rtol=1e-9, atol=1e-9 * maximum(abs, Ss[b]))
+                    @test maximum(abs, imag.(Dt)) ≤ 1e-9 * maximum(abs, Dt)
+                    @test maximum(abs, imag.(St)) ≤ 1e-9 * maximum(abs, St)
+                end
+                if length(Us) == 2
+                    cross = Us[1]' * (D_k[1] * Us[2])
+                    @test maximum(abs, cross) ≤ 1e-9 * maximum(abs, D_k[1])
+                end
+            end
         end
 
         @testset "Kernel3D laplace_kernel" begin

@@ -13,6 +13,7 @@ using ..Utilities.FourierTransforms: FourierTransform, compute_fourier_coefficie
 
 include("Utilities.jl")
 include("DataTypes.jl")
+include("Symmetry3D.jl")
 include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
@@ -113,7 +114,7 @@ Green's functions are internal scratch only.
             grad_green_interior .= grad_green
 
             # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); the solve gives
-            # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites grad_green to save memory.
+            # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites the block to save memory.
             ldiv!(lu!(grad_green), grre)
 
             # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
@@ -126,9 +127,9 @@ Green's functions are internal scratch only.
             # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = grri - grre
             # They are flipped because VACUUM builds the operators in its CW-θ frame while GPEC
             # uses CCW-θ, flipping the outward-normal sign.
-            I_v_block = @view vac_data.I_v[block_idx, block_idx]
             g_diff = @view grri[1:num_points_surf, :]
             g_diff .= @view(grre[1:num_points_surf, :]) .- g_diff
+            I_v_block = @view vac_data.I_v[block_idx, block_idx]
             mul!(I_v_block, ft.basis, g_diff)
             conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
             I_v_block ./= num_points_surf
@@ -158,28 +159,76 @@ Green's functions are internal scratch only.
 end
 
 """
-    _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    _unsplit!(dest, split)
 
-3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction. For `nfp == 1`
-the block-circulant assembly and residue-class loop are skipped in favour of a more efficient
-direct real solve on the built kernel matrices (equivalent to 2D).
+Recombine a real `[Re Im]` column pair into the complex `dest`.
+"""
+function _unsplit!(dest::AbstractMatrix{<:Complex}, split::AbstractMatrix{Float64})
+    mc = size(split, 2) ÷ 2
+    @views dest .= complex.(split[:, 1:mc], split[:, (mc+1):(2mc)])
+    return dest
+end
 
-The `nfp`-periodic boundary makes the single-/double-layer operators `S`, `D` block-circulant in
-the field-period index. Writing the response as `wv = (4π²/N)·Eᴴ·D⁻¹S·E` (`E` the complex Fourier
-basis, `N = mtheta·nzeta_full`), the structure block-diagonalizes the problem by toroidal residue
-class `k = mod(n, nfp)`: modes with different `k` do not couple, and within a class
+"""
+    _solve_projected_rhs!(grre, grri, Ẽ, op, scratch)
+
+Form `S Ẽᴴ` and solve `D \\ ·` into `grre` (exterior) and optionally `grri` (interior).
+`op = (; green, lu_ext, lu_int)` with `lu_int === nothing` when `I_v` is not needed.
+`scratch = (; basis_real, rhs_real, rhs_real_int)` holds the `[Re Im]` workspace for a real operator.
+A real `green` uses that split because BLAS has no mixed real/complex product.
+"""
+function _solve_projected_rhs!(
+    grre::AbstractMatrix{<:Complex},
+    grri::AbstractMatrix{<:Complex},
+    Ẽ::AbstractMatrix{<:Complex},
+    op::NamedTuple,
+    scratch::NamedTuple
+)
+    (; green, lu_ext, lu_int) = op
+    ncols, sz = size(Ẽ)
+    nrow = size(grre, 1)
+    compute_Iv = lu_int !== nothing
+
+    if eltype(green) === Float64
+        (; basis_real, rhs_real, rhs_real_int) = scratch
+        Er = @view basis_real[1:sz, 1:(2ncols)]
+        @views Er[:, 1:ncols] .= real.(Ẽ')
+        @views Er[:, (ncols+1):(2ncols)] .= imag.(Ẽ')
+        grre_real = @view rhs_real[1:nrow, 1:(2ncols)]
+        mul!(grre_real, green, Er)
+        grri_real = @view rhs_real_int[1:nrow, 1:(2ncols)]
+        compute_Iv && (grri_real .= grre_real)
+        ldiv!(lu_ext, grre_real)
+        _unsplit!(grre, grre_real)
+        if compute_Iv
+            ldiv!(lu_int, grri_real)
+            _unsplit!(grri, grri_real)
+        end
+    else
+        mul!(grre, green, Ẽ')
+        compute_Iv && (grri .= grre)
+        ldiv!(lu_ext, grre)
+        compute_Iv && ldiv!(lu_int, grri)
+    end
+end
+
+"""
+    _compute_vacuum_response_3d!(vac_data, inputs, wall_settings; compute_Iv=false)
+
+3D (`inputs.nzeta > 1`) vacuum response via block-circulant field-period reduction.
+
+The `nfp`-periodic boundary makes the layer operators block-circulant in the field-period index, so
+the problem block-diagonalizes by toroidal residue class `k = mod(n, nfp)`:
 
     D̂ₖ = Σ_d D_d ω^{k d},   Ŝₖ = Σ_d S_d ω^{k d},   ω = exp(-2πi/nfp),
 
-with `D_d`, `S_d` the blocks coupling observers in field period 0 to sources in period `d`. Each
-class needs one solve `wv[class k] = (4π²/M)·E_localᴴ·(D̂ₖ \\ Ŝₖ)|_plasma·E_local`. Only the first
-block-row of the operators is built, so the kernel cost drops by `nfp` and the dense `O(N³)`
-factorization is replaced by per-class `O(M³)` solves (`M = N/nfp`).
+with `D_d`, `S_d` coupling observers in field period 0 to sources in period `d`. Each class is one
+solve `wv[k] = (4π²/M)·Ẽᴴ·(D̂ₖ \\ Ŝₖ)|_plasma·Ẽ`, the 3D analogue of the 2D loop over decoupled `n`.
+The phase sum is folded into the kernel write, so only the reduced operator is stored.
 
-Only `wv` is produced currently; `I_v` is left zeroed when `compute_Iv=true`
-(surface-current / inductance not yet supported in 3D).
-Extension point: per residue class, apply the per-period basis to `D̂ₖ⁻¹Ŝₖ` for the exterior columns and the
-interior variant `-D + 2I` for the interior columns, then scatter back into the `[2N × 2·num_modes]` arrays.
+Real `D_d`, `S_d` give `D̂₋ₖ = conj(D̂ₖ)`, so class `mod(nfp - k, nfp)` reuses this factorization with
+a conjugated mode basis. A stellarator-symmetric boundary gets a [`StellSymBasis`](@ref), making the
+class operator real and splitting a self-conjugate class into two half-size blocks.
 """
 @with_pool pool function _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
 
@@ -187,77 +236,153 @@ interior variant `-D + 2I` for the interior columns, then scatter back into the 
     fill!(vac_data.wv, 0)
     fill!(vac_data.I_v, 0)
 
-    compute_Iv && @warn "compute_Iv=true is not supported for 3D vacuum response; I_v left as zeros" maxlog=1
-
-    # Full-torus geometry for source surface; observers are restricted to one field period
+    # Full-torus geometry for sources; observers are one field period
     full = expand_field_periods(inputs)
     plasma_surf = PlasmaGeometry3D(full)
     wall = WallGeometry3D(full, plasma_surf, wall_settings)
 
-    num_points_per_fp = mtheta * nzeta # points per field period
-    num_points = num_points_per_fp * nfp # full-torus point count
+    num_points_per_fp = mtheta * nzeta
     mpert = length(m_modes)
-    nb = wall.nowall ? 1 : 2            # surface blocks: plasma, or [plasma; wall]
-    n_obs = nb * num_points_per_fp       # number of observer points per field period
+    nb = wall.nowall ? 1 : 2  # plasma, or [plasma; wall]
+    n_obs = nb * num_points_per_fp
+    num_modes = mpert * length(n_modes)
 
-    # Complex Fourier basis exp(-i(mθ-nζ)) on a single field period
+    # exp(-i(mθ − nζ)) on one field period
     exp_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta * nfp, n_modes; nfp=nfp)
 
-    # Local work matrices
-    grad_green = zeros!(pool, n_obs, nb * num_points)   # double-layer D (with +I on the period-0 diagonals)
-    green_temp = zeros!(pool, n_obs, num_points)       # single-layer S (plasma sources only)
-
-    # Kernel parameters, hardcoded for now
+    # 23×23 patch, 20 radial / 40 angular polar nodes, 5-point Lagrange. Malhotra JCP 397 (2019) 108791 sec 3.2.2
+    # grows these as N^(1/4); over our grids that spans M = 19..35 with no measured accuracy gain, so they are fixed.
     PATCH_RAD = 11
     RAD_DIM = 20
     INTERP_ORDER = 5
 
-    # Plasma–plasma block
-    compute_3D_kernel_matrices!(grad_green, view(green_temp, 1:num_points_per_fp, :), plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+    # Shared within-period reflection when both surfaces allow it; `nothing` leaves the operator untransformed
+    σ_map = stell_sym_map(plasma_surf, wall, nfp)
 
-    if !wall.nowall
-        # Plasma–Wall block
-        compute_3D_kernel_matrices!(grad_green, view(green_temp, 1:num_points_per_fp, :), plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-        # Wall–Plasma block
-        compute_3D_kernel_matrices!(grad_green, view(green_temp, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-        # Wall–Wall block
-        compute_3D_kernel_matrices!(grad_green, view(green_temp, (num_points_per_fp+1):(2*num_points_per_fp), :), wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-    end
+    # Find all mode families that share one vacuum operator D̂ₖ, and group them by conjugate pairs
+    classes = unique(mod.(n_modes, nfp))
+    groups = get_conjugate_groups(classes, nfp)
 
-    if nfp == 1
-        # nfp == 1 case: direct real solve on the built kernel matrices (equivalent to 2D)
-        ldiv!(lu!(grad_green), green_temp)
-        G_plasma = @view green_temp[1:num_points_per_fp, :]
-        vac_data.wv .= (4π^2 / num_points_per_fp) .* (exp_mn_basis * (G_plasma * exp_mn_basis'))
-    else
-        # nfp > 1 case: block-circulant solve on the built kernel matrices
-        # Solve one reduced (nb·M)×(nb·M) system per toroidal residue class k = mod(n, nfp)
-        D̂ = zeros!(pool, ComplexF64, n_obs, n_obs)
-        Ŝ = zeros!(pool, ComplexF64, n_obs, num_points_per_fp)
-        for k in unique(mod.(n_modes, nfp))
-            # Reduced operators D̂ₖ = Σ_d D_d ω^{k d}, Ŝₖ = Σ_d S_d ω^{k d} (fused, allocation-free).
-            # D̂ keeps the nb-block source structure (plasma cols 1:M, wall cols M+1:2M); Ŝ is plasma-
-            # source-only over all nb·M observer rows.
-            fill!(D̂, 0)
-            fill!(Ŝ, 0)
-            for d in 0:(nfp-1)
-                phase = cis(-2π * (k * d) / nfp)
-                for s in 0:(nb-1)
-                    src_cols = (s*num_points+d*num_points_per_fp+1):(s*num_points+(d+1)*num_points_per_fp)
-                    dst_cols = (s*num_points_per_fp+1):((s+1)*num_points_per_fp)
-                    @views @. D̂[:, dst_cols] += phase * grad_green[:, src_cols]
+    # Real under stellarator symmetry, or when every class is self-conjugate (ω^k = ±1)
+    T = (σ_map !== nothing || all(k -> is_self_conjugate(k, nfp), classes)) ? Float64 : ComplexF64
+
+    # grre/grri are O(n_obs · num_modes), small beside the O(n_obs²) operator, so both are allocated unconditionally
+    grre = zeros!(pool, ComplexF64, n_obs, num_modes)
+    grri = zeros!(pool, ComplexF64, n_obs, num_modes)
+    # Holds this class's mode basis, symmetry-transformed and/or conjugated as the class requires
+    basis_buffer = zeros!(pool, ComplexF64, num_modes, num_points_per_fp)
+    # Dense per-class accumulators for the wv / I_v projections
+    wv_acc = zeros!(pool, ComplexF64, num_modes, num_modes)
+    Iv_acc = zeros!(pool, ComplexF64, num_modes, num_modes)
+    # Split [Re Im] scratch; zero-sized (unallocated) when the operator is complex
+    rhs_real = zeros!(pool, Float64, T === Float64 ? n_obs : 0, 2 * num_modes)
+    rhs_real_int = zeros!(pool, Float64, T === Float64 ? n_obs : 0, 2 * num_modes)
+    basis_real = zeros!(pool, Float64, T === Float64 ? num_points_per_fp : 0, 2 * num_modes)
+    real_scratch = (; basis_real, rhs_real, rhs_real_int)
+
+    for group in groups
+        # This class's operator is the only large allocation; rewind so peak memory stays at one class
+        checkpoint!(pool)
+        k = classes[group[1]]
+        sym_basis = σ_map === nothing ? nothing : StellSymBasis(σ_map, mtheta, k, nfp)
+        sizes = sym_basis === nothing ? [num_points_per_fp] : sym_basis.block_sizes
+        offsets = cumsum([0; sizes])
+        block_cols = [(offsets[i]+1):offsets[i+1] for i in eachindex(sizes)]
+
+        # Field-period phases ω^{k d}. Real ±1 for a self-conjugate class, which keeps it off the complex path.
+        ωkd = ComplexF64[cis(-2π * (k * d) / nfp) for d in 0:(nfp-1)]
+        phases = is_self_conjugate(k, nfp) ? round.(real.(ωkd)) : ωkd
+
+        # `sym_basis` makes each reduced block real even when `phases` are complex
+        grad_blocks = [zeros!(pool, T, nb * sz, nb * sz) for sz in sizes]
+        green_blocks = [zeros!(pool, T, nb * sz, sz) for sz in sizes]
+
+        # Plasma–Plasma block
+        compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+
+        if !wall.nowall
+            # Plasma–Wall block
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+            # Wall–Wall block
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+            # Wall–Plasma block
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+        end
+
+        # Factor once per group (conjugate partner reuses it)
+        # D_ext = 2I + 𝒦 (Chance 1997 eq. 89); lu! overwrites, so copy D_int = D_ext - 2I first
+        lu_int = if compute_Iv
+            map(grad_blocks) do g
+                interior = similar!(pool, g)
+                interior .= g
+                for i in axes(interior, 1)
+                    interior[i, i] -= 2
                 end
-                scols = (d*num_points_per_fp+1):((d+1)*num_points_per_fp)
-                @views @. Ŝ += phase * green_temp[:, scols]
+                lu!(interior)
+            end
+        else
+            LU{T,Matrix{T},Vector{Int}}[]
+        end
+        lu_ext = [lu!(g) for g in grad_blocks]
+
+        for (member, idx_class) in enumerate(group)
+            # Conjugate class: conj(D̂ₖ)x = conj(Ŝₖ)Eᴴ ⇔ D̂ₖ acts on conj(E); conjugate the result back.
+            partner = member > 1
+            # Columns of wv for this class; collapse to a range when contiguous for cheaper indexing
+            n_idxs = findall(n -> mod(n, nfp) == classes[idx_class], n_modes)
+            cols = [idx_m + (idx_n - 1) * mpert for idx_n in n_idxs for idx_m in 1:mpert]
+            mode_cols = length(cols) == cols[end] - cols[1] + 1 ? (cols[1]:cols[end]) : cols
+            E = @view exp_mn_basis[mode_cols, :]
+
+            # E_out = conj?(E)·U carries the change of basis through the solve. U is unitary, so the
+            # right-hand side, the wv projection and I_v are all unchanged by it.
+            E_out = [view(basis_buffer, 1:length(mode_cols), r) for r in block_cols]
+            transform_mode_basis!(E_out, E, sym_basis; conjugate=partner)
+
+            # Dense scratch: a non-contiguous class would make the vac_data view non-strided and drop these projections off BLAS.
+            ncols = length(mode_cols)
+            wv_block = @view wv_acc[1:ncols, 1:ncols]
+            Iv_block = @view Iv_acc[1:ncols, 1:ncols]
+            fill!(wv_block, 0)
+            compute_Iv && fill!(Iv_block, 0)
+
+            row_offset = 0
+            for (b, sz) in enumerate(sizes)
+                nrow = nb * sz
+                rows = (row_offset+1):(row_offset+nrow)
+                row_offset += nrow
+                Ẽ = E_out[b]
+                grre_k = @view grre[rows, 1:ncols]
+                grri_k = @view grri[rows, 1:ncols]
+
+                # Project S onto Ẽ before the solve: (D⁻¹S)Ẽᴴ = D⁻¹(SẼᴴ), so the RHS is this class's modes, not one column per point
+                op = (; green=green_blocks[b], lu_ext=lu_ext[b], lu_int=compute_Iv ? lu_int[b] : nothing)
+                _solve_projected_rhs!(grre_k, grri_k, Ẽ, op, real_scratch)
+
+                if compute_Iv
+                    # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), accumulated over the blocks
+                    g_diff = @view grri_k[1:sz, :]
+                    g_diff .= @view(grre_k[1:sz, :]) .- g_diff
+                    mul!(Iv_block, Ẽ, g_diff, 1, 1)
+                end
+
+                # Project the exterior kernel onto the observer basis exp(-i(mθ-nζ)), summed over the blocks
+                mul!(wv_block, Ẽ, @view(grre_k[1:sz, :]), 1, 1)
             end
 
-            # Exterior response operator for this sector: solve D̂ₖ G = Ŝₖ in place (Ŝ ← G = D̂ₖ⁻¹Ŝₖ)
-            ldiv!(lu!(D̂), Ŝ)
-            mode_cols = [(idx_m + (idx_n-1)*mpert) for (idx_n, n) in enumerate(n_modes) if mod(n, nfp) == k for idx_m in 1:mpert]
-            E = @view exp_mn_basis[mode_cols, :]
-            G_plasma = @view Ŝ[1:num_points_per_fp, :]   # plasma-observer rows of the combined exterior operator
-            vac_data.wv[mode_cols, mode_cols] .= (4π^2 / num_points_per_fp) .* (E * (G_plasma * E'))
+            wv_block .*= 4π^2 / num_points_per_fp
+            # Partner solved the conjugated system: conjugate wv back
+            partner && conj!(wv_block)
+            @views vac_data.wv[mode_cols, mode_cols] .= wv_block
+
+            if compute_Iv
+                # The θ_VAC → -θ_VAC flip on I_v cancels that conjugation for a partner, so only the representative conj!s I_v.
+                partner || conj!(Iv_block)
+                Iv_block ./= num_points_per_fp
+                @views vac_data.I_v[mode_cols, mode_cols] .= Iv_block
+            end
         end
+        rewind!(pool)
     end
 
     # Remove any non-Hermitian residual from Hermitian matrices due to discretization
@@ -272,10 +397,7 @@ end
 """
     compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false) -> VacuumResponse
 
-Compute the vacuum response for the given inputs. Allocating wrapper around
-[`compute_vacuum_response!`](@ref); pass a preallocated [`VacuumResponse`](@ref) to that method
-instead when reusing storage across calls. Pass `compute_Iv=true` to additionally populate the
-surface-current matrix `I_v` (2D only).
+Allocating version of [`compute_vacuum_response!`](@ref).
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
     vac = VacuumResponse(inputs)
@@ -286,9 +408,8 @@ end
 """
     compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
 
-In-place variant that populates the arrays of an existing [`VacuumResponse`](@ref). Dispatches on
-dimensionality only: 2D (`inputs.nzeta == 1`) routes to [`_compute_vacuum_response_2d!`], 3D to
-[`_compute_vacuum_response_3d!`].
+Compute the vacuum response into `vac_data`. 2D (`inputs.nzeta == 1`) and 3D otherwise. Pass
+`compute_Iv=true` to also fill the surface-current matrix `I_v`.
 """
 function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
     if inputs.nzeta == 1
