@@ -37,7 +37,7 @@ include("h5_metadata_check.jl")
         mc = EF.MonteCarloResult(edges, pdf, pdf, reshape(pdf, :, 1), reshape(pdf, :, 1),
             1.0e-4, 2.0e-4, 1.0e-4, 1.0e-4, 0.0, 1000, 1, 1)
         sc = EF.threshold_scaling(; n=1)
-        scen = EF.ScenarioParameters(5.0, 2.0, 1.7, 1.0, 1.0)
+        scen = EF.ScenarioParameters(; n_e=5.0, b_t0=2.0, r_0=1.7, beta_n=1.0, l_i=1.0)
 
         # Every threshold above the distribution: nothing ever locks.
         @test EF.locking_risk(mc, fill(1.0, 100), sc, scen).plock == 0
