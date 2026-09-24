@@ -303,6 +303,25 @@ extract = "all_complex"
 label = "resonant area-weighted field b^r"
 noise_threshold = 1e-8
 
+# Dominant resonant-coupling mode: singular values of the b̃-space coupling matrix over every
+# rational surface (coordinate-invariant), and the applied forcing's magnitude on the dominant
+# mode. Singular vectors carry an arbitrary phase, so only the magnitude is tracked.
+[quantities.dominant_singular_values]
+h5path = "PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values"
+type = "real_vector"
+extract = "all_real"
+label = "dominant-coupling singular values"
+noise_threshold = 1e-8
+order = 84
+
+[quantities.dominant_forcing_overlap]
+h5path = "PerturbedEquilibrium/SingularCoupling/DominantMode/forcing_overlap"
+type = "complex_vector"
+extract = "abs_first"
+label = "|forcing overlap with dominant mode|"
+noise_threshold = 1e-8
+order = 85
+
 # Perturbed equilibrium: energies
 [quantities.pe_plasma_energy]
 h5path = "PerturbedEquilibrium/Energies/plasma_energy"

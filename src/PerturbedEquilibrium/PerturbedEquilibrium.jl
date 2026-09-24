@@ -25,6 +25,7 @@ include("ResponseMatrices.jl")
 include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
+include("ResonantCoupling.jl")
 include("Utils.jl")
 
 # Export main types
@@ -36,6 +37,7 @@ export ForcingMode
 # Export main functions
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
+export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, CORE_PSI_HIGH
 
 """
     compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
@@ -100,6 +102,7 @@ function compute_perturbed_equilibrium(
        ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
        ForceFreeStates.require_solution(ffs, "singular coupling calculation")
         compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, mats)
+        compute_dominant_coupling!(state, ctrl)
     end
 
     # Step 4: Output eigenmode fields (integrated into HDF5 output)
