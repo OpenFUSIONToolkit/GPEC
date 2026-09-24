@@ -135,7 +135,10 @@ include("h5_metadata_check.jl")
 
             # The one-call overlap path. Built in memory from the same coupling the table used, so
             # the comparison is exact rather than up to an SVD phase.
-            ctx = EF.ResonantDriveContext(ffs.equil, rc, cfg, ffs.psilim, sens.b_t0)
+            ctx = EF.ResonantDriveContext(ffs.equil, rc, cfg; psilim=ffs.psilim, b_t0=sens.b_t0)
+            # psilim and b_t0 are both positive scalars of similar size, so a positional form would
+            # accept them transposed and evaluate the equilibrium well outside its domain.
+            @test_throws MethodError EF.ResonantDriveContext(ffs.equil, rc, cfg, ffs.psilim, sens.b_t0)
             @test ctx.psilim == ffs.psilim && ctx.b_t0 == sens.b_t0
             @test length(ctx.grids) == length(unique(rc.n_modes))
             ovs = EF.coil_overlaps(ctx, sets)
@@ -183,7 +186,7 @@ include("h5_metadata_check.jl")
             coarse_cfg = EF.regrid(cfg; nzeta_coil=8)
             @test coarse_cfg.nzeta_coil == 8 && coarse_cfg.mtheta_coil == cfg.mtheta_coil
             @test EF.regrid(cfg).nzeta_coil == cfg.nzeta_coil
-            @test_logs (:warn, r"points per period") match_mode = :any EF.ResonantDriveContext(ffs.equil, rc, coarse_cfg, ffs.psilim, sens.b_t0)
+            @test_logs (:warn, r"points per period") match_mode = :any EF.ResonantDriveContext(ffs.equil, rc, coarse_cfg; psilim=ffs.psilim, b_t0=sens.b_t0)
 
             # Guards: a current-free set, a bad pivot name, a non-positive step.
             dead = FT.CoilSet(sets[1].name, sets[1].ncoil, sets[1].s, sets[1].nw, sets[1].nsec, sets[1].x, sets[1].y, sets[1].z, zeros(sets[1].ncoil))
