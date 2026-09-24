@@ -176,7 +176,7 @@ function sensitivity_table(sens::CoilSensitivities, dom::DominantCoupling; mode:
         1e-3 .* inplane_rms(shift), per_deg, per_mm_rim, cancelling(shift), cancelling(tilt))
 end
 
-function sensitivity_table(h5path::AbstractString; psi_low::Real=PerturbedEquilibirum.CORE_PSI_LOW, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1)
+function sensitivity_table(h5path::AbstractString; psi_low::Real=PerturbedEquilibrium.CORE_PSI_LOW, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1)
     rc = ResonantCoupling(h5path)
     dom = dominant_coupling(rc; psi_low, psi_high)
     return sensitivity_table(CoilSensitivities(h5path), dom; mode)
