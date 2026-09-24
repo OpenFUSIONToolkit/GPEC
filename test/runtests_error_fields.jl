@@ -37,7 +37,7 @@ include("h5_metadata_check.jl")
         mc = EF.MonteCarloResult(edges, pdf, pdf, reshape(pdf, :, 1), reshape(pdf, :, 1),
             1.0e-4, 2.0e-4, 1.0e-4, 1.0e-4, 0.0, 1000, 1, 1)
         sc = EF.threshold_scaling(; n=1)
-        scen = EF.ScenarioParameters(5.0, 2.0, 1.7, 1.0, 1.0)
+        scen = EF.ScenarioParameters(; n_e=5.0, b_t0=2.0, r_0=1.7, beta_n=1.0, l_i=1.0)
 
         # Every threshold above the distribution: nothing ever locks.
         @test EF.locking_risk(mc, fill(1.0, 100), sc, scen).plock == 0
@@ -209,6 +209,16 @@ include("h5_metadata_check.jl")
             @test in_memory isa Plots.Plot
             @test AEF.plot_coil_sensitivities(["file" => h5path, "memory" => table]) isa Plots.Plot
             @test isequal(in_memory.series_list[1][:y], AEF.plot_coil_sensitivities(h5path).series_list[1][:y])
+
+            # The threshold plot needs the overlap distribution and the penetration threshold, which
+            # live on two different result types. A lone RiskResult cannot supply the distribution,
+            # so it must be skipped rather than indexed into a missing field; the pair must work.
+            @test AEF.plot_threshold_scaling(["pair" => (mc, risk)]) isa Plots.Plot
+            paired = AEF.plot_threshold_scaling(["pair" => (mc, risk)])
+            @test !isempty(paired.series_list)
+            @test AEF.plot_threshold_scaling(["risk only" => risk]) isa Plots.Plot
+            @test isequal(AEF.plot_threshold_scaling(["f" => h5path]).series_list[1][:y],
+                AEF.plot_threshold_scaling(["p" => (mc, risk)]).series_list[1][:y])
 
             # The three coil diagnostics, from a context and from a file.
             ctx_plot = EF.ResonantDriveContext(h5path)

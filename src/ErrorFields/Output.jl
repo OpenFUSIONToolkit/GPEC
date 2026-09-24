@@ -170,11 +170,17 @@ function MonteCarloResult(h5path::AbstractString)
         haskey(f, _MC_GROUP) || throw(ArgumentError("$h5path has no $_MC_GROUP group (run with a tolerance_file)"))
         g = f[_MC_GROUP]
         inputs = TOML.parse(read(f["Input/gpec_toml_raw"]))
-        ctrl = MonteCarloControl(; (Symbol(k) => v for (k, v) in get(get(inputs, "ErrorFields", Dict{String,Any}()), "MonteCarlo", Dict{String,Any}()))...)
+        # Read the two settings this needs by name rather than splatting the whole stored table into
+        # MonteCarloControl: a file written by a version that knows one more key would otherwise be
+        # unreadable here, and reading a result back should not depend on the writer's vintage.
+        mc_tbl = get(get(inputs, "ErrorFields", Dict{String,Any}()), "MonteCarlo", Dict{String,Any}())
+        defaults = MonteCarloControl()
+        nsample = get(mc_tbl, "nsample", defaults.nsample)
+        seed = get(mc_tbl, "seed", defaults.seed)
         pdf_batches = read(g["pdf_batches"])
         return MonteCarloResult(read(g["bin_edges"]), read(g["pdf"]), read(g["pdf_efc"]), pdf_batches, read(g["pdf_efc_batches"]),
             read(g["delta_nominal"]), read(g["delta_worst"]), read(g["mean_abs_delta"]), read(g["mean_abs_delta_efc"]),
-            read(g["clamped_fraction"]), ctrl.nsample, size(pdf_batches, 2), ctrl.seed)
+            read(g["clamped_fraction"]), nsample, size(pdf_batches, 2), seed)
     end
 end
 
