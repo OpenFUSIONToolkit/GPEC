@@ -158,14 +158,28 @@ extracted_q(name; value_real=nothing, value_int=nothing, value_text=nothing, val
         @test vals["x"].tolerance_basis == "class-default (provisional)"
         @test isnan(vals["x"].plateau_drift) && isnan(vals["x"].platform_spread)
 
-        # Same type carries the prior's hard-won measurements forward unchanged.
+        # Same type, moved within the old tolerance: the prior's measurements carry forward unchanged.
         prior2 = Dict("x" => golden_val("x"; value_real=1.0, rtol=3e-7, atol=1e-12,
             basis="measured", drift=1e-8, spread=2e-7, at="mpsi=1024"))
-        vals2 = build_golden_values([extracted_q("x"; value_real=1.5)], [spec], prior2)
-        @test vals2["x"].value_real == 1.5
+        vals2 = build_golden_values([extracted_q("x"; value_real=1.0 + 1e-7)], [spec], prior2)
+        @test vals2["x"].value_real == 1.0 + 1e-7
         @test vals2["x"].rtol == 3e-7 && vals2["x"].atol == 1e-12
         @test vals2["x"].tolerance_basis == "measured"
         @test vals2["x"].plateau_drift == 1e-8 && vals2["x"].platform_spread == 2e-7
+
+        # A move beyond the old tolerance drops the evidence, and the tolerance never loosens.
+        vals5 = @test_logs (:warn, r"beyond its old tolerance") build_golden_values(
+            [extracted_q("x"; value_real=1.5)], [spec], prior2)
+        @test vals5["x"].value_real == 1.5
+        @test vals5["x"].rtol == 3e-7 && vals5["x"].atol == 0.0
+        @test vals5["x"].tolerance_basis == "provisional" && is_provisional(vals5["x"])
+        @test isnan(vals5["x"].plateau_drift) && isnan(vals5["x"].platform_spread) && isempty(vals5["x"].converged_at)
+        # A measured tolerance wider than the class default is tightened back to the default.
+        prior5 = Dict("x" => golden_val("x"; value_real=1.0, rtol=1e-4, basis="measured", drift=5e-5))
+        vals6 = @test_logs (:warn, r"beyond its old tolerance") build_golden_values(
+            [extracted_q("x"; value_real=1.5)], [spec], prior5)
+        @test vals6["x"].rtol == CLASS_DEFAULT_TOLERANCE["physics_converged"].rtol
+        @test vals6["x"].tolerance_basis == "class-default (provisional)"
 
         # A change of the case-declared class resets measurements, like a type change.
         prior3 = Dict("x" => golden_val("x"; value_real=1.0, rtol=3e-7, basis="measured", drift=1e-8))
@@ -314,6 +328,12 @@ value = 12.5
         # A class declared in the case file wins over inference, and must be a real class.
         @test infer_class(qspec("ntv_psi_nsteps"; type="int_scalar", class="diagnostic")) == "diagnostic"
         @test_throws ErrorException infer_class(qspec("x"; class="gating_optional"))
+    end
+
+    @testset "is_pinnable" begin
+        @test is_pinnable(qspec("a"))
+        @test !is_pinnable(qspec("rt"; type="runtime"))
+        @test !is_pinnable(qspec("h"; extract="checksum"))
     end
 
     @testset "golden check counting and crash classification" begin

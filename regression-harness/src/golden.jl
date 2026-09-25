@@ -64,7 +64,8 @@ One quantity's pinned value and the terms it is judged by.
   - `rtol` / `atol` — pass when `|x - gold| <= atol + rtol*|gold|`
   - `class` — one of `TOLERANCE_CLASSES`
   - `tolerance_basis` — how the tolerance was arrived at: "measured" (requires a recorded
-    `plateau_drift` or `platform_spread`) or "class-default (provisional)"
+    `plateau_drift` or `platform_spread`), "class-default (provisional)", or "provisional" (no
+    measurement, tolerance kept tighter than the class default after a re-pin dropped the evidence)
   - `plateau_drift` — relative movement over the final refinement of the convergence scan; NaN
     when not measured
   - `platform_spread` — relative disagreement between reference platforms; NaN when not measured
@@ -89,24 +90,34 @@ end
 is_gating(g::GoldenValue) = g.class in GATING_CLASSES
 
 """
+True when a tolerance is not backed by a recorded measurement, i.e. any basis other than "measured".
+"""
+is_provisional(g::GoldenValue) = g.tolerance_basis != "measured"
+
+"""
+Runtimes are wall-clock and checksums have no notion of "close", so neither is ever pinned.
+"""
+is_pinnable(spec::QuantitySpec) = spec.type != "runtime" && spec.extract != "checksum"
+
+"""
 Refuse an entry that would gate more quietly than its evidence allows. Run on every load as well as
 every save, so a hand edit or a merge taking the wrong side is caught as surely as a bad write.
 """
-function validate_golden_value(g::GoldenValue, where::AbstractString)
-    g.class in TOLERANCE_CLASSES || error("$where: quantity '$(g.name)' has unknown class '$(g.class)'")
+function validate_golden_value(g::GoldenValue, context::AbstractString)
+    g.class in TOLERANCE_CLASSES || error("$context: quantity '$(g.name)' has unknown class '$(g.class)'")
     if is_gating(g)
         (isfinite(g.rtol) && g.rtol >= 0 && isfinite(g.atol) && g.atol >= 0) ||
-            error("$where: gating quantity '$(g.name)' needs a finite, non-negative rtol and atol (got rtol=$(g.rtol), atol=$(g.atol))")
+            error("$context: gating quantity '$(g.name)' needs a finite, non-negative rtol and atol (got rtol=$(g.rtol), atol=$(g.atol))")
         for (label, m) in (("platform_spread", g.platform_spread), ("plateau_drift", g.plateau_drift))
             isfinite(m) && g.rtol < m &&
                 error(
-                    "$where: quantity '$(g.name)' has rtol $(g.rtol) below its measured $label $m. " *
+                    "$context: quantity '$(g.name)' has rtol $(g.rtol) below its measured $label $m. " *
                     "Widen it deliberately, with the measurement recorded, or reduce the $label before pinning."
                 )
         end
     end
     g.tolerance_basis == "measured" && !isfinite(g.plateau_drift) && !isfinite(g.platform_spread) &&
-        error("$where: quantity '$(g.name)' claims a measured tolerance but records neither plateau_drift nor platform_spread")
+        error("$context: quantity '$(g.name)' claims a measured tolerance but records neither plateau_drift nor platform_spread")
     return nothing
 end
 
@@ -353,26 +364,25 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
     end
 
     rows = Vector{Vector{String}}()
-    n_pass = n_fail = n_untracked = n_informational = 0
+    n_pass = n_fail = n_untracked = n_informational = n_provisional = 0
 
     for spec in case_spec.quantities
         g = get(golden.values, spec.name, nothing)
         if g === nothing
-            # Runtimes and checksums are never pinned, so they do not count as untracked physics.
-            (spec.type == "runtime" || spec.extract == "checksum") && continue
+            is_pinnable(spec) || continue
             n_untracked += 1
             continue
         end
         q_raw = get(quantities, spec.name, nothing)
         if q_raw === nothing
-            push!(rows, [spec.label, g.class, "MISSING", "—", "FAIL"])
+            push!(rows, [spec.label, g.class, "MISSING", "—", "—", "—", "FAIL"])
             n_fail += 1
             continue
         end
         # The golden file's class must be the one the case declares, so a demotion cannot hide there.
         declared = infer_class(spec)
         if g.class != declared
-            push!(rows, [spec.label, g.class, "CLASS", "—", "** FAIL **  case declares $declared; regenerate goldens"])
+            push!(rows, [spec.label, g.class, "CLASS", "—", "—", "—", "** FAIL **  case declares $declared; regenerate goldens"])
             n_fail += 1
             continue
         end
@@ -396,21 +406,26 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
         else
             n_fail += 1
         end
-        dev = isnan(deviation) ? "—" : @sprintf("%.2e", deviation)
-        tol = isfinite(g.rtol) ? @sprintf("%.1e", g.rtol) : "—"
-        push!(rows, [spec.label, g.class, dev, tol, status * (isempty(detail) ? "" : "  $detail")])
+        # A scalar with a zero golden value is judged absolutely, so its deviation is marked as such.
+        zero_gold = (g.value_type == "real" && g.value_real == 0.0) || (g.value_type == "integer" && g.value_int == 0)
+        dev = isnan(deviation) ? "—" : @sprintf("%.2e", deviation) * (zero_gold ? " (abs)" : "")
+        rtol = isfinite(g.rtol) ? @sprintf("%.1e", g.rtol) : "—"
+        atol = isfinite(g.atol) ? @sprintf("%.1e", g.atol) : "—"
+        basis = !gating ? "—" : is_provisional(g) ? "provisional" : "measured"
+        gating && is_provisional(g) && (n_provisional += 1)
+        push!(rows, [spec.label, g.class, dev, rtol, atol, basis, status * (isempty(detail) ? "" : "  $detail")])
     end
 
     # An orphaned entry fails regardless of class: a renamed quantity must not silently drop its gate.
     spec_names = Set(spec.name for spec in case_spec.quantities)
     for name in sort(collect(keys(golden.values)))
         name in spec_names && continue
-        push!(rows, [name, golden.values[name].class, "ORPHANED", "—",
+        push!(rows, [name, golden.values[name].class, "ORPHANED", "—", "—", "—",
             "** FAIL **  no matching quantity in the case — renamed or removed? Regenerate goldens."])
         n_fail += 1
     end
 
-    header = ["Quantity", "Class", "Deviation", "rtol", "Status"]
+    header = ["Quantity", "Class", "Deviation", "rtol", "atol", "Basis", "Status"]
     widths = [length(h) for h in header]
     for row in rows, i in eachindex(row)
         widths[i] = max(widths[i], length(row[i]))
@@ -439,6 +454,10 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
     n_informational > 0 && push!(parts, "$n_informational informational")
     n_untracked > 0 && push!(parts, "$n_untracked untracked")
     println("Summary: ", join(parts, ", "))
+    n_provisional > 0 && println(
+        "  $n_provisional gating quantity/quantities are judged against provisional class-default tolerances, " *
+        "not a measured plateau drift or platform spread."
+    )
     println()
     return (n_pass=n_pass, n_fail=n_fail, n_untracked=n_untracked, n_informational=n_informational, n_run_failed=0)
 end
@@ -495,10 +514,10 @@ function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash:
     println()
     println("Golden update: $(case_spec.name)  (v$(previous === nothing ? 0 : previous.meta.golden_version) → v$(meta.golden_version))")
     if existing !== nothing
-        runtime_names = Set(s.name for s in case_spec.quantities if s.type == "runtime")
+        unpinnable = Set(s.name for s in case_spec.quantities if !is_pinnable(s))
         for name in sort(collect(keys(existing)))
-            if name in runtime_names
-                println(@sprintf("  %-34s REMOVED — runtimes are no longer pinned", name))
+            if name in unpinnable
+                println(@sprintf("  %-34s REMOVED — runtimes and checksums are not pinned", name))
             elseif !haskey(values, name)
                 println(
                     @sprintf(
@@ -519,7 +538,7 @@ function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash:
     end
     path = save_golden(meta, values)
     println("Wrote $path  ($(length(values)) quantities)")
-    provisional = count(g -> startswith(g.tolerance_basis, "class-default"), Base.values(values))
+    provisional = count(g -> is_gating(g) && is_provisional(g), Base.values(values))
     provisional > 0 && println(
         "  $provisional quantity/quantities still carry provisional class-default tolerances — " *
         "replace them with measured plateau drift and platform spread before relying on this as a gate."
@@ -558,7 +577,9 @@ Build golden entries from a set of freshly extracted quantities.
 
 `existing` carries forward the tolerance and evidence already recorded for a quantity, so
 regenerating values after a physics change does not silently reset hard-won measurements to
-provisional defaults. A change of value type or of the case-declared class invalidates them.
+provisional defaults. A change of value type or of the case-declared class invalidates them. So
+does a move beyond the old gating tolerance: the evidence was measured on a different value, so it
+is dropped and the entry becomes provisional, with a tolerance no looser than before.
 """
 function build_golden_values(extracted::Vector{ExtractedQuantity}, specs::Vector{QuantitySpec},
     existing::Union{Dict{String,GoldenValue},Nothing})
@@ -568,8 +589,7 @@ function build_golden_values(extracted::Vector{ExtractedQuantity}, specs::Vector
         eq.value_type == "missing" && continue
         spec = get(spec_by_name, eq.name, nothing)
         spec === nothing && continue
-        # Checksums have no notion of "close" and runtimes are wall-clock, so neither is pinned.
-        (eq.value_type == "checksum" || spec.type == "runtime") && continue
+        is_pinnable(spec) || continue
         class = infer_class(spec)
         prior = existing === nothing ? nothing : get(existing, eq.name, nothing)
         if prior !== nothing && prior.value_type != eq.value_type
@@ -579,9 +599,15 @@ function build_golden_values(extracted::Vector{ExtractedQuantity}, specs::Vector
             @warn "Golden '$(eq.name)': class changed $(prior.class) → $class; resetting tolerances to provisional"
             prior = nothing
         end
+        defaults = CLASS_DEFAULT_TOLERANCE[class]
+        run_value = (value_real=eq.value_real, value_int=eq.value_int, value_text=eq.value_text, value_type=eq.value_type)
         if prior === nothing
-            defaults = CLASS_DEFAULT_TOLERANCE[class]
             rtol, atol, basis = defaults.rtol, defaults.atol, "class-default (provisional)"
+            drift, spread, at = NaN, NaN, ""
+        elseif is_gating(prior) && !compare_to_golden(run_value, prior)[1]
+            @warn "Golden '$(eq.name)': value moved beyond its old tolerance; dropping its recorded evidence and marking it provisional"
+            rtol, atol = min(prior.rtol, defaults.rtol), min(prior.atol, defaults.atol)
+            basis = (rtol, atol) == (defaults.rtol, defaults.atol) ? "class-default (provisional)" : "provisional"
             drift, spread, at = NaN, NaN, ""
         else
             rtol, atol, basis = prior.rtol, prior.atol, prior.tolerance_basis
