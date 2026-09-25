@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS runs (
     manifest_sha  TEXT,
     nthreads      INTEGER,
     blas_threads  INTEGER,
+    build_mode    TEXT,
     pinned        INTEGER,
     UNIQUE(commit_hash, case_name)
 );
@@ -67,7 +68,7 @@ fingerprinting keep their rows, with NULL in these columns — such rows never m
 const ENV_COLUMNS = [
     ("env_key", "TEXT"), ("julia_version", "TEXT"), ("os_arch", "TEXT"),
     ("manifest_sha", "TEXT"), ("nthreads", "INTEGER"), ("blas_threads", "INTEGER"),
-    ("pinned", "INTEGER")
+    ("pinned", "INTEGER"), ("build_mode", "TEXT")
 ]
 
 """Add any `runs` columns missing from a database created by an earlier harness version."""
@@ -152,13 +153,13 @@ function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::Abs
         DBInterface.execute(db,
             """INSERT INTO runs
                (commit_hash, commit_short, commit_date, commit_msg, case_name, ran_at, runtime_s, success, error_msg,
-                env_key, julia_version, os_arch, manifest_sha, nthreads, blas_threads, pinned)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                env_key, julia_version, os_arch, manifest_sha, nthreads, blas_threads, pinned, build_mode)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (String(commit_hash), String(commit_short), String(commit_date), String(commit_msg),
              String(case_name), ran_at, runtime_s, success ? 1 : 0, String(error_msg),
              env_key(fingerprint), fingerprint.julia_version, fingerprint.os_arch,
              fingerprint.manifest_sha, fingerprint.nthreads, fingerprint.blas_threads,
-             fingerprint.pinned ? 1 : 0))
+             fingerprint.pinned ? 1 : 0, fingerprint.build_mode))
 
         run_id = SQLite.last_insert_rowid(db)
 
@@ -219,7 +220,7 @@ Get run info for a (commit, case) pair. Returns NamedTuple or nothing.
 function get_run_info(db::SQLite.DB, commit_hash::String, case_name::String)
     rows = query_rows(db,
         """SELECT commit_short, commit_date, commit_msg, runtime_s, success, error_msg,
-                  julia_version, os_arch, manifest_sha, nthreads, blas_threads, pinned
+                  julia_version, os_arch, manifest_sha, nthreads, blas_threads, pinned, build_mode
            FROM runs WHERE commit_hash = ? AND case_name = ?""",
         (commit_hash, case_name))
     isempty(rows) && return nothing
@@ -230,6 +231,7 @@ function get_run_info(db::SQLite.DB, commit_hash::String, case_name::String)
         String(_column(row.manifest_sha, "")),
         Int(_column(row.nthreads, -1)),
         Int(_column(row.blas_threads, -1)),
+        String(_column(row.build_mode, "")),
         _column(row.pinned, 0) == 1
     )
     return (

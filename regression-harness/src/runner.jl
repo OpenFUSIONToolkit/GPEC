@@ -11,7 +11,9 @@ so it describes what actually ran rather than what the harness intended to run.
 const RUNINFO_EPILOGUE = """
 using SHA
 using LinearAlgebra: BLAS
-let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml")
+let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml"), gpec = GeneralizedPerturbedEquilibrium
+    has_workload = isfile(joinpath(dirname(pathof(gpec)), "precompile.jl"))
+    workload_on = get(Base.get_preferences(Base.PkgId(gpec).uuid), "precompile_workload", true) == true
     open(ARGS[2], "w") do f
         println(f, "runtime_s=", elapsed)
         println(f, "julia_version=", string(VERSION))
@@ -19,6 +21,7 @@ let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml")
         println(f, "manifest_sha=", isfile(manifest) ? bytes2hex(SHA.sha256(read(manifest))) : "")
         println(f, "nthreads=", Threads.nthreads())
         println(f, "blas_threads=", BLAS.get_num_threads())
+        println(f, "build_mode=", has_workload && workload_on ? "aot" : "jit")
     end
 end
 """
@@ -309,6 +312,7 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
+        _warn_build_mode(fingerprint, case_spec)
         if !isfile(h5path)
             error("Computed case '$(case_spec.name)' produced no output h5")
         end
@@ -445,6 +449,13 @@ function _warn_pin_broken(pin_manifest::Union{String,Nothing}, fp::EnvFingerprin
     @warn "Pinned Manifest was re-resolved for $label — its package set differs from the working tree" pinned = pinned_sha[1:8] resolved = fp.manifest_sha[1:8]
 end
 
+"""Warn when a run's build mode differs from its case's, e.g. a workload case run at a commit that predates the workload."""
+function _warn_build_mode(fp::EnvFingerprint, case_spec::CaseSpec)
+    expected = case_spec.precompile_workload ? "aot" : "jit"
+    (isempty(fp.build_mode) || fp.build_mode == expected) && return
+    @warn "Case $(case_spec.name) requested a $expected build but ran $(fp.build_mode); its numbers are not comparable across build modes"
+end
+
 """
 Explain a cache miss caused by the environment rather than by absence.
 
@@ -511,6 +522,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
+        _warn_build_mode(fingerprint, case_spec)
 
         h5path = joinpath(rundir, "gpec.h5")
         if !isfile(h5path)
@@ -629,6 +641,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, commit_info.short)
+        _warn_build_mode(fingerprint, case_spec)
 
         # Check for gpec.h5
         h5path = joinpath(rundir, "gpec.h5")

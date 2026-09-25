@@ -19,6 +19,7 @@ Identity of the environment a run was produced in.
   - `manifest_sha::String` — SHA-256 of the `Manifest.toml` the run resolved against ("" if absent)
   - `nthreads::Int` — `Threads.nthreads()` in the run (-1 if unknown)
   - `blas_threads::Int` — `BLAS.get_num_threads()` in the run (-1 if unknown)
+  - `build_mode::String` — "aot" if the loaded GPEC was built with its precompile workload, "jit" otherwise ("" if unknown)
   - `pinned::Bool` — whether the harness copied its own Manifest into the run's project
 """
 struct EnvFingerprint
@@ -27,10 +28,11 @@ struct EnvFingerprint
     manifest_sha::String
     nthreads::Int
     blas_threads::Int
+    build_mode::String
     pinned::Bool
 end
 
-const UNKNOWN_ENV = EnvFingerprint("", "", "", -1, -1, false)
+const UNKNOWN_ENV = EnvFingerprint("", "", "", -1, -1, "", false)
 
 """
 Cache key for an environment.
@@ -103,6 +105,7 @@ function read_runinfo(path::String, pinned::Bool)
         getf("manifest_sha", ""),
         something(tryparse(Int, getf("nthreads", "")), -1),
         something(tryparse(Int, getf("blas_threads", "")), -1),
+        getf("build_mode", ""),
         pinned
     )
     return (something(runtime_s, NaN), fp)
@@ -114,5 +117,6 @@ function describe_env(fp::EnvFingerprint)::String
     mani = isempty(fp.manifest_sha) ? "no Manifest" : "manifest " * fp.manifest_sha[1:min(8, end)]
     pin = fp.pinned ? "pinned" : "unpinned"
     threads = "$(fp.nthreads) thread$(fp.nthreads == 1 ? "" : "s")/$(fp.blas_threads) BLAS"
-    return "julia $(fp.julia_version), $(fp.os_arch), $mani ($pin), $threads"
+    mode = isempty(fp.build_mode) ? "" : ", $(fp.build_mode) build"
+    return "julia $(fp.julia_version), $(fp.os_arch), $mani ($pin), $threads$mode"
 end

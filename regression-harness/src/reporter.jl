@@ -62,6 +62,8 @@ function _warn_env_difference(fp1::EnvFingerprint, fp2::EnvFingerprint)
     fp1.manifest_sha != fp2.manifest_sha && push!(differences, "different package sets (Manifest hashes differ)")
     fp1.nthreads != fp2.nthreads && push!(differences, "$(fp1.nthreads) vs $(fp2.nthreads) Julia threads")
     fp1.blas_threads != fp2.blas_threads && push!(differences, "$(fp1.blas_threads) vs $(fp2.blas_threads) BLAS threads")
+    fp1.build_mode != fp2.build_mode && !isempty(fp1.build_mode) && !isempty(fp2.build_mode) &&
+        push!(differences, "$(fp1.build_mode) vs $(fp2.build_mode) build (precompile workload); results differ between build modes")
     isempty(differences) && return
     println()
     println("!! ENVIRONMENTS DIFFER — source code is not the only variable in this comparison:")
