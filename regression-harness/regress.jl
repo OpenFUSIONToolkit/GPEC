@@ -132,7 +132,7 @@ Options:
     --fail-on-change       Exit non-zero if any tracked quantity changed (for CI use; a failed
                            run always exits non-zero regardless)
     --check                Run the working tree and compare against the committed golden values
-                           (regression-harness/golden/<case>.toml). This is the mode CI gates on.
+                           (regression-harness/golden/<case>.toml). No CI workflow runs it yet.
     --update-golden        Regenerate the golden values from a fresh run. Requires --cases and
                            --reason, and refuses a working tree with uncommitted changes.
     --reason "..."         Why the goldens changed. Mandatory with --update-golden: a golden
@@ -149,7 +149,8 @@ Golden values:
     plateau drift and cross-platform spread; until measured they are provisional class defaults
     and say so. A quantity's class is declared in its case file (`class = ...`) or inferred,
     never set in the golden file. A failing --check is fixed by explaining the physics or
-    fixing the regression, not by loosening rtol.
+    fixing the regression, not by loosening rtol. A re-pin that moves a value beyond its old
+    tolerance drops the recorded evidence and marks the entry provisional.
 
 Exit status:
     0  all runs completed (and, with --fail-on-change, nothing changed)

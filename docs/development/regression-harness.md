@@ -140,7 +140,21 @@ re-run once — those are exactly the entries whose provenance cannot be establi
 
 If the two refs in a comparison ran under different thread counts, the report flags it.
 
+## Golden values
+
+`--refs` comparisons say whether a number changed; golden values say whether it still matches a committed, reviewed reference. Each case may have a golden file at `regression-harness/golden/<case>.toml` holding every pinned quantity with its `rtol`, `atol`, tolerance class and the evidence behind the tolerance.
+
+```bash
+regress --check --cases slayer_dels_fitzpatrick                          # working tree vs the committed goldens
+regress --update-golden --cases slayer_dels_fitzpatrick --reason "..."   # re-pin from a fresh run
+```
+
+- **Classes** come from the case file's `class` key (else `infer_class` in `src/golden.jl`), never from the golden file: `topological` (exact), `equilibrium_scalar`, `physics_converged` gate; `diagnostic` and `unconverged` are reported only.
+- **Tolerances** are either the provisional class default (`tolerance_basis = "class-default (provisional)"`) or `"measured"`, which requires a recorded `plateau_drift` or `platform_spread` no larger than `rtol`. No harness tool measures these yet, so every committed golden currently gates on provisional defaults, and `--check` labels those rows `provisional`.
+- **Re-pinning** requires `--cases` and `--reason`, refuses a working tree with uncommitted tracked changes, and prints an old → new line per moved quantity, flagging any move the old tolerance would have failed. Such an entry loses its recorded evidence and becomes provisional, with a tolerance no looser than before.
+- A failing `--check` is fixed by explaining the physics or fixing the regression, never by widening `rtol` or `atol`. The unit tests for this logic run with `julia --project=regression-harness regression-harness/test/runtests.jl` and need no GPEC build.
+
 ## Exit status
 
 - `0` — every run completed (and, with `--fail-on-change`, nothing changed)
-- `1` — a run failed, or a quantity changed under `--fail-on-change`
+- `1` — a run failed, a quantity changed under `--fail-on-change`, or a `--check` golden comparison failed or gated nothing
