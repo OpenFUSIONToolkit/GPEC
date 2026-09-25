@@ -37,7 +37,7 @@ export ForcingMode
 # Export main functions
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
-export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, CORE_PSI_HIGH
+export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
 
 """
     compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
