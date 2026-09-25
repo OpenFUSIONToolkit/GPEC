@@ -173,7 +173,21 @@ function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, om
     return Ω_E
 end
 
-# Real Doppler offset on a surface's inner-layer Q: Q_k = τ_k·(ω − n·Ω_E) in its E×B frame.
+"""
+    _q_shift(p::SLAYERParameters, Ω_E) -> Float64
+
+Real offset added to a surface's scanned inner-layer `Q` for E×B rotation `Ω_E` per unit n [rad/s].
+The layer's `Q` is the mode frequency in the local E×B frame (Burgess et al. 2026, Table 1), while
+the coupled scan runs in the lab frame, so
+
+```
+Q_layer = τ_k·ω_lab − τ_k·n·Ω_E    ⇒    q_shift = −τ_k·n·Ω_E
+```
+
+A layer root at rest in its E×B frame therefore sits at `ω_lab = n·Ω_E`: the mode rotates with the
+plasma, at unchanged γ. The conjugated layer Δ and the opposite-sign diamagnetic inputs
+(`Q_e = −τ_k·ω_*e`) flip together and leave this sign unchanged.
+"""
 function _q_shift(p::SLAYERParameters, Ω_E::Real)
     iszero(Ω_E) || p.n >= 1 ||
         throw(ArgumentError("run_slayer: E×B rotation Ω_E=$(Ω_E) rad/s needs the toroidal mode number, but SLAYERParameters has n=$(p.n)"))

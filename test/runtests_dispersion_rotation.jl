@@ -3,7 +3,7 @@
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
     using GeneralizedPerturbedEquilibrium.Dispersion
     using GeneralizedPerturbedEquilibrium.Tearing.Runner: SLAYERControl,
-        slayer_control_from_toml, validate, _q_shifts, _omega_E_per_surface
+        slayer_control_from_toml, validate, _q_shifts, _omega_E_per_surface, _build_surface_coupling
     using LinearAlgebra
 
     # Linear inner layer Δ(Q) = a + b·Q makes the applied Q offset readable
@@ -97,6 +97,28 @@
         # An m/n matching no analysed surface is an error, as is a file of the wrong length.
         @test_throws "matching no analysed surface" qs(SLAYERControl(; omega_E_kHz=Dict("2/1" => 1.0)))
         @test_throws ArgumentError qs(SLAYERControl(); omega_E=[1.0])
+    end
+
+    @testset "Real SLAYER surfaces: the lab-frame root moves with the E×B rotation" begin
+        # Q_layer = τ_k·ω_lab − τ_k·n·Ω_E, so the rotating determinant at Q + τ_ref·n·Ω_E equals the
+        # static one at Q: every root keeps its γ and moves by ω_lab(Ω_E) − ω_lab(0) = +n·Ω_E.
+        mk(; qval, rs, m, n) = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0,
+            omega_e=1.0e4, omega_i=5.0e3,
+            qval=qval, sval_r=1.0, bt=2.0, rs=rs, R0=1.7,
+            mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=n)
+        params = [mk(; qval=1.5, rs=0.5, m=3, n=2), mk(; qval=2.0, rs=0.6, m=4, n=2)]
+        slayer = SLAYERModel(; variant=:fitzpatrick)
+        dp = ComplexF64[-2.0 0.5; 0.5 -3.0]
+        lab_shift = 0.5                                        # τ_ref·n·Ω_E in the reference Q
+        Ω_rigid = lab_shift / (params[1].tauk * params[1].n)   # rad/s per unit n, on both surfaces
+        build(Ω) = [_build_surface_coupling(slayer, params[k], dp[k, k], q) for (k, q) in enumerate(_q_shifts(params, Ω))]
+        static = multi_surface_coupling(build(zeros(2)), dp; ref_idx=1, msing_max=2)
+        rotating = multi_surface_coupling(build(fill(Ω_rigid, 2)), dp; ref_idx=1, msing_max=2)
+        for Q in (0.3 + 0.2im, -0.4 + 0.6im, 0.1 + 1.1im)
+            @test rotating(Q + lab_shift) ≈ static(Q) rtol = 1e-6
+            # The opposite Doppler sign (mode counter-rotating with the plasma) must not match.
+            @test !isapprox(rotating(Q - lab_shift), static(Q); rtol=1e-3)
+        end
     end
 
     @testset "Coupled roots do not depend on the reference surface" begin
