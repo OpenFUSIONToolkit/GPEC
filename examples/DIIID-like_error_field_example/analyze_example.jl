@@ -79,8 +79,7 @@ println("Saved: ", abspath(pdf_path))
 # Locking risk: the threshold distribution against the overlap distribution, and the risk against
 # tolerance scale with the allowable tolerance for a 1 % target read off the scan.
 scan = ErrorFields.ToleranceScan(h5path)
-risk_nominal = h5open(
-    f -> (read(f["ErrorFields/Risk/plock_percent"]), read(f["ErrorFields/Risk/plock_efc_percent"]),
+risk_nominal = h5open(f -> (read(f["ErrorFields/Risk/plock_percent"]), read(f["ErrorFields/Risk/plock_efc_percent"]),
         read(f["ErrorFields/Risk/threshold_nominal"]), read(f["ErrorFields/Risk/threshold_pdf"]), read(f["ErrorFields/Risk/p_lock_given_delta"])), h5path, "r")
 plock, plock_efc, thr_nom, thr_pdf, p_given = risk_nominal
 p_thr = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright, xscale=:log10,
