@@ -195,6 +195,14 @@ using TOML
         @test all(in(fieldnames(FFS.ForceFreeStatesControl)), keys(kwargs))
     end
 
+    @testset "alpha_boundary_scan=false skips only the α-boundary scan" begin
+        @test FFS.ForceFreeStatesControl().alpha_boundary_scan
+        ctrl = FFS.ForceFreeStatesControl(; verbose=false, local_stability_flag=true, alpha_boundary_scan=false)
+        locstab, boundary = GPEC.run_local_stability(ctrl, equil)
+        @test locstab !== nothing
+        @test isempty(boundary.psi) && isempty(boundary.alpha) && isempty(boundary.alpha_critical)
+    end
+
     @testset "rejected keyword combinations" begin
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., match=ResistiveMatch())
