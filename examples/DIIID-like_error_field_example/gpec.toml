@@ -222,7 +222,7 @@ nbins = 300                             # Histogram bins, linear on [0, delta_ma
 n_e = 5.0                               # Electron density for the threshold scaling [1e19 m^-3]
 
 [ErrorFields.Risk]
-dataset = "O,L"                         # ITPA dataset of the threshold fit: "O,L" or "O,L,H" (n = 1)
-fit = "WLS"                             # Fitting method: "OLS", "DSOLS", or "WLS"
+dataset = "O,L"                         # ITPA dataset of the threshold fit: "O,L", "O,L,H" or "O,L 2026" (n = 1)
+fit = "WLS"                             # Fitting method: "OLS", "DSOLS", or "WLS" ("O,L 2026": "OLS" or "WLS")
 nsample_threshold = 1000000             # Threshold samples
 scan_scales = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]   # Tolerance multipliers of the allowable-tolerance scan
