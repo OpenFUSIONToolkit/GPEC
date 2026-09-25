@@ -15,6 +15,9 @@ never inputs: the full spectra are stored and projected post hoc with [`sensitiv
     about its own arc-length centre (the Fortran `coil_read` convention the OMFIT tolerance tool
     inherited), `"set"` rotates the whole set rigidly about its common arc-length centre (a
     winding pack moving as one body, which is what an axis-line tolerance constrains)
+  - `tolerance_file`: manufacturing-tolerance TOML (see `ToleranceTOML`), relative to the run
+    directory; empty means none. It is validated against the run's coil sets and echoed into
+    `Input/RawInputs/ErrorFields/tolerance_toml_raw`
   - `output_filename`: HDF5 file the results are appended to; empty means the run's main output
   - `write_outputs_to_HDF5`: write `ErrorFields/CoilSensitivities/` when true
   - `verbose`: log per-coil-set progress and the linearity diagnostics
@@ -23,6 +26,7 @@ Base.@kwdef struct ErrorFieldsControl
     fd_step_shift_m::Float64 = 1e-3
     fd_step_tilt_deg::Float64 = 0.1
     rotation_center::String = "conductor"
+    tolerance_file::String = ""
     output_filename::String = ""
     write_outputs_to_HDF5::Bool = true
     verbose::Bool = false

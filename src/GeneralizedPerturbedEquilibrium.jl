@@ -996,7 +996,8 @@ end
     run_error_fields(inputs, result, pe_state, preloaded_coil_sets) -> CoilSensitivities or nothing
 
 Linearize every coil set's resonant drive with respect to its rigid shifts and tilts and write
-`ErrorFields/CoilSensitivities/` when the deck carries an `[ErrorFields]` section. Needs the
+`ErrorFields/CoilSensitivities/` when the deck carries an `[ErrorFields]` section; read, validate
+and echo the tolerance file when one is named. Needs the
 perturbed-equilibrium state's singular-coupling matrix and coil-format forcing, and errors
 otherwise: a deck asking for error-field sensitivities without them is a misconfiguration, not a
 case to skip silently. Coil geometry is rebuilt from the deck unless a replay injected it.
@@ -1024,10 +1025,20 @@ function run_error_fields(
     sens = ErrorFields.compute_coil_sensitivities(coil_sets, rc, result.equil, cfg, ef_ctrl;
         psi=result.psilim, b_t0=result.equil.params.bt0)
 
+    tolerances = nothing
+    if !isempty(ef_ctrl.tolerance_file)
+        tol_path = joinpath(result.dir_path, ef_ctrl.tolerance_file)
+        isfile(tol_path) || error("[ErrorFields] tolerance_file not found: $tol_path")
+        tolerances = ErrorFields.validate_tolerances(ErrorFields.read_tolerance_toml(tol_path), sens.coil_names)
+        @info "Tolerances: $(length(tolerances.coils)) coil sets, $(length(tolerances.groups)) coherent groups from $(ef_ctrl.tolerance_file)"
+    end
+
     if ef_ctrl.write_outputs_to_HDF5
         output_file = isempty(ef_ctrl.output_filename) ? result.control.HDF5_filename : ef_ctrl.output_filename
         h5open(joinpath(result.dir_path, output_file), "cw") do h5file
             ErrorFields.write_to_hdf5!(h5file, sens, PerturbedEquilibrium.dominant_coupling(rc))
+            # Raw echo of the tolerance input for replay (read back by ErrorFields.parse_tolerance_toml).
+            tolerances === nothing || ErrorFields.write_tolerance_snapshot!(h5file, tolerances)
         end
         @info "Results written to $output_file"
     end
