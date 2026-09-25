@@ -208,6 +208,7 @@ function main_from_inputs(
     ffs_table = inputs["ForceFreeStates"]
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
+    ForceFreeStates.el_ode_algorithm(ctrl)  # fail fast on an unknown ode_solver, before the equilibrium solve
 
     resolve_mode_space!(intr, ctrl)
 
@@ -760,6 +761,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
     ForceFreeStates._apply_match!(ctrl_kwargs, prob.match, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
+    ForceFreeStates.el_ode_algorithm(ctrl)  # fail fast on an unknown ode_solver
 
     ctrl.kinetic_factor > 0 &&
         error("kinetic runs (kinetic_factor > 0) need the [KineticForces] profiles and are TOML-driven; run them through `main`")

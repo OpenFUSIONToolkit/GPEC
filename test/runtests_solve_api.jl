@@ -160,7 +160,7 @@ using TOML
         @test d.terms[2].scale == 1.0 + 0.0im
         @test (im * a).scale == im
         @test (a * 3).scale == 3.0 + 0.0im
-        @test (a - b).terms[2].scale == -0.5 + 0.0im
+        @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
     end
 
@@ -202,5 +202,16 @@ using TOML
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
+        # An unbenchmarked ode_solver is refused before any integration starts.
+        @test_throws ArgumentError solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., ode_solver="Rodas5")
+    end
+
+    @testset "ode_solver resolves to the benchmarked explicit methods" begin
+        for name in keys(FFS.EL_ODE_SOLVERS)
+            alg = FFS.el_ode_algorithm(FFS.ForceFreeStatesControl(; ode_solver=String(name)))
+            @test nameof(typeof(alg)) === name
+        end
+        @test FFS.el_ode_algorithm(FFS.ForceFreeStatesControl()) isa GPEC.ForceFreeStates.OrdinaryDiffEq.Vern7
+        @test_throws ArgumentError FFS.el_ode_algorithm(FFS.ForceFreeStatesControl(; ode_solver="solve"))
     end
 end
