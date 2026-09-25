@@ -177,7 +177,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
 end
 
 """
-    slayer_parameters(; n_e, t_e, t_i, omega, omega_e, omega_i,
+    slayer_parameters(; n_e, t_e, t_i, omega_e, omega_i,
                         qval, sval_r, bt, rs, R0, mu_i, zeff,
                         chi_perp, chi_tor,
                         m, n,
@@ -199,7 +199,6 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `n_e` -- electron density [m⁻³]
   - `t_e` -- electron temperature [eV]
   - `t_i` -- ion temperature [eV]
-  - `omega`   -- toroidal rotation frequency at the surface [rad/s]
   - `omega_e` -- electron diamagnetic frequency [rad/s]
   - `omega_i` -- ion diamagnetic frequency [rad/s]
   - `qval`    -- safety factor q at the surface
@@ -260,7 +259,7 @@ dispersion relation.
 """
 function slayer_parameters(;
     n_e::Real, t_e::Real, t_i::Real,
-    omega::Real, omega_e::Real, omega_i::Real,
+    omega_e::Real, omega_i::Real,
     qval::Real, sval_r::Real, bt::Real,
     rs::Real, R0::Real, mu_i::Real, zeff::Real,
     chi_perp::Real, chi_tor::Real,

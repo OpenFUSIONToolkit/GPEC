@@ -34,14 +34,12 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
             error("run_slayer: kinetic file '$path' is missing required " *
                   "dataset '$name' for the SLAYER inner layer.")
     end
-    # ω_*e/ω_*i are recomputed per-surface from equilibrium gradients
-    # (compute_omega_star), so the diamagnetic-frequency inputs here are
-    # placeholders; `omega` carries the ExB rotation when present.
+    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the file has it; ω_*e/ω_*i are
+    # derived per surface from the density and temperature splines by `build_slayer_inputs`.
     npsi = length(data.psi)
-    omega = data.omega_E === nothing ? zeros(npsi) : data.omega_E
+    omega_E = data.omega_E === nothing ? zeros(npsi) : data.omega_E
     profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
-        T_i=data.T_i, omega=omega,
-        omega_e=zeros(npsi), omega_i=zeros(npsi))
+        T_i=data.T_i, omega_E=omega_E)
 
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
@@ -139,17 +137,66 @@ end
 # ---------------------------------------------------------------------
 # SLAYER: scale = lu^(1/3), tauk from the surface, dc from the χ‖ proxy.
 function _build_surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-    dp_diag)
-    return surface_coupling(model, params, dp_diag; dc=params.dc_tmp)
+    dp_diag, q_shift::Real)
+    return surface_coupling(model, params, dp_diag; dc=params.dc_tmp, q_shift=q_shift)
 end
 
 # GGJ: scale = 1.0 (rescale_delta applied inside solve_inner), tauk = 1.0,
 # dc = 0 (the 4m×4m Pletzer-Dewar residual carries interchange stabilization
-# natively). See the GGJ `surface_coupling` method.
-function _build_surface_coupling(model::GGJModel, params::GGJParameters,
-    dp_diag)
-    return surface_coupling(model, params, dp_diag)
+# natively), and no E×B shift. See the GGJ `surface_coupling` method.
+_build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
+    surface_coupling(model, params, dp_diag)
+
+# "m/n" label keying `control.omega_E_kHz`; GGJ parameters carry no mode numbers.
+_mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
+_mn_label(::InnerLayerParameters) = nothing
+
+# Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
+# rational surface, replaced on every surface whose m/n `control.omega_E_kHz` lists.
+function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
+    n = length(params)
+    isempty(omega_E_file) || length(omega_E_file) == n ||
+        throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
+                            "$n rational surfaces were analysed."))
+    Ω_E = isempty(omega_E_file) ? zeros(Float64, n) : Float64.(omega_E_file)
+    isempty(control.omega_E_kHz) && return Ω_E
+    labels = [_mn_label(p) for p in params]
+    any(isnothing, labels) &&
+        throw(ArgumentError("run_slayer: omega_E_kHz is keyed by m/n, which $(eltype(params)) surfaces do not carry."))
+    unknown = setdiff(keys(control.omega_E_kHz), labels)
+    isempty(unknown) ||
+        throw(ArgumentError("run_slayer: omega_E_kHz lists m/n $(sort(collect(unknown))) matching no analysed surface; " *
+                            "the analysed surfaces are $(labels)."))
+    for (k, label) in enumerate(labels)
+        haskey(control.omega_E_kHz, label) && (Ω_E[k] = 2π * 1e3 * control.omega_E_kHz[label])
+    end
+    return Ω_E
 end
+
+"""
+    _q_shift(p::SLAYERParameters, Ω_E) -> Float64
+
+Real offset added to a surface's scanned inner-layer `Q` for E×B rotation `Ω_E` per unit n [rad/s].
+The layer's `Q` is the mode frequency in the local E×B frame (Burgess et al. 2026, Table 1), while
+the coupled scan runs in the lab frame, so
+
+```
+Q_layer = τ_k·ω_lab − τ_k·n·Ω_E    ⇒    q_shift = −τ_k·n·Ω_E
+```
+
+A layer root at rest in its E×B frame therefore sits at `ω_lab = n·Ω_E`: the mode rotates with the
+plasma, at unchanged γ. The conjugated layer Δ and the opposite-sign diamagnetic inputs
+(`Q_e = −τ_k·ω_*e`) flip together and leave this sign unchanged.
+"""
+function _q_shift(p::SLAYERParameters, Ω_E::Real)
+    iszero(Ω_E) || p.n >= 1 ||
+        throw(ArgumentError("run_slayer: E×B rotation Ω_E=$(Ω_E) rad/s needs the toroidal mode number, but SLAYERParameters has n=$(p.n)"))
+    return -p.tauk * p.n * Ω_E
+end
+# GGJ carries no time normalization (tauk = 1), so a physical rotation has no Q-space image.
+_q_shift(::InnerLayerParameters, ::Real) = 0.0
+
+_q_shifts(params, Ω_E::AbstractVector{<:Real}) = Float64[_q_shift(params[k], Ω_E[k]) for k in eachindex(Ω_E)]
 
 # ---------------------------------------------------------------------
 # Reference-length conversion of the outer Δ' for the slab layer
@@ -199,19 +246,24 @@ end
 """
     run_slayer_from_inputs(params::Vector{SLAYERParameters},
                             dp_matrix::AbstractMatrix,
-                            control::SLAYERControl) -> SLAYERResult
+                            control::SLAYERControl;
+                            rational_psi, rational_q, omega_E) -> SLAYERResult
 
 Run the SLAYER tearing analysis given pre-built per-surface
 `SLAYERParameters` and the outer-region Δ' matrix. Bypasses the
 equilibrium-driven `build_slayer_inputs` step — use this when the
 parameters are already known (e.g. in unit tests or when rebuilding
-from cached HDF5 output).
+from cached HDF5 output). `omega_E` is the E×B angular frequency per unit n
+at each surface [rad/s], replaced on any surface whose m/n `control.omega_E_kHz`
+lists; empty means no rotation. In coupled mode it Doppler-shifts each surface's
+inner-layer Q; in both modes the resolved value is reported as `result.omega_E`.
 """
 function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     dp_matrix::AbstractMatrix,
     control::SLAYERControl;
     rational_psi::Vector{Float64}=Float64[],
-    rational_q::Vector{Float64}=Float64[])
+    rational_q::Vector{Float64}=Float64[],
+    omega_E::Vector{Float64}=Float64[])
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(params) && return empty_slayer_result(control)
@@ -272,8 +324,30 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         )
     end
 
-    # Per-surface SurfaceCoupling objects
-    scs = [_build_surface_coupling(model, params[k], dp[k, k]) for k in 1:n]
+    # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
+    # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
+    coupled = control.coupling_mode === :coupled
+    !coupled && !isempty(control.omega_E_kHz) &&
+        @warn(
+            "SLAYER: omega_E_kHz does not shift the layers with coupling_mode=:uncoupled; rotation only " *
+            "enters the coupled determinant, so it is just recorded in PerSurface/omega_E.")
+    Ω_E = _omega_E_per_surface(control, params, omega_E)
+    coupled && _is_ggj(model) && any(!iszero, Ω_E) && @warn(
+            "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
+    q_shifts = coupled ? _q_shifts(params, Ω_E) : zeros(Float64, n)
+    scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
+    # Coupled Q is scanned in the reference surface's normalization.
+    ref_idx = 1
+    # In the scanned Q, surface k's layer response moves by τ_ref·n·Ω_E,k. Heuristic check only:
+    # the root also carries the diamagnetic Re(Q), so a window can pass and still miss it.
+    if any(!iszero, q_shifts)
+        m_use = min(control.msing_max, n)
+        doppler = [-q_shifts[k] * scs[ref_idx].tauk / scs[k].tauk for k in 1:m_use]
+        lo, hi = control.Q_re_range
+        any(d -> !(lo <= d <= hi), doppler) && @warn(
+            "SLAYER: E×B Doppler offsets Re(Q)=$(round.(doppler; digits=3)) fall outside " *
+            "Q_re_range=$(control.Q_re_range); widen it or the coupled root may be missed.")
+    end
 
     # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
     # Independent of the dispersion scan / coupling mode — a pure diagnostic.
@@ -335,16 +409,15 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
 
     elseif control.coupling_mode === :coupled
         m_use = min(control.msing_max, n)
-        mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use)
+        mc = multi_surface_coupling(scs, dp; ref_idx=ref_idx, msing_max=m_use)
         scan = _run_scan(mc, control)
         pthr = _pole_threshold_for(scan)
-        ref_tauk = scs[1].tauk
+        ref_tauk = scs[ref_idx].tauk
         # Coupled path: no root polishing / validity gate. The m×m coupled
         # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
         # above zero), so |det|-based polishing is a no-op and the residual-scale
-        # gate is unreliable. A σ_min-based coupled refinement is a dev follow-up;
-        # for now the coupled determinant uses the raw contour extraction (the
-        # BLAS pin in the scan still makes it thread-deterministic).
+        # gate is unreliable. The coupled root is therefore the raw contour
+        # intersection and carries the triangulation's interpolation error.
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
             filter_above_poles=control.filter_above_poles,
@@ -364,7 +437,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, scan_data_list)
+        layer_widths, Ω_E, q_shifts, scan_data_list)
 end
 
 # ---------------------------------------------------------------------
@@ -503,5 +576,7 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
 
     rational_psi = Float64[surfaces[p.ising].psifac for p in params]
     rational_q = Float64[surfaces[p.ising].q for p in params]
-    return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
+    # E×B rotation per unit n at each surface, for the coupled determinant's Doppler shifts.
+    omega_E = Float64[profiles.omega_E(ψ) for ψ in rational_psi]
+    return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q, omega_E=omega_E)
 end

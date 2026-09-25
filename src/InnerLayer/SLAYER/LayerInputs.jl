@@ -238,7 +238,6 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     dgeo_val=nothing,
     dc_type::Symbol=:none,
     theta::Real=0.0,
-    compute_omega_star::Bool=true,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl)
     R0_use = R0 === nothing ? equil.ro : Float64(R0)
@@ -291,9 +290,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         n_res = sing.n[1]
 
         prof = profiles(psi)
-        # Take ω_*e, ω_*i from the spline derivatives, or from `profiles` when the caller
-        # supplies them directly. `run_slayer` supplies zeros, so the latter is a library path.
-        ω_e_use, ω_i_use = compute_omega_star ? _omega_star_at(psi, n_res) : (prof.omega_e, prof.omega_i)
+        # ω_*e, ω_*i from the density and temperature spline derivatives, at this surface's n.
+        ω_e_use, ω_i_use = _omega_star_at(psi, n_res)
 
         # Pull geometric trapped-fraction inputs from ResistGeometry when
         # available (populated by ForceFreeStates.resist_eval_all!); else
@@ -375,7 +373,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         out[k] = slayer_parameters(;
             n_e=prof.n_e, t_e=prof.T_e, t_i=prof.T_i,
-            omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
+            omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
             rs=rs, R0=R0_use, mu_i=mu_i, zeff=zeff,
             chi_perp=_eval(chi_perp, psi),

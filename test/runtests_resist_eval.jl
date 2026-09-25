@@ -105,9 +105,7 @@
             n_e=fill(5.0e19, length(psi_pts)),
             T_e=1000.0 .* (1.0 .- 0.7 .* psi_pts),
             T_i=1000.0 .* (1.0 .- 0.6 .* psi_pts),
-            omega=fill(0.0, length(psi_pts)),
-            omega_e=fill(1.0e4, length(psi_pts)),
-            omega_i=fill(5.0e3, length(psi_pts)))
+            omega_E=fill(0.0, length(psi_pts)))
 
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
@@ -149,7 +147,7 @@
         n = length(psi_pts)
         profiles = KineticProfiles(; psi=psi_pts,
             n_e=fill(5.0e19, n), T_e=fill(1000.0, n), T_i=fill(1000.0, n),
-            omega=fill(0.0, n), omega_e=fill(1.0e4, n), omega_i=fill(5.0e3, n))
+            omega_E=fill(0.0, n))
 
         s_unpop = SingType(; psifac=0.5, rho=sqrt(0.5), m=[2], n=[1],
             q=2.0, q1=1.0,
@@ -168,9 +166,7 @@
             n_e=fill(5.0e19, length(psi_pts)),
             T_e=1000.0 .* (1.0 .- 0.7 .* psi_pts),
             T_i=fill(1000.0, length(psi_pts)),
-            omega=fill(0.0, length(psi_pts)),
-            omega_e=fill(0.0, length(psi_pts)),
-            omega_i=fill(0.0, length(psi_pts)))
+            omega_E=fill(0.0, length(psi_pts)))
 
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],

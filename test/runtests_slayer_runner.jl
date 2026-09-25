@@ -136,6 +136,46 @@
         end
     end
 
+    @testset "run_slayer_from_inputs: E×B rotation enters only the coupled determinant" begin
+        params = [_mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, n=1, ising=1),
+            _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, n=1, ising=2)]
+        dpm = ComplexF64[-2.0 0.0; 0.0 -3.0]
+        Ω_E = [2.0e3, -1.0e3]
+        grid = (; enabled=true, scan_mode=:brute_force, Q_re_range=(-1.0, 1.0), Q_im_range=(-0.5, 0.8),
+            nre=8, nim=8, pole_threshold=1e5)
+
+        # Uncoupled layers are solved in their own plasma frame: no shift, even when supplied.
+        r_unc = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...); omega_E=Ω_E)
+        @test r_unc.q_shift == [0.0, 0.0]
+        # The resolved rotation is still reported in both modes.
+        @test r_unc.omega_E == Ω_E
+
+        # Coupled: the kinetic-file Ω_E Dopplers each surface by −τ_k·n·Ω_E.
+        r_cpl = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=Ω_E)
+        @test r_cpl.q_shift ≈ [-1.0e-4 * 1 * Ω_E[1], -1.2e-4 * 1 * Ω_E[2]]
+        @test r_cpl.omega_E == Ω_E
+
+        # omega_E_kHz takes precedence over the file on the surfaces it lists.
+        r_ovr = run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("2/1" => 1.0, "3/1" => 0.0), grid...); omega_E=Ω_E)
+        @test r_ovr.q_shift ≈ [-1.0e-4 * 2π * 1e3, 0.0]
+        @test r_ovr.omega_E ≈ [2π * 1e3, 0.0]
+        r_part = run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("2/1" => 1.0), grid...); omega_E=Ω_E)
+        @test r_part.omega_E ≈ [2π * 1e3, Ω_E[2]]
+        @test r_part.q_shift ≈ [-1.0e-4 * 2π * 1e3, -1.2e-4 * Ω_E[2]]
+
+        # A Doppler offset beyond the scan box is flagged rather than silently losing the root:
+        # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].
+        @test_logs (:warn, r"outside Q_re_range") match_mode = :any run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[3.0e4, 0.0])
+
+        # Rotation without a toroidal mode number would silently vanish, so it is an error.
+        params_n0 = [_mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, n=0, ising=1)]
+        @test_throws "needs the toroidal mode number" run_slayer_from_inputs(params_n0, ComplexF64[-2.0;;],
+            SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[2.0e3])
+    end
+
     @testset "run_slayer_from_inputs: disabled path is a no-op" begin
         c = SLAYERControl(; enabled=false)
         params = [_mk_params()]
@@ -182,7 +222,7 @@
             tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.4, R0=1.7, bt=2.0,
             sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=2, n=1, ising=1,
             k_ref=0.8, alpha_mercier=0.5)
-        dp1 = ComplexF64[5.0+0im;;]
+        dp1 = ComplexF64[5.0 + 0im;;]
         @test Runner.delta_prime_to_rs_reference(dp1, [pslab])[1, 1] ≈ 0.8 * 5.0
         # Default parameters (k_ref = 1) give the identity regardless of α
         @test Runner.delta_prime_to_rs_reference(dp, [_mk_params(), _mk_params()]) ≈ dp
