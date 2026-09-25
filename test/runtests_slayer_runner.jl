@@ -159,7 +159,7 @@
 
         # A Doppler offset beyond the scan box is flagged rather than silently losing the root:
         # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].
-        @test_logs (:warn, r"outside Q_re_range") match_mode=:any run_slayer_from_inputs(params, dpm,
+        @test_logs (:warn, r"outside Q_re_range") match_mode = :any run_slayer_from_inputs(params, dpm,
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[3.0e4, 0.0])
 
         # Rotation without a toroidal mode number would silently vanish, so it is an error.
@@ -214,7 +214,7 @@
             tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.4, R0=1.7, bt=2.0,
             sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=2, n=1, ising=1,
             k_ref=0.8, alpha_mercier=0.5)
-        dp1 = ComplexF64[5.0+0im;;]
+        dp1 = ComplexF64[5.0 + 0im;;]
         @test Runner.delta_prime_to_rs_reference(dp1, [pslab])[1, 1] ≈ 0.8 * 5.0
         # Default parameters (k_ref = 1) give the identity regardless of α
         @test Runner.delta_prime_to_rs_reference(dp, [_mk_params(), _mk_params()]) ≈ dp
