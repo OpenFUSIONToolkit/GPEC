@@ -26,7 +26,8 @@ plasma solve or a new Biot-Savart integration.
   shapes, `sample_disk`, `sample_uncertainty`, and the additive and cylinder tolerance models
 - `MonteCarlo.jl`: `run_monte_carlo`, the batched, seeded recombination of a `SensitivityTable`
   with a `ToleranceSet` into intrinsic and corrected `|δ|` histograms
-- `Risk.jl`: the ITPA penetration-threshold scalings, `locking_risk` (the overlap distribution
+- `Risk.jl`: the ITPA penetration-threshold scalings (the 2020 n = 1 and n = 2 fits and the
+  2026 n = 1 OLS and WLS fits), `locking_risk` (the overlap distribution
   convolved with the threshold distribution), `tolerance_scan` and `allowable_tolerance`
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface

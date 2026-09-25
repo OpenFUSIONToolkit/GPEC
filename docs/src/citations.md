@@ -131,6 +131,38 @@ Combines the toroidal outer-region calculation with the two-fluid slab layer mod
 
 ---
 
+## ErrorFields Module
+
+> N. C. Logan et al., "Robustness of the tokamak error field correction tolerance scaling,"
+> *Plasma Physics and Controlled Fusion* **62**, 084001 (2020).
+
+The n = 1 ITPA error-field penetration-threshold fits on the ohmic and L-mode (`"O,L"`) and
+ohmic, L- and H-mode (`"O,L,H"`) databases, each by OLS, downsampled OLS and weighted least
+squares. Used by `ErrorFields.Risk` (`ITPA_THRESHOLD_SCALINGS`).
+
+---
+
+> N. C. Logan et al., "Empirical scaling of the n = 2 error field penetration threshold in tokamaks,"
+> *Nuclear Fusion* **60**, 086010 (2020).
+
+The n = 2 penetration-threshold fits used by `ErrorFields.Risk`.
+
+---
+
+> E. M. Bursch, J.-K. Park, N. C. Logan, F. Mao, N. Wang, C. F. B. Zimmermann, R. J. Buttery, C. Paz-Soldan, M. Pharr, L. Piron, G. Szepesi, H. Wang, S. M. Yang, JET Contributors, and the EUROfusion Tokamak Exploitation Team,
+> "Improved n=1 empirical error field penetration threshold scaling with Ohmic and L-mode conventional tokamak plasma discharges,"
+> Preprint (2026).
+> [arXiv:2604.27317](https://arxiv.org/abs/2604.27317)
+
+The 2026 n = 1 penetration-threshold scalings on the core dominant-mode overlap δ, fitted to
+ohmic and L-mode discharges of conventional tokamaks only (C-Mod, DIII-D, EAST, JET, J-TEXT,
+KSTAR) and adding a plasma-current term: Eq. 7 (OLS) and Eq. 8 (KDE-weighted WLS),
+`δ = 10^α_c (β_n/l_i)^α_β |I_p|^α_I R_0^α_R n_e^α_n |B_T|^α_B`. These are the `"O,L 2026"` fits
+of `ErrorFields.Risk`. The paper's overlap is the same dominant-mode metric the `ErrorFields`
+module computes (Eqs. 1–5).
+
+---
+
 ## Kinetic Forces
 
 The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical TRansport Code) formalism.
