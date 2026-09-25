@@ -93,6 +93,13 @@ include("h5_metadata_check.jl")
             end
             @test_throws ArgumentError EF.sensitivity_table(sens, dom; mode=length(dom.singular_values) + 1)
             @test_throws DimensionMismatch EF.sensitivity_table(sens, PE.dominant_coupling(rc.C[:, 1:(end-1)], rc.rational_psi))
+            # A decomposition from a different (m, n) basis has the right column count and would
+            # otherwise project and return plausible numbers, so the basis itself is checked.
+            shifted = PE.DominantCoupling(dom.singular_values, dom.right_singular_vectors, dom.left_singular_vectors,
+                dom.rational_index, dom.m_modes .+ 1, dom.n_modes)
+            @test_throws ArgumentError EF.sensitivity_table(sens, shifted)
+            # The bare-matrix construction carries no basis, so it stays permitted.
+            @test EF.sensitivity_table(sens, PE.dominant_coupling(rc.C, rc.rational_psi)) isa EF.SensitivityTable
             windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[end]))
             @test length(windowed.delta_nominal) == 2
 
