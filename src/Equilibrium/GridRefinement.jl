@@ -375,7 +375,8 @@ surface (no knot-on-surface jump) and *stable across* grid refinement — a narr
 wide neighbors would be consistent but noisy. Non-bracket knots within `w` of the center, or
 within `min_spacing` of either new bracket knot, are dropped; endpoints always win; bracket knots
 outside the open domain are dropped, and knots closer than `collapse_atol` are collapsed to keep
-the grid strictly increasing.
+the grid strictly increasing. Errors if adjacent brackets overlap (`c₂ − w₂ ≤ c₁ + w₁`) or a
+half-width is non-finite (a tangent surface, q′ = 0).
 """
 function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}, min_half_widths::Vector{Float64}, min_spacing::Float64; collapse_atol::Float64=1e-7)
     isempty(centers) && return copy(grid)
@@ -383,7 +384,7 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
     lo, hi = grid[1], grid[end]
     order = sortperm(centers)
     kept = Tuple{Float64,Bool}[(g, false) for g in grid]  # (value, is_bracket_knot)
-    last_c = -Inf
+    last_c, last_w = -Inf, 0.0
     for idx in order
         c, hw = centers[idx], min_half_widths[idx]
         (lo < c < hi) || continue
@@ -391,6 +392,14 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
         k = clamp(searchsortedlast(grid, c), 1, length(grid) - 1)
         w = max(hw, 0.5 * (grid[k+1] - grid[k]))  # blend to half the local spacing
         left, right = c - w, c + w
+        # Overlapping brackets would interleave their knots and leave a surface off-center or sharing an interval.
+        isfinite(w) || error("Rational surface at ψ=$c: its grid bracket half-width $w is not finite (tangent surface, q′ = 0).")
+        if left <= last_c + last_w
+            error(
+                "Rational surface at ψ=$c: its grid bracket half-width $w reaches back past the bracket " *
+                "of the previous rational surface at ψ=$last_c (half-width $last_w)."
+            )
+        end
         # Drop non-bracket, non-endpoint knots inside the zone or crowding a new bracket knot.
         filter!(kept) do t
             t[2] || t[1] == lo || t[1] == hi ||
@@ -398,7 +407,7 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
         end
         left > lo && push!(kept, (left, true))
         right < hi && push!(kept, (right, true))
-        last_c = c
+        last_c, last_w = c, w
     end
     sort!(kept; by=first)
     merged = Float64[]
