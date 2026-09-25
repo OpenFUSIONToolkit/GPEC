@@ -11,7 +11,8 @@ example_dir = "examples/DIIID-like_SLAYER_example"
 [overrides]
 "SLAYER.dc_type" = "toroidal"
 
-# Critical-Δ inputs and offset: the resistive interchange index, the geometric factor, and D_c.
+# Critical-Δ input and offset: the resistive interchange index and D_c. The geometric factor
+# D_geo does not depend on dc_type and is tracked once, in diiid_slayer_n1.
 [quantities.slayer_dr_val]
 h5path = "Tearing/PerSurface/D_R"
 type = "real_vector"
@@ -19,14 +20,6 @@ extract = "all_real"
 label = "SLAYER resistive interchange D_R"
 noise_threshold = 1e-10
 order = 10
-
-[quantities.slayer_D_geo]
-h5path = "Tearing/PerSurface/D_geo"
-type = "real_vector"
-extract = "all_real"
-label = "SLAYER toroidal critical-Δ factor D_geo"
-noise_threshold = 1e-10
-order = 11
 
 [quantities.slayer_D_c_offset]
 h5path = "Tearing/PerSurface/D_c_offset"
