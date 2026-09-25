@@ -1,11 +1,10 @@
 using Test
-using Printf
+using FastInterpolations: deriv1
 using GeneralizedPerturbedEquilibrium.Equilibrium
 using GeneralizedPerturbedEquilibrium.Equilibrium: CerfonConfig, EquilibriumConfig, setup_equilibrium,
     cerfon_run, cerfon_basis, cerfon_basis_dx, cerfon_basis_dy, cerfon_basis_dxx, cerfon_basis_dyy,
-    cerfon_basis_dxy, cerfon_psi_p, cerfon_dpsi_p_dx, cerfon_d2psi_p_dx2, cerfon_psihat, cerfon_grad,
-    cerfon_solve_coeffs, cerfon_find_axis, cerfon_null_point, cerfon_shape_points,
-    cerfon_flux_scale
+    cerfon_basis_dxy, cerfon_psi_p, cerfon_dpsi_p_dx, cerfon_d2psi_p_dx2, cerfon_psihat, cerfon_grad, cerfon_hessian,
+    cerfon_solve_coeffs, cerfon_find_axis, cerfon_shape_points
 
 # Cerfon-Freidberg diverted analytic equilibrium (eq_type = "cerfon").
 #
@@ -64,7 +63,8 @@ end
             c, (xn, yn) = cerfon_solve_coeffs(cfg)
             A = cfg.a_solovev
             p = cerfon_shape_points(cfg)
-            @test cerfon_null_point(cfg) == (xn, yn)
+            # the single null sits below the midplane; the double null returns its upper null
+            @test sign(yn) == (null == "dn" ? 1 : -1)
             # boundary passes through the equatorial points and the null
             @test abs(cerfon_psihat(p.xout, 0.0, c, A)) < 1e-12
             @test abs(cerfon_psihat(p.xin, 0.0, c, A)) < 1e-12
@@ -82,35 +82,35 @@ end
         c, _ = cerfon_solve_coeffs(cfg)
         p = cerfon_shape_points(cfg)
         @test abs(cerfon_psihat(p.xhigh, p.yhigh, c, cfg.a_solovev)) < 1e-12
-        cdn, _ = cerfon_solve_coeffs(CerfonConfig(; null="dn"))
+        cfg_dn = CerfonConfig(; null="dn")
+        cdn, _ = cerfon_solve_coeffs(cfg_dn)
         @test all(abs.(cdn[8:12]) .< 1e-12)
-        @test cerfon_find_axis(CerfonConfig(; null="dn"), cdn, -0.155)[2] ≈ 0 atol = 1e-9
+        @test cerfon_find_axis(cfg_dn, cdn, cfg_dn.a_solovev)[2] ≈ 0 atol = 1e-9
     end
 
-    @testset "the flux map and the F/p profiles satisfy Grad-Shafranov" begin
-        # The strongest invariant available: the tabulated profiles must reproduce the source
-        # of the flux map they are paired with. A sign slip in F² leaves the shape, the nulls
-        # and the q divergence all looking correct while breaking the equilibrium outright,
-        # and only this residual notices.
+    @testset "cerfon_run's F/μ₀p table satisfies Grad-Shafranov with its flux map" begin
+        # Differentiates the profile columns cerfon_run hands downstream, so a sign slip in F² fails here.
         for null in ("lsn", "dn")
             cfg = CerfonConfig(; null=null)
+            run_input = cerfon_run(EquilibriumConfig(; eq_type="cerfon"), cfg)
             c, _ = cerfon_solve_coeffs(cfg)
-            A = cfg.a_solovev
+            A, R0, psio = cfg.a_solovev, cfg.r0, run_input.psio
             xa, ya = cerfon_find_axis(cfg, c, A)
-            P = cerfon_flux_scale(cfg, c, A, xa, ya)
-            R0 = cfg.r0
-            psi_of = (x, y) -> -P * cerfon_psihat(x, y, c, A)
-            # Solov'ev source terms implied by ψ = −P·ψ̂ (see cerfon_run)
-            mu0_dpdpsi = P * (1 - A) / R0^4
-            FdFdpsi = A * P / R0^2
-            for (x, y) in ((0.85, -0.2), (1.05, 0.05), (1.25, 0.3), (0.95, 0.4))
-                h = 2e-4
-                # Δ* in normalized coordinates equals R0² Δ*_(R,Z)
-                dstar =
-                    (psi_of(x + h, y) - 2psi_of(x, y) + psi_of(x - h, y)) / h^2 -
-                    (psi_of(x + h, y) - psi_of(x - h, y)) / (2h) / x +
-                    (psi_of(x, y + h) - 2psi_of(x, y) + psi_of(x, y - h)) / h^2
-                residual = dstar + R0^2 * (mu0_dpdpsi * (R0 * x)^2 + FdFdpsi)
+            P = -psio / cerfon_psihat(xa, ya, c, A)  # flux scale of ψ = −P·ψ̂, recovered from cerfon_run's ψ_axis
+            sq_deriv = deriv1(run_input.sq_in)
+            sq, dsq = zeros(4), zeros(4)
+            for (x, y) in ((0.85, -0.2), (1.1, -0.1), (1.15, 0.2), (0.95, 0.4))
+                psi_norm = 1 - (-P * cerfon_psihat(x, y, c, A)) / psio
+                @test 0 < psi_norm < 1
+                run_input.sq_in(sq, psi_norm)
+                sq_deriv(dsq, psi_norm)
+                # table columns are F and μ₀p against ψ_N = 1 − ψ/psio, so d/dψ = −(1/psio) d/dψ_N
+                mu0_dpdpsi = -dsq[2] / psio
+                FdFdpsi = -sq[1] * dsq[1] / psio
+                gx, _ = cerfon_grad(x, y, c, A)
+                hxx, hyy, _ = cerfon_hessian(x, y, c, A)
+                dstar = -P * (hxx - gx / x + hyy) / R0^2  # Δ*ψ in (R, Z)
+                residual = dstar + mu0_dpdpsi * (R0 * x)^2 + FdFdpsi
                 @test abs(residual) / abs(dstar) < 1e-5
             end
         end
@@ -132,6 +132,8 @@ end
                 etol=1e-8, force_termination=true)
             cfg = CerfonConfig(; null="lsn", mr=256, mz=384, ma=128, q0=1.1)
             pe = setup_equilibrium(eq, cerfon_run(eq, cfg))
+            # the closed-form flux scale must deliver the requested on-axis q
+            @test pe.params.q0 ≈ cfg.q0 rtol = 1e-3
             push!(qedge, pe.profiles.q_spline(last(pe.profiles.xs)))
         end
         @test issorted(qedge)
@@ -147,7 +149,9 @@ end
                 eq = EquilibriumConfig(; eq_type="cerfon", jac_type="pest", grid_type="ldp",
                     psilow=1e-4, psihigh=psihigh, mpsi=128, mtheta=128,
                     etol=1e-8, force_termination=true)
-                pe = setup_equilibrium(eq, cerfon_run(eq, CerfonConfig(; null=null, mr=256, mz=384, ma=128, q0=1.1)))
+                cfg = CerfonConfig(; null=null, mr=256, mz=384, ma=128, q0=1.1)
+                pe = setup_equilibrium(eq, cerfon_run(eq, cfg))
+                @test pe.params.q0 ≈ cfg.q0 rtol = 1e-3
                 pe.profiles.q_spline(last(pe.profiles.xs))
             end
             qs[2] - qs[1]
