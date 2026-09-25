@@ -123,10 +123,17 @@ Finds the key geometric locations of the equilibrium: the magnetic axis (O-point
 and the inboard/outboard separatrix crossings on the midplane. It also updates the
 spline representing the poloidal flux `ψ(R,Z)` based on the new magnetic axis location.
 The returned axis is a root of `∇ψ = 0` that meets the Newton step-size test
-`|δR|, |δZ| ≤ 1e-12 R`. Newton starts from a midplane guess; if it stops on a singular
-Jacobian or the iteration cap, it is restarted with capped steps from a first-derivative
-bisection, the result must be an O-point (`det ∂(B_R,B_Z)/∂(R,Z) > 0`), and a warning reports
-the residual `|B_p|`. Otherwise it is an error.
+`|δR|, |δZ| ≤ 1e-12 R`. Newton starts from a midplane guess, found by marching outward along
+the grid's midplane `Z` until `B_z ≥ 0`; if it stops on a singular Jacobian or the iteration
+cap, it is restarted with capped steps from a first-derivative bisection. On either path the
+axis must
+
+  - lie inside the ψ grid, and inside the R-bracket `[R - ΔR, R]` of the march's last step
+    when the march took at least one step;
+  - be an O-point, `det ∂(B_R,B_Z)/∂(R,Z) > 0`.
+
+After the restart, the residual must also satisfy `|B_p| ≤ 1e-10 B_scale` with
+`B_scale = |ψ₀| / (R_axis (R_max - R_min))`, and a warning reports `|B_p|`. Any violation is an error.
 
 ## Arguments:
 
@@ -153,17 +160,22 @@ function direct_position!(raw_profile::DirectRunInput)
     z = (raw_profile.zmax + raw_profile.zmin) / 2.0
     dr = (raw_profile.rmax - raw_profile.rmin) / 20.0
 
+    r_start = r
+    r_prev = r
     for _ in 1:max_iterations
         direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
         if bfield.bz >= 0.0
             break
         end
+        r_prev = r
         r += dr
     end
 
     # If we never exited early, the loop failed to find bz = 0
     !(bfield.bz >= 0) && error("Took too many iterations to get bz=0.")
     r_march, z_march = r, z
+    # The march brackets the midplane B_z sign change in R only if it took at least one step.
+    has_march_bracket = r_march != r_start
 
     # Newton iteration for the O-point (magnetic axis), where B_r = B_z = 0, with each step capped
     # at `cap`. Every attempt uses the same convergence test on the step size, and returns a status of
@@ -217,17 +229,39 @@ function direct_position!(raw_profile::DirectRunInput)
             "Failed to find magnetic axis: Newton from the midplane guess stopped ($(_stop_reason(status))), " *
             "and the restart from the bisected point ($rb, $zb) stopped ($(_stop_reason(restart_status)))."
         )
-        # An O-point has det ∂(B_R,B_Z)/∂(R,Z) = det(Hess ψ)/R² > 0; an X-point has det < 0.
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
-        det_axis = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
-        residual = hypot(bfield.br, bfield.bz)
-        det_axis > 0 || error(
-            "Failed to find magnetic axis: the restarted Newton converged at (R, Z) = ($r, $z), which is not an O-point " *
-            "(det ∂(B_R,B_Z)/∂(R,Z) = $det_axis ≤ 0, |B_p| = $residual T)."
+    end
+    newton_path = status === :converged ? "Newton from the midplane guess" : "the restarted Newton"
+
+    # The axis must lie on the ψ grid (a root off it is an artifact of spline extrapolation) and, when the
+    # midplane march bracketed the B_z sign change, inside that R-bracket.
+    rmin, rmax, zmin, zmax = raw_profile.rmin, raw_profile.rmax, raw_profile.zmin, raw_profile.zmax
+    (rmin <= r <= rmax && zmin <= z <= zmax) || error(
+        "Failed to find magnetic axis: $newton_path converged at (R, Z) = ($r, $z), outside the ψ grid " *
+        "R ∈ [$rmin, $rmax], Z ∈ [$zmin, $zmax]."
+    )
+    has_march_bracket && !(r_prev <= r <= r_march) && error(
+        "Failed to find magnetic axis: $newton_path converged at (R, Z) = ($r, $z), outside the R-bracket " *
+        "[$r_prev, $r_march] of the B_z sign change found by the midplane march along Z = $z_march."
+    )
+    # An O-point has det ∂(B_R,B_Z)/∂(R,Z) = det(Hess ψ)/R² > 0; an X-point has det < 0.
+    direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+    det_axis = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
+    residual = hypot(bfield.br, bfield.bz)
+    det_axis > 0 || error(
+        "Failed to find magnetic axis: $newton_path converged at (R, Z) = ($r, $z), which is not an O-point " *
+        "(det ∂(B_R,B_Z)/∂(R,Z) = $det_axis ≤ 0, |B_p| = $residual T)."
+    )
+    if status !== :converged
+        # The fallback's step test alone does not certify a root, so also bound |B_p| against a typical poloidal field.
+        axis_residual_rtol = 1e-10
+        b_scale = abs(raw_profile.psio) / (r * (rmax - rmin))
+        residual <= axis_residual_rtol * b_scale || error(
+            "Failed to find magnetic axis: the restarted Newton converged at (R, Z) = ($r, $z) with |B_p| = $residual T, " *
+            "above $axis_residual_rtol × B_scale = $(axis_residual_rtol * b_scale) T, B_scale = |ψ₀|/(R (R_max − R_min))."
         )
         @warn "Newton from the midplane guess stopped ($(_stop_reason(status))); magnetic axis found by restarting Newton " *
-              "from a first-derivative bisection, at (R, Z) = ($r, $z) with |B_p| = $residual T and " *
-              "det ∂(B_R,B_Z)/∂(R,Z) = $det_axis T²/m². Check ψ near the axis in the equilibrium file."
+              "from a first-derivative bisection, at (R, Z) = ($r, $z) with |B_p| = $residual T ($(residual / b_scale) × B_scale) " *
+              "and det ∂(B_R,B_Z)/∂(R,Z) = $det_axis T²/m². Check ψ near the axis in the equilibrium file."
     end
     @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
 
