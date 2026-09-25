@@ -131,6 +131,29 @@ Combines the toroidal outer-region calculation with the two-fluid slab layer mod
 
 ---
 
+> R. Fitzpatrick, "Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation,"
+> *Nuclear Fusion* (2025).
+> DOI: [10.1088/1741-4326/ae4fdd](https://doi.org/10.1088/1741-4326/ae4fdd) (open access: arXiv:2511.07666)
+
+Gives the diffusive-resistive layer width (Eq. 100) and, in Sect. 5.9, restricts the response calculation to the region inside the point where adjacent resonant layers first overlap. Both are implemented by the layer-overlap scan in `src/Tearing/LayerOverlap.jl`, which feeds the `psilim_from_layer_overlap` cap described in [Integration domain truncation](@ref).
+
+---
+
+> R. Fitzpatrick, "Investigation of tearing mode stability near ideal stability boundaries via asymptotic matching techniques,"
+> *Physics of Plasmas* **32**, 062509 (2025).
+> DOI: [10.1063/5.0273568](https://doi.org/10.1063/5.0273568) (arXiv:2503.24184)
+
+The critical island width `W_d` and its short/long-mean-free-path parallel conductivity blend, used for the critical-Δ offset in `src/InnerLayer/SLAYER/LayerParameters.jl`.
+
+---
+
+> J. W. Connor, C. J. Ham, R. J. Hastie, and Y. Q. Liu, "The role of thermal conduction in tearing mode theory,"
+> *Plasma Physics and Controlled Fusion* **57**, 065001 (2015). arXiv:1410.7240
+
+The toroidal (Eq. 59) and large-aspect-ratio (Eq. 61) critical-Δ offsets from finite parallel thermal conduction, building on H. Lütjens, J.-F. Luciani, and X. Garbet, *Physics of Plasmas* **8**, 4267 (2001).
+
+---
+
 ## Kinetic Forces
 
 The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical TRansport Code) formalism.

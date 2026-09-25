@@ -190,7 +190,7 @@ profiles, without an intermediate file round-trip.
     (`:lar`, `:rfitzp`, `:toroidal`). When `nothing` (default), Julia
     derives it per-surface from the equilibrium as
     `dr_val_k = D_R(ψ_k) = E_k + F_k + H_k²`,
-    consistent with Connor-Hastie-Helander 2015 (PPCF 57 065001) Eq. 59
+    consistent with Connor, Ham, Hastie & Liu 2015 (PPCF 57 065001) Eq. 59
     which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar /
     vector / callable to override.
 
@@ -313,7 +313,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         # dr_val: per-surface resistive interchange index D_R = E + F + H²
         # (Glasser-Greene-Johnson 1975). Used by `_solve_dc_tmp` to compute
-        # the χ_‖-matching critical-Δ via Connor-Hastie-Helander 2015 Eq. 59,
+        # the χ_‖-matching critical-Δ via Connor et al. 2015 Eq. 59,
         # which has `(−D_R)` as a multiplier. NOT the Mercier index
         # D_I = E + F + H − 1/4 (see this function's docstring); we use the
         # physically correct D_R here.
@@ -332,8 +332,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             _eval(dr_val, psi)
         end
 
-        # dgeo_val: only used by dc_type=:toroidal (the Connor-Hastie-
-        # Helander 2015 formula). Auto-derivation requires ⟨|∇ψ|²⟩ FSA
+        # dgeo_val: only used by dc_type=:toroidal (the Connor et al.
+        # 2015 formula). Auto-derivation requires ⟨|∇ψ|²⟩ FSA
         # which the current `ResistGeometry` doesn't expose; for now we
         # require an explicit value if the toroidal dc_type is selected.
         dgeo_val_k = if dgeo_val === nothing

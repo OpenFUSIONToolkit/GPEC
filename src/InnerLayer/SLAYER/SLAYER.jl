@@ -55,7 +55,7 @@ include("LayerInputs.jl")
 
 export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear
-export riccati_del_s, slayer_layer_thickness, LayerWidths
+export riccati_del_s, slayer_layer_thickness, slayer_algebraic_widths, LayerWidths
 export surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs
 export NeoResistivityModel, SpitzerModel, SpitzerHarmModel, SauterNeoModel, RedlNeoModel
 

@@ -57,6 +57,101 @@ const CORE_MODEL_PSI_MAX = 0.03
 const EDGE_MODEL_PSI_MIN = 0.9
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
+# --- shared separatrix edge q-law -------------------------------------------------------------
+# Minimum knots in the edge band before a fit is attempted.
+const EDGE_FIT_MIN_KNOTS = 4
+# Weak absolute backstop against a fit that describes nothing at all. It is deliberately not a
+# discriminator: no absolute r2 separates diverted from limited edges (real reconstructions fit the
+# log law at 0.929-0.977, the limited a10 deck at 0.972), so the discrimination is the relative
+# r2_log > r2_linear comparison, and the pathology guard is the shear consistency below.
+const EDGE_FIT_MIN_R2 = 0.5
+# `A` in q = q_bar + A*(ln(1-psi) - u_bar) is the local logarithmic shear, so the fit must satisfy
+# A = -(1-psi)*q'(psi) on the knots it was fitted to. Accept a factor of this much disagreement
+# between the fitted slope and the measured one; a fit driven by edge noise, or one describing an
+# edge that does not actually diverge, misses by far more.
+const EDGE_FIT_SHEAR_RATIO = 2.0
+
+# Least-squares slope and coefficient of determination for y = a + b*x.
+function _linfit_r2(x::Vector{Float64}, y::Vector{Float64})
+    x_bar = sum(x) / length(x)
+    y_bar = sum(y) / length(y)
+    sxx = sum((x .- x_bar) .^ 2)
+    sxx > 0 || return (NaN, NaN, NaN, NaN)
+    b = sum((x .- x_bar) .* (y .- y_bar)) / sxx
+    ss_res = sum((y .- (y_bar .+ b .* (x .- x_bar))) .^ 2)
+    ss_tot = sum((y .- y_bar) .^ 2)
+    r2 = ss_tot > 0 ? 1 - ss_res / ss_tot : NaN
+    return (b, r2, x_bar, y_bar)
+end
+
+"""
+    edge_q_law(equil; psi_max, psi_min=EDGE_MODEL_PSI_MIN, min_knots=EDGE_FIT_MIN_KNOTS,
+               min_r2=EDGE_FIT_MIN_R2, shear_ratio=EDGE_FIT_SHEAR_RATIO)
+        -> nothing | (; A, q_bar, u_bar, n_knots, r2_log, r2_linear)
+
+Least-squares fit of the separatrix edge law `q = q̄ + A·(ln(1−ψ) − ū)` over the equilibrium's
+outer knots — the single shared statement of that model, used both by the grid-refinement edge
+density floor and by the resistive-layer overlap scan's out-of-grid surface search.
+
+Returns `nothing` when the diverging model does **not** describe this equilibrium's edge, so a
+plasma with finite edge q is never extrapolated as if q blew up:
+
+  - fewer than `min_knots` knots in the band;
+  - `A ≥ 0`, i.e. q not rising toward ψ = 1;
+  - `r2_log < min_r2` — a weak backstop; the log law describes nothing at all;
+  - `r2_log ≤ r2_linear` — a plain linear-in-ψ fit explains the edge q at least as well, which is
+    what a **limited** plasma looks like. This comparison carries no scale and is what separates
+    the shipped limited decks (Solovev 0.760 vs 0.9996 linear; LAR 0.904 vs 0.998) from the
+    diverted ones (DIII-D 0.996 vs 0.865, 0.999 vs 0.594).
+
+This is a test of the **model**, not a topology classification: it asks whether q diverges
+logarithmically here, not whether an x-point exists. Geometric x-point detection is
+[`classify_topology`](@ref), which is a separate concern.
+"""
+function edge_q_law(equil::PlasmaEquilibrium;
+    psi_max::Real=Float64(equil.profiles.xs[end]),
+    psi_min::Real=EDGE_MODEL_PSI_MIN,
+    min_knots::Int=EDGE_FIT_MIN_KNOTS,
+    min_r2::Real=EDGE_FIT_MIN_R2,
+    shear_ratio::Real=EDGE_FIT_SHEAR_RATIO)
+    xs = collect(Float64, equil.profiles.xs)
+    band = findall(x -> x >= psi_min && x < psi_max, xs)
+    if length(band) < min_knots
+        n_tail = max(min_knots, length(xs) ÷ 10)
+        band = filter(i -> xs[i] < psi_max, collect(max(1, length(xs) - n_tail + 1):length(xs)))
+    end
+    length(band) >= min_knots || return nothing
+
+    q = [Float64(equil.profiles.q_spline(xs[i])) for i in band]
+    u = [log(1.0 - xs[i]) for i in band]
+    all(isfinite, u) && all(isfinite, q) || return nothing
+
+    A, r2_log, u_bar, q_bar = _linfit_r2(u, q)
+    _, r2_linear, _, _ = _linfit_r2([xs[i] for i in band], q)
+    (isfinite(A) && A < 0) || return nothing            # q must rise toward the edge
+    (isfinite(r2_log) && r2_log >= min_r2) || return nothing
+    (isfinite(r2_linear) && r2_log > r2_linear) || return nothing
+
+    # Shear consistency: the fitted slope is the local logarithmic shear, so it must match the
+    # profile's own -(1-psi)*q' over the same knots.
+    hint = Ref(1)
+    A_meas = median([-(1.0 - xs[i]) * Float64(equil.profiles.q_deriv(xs[i]; hint=hint)) for i in band])
+    isfinite(A_meas) && A_meas < 0 || return nothing
+    ratio = A / A_meas
+    (ratio >= inv(shear_ratio) && ratio <= shear_ratio) || return nothing
+
+    return (A=A, q_bar=q_bar, u_bar=u_bar, n_knots=length(band), r2_log=r2_log, r2_linear=r2_linear)
+end
+
+"""
+ψ at which the edge law reaches `q_target`; closed form, no root-finding needed.
+"""
+edge_q_law_psi(fit, q_target::Real) = 1.0 - exp(fit.u_bar + (q_target - fit.q_bar) / fit.A)
+
+"""
+dq/dψ from the edge law: q = q̄ + A·ln(1−ψ) + const ⇒ dq/dψ = −A/(1−ψ).
+"""
+edge_q_law_dqdpsi(fit, psi::Real) = -fit.A / (1.0 - psi)
 # Rational-surface bracketing (Δ′ robustness). The ideal-MHD Δ′ asymptotic matching samples the
 # cubic equilibrium splines' 2nd/3rd derivatives across each rational ψ_s over the matching stencil
 # [ψ_s − dpsi, ψ_s + dpsi], dpsi = singfac_min/|n·q′|. A cubic 3rd derivative is piecewise constant
@@ -248,10 +343,15 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
     # nodal data of the smallest flux surfaces is dominated by integration and axis
     # extrapolation error, so measured curvature is not trusted below the core split.
     dlog = (4.0 * tau)^(1 / 3)
+    # The edge floor encodes the DIVERGING edge law q ≈ -A·ln(1-ψ), so it is applied only where
+    # that model actually describes the equilibrium. A limited plasma has finite edge q and must
+    # not be packed as if q blew up. The density itself stays A-independent (that is the point of
+    # the form: uniform relative q′ error regardless of A) -- the fit supplies validity, not slope.
+    edge_diverges = edge_q_law(equil) !== nothing
     @inbounds for i in 1:n
         if xs[i] <= CORE_MODEL_PSI_MAX
             rho_s[i] = 1.0 / (dlog * xs[i])
-        elseif xs[i] >= EDGE_MODEL_PSI_MIN
+        elseif edge_diverges && xs[i] >= EDGE_MODEL_PSI_MIN
             rho_s[i] = max(rho_s[i], 1.0 / (dlog * (1.0 - xs[i])))
         end
         rho_s[i] = max(rho_s[i], 1.0 / H_TARGET_MAX)
