@@ -440,6 +440,40 @@ end
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
+
+        # Case 5: both crossings of q = 2 on q = (2 - ε) + a(ψ - ψ0)², at ψ0 ∓ √(ε/a) with q' = ∓2√(aε).
+        # With n = 1 their standoffs singfac_min/|q'| overlap exactly when 2ε ≤ singfac_min.
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ctrl = FFS.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-4)
+        function reverse_shear_pair(ε; a=3.0, psi0=0.4)
+            intr = FFS.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+            dpsi, q1 = sqrt(ε / a), 2 * sqrt(a * ε)
+            intr.sing = [FFS.SingType(; psifac=psi0 - dpsi, n=[1], m=[2], q=2.0, q1=-q1), FFS.SingType(; psifac=psi0 + dpsi, n=[1], m=[2], q=2.0, q1=q1)]
+            intr.msing = 2
+            intr.psilim = 1.0
+            intr.mlow = 1
+            intr.mhigh = 3
+            odet = FFS.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+            odet.psifac = 0.0
+            return odet, intr
+        end
+        odet, intr = reverse_shear_pair(1e-3)
+        chunks = FFS.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 3
+        @test all(c.needs_crossing for c in chunks[1:2])
+        odet, intr = reverse_shear_pair(1e-5)
+        @test_throws ErrorException FFS.chunk_el_integration_bounds(odet, ctrl, intr)
+
+        # Case 6: a surface tangent to q_min (q' = 0) has an unbounded standoff.
+        intr = FFS.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        intr.sing = [FFS.SingType(; psifac=0.4, n=[1], m=[2], q=2.0, q1=0.0)]
+        intr.msing = 1
+        intr.psilim = 1.0
+        intr.mlow = 1
+        intr.mhigh = 3
+        odet = FFS.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+        @test_throws ErrorException FFS.chunk_el_integration_bounds(odet, ctrl, intr)
     end
 
     @testset "EdgeScanState" begin
