@@ -160,7 +160,10 @@ end
 """
 Evaluate ψ̂ = ψ_p + Σ cᵢψᵢ at normalized coordinates.
 """
-cerfon_psihat(x, y, c, A) = cerfon_psi_p(x, A) + sum(c[i] * cerfon_basis(x, y)[i] for i in 1:12)
+function cerfon_psihat(x, y, c, A)
+    b = cerfon_basis(x, y)
+    return cerfon_psi_p(x, A) + sum(c[i] * b[i] for i in 1:12)
+end
 
 """
 ∇ψ̂ = (∂ψ̂/∂x, ∂ψ̂/∂y) at normalized coordinates.
@@ -184,31 +187,24 @@ end
 """
     cerfon_shape_points(cfg)
 
-Boundary reference points in normalized coordinates: the outer and inner equatorial points,
-the high point, and the nominal null position. `xsep` displaces the null(s) beyond the high
-point so the boundary closes through them.
+Boundary reference points in normalized coordinates: the outer and inner equatorial points
+and the high point. The null position comes from `cerfon_null_point`.
 """
 function cerfon_shape_points(cfg::CerfonConfig)
-    ε, κ, δ, s = cfg.epsilon, cfg.kappa, cfg.delta, cfg.xsep
-    return (xout=1 + ε, xin=1 - ε,
-        xhigh=1 - δ * ε, yhigh=κ * ε,
-        xnull=1 - s * δ * ε, ynull=s * κ * ε)
+    ε, κ, δ = cfg.epsilon, cfg.kappa, cfg.delta
+    return (xout=1 + ε, xin=1 - ε, xhigh=1 - δ * ε, yhigh=κ * ε)
 end
 
 """
     cerfon_null_point(cfg)
 
-Position `(x, y)` of the magnetic null to place on the boundary.
-
-Nulls sit on the shaped contour `x = 1 + xsep·ε·cos(θ + α sin θ)`, `y = xsep·κ·ε·sin θ` with
-`α = asin δ`, so `θ = ∓π/2` reproduces the usual `(1 − xsep·δ·ε, ∓xsep·κ·ε)`. A double null
-returns only the upper null — up-down symmetry supplies the lower one.
+Position `(x, y) = (1 − xsep·δ·ε, ±xsep·κ·ε)` of the magnetic null placed on the boundary,
+`xsep` beyond the high point: below the midplane for `"lsn"`, above it for `"dn"`, whose lower
+null follows from up-down symmetry.
 """
 function cerfon_null_point(cfg::CerfonConfig)
-    ε, κ, δ = cfg.epsilon, cfg.kappa, cfg.delta
-    α = asin(δ)
-    θ = cfg.null == "dn" ? π / 2 : -π / 2
-    return (1 + cfg.xsep * ε * cos(θ + α * sin(θ)), cfg.xsep * κ * ε * sin(θ))
+    ε, κ, δ, s = cfg.epsilon, cfg.kappa, cfg.delta, cfg.xsep
+    return (1 - s * δ * ε, (cfg.null == "dn" ? 1 : -1) * s * κ * ε)
 end
 
 """
@@ -219,6 +215,8 @@ function cerfon_curvature_coeffs(cfg::CerfonConfig)
     α = asin(δ)
     return (-(1 + α)^2 / (ε * κ^2), (1 - α)^2 / (ε * κ^2), -κ / (ε * cos(α)^2))
 end
+
+const CERFON_BC_COND_WARN = 1e12  # condition number of the boundary-condition matrix above which a warning is issued
 
 """
     cerfon_solve_coeffs(cfg)
@@ -238,17 +236,12 @@ primary null. The remaining conditions differ:
     equatorial tangent conditions are dropped — imposing them here would make the system
     singular. The boundary reaches the nulls at ±`xsep`·κ·ε, so the realized elongation is
     `xsep`·κ rather than κ.
-    No snowflake topology is offered, for two independent reasons. An *exact* second-order null
-    additionally requires the Grad-Shafranov source `(1 − A)x² + A` to vanish at the null,
-    fixing `A = x_null²/(x_null² − 1)`; that pins the null to the surface where the toroidal
-    current density reverses sign, and the closed flux surfaces detach from it entirely — the
-    solution exists but confines nothing out to the null. A snowflake-minus (a secondary null
-    just outside the separatrix) does solve and gives a well-shaped plasma, but the resulting
-    near-separatrix surfaces are not star-shaped about the axis, so the ray-Newton flux-surface
-    tracer in `direct_fieldline_int` fails on them. Supporting it would need a tracer that can
-    follow a non-star-shaped contour.
+
+No snowflake is offered: an exact second-order null detaches the closed surfaces from it, and a
+snowflake-minus is not star-shaped about the axis, which the direct flux-surface tracer requires.
 """
 function cerfon_solve_coeffs(cfg::CerfonConfig)
+    cfg.null in ("lsn", "dn") || error("Unknown Cerfon null type \"$(cfg.null)\"; expected \"lsn\" or \"dn\".")
     p = cerfon_shape_points(cfg)
     N1, N2, N3 = cerfon_curvature_coeffs(cfg)
     xn, yn = cerfon_null_point(cfg)
@@ -285,10 +278,17 @@ function cerfon_solve_coeffs(cfg::CerfonConfig)
         set!(cerfon_basis_dyy(p.xin, 0.0) .+ N2 .* cerfon_basis_dx(p.xin, 0.0), -N2 * cerfon_dpsi_p_dx(p.xin, A))
     end
 
+    @assert row == 12 "Cerfon boundary-condition system has $row rows, expected 12"
     κM = cond(M)
-    κM > 1e12 && @warn "Cerfon boundary-condition matrix is poorly conditioned (cond = $(@sprintf("%.2e", κM))); check the requested shape."
+    κM > CERFON_BC_COND_WARN && @warn "Cerfon boundary-condition matrix is poorly conditioned (cond = $(@sprintf("%.2e", κM))); check the requested shape."
     return M \ b, (xn, yn)
 end
+
+const CERFON_AXIS_SCAN_NX = 81            # x points in the coarse ψ̂-minimum scan
+const CERFON_AXIS_SCAN_NY = 121           # y points in the coarse ψ̂-minimum scan
+const CERFON_AXIS_NEWTON_MAXITER = 100    # Newton iteration cap for the axis polish
+const CERFON_AXIS_NEWTON_TOL = 1e-13      # Newton step size, in normalized units, below which the axis is converged
+const CERFON_AXIS_DET_FLOOR = 1e-20       # |det Hessian| below which the Newton step is treated as singular
 
 """
     cerfon_find_axis(cfg, c, A)
@@ -302,11 +302,12 @@ start can walk out of the domain (ψ̂ contains `ln x`, so `x ≤ 0` is not eval
 """
 function cerfon_find_axis(cfg::CerfonConfig, c, A)
     p = cerfon_shape_points(cfg)
-    ylo = min(-p.ynull, -p.yhigh)
-    yhi = max(p.ynull, p.yhigh)
+    ynull = abs(cerfon_null_point(cfg)[2])
+    ylo = min(-ynull, -p.yhigh)
+    yhi = max(ynull, p.yhigh)
 
     x, y, best = 1.0, 0.0, Inf
-    for xs in range(p.xin, p.xout; length=81), ys in range(ylo, yhi; length=121)
+    for xs in range(p.xin, p.xout; length=CERFON_AXIS_SCAN_NX), ys in range(ylo, yhi; length=CERFON_AXIS_SCAN_NY)
         v = cerfon_psihat(xs, ys, c, A)
         if v < best
             best, x, y = v, xs, ys
@@ -314,24 +315,23 @@ function cerfon_find_axis(cfg::CerfonConfig, c, A)
     end
 
     converged = false
-    for _ in 1:100
+    for _ in 1:CERFON_AXIS_NEWTON_MAXITER
         gx, gy = cerfon_grad(x, y, c, A)
         hxx, hyy, hxy = cerfon_hessian(x, y, c, A)
         det = hxx * hyy - hxy^2
-        abs(det) < 1e-20 && error("Singular Hessian while locating the Cerfon magnetic axis at ($x, $y).")
+        abs(det) < CERFON_AXIS_DET_FLOOR && error("Singular Hessian while locating the Cerfon magnetic axis at ($x, $y).")
         dx = -(hyy * gx - hxy * gy) / det
         dy = -(hxx * gy - hxy * gx) / det
-        # Cap the step at the scan cell size so a bad Hessian cannot throw the iterate out of
-        # the domain; near the axis the steps are far smaller than this and the cap is inert.
-        scale = min(1.0, (p.xout - p.xin) / 80 / max(abs(dx), abs(dy), eps()))
+        # Cap the step at one scan cell so a bad Hessian cannot throw the iterate out of the domain.
+        scale = min(1.0, (p.xout - p.xin) / (CERFON_AXIS_SCAN_NX - 1) / max(abs(dx), abs(dy), eps()))
         x += scale * dx
         y += scale * dy
-        if abs(scale * dx) < 1e-13 && abs(scale * dy) < 1e-13
+        if abs(scale * dx) < CERFON_AXIS_NEWTON_TOL && abs(scale * dy) < CERFON_AXIS_NEWTON_TOL
             converged = true
             break
         end
     end
-    converged || error("Failed to locate the Cerfon magnetic axis after 100 Newton iterations.")
+    converged || error("Failed to locate the Cerfon magnetic axis after $CERFON_AXIS_NEWTON_MAXITER Newton iterations.")
     return x, y
 end
 
@@ -369,9 +369,6 @@ field-line integration, as for the other direct-path equilibria.
 """
 function cerfon_run(equil_inputs::EquilibriumConfig, cerfon_inputs::CerfonConfig)
     cfg = cerfon_inputs
-    cfg.null in ("lsn", "dn") ||
-        error("Unknown Cerfon null type \"$(cfg.null)\"; expected \"lsn\" or \"dn\".")
-
     c, (xn, yn) = cerfon_solve_coeffs(cfg)
     A = cfg.a_solovev
     xa, ya = cerfon_find_axis(cfg, c, A)
@@ -388,13 +385,12 @@ function cerfon_run(equil_inputs::EquilibriumConfig, cerfon_inputs::CerfonConfig
     sqfs = zeros(cfg.ma + 1, 4)
     for (i, pn) in enumerate(psi_norm)
         psi = psio * (1 - pn)
-        # F² = F_edge² − 2CAψ/R₀² with C = −P, i.e. +2APψ/R₀². For A < 0 this makes the
-        # plasma diamagnetic. The opposite sign is not a cosmetic 3% shift in F — it breaks
-        # Grad-Shafranov outright, so `runtests_cerfon.jl` checks the residual directly.
+        # F² = F_edge² + 2APψ/R₀² (FF′ = −CA/R₀², C = −P); A < 0 is diamagnetic.
         f2 = (cfg.r0 * cfg.b0)^2 + 2 * A * P * psi / cfg.r0^2
         f2 <= 0 && error("Cerfon toroidal field vanishes at ψ_N = $pn (F² = $f2); reduce q0 or |a_solovev|.")
         sqfs[i, 1] = sqrt(f2)
         sqfs[i, 2] = P * (1 - A) * psi / cfg.r0^4
+        sqfs[i, 4] = sqrt(pn)
     end
     sq_in = cubic_interp(psi_norm, Series(sqfs); extrap=ExtendExtrap())
 
@@ -404,7 +400,7 @@ function cerfon_run(equil_inputs::EquilibriumConfig, cerfon_inputs::CerfonConfig
     m = cfg.box_margin * cfg.epsilon
     rmin = cfg.r0 * (p.xin - m)
     rmax = cfg.r0 * (p.xout + m)
-    ztop = cfg.r0 * (cfg.null == "dn" ? p.ynull + m : p.yhigh + m)
+    ztop = cfg.r0 * (cfg.null == "dn" ? abs(yn) + m : p.yhigh + m)
     zbot = cfg.r0 * (-abs(yn) - m)
 
     r = [rmin + i * (rmax - rmin) / cfg.mr for i in 0:cfg.mr]

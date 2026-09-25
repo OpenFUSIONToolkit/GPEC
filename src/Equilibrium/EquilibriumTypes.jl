@@ -356,7 +356,8 @@ surface and carries a magnetic null, so `q → ∞` as ψ_N → 1 and no `psihig
   - `xsep`: places the null(s) at `(1 − xsep·δ·ε, ±xsep·κ·ε)`, just beyond the high point
   - `box_margin`: `ψ(R,Z)` box padding beyond the boundary, in units of ε. Keep it small —
     the `ψ = 0` level set also contains the divertor legs, and the midplane separatrix
-    search can latch onto one of them if the box reaches too far
+    search can latch onto one of them if the box reaches too far. Known limitation: the
+    private-flux region below the X-point also has `ψ > 0` inside the box, so correctness rests on this margin
 """
 @kwdef mutable struct CerfonConfig
     mr::Int = 256               # number of radial grid zones in the tabulated ψ(R,Z) map
