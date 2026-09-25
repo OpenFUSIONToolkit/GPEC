@@ -30,6 +30,10 @@ How strictly a quantity must reproduce, and why.
 
 A quantity's class comes from its case file (an explicit `class` key, else `infer_class`), never
 from the golden file, so demoting a gate to a non-gating class is a reviewed case-file change.
+
+A gating entry's `atol` must be 0 unless its golden value contains an exact zero (a scalar equal to
+0, or an array element whose every component is 0). Everywhere else the relative test is the whole
+gate; an absolute floor is only for structural zeros, where the relative test is meaningless.
 """
 const TOLERANCE_CLASSES = ("topological", "equilibrium_scalar", "physics_converged", "diagnostic", "unconverged")
 
@@ -89,6 +93,20 @@ end
 
 is_gating(g::GoldenValue) = g.class in GATING_CLASSES
 
+_is_exact_zero(x) = x isa Number ? x == 0 : (x isa Vector && !isempty(x) && all(_is_exact_zero, x))
+
+"""
+True when a value holds an exact zero at the granularity `compare_to_golden` judges it: a zero
+scalar, or an array element (a number, or a nested row or complex pair) that is zero throughout.
+"""
+function has_exact_zero(value_type, value_real, value_int, value_text)
+    value_type == "real" && return value_real !== nothing && value_real == 0.0
+    value_type == "integer" && return value_int !== nothing && value_int == 0
+    value_type == "json_array" && value_text !== nothing && return any(_is_exact_zero, JSON.parse(value_text; allownan=true))
+    return false
+end
+has_exact_zero(g::GoldenValue) = has_exact_zero(g.value_type, g.value_real, g.value_int, g.value_text)
+
 """
 True when a tolerance is not backed by a recorded measurement, i.e. any basis other than "measured".
 """
@@ -108,6 +126,8 @@ function validate_golden_value(g::GoldenValue, context::AbstractString)
     if is_gating(g)
         (isfinite(g.rtol) && g.rtol >= 0 && isfinite(g.atol) && g.atol >= 0) ||
             error("$context: gating quantity '$(g.name)' needs a finite, non-negative rtol and atol (got rtol=$(g.rtol), atol=$(g.atol))")
+        g.atol == 0 || has_exact_zero(g) ||
+            error("$context: gating quantity '$(g.name)' has atol $(g.atol) but no exact zero in its value; atol is only for structural zeros")
         for (label, m) in (("platform_spread", g.platform_spread), ("plateau_drift", g.plateau_drift))
             isfinite(m) && g.rtol < m &&
                 error(
@@ -123,6 +143,13 @@ end
 
 """
 Provenance for a whole golden file: what produced these numbers and why they last changed.
+
+## Fields
+
+  - `exceeded` — for each gating quantity whose re-pin fell outside its previous tolerance (allowed
+    only with `--accept-exceeding`), a table of `previous_version`, `previous` (the old value),
+    `deviation` (as `compare_to_golden` reports it; NaN on a type change), `previous_rtol` and
+    `previous_atol`; written as `[meta.exceeded.<name>]` so the git diff shows each accepted move
 """
 struct GoldenMeta
     case::String
@@ -135,7 +162,11 @@ struct GoldenMeta
     manifest_sha::String
     nthreads::Int
     blas_threads::Int
+    exceeded::Dict{String,Any}
 end
+
+GoldenMeta(case, golden_version, generated_at, commit, reason, julia_version, os_arch, manifest_sha, nthreads, blas_threads) =
+    GoldenMeta(case, golden_version, generated_at, commit, reason, julia_version, os_arch, manifest_sha, nthreads, blas_threads, Dict{String,Any}())
 
 golden_path(case_name::AbstractString) = joinpath(GOLDEN_DIR, "$(case_name).toml")
 
@@ -159,7 +190,8 @@ function load_golden(case_name::AbstractString)
         get(m, "os_arch", ""),
         get(m, "manifest_sha", ""),
         Int(get(m, "nthreads", -1)),
-        Int(get(m, "blas_threads", -1))
+        Int(get(m, "blas_threads", -1)),
+        Dict{String,Any}(get(m, "exceeded", Dict{String,Any}()))
     )
     values = Dict{String,GoldenValue}()
     for (name, v) in get(data, "values", Dict{String,Any}())
@@ -216,6 +248,7 @@ function save_golden(meta::GoldenMeta, values::Dict{String,GoldenValue})
             "blas_threads" => meta.blas_threads
         )
     )
+    isempty(meta.exceeded) || (out["meta"]["exceeded"] = meta.exceeded)
     vals = Dict{String,Any}()
     for (name, g) in values
         entry = Dict{String,Any}(
@@ -463,11 +496,39 @@ function report_golden_check(db::SQLite.DB, case_spec::CaseSpec, commit_hash::St
 end
 
 """
-Uncommitted changes to tracked files under `repo_root`, ignoring `exclude_dir` (the goldens themselves).
+Directories, relative to the repository root, whose untracked files could change a golden run's result.
 """
-function uncommitted_changes(repo_root::AbstractString, exclude_dir::AbstractString)
+const GOLDEN_SOURCE_DIRS = ("examples", "src", "regression-harness/cases")
+
+"""
+Changes that the recorded commit would not reproduce: uncommitted changes to tracked files under
+`repo_root`, ignoring `exclude_dir` (the goldens themselves), plus untracked files under `source_dirs`.
+"""
+function uncommitted_changes(repo_root::AbstractString, exclude_dir::AbstractString; source_dirs=GOLDEN_SOURCE_DIRS)
     rel = relpath(exclude_dir, repo_root)
-    return String(strip(read(`git -C $repo_root status --porcelain --untracked-files=no -- . ":(exclude)$rel"`, String)))
+    tracked = strip(read(`git -C $repo_root status --porcelain --untracked-files=no -- . ":(exclude)$rel"`, String))
+    status = read(`git -C $repo_root status --porcelain --untracked-files=all -- $(collect(source_dirs))`, String)
+    untracked = filter(l -> startswith(l, "??"), split(status, '\n'))
+    return String(strip(join([tracked; untracked], '\n')))
+end
+
+"""
+Gating entries of `existing` whose regenerated value in `values` falls outside the old tolerance,
+as `name => Dict` tables ready for `GoldenMeta.exceeded`. A value-type change always counts.
+"""
+function exceeding_changes(existing::Dict{String,GoldenValue}, values::Dict{String,GoldenValue}, previous_version::Int)
+    exceeded = Dict{String,Any}()
+    for (name, new) in values
+        old = get(existing, name, nothing)
+        (old === nothing || !is_gating(old)) && continue
+        q = (value_real=new.value_real, value_int=new.value_int, value_text=new.value_text, value_type=new.value_type)
+        passed, dev, _ = compare_to_golden(q, old)
+        passed && continue
+        exceeded[name] = Dict{String,Any}("previous_version" => previous_version,
+            "previous" => something(old.value_real, old.value_int, old.value_text, ""),
+            "deviation" => dev, "previous_rtol" => old.rtol, "previous_atol" => old.atol)
+    end
+    return exceeded
 end
 
 """
@@ -476,17 +537,20 @@ Regenerate a case's golden file from a completed run, reporting what moved.
 Prints an old→new delta for every quantity whose value or class changed, flagging any move that
 the old tolerance would have failed, so the diff a reviewer sees in git comes with the size and
 significance of each move. Refuses a working tree with uncommitted changes outside the golden
-directory, because the recorded commit is what a reviewer uses to reproduce a disputed number.
+directory, or untracked files under `GOLDEN_SOURCE_DIRS`, because the recorded commit is what a
+reviewer uses to reproduce a disputed number. Refuses a re-pin in which any gating quantity leaves
+its old tolerance unless `accept_exceeding`, which records each such move in `[meta.exceeded]`.
 """
 function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash::String,
-    reason::String, repo_root::String)
+    reason::String, repo_root::String; accept_exceeding::Bool=false)
     info = get_run_info(db, commit_hash, case_spec.name)
     (info === nothing || !info.success) && error("Cannot update goldens for '$(case_spec.name)': the run did not succeed")
     if commit_hash == LOCAL_REF
         dirty = uncommitted_changes(repo_root, GOLDEN_DIR)
         isempty(dirty) || error(
-            "Cannot update goldens for '$(case_spec.name)': the working tree has uncommitted " *
-            "changes, so the recorded commit would not reproduce these values. Commit first.\n$dirty"
+            "Cannot update goldens for '$(case_spec.name)': the working tree has uncommitted changes " *
+            "or untracked source files, so the recorded commit would not reproduce these values. " *
+            "Commit (or remove) them first.\n$dirty"
         )
     end
 
@@ -504,12 +568,13 @@ function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash:
     existing = previous === nothing ? nothing : previous.values
     values = build_golden_values(extracted, case_spec.quantities, existing)
 
+    exceeded = existing === nothing ? Dict{String,Any}() : exceeding_changes(existing, values, previous.meta.golden_version)
     fp = info.fingerprint
     meta = GoldenMeta(case_spec.name,
         previous === nothing ? 1 : previous.meta.golden_version + 1,
         Dates.format(Dates.now(), "yyyy-mm-dd"),
         strip(read(`git -C $repo_root rev-parse --short $(commit_hash == LOCAL_REF ? "HEAD" : commit_hash)`, String)),
-        reason, fp.julia_version, fp.os_arch, fp.manifest_sha, fp.nthreads, fp.blas_threads)
+        reason, fp.julia_version, fp.os_arch, fp.manifest_sha, fp.nthreads, fp.blas_threads, exceeded)
 
     println()
     println("Golden update: $(case_spec.name)  (v$(previous === nothing ? 0 : previous.meta.golden_version) → v$(meta.golden_version))")
@@ -535,6 +600,15 @@ function update_golden_from_run(db::SQLite.DB, case_spec::CaseSpec, commit_hash:
             line = describe_golden_change(old, g)
             line === nothing || println(@sprintf("  %-34s %s", name, line))
         end
+    end
+    if !isempty(exceeded)
+        names = join(sort(collect(keys(exceeded))), ", ")
+        accept_exceeding || error(
+            "Refusing to re-pin '$(case_spec.name)': $(length(exceeded)) gating quantity/quantities moved " *
+            "outside the old tolerance ($names). If --reason explains the move, re-run with --accept-exceeding; " *
+            "the old values and deviations are then recorded under [meta.exceeded]."
+        )
+        println("  Accepted $(length(exceeded)) move(s) beyond the old tolerance, recorded under [meta.exceeded]: $names")
     end
     path = save_golden(meta, values)
     println("Wrote $path  ($(length(values)) quantities)")
@@ -613,6 +687,8 @@ function build_golden_values(extracted::Vector{ExtractedQuantity}, specs::Vector
             rtol, atol, basis = prior.rtol, prior.atol, prior.tolerance_basis
             drift, spread, at = prior.plateau_drift, prior.platform_spread, prior.converged_at
         end
+        # An absolute floor carried from a zero value is dropped once the value is no longer zero.
+        class in GATING_CLASSES && !has_exact_zero(eq.value_type, eq.value_real, eq.value_int, eq.value_text) && (atol = 0.0)
         values[eq.name] = GoldenValue(eq.name, eq.value_type, eq.value_real, eq.value_int,
             eq.value_text, rtol, atol, class, basis, drift, spread, at)
     end

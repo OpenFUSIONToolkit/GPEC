@@ -134,7 +134,11 @@ Options:
     --check                Run the working tree and compare against the committed golden values
                            (regression-harness/golden/<case>.toml). No CI workflow runs it yet.
     --update-golden        Regenerate the golden values from a fresh run. Requires --cases and
-                           --reason, and refuses a working tree with uncommitted changes.
+                           --reason, and refuses a working tree with uncommitted changes or with
+                           untracked files under examples/, src/ or regression-harness/cases/.
+    --accept-exceeding     With --update-golden, allow a re-pin in which a gating quantity moved
+                           outside its old tolerance (refused otherwise). Each such move's old
+                           value and deviation is recorded under [meta.exceeded] in the golden file.
     --reason "..."         Why the goldens changed. Mandatory with --update-golden: a golden
                            change is a claim about physics that a reviewer has to evaluate.
     --help                 Print this help message
@@ -189,7 +193,9 @@ Examples:
 """
 
 function main(args=ARGS)
-    opts = parse_args(args)
+    # Kept out of CLIOptions so this flag needs no change to the shared option struct.
+    accept_exceeding = "--accept-exceeding" in args
+    opts = parse_args(filter(!=("--accept-exceeding"), args))
 
     if opts.help
         print(HELP_TEXT)
@@ -232,6 +238,9 @@ function main(args=ARGS)
         if opts.update_golden && (opts.reason === nothing || isempty(strip(opts.reason)))
             error("--update-golden requires --reason \"...\": a golden change is a claim about physics, " *
                   "and the reviewer needs to know what changed and why")
+        end
+        if accept_exceeding && !opts.update_golden
+            error("--accept-exceeding only applies to --update-golden")
         end
         if opts.update_golden && isempty(opts.cases)
             error("--update-golden requires --cases: goldens are regenerated one deliberate case at a time")
@@ -297,7 +306,7 @@ function main(args=ARGS)
 
             if opts.update_golden
                 update_golden_from_run(db, case_spec, resolved_refs[1].commit_hash,
-                    String(opts.reason), REPO_ROOT)
+                    String(opts.reason), REPO_ROOT; accept_exceeding=accept_exceeding)
             elseif opts.check
                 summary = report_golden_check(db, case_spec, resolved_refs[1].commit_hash)
                 n_golden_fail += summary.n_fail

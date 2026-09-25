@@ -163,7 +163,8 @@ extracted_q(name; value_real=nothing, value_int=nothing, value_text=nothing, val
             basis="measured", drift=1e-8, spread=2e-7, at="mpsi=1024"))
         vals2 = build_golden_values([extracted_q("x"; value_real=1.0 + 1e-7)], [spec], prior2)
         @test vals2["x"].value_real == 1.0 + 1e-7
-        @test vals2["x"].rtol == 3e-7 && vals2["x"].atol == 1e-12
+        # An absolute floor on a nonzero value is not a legal gate, so it is dropped rather than carried.
+        @test vals2["x"].rtol == 3e-7 && vals2["x"].atol == 0.0
         @test vals2["x"].tolerance_basis == "measured"
         @test vals2["x"].plateau_drift == 1e-8 && vals2["x"].platform_spread == 2e-7
 
@@ -174,6 +175,11 @@ extracted_q(name; value_real=nothing, value_int=nothing, value_text=nothing, val
         @test vals5["x"].rtol == 3e-7 && vals5["x"].atol == 0.0
         @test vals5["x"].tolerance_basis == "provisional" && is_provisional(vals5["x"])
         @test isnan(vals5["x"].plateau_drift) && isnan(vals5["x"].platform_spread) && isempty(vals5["x"].converged_at)
+
+        # A structural zero keeps its absolute floor across a re-pin that stays zero.
+        priorz = Dict("z" => golden_val("z"; value_type="json_array", value_text="[0.0,1.0]", atol=1e-10))
+        valsz = build_golden_values([extracted_q("z"; value_text="[0.0,1.0000001]", value_type="json_array")], [qspec("z"; type="real_array")], priorz)
+        @test valsz["z"].atol == 1e-10
         # A measured tolerance wider than the class default is tightened back to the default.
         prior5 = Dict("x" => golden_val("x"; value_real=1.0, rtol=1e-4, basis="measured", drift=5e-5))
         vals6 = @test_logs (:warn, r"beyond its old tolerance") build_golden_values(
@@ -263,6 +269,49 @@ value = 1.0
         )
         @test_throws ErrorException load_golden("below_drift")
 
+        # atol on a gating entry is only for structural zeros.
+        write(
+            golden_path("atol_nonzero"),
+            """
+[values.x]
+class = "physics_converged"
+rtol = 1.0e-6
+atol = 1.0e-12
+value = 1.0
+"""
+        )
+        @test_throws ErrorException load_golden("atol_nonzero")
+        write(
+            golden_path("atol_zeros"),
+            """
+[values.x]
+class = "physics_converged"
+rtol = 1.0e-6
+atol = 1.0e-12
+value = 0.0
+
+[values.v]
+class = "physics_converged"
+value_type = "json_array"
+value_text = "[1.0,0.0]"
+rtol = 1.0e-6
+atol = 1.0e-12
+
+[values.c]
+class = "physics_converged"
+value_type = "json_array"
+value_text = "[[1.0,0.0],[0.0,0.0]]"
+rtol = 1.0e-6
+atol = 1.0e-12
+"""
+        )
+        @test length(load_golden("atol_zeros").values) == 3
+        # A complex pair with only one zero component is not a structural zero.
+        @test !has_exact_zero(golden_val("c"; value_type="json_array", value_text="[[1.0,0.0],[2.0,0.5]]"))
+        @test has_exact_zero(golden_val("n"; value_type="integer", value_int=0))
+        @test_throws ErrorException save_golden(GoldenMeta("atol_save", 1, "", "", "", "", "", "", 1, 1),
+            Dict("x" => golden_val("x"; value_real=2.0, atol=1e-9)))
+
         # "measured" must be backed by a recorded measurement.
         write(
             golden_path("unbacked"),
@@ -315,6 +364,63 @@ value = 12.5
         @test back.values["a"].plateau_drift == 1e-8 && back.values["a"].platform_spread == 1e-7
         @test back.values["n"].value_int == 7 && back.values["n"].class == "topological"
         @test back.values["v"].value_text == "[1.0,2.0]"
+        @test isempty(back.meta.exceeded)
+
+        # Accepted moves beyond the old tolerance round-trip through [meta.exceeded].
+        exc = exceeding_changes(Dict("a" => golden_val("a"; value_real=2.5)), Dict("a" => golden_val("a"; value_real=2.6)), 1)
+        meta2 = GoldenMeta("rt_case", 2, "2026-09-25", "deadbeef", "unit test", "1.11.6", "arm64", "abc", 4, 4, exc)
+        save_golden(meta2, Dict("a" => golden_val("a"; value_real=2.6)))
+        back2 = load_golden("rt_case")
+        @test back2.meta.exceeded["a"]["previous"] == 2.5 && back2.meta.exceeded["a"]["previous_version"] == 1
+        @test back2.meta.exceeded["a"]["deviation"] ≈ 0.04
+        @test occursin("[meta.exceeded.a]", read(golden_path("rt_case"), String))
+    end
+
+    @testset "exceeding_changes" begin
+        existing = Dict(
+            "in" => golden_val("in"; value_real=1.0),
+            "out" => golden_val("out"; value_real=1.0),
+            "diag" => golden_val("diag"; value_real=1.0, rtol=Inf, atol=Inf, class="diagnostic"),
+            "typ" => golden_val("typ"; value_real=1.0),
+            "tok" => golden_val("tok"; value_type="token", value_text="riccati", class="topological"))
+        values = Dict(
+            "in" => golden_val("in"; value_real=1.0 + 1e-7),
+            "out" => golden_val("out"; value_real=1.1),
+            "diag" => golden_val("diag"; value_real=50.0, rtol=Inf, atol=Inf, class="diagnostic"),
+            "typ" => golden_val("typ"; value_type="json_array", value_text="[1.0]"),
+            "tok" => golden_val("tok"; value_type="token", value_text="galerkin", class="topological"),
+            "new" => golden_val("new"; value_real=3.0))
+        exc = exceeding_changes(existing, values, 4)
+        @test sort(collect(keys(exc))) == ["out", "tok", "typ"]
+        @test exc["out"]["previous"] == 1.0 && exc["out"]["deviation"] ≈ 0.1 && exc["out"]["previous_version"] == 4
+        @test exc["tok"]["previous"] == "riccati"
+        @test isnan(exc["typ"]["deviation"])
+    end
+
+    @testset "update refuses a move beyond the old tolerance" begin
+        repo = mktempdir()
+        run(`git -C $repo init -q`)
+        write(joinpath(repo, "f.txt"), "x\n")
+        run(`git -C $repo add -A`)
+        run(`git -C $repo -c user.name=t -c user.email=t@t commit -q -m init`)
+        sha = String(strip(read(`git -C $repo rev-parse HEAD`, String)))
+        db = open_database(joinpath(mktempdir(), "update.sqlite"))
+        case = CaseSpec("exceed_case", "synthetic", "", [qspec("a"), qspec("b")], "example", Dict{String,Any}())
+        save_golden(GoldenMeta("exceed_case", 3, "2026-09-01", "cafe", "seed", "1.11.6", "arm64", "abc", 4, 4),
+            Dict("a" => golden_val("a"; value_real=1.0), "b" => golden_val("b"; value_real=2.0)))
+        store_run(db, sha, sha, "", "", "exceed_case", 1.0, [extracted_q("a"; value_real=1.2), extracted_q("b"; value_real=2.0)])
+        @test_throws ErrorException redirect_stdout(devnull) do
+            update_golden_from_run(db, case, sha, "moved", repo)
+        end
+        @test load_golden("exceed_case").meta.golden_version == 3
+        @test_logs (:warn, r"beyond its old tolerance") match_mode=:any redirect_stdout(devnull) do
+            update_golden_from_run(db, case, sha, "moved", repo; accept_exceeding=true)
+        end
+        back = load_golden("exceed_case")
+        @test back.meta.golden_version == 4 && back.values["a"].value_real == 1.2
+        @test collect(keys(back.meta.exceeded)) == ["a"]
+        @test back.meta.exceeded["a"]["previous"] == 1.0 && back.meta.exceeded["a"]["previous_version"] == 3
+        close_database(db)
     end
 
     @testset "infer_class" begin
@@ -433,9 +539,17 @@ value = 12.5
         run(`git -C $repo add -A`)
         run(`git -C $repo -c user.name=t -c user.email=t@t commit -q -m init`)
         @test isempty(uncommitted_changes(repo, joinpath(repo, "golden")))
-        # Rewriting a golden file is the update itself, and untracked files are not source.
+        # Rewriting a golden file is the update itself, and untracked files outside the source dirs are not source.
         write(joinpath(repo, "golden", "case.toml"), "a = 2\n")
         write(joinpath(repo, "scratch.md"), "notes\n")
+        @test isempty(uncommitted_changes(repo, joinpath(repo, "golden")))
+        # An untracked file under a source dir can change the run, so it is refused like a tracked edit.
+        for f in ("src/new.jl", "examples/case/gpec.toml", "regression-harness/cases/new_case.toml")
+            mkpath(dirname(joinpath(repo, f)))
+            write(joinpath(repo, f), "x\n")
+            @test occursin(f, uncommitted_changes(repo, joinpath(repo, "golden")))
+            rm(joinpath(repo, f))
+        end
         @test isempty(uncommitted_changes(repo, joinpath(repo, "golden")))
         write(joinpath(repo, "src.jl"), "x = 2\n")
         @test occursin("src.jl", uncommitted_changes(repo, joinpath(repo, "golden")))
