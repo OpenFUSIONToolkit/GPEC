@@ -16,7 +16,7 @@ using LinearAlgebra
     nominal = hcat(b1, b2, b3)
     b_t0 = 2.0
     sens = EF.CoilSensitivities(["L", "M", "U"], [1, 2, 3, 4], [1, 1, 1, 1], b_t0, nominal, zeros(ComplexF64, 4, 3, 3), zeros(ComplexF64, 4, 3, 3),
-        zeros(3, 3), zeros(3, 3), [1000.0, 2000.0, 500.0], [10.0, 5.0, 4.0])
+        zeros(3, 3), zeros(3, 3), [1000.0, 2000.0, 500.0], [10.0, 5.0, 4.0], [2.0, 2.0, 2.0])
     kat = [10.0 * 1.0, 5.0 * 2.0, 4.0 * 0.5]           # kA·turns
     δ = [dot(v, nominal[:, j]) / kat[j] / b_t0 for j in 1:3]
 
@@ -53,7 +53,7 @@ using LinearAlgebra
         # The same geometry with a negative winding multiplier is the same array wound the other
         # way: its per-kAt spectrum flips sign, so the map is the original one rotated by 180°.
         flipped = EF.CoilSensitivities(sens.coil_names, sens.m_modes, sens.n_modes, b_t0, hcat(b1, -b2, b3), sens.shift_sensitivity, sens.tilt_sensitivity,
-            sens.shift_linearity_residual, sens.tilt_linearity_residual, sens.peak_current, [10.0, -5.0, 4.0])
+            sens.shift_linearity_residual, sens.tilt_linearity_residual, sens.peak_current, [10.0, -5.0, 4.0], sens.nominal_radius)
         m0 = EF.phasing_map(sens, dom, ["L", "M"]; nphase=36)
         m1 = EF.phasing_map(flipped, dom, ["L", "M"]; nphase=36)
         @test m1.delta_per_kat ≈ circshift(m0.delta_per_kat, 18)
@@ -66,7 +66,7 @@ using LinearAlgebra
         @test_throws ArgumentError EF.phasing_map(sens, dom, ["L", "M"]; nphase=1)
         @test_throws ArgumentError EF.phasing_map(sens, dom, ["L", "M"]; mode=3)
         dead = EF.CoilSensitivities(sens.coil_names, sens.m_modes, sens.n_modes, b_t0, nominal, sens.shift_sensitivity, sens.tilt_sensitivity,
-            sens.shift_linearity_residual, sens.tilt_linearity_residual, [0.0, 2000.0, 500.0], sens.winding_multiplier)
+            sens.shift_linearity_residual, sens.tilt_linearity_residual, [0.0, 2000.0, 500.0], sens.winding_multiplier, sens.nominal_radius)
         @test_throws ArgumentError EF.phasing_map(dead, dom, ["L", "M"])
         map = EF.phasing_map(sens, dom, ["L", "M"]; nphase=12)
         @test_throws ArgumentError EF.extreme_phasing(map; quantity=:foo)
