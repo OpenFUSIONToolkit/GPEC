@@ -176,6 +176,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         equil = load_equilibrium_from_gpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "gpec.toml"))
         # Swap in a synthetic reverse-shear q (q_min = 1.8 at ψ = 0.4) so q = 2 is crossed twice.
+        # sing_find! reads only q, so F, P and geometry are left inconsistent with it.
         pr = equil.profiles
         q_rs = @. 1.8 + 3 * (pr.xs - 0.4)^2
         equil.profiles = GeneralizedPerturbedEquilibrium.Equilibrium.ProfileSplines(pr.xs, pr.F_spline.y, pr.P_spline.y, pr.dVdpsi_spline.y, q_rs)
@@ -191,7 +192,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         q2 = filter(s -> isapprox(s.q, 2.0; atol=1e-8), intr.sing)
         psi_q2 = 0.4 .+ [-1, 1] .* sqrt(0.2 / 3)
         @test length(q2) == 2
-        @test [s.psifac for s in q2] ≈ psi_q2 atol = 1e-6
+        @test isapprox([s.psifac for s in q2], psi_q2; atol=1e-6)
         @test q2[1].q1 < 0 < q2[2].q1
         # (2,1) and (4,2) still merge onto each crossing.
         @test all(s -> sort(s.m) == [2, 4] && sort(s.n) == [1, 2], q2)

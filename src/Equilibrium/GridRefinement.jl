@@ -387,7 +387,7 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
     for idx in order
         c, hw = centers[idx], min_half_widths[idx]
         (lo < c < hi) || continue
-        c - last_c < collapse_atol && continue  # duplicate rational (same q via several (m,n))
+        c - last_c < collapse_atol && continue  # centers closer than collapse_atol share one bracket
         k = clamp(searchsortedlast(grid, c), 1, length(grid) - 1)
         w = max(hw, 0.5 * (grid[k+1] - grid[k]))  # blend to half the local spacing
         left, right = c - w, c + w

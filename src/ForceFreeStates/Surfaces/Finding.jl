@@ -64,9 +64,10 @@ _same_surface(q_a, psi_a, q_b, psi_b) = isapprox(q_a, q_b; atol=SURFACE_TOLERANC
 """
     sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
 
-Locate singular rational q-surfaces (q = m/nn) using a bisection method
-between extrema of the q-profile, and store their properties in `intr.sing`.
-Performs the same function as `sing_find` in the Fortran code.
+Locate singular rational q-surfaces (q = m/n) by bisection between extrema of the q-profile,
+and store their properties in `intr.sing`, sorted by increasing ψ. Roots of equal ratio m/n at
+the same ψ (e.g. (2,1) and (4,2)) merge into one surface carrying all its (m, n); the two
+crossings of one rational on a reverse-shear profile stay separate surfaces with opposite-sign q′.
 """
 function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     profiles = equil.profiles
@@ -74,7 +75,6 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 
     for s in _find_rational_surfaces(equil, intr.nlow, intr.nhigh)
         m, n, psifac = s.m, s.n, s.psifac
-        # Merge equal-ratio (m, n) at one surface; reverse-shear crossings of one rational stay separate.
         idx = findfirst(sg -> _same_surface(sg.q, sg.psifac, m / n, psifac), intr.sing)
         if idx !== nothing
             push!(intr.sing[idx].m, m)
