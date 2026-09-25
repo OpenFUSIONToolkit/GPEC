@@ -160,7 +160,7 @@ using TOML
         @test d.terms[2].scale == 1.0 + 0.0im
         @test (im * a).scale == im
         @test (a * 3).scale == 3.0 + 0.0im
-        @test (a - b).terms[2].scale == -0.5 + 0.0im
+        @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
     end
 

@@ -85,8 +85,8 @@ using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-                              "gal_flag")
+    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
+    "gal_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -743,10 +743,10 @@ runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]
 and errors here.
 
 ```julia
-eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
 prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
-ffs  = solve(prob, Riccati())
-ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+ffs = solve(prob, Riccati())
+ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
 function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
