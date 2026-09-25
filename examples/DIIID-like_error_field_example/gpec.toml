@@ -4,7 +4,9 @@
 # centroid of its winding pack, from OpenFUSIONToolkit's TokaMaker DIIID_geom.json. An
 # axisymmetric hoop drives no n=1 field as built, so each F coil's error-field content is
 # entirely its sensitivity to misalignment: the [ErrorFields] stage linearizes every coil set's
-# resonant drive with respect to rigid shifts and tilts, and analyze_example.jl ranks them.
+# resonant drive with respect to rigid shifts and tilts, samples illustrative tolerances
+# (tolerances.toml) into an error-field distribution, and analyze_example.jl ranks the coils
+# and plots the distribution.
 
 [Equilibrium]
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
@@ -208,3 +210,10 @@ fd_step_tilt_deg = 0.1                  # Central-difference step for the rigid 
 rotation_center = "conductor"           # Tilt pivot: each conductor's own centre ("conductor") or the whole set's ("set")
 write_outputs_to_HDF5 = true            # Write ErrorFields/CoilSensitivities/ to the output file
 verbose = true                          # Log per-coil-set progress and linearity diagnostics
+tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the run directory
+
+[ErrorFields.MonteCarlo]
+nsample = 1000000                       # Samples per batch
+nbatch = 10                             # Independent batches; their spread is the statistical error bar
+seed = 1                                # Base seed; batch b uses Xoshiro(hash((seed, b)))
+nbins = 300                             # Histogram bins, linear on [0, delta_max]
