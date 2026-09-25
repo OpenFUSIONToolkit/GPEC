@@ -249,7 +249,9 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     zeroth::Bool = false
 end
 
-"Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table."
+"""
+Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table.
+"""
 function LargeAspectRatioConfig(input_dict::Dict{String,Any})
     return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
 end
@@ -289,7 +291,9 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
-"Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table."
+"""
+Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table.
+"""
 function TJAnalyticConfig(input_dict::Dict{String,Any})
     return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
@@ -325,7 +329,9 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
     f0fac::Float64 = 1       # scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 end
 
-"Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table."
+"""
+Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table.
+"""
 function SolovevConfig(input_dict::Dict{String,Any})
     return SolovevConfig(; symbolize_keys(input_dict)...)
 end
@@ -375,7 +381,9 @@ surface and carries a magnetic null, so `q → ∞` as ψ_N → 1 and no `psihig
     box_margin::Float64 = 0.12  # ψ(R,Z) box padding beyond the boundary, in units of ε
 end
 
-"Build a `CerfonConfig` from a parsed `[CERFON_INPUT]` TOML table."
+"""
+Build a `CerfonConfig` from a parsed `[CERFON_INPUT]` TOML table.
+"""
 function CerfonConfig(input_dict::Dict{String,Any})
     return CerfonConfig(; symbolize_keys(input_dict)...)
 end
@@ -777,7 +785,7 @@ function GeometryProfileSplines(xs::Vector{Float64},
 
     GeometryProfileSplines{typeof(area_spline)}(
         xs, npts, npts - 1,
-        area_spline, avg_r_spline, avg_R_spline,
+        area_spline, avg_r_spline, avg_R_spline
     )
 end
 
@@ -856,7 +864,7 @@ function KineticProfileSplines(xs::Vector{Float64},
         xs, npts, npts - 1,
         ni_spline, ne_spline, Ti_spline, Te_spline,
         omegaE_spline, loglam_spline, nui_spline, nue_spline, zeff_spline,
-        ni_deriv, ne_deriv, Ti_deriv, Te_deriv,
+        ni_deriv, ne_deriv, Ti_deriv, Te_deriv
     )
 end
 
