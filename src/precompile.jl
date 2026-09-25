@@ -31,10 +31,7 @@ import Logging
             end
         end
     end
-    # Drop run-dependent caches the workload filled so they are not serialized into the image.
-    empty!(Vacuum._PN_CACHE)
-    Vacuum._PN_LAST_N[] = 0
-    Vacuum._PN_LAST_ENTRY[] = Vacuum.PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0)
-    Vacuum.SINGULAR_QUAD_CACHE[] = nothing
-    empty!(KineticForces._QUAD_WEIGHTS)
+    # Start each session with empty caches, as a JIT build does, instead of the workload's run state.
+    Vacuum.reset_caches!()
+    KineticForces.reset_caches!()
 end

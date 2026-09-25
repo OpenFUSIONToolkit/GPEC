@@ -73,6 +73,21 @@ const _PN_LAST_N = Threads.Atomic{Int}(0)
 const _PN_LAST_ENTRY = Ref{PnQuadEntry}(PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0))
 
 """
+    reset_caches!()
+
+Empty Vacuum's run-filled module-level caches: the per-n Legendre quadrature entries and the
+singular-quadrature data. Called after the precompile workload so no run state is serialized
+into the package image.
+"""
+function reset_caches!()
+    _PN_LAST_N[] = 0
+    @lock _PN_CACHE_LOCK empty!(_PN_CACHE)
+    _PN_LAST_ENTRY[] = PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0)
+    SINGULAR_QUAD_CACHE[] = nothing
+    return nothing
+end
+
+"""
     get_pn_quad_cache(n::Int) -> PnQuadEntry
 
 Return cached sinh/cosh values for toroidal mode `n`, computing on first access.

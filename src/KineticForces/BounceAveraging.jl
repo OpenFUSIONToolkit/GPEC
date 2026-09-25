@@ -339,6 +339,17 @@ const _QUAD_WEIGHTS = Dict{Int,Tuple{Vector{Float64},Matrix{Float64}}}()
 const _QUAD_WEIGHTS_LOCK = ReentrantLock()
 
 """
+    reset_caches!()
+
+Empty KineticForces' run-filled module-level caches (the θ-quadrature weights by ntheta). Called
+after the precompile workload so no run state is serialized into the package image.
+"""
+function reset_caches!()
+    @lock _QUAD_WEIGHTS_LOCK empty!(_QUAD_WEIGHTS)
+    return nothing
+end
+
+"""
     _quadrature_weights(ntheta) → (int_w, cumint_W)
 
 Exact integral of the `CubicFit`-endpoint spline on the fixed grid `range(0,1,ntheta)`
