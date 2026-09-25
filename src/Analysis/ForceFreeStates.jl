@@ -378,7 +378,7 @@ pressure gradient α (solid) and the first stability boundary α_crit (dashed) v
 normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
 are ballooning-unstable. Reads `LocalStability/ballooning_psi`, `LocalStability/alpha`, and
 `LocalStability/alpha_critical` (populated when ForceFreeStates runs with
-`local_stability_flag = true`).
+`local_stability_flag = true` and `alpha_boundary_scan = true`).
 
 ### Arguments
 

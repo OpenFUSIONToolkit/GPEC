@@ -276,7 +276,7 @@ reltol            = 1e-6   # ODE relative tolerance
 
 # Local stability
 local_stability_flag = false  # scan Mercier D_I, resistive D_R, and ballooning Δ' over ψ
-alpha_boundary_scan  = true   # also scan the ballooning α boundary (the costly part of local stability)
+alpha_boundary_scan  = true   # also scan the ballooning α boundary (a root find per ψ surface)
 
 # Output
 verbose              = true
