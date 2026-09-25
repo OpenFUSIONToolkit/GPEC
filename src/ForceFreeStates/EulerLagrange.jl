@@ -710,8 +710,10 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
             # The crossing standoff singfac_min/|n q'| must not reach back past the current chunk start.
             if psi_end <= psi_current
                 sg = intr.sing[ising_current]
-                error("Singular surface q=$(sg.q) at ψ=$(sg.psifac) (q'=$(sg.q1)): its crossing standoff " *
-                      "singfac_min/|n q'| = $(sg.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current.")
+                error(
+                    "Singular surface q=$(sg.q) at ψ=$(sg.psifac) (q'=$(sg.q1)): its crossing standoff " *
+                    "singfac_min/|n q'| = $(sg.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current."
+                )
             end
             @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"
 
