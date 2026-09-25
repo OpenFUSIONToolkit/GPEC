@@ -61,7 +61,7 @@ end
         for null in ("lsn", "dn")
             cfg = CerfonConfig(; null=null)
             c, (xn, yn) = cerfon_solve_coeffs(cfg)
-            A = cfg.a_solovev
+            A = cfg.A
             p = cerfon_shape_points(cfg)
             # the single null sits below the midplane; the double null returns its upper null
             @test sign(yn) == (null == "dn" ? 1 : -1)
@@ -81,11 +81,16 @@ end
         cfg = CerfonConfig(; null="lsn")
         c, _ = cerfon_solve_coeffs(cfg)
         p = cerfon_shape_points(cfg)
-        @test abs(cerfon_psihat(p.xhigh, p.yhigh, c, cfg.a_solovev)) < 1e-12
+        @test abs(cerfon_psihat(p.xhigh, p.yhigh, c, cfg.A)) < 1e-12
         cfg_dn = CerfonConfig(; null="dn")
         cdn, _ = cerfon_solve_coeffs(cfg_dn)
         @test all(abs.(cdn[8:12]) .< 1e-12)
-        @test cerfon_find_axis(cfg_dn, cdn, cfg_dn.a_solovev)[2] ≈ 0 atol = 1e-9
+        @test cerfon_find_axis(cfg_dn, cdn, cfg_dn.A)[2] ≈ 0 atol = 1e-9
+    end
+
+    @testset "[CERFON_INPUT] reads A and rejects the old a_solovev key" begin
+        @test CerfonConfig(Dict{String,Any}("A" => -0.2)).A == -0.2
+        @test_throws MethodError CerfonConfig(Dict{String,Any}("a_solovev" => -0.2))
     end
 
     @testset "cerfon_run's F/μ₀p table satisfies Grad-Shafranov with its flux map" begin
@@ -94,7 +99,7 @@ end
             cfg = CerfonConfig(; null=null)
             run_input = cerfon_run(EquilibriumConfig(; eq_type="cerfon"), cfg)
             c, _ = cerfon_solve_coeffs(cfg)
-            A, R0, psio = cfg.a_solovev, cfg.r0, run_input.psio
+            A, R0, psio = cfg.A, cfg.r0, run_input.psio
             xa, ya = cerfon_find_axis(cfg, c, A)
             P = -psio / cerfon_psihat(xa, ya, c, A)  # flux scale of ψ = −P·ψ̂, recovered from cerfon_run's ψ_axis
             sq_deriv = deriv1(run_input.sq_in)

@@ -68,7 +68,7 @@ b0 = 2.0             # Vacuum toroidal field at r0 in T
 epsilon = 0.32       # Inverse aspect ratio eps = a/R0
 kappa = 1.7          # Elongation kappa
 delta = 0.33         # Triangularity delta
-a_solovev = -0.155   # Solov'ev parameter A setting the p'/FF' split (0 = pressure-driven only)
+A = -0.155           # Solov'ev parameter A setting the p'/FF' split (0 = pressure-driven only)
 q0 = 1.5             # Target safety factor on axis; fixes the flux scale
 null = "lsn"         # Null topology: "lsn" (lower single null) or "dn" (double null)
 xsep = 1.1           # Places the null at (1 - xsep*delta*eps, -xsep*kappa*eps)

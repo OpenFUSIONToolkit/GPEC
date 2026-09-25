@@ -342,7 +342,7 @@ end
 Parameters for the Cerfon-Freidberg analytic Solov'ev equilibrium (`eq_type = "cerfon"`), a
 diverted generalization of [`SolovevConfig`](@ref): the plasma boundary is the `ψ = 0`
 surface and carries a magnetic null, so `q → ∞` as ψ_N → 1 and no `psihigh` converges. The
-`"sol"` model is the `a_solovev = 0`, no-null member of the same family.
+`"sol"` model is the `A = 0`, no-null member of the same family.
 
 ## Fields:
 
@@ -354,7 +354,7 @@ surface and carries a magnetic null, so `q → ∞` as ψ_N → 1 and no `psihig
   - `epsilon`: inverse aspect ratio ε = a/R₀
   - `kappa`: elongation κ
   - `delta`: triangularity δ
-  - `a_solovev`: Solov'ev parameter A setting the `p'`/`FF'` split (0 = pressure-driven only,
+  - `A`: Cerfon & Freidberg's Solov'ev parameter A setting the `p'`/`FF'` split (0 = pressure-driven only,
     matching the `"sol"` model)
   - `q0`: target safety factor on axis; fixes the flux scale
   - `null`: null topology — `"lsn"` (lower single null) or `"dn"` (double null). The double
@@ -374,7 +374,7 @@ surface and carries a magnetic null, so `q → ∞` as ψ_N → 1 and no `psihig
     epsilon::Float64 = 0.32     # inverse aspect ratio ε = a/R₀
     kappa::Float64 = 1.7        # elongation κ
     delta::Float64 = 0.33       # triangularity δ
-    a_solovev::Float64 = -0.155 # Solov'ev parameter A setting the p'/FF' split
+    A::Float64 = -0.155         # Solov'ev parameter A setting the p'/FF' split
     q0::Float64 = 1.1           # target safety factor on axis; fixes the flux scale
     null::String = "lsn"        # null topology: "lsn" (lower single null) or "dn" (double null)
     xsep::Float64 = 1.1         # places the null(s) at (1 − xsep·δ·ε, ±xsep·κ·ε)

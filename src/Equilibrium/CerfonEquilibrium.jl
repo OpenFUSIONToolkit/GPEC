@@ -216,7 +216,7 @@ function cerfon_curvature_coeffs(cfg::CerfonConfig)
     return (-(1 + α)^2 / (ε * κ^2), (1 - α)^2 / (ε * κ^2), -κ / (ε * cos(α)^2))
 end
 
-const CERFON_BC_COND_WARN = 1e12  # condition number of the boundary-condition matrix above which a warning is issued
+const CERFON_BC_COND_MAX = 1e12  # condition number of the boundary-condition matrix above which the solve is refused
 
 """
     cerfon_solve_coeffs(cfg)
@@ -245,7 +245,7 @@ function cerfon_solve_coeffs(cfg::CerfonConfig)
     p = cerfon_shape_points(cfg)
     N1, N2, N3 = cerfon_curvature_coeffs(cfg)
     xn, yn = cerfon_null_point(cfg)
-    A = cfg.a_solovev
+    A = cfg.A
 
     M = zeros(12, 12)
     b = zeros(12)
@@ -280,7 +280,8 @@ function cerfon_solve_coeffs(cfg::CerfonConfig)
 
     @assert row == 12 "Cerfon boundary-condition system has $row rows, expected 12"
     κM = cond(M)
-    κM > CERFON_BC_COND_WARN && @warn "Cerfon boundary-condition matrix is poorly conditioned (cond = $(@sprintf("%.2e", κM))); check the requested shape."
+    κM > CERFON_BC_COND_MAX &&
+        error("Cerfon boundary-condition matrix is ill-conditioned (cond = $(@sprintf("%.2e", κM)) > $(@sprintf("%.0e", CERFON_BC_COND_MAX))); check the requested shape.")
     return M \ b, (xn, yn)
 end
 
@@ -352,7 +353,7 @@ function cerfon_flux_scale(cfg::CerfonConfig, c, A, xa, ya)
     psihat_a >= 0 && error("Expected ψ̂ < 0 on axis for the Cerfon solution, got $psihat_a.")
 
     denom = cfg.q0^2 * xa^2 * detH - 2 * A * abs(psihat_a)
-    denom <= 0 && error("No positive flux scale satisfies q0 = $(cfg.q0) at a_solovev = $A; lower q0 or make a_solovev more negative.")
+    denom <= 0 && error("No positive flux scale satisfies q0 = $(cfg.q0) at A = $A; lower q0 or make A more negative.")
     return cfg.r0^2 * cfg.b0 / sqrt(denom)
 end
 
@@ -370,7 +371,7 @@ field-line integration, as for the other direct-path equilibria.
 function cerfon_run(equil_inputs::EquilibriumConfig, cerfon_inputs::CerfonConfig)
     cfg = cerfon_inputs
     c, (xn, yn) = cerfon_solve_coeffs(cfg)
-    A = cfg.a_solovev
+    A = cfg.A
     xa, ya = cerfon_find_axis(cfg, c, A)
     P = cerfon_flux_scale(cfg, c, A, xa, ya)
 
@@ -387,7 +388,7 @@ function cerfon_run(equil_inputs::EquilibriumConfig, cerfon_inputs::CerfonConfig
         psi = psio * (1 - pn)
         # F² = F_edge² + 2APψ/R₀² (FF′ = −CA/R₀², C = −P); A < 0 is diamagnetic.
         f2 = (cfg.r0 * cfg.b0)^2 + 2 * A * P * psi / cfg.r0^2
-        f2 <= 0 && error("Cerfon toroidal field vanishes at ψ_N = $pn (F² = $f2); reduce q0 or |a_solovev|.")
+        f2 <= 0 && error("Cerfon toroidal field vanishes at ψ_N = $pn (F² = $f2); reduce q0 or |A|.")
         sqfs[i, 1] = sqrt(f2)
         sqfs[i, 2] = P * (1 - A) * psi / cfg.r0^4
         sqfs[i, 4] = sqrt(pn)
