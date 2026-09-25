@@ -87,7 +87,7 @@ jobs:
 
   test:
     # Branch protection lists the single-threaded job names as required checks, so those must
-    # stay byte-identical; the multi-threaded leg gets a distinct name and is purely additive.
+    # stay byte-identical; the multi-threaded leg gets a distinct name and gates via the Tests job.
     name: runtests ${{ matrix.version }} - ${{ matrix.os }}${{ matrix.threads != '1' && format(' ({0} threads)', matrix.threads) || '' }}
     needs: changes
     if: needs.changes.outputs.julia == 'true'
