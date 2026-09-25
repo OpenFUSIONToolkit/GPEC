@@ -14,12 +14,12 @@ using FastInterpolations
 Radial kinetic-profile container. All four profiles are 1D cubic splines of
 the normalized poloidal flux ψ ∈ [0, 1].
 
-| field     | meaning                                 | units |
-|:--------- |:--------------------------------------- |:----- |
-| `n_e`     | electron density                        | m⁻³   |
-| `T_e`     | electron temperature                    | eV    |
-| `T_i`     | ion temperature                         | eV    |
-| `omega_E` | E×B rotation Ω_E, per unit n            | rad/s |
+| field     | meaning                      | units |
+|:--------- |:---------------------------- |:----- |
+| `n_e`     | electron density             | m⁻³   |
+| `T_e`     | electron temperature         | eV    |
+| `T_i`     | ion temperature              | eV    |
+| `omega_E` | E×B rotation Ω_E, per unit n | rad/s |
 
 Construct via the keyword constructor `KineticProfiles(; psi, n_e, T_e, T_i, omega_E)` with
 matched-length vectors. The SLAYER runner builds this object from a standardized

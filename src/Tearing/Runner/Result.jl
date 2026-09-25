@@ -25,9 +25,10 @@ downstream inspection and HDF5 output.
     `delta_prime_to_rs_reference`, written as `PerSurface/Delta_prime_matrix_rs`);
     GGJ path: the ψ_N matrix unchanged (written as `PerSurface/Delta_prime_matrix`)
   - `Q_root`              -- tearing eigenvalue(s) in normalized Q
-    * length `nsurfaces` in `:uncoupled` mode
-    * length `1` in `:coupled` mode (global eigenvalue normalized by
-      `params[1].tauk`)
+
+      + length `nsurfaces` in `:uncoupled` mode
+      + length `1` in `:coupled` mode (global eigenvalue normalized by
+        `params[1].tauk`)
   - `omega_Hz`, `gamma_Hz` -- physical rotation frequency / growth rate
   - `per_surface_extraction` -- `Vector{GrowthRateResult}` of length
     `nsurfaces` in uncoupled mode (each includes polelines, pole list,
@@ -66,12 +67,12 @@ end
 # Empty result (enabled=false path)
 function empty_slayer_result(control::SLAYERControl)
     return SLAYERResult(false, control,
-                        SLAYERParameters[],
-                        Float64[], Float64[],
-                        zeros(ComplexF64, 0, 0),
-                        ComplexF64[], Float64[], Float64[],
-                        GrowthRateResult[], nothing,
-                        LayerWidths[],
-                        Float64[], Float64[],
-                        Union{ScanResult,AMRResult}[])
+        SLAYERParameters[],
+        Float64[], Float64[],
+        zeros(ComplexF64, 0, 0),
+        ComplexF64[], Float64[], Float64[],
+        GrowthRateResult[], nothing,
+        LayerWidths[],
+        Float64[], Float64[],
+        Union{ScanResult,AMRResult}[])
 end

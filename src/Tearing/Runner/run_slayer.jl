@@ -327,7 +327,8 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
     coupled = control.coupling_mode === :coupled
-    !coupled && !isempty(control.omega_E_kHz) && @warn(
+    !coupled && !isempty(control.omega_E_kHz) &&
+        @warn(
             "SLAYER: omega_E_kHz does not shift the layers with coupling_mode=:uncoupled; rotation only " *
             "enters the coupled determinant, so it is just recorded in PerSurface/omega_E.")
     Ω_E = _omega_E_per_surface(control, params, omega_E)
