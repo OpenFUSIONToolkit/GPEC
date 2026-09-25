@@ -664,7 +664,10 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                       ctrl.singfac_min / abs(minimum(intr.kinsing[ising_current].n) * intr.kinsing[ising_current].q1)
 
             if psi_current >= psi_end
-                # Surface too close to current position — skip it
+                # The crossing standoff reaches back past the current chunk start: skip this surface, loudly.
+                ks = intr.kinsing[ising_current]
+                @warn "Skipping kinetic singular surface m/n=$(join(string.(ks.m, "/", ks.n), ", ")) at ψ=$(ks.psifac) (q'=$(ks.q1)): " *
+                      "its crossing standoff singfac_min/|n q'| = $(ks.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current."
                 ising_current = find_next_kinsing!(ising_current, intr)
                 continue
             end

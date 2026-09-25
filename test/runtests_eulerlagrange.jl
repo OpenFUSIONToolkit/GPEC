@@ -474,6 +474,14 @@ end
         odet = FFS.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
         @test_throws ErrorException FFS.chunk_el_integration_bounds(odet, ctrl, intr)
+
+        # Case 7: the kinetic path skips the second of two overlapping crossings, with a warning naming it.
+        ctrl_kin = FFS.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-4, kinetic_factor=1.0)
+        odet, intr = reverse_shear_pair(1e-5)
+        intr.kinsing, intr.kmsing = intr.sing, intr.msing
+        chunks = @test_logs (:warn, r"Skipping kinetic singular surface m/n=2/1") match_mode = :any FFS.chunk_el_integration_bounds(odet, ctrl_kin, intr)
+        @test length(chunks) == 2
+        @test chunks[1].needs_crossing && !chunks[2].needs_crossing
     end
 
     @testset "EdgeScanState" begin
