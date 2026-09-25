@@ -161,6 +161,11 @@
         # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].
         @test_logs (:warn, r"outside Q_re_range") match_mode=:any run_slayer_from_inputs(params, dpm,
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[3.0e4, 0.0])
+
+        # Rotation without a toroidal mode number would silently vanish, so it is an error.
+        params_n0 = [_mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, n=0, ising=1)]
+        @test_throws "needs the toroidal mode number" run_slayer_from_inputs(params_n0, ComplexF64[-2.0;;],
+            SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[2.0e3])
     end
 
     @testset "run_slayer_from_inputs: disabled path is a no-op" begin

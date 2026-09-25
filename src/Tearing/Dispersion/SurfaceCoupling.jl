@@ -12,9 +12,9 @@
 # multi-surface `MultiSurfaceCoupling` to rescale Q between each surface's
 # normalization.
 #
-# `q_shift = −tau_k·omega_E_k` is a real, additive offset on the layer's Q argument that puts
-# the mode frequency in this surface's E×B frame, `Q_k = tau_k·(omega − omega_E_k)`; zero is
-# the static, all-surfaces-corotating case.
+# `q_shift = −tau_k·n·Omega_E_k` (Omega_E per unit toroidal mode number n) is a real, additive
+# offset on the layer's Q argument that puts the mode frequency in this surface's E×B frame,
+# `Q_k = tau_k·(omega − n·Omega_E_k)`; zero is the static, all-surfaces-corotating case.
 #
 # Constructor convenience: `surface_coupling(model, params, dp_diag; dc=0.0)`
 # auto-fills `scale` and `tauk` based on the model type — `scale = S^(1/3)`
@@ -69,7 +69,7 @@ length). `dp_diag` must already be in that same r_s reference — the Tearing
 runner converts the ψ_N-referenced BVP Δ' via `delta_prime_to_rs_reference`
 before building couplings. `tauk` is taken from `params.tauk` for use by
 `MultiSurfaceCoupling` Q rescaling. `q_shift` is the real E×B Doppler offset on
-the layer's Q argument (`-tauk * omega_E`); it defaults to zero.
+the layer's Q argument (`-tauk * n * Omega_E`, Omega_E per unit n); it defaults to zero.
 """
 function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
     dp_diag::Number; dc::Real=0.0, q_shift::Real=0.0)

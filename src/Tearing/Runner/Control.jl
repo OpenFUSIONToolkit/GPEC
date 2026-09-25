@@ -32,14 +32,12 @@ constructor.
   - `bt`       -- toroidal field `[T]`. `nothing` (default) resolves the physical
     `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
     callable of `psi` overrides it
-  - `omega_E_kHz` -- optional override of the per-surface E×B rotation, as the
-    frequency Ω_E/2π per unit toroidal mode number in kHz (the kinetic file's
-    `omega_E` convention), ordered core→edge. Empty (default) takes Ω_E from the
-    kinetic file at each rational surface. Rotation enters only the coupled
-    determinant: surface `k`'s inner-layer Q is Doppler-shifted by
-    `ΔRe(Q_k) = −tauk_k · n · Ω_E,k`, so each layer sees the mode in its own E×B
-    frame. Must be empty or have one entry per
-    rational surface actually analysed
+  - `omega_E_kHz` -- optional override of the per-surface E×B rotation, ordered core→edge.
+    Per unit toroidal mode number like the kinetic file's `omega_E`, but given as Ω_E/2π in
+    kHz rather than the file's rad/s. Empty (default) takes Ω_E from the kinetic file at each
+    rational surface. Rotation enters only the coupled determinant: surface `k`'s inner-layer
+    Q is Doppler-shifted by `ΔRe(Q_k) = −tauk_k · n · Ω_E,k`, so each layer sees the mode in
+    its own E×B frame. Must be empty or have one entry per rational surface actually analysed
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
@@ -159,8 +157,6 @@ there is one consistent interface for resistive and kinetic profiles.
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
 
-    # Override for the per-surface E×B rotation Ω_E/2π per unit n [kHz], core→edge. Empty takes
-    # Ω_E from the kinetic file; either way it only Doppler-shifts the coupled determinant.
     omega_E_kHz::Vector{Float64} = Float64[]
 
     profile_file::String = ""

@@ -196,18 +196,25 @@
         # Build a 2-surface SLAYER MultiSurfaceCoupling, evaluate at
         # Q_pin, and back-fill dp_matrix so that det(M(Q_pin)) = 0
         # exactly.
+        # A second surface with different n_e and T_e, so tauk differs and the rescale is exercised.
         p_a = _slayer_ref()
-        p_b = _slayer_ref()
+        p_b = slayer_parameters(;
+            n_e=2.0e19, t_e=500.0, t_i=500.0,
+            omega_e=-1.0e4, omega_i=5.0e3,
+            qval=3.0, sval_r=1.5, bt=2.0,
+            rs=0.6, R0=1.7, mu_i=2.0, zeff=1.0,
+            chi_perp=1.0, chi_tor=1.0, m=3, n=1)
         m = SLAYERModel()
         sc1 = surface_coupling(m, p_a, 0.0 + 0im)
         sc2 = surface_coupling(m, p_b, 0.0 + 0im)
+        @test !(sc2.tauk ≈ sc1.tauk)
 
         Q_pin = 0.3 + 0.4im
         ref_tauk = sc1.tauk
 
         # Compute the diagonal modifications at Q_pin
-        Δ1 = solve_inner(m, p_a, Q_pin * (ref_tauk / sc1.tauk)).tearing * sc1.scale
-        Δ2 = solve_inner(m, p_b, Q_pin * (ref_tauk / sc2.tauk)).tearing * sc2.scale
+        Δ1 = solve_inner(m, p_a, Q_pin * (sc1.tauk / ref_tauk)).tearing * sc1.scale
+        Δ2 = solve_inner(m, p_b, Q_pin * (sc2.tauk / ref_tauk)).tearing * sc2.scale
 
         # Build dp such that M(Q_pin) is exactly singular.
         # Choose off-diagonal couplings, then set diagonals so M[k,k]=Δ_k

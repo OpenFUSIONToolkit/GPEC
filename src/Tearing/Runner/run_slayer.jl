@@ -169,7 +169,11 @@ function _omega_E_per_surface(control::SLAYERControl, n::Integer, omega_E_file::
 end
 
 # Real Doppler offset on a surface's inner-layer Q: Q_k = τ_k·(ω − n·Ω_E) in its E×B frame.
-_q_shift(p::SLAYERParameters, Ω_E::Real) = -p.tauk * p.n * Ω_E
+function _q_shift(p::SLAYERParameters, Ω_E::Real)
+    iszero(Ω_E) || p.n >= 1 ||
+        throw(ArgumentError("run_slayer: E×B rotation Ω_E=$(Ω_E) rad/s needs the toroidal mode number, but SLAYERParameters has n=$(p.n)"))
+    return -p.tauk * p.n * Ω_E
+end
 # GGJ carries no time normalization (tauk = 1), so a physical rotation has no Q-space image.
 _q_shift(::InnerLayerParameters, ::Real) = 0.0
 
@@ -311,20 +315,18 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
             "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
     q_shifts = _q_shifts(params, Ω_E)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
-    # In the scanned (reference-normalized) Q, surface k's layer response moves by τ_ref·n·Ω_E,k.
-    # A shift outside the scan box silently turns the coupled root into :no_root.
+    # Coupled Q is scanned in the reference surface's normalization.
+    ref_idx = 1
+    # In the scanned Q, surface k's layer response moves by τ_ref·n·Ω_E,k. Heuristic check only:
+    # the root also carries the diamagnetic Re(Q), so a window can pass and still miss it.
     if any(!iszero, q_shifts)
         m_use = min(control.msing_max, n)
-        doppler = [-q_shifts[k] * scs[1].tauk / scs[k].tauk for k in 1:m_use]
+        doppler = [-q_shifts[k] * scs[ref_idx].tauk / scs[k].tauk for k in 1:m_use]
         lo, hi = control.Q_re_range
         any(d -> !(lo <= d <= hi), doppler) && @warn(
             "SLAYER: E×B Doppler offsets Re(Q)=$(round.(doppler; digits=3)) fall outside " *
             "Q_re_range=$(control.Q_re_range); widen it or the coupled root may be missed.")
     end
-    any(!iszero, q_shifts) && @info(
-        "SLAYER: coupled determinant Doppler-shifted by per-surface E×B rotation " *
-        "(" * (isempty(control.omega_E_kHz) ? "kinetic file" : "omega_E_kHz override") * ") " *
-        "→ ΔRe(Q)=$(round.(q_shifts; digits=4))")
 
     # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
     # Independent of the dispersion scan / coupling mode — a pure diagnostic.
@@ -386,16 +388,15 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
 
     elseif control.coupling_mode === :coupled
         m_use = min(control.msing_max, n)
-        mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use)
+        mc = multi_surface_coupling(scs, dp; ref_idx=ref_idx, msing_max=m_use)
         scan = _run_scan(mc, control)
         pthr = _pole_threshold_for(scan)
-        ref_tauk = scs[1].tauk
+        ref_tauk = scs[ref_idx].tauk
         # Coupled path: no root polishing / validity gate. The m×m coupled
         # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
         # above zero), so |det|-based polishing is a no-op and the residual-scale
-        # gate is unreliable. A σ_min-based coupled refinement is a dev follow-up;
-        # for now the coupled root is the raw contour intersection, so it carries the
-        # triangulation's interpolation error (~0.7% in γ on the DIII-D-like deck).
+        # gate is unreliable. The coupled root is therefore the raw contour
+        # intersection and carries the triangulation's interpolation error.
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
             filter_above_poles=control.filter_above_poles,
