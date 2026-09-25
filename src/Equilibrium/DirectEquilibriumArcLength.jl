@@ -64,11 +64,11 @@ end
 Arc-length-parameterized flux surface integration. Drop-in replacement for
 `direct_fieldline_int` with identical return format:
 
-- `y_out[:, 1]`: geometric angle η ∈ 0 to 2π (CCW from outboard midplane)
-- `y_out[:, 2]`: accumulated ∫dl/Bp
-- `y_out[:, 3]`: rfac = √((R−ro)² + (Z−zo)²)
-- `y_out[:, 4]`: accumulated ∫dl/(R²Bp)
-- `y_out[:, 5]`: accumulated ∫jac·dl/Bp
+  - `y_out[:, 1]`: geometric angle η ∈ 0 to 2π (CCW from outboard midplane)
+  - `y_out[:, 2]`: accumulated ∫dl/Bp
+  - `y_out[:, 3]`: rfac = √((R−ro)² + (Z−zo)²)
+  - `y_out[:, 4]`: accumulated ∫dl/(R²Bp)
+  - `y_out[:, 5]`: accumulated ∫jac·dl/Bp
 
 The ODE is terminated by a `ContinuousCallback` that detects the return to the
 outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
@@ -144,4 +144,3 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     # bfield at the starting point carries F and P for the surface-averaged quantities
     return y_out, bfield
 end
-
