@@ -1,7 +1,140 @@
 using HDF5
+using LinearAlgebra
+using TOML
+
+"""
+Walk two HDF5 groups and require every numeric dataset present in both to agree. Reflective on
+purpose: a field added later, or left describing a stale plasma edge, is compared without anyone
+having to remember to list it here.
+"""
+function compare_h5_numeric(ha, hb, path; skip=String[], rtol=1e-4, atol=1e-12)
+    haskey(ha, path) && haskey(hb, path) || return
+    ga, gb = ha[path], hb[path]
+    for k in keys(ga)
+        k in skip && continue
+        haskey(gb, k) || continue
+        isempty(read(ga[k])) && continue
+        if ga[k] isa HDF5.Group
+            compare_h5_numeric(ha, hb, "$path/$k"; skip, rtol, atol)
+            continue
+        end
+        va, vb = read(ga[k]), read(gb[k])
+        (eltype(va) <: Number && eltype(vb) <: Number) || continue
+        @test size(va) == size(vb)
+        size(va) == size(vb) || continue
+        @test isapprox(va, vb; rtol, atol)
+    end
+    return
+end
+
 
 # Run GeneralizedPerturbedEquilibrium.main on the provided example directories and assert it completes without throwing.
 @testset "Full ForceFreeStates runs" begin
+    @testset "dW-peak truncation leaves no state describing the old plasma edge" begin
+        # truncate_at_dW_peak moves the plasma boundary inward after the run has already derived
+        # state from the original one. Anything keyed to the edge has to move with it. These
+        # settings put the dW peak back inside a rational surface the integration had already
+        # crossed, which is the case that exposes it: psiedge = 0.97 brings a second rational into
+        # the scan band so a complete interior lobe outranks the truncated outermost one.
+        ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+        d = mktempdir()
+        for f in readdir(ex)
+            cp(joinpath(ex, f), joinpath(d, f); force=true)
+        end
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        inputs["ForceFreeStates"]["psiedge"] = 0.97
+        inputs["ForceFreeStates"]["truncate_at_dW_peak"] = true
+        inputs["ForceFreeStates"]["dmlim"] = 0.01
+        inputs["ForceFreeStates"]["nn_low"] = 2
+        inputs["ForceFreeStates"]["nn_high"] = 2
+        inputs["ForceFreeStates"]["verbose"] = false
+        open(joinpath(d, "gpec.toml"), "w") do io
+            TOML.print(io, inputs)
+        end
+        GeneralizedPerturbedEquilibrium.main([d])
+
+        qlim_pullback = h5open(f -> read(f["Info/qlim"]), joinpath(d, "gpec.h5"), "r")
+
+        h5open(joinpath(d, "gpec.h5"), "r") do h5
+            psilim = read(h5["Info/psilim"])
+            qlim = read(h5["Info/qlim"])
+            rational_psi = read(h5["SingularSurfaces/rational_psi"])
+            scan_psi = read(h5["ForceFreeStates/EdgeScan/psi"])
+            scan_q = read(h5["ForceFreeStates/EdgeScan/q"])
+
+            # The precondition the rest of the test rests on. The scan integrated past q = 6, which
+            # is resonant at n = 2 (m = 12), and the edge then settled below it — so that surface
+            # was crossed and is now outside the plasma. Without this the test would pass while
+            # exercising nothing, which is the failure mode that hides a regression here.
+            @test maximum(scan_q) > 6.0
+            @test qlim < 6.0
+            @test psilim < maximum(scan_psi)
+
+            # Nothing outside the plasma survives in the surface list. Left stale, the perturbed
+            # equilibrium evaluates those surfaces by extrapolating off the end of the solution.
+            @test all(<=(psilim), rational_psi)
+            # and the per-surface asymptotic stores stay the same length as the list.
+            @test size(read(h5["SingularSurfaces/ca_left"]), 4) == length(rational_psi)
+            @test maximum(read(h5["SingularSurfaces/rational_q"])) < qlim
+
+            # dq/dψ is re-derived at the new edge rather than left describing the old one. The scan
+            # tabulates q(ψ) across the band, so the edge value is checkable against a difference
+            # taken from the run's own output; a stale q1lim is off by roughly a factor of two here.
+            i = searchsortedfirst(scan_psi, psilim)
+            dqdpsi_edge = (scan_q[i+1] - scan_q[i-1]) / (scan_psi[i+1] - scan_psi[i-1])
+            @test read(h5["Info/dqdpsi_lim"]) ≈ dqdpsi_edge rtol = 0.05
+
+            # The stored edge displacement matrix is what the perturbed-equilibrium boundary solve
+            # inverts. Reductions recorded beyond the new edge would leave it rank deficient — the
+            # unfixed code reaches cond ~1e17 here, against O(1) when the edge is consistent.
+            xi = read(h5["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"])
+            edge = ndims(xi) == 3 ? xi[:, :, end] : xi
+            @test cond(edge) < 1e8
+        end
+
+        # Now reach the same edge without truncating, and require the two to agree. Asking for the
+        # edge through qhigh rather than psihigh keeps qmax, and with it the poloidal mode range and
+        # the radial grid, identical — so anything that differs is the route to the edge, not the
+        # discretization. This is the part that catches state nobody thought to assert: a field left
+        # describing the old boundary shows up here whether or not the test knows it exists.
+        d2 = mktempdir()
+        for f in readdir(ex)
+            cp(joinpath(ex, f), joinpath(d2, f); force=true)
+        end
+        inputs["ForceFreeStates"]["psiedge"] = 1.0                  # no scan, so no truncation
+        inputs["ForceFreeStates"]["truncate_at_dW_peak"] = false
+        inputs["ForceFreeStates"]["set_psilim_via_dmlim"] = false
+        inputs["ForceFreeStates"]["qhigh"] = qlim_pullback
+        open(joinpath(d2, "gpec.toml"), "w") do io
+            TOML.print(io, inputs)
+        end
+        GeneralizedPerturbedEquilibrium.main([d2])
+
+        h5open(joinpath(d, "gpec.h5"), "r") do ha
+            h5open(joinpath(d2, "gpec.h5"), "r") do hb
+                # EdgeScan exists only in the truncated run; git_version is not a result.
+                compare_h5_numeric(ha, hb, "Info"; skip=["git_version"])
+                compare_h5_numeric(ha, hb, "SingularSurfaces")
+                # Solutions/ is skipped wholesale: the adaptive integrator takes a different number
+                # of steps when it stops at the edge rather than integrating past it and truncating,
+                # so those arrays differ in length by construction. The boundary values are what the
+                # perturbed equilibrium consumes, so compare the final step of each explicitly.
+                compare_h5_numeric(ha, hb, "ForceFreeStates"; skip=["EdgeScan", "Solutions"])
+                for k in ("xi_psi", "u2", "xi_s", "dxi_psidpsi")
+                    va = read(ha["ForceFreeStates/Solutions/ForwardIntegration/$k"])
+                    vb = read(hb["ForceFreeStates/Solutions/ForwardIntegration/$k"])
+                    @test isapprox(va[:, :, end], vb[:, :, end]; rtol=1e-4, atol=1e-12)
+                end
+                pa = read(ha["ForceFreeStates/Solutions/ForwardIntegration/psi"])
+                pb = read(hb["ForceFreeStates/Solutions/ForwardIntegration/psi"])
+                @test pa[end] ≈ pb[end]
+            end
+        end
+
+        rm(d; recursive=true, force=true)
+        rm(d2; recursive=true, force=true)
+    end
+
     ex1 = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     @info "Running Solovev ideal example"
     @test begin

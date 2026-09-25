@@ -344,6 +344,7 @@ function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
     intr.qlim = odet.q_store[end]
     odet.u .= odet.u_store[:, :, :, end]
     renormalize_riccati_inplace!(odet.u, N)  # stored snapshot may be pre-renorm
+    adopt_plasma_edge!(intr, odet, equil)
 
     peak_psi = odet.psi_store[end]
     last_chunk_idx = findlast(c -> c.psi_start < peak_psi, chunks)

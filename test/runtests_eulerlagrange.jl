@@ -93,6 +93,84 @@ end
         @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
     end
 
+    @testset "adopt_plasma_edge! brings the rest of the state to a moved edge" begin
+        # The edge-dW truncation rewrites psilim/qlim after the surface list and q1lim were already
+        # derived from the original edge. Everything keyed to the edge has to come with it, or the
+        # perturbed-equilibrium coupling evaluates surfaces that are no longer inside the plasma.
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+            eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+
+        mpert = 2
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 5, 3)
+        intr.sing = [GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=p, q=q, m=[m], n=[1])
+                     for (p, q, m) in ((0.30, 2.0, 2), (0.60, 3.0, 3), (0.90, 4.0, 4))]
+        intr.msing = 3
+        odet.ca_l .= 1.0
+        odet.ca_r .= 2.0
+        intr.q1lim = -999.0        # a value the old edge would have produced
+
+        intr.psilim = 0.75         # edge moved inward, past the outermost surface
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.adopt_plasma_edge!(intr, odet, equil)
+
+        @test intr.msing == 2
+        @test length(intr.sing) == 2
+        @test all(s.psifac <= intr.psilim for s in intr.sing)
+        # The asymptotic stores stay aligned with the surfaces they describe.
+        @test size(odet.ca_l, 4) == intr.msing
+        @test size(odet.ca_r, 4) == intr.msing
+        # q1lim is re-derived at the new edge rather than left describing the old one.
+        @test intr.q1lim ≈ equil.profiles.q_deriv(intr.psilim)
+        @test intr.q1lim != -999.0
+    end
+
+    @testset "transform_u! ignores fixups recorded past the end of the store" begin
+        # A truncated store (as truncate_at_dW_peak produces) must leave its last step in the basis
+        # it was integrated in, so that u_store[end] still equals the raw odet.u the energies and
+        # the boundary solve are built from. Reductions recorded beyond the new end must not be
+        # folded in — a singular-surface one carries a zeroed column, which is a projection and
+        # would leave the edge solution rank deficient.
+        mpert = 2
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 5, 2)
+
+        # Two fixups: the first inside the (later truncated) store, the second past its end and
+        # from a singular-surface crossing, so its reduction zeroes a column.
+        odet.ifix = 2
+        odet.fixstep[1] = 3
+        odet.fixstep[2] = 7
+        odet.sing_flag[1] = false
+        odet.sing_flag[2] = true
+        odet.zeroed_idx[1] = Int[]
+        odet.zeroed_idx[2] = [1]
+        for ifix in 1:2
+            odet.fixfac[:, :, ifix] = ComplexF64[1.0 0.5; 0.0 1.0]
+            odet.index[:, ifix] = [1, 2]
+        end
+
+        # Storage truncated to step 5, behind the second fixup.
+        odet.step = 5
+        for i in 1:odet.step
+            odet.u_store[:, :, 1, i] = ComplexF64[i 0.0; 0.0 i]
+            odet.u_store[:, :, 2, i] = ComplexF64[i+0.1 0.0; 0.0 i+0.1]
+        end
+        edge_before = copy(odet.u_store[:, :, 1, odet.step])
+
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.transform_u!(odet, intr)
+
+        # The last stored step keeps the basis it was integrated in.
+        @test odet.u_store[:, :, 1, odet.step] ≈ edge_before
+        # and is therefore still invertible, which is what the boundary solve needs.
+        @test rank(odet.u_store[:, :, 1, odet.step]) == mpert
+        # Steps before the retained fixup still get its reduction undone.
+        @test !(odet.u_store[:, :, 1, 1] ≈ ComplexF64[1.0 0.0; 0.0 1.0])
+        # odet.ifix still reports what actually happened during integration.
+        @test odet.ifix == 2
+    end
+
     @testset "transform_u!" begin
         # Test transformation of solution vectors
         mpert = 2
