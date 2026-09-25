@@ -251,6 +251,7 @@ function direct_position!(raw_profile::DirectRunInput)
     function find_separatrix_crossing(r_edge, label)
         # On each failed attempt, shift the initial guess (a weighted blend of r_edge and the axis
         # ro) from near the grid edge toward the axis (Fortran direct.f restart counter ird = 0..5).
+        local r, dr
         for restart in 0:5
             r = ((3 - 0.5 * restart) * r_edge + ro) / (4 - 0.5 * restart)
             for _ in 1:max_separatrix_steps
