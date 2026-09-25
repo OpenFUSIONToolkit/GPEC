@@ -140,7 +140,23 @@ re-run once — those are exactly the entries whose provenance cannot be establi
 
 If the two refs in a comparison ran under different thread counts, the report flags it.
 
+## Golden values
+
+`--refs` comparisons say whether a number changed; golden values say whether it still matches a committed, reviewed reference. Each case may have a golden file at `regression-harness/golden/<case>.toml` holding every pinned quantity with its `rtol`, `atol`, tolerance class and the evidence behind the tolerance.
+
+```bash
+regress --check --cases slayer_dels_fitzpatrick                          # working tree vs the committed goldens
+regress --update-golden --cases slayer_dels_fitzpatrick --reason "..."   # re-pin from a fresh run
+```
+
+- **Classes** come only from the `class` key that every `[quantities.*]` block in a case file must declare, never from the golden file or the quantity's name; a missing or unknown class makes the case fail to load. `topological` (exact), `equilibrium_scalar`, `physics_converged` gate; `diagnostic` and `unconverged` are reported only.
+- **Tolerances** are either the provisional class default (`tolerance_basis = "class-default (provisional)"`) or `"measured"`, which requires a recorded `plateau_drift` or `platform_spread` no larger than `rtol`. No harness tool measures these yet, so every committed golden currently gates on provisional defaults, and `--check` labels those rows `provisional`.
+- **`atol`** must be 0 on a gating entry unless its golden value contains an exact zero (a zero scalar, or an array element that is zero throughout); the relative test is the gate everywhere else. Loading and saving both enforce this.
+- **Re-pinning** requires `--cases` and `--reason`, refuses a working tree with uncommitted tracked changes or with untracked files under `examples/`, `src/` or `regression-harness/cases/`, and prints an old → new line per moved quantity, flagging any move the old tolerance would have failed.
+- **A move beyond the old tolerance** makes `--update-golden` refuse the whole re-pin unless `--accept-exceeding` is given. When it is, the entry loses its recorded evidence and becomes provisional, with a tolerance no looser than before, and the golden file's `[meta.exceeded.<name>]` table records the previous version's value, the deviation and the old `rtol`/`atol`, so the reviewer sees each accepted move in the git diff.
+- A failing `--check` is fixed by explaining the physics or fixing the regression, never by widening `rtol` or `atol`. The unit tests for this logic run with `julia --project=regression-harness regression-harness/test/runtests.jl` and need no GPEC build.
+
 ## Exit status
 
 - `0` — every run completed (and, with `--fail-on-change`, nothing changed)
-- `1` — a run failed, or a quantity changed under `--fail-on-change`
+- `1` — a run failed, a quantity changed under `--fail-on-change`, or a `--check` golden comparison failed or gated nothing

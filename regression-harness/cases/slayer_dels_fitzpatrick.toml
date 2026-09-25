@@ -1,0 +1,68 @@
+# Regression case: GPEC's del_s Riccati layer-width solver against Fitzpatrick, "Tearing Mode
+# Dynamics in Tokamak Plasmas" (IOP 2023), figures 6.2 and 6.3 (p. 6-10), over (Q_hat, P_hat).
+# Hand-checked at eight points against the published contour bands, e.g. (Q,P) = (4.0, 0.5) ->
+# Re 2.008 against the 1.9-2.1 contours. The golden pins GPEC's output at that validated state on
+# a provisional tolerance, so any re-pin must be re-checked against the figures.
+# Pure ODE, no equilibrium or kinetic input: sub-second and fast-tier eligible. Complements
+# slayer_delta_probe, which pins the dispersion solve Delta(Q).
+[case]
+name = "slayer_dels_fitzpatrick"
+description = "del_s Riccati layer width vs Fitzpatrick 2023 figs 6.2/6.3 over (Q_hat, P_hat)"
+kind = "computed"
+
+# The scan axes, pinned exactly so a silently reshaped grid is a failure rather than a re-gold.
+[quantities.q_hat]
+h5path = "fitzpatrick/Q_hat"
+type = "real_vector"
+extract = "all_real"
+label = "grid Q_hat (= Q_*/D^4)"
+noise_threshold = 0
+order = 10
+class = "topological" # exact input, not a converged output
+
+[quantities.p_hat]
+h5path = "fitzpatrick/P_hat"
+type = "real_vector"
+extract = "all_real"
+label = "grid P_hat (= P/D^6)"
+noise_threshold = 0
+order = 11
+class = "topological" # exact input, not a converged output
+
+# tau is not stated in the book's figure captions; tau = 1 (table 5.1, low-field reactor) is the
+# assumption this reproduction rests on, so it is pinned rather than left implicit.
+[quantities.tau]
+h5path = "fitzpatrick/tau"
+type = "real_scalar"
+extract = "value"
+label = "tau (assumed; not given in the figure captions)"
+noise_threshold = 0
+order = 12
+class = "topological" # exact input, not a converged output
+
+[quantities.dels_db_re]
+h5path = "fitzpatrick/dels_db_re"
+type = "real_vector"
+extract = "all_real"
+label = "Re(delta_s/d_beta) — Fitzpatrick fig 6.2"
+noise_threshold = 1e-10
+order = 20
+class = "physics_converged"
+
+[quantities.dels_db_im]
+h5path = "fitzpatrick/dels_db_im"
+type = "real_vector"
+extract = "all_real"
+label = "Im(delta_s/d_beta) — Fitzpatrick fig 6.3"
+noise_threshold = 1e-10
+order = 21
+class = "physics_converged"
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
+class = "diagnostic"

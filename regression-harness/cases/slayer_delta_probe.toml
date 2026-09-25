@@ -1,0 +1,55 @@
+# Regression case: fixed-Q probe of the SLAYER inner-layer dispersion Δ(Q).
+# Evaluates Δ(Q) on a fixed 4×4 grid over Re(Q), Im(Q) ∈ [-10, 10] using the DIII-D-like
+# SLAYER deck's own 2/1-surface layer parameters, quoted verbatim in the runner's computed
+# script. Fixed Q values are refinement-stable, unlike the AMR scan samples in gpec.h5, so
+# this pins the dispersion curve itself; the parameter chain producing those layer inputs
+# is pinned separately by diiid_slayer_n1. Seconds to run — fast-tier eligible. No golden file yet.
+[case]
+name = "slayer_delta_probe"
+description = "SLAYER inner-layer Δ(Q) on a fixed 4×4 Q grid, DIII-D-like 2/1 layer parameters"
+kind = "computed"
+
+[quantities.q_re]
+h5path = "slayer_probe/Q_re"
+type = "real_vector"
+extract = "all_real"
+label = "probe grid Re(Q)"
+noise_threshold = 0
+order = 10
+class = "topological" # exact input, not a converged output
+
+[quantities.q_im]
+h5path = "slayer_probe/Q_im"
+type = "real_vector"
+extract = "all_real"
+label = "probe grid Im(Q)"
+noise_threshold = 0
+order = 11
+class = "topological" # exact input, not a converged output
+
+[quantities.delta_re]
+h5path = "slayer_probe/Delta_re"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER inner-layer Re Δ(Q) on the fixed grid"
+noise_threshold = 1e-10
+order = 20
+class = "physics_converged"
+
+[quantities.delta_im]
+h5path = "slayer_probe/Delta_im"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER inner-layer Im Δ(Q) on the fixed grid"
+noise_threshold = 1e-10
+order = 21
+class = "physics_converged"
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
+class = "diagnostic"

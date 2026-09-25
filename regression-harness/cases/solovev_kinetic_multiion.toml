@@ -16,6 +16,7 @@ extract = "value"
 label = "NTV total (D+T+imp+e) [N·m]"
 noise_threshold = 1e-8
 order = 10
+class = "physics_converged"
 
 [quantities.ntv_D]
 h5path = "KineticForces/PerSpecies/ion_z1_m2/fgar/total_torque"
@@ -24,6 +25,7 @@ extract = "value"
 label = "NTV Deuterium [N·m]"
 noise_threshold = 1e-8
 order = 11
+class = "physics_converged"
 
 [quantities.ntv_T]
 h5path = "KineticForces/PerSpecies/ion_z1_m3/fgar/total_torque"
@@ -32,6 +34,7 @@ extract = "value"
 label = "NTV Tritium [N·m]"
 noise_threshold = 1e-8
 order = 12
+class = "physics_converged"
 
 [quantities.ntv_electron]
 h5path = "KineticForces/PerSpecies/electron/fgar/total_torque"
@@ -40,6 +43,7 @@ extract = "value"
 label = "NTV electron [N·m]"
 noise_threshold = 1e-8
 order = 14
+class = "physics_converged"
 
 # Stability anchors — confirm the upstream FFS/PE stages feeding the NTV diagnostic.
 [quantities.et_real]
@@ -49,6 +53,7 @@ extract = "real_first"
 label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 [quantities.msing]
 h5path = "SingularSurfaces/rational_count"
@@ -57,6 +62,7 @@ extract = "value"
 label = "# singular surfaces"
 noise_threshold = 0
 order = 21
+class = "topological"
 
 [quantities.runtime]
 h5path = ""
@@ -65,3 +71,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 90
+class = "diagnostic"

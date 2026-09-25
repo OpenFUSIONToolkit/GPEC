@@ -15,6 +15,7 @@ extract = "real_first"
 label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
+class = "physics_converged"
 
 [quantities.et_imag]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -23,6 +24,7 @@ extract = "imag_first"
 label = "total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
+class = "physics_converged"
 
 [quantities.vacuum_eigenvalue]
 h5path = "ForceFreeStates/FreeBoundaryStability/vacuum_eigenvalue"
@@ -31,6 +33,7 @@ extract = "value"
 label = "vacuum matrix min eigenvalue"
 noise_threshold = 1e-10
 order = 14
+class = "physics_converged"
 
 # Energies — full eigenvalue arrays
 [quantities.ep_all]
@@ -40,6 +43,7 @@ extract = "all_complex"
 label = "plasma energy (all)"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 [quantities.ev_all]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
@@ -48,6 +52,7 @@ extract = "all_complex"
 label = "vacuum energy (all)"
 noise_threshold = 1e-10
 order = 21
+class = "physics_converged"
 
 [quantities.et_all]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -56,6 +61,7 @@ extract = "all_complex"
 label = "total energy (all)"
 noise_threshold = 1e-10
 order = 22
+class = "physics_converged"
 
 # Integration
 [quantities.nstep]
@@ -65,6 +71,7 @@ extract = "value"
 label = "ODE steps (saved)"
 noise_threshold = 0
 order = 30
+class = "diagnostic"
 
 [quantities.nstep_total]
 h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
@@ -73,6 +80,7 @@ extract = "value"
 label = "ODE steps (total)"
 noise_threshold = 0
 order = 31
+class = "diagnostic"
 
 # Equilibrium
 [quantities.q0]
@@ -82,6 +90,7 @@ extract = "value"
 label = "q0"
 noise_threshold = 1e-12
 order = 40
+class = "equilibrium_scalar"
 
 [quantities.q95]
 h5path = "Equilibrium/q_95"
@@ -90,6 +99,7 @@ extract = "value"
 label = "q95"
 noise_threshold = 1e-12
 order = 41
+class = "equilibrium_scalar"
 
 # Singular surfaces
 [quantities.msing]
@@ -99,6 +109,7 @@ extract = "value"
 label = "# singular surfaces"
 noise_threshold = 0
 order = 50
+class = "topological"
 
 [quantities.sing_psi]
 h5path = "SingularSurfaces/rational_psi"
@@ -107,6 +118,7 @@ extract = "all_real"
 label = "singular psi locations"
 noise_threshold = 1e-8
 order = 51
+class = "physics_converged"
 
 # Mode numbers
 [quantities.mpert]
@@ -116,6 +128,7 @@ extract = "value"
 label = "mpert"
 noise_threshold = 0
 order = 60
+class = "topological"
 
 [quantities.npert]
 h5path = "Info/npert"
@@ -124,6 +137,7 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 order = 61
+class = "topological"
 
 # Profiles (checksums)
 [quantities.q_profile]
@@ -133,6 +147,7 @@ extract = "checksum"
 label = "q profile (checksum)"
 noise_threshold = 0
 order = 70
+class = "physics_converged"
 
 # Runtime
 [quantities.runtime]
@@ -142,3 +157,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"
