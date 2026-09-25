@@ -10,23 +10,22 @@ using TOML
 # matrix is bit-identical when the same integration is cut into a genuinely different set of
 # chunks. Driven through the public solve API so it exercises the production path itself.
 
-const GP_TI = GeneralizedPerturbedEquilibrium
-
 """
 Solve the DIII-D-like deck with the Riccati integrator at a given chunk count (`nchunks = 0` is
 the msing-derived auto target) and return the published Δ′ matrix alongside the leading energy
 eigenvalue, which is used only as a witness that the two decompositions really differed.
 """
 function _solve_at_nchunks(dir::String, nchunks::Int)
+    GPEC = GeneralizedPerturbedEquilibrium
     inputs = TOML.parsefile(joinpath(dir, "gpec.toml"))
     ffs_in = inputs["ForceFreeStates"]
-    eq_config = GP_TI.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir)
-    equil = GP_TI.Equilibrium.setup_equilibrium(eq_config, nothing)
-    if GP_TI.Equilibrium.wants_two_pass(eq_config)
-        mand = GP_TI.ForceFreeStates.rational_psi_nodes(equil; nlow=ffs_in["nn_low"], nhigh=ffs_in["nn_high"])
-        psi_nodes = GP_TI.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
-        rerun_input = GP_TI.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
-        equil = GP_TI.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+    eq_config = GPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir)
+    equil = GPEC.Equilibrium.setup_equilibrium(eq_config, nothing)
+    if GPEC.Equilibrium.wants_two_pass(eq_config)
+        mand = GPEC.ForceFreeStates.rational_psi_nodes(equil; nlow=ffs_in["nn_low"], nhigh=ffs_in["nn_high"])
+        psi_nodes = GPEC.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
+        rerun_input = GPEC.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
+        equil = GPEC.Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
     end
 
     # Every ForceFreeStatesControl key from the deck except the ones the problem or the
@@ -36,9 +35,9 @@ function _solve_at_nchunks(dir::String, nchunks::Int)
     ctrl_kwargs[:verbose] = false
     ctrl_kwargs[:write_outputs_to_HDF5] = false
 
-    wall = GP_TI.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    prob = GP_TI.EulerLagrangeProblem(equil; nn=ffs_in["nn_low"], wall=wall, dir_path=dir, ctrl_kwargs...)
-    return GP_TI.solve(prob, GP_TI.ForceFreeStates.Riccati(; nchunks=nchunks))
+    wall = GPEC.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+    prob = GPEC.EulerLagrangeProblem(equil; nn=ffs_in["nn_low"], wall=wall, dir_path=dir, ctrl_kwargs...)
+    return GPEC.solve(prob, GPEC.ForceFreeStates.Riccati(; nchunks=nchunks))
 end
 
 @testset "Decomposition invariance of the Riccati Δ′ path" begin
