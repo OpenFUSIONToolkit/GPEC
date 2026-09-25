@@ -149,7 +149,7 @@ regress --check --cases slayer_dels_fitzpatrick                          # worki
 regress --update-golden --cases slayer_dels_fitzpatrick --reason "..."   # re-pin from a fresh run
 ```
 
-- **Classes** come from the case file's `class` key (else `infer_class` in `src/golden.jl`), never from the golden file: `topological` (exact), `equilibrium_scalar`, `physics_converged` gate; `diagnostic` and `unconverged` are reported only.
+- **Classes** come only from the `class` key that every `[quantities.*]` block in a case file must declare, never from the golden file or the quantity's name; a missing or unknown class makes the case fail to load. `topological` (exact), `equilibrium_scalar`, `physics_converged` gate; `diagnostic` and `unconverged` are reported only.
 - **Tolerances** are either the provisional class default (`tolerance_basis = "class-default (provisional)"`) or `"measured"`, which requires a recorded `plateau_drift` or `platform_spread` no larger than `rtol`. No harness tool measures these yet, so every committed golden currently gates on provisional defaults, and `--check` labels those rows `provisional`.
 - **`atol`** must be 0 on a gating entry unless its golden value contains an exact zero (a zero scalar, or an array element that is zero throughout); the relative test is the gate everywhere else. Loading and saving both enforce this.
 - **Re-pinning** requires `--cases` and `--reason`, refuses a working tree with uncommitted tracked changes or with untracked files under `examples/`, `src/` or `regression-harness/cases/`, and prints an old → new line per moved quantity, flagging any move the old tolerance would have failed.

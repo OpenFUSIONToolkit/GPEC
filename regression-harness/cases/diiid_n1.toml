@@ -18,6 +18,7 @@ extract = "real_first"
 label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
+class = "physics_converged"
 
 [quantities.et_imag]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -26,6 +27,7 @@ extract = "imag_first"
 label = "total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
+class = "physics_converged"
 
 [quantities.ep_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
@@ -34,6 +36,7 @@ extract = "real_first"
 label = "plasma energy Re(ep[1])"
 noise_threshold = 1e-10
 order = 12
+class = "physics_converged"
 
 [quantities.ev_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
@@ -42,6 +45,7 @@ extract = "real_first"
 label = "vacuum energy Re(ev[1])"
 noise_threshold = 1e-10
 order = 13
+class = "physics_converged"
 
 [quantities.vacuum_eigenvalue]
 h5path = "ForceFreeStates/FreeBoundaryStability/vacuum_eigenvalue"
@@ -50,6 +54,7 @@ extract = "value"
 label = "vacuum matrix min eigenvalue"
 noise_threshold = 1e-10
 order = 14
+class = "physics_converged"
 
 # Energies — full eigenvalue arrays
 [quantities.ep_all]
@@ -59,6 +64,7 @@ extract = "all_complex"
 label = "plasma energy (all)"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 [quantities.ev_all]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
@@ -67,6 +73,7 @@ extract = "all_complex"
 label = "vacuum energy (all)"
 noise_threshold = 1e-10
 order = 21
+class = "physics_converged"
 
 [quantities.et_all]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -75,6 +82,7 @@ extract = "all_complex"
 label = "total energy (all)"
 noise_threshold = 1e-10
 order = 22
+class = "physics_converged"
 
 # Integration
 [quantities.nstep]
@@ -84,6 +92,7 @@ extract = "value"
 label = "ODE steps (saved)"
 noise_threshold = 0
 order = 30
+class = "diagnostic"
 
 [quantities.nstep_total]
 h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
@@ -92,6 +101,7 @@ extract = "value"
 label = "ODE steps (total)"
 noise_threshold = 0
 order = 31
+class = "diagnostic"
 
 # Equilibrium
 [quantities.q0]
@@ -101,6 +111,7 @@ extract = "value"
 label = "q0"
 noise_threshold = 1e-12
 order = 40
+class = "equilibrium_scalar"
 
 [quantities.q95]
 h5path = "Equilibrium/q_95"
@@ -109,6 +120,7 @@ extract = "value"
 label = "q95"
 noise_threshold = 1e-12
 order = 41
+class = "equilibrium_scalar"
 
 [quantities.betat]
 h5path = "Equilibrium/beta_t"
@@ -117,6 +129,7 @@ extract = "value"
 label = "beta_t"
 noise_threshold = 1e-12
 order = 42
+class = "equilibrium_scalar"
 
 [quantities.betan]
 h5path = "Equilibrium/beta_N"
@@ -125,6 +138,7 @@ extract = "value"
 label = "beta_n"
 noise_threshold = 1e-12
 order = 43
+class = "equilibrium_scalar"
 
 [quantities.li1]
 h5path = "Equilibrium/l_i_1"
@@ -133,6 +147,7 @@ extract = "value"
 label = "internal inductance li1"
 noise_threshold = 1e-12
 order = 44
+class = "equilibrium_scalar"
 
 [quantities.li2]
 h5path = "Equilibrium/l_i_2"
@@ -141,6 +156,7 @@ extract = "value"
 label = "internal inductance li2"
 noise_threshold = 1e-12
 order = 45
+class = "equilibrium_scalar"
 
 [quantities.li3]
 h5path = "Equilibrium/l_i_3"
@@ -149,6 +165,7 @@ extract = "value"
 label = "internal inductance li3"
 noise_threshold = 1e-12
 order = 46
+class = "equilibrium_scalar"
 
 [quantities.betap1]
 h5path = "Equilibrium/beta_p_1"
@@ -157,6 +174,7 @@ extract = "value"
 label = "poloidal beta betap1"
 noise_threshold = 1e-12
 order = 47
+class = "equilibrium_scalar"
 
 [quantities.betap2]
 h5path = "Equilibrium/beta_p_2"
@@ -165,6 +183,7 @@ extract = "value"
 label = "poloidal beta betap2"
 noise_threshold = 1e-12
 order = 48
+class = "equilibrium_scalar"
 
 [quantities.betap3]
 h5path = "Equilibrium/beta_p_3"
@@ -173,6 +192,7 @@ extract = "value"
 label = "poloidal beta betap3"
 noise_threshold = 1e-12
 order = 49
+class = "equilibrium_scalar"
 
 [quantities.betaj]
 h5path = "Equilibrium/beta_j"
@@ -181,6 +201,7 @@ extract = "value"
 label = "current beta betaj"
 noise_threshold = 1e-12
 order = 57
+class = "equilibrium_scalar"
 
 [quantities.volume]
 h5path = "Equilibrium/volume"
@@ -189,6 +210,7 @@ extract = "value"
 label = "plasma volume"
 noise_threshold = 1e-12
 order = 58
+class = "equilibrium_scalar"
 
 [quantities.crnt]
 h5path = "Equilibrium/I_p"
@@ -197,6 +219,7 @@ extract = "value"
 label = "plasma current"
 noise_threshold = 1e-12
 order = 59
+class = "equilibrium_scalar"
 
 [quantities.bt0]
 h5path = "Equilibrium/B_T_axis"
@@ -205,6 +228,7 @@ extract = "value"
 label = "toroidal field bt0"
 noise_threshold = 1e-12
 order = 62
+class = "equilibrium_scalar"
 
 [quantities.bwall]
 h5path = "Equilibrium/B_T_wall"
@@ -213,6 +237,7 @@ extract = "value"
 label = "wall field bwall"
 noise_threshold = 1e-12
 order = 63
+class = "equilibrium_scalar"
 
 [quantities.aratio]
 h5path = "Equilibrium/aspect_ratio"
@@ -221,6 +246,7 @@ extract = "value"
 label = "aspect ratio"
 noise_threshold = 1e-12
 order = 64
+class = "equilibrium_scalar"
 
 [quantities.kappa]
 h5path = "Equilibrium/kappa"
@@ -229,6 +255,7 @@ extract = "value"
 label = "elongation kappa"
 noise_threshold = 1e-12
 order = 65
+class = "equilibrium_scalar"
 
 # Singular surfaces
 [quantities.msing]
@@ -238,6 +265,7 @@ extract = "value"
 label = "# singular surfaces"
 noise_threshold = 0
 order = 50
+class = "topological"
 
 [quantities.sing_psi]
 h5path = "SingularSurfaces/rational_psi"
@@ -246,6 +274,7 @@ extract = "all_real"
 label = "singular psi locations"
 noise_threshold = 1e-8
 order = 51
+class = "physics_converged"
 
 [quantities.sing_q]
 h5path = "SingularSurfaces/rational_q"
@@ -254,6 +283,7 @@ extract = "all_real"
 label = "singular q values"
 noise_threshold = 1e-8
 order = 52
+class = "physics_converged"
 
 # Mode numbers
 [quantities.mpert]
@@ -263,6 +293,7 @@ extract = "value"
 label = "mpert"
 noise_threshold = 0
 order = 60
+class = "topological"
 
 [quantities.npert]
 h5path = "Info/npert"
@@ -271,6 +302,7 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 order = 61
+class = "topological"
 
 [quantities.island_half_width]
 h5path = "PerturbedEquilibrium/SingularCoupling/island_half_width"
@@ -279,6 +311,7 @@ extract = "all_real"
 label = "island half-widths"
 noise_threshold = 1e-8
 order = 81
+class = "physics_converged"
 
 [quantities.chirikov_parameter]
 h5path = "PerturbedEquilibrium/SingularCoupling/chirikov_parameter"
@@ -287,6 +320,7 @@ extract = "all_real"
 label = "Chirikov parameter"
 noise_threshold = 1e-8
 order = 82
+class = "physics_converged"
 
 [quantities.resonant_area_weighted_field]
 h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
@@ -295,6 +329,7 @@ extract = "norm"
 label = "||resonant area-weighted field||"
 noise_threshold = 1e-8
 order = 83
+class = "physics_converged"
 
 [quantities.resonant_area_weighted_field_all]
 h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
@@ -302,6 +337,7 @@ type = "complex_vector"
 extract = "all_complex"
 label = "resonant area-weighted field b^r"
 noise_threshold = 1e-8
+class = "physics_converged"
 
 # Perturbed equilibrium: energies
 [quantities.pe_plasma_energy]
@@ -311,6 +347,7 @@ extract = "value"
 label = "PE plasma energy"
 noise_threshold = 1e-10
 order = 91
+class = "physics_converged"
 
 [quantities.pe_vacuum_energy]
 h5path = "PerturbedEquilibrium/Energies/vacuum_energy"
@@ -319,6 +356,7 @@ extract = "value"
 label = "PE vacuum energy"
 noise_threshold = 1e-10
 order = 92
+class = "physics_converged"
 
 [quantities.pe_surface_energy]
 h5path = "PerturbedEquilibrium/Energies/surface_energy"
@@ -327,6 +365,7 @@ extract = "value"
 label = "PE surface energy"
 noise_threshold = 1e-10
 order = 93
+class = "physics_converged"
 
 [quantities.pe_toroidal_torque]
 h5path = "PerturbedEquilibrium/Energies/toroidal_torque"
@@ -335,6 +374,7 @@ extract = "value"
 label = "PE toroidal torque"
 noise_threshold = 1e-12
 order = 94
+class = "physics_converged"
 
 # NTV (neoclassical toroidal viscosity) toroidal torque T_φ [N·m] from the
 # [KineticForces] FGAR method (pressure moment) — a diagnostic computed on top of
@@ -348,6 +388,7 @@ extract = "value"
 label = "NTV torque FGAR [N·m]"
 noise_threshold = 1e-2
 order = 95
+class = "physics_converged"
 
 # NTV kinetic energy δW_k = Im(T)/(2n) [J] through the same post-PE FGAR path.
 # Tracked at a tighter threshold — it isolates the energy component the
@@ -359,6 +400,7 @@ extract = "value"
 label = "NTV kinetic energy dW FGAR [J]"
 noise_threshold = 1e-3
 order = 96
+class = "physics_converged"
 
 # Profiles (checksums)
 [quantities.q_profile]
@@ -368,6 +410,7 @@ extract = "checksum"
 label = "q profile (checksum)"
 noise_threshold = 0
 order = 70
+class = "physics_converged"
 
 [quantities.pressure_profile]
 h5path = "Equilibrium/Profiles/mu0p"
@@ -376,6 +419,7 @@ extract = "checksum"
 label = "pressure profile (checksum)"
 noise_threshold = 0
 order = 71
+class = "physics_converged"
 
 # Local stability profiles (local_stability_flag = true). Checksums hash the full
 # profile so they are robust to NaN edge-surface entries and catch any change.
@@ -386,6 +430,7 @@ extract = "checksum"
 label = "Mercier D_I profile (checksum)"
 noise_threshold = 0
 order = 72
+class = "physics_converged"
 
 [quantities.locstab_dr]
 h5path = "LocalStability/D_R"
@@ -394,6 +439,7 @@ extract = "checksum"
 label = "resistive interchange D_R profile (checksum)"
 noise_threshold = 0
 order = 73
+class = "physics_converged"
 
 [quantities.locstab_ballooning_dp]
 h5path = "LocalStability/ballooning_Delta_prime"
@@ -402,6 +448,7 @@ extract = "checksum"
 label = "ballooning Delta' profile (checksum)"
 noise_threshold = 0
 order = 74
+class = "physics_converged"
 
 # Runtime
 [quantities.runtime]
@@ -411,6 +458,7 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"
 
 # Root-area-weighted (coordinate-invariant) forcing field b̃ on the control surface: the
 # applied coil spectrum pushed through the √(J|∇ψ|) weight operator. Tracks the field-space
@@ -422,3 +470,4 @@ extract = "norm"
 label = "||forcing b~|| (root-area-weighted)"
 noise_threshold = 1e-10
 order = 1000
+class = "physics_converged"

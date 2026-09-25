@@ -24,6 +24,7 @@ extract = "toml_key:ForceFreeStates.integrator"
 label = "integrator (Δ′ provenance)"
 noise_threshold = 0
 order = 1
+class = "topological"
 
 # Surface locations / count (sanity)
 [quantities.pe_rational_q]
@@ -33,6 +34,7 @@ extract = "all_real"
 label = "rational q values"
 noise_threshold = 1e-8
 order = 10
+class = "physics_converged"
 
 # Island half-widths per rational surface — the headline driven quantity
 [quantities.pe_island_half_width]
@@ -42,6 +44,7 @@ extract = "all_real"
 label = "island half-widths"
 noise_threshold = 1e-8
 order = 20
+class = "physics_converged"
 
 # Chirikov overlap parameter per surface
 [quantities.pe_chirikov]
@@ -51,6 +54,7 @@ extract = "all_real"
 label = "Chirikov parameter"
 noise_threshold = 1e-8
 order = 21
+class = "physics_converged"
 
 # Resonant area-weighted field b̄^r = Φ^r/A^r per surface (tesla) — norm + per-surface complex values
 [quantities.pe_resonant_flux_norm]
@@ -60,6 +64,7 @@ extract = "norm"
 label = "||resonant b field||"
 noise_threshold = 1e-6
 order = 30
+class = "physics_converged"
 
 [quantities.pe_resonant_flux_all]
 h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
@@ -68,6 +73,7 @@ extract = "all_complex"
 label = "resonant b field (all)"
 noise_threshold = 1e-8
 order = 31
+class = "physics_converged"
 
 # Penetrated (reconnected) resonant field per surface — the resistive shielding signature
 [quantities.pe_penetrated_field]
@@ -77,6 +83,7 @@ extract = "all_complex"
 label = "penetrated b field"
 noise_threshold = 1e-8
 order = 32
+class = "physics_converged"
 
 # Per-surface driven-response Δ' from the PE singular-coupling jump (∂b^ψ/∂ψ across the
 # rational surface over 2π·χ₁, forced by the applied flux). This is a driven-response
@@ -88,6 +95,7 @@ extract = "all_complex"
 label = "PE driven-response Δ′ (SingularCoupling jump)"
 noise_threshold = 1e-8
 order = 33
+class = "physics_converged"
 
 # Resonant-field coupling matrix (n_rational × numpert_total) — Frobenius norm, catches broader drift
 [quantities.pe_C_resonant_flux_norm]
@@ -97,6 +105,7 @@ extract = "norm"
 label = "||C resonant b field||"
 noise_threshold = 1e-6
 order = 40
+class = "physics_converged"
 
 [quantities.runtime]
 h5path = ""
@@ -105,3 +114,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"

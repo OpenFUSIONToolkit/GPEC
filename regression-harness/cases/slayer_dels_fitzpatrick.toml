@@ -47,6 +47,7 @@ extract = "all_real"
 label = "Re(delta_s/d_beta) — Fitzpatrick fig 6.2"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 [quantities.dels_db_im]
 h5path = "fitzpatrick/dels_db_im"
@@ -55,6 +56,7 @@ extract = "all_real"
 label = "Im(delta_s/d_beta) — Fitzpatrick fig 6.3"
 noise_threshold = 1e-10
 order = 21
+class = "physics_converged"
 
 [quantities.runtime]
 h5path = ""
@@ -63,3 +65,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"

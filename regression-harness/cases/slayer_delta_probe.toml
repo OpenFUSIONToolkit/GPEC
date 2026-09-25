@@ -34,6 +34,7 @@ extract = "all_real"
 label = "SLAYER inner-layer Re Δ(Q) on the fixed grid"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 [quantities.delta_im]
 h5path = "slayer_probe/Delta_im"
@@ -42,6 +43,7 @@ extract = "all_real"
 label = "SLAYER inner-layer Im Δ(Q) on the fixed grid"
 noise_threshold = 1e-10
 order = 21
+class = "physics_converged"
 
 [quantities.runtime]
 h5path = ""
@@ -50,3 +52,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"

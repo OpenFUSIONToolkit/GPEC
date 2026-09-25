@@ -18,7 +18,7 @@ for f in ("types.jl", "env.jl", "config.jl", "database.jl", "utils.jl", "extract
     include(joinpath(HARNESS_DIR, "src", f))
 end
 
-qspec(name; type="real_scalar", extract="value", label=name, noise=0.0, order=1, class="") =
+qspec(name; type="real_scalar", extract="value", label=name, noise=0.0, order=1, class="physics_converged") =
     QuantitySpec(name, "", type, extract, label, noise, order, class)
 
 golden_val(name; value_type="real", value_real=nothing, value_int=nothing, value_text=nothing,
@@ -200,7 +200,7 @@ extracted_q(name; value_real=nothing, value_int=nothing, value_text=nothing, val
                 extracted_q("x"; value_text="abc123", value_type="checksum"),
                 extracted_q("rt"; value_real=12.5),
                 extracted_q("unspecced"; value_real=1.0)],
-            [spec, qspec("rt"; type="runtime")], nothing)
+            [spec, qspec("rt"; type="runtime", class="diagnostic")], nothing)
         @test isempty(vals3)
     end
 
@@ -424,21 +424,37 @@ value = 12.5
     end
 
     @testset "infer_class" begin
-        @test infer_class(qspec("runtime"; type="runtime")) == "diagnostic"
-        @test infer_class(qspec("nstep"; type="int_scalar")) == "diagnostic"
-        @test infer_class(qspec("msing"; type="int_scalar")) == "topological"
-        @test infer_class(qspec("integrator"; type="token", extract="toml_key:ForceFreeStates.integrator")) == "topological"
-        @test infer_class(qspec("q0")) == "equilibrium_scalar"
-        @test infer_class(qspec("psio")) == "equilibrium_scalar"
-        @test infer_class(qspec("et1_re")) == "physics_converged"
-        # A class declared in the case file wins over inference, and must be a real class.
-        @test infer_class(qspec("ntv_psi_nsteps"; type="int_scalar", class="diagnostic")) == "diagnostic"
+        # The declared class is returned as-is, whatever the quantity's name or type suggests.
+        for class in TOLERANCE_CLASSES
+            @test infer_class(qspec("x"; class=class)) == class
+        end
+        @test infer_class(qspec("q0"; class="physics_converged")) == "physics_converged"
+        @test infer_class(qspec("nstep"; type="int_scalar", class="topological")) == "topological"
+        # A missing or unknown class is an error, never a default.
+        @test_throws ErrorException infer_class(qspec("x"; class=""))
         @test_throws ErrorException infer_class(qspec("x"; class="gating_optional"))
+    end
+
+    @testset "load_case requires a declared class" begin
+        dir = mktempdir()
+        write_case(body) = (path = joinpath(dir, "c.toml"); write(path, "[case]\nname = \"c\"\n\n" * body); path)
+        block = "[quantities.a]\nh5path = \"x\"\ntype = \"real_scalar\"\nextract = \"value\"\n"
+        @test load_case(write_case(block * "class = \"diagnostic\"\n")).quantities[1].class == "diagnostic"
+        err = try
+            load_case(write_case(block))
+            ""
+        catch e
+            sprint(showerror, e)
+        end
+        @test occursin("c.toml", err) && occursin("'a'", err) && occursin("no `class`", err)
+        @test_throws ErrorException load_case(write_case(block * "class = \"gating_optional\"\n"))
+        # Every committed case declares a valid class on every quantity.
+        @test all(q -> q.class in TOLERANCE_CLASSES, Iterators.flatten(c.quantities for c in values(load_all_cases(CASES_DIR))))
     end
 
     @testset "is_pinnable" begin
         @test is_pinnable(qspec("a"))
-        @test !is_pinnable(qspec("rt"; type="runtime"))
+        @test !is_pinnable(qspec("rt"; type="runtime", class="diagnostic"))
         @test !is_pinnable(qspec("h"; extract="checksum"))
     end
 
@@ -447,8 +463,8 @@ value = 12.5
         case = CaseSpec("count_case", "synthetic", "",
             [
                 qspec("a"),
-                qspec("rt"; type="runtime", extract=""),
-                qspec("c"; type="int_scalar"),
+                qspec("rt"; type="runtime", extract="", class="diagnostic"),
+                qspec("c"; type="int_scalar", class="topological"),
                 qspec("d"; class="diagnostic"),
                 qspec("e"),
                 qspec("f"),

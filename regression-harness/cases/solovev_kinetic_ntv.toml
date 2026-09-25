@@ -18,6 +18,7 @@ extract = "all_real"
 label = "NTV torque fgar [Re, Im]"
 noise_threshold = 1e-8
 order = 10
+class = "physics_converged"
 
 [quantities.ntv_psi_nsteps]
 h5path = "KineticForces/fgar/psi_nsteps"
@@ -36,6 +37,7 @@ extract = "real_first"
 label = "root-area-weighted total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 [quantities.msing]
 h5path = "SingularSurfaces/rational_count"
@@ -44,6 +46,7 @@ extract = "value"
 label = "# singular surfaces"
 noise_threshold = 0
 order = 21
+class = "topological"
 
 [quantities.sing_psi]
 h5path = "SingularSurfaces/rational_psi"
@@ -52,6 +55,7 @@ extract = "all_real"
 label = "singular psi locations"
 noise_threshold = 1e-8
 order = 22
+class = "physics_converged"
 
 [quantities.q0]
 h5path = "Equilibrium/q_axis"
@@ -60,6 +64,7 @@ extract = "value"
 label = "q0"
 noise_threshold = 0
 order = 23
+class = "equilibrium_scalar"
 
 # Runtime (special: not from H5)
 [quantities.runtime]
@@ -68,3 +73,4 @@ type = "runtime"
 extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
+class = "diagnostic"

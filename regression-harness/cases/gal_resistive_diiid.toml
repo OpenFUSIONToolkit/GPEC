@@ -20,6 +20,7 @@ extract = "toml_key:ForceFreeStates.integrator"
 label = "integrator (Δ′ provenance)"
 noise_threshold = 0
 order = 1
+class = "topological"
 
 # Number of resonant surfaces in the gal domain
 [quantities.gal_msing]
@@ -29,6 +30,7 @@ extract = "value"
 label = "gal # singular surfaces"
 noise_threshold = 0
 order = 10
+class = "topological"
 
 [quantities.gal_sing_q]
 h5path = "ForceFreeStates/Solutions/GalerkinIntegration/rational_q"
@@ -37,6 +39,7 @@ extract = "all_real"
 label = "gal singular q values"
 noise_threshold = 1e-8
 order = 11
+class = "physics_converged"
 
 # PEST-3 Δ matching matrix — per-surface diagonal (the physics-meaningful tearing Δ′)
 [quantities.gal_pest3_delta_diag]
@@ -46,6 +49,7 @@ extract = "diagonal_complex"
 label = "Δ′ Galerkin RDCON (PEST3) diagonal"
 noise_threshold = 1e-6
 order = 20
+class = "physics_converged"
 
 # Raw outer Δ′ matrix (2·msing × 2·msing) — Frobenius norm catches any element drift
 [quantities.gal_delta_norm]
@@ -55,6 +59,7 @@ extract = "norm"
 label = "||Δ′ Galerkin RDCON (PEST3) matrix||"
 noise_threshold = 1e-6
 order = 21
+class = "physics_converged"
 
 # rpec coil-response block (edge mode × surface-side) — Frobenius norm
 [quantities.gal_delta_coil_norm]
@@ -64,6 +69,7 @@ extract = "norm"
 label = "||gal Δ_coil block||"
 noise_threshold = 1e-6
 order = 22
+class = "physics_converged"
 
 # Mercier index per surface
 [quantities.gal_di]
@@ -73,6 +79,7 @@ extract = "all_real"
 label = "gal D_I per surface"
 noise_threshold = 1e-8
 order = 30
+class = "physics_converged"
 
 # Resonant exponents α per surface
 [quantities.gal_alpha]
@@ -82,6 +89,7 @@ extract = "all_complex"
 label = "gal α per surface"
 noise_threshold = 1e-8
 order = 31
+class = "physics_converged"
 
 # --- DRIVEN (RPEC) inner-layer matching (gal_match_flag) ---
 # Only finite, well-defined matching quantities are tracked. The reconstructed ξ/ξ′ are deliberately
@@ -97,6 +105,7 @@ extract = "norm"
 label = "||gal inner-layer Δ||"
 noise_threshold = 1e-6
 order = 41
+class = "physics_converged"
 
 # Outer-region matched coefficients cout (2·msing × mcoil) — the 4·msing matching assembly + solve.
 [quantities.gal_match_cout_norm]
@@ -106,6 +115,7 @@ extract = "norm"
 label = "||gal match cout||"
 noise_threshold = 1e-6
 order = 42
+class = "physics_converged"
 
 # Matching linear-solve residual ‖mat·cof − rmat‖/‖rmat‖ — health check (should stay ~machine eps).
 [quantities.gal_match_residual]
@@ -115,6 +125,7 @@ extract = "value"
 label = "gal match residual"
 noise_threshold = 1e-10
 order = 44
+class = "physics_converged"
 
 [quantities.runtime]
 h5path = ""
@@ -123,3 +134,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"

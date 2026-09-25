@@ -20,6 +20,7 @@ extract = "toml_key:ForceFreeStates.integrator"
 label = "integrator (Δ′ provenance)"
 noise_threshold = 0
 order = 1
+class = "topological"
 
 # Per-surface SLAYER layer parameters (geometry + dimensionless)
 [quantities.slayer_ising]
@@ -29,6 +30,7 @@ extract = "all_real"
 label = "SLAYER surface indices"
 noise_threshold = 0
 order = 10
+class = "physics_converged"
 
 [quantities.slayer_m]
 h5path = "Tearing/PerSurface/m"
@@ -37,6 +39,7 @@ extract = "all_real"
 label = "SLAYER poloidal m"
 noise_threshold = 0
 order = 11
+class = "physics_converged"
 
 [quantities.slayer_n]
 h5path = "Tearing/PerSurface/n"
@@ -45,6 +48,7 @@ extract = "all_real"
 label = "SLAYER toroidal n"
 noise_threshold = 0
 order = 12
+class = "physics_converged"
 
 [quantities.slayer_rs]
 h5path = "Tearing/PerSurface/rs"
@@ -53,6 +57,7 @@ extract = "all_real"
 label = "SLAYER minor radius rs"
 noise_threshold = 1e-10
 order = 13
+class = "physics_converged"
 
 [quantities.slayer_sval_r]
 h5path = "Tearing/PerSurface/sval_r"
@@ -61,6 +66,7 @@ extract = "all_real"
 label = "SLAYER r-based shear"
 noise_threshold = 1e-10
 order = 14
+class = "physics_converged"
 
 [quantities.slayer_lu]
 h5path = "Tearing/PerSurface/lu"
@@ -69,6 +75,7 @@ extract = "all_real"
 label = "SLAYER Lundquist S"
 noise_threshold = 1e-8
 order = 15
+class = "physics_converged"
 
 [quantities.slayer_D_norm]
 h5path = "Tearing/PerSurface/D_norm"
@@ -77,6 +84,7 @@ extract = "all_real"
 label = "SLAYER D_norm"
 noise_threshold = 1e-10
 order = 16
+class = "physics_converged"
 
 [quantities.slayer_P_perp]
 h5path = "Tearing/PerSurface/P_perp"
@@ -85,6 +93,7 @@ extract = "all_real"
 label = "SLAYER P_perp"
 noise_threshold = 1e-8
 order = 17
+class = "physics_converged"
 
 [quantities.slayer_tauk]
 h5path = "Tearing/PerSurface/tau_k"
@@ -93,6 +102,7 @@ extract = "all_real"
 label = "SLAYER tauk"
 noise_threshold = 1e-12
 order = 18
+class = "physics_converged"
 
 [quantities.slayer_iota_e]
 h5path = "Tearing/PerSurface/iota_e"
@@ -101,6 +111,7 @@ extract = "all_real"
 label = "SLAYER iota_e"
 noise_threshold = 1e-12
 order = 19
+class = "physics_converged"
 
 # Normalized diamagnetic frequencies. iota_e above is their ratio, so it is blind
 # to a common factor on both; these pin the drive itself.
@@ -111,6 +122,7 @@ extract = "all_real"
 label = "SLAYER Q_e"
 noise_threshold = 1e-12
 order = 20
+class = "physics_converged"
 
 [quantities.slayer_Q_i]
 h5path = "Tearing/PerSurface/Q_i"
@@ -119,6 +131,7 @@ extract = "all_real"
 label = "SLAYER Q_i"
 noise_threshold = 1e-12
 order = 21
+class = "physics_converged"
 
 # Tearing eigenvalue (coupled mode → length 1). The headline deliverable:
 # a real, nonzero growth rate on a realistic equilibrium. Root-extraction
@@ -136,6 +149,7 @@ extract = "first_3_complex"
 label = "SLAYER Q_root [2/1,3/1,4/1]"
 noise_threshold = 1e-4
 order = 30
+class = "physics_converged"
 
 [quantities.slayer_omega_Hz]
 h5path = "Tearing/Roots/omega"
@@ -144,6 +158,7 @@ extract = "first_3"
 label = "SLAYER ω_Hz [2/1,3/1,4/1]"
 noise_threshold = 1.0
 order = 32
+class = "physics_converged"
 
 [quantities.slayer_gamma_Hz]
 h5path = "Tearing/Roots/gamma"
@@ -152,6 +167,7 @@ extract = "first_3"
 label = "SLAYER γ_Hz [2/1,3/1,4/1]"
 noise_threshold = 1e-1
 order = 33
+class = "physics_converged"
 
 # no_root flag (1 = extraction failed). Pinned for the inner three surfaces;
 # this case guards that the 2/1, 3/1, 4/1 keep finding a real root.
@@ -162,6 +178,7 @@ extract = "first_3"
 label = "SLAYER no_root flags [2/1,3/1,4/1]"
 noise_threshold = 0
 order = 34
+class = "physics_converged"
 
 # Outer-region Δ' consumed by the SLAYER matching — the same STRIDE-like BVP (PEST3) matrix
 # the riccati case pins at source; tracked here too so a change in what SLAYER actually
@@ -173,6 +190,7 @@ extract = "diagonal_complex"
 label = "Δ′ STRIDE-like BVP (PEST3) diagonal, as ingested by SLAYER"
 noise_threshold = 1e-8
 order = 40
+class = "physics_converged"
 
 # Inner-layer solve outputs per surface (the resistive-layer Riccati solution itself, not the
 # outer matching). The adaptive-scan Δ(Q) sample arrays are deliberately NOT pinned: AMR sample
@@ -184,6 +202,7 @@ extract = "all_complex"
 label = "SLAYER inner-layer thickness δ_s (complex, Riccati)"
 noise_threshold = 1e-10
 order = 41
+class = "physics_converged"
 
 [quantities.slayer_delta_s_over_d_beta]
 h5path = "Tearing/LayerWidths/delta_s_over_d_beta"
@@ -192,6 +211,7 @@ extract = "all_complex"
 label = "SLAYER inner-layer δ_s/d_β (complex, dimensionless)"
 noise_threshold = 1e-10
 order = 42
+class = "physics_converged"
 
 [quantities.slayer_delta_s_abs]
 h5path = "Tearing/LayerWidths/delta_s_abs"
@@ -200,6 +220,7 @@ extract = "all_real"
 label = "SLAYER inner-layer physical thickness |δ_s| [m]"
 noise_threshold = 1e-12
 order = 43
+class = "physics_converged"
 
 [quantities.slayer_d_beta]
 h5path = "Tearing/LayerWidths/d_beta"
@@ -208,6 +229,7 @@ extract = "all_real"
 label = "SLAYER β-weighted ion drift scale d_β [m]"
 noise_threshold = 1e-12
 order = 44
+class = "physics_converged"
 
 # Settings (catches accidental config drift)
 [quantities.slayer_enabled]
@@ -217,6 +239,7 @@ extract = "value"
 label = "SLAYER enabled flag"
 noise_threshold = 0
 order = 90
+class = "topological"
 
 [quantities.runtime]
 h5path = ""
@@ -225,3 +248,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"

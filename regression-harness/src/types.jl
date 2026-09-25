@@ -5,8 +5,7 @@ Shared data structures for the regression harness.
 """
 Specification for a single quantity to extract from gpec.h5.
 
-`class` is the golden tolerance class declared in the case file, or empty to let `infer_class`
-choose; declaring it is the only way to make a quantity non-gating that inference would gate.
+`class` is the golden tolerance class declared in the case file; every quantity must declare one.
 """
 struct QuantitySpec
     name::String
@@ -17,7 +16,7 @@ struct QuantitySpec
     label::String           # Human-readable label for reports
     noise_threshold::Float64 # Absolute changes below this are noise
     order::Int              # Display order in reports (lower = earlier)
-    class::String           # Declared golden tolerance class; empty = inferred
+    class::String           # Declared golden tolerance class (one of TOLERANCE_CLASSES)
 end
 
 """

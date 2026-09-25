@@ -28,8 +28,9 @@ How strictly a quantity must reproduce, and why.
   - `unconverged` — measured and found to have no plateau; tracked differentially, never pinned,
     so that a known-unconverged quantity is visibly excluded instead of quietly given a wide bound
 
-A quantity's class comes from its case file (an explicit `class` key, else `infer_class`), never
-from the golden file, so demoting a gate to a non-gating class is a reviewed case-file change.
+A quantity's class comes only from the `class` key its case file must declare, never from the
+golden file or the quantity's name, so demoting a gate to a non-gating class is a reviewed
+case-file change and renaming a quantity cannot silently change its class.
 
 A gating entry's `atol` must be 0 unless its golden value contains an exact zero (a scalar equal to
 0, or an array element whose every component is 0). Everywhere else the relative test is the whole
@@ -274,30 +275,15 @@ function save_golden(meta::GoldenMeta, values::Dict{String,GoldenValue})
 end
 
 """
-Classify a quantity from its case spec, so a new case gets sensible defaults without every
-tolerance having to be written by hand.
+Return a quantity's declared tolerance class, validated against `TOLERANCE_CLASSES`.
 
-An explicit `class` in the case file wins. Otherwise integer counts are topological; runtimes and
-step counts describe the numerics rather than the physics and so are diagnostic; everything else
-is assumed to be a physics quantity that must be converged, which is the conservative assumption —
-it gates.
+There is no inference from the quantity's name or type: a missing class is an error, so that
+every gate is an explicit, reviewed choice in the case file.
 """
 function infer_class(spec::QuantitySpec)::String
-    if !isempty(spec.class)
-        spec.class in TOLERANCE_CLASSES || error("Quantity '$(spec.name)': unknown class '$(spec.class)' in its case file")
-        return spec.class
-    end
-    spec.type == "runtime" && return "diagnostic"
-    spec.name in ("nstep", "nstep_total") && return "diagnostic"
-    spec.type == "int_scalar" && return "topological"
-    # A control token has no meaningful tolerance between "riccati" and "galerkin".
-    startswith(spec.extract, "toml_key:") && return "topological"
-    name = spec.name
-    # sing_psi / sing_q are absent on purpose: they come from a root search, not pure quadrature.
-    equilibrium_names = ("q0", "q95", "betat", "betan", "betap1", "betap2", "betap3", "betaj",
-        "li1", "li2", "li3", "volume", "crnt", "bt0", "bwall", "aratio", "kappa", "psio")
-    name in equilibrium_names && return "equilibrium_scalar"
-    return "physics_converged"
+    isempty(spec.class) && error("Quantity '$(spec.name)': no `class` declared in its case file")
+    spec.class in TOLERANCE_CLASSES || error("Quantity '$(spec.name)': unknown class '$(spec.class)' in its case file")
+    return spec.class
 end
 
 """
