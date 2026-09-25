@@ -38,8 +38,8 @@ specified in the input.
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Float64` - Target on-axis safety factor q(0); the q and F profiles are rescaled to
     meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
-  - `etol::Float64` - Relative tolerance of the equilibrium ODE solves; their absolute tolerance is
-    `equil_abstol(etol)`, i.e. `etol` capped at `EQUIL_ABSTOL_MAX`
+  - `etol::Float64` - Relative tolerance of the equilibrium ODE solves (positive and finite); their
+    absolute tolerance is `equil_abstol(etol)`, i.e. `etol` capped at `EQUIL_ABSTOL_MAX`
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
@@ -144,6 +144,7 @@ specified in the input.
         else
             error("Cannot recognize jac_type = $(jac_type)")
         end
+        (isfinite(etol) && etol > 0) || error("etol = $etol must be a positive, finite relative tolerance")
         if psihigh > 1.0
             @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
         end

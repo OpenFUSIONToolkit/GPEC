@@ -129,6 +129,13 @@
         @test isapprox(q_axis, 1.05; rtol=0.02)
     end
 
+    @testset "etol must be positive and finite" begin
+        for etol in (0.0, -1e-8, NaN, Inf)
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; etol=etol)
+        end
+        @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; etol=1e-8).etol == 1e-8
+    end
+
     @testset "Deprecated TOML keys are dropped, not fatal" begin
         # Removed control knobs must keep old gpec.toml decks (and older gpec.h5 replays,
         # whose stored TOML blob goes through the same path) parsing with a warning.
