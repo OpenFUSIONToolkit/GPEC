@@ -197,12 +197,12 @@ scalings ([citations](citations.md#ErrorFields-Module)): the n = 1 fits of Logan
 Fusion* (2026), [doi:10.1088/1361-6587/aea7d6](https://doi.org/10.1088/1361-6587/aea7d6), and the n = 2 fits of Logan et al.,
 *Nucl. Fusion* **60**, 086010 (2020):
 `δ_thresh = 10^α_c · n_e^α_n · B_T^α_B · R_0^α_R · (β_N/l_i)^α_β · I_p^α_I`, with `n_e` in
-10¹⁹ m⁻³, `B_T` in T, `R_0` in m and `I_p` in MA. Only the 2026 fits carry the current term:
+10¹⁹ m⁻³, `B_T` in T, `R_0` in m and `I_p` in MA. Each fit is chosen by `year`, `dataset` and `fit`; only the 2026 fits carry the current term:
 
-| Fit (`dataset`, `fit`) | α_c | α_n | α_B | α_R | α_β | α_I |
+| Fit (`year`, `dataset`, `fit`) | α_c | α_n | α_B | α_R | α_β | α_I |
 |---|---|---|---|---|---|---|
-| `"O,L 2026"`, `"OLS"` (Eq. 7) | −4.31 ± 0.09 | 0.77 ± 0.08 | 0.19 ± 0.09 | 1.88 ± 0.16 | 0.25 ± 0.08 | −0.97 ± 0.08 |
-| `"O,L 2026"`, `"WLS"` (Eq. 8) | −4.26 ± 0.09 | 0.56 ± 0.08 | 0.30 ± 0.10 | 1.57 ± 0.15 | 0.13 ± 0.06 | −1.01 ± 0.07 |
+| `2026`, `"O,L"`, `"OLS"` (Eq. 7) | −4.31 ± 0.09 | 0.77 ± 0.08 | 0.19 ± 0.09 | 1.88 ± 0.16 | 0.25 ± 0.08 | −0.97 ± 0.08 |
+| `2026`, `"O,L"`, `"WLS"` (Eq. 8) | −4.26 ± 0.09 | 0.56 ± 0.08 | 0.30 ± 0.10 | 1.57 ± 0.15 | 0.13 ± 0.06 | −1.01 ± 0.07 |
 
 The 2026 fits use only ohmic and L-mode discharges of conventional tokamaks (C-Mod, DIII-D,
 EAST, JET, J-TEXT and KSTAR; no NSTX or COMPASS), so they suit conventional-aspect-ratio designs
@@ -220,8 +220,9 @@ n_e = 5.0                       # Electron density for the threshold scaling [1e
 # i_p = 1.2                     # Plasma current magnitude [MA]; defaults to the equilibrium's
 
 [ErrorFields.Risk]
-dataset = "O,L"                 # ITPA dataset of the threshold fit: "O,L", "O,L,H" or "O,L 2026" (n = 1); "O,L", "O,L,-C", "O,L,N" (n = 2)
-fit = "WLS"                     # Fitting method: "OLS", "DSOLS", or "WLS" ("O,L 2026": "OLS" or "WLS")
+year = 2020                     # Publication year of the threshold fit: 2020 (n = 1 and n = 2) or 2026 (n = 1)
+dataset = "O,L"                 # ITPA dataset of the fit: 2020 "O,L" or "O,L,H" (n = 1), "O,L", "O,L,-C", "O,L,N" (n = 2); 2026 "O,L"
+fit = "WLS"                     # Fitting method: "OLS", "DSOLS", or "WLS" (2026: "OLS" or "WLS")
 distribution = "normal"         # How the fit exponents are sampled: "normal", "flat", or "normal_truncated"
 nsample_threshold = 1000000     # Threshold samples
 seed = 1                        # Seed of the threshold sampling
@@ -239,7 +240,7 @@ scan = EF.ToleranceScan("gpec.h5")
 EF.allowable_tolerance(scan, 1.0)                  # tolerance multiplier at 1 % locking risk
 EF.allowable_tolerance(scan, 1.0; corrected=true)  # with error-field correction
 risk = EF.locking_risk("gpec.h5"; n_e=5.0, psi_low=0.7, risk_ctrl=EF.RiskControl(; dataset="O,L,H"))
-risk26 = EF.locking_risk("gpec.h5"; n_e=5.0, risk_ctrl=EF.RiskControl(; dataset="O,L 2026", fit="OLS"))
+risk26 = EF.locking_risk("gpec.h5"; n_e=5.0, risk_ctrl=EF.RiskControl(; year=2026, fit="OLS"))
 scan2 = EF.tolerance_scan("gpec.h5"; n_e=5.0, scales=[0.5, 1, 2, 4], coil_subset=["F6A", "F7A"])
 ```
 
