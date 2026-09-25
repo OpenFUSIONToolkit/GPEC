@@ -67,6 +67,10 @@ const _PREFS_ENVS = Dict{Bool,String}()
 """
 Launch `cmd` with GPEC's `precompile_workload` preference set from `case_spec`, via a small
 environment stacked on the load path so no file is written into the run's project.
+
+The environment goes first: preferences from earlier load-path entries win, so this outranks a
+developer's `LocalPreferences.toml` beside the run's `Project.toml`. It declares GPEC only under
+`[extras]` and has no Manifest, so package loading still falls through to the active project.
 """
 function with_workload_preference(cmd::Cmd, case_spec::CaseSpec)
     workload = case_spec.precompile_workload
@@ -76,7 +80,8 @@ function with_workload_preference(cmd::Cmd, case_spec::CaseSpec)
         write(joinpath(dir, "LocalPreferences.toml"), "[GeneralizedPerturbedEquilibrium]\nprecompile_workload = $workload\n")
         return dir
     end
-    return addenv(cmd, "JULIA_LOAD_PATH" => "@:$env:@v#.#:@stdlib")
+    load_path = get(ENV, "JULIA_LOAD_PATH", "@:@v#.#:@stdlib")
+    return addenv(cmd, "JULIA_LOAD_PATH" => env * (Sys.iswindows() ? ";" : ":") * load_path)
 end
 
 const RUNNER_SCRIPT_TEMPLATE = """

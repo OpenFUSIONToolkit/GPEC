@@ -41,3 +41,6 @@ profiling/
 
 # Override-case rundirs materialized beside their example by the regression harness
 .regress-override-*
+
+# Per-developer package preferences (e.g. the precompile_workload switch)
+LocalPreferences.toml
