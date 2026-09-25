@@ -239,10 +239,11 @@ function direct_position!(raw_profile::DirectRunInput)
         "Failed to find magnetic axis: $newton_path converged at (R, Z) = ($r, $z), outside the ψ grid " *
         "R ∈ [$rmin, $rmax], Z ∈ [$zmin, $zmax]."
     )
-    has_march_bracket && !(r_prev <= r <= r_march) && error(
-        "Failed to find magnetic axis: $newton_path converged at (R, Z) = ($r, $z), outside the R-bracket " *
-        "[$r_prev, $r_march] of the B_z sign change found by the midplane march along Z = $z_march."
-    )
+    has_march_bracket && !(r_prev <= r <= r_march) &&
+        error(
+            "Failed to find magnetic axis: $newton_path converged at (R, Z) = ($r, $z), outside the R-bracket " *
+            "[$r_prev, $r_march] of the B_z sign change found by the midplane march along Z = $z_march."
+        )
     # An O-point has det ∂(B_R,B_Z)/∂(R,Z) = det(Hess ψ)/R² > 0; an X-point has det < 0.
     direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
     det_axis = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
