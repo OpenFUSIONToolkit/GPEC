@@ -8,7 +8,7 @@ julia_version = "1.11.6"
 manifest_sha = "7e5c34ad1722fa6addf94f7387b972fa8ac17ff86166793819b158496d495132"
 nthreads = 8
 os_arch = "arm64-apple-darwin24.0.0"
-reason = "Regenerate on the branch after the second adversarial review: scan axes and tau now topological, runtime no longer pinned; values unchanged from the Fitzpatrick-validated state"
+reason = "Pin del_s/d_beta over the Fitzpatrick figs 6.2/6.3 (Q_hat, P_hat) grid, with the scan axes and tau exact; values unchanged from the figure-validated state"
 
 [values.dels_db_im]
 atol = 0.0

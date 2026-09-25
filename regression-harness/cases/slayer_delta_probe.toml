@@ -3,7 +3,7 @@
 # SLAYER deck's own 2/1-surface layer parameters, quoted verbatim in the runner's computed
 # script. Fixed Q values are refinement-stable, unlike the AMR scan samples in gpec.h5, so
 # this pins the dispersion curve itself; the parameter chain producing those layer inputs
-# is pinned separately by diiid_slayer_n1. Seconds to run — fast-tier eligible.
+# is pinned separately by diiid_slayer_n1. Seconds to run — fast-tier eligible. No golden file yet.
 [case]
 name = "slayer_delta_probe"
 description = "SLAYER inner-layer Δ(Q) on a fixed 4×4 Q grid, DIII-D-like 2/1 layer parameters"
@@ -16,6 +16,7 @@ extract = "all_real"
 label = "probe grid Re(Q)"
 noise_threshold = 0
 order = 10
+class = "topological" # exact input, not a converged output
 
 [quantities.q_im]
 h5path = "slayer_probe/Q_im"
@@ -24,6 +25,7 @@ extract = "all_real"
 label = "probe grid Im(Q)"
 noise_threshold = 0
 order = 11
+class = "topological" # exact input, not a converged output
 
 [quantities.delta_re]
 h5path = "slayer_probe/Delta_re"
