@@ -16,7 +16,11 @@ using LinearAlgebra
         n = length(names)
         rms(M) = [sqrt((abs2(M[1, j]) + abs2(M[2, j])) / 2) for j in 1:n]
         canc(M) = [EF.cancelling_offset(δ0[j], M[1, j], M[2, j])[i] for i in 1:2, j in 1:n]
-        return EF.SensitivityTable(names, 1, ComplexF64.(δ0), ComplexF64.(S), ComplexF64.(T), rms(S), rms(T), canc(S), canc(T))
+        # delta_per_mm_shift, delta_per_deg_tilt, delta_per_mm_rim: the rim column is the tilt
+        # sensitivity re-expressed per mm at the coil radius; these hoops carry no radius here, so
+        # reuse the per-degree column. Nothing in this file reads it — the sampler uses shift/tilt.
+        return EF.SensitivityTable(names, 1, ComplexF64.(δ0), ComplexF64.(S), ComplexF64.(T),
+            rms(S), rms(T), rms(T), canc(S), canc(T))
     end
     hoops(names; heights=zeros(length(names))) = [FT.make_pf_hoop(; radius=1.5, height=heights[i], name=nm) for (i, nm) in enumerate(names)]
     pdf_moments(res) = begin
@@ -148,6 +152,53 @@ using LinearAlgebra
         # With nothing sampled but the ring budget, |δ| = |Σδ0 + 5e-5·e^{iφ}| lies within 5e-5 of the nominal.
         @test none.mean_abs_delta ≈ res.delta_nominal rtol = 0.5
         @test all(abs.(none.bin_edges[findall(>(0), none.pdf)] .- res.delta_nominal) .< 5e-5 + 2 * (none.bin_edges[2] - none.bin_edges[1]))
+    end
+
+    @testset "coherent group tilt in metres needs one radius to mean one angle" begin
+        # A group rotates as one body, so a rim displacement only names an angle once a radius is
+        # picked. Members of equal radius agree on it; members of different radii do not, and
+        # picking one member's radius would make the answer depend on the order they were listed.
+        names = ["a", "b"]
+        table = synthetic_table(names, [0.0, 0.0], zeros(ComplexF64, 3, 2), ones(ComplexF64, 3, 2))
+        in_m = nm -> EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "$nm"
+            members = ["a", "b"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.01
+            tilt_units = "m"
+            rotation_center_z_m = 0.0
+            """)
+        same = [FT.make_pf_hoop(; radius=1.5, height=0.0, name=nm) for nm in names]
+        r_same = FT.nominal_major_radius(same[1])
+        @test EF.group_tilt_deg(only(in_m("same").groups), Dict(zip(names, same))) ≈ rad2deg(asin(0.01 / r_same))
+
+        differ = [FT.make_pf_hoop(; radius=1.5, height=0.0, name="a"),
+                  FT.make_pf_hoop(; radius=2.5, height=0.0, name="b")]
+        by_name = Dict(zip(names, differ))
+        @test_throws ArgumentError EF.group_tilt_deg(only(in_m("differ").groups), by_name)
+        # Reversing the member order must not change whether it is accepted.
+        rev = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "differ"
+            members = ["b", "a"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.01
+            tilt_units = "m"
+            rotation_center_z_m = 0.0
+            """)
+        @test_throws ArgumentError EF.group_tilt_deg(only(rev.groups), by_name)
+        # Degrees are unambiguous whatever the members are, which is what the reference tables use.
+        in_deg = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "differ"
+            members = ["a", "b"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.25
+            tilt_units = "deg"
+            rotation_center_z_m = 0.0
+            """)
+        @test EF.group_tilt_deg(only(in_deg.groups), by_name) == 0.25
     end
 
     @testset "coherent group: shared draw and rigid rotation" begin

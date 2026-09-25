@@ -257,6 +257,31 @@ end
     return δc, δu
 end
 
+"""
+    group_tilt_deg(g::CoherentGroupTolerance, set_of) -> Float64
+
+The rigid rotation angle, in degrees, that a coherent group's tilt tolerance stands for.
+
+A group rotates as one body, so it has one angle. Declared in degrees that angle is the tolerance
+itself. Declared in metres it is a rim displacement, which only names an angle once a radius is
+chosen — and the members do not have to share one. The reference implementation sidesteps this by
+converting per coil, giving every member the same rim displacement and therefore a *different*
+angle each, which is no longer a rigid rotation of the group.
+
+Rather than pick a member's radius and hide the choice, this errors when the members disagree.
+Declare such a group in degrees, which is unambiguous and is what the reference's own tables do.
+"""
+function group_tilt_deg(g::CoherentGroupTolerance, set_of)
+    g.tilt_units == "deg" && return Float64(g.tilt_tol)
+    radii = [ForcingTerms.nominal_major_radius(set_of[m]) for m in g.members]
+    lo, hi = extrema(radii)
+    hi - lo <= 0.01 * hi || throw(ArgumentError(
+        "coherent group \"$(g.name)\" gives its tilt in metres, but its members span nominal radii " *
+        "$(round(lo; digits=3))-$(round(hi; digits=3)) m, so a rim displacement does not name one " *
+        "rotation angle. Declare this group's tilt in degrees (tilt_units = \"deg\")."))
+    return tilt_tolerance_deg(g.tilt_tol, g.tilt_units, set_of[g.members[argmin(radii)]])
+end
+
 function _resolve_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}, ctrl::MonteCarloControl)
     names = table.coil_names
     index = Dict(n => i for (i, n) in enumerate(names))
@@ -320,9 +345,7 @@ function _resolve_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
             m in uncorrectable && (g_corr[gi] = false)
         end
         g_shift[gi] = scale * g.shift_tol_m
-        # A group tilt in metres is converted through the first member's radius, as the OMFIT
-        # tables did; give group tilts in degrees when members differ in size.
-        g_tilt[gi] = scale * tilt_tolerance_deg(g.tilt_tol, g.tilt_units, set_of[g.members[1]])
+        g_tilt[gi] = scale * group_tilt_deg(g, set_of)
         g_p[gi] = _radial_p(g.radial_shape)
         g_model[gi] = _model_code(g.tolerance_model)
         g_ztop[gi] = g.cylinder_half_height_m
