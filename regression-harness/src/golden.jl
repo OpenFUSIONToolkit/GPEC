@@ -589,7 +589,7 @@ function build_golden_values(extracted::Vector{ExtractedQuantity}, specs::Vector
         eq.value_type == "missing" && continue
         spec = get(spec_by_name, eq.name, nothing)
         spec === nothing && continue
-        is_pinnable(spec) || continue
+        (is_pinnable(spec) && eq.value_type != "checksum") || continue
         class = infer_class(spec)
         prior = existing === nothing ? nothing : get(existing, eq.name, nothing)
         if prior !== nothing && prior.value_type != eq.value_type
