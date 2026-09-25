@@ -164,6 +164,27 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
+    check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+
+Error when `qmin < qlow < q0`. On such a reversed-shear profile the q < qlow region is a ring
+around q_min rather than a core, so there is no single lower bound that excludes it: `sing_min!`
+places `psilow` on the outer leg, while `initialize_el_at_axis!` starts at the axis because
+`qlow < q0`, and the two disagree about the integration domain.
+"""
+function check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+    q0 = equil.profiles.q_spline.y[1]
+    qmin = equil.params.qmin
+    if ctrl.qlow > qmin && q0 > ctrl.qlow
+        error(
+            "qlow=$(ctrl.qlow) lies between qmin=$qmin and the axis value q0=$q0 of a reversed-shear q profile: " *
+            "the q < qlow region is a ring around q_min, not a core, so no single lower integration bound excludes it. " *
+            "Set qlow ≤ qmin to integrate from the axis, or qlow ≥ q0 to start outside q_min."
+        )
+    end
+    return nothing
+end
+
+"""
     sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
 Set the lower integration bound `intr.psilow`. Port of Fortran RDCON `sing_min` (sing.f):

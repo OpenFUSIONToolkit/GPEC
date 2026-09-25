@@ -201,6 +201,13 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         nodes = FFS.rational_psi_nodes(equil; nlow=1, nhigh=2)
         @test count(p -> any(isapprox.(p, psi_q2; atol=1e-6)), nodes) == 2
         @test length(nodes) == intr.msing
+
+        # qmin < qlow < q0 makes the q < qlow region a ring around q_min, which no single lower bound excludes.
+        q0 = equil.profiles.q_spline.y[1]
+        @test equil.params.qmin < 2.0 < q0
+        @test_throws ErrorException FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=2.0), equil)
+        @test FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=1.5), equil) === nothing
+        @test FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=q0 + 0.1), equil) === nothing
     end
 
     # ---------------------------------
