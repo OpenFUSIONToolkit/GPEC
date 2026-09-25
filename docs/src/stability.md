@@ -280,6 +280,7 @@ local_stability_flag = false  # scan Mercier D_I, resistive D_R, and ballooning 
 # Output
 verbose              = true
 write_outputs_to_HDF5 = true
+write_el_matrices    = false  # also write ForceFreeStates/EulerLagrangeMatrices (mpert² × npsi per matrix)
 ```
 
 The number of Julia threads is controlled at startup via `-t N` or the `JULIA_NUM_THREADS`
