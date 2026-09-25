@@ -413,7 +413,7 @@ value = 12.5
             update_golden_from_run(db, case, sha, "moved", repo)
         end
         @test load_golden("exceed_case").meta.golden_version == 3
-        @test_logs (:warn, r"beyond its old tolerance") match_mode=:any redirect_stdout(devnull) do
+        @test_logs (:warn, r"beyond its old tolerance") match_mode = :any redirect_stdout(devnull) do
             update_golden_from_run(db, case, sha, "moved", repo; accept_exceeding=true)
         end
         back = load_golden("exceed_case")

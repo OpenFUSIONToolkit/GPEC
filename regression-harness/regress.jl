@@ -34,6 +34,7 @@ function parse_args(args)
     fail_on_change = false
     check = false
     update_golden = false
+    accept_exceeding = false
     reason = nothing
     help = false
 
@@ -70,6 +71,9 @@ function parse_args(args)
         elseif arg == "--update-golden"
             update_golden = true
             i += 1
+        elseif arg == "--accept-exceeding"
+            accept_exceeding = true
+            i += 1
         elseif arg == "--reason" && i < length(args)
             reason = args[i+1]
             i += 2
@@ -97,7 +101,7 @@ function parse_args(args)
     end
 
     return CLIOptions(cases, refs, ref_range, force, list_cases, show_qty, show_case, db_path, verbose,
-        no_instantiate, no_pin_manifest, allow_env_mismatch, fail_on_change, check, update_golden, reason, help)
+        no_instantiate, no_pin_manifest, allow_env_mismatch, fail_on_change, check, update_golden, accept_exceeding, reason, help)
 end
 
 const HELP_TEXT = """
@@ -194,8 +198,7 @@ Examples:
 
 function main(args=ARGS)
     # Kept out of CLIOptions so this flag needs no change to the shared option struct.
-    accept_exceeding = "--accept-exceeding" in args
-    opts = parse_args(filter(!=("--accept-exceeding"), args))
+    opts = parse_args(args)
 
     if opts.help
         print(HELP_TEXT)
@@ -239,7 +242,7 @@ function main(args=ARGS)
             error("--update-golden requires --reason \"...\": a golden change is a claim about physics, " *
                   "and the reviewer needs to know what changed and why")
         end
-        if accept_exceeding && !opts.update_golden
+        if opts.accept_exceeding && !opts.update_golden
             error("--accept-exceeding only applies to --update-golden")
         end
         if opts.update_golden && isempty(opts.cases)
@@ -306,7 +309,7 @@ function main(args=ARGS)
 
             if opts.update_golden
                 update_golden_from_run(db, case_spec, resolved_refs[1].commit_hash,
-                    String(opts.reason), REPO_ROOT; accept_exceeding=accept_exceeding)
+                    String(opts.reason), REPO_ROOT; accept_exceeding=opts.accept_exceeding)
             elseif opts.check
                 summary = report_golden_check(db, case_spec, resolved_refs[1].commit_hash)
                 n_golden_fail += summary.n_fail
