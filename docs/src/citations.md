@@ -157,8 +157,8 @@ The n = 2 penetration-threshold fits used by `ErrorFields.Risk`.
 The 2026 n = 1 penetration-threshold scalings on the core dominant-mode overlap δ, fitted to
 ohmic and L-mode discharges of conventional tokamaks only (C-Mod, DIII-D, EAST, JET, J-TEXT,
 KSTAR) and adding a plasma-current term: Eq. 7 (OLS) and Eq. 8 (KDE-weighted WLS),
-`δ = 10^α_c (β_n/l_i)^α_β |I_p|^α_I R_0^α_R n_e^α_n |B_T|^α_B`. These are the `"O,L 2026"` fits
-of `ErrorFields.Risk`. The paper's overlap is the same dominant-mode metric the `ErrorFields`
+`δ = 10^α_c (β_n/l_i)^α_β |I_p|^α_I R_0^α_R n_e^α_n |B_T|^α_B`. These are the `year = 2026`
+fits of `ErrorFields.Risk`. The paper's overlap is the same dominant-mode metric the `ErrorFields`
 module computes (Eqs. 1–5).
 
 ---
