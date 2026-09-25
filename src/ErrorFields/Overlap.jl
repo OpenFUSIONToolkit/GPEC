@@ -91,9 +91,9 @@ function regrid(cfg::CoilConfig; mtheta_coil=nothing, nzeta_coil=nothing, dat_di
 end
 
 """
-    ResonantDriveContext(equil, rc, cfg, psilim, b_t0; psi_low=0.0, psi_high=CORE_PSI_HIGH,
+    ResonantDriveContext(equil, rc, cfg; psilim, b_t0, psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH,
                    mtheta_coil=nothing, nzeta_coil=nothing, inputs=Dict{String,Any}())
-    ResonantDriveContext(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mtheta_coil=nothing,
+    ResonantDriveContext(h5path; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH, mtheta_coil=nothing,
                    nzeta_coil=nothing, dat_dir=nothing)
 
 Assemble the context. The ψ window selects which rational surfaces the dominant mode is built from.
@@ -105,10 +105,10 @@ rebuilt from the file.
 function ResonantDriveContext(
     equil::Equilibrium.PlasmaEquilibrium,
     rc::ResonantCoupling,
-    cfg::CoilConfig,
+    cfg::CoilConfig;
     psilim::Real,
-    b_t0::Real;
-    psi_low::Real=0.0,
+    b_t0::Real,
+    psi_low::Real=PerturbedEquilibrium.CORE_PSI_LOW,
     psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH,
     mtheta_coil=nothing,
     nzeta_coil=nothing,
