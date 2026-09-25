@@ -193,8 +193,8 @@ mc.mean_abs_delta, mc.delta_nominal
 
 An overlap distribution becomes a locking risk through the empirical ITPA penetration-threshold
 scalings ([citations](citations.md#ErrorFields-Module)): the n = 1 fits of Logan et al.,
-*Plasma Phys. Control. Fusion* **62**, 084001 (2020) and of Bursch et al. (2026),
-[arXiv:2604.27317](https://arxiv.org/abs/2604.27317), and the n = 2 fits of Logan et al.,
+*Plasma Phys. Control. Fusion* **62**, 084001 (2020) and of Bursch et al., *Plasma Phys. Control.
+Fusion* (2026), [doi:10.1088/1361-6587/aea7d6](https://doi.org/10.1088/1361-6587/aea7d6), and the n = 2 fits of Logan et al.,
 *Nucl. Fusion* **60**, 086010 (2020):
 `δ_thresh = 10^α_c · n_e^α_n · B_T^α_B · R_0^α_R · (β_N/l_i)^α_β · I_p^α_I`, with `n_e` in
 10¹⁹ m⁻³, `B_T` in T, `R_0` in m and `I_p` in MA. Only the 2026 fits carry the current term:
