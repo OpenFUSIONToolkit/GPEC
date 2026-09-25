@@ -1,5 +1,6 @@
 using LinearAlgebra
 using HDF5
+using Logging
 
 # The NTV-limited error-field-correction model on hand-built couplings: the residual spectrum
 # projection, the linear and NTV-limited correction currents against the closed-form quadratic,
@@ -120,6 +121,17 @@ using HDF5
         # Beyond the scanned span the balance has no root.
         @test isnan(EF.rotation_shift(constant, 1e3; torque_budget=T0))
         @test_throws ArgumentError EF.rotation_shift(c, 1.0; torque_budget=T0)
+        # A braking torque whose magnitude grows as the rotation brakes (zero at a positive shift): a physical
+        # regime, not a sign error. The balance is still the first, stable crossing in the braking sense, found
+        # without a warning, and it is lost (NaN) at a current the falling-torque table would still balance.
+        Tg(Δ) = 0.02 * (1 - Δ / 2.0e4)
+        grows = EF.EFCCoupling("grows", 2.0e-5, 40.0, 0.05, 0.02, Δ, 2.5 .* Tg.(Δ), Tg.(Δ), ω_ref, NaN, Float64[], zeros(0, 1), zeros(0, 1))
+        Δg = @test_logs min_level = Logging.Warn EF.rotation_shift(grows, I; torque_budget=T0)
+        @test Δg < 0
+        @test Δg * T0 / ω_ref ≈ EF.TORQUE_ROTATION_SIGN * Tg(Δg) * I^2 rtol = 1e-6
+        @test abs(Δg) > abs(Δb)                                                 # more braking than the falling table at the same current
+        @test EF.threshold_factor(grows, I; torque_budget=T0) ≈ 1 + Δg / ω_ref
+        @test isnan(EF.rotation_shift(grows, 20.0; torque_budget=T0)) && !isnan(EF.rotation_shift(scanned, 20.0; torque_budget=T0))
     end
 
     @testset "correction current with the balance" begin

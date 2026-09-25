@@ -59,8 +59,9 @@ Sign relating the kinetic torque to the rotation it acts on: `−1` means a posi
 lowers the E×B rotation shift `Δω`, i.e. the kernel reports a braking torque as positive for
 the co-rotating profiles of the kinetic file. Fixed empirically on the DIII-D error-field
 example, whose tabulated torque is positive at the nominal rotation and rises through zero at a
-negative shift, so the balance is restoring only with this sign; [`rotation_shift`](@ref) checks
-the slope at every crossing it uses and warns if the convention does not hold for a run.
+negative shift, so the balance is restoring only with this sign. It is a property of the kinetic
+kernel's sign convention, not of a run: a tabulated torque cannot tell a wrong sign from a torque
+that grows as the rotation brakes, which is a physical regime, so no check of it is made.
 """
 const TORQUE_ROTATION_SIGN = -1.0
 
@@ -224,14 +225,9 @@ function rotation_shift(c::EFCCoupling, current::Real; torque_budget::Real, omeg
     i = i0
     while 1 <= i + step <= length(x)
         a, b = x[i], x[i+step]
-        if g(a) * g(b) <= 0
-            root = _bracketed_zero(g, min(a, b), max(a, b))
-            # A restoring balance needs the torque falling through the crossing in the sense of the shift.
-            slope = deriv1(_scan_spline(c, field))(root)
-            TORQUE_ROTATION_SIGN * slope * sign(omega_reference) > 0 &&
-                @warn "rotation_shift: $(c.coil_name)'s torque grows with the rotation at the balance point; check TORQUE_ROTATION_SIGN" maxlog = 1
-            return root
-        end
+        # The first crossing in the push direction is the stable balance whatever the torque's slope there:
+        # a torque that grows as the rotation brakes just brings the bifurcation (no root, NaN) closer.
+        g(a) * g(b) <= 0 && return _bracketed_zero(g, min(a, b), max(a, b))
         i += step
     end
     return NaN
