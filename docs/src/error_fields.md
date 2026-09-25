@@ -262,8 +262,14 @@ A correction coil cancels the dominant-mode overlap at `C_c` per kilo-ampere-tur
 non-resonant remainder of its field drives a neoclassical toroidal viscosity (NTV) torque
 `T·I²` that a perfect correction does not remove. With a torque budget `T_0` and the threshold
 taken to fall in proportion to the torque spent, the current that corrects an intrinsic overlap
-`δ_EF` solves `δ_EF − C_c I = s δ_thresh (1 − T_residual I²/T_0)`, and real roots exist only up
-to a largest correctable overlap. `[ErrorFields.NTV]` names the correction arrays; the run
+`δ_EF` solves `δ_EF − C_c I = s δ_thresh (1 − T_residual I²/T_0)`. This is the model used for
+SPARC by Logan et al., Nucl. Fusion (2026), doi:10.1088/1741-4326/ae6086, and for ARC by
+Leuthold et al., J. Plasma Phys. 92, E49 (2026), doi:10.1017/S0022377826101421. It holds only
+while the plasma still rotates, so the current is capped at `I_max = √(T_0/T_residual)`, and the
+largest correctable overlap is whichever comes first: the peak of the quadratic, or the overlap
+cancelled at `I_max`. `max_correctable_overlap` returns that limit (`with_ntv`) together with the two
+published zero-rotation limits, `C_c √(T_0/T_residual)` (SPARC, `residual_only`) and
+`C_c √(T_0/T_full)` (ARC, `torque_only`). `[ErrorFields.NTV]` names the correction arrays; the run
 evaluates each one's `C_c`, resonant fraction, and NTV torque per kAt² for its whole field and
 for its field with the dominant mode projected out — two plasma-response evaluations of the
 unit-current spectrum followed by the kinetic torque, which needs a `[KineticForces]` section —
@@ -285,7 +291,12 @@ couplings = EF.read_efc_couplings("gpec.h5")
 curve = EF.efc_current_curve(couplings[1]; delta_threshold=1.4e-4, torque_budget=4.0)
 EF.max_correctable_overlap(couplings[1]; delta_threshold=1.4e-4, torque_budget=4.0)
 AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0)   # threshold from the run's Risk/ group
+# The SPARC paper's uncertainty: ±50 % on the NTV torque, T_0 = 4 ± 2 N·m
+AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0, torque_rtol=0.5, budget_rtol=0.5)
 ```
+
+The torque budget is the plasma's intrinsic torque. The SPARC paper uses 4 N·m for SPARC and the
+ARC paper 5–20 N·m for ARC; pick a value for the machine being analysed.
 
 ## Analysis after the run
 

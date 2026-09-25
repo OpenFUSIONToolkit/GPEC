@@ -422,26 +422,43 @@ function plot_phasing_map(h5path::AbstractString, coil_names::AbstractVector{<:A
 end
 
 """
-    plot_efc_ntv_limits(h5path; torque_budget, delta_threshold=nothing, safety_factor=1.0, delta_max=15, save_path=nothing)
+    plot_efc_ntv_limits(h5path; torque_budget, delta_threshold=nothing, safety_factor=1.0, delta_max=15,
+                        torque_rtol=0.0, budget_rtol=0.0, save_path=nothing)
     plot_efc_ntv_limits(couplings::Vector{EF.EFCCoupling}; delta_threshold, torque_budget, kwargs...)
 
 Correction current against intrinsic overlap for each correction array of a run
 (`ErrorFields/NTV/`): the linear single-mode current and the NTV-limited current whose residual
-torque lowers the threshold, with the largest correctable overlap marked. `delta_threshold`
-defaults to the run's nominal penetration threshold (`ErrorFields/Risk/threshold_nominal`);
-`torque_budget` is the torque, N·m, the rotation can afford to lose.
+torque lowers the threshold, with the largest correctable overlap marked (dotted line), the
+zero-rotation limits with the residual torque (Logan et al. 2026, SPARC; circle) and with the
+whole field's torque (Leuthold et al. 2026, ARC; star). Nonzero `torque_rtol` or `budget_rtol`
+shade the band between the pessimistic and optimistic curves and the range of the correctable
+limit (see `ErrorFields.efc_current_curve`). `delta_threshold` defaults to the run's nominal
+penetration threshold (`ErrorFields/Risk/threshold_nominal`); `torque_budget` is the torque,
+N·m, the rotation can afford to lose.
 """
 function plot_efc_ntv_limits(couplings::Vector{EF.EFCCoupling}; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0,
-    delta_max::Real=15, save_path=nothing)
+    delta_max::Real=15, torque_rtol::Real=0.0, budget_rtol::Real=0.0, save_path=nothing)
+    band = torque_rtol > 0 || budget_rtol > 0
+    title = "Correction against its own NTV, T₀ = $(torque_budget) N·m"
+    band_label = "NTV band (T₀ ±$(round(Int, 100budget_rtol)) %, torque ±$(round(Int, 100torque_rtol)) %)"
     p = plot(; xlabel="intrinsic overlap δ_EF / δ_thresh", ylabel="correction current [kAt]", legend=:topleft,
-        title="Error-field correction against its own NTV torque (budget $(torque_budget) N·m)", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+        title, titlefontsize=10, left_margin=12Plots.mm, bottom_margin=6Plots.mm)
     for (j, c) in enumerate(couplings)
-        curve = EF.efc_current_curve(c; delta_threshold, torque_budget, safety_factor, delta_max)
+        curve = EF.efc_current_curve(c; delta_threshold, torque_budget, safety_factor, delta_max, torque_rtol, budget_rtol)
         x = curve.delta_ef ./ delta_threshold
+        if band
+            lo, hi = curve.limits_pessimistic.with_ntv, curve.limits_optimistic.with_ntv
+            isfinite(lo) && vspan!(p, [lo, min(hi, x[end] * delta_threshold)] ./ delta_threshold; c=j, alpha=0.12, lw=0, label="")
+            plot!(p, x, curve.current_ntv_pessimistic; lw=1, c=j, alpha=0.5, label="$(c.coil_name) $band_label")
+            plot!(p, x, curve.current_ntv_optimistic; lw=1, c=j, alpha=0.5, label="")
+        end
         plot!(p, x, curve.current_linear; lw=2, c=j, label="$(c.coil_name) single-mode")
         plot!(p, x, curve.current_ntv; lw=2, ls=:dash, c=j, label="$(c.coil_name) with residual NTV")
-        isfinite(curve.with_ntv) && vline!(p, [curve.with_ntv / delta_threshold]; ls=:dot, c=j, label="$(c.coil_name) NTV limit")
-        isfinite(curve.torque_only) && scatter!(p, [curve.torque_only / delta_threshold], [0.0]; marker=:star5, ms=9, c=j, label="$(c.coil_name) torque-budget limit")
+        isfinite(curve.with_ntv) && vline!(p, [curve.with_ntv / delta_threshold]; ls=:dot, c=j, label="$(c.coil_name) correctable limit")
+        isfinite(curve.residual_only) && scatter!(p, [curve.residual_only / delta_threshold], [0.0]; marker=:circle, ms=6, c=j,
+            label="$(c.coil_name) zero rotation, residual torque")
+        isfinite(curve.torque_only) && scatter!(p, [curve.torque_only / delta_threshold], [0.0]; marker=:star5, ms=9, c=j,
+            label="$(c.coil_name) zero rotation, whole-field torque")
     end
     return _save(p, save_path)
 end
