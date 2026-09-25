@@ -14,6 +14,9 @@ plasma solve or a new Biot-Savart integration.
 - `ErrorFieldsStructs.jl`: `ErrorFieldsControl` (the `[ErrorFields]` TOML section),
   `CoilSensitivities` (the cached linearization: nominal spectra and their derivatives),
   `SensitivityTable` (that linearization projected onto one dominant coupling mode)
+- `Overlap.jl`: `ResonantDriveContext` (everything a finished run offers for judging coil geometry,
+  gathered once), `coil_overlaps`, `combine_overlaps`, `applied_spectrum` — the entry point for
+  evaluating a coil design against a stored solve without re-running the plasma
 - `Sensitivity.jl`: `compute_coil_sensitivities` (central-difference sweep of every rigid
   shift and tilt of every coil set on one shared boundary grid), `sensitivity_table`
 - `Output.jl`: HDF5 writer under `ErrorFields/CoilSensitivities/` and the matching reader
