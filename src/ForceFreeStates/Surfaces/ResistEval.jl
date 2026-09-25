@@ -1,9 +1,9 @@
 # ResistEval.jl
 #
 # Per-singular-surface Glasser-Greene-Johnson geometric coefficients (E, F,
-# G, H, K, M) and the two flux-surface averages (⟨B²/|∇ψ|²⟩, ⟨B²⟩) that
-# downstream callers need to turn geometry into τ_A / τ_R with kinetic
-# profiles.
+# G, H, K, M) and the three flux-surface averages (⟨B²/|∇ψ|²⟩, ⟨B²⟩, ⟨|∇ψ|²⟩)
+# that downstream callers need to turn geometry into τ_A / τ_R with kinetic
+# profiles and into the toroidal critical-Δ geometric factor.
 #
 # Port of Fortran RDCON `resist_eval` (geometric part only).
 # Unlike the Fortran, this routine produces *only* the pure-equilibrium
@@ -19,6 +19,8 @@
 #   4: 1 / (B² · |∇ψ|²)
 #   5: B²
 #   6: |∇ψ|² / B²
+#   7: B          (see below)
+#   8: |∇ψ|²      (toroidal critical-Δ, ⟨|∇V|²⟩ = v1²⟨|∇ψ_N|²⟩)
 # All weighted by `jac / v1` (jacobian / dV/dψ) before integration.
 #
 # A seventh integrand, B, is added (beyond the Fortran set) so that ⟨B⟩ is
@@ -31,7 +33,8 @@
     ResistGeometry
 
 Per-singular-surface Glasser-Greene-Johnson geometric coefficients and
-supporting flux-surface averages.
+supporting flux-surface averages. All averages ⟨·⟩ are normalized flux-surface
+averages (⟨1⟩ = 1), and `‖∇ψ_N‖` is the gradient of the normalized poloidal flux.
 
 | field                 | meaning                                                  |
 |:--------------------- |:-------------------------------------------------------- |
@@ -40,9 +43,9 @@ supporting flux-surface averages.
 | `H`                   | Pfirsch-Schlüter coefficient                             |
 | `K`                   | Glasser parameter                                        |
 | `M`                   | Mass factor                                              |
-| `avg_bsq_over_dpsisq` | ⟨B²/                                                     |
+| `avg_bsq_over_dpsisq` | ⟨B²/‖∇ψ_N‖²⟩ — needed for τ_R                            |
 | `avg_bsq`             | ⟨B²⟩ — needed for τ_R                                    |
-| `avg_dpsisq`          | ⟨                                                        |
+| `avg_dpsisq`          | ⟨‖∇ψ_N‖²⟩ — needed for the toroidal critical-Δ           |
 | `avg_B`               | ⟨B⟩ — needed for Lin-Liu-Miller f_t                      |
 | `B_max`, `B_min`      | θ-extrema of B on the surface [T]                        |
 | `f_trap`              | Lin-Liu & Miller 1995 trapped-particle fraction          |
@@ -85,8 +88,8 @@ end
 """
     resist_geometry(equil, psifac, q1; gamma=5/3) -> ResistGeometry
 
-Port of Fortran RDCON `resist_eval` restricted to the
-pure-equilibrium geometric coefficients. Integrates the 8 theta integrands
+Glasser, Greene & Johnson 1975 (Phys. Fluids 18, 875) resistive-layer coefficients,
+restricted to the pure-equilibrium geometric part. Integrates the 8 theta integrands
 at the given flux surface and combines the 6 GGJ ones into E, F, G, H, K, M via
 the standard GGJ formulas.
 
