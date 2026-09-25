@@ -449,7 +449,9 @@ function _warn_pin_broken(pin_manifest::Union{String,Nothing}, fp::EnvFingerprin
     @warn "Pinned Manifest was re-resolved for $label — its package set differs from the working tree" pinned = pinned_sha[1:8] resolved = fp.manifest_sha[1:8]
 end
 
-"""Warn when a run's build mode differs from its case's, e.g. a workload case run at a commit that predates the workload."""
+"""
+Warn when a run's build mode differs from its case's, e.g. a workload case run at a commit that predates the workload.
+"""
 function _warn_build_mode(fp::EnvFingerprint, case_spec::CaseSpec)
     expected = case_spec.precompile_workload ? "aot" : "jit"
     (isempty(fp.build_mode) || fp.build_mode == expected) && return
