@@ -10,13 +10,15 @@
     # Up-down symmetric Solovev ψ whose axis sits off the grid's R-midpoint and off every node, plus a
     # conical cusp -A·ρ·exp(-(ρ/w)⁴) at the axis: the cells there carry a curvature spike, and the
     # cusp strength A is set so that a Newton step overshoots the axis by `ncell` grid cells.
-    function cusp_solovev(; ncell, nr=96)
+    # `r_in`, `r_out` set the grid's extent about r0 in units of a; with r_in > r_out the grid's R-midpoint lies inboard
+    # of the axis, so the midplane march takes a step and brackets the axis in R.
+    function cusp_solovev(; ncell, nr=96, r_in=1.4, r_out=1.6)
         sol = SolovevConfig(; mr=nr, mz=nr)
         cfg = EquilibriumConfig(; eq_type="sol")
         (; e, a, r0, q0, b0fac) = sol
         psio = e * r0 * b0fac * a^2 / (2 * q0 * r0)
         psifac = psio / (a * r0)^2
-        rs = collect(range(r0 - 1.4a, r0 + 1.6a; length=nr + 1))
+        rs = collect(range(r0 - r_in * a, r0 + r_out * a; length=nr + 1))
         zh = collect(range(0.0, 1.5e * a; length=nr ÷ 2 + 1))
         zs = vcat(-reverse(zh[2:end]), zh)
         h = rs[2] - rs[1]
@@ -57,5 +59,20 @@
         ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
         test_axis_is_o_point(rp, ro, zo)
         @test 6.5 < ro < 7.5
+    end
+
+    @testset "midplane march that brackets the axis takes the plain Newton path" begin
+        rp, r0, h = cusp_solovev(; ncell=0.0, r_in=1.6, r_out=1.4)
+        ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
+        test_axis_is_o_point(rp, ro, zo)
+        @test abs(zo) <= eps(ro)
+        @test abs(ro - r0) < h
+    end
+
+    @testset "Newton converging off the ψ grid is an error" begin
+        for ncell in (2.25, 2.5)
+            rp, _, _ = cusp_solovev(; ncell)
+            @test_throws r"outside the ψ grid" direct_position!(rp)
+        end
     end
 end
