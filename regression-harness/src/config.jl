@@ -2,8 +2,33 @@
 Case definition loading from TOML files.
 """
 
+"""
+    resolve_case_base(data, filepath)
+
+Merge a variant case onto the case named by its `[case] base` key, read from the sibling file
+`<base>.toml`. The variant must set its own `name`; its `[case]` keys, `[quantities.*]` blocks and
+`[overrides]` entries replace the base's same-named ones, and everything else is inherited.
+A missing base, or a base that itself has a base, is an error.
+"""
+function resolve_case_base(data::Dict{String,Any}, filepath::String)
+    base = get(data["case"], "base", nothing)
+    base === nothing && return data
+    file = basename(filepath)
+    haskey(data["case"], "name") || error("Case $file: a case with a base must set its own [case] name")
+    base_path = joinpath(dirname(filepath), "$base.toml")
+    isfile(base_path) || error("Case $file: base case \"$base\" not found (expected $base_path)")
+    base_data = TOML.parsefile(base_path)
+    haskey(base_data["case"], "base") && error("Case $file: base case \"$base\" itself has a base; chained bases are not supported")
+    merged = Dict{String,Any}()
+    for section in ("case", "quantities", "overrides")
+        merged[section] = merge(get(base_data, section, Dict{String,Any}()), get(data, section, Dict{String,Any}()))
+    end
+    delete!(merged["case"], "base")
+    return merged
+end
+
 function load_case(filepath::String)::CaseSpec
-    data = TOML.parsefile(filepath)
+    data = resolve_case_base(TOML.parsefile(filepath), filepath)
 
     case_section = data["case"]
     name = case_section["name"]
