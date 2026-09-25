@@ -90,7 +90,8 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/sval_r" => (; long_name="r-based magnetic shear r_s·(dq/dr)/q (Fitzpatrick convention)", dims=("surface",)),
     "PerSurface/D_R" =>
         (; long_name="resistive interchange D_R = E + F + H² for the critical-Δ formula (auto-derived from GGJ coefficients unless overridden)", dims=("surface",)),
-    "PerSurface/D_geo" => (; long_name="Connor et al. 2015 Eq. 59 toroidal critical-Δ geometric factor in the r_s reference (0 when no ResistGeometry)", dims=("surface",)),
+    "PerSurface/D_geo" =>
+        (; long_name="Connor et al. 2015 Eq. 59 toroidal critical-Δ geometric factor in the r_s reference or the dgeo_val override (0 without ResistGeometry)", dims=("surface",)),
     "PerSurface/eta" => (; long_name="parallel resistivity at each surface", units="Ohm*m", dims=("surface",)),
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
     "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor, Ham, Hastie & Liu 2015 Eq. 59)", dims=("surface",)),

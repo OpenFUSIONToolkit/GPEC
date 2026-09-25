@@ -42,9 +42,10 @@ constructor.
     auto-derives them from the equilibrium: `dr_val` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
     Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s` reference
-    (consumed only by `dc_type=:toroidal`). Supply a
-    scalar only to override the auto-derivation; an explicit `0.0` disables the
-    critical-Δ offset (Δ_crit ≡ 0)
+    (consumed only by `dc_type=:toroidal`). Supply a scalar only to override
+    the auto-derivation. An explicit `dr_val = 0.0` disables the critical-Δ
+    offset (Δ_crit ≡ 0) for every `dc_type`; `dgeo_val = 0.0` does so only for
+    `:toroidal`
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
