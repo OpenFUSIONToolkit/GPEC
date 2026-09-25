@@ -34,12 +34,12 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
             error("run_slayer: kinetic file '$path' is missing required " *
                   "dataset '$name' for the SLAYER inner layer.")
     end
-    # `omega` carries the E×B rotation Ω_E (per unit n) when the file has it; ω_*e/ω_*i are
+    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the file has it; ω_*e/ω_*i are
     # derived per surface from the density and temperature splines by `build_slayer_inputs`.
     npsi = length(data.psi)
-    omega = data.omega_E === nothing ? zeros(npsi) : data.omega_E
+    omega_E = data.omega_E === nothing ? zeros(npsi) : data.omega_E
     profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
-        T_i=data.T_i, omega=omega)
+        T_i=data.T_i, omega_E=omega_E)
 
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
@@ -556,6 +556,6 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
     rational_psi = Float64[surfaces[p.ising].psifac for p in params]
     rational_q = Float64[surfaces[p.ising].q for p in params]
     # E×B rotation per unit n at each surface, for the coupled determinant's Doppler shifts.
-    omega_E = Float64[profiles.omega(ψ) for ψ in rational_psi]
+    omega_E = Float64[profiles.omega_E(ψ) for ψ in rational_psi]
     return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q, omega_E=omega_E)
 end

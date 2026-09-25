@@ -20,7 +20,7 @@
         n_e=fill(5.0e19, length(psi_pts)),
         T_e=1000.0 .* (1.0 .- 0.7 .* psi_pts),
         T_i=1000.0 .* (1.0 .- 0.6 .* psi_pts),
-        omega=fill(0.0, length(psi_pts)))
+        omega_E=fill(0.0, length(psi_pts)))
 
     # Helper to build a minimal SingType without touching unused fields
     _mk_sing(; psi, q, q1, m, n, delta_prime=-10.0+0im) = SingType(
