@@ -5,6 +5,7 @@ using PrecompileTools: @setup_workload, @compile_workload
 import Logging
 
 @setup_workload begin
+    # examples/Solovev_ideal_example, coarsened in mpsi and mthvac to keep the build short.
     inputs = Dict{String,Any}(
         "Equilibrium" => Dict{String,Any}(
             "eq_type" => "sol", "jac_type" => "pest", "grid_type" => "ldp", "psilow" => 1e-4, "psihigh" => 0.9995,
