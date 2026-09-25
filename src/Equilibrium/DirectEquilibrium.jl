@@ -291,7 +291,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
-    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=min(equil_config.etol, 1e-8), dt=2π / 200, adaptive=true, dense=false)
+    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=equil_abstol(equil_config.etol), dt=2π / 200, adaptive=true, dense=false)
 
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
