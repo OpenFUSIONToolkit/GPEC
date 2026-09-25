@@ -122,12 +122,11 @@ end
 Finds the key geometric locations of the equilibrium: the magnetic axis (O-point)
 and the inboard/outboard separatrix crossings on the midplane. It also updates the
 spline representing the poloidal flux `ψ(R,Z)` based on the new magnetic axis location.
-The axis is Newton's root of `∇ψ = 0` from a midplane guess; if that fails, Newton is
-restarted (with capped steps) from a first-derivative bisection and a warning is issued,
-and if the restart fails too, it is an error. Either way the axis meets the same
-step-size convergence test. This function performs the same overall function as the Fortran `direct_position`
-subroutine with better iteration control and error handling. We have also added a
-helper function for separatrix finding.
+The returned axis is a root of `∇ψ = 0` that meets the Newton step-size test
+`|δR|, |δZ| ≤ 1e-12 R`. Newton starts from a midplane guess; if it stops on a singular
+Jacobian or the iteration cap, it is restarted with capped steps from a first-derivative
+bisection, the result must be an O-point (`det ∂(B_R,B_Z)/∂(R,Z) > 0`), and a warning reports
+the residual `|B_p|`. Otherwise it is an error.
 
 ## Arguments:
 
@@ -167,12 +166,14 @@ function direct_position!(raw_profile::DirectRunInput)
     r_march, z_march = r, z
 
     # Newton iteration for the O-point (magnetic axis), where B_r = B_z = 0, with each step capped
-    # at `cap`. Every attempt uses the same convergence test on the step size.
+    # at `cap`. Every attempt uses the same convergence test on the step size, and returns a status of
+    # :converged, :singular_jacobian (|det J| < singular_det) or :iteration_cap.
+    singular_det = 1e-20
     function _axis_newton(r, z, cap)
         for _ in 1:max_iterations
             direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
             det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
-            abs(det) < 1e-20 && return r, z, false
+            abs(det) < singular_det && return r, z, :singular_jacobian
             # Δx = -J⁻¹ F
             δr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
             δz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
@@ -180,54 +181,53 @@ function direct_position!(raw_profile::DirectRunInput)
             step > cap && ((δr, δz) = (δr * cap / step, δz * cap / step))
             r += δr
             z += δz
-            abs(δr) <= 1e-12 * abs(r) && abs(δz) <= 1e-12 * abs(r) && return r, z, true
+            abs(δr) <= 1e-12 * abs(r) && abs(δz) <= 1e-12 * abs(r) && return r, z, :converged
         end
-        return r, z, false
+        return r, z, :iteration_cap
     end
-    r, z, converged = _axis_newton(r_march, z_march, Inf)
+    _stop_reason(status) = status === :singular_jacobian ? "singular Jacobian, |det| < $singular_det" : "no convergence in $max_iterations iterations"
+    r, z, status = _axis_newton(r_march, z_march, Inf)
 
-    if !converged
-        # Newton from the midplane guess met a singular or indefinite Hessian, which means ψ is not
-        # smooth near the axis. Restart it, with each step capped at one march step, from an axis
-        # located by alternating 1-D bisections on B_z (along R) and B_r (along Z).
+    if status !== :converged
+        # Newton from the midplane guess stopped on a singular Jacobian or the iteration cap. Restart it,
+        # with each step capped at one march step `dr`, from a point located by alternating 1-D
+        # bisections on B_z (along R) and B_r (along Z).
         _bz(rr, zz) = (direct_get_bfield!(bfield, rr, zz, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.bz)
         _br(rr, zz) = (direct_get_bfield!(bfield, rr, zz, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.br)
-        # Root of f in [lo, hi], or `nothing` when f does not change sign there.
-        function _bisect(f, lo, hi)
-            flo = f(lo)
-            flo == 0 && return lo
-            sign(flo) == sign(f(hi)) && return nothing
-            for _ in 1:80
-                mid = (lo + hi) / 2
-                fmid = f(mid)
-                (fmid == 0 || hi - lo < 4eps(mid)) && return mid
-                sign(fmid) == sign(flo) ? ((lo, flo) = (mid, fmid)) : (hi = mid)
-            end
-            return (lo + hi) / 2
-        end
-        # Nearest sign change of f around x, doubling the half-width w up to the grid edges.
+        # Nearest sign change of f around x, doubling the half-width w up to the grid edges; `nothing` if none.
         function _bracketed_root(f, x, w, xmin, xmax)
             while true
                 lo, hi = max(x - w, xmin), min(x + w, xmax)
-                root = _bisect(f, lo, hi)
-                (root !== nothing || (lo == xmin && hi == xmax)) && return root
+                sign(f(lo)) * sign(f(hi)) <= 0 && return find_zero(f, (lo, hi), Roots.Bisection())
+                (lo == xmin && hi == xmax) && return nothing
                 w *= 2
             end
         end
+        # A few passes only seed the capped Newton restart; the restart's step test decides convergence.
+        n_bisection_passes = 4
         rb, zb = r_march, z_march
-        for _ in 1:4
+        for _ in 1:n_bisection_passes
             rb = _bracketed_root(rr -> _bz(rr, zb), rb, dr, raw_profile.rmin, raw_profile.rmax)
             rb === nothing && error("Failed to find magnetic axis: B_z has no sign change along Z = $zb.")
             zb = _bracketed_root(zz -> _br(rb, zz), zb, dr, raw_profile.zmin, raw_profile.zmax)
             zb === nothing && error("Failed to find magnetic axis: B_r has no sign change along R = $rb.")
         end
-        r, z, converged = _axis_newton(rb, zb, dr)
-        converged || error(
-            "Failed to find magnetic axis: Newton did not converge from the midplane guess or from " *
-            "the bisected point ($rb, $zb). ψ is likely not smooth near the axis; check the equilibrium file."
+        r, z, restart_status = _axis_newton(rb, zb, dr)
+        restart_status === :converged || error(
+            "Failed to find magnetic axis: Newton from the midplane guess stopped ($(_stop_reason(status))), " *
+            "and the restart from the bisected point ($rb, $zb) stopped ($(_stop_reason(restart_status)))."
         )
-        @warn "Magnetic axis found only by restarting Newton from a first-derivative bisection; " *
-              "ψ is likely not smooth near the axis, so check the equilibrium file."
+        # An O-point has det ∂(B_R,B_Z)/∂(R,Z) = det(Hess ψ)/R² > 0; an X-point has det < 0.
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+        det_axis = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
+        residual = hypot(bfield.br, bfield.bz)
+        det_axis > 0 || error(
+            "Failed to find magnetic axis: the restarted Newton converged at (R, Z) = ($r, $z), which is not an O-point " *
+            "(det ∂(B_R,B_Z)/∂(R,Z) = $det_axis ≤ 0, |B_p| = $residual T)."
+        )
+        @warn "Newton from the midplane guess stopped ($(_stop_reason(status))); magnetic axis found by restarting Newton " *
+              "from a first-derivative bisection, at (R, Z) = ($r, $z) with |B_p| = $residual T and " *
+              "det ∂(B_R,B_Z)/∂(R,Z) = $det_axis T²/m². Check ψ near the axis in the equilibrium file."
     end
     @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
 
