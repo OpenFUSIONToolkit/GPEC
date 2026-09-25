@@ -12,7 +12,8 @@ over a range of tolerance scales gives the allowable tolerance for a target risk
 n = 1 fits: Logan et al., "Robustness of the tokamak error field correction tolerance scaling",
 Plasma Phys. Control. Fusion 62 (2020) 084001 (datasets "O,L" and "O,L,H"); Bursch et al.,
 "Improved n=1 empirical error field penetration threshold scaling with Ohmic and L-mode
-conventional tokamak plasma discharges" (2026), arXiv:2604.27317 (dataset "O,L 2026", Eqs. 7 and 8);
+conventional tokamak plasma discharges", Plasma Phys. Control. Fusion (2026),
+doi:10.1088/1361-6587/aea7d6 (dataset "O,L 2026", Eqs. 7 and 8);
 n = 2 fits: Logan et al., "Empirical scaling of
 the n = 2 error field penetration threshold in tokamaks", Nucl. Fusion 60 (2020) 086010.
 """
@@ -57,7 +58,7 @@ const ITPA_THRESHOLD_SCALINGS = Dict{String,ThresholdScaling}(
     "n=1 O,L,H OLS" => ThresholdScaling(1, "O,L,H", "OLS", (-3.64, 0.04), (0.60, 0.08), (-0.95, 0.08), (0.12, 0.08), (-0.30, 0.05)),
     "n=1 O,L,H DSOLS" => ThresholdScaling(1, "O,L,H", "DSOLS", (-3.58, 0.04), (0.45, 0.06), (-0.94, 0.08), (0.09, 0.07), (-0.15, 0.05)),
     "n=1 O,L,H WLS" => ThresholdScaling(1, "O,L,H", "WLS", (-3.62, 0.04), (0.53, 0.06), (-0.95, 0.07), (0.14, 0.08), (-0.19, 0.05)),
-    # Bursch et al. 2026 (arXiv:2604.27317) Eq. 7 (OLS, R² = 0.63) and Eq. 8 (KDE-weighted WLS, R² = 0.66): ohmic and L-mode
+    # Bursch et al., PPCF 2026 (doi:10.1088/1361-6587/aea7d6) Eq. 7 (OLS, R² = 0.63) and Eq. 8 (KDE-weighted WLS, R² = 0.66): ohmic and L-mode
     # discharges of conventional tokamaks (C-Mod, DIII-D, EAST, JET, J-TEXT, KSTAR), no NSTX or COMPASS, with |B_T| and |I_p|.
     "n=1 O,L 2026 OLS" => ThresholdScaling(1, "O,L 2026", "OLS", (-4.31, 0.09), (0.77, 0.08), (0.19, 0.09), (1.88, 0.16), (0.25, 0.08), (-0.97, 0.08)),
     "n=1 O,L 2026 WLS" => ThresholdScaling(1, "O,L 2026", "WLS", (-4.26, 0.09), (0.56, 0.08), (0.30, 0.10), (1.57, 0.15), (0.13, 0.06), (-1.01, 0.07)),

@@ -151,8 +151,8 @@ The n = 2 penetration-threshold fits used by `ErrorFields.Risk`.
 
 > E. M. Bursch, J.-K. Park, N. C. Logan, F. Mao, N. Wang, C. F. B. Zimmermann, R. J. Buttery, C. Paz-Soldan, M. Pharr, L. Piron, G. Szepesi, H. Wang, S. M. Yang, JET Contributors, and the EUROfusion Tokamak Exploitation Team,
 > "Improved n=1 empirical error field penetration threshold scaling with Ohmic and L-mode conventional tokamak plasma discharges,"
-> Preprint (2026).
-> [arXiv:2604.27317](https://arxiv.org/abs/2604.27317)
+> *Plasma Physics and Controlled Fusion* (2026).
+> DOI: [10.1088/1361-6587/aea7d6](https://doi.org/10.1088/1361-6587/aea7d6)
 
 The 2026 n = 1 penetration-threshold scalings on the core dominant-mode overlap δ, fitted to
 ohmic and L-mode discharges of conventional tokamaks only (C-Mod, DIII-D, EAST, JET, J-TEXT,

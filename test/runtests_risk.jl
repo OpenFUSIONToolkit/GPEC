@@ -37,7 +37,7 @@ using Statistics
     end
 
     @testset "2026 n=1 fits with a plasma-current term" begin
-        # Bursch et al. 2026 (arXiv:2604.27317), Eqs. 7 (OLS) and 8 (WLS), exponent by exponent.
+        # Bursch et al., PPCF 2026 (doi:10.1088/1361-6587/aea7d6), Eqs. 7 (OLS) and 8 (WLS), exponent by exponent.
         ols = EF.threshold_scaling(; n=1, dataset="O,L 2026", fit="OLS")
         wls = EF.threshold_scaling(; n=1, dataset="O,L 2026", fit="WLS")
         @test (ols.alpha_c, ols.alpha_n, ols.alpha_b, ols.alpha_r, ols.alpha_beta, ols.alpha_ip) ==
