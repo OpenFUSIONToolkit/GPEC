@@ -76,7 +76,7 @@
             mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=n)
         params = [mk(; qval=1.5, rs=0.5, m=3, n=2), mk(; qval=2.0, rs=0.6, m=4, n=2)]
         Ω_file = [3.0e4, -1.0e4]   # rad/s per unit n, as carried by the kinetic file
-        qs(ctrl; omega_E=Float64[]) = _q_shifts(params, _omega_E_per_surface(ctrl, 2, omega_E))
+        qs(ctrl; omega_E=Float64[]) = _q_shifts(params, _omega_E_per_surface(ctrl, params, omega_E))
 
         # No file rotation and no override: no shift anywhere.
         @test qs(SLAYERControl()) == [0.0, 0.0]
@@ -86,12 +86,16 @@
         got = qs(SLAYERControl(); omega_E=Ω_file)
         @test got ≈ [-params[1].tauk * 2 * Ω_file[1], -params[2].tauk * 2 * Ω_file[2]]
 
-        # A non-empty omega_E_kHz replaces the file values, in the same per-unit-n convention.
-        ovr = qs(SLAYERControl(; omega_E_kHz=[1.0, -2.0]); omega_E=Ω_file)
+        # omega_E_kHz replaces the file value on each listed m/n, in the same per-unit-n convention.
+        ovr = qs(SLAYERControl(; omega_E_kHz=Dict("3/2" => 1.0, "4/2" => -2.0)); omega_E=Ω_file)
         @test ovr ≈ [-params[1].tauk * 2 * 2π * 1e3 * 1.0, -params[2].tauk * 2 * 2π * 1e3 * -2.0]
 
-        # Either source must supply exactly one value per analysed surface.
-        @test_throws ArgumentError qs(SLAYERControl(; omega_E_kHz=[1.0]))
+        # Unlisted surfaces keep the kinetic-file value.
+        part = qs(SLAYERControl(; omega_E_kHz=Dict("4/2" => -2.0)); omega_E=Ω_file)
+        @test part ≈ [-params[1].tauk * 2 * Ω_file[1], -params[2].tauk * 2 * 2π * 1e3 * -2.0]
+
+        # An m/n matching no analysed surface is an error, as is a file of the wrong length.
+        @test_throws "matching no analysed surface" qs(SLAYERControl(; omega_E_kHz=Dict("2/1" => 1.0)))
         @test_throws ArgumentError qs(SLAYERControl(); omega_E=[1.0])
     end
 
@@ -134,13 +138,18 @@
     end
 
     @testset "omega_E_kHz parses and validates from TOML" begin
-        ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => [0, 3.0, -1.5]))
-        @test ctrl.omega_E_kHz == [0.0, 3.0, -1.5]
-        @test eltype(ctrl.omega_E_kHz) === Float64
+        ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2/1" => 0, " 3 / 1 " => 3.0)))
+        @test ctrl.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
+        @test ctrl.omega_E_kHz isa Dict{String,Float64}
         # Default stays empty so existing decks are untouched.
         @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_E_kHz)
+        # The positional list form is gone, and keys must read m/n.
+        @test_throws "table keyed by m/n" slayer_control_from_toml(Dict("omega_E_kHz" => [0.0, 3.0]))
+        @test_throws "not of the form" slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2:1" => 3.0)))
+        @test_throws "same m/n twice" slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2/1" => 1.0, "02/1" => 2.0)))
         # A non-finite shift would silently poison every Q evaluation; the
         # validator rejects it (TOML cannot express NaN, so go through validate).
-        @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=[NaN]))
+        @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=Dict("2/1" => NaN)))
+        @test_throws "not canonical" validate(SLAYERControl(; omega_E_kHz=Dict("02/1" => 1.0)))
     end
 end

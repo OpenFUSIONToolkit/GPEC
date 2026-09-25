@@ -147,15 +147,23 @@
         # Uncoupled layers are solved in their own plasma frame: no shift, even when supplied.
         r_unc = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...); omega_E=Ω_E)
         @test r_unc.q_shift == [0.0, 0.0]
+        # The resolved rotation is still reported in both modes.
+        @test r_unc.omega_E == Ω_E
 
         # Coupled: the kinetic-file Ω_E Dopplers each surface by −τ_k·n·Ω_E.
         r_cpl = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=Ω_E)
         @test r_cpl.q_shift ≈ [-1.0e-4 * 1 * Ω_E[1], -1.2e-4 * 1 * Ω_E[2]]
+        @test r_cpl.omega_E == Ω_E
 
-        # omega_E_kHz takes precedence over the file.
+        # omega_E_kHz takes precedence over the file on the surfaces it lists.
         r_ovr = run_slayer_from_inputs(params, dpm,
-            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=[1.0, 0.0], grid...); omega_E=Ω_E)
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("2/1" => 1.0, "3/1" => 0.0), grid...); omega_E=Ω_E)
         @test r_ovr.q_shift ≈ [-1.0e-4 * 2π * 1e3, 0.0]
+        @test r_ovr.omega_E ≈ [2π * 1e3, 0.0]
+        r_part = run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("2/1" => 1.0), grid...); omega_E=Ω_E)
+        @test r_part.omega_E ≈ [2π * 1e3, Ω_E[2]]
+        @test r_part.q_shift ≈ [-1.0e-4 * 2π * 1e3, -1.2e-4 * Ω_E[2]]
 
         # A Doppler offset beyond the scan box is flagged rather than silently losing the root:
         # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].

@@ -37,6 +37,11 @@ downstream inspection and HDF5 output.
   - `layer_widths`        -- `Vector{LayerWidths}`, one per surface: the
     resistive layer thickness (in meters) from the `del_s` Riccati solve
     plus FKR / visco-resistive sanity scales. Empty when disabled.
+  - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] resolved on each
+    surface: the kinetic file's value, or the `control.omega_E_kHz` override for that m/n.
+    Recorded in both coupling modes
+  - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
+    inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
   - `scan_data`           -- scan results (per-surface in uncoupled, single
     entry in coupled). Empty unless `control.store_scan == true`.
 """
@@ -53,6 +58,7 @@ struct SLAYERResult
     per_surface_extraction::Vector{GrowthRateResult}
     coupled_extraction::Union{Nothing,GrowthRateResult}
     layer_widths::Vector{LayerWidths}
+    omega_E::Vector{Float64}
     q_shift::Vector{Float64}
     scan_data::Vector{Union{ScanResult,AMRResult}}
 end
@@ -66,6 +72,6 @@ function empty_slayer_result(control::SLAYERControl)
                         ComplexF64[], Float64[], Float64[],
                         GrowthRateResult[], nothing,
                         LayerWidths[],
-                        Float64[],
+                        Float64[], Float64[],
                         Union{ScanResult,AMRResult}[])
 end

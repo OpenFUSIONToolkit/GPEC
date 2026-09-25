@@ -147,25 +147,30 @@ end
 _build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
     surface_coupling(model, params, dp_diag)
 
-# Per-surface E×B angular frequency Ω_E per unit n [rad/s]: `control.omega_E_kHz` when set,
-# otherwise the kinetic file's `omega_E` sampled at each rational surface.
-function _omega_E_per_surface(control::SLAYERControl, n::Integer, omega_E_file::AbstractVector{<:Real})
-    if !isempty(control.omega_E_kHz)
-        length(control.omega_E_kHz) == n ||
-            throw(
-                ArgumentError(
-                    "run_slayer: omega_E_kHz has $(length(control.omega_E_kHz)) " *
-                    "entries but $n rational surfaces were analysed. Supply one " *
-                    "entry per surface, or leave it empty to use the kinetic file."
-                )
-            )
-        return 2π * 1e3 .* control.omega_E_kHz
-    end
-    isempty(omega_E_file) && return zeros(Float64, n)
-    length(omega_E_file) == n ||
+# "m/n" label keying `control.omega_E_kHz`; GGJ parameters carry no mode numbers.
+_mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
+_mn_label(::InnerLayerParameters) = nothing
+
+# Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
+# rational surface, replaced on every surface whose m/n `control.omega_E_kHz` lists.
+function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
+    n = length(params)
+    isempty(omega_E_file) || length(omega_E_file) == n ||
         throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
                             "$n rational surfaces were analysed."))
-    return Float64.(omega_E_file)
+    Ω_E = isempty(omega_E_file) ? zeros(Float64, n) : Float64.(omega_E_file)
+    isempty(control.omega_E_kHz) && return Ω_E
+    labels = [_mn_label(p) for p in params]
+    any(isnothing, labels) &&
+        throw(ArgumentError("run_slayer: omega_E_kHz is keyed by m/n, which $(eltype(params)) surfaces do not carry."))
+    unknown = setdiff(keys(control.omega_E_kHz), labels)
+    isempty(unknown) ||
+        throw(ArgumentError("run_slayer: omega_E_kHz lists m/n $(sort(collect(unknown))) matching no analysed surface; " *
+                            "the analysed surfaces are $(labels)."))
+    for (k, label) in enumerate(labels)
+        haskey(control.omega_E_kHz, label) && (Ω_E[k] = 2π * 1e3 * control.omega_E_kHz[label])
+    end
+    return Ω_E
 end
 
 # Real Doppler offset on a surface's inner-layer Q: Q_k = τ_k·(ω − n·Ω_E) in its E×B frame.
@@ -235,8 +240,9 @@ Run the SLAYER tearing analysis given pre-built per-surface
 equilibrium-driven `build_slayer_inputs` step — use this when the
 parameters are already known (e.g. in unit tests or when rebuilding
 from cached HDF5 output). `omega_E` is the E×B angular frequency per unit n
-at each surface [rad/s]; in coupled mode it Doppler-shifts each surface's
-inner-layer Q unless `control.omega_E_kHz` overrides it. Empty means no rotation.
+at each surface [rad/s], replaced on any surface whose m/n `control.omega_E_kHz`
+lists; empty means no rotation. In coupled mode it Doppler-shifts each surface's
+inner-layer Q; in both modes the resolved value is reported as `result.omega_E`.
 """
 function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     dp_matrix::AbstractMatrix,
@@ -308,12 +314,12 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
     coupled = control.coupling_mode === :coupled
     !coupled && !isempty(control.omega_E_kHz) && @warn(
-            "SLAYER: omega_E_kHz is ignored with coupling_mode=:uncoupled; rotation only enters " *
-            "the coupled determinant.")
-    Ω_E = coupled ? _omega_E_per_surface(control, n, omega_E) : zeros(Float64, n)
+            "SLAYER: omega_E_kHz does not shift the layers with coupling_mode=:uncoupled; rotation only " *
+            "enters the coupled determinant, so it is just recorded in PerSurface/omega_E.")
+    Ω_E = _omega_E_per_surface(control, params, omega_E)
     coupled && _is_ggj(model) && any(!iszero, Ω_E) && @warn(
             "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
-    q_shifts = _q_shifts(params, Ω_E)
+    q_shifts = coupled ? _q_shifts(params, Ω_E) : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
     ref_idx = 1
@@ -416,7 +422,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, q_shifts, scan_data_list)
+        layer_widths, Ω_E, q_shifts, scan_data_list)
 end
 
 # ---------------------------------------------------------------------
