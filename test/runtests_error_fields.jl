@@ -82,7 +82,8 @@ include("h5_metadata_check.jl")
                 "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100),
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
-                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"]))
+                # The smallest rotation scan that exercises the table path (three shifts, no refinement).
+                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"], "rotation_scan_points" => 3, "rotation_scan_max_points" => 3))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -284,6 +285,14 @@ include("h5_metadata_check.jl")
             @test c.delta_per_kat ≈ abs(table.delta_nominal[1]) / kat rtol = 1e-6
             @test 0 < c.overlap_percent <= 100
             @test isfinite(c.torque_full_per_kat2) && isfinite(c.torque_residual_per_kat2)
+            # The rotation scan the run tabulated: symmetric about the unshifted point, whose torques
+            # are the nominal ones, with a cumulative profile that starts at zero on the kinetic grid.
+            @test EF.has_rotation_scan(c)
+            @test length(c.rotation_shift) == 3 && c.rotation_shift[2] == 0.0 && c.rotation_shift[1] ≈ -c.rotation_shift[3]
+            @test c.torque_full_scan[2] == c.torque_full_per_kat2 && c.torque_residual_scan[2] == c.torque_residual_per_kat2
+            @test isfinite(c.omega_reference) && c.omega_reference != 0
+            @test c.psi[1] == 0.0 && c.psi[end] == 1.0 && issorted(c.psi)
+            @test size(c.torque_full_profile) == (length(c.psi), 3) && c.torque_full_profile[1, 2] == 0.0
             @test abs(dot(dom.right_singular_vectors[:, 1], EF.residual_spectrum(dom, sens.nominal_field[:, 1]))) < 1e-12
             @test EF.read_efc_couplings(h5path)[1] == c
             h5open(h5path, "r") do f
@@ -294,6 +303,7 @@ include("h5_metadata_check.jl")
             @test length(curve.delta_ef) == 500 && all(curve.current_linear .>= 0)
             ntv_plot = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png"))
             @test length(ntv_plot.series_list) >= 2                        # the single-mode and NTV-limited currents
+            @test length(ntv_plot.subplots) == 2                            # the scan adds the torque-against-rotation panel
             @test_throws ErrorException GPEC.efc_couplings(ffs, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl(), nothing)
 
             # Central differences: doubling the step moves the derivatives at O(h²).

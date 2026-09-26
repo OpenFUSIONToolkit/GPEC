@@ -1,6 +1,6 @@
 # Regression case: the DIII-D-like error-field assessment example — the full ErrorFields stage
-# (sensitivities, tolerance Monte Carlo, locking risk) and the correction-coil NTV couplings.
-# The only case exercising [ErrorFields.NTV].
+# (sensitivities, tolerance Monte Carlo, locking risk) and the correction-coil NTV couplings
+# with their torque-versus-rotation tables. The only case exercising [ErrorFields.NTV].
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
 # noise floor below which a difference is treated as zero.
 [case]
@@ -8,7 +8,7 @@ name = "diiid_error_field"
 description = "DIII-D-like error-field assessment, n=1: ErrorFields stage with the NTV-limited correction couplings"
 example_dir = "examples/DIIID-like_error_field_example"
 
-# Correction-coil couplings (one array, the C-coil standing in).
+# Correction-coil couplings at the nominal rotation (one array, the C-coil standing in).
 [quantities.efc_delta_per_kat]
 h5path = "ErrorFields/NTV/delta_per_kat"
 type = "real_vector"
@@ -32,6 +32,31 @@ extract = "all_real"
 label = "EFC residual-field NTV torque per kAt² [N·m]"
 noise_threshold = 1e-8
 order = 12
+
+# The torque-versus-rotation table: reference rotation, the adaptive shift grid and the residual torque on it.
+[quantities.efc_omega_reference]
+h5path = "ErrorFields/NTV/omega_reference"
+type = "real_vector"
+extract = "all_real"
+label = "EFC reference rotation ω_ref [rad/s]"
+noise_threshold = 1e-6
+order = 13
+
+[quantities.efc_rotation_shift]
+h5path = "ErrorFields/NTV/RotationScan/rotation_shift"
+type = "real_vector"
+extract = "all_real"
+label = "EFC rotation-scan shifts [rad/s]"
+noise_threshold = 1e-6
+order = 14
+
+[quantities.efc_torque_residual_scan]
+h5path = "ErrorFields/NTV/RotationScan/torque_residual"
+type = "real_vector"
+extract = "all_real"
+label = "EFC residual torque against rotation [N·m/kAt²]"
+noise_threshold = 1e-8
+order = 15
 
 # Anchors of the stages feeding the couplings.
 [quantities.dominant_singular_values]

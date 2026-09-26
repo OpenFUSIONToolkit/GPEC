@@ -231,6 +231,12 @@ scan_scales = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]   # Tolerance mul
 [ErrorFields.NTV]
 efc_coils = ["d3d_c"]                   # Coil set names of the correction arrays to evaluate (here the C-coil stands in for a correction coil)
 method = "fgar"                         # KineticForces torque method (must be enabled in [KineticForces])
+rotation_scan = true                    # Tabulate the torques against a rigid E×B rotation shift (false: nominal rotation only, linear model)
+rotation_scan_points = 5                # Points of the initial symmetric shift grid (made odd so the unshifted point is one of them)
+rotation_scan_max_points = 9            # Cap on kinetic evaluations per spectrum after adaptive refinement
+rotation_scan_tolerance = 0.05          # Refinement stops when every interval's midpoint prediction error is below this fraction of the torque range
+rotation_span_factor = 1.0              # The scan covers ±span_factor × max(|ω_E|, offset_factor·|ω_*T|) at the innermost kinetic surface
+rotation_offset_factor = 2.0            # Rough neoclassical offset as a multiple of the ion temperature-gradient diamagnetic frequency ω_*T
 
 [KineticForces]
 kinetic_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5"  # GPEC HDF5 kinetic schema (psi,n_i,n_e,T_i,T_e,omega_E,+chi_e,chi_phi)
