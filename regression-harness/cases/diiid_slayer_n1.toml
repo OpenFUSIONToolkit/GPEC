@@ -109,6 +109,16 @@ label = "SLAYER Q_i"
 noise_threshold = 1e-12
 order = 21
 
+# Toroidal critical-Δ geometric factor, derived on every surface that carries a ResistGeometry
+# whatever dc_type is selected, so it is tracked here at the deck's dc_type = "none".
+[quantities.slayer_D_geo]
+h5path = "Tearing/PerSurface/D_geo"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER toroidal critical-Δ factor D_geo"
+noise_threshold = 1e-10
+order = 22
+
 # Tearing eigenvalue (coupled mode → length 1). The headline deliverable:
 # a real, nonzero growth rate on a realistic equilibrium. Root-extraction
 # is sensitive to the AMR cell topology and ODE solver, so the Q/ω/γ
