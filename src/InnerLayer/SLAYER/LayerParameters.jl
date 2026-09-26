@@ -20,33 +20,34 @@ Fitzpatrick two-fluid drift-MHD SLAYER inner-layer model (Fitzpatrick
 de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 `D_norm` (not the older `pr`/`pe`/`ds` set).
 
-| field      | meaning                                                           |
-|:---------- |:----------------------------------------------------------------- |
-| `ising`    | Singular-surface index (traceability only)                        |
-| `m`, `n`   | Poloidal / toroidal mode numbers at this surface                  |
-| `tau`      | T_i / T_e                                                         |
-| `lu`       | Lundquist number S = τ_R / τ_H                                    |
-| `c_beta`   | Compressibility √(β_local / (1 + β_local))                        |
-| `D_norm`   | (d_β/r_s) · S^(1/3) · √ι_e  (Fitzpatrick normalized scale)        |
-| `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                            |
-| `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
-| `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
-| `Q_i`      | Normalized ion diamagnetic:      −tauk · ω_*i                     |
-| `iota_e`   | Q_e / (Q_e − Q_i)                                                 |
-| `tauk`     | Q-conversion factor S^(1/3) · τ_H  [s] — multiplies ω to get Q    |
-| `tau_r`    | Resistive diffusion time [s]                                      |
-| `delta_n`  | Δ-normalization factor S^(1/3) / r_s [m⁻¹]                        |
-| `rs`       | Minor radius at this surface [m]                                  |
-| `R0`       | Major radius [m]                                                  |
-| `bt`       | Toroidal field [T]                                                |
-| `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention) |
-| `dr_val`   | Resistive interchange D_R = E + F + H² (critical-Δ input; auto-derived from GGJ coefficients unless overridden) |
-| `dgeo_val` | Connor et al. 2015 Eq. 59 toroidal critical-Δ geometric factor in the r_s reference (see `toroidal_dgeo`) |
-| `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                |
-| `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
-| `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
-| `dc_type`  | Selector for `dc_tmp` formula                                     |
-| `k_ref`    | Reference-length ratio K = r_s · (dψ_N/dr) at this surface (1 = no Δ' conversion) |
+| field           | meaning                                                                                                                                                 |
+|:--------------- |:------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ising`         | Singular-surface index (traceability only)                                                                                                              |
+| `m`, `n`        | Poloidal / toroidal mode numbers at this surface                                                                                                        |
+| `tau`           | T_i / T_e                                                                                                                                               |
+| `lu`            | Lundquist number S = τ_R / τ_H                                                                                                                          |
+| `c_beta`        | Compressibility √(β_local / (1 + β_local))                                                                                                              |
+| `D_norm`        | (d_β/r_s) · S^(1/3) · √ι_e  (Fitzpatrick normalized scale)                                                                                              |
+| `P_perp`        | Perpendicular Prandtl number τ_R / τ_⊥                                                                                                                  |
+| `P_tor`         | Toroidal-direction Prandtl number τ_R / τ_‖tor                                                                                                          |
+| `Q_e`           | Normalized electron diamagnetic: −tauk · ω_*e                                                                                                           |
+| `Q_i`           | Normalized ion diamagnetic:      −tauk · ω_*i                                                                                                           |
+| `iota_e`        | Q_e / (Q_e − Q_i)                                                                                                                                       |
+| `tauk`          | Q-conversion factor S^(1/3) · τ_H  [s] — multiplies ω to get Q                                                                                          |
+| `tau_r`         | Resistive diffusion time [s]                                                                                                                            |
+| `delta_n`       | Δ-normalization factor S^(1/3) / r_s [m⁻¹]                                                                                                              |
+| `rs`            | Minor radius at this surface [m]                                                                                                                        |
+| `R0`            | Major radius [m]                                                                                                                                        |
+| `bt`            | Toroidal field [T]                                                                                                                                      |
+| `sval_r`        | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention)                                                                                       |
+| `dr_val`        | Resistive interchange D_R = E + F + H² (critical-Δ input; auto-derived from GGJ coefficients unless overridden)                                         |
+| `dgeo_val`      | Connor et al. 2015 Eq. 59 toroidal critical-Δ geometric factor in the r_s reference (see `toroidal_dgeo`)                                               |
+| `kpar_val`      | Parallel-wavenumber gradient K∥ [1/m] of the `:toroidal` χ∥ closure, k∥ = K∥·W_d (see `toroidal_kpar`); the cylindrical n·abs(s)/R₀ when not derived    |
+| `eta`           | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                                                                                                      |
+| `d_beta`        | Beta-weighted ion length scale c_β · d_i [m]                                                                                                            |
+| `dc_tmp`        | Critical-Δ offset from chi_parallel matching (for `:toroidal`, W_d and the free-streaming χ∥ use `dgeo_val` and `kpar_val`)                             |
+| `dc_type`       | Selector for `dc_tmp` formula                                                                                                                           |
+| `k_ref`         | Reference-length ratio K = r_s · (dψ_N/dr) at this surface (1 = no Δ' conversion)                                                                       |
 | `alpha_mercier` | Mercier Frobenius exponent α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48) governing the Δ' reference-length conversion (1/2 = slab/cylindrical value) |
 
 `k_ref` and `alpha_mercier` feed the ψ_N → r_s reference-length conversion of
@@ -88,6 +89,7 @@ Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     sval_r::Float64
     dr_val::Float64 = 0.0
     dgeo_val::Float64 = 0.0
+    kpar_val::Float64 = 0.0
     eta::Float64
     d_beta::Float64
 
@@ -134,23 +136,32 @@ end
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
     rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
+    kpar_val::Union{Real,Nothing}=nothing,
     max_iter::Integer=100, tol::Real=1e-10)
     dc_type in ALLOWED_DC_TYPES ||
         throw(ArgumentError("SLAYERParameters: unknown dc_type=$dc_type. " *
                             "Allowed: $(ALLOWED_DC_TYPES)"))
-    (dc_type === :none || dr_val == 0.0) && return 0.0
+    (dc_type === :none || dr_val == 0.0 || (dc_type === :toroidal && dgeo_val == 0.0)) && return 0.0
 
     vte = sqrt(2.0 * t_e * E_CHG / M_E)
     chi_par_smfp = (1.581 * tau_ee * vte^2) / (1.0 + 0.2535 * zeff)
 
+    # W_d balance χ∥k∥² = χ⊥k⊥² (Fitzpatrick 1995 Sec. VII): W_d = √8·(χ⊥/χ∥)^¼/g_w, free-streaming k∥ = K∥·W_d.
+    # Cylindrical g_w = √(n|s|r_s/R₀), K∥ = n|s|/R₀; :toroidal uses Connor et al. 2015 Eqs. 20/59 (toroidal_dgeo/kpar).
+    kpar_cyl = n_tor * abs(sval_r) / R0
+    g_w, kpar = if dc_type === :toroidal
+        (dgeo_val, kpar_val === nothing ? kpar_cyl : kpar_val)
+    else
+        (sqrt((rs / R0) * abs(sval_r) * n_tor), kpar_cyl)
+    end
+
     Wd = 0.1
     converged = false
     for _ in 1:max_iter
-        chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * abs(sval_r) * Wd)
+        chi_par_lmfp = (2.0 * vte) / (sqrt(π) * kpar * Wd)
         chi_par = (chi_par_smfp * chi_par_lmfp) /
                   (chi_par_smfp + chi_par_lmfp)
-        Wd_new = sqrt(8.0) * (chi_perp / chi_par)^0.25 *
-                 (1.0 / sqrt((rs / R0) * abs(sval_r) * n_tor))
+        Wd_new = sqrt(8.0) * (chi_perp / chi_par)^0.25 / g_w
         if abs(Wd_new - Wd) / max(abs(Wd), 1e-30) < tol
             Wd = Wd_new
             converged = true
@@ -160,7 +171,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     end
     converged || error("SLAYERParameters: Wd iteration failed to converge")
 
-    chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * abs(sval_r) * Wd)
+    chi_par_lmfp = (2.0 * vte) / (sqrt(π) * kpar * Wd)
     chi_par = (chi_par_smfp * chi_par_lmfp) / (chi_par_smfp + chi_par_lmfp)
 
     if dc_type === :lar
@@ -181,7 +192,7 @@ end
                         qval, sval_r, bt, rs, R0, mu_i, zeff,
                         chi_perp, chi_tor,
                         m, n,
-                        dr_val=0.0, dgeo_val=0.0,
+                        dr_val=0.0, dgeo_val=0.0, kpar_val=nothing,
                         dc_type=:none, ising=0,
                         resistivity_model=SauterNeoModel(),
                         f_trap=nothing, nu_e_star=nothing,
@@ -215,6 +226,8 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula: the resistive
     interchange index `D_R` and the Connor et al. 2015 Eq. 59 geometric factor
     in the `r_s` reference (`toroidal_dgeo`)
+  - `kpar_val` -- parallel-wavenumber gradient K∥ [1/m] of the `:toroidal` χ∥
+    closure (`toroidal_kpar`); `nothing` (default) uses the cylindrical `n·|s|/R₀`
   - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
   - `k_ref`   -- reference-length ratio K = r_s·(dψ_N/dr) at the surface,
@@ -268,6 +281,7 @@ function slayer_parameters(;
     chi_perp::Real, chi_tor::Real,
     m::Integer, n::Integer,
     dr_val::Real=0.0, dgeo_val::Real=0.0,
+    kpar_val::Union{Real,Nothing}=nothing,
     dc_type::Symbol=:none, ising::Integer=0,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     f_trap::Union{Real,Nothing}=nothing,
@@ -382,7 +396,7 @@ function slayer_parameters(;
     dc_tmp = _solve_dc_tmp(; dc_type=dc_type, dr_val=dr_val, dgeo_val=dgeo_val,
         chi_perp=chi_perp, t_e=t_e, zeff=zeff,
         tau_ee=tau_ee, rs=rs, R0=R0, sval_r=sval_r,
-        n_tor=n)
+        n_tor=n, kpar_val=kpar_val)
 
     return SLAYERParameters(;
         ising=ising, m=m, n=n,
@@ -392,6 +406,7 @@ function slayer_parameters(;
         tauk=tauk, tau_r=tau_r, delta_n=delta_n,
         rs=rs, R0=R0, bt=bt, sval_r=sval_r,
         dr_val=dr_val, dgeo_val=dgeo_val,
+        kpar_val=kpar_val === nothing ? n * abs(sval_r) / R0 : kpar_val,
         eta=eta, d_beta=d_beta,
         dc_tmp=dc_tmp, dc_type=dc_type,
         k_ref=k_ref, alpha_mercier=alpha_mercier

@@ -97,7 +97,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # local r_s/R₀ (measured coefficient 0.15–0.18) and must halve with ε (measured 0.49–0.50);
         # a wrong O(1) factor would not shrink.
         using GeneralizedPerturbedEquilibrium.ForceFreeStates: resist_geometry
-        using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, r_based_shear,
+        using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, toroidal_kpar, r_based_shear,
             surface_minor_radius, surface_da_dpsi
         function _lar_equilibrium(eps)
             tj = TJAnalyticConfig(; lar_r0=1.0 / eps, lar_a=1.0, qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0, ma=64, mtau=64)
@@ -112,14 +112,20 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
             da = surface_da_dpsi(pe, psi_s)
             dgeo = toroidal_dgeo(; chi1=2π * pe.psio, v1=rg.v1_local, q=q, q1=q1, n=n,
                 avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=rs / da)
-            return dgeo / sqrt(n * r_based_shear(rs, q, q1, da) * rs / pe.ro) - 1, rs / pe.ro
+            kpar = toroidal_kpar(; chi1=2π * pe.psio, v1=rg.v1_local, q=q, q1=q1, n=n, avg_bsq=rg.avg_bsq, k_ref=rs / da)
+            s = r_based_shear(rs, q, q1, da)
+            return dgeo / sqrt(n * s * rs / pe.ro) - 1, kpar / (n * s / pe.ro) - 1, rs / pe.ro
         end
         pe, pe_half = _lar_equilibrium(0.05), _lar_equilibrium(0.025)
         for (psi_s, n) in ((0.3, 1), (0.6, 2))
-            dev, eps_local = _lar_deviation(pe, psi_s, n)
+            dev, dev_k, eps_local = _lar_deviation(pe, psi_s, n)
+            dev_half, dev_k_half, _ = _lar_deviation(pe_half, psi_s, n)
             @test abs(dev) <= eps_local
-            dev_half, _ = _lar_deviation(pe_half, psi_s, n)
             @test dev_half / dev ≈ 0.5 rtol = 0.1
+            # The χ∥ closure's K∥ reduces to Fitzpatrick's cylindrical n·s/R₀ at second order (measured
+            # coefficient 0.37–0.47 of ε²): it has no |∇ψ| metric factor, which carries D_geo's O(ε) term.
+            @test abs(dev_k) <= eps_local^2
+            @test dev_k_half / dev_k ≈ 0.25 rtol = 0.1
         end
     end
 
@@ -127,7 +133,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # The r_s-referenced Eq. 59 factor must be invariant under B₀ → B₀/2 and
         # (a, R₀) → 2(a, R₀) at fixed ε; a missing power of ψ_t' in Λ breaks this.
         using GeneralizedPerturbedEquilibrium.ForceFreeStates: resist_geometry
-        using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, surface_minor_radius, surface_da_dpsi
+        using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, toroidal_kpar, surface_minor_radius, surface_da_dpsi
         function _dgeo(a, B0, psi)
             tj = TJAnalyticConfig(; lar_r0=a / 0.2, lar_a=a,
                 qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=B0,
@@ -139,11 +145,19 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
             q1 = pe.profiles.q_deriv(psi)
             rg = resist_geometry(pe, psi, q1)
             rs = surface_minor_radius(pe, psi)
-            return toroidal_dgeo(; chi1=2π * pe.psio, v1=rg.v1_local, q=pe.profiles.q_spline(psi), q1=q1, n=1,
-                avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=rs / surface_da_dpsi(pe, psi))
+            q = pe.profiles.q_spline(psi)
+            k_ref = rs / surface_da_dpsi(pe, psi)
+            dgeo = toroidal_dgeo(; chi1=2π * pe.psio, v1=rg.v1_local, q=q, q1=q1, n=1,
+                avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=k_ref)
+            # K∥ is per metre, so K∥·a is the dimensionless combination.
+            kpar_a = a * toroidal_kpar(; chi1=2π * pe.psio, v1=rg.v1_local, q=q, q1=q1, n=1, avg_bsq=rg.avg_bsq, k_ref=k_ref)
+            return dgeo, kpar_a
         end
-        d_ref = _dgeo(1.0, 12.0, 0.5)
-        @test _dgeo(1.0, 6.0, 0.5) ≈ d_ref rtol = 1e-6
-        @test _dgeo(2.0, 12.0, 0.5) ≈ d_ref rtol = 1e-6
+        d_ref, k_ref_a = _dgeo(1.0, 12.0, 0.5)
+        for (a, B0) in ((1.0, 6.0), (2.0, 12.0))
+            d, k_a = _dgeo(a, B0, 0.5)
+            @test d ≈ d_ref rtol = 1e-6
+            @test k_a ≈ k_ref_a rtol = 1e-6
+        end
     end
 end

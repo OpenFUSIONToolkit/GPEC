@@ -45,7 +45,8 @@ constructor.
     (consumed only by `dc_type=:toroidal`). Supply a scalar only to override
     the auto-derivation. An explicit `dr_val = 0.0` disables the critical-Δ
     offset (Δ_crit ≡ 0) for every `dc_type`; `dgeo_val = 0.0` does so only for
-    `:toroidal`
+    `:toroidal`. `:toroidal` also takes the χ∥ closure's parallel wavenumber
+    from the equilibrium (`toroidal_kpar`), which has no override
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`

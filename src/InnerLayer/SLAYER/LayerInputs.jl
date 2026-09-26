@@ -184,13 +184,40 @@ and is converted with `K^(2α_M)`.
 """
 function toroidal_dgeo(; chi1::Real, v1::Real, q::Real, q1::Real, n::Integer,
     avg_bsq::Real, avg_dpsisq::Real, k_ref::Real)
-    v1 > 0 || throw(ArgumentError("toroidal_dgeo: dV/dψ_N must be positive, got $v1"))
-    chi1 != 0 || throw(ArgumentError("toroidal_dgeo: chi1 must be non-zero"))
+    alpha, lambda = _connor_alpha_lambda("toroidal_dgeo", chi1, v1, q, q1, n)
+    grad_v_sq = v1^2 * avg_dpsisq
+    return k_ref * v1 * (alpha^2 * lambda^2 / (avg_bsq * grad_v_sq))^0.25
+end
+
+"""
+    toroidal_kpar(; chi1, v1, q, q1, n, avg_bsq, k_ref) -> Float64
+
+Parallel-wavenumber gradient `K∥` [1/m] of the toroidal critical-Δ closure: an island of normalized
+width `W` (in the `x̂ = (r−r_s)/r_s` reference) sees `k∥ = K∥·W`. From Connor, Ham, Hastie & Liu 2015
+(PPCF 57 065001) Eq. 20, whose transport balance reads `χ⊥⟨|∇V|²⟩ ∂²_x = χ∥ (α²Λ²/⟨B²⟩) x²` in
+`x = V − V_s`, the parallel wavenumber is `k∥ = |αΛ|·x/√⟨B²⟩`; with `x = W·r_s·(dV/dr) = W·k_ref·v1`,
+
+```
+K∥ = |α·Λ|·k_ref·v1 / √⟨B²⟩,
+```
+
+with `α`, `Λ` as in [`toroidal_dgeo`](@ref). At large aspect ratio it reduces to Fitzpatrick's
+(1995, Phys. Plasmas 2 825, Eq. 132) cylindrical `n·s/R₀`. It is not a function of `D_geo` alone:
+`K∥ = (D_geo²/r_s)·r_s√⟨|∇ψ_N|²⟩/k_ref`, and the last factor is 1 only in a cylinder.
+"""
+function toroidal_kpar(; chi1::Real, v1::Real, q::Real, q1::Real, n::Integer, avg_bsq::Real, k_ref::Real)
+    alpha, lambda = _connor_alpha_lambda("toroidal_kpar", chi1, v1, q, q1, n)
+    return abs(alpha * lambda) * k_ref * v1 / sqrt(avg_bsq)
+end
+
+# Connor et al. 2015 α = 2πn/χ' and Λ = ψ_t'²·(ι/2π)' (' = d/dV) from ψ_N-grid quantities.
+function _connor_alpha_lambda(caller, chi1, v1, q, q1, n)
+    v1 > 0 || throw(ArgumentError("$caller: dV/dψ_N must be positive, got $v1"))
+    chi1 != 0 || throw(ArgumentError("$caller: chi1 must be non-zero"))
     alpha = 2π * n * v1 / chi1
     psit1 = q * chi1 / v1
     lambda = psit1^2 * (-q1 / (q^2 * v1))
-    grad_v_sq = v1^2 * avg_dpsisq
-    return k_ref * v1 * (alpha^2 * lambda^2 / (avg_bsq * grad_v_sq))^0.25
+    return alpha, lambda
 end
 
 """
@@ -247,7 +274,10 @@ profiles, without an intermediate file round-trip.
     one. Pass a scalar or a callable of `psi` to prescribe it; a prescribed
     value must already be in the `r_s` reference, i.e. Eq. 59's own value
     times `k_ref·v1/V_s` (≈ 2 at large aspect ratio). Only `dc_type=:toroidal`
-    consumes it.
+    consumes it. The same dc_type's χ∥ closure also uses the toroidal
+    parallel-wavenumber gradient [`toroidal_kpar`](@ref), which is always derived
+    from the surface's `ResistGeometry`, also when `dgeo_val` is prescribed;
+    without one it falls back to the cylindrical `n·|s|/R₀` with a warning.
   - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
   - `rs_method` -- radial label defining `r_s` for the whole layer stack:
     `:midplane` (default), `:halfwidth`, `:fsa`, `:volume`, or `:flux`. See
@@ -386,9 +416,17 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             1.0
         end
 
-        # dgeo_val: Connor et al. 2015 Eq. 59 geometric factor in the r_s reference
-        # (see `toroidal_dgeo`), derived whenever the surface carries a ResistGeometry;
-        # only dc_type=:toroidal consumes it.
+        # dgeo_val and kpar_val: Connor et al. 2015 Eq. 59 geometric factor in the r_s reference and
+        # the Eq. 20 parallel-wavenumber gradient (see `toroidal_dgeo`, `toroidal_kpar`), derived
+        # whenever the surface carries a ResistGeometry; only dc_type=:toroidal consumes them.
+        kpar_val_k = if rg === nothing
+            dc_type === :toroidal && @warn(
+                "build_slayer_inputs: no ResistGeometry, so the toroidal critical-Δ χ∥ closure uses " *
+                "the cylindrical parallel wavenumber n·|s|/R₀.", maxlog = 1)
+            nothing
+        else
+            toroidal_kpar(; chi1=chi1, v1=rg.v1_local, q=q, q1=q1, n=n_res, avg_bsq=rg.avg_bsq, k_ref=k_ref_k)
+        end
         dgeo_val_k = if dgeo_val === nothing
             if rg !== nothing
                 toroidal_dgeo(; chi1=chi1, v1=rg.v1_local, q=q, q1=q1, n=n_res,
@@ -429,6 +467,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             m=m_res, n=n_res,
             dr_val=dr_val_k,
             dgeo_val=dgeo_val_k,
+            kpar_val=kpar_val_k,
             dc_type=dc_type, ising=k,
             resistivity_model=resistivity_model,
             f_trap=f_trap_kw,

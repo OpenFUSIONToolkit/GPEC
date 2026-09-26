@@ -223,38 +223,48 @@
             bt=2.0, dc_type=:toroidal, dr_val=-0.01)[1]
         @test p_stable.dc_tmp > 0
 
-        # Same χ matching and D_R prefactor as :rfitzp, which carries √(n|s|r_s/R₀) in place of dgeo;
-        # exact up to the W_d iteration's 1e-10 convergence.
-        p_rf0 = build_slayer_inputs(equil, [sing], profiles;
-            bt=2.0, dc_type=:rfitzp, dr_val=0.01)[1]
-        @test p.dc_tmp / p_rf0.dc_tmp ≈ p.dgeo_val / sqrt(p.n * abs(p.sval_r) * p.rs / p.R0) rtol = 1e-8
-
-        # Wiring check, not physics: the derivation reaches toroidal_dgeo with the surface's inputs.
+        # Wiring check, not physics: the derivation reaches toroidal_dgeo and toroidal_kpar with the surface's inputs.
         rg = sing.restype
         rs = surface_minor_radius(equil, psi_s)
         k_ref = rs / surface_da_dpsi(equil, psi_s)
         dgeo_ref = toroidal_dgeo(; chi1=2π * equil.psio, v1=rg.v1_local, q=q_s, q1=q1_s, n=1,
             avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=k_ref)
+        kpar_ref = toroidal_kpar(; chi1=2π * equil.psio, v1=rg.v1_local, q=q_s, q1=q1_s, n=1, avg_bsq=rg.avg_bsq, k_ref=k_ref)
         @test p.dgeo_val ≈ dgeo_ref rtol = 1e-12
+        @test p.kpar_val ≈ kpar_ref rtol = 1e-12
         @test p.k_ref ≈ k_ref rtol = 1e-12
 
-        # An explicit dgeo_val still overrides the derivation.
+        # K∥ is not D_geo²/r_s outside a cylinder: the metric factor r_s·√⟨|∇ψ_N|²⟩/k_ref enters.
+        @test p.kpar_val ≈ p.dgeo_val^2 * sqrt(rg.avg_dpsisq) / k_ref rtol = 1e-10
+
+        # An explicit dgeo_val still overrides the derivation; K∥ stays derived.
         p_fix = build_slayer_inputs(equil, [sing], profiles;
             bt=2.0, dc_type=:toroidal, dr_val=0.01, dgeo_val=0.3)[1]
         @test p_fix.dgeo_val == 0.3
+        @test p_fix.kpar_val ≈ kpar_ref rtol = 1e-12
 
-        # The factor is derived for every dc_type once a ResistGeometry is present.
+        # The factors are derived for every dc_type once a ResistGeometry is present.
         p_rf = build_slayer_inputs(equil, [sing], profiles;
             bt=2.0, dc_type=:rfitzp, dr_val=0.01)[1]
         @test p_rf.dgeo_val ≈ dgeo_ref rtol = 1e-12
+        @test p_rf.kpar_val ≈ kpar_ref rtol = 1e-12
 
-        # Wiring check, not physics: the radial label reaches the factor only through k_ref.
+        # The radial label reaches the geometry only through k_ref, and the whole toroidal critical-Δ, closure
+        # included, scales with k_ref like the converted outer Δ' (exact up to the W_d iteration's 1e-10).
         for lab in (:flux, :volume)
             p_lab = build_slayer_inputs(equil, [sing], profiles;
                 bt=2.0, dc_type=:toroidal, dr_val=0.01, rs_method=lab)[1]
             @test p_lab.k_ref != p.k_ref
             @test p_lab.dgeo_val / p_lab.k_ref ≈ p.dgeo_val / p.k_ref rtol = 1e-10
+            @test p_lab.kpar_val / p_lab.k_ref ≈ p.kpar_val / p.k_ref rtol = 1e-10
+            @test p_lab.dc_tmp / p_lab.k_ref ≈ p.dc_tmp / p.k_ref rtol = 1e-8
         end
+
+        # Without a ResistGeometry a prescribed dgeo_val runs with the cylindrical K∥, and says so.
+        sing_bare = _mk_sing(; psi=psi_s, q=q_s, q1=q1_s, m=2, n=1)
+        p_bare = (@test_logs (:warn, r"cylindrical") match_mode = :any build_slayer_inputs(equil, [sing_bare], profiles;
+            bt=2.0, dc_type=:toroidal, dr_val=0.01, dgeo_val=0.3))[1]
+        @test p_bare.kpar_val ≈ p_bare.n * abs(p_bare.sval_r) / p_bare.R0 rtol = 1e-14
     end
 
     @testset "build_slayer_inputs: empty sings returns empty vector" begin
