@@ -36,13 +36,38 @@ using Logging
         @test EF.correction_current(3δt, c; delta_threshold=δt, torque_budget=T0, safety_factor=2.0, ntv=false) ≈ δt / c.delta_per_kat
         c0 = EF.EFCCoupling("x", c.delta_per_kat, 40.0, 0.05, 0.0)
         @test EF.correction_current(3δt, c0; delta_threshold=δt, torque_budget=T0) ≈ 2δt / c.delta_per_kat
-        # Beyond the correctable limit there is no real root.
+        # Beyond the correctable limit there is no valid root.
         lim = EF.max_correctable_overlap(c; delta_threshold=δt, torque_budget=T0)
         @test isnan(EF.correction_current(1.01 * lim.with_ntv, c; delta_threshold=δt, torque_budget=T0))
         @test !isnan(EF.correction_current(0.99 * lim.with_ntv, c; delta_threshold=δt, torque_budget=T0))
+        # No current past I_max = √(T_0/T_r), where the rotation is gone: c's quadratic still has real
+        # roots there (they run to C_c/(2a) = 20 kAt), but I_max ≈ 14.1 kAt.
+        i_max = sqrt(T0 / c.torque_residual_per_kat2)
+        δ_past = δt * (1 - c.torque_residual_per_kat2 * 16^2 / T0) + c.delta_per_kat * 16   # needs I = 16 kAt
+        @test c.delta_per_kat^2 - 4a * (δ_past - δt) >= 0 && isnan(EF.correction_current(δ_past, c; delta_threshold=δt, torque_budget=T0))
+        @test EF.correction_current(0.99 * c.delta_per_kat * i_max, c; delta_threshold=δt, torque_budget=T0) < i_max
+
+        # The condition is on |δ_EF − C·I|, so the correctable currents are a window: over-shooting
+        # by more than the threshold is as bad as falling short of it, whatever the phase of the miss.
+        δ_w = 2δt
+        lo = EF.correction_current(δ_w, c; delta_threshold=δt, torque_budget=T0)
+        hi = EF.correction_current_upper(δ_w, c; delta_threshold=δt, torque_budget=T0)
+        @test hi > lo
+        resid(I) = abs(δ_w - c.delta_per_kat * I)
+        thresh(I) = δt * (1 - abs(c.torque_residual_per_kat2) * I^2 / T0)
+        @test resid(lo) ≈ thresh(lo) rtol = 1e-10        # lower edge: short by exactly the threshold
+        @test resid(hi) ≈ thresh(hi) rtol = 1e-10        # upper edge: over by exactly the threshold
+        @test resid(0.5 * (lo + hi)) < thresh(0.5 * (lo + hi))     # inside the window it is corrected
+        @test resid(hi * 1.02) > thresh(hi * 1.02)                 # past it, locked again
+        # Without NTV the window is symmetric about the null, by ±δ_t/C.
+        @test EF.correction_current_upper(δ_w, c; delta_threshold=δt, torque_budget=T0, ntv=false) ≈ (δ_w + δt) / c.delta_per_kat
+        # Beyond the correctable overlap neither edge exists.
+        @test isnan(EF.correction_current_upper(1.01 * lim.with_ntv, c; delta_threshold=δt, torque_budget=T0))
     end
 
     @testset "limits and curve" begin
+        # c peaks past zero rotation (C_c √(T_0/T_r) > 2δ_t), so its limit is the zero-rotation one,
+        # C_c √(T_0/T_r) (Logan et al. 2026, Eq. 7); torque_only uses the whole field's torque.
         lim = EF.max_correctable_overlap(c; delta_threshold=δt, torque_budget=T0)
         # For this coupling the residual torque exhausts the budget before the quadratic's tangency:
         # the limit is C_c √(T_0/T_res) and the current there is the budget-exhausting √(T_0/T_res).
@@ -58,6 +83,21 @@ using Logging
         a = δt * weak.torque_residual_per_kat2 / T0
         @test EF.correction_current((1 - 1e-6) * limw.with_ntv, weak; delta_threshold=δt, torque_budget=T0) ≈ weak.delta_per_kat / (2a) rtol = 1e-2
         @test isnan(EF.correction_current(1.01 * limw.with_ntv, weak; delta_threshold=δt, torque_budget=T0))
+        @test limw.with_ntv > limw.residual_only                    # the vertex binds only inside the rotating range
+        @test lim.residual_only ≈ c.delta_per_kat * sqrt(T0 / c.torque_residual_per_kat2)
+        @test lim.with_ntv == lim.residual_only
+        @test lim.torque_only ≈ c.delta_per_kat * sqrt(T0 / c.torque_full_per_kat2)
+        # A larger residual torque puts the peak inside the rotating range (C_c √(T_0/T_r) < 2δ_t):
+        # there the limit is the vertex of the quadratic, where the discriminant vanishes and the
+        # current tends to C_c / (2a).
+        cp = EF.EFCCoupling("peak", c.delta_per_kat, 40.0, 0.5, 0.2)
+        limp = EF.max_correctable_overlap(cp; delta_threshold=δt, torque_budget=T0)
+        @test cp.delta_per_kat * sqrt(T0 / cp.torque_residual_per_kat2) < 2δt
+        @test limp.with_ntv ≈ δt + cp.delta_per_kat^2 * T0 / (4 * δt * cp.torque_residual_per_kat2)
+        @test limp.with_ntv > limp.residual_only
+        ap = δt * cp.torque_residual_per_kat2 / T0
+        @test EF.correction_current((1 - 1e-6) * limp.with_ntv, cp; delta_threshold=δt, torque_budget=T0) ≈ cp.delta_per_kat / (2ap) rtol = 1e-2
+        @test isnan(EF.correction_current((1 + 1e-6) * limp.with_ntv, cp; delta_threshold=δt, torque_budget=T0))
         curve = EF.efc_current_curve(c; delta_threshold=δt, torque_budget=T0, delta_max=20, npoints=200)
         @test length(curve.delta_ef) == 200 && curve.delta_ef[end] ≈ 20δt
         @test all(curve.current_linear .>= 0)
@@ -70,7 +110,23 @@ using Logging
         @test EF.max_correctable_overlap(negative; delta_threshold=δt, torque_budget=T0) == lim
         @test EF.correction_current(2δt, negative; delta_threshold=δt, torque_budget=T0) == EF.correction_current(2δt, c; delta_threshold=δt, torque_budget=T0)
         no_torque = EF.EFCCoupling("y", c.delta_per_kat, 40.0, 0.0, 0.0)
-        @test EF.max_correctable_overlap(no_torque; delta_threshold=δt, torque_budget=T0) == (; with_ntv=Inf, torque_only=Inf)
+        @test EF.max_correctable_overlap(no_torque; delta_threshold=δt, torque_budget=T0) == (; with_ntv=Inf, residual_only=Inf, torque_only=Inf)
+    end
+
+    @testset "uncertainty band" begin
+        # Zero tolerances: both bounds are the nominal curve.
+        curve = EF.efc_current_curve(c; delta_threshold=δt, torque_budget=T0, delta_max=20, npoints=200)
+        @test isequal(curve.current_ntv_pessimistic, curve.current_ntv) && isequal(curve.current_ntv_optimistic, curve.current_ntv)
+        # ±50 % torque and T_0 = 4 ± 2 N·m, as in Logan et al. 2026: the model depends only on T/T_0,
+        # so each bound is the nominal model at an equivalent budget.
+        band = EF.efc_current_curve(c; delta_threshold=δt, torque_budget=T0, delta_max=20, npoints=200, torque_rtol=0.5, budget_rtol=0.5)
+        @test band.limits_pessimistic == EF.max_correctable_overlap(c; delta_threshold=δt, torque_budget=T0 * 0.5 / 1.5)
+        @test band.limits_optimistic == EF.max_correctable_overlap(c; delta_threshold=δt, torque_budget=T0 * 1.5 / 0.5)
+        @test band.limits_pessimistic.with_ntv < band.with_ntv < band.limits_optimistic.with_ntv
+        ok = .!isnan.(band.current_ntv_pessimistic) .& .!isnan.(band.current_ntv_optimistic)
+        @test all(band.current_ntv_pessimistic[ok] .>= band.current_ntv_optimistic[ok])
+        @test_throws ArgumentError EF.efc_current_curve(c; delta_threshold=δt, torque_budget=T0, budget_rtol=1.0)
+        @test_throws ArgumentError EF.efc_current_curve(c; delta_threshold=δt, torque_budget=T0, torque_rtol=-0.1)
     end
 
     # A tabulated torque: linear in the rotation shift, braking at the nominal rotation, zero at the offset.
@@ -171,4 +227,20 @@ using Logging
         @test !EF.has_rotation_scan(back[2]) && back[2].torque_full_per_kat2 == c.torque_full_per_kat2
         rm(tmp)
     end
+
+    @testset "correction window, torque balance" begin
+        δt, T0 = 1e-4, 4.0
+        for cc in (scanned,)
+            δ_w = 3δt
+            lo = EF.correction_current(δ_w, cc; delta_threshold=δt, torque_budget=T0)
+            hi = EF.correction_current_upper(δ_w, cc; delta_threshold=δt, torque_budget=T0)
+            @test isfinite(lo) && isfinite(hi) && hi > lo
+            g(I) = abs(δ_w - cc.delta_per_kat * I) - δt * EF.threshold_factor(cc, I; torque_budget=T0)
+            @test abs(g(lo)) < 1e-9 * δt                        # short by exactly the threshold
+            @test g(0.5 * (lo + hi)) < 0                         # inside the window: corrected
+            lim = EF.max_correctable_overlap(cc; delta_threshold=δt, torque_budget=T0)
+            @test lim.residual_only > 0 && lim.torque_only > 0
+        end
+    end
+
 end

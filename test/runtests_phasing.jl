@@ -65,6 +65,14 @@ using LinearAlgebra
         @test_throws ArgumentError EF.phasing_map(sens, dom, ["L", "X"])
         @test_throws ArgumentError EF.phasing_map(sens, dom, ["L", "M"]; nphase=1)
         @test_throws ArgumentError EF.phasing_map(sens, dom, ["L", "M"]; mode=3)
+        # A decomposition carrying a different (m, n) basis has the right shape and would project
+        # silently; the bare four-argument construction above carries none and stays permitted.
+        rebased = PE.DominantCoupling(dom.singular_values, dom.right_singular_vectors, dom.left_singular_vectors,
+            dom.rational_index, sens.m_modes .+ 1, sens.n_modes)
+        @test_throws ArgumentError EF.phasing_map(sens, rebased, ["L", "M"])
+        matching = PE.DominantCoupling(dom.singular_values, dom.right_singular_vectors, dom.left_singular_vectors,
+            dom.rational_index, sens.m_modes, sens.n_modes)
+        @test EF.phasing_map(sens, matching, ["L", "M"]; nphase=12) isa EF.PhasingMap
         dead = EF.CoilSensitivities(sens.coil_names, sens.m_modes, sens.n_modes, b_t0, nominal, sens.shift_sensitivity, sens.tilt_sensitivity,
             sens.shift_linearity_residual, sens.tilt_linearity_residual, [0.0, 2000.0, 500.0], sens.winding_multiplier, sens.nominal_radius)
         @test_throws ArgumentError EF.phasing_map(dead, dom, ["L", "M"])

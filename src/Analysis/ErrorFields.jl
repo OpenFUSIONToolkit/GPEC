@@ -430,22 +430,37 @@ Correction current against intrinsic overlap for each correction array of a run
 torque lowers the threshold, with the largest correctable overlap marked; when the run
 tabulated the torques against rotation, a second panel shows those tables with the offsets
 found and the reference rotation, and the curve uses the torque balance (`model`,
-`rotation_exponent` as in `efc_current_curve`). `delta_threshold` defaults to the run's nominal
+`rotation_exponent` as in `efc_current_curve`). The zero-rotation limits are marked with the
+residual torque (circle) and with the whole field's torque (star); nonzero `torque_rtol` or
+`budget_rtol` shade the band between the pessimistic and optimistic curves and the range of the
+correctable limit. `delta_threshold` defaults to the run's nominal
 penetration threshold (`ErrorFields/Risk/threshold_nominal`); `torque_budget` is the torque,
 N·m, that would bring the reference rotation to rest.
 """
 function plot_efc_ntv_limits(couplings::Vector{EF.EFCCoupling}; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0,
-    delta_max::Real=15, model::Symbol=:auto, rotation_exponent::Real=1.0, save_path=nothing)
+    delta_max::Real=15, model::Symbol=:auto, rotation_exponent::Real=1.0, torque_rtol::Real=0.0, budget_rtol::Real=0.0, save_path=nothing)
+    band = torque_rtol > 0 || budget_rtol > 0
+    band_label = "NTV band (T₀ ±$(round(Int, 100budget_rtol)) %, torque ±$(round(Int, 100torque_rtol)) %)"
     p = plot(; xlabel="intrinsic overlap δ_EF / δ_thresh", ylabel="correction current [kAt]", legend=:topleft,
         title="Error-field correction against its own NTV torque (budget $(torque_budget) N·m)", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
     for (j, c) in enumerate(couplings)
-        curve = EF.efc_current_curve(c; delta_threshold, torque_budget, safety_factor, delta_max, model, rotation_exponent)
+        curve = EF.efc_current_curve(c; delta_threshold, torque_budget, safety_factor, delta_max, model, rotation_exponent, torque_rtol, budget_rtol)
         x = curve.delta_ef ./ delta_threshold
         tag = curve.model === :torque_balance ? "torque balance" : "linear budget"
+        if band
+            lo, hi = curve.limits_pessimistic.with_ntv, curve.limits_optimistic.with_ntv
+            isfinite(lo) && vspan!(p, [lo, min(hi, x[end] * delta_threshold)] ./ delta_threshold; c=j, alpha=0.12, lw=0, label="")
+            plot!(p, x, curve.current_ntv_pessimistic; lw=1, c=j, alpha=0.5, label="$(c.coil_name) $band_label")
+            plot!(p, x, curve.current_ntv_optimistic; lw=1, c=j, alpha=0.5, label="")
+        end
         plot!(p, x, curve.current_linear; lw=2, c=j, label="$(c.coil_name) single-mode")
         plot!(p, x, curve.current_ntv; lw=2, ls=:dash, c=j, label="$(c.coil_name) with residual NTV ($tag)")
-        isfinite(curve.with_ntv) && vline!(p, [curve.with_ntv / delta_threshold]; ls=:dot, c=j, label="$(c.coil_name) NTV limit")
-        isfinite(curve.torque_only) && scatter!(p, [curve.torque_only / delta_threshold], [0.0]; marker=:star5, ms=9, c=j, label="$(c.coil_name) whole-field limit")
+        plot!(p, x, curve.current_ntv_upper; lw=1, ls=:dashdot, c=j, alpha=0.7, label="$(c.coil_name) over-correction edge")
+        isfinite(curve.with_ntv) && vline!(p, [curve.with_ntv / delta_threshold]; ls=:dot, c=j, label="$(c.coil_name) correctable limit")
+        isfinite(curve.residual_only) && scatter!(p, [curve.residual_only / delta_threshold], [0.0]; marker=:circle, ms=6, c=j,
+            label="$(c.coil_name) zero rotation, residual torque")
+        isfinite(curve.torque_only) && scatter!(p, [curve.torque_only / delta_threshold], [0.0]; marker=:star5, ms=9, c=j,
+            label="$(c.coil_name) zero rotation, whole-field torque")
     end
     scanned = filter(EF.has_rotation_scan, couplings)
     isempty(scanned) && return _save(p, save_path)

@@ -3,33 +3,44 @@
 
 From an overlap distribution to a locking risk. The empirical ITPA penetration-threshold
 scalings give the overlap δ at which an error field locks as a power law in density, field,
-major radius and β_N/l_i, with fitted exponents and their uncertainties; sampling the
-exponents turns the threshold into a distribution and its cumulative distribution into the
-probability that an overlap δ locks. Convolving that with the Monte Carlo distribution of
-`|δ|` gives the locking probability of the assembled machine, and repeating the Monte Carlo
-over a range of tolerance scales gives the allowable tolerance for a target risk.
+major radius, β_N/l_i and (for the 2026 fits) plasma current, with fitted exponents and their
+uncertainties; sampling the exponents turns the threshold into a distribution and its cumulative
+distribution into the probability that an overlap δ locks. Convolving that with the Monte Carlo
+distribution of `|δ|` gives the locking probability of the assembled machine, and repeating the
+Monte Carlo over a range of tolerance scales gives the allowable tolerance for a target risk.
 
-n = 1 fits: Logan et al., "Robustness of the tokamak error field correction tolerance scaling",
-Plasma Phys. Control. Fusion 62 (2020) 084001; n = 2 fits: Logan et al., "Empirical scaling of
-the n = 2 error field penetration threshold in tokamaks", Nucl. Fusion 60 (2020) 086010.
+Each fit is identified by its toroidal mode number, publication year, plasma dataset and fitting
+method, `"n=<n> <year> <dataset> <fit>"`:
+
+  - 2020, n = 1: Logan et al., "Robustness of the tokamak error field correction tolerance
+    scaling", Plasma Phys. Control. Fusion 62 (2020) 084001 — datasets `"O,L"` and `"O,L,H"`,
+    fits `"OLS"`, `"DSOLS"`, `"WLS"`.
+  - 2020, n = 2: Logan et al., "Empirical scaling of the n = 2 error field penetration threshold
+    in tokamaks", Nucl. Fusion 60 (2020) 086010 — datasets `"O,L"`, `"O,L,-C"`, `"O,L,N"`, fit `"WLS"`.
+  - 2026, n = 1: Bursch et al., "Improved n=1 empirical error field penetration threshold scaling
+    with Ohmic and L-mode conventional tokamak plasma discharges", Plasma Phys. Control. Fusion
+    (2026), doi:10.1088/1361-6587/aea7d6 — dataset `"O,L"`, fits `"OLS"` (Eq. 7) and `"WLS"` (Eq. 8).
 """
 
 """
     ThresholdScaling
 
 One fit of the ITPA error-field penetration threshold,
-`δ_thresh = 10^α_c · n_e^α_n · B_T^α_B · R_0^α_R · (β_N/l_i)^α_β`, with `n_e` in 10¹⁹ m⁻³,
-`B_T` in tesla and `R_0` in metres. Each exponent carries the fit's standard error.
+`δ_thresh = 10^α_c · n_e^α_n · B_T^α_B · R_0^α_R · (β_N/l_i)^α_β · I_p^α_I`, with `n_e` in 10¹⁹ m⁻³,
+`B_T` in tesla, `R_0` in metres and `I_p` in MA. Each exponent carries the fit's standard error. Only
+the 2026 fits have a current term; the 2020 fits carry `α_I = (0, 0)`.
 
 ## Fields
 
   - `n`: toroidal mode number of the scaling
+  - `year`: publication year of the fit, `2020` or `2026`; the two years fit different databases
   - `dataset`: plasma dataset the fit was made on (`"O,L"` ohmic and L-mode, `"O,L,H"` with H-modes, ...)
   - `fit`: fitting method (`"OLS"`, `"DSOLS"` downsampled, `"WLS"` weighted)
-  - `alpha_c`, `alpha_n`, `alpha_b`, `alpha_r`, `alpha_beta`: `(value, standard error)` of each exponent
+  - `alpha_c`, `alpha_n`, `alpha_b`, `alpha_r`, `alpha_beta`, `alpha_ip`: `(value, standard error)` of each exponent
 """
 struct ThresholdScaling
     n::Int
+    year::Int
     dataset::String
     fit::String
     alpha_c::Tuple{Float64,Float64}
@@ -37,28 +48,47 @@ struct ThresholdScaling
     alpha_b::Tuple{Float64,Float64}
     alpha_r::Tuple{Float64,Float64}
     alpha_beta::Tuple{Float64,Float64}
+    alpha_ip::Tuple{Float64,Float64}
 end
 
-# The published ITPA fits, keyed "n=<n> <dataset> <fit>".
+# The fits without a plasma-current term (the 2020 fits).
+ThresholdScaling(n, year, dataset, fit, alpha_c, alpha_n, alpha_b, alpha_r, alpha_beta) =
+    ThresholdScaling(n, year, dataset, fit, alpha_c, alpha_n, alpha_b, alpha_r, alpha_beta, (0.0, 0.0))
+
+"""
+    scaling_label(sc::ThresholdScaling) -> String
+
+The fit's key in `ITPA_THRESHOLD_SCALINGS`, `"n=<n> <year> <dataset> <fit>"`.
+"""
+scaling_label(sc::ThresholdScaling) = "n=$(sc.n) $(sc.year) $(sc.dataset) $(sc.fit)"
+
+# The published ITPA fits, keyed "n=<n> <year> <dataset> <fit>". Exponent order: α_c, α_n, α_B, α_R, α_β[, α_I].
 const ITPA_THRESHOLD_SCALINGS = Dict{String,ThresholdScaling}(
-    "n=1 O,L OLS" => ThresholdScaling(1, "O,L", "OLS", (-3.75, 0.05), (0.63, 0.09), (-0.98, 0.12), (0.15, 0.08), (-0.13, 0.10)),
-    "n=1 O,L DSOLS" => ThresholdScaling(1, "O,L", "DSOLS", (-3.39, 0.06), (0.58, 0.08), (-1.08, 0.10), (0.19, 0.07), (0.26, 0.10)),
-    "n=1 O,L WLS" => ThresholdScaling(1, "O,L", "WLS", (-3.46, 0.05), (0.64, 0.06), (-1.14, 0.08), (0.20, 0.07), (0.15, 0.07)),
-    "n=1 O,L,H OLS" => ThresholdScaling(1, "O,L,H", "OLS", (-3.64, 0.04), (0.60, 0.08), (-0.95, 0.08), (0.12, 0.08), (-0.30, 0.05)),
-    "n=1 O,L,H DSOLS" => ThresholdScaling(1, "O,L,H", "DSOLS", (-3.58, 0.04), (0.45, 0.06), (-0.94, 0.08), (0.09, 0.07), (-0.15, 0.05)),
-    "n=1 O,L,H WLS" => ThresholdScaling(1, "O,L,H", "WLS", (-3.62, 0.04), (0.53, 0.06), (-0.95, 0.07), (0.14, 0.08), (-0.19, 0.05)),
-    "n=2 O,L WLS" => ThresholdScaling(2, "O,L", "WLS", (-3.36, 0.06), (1.07, 0.09), (-1.52, 0.2), (1.46, 0.09), (0.36, 0.11)),
-    "n=2 O,L,-C WLS" => ThresholdScaling(2, "O,L,-C", "WLS", (-2.98, 0.05), (0.93, 0.08), (-1.28, 0.15), (0.0, 0.0), (0.41, 0.08)),
-    "n=2 O,L,N WLS" => ThresholdScaling(2, "O,L,N", "WLS", (-3.16, 0.05), (0.64, 0.06), (-1.14, 0.08), (0.20, 0.07), (0.15, 0.07))
+    # 2020 n = 1: Logan et al., PPCF 62 (2020) 084001.
+    "n=1 2020 O,L OLS" => ThresholdScaling(1, 2020, "O,L", "OLS", (-3.75, 0.05), (0.63, 0.09), (-0.98, 0.12), (0.15, 0.08), (-0.13, 0.10)),
+    "n=1 2020 O,L DSOLS" => ThresholdScaling(1, 2020, "O,L", "DSOLS", (-3.39, 0.06), (0.58, 0.08), (-1.08, 0.10), (0.19, 0.07), (0.26, 0.10)),
+    "n=1 2020 O,L WLS" => ThresholdScaling(1, 2020, "O,L", "WLS", (-3.46, 0.05), (0.64, 0.06), (-1.14, 0.08), (0.20, 0.07), (0.15, 0.07)),
+    "n=1 2020 O,L,H OLS" => ThresholdScaling(1, 2020, "O,L,H", "OLS", (-3.64, 0.04), (0.60, 0.08), (-0.95, 0.08), (0.12, 0.08), (-0.30, 0.05)),
+    "n=1 2020 O,L,H DSOLS" => ThresholdScaling(1, 2020, "O,L,H", "DSOLS", (-3.58, 0.04), (0.45, 0.06), (-0.94, 0.08), (0.09, 0.07), (-0.15, 0.05)),
+    "n=1 2020 O,L,H WLS" => ThresholdScaling(1, 2020, "O,L,H", "WLS", (-3.62, 0.04), (0.53, 0.06), (-0.95, 0.07), (0.14, 0.08), (-0.19, 0.05)),
+    # 2026 n = 1: Bursch et al., PPCF 2026 (doi:10.1088/1361-6587/aea7d6) Eq. 7 (OLS, R² = 0.63) and Eq. 8 (KDE-weighted WLS, R² = 0.66): ohmic and L-mode
+    # discharges of conventional tokamaks (C-Mod, DIII-D, EAST, JET, J-TEXT, KSTAR), no NSTX or COMPASS, with |B_T| and |I_p|.
+    "n=1 2026 O,L OLS" => ThresholdScaling(1, 2026, "O,L", "OLS", (-4.31, 0.09), (0.77, 0.08), (0.19, 0.09), (1.88, 0.16), (0.25, 0.08), (-0.97, 0.08)),
+    "n=1 2026 O,L WLS" => ThresholdScaling(1, 2026, "O,L", "WLS", (-4.26, 0.09), (0.56, 0.08), (0.30, 0.10), (1.57, 0.15), (0.13, 0.06), (-1.01, 0.07)),
+    # 2020 n = 2: Logan et al., NF 60 (2020) 086010.
+    "n=2 2020 O,L WLS" => ThresholdScaling(2, 2020, "O,L", "WLS", (-3.36, 0.06), (1.07, 0.09), (-1.52, 0.2), (1.46, 0.09), (0.36, 0.11)),
+    "n=2 2020 O,L,-C WLS" => ThresholdScaling(2, 2020, "O,L,-C", "WLS", (-2.98, 0.05), (0.93, 0.08), (-1.28, 0.15), (0.0, 0.0), (0.41, 0.08)),
+    "n=2 2020 O,L,N WLS" => ThresholdScaling(2, 2020, "O,L,N", "WLS", (-3.16, 0.05), (0.64, 0.06), (-1.14, 0.08), (0.20, 0.07), (0.15, 0.07))
 )
 
 """
-    threshold_scaling(; n=1, dataset="O,L", fit="WLS") -> ThresholdScaling
+    threshold_scaling(; n=1, year=2020, dataset="O,L", fit="WLS") -> ThresholdScaling
 
-Look up a published ITPA fit; the available keys are those of `ITPA_THRESHOLD_SCALINGS`.
+Look up a published ITPA fit by toroidal mode number, publication year, dataset and fitting
+method; the available keys are those of `ITPA_THRESHOLD_SCALINGS`.
 """
-function threshold_scaling(; n::Int=1, dataset::AbstractString="O,L", fit::AbstractString="WLS")
-    key = "n=$n $dataset $fit"
+function threshold_scaling(; n::Int=1, year::Int=2020, dataset::AbstractString="O,L", fit::AbstractString="WLS")
+    key = "n=$n $year $dataset $fit"
     haskey(ITPA_THRESHOLD_SCALINGS, key) ||
         throw(ArgumentError("no ITPA threshold scaling \"$key\"; available: $(join(sort(collect(keys(ITPA_THRESHOLD_SCALINGS))), ", "))"))
     return ITPA_THRESHOLD_SCALINGS[key]
@@ -68,8 +98,10 @@ end
     ScenarioParameters
 
 Operating point the threshold scaling is evaluated at. Density is not an ideal-MHD equilibrium
-output and must be given; the other four default from the equilibrium when built with
-`ScenarioParameters(equil; n_e)`.
+output and must be given; the others default from the equilibrium when built with
+`ScenarioParameters(equil; n_e)`. The plasma current only enters the fits that carry a current
+term, so the keyword constructor leaves it `NaN` unless given and those fits refuse to evaluate
+without it.
 
 ## Fields
 
@@ -78,6 +110,7 @@ output and must be given; the other four default from the equilibrium when built
   - `r_0`: major radius of the magnetic axis, metres
   - `beta_n`: normalized beta
   - `l_i`: normalized internal inductance (`l_i(1)`)
+  - `i_p`: plasma current magnitude, MA (`NaN`: not given)
 """
 struct ScenarioParameters
     n_e::Float64
@@ -85,53 +118,70 @@ struct ScenarioParameters
     r_0::Float64
     beta_n::Float64
     l_i::Float64
+    i_p::Float64
     # Keyword-only: all five are positive scalars of comparable magnitude, so a positional form
     # accepts them transposed and the all-positive guard sees nothing wrong — swapping B_T0 and R_0
     # alone moves the threshold by (R/B)^(α_B − α_R).
-    function ScenarioParameters(; n_e, b_t0, r_0, beta_n, l_i)
+    function ScenarioParameters(; n_e, b_t0, r_0, beta_n, l_i, i_p=NaN)
         all(>(0), (n_e, b_t0, r_0, beta_n, l_i)) || throw(ArgumentError("scenario parameters must be positive (got n_e=$n_e, B_T0=$b_t0, R_0=$r_0, β_N=$beta_n, l_i=$l_i)"))
-        return new(n_e, b_t0, r_0, beta_n, l_i)
+        (isnan(i_p) || i_p > 0) || throw(ArgumentError("the plasma current must be a positive magnitude in MA (got I_p=$i_p)"))
+        return new(n_e, b_t0, r_0, beta_n, l_i, i_p)
     end
 end
 
 """
-    ScenarioParameters(equil::PlasmaEquilibrium; n_e, b_t0=equil.params.bt0, r_0=equil.ro, beta_n=equil.params.betan, l_i=equil.params.li1)
+    ScenarioParameters(equil::PlasmaEquilibrium; n_e, b_t0=equil.params.bt0, r_0=equil.ro, beta_n=equil.params.betan, l_i=equil.params.li1, i_p=equil.params.crnt)
     ScenarioParameters(h5path; n_e, kwargs...)
 
 Build the operating point from an equilibrium (or a run's `Equilibrium/` scalars), with the
-density supplied and any other parameter overridable.
+density supplied and any other parameter overridable. The current is the equilibrium's computed
+`crnt` (`Equilibrium/I_p`), a positive magnitude in MA.
 """
 function ScenarioParameters(equil::Equilibrium.PlasmaEquilibrium; n_e::Real, b_t0::Real=equil.params.bt0, r_0::Real=equil.ro,
-    beta_n::Real=equil.params.betan, l_i::Real=equil.params.li1)
-    return ScenarioParameters(; n_e, b_t0, r_0, beta_n, l_i)
+    beta_n::Real=equil.params.betan, l_i::Real=equil.params.li1, i_p::Union{Nothing,Real}=equil.params.crnt)
+    return ScenarioParameters(; n_e, b_t0, r_0, beta_n, l_i, i_p=something(i_p, NaN))
 end
 
 function ScenarioParameters(h5path::AbstractString; n_e::Real, kwargs...)
     vals = h5open(h5path, "r") do f
-        (b_t0=read(f["Equilibrium/B_T_axis"]), r_0=read(f["Equilibrium/R_axis"]), beta_n=read(f["Equilibrium/beta_N"]), l_i=read(f["Equilibrium/l_i_1"]))
+        (b_t0=read(f["Equilibrium/B_T_axis"]), r_0=read(f["Equilibrium/R_axis"]), beta_n=read(f["Equilibrium/beta_N"]), l_i=read(f["Equilibrium/l_i_1"]),
+            i_p=haskey(f, "Equilibrium/I_p") ? read(f["Equilibrium/I_p"]) : NaN)
     end
     merged = merge(vals, values(kwargs))
-    return ScenarioParameters(; n_e, b_t0=merged.b_t0, r_0=merged.r_0, beta_n=merged.beta_n, l_i=merged.l_i)
+    return ScenarioParameters(; n_e, b_t0=merged.b_t0, r_0=merged.r_0, beta_n=merged.beta_n, l_i=merged.l_i, i_p=merged.i_p)
 end
 
-_threshold(sc::ThresholdScaling, scen::ScenarioParameters, αc, αn, αb, αr, αβ) =
-    10.0^αc * scen.n_e^αn * scen.b_t0^αb * scen.r_0^αr * (scen.beta_n / scen.l_i)^αβ
+_has_current_term(sc::ThresholdScaling) = sc.alpha_ip != (0.0, 0.0)
+
+function _check_current(sc::ThresholdScaling, scen::ScenarioParameters)
+    (_has_current_term(sc) && isnan(scen.i_p)) && throw(ArgumentError(
+        "the $(scaling_label(sc)) threshold scaling has a plasma-current term; give i_p (MA) in the scenario"))
+    return nothing
+end
+
+# A fit without a current term never touches I_p, so a scenario without one evaluates it.
+_threshold(sc::ThresholdScaling, scen::ScenarioParameters, αc, αn, αb, αr, αβ, αI) =
+    10.0^αc * scen.n_e^αn * scen.b_t0^αb * scen.r_0^αr * (scen.beta_n / scen.l_i)^αβ * (αI == 0 ? 1.0 : scen.i_p^αI)
 
 """
     nominal_threshold(sc::ThresholdScaling, scen::ScenarioParameters) -> Float64
 
 The penetration threshold at the fitted exponents.
 """
-nominal_threshold(sc::ThresholdScaling, scen::ScenarioParameters) = _threshold(sc, scen, sc.alpha_c[1], sc.alpha_n[1], sc.alpha_b[1], sc.alpha_r[1], sc.alpha_beta[1])
+function nominal_threshold(sc::ThresholdScaling, scen::ScenarioParameters)
+    _check_current(sc, scen)
+    return _threshold(sc, scen, sc.alpha_c[1], sc.alpha_n[1], sc.alpha_b[1], sc.alpha_r[1], sc.alpha_beta[1], sc.alpha_ip[1])
+end
 
 """
     threshold_samples(rng, sc, scen; nsample=1_000_000, dist="normal") -> Vector{Float64}
 
-Thresholds with the five exponents drawn around their fitted values: `"normal"` (Gaussian with
+Thresholds with the exponents drawn around their fitted values: `"normal"` (Gaussian with
 the standard error), `"flat"` (uniform within one standard error), or `"normal_truncated"`
 (Gaussian, redrawn beyond 1.5 standard errors). The exponents' uncertainties are far from small
 relative to the sensitivity of a power law, so the distribution is sampled rather than
-propagated to first order.
+propagated to first order. The current exponent is drawn only for fits that have one, so
+the other fits' sample streams do not depend on it.
 """
 function threshold_samples(rng::AbstractRNG, sc::ThresholdScaling, scen::ScenarioParameters; nsample::Int=1_000_000, dist::AbstractString="normal")
     draw = if dist == "normal"
@@ -149,11 +199,14 @@ function threshold_samples(rng::AbstractRNG, sc::ThresholdScaling, scen::Scenari
     else
         throw(ArgumentError("dist must be \"normal\", \"flat\", or \"normal_truncated\" (got \"$dist\")"))
     end
+    _check_current(sc, scen)
+    with_ip = _has_current_term(sc)
     out = Vector{Float64}(undef, nsample)
     for i in 1:nsample
-        out[i] = _threshold(sc, scen,
-            sc.alpha_c[1] + sc.alpha_c[2] * draw(), sc.alpha_n[1] + sc.alpha_n[2] * draw(), sc.alpha_b[1] + sc.alpha_b[2] * draw(),
-            sc.alpha_r[1] + sc.alpha_r[2] * draw(), sc.alpha_beta[1] + sc.alpha_beta[2] * draw())
+        αc, αn, αb = sc.alpha_c[1] + sc.alpha_c[2] * draw(), sc.alpha_n[1] + sc.alpha_n[2] * draw(), sc.alpha_b[1] + sc.alpha_b[2] * draw()
+        αr, αβ = sc.alpha_r[1] + sc.alpha_r[2] * draw(), sc.alpha_beta[1] + sc.alpha_beta[2] * draw()
+        αI = with_ip ? sc.alpha_ip[1] + sc.alpha_ip[2] * draw() : 0.0
+        out[i] = _threshold(sc, scen, αc, αn, αb, αr, αβ, αI)
     end
     return out
 end
@@ -165,7 +218,10 @@ Settings of the locking-risk evaluation, the `[ErrorFields.Risk]` TOML table.
 
 ## Fields
 
-  - `dataset`, `fit`: which ITPA threshold fit to use (the toroidal mode number is the run's)
+  - `year`, `dataset`, `fit`: which ITPA threshold fit to use (the toroidal mode number is the
+    run's). n = 1, `year = 2020`: `"O,L"` or `"O,L,H"` with `"OLS"`, `"DSOLS"` or `"WLS"`;
+    n = 1, `year = 2026`: `"O,L"` with `"OLS"` or `"WLS"` (with a plasma-current term);
+    n = 2, `year = 2020`: `"O,L"`, `"O,L,-C"` or `"O,L,N"` with `"WLS"`
   - `distribution`: how the fit exponents are sampled — `"normal"`, `"flat"`, or `"normal_truncated"`
   - `nsample_threshold`: threshold samples
   - `seed`: seed of the threshold sampling
@@ -173,6 +229,7 @@ Settings of the locking-risk evaluation, the `[ErrorFields.Risk]` TOML table.
     is a fresh Monte Carlo with every shift and tilt tolerance multiplied by the scale
 """
 Base.@kwdef struct RiskControl
+    year::Int = 2020
     dataset::String = "O,L"
     fit::String = "WLS"
     distribution::String = "normal"
@@ -268,7 +325,7 @@ function locking_risk(
 )
     mc = run_monte_carlo(h5path; psi_low, psi_high, mode, kwargs...)
     n = scaling_toroidal_mode(h5path)
-    sc = threshold_scaling(; n, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
+    sc = threshold_scaling(; n, year=risk_ctrl.year, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
     return locking_risk(mc, sc, ScenarioParameters(h5path; n_e); ctrl=risk_ctrl)
 end
 
@@ -284,10 +341,12 @@ saying nothing would apply an n = 1 threshold to a mode that is partly n = 2.
 function scaling_toroidal_mode(h5path::AbstractString)
     return h5open(h5path, "r") do f
         nlow, nhigh = Int(read(f["Info/nlow"])), Int(read(f["Info/nhigh"]))
-        nlow == nhigh || throw(ArgumentError(
-            "$h5path carries n = $nlow:$nhigh, but a locking-threshold scaling is fitted for one " *
-            "toroidal mode number. Re-run the assessment for a single n, or project onto one n's " *
-            "coupling before asking for a risk."))
+        nlow == nhigh || throw(
+            ArgumentError(
+                "$h5path carries n = $nlow:$nhigh, but a locking-threshold scaling is fitted for one " *
+                "toroidal mode number. Re-run the assessment for a single n, or project onto one n's " *
+                "coupling before asking for a risk.")
+        )
         nlow
     end
 end
@@ -358,7 +417,7 @@ function tolerance_scan(h5path::AbstractString; scales::AbstractVector{<:Real}, 
         sets, nothing
     end
     n = scaling_toroidal_mode(h5path)
-    sc = threshold_scaling(; n, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
+    sc = threshold_scaling(; n, year=risk_ctrl.year, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
     scen = ScenarioParameters(h5path; n_e)
     return tolerance_scan(table, ts, coil_sets, MonteCarloControl(; kwargs...), sc, scen; scales, risk_ctrl)
 end

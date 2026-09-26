@@ -23,6 +23,24 @@ shift under a current `I` solves `Δω·T_0/ω_ref = T(Δω)·I²`, and the thre
 balance loses its root the rotation has bifurcated away and the overlap is not correctable. A
 constant braking torque with `α = 1` reduces this to the closed-form quadratic
 `δ_EF − C_c·I = s·δ_thresh·(1 − T·I²/T_0)` of the original analysis, kept as the `:linear` model.
+
+In either model the condition is on the *magnitude* of the residual error field,
+`|δ_EF − C_c·I| = s·δ_thresh·f(I)` with `f` the model's threshold factor: the residual never falls
+below zero, and over-correcting by a given amount is exactly as bad as under-correcting by it — the
+phase of the miss does not matter, only its size. The correctable currents are therefore a window
+between two roots, not a half-line: [`correction_current`](@ref) returns the lower edge, the least
+current that does the job, and [`correction_current_upper`](@ref) the upper edge, past which the
+over-correction is itself above threshold (`efc_current_curve` carries both as `current_ntv` and
+`current_ntv_upper`).
+
+The `:linear` model holds only while the plasma still rotates, `T·I² < T_0`, so its current is
+capped at `I_max = √(T_0/T)`, where the threshold has fallen to zero and any remaining overlap
+locks; it assumes a relatively large positive rotation and so ignores the neoclassical offset the
+NTV actually drives the rotation towards, of order the ion diamagnetic rotation. The tabulated
+torque balance spans past that offset and is the default whenever the run carries a rotation
+scan. The linear model is that of Logan et al., Nucl. Fusion (2026), doi:10.1088/1741-4326/ae6086,
+Eqs. (5)–(7), and of Leuthold et al., J. Plasma Phys. 92, E49 (2026), doi:10.1017/S0022377826101421,
+Eq. (A2).
 """
 
 """
@@ -270,7 +288,9 @@ lowers the threshold by [`threshold_factor`](@ref): for the `:torque_balance` mo
 when the coupling carries a rotation scan) the current is the root of
 `δ_ef − C_c·I − s·δ_thresh·(1 + Δω(I)/ω_ref)^α`; for `:linear` it is the smaller root of the
 closed-form quadratic, provided the residual torque has not exhausted the budget there. `NaN`
-when no such root exists, i.e. the overlap is beyond [`max_correctable_overlap`](@ref).
+when no such root exists, i.e. the overlap is beyond [`max_correctable_overlap`](@ref). The
+returned current is the lower edge of the correctable window; [`correction_current_upper`](@ref)
+gives the upper edge, past which the over-correction is itself above threshold.
 """
 function correction_current(δ_ef::Real, c::EFCCoupling; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0, ntv::Bool=true,
     model::Symbol=:auto, rotation_exponent::Real=1.0, omega_reference::Real=c.omega_reference)
@@ -326,13 +346,17 @@ end
 
 """
     max_correctable_overlap(c::EFCCoupling; delta_threshold, torque_budget, safety_factor=1.0, model=:auto,
-                            rotation_exponent=1.0, omega_reference=c.omega_reference) -> (; with_ntv, torque_only)
+                            rotation_exponent=1.0, omega_reference=c.omega_reference) -> (; with_ntv, residual_only, torque_only)
 
 The largest intrinsic overlap the array can correct. `with_ntv`: the overlap beyond which
 [`correction_current`](@ref) has no root (for the `:linear` model in closed form: the
 quadratic's tangency `s·δ_thresh + C_c² T_0 / (4 s δ_thresh T_residual)`, or
 `C_c √(T_0 / T_residual)` when the residual torque exhausts the budget before that; for
 `:torque_balance` by bisection).
+`residual_only`: the overlap cancelled by the current at which the residual torque alone brings
+the rotation to rest (`C_c √(T_0 / T_residual)` for `:linear`), the zero-rotation limit of
+Logan et al. (2026) Eq. (7); it coincides with `with_ntv` whenever the quadratic's vertex lies
+outside the rotating range.
 `torque_only`: the overlap cancelled by the current at which the whole field's torque alone
 exhausts the budget (`C_c √(T_0 / T_full)`) or, with the balance, brings the reference rotation
 to rest or breaks the balance.
@@ -349,18 +373,23 @@ function max_correctable_overlap(c::EFCCoupling; delta_threshold::Real, torque_b
             tangency = target + c.delta_per_kat^2 * torque_budget / (4 * target * t_res)
             exhausted = c.delta_per_kat * sqrt(torque_budget / t_res)
             with_ntv = exhausted <= 2 * target ? tangency : exhausted
+            residual_only = exhausted
         else
             with_ntv = Inf
+            residual_only = Inf
         end
         torque_only = t_full > 0 ? c.delta_per_kat * sqrt(torque_budget / t_full) : Inf
-        return (; with_ntv, torque_only)
+        return (; with_ntv, residual_only, torque_only)
     end
     kw = (; delta_threshold, torque_budget, safety_factor, model, rotation_exponent, omega_reference)
     with_ntv = _largest_finite(δ -> correction_current(δ, c; kw...), target, 1e4 * target)
     # The whole field's torque alone brings the rotation to rest (factor 0) or breaks the balance.
     stops(I) = (f = threshold_factor(c, I; torque_budget, rotation_exponent, omega_reference, model, field=:full); isfinite(f) && f > 0 ? f : NaN)
     torque_only = c.delta_per_kat * _largest_finite(stops, 0.0, 1e4 * (target / c.delta_per_kat))
-    return (; with_ntv, torque_only)
+    # The residual torque alone brings the rotation to rest or breaks the balance: the zero-rotation limit.
+    stops_res(I) = (f = threshold_factor(c, I; torque_budget, rotation_exponent, omega_reference, model, field=:residual); isfinite(f) && f > 0 ? f : NaN)
+    residual_only = c.delta_per_kat * _largest_finite(stops_res, 0.0, 1e4 * (target / c.delta_per_kat))
+    return (; with_ntv, residual_only, torque_only)
 end
 
 # Largest x in [lo, hi] for which f(x) is finite, assuming finiteness holds on [lo, x*) only; Inf if finite up to hi.
@@ -380,22 +409,72 @@ function _largest_finite(f, lo::Real, hi::Real)
 end
 
 """
-    efc_current_curve(c::EFCCoupling; delta_threshold, torque_budget, safety_factor=1.0, delta_max=15, npoints=500,
-                      model=:auto, rotation_exponent=1.0, omega_reference=c.omega_reference) -> NamedTuple
+    correction_current_upper(δ_ef, c::EFCCoupling; delta_threshold, torque_budget, safety_factor=1.0, ntv=true,
+                             model=:auto, rotation_exponent=1.0, omega_reference=c.omega_reference) -> Float64
 
-The correction current against intrinsic overlap, `δ_ef` from `0` to `delta_max × δ_thresh`:
-`delta_ef`, the linear `current_linear`, the NTV-limited `current_ntv` (`NaN` past the limit),
-the threshold factor `threshold_factor` along it, the `model` used, and the two limits of
-[`max_correctable_overlap`](@ref).
+Upper edge of the correctable current window, kAt: the current past which the over-correction
+`C_c·I − δ_ef` is itself above `safety_factor × delta_threshold`, so the field locks again from
+the other side. Without NTV it is `(δ_ef + s·δ_thresh) / C_c`. For the `:linear` model it is the
+larger root of the same quadratic, capped at `I_max`; for `:torque_balance` it is the root of
+`C_c·I − δ_ef − s·δ_thresh·(1 + Δω(I)/ω_ref)^α` above the null, or the current at which the
+balance fails if that comes first. `NaN` whenever [`correction_current`](@ref) is `NaN`.
+"""
+function correction_current_upper(δ_ef::Real, c::EFCCoupling; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0, ntv::Bool=true,
+    model::Symbol=:auto, rotation_exponent::Real=1.0, omega_reference::Real=c.omega_reference)
+    target = safety_factor * delta_threshold
+    isnan(correction_current(δ_ef, c; delta_threshold, torque_budget, safety_factor, ntv, model, rotation_exponent, omega_reference)) && return NaN
+    ntv || return (δ_ef + target) / c.delta_per_kat
+    model = _resolve_model(c, model)
+    if model === :linear
+        t_res = abs(c.torque_residual_per_kat2)
+        t_res == 0 && return (δ_ef + target) / c.delta_per_kat
+        # Over-correction side: C·I − δ_ef = target·(1 − t_res·I²/T_0), i.e. a·I² + C·I − (δ_ef + target) = 0
+        # with the same a as the under-correction quadratic; its positive root is the upper edge.
+        a = target * t_res / torque_budget
+        upper = (-c.delta_per_kat + sqrt(c.delta_per_kat^2 + 4a * (δ_ef + target))) / (2a)
+        return min(upper, sqrt(torque_budget / t_res))
+    end
+    g(I) = c.delta_per_kat * I - δ_ef - target * threshold_factor(c, I; torque_budget, rotation_exponent, omega_reference, model)
+    I_null = max(δ_ef / c.delta_per_kat, 0.0)
+    isnan(g(I_null)) && return NaN
+    span = 1e3 * max(I_null, target / c.delta_per_kat)
+    I_hi = _largest_finite(I -> threshold_factor(c, I; torque_budget, rotation_exponent, omega_reference, model), I_null, span)
+    isinf(I_hi) && (I_hi = span)
+    root = _bracketed_zero(g, I_null, I_hi)
+    return isnan(root) ? I_hi : root       # no crossing before the balance fails: the failure is the edge
+end
+
+"""
+    efc_current_curve(c::EFCCoupling; delta_threshold, torque_budget, safety_factor=1.0, delta_max=15, npoints=500,
+                      model=:auto, rotation_exponent=1.0, omega_reference=c.omega_reference,
+                      torque_rtol=0.0, budget_rtol=0.0) -> NamedTuple
+
+The correction current against the intrinsic overlap from 0 to `delta_max × delta_threshold`:
+`current_linear` (no NTV), `current_ntv` and `current_ntv_upper` (the two edges of the correctable
+window under the model), the `threshold_factor` along the lower edge, the resolved `model`, and the
+limits of [`max_correctable_overlap`](@ref) spliced in (`with_ntv`, `residual_only`,
+`torque_only`). Nonzero `torque_rtol` and `budget_rtol` (fractional uncertainties of the torque
+coefficients and of `T_0`) add `current_ntv_pessimistic`/`current_ntv_optimistic` and
+`limits_pessimistic`/`limits_optimistic`: scaling the torques by `1 ± torque_rtol` is the same as
+scaling the budget by its inverse, since both models depend on `T/T_0` only.
 """
 function efc_current_curve(c::EFCCoupling; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0, delta_max::Real=15, npoints::Int=500,
-    model::Symbol=:auto, rotation_exponent::Real=1.0, omega_reference::Real=c.omega_reference)
+    model::Symbol=:auto, rotation_exponent::Real=1.0, omega_reference::Real=c.omega_reference, torque_rtol::Real=0.0, budget_rtol::Real=0.0)
+    (0 <= torque_rtol < 1 && 0 <= budget_rtol < 1) ||
+        throw(ArgumentError("torque_rtol and budget_rtol are fractional uncertainties in [0, 1); got $torque_rtol and $budget_rtol"))
     model = _resolve_model(c, model)
-    kw = (; delta_threshold, torque_budget, safety_factor, model, rotation_exponent, omega_reference)
+    kw(budget) = (; delta_threshold, torque_budget=budget, safety_factor, model, rotation_exponent, omega_reference)
     δ = collect(range(0.0, delta_max * delta_threshold; length=npoints))
     lin = [correction_current(d, c; delta_threshold, torque_budget, safety_factor, ntv=false) for d in δ]
-    ntv = [correction_current(d, c; kw...) for d in δ]
+    ntv_at(budget) = [correction_current(d, c; kw(budget)...) for d in δ]
+    ntv = ntv_at(torque_budget)
+    upper = [correction_current_upper(d, c; kw(torque_budget)...) for d in δ]
     factor = [isnan(I) ? NaN : threshold_factor(c, I; torque_budget, rotation_exponent, omega_reference, model) for I in ntv]
-    limits = max_correctable_overlap(c; kw...)
-    return (; delta_ef=δ, current_linear=lin, current_ntv=ntv, threshold_factor=factor, model, limits...)
+    pessimistic = torque_budget * (1 - budget_rtol) / (1 + torque_rtol)
+    optimistic = torque_budget * (1 + budget_rtol) / (1 - torque_rtol)
+    return (; delta_ef=δ, current_linear=lin, current_ntv=ntv, current_ntv_upper=upper, threshold_factor=factor, model,
+        current_ntv_pessimistic=ntv_at(pessimistic), current_ntv_optimistic=ntv_at(optimistic),
+        limits_pessimistic=max_correctable_overlap(c; kw(pessimistic)...),
+        limits_optimistic=max_correctable_overlap(c; kw(optimistic)...),
+        max_correctable_overlap(c; kw(torque_budget)...)...)
 end

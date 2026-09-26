@@ -158,7 +158,7 @@ include("h5_metadata_check.jl")
             # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
             risk = res.locking_risk
             @test risk isa EF.RiskResult
-            @test risk.scaling.n == 1 && risk.scaling.dataset == "O,L" && risk.scaling.fit == "WLS"
+            @test risk.scaling.n == 1 && risk.scaling.year == 2020 && risk.scaling.dataset == "O,L" && risk.scaling.fit == "WLS"
             @test risk.threshold_nominal == EF.nominal_threshold(risk.scaling, EF.ScenarioParameters(ffs.equil; n_e=12.0))
             @test 0 <= risk.plock_efc <= risk.plock <= 100
             @test length(risk.plock_batches) == 2
