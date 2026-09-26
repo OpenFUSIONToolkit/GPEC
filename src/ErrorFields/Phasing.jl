@@ -56,6 +56,7 @@ function phasing_map(sens::CoilSensitivities, dom::DominantCoupling, coil_names:
     length(coil_names) >= 2 || throw(ArgumentError("phasing_map needs at least two coil arrays"))
     nphase >= 2 || throw(ArgumentError("nphase must be ≥ 2"))
     1 <= mode <= length(dom.singular_values) || throw(ArgumentError("mode $mode is outside the decomposition"))
+    PerturbedEquilibrium.check_mode_basis(dom, sens.m_modes, sens.n_modes, "phasing_map")
     idx = [findfirst(==(String(nm)), sens.coil_names) for nm in coil_names]
     any(isnothing, idx) && throw(ArgumentError("coil arrays not in the sensitivities: $(join(coil_names[isnothing.(idx)], ", "))"))
     v = dom.right_singular_vectors[:, mode]

@@ -19,7 +19,7 @@ using Statistics
         @test EF.nominal_threshold(sc, scen) ≈ 10.0^-3.46 * 2.0^0.64 * 2.0^-1.14 * 1.7^0.20 * 1.8^0.15
         @test_throws ArgumentError EF.threshold_scaling(; n=3)
         @test_throws ArgumentError EF.threshold_scaling(; n=1, fit="XYZ")
-        @test length(EF.ITPA_THRESHOLD_SCALINGS) == 9
+        @test length(EF.ITPA_THRESHOLD_SCALINGS) == 11
         # n=2 "O,L,N" is the n=1 O,L WLS fit doubled: 10^(-3.16) ≈ 2·10^(-3.46).
         @test 10^EF.threshold_scaling(; n=2, dataset="O,L,N").alpha_c[1] ≈ 2 * 10^EF.threshold_scaling(; n=1, dataset="O,L").alpha_c[1] rtol = 5e-3
         @test_throws ArgumentError EF.ScenarioParameters(; n_e=0.0, b_t0=2.0, r_0=1.7, beta_n=1.8, l_i=1.0)
@@ -34,6 +34,41 @@ using Statistics
         trunc = EF.threshold_samples(Xoshiro(1), sc, scen; nsample=50_000, dist="normal_truncated")
         @test std(log10.(trunc)) < std(log10.(t))
         @test_throws ArgumentError EF.threshold_samples(Xoshiro(1), sc, scen; nsample=10, dist="cauchy")
+    end
+
+    @testset "2026 n=1 fits with a plasma-current term" begin
+        # Bursch et al., PPCF 2026 (doi:10.1088/1361-6587/aea7d6), Eqs. 7 (OLS) and 8 (WLS), exponent by exponent.
+        ols = EF.threshold_scaling(; n=1, year=2026, dataset="O,L", fit="OLS")
+        wls = EF.threshold_scaling(; n=1, year=2026, dataset="O,L", fit="WLS")
+        @test (ols.alpha_c, ols.alpha_n, ols.alpha_b, ols.alpha_r, ols.alpha_beta, ols.alpha_ip) ==
+              ((-4.31, 0.09), (0.77, 0.08), (0.19, 0.09), (1.88, 0.16), (0.25, 0.08), (-0.97, 0.08))
+        @test (wls.alpha_c, wls.alpha_n, wls.alpha_b, wls.alpha_r, wls.alpha_beta, wls.alpha_ip) ==
+              ((-4.26, 0.09), (0.56, 0.08), (0.30, 0.10), (1.57, 0.15), (0.13, 0.06), (-1.01, 0.07))
+        @test_throws ArgumentError EF.threshold_scaling(; n=1, year=2026, dataset="O,L", fit="DSOLS")
+        # The 2020 fits carry no current term.
+        @test all(sc -> sc.year == 2026 || sc.alpha_ip == (0.0, 0.0), values(EF.ITPA_THRESHOLD_SCALINGS))
+        # Every key names its year, and the default lookup stays the 2020 n=1 O,L WLS fit.
+        @test all(((k, sc),) -> k == EF.scaling_label(sc), EF.ITPA_THRESHOLD_SCALINGS)
+        @test EF.scaling_label(EF.threshold_scaling()) == "n=1 2020 O,L WLS"
+        @test EF.scaling_label(wls) == "n=1 2026 O,L WLS"
+        @test_throws ArgumentError EF.threshold_scaling(; n=1, year=2026, dataset="O,L,H")
+
+        scen_ip = EF.ScenarioParameters(; n_e=2.0, b_t0=2.0, r_0=1.7, beta_n=1.8, l_i=1.0, i_p=1.2)   # I_p in MA
+        @test EF.nominal_threshold(ols, scen_ip) ≈ 10.0^-4.31 * 2.0^0.77 * 2.0^0.19 * 1.7^1.88 * 1.8^0.25 * 1.2^-0.97
+        @test EF.nominal_threshold(wls, scen_ip) ≈ 10.0^-4.26 * 2.0^0.56 * 2.0^0.30 * 1.7^1.57 * 1.8^0.13 * 1.2^-1.01
+        # Without a current the 2026 fits refuse to evaluate; the 2020 fits never need one.
+        @test isnan(scen.i_p)
+        @test_throws ArgumentError EF.nominal_threshold(wls, scen)
+        @test_throws ArgumentError EF.threshold_samples(Xoshiro(1), ols, scen; nsample=10)
+        @test_throws ArgumentError EF.ScenarioParameters(; n_e=2.0, b_t0=2.0, r_0=1.7, beta_n=1.8, l_i=1.0, i_p=-1.2)
+        # A fit without a current term draws no current exponent, so its sampled stream does not
+        # depend on whether the scenario carries a current.
+        sc20 = EF.threshold_scaling(; n=1, year=2020, dataset="O,L", fit="WLS")
+        @test EF.threshold_samples(Xoshiro(3), sc20, scen; nsample=1000) == EF.threshold_samples(Xoshiro(3), sc20, scen_ip; nsample=1000)
+        @test EF.nominal_threshold(sc20, scen) == EF.nominal_threshold(sc20, scen_ip)
+        # With the current term the sampled median still sits at the nominal threshold.
+        t = EF.threshold_samples(Xoshiro(1), wls, scen_ip; nsample=100_000)
+        @test abs(log10(median(t)) - log10(EF.nominal_threshold(wls, scen_ip))) < 0.01
     end
 
     # A Monte Carlo result with a known |δ| density: uniform on [a, b].
@@ -86,7 +121,7 @@ using Statistics
         δt = 1e-4   # = |S| · 0.5 mm: the scale-0.5 edge
         # A degenerate scaling whose exponents have no spread gives a sharp threshold; pick one so
         # that nominal_threshold == δt by construction.
-        sharp = EF.ThresholdScaling(1, "test", "sharp", (log10(δt), 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0))
+        sharp = EF.ThresholdScaling(1, 0, "test", "sharp", (log10(δt), 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0))
         scan = EF.tolerance_scan(table, ts, sets, mc_ctrl, sharp, scen; scales, risk_ctrl=EF.RiskControl(; nsample_threshold=1000))
         expected = [max(0.0, 1 - δt / (S * s * 1e-3)) * 100 for s in scales]
         @test scan.scale == scales
