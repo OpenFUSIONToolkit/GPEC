@@ -100,11 +100,19 @@ PerturbedEquilibrium/
 │       ├── left_singular_vectors    # U: resonant-field patterns over the retained surfaces [n_retained × rank]
 │       ├── rational_index           # rows of rational_* retained in the ψ_N window [n_retained]
 │       └── forcing_overlap          # Vᴴ·b̃_x, applied forcing's coefficient on each mode [rank]
-└── Energies/
-    ├── vacuum_energy
-    ├── surface_energy
-    ├── plasma_energy
-    └── toroidal_torque
+├── Energies/
+│   ├── vacuum_energy
+│   ├── surface_energy
+│   ├── plasma_energy
+│   └── toroidal_torque
+└── TorqueResponse/           # kinetic forward solves with compute_torque_response; b̃ basis, cumulative in ψ
+    ├── psi                   # ψ_N of each stored node [npsi]
+    ├── m, n                  # (m, n) of each row/column of T_xe [numpert_total]
+    ├── T_xe                  # torque response on b̃, N·m/T² (ComplexF64 [numpert_total, numpert_total, npsi])
+    ├── coil_name             # coil-set names [ncoil_set] (coil forcing only)
+    ├── T_coil                # torque response in coil-set space (ComplexF64 [ncoil_set, ncoil_set, npsi])
+    ├── T_applied             # b̃ₓ†·T_xe(ψ)·b̃ₓ/2: Re = torque inside ψ, Im = 2n·δW inside ψ (ComplexF64 [npsi])
+    └── total_torque          # Re T_applied at the control surface [N·m]
 ```
 """
 function write_outputs_to_HDF5(
@@ -241,6 +249,24 @@ function write_outputs_to_HDF5(
         energy_group["surface_energy"] = state.surface_energy
         energy_group["plasma_energy"] = state.plasma_energy
         energy_group["toroidal_torque"] = state.toroidal_torque
+
+        # Torque response matrices (kinetic forward solves only)
+        tr = state.torque_response
+        if tr !== nothing
+            tr_group = haskey(pe_group, "TorqueResponse") ? pe_group["TorqueResponse"] : create_group(pe_group, "TorqueResponse")
+            tr_group["psi"] = tr.psi
+            tr_group["m"] = tr.m_modes
+            tr_group["n"] = tr.n_modes
+            tr_group["T_xe"] = tr.T_xe
+            if !isempty(tr.coil_names)
+                tr_group["coil_name"] = tr.coil_names
+                tr_group["T_coil"] = tr.T_coil
+            end
+            if !isempty(tr.T_applied)
+                tr_group["T_applied"] = tr.T_applied
+                tr_group["total_torque"] = real(tr.T_applied[end])
+            end
+        end
 
         annotate_pe!(pe_group)
     end
@@ -379,6 +405,26 @@ const PE_H5_ANNOTATIONS = [
     "Energies/plasma_energy" => (; long_name="perturbed plasma energy", units="J"),
     "Energies/toroidal_torque" => (;
         long_name="boundary-response toroidal torque −2n·Im⟨Φ_tot,Λ⁻¹Φ_tot⟩/4: equals the volume-integrated Euler-Lagrange kinetic torque for converged self-consistent solutions; distinct construction from the KineticForces NTV torque",
+        units="N*m"
+    ),
+    "TorqueResponse/psi" => (; long_name="normalized poloidal flux ψ_N of each stored node of the solve; the torque response matrices are cumulative inside it", scale="psi"),
+    "TorqueResponse/m" => (; long_name="poloidal mode number of each row and column of T_xe", scale="m"),
+    "TorqueResponse/n" => (; long_name="toroidal mode number of each row and column of T_xe", dims=("mode",), attach=(1 => "TorqueResponse/m",)),
+    "TorqueResponse/T_xe" =>
+        (;
+            long_name="torque response matrix on the applied root-area-weighted field b̃, cumulative inside ψ_N: b̃†·T_xe·b̃/2 is the complex torque (Re = toroidal torque, Im = 2n·δW ideal+kinetic); the Hermitian part is the torque quadratic form",
+            units="N*m/T^2", dims=("mode_row", "mode_col", "psi"), attach=(1 => "TorqueResponse/m", 2 => "TorqueResponse/m", 3 => "TorqueResponse/psi")),
+    "TorqueResponse/coil_name" => (; long_name="name of each coil set of T_coil"),
+    "TorqueResponse/T_coil" =>
+        (;
+            long_name="torque response matrix in coil-set space, cumulative inside ψ_N: s†·T_coil·s/2 is the complex torque of the sets driven at s times their currents as built",
+            units="N*m", dims=("coil_set_row", "coil_set_col", "psi"), attach=(3 => "TorqueResponse/psi",)),
+    "TorqueResponse/T_applied" =>
+        (;
+            long_name="run's own forcing contracted with the torque response, b̃ₓ†·T_xe(ψ)·b̃ₓ/2: Re = toroidal torque on the plasma inside ψ_N, Im = 2n·δW (ideal + kinetic) of that plasma",
+            units="N*m", dims=("psi",), attach=(1 => "TorqueResponse/psi",)),
+    "TorqueResponse/total_torque" => (;
+        long_name="toroidal torque of the run's own forcing from the torque response at the control surface, Re T_applied(ψ_lim); equals Energies/toroidal_torque",
         units="N*m"
     )
 ]

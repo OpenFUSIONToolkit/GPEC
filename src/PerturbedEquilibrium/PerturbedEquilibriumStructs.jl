@@ -1,4 +1,39 @@
 """
+    TorqueResponse
+
+ψ-resolved torque response of a forward kinetic Euler-Lagrange solve, expressed on the
+root-area-weighted control-surface field b̃ (the basis of `forcing_b_rootarea` and of the
+stored response matrices). The matrices are cumulative in ψ: `T_xe[:, :, k]` is the response
+of the plasma inside `psi[k]`, and the last slice is the total.
+
+The quadratic form `b̃†·T_xe(ψ)·b̃` is the complex "2×" torque, matching the Fortran GPEC
+`T_xe` array: the physical torque and energy of the applied spectrum `b̃` are recovered with a
+factor 1/2 (`torque_profile`), `T(ψ) = b̃†·T_xe(ψ)·b̃/2`, whose real part is the toroidal torque
+on the plasma inside ψ and whose imaginary part is `2n·δW` of that plasma (ideal plus kinetic).
+
+## Fields
+
+  - `psi::Vector{Float64}` - ψ_N of each stored node of the solve `[npsi]`
+  - `m_modes`, `n_modes::Vector{Int}` - (m, n) of each row and column of `T_xe` `[numpert_total]`
+  - `T_xe::Array{ComplexF64,3}` - torque response on b̃, N·m/T² `[numpert_total × numpert_total × npsi]`
+  - `coil_names::Vector{String}` - name of each coil set of `T_coil` `[ncoil_set]`
+  - `T_coil::Array{ComplexF64,3}` - torque response in coil-set space `[ncoil_set × ncoil_set × npsi]`,
+    N·m per squared scale factor of the coil-set currents as built: driving the sets at `s_c` times
+    their deck currents gives the complex 2× torque `s†·T_coil·s`. Empty when the forcing is not coils.
+  - `T_applied::Vector{ComplexF64}` - the run's own forcing contracted, `b̃ₓ†·T_xe(ψ)·b̃ₓ/2` `[npsi]`;
+    empty when no forcing spectrum was supplied
+"""
+struct TorqueResponse
+    psi::Vector{Float64}
+    m_modes::Vector{Int}
+    n_modes::Vector{Int}
+    T_xe::Array{ComplexF64,3}
+    coil_names::Vector{String}
+    T_coil::Array{ComplexF64,3}
+    T_applied::Vector{ComplexF64}
+end
+
+"""
     PerturbedEquilibriumControl
 
 User-facing control parameters from TOML [PerturbedEquilibrium] section.
@@ -13,6 +48,7 @@ High Priority (MWE):
   - `output_eigenmodes::Bool` - Output mode fields as b-fields (default: true)
   - `compute_response::Bool` - Compute plasma response (default: true)
   - `compute_singular_coupling::Bool` - Compute singular coupling metrics (default: true)
+  - `compute_torque_response::Bool` - Build the ψ-resolved torque response matrices `T_xe` and `T_coil` (default: false). Needs a forward-integrated kinetic solve (`integrator = "forward"`, `kinetic_factor > 0`) and `compute_response`; errors otherwise
   - `verbose::Bool` - Enable verbose logging (default: true)
 
 Output Settings:
@@ -37,6 +73,7 @@ Regularization:
     output_eigenmodes::Bool = true
     compute_response::Bool = true
     compute_singular_coupling::Bool = true
+    compute_torque_response::Bool = false
     verbose::Bool = true
 
     # Output settings
@@ -161,6 +198,11 @@ well-conditioned flux-space inductances L, Λ:
   - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 ) — the boundary-response torque, zero for ideal
     (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
     self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
+
+Torque response (kinetic forward solves with `compute_torque_response`):
+
+  - `torque_response::Union{Nothing,TorqueResponse}` - the ψ-resolved torque response matrices on the
+    applied b̃ and on the coil sets, with the run's own forcing contracted; see [`TorqueResponse`](@ref)
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
@@ -227,4 +269,7 @@ well-conditioned flux-space inductances L, Λ:
     surface_energy::Float64 = 0.0
     plasma_energy::Float64 = 0.0
     toroidal_torque::Float64 = 0.0
+
+    # ψ-resolved torque response matrices of a kinetic forward solve
+    torque_response::Union{Nothing,TorqueResponse} = nothing
 end

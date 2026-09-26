@@ -43,7 +43,7 @@ Top level (11 groups):
 | `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, `Match/` diagnostics, the gal surface list, debug-gated `Basis/`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), `Kinetic/` |
-| `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
+| `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, `TorqueResponse/` (kinetic forward solves: ψ-resolved `T_xe`, `T_coil`), control-surface spectra |
 | `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `ErrorFields/` | `CoilSensitivities/` (per-coil-set control-surface spectra and their rigid shift/tilt derivatives, `DominantMode/` full-window projection) |
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |

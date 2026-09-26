@@ -62,6 +62,54 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.check_mode_basis
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_dominant_coupling!
 ```
 
+## Torque response matrices
+
+A kinetic forward solve (`integrator = "forward"`, `kinetic_factor > 0`) carries the
+drift-kinetic response inside its Euler-Lagrange energy: the complex plasma energy inside a
+flux surface, `δW(ψ) = ξ†·U₂(ψ)·U₁(ψ)⁻¹·ξ/(2μ₀)`, has an anti-Hermitian part that is the
+neoclassical toroidal viscosity torque (Logan & Park 2013, eq. 19). With
+`compute_torque_response = true` the response stage refers that quadratic form back to the
+applied root-area-weighted control-surface field b̃ — through the permeability, the
+boundary flux-to-displacement factor `χ₁(m − n·q_lim)·2πi` and the b̃ → Φ conform `R` — and
+stores the result at every stored node as the **torque response matrix** `T_xe(ψ)`, cumulative
+in ψ, in `PerturbedEquilibrium/TorqueResponse/`. It is the Fortran GPEC `T_xe`
+(`gpout_dw_matrix`), in the same basis as the stored response matrices, with units N·m/T².
+
+Two conventions are worth stating explicitly:
+
+  - **Factor of 2.** `T_xe` matches the Fortran array, whose quadratic form is built on the `+n`
+    harmonic alone and is therefore twice the physical value. The physical cumulative complex
+    torque of an applied spectrum is `T(ψ) = b̃†·T_xe(ψ)·b̃/2` — `torque_profile` applies the
+    1/2 — with `real(T)` the toroidal torque on the plasma inside ψ and `imag(T)` its `2n·δW`
+    (ideal plus kinetic). At the control surface `real(T)` equals `Energies/toroidal_torque`.
+  - **Hermitian part.** Only the Hermitian part `(T_xe + T_xe†)/2` contributes to the torque;
+    its eigenvectors are the applied spectra of extremal torque and its eigenvalues their torque
+    per unit `‖b̃‖²/2`. The anti-Hermitian part carries the energy.
+
+The coil-space form `T_coil(ψ) = M†·T·M`, with one column of `M` per coil set of the run's
+`[ForcingTerms]` (each as built, at its deck currents), is written alongside when the forcing
+is coils; driving the sets at scale factors `s` gives `s†·T_coil·s/2`.
+
+```julia
+using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+using LinearAlgebra
+
+tr = pe_state.torque_response                       # a TorqueResponse
+T = torque_profile(tr, pe_state.forcing_b_rootarea) # cumulative complex torque of the run's forcing
+real(T[end])                                        # total toroidal torque [N·m]
+
+T_h = Hermitian((tr.T_xe[:, :, end] + tr.T_xe[:, :, end]') / 2)
+λ, V = eigen(T_h)                                   # V[:, end]: applied b̃ of maximum torque
+```
+
+```@docs
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.TorqueResponse
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_response_matrices
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_profile
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.coil_flux_spectra
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_torque_response!
+```
+
 ## Plotting per-surface results against ψ or q
 
 `SingularCoupling/` quantities are indexed by rational-surface **index**, not by q: with

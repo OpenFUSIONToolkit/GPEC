@@ -113,6 +113,32 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 
+# Torque of the run's own coil forcing, three routes on one kinetic solve: the ψ-resolved torque
+# response matrix T_xe contracted with the applied field (its Hermitian part carries the torque),
+# the boundary-response torque from the plasma inductance (same number, different algebra), and
+# the KineticForces NTV quadrature of the same displacement (an independent evaluation that
+# agrees only to the level the kinetic-matrix and quadrature discretizations do).
+[quantities.torque_response_total]
+h5path = "PerturbedEquilibrium/TorqueResponse/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "T_xe applied-forcing torque [N·m]"
+noise_threshold = 1e-10
+
+[quantities.boundary_torque]
+h5path = "PerturbedEquilibrium/Energies/toroidal_torque"
+type = "real_scalar"
+extract = "value"
+label = "boundary-response torque [N·m]"
+noise_threshold = 1e-10
+
+[quantities.ntv_fgar_torque]
+h5path = "KineticForces/fgar/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "NTV fgar quadrature torque [N·m]"
+noise_threshold = 1e-10
+
 # Runtime (special: not from H5)
 [quantities.runtime]
 h5path = ""
