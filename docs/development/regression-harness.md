@@ -104,6 +104,53 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 
 GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, and the count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines). Thread count is deliberately not part of the cache key, so `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
 
+On a machine you share with other people or with your own parallel sessions, `-t auto` is antisocial: set `GPEC_REGRESS_THREADS` to a bounded count, and `JULIA_NUM_PRECOMPILE_TASKS` alongside it, since `Pkg.instantiate()` otherwise fans out to `Sys.CPU_THREADS + 1` precompile workers at the start of every ref. If the machine has a batch scheduler, submit the run through it and pin both variables to the allocation.
+
+## Three things named "regression"
+
+They share the word and nothing else, which is a reliable source of confusion:
+
+- **This harness** (`regression-harness/`) tracks numerical quantities across commits. Its cases
+  live in `regression-harness/cases/*.toml` and point at decks under `examples/`. This is what the
+  pull-request checklist means by "the regression harness".
+- **`test/test_data/regression_*/`** are *input decks for the unit tests* — a `gpec.toml`, and a
+  `kinetic.dat` for the kinetic ones. They are not harness cases and the harness never reads them.
+- **`test/runtests_*.jl`** are the unit and golden-value tests. Their expected numbers live in the
+  test files themselves, so moving one is a hand edit that has to be justified in review.
+
+## Run isolation
+
+Every git ref in a comparison is checked out into its own detached worktree, so a harness run is
+already insulated from whatever you do to the working tree while it runs. The `local` ref is the
+exception: it runs GPEC in the live checkout.
+
+That matters more than it first appears, because each case runs as a **fresh `julia` subprocess**
+that loads `src/` from disk when it starts. A multi-case `--refs develop,local` run therefore reads
+the source once per case, and an edit landing between two cases yields a single report whose rows
+were produced by different code — with nothing in the output to say so.
+
+For anything you intend to cite — a pull-request report, a bisect, a number you will act on —
+commit the work to the feature branch and compare branch refs:
+
+```bash
+regress --cases diiid_n1 --refs develop,my-feature-branch
+```
+
+`local` stays the right tool for a quick spot check on uncommitted work, provided you leave the tree
+alone until it finishes.
+
+Two related hazards outside the harness, for the same reason:
+
+- **`test/runtests.jl` loads GPEC once, in-process, then `include`s its test files in sequence.**
+  Editing `src/` mid-run changes nothing the run sees, so it reports green for code no longer on
+  disk; editing a `test/runtests_*.jl` file *is* picked up when the run reaches it, so the report
+  mixes old and new. Neither failure is loud.
+- **Concurrent runs in one checkout collide over output paths.** `runtests_fullruns.jl` writes and
+  then deletes `test/test_data/regression_*/gpec.h5`; direct example runs and the harness `local`
+  ref write `examples/<case>/gpec.h5`. Two runs in the same clone delete each other's output. Give
+  the second one its own worktree (`git worktree add --detach <path> HEAD`, copying `Manifest.toml`
+  across so both resolve the same package set).
+
 ## Making source code the only variable
 
 `Manifest.toml` is untracked, so a worktree checked out at an old commit used to resolve whatever
