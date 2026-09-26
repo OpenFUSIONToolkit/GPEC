@@ -259,6 +259,25 @@ AEF.plot_dominant_mode_spectrum("gpec.h5")
 AEF.plot_error_field_summary("gpec.h5"; save_path="error_field_summary.png")
 ```
 
+Four more views answer the questions the assessment's single numbers hide. `plot_overlap_phasors`
+lays each coil's complex overlap head to tail, so a coil that adds to the error field is told
+apart from one that cancels another's; `plot_tolerance_budget` stacks the terms of the worst-case
+bound `delta_worst` (`EF.worst_case_terms`) per coil, group and unattributed budget, so the
+tolerance the budget is spent on is visible; `plot_linearity_residuals` shows the curvature the
+linear sensitivity model neglects, at the finite-difference step or rescaled to each coil's own
+tolerance; and `quantity=:fraction` on the sensitivity bars is the resonant share of each coil's
+own spectrum, which separates a coil that is small from one that drives the wrong harmonics.
+
+```julia
+AEF.plot_overlap_phasors("gpec.h5")                                  # one panel per source
+AEF.plot_tolerance_budget("gpec.h5"; sort=:total, top=10)            # largest budget terms first
+AEF.plot_linearity_residuals("gpec.h5"; at=:tolerance)               # curvature over the tolerance range
+AEF.plot_coil_sensitivities("gpec.h5"; quantity=:fraction)           # resonant fraction, in percent
+AEF.plot_coil_sensitivities("gpec.h5"; quantity=:nominal, yscale=:log10)   # stems, never bars, on a log axis
+AEF.plot_tolerance_pdf("gpec.h5"; show_batches=true)                 # batch spread and the clamped fraction
+EF.worst_case_terms("gpec.h5").total                                 # = ErrorFields/MonteCarlo/delta_worst
+```
+
 When several independently powered coil arrays share the job of correcting the error field,
 the relative phases of their current patterns decide how much dominant-mode field they can
 drive per ampere-turn. `phasing_map` evaluates `|Σ_k δ_k e^{iφ_k}|` per kilo-ampere-turn and
@@ -309,6 +328,7 @@ EF.max_correctable_overlap(couplings[1]; delta_threshold=1.4e-4, torque_budget=4
 AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0)   # threshold from the run's Risk/ group
 # The SPARC paper's uncertainty: ±50 % on the NTV torque, T_0 = 4 ± 2 N·m
 AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0, torque_rtol=0.5, budget_rtol=0.5)
+AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0, profiles=true)   # adds T(ψ) integrated from the axis
 ```
 
 The torque budget is the plasma's intrinsic torque. The SPARC paper uses 4 N·m for SPARC and the

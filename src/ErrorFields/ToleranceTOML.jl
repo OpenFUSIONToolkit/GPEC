@@ -284,16 +284,20 @@ end
 
 """
     tilt_tolerance_deg(tilt, tilt_units, cs::CoilSet) -> Float64
+    tilt_tolerance_deg(tilt, tilt_units, r_nom::Real; name="the coil set") -> Float64
     tilt_tolerance_deg(t::CoilTolerance, cs::CoilSet) -> Float64
 
 A tilt tolerance in the degrees the stored sensitivities use. `"deg"` passes through; `"m"` is
 a rim displacement converted through the coil set's arc-length-weighted major radius exactly as
-`apply_transforms` converts `tilt_in_meters`: `asin(t / R_nom)`.
+`apply_transforms` converts `tilt_in_meters`: `asin(t / R_nom)`. The radius form takes that
+radius directly, as a run stores it in `ErrorFields/CoilSensitivities/nominal_radius`, for
+readers that have the file but not the geometry.
 """
-function tilt_tolerance_deg(tilt::Real, tilt_units::AbstractString, cs::CoilSet)
+function tilt_tolerance_deg(tilt::Real, tilt_units::AbstractString, r_nom::Real; name::AbstractString="the coil set")
     tilt_units == "deg" && return Float64(tilt)
-    r_nom = ForcingTerms.nominal_major_radius(cs)
-    tilt <= r_nom || throw(ArgumentError("tilt $tilt m exceeds the nominal radius $r_nom m of coil set $(cs.name)"))
+    tilt <= r_nom || throw(ArgumentError("tilt $tilt m exceeds the nominal radius $r_nom m of $name"))
     return rad2deg(asin(tilt / r_nom))
 end
+tilt_tolerance_deg(tilt::Real, tilt_units::AbstractString, cs::CoilSet) =
+    tilt_tolerance_deg(tilt, tilt_units, ForcingTerms.nominal_major_radius(cs); name="coil set $(cs.name)")
 tilt_tolerance_deg(t::CoilTolerance, cs::CoilSet) = tilt_tolerance_deg(t.tilt_tol, t.tilt_units, cs)

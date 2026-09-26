@@ -205,6 +205,13 @@ function run_monte_carlo(table::SensitivityTable, ts::ToleranceSet, coil_sets::V
 end
 
 function run_monte_carlo(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1, kwargs...)
+    table, ts, coil_sets = _monte_carlo_inputs(h5path; psi_low, psi_high, mode)
+    return run_monte_carlo(table, ts, coil_sets, MonteCarloControl(; kwargs...))
+end
+
+# The three inputs of a post-hoc Monte Carlo rebuilt from a run file: the windowed sensitivity
+# table, the echoed tolerances, and the coil geometry snapshot.
+function _monte_carlo_inputs(h5path::AbstractString; psi_low::Real, psi_high::Real, mode::Int)
     ts = read_tolerance_snapshot(h5path)
     ts === nothing && throw(ArgumentError("$h5path carries no tolerance snapshot (the run named no tolerance_file)"))
     table = sensitivity_table(h5path; psi_low, psi_high, mode)
@@ -214,7 +221,7 @@ function run_monte_carlo(h5path::AbstractString; psi_low::Real=0.0, psi_high::Re
         ForcingTerms.load_coils_from_h5_group!(sets, f["Input/RawInputs/Coils"])
         sets
     end
-    return run_monte_carlo(table, ts, coil_sets, MonteCarloControl(; kwargs...))
+    return table, ts, coil_sets
 end
 
 # One sample: returns (correctable, uncorrectable) complex overlaps. `phases` is scratch for
@@ -275,10 +282,12 @@ function group_tilt_deg(g::CoherentGroupTolerance, set_of)
     g.tilt_units == "deg" && return Float64(g.tilt_tol)
     radii = [ForcingTerms.nominal_major_radius(set_of[m]) for m in g.members]
     lo, hi = extrema(radii)
-    hi - lo <= 0.01 * hi || throw(ArgumentError(
-        "coherent group \"$(g.name)\" gives its tilt in metres, but its members span nominal radii " *
-        "$(round(lo; digits=3))-$(round(hi; digits=3)) m, so a rim displacement does not name one " *
-        "rotation angle. Declare this group's tilt in degrees (tilt_units = \"deg\")."))
+    hi - lo <= 0.01 * hi || throw(
+        ArgumentError(
+            "coherent group \"$(g.name)\" gives its tilt in metres, but its members span nominal radii " *
+            "$(round(lo; digits=3))-$(round(hi; digits=3)) m, so a rim displacement does not name one " *
+            "rotation angle. Declare this group's tilt in degrees (tilt_units = \"deg\").")
+    )
     return tilt_tolerance_deg(g.tilt_tol, g.tilt_units, set_of[g.members[argmin(radii)]])
 end
 
@@ -372,4 +381,53 @@ function _worst_case(table::SensitivityTable, coils::_CoilTerms, groups::_GroupT
         w += s_in * groups.shift_tol[g] + t_in * tilt_reach
     end
     return w + other.magnitude + _WORST_CASE_SIGMA * other.sigma
+end
+
+"""
+    worst_case_terms(table, tolerances, coil_sets; tolerance_scale=1.0) -> NamedTuple
+    worst_case_terms(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, tolerance_scale=1.0) -> NamedTuple
+
+The worst-case alignment bound `delta_worst` of [`run_monte_carlo`](@ref) split into the terms
+that make it up, so the tolerance budget can be read coil by coil. Per coil set: `nominal` is
+`|δ_nominal|`, `shift` is `max(|S_x|, |S_y|)·(shift_tol + 3σ_shift)` and `tilt` is
+`max(|T_x|, |T_y|)·(tilt_reach + 3σ_tilt)`, where `tilt_reach` is the tilt tolerance in degrees
+or, under the cylinder model, the angle the axis line can reach, `atan(shift_tol / half_height)`.
+Per coherent group (`group_names`): `group_shift` and `group_tilt`, the latter including the
+lateral displacement a rigid rotation gives each member. `other` is the unattributed budget at
+`magnitude + 3σ`. `total` is `delta_worst` itself, the sum of every term; uncertainties enter at
+three standard deviations exactly as in the bound. Every coil set is counted (no `coil_subset`),
+and `tolerance_scale` multiplies the tolerances as in the Monte Carlo. The file form rebuilds the
+inputs from `gpec.h5` as `run_monte_carlo` does.
+"""
+function worst_case_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}; tolerance_scale::Real=1.0)
+    validate_tolerances(ts, table.coil_names)
+    coils, groups = _resolve_terms(table, ts, coil_sets, MonteCarloControl(; tolerance_scale))
+    other = ts.other_field
+    nominal = abs.(table.delta_nominal)
+    shift = similar(nominal)
+    tilt = similar(nominal)
+    for c in eachindex(coils.delta0)
+        s_in = max(abs(coils.Sx[c]), abs(coils.Sy[c]))
+        t_in = max(abs(coils.Tx[c]), abs(coils.Ty[c]))
+        tilt_reach = coils.model[c] == _CYLINDER ? rad2deg(atan(coils.shift_tol[c] / coils.z_top[c])) : coils.tilt_tol[c]
+        shift[c] = s_in * (coils.shift_tol[c] + _WORST_CASE_SIGMA * coils.shift_sigma[c])
+        tilt[c] = t_in * (tilt_reach + _WORST_CASE_SIGMA * coils.tilt_sigma[c])
+    end
+    ng = length(groups.Sx)
+    group_shift = zeros(ng)
+    group_tilt = zeros(ng)
+    for g in 1:ng
+        s_in = max(abs(groups.Sx[g]), abs(groups.Sy[g]))
+        t_in = max(abs(groups.Tx[g]), abs(groups.Ty[g])) + deg2rad(1) * max(abs(groups.Rx[g]), abs(groups.Ry[g]))
+        tilt_reach = groups.model[g] == _CYLINDER ? rad2deg(atan(groups.shift_tol[g] / groups.z_top[g])) : groups.tilt_tol[g]
+        group_shift[g] = s_in * groups.shift_tol[g]
+        group_tilt[g] = t_in * tilt_reach
+    end
+    group_names = [g.name for g in ts.groups]
+    return (; coil_names=copy(table.coil_names), nominal, shift, tilt, group_names, group_shift, group_tilt,
+        other=other.magnitude + _WORST_CASE_SIGMA * other.sigma, total=_worst_case(table, coils, groups, other))
+end
+function worst_case_terms(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1, tolerance_scale::Real=1.0)
+    table, ts, coil_sets = _monte_carlo_inputs(h5path; psi_low, psi_high, mode)
+    return worst_case_terms(table, ts, coil_sets; tolerance_scale)
 end
