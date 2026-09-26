@@ -1,6 +1,5 @@
 using LinearAlgebra
 using HDF5
-using Logging
 
 # The NTV-limited error-field-correction model on hand-built couplings: the residual spectrum
 # projection, the linear and NTV-limited correction currents against the closed-form quadratic,
@@ -182,7 +181,7 @@ using Logging
         # without a warning, and it is lost (NaN) at a current the falling-torque table would still balance.
         Tg(Δ) = 0.02 * (1 - Δ / 2.0e4)
         grows = EF.EFCCoupling("grows", 2.0e-5, 40.0, 0.05, 0.02, Δ, 2.5 .* Tg.(Δ), Tg.(Δ), ω_ref, NaN, Float64[], zeros(0, 1), zeros(0, 1))
-        Δg = @test_logs min_level = Logging.Warn EF.rotation_shift(grows, I; torque_budget=T0)
+        Δg = @test_logs min_level = Base.CoreLogging.Warn EF.rotation_shift(grows, I; torque_budget=T0)
         @test Δg < 0
         @test Δg * T0 / ω_ref ≈ EF.TORQUE_ROTATION_SIGN * Tg(Δg) * I^2 rtol = 1e-6
         @test abs(Δg) > abs(Δb)                                                 # more braking than the falling table at the same current
