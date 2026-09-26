@@ -22,6 +22,7 @@ import DelimitedFiles: readdlm
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
+include("TorqueResponse.jl")
 include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
@@ -38,6 +39,7 @@ export ForcingMode
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
 export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
+export TorqueResponse, torque_response_matrices, torque_profile
 
 """
     compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
@@ -95,6 +97,14 @@ function compute_perturbed_equilibrium(
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
         compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, mats)
+    end
+
+    # Torque response matrices of a kinetic forward solve, on the plasma response just computed
+    if ctrl.compute_torque_response
+        ctrl.compute_response || throw(ArgumentError("compute_torque_response needs compute_response = true"))
+        ForceFreeStates.require_solution(ffs, "torque response matrices") ||
+            throw(ArgumentError("compute_torque_response needs the dense forward-integrated ξ solution"))
+        compute_torque_response!(state, ffs, forcing, intr, ctrl)
     end
 
     # Step 3: Compute singular coupling metrics
