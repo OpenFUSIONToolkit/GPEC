@@ -1,6 +1,7 @@
 using HDF5
 using TOML
 using LinearAlgebra
+using Plots
 
 # The ErrorFields coil linearization: a closed-form check on the cancelling offset, then one
 # coil-forced Solovev run with an axisymmetric PF hoop (whose rigid-motion response is known
@@ -179,6 +180,73 @@ include("h5_metadata_check.jl")
             @test rescan.scale == [1.0]
             @test rescan.plock[1] == again.plock
             @test rescan.plock_efc[1] == again.plock_efc
+
+            # Analysis plots: every ErrorFields plot renders from the file and saves; the phasing map
+            # of the two hoops is the closed form on their stored spectra.
+            AEF = GPEC.Analysis.ErrorFields
+            for (name, fn) in (("sens", AEF.plot_coil_sensitivities), ("pdf", AEF.plot_tolerance_pdf), ("risk", AEF.plot_locking_risk),
+                ("thr", AEF.plot_threshold_scaling), ("mode", AEF.plot_dominant_mode_spectrum))
+                png = joinpath(dir, "plot_$name.png")
+                @test fn(h5path; save_path=png) isa Plots.Plot
+                @test isfile(png)
+            end
+            # The spectrum plot draws the stored dominant mode, padded to zero at both ends by the step convention.
+            spec = AEF.plot_dominant_mode_spectrum(h5path)
+            @test maximum(spec.series_list[1][:y]) ≈ maximum(abs.(dom.right_singular_vectors[:, 1])) rtol = 1e-10
+            @test spec.series_list[1][:y][1] == 0.0 && spec.series_list[1][:y][end] == 0.0
+            @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt)[1][:yaxis][:guide] == "|δ| per degree of tilt"
+            @test AEF.plot_coil_sensitivities(h5path; quantity=:rim)[1][:yaxis][:guide] == "|δ| per mm of rim displacement"
+            @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; quantity=:bogus)
+
+            # An in-memory table plots the same way a stored run does, which is the whole point of
+            # the dual entry points: coil geometry that was never part of a run has no file to read.
+            in_memory = AEF.plot_coil_sensitivities(table)
+            @test in_memory isa Plots.Plot
+            @test AEF.plot_coil_sensitivities(["file" => h5path, "memory" => table]) isa Plots.Plot
+            @test isequal(in_memory.series_list[1][:y], AEF.plot_coil_sensitivities(h5path).series_list[1][:y])
+
+            # The threshold plot needs the overlap distribution and the penetration threshold, which
+            # live on two different result types. A lone RiskResult cannot supply the distribution,
+            # so it must be skipped rather than indexed into a missing field; the pair must work.
+            @test AEF.plot_threshold_scaling(["pair" => (mc, risk)]) isa Plots.Plot
+            paired = AEF.plot_threshold_scaling(["pair" => (mc, risk)])
+            @test !isempty(paired.series_list)
+            @test AEF.plot_threshold_scaling(["risk only" => risk]) isa Plots.Plot
+            @test isequal(AEF.plot_threshold_scaling(["f" => h5path]).series_list[1][:y],
+                AEF.plot_threshold_scaling(["p" => (mc, risk)]).series_list[1][:y])
+
+            # The three coil diagnostics, from a context and from a file.
+            ctx_plot = EF.ResonantDriveContext(h5path)
+            plot_sets = FT.load_coil_sets(ctx_plot.cfg, 1; equil=ctx_plot.equil)
+            ovs_plot = EF.coil_overlaps(ctx_plot, plot_sets)
+            for (name, fn) in (("spectra", AEF.plot_applied_spectra), ("contrib", AEF.plot_overlap_contributions),
+                ("surface", AEF.plot_surface_overlay))
+                png = joinpath(dir, "diag_$name.png")
+                @test fn(ctx_plot, ovs_plot; save_path=png) isa Plots.Plot
+                @test isfile(png)
+            end
+            @test AEF.plot_applied_spectra(h5path, plot_sets) isa Plots.Plot
+            @test AEF.plot_applied_spectra(ctx_plot, ovs_plot; normalize=false)[1][:yaxis][:guide] == "|b̃| (T)"
+            @test length(AEF.plot_surface_overlay(ctx_plot, ovs_plot; ntheta=32, nzeta=24).subplots) == length(ovs_plot)
+
+            # The per-harmonic contributions the plot draws sum to each coil's resonant fraction,
+            # which is what makes them readable as a decomposition. Asserted on the numbers rather
+            # than the rendered series: the step recipe expands every point into two vertices.
+            v_plot = ctx_plot.dom.right_singular_vectors[:, 1]
+            for o in ovs_plot
+                bars = real.(conj.(v_plot) .* o.spectrum .* cis(-angle(o.raw))) ./ o.spectrum_norm
+                @test 100 * sum(bars) ≈ o.fraction_percent rtol = 1e-10
+            end
+            # The target risk adds its own line and the allowable-tolerance markers.
+            @test length(AEF.plot_locking_risk(h5path; target_percent=1.0).series_list) > length(AEF.plot_locking_risk(h5path).series_list)
+            @test length(AEF.plot_error_field_summary(h5path; save_path=joinpath(dir, "summary.png")).subplots) == 4
+            pmap = EF.phasing_map(h5path, ["hoop_tilted", "hoop_axi"]; nphase=36)
+            @test length(pmap.phase_deg) == 1 && size(pmap.delta_per_kat) == (36,)
+            kat = sens.winding_multiplier .* sens.peak_current ./ 1e3
+            δ_each = [dot(dom.right_singular_vectors[:, 1], sens.nominal_field[:, j]) / kat[j] / sens.b_t0 for j in 1:2]
+            @test pmap.delta_per_kat ≈ abs.(δ_each[1] .+ δ_each[2] .* cis.(deg2rad.(pmap.phase_deg[1])))
+            @test AEF.plot_phasing_map(pmap; save_path=joinpath(dir, "phasing.png")) isa Plots.Plot
+            @test AEF.plot_phasing_map(h5path, ["hoop_tilted", "hoop_axi"]; nphase=12) isa Plots.Plot
             from_file = EF.CoilSensitivities(h5path)
             @test from_file.coil_names == sens.coil_names
             @test from_file.m_modes == sens.m_modes && from_file.n_modes == sens.n_modes
