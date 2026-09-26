@@ -10,12 +10,24 @@ proportion to the torque spent, the current needed to correct an intrinsic overl
 to the (reduced) threshold solves
 
 ```
-δ_EF − C_c·I = s·δ_thresh·(1 − T·I²/T_0)
+|δ_EF − C_c·I| = s·δ_thresh·(1 − T·I²/T_0)
 ```
 
-whose real roots exist only up to a largest correctable overlap `δ_max`. The model holds only
+The left side is the magnitude of the *residual* error field, so it never falls below zero and
+over-correcting by a given amount is exactly as bad as under-correcting by it: the phase of the
+miss does not matter, only its size. The correctable currents are therefore a window between the
+two roots, not a half-line — [`correction_current`](@ref) returns the lower edge, the least
+current that does the job, and `efc_current_curve`'s `current_ntv_upper` is the upper edge, past
+which the over-correction is itself above threshold.
+
+Real roots exist only up to a largest correctable overlap `δ_max`. The model holds only
 while the plasma still rotates, `T·I² < T_0`, so the current is capped at `I_max = √(T_0/T)`; at
-that current the threshold has fallen to zero and any remaining overlap locks. This is the model
+that current the threshold has fallen to zero and any remaining overlap locks.
+
+The model assumes a relatively large positive rotation and so ignores the neoclassical offset.
+The NTV in fact drives the rotation towards a non-zero offset of order the ion diamagnetic
+rotation rather than towards rest, so the approach to `I_max` is softer than modelled here; that
+refinement is left for later work. This is the model
 of Logan et al., Nucl. Fusion (2026), doi:10.1088/1741-4326/ae6086, Eqs. (5)–(7), for SPARC and
 of Leuthold et al., J. Plasma Phys. 92, E49 (2026), doi:10.1017/S0022377826101421, Eq. (A2),
 for ARC. The torque
@@ -83,7 +95,9 @@ Correction current, kAt, that brings an intrinsic overlap `δ_ef` down to
 `safety_factor × delta_threshold`. Without NTV (`ntv = false`) that is the linear
 `(δ_ef − s·δ_thresh) / C_c`, zero when no correction is needed. With NTV the residual torque
 lowers the threshold in proportion to the fraction of `torque_budget` (N·m) it consumes, and the
-smaller root of the resulting quadratic is returned. `NaN` when the overlap is beyond
+smaller root of the resulting quadratic is returned: the least current that brings the residual
+down to the threshold. Driving past the larger root over-corrects far enough that the residual is
+above threshold again — see `efc_current_curve`'s `current_ntv_upper`. `NaN` when the overlap is beyond
 [`max_correctable_overlap`](@ref): either the quadratic has no real root, or its root lies past
 `I_max = √(T_0/T_residual)`, where the residual torque has used the whole budget and the plasma
 no longer rotates.
@@ -136,6 +150,27 @@ function max_correctable_overlap(c::EFCCoupling; delta_threshold::Real, torque_b
 end
 
 """
+    correction_current_upper(δ_ef, c::EFCCoupling; delta_threshold, torque_budget, safety_factor=1.0, ntv=true) -> Float64
+
+Upper edge of the correctable current window, kAt: the current past which the over-correction
+`C_c·I − δ_ef` is itself above `safety_factor × delta_threshold`, so the field locks again from
+the other side. This is the larger root of the same quadratic, capped at `I_max`; without NTV it
+is `(δ_ef + s·δ_thresh) / C_c`. `NaN` whenever [`correction_current`](@ref) is `NaN`.
+"""
+function correction_current_upper(δ_ef::Real, c::EFCCoupling; delta_threshold::Real, torque_budget::Real, safety_factor::Real=1.0, ntv::Bool=true)
+    target = safety_factor * delta_threshold
+    isnan(correction_current(δ_ef, c; delta_threshold, torque_budget, safety_factor, ntv)) && return NaN
+    ntv || return (δ_ef + target) / c.delta_per_kat
+    t_res = abs(c.torque_residual_per_kat2)
+    t_res == 0 && return (δ_ef + target) / c.delta_per_kat
+    # Over-correction side: C·I − δ_ef = target·(1 − t_res·I²/T_0), i.e. a·I² + C·I − (δ_ef + target) = 0
+    # with the same a as the under-correction quadratic; its positive root is the upper edge.
+    a = target * t_res / torque_budget
+    upper = (-c.delta_per_kat + sqrt(c.delta_per_kat^2 + 4a * (δ_ef + target))) / (2a)
+    return min(upper, sqrt(torque_budget / t_res))
+end
+
+"""
     efc_current_curve(c::EFCCoupling; delta_threshold, torque_budget, safety_factor=1.0, delta_max=15, npoints=500,
                       torque_rtol=0.0, budget_rtol=0.0) -> NamedTuple
 
@@ -161,7 +196,8 @@ function efc_current_curve(c::EFCCoupling; delta_threshold::Real, torque_budget:
     pessimistic = torque_budget * (1 - budget_rtol) / (1 + torque_rtol)
     optimistic = torque_budget * (1 + budget_rtol) / (1 - torque_rtol)
     limits = max_correctable_overlap(c; delta_threshold, torque_budget, safety_factor)
-    return (; delta_ef=δ, current_linear=lin, current_ntv=ntv_at(torque_budget),
+    upper = [correction_current_upper(d, c; delta_threshold, torque_budget, safety_factor, ntv=true) for d in δ]
+    return (; delta_ef=δ, current_linear=lin, current_ntv=ntv_at(torque_budget), current_ntv_upper=upper,
         current_ntv_pessimistic=ntv_at(pessimistic), current_ntv_optimistic=ntv_at(optimistic),
         limits_pessimistic=max_correctable_overlap(c; delta_threshold, torque_budget=pessimistic, safety_factor),
         limits_optimistic=max_correctable_overlap(c; delta_threshold, torque_budget=optimistic, safety_factor),

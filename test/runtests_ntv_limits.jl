@@ -44,6 +44,23 @@ using LinearAlgebra
         δ_past = δt * (1 - c.torque_residual_per_kat2 * 16^2 / T0) + c.delta_per_kat * 16   # needs I = 16 kAt
         @test c.delta_per_kat^2 - 4a * (δ_past - δt) >= 0 && isnan(EF.correction_current(δ_past, c; delta_threshold=δt, torque_budget=T0))
         @test EF.correction_current(0.99 * c.delta_per_kat * i_max, c; delta_threshold=δt, torque_budget=T0) < i_max
+
+        # The condition is on |δ_EF − C·I|, so the correctable currents are a window: over-shooting
+        # by more than the threshold is as bad as falling short of it, whatever the phase of the miss.
+        δ_w = 2δt
+        lo = EF.correction_current(δ_w, c; delta_threshold=δt, torque_budget=T0)
+        hi = EF.correction_current_upper(δ_w, c; delta_threshold=δt, torque_budget=T0)
+        @test hi > lo
+        resid(I) = abs(δ_w - c.delta_per_kat * I)
+        thresh(I) = δt * (1 - abs(c.torque_residual_per_kat2) * I^2 / T0)
+        @test resid(lo) ≈ thresh(lo) rtol = 1e-10        # lower edge: short by exactly the threshold
+        @test resid(hi) ≈ thresh(hi) rtol = 1e-10        # upper edge: over by exactly the threshold
+        @test resid(0.5 * (lo + hi)) < thresh(0.5 * (lo + hi))     # inside the window it is corrected
+        @test resid(hi * 1.02) > thresh(hi * 1.02)                 # past it, locked again
+        # Without NTV the window is symmetric about the null, by ±δ_t/C.
+        @test EF.correction_current_upper(δ_w, c; delta_threshold=δt, torque_budget=T0, ntv=false) ≈ (δ_w + δt) / c.delta_per_kat
+        # Beyond the correctable overlap neither edge exists.
+        @test isnan(EF.correction_current_upper(1.01 * lim.with_ntv, c; delta_threshold=δt, torque_budget=T0))
     end
 
     @testset "limits and curve" begin

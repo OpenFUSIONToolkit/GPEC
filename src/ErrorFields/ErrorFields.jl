@@ -75,6 +75,6 @@ export MonteCarloControl, MonteCarloResult, run_monte_carlo
 export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, ScenarioParameters, nominal_threshold, threshold_samples
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
 export PhasingMap, phasing_map, extreme_phasing
-export NTVControl, EFCCoupling, residual_spectrum, correction_current, max_correctable_overlap, efc_current_curve, read_efc_couplings
+export NTVControl, EFCCoupling, residual_spectrum, correction_current, correction_current_upper, max_correctable_overlap, efc_current_curve, read_efc_couplings
 
 end # module ErrorFields
