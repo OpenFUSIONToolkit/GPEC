@@ -113,7 +113,12 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             @test real(T_total) != 0
             @test real(T_total) ≈ pe.toroidal_torque rtol = 1e-6
             @test _PE_TR.torque_profile(tr, b̃) == tr.T_applied
-            @test norm(tr.T_xe[:, :, 1]) < 1e-8 * norm(tr.T_xe[:, :, end])
+            # Cumulative in ψ: every node's matrix is the plasma inside it, so the same
+            # contraction at an interior node is the torque inside that node.
+            k = npsi ÷ 2
+            ξk = sol.u_store[:, :, 1, k] * (U1l \ ξ)
+            Tk = dot(ξk, (sol.u_store[:, :, 2, k] / sol.u_store[:, :, 1, k]) * ξk) * (2 * nn * im / (2μ₀)) / 2
+            @test tr.T_applied[k] ≈ Tk rtol = 1e-8
         end
 
         @testset "Hermitian part carries the torque" begin
