@@ -32,14 +32,7 @@ Covariant components from metric tensor contraction (matches Fortran gpeq_cova):
     ξ_ψ(m) = Σ_dm g¹¹J(dm)·ξ^ψJ(m+dm) + g¹²J(dm)·ξ^θ_m(m+dm) + g³¹J(dm)·ξ^ζ_m(m+dm)
     ξ_θ(m) = Σ_dm g¹²J(dm)·ξ^ψJ(m+dm) + g²²J(dm)·ξ^θ_m(m+dm) + g²³J(dm)·ξ^ζ_m(m+dm)
     ξ_ζ(m) = Σ_dm g³¹J(dm)·ξ^ψJ(m+dm) + g²³J(dm)·ξ^θ_m(m+dm) + g³³J(dm)·ξ^ζ_m(m+dm)
-
-Mode-space arrays are [npsi, numpert_total] in the ForceFreeStates ordering (m fastest, one
-block of mpert columns per n). The equilibrium is axisymmetric, so every poloidal convolution
-and θ transform acts within one n block.
 """
-
-# (m, n) of column `j` in the numpert_total ordering.
-_mode_mn(ffs::ForceFreeStatesResult, j::Int) = (ffs.mlow + (j - 1) % ffs.mpert, ffs.nlow + (j - 1) ÷ ffs.mpert)
 
 """
     reconstruct_physical_fields(
@@ -50,13 +43,13 @@ _mode_mn(ffs::ForceFreeStatesResult, j::Int) = (ffs.mlow + (j - 1) % ffs.mpert, 
 Reconstruct displacement and perturbed magnetic field from eigenmode response.
 
 Implements the full Fortran gpeq pipeline: gpeq_sol → gpeq_contra → gpeq_cova.
-All fields returned in mode space [npsi, numpert_total].
+All fields returned in mode space [npsi, mpert].
 
 # Returns
 
 Tuple of (xi_modes, b_modes) NamedTuples:
 
-  - `xi_modes.psi`: ξ_ψ [npsi, numpert_total]
+  - `xi_modes.psi`: ξ_ψ [npsi, mpert]
   - `xi_modes.psi_J`: J·ξ^ψ (Jacobian-weighted, from gpeq_contra; used by gpeq_normal for b_n/xi_n)
   - `xi_modes.theta`: ξ^θ contravariant (from gpeq_contra Jacobian convolution)
   - `xi_modes.zeta`: ξ^ζ contravariant (from gpeq_contra Jacobian convolution)
@@ -66,10 +59,10 @@ Tuple of (xi_modes, b_modes) NamedTuples:
   - `xi_modes.theta_reg`: ξ^θ regularized (= xmt, from gpeq_contra with reg_spot smoothing)
   - `xi_modes.zeta_reg`: ξ^ζ regularized (= xmz, from gpeq_contra with reg_spot smoothing)
   - `xi_modes.cova_psi/theta/zeta`: covariant displacement (from gpeq_cova)
-  - `b_modes.psi`: b^ψ [npsi, numpert_total]
+  - `b_modes.psi`: b^ψ [npsi, mpert]
   - `b_modes.b_psi_area_weighted`: b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
-  - `b_modes.theta`: b^θ [npsi, numpert_total]
-  - `b_modes.zeta`: b^ζ [npsi, numpert_total]
+  - `b_modes.theta`: b^θ [npsi, mpert]
+  - `b_modes.zeta`: b^ζ [npsi, mpert]
   - `b_modes.theta_reg/zeta_reg`: regularized b^θ, b^ζ (from gpeq_sol with reg_spot smoothing)
   - `b_modes.cova_psi/theta/zeta`: covariant field (from gpeq_cova)
 """
@@ -172,7 +165,7 @@ function reconstruct_physical_fields(
         # Build the (ψ,θ) flux→cylindrical geometry once and reuse it for both ξ and b: the
         # transform matrices depend only on equilibrium geometry, not on the perturbed field.
         mlow = ffs.mlow
-        mpert_rz = ffs.mpert
+        mpert_rz = size(xi_psi_modes, 2)
         mtheta_rz = max(2 * (abs(mlow) + mpert_rz), 512)
         ft_rz = Utilities.FourierTransforms.FourierTransform(mtheta_rz, mpert_rz, mlow)
         rzphi_geom = _build_rzphi_geometry(equil, psi_grid, mtheta_rz)
@@ -231,9 +224,9 @@ xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (toroidal, Glasser 2
 
 # Returns
 
-  - `xi_psi_modes`: Radial displacement ξ_ψ(ψ, m) [npsi, numpert_total]
-  - `xi_psi1_modes`: Radial derivative dξ_ψ/dψ(ψ, m) [npsi, numpert_total]
-  - `xi_s_modes`: Toroidal displacement ξ_s(ψ, m) = -A⁻¹(B·dξ_ψ/dψ + C·ξ_ψ) [npsi, numpert_total]
+  - `xi_psi_modes`: Radial displacement ξ_ψ(ψ, m) [npsi, mpert]
+  - `xi_psi1_modes`: Radial derivative dξ_ψ/dψ(ψ, m) [npsi, mpert]
+  - `xi_s_modes`: Toroidal displacement ξ_s(ψ, m) = -A⁻¹(B·dξ_ψ/dψ + C·ξ_ψ) [npsi, mpert]
 """
 function sum_eigenmode_contributions(
     response_vector::Vector{ComplexF64},
@@ -241,19 +234,19 @@ function sum_eigenmode_contributions(
     solution::SolutionProfiles,
     ffs::ForceFreeStatesResult
 )
-    numpert_total = ffs.numpert_total
+    mpert = ffs.mpert
     npsi = size(solution.u_store, 4)
 
     # Convert mode-basis response (Phi_tot) to eigenmode amplitudes alpha
     # flux_matrix[mode, eigenmode], so: flux_matrix * alpha = response_vector
-    alpha = flux_matrix \ response_vector   # [numpert_total]
+    alpha = flux_matrix \ response_vector   # [mpert]
 
-    xi_psi_modes = zeros(ComplexF64, npsi, numpert_total)
-    xi_psi1_modes = zeros(ComplexF64, npsi, numpert_total)
-    xi_s_modes = zeros(ComplexF64, npsi, numpert_total)
+    xi_psi_modes = zeros(ComplexF64, npsi, mpert)
+    xi_psi1_modes = zeros(ComplexF64, npsi, mpert)
+    xi_s_modes = zeros(ComplexF64, npsi, mpert)
     # Surfaces are independent; threaded over ψ (run with `julia -t N` or JULIA_NUM_THREADS).
     Threads.@threads :static for ipsi in 1:npsi
-        # u_store[:,:,1] = Ξ_ψ (radial displacement). @view avoids copying the numpert_total²
+        # u_store[:,:,1] = Ξ_ψ (radial displacement). @view avoids copying the mpert×mpert
         # eigenmode-matrix slice on every surface (mul! takes the view directly).
         mul!(view(xi_psi_modes, ipsi, :),
             @view(solution.u_store[:, :, 1, ipsi]),
@@ -298,6 +291,8 @@ function compute_perturbed_field_modes(
     b_theta_modes = zeros(ComplexF64, npsi, mpert)
     b_zeta_modes = zeros(ComplexF64, npsi, mpert)
 
+    mlow = ffs.mlow
+    nn = ffs.nlow
     chi1 = 2π * equil.psio
 
     Threads.@threads :static for ipsi in 1:npsi
@@ -306,7 +301,7 @@ function compute_perturbed_field_modes(
         q1 = equil.profiles.q_deriv(psi_norm)
 
         for ipert in 1:mpert
-            m, nn = _mode_mn(ffs, ipert)
+            m = mlow + ipert - 1
             singfac = m - nn * q
 
             xsp = xi_psi_modes[ipsi, ipert]
@@ -353,6 +348,8 @@ function compute_clebsch_displacements(
     ctrl::PerturbedEquilibriumControl
 )
     npsi, mpert = size(xi_psi_modes)
+    nn = ffs.nlow
+    mlow = ffs.mlow
     chi1 = 2π * equil.psio
     numpert_total = ffs.numpert_total
 
@@ -394,7 +391,7 @@ function compute_clebsch_displacements(
 
         # Apply diagonal regularization to xsp1 → xmp1
         for ipert in 1:mpert
-            m, nn = _mode_mn(ffs, ipert)
+            m = mlow + ipert - 1
             singfac = m - nn * q
             reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
             clebsch_psi1[ipsi, ipert] = xi_psi1_modes[ipsi, ipert] * reg_factor
@@ -448,6 +445,8 @@ function compute_modified_field_modes(
     ffs::ForceFreeStatesResult
 )
     npsi, mpert = size(xi_psi_modes)
+    mlow = ffs.mlow
+    nn = ffs.nlow
     chi1 = 2π * equil.psio
 
     b_theta_reg = zeros(ComplexF64, npsi, mpert)
@@ -459,7 +458,7 @@ function compute_modified_field_modes(
         q1 = equil.profiles.q_deriv(psi_norm)
 
         for ipert in 1:mpert
-            m, nn = _mode_mn(ffs, ipert)
+            m = mlow + ipert - 1
             xsp = xi_psi_modes[ipsi, ipert]
             xmp1 = clebsch_psi1[ipsi, ipert]
             xms = clebsch_alpha[ipsi, ipert] * chi1  # undo χ₁ division
@@ -500,15 +499,16 @@ function compute_contra_displacements(
     metric::MetricData,
     ctrl::PerturbedEquilibriumControl
 )
-    npsi, numpert_total = size(xi_psi_modes)
-    (; mpert, mlow, nlow, npert) = ffs
+    npsi, mpert = size(xi_psi_modes)
+    mlow = ffs.mlow
+    nn = ffs.nlow
     chi1 = 2π * equil.psio
     reg_spot = ctrl.reg_spot
     fc = metric.fourier_coeffs
 
-    xwp_modes = zeros(ComplexF64, npsi, numpert_total)
-    xwt_modes = zeros(ComplexF64, npsi, numpert_total)
-    xwz_modes = zeros(ComplexF64, npsi, numpert_total)
+    xwp_modes = zeros(ComplexF64, npsi, mpert)
+    xwt_modes = zeros(ComplexF64, npsi, mpert)
+    xwz_modes = zeros(ComplexF64, npsi, mpert)
 
     # Per-thread Fourier coefficient vectors and spline hints (not safe to share across threads).
     vlen = 2 * mpert - 1
@@ -546,9 +546,7 @@ function compute_contra_displacements(
         end
 
         # Matches Fortran gpeq_contra: uses regularized xmp1/xms for theta/zeta components
-        for in in 1:npert, ipert in 1:mpert
-            nn = nlow + in - 1
-            off = (in - 1) * mpert
+        for ipert in 1:mpert
             m = mlow + ipert - 1
             singfac = m - nn * q
             twopi_i_singfac = 2π * im * singfac
@@ -558,7 +556,7 @@ function compute_contra_displacements(
             xwz_acc = zero(ComplexF64)
 
             for dm in (1-ipert):(mpert-ipert)
-                jpert = off + ipert + dm
+                jpert = ipert + dm
                 dmidx = dm + mpert
 
                 xsp_j = xi_psi_modes[ipsi, jpert]
@@ -575,12 +573,12 @@ function compute_contra_displacements(
                            2π * im * m / chi1 * jmat[dmidx] * xms_j
             end
 
-            xwp_modes[ipsi, off+ipert] = xwp_acc
+            xwp_modes[ipsi, ipert] = xwp_acc
 
             # Divide by 2πi·singfac (avoid division by zero near rational surfaces)
             if abs(twopi_i_singfac) > 1e-30
-                xwt_modes[ipsi, off+ipert] = -xwt_acc / twopi_i_singfac
-                xwz_modes[ipsi, off+ipert] = -xwz_acc / twopi_i_singfac
+                xwt_modes[ipsi, ipert] = -xwt_acc / twopi_i_singfac
+                xwz_modes[ipsi, ipert] = -xwz_acc / twopi_i_singfac
             end
         end
     end
@@ -592,8 +590,8 @@ function compute_contra_displacements(
         Threads.@threads :static for ipsi in 1:npsi
             psi_norm = psi_grid[ipsi]
             q = equil.profiles.q_spline(psi_norm)
-            for ipert in 1:numpert_total
-                m, nn = _mode_mn(ffs, ipert)
+            for ipert in 1:mpert
+                m = mlow + ipert - 1
                 singfac = m - nn * q
                 reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
                 xmt_modes[ipsi, ipert] = xwt_modes[ipsi, ipert] * reg_factor
@@ -631,16 +629,16 @@ function compute_cova_components(
     ffs::ForceFreeStatesResult,
     metric::MetricData
 )
-    npsi, numpert_total = size(xwp_modes)
-    (; mpert, npert) = ffs
+    npsi, mpert = size(xwp_modes)
+    mlow = ffs.mlow
     fc = metric.fourier_coeffs
 
-    xvp_modes = zeros(ComplexF64, npsi, numpert_total)
-    xvt_modes = zeros(ComplexF64, npsi, numpert_total)
-    xvz_modes = zeros(ComplexF64, npsi, numpert_total)
-    bvp_modes = zeros(ComplexF64, npsi, numpert_total)
-    bvt_modes = zeros(ComplexF64, npsi, numpert_total)
-    bvz_modes = zeros(ComplexF64, npsi, numpert_total)
+    xvp_modes = zeros(ComplexF64, npsi, mpert)
+    xvt_modes = zeros(ComplexF64, npsi, mpert)
+    xvz_modes = zeros(ComplexF64, npsi, mpert)
+    bvp_modes = zeros(ComplexF64, npsi, mpert)
+    bvt_modes = zeros(ComplexF64, npsi, mpert)
+    bvz_modes = zeros(ComplexF64, npsi, mpert)
 
     # Per-thread metric Fourier coefficient vectors and spline hints (not safe to share).
     vlen = 2 * mpert - 1
@@ -689,9 +687,8 @@ function compute_cova_components(
             g12[k+mpert] = conj(g12[mpert-k])
         end
 
-        # Tensor contraction with poloidal mode coupling within each n block (matches Fortran gpeq_cova)
-        for in in 1:npert, ipert in 1:mpert
-            off = (in - 1) * mpert
+        # Tensor contraction with mode coupling (matches Fortran gpeq_cova)
+        for ipert in 1:mpert
             xvp_acc = zero(ComplexF64)
             xvt_acc = zero(ComplexF64)
             xvz_acc = zero(ComplexF64)
@@ -700,7 +697,7 @@ function compute_cova_components(
             bvz_acc = zero(ComplexF64)
 
             for dm in (1-ipert):(mpert-ipert)
-                jpert = off + ipert + dm
+                jpert = ipert + dm
                 dmidx = dm + mpert
 
                 # Displacement covariant: ξ_i = g_ij · ξ^j (tensor contraction)
@@ -714,12 +711,12 @@ function compute_cova_components(
                 bvz_acc += g31[dmidx] * bwp_modes[ipsi, jpert] + g23[dmidx] * bmt_modes[ipsi, jpert] + g33[dmidx] * bmz_modes[ipsi, jpert]
             end
 
-            xvp_modes[ipsi, off+ipert] = xvp_acc
-            xvt_modes[ipsi, off+ipert] = xvt_acc
-            xvz_modes[ipsi, off+ipert] = xvz_acc
-            bvp_modes[ipsi, off+ipert] = bvp_acc
-            bvt_modes[ipsi, off+ipert] = bvt_acc
-            bvz_modes[ipsi, off+ipert] = bvz_acc
+            xvp_modes[ipsi, ipert] = xvp_acc
+            xvt_modes[ipsi, ipert] = xvt_acc
+            xvz_modes[ipsi, ipert] = xvz_acc
+            bvp_modes[ipsi, ipert] = bvp_acc
+            bvt_modes[ipsi, ipert] = bvt_acc
+            bvz_modes[ipsi, ipert] = bvz_acc
         end
     end
 
@@ -772,7 +769,7 @@ Nyquist (mtheta/2) >> 2·max|m|, so no aliasing from the 1/(J·|∇ψ|) division
 
 # Returns
 
-Tuple (b_n_modes, xi_n_modes), each [npsi, numpert_total] ComplexF64.
+Tuple (b_n_modes, xi_n_modes), each [npsi, mpert] ComplexF64.
 """
 function compute_b_n_xi_n_modes(
     xwp_modes::Matrix{ComplexF64},
@@ -781,14 +778,14 @@ function compute_b_n_xi_n_modes(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult
 )
-    npsi, numpert_total = size(b_psi_modes)
-    (; mpert, mlow, npert) = ffs
+    npsi, mpert = size(b_psi_modes)
+    mlow = ffs.mlow
     mthsurf = length(equil.rzphi_ys) - 1
     ro = equil.ro
     twopi = 2π
 
-    b_n_modes = zeros(ComplexF64, npsi, numpert_total)
-    xi_n_modes = zeros(ComplexF64, npsi, numpert_total)
+    b_n_modes = zeros(ComplexF64, npsi, mpert)
+    xi_n_modes = zeros(ComplexF64, npsi, mpert)
 
     # Pre-compute mode indices and DFT phase table
     m_vals = [mlow + ipert - 1 for ipert in 1:mpert]
@@ -801,6 +798,9 @@ function compute_b_n_xi_n_modes(
         psi = solution.psi_store[ipsi]
         hint2d_psi = (Ref(1), Ref(1))
 
+        # IDFT: mode space → theta space
+        bwp_fun = phase_fwd * b_psi_modes[ipsi, :]   # [mthsurf] — b^ψ (not J-weighted)
+        xwp_fun = phase_fwd * xwp_modes[ipsi, :]     # [mthsurf] — J·ξ^ψ (J-weighted from gpeq_contra)
         delpsis = zeros(Float64, mthsurf)
         jacs = zeros(Float64, mthsurf)
         for k in 1:mthsurf
@@ -820,23 +820,15 @@ function compute_b_n_xi_n_modes(
             jacs[k] = jac
         end
 
+        # Divide by J·|∇ψ| → physical normal components in theta space (matches Fortran gpeq_normal)
         jd = jacs .* delpsis
+        bno_fun = bwp_fun ./ jd
+        xno_fun = xwp_fun ./ jd
 
-        for in in 1:npert
-            blk = ((in - 1) * mpert + 1):(in * mpert)
-            # IDFT: mode space → theta space
-            bwp_fun = phase_fwd * b_psi_modes[ipsi, blk]   # [mthsurf] — b^ψ (not J-weighted)
-            xwp_fun = phase_fwd * xwp_modes[ipsi, blk]     # [mthsurf] — J·ξ^ψ (J-weighted from gpeq_contra)
-
-            # Divide by J·|∇ψ| → physical normal components in theta space (matches Fortran gpeq_normal)
-            bno_fun = bwp_fun ./ jd
-            xno_fun = xwp_fun ./ jd
-
-            # Forward DFT: theta space → mode space (1/mthsurf normalization matches Fortran iscdftf).
-            # Must use transpose (not adjoint) so the phase is exp(-2πi·m·θ), not exp(+2πi·m·θ).
-            b_n_modes[ipsi, blk] = (transpose(phase_back) * bno_fun) ./ mthsurf
-            xi_n_modes[ipsi, blk] = (transpose(phase_back) * xno_fun) ./ mthsurf
-        end
+        # Forward DFT: theta space → mode space (1/mthsurf normalization matches Fortran iscdftf).
+        # Must use transpose (not adjoint) so the phase is exp(-2πi·m·θ), not exp(+2πi·m·θ).
+        b_n_modes[ipsi, :] = (transpose(phase_back) * bno_fun) ./ mthsurf
+        xi_n_modes[ipsi, :] = (transpose(phase_back) * xno_fun) ./ mthsurf
     end
 
     return b_n_modes, xi_n_modes
@@ -970,7 +962,7 @@ flux coordinates (ψ,θ,ζ) to cylindrical (R,Z,φ) in mode space (Fortran `gpeq
 
     R(θ) = (t11·ξ^ψ + t12·ξ^θ) / J,  Z(θ) = (t21·ξ^ψ + t22·ξ^θ) / J,  φ(θ) = t33·ξ_ζ
 
-Returns mode-space arrays (npsi × numpert_total) in SFL coordinates, transformed per n block. The pointwise product with
+Returns mode-space arrays (npsi × mpert) in SFL coordinates. The pointwise product with
 geometry generates harmonics beyond mpert; users needing fuller resolution should increase
 the mode count or use `Analysis.PerturbedEquilibriumModes.modes_to_theta` post-hoc.
 
@@ -984,13 +976,11 @@ function _apply_rzphi_transform(
     theta_input::Matrix{ComplexF64},
     cova_zeta_input::Matrix{ComplexF64}
 )
-    npsi, numpert_total = size(psi_input)
-    mpert = ft.mpert
-    npert = numpert_total ÷ mpert
+    npsi, mpert = size(psi_input)
 
-    R_modes = zeros(ComplexF64, npsi, numpert_total)
-    Z_modes = zeros(ComplexF64, npsi, numpert_total)
-    phi_modes = zeros(ComplexF64, npsi, numpert_total)
+    R_modes = zeros(ComplexF64, npsi, mpert)
+    Z_modes = zeros(ComplexF64, npsi, mpert)
+    phi_modes = zeros(ComplexF64, npsi, mpert)
 
     # Per-thread scratch (the immutable `ft` functor and `geom` are shared read-only): θ-space
     # transform inputs/outputs (length mtheta) and mode-space forward-DFT outputs (length mpert),
@@ -1007,42 +997,39 @@ function _apply_rzphi_transform(
         R_fun = buf.R
         Z_fun = buf.Z
         phi_fun = buf.P
+
+        # Inverse DFT: modes → theta-space (in place)
         psi_fun = buf.psi
         theta_fn = buf.th
         zeta_fn = buf.ze
+        Utilities.FourierTransforms.inverse_transform!(psi_fun, ft, view(psi_input, ipsi, :))
+        Utilities.FourierTransforms.inverse_transform!(theta_fn, ft, view(theta_input, ipsi, :))
+        Utilities.FourierTransforms.inverse_transform!(zeta_fn, ft, view(cova_zeta_input, ipsi, :))
 
-        for in in 1:npert
-            blk = ((in - 1) * mpert + 1):(in * mpert)
-            # Inverse DFT: modes → theta-space (in place)
-            Utilities.FourierTransforms.inverse_transform!(psi_fun, ft, view(psi_input, ipsi, blk))
-            Utilities.FourierTransforms.inverse_transform!(theta_fn, ft, view(theta_input, ipsi, blk))
-            Utilities.FourierTransforms.inverse_transform!(zeta_fn, ft, view(cova_zeta_input, ipsi, blk))
+        # Pointwise transformation (Fortran gpeq_rzphi, gpeq.f:484-489)
+        for itheta in 1:mtheta
+            J = geom.J_theta[itheta, ipsi]
+            xwp = psi_fun[itheta]
+            xwt = theta_fn[itheta]
+            xvz = zeta_fn[itheta]
 
-            # Pointwise transformation (Fortran gpeq_rzphi, gpeq.f:484-489)
-            for itheta in 1:mtheta
-                J = geom.J_theta[itheta, ipsi]
-                xwp = psi_fun[itheta]
-                xwt = theta_fn[itheta]
-                xvz = zeta_fn[itheta]
-
-                if abs(J) > 1e-30
-                    R_fun[itheta] = (geom.t11[itheta, ipsi] * xwp + geom.t12[itheta, ipsi] * xwt) / J
-                    Z_fun[itheta] = (geom.t21[itheta, ipsi] * xwp + geom.t22[itheta, ipsi] * xwt) / J
-                else
-                    R_fun[itheta] = zero(ComplexF64)
-                    Z_fun[itheta] = zero(ComplexF64)
-                end
-                phi_fun[itheta] = geom.t33[itheta, ipsi] * xvz
+            if abs(J) > 1e-30
+                R_fun[itheta] = (geom.t11[itheta, ipsi] * xwp + geom.t12[itheta, ipsi] * xwt) / J
+                Z_fun[itheta] = (geom.t21[itheta, ipsi] * xwp + geom.t22[itheta, ipsi] * xwt) / J
+            else
+                R_fun[itheta] = zero(ComplexF64)
+                Z_fun[itheta] = zero(ComplexF64)
             end
-
-            # Forward DFT: theta-space → modes (in place)
-            Utilities.FourierTransforms.transform!(buf.Ro, ft, R_fun)
-            Utilities.FourierTransforms.transform!(buf.Zo, ft, Z_fun)
-            Utilities.FourierTransforms.transform!(buf.Po, ft, phi_fun)
-            R_modes[ipsi, blk] .= buf.Ro
-            Z_modes[ipsi, blk] .= buf.Zo
-            phi_modes[ipsi, blk] .= buf.Po
+            phi_fun[itheta] = geom.t33[itheta, ipsi] * xvz
         end
+
+        # Forward DFT: theta-space → modes (in place)
+        Utilities.FourierTransforms.transform!(buf.Ro, ft, R_fun)
+        Utilities.FourierTransforms.transform!(buf.Zo, ft, Z_fun)
+        Utilities.FourierTransforms.transform!(buf.Po, ft, phi_fun)
+        R_modes[ipsi, :] .= buf.Ro
+        Z_modes[ipsi, :] .= buf.Zo
+        phi_modes[ipsi, :] .= buf.Po
     end
 
     return R_modes, Z_modes, phi_modes

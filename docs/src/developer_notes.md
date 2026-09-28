@@ -143,8 +143,6 @@ Available regression cases:
 ----------------------------------------------------------------
   diiid_n1                 DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
                            dir: examples/DIIID-like_ideal_example  (24 quantities)
-  diiid_multi_n            DIII-D-like equilibrium, n = 1, 2, ideal + perturbed equilibrium
-                           dir: examples/DIIID-like_ideal_multi_n_example  (21 quantities)
   solovev_multi_n          Solovev analytical equilibrium, multi-n, ideal stability
                            dir: examples/Solovev_ideal_example_multi_n  (12 quantities)
   solovev_n1               Solovev analytical equilibrium, n=1, ideal stability

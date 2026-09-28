@@ -153,16 +153,3 @@ include("h5_metadata_check.jl")
         end
     end
 end
-
-@testset "island diagnostics across toroidal modes" begin
-    PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
-    # q = 2 surface (index 1) resonates at n = 1 and n = 2; q = 2.5 (index 2) at n = 2 only.
-    state = PE.PerturbedEquilibriumState()
-    state.rational_psi = [0.4, 0.4, 0.6]
-    state.rational_surface_idx = [1, 1, 2]
-    state.island_width_sq = ComplexF64[0.01, 0.0004, 0.0025]
-    PE.compute_island_diagnostics!(state, 3)
-    @test state.island_half_width ≈ [0.1, 0.02, 0.05]
-    # The repeated surface is not its own neighbour: every row sees the 0.2 gap to the other surface.
-    @test state.chirikov_parameter ≈ [0.1, 0.02, 0.05] ./ 0.1
-end

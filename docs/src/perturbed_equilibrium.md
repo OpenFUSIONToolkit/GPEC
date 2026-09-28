@@ -17,25 +17,6 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibri
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.write_outputs_to_HDF5
 ```
 
-## Several toroidal modes
-
-With `nn_low < nn_high` every `mode` axis in `PerturbedEquilibrium/` runs over the full
-`numpert_total = mpert·npert` space, with m varying fastest and one block of `mpert` entries for each n.
-`PerturbedEquilibrium/mode_m` and `mode_n` label each entry. The equilibrium is axisymmetric, so
-different n never couple:
-
-  - Λ, L, P and ϱ are block-diagonal in n, and each block equals the matrix of a single-n run.
-  - Energies and torque are sums of the single-n values; the plasma energy Φ_n†·Λ_nn⁻¹·Φ_n/4 and the
-    torque −2n·Im(Φ_n†·Λ_nn⁻¹·Φ_n)/4 use only the diagonal n blocks of Λ: off-n blocks vanish for an
-    axisymmetric equilibrium, so numerical leakage there must not enter.
-  - Profiles in `Response/` hold one block of columns for each n.
-  - `SingularCoupling/` has one row for each resonant (surface, n) pair, sorted by ψ across all n.
-    An integer-q surface appears once for each n that resonates there. Those rows are not
-    neighbors of each other when the Chirikov parameter is computed.
-
-`set_psilim_via_dmlim` is ignored for multi-n runs, so set the edge with `qhigh` or `psihigh`,
-away from any rational m/n in the range. KineticForces still takes a single n.
-
 ## Dominant resonant-coupling mode
 
 The singular-coupling matrix `C_resonant_area_weighted_field` maps an applied

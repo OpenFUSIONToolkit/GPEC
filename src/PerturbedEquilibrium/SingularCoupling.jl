@@ -290,8 +290,6 @@ function compute_singular_coupling_metrics!(
             push!(resonant_pairs, (s, nn))
         end
     end
-    # Rows run outward in ψ across every n; an integer-q surface keeps its n order.
-    sort!(resonant_pairs; by=((s, nn),) -> (ffs.surfaces[s].psifac, nn))
 
     n_rational = length(resonant_pairs)
     if n_rational == 0
@@ -650,8 +648,7 @@ end
 Compute island half-width and Chirikov parameter from applied resonant vectors.
 
   - `island_half_width[row]` = √|island_width_sq[row]|
-  - `chirikov_parameter[row]` = half-width / (half-distance to the nearest other rational surface);
-    rows on the same surface at another n (integer q) are not neighbors
+  - `chirikov_parameter[row]` = half-width / (half-distance to nearest neighbor in rational_psi)
 """
 function compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rational::Int)
     state.island_half_width = sqrt.(abs.(state.island_width_sq))
@@ -663,7 +660,7 @@ function compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rationa
         psi_row = state.rational_psi[row]
         min_dist = Inf
         for row2 in 1:n_rational
-            state.rational_surface_idx[row2] == state.rational_surface_idx[row] && continue
+            row2 == row && continue
             dist = abs(state.rational_psi[row2] - psi_row)
             min_dist = min(min_dist, dist)
         end

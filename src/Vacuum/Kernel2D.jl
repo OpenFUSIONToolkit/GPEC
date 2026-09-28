@@ -120,7 +120,6 @@ grad_greenfunction is not zeroed since it fills a different block of the
     # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
     # This is constant for all source/observer point pairs within this kernel call.
     gamma_prefactor = 2 * sqrt(π) * gamma(0.5 - n)
-    pn_cache = get_pn_quad_cache(n)
 
     # Set up periodic splines used for off-grid Gaussian quadrature points
     spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
@@ -150,7 +149,7 @@ grad_greenfunction is not zeroed since it fills a different block of the
         # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
         @inbounds for k in 1:(mtheta-3)
             isrc = mod1(j + 1 + k, mtheta)
-            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n; gamma_prefactor, pn_cache)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n; gamma_prefactor)
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
@@ -181,7 +180,7 @@ grad_greenfunction is not zeroed since it fills a different block of the
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
-                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n; gamma_prefactor, pn_cache)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n; gamma_prefactor)
 
                 # Get stencil and weight for the Gaussian point
                 s = leftpanel ? stencils_left[ig] : stencils_right[ig]
@@ -502,10 +501,10 @@ This implementation uses:
 """
 function Pn_minus_half_2007(s::Real, n::Int)
     P = Vector{Float64}(undef, n + 2)
-    return Pn_minus_half_2007!(P, s, n; pn_cache=get_pn_quad_cache(n))
+    return Pn_minus_half_2007!(P, s, n)
 end
 
-function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int; pn_cache::PnQuadEntry)
+function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
     pii = 2.0 / π
@@ -542,6 +541,8 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int; pn_cac
 
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
+
+        pn_cache = get_pn_quad_cache(n)
 
         gint = 0.0
         gintp = 0.0
@@ -595,7 +596,7 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int; pn_cac
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; gamma_prefactor, pn_cache, uselegacygreenfunction=false)
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; gamma_prefactor, uselegacygreenfunction=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry
 according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
@@ -612,7 +613,6 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - `gamma_prefactor`: Precomputed value of `2√π · Γ(1/2 - n)` [Chance Phys. Plasmas 1997 eq. 40].
     Constant for a given `n`; callers in tight loops should compute this once and pass it in.
     Defaults to `2 * sqrt(π) * gamma(0.5 - n)` if omitted.
-  - `pn_cache`: `get_pn_quad_cache(n)`; takes a lock, so tight-loop callers look it up once and pass it in.
   - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default false, uses 2007 version)
 
 # Returns
@@ -637,7 +637,6 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     dz_dtheta::Float64,
     n::Int;
     gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n),
-    pn_cache::PnQuadEntry,
     uselegacygreenfunction::Bool=false
 )
     x_obs2 = x_obs^2
@@ -669,7 +668,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     if uselegacygreenfunction
         Pn_minus_half_1997!(legendre, s, n)
     else
-        Pn_minus_half_2007!(legendre, s, n; pn_cache)
+        Pn_minus_half_2007!(legendre, s, n)
     end
 
     p0, p1, pnp1, pn = @inbounds legendre[1], legendre[2], legendre[end], legendre[end-1]
