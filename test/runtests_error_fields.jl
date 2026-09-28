@@ -50,7 +50,8 @@ include("h5_metadata_check.jl")
                 "compute_response" => true, "compute_singular_coupling" => true,
                 "verbose" => false, "write_outputs_to_HDF5" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
-            inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml")
+            inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
+                "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -107,6 +108,20 @@ include("h5_metadata_check.jl")
             @test snapshot isa EF.ToleranceSet
             @test snapshot.raw == read(joinpath(dir, "tolerances.toml"), String)
             @test [c.name for c in snapshot.coils] == ["hoop_tilted", "hoop_axi"]
+
+            # The run's Monte Carlo (full window, dominant mode) is written and re-runnable from the file.
+            mc = res.monte_carlo
+            @test mc isa EF.MonteCarloResult
+            @test mc.nsample == 20_000 && mc.nbatch == 2 && mc.seed == 5
+            @test mc.delta_nominal ≈ abs(sum(table.delta_nominal))
+            @test sum(mc.pdf .* diff(mc.bin_edges)) ≈ 1 atol = 1e-6
+            @test mc.mean_abs_delta_efc < mc.mean_abs_delta
+            mc_file = EF.MonteCarloResult(h5path)
+            @test mc_file.pdf == mc.pdf && mc_file.bin_edges == mc.bin_edges && mc_file.nsample == 20_000
+            rerun = EF.run_monte_carlo(h5path; nsample=20_000, nbatch=2, seed=5, nbins=100)
+            @test rerun.pdf == mc.pdf
+            windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[end], nsample=5_000, nbatch=1, seed=5, nbins=50)
+            @test windowed_mc.delta_nominal ≈ abs(sum(windowed.delta_nominal))
             from_file = EF.CoilSensitivities(h5path)
             @test from_file.coil_names == sens.coil_names
             @test from_file.m_modes == sens.m_modes && from_file.n_modes == sens.n_modes

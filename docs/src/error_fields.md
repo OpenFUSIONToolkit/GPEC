@@ -151,6 +151,44 @@ rng = Random.Xoshiro(1)
 Δ, θ = EF.sample_cylinder(rng, 0.5e-3, 1.5, EF.randpow(EF.Flat()))   # correlated shift [m] and tilt [deg]
 ```
 
+## Tolerance Monte Carlo
+
+With a `tolerance_file` named, the run samples every coil set's misalignment within its
+tolerance and histograms the dominant-mode overlap `|δ|`: per sample and coil set the overlap
+moves by `S·(Δ + u) + T·(θ + v)` for the coil's own draw (`Δ`, `θ`) and Gaussian placement
+uncertainties (`u`, `v`); coherent groups add one shared draw per group, with the lateral shift
+a rigid rotation about the group pivot gives each member; the unattributed budget adds a random
+direction. Because the overlap is linear in the misalignments, a million samples take about a
+second and no field is recomputed. Two histograms are written to `ErrorFields/MonteCarlo/`: the
+intrinsic `|δ|` and the corrected one, in which every correctable term (coil sets and groups not
+listed as uncorrectable, and the unattributed budget) is divided by `efc_factor`. Batches are
+seeded individually, so results are bit-identical for any thread count, and their spread is the
+statistical error bar of anything derived from them.
+
+```toml
+[ErrorFields]
+tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the run directory
+
+[ErrorFields.MonteCarlo]
+nsample = 1000000               # Samples per batch
+nbatch = 10                     # Independent batches; their spread is the statistical error bar
+seed = 1                        # Base seed; batch b uses Xoshiro(hash((seed, b)))
+nbins = 300                     # Histogram bins, linear on [0, delta_max]
+delta_max = 0.0                 # Upper histogram edge; 0 = 1.5 × the worst-case alignment bound
+tolerance_scale = 1.0           # Multiplies every shift and tilt tolerance (for tolerance scans)
+coil_subset = []                # Coil sets whose tolerances are sampled; empty = all
+```
+
+The run's histogram is the full-window, dominant-mode summary. Any other window or mode, a
+tolerance scale, or a coil subset is a post-hoc re-run of the same kernel:
+
+```julia
+mc = EF.run_monte_carlo("gpec.h5"; psi_low=0.5, tolerance_scale=2.0, coil_subset=["PF1U", "PF2U"])
+mc.pdf, mc.bin_edges           # intrinsic |δ| density
+mc.pdf_efc                     # corrected
+mc.mean_abs_delta, mc.delta_nominal
+```
+
 ## Analysis after the run
 
 Window the coupling to any range of rational surfaces and project onto any singular mode

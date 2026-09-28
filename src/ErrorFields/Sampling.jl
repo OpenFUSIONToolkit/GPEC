@@ -99,9 +99,16 @@ end
     disk_radius(rng, R, p) -> Float64
 
 A radius drawn in `[0, R]` with density exponent `p` (see [`RadialDistribution`](@ref)):
-`R·rand()^p`.
+`R·rand()^p`. The common exponents (`0`, `1/3`, `1/2`, `1`, from [`Ring`](@ref), [`Hollow`](@ref),
+[`UniformArea`](@ref), [`Flat`](@ref)) take a `sqrt`/`cbrt`/identity fast path instead of the
+general `^`, which is the hot loop's dominant cost otherwise.
 """
-disk_radius(rng::AbstractRNG, R::Real, p::Real) = Float64(R) * rand(rng)^Float64(p)
+@inline function disk_radius(rng::AbstractRNG, R::Real, p::Real)
+    u = rand(rng)
+    pf = Float64(p)
+    r = pf == 1.0 ? u : pf == 0.5 ? sqrt(u) : pf == (1 / 3) ? cbrt(u) : pf == 0.0 ? 1.0 : u^pf
+    return Float64(R) * r
+end
 
 """
     sample_disk(rng, R, p; phase=2π·rand(rng)) -> ComplexF64
