@@ -262,15 +262,46 @@ const NTV_H5_ANNOTATIONS = [
     "delta_per_kat" => (; long_name="dominant-mode overlap |δ| of each array per kilo-ampere-turn", units="1/kAt"),
     "overlap_percent" => (; long_name="resonant fraction of each array's field, 100·|Vᴴb̃|/‖b̃‖", units="%"),
     "torque_full_per_kat2" => (; long_name="NTV torque of each array's whole field per kilo-ampere-turn squared", units="N*m/kAt^2"),
-    "torque_residual_per_kat2" => (; long_name="NTV torque of each array's field with the dominant mode projected out, per kilo-ampere-turn squared", units="N*m/kAt^2")
+    "torque_residual_per_kat2" => (; long_name="NTV torque of each array's field with the dominant mode projected out, per kilo-ampere-turn squared", units="N*m/kAt^2"),
+    "omega_reference" => (; long_name="reference rotation ω_ref of each array's torque balance: ion toroidal rotation weighted by density and volume", units="rad/s"),
+    "omega_offset_estimate" =>
+        (; long_name="rough neoclassical offset rotation the scan span was sized against, offset_factor·ω_*T at the innermost kinetic surface", units="rad/s")
+]
+
+# ErrorFields/NTV/RotationScan/: the torques against a rigid E×B rotation shift, one column per
+# array; the adaptive grids differ in length, so shorter scans are padded with NaN.
+const NTV_SCAN_H5_ANNOTATIONS = [
+    "coil_name" => (; long_name="name of each scanned correction coil array"),
+    "rotation_shift" =>
+        (; long_name="rigid shift Δω of the E×B rotation profile at each scan point of each array (NaN-padded)", units="rad/s", dims=("scan_point", "coil_set")),
+    "torque_full" =>
+        (; long_name="NTV torque of the whole field at each rotation shift, per kilo-ampere-turn squared (NaN-padded)", units="N*m/kAt^2", dims=("scan_point", "coil_set")),
+    "torque_residual" => (;
+        long_name="NTV torque of the field with the dominant mode projected out at each rotation shift, per kilo-ampere-turn squared (NaN-padded)",
+        units="N*m/kAt^2",
+        dims=("scan_point", "coil_set")
+    ),
+    "psi" => (; long_name="kinetic normalized poloidal flux grid of the torque profiles", scale="psi"),
+    "torque_full_profile" => (;
+        long_name="cumulative NTV torque of the whole field from the axis to ψ_N, at each rotation shift of each array, per kilo-ampere-turn squared (NaN-padded)",
+        units="N*m/kAt^2",
+        dims=("psi", "scan_point", "coil_set")
+    ),
+    "torque_residual_profile" => (;
+        long_name="cumulative NTV torque of the residual field from the axis to ψ_N, at each rotation shift of each array, per kilo-ampere-turn squared (NaN-padded)",
+        units="N*m/kAt^2",
+        dims=("psi", "scan_point", "coil_set")
+    )
 ]
 
 """
     write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
 
-Write the correction-coil couplings to `ErrorFields/NTV/`. The torque budget, threshold and
-safety factor that turn them into a correction-current curve are analysis choices left to
-[`efc_current_curve`](@ref). An existing group is replaced.
+Write the correction-coil couplings to `ErrorFields/NTV/`, and the torque-versus-rotation tables
+of the arrays that have one to `ErrorFields/NTV/RotationScan/` (one column per array, shorter
+scans NaN-padded). The torque budget, threshold, rotation exponent and safety factor that turn
+them into a correction-current curve are analysis choices left to [`efc_current_curve`](@ref).
+An existing group is replaced.
 """
 function write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
     haskey(h5file, _NTV_GROUP) && delete_object(h5file, _NTV_GROUP)
@@ -280,23 +311,61 @@ function write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
     g["overlap_percent"] = [c.overlap_percent for c in couplings]
     g["torque_full_per_kat2"] = [c.torque_full_per_kat2 for c in couplings]
     g["torque_residual_per_kat2"] = [c.torque_residual_per_kat2 for c in couplings]
+    g["omega_reference"] = [c.omega_reference for c in couplings]
+    g["omega_offset_estimate"] = [c.omega_offset_estimate for c in couplings]
     Utilities.HDF5Annotations.annotate!(g, NTV_H5_ANNOTATIONS)
+    scanned = filter(has_rotation_scan, couplings)
+    if !isempty(scanned)
+        nmax = maximum(length(c.rotation_shift) for c in scanned)
+        ψ = scanned[1].psi
+        all(c.psi == ψ for c in scanned) || error("write_to_hdf5!: the rotation scans of the arrays are on different ψ grids")
+        pad(v) = vcat(Float64.(v), fill(NaN, nmax - length(v)))
+        padm(m) = hcat(Float64.(m), fill(NaN, size(m, 1), nmax - size(m, 2)))
+        sg = create_group(g, "RotationScan")
+        sg["coil_name"] = [c.coil_name for c in scanned]
+        sg["rotation_shift"] = reduce(hcat, pad(c.rotation_shift) for c in scanned)
+        sg["torque_full"] = reduce(hcat, pad(c.torque_full_scan) for c in scanned)
+        sg["torque_residual"] = reduce(hcat, pad(c.torque_residual_scan) for c in scanned)
+        sg["psi"] = ψ
+        sg["torque_full_profile"] = cat((padm(c.torque_full_profile) for c in scanned)...; dims=3)
+        sg["torque_residual_profile"] = cat((padm(c.torque_residual_profile) for c in scanned)...; dims=3)
+        Utilities.HDF5Annotations.annotate!(sg, NTV_SCAN_H5_ANNOTATIONS)
+    end
     return g
 end
 
 """
     read_efc_couplings(h5path::AbstractString) -> Vector{EFCCoupling}
 
-Read a run's correction-coil couplings back from `ErrorFields/NTV/`.
+Read a run's correction-coil couplings back from `ErrorFields/NTV/`, with their
+torque-versus-rotation tables when the run made them.
 """
 function read_efc_couplings(h5path::AbstractString)
     h5open(h5path, "r") do f
         haskey(f, _NTV_GROUP) || throw(ArgumentError("$h5path has no $_NTV_GROUP group (set efc_coils in [ErrorFields.NTV])"))
         g = f[_NTV_GROUP]
         names = read(g["coil_name"])
-        return [
-            EFCCoupling(names[i], read(g["delta_per_kat"])[i], read(g["overlap_percent"])[i], read(g["torque_full_per_kat2"])[i], read(g["torque_residual_per_kat2"])[i])
-            for i in eachindex(names)
-        ]
+        δ, ov = read(g["delta_per_kat"]), read(g["overlap_percent"])
+        Tf, Tr = read(g["torque_full_per_kat2"]), read(g["torque_residual_per_kat2"])
+        ω_ref = haskey(g, "omega_reference") ? read(g["omega_reference"]) : fill(NaN, length(names))
+        ω_off = haskey(g, "omega_offset_estimate") ? read(g["omega_offset_estimate"]) : fill(NaN, length(names))
+        scan = haskey(g, "RotationScan") ? g["RotationScan"] : nothing
+        scan_names = scan === nothing ? String[] : read(scan["coil_name"])
+        out = EFCCoupling[]
+        for i in eachindex(names)
+            j = findfirst(==(names[i]), scan_names)
+            if j === nothing
+                push!(out, EFCCoupling(names[i], δ[i], ov[i], Tf[i], Tr[i]))
+            else
+                shifts = read(scan["rotation_shift"])[:, j]
+                n = count(!isnan, shifts)
+                push!(
+                    out,
+                    EFCCoupling(names[i], δ[i], ov[i], Tf[i], Tr[i], shifts[1:n], read(scan["torque_full"])[1:n, j], read(scan["torque_residual"])[1:n, j],
+                        ω_ref[i], ω_off[i], read(scan["psi"]), read(scan["torque_full_profile"])[:, 1:n, j], read(scan["torque_residual_profile"])[:, 1:n, j])
+                )
+            end
+        end
+        return out
     end
 end

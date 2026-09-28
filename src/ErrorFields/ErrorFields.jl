@@ -45,6 +45,8 @@ using Printf
 using TOML
 using Random
 import Random: AbstractRNG
+using FastInterpolations: cubic_interp, linear_interp
+using Roots: find_zero, Brent
 
 import ..Equilibrium
 import ..ForcingTerms
@@ -77,5 +79,6 @@ export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_lab
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
 export PhasingMap, phasing_map, extreme_phasing
 export NTVControl, EFCCoupling, residual_spectrum, correction_current, correction_current_upper, max_correctable_overlap, efc_current_curve, read_efc_couplings
+export has_rotation_scan, rotation_scan_span, torque_at, torque_zero_crossings, rotation_shift, threshold_factor
 
 end # module ErrorFields
