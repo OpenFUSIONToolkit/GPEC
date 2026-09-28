@@ -318,8 +318,19 @@ function main_from_inputs(
         end
     end
 
+    ef_start = time()
     error_fields = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles)
     coil_sensitivities, monte_carlo, locking_risk, efc_couplings = error_fields === nothing ? (nothing, nothing, nothing, nothing) : error_fields
+    if "ErrorFields" in keys(inputs)
+        push!(runtimes, "error_fields" => time() - ef_start)
+        # Mirrors the write gate inside `run_error_fields` (write flag defaults to true, filename
+        # falls back to the ForceFreeStates file since the result carries this same control).
+        ef_raw = inputs["ErrorFields"]
+        if get(ef_raw, "write_outputs_to_HDF5", true)
+            ef_out = get(ef_raw, "output_filename", "")
+            written_h5 = isempty(ef_out) ? ctrl.HDF5_filename : ef_out
+        end
+    end
 
     slayer_result = run_slayer_stage(ffs_result, inputs, pe_file; runtimes=runtimes)
     # A non-nothing result means the Tearing/ group was appended inside the guarded stage.

@@ -259,6 +259,7 @@ const RUNTIME_H5_ANNOTATIONS = [
     "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
     "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
     "Info/Runtimes/kinetic_forces" => (; long_name="wall-clock time of the KineticForces (NTV) stage", units="s"),
+    "Info/Runtimes/error_fields" => (; long_name="wall-clock time of the ErrorFields stage (coil sensitivities, Monte Carlo, locking risk)", units="s"),
     "Info/Runtimes/total" =>
         (; long_name="wall-clock time of the full GPEC run (the per-stage values nest rather than partition it, so they do not sum to this)", units="s"),
 ]
