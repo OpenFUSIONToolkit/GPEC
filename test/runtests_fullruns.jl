@@ -31,6 +31,10 @@ using HDF5
             # Per-stage wall-clock records (informational, not regression quantities).
             @test haskey(h5, "Info/Runtimes/total") && read(h5["Info/Runtimes/total"]) > 0
             @test haskey(h5, "Info/Runtimes/force_free_states")
+            # Kinetic runs never populate the asymptotic ca coefficients; the writer must
+            # emit deterministic zero-extent sentinels, not uninitialized memory.
+            @test isempty(read(h5["SingularSurfaces/ca_left"]))
+            @test isempty(read(h5["SingularSurfaces/ca_right"]))
         end
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true

@@ -27,7 +27,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `tau`      | T_i / T_e                                                         |
 | `lu`       | Lundquist number S = τ_R / τ_H                                    |
 | `c_beta`   | Compressibility √(β_local / (1 + β_local))                        |
-| `D_norm`   | (d_β/r_s) · S^(1/3) · √(τ/(1+τ))  (Fitzpatrick normalized scale)  |
+| `D_norm`   | (d_β/r_s) · S^(1/3) · √ι_e  (Fitzpatrick normalized scale)        |
 | `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                            |
 | `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
 | `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
@@ -46,6 +46,15 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
 | `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
 | `dc_type`  | Selector for `dc_tmp` formula                                     |
+| `k_ref`    | Reference-length ratio K = r_s · (dψ_N/dr) at this surface (1 = no Δ' conversion) |
+| `alpha_mercier` | Mercier Frobenius exponent α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48) governing the Δ' reference-length conversion (1/2 = slab/cylindrical value) |
+
+`k_ref` and `alpha_mercier` feed the ψ_N → r_s reference-length conversion of
+the outer Δ' matrix (see `delta_prime_to_rs_reference` in the Tearing
+runner): the slab layer, its `dc_tmp` critical-Δ, and the `S^(1/3)` Δ(Q)
+scale are all referenced to unit `x̂ = (r−r_s)/r_s`, while the outer BVP Δ'
+is referenced to unit Δψ_N. Hand-built parameters default to `k_ref = 1`,
+which makes the conversion the identity.
 
 The complex normalized growth rate `Q = ω + iγ` is **not** stored here;
 it is passed as a separate argument to `solve_inner`.
@@ -85,6 +94,10 @@ Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     # Critical-Δ offset
     dc_tmp::Float64 = 0.0
     dc_type::Symbol = :none
+
+    # Reference-length conversion inputs for the outer Δ' (ψ_N → r_s-based x̂)
+    k_ref::Float64 = 1.0
+    alpha_mercier::Float64 = 0.5
 end
 
 # Allowed dc_type values for the critical-Δ offset. `:none` is the default
@@ -133,11 +146,11 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     Wd = 0.1
     converged = false
     for _ in 1:max_iter
-        chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * sval_r * Wd)
+        chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * abs(sval_r) * Wd)
         chi_par = (chi_par_smfp * chi_par_lmfp) /
                   (chi_par_smfp + chi_par_lmfp)
         Wd_new = sqrt(8.0) * (chi_perp / chi_par)^0.25 *
-                 (1.0 / sqrt((rs / R0) * sval_r * n_tor))
+                 (1.0 / sqrt((rs / R0) * abs(sval_r) * n_tor))
         if abs(Wd_new - Wd) / max(abs(Wd), 1e-30) < tol
             Wd = Wd_new
             converged = true
@@ -147,13 +160,13 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     end
     converged || error("SLAYERParameters: Wd iteration failed to converge")
 
-    chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * sval_r * Wd)
+    chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * abs(sval_r) * Wd)
     chi_par = (chi_par_smfp * chi_par_lmfp) / (chi_par_smfp + chi_par_lmfp)
 
     if dc_type === :lar
         return 0.5 * (-dr_val) * π^1.5 *
                (chi_par / chi_perp)^0.25 *
-               sqrt((n_tor * sval_r) / (R0 * rs))
+               sqrt((n_tor * abs(sval_r)) / (R0 * rs))
     elseif dc_type === :rfitzp
         return -(sqrt(2.0) * π^1.5 * dr_val) / Wd
     elseif dc_type === :toroidal
@@ -202,6 +215,12 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
   - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
+  - `k_ref`   -- reference-length ratio K = r_s·(dψ_N/dr) at the surface,
+    used by the Tearing runner to convert the ψ_N-referenced outer Δ' to
+    the r_s-referenced convention this layer works in (default `1.0`,
+    i.e. no conversion; `build_slayer_inputs` fills it from the equilibrium)
+  - `alpha_mercier` -- Mercier Frobenius exponent α = √(−D_I) for the same conversion
+    (default `0.5`, the slab/cylindrical value at D_I = −1/4)
 
 # Resistivity kwargs
 
@@ -252,7 +271,9 @@ function slayer_parameters(;
     f_trap::Union{Real,Nothing}=nothing,
     nu_e_star::Union{Real,Nothing}=nothing,
     R_major_eff::Union{Real,Nothing}=nothing,
-    lnLambda_form::Symbol=:nrl)
+    lnLambda_form::Symbol=:nrl,
+    k_ref::Real=1.0,
+    alpha_mercier::Real=0.5)
 
     # Coulomb logarithm shared by the resistivity closure and τ_ee.
     lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
@@ -297,8 +318,10 @@ function slayer_parameters(;
 
     # Alfven time uses minor-radius shear directly (sval enters the
     # b_l = (n/m) r_s sval bt / R0 expression and cancels through to
-    # tau_h = R0 sqrt(mu0 rho) / (n sval bt)).
-    tau_h = R0 * sqrt(MU_0 * rho) / (n * sval_r * bt)
+    # tau_h = R0 sqrt(mu0 rho) / (n sval bt)). Magnitude only: the layer timescales and
+    # widths depend on |dq/dr|, not its sign, and a reverse-shear surface would otherwise
+    # give tau_h < 0, hence lu < 0 and a DomainError in lu^(1/3) below.
+    tau_h = R0 * sqrt(MU_0 * rho) / (n * abs(sval_r) * bt)
     # Resistive diffusion time τ_R = μ₀ r_s² / η (Fitzpatrick 2023), with
     # the selected η closure — neoclassical by default — setting the
     # Lundquist number.
@@ -327,6 +350,16 @@ function slayer_parameters(;
             )
         )
     iota_e = Q_e / Q_e_minus_Q_i
+    iota_e > 0 ||
+        throw(
+            ArgumentError(
+                "slayer_parameters: iota_e = Q_e/(Q_e - Q_i) = $iota_e is " *
+                "not positive, so the ion-sound-radius normalization " *
+                "D_norm = (d_beta/r_s)·S^(1/3)·sqrt(iota_e) is undefined. " *
+                "Check the diamagnetic-frequency inputs ω_*e, ω_*i — they " *
+                "are expected to carry opposite signs."
+            )
+        )
 
     # Plasma beta and compressibility
     lbeta = (5.0 / 3.0) * MU_0 * n_e * E_CHG * (t_e + t_i) / bt^2
@@ -340,7 +373,7 @@ function slayer_parameters(;
 
     # Normalized beta-related width and Δ-normalization
     d_beta = c_beta * d_i
-    D_norm = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(tau / (1.0 + tau))
+    D_norm = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(iota_e)
     delta_n = lu^(1.0 / 3.0) / rs
 
     # Critical-Δ offset from chi_parallel matching
@@ -358,6 +391,7 @@ function slayer_parameters(;
         rs=rs, R0=R0, bt=bt, sval_r=sval_r,
         dr_val=dr_val, dgeo_val=dgeo_val,
         eta=eta, d_beta=d_beta,
-        dc_tmp=dc_tmp, dc_type=dc_type
+        dc_tmp=dc_tmp, dc_type=dc_type,
+        k_ref=k_ref, alpha_mercier=alpha_mercier
     )
 end

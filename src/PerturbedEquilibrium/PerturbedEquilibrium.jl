@@ -11,7 +11,7 @@ using FastInterpolations
 # Import parent modules
 import ..Equilibrium
 import ..ForceFreeStates
-import ..ForceFreeStates: SolutionProfiles, ForceFreeStatesResult, FourFitVars, MetricData
+import ..ForceFreeStates: SolutionProfiles, ForceFreeStatesResult, MatrixSplines, MetricData
 import ..Vacuum
 import ..ForcingTerms
 import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization!
@@ -25,6 +25,7 @@ include("ResponseMatrices.jl")
 include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
+include("ResonantCoupling.jl")
 include("Utils.jl")
 
 # Export main types
@@ -36,6 +37,7 @@ export ForcingMode
 # Export main functions
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
+export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
 
 """
     compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
@@ -68,7 +70,7 @@ function compute_perturbed_equilibrium(
 
     state = PerturbedEquilibriumState()
     equil = ffs.equil
-    ffit = ffs.ffit
+    mats = ffs.mats
     mthvac = ffs.control.mthvac
 
     # Step 0: Initialize mode arrays for convenient indexing
@@ -92,14 +94,15 @@ function compute_perturbed_equilibrium(
     if ctrl.compute_response &&
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
-        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, ffit)
+        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, mats)
     end
 
     # Step 3: Compute singular coupling metrics
     if ctrl.compute_singular_coupling &&
        ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
        ForceFreeStates.require_solution(ffs, "singular coupling calculation")
-        compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, ffit)
+        compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, mats)
+        compute_dominant_coupling!(state, ctrl)
     end
 
     # Step 4: Output eigenmode fields (integrated into HDF5 output)

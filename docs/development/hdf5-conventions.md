@@ -25,7 +25,7 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 - **"rational" over "singular"** in dataset names (`rational_psi`, `rational_q`, `rational_m`, `rational_n`, `rational_index`, `rational_count`) — kinetic/resistive runs are not singular at the rationals. Specifier order is standardized specifier-first (`rational_psi`, never `psi_rational`).
 - **Vector components** follow `[d]<variable>[_<representation>]_<coordinate>[dpsi]` — the variable always comes first and the coordinate is always the trailing subscript. A bare coordinate suffix is the **contravariant** component (`xi_psi` = ξ^ψ), `_cov_` marks the **covariant** one (`b_cov_theta` = b_θ), a leading `J` marks a **Jacobian-weighted** component (`Jxi_theta` = J·ξ^θ), and other representations sit in the same slot (`xi_clebsch_psi`, `dxi_clebsch_psidpsi`). Never drop the variable: `clebsch_psi` is wrong because it does not say *what* is being represented. There is no HDF5/netCDF standard for super- vs subscripts — flat `_` names are universal — so the typeset form always appears in the dataset's `long_name`.
 - **Coordinates**: the radial abscissa is `psi` (normalized poloidal flux ψ_N) and the poloidal one is `theta` in every group; never `psi_n`, `xs`, or `ys`.
-- **One name per physical quantity**: a quantity written in several groups carries the identical leaf name everywhere (`rational_psi` in `SingularSurfaces/`, `Solutions/GalerkinIntegration/`, and `SingularCoupling/`; `Delta_prime_matrix` in `SingularSurfaces/` and `Tearing/PerSurface/`; `dVdpsi` in `Profiles/`, `SingularSurfaces/`, and `KineticForces/<method>/`) — the group supplies the context, the leaf supplies the identity.
+- **One name per physical quantity**: a quantity written in several groups carries the identical leaf name everywhere (`rational_psi` in `SingularSurfaces/`, `Solutions/GalerkinIntegration/`, and `SingularCoupling/`; `Delta_prime_matrix` in `SingularSurfaces/` and, on the GGJ path, `Tearing/PerSurface/` — the r_s-referenced matrix the slab layer matches is a different quantity and so carries its own name, `Tearing/PerSurface/Delta_prime_matrix_rs`; `dVdpsi` in `Profiles/`, `SingularSurfaces/`, and `KineticForces/<method>/`) — the group supplies the context, the leaf supplies the identity.
 
 ## Inputs live only under `Input/`
 
@@ -33,7 +33,7 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 
 ## Schema
 
-Top level (10 groups):
+Top level (11 groups):
 
 | Group | Contents |
 |---|---|
@@ -45,6 +45,7 @@ Top level (10 groups):
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
 | `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
+| `ErrorFields/` | `CoilSensitivities/` (per-coil-set control-surface spectra and their rigid shift/tilt derivatives, `DominantMode/` full-window projection); `MonteCarlo/` (intrinsic and corrected `\|δ\|` histograms over the sampled tolerances, per batch and averaged); `Risk/` (threshold density, `P(lock\|δ)`, locking probabilities, `ToleranceScan/`); `NTV/` (correction-coil overlap and NTV torque couplings per kAt) |
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
 
@@ -67,6 +68,7 @@ Mechanism: writers stay table-driven — each writer keeps a `path => (; long_na
 
 - Complex quantities are stored as the native HDF5.jl compound type (readable by h5py as a compound dtype) — **never split into `*_real`/`*_imag` dataset pairs**. Sole sanctioned exception: `Input/RawInputs/ForcingTerms/amplitude_{real,imag}`, which mirrors the external forcing ingest-file format and keeps pre-existing snapshots replayable.
 - `NaN` is the not-computed sentinel in numeric datasets (e.g. auto-derived settings, rootless growth-rate entries).
+- A **zero-extent array** is the not-computed sentinel for whole datasets that a given run never produces (e.g. `SingularSurfaces/ca_left`/`ca_right` on kinetic or galerkin-matched runs, the free-boundary energies when `vac_flag=false`, the on-demand derivative stores). Never write unpopulated (`undef`) memory.
 - Ragged (variable-length) data uses the flat-plus-`offsets` companion pattern (`offsets[k+1] - offsets[k]` = length of row `k`) rather than HDF5 VLEN types, e.g. `KineticForces/<method>/EnergyIntegrals/` and `Tearing/Diagnostics/*`.
 
 ## Back-compatibility policy

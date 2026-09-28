@@ -1,7 +1,7 @@
 """
     compute_plasma_response!(
         state, equil, solution, wt0, mthvac, ffs,
-        intr, ctrl, metric, ffit
+        intr, ctrl, metric, mats
     )
 
 Compute plasma response to external forcing using ForceFreeStates eigenmode solutions.
@@ -24,7 +24,7 @@ function compute_plasma_response!(
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
     metric::MetricData,
-    ffit::FourFitVars
+    mats::MatrixSplines
 )
     if ctrl.verbose
         @info "Computing plasma response (wt0-based inductance)"
@@ -95,11 +95,13 @@ function compute_plasma_response!(
     state.vacuum_energy = real(vy)
     state.surface_energy = real(sy)
     state.plasma_energy = real(py)              # Fortran's "total energy" is this pengy
+    # Boundary-response torque: distinct construction from the KineticForces NTV torque —
+    # see the PerturbedEquilibriumState docstring for the delineation of GPEC torque outputs.
     state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(
         response_flux, flux_matrix, solution, equil, ffs, intr,
-        metric, ffit, ctrl
+        metric, mats, ctrl
     )
 
     npsi = size(solution.u_store, 4)

@@ -654,6 +654,7 @@ robustness.
 
     params = EquilibriumParameters()
     params.bt_sign = raw_profile.bt_sign
+    params.ip_sign = raw_profile.ip_sign
     params.psihigh_resolved = psihigh
 
     return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,

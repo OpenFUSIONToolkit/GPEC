@@ -327,6 +327,8 @@ function plot_delta_prime(h5path; save_path=nothing)
     end
 
     msing == 0 && return plot(; title="No singular surfaces found", legend=false)
+    # ca_left/ca_right are zero-extent sentinels on kinetic/galerkin-matched runs (never computed there).
+    isempty(ca_l) && return plot(; title="No asymptotic coefficients — ca_left/ca_right not computed for this run", legend=false)
 
     numpert_total = size(ca_l, 1)
     chi1 = 2π * psio
