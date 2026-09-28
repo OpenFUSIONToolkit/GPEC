@@ -26,6 +26,9 @@ plasma solve or a new Biot-Savart integration.
   shapes, `sample_disk`, `sample_uncertainty`, and the additive and cylinder tolerance models
 - `MonteCarlo.jl`: `run_monte_carlo`, the batched, seeded recombination of a `SensitivityTable`
   with a `ToleranceSet` into intrinsic and corrected `|δ|` histograms
+- `Risk.jl`: the ITPA penetration-threshold scalings, keyed by publication year (the 2020 n = 1
+  and n = 2 fits, the 2026 n = 1 OLS and WLS fits), `locking_risk` (the overlap distribution
+  convolved with the threshold distribution), `tolerance_scan` and `allowable_tolerance`
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface
 spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
@@ -52,6 +55,7 @@ include("Sensitivity.jl")
 include("ToleranceTOML.jl")
 include("Sampling.jl")
 include("MonteCarlo.jl")
+include("Risk.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
@@ -63,5 +67,7 @@ export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tole
 export RadialDistribution, Flat, UniformArea, Hollow, Ring, PowerLaw, randpow, radial_distribution
 export disk_radius, sample_disk, sample_uncertainty, sample_additive, sample_cylinder
 export MonteCarloControl, MonteCarloResult, run_monte_carlo
+export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_label, ScenarioParameters, nominal_threshold, threshold_samples
+export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
 
 end # module ErrorFields

@@ -28,6 +28,30 @@ include("h5_metadata_check.jl")
         @test 1.0 + Δx + 2Δy ≈ 0 atol = 1e-14
     end
 
+    @testset "locking risk convolution" begin
+        # A flat |δ| distribution on [0, 2δ₀] against thresholds spread across it. Both halves are
+        # constructed, so the answer is arithmetic rather than whatever a fixture happens to produce.
+        edges = collect(range(0, 2.0e-4; length=201))
+        pdf = fill(1 / (edges[end] - edges[1]), length(edges) - 1)
+        mc = EF.MonteCarloResult(edges, pdf, pdf, reshape(pdf, :, 1), reshape(pdf, :, 1),
+            1.0e-4, 2.0e-4, 1.0e-4, 1.0e-4, 0.0, 1000, 1, 1)
+        sc = EF.threshold_scaling(; n=1)
+        scen = EF.ScenarioParameters(; n_e=5.0, b_t0=2.0, r_0=1.7, beta_n=1.0, l_i=1.0)
+
+        # Every threshold above the distribution: nothing ever locks.
+        @test EF.locking_risk(mc, fill(1.0, 100), sc, scen).plock == 0
+        # Every threshold below it: everything locks, to the width of the bin the zero edge pins.
+        @test EF.locking_risk(mc, fill(1.0e-12, 100), sc, scen).plock ≈ 100 atol = 0.5
+        # Thresholds spread uniformly across the distribution: a flat δ against a flat threshold
+        # gives half, since P(δ > threshold) = 1/2 for two independent uniforms on the same range.
+        straddling = EF.locking_risk(mc, collect(range(0, 2.0e-4; length=20_001)), sc, scen)
+        @test 0 < straddling.plock < 100
+        @test straddling.plock ≈ 50 atol = 1.0
+        # Shifting the thresholds down can only raise the risk.
+        lower = EF.locking_risk(mc, collect(range(0, 1.0e-4; length=20_001)), sc, scen)
+        @test lower.plock > straddling.plock
+    end
+
     @testset "coil-forced Solovev run: identities, output, and post-hoc entry point" begin
         template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
@@ -51,7 +75,9 @@ include("h5_metadata_check.jl")
                 "verbose" => false, "write_outputs_to_HDF5" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
             inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
-                "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100))
+                "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100),
+                "scenario" => Dict{String,Any}("n_e" => 12.0),
+                "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -122,6 +148,37 @@ include("h5_metadata_check.jl")
             @test rerun.pdf == mc.pdf
             windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[end], nsample=5_000, nbatch=1, seed=5, nbins=50)
             @test windowed_mc.delta_nominal ≈ abs(sum(windowed.delta_nominal))
+
+            # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
+            risk = res.locking_risk
+            @test risk isa EF.RiskResult
+            @test risk.scaling.n == 1 && risk.scaling.year == 2020 && risk.scaling.dataset == "O,L" && risk.scaling.fit == "WLS"
+            @test risk.threshold_nominal == EF.nominal_threshold(risk.scaling, EF.ScenarioParameters(ffs.equil; n_e=12.0))
+            @test 0 <= risk.plock_efc <= risk.plock <= 100
+            @test length(risk.plock_batches) == 2
+            h5open(h5path, "r") do f
+                @test haskey(f, "ErrorFields/Risk/plock_percent") && haskey(f, "ErrorFields/Risk/ToleranceScan/scale")
+                @test read(f["ErrorFields/Risk/plock_percent"]) == risk.plock
+                @test isempty(_collect_metadata_violations(f))
+            end
+            scan = EF.ToleranceScan(h5path)
+            @test scan.scale == [0.5, 1.0, 2.0]
+            @test all(diff(scan.plock) .>= -0.5)                          # risk grows with tolerance (to Monte Carlo noise)
+            # Two 2 kA hoops on a toy equilibrium drive an overlap around 1e-5, two orders below the
+            # ITPA threshold at any plausible density, so zero risk is the right answer here and the
+            # scan is flat. The convolution itself is pinned by its own testset above, on a
+            # distribution built to straddle a threshold.
+            @test risk.plock == 0
+            @test scan.plock[2] ≈ risk.plock rtol = 1e-12                # the scale-1 point is the run's own Monte Carlo
+            again = EF.locking_risk(h5path; n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
+                risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
+            @test again.plock == risk.plock
+            # The scan's own file entry point at unit scale is that same re-run.
+            rescan = EF.tolerance_scan(h5path; scales=[1.0], n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
+                risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
+            @test rescan.scale == [1.0]
+            @test rescan.plock[1] == again.plock
+            @test rescan.plock_efc[1] == again.plock_efc
             from_file = EF.CoilSensitivities(h5path)
             @test from_file.coil_names == sens.coil_names
             @test from_file.m_modes == sens.m_modes && from_file.n_modes == sens.n_modes
