@@ -16,7 +16,6 @@ include("DataTypes.jl")
 include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
-include("Field.jl")
 
 export VacuumInput, VacuumResponse, WallShapeSettings
 export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
