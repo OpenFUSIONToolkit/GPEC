@@ -66,7 +66,7 @@ temperatures eV, frequencies rad/s, diffusivities m²/s.
 | `T_i`/`T_e`         | ion / electron temperature                                                                                        |
 | `omega_E`           | ExB rotation                                                                                                      |
 | `omega_tor`         | toroidal rotation (optional)                                                                                      |
-| `chi_e`             | perpendicular heat diffusivity χ⊥                                                                                 |
+| `chi_e`             | perpendicular heat diffusivity χ⊥ (shipped data: electron power-balance χ_e; see the stability docs)              |
 | `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
 | `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
 | `provenance`        | short string recording the source file/format                                                                     |
