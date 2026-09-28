@@ -766,11 +766,14 @@ function cross_ideal_singular_surf!(
     ising::Int
 )
 
-    # Fixup solution at singular surface
-    compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+    singp = intr.sing[ising]
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+
+    # Fixup solution at singular surface; the ideal jump reduces on the resonant rows so the
+    # solution it removes below is the resonant one
+    compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=(ctrl.kinetic_factor == 0 ? ipert_res : Int[]))
 
     # Compute direction-specific asymptotic power series for this singular surface
-    singp = intr.sing[ising]
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
     sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
     dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
@@ -779,18 +782,14 @@ function cross_ideal_singular_surf!(
     ua = sing_get_ua(sing_asymp_left, dpsi)
     odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
-    # Single n: remove largest solution and sub in asymptotics on the other side
-    # Multi-n: if we remove the N largest modes in arbitrary order, we can mess up the
-    # diagonal structure of the matrix and later calculations. zeroed_idx let's us make sure
-    # the solution vector we're zeroing corresponds to the same block as the resonant mode we
-    # introduce. It is also needed when transforming u back to the full solution after integration.
-    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    # Remove the resonant solution for each resonance and sub in asymptotics on the other side.
+    # The reduction above placed the column pivoted on ipert_res[i] at index position i, which also
+    # keeps each zeroed column in the same n-block as the resonant mode introduced below; zeroed_idx
+    # records the positions for transforming u back to the full solution after integration.
     if ctrl.kinetic_factor == 0
-        # Eliminate the solution with the largest norm (in the same block) for each resonance
-        odet.zeroed_idx[odet.ifix] = Int[]
-        for i in eachindex(sing_asymp_right.r1)
-            push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
-            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
+        odet.zeroed_idx[odet.ifix] = collect(eachindex(ipert_res))
+        for i in eachindex(ipert_res)
+            odet.u[:, odet.index[i, odet.ifix], :] .= 0
         end
     end
 
@@ -960,7 +959,7 @@ function integrate_el_region!(
 end
 
 """
-    compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
+    compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
 Computes norms of the solution vectors of the array `u` and normalizes them
 if this is not the first call after a fixup. Formerly `ode_unorm!`.
@@ -979,12 +978,16 @@ operate on `u` directly without extra copies.
 
   - u: Current solution vector array, updated in-place if fixfac is called
   - sing_flag: Indicates if normalization is occuring at a singular surface or not
+  - resonant_rows: Rows of the resonant harmonics at an ideal crossing. When given, the reduction
+    always runs, even right after a `ucrit` reduction, and pivots on these rows (see
+    `apply_gaussian_reduction!`)
 
 ### TODOs
 
 Add resizing logic for unorm arrays when ifix exceeds allocated size
 """
-function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
+function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool;
+    resonant_rows=Int[])
 
     # Compute norms of first solution vectors, abort if any are zero
     odet.unorm .= norm.(eachcol(u[:, :, 1]))
@@ -994,11 +997,11 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     end
 
     # Normalize unorm and perform Gaussian reduction if required
-    if odet.new
+    if odet.new && isempty(resonant_rows)
         odet.new = false
         odet.unorm0 .= odet.unorm
     else
-        odet.unorm ./= odet.unorm0
+        odet.new || (odet.unorm ./= odet.unorm0)
         uratio = maximum(odet.unorm) / minimum(odet.unorm)
         if uratio > ctrl.ucrit || sing_flag
             # TODO: add resizing logic here as well
@@ -1008,14 +1011,14 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
                 @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
                 Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
             end
-            apply_gaussian_reduction!(u, odet, intr, sing_flag)
+            apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
             odet.new = true
         end
     end
 end
 
 """
-    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
+    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
 Applies Gaussian reduction to orthogonalize solution vectors in `u`.
 Formerly `ode_fixup!`. Performs the same function as `ode_fixup` in the Fortran code,
@@ -1024,8 +1027,14 @@ Used when the spread in norms exceeds a threshold or when a rational surface is 
 This will update both `u` and relevant fields in `odet` in-place. See the
 description of `compute_solution_norms!` for more details on the benefits of in-place `u`
 updates.
+
+Columns are triangularized in order of their growth since the last reduction. At an ideal
+crossing, `resonant_rows` puts first, for each resonant row, the column with the largest
+component there and pivots it on that row, so that column alone carries the resonant harmonic.
+Growth order cannot identify the resonant solution when a `ucrit` reduction fired only a few
+steps before the crossing, because every column has then grown alike.
 """
-function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
+function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
     # Store data for the current fixup
     ifix = odet.ifix
@@ -1038,16 +1047,20 @@ function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr:
     for isol in 1:intr.numpert_total
         odet.fixfac[isol, isol, ifix] = 1
     end
-    # Sort unorm in descending order (since we triangularize from largest to smallest)
-    odet.index[:, ifix] = sortperm(odet.unorm; rev=true)
+    # Resonant columns first, then the rest in descending unorm (we triangularize from largest to smallest)
+    lead = Int[]
+    for r in resonant_rows
+        push!(lead, argmax(j -> j in lead ? -Inf : abs(u[r, j, 1]), 1:intr.numpert_total))
+    end
+    odet.index[:, ifix] = vcat(lead, filter(j -> !(j in lead), sortperm(odet.unorm; rev=true)))
 
     # Triangularize primary solutions
     mask = trues(2, intr.numpert_total)
     for isol in 1:intr.numpert_total
         ksol = odet.index[isol, ifix]
         mask[2, ksol] = false
-        # Set pivot row based on max location
-        @views kpert = argmax(abs.(u[:, ksol, 1]) .* mask[1, :])
+        # Set pivot row: the resonant row for a leading resonant column, else the max location
+        @views kpert = isol <= length(lead) ? resonant_rows[isol] : argmax(abs.(u[:, ksol, 1]) .* mask[1, :])
         mask[1, kpert] = false
         # Eliminate other solution vectors below the pivot
         for jsol in 1:intr.numpert_total
