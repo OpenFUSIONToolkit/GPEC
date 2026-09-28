@@ -82,7 +82,8 @@ include("h5_metadata_check.jl")
                 "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100),
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
-                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"]))
+                # The smallest rotation scan that exercises the table path (three shifts, no refinement).
+                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"], "rotation_scan_points" => 3, "rotation_scan_max_points" => 3))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -251,6 +252,80 @@ include("h5_metadata_check.jl")
                 bars = real.(conj.(v_plot) .* o.spectrum .* cis(-angle(o.raw))) ./ o.spectrum_norm
                 @test 100 * sum(bars) ≈ o.fraction_percent rtol = 1e-10
             end
+            # The resonant fraction the plot derives from the stored field and overlap is the one
+            # the overlap diagnostics report; a table alone cannot supply it, and a name no source
+            # carries is an error rather than an empty bar.
+            frac = AEF.plot_coil_sensitivities(h5path; quantity=:fraction)
+            @test frac[1][:yaxis][:guide] == "resonant fraction of |b̃| [%]"
+            fraction_drawn = AEF._sensitivity_values("run", AEF._load(h5path), sens.coil_names, :fraction)
+            for o in ovs_plot
+                @test fraction_drawn[findfirst(==(o.coil_name), sens.coil_names)] ≈ o.fraction_percent rtol = 1e-8
+            end
+            @test AEF._sensitivity_values("ovs", AEF._load(ovs_plot), sens.coil_names, :fraction) ≈ fraction_drawn rtol = 1e-8
+            @test_throws ArgumentError AEF.plot_coil_sensitivities(table; quantity=:fraction)
+            @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; coils=["hoop_tilted", "no_such_coil"])
+            @test_throws ArgumentError AEF.plot_coil_sensitivities(ovs_plot; quantity=:shift)
+            # On a logarithmic axis the values are stems and markers, never bars.
+            stems = AEF.plot_coil_sensitivities(h5path; yscale=:log10, save_path=joinpath(dir, "stems.png"))
+            @test stems[1][:yaxis][:scale] === :log10
+            @test all(st[:seriestype] in (:path, :scatter) for st in stems.series_list)
+            @test AEF.plot_coil_sensitivities(h5path; quantity=:nominal, yscale=:log10) isa Plots.Plot
+
+            # The head-to-tail phasor walk ends at the coherent as-designed total the Monte Carlo
+            # starts from; the tilted hoop carries the whole n=1 overlap and the axisymmetric one none.
+            phasors = AEF.plot_overlap_phasors(h5path; save_path=joinpath(dir, "phasors.png"))
+            @test phasors isa Plots.Plot
+            @test abs(sum(AEF._load(h5path).delta_nominal)) ≈ mc.delta_nominal rtol = 1e-10
+            @test length(AEF.plot_overlap_phasors(["file" => h5path, "memory" => table]).subplots) == 2
+            @test AEF.plot_overlap_phasors(ovs_plot; coils=["hoop_axi"]) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_overlap_phasors(h5path; coils=["no_such_coil"])
+
+            # The worst-case budget's terms sum to the bound the Monte Carlo sized its histogram
+            # by, from memory and from the file, and each term is what the bound charges: the
+            # cylinder coil's tilt reach is the angle its axis line can reach, not its tilt_tol.
+            terms = EF.worst_case_terms(table, snapshot, plot_sets)
+            @test terms.total ≈ mc.delta_worst rtol = 1e-12
+            @test sum(terms.nominal) + sum(terms.shift) + sum(terms.tilt) + sum(terms.group_shift) + sum(terms.group_tilt) + terms.other ≈ mc.delta_worst rtol = 1e-12
+            @test terms.coil_names == sens.coil_names && terms.group_names == ["both_hoops"]
+            @test terms.nominal ≈ abs.(table.delta_nominal)
+            @test terms.other ≈ 8.2e-6 + 3 * 1.0e-6
+            i_axi = findfirst(==("hoop_axi"), sens.coil_names)
+            reach = rad2deg(atan(2.0e-3 / 1.5))
+            @test terms.tilt[i_axi] ≈ max(abs(table.tilt[1, i_axi]), abs(table.tilt[2, i_axi])) * reach rtol = 1e-12
+            @test terms.shift[i_axi] ≈ max(abs(table.shift[1, i_axi]), abs(table.shift[2, i_axi])) * (2.0e-3 + 3 * 1.0e-4) rtol = 1e-12
+            from_file = EF.worst_case_terms(h5path)
+            @test from_file.total ≈ mc.delta_worst rtol = 1e-10
+            @test EF.worst_case_terms(table, snapshot, plot_sets; tolerance_scale=2.0).shift[i_axi] > terms.shift[i_axi]
+            budget = AEF.plot_tolerance_budget(h5path; save_path=joinpath(dir, "budget.png"))
+            @test budget isa Plots.Plot && isfile(joinpath(dir, "budget.png"))
+            @test AEF.plot_tolerance_budget(table, snapshot, plot_sets; monte_carlo=mc, sort=:name) isa Plots.Plot
+            @test AEF.plot_tolerance_budget(terms; top=1, sort=:none) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_tolerance_budget(terms; sort=:bogus)
+
+            # Linearity residuals: at the tolerance each tap is the stored ratio scaled by
+            # tolerance / step, with the metres tilt of the tilted hoop converted through its radius.
+            lin_step = AEF.plot_linearity_residuals(h5path; at=:step, save_path=joinpath(dir, "linearity.png"))
+            @test lin_step isa Plots.Plot && isfile(joinpath(dir, "linearity.png"))
+            @test AEF.plot_linearity_residuals(h5path) isa Plots.Plot
+            @test AEF.plot_linearity_residuals(sens; at=:step) isa Plots.Plot
+            @test AEF.plot_linearity_residuals(sens; tolerances=snapshot, fd_step_shift_m=1e-3, fd_step_tilt_deg=0.1) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_linearity_residuals(sens)
+            @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; at=:bogus)
+            i_tilted = findfirst(==("hoop_tilted"), sens.coil_names)
+            tilt_deg = EF.tilt_tolerance_deg(0.002, "m", sens.nominal_radius[i_tilted])
+            @test tilt_deg ≈ EF.tilt_tolerance_deg(0.002, "m", plot_sets[findfirst(cs -> cs.name == "hoop_tilted", plot_sets)])
+            @test_throws ArgumentError EF.tilt_tolerance_deg(5.0, "m", 1.5)
+            at_tol = AEF._linearity_matrix("run", AEF._load(h5path), sens.coil_names, :tolerance)
+            @test size(at_tol) == (6, 2)
+            @test at_tol[1, i_tilted] ≈ sens.shift_linearity_residual[1, i_tilted] * (0.5e-3 / 1e-3) rtol = 1e-12
+            @test at_tol[4, i_tilted] ≈ sens.tilt_linearity_residual[1, i_tilted] * (tilt_deg / 0.1) rtol = 1e-12
+            @test at_tol[6, i_axi] ≈ sens.tilt_linearity_residual[3, i_axi] * (0.019 / 0.1) rtol = 1e-12
+            @test AEF._linearity_matrix("run", AEF._load(h5path), sens.coil_names, :step) == hcat(vcat(sens.shift_linearity_residual, sens.tilt_linearity_residual))
+
+            # Batches draw under the mean without turning the density into bars.
+            batched = AEF.plot_tolerance_pdf(h5path; show_batches=true)
+            @test length(batched.series_list) == length(AEF.plot_tolerance_pdf(h5path).series_list) + mc.nbatch
+
             # The target risk adds its own line and the allowable-tolerance markers.
             @test length(AEF.plot_locking_risk(h5path; target_percent=1.0).series_list) > length(AEF.plot_locking_risk(h5path).series_list)
             @test length(AEF.plot_error_field_summary(h5path; save_path=joinpath(dir, "summary.png")).subplots) == 4
@@ -294,6 +369,14 @@ include("h5_metadata_check.jl")
             @test c.delta_per_kat ≈ abs(table.delta_nominal[1]) / kat rtol = 1e-6
             @test 0 < c.overlap_percent <= 100
             @test isfinite(c.torque_full_per_kat2) && isfinite(c.torque_residual_per_kat2)
+            # The rotation scan the run tabulated: symmetric about the unshifted point, whose torques
+            # are the nominal ones, with a cumulative profile that starts at zero on the kinetic grid.
+            @test EF.has_rotation_scan(c)
+            @test length(c.rotation_shift) == 3 && c.rotation_shift[2] == 0.0 && c.rotation_shift[1] ≈ -c.rotation_shift[3]
+            @test c.torque_full_scan[2] == c.torque_full_per_kat2 && c.torque_residual_scan[2] == c.torque_residual_per_kat2
+            @test isfinite(c.omega_reference) && c.omega_reference != 0
+            @test c.psi[1] == 0.0 && c.psi[end] == 1.0 && issorted(c.psi)
+            @test size(c.torque_full_profile) == (length(c.psi), 3) && c.torque_full_profile[1, 2] == 0.0
             @test abs(dot(dom.right_singular_vectors[:, 1], EF.residual_spectrum(dom, sens.nominal_field[:, 1]))) < 1e-12
             @test EF.read_efc_couplings(h5path)[1] == c
             h5open(h5path, "r") do f
@@ -304,6 +387,11 @@ include("h5_metadata_check.jl")
             @test length(curve.delta_ef) == 500 && all(curve.current_linear .>= 0)
             ntv_plot = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png"))
             @test length(ntv_plot.series_list) >= 2                        # the single-mode and NTV-limited currents
+            @test length(ntv_plot.subplots) == 2                            # the scan adds the torque-against-rotation panel
+            with_profiles = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, profiles=true)
+            @test length(with_profiles.subplots) == 3                       # and the deposition profile its own panel
+            @test with_profiles[3].series_list[1][:y] == c.torque_full_profile[:, 2]
+            @test with_profiles[3].series_list[2][:y] == c.torque_residual_profile[:, 2]
             @test_throws ErrorException GPEC.efc_couplings(ffs, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl(), nothing)
 
             # Central differences: doubling the step moves the derivatives at O(h²).

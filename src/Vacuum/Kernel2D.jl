@@ -659,8 +659,8 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     D = a + ζ2            # x_obs2 - x_source2 + ζ2
     E = ζ2 - a             # x_source2 - x_obs2 + ζ2
     fourXmult = 4 * x_multiple
-    twoXobsD  = 2 * x_obs * D
-    xSourceE  = x_source * E
+    twoXobsD = 2 * x_obs * D
+    xSourceE = x_source * E
 
     s = S / R2
 
@@ -677,7 +677,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     G_n = gg * pn
     grad_gg = gg / (2π * R4)
 
-    dG_dX = grad_gg * ( (n * S * D - x_source * xSourceE) * pn / x_source + twoXobsD * pnp1 )
+    dG_dX = grad_gg * ((n * S * D - x_source * xSourceE) * pn / x_source + twoXobsD * pnp1)
     dG_dZ = grad_gg * ((2n + 1) * S * pn + fourXmult * pnp1) * ζ
 
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
