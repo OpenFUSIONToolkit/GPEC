@@ -35,7 +35,7 @@ include("h5_metadata_check.jl")
 
         # The default is the core window ψ_N ≤ 0.9; the full window reproduces the plain SVD; an empty window is an error.
         core = PE.dominant_coupling(C, rational_psi)
-        @test core.rational_index == [1, 2, 3] && PE.CORE_PSI_HIGH == 0.9   # all three surfaces are inside the core here
+        @test core.rational_index == [1, 2, 3] && PE.CORE_PSI_LOW == 0.0 && PE.CORE_PSI_HIGH == 0.9   # all three surfaces are inside the core here
         @test isempty(PE.dominant_coupling(C, [0.2, 0.5, 0.95]).rational_index ∩ [3])
         full = PE.dominant_coupling(C, rational_psi; psi_high=1.0)
         @test full.rational_index == [1, 2, 3]
@@ -126,6 +126,17 @@ include("h5_metadata_check.jl")
                 @test dom_w.singular_values ≈ svd(rc.C[dom_w.rational_index, :]).S
             end
             @test_throws DimensionMismatch PE.rootarea_field(rc, ComplexF64[1, 2])
+
+            # The decomposition carries the (m, n) ordering it was built on, so projecting onto it
+            # can be checked. A decomposition from another run can have the same number of columns
+            # and mean something else, which a length check cannot see.
+            @test dom.m_modes == rc.m_modes && dom.n_modes == rc.n_modes
+            @test PE.check_mode_basis(dom, rc.m_modes, rc.n_modes, "same basis") === nothing
+            @test_throws ArgumentError PE.check_mode_basis(dom, rc.m_modes .+ 1, rc.n_modes, "shifted basis")
+            # Built from a bare matrix there are no labels to check against, and it must stay usable.
+            bare = PE.dominant_coupling(rc.C, rc.rational_psi)
+            @test isempty(bare.m_modes)
+            @test PE.check_mode_basis(bare, rc.m_modes .+ 1, rc.n_modes, "unlabelled") === nothing
 
             # Without the response step the conform operator is rebuilt from the equilibrium.
             pe.rootarea_to_area_weight = zeros(ComplexF64, 0, 0)

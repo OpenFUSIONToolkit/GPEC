@@ -422,6 +422,34 @@ label = "ballooning Delta' profile (checksum)"
 noise_threshold = 0
 order = 74
 
+# Error fields — per-coil-set overlap with the full-window dominant mode and its rigid shift/tilt
+# sensitivities. Singular vectors carry an arbitrary phase, so only magnitudes are tracked; the
+# in-plane components of a whole n=1-phased array vanish by symmetry, so the norms track the
+# vertical shift and axial tilt that survive.
+[quantities.ef_delta_nominal]
+h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_nominal"
+type = "complex_vector"
+extract = "abs_first"
+label = "|delta_nominal| of coil set 1"
+noise_threshold = 1e-10
+order = 86
+
+[quantities.ef_shift_sensitivity]
+h5path = "ErrorFields/CoilSensitivities/DominantMode/shift_sensitivity"
+type = "complex_vector"
+extract = "norm"
+label = "||ddelta/d(shift)|| over coil sets"
+noise_threshold = 1e-10
+order = 87
+
+[quantities.ef_tilt_sensitivity]
+h5path = "ErrorFields/CoilSensitivities/DominantMode/tilt_sensitivity"
+type = "complex_vector"
+extract = "norm"
+label = "||ddelta/d(tilt)|| over coil sets"
+noise_threshold = 1e-10
+order = 88
+
 # Runtime
 [quantities.runtime]
 h5path = ""

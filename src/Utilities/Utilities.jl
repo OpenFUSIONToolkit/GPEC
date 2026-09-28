@@ -25,6 +25,7 @@ include("KineticProfiles.jl")
 include("NeoclassicalResistivity.jl")
 include("GridUtilities.jl")
 include("HDF5Annotations.jl")
+include("AdaptiveSampling.jl")
 
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients
@@ -39,6 +40,10 @@ export KineticProfiles
 
 using .HDF5Annotations
 export HDF5Annotations
+
+# Adaptive one-dimensional sampling for expensive scans
+using .AdaptiveSampling
+export AdaptiveSampling, adaptive_sample
 
 using .NeoclassicalResistivity
 export NeoclassicalResistivity
