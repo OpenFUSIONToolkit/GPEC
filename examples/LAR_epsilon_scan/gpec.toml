@@ -59,4 +59,4 @@ dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmli
 force_termination     = true   # Stop after force-free states (skip perturbed equilibrium)
 write_outputs_to_HDF5 = true   # Write outputs to the HDF5 file
 HDF5_filename         = "gpec.h5"  # Output HDF5 filename (run_scan.jl overrides this per scan point)
-save_interval         = 3      # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+save_interval         = 1      # Save every Nth ODE step (1=all). Always saves near rational surfaces.

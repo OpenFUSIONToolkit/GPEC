@@ -45,49 +45,81 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
 
   - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
+
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
+
   - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
+
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
+
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
+
   - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
+
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
+
   - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
     `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
     except on the galerkin-matched path which supplies the analytic derivative at construction.
     du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
+
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
     shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
+
   - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
     derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
     are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
+
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
     (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
     galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
     sparse parallel path whose solution is in the Riccati basis.
+
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
+
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
+
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
+
   - `ca_populated::Bool` - True once an ideal singular-surface crossing has filled `ca_l`/`ca_r`; kinetic and
     galerkin-matched runs never populate them and leave this false, and the HDF5 writer then emits zero-extent
     `ca_left`/`ca_right` datasets instead of unpopulated arrays.
+
   - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
+
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
+
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
+
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
+
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
+
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
+
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
+
+    # Initialization parameters
+
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
+
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
     # Initialization parameters
+
+    # Saved data throughout integration
+
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
+
+# Total ODE solver steps taken (all steps, not just saved ones)
+
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
 
     # Saved data throughout integration
+
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
 
 # Total ODE solver steps taken (all steps, not just saved ones)
@@ -96,8 +128,15 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
+
+    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+
+    # Initialization parameters
+
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
-  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
+
+  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.    # Data for integrator
+
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
 @kwdef mutable struct OdeState
@@ -871,6 +910,25 @@ function cross_kinetic_singular_surf!(
     store_ode_data!(odet, odet.psifac, odet.u)
 end
 
+"""
+    column_abstol!(abstol, u, rtol) -> abstol
+
+Per-column absolute tolerance `max|u[:, j, k]|·rtol` for each column `j` of U₁ (`k = 1`) and U₂ (`k = 2`),
+as Fortran `ode_step` sets `atol` before every step. An all-zero block (e.g. U₁ = 0 at a fixed start) takes
+its column's other block instead, so it stays error-controlled.
+"""
+function column_abstol!(abstol::AbstractArray{Float64,3}, u::AbstractArray{<:Number,3}, rtol::Real)
+    for j in axes(u, 2)
+        a1 = maximum(abs, @view u[:, j, 1])
+        a2 = maximum(abs, @view u[:, j, 2])
+        afill = max(a1, a2, floatmin(Float64))
+        abstol[:, j, 1] .= (a1 > 0 ? a1 : afill) * rtol
+        abstol[:, j, 2] .= (a2 > 0 ? a2 : afill) * rtol
+    end
+    return abstol
+end
+
+column_abstol(u::AbstractArray{<:Number,3}, rtol::Real) = column_abstol!(similar(u, Float64), u, rtol)
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
@@ -893,10 +951,8 @@ making it clear what region is being integrated.
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
 
-### TODOs
-
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Check absolute tolerances, currently only relative tolerances are updated
+The absolute tolerance is refreshed per solution column after every step (`column_abstol!`), as in
+Fortran `ode_step`; a fixed absolute floor leaves the small near-axis columns of U₁ uncontrolled.
 """
 function integrate_el_region!(
     odet::OdeState,
@@ -927,6 +983,7 @@ function integrate_el_region!(
         steps_in_segment[] += 1
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
+        column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
@@ -945,7 +1002,8 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    rtol = ctrl.eulerlagrange_tolerance
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(odet.u, rtol), callback=cb, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
@@ -1150,7 +1208,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
+            mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
         # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
@@ -1167,7 +1225,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # and mfix + 1 is the for the region after the last fixup and before the edge
     transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, (ifix + 1)))
+        mul!(view(transforms,:,:,ifix), view(gauss,:,:,ifix), view(transforms,:,:,(ifix+1)))
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
