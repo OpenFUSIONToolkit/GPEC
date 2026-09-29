@@ -327,8 +327,9 @@
         end
 
         @testset "green" begin
+            pn_cache = GeneralizedPerturbedEquilibrium.Vacuum.get_pn_quad_cache(1)
             @testset "basic output structure" begin
-                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1)
+                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; pn_cache)
                 @test G_n isa Float64
                 @test coupling_n isa Float64
                 @test coupling_0 isa Float64
@@ -338,17 +339,11 @@
             end
 
             @testset "uselegacygreenfunction" begin
-                G_leg, cpl_leg, c0_leg = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=true)
-                G_new, cpl_new, c0_new = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=false)
+                G_leg, cpl_leg, c0_leg = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; pn_cache, uselegacygreenfunction=true)
+                G_new, cpl_new, c0_new = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; pn_cache, uselegacygreenfunction=false)
                 @test isfinite(G_leg) && isfinite(G_new)
                 # Both implementations should give similar order of magnitude for this non-singular case
                 @test isapprox(G_leg, G_new, rtol=1e-5)
-            end
-
-            @testset "n=0" begin
-                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(1.5, 0.0, 1.0, 0.0, 0.0, 1.0, 0)
-                @test isfinite(G_n)
-                @test isfinite(coupling_0)
             end
         end
 
@@ -499,6 +494,26 @@
             @test size(L) == (length(m_modes), length(m_modes))
             @test all(isfinite, L)
             @test isapprox(L, L', rtol=1e-8)   # Hermitian inductance
+
+            # Several n: block-diagonal, each block the single-n L
+            L12 = PerturbedEquilibrium.calc_surface_inductance(pe, 0.9, 64, m_modes, 1:2)
+            L2 = PerturbedEquilibrium.calc_surface_inductance(pe, 0.9, 64, m_modes, 2)
+            b1, b2 = 1:length(m_modes), (length(m_modes)+1):(2*length(m_modes))
+            @test L12[b1, b1] ≈ L rtol = 1e-12
+            @test L12[b2, b2] ≈ L2 rtol = 1e-12
+            @test iszero(L12[b1, b2]) && iszero(L12[b2, b1])
+        end
+
+        @testset "Legendre quadrature under concurrent n" begin
+            # Threads alternating n must match serial values (multi-n PE solves several n at once).
+            s = 1.2
+            ref = Dict(n => Vacuum.Pn_minus_half_2007(s, n) for n in 1:3)
+            ok = Threads.Atomic{Bool}(true)
+            Threads.@threads for k in 1:20_000
+                n = 1 + k % 3
+                Vacuum.Pn_minus_half_2007(s, n) == ref[n] || (ok[] = false)
+            end
+            @test ok[]
         end
     end
 

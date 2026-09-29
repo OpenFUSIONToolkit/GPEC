@@ -133,6 +133,156 @@
     end
 
     # =========================================================================
+    # Bounce-point root finding
+    # =========================================================================
+    @testset "bounce-point enumeration" begin
+        # Multi-well periodic B(θ): three distinct wells of unequal depth, so the
+        # deepest-well selection and the wrap through θ = 0/1 are both exercised.
+        xs = collect(range(0.0, 1.0; length=257))
+        B_vals = @. 2.0 + 0.4 * cos(2pi * xs) + 0.12 * cos(4pi * xs + 0.7) + 0.05 * sin(6pi * xs)
+        B_vals[end] = B_vals[1]
+        B_vpar = cubic_interp(xs, B_vals; bc=PeriodicBC())
+        bo = 2.0
+
+        bf = KF._surface_b_field(B_vpar)
+
+        @testset "stationary points are exact" begin
+            # A periodic function has an even number of stationary points per period.
+            @test iseven(length(bf.theta))
+            @test length(bf.theta) >= 2
+            @test issorted(bf.theta)
+            @test all(0.0 .<= bf.theta .< 1.0)
+            # dB/dθ vanishes at each, and the cached B values match the spline.
+            dB = deriv1(B_vpar)
+            scale = maximum(abs, B_vals)
+            for (θ, b) in zip(bf.theta, bf.bval)
+                @test abs(dB(θ)) < 1e-8 * scale
+                @test b ≈ B_vpar(θ) rtol=1e-14
+            end
+            # Every stationary point of a dense derivative sign scan is accounted for.
+            dense = range(0.0, 1.0; length=20001)
+            dv = [dB(x) for x in dense]
+            nsign = count(i -> dv[i] * dv[i+1] < 0, 1:length(dv)-1)
+            @test length(bf.theta) == nsign
+        end
+
+        bmax = maximum(bf.bval)
+        bmin = minimum(bf.bval)
+        lmdatpb = bo / bmax
+        lmdamax = bo / bmin
+
+        @testset "closed-form cubic roots" begin
+            # Polynomials with known roots, including the repeated-root case where the
+            # discriminant cancels to zero and a naive branch reports only the simple root.
+            for (a, b, c, d, expect) in ((1.0, -6.0, 11.0, -6.0, [1.0, 2.0, 3.0]),   # (u-1)(u-2)(u-3)
+                                         (1.0, 0.0, -1.0, 0.0, [-1.0, 0.0, 1.0]),     # u³ - u
+                                         (2.0, -4.0, 2.0, 0.0, [0.0, 1.0]),           # 2u(u-1)², double root
+                                         (1.0, 0.0, 0.0, -8.0, [2.0]),                # u³ - 8, one real root
+                                         (0.0, 1.0, -3.0, 2.0, [1.0, 2.0]),           # degenerates to a quadratic
+                                         (0.0, 0.0, 2.0, -4.0, [2.0]))                # degenerates to a linear
+                n, r1, r2, r3 = KF._real_cubic_roots(a, b, c, d)
+                got = filter(isfinite, [r1, r2, r3][1:min(n, 3)])
+                for e in expect
+                    @test any(abs.(got .- e) .< 1e-9)
+                end
+                # Every returned root satisfies the polynomial.
+                for u in got
+                    @test abs(evalpoly(u, (d, c, b, a))) < 1e-9 * max(1.0, abs(u)^3)
+                end
+            end
+        end
+
+        @testset "agrees with the adaptive scan across λ" begin
+            # Over the bulk of the trapped range the bracketed solver must reproduce
+            # Roots.find_zeros exactly. λ crowded against the boundaries is asserted
+            # separately below: there the two roots straddling an extremum become so
+            # close that whether the adaptive scan still resolves them depends on its
+            # own step heuristics, which is not a contract worth pinning a test to.
+            buf = Float64[]
+            hints = ones(Int, length(bf.theta) + 1)
+            for lmda in range(lmdatpb * (1 + 1e-6), lmdamax * (1 - 1e-6); length=200)
+                new_roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf, lmda, bo))
+                ref_roots = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(B_vpar, lmda, bo, θ), 0.0, 1.0); rev=true)
+                @test length(new_roots) == length(ref_roots)
+                if length(new_roots) == length(ref_roots)
+                    @test all(abs.(new_roots .- ref_roots) .< 1e-9)
+                end
+                # Roots are returned in the descending order downstream assumes.
+                @test issorted(new_roots; rev=true)
+                # v_par vanishes at each root.
+                for θ in new_roots
+                    # Solved directly from the cell's cubic, so v_par vanishes to
+                    # machine precision rather than to a solver tolerance.
+                    @test abs(KF._vpar_from_spline(B_vpar, lmda, bo, θ)) < 1e-13
+                end
+            end
+        end
+
+        @testset "resolves the pair straddling an extremum" begin
+            # Approaching a boundary, the two bounce points collapse onto the extremum
+            # of B from either side. Assert that directly rather than against another
+            # solver: exactly two roots, one on each side of the extremum, both closing
+            # on it as λ tightens, with v_par vanishing at each.
+            buf = Float64[]
+            hints = ones(Int, length(bf.theta) + 1)
+            θmax = bf.theta[argmax(bf.bval)]
+            θmin = bf.theta[argmin(bf.bval)]
+
+            # Width of the arc between the two roots that encloses θx. θ is periodic,
+            # so the enclosing arc may run through the θ = 0/1 seam — the B maximum of
+            # this fixture sits at θ ≈ 0.999, which exercises exactly that.
+            function enclosing_arc(roots, θx)
+                lo, hi = minimum(roots), maximum(roots)
+                return lo <= θx <= hi ? hi - lo : 1.0 - (hi - lo)
+            end
+
+            prev = Dict(:max => Inf, :min => Inf)
+            for eps in (1e-4, 1e-6, 1e-8, 1e-10, 1e-12)
+                for (key, lmda, θx) in ((:max, lmdatpb * (1 + eps), θmax), (:min, lmdamax * (1 - eps), θmin))
+                    roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf, lmda, bo))
+                    @test length(roots) == 2
+                    length(roots) == 2 || continue
+                    for θ in roots
+                        @test abs(KF._vpar_from_spline(B_vpar, lmda, bo, θ)) < 1e-10
+                    end
+                    # The pair hugs the extremum and closes on it as λ tightens.
+                    arc = enclosing_arc(roots, θx)
+                    @test arc < prev[key]
+                    prev[key] = arc
+                end
+            end
+            # Having closed monotonically from 1e-4 to 1e-12, the pair is now far
+            # tighter than the θ-grid spacing that a node-by-node scan would resolve.
+            @test prev[:max] < 0.5 * (xs[2] - xs[1])
+            @test prev[:min] < 0.5 * (xs[2] - xs[1])
+        end
+
+        @testset "cell hints never change the answer" begin
+            # The hint only says where to start looking. A stale or absurd one must cost
+            # a few extra steps, or a fall back to bisection, and nothing else.
+            buf = Float64[]
+            nh = length(bf.theta) + 1
+            swept = ones(Int, nh)
+            for lmda in range(lmdatpb * (1 + 1e-6), lmdamax * (1 - 1e-6); length=120)
+                want = copy(KF._bounce_points_at_lambda!(buf, swept, bf, lmda, bo))
+                for bogus in (ones(Int, nh), fill(length(bf.poly), nh), fill(-5, nh), fill(10^6, nh))
+                    got = copy(KF._bounce_points_at_lambda!(buf, copy(bogus), bf, lmda, bo))
+                    @test got == want
+                end
+            end
+        end
+
+        @testset "degenerate λ signals the fallback" begin
+            # λ below the trapped-passing boundary puts bo/λ above every B, so no
+            # interval brackets and the caller is told to fall back.
+            buf = Float64[]
+            hints = ones(Int, length(bf.theta) + 1)
+            bmax = maximum(bf.bval)
+            @test length(KF._bounce_points_at_lambda!(buf, hints, bf, 0.5 * bo / bmax, bo)) < 2
+        end
+    end
+
+    # =========================================================================
     # Resonance root solver
     # =========================================================================
     @testset "find_resonance_energies" begin
