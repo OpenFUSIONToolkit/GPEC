@@ -157,6 +157,7 @@ function sensitivity_table(sens::CoilSensitivities, dom::DominantCoupling; mode:
         throw(ArgumentError("mode $mode is outside the $(length(dom.singular_values)) singular modes of the decomposition"))
     size(dom.right_singular_vectors, 1) == length(sens.m_modes) ||
         throw(DimensionMismatch("the decomposition acts on $(size(dom.right_singular_vectors, 1)) modes but the sensitivities carry $(length(sens.m_modes))"))
+    PerturbedEquilibrium.check_mode_basis(dom, sens.m_modes, sens.n_modes, "sensitivity_table")
     v = dom.right_singular_vectors[:, mode]
     project(b̃) = dot(v, b̃) / sens.b_t0
     nset = length(sens.coil_names)
