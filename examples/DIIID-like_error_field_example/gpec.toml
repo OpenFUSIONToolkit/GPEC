@@ -1,10 +1,12 @@
 # DIII-D-like H-mode equilibrium — n=1 error-field sensitivity of the poloidal-field coils.
 # Same free-boundary ideal solve as DIIID-like_ideal_example, with the DIII-D C-coil supplying
-# the nominal n=1 forcing and every F coil (F1A–F9B) added as a single-filament hoop at the
+# a small intrinsic n=1 error field and every F coil (F1A–F9B) added as a single-filament hoop at the
 # centroid of its winding pack, from OpenFUSIONToolkit's TokaMaker DIIID_geom.json. An
 # axisymmetric hoop drives no n=1 field as built, so each F coil's error-field content is
 # entirely its sensitivity to misalignment: the [ErrorFields] stage linearizes every coil set's
-# resonant drive with respect to rigid shifts and tilts, and analyze_example.jl ranks them.
+# resonant drive with respect to rigid shifts and tilts, samples illustrative tolerances
+# (tolerances.toml) into an error-field distribution, and analyze_example.jl ranks the coils
+# and plots the distribution.
 
 [Equilibrium]
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
@@ -65,7 +67,7 @@ nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
 
 [[ForcingTerms.coil_set]]
 name = "c"                              # Coil set; resolves to coil_geometries/d3d_c.dat (DIII-D C-coil, 6 coils): the nominal n=1 source
-currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
+currents = [20.0, 10.0, -10.0, -20.0, -10.0, 10.0]  # n=1 cosine phasing, 20 A peak: an intrinsic error field just below the penetration threshold [A]
 
 [[ForcingTerms.coil_set]]
 name = "F1A"                            # DIII-D F coil F1A: 58-turn winding pack, TokaMaker DIIID_geom.json cross-section centroid
@@ -208,3 +210,47 @@ fd_step_tilt_deg = 0.1                  # Central-difference step for the rigid 
 rotation_center = "conductor"           # Tilt pivot: each conductor's own centre ("conductor") or the whole set's ("set")
 write_outputs_to_HDF5 = true            # Write ErrorFields/CoilSensitivities/ to the output file
 verbose = true                          # Log per-coil-set progress and linearity diagnostics
+tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the run directory
+
+[ErrorFields.MonteCarlo]
+nsample = 200000                        # Samples per batch
+nbatch = 10                             # Independent batches; their spread is the statistical error bar
+seed = 1                                # Base seed; batch b uses Xoshiro(hash((seed, b)))
+nbins = 300                             # Histogram bins, linear on [0, delta_max]
+
+[ErrorFields.scenario]
+n_e = 5.0                               # Electron density for the threshold scaling [1e19 m^-3]
+
+[ErrorFields.Risk]
+year = 2020                             # Publication year of the threshold fit: 2020 or 2026 (n = 1)
+dataset = "O,L"                         # ITPA dataset of the fit: 2020 "O,L" or "O,L,H"; 2026 "O,L" (n = 1)
+fit = "WLS"                             # Fitting method: "OLS", "DSOLS", or "WLS" (2026: "OLS" or "WLS")
+nsample_threshold = 1000000             # Threshold samples
+scan_scales = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]   # Tolerance multipliers of the allowable-tolerance scan
+
+[ErrorFields.NTV]
+efc_coils = ["d3d_c"]                   # Coil set names of the correction arrays to evaluate (here the C-coil stands in for a correction coil)
+method = "fgar"                         # KineticForces torque method (must be enabled in [KineticForces])
+rotation_scan = true                    # Tabulate the torques against a rigid E×B rotation shift (false: nominal rotation only, linear model)
+rotation_scan_points = 5                # Points of the initial symmetric shift grid (made odd so the unshifted point is one of them)
+rotation_scan_max_points = 9            # Cap on kinetic evaluations per spectrum after adaptive refinement
+rotation_scan_tolerance = 0.05          # Refinement stops when every interval's midpoint prediction error is below this fraction of the torque range
+rotation_span_factor = 1.0              # The scan covers ±span_factor × max(|ω_E|, offset_factor·|ω_*T|) at the innermost kinetic surface
+rotation_offset_factor = 2.0            # Rough neoclassical offset as a multiple of the ion temperature-gradient diamagnetic frequency ω_*T
+
+[KineticForces]
+kinetic_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5"  # GPEC HDF5 kinetic schema (psi,n_i,n_e,T_i,T_e,omega_E,+chi_e,chi_phi)
+nn = 1                                  # Toroidal mode number (matches nn_low/nn_high)
+nl = 6                                  # Bounce harmonics retained
+zi = 1                                  # Main-ion charge (deuterium)
+mi = 2                                  # Main-ion mass [proton masses]
+zimp = 6                                # Impurity charge (carbon)
+mimp = 12                               # Impurity mass [proton masses]
+electron = false                        # Ion-only NTV
+nutype = "harmonic"                     # Collision operator
+f0type = "maxwellian"                   # Equilibrium distribution
+moment = "pressure"                     # Pressure-moment NTV torque
+atol_xlmda = 1e-9                       # Absolute tolerance for inner pitch + energy integrations
+rtol_xlmda = 1e-5                       # Relative tolerance for inner pitch + energy integrations
+write_outputs_to_HDF5 = true            # Write outputs to the HDF5 file
+verbose = false                         # Enable verbose logging

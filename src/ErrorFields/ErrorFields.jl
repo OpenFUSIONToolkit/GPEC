@@ -24,6 +24,15 @@ plasma solve or a new Biot-Savart integration.
   `validate_tolerances`, and the tilt unit conversion `tilt_tolerance_deg`
 - `Sampling.jl`: random misalignment draws within a tolerance — the `RadialDistribution`
   shapes, `sample_disk`, `sample_uncertainty`, and the additive and cylinder tolerance models
+- `MonteCarlo.jl`: `run_monte_carlo`, the batched, seeded recombination of a `SensitivityTable`
+  with a `ToleranceSet` into intrinsic and corrected `|δ|` histograms
+- `Risk.jl`: the ITPA penetration-threshold scalings, keyed by publication year (the 2020 n = 1
+  and n = 2 fits, the 2026 n = 1 OLS and WLS fits), `locking_risk` (the overlap distribution
+  convolved with the threshold distribution), `tolerance_scan` and `allowable_tolerance`
+- `Phasing.jl`: `phasing_map`, the closed-form overlap of several coil arrays against their
+  relative current-pattern phases
+- `NTVLimits.jl`: how much error field a correction coil can cancel before its own NTV torque
+  costs the rotation that holds the threshold up (`EFCCoupling`, `correction_current`)
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface
 spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
@@ -36,6 +45,8 @@ using Printf
 using TOML
 using Random
 import Random: AbstractRNG
+using FastInterpolations: cubic_interp, linear_interp
+using Roots: find_zero, Brent
 
 import ..Equilibrium
 import ..ForcingTerms
@@ -49,6 +60,10 @@ include("Overlap.jl")
 include("Sensitivity.jl")
 include("ToleranceTOML.jl")
 include("Sampling.jl")
+include("MonteCarlo.jl")
+include("Risk.jl")
+include("Phasing.jl")
+include("NTVLimits.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
@@ -59,5 +74,11 @@ export ToleranceSet, CoilTolerance, CoherentGroupTolerance, OtherFieldBudget
 export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tolerance_deg
 export RadialDistribution, Flat, UniformArea, Hollow, Ring, PowerLaw, randpow, radial_distribution
 export disk_radius, sample_disk, sample_uncertainty, sample_additive, sample_cylinder
+export MonteCarloControl, MonteCarloResult, run_monte_carlo, worst_case_terms
+export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_label, ScenarioParameters, nominal_threshold, threshold_samples
+export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
+export PhasingMap, phasing_map, extreme_phasing
+export NTVControl, EFCCoupling, residual_spectrum, correction_current, correction_current_upper, max_correctable_overlap, efc_current_curve, read_efc_couplings
+export has_rotation_scan, rotation_scan_span, torque_at, torque_zero_crossings, rotation_shift, threshold_factor
 
 end # module ErrorFields

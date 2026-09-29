@@ -116,3 +116,256 @@ function read_tolerance_snapshot(h5path::AbstractString)
         return parse_tolerance_toml(read(f[_TOLERANCE_SNAPSHOT]))
     end
 end
+
+const _MC_GROUP = "ErrorFields/MonteCarlo"
+
+# Metadata table for ErrorFields/MonteCarlo/ (paths relative to the group). bin_edges has one
+# more entry than the densities, so it is documented rather than attached as a dimension scale.
+const MC_H5_ANNOTATIONS = [
+    "bin_edges" => (; long_name="|δ| bin edges of the overlap histograms (nbins + 1); samples beyond the last edge are counted in the last bin"),
+    "pdf" => (; long_name="probability density of the intrinsic dominant-mode overlap |δ| over the sampled misalignments, batch average", dims=("delta_bin",)),
+    "pdf_efc" => (; long_name="probability density of the corrected overlap |δ| (correctable terms divided by efc_factor), batch average", dims=("delta_bin",)),
+    "pdf_batches" => (; long_name="probability density of the intrinsic overlap |δ| per batch", dims=("delta_bin", "batch")),
+    "pdf_efc_batches" => (; long_name="probability density of the corrected overlap |δ| per batch", dims=("delta_bin", "batch")),
+    "delta_nominal" => (; long_name="|Σ δ_nominal|, the as-designed overlap with every coil set at its nominal position"),
+    "delta_worst" => (; long_name="worst-case alignment bound Σ(|δ_nominal| + tolerance × |sensitivity|) used to size the histogram"),
+    "mean_abs_delta" => (; long_name="sample mean of the intrinsic overlap |δ|"),
+    "mean_abs_delta_efc" => (; long_name="sample mean of the corrected overlap |δ|"),
+    "clamped_fraction" => (; long_name="fraction of samples beyond the last bin edge")
+]
+
+"""
+    write_to_hdf5!(h5file::HDF5.File, mc::MonteCarloResult)
+
+Write the tolerance Monte Carlo histograms to `ErrorFields/MonteCarlo/`. The sampling settings
+(`nsample`, `nbatch`, `seed`) live in the run's `[ErrorFields.MonteCarlo]` table under
+`Input/gpec_toml_raw`; the tolerances in `Input/RawInputs/ErrorFields/tolerance_toml_raw`.
+An existing group is replaced.
+"""
+function write_to_hdf5!(h5file::HDF5.File, mc::MonteCarloResult)
+    haskey(h5file, _MC_GROUP) && delete_object(h5file, _MC_GROUP)
+    g = create_group(h5file, _MC_GROUP)
+    g["bin_edges"] = mc.bin_edges
+    g["pdf"] = mc.pdf
+    g["pdf_efc"] = mc.pdf_efc
+    g["pdf_batches"] = mc.pdf_batches
+    g["pdf_efc_batches"] = mc.pdf_efc_batches
+    g["delta_nominal"] = mc.delta_nominal
+    g["delta_worst"] = mc.delta_worst
+    g["mean_abs_delta"] = mc.mean_abs_delta
+    g["mean_abs_delta_efc"] = mc.mean_abs_delta_efc
+    g["clamped_fraction"] = mc.clamped_fraction
+    Utilities.HDF5Annotations.annotate!(g, MC_H5_ANNOTATIONS)
+    return g
+end
+
+"""
+    MonteCarloResult(h5path::AbstractString)
+
+Read the tolerance Monte Carlo of a run back from its `gpec.h5`, with the sampling settings
+from the `[ErrorFields.MonteCarlo]` table of the stored deck.
+"""
+function MonteCarloResult(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        haskey(f, _MC_GROUP) || throw(ArgumentError("$h5path has no $_MC_GROUP group (run with a tolerance_file)"))
+        g = f[_MC_GROUP]
+        inputs = TOML.parse(read(f["Input/gpec_toml_raw"]))
+        # Read the two settings this needs by name rather than splatting the whole stored table into
+        # MonteCarloControl: a file written by a version that knows one more key would otherwise be
+        # unreadable here, and reading a result back should not depend on the writer's vintage.
+        mc_tbl = get(get(inputs, "ErrorFields", Dict{String,Any}()), "MonteCarlo", Dict{String,Any}())
+        defaults = MonteCarloControl()
+        nsample = get(mc_tbl, "nsample", defaults.nsample)
+        seed = get(mc_tbl, "seed", defaults.seed)
+        pdf_batches = read(g["pdf_batches"])
+        return MonteCarloResult(read(g["bin_edges"]), read(g["pdf"]), read(g["pdf_efc"]), pdf_batches, read(g["pdf_efc_batches"]),
+            read(g["delta_nominal"]), read(g["delta_worst"]), read(g["mean_abs_delta"]), read(g["mean_abs_delta_efc"]),
+            read(g["clamped_fraction"]), nsample, size(pdf_batches, 2), seed)
+    end
+end
+
+const _RISK_GROUP = "ErrorFields/Risk"
+
+# Metadata table for ErrorFields/Risk/ (paths relative to the group). Percentages are stored as
+# such; the threshold density and P(lock|δ) share the Monte Carlo's |δ| grid.
+const RISK_H5_ANNOTATIONS = [
+    "threshold_pdf" => (; long_name="probability density of the sampled ITPA penetration threshold on the Monte Carlo |δ| bins", dims=("delta_bin",)),
+    "p_lock_given_delta" => (; long_name="probability that an overlap equal to each Monte Carlo bin edge locks (threshold cumulative distribution)", dims=("delta_edge",)),
+    "threshold_nominal" => (; long_name="ITPA penetration threshold at the fitted exponents"),
+    "plock_percent" => (; long_name="locking probability of the intrinsic overlap distribution, 100 ∫ pdf(δ) P(lock|δ) dδ, batch average", units="%"),
+    "plock_efc_percent" => (; long_name="locking probability of the corrected overlap distribution, batch average", units="%"),
+    "plock_batches_percent" => (; long_name="locking probability of the intrinsic distribution per Monte Carlo batch", units="%"),
+    "plock_efc_batches_percent" => (; long_name="locking probability of the corrected distribution per Monte Carlo batch", units="%"),
+    "plock_nominal_percent" => (; long_name="locking probability of the as-designed machine, 100 P(lock|δ_nominal)", units="%"),
+    "plock_sharp_percent" => (; long_name="locking probability if the threshold were exactly its nominal value, 100 P(|δ| > threshold_nominal)", units="%"),
+    "ToleranceScan/scale" => (; long_name="multiplier applied to every shift and tilt tolerance"),
+    "ToleranceScan/plock_percent" => (; long_name="locking probability of the intrinsic distribution at each tolerance scale", units="%", dims=("scale",)),
+    "ToleranceScan/plock_efc_percent" => (; long_name="locking probability of the corrected distribution at each tolerance scale", units="%", dims=("scale",)),
+    "ToleranceScan/plock_spread_percent" => (; long_name="range of the intrinsic locking probability over the Monte Carlo batches at each scale", units="%", dims=("scale",)),
+    "ToleranceScan/plock_efc_spread_percent" =>
+        (; long_name="range of the corrected locking probability over the Monte Carlo batches at each scale", units="%", dims=("scale",))
+]
+
+"""
+    write_to_hdf5!(h5file::HDF5.File, risk::RiskResult; scan=nothing)
+
+Write the locking risk to `ErrorFields/Risk/`, with the tolerance scan under
+`ErrorFields/Risk/ToleranceScan/` when given. The threshold fit, scenario and sampling settings
+live in the run's `[ErrorFields.Risk]` and `[ErrorFields.scenario]` tables under
+`Input/gpec_toml_raw`. An existing group is replaced.
+"""
+function write_to_hdf5!(h5file::HDF5.File, risk::RiskResult; scan::Union{Nothing,ToleranceScan}=nothing)
+    haskey(h5file, _RISK_GROUP) && delete_object(h5file, _RISK_GROUP)
+    g = create_group(h5file, _RISK_GROUP)
+    g["threshold_pdf"] = risk.threshold_pdf
+    g["p_lock_given_delta"] = risk.p_lock_given_delta
+    g["threshold_nominal"] = risk.threshold_nominal
+    g["plock_percent"] = risk.plock
+    g["plock_efc_percent"] = risk.plock_efc
+    g["plock_batches_percent"] = risk.plock_batches
+    g["plock_efc_batches_percent"] = risk.plock_efc_batches
+    g["plock_nominal_percent"] = risk.plock_nominal
+    g["plock_sharp_percent"] = risk.plock_sharp
+    if scan !== nothing
+        sg = create_group(g, "ToleranceScan")
+        sg["scale"] = scan.scale
+        sg["plock_percent"] = scan.plock
+        sg["plock_efc_percent"] = scan.plock_efc
+        sg["plock_spread_percent"] = scan.plock_spread
+        sg["plock_efc_spread_percent"] = scan.plock_efc_spread
+    end
+    Utilities.HDF5Annotations.annotate!(g, RISK_H5_ANNOTATIONS)
+    return g
+end
+
+"""
+    ToleranceScan(h5path::AbstractString)
+
+Read a run's tolerance scan back from `ErrorFields/Risk/ToleranceScan/`.
+"""
+function ToleranceScan(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        path = _RISK_GROUP * "/ToleranceScan"
+        haskey(f, path) || throw(ArgumentError("$h5path has no $path group (set scan_scales in [ErrorFields.Risk])"))
+        g = f[path]
+        return ToleranceScan(read(g["scale"]), read(g["plock_percent"]), read(g["plock_efc_percent"]), read(g["plock_spread_percent"]),
+            read(g["plock_efc_spread_percent"]), read(f[_RISK_GROUP*"/plock_nominal_percent"]))
+    end
+end
+
+const _NTV_GROUP = "ErrorFields/NTV"
+
+# Metadata table for ErrorFields/NTV/ (paths relative to the group): per correction-coil array,
+# per kilo-ampere-turn of its current pattern.
+const NTV_H5_ANNOTATIONS = [
+    "coil_name" => (; long_name="name of each correction coil array"),
+    "delta_per_kat" => (; long_name="dominant-mode overlap |δ| of each array per kilo-ampere-turn", units="1/kAt"),
+    "overlap_percent" => (; long_name="resonant fraction of each array's field, 100·|Vᴴb̃|/‖b̃‖", units="%"),
+    "torque_full_per_kat2" => (; long_name="NTV torque of each array's whole field per kilo-ampere-turn squared", units="N*m/kAt^2"),
+    "torque_residual_per_kat2" => (; long_name="NTV torque of each array's field with the dominant mode projected out, per kilo-ampere-turn squared", units="N*m/kAt^2"),
+    "omega_reference" => (; long_name="reference rotation ω_ref of each array's torque balance: ion toroidal rotation weighted by density and volume", units="rad/s"),
+    "omega_offset_estimate" =>
+        (; long_name="rough neoclassical offset rotation the scan span was sized against, offset_factor·ω_*T at the innermost kinetic surface", units="rad/s")
+]
+
+# ErrorFields/NTV/RotationScan/: the torques against a rigid E×B rotation shift, one column per
+# array; the adaptive grids differ in length, so shorter scans are padded with NaN.
+const NTV_SCAN_H5_ANNOTATIONS = [
+    "coil_name" => (; long_name="name of each scanned correction coil array"),
+    "rotation_shift" =>
+        (; long_name="rigid shift Δω of the E×B rotation profile at each scan point of each array (NaN-padded)", units="rad/s", dims=("scan_point", "coil_set")),
+    "torque_full" =>
+        (; long_name="NTV torque of the whole field at each rotation shift, per kilo-ampere-turn squared (NaN-padded)", units="N*m/kAt^2", dims=("scan_point", "coil_set")),
+    "torque_residual" => (;
+        long_name="NTV torque of the field with the dominant mode projected out at each rotation shift, per kilo-ampere-turn squared (NaN-padded)",
+        units="N*m/kAt^2",
+        dims=("scan_point", "coil_set")
+    ),
+    "psi" => (; long_name="kinetic normalized poloidal flux grid of the torque profiles", scale="psi"),
+    "torque_full_profile" => (;
+        long_name="cumulative NTV torque of the whole field from the axis to ψ_N, at each rotation shift of each array, per kilo-ampere-turn squared (NaN-padded)",
+        units="N*m/kAt^2",
+        dims=("psi", "scan_point", "coil_set")
+    ),
+    "torque_residual_profile" => (;
+        long_name="cumulative NTV torque of the residual field from the axis to ψ_N, at each rotation shift of each array, per kilo-ampere-turn squared (NaN-padded)",
+        units="N*m/kAt^2",
+        dims=("psi", "scan_point", "coil_set")
+    )
+]
+
+"""
+    write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
+
+Write the correction-coil couplings to `ErrorFields/NTV/`, and the torque-versus-rotation tables
+of the arrays that have one to `ErrorFields/NTV/RotationScan/` (one column per array, shorter
+scans NaN-padded). The torque budget, threshold, rotation exponent and safety factor that turn
+them into a correction-current curve are analysis choices left to [`efc_current_curve`](@ref).
+An existing group is replaced.
+"""
+function write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
+    haskey(h5file, _NTV_GROUP) && delete_object(h5file, _NTV_GROUP)
+    g = create_group(h5file, _NTV_GROUP)
+    g["coil_name"] = [c.coil_name for c in couplings]
+    g["delta_per_kat"] = [c.delta_per_kat for c in couplings]
+    g["overlap_percent"] = [c.overlap_percent for c in couplings]
+    g["torque_full_per_kat2"] = [c.torque_full_per_kat2 for c in couplings]
+    g["torque_residual_per_kat2"] = [c.torque_residual_per_kat2 for c in couplings]
+    g["omega_reference"] = [c.omega_reference for c in couplings]
+    g["omega_offset_estimate"] = [c.omega_offset_estimate for c in couplings]
+    Utilities.HDF5Annotations.annotate!(g, NTV_H5_ANNOTATIONS)
+    scanned = filter(has_rotation_scan, couplings)
+    if !isempty(scanned)
+        nmax = maximum(length(c.rotation_shift) for c in scanned)
+        ψ = scanned[1].psi
+        all(c.psi == ψ for c in scanned) || error("write_to_hdf5!: the rotation scans of the arrays are on different ψ grids")
+        pad(v) = vcat(Float64.(v), fill(NaN, nmax - length(v)))
+        padm(m) = hcat(Float64.(m), fill(NaN, size(m, 1), nmax - size(m, 2)))
+        sg = create_group(g, "RotationScan")
+        sg["coil_name"] = [c.coil_name for c in scanned]
+        sg["rotation_shift"] = reduce(hcat, pad(c.rotation_shift) for c in scanned)
+        sg["torque_full"] = reduce(hcat, pad(c.torque_full_scan) for c in scanned)
+        sg["torque_residual"] = reduce(hcat, pad(c.torque_residual_scan) for c in scanned)
+        sg["psi"] = ψ
+        sg["torque_full_profile"] = cat((padm(c.torque_full_profile) for c in scanned)...; dims=3)
+        sg["torque_residual_profile"] = cat((padm(c.torque_residual_profile) for c in scanned)...; dims=3)
+        Utilities.HDF5Annotations.annotate!(sg, NTV_SCAN_H5_ANNOTATIONS)
+    end
+    return g
+end
+
+"""
+    read_efc_couplings(h5path::AbstractString) -> Vector{EFCCoupling}
+
+Read a run's correction-coil couplings back from `ErrorFields/NTV/`, with their
+torque-versus-rotation tables when the run made them.
+"""
+function read_efc_couplings(h5path::AbstractString)
+    h5open(h5path, "r") do f
+        haskey(f, _NTV_GROUP) || throw(ArgumentError("$h5path has no $_NTV_GROUP group (set efc_coils in [ErrorFields.NTV])"))
+        g = f[_NTV_GROUP]
+        names = read(g["coil_name"])
+        δ, ov = read(g["delta_per_kat"]), read(g["overlap_percent"])
+        Tf, Tr = read(g["torque_full_per_kat2"]), read(g["torque_residual_per_kat2"])
+        ω_ref = haskey(g, "omega_reference") ? read(g["omega_reference"]) : fill(NaN, length(names))
+        ω_off = haskey(g, "omega_offset_estimate") ? read(g["omega_offset_estimate"]) : fill(NaN, length(names))
+        scan = haskey(g, "RotationScan") ? g["RotationScan"] : nothing
+        scan_names = scan === nothing ? String[] : read(scan["coil_name"])
+        out = EFCCoupling[]
+        for i in eachindex(names)
+            j = findfirst(==(names[i]), scan_names)
+            if j === nothing
+                push!(out, EFCCoupling(names[i], δ[i], ov[i], Tf[i], Tr[i]))
+            else
+                shifts = read(scan["rotation_shift"])[:, j]
+                n = count(!isnan, shifts)
+                push!(
+                    out,
+                    EFCCoupling(names[i], δ[i], ov[i], Tf[i], Tr[i], shifts[1:n], read(scan["torque_full"])[1:n, j], read(scan["torque_residual"])[1:n, j],
+                        ω_ref[i], ω_off[i], read(scan["psi"]), read(scan["torque_full_profile"])[:, 1:n, j], read(scan["torque_residual_profile"])[:, 1:n, j])
+                )
+            end
+        end
+        return out
+    end
+end
