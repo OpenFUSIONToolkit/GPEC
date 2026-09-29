@@ -5,6 +5,7 @@ using FastInterpolations
 using FastGaussQuadrature: gausslegendre
 using StaticArrays: SVector
 using SparseArrays
+using HDF5: h5open
 using AdaptiveArrayPools
 
 # Import parent modules

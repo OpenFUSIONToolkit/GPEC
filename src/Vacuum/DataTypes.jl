@@ -198,8 +198,9 @@ Struct containing input settings for vacuum wall geometry.
         + `"mod_dee"`: Modified Dee-shaped wall
         + `"filepath"`: Custom wall shape from the file you specify
 
-    A non-axisymmetric boundary (`nzeta_in > 1`) supports `"nowall"` and `"conformal"`; the others
-    are poloidal contours that get revolved and so need `nzeta_in == 1`.
+    A non-axisymmetric boundary (`nzeta_in > 1`) supports `"nowall"`, `"conformal"` and an HDF5 file
+    (flat `x`, `y`, `z` with θ fastest, plus `mtheta`, `nzeta`, on a full-torus endpoint-excluded grid);
+    the others are poloidal contours that get revolved and so need `nzeta_in == 1`.
 
   - `a::Float64`: Distance of wall from plasma in units of the minor radius `0.5(max R - min R)`
     (conformal), or shape parameter (others). On a non-axisymmetric boundary the extrema are taken
@@ -658,7 +659,7 @@ Expects a full-torus boundary on the same `mtheta`/`nzeta` grid as `plasma_surf`
 # Notes
 
   - Axisymmetric boundaries (`nzeta_in == 1`) support nowall, conformal, elliptical, dee, mod_dee and
-    from_file; non-axisymmetric boundaries support nowall and conformal
+    from_file; non-axisymmetric boundaries support nowall, conformal and an HDF5 file
   - The non-axisymmetric conformal wall displaces each plasma point along its own normal, so wall grid
     index `(i, j)` is the closest wall point to plasma index `(i, j)` — the correspondence the near-field
     patch of `compute_3D_kernel_matrices!` assumes. The revolved branch does not share it: the wall sits
@@ -757,6 +758,29 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
 
         # Every point moves exactly offset_gap along its own normal, so the separation needs no search
         fill!(gap, offset_gap)
+    elseif isfile(wall_settings.shape)
+        # Wall on its own full-torus (θ, ζ) grid in an HDF5 file, resampled onto the vacuum grid
+        @info "Loading wall geometry from $(wall_settings.shape)"
+        h5open(wall_settings.shape, "r") do f
+            mθ_w, nζ_w = read(f, "mtheta"), read(f, "nzeta")
+            xyz = [reshape(read(f, name), mθ_w, nζ_w) for name in ("x", "y", "z")]
+            # The periodic spline would take a repeated 2π endpoint as a distinct point
+            (all(c -> c[1, :] ≈ c[end, :], xyz) || all(c -> c[:, 1] ≈ c[:, end], xyz)) &&
+                error("Wall file $(wall_settings.shape) repeats the 2π endpoint; its (θ, ζ) grid must exclude it.")
+            θ_w = range(; start=0, length=mθ_w, step=2π / mθ_w)
+            ζ_w = range(; start=0, length=nζ_w, step=2π / nζ_w)
+            grid_points = (repeat(collect(θ_grid), nzeta), repeat(collect(ϕ_grid); inner=mtheta))
+            for k in 1:3
+                itp = cubic_interp((θ_w, ζ_w), xyz[k]; bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive)))
+                r[:, k] = itp(grid_points)
+            end
+        end
+        gap .= norm.(eachrow(r .- plasma_surf.r))
+        # Each wall point must lie outside its same-index plasma point (plasma normal points inward)
+        any(≥(0), sum((r .- plasma_surf.r) .* plasma_surf.normal; dims=2)) && error(
+            "Wall file $(wall_settings.shape) is not outside the plasma at every same-index point: it must span the " *
+            "full torus in metres, θ fastest, with θ and ζ running the same way as the plasma boundary."
+        )
     else
         error("Wall shape $(wall_settings.shape) is not available for a non-axisymmetric boundary (nzeta_in > 1).")
     end

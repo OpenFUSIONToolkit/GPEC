@@ -1,3 +1,5 @@
+using HDF5
+
 @testset "Vacuum.jl Unit Tests" begin
 
     @testset "Vacuum.jl (2D)" begin
@@ -678,6 +680,43 @@
                 radii = [hypot(hypot(wall.r[i, 1], wall.r[i, 2]) - R0, wall.r[i, 3]) for i in axes(wall.r, 1)]
                 # Residual is the 32 -> 24 poloidal resampling of the boundary spline, not the offset
                 @test all(isapprox(rad, r_minor * (1 + a); atol=5e-4) for rad in radii)
+            end
+        end
+
+        @testset "WallGeometry3D from an HDF5 file" begin
+            V = GeneralizedPerturbedEquilibrium.Vacuum
+            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24)
+            plasma = V.PlasmaGeometry3D(inputs)
+            settings = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            conformal = V.WallGeometry3D(inputs, plasma, settings)
+            fine = _make_3d_periodic_inputs(mtheta=48, nzeta=48)
+            fine_wall = V.WallGeometry3D(fine, V.PlasmaGeometry3D(fine), settings)
+
+            mktempdir() do dir
+                path = joinpath(dir, "wall.h5")
+                write_wall(r, m, n) = h5open(path, "w") do f
+                    f["x"], f["y"], f["z"], f["mtheta"], f["nzeta"] = r[:, 1], r[:, 2], r[:, 3], m, n
+                end
+
+                # The vacuum grid round-trips; a finer grid is resampled onto it
+                for (wall, m, tol) in ((fine_wall, 48, 1e-3), (conformal, 24, 1e-10))
+                    write_wall(wall.r, m, m)
+                    @test maximum(abs, V.WallGeometry3D(inputs, plasma, WallShapeSettings(shape=path)).r .- conformal.r) < tol
+                end
+                @test compute_vacuum_response(inputs, WallShapeSettings(shape=path)).wv ≈ compute_vacuum_response(inputs, settings).wv
+
+                # Malformed walls are rejected rather than silently misread
+                G = reshape(conformal.r, 24, 24, 3)
+                flip = [1; 24:-1:2]
+                for (bad, m, n, msg) in (
+                    (G[[1:24; 1], :, :], 25, 24, "2π endpoint"),   # θ = 2π repeated
+                    (G[flip, :, :], 24, 24, "not outside"),        # θ reversed
+                    (G[:, flip, :], 24, 24, "not outside"),        # ζ reversed
+                    (G[:, 1:12, :], 24, 12, "not outside")         # half the torus
+                )
+                    write_wall(reshape(bad, :, 3), m, n)
+                    @test_throws msg V.WallGeometry3D(inputs, plasma, WallShapeSettings(shape=path))
+                end
             end
         end
 

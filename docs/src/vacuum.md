@@ -28,6 +28,19 @@ Specifies wall geometry configuration with options for:
 - Geometric parameters (a, aw, bw, cw, dw, tw)
 - Equal arc length spacing option
 
+#### 3D wall from an HDF5 file
+
+For a non-axisymmetric boundary (`nzeta_in > 1`), `shape` may be the path to an HDF5 file with:
+
+- `x`, `y`, `z`: flat vectors of Cartesian wall coordinates in metres, θ varying fastest
+- `mtheta`, `nzeta`: scalar integers giving the file's (θ, ζ) grid
+
+The grid must cover the full torus, not one field period, with the 2π endpoint excluded in both
+angles. θ and ζ must run in the same directions as the plasma boundary. The file grid does not
+need to match the vacuum grid: a periodic bicubic resamples it. Each resampled wall point must lie
+outside its same-index plasma point; this is checked, because the near-field quadrature pairs
+plasma and wall points by index.
+
 ## API Reference
 
 ```@autodocs
