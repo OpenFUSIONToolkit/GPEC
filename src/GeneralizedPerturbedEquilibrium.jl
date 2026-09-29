@@ -6,6 +6,7 @@ using TOML
 using Printf
 using HDF5
 using FastInterpolations
+import LinearAlgebra: dot, norm
 import IMASdd
 import AdaptiveArrayPools: @with_pool
 
@@ -62,6 +63,10 @@ include("KineticForces/KineticForces.jl")
 import .KineticForces as KineticForces
 export KineticForces
 
+include("ErrorFields/ErrorFields.jl")
+import .ErrorFields as ErrorFields
+export ErrorFields
+
 include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
@@ -85,8 +90,8 @@ using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-                              "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-                              "gal_flag")
+    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
+    "gal_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -262,12 +267,15 @@ function main_from_inputs(
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result)
+        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, coil_sensitivities=nothing, monte_carlo=nothing, locking_risk=nothing, efc_couplings=nothing)
     end
 
     pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
 
     run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles, kf_species)
+
+    error_fields = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles)
+    coil_sensitivities, monte_carlo, locking_risk, efc_couplings = error_fields === nothing ? (nothing, nothing, nothing, nothing) : error_fields
 
     # SLAYER runs after PE so it appends to the PE output file; it falls back to the
     # ForceFreeStates file when PE did not run.
@@ -286,7 +294,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result)
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
 
 end
 
@@ -740,10 +748,10 @@ runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]
 and errors here.
 
 ```julia
-eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
 prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
-ffs  = solve(prob, Riccati())
-ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+ffs = solve(prob, Riccati())
+ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
 function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
@@ -819,19 +827,7 @@ function run_perturbed_equilibrium(
     # Check for PerturbedEquilibrium section and run if present
     pe_state = nothing
     if "PerturbedEquilibrium" in keys(inputs)
-        # Read ForcingTerms control parameters
-        if "ForcingTerms" in keys(inputs)
-            forcing_raw = inputs["ForcingTerms"]
-            # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
-            # kwarg splatting and passed as the explicit coil_sets_raw keyword
-            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
-            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
-            ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw
-            )
-        else
-            ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
-        end
+        ft_ctrl = forcing_terms_control(inputs)
 
         # The deck's forcing block is an unscaled RMPField, so the TOML path and the
         # scripting API share one stage.
@@ -981,6 +977,288 @@ function run_kinetic_forces(
     @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
 
     return nothing
+end
+
+"""
+    forcing_terms_control(inputs) -> ForcingTermsControl
+
+The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent. The
+`[[ForcingTerms.coil_set]]` array of tables is passed through as `coil_sets_raw` rather than
+splatted with the scalar keys.
+"""
+function forcing_terms_control(inputs::Dict{String,Any})
+    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl()
+    forcing_raw = inputs["ForcingTerms"]
+    coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+    scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
+    return ForcingTerms.ForcingTermsControl(; (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw)
+end
+
+"""
+    run_error_fields(inputs, result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles) -> (sensitivities, monte_carlo, risk, couplings) or nothing
+
+Linearize every coil set's resonant drive with respect to its rigid shifts and tilts and write
+`ErrorFields/CoilSensitivities/` when the deck carries an `[ErrorFields]` section. When the
+section names a `tolerance_file`, read, validate and echo it, then run the tolerance Monte
+Carlo on the full-window dominant mode with the `[ErrorFields.MonteCarlo]` settings and write
+`ErrorFields/MonteCarlo/`; with an `[ErrorFields.scenario]` table as well, evaluate the locking
+risk (and the tolerance scan when `[ErrorFields.Risk]` names `scan_scales`) and write
+`ErrorFields/Risk/`; with `[ErrorFields.NTV]` naming correction arrays, evaluate their overlap and NTV
+torque couplings per kilo-ampere-turn (needs the kinetic context) and write `ErrorFields/NTV/`.
+Stages not requested return `nothing`. Needs the
+perturbed-equilibrium state's singular-coupling matrix and coil-format forcing, and errors
+otherwise: a deck asking for error-field sensitivities without them is a misconfiguration, not a
+case to skip silently. Coil geometry is rebuilt from the deck unless a replay injected it.
+"""
+function run_error_fields(
+    inputs::Dict{String,Any},
+    result::ForceFreeStatesResult,
+    pe_state,
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}},
+    kf_ctrl::KineticForces.KineticForcesControl=KineticForces.KineticForcesControl(),
+    kinetic_profiles=nothing
+)
+    ("ErrorFields" in keys(inputs)) || return nothing
+
+    @info "\n  ErrorFields\n$_SECTION"
+    ef_start = time()
+
+    # [ErrorFields.MonteCarlo], [ErrorFields.Risk] and [ErrorFields.scenario] are nested tables,
+    # excluded from the control-struct splat.
+    ef_raw = inputs["ErrorFields"]
+    nested = ("MonteCarlo", "Risk", "scenario", "NTV")
+    ef_ctrl = ErrorFields.ErrorFieldsControl(; (Symbol(k) => v for (k, v) in ef_raw if !(k in nested))...)
+    mc_ctrl = ErrorFields.MonteCarloControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "MonteCarlo", Dict{String,Any}()))...)
+    risk_ctrl = ErrorFields.RiskControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "Risk", Dict{String,Any}()))...)
+    scenario_raw = get(ef_raw, "scenario", nothing)
+    ntv_ctrl = ErrorFields.NTVControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "NTV", Dict{String,Any}()))...)
+    pe_state === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section with compute_singular_coupling = true")
+    ft_ctrl = forcing_terms_control(inputs)
+    ft_ctrl.forcing_data_format == "coil" ||
+        error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(ft_ctrl.forcing_data_format)\")")
+
+    cfg = ForcingTerms.CoilConfig(ft_ctrl)
+    coil_sets = preloaded_coil_sets === nothing ? ForcingTerms.load_coil_sets(cfg, result.nlow; equil=result.equil) : preloaded_coil_sets
+    rc = PerturbedEquilibrium.ResonantCoupling(pe_state, result)
+    sens = ErrorFields.compute_coil_sensitivities(coil_sets, rc, result.equil, cfg, ef_ctrl;
+        psi=result.psilim, b_t0=result.equil.params.bt0)
+
+    tolerances = nothing
+    if !isempty(ef_ctrl.tolerance_file)
+        tol_path = joinpath(result.dir_path, ef_ctrl.tolerance_file)
+        isfile(tol_path) || error("[ErrorFields] tolerance_file not found: $tol_path")
+        tolerances = ErrorFields.validate_tolerances(ErrorFields.read_tolerance_toml(tol_path), sens.coil_names)
+        @info "Tolerances: $(length(tolerances.coils)) coil sets, $(length(tolerances.groups)) coherent groups from $(ef_ctrl.tolerance_file)"
+    end
+
+    # The run's Monte Carlo is the full-window, dominant-mode summary; other windows are re-run
+    # post hoc with ErrorFields.run_monte_carlo.
+    dom = PerturbedEquilibrium.dominant_coupling(rc)
+    monte_carlo = nothing
+    if tolerances !== nothing
+        mc_start = time()
+        monte_carlo = ErrorFields.run_monte_carlo(ErrorFields.sensitivity_table(sens, dom), tolerances, coil_sets, mc_ctrl)
+        @info "Monte Carlo: $(mc_ctrl.nbatch) × $(mc_ctrl.nsample) samples in $(@sprintf("%.2f", time() - mc_start)) s; " *
+              "⟨|δ|⟩ = $(@sprintf("%.3e", monte_carlo.mean_abs_delta)) intrinsic, $(@sprintf("%.3e", monte_carlo.mean_abs_delta_efc)) corrected " *
+              "(nominal $(@sprintf("%.3e", monte_carlo.delta_nominal)))"
+    end
+
+    # Locking risk needs the operating point: [ErrorFields.scenario] with at least n_e.
+    risk = nothing
+    scan = nothing
+    if monte_carlo !== nothing && scenario_raw !== nothing
+        haskey(scenario_raw, "n_e") || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
+        scen = ErrorFields.ScenarioParameters(result.equil; (Symbol(k) => v for (k, v) in scenario_raw)...)
+        sc = ErrorFields.threshold_scaling(; n=result.nlow, year=risk_ctrl.year, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
+        risk_start = time()
+        risk = ErrorFields.locking_risk(monte_carlo, sc, scen; ctrl=risk_ctrl)
+        @info "Locking risk ($(ErrorFields.scaling_label(sc))): threshold $(@sprintf("%.3e", risk.threshold_nominal)); " *
+              "P_lock = $(@sprintf("%.2f", risk.plock)) % intrinsic, $(@sprintf("%.2f", risk.plock_efc)) % corrected, " *
+              "$(@sprintf("%.2f", risk.plock_nominal)) % as designed ($(@sprintf("%.2f", time() - risk_start)) s)"
+        if !isempty(risk_ctrl.scan_scales)
+            scan_start = time()
+            scan = ErrorFields.tolerance_scan(ErrorFields.sensitivity_table(sens, dom), tolerances, coil_sets, mc_ctrl, sc, scen;
+                scales=risk_ctrl.scan_scales, risk_ctrl)
+            @info "Tolerance scan over $(length(scan.scale)) scales in $(@sprintf("%.2f", time() - scan_start)) s"
+        end
+    end
+
+    # Correction-coil couplings: overlap per kAt and the NTV torque of the full and residual fields.
+    couplings = nothing
+    if !isempty(ntv_ctrl.efc_coils)
+        efc_sets = [cs for cs in coil_sets if cs.name in ntv_ctrl.efc_coils]
+        missing = setdiff(ntv_ctrl.efc_coils, [cs.name for cs in efc_sets])
+        isempty(missing) || error("[ErrorFields.NTV] efc_coils not among the run's coil sets: $(join(missing, ", "))")
+        ntv_start = time()
+        couplings = efc_couplings(result, efc_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; method=ntv_ctrl.method, verbose=ntv_ctrl.verbose,
+            rotation_scan=ntv_ctrl.rotation_scan, scan_points=ntv_ctrl.rotation_scan_points, scan_max_points=ntv_ctrl.rotation_scan_max_points,
+            scan_tolerance=ntv_ctrl.rotation_scan_tolerance, span_factor=ntv_ctrl.rotation_span_factor, offset_factor=ntv_ctrl.rotation_offset_factor)
+        @info "NTV couplings of $(length(couplings)) correction arrays in $(@sprintf("%.1f", time() - ntv_start)) s"
+    end
+
+    if ef_ctrl.write_outputs_to_HDF5
+        output_file = isempty(ef_ctrl.output_filename) ? result.control.HDF5_filename : ef_ctrl.output_filename
+        h5open(joinpath(result.dir_path, output_file), "cw") do h5file
+            ErrorFields.write_to_hdf5!(h5file, sens, dom)
+            # Raw echo of the tolerance input for replay (read back by ErrorFields.read_tolerance_snapshot).
+            tolerances === nothing || ErrorFields.write_tolerance_snapshot!(h5file, tolerances)
+            monte_carlo === nothing || ErrorFields.write_to_hdf5!(h5file, monte_carlo)
+            risk === nothing || ErrorFields.write_to_hdf5!(h5file, risk; scan)
+            couplings === nothing || ErrorFields.write_to_hdf5!(h5file, couplings)
+        end
+        @info "Results written to $output_file"
+    end
+
+    @info "ErrorFields completed in $(@sprintf("%.3f", time() - ef_start)) s"
+
+    return sens, monte_carlo, risk, couplings
+end
+
+"""
+    efc_couplings(ffs, coil_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; mode=1, method="fgar", verbose=false) -> Vector{ErrorFields.EFCCoupling}
+
+The couplings of each correction coil array in `coil_sets` per kilo-ampere-turn: its
+dominant-mode overlap and resonant fraction from its spectrum on the control surface, and its
+NTV torque for the whole field and for the field with mode `mode` of `dom` projected out. The
+torque is a quadratic form of the applied spectrum, so each is one plasma-response evaluation
+of the unit-current spectrum (injected as forcing modes, nothing written) followed by the
+kinetic torque of `method`; both scale exactly with the square of the current. `cfg` is the
+run's `[ForcingTerms]` coil configuration, so the boundary grid matches the one the run's
+sensitivities were evaluated on; `rc` must be the coupling of `ffs`'s own solve and
+`kinetic_profiles` its kinetic context. The spectrum is normalized by the magnitude of the
+array's ampere-turns, `|nw| × max|I|`, keeping its winding sense and current pattern as the
+phase reference; the torque is stored with its sign.
+"""
+function efc_couplings(
+    ffs::ForceFreeStatesResult,
+    coil_sets::Vector{ForcingTerms.CoilSet},
+    rc::PerturbedEquilibrium.ResonantCoupling,
+    dom::PerturbedEquilibrium.DominantCoupling,
+    cfg::ForcingTerms.CoilConfig,
+    kf_ctrl::KineticForces.KineticForcesControl,
+    kinetic_profiles;
+    mode::Int=1,
+    method::AbstractString="fgar",
+    rotation_scan::Bool=true,
+    scan_points::Int=9,
+    scan_max_points::Int=21,
+    scan_tolerance::Real=0.05,
+    span_factor::Real=1.0,
+    offset_factor::Real=2.0,
+    verbose::Bool=false
+)
+    kinetic_profiles === nothing && error("efc_couplings needs kinetic profiles: add a [KineticForces] section with a kinetic_file")
+    getfield(kf_ctrl, Symbol(method * "_flag")) || error("efc_couplings: KineticForces method \"$method\" is not enabled in the control")
+    equil = ffs.equil
+    grids = [(n, ForcingTerms.CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)) for n in sort(unique(rc.n_modes))]
+    m_low, m_high = extrema(rc.m_modes)
+    v = dom.right_singular_vectors[:, mode]
+    quiet = PerturbedEquilibrium.PerturbedEquilibriumControl(; compute_response=true, compute_singular_coupling=false, verbose=verbose, write_outputs_to_HDF5=false)
+
+    # Reference rotation and scan span from the kinetic profiles, with the torque kernel's own
+    # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
+    kp = kinetic_profiles
+    chi1 = 2π * equil.psio
+    chrg = kf_ctrl.zi * Utilities.E_CHG
+    ψk = kp.xs
+    ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
+    ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
+    ω_star_n = [(n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk]
+    ω_φ = ω_E .+ ω_star_n .+ ω_star_T
+    # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
+    w = [ψ <= ffs.psilim ? max(kp.ni_spline(ψ), 0.0) * equil.profiles.dVdpsi_spline(clamp(ψ, equil.profiles.xs[1], equil.profiles.xs[end])) : 0.0 for ψ in ψk]
+    ω_ref = sum(w .* ω_φ) / sum(w)
+    span, ω_offset = ErrorFields.rotation_scan_span(ω_E[1], ω_star_T[1]; span_factor, offset_factor)
+    npts = isodd(scan_points) ? scan_points : scan_points + 1
+    grid0 = rotation_scan ? collect(range(-span, span; length=max(npts, 3))) : [0.0]
+    verbose && @info "NTV couplings: ω_ref = $(@sprintf("%.3e", ω_ref)) rad/s, rough offset $(@sprintf("%.3e", ω_offset)) rad/s, " *
+          "scan ±$(@sprintf("%.3e", span)) rad/s on $(length(grid0)) initial points (max $(scan_max_points))"
+
+    function response_of(modes::Vector{ForcingTerms.ForcingMode})
+        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
+        pe_intr.inner_bpen = ffs.bpen
+        pe_intr.forcing_modes = modes
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, ForcingTerms.RMPField(ForcingTerms.ForcingTermsControl()), quiet, pe_intr)
+        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=verbose)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
+        return kf_intr
+    end
+    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.
+    function torque_of(kf_intr, profiles)
+        kf_state = KineticForces.KineticForcesState()
+        logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
+        Base.CoreLogging.with_logger(logger) do
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, profiles)
+        end
+        r = kf_state.method_results[String(method)]
+        T = real(r.total_torque)
+        prof = zeros(Float64, length(ψk))
+        if length(r.psi_grid) >= 2
+            # Cubic spline of the cumulative torque on the quadrature's own ψ points (deduplicated), zero
+            # inside the first point and the total beyond the last.
+            keep = [i == 1 || r.psi_grid[i] > r.psi_grid[i-1] for i in eachindex(r.psi_grid)]
+            pg, tc = r.psi_grid[keep], real.(r.t_cumulative[keep])
+            spl = length(pg) >= 4 ? cubic_interp(pg, tc) : nothing
+            for (k, ψ) in enumerate(ψk)
+                prof[k] = ψ <= pg[1] ? 0.0 : ψ >= pg[end] ? tc[end] : spl === nothing ? tc[searchsortedlast(pg, ψ)] : spl(ψ)
+            end
+        end
+        return T, prof
+    end
+
+    out = ErrorFields.EFCCoupling[]
+    for cs in coil_sets
+        kat = abs(cs.nw) * maximum(abs, cs.currents) / 1e3
+        kat > 0 || error("efc_couplings: coil set \"$(cs.name)\" carries no current")
+        # Unit-current spectrum: per kilo-ampere-turn of the array's current pattern.
+        modes = ForcingTerms.ForcingMode[]
+        for (n, grid) in grids
+            append!(modes, ForcingTerms.coil_forcing_modes(cs, grid, n, m_low, m_high))
+        end
+        modes = [ForcingTerms.ForcingMode(; n=m.n, m=m.m, amplitude=m.amplitude / kat) for m in modes]
+        b̃ = PerturbedEquilibrium.rootarea_field(rc, modes)
+        δ = dot(v, b̃) / equil.params.bt0
+        overlap = 100 * abs(dot(v, b̃)) / norm(b̃)
+        # The residual field as forcing modes: back through the conform operator to Φ_x.
+        Φ_res = rc.flux_conform * ErrorFields.residual_spectrum(dom, b̃; mode)
+        residual_modes = [ForcingTerms.ForcingMode(; n=rc.n_modes[k], m=rc.m_modes[k], amplitude=Φ_res[k]) for k in eachindex(Φ_res)]
+        t_start = time()
+        kf_full = response_of(modes)
+        kf_res = response_of(residual_modes)
+        profiles_full = Dict{Float64,Vector{Float64}}()
+        profiles_res = Dict{Float64,Vector{Float64}}()
+        function torques(Δ)
+            profiles = Δ == 0 ? kp : Equilibrium.shift_exb_rotation(kp, Δ)
+            T_f, p_f = torque_of(kf_full, profiles)
+            T_r, p_r = torque_of(kf_res, profiles)
+            profiles_full[Δ] = p_f
+            profiles_res[Δ] = p_r
+            verbose && @info "    $(cs.name) Δω = $(@sprintf("%+.3e", Δ)) rad/s: torque $(@sprintf("%.3e", T_f)) N·m per kAt² (residual $(@sprintf("%.3e", T_r)))"
+            return [T_f, T_r]
+        end
+        if rotation_scan
+            Δs, Ts = Utilities.adaptive_sample(torques, grid0; max_points=scan_max_points, rtol=scan_tolerance)
+        else
+            Δs = [0.0]
+            Ts = permutedims(torques(0.0))
+        end
+        i0 = findfirst(==(0.0), Δs)
+        T_full, T_res = Ts[i0, 1], Ts[i0, 2]
+        c = ErrorFields.EFCCoupling(cs.name, abs(δ), overlap, T_full, T_res, Δs, Ts[:, 1], Ts[:, 2],
+            rotation_scan ? ω_ref : NaN, rotation_scan ? ω_offset : NaN, rotation_scan ? collect(ψk) : Float64[],
+            rotation_scan ? reduce(hcat, profiles_full[Δ] for Δ in Δs) : zeros(0, 1),
+            rotation_scan ? reduce(hcat, profiles_res[Δ] for Δ in Δs) : zeros(0, 1))
+        if rotation_scan
+            crossings = ErrorFields.torque_zero_crossings(c)
+            isempty(crossings) && @warn "NTV couplings: the residual torque of $(cs.name) does not change sign within ±$(@sprintf("%.3e", span)) rad/s; " *
+                  "raise rotation_span_factor to reach the neoclassical offset"
+        end
+        verbose && @info "  $(cs.name): |δ| = $(@sprintf("%.3e", abs(δ))) per kAt, resonant fraction $(@sprintf("%.1f", overlap)) %, " *
+              "torque $(@sprintf("%.3e", T_full)) N·m per kAt² (residual $(@sprintf("%.3e", T_res))) at the nominal rotation, " *
+              "$(length(Δs)) scan points in $(@sprintf("%.1f", time() - t_start)) s"
+        push!(out, c)
+    end
+    return out
 end
 
 """

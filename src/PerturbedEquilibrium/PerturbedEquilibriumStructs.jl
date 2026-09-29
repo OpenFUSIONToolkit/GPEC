@@ -26,7 +26,9 @@ Medium Priority (defer for MWE):
   - `singular_point_method::String` - Method for singular point treatment (default: "standard")
 
 Regularization:
-    # High Priority (MWE)
+
+# High Priority (MWE)
+
   - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
 @kwdef struct PerturbedEquilibriumControl
@@ -119,8 +121,19 @@ Metadata [n_rational] — identifies each (surface, n) row:
 
   - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 
+Dominant resonant-coupling modes — the run summary SVD `U·diag(σ)·Vᴴ` of
+`C_resonant_area_weighted_field` over every resonant row (window post hoc with `dominant_coupling`
+on a `ResonantCoupling`):
+
+  - `dominant_singular_values` - σ, descending [rank]
+  - `dominant_right_singular_vectors` - V, applied-b̃ spectra ranked by resonant drive [numpert_total × rank]
+  - `dominant_left_singular_vectors` - U, resonant-field patterns over the retained surfaces [n_retained × rank]
+  - `dominant_rational_index` - rows of the `rational_*` arrays retained in the window [n_retained]
+  - `dominant_forcing_overlap` - Vᴴ·b̃_x, the applied forcing's coefficient on each mode [rank]
+
 Control-surface forcing/response spectra [numpert_total], in the three Pharr (2026) field
 representations (all tesla; no flux/weber is stored):
+
   - `forcing_b`/`response_b` - bare normal field b (Σ⁻¹·b̃)
   - `forcing_b_rootarea`/`response_b_rootarea` - root-area-weighted field b̃ (coordinate-invariant)
   - `forcing_b_area`/`response_b_area` - area-weighted field b̄ (= S·b̃; flux is Φ = A·b̄)
@@ -186,19 +199,26 @@ well-conditioned flux-space inductances L, Λ:
     rational_n::Vector{Int} = Int[]
     rational_surface_idx::Vector{Int} = Int[]
 
+    # Dominant resonant-coupling modes: SVD of C_resonant_area_weighted_field over the retained rows
+    dominant_singular_values::Vector{Float64} = Float64[]
+    dominant_right_singular_vectors::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # V [numpert_total × rank]
+    dominant_left_singular_vectors::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)   # U [n_retained × rank]
+    dominant_rational_index::Vector{Int} = Int[]                                  # retained rows of rational_*
+    dominant_forcing_overlap::Vector{ComplexF64} = ComplexF64[]                    # Vᴴ·b̃_x [rank]
+
     # Control-surface forcing/response spectra in the three weightings of field representations [numpert_total], tesla
-    forcing_b::Vector{ComplexF64}           = ComplexF64[]  # bare normal field b (forcing Φ_x)
-    forcing_b_rootarea::Vector{ComplexF64}  = ComplexF64[]  # root-area-weighted field b̃ (coordinate-invariant)
-    forcing_b_area::Vector{ComplexF64}      = ComplexF64[]  # area-weighted field b̄
-    response_b::Vector{ComplexF64}          = ComplexF64[]  # bare normal field b (response Φ_tot = P·Φ_x)
+    forcing_b::Vector{ComplexF64} = ComplexF64[]  # bare normal field b (forcing Φ_x)
+    forcing_b_rootarea::Vector{ComplexF64} = ComplexF64[]  # root-area-weighted field b̃ (coordinate-invariant)
+    forcing_b_area::Vector{ComplexF64} = ComplexF64[]  # area-weighted field b̄
+    response_b::Vector{ComplexF64} = ComplexF64[]  # bare normal field b (response Φ_tot = P·Φ_x)
     response_b_rootarea::Vector{ComplexF64} = ComplexF64[]  # root-area-weighted field b̃
-    response_b_area::Vector{ComplexF64}     = ComplexF64[]  # area-weighted field b̄
+    response_b_area::Vector{ComplexF64} = ComplexF64[]  # area-weighted field b̄
 
     # Control surface matrices [numpert_total × numpert_total], root-area-weighted field (b̃) space
-    plasma_inductance::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)  # Λ̃ (field space)
+    plasma_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # Λ̃ (field space)
     surface_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # L̃ (field space)
-    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P̃ = R⁻¹·Λ·L⁻¹·R
-    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # ϱ̃ = R†·L⁻¹·(Λ−L)·L⁻¹·R
+    permeability::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # P̃ = R⁻¹·Λ·L⁻¹·R
+    reluctance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # ϱ̃ = R†·L⁻¹·(Λ−L)·L⁻¹·R
     rootarea_to_area_weight::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # S = Σ/√A at psilim: b̃→b̄ recovery operator
     surface_area::Float64 = 0.0  # scalar control-surface area A = ∫J|∇ψ|dθ (flux: Φ = A·b̄; conform R = S·A)
 

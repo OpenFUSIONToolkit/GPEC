@@ -1,4 +1,5 @@
 using TOML
+using LinearAlgebra
 
 # TODO: this helper may belong in a shared test-utilities file rather than here.
 # TODO: come up with a Gaussian reduction test that doesn't rely on external data.
@@ -327,6 +328,49 @@ end
         @test size(odet.fixfac) == (numpert_total, numpert_total, numunorms_init)
         @test length(odet.unorm) == numpert_total
         @test length(odet.unorm0) == numpert_total
+    end
+
+    @testset "interior start falls back to the fixed initialization" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        inputs["ForceFreeStates"]["verbose"] = false
+        function axis_state(psilow; kwargs...)
+            eq_inputs = copy(inputs["Equilibrium"])
+            eq_inputs["psilow"] = psilow
+            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(eq_inputs, ex)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+            ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., kwargs...)
+            intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
+            intr.nlow = ctrl.nn_low
+            intr.nhigh = ctrl.nn_high
+            intr.npert = 1
+            FFS.sing_lim!(intr, ctrl, equil)
+            FFS.sing_find!(intr, equil)
+            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+            intr.mpert = intr.mhigh - intr.mlow + 1
+            intr.numpert_total = intr.mpert * intr.npert
+            mats = FFS.build_matrix_splines(equil, intr, FFS.make_metric(equil, intr.mpert))
+            odet = FFS.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+            return odet, ctrl, mats, equil, intr
+        end
+        # Near the axis the Frobenius start gives the regular solution: U₂ = I with a nonzero U₁.
+        odet, ctrl, mats, equil, intr = axis_state(1e-4)
+        FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test odet.u[:, :, 2] ≈ I
+        @test any(!iszero, odet.u[:, :, 1])
+        # An interior start switches to the fixed start (U₁ = 0, U₂ = I) and says so.
+        odet, ctrl, mats, equil, intr = axis_state(0.3)
+        @test_logs (:warn, r"fixed start") FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # The threshold is a control: raising it keeps the Frobenius start, and zero selects the fixed start silently.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.5)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test any(!iszero, odet.u[:, :, 1])
+        odet, ctrl, mats, equil, intr = axis_state(1e-4; frobenius_psi_max=0.0)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
     end
 
     @testset "chunk_el_integration_bounds tests" begin
