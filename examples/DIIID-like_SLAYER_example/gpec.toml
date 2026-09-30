@@ -73,7 +73,7 @@ coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (
 dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar", "rfitzp", or "toroidal"
 mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
 zeff                    = 1.0        # Effective charge
-chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
+chi_perp_e              = 1.0       # fallback only; the kinetic file supplies χ⊥,e(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
 filter_above_poles      = true       # Discard roots above the highest pole γ

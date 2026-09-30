@@ -181,8 +181,13 @@ profiles, without an intermediate file round-trip.
 
   - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
   - `zeff`      -- effective charge (default `1.0`).
-  - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
+  - `chi_perp_e`  -- electron perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
+  - `chi_perp_i`, `D_perp` -- ion perpendicular heat / perpendicular particle
+    diffusivity [m²/s], scalar or callable of `psi` (default `1.0`); used only by
+    the matching `P_perp_model`.
+  - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
+    (default `:chi_perp_e`).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
     of `psi` (default `1.0`).
   - `dr_val`    -- resistive interchange index `D_R = E + F + H²`
@@ -232,7 +237,10 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     mu_i::Real=2.0,
     zeff::Real=1.0,
     z_i::Real=1.0,
-    chi_perp=1.0,
+    chi_perp_e=1.0,
+    chi_perp_i=1.0,
+    D_perp=1.0,
+    P_perp_model::Symbol=:chi_perp_e,
     chi_tor=1.0,
     dr_val=nothing,
     dgeo_val=nothing,
@@ -378,8 +386,11 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
             rs=rs, R0=R0_use, mu_i=mu_i, zeff=zeff,
-            chi_perp=_eval(chi_perp, psi),
+            chi_perp_e=_eval(chi_perp_e, psi),
             chi_tor=_eval(chi_tor, psi),
+            chi_perp_i=_eval(chi_perp_i, psi),
+            D_perp=_eval(D_perp, psi),
+            P_perp_model=P_perp_model,
             m=m_res, n=n_res,
             dr_val=dr_val_k,
             dgeo_val=dgeo_val_k,

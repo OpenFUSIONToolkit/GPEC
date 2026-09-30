@@ -34,10 +34,15 @@ constructor.
     callable of `psi` overrides it
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
-  - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
-    diffusivity [m²/s], used only when the kinetic file carries no usable
-    `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
-    file's χ⊥(ψ)/χ_φ(ψ) take precedence
+  - `chi_perp_e`, `chi_perp_i`, `chi_tor` -- fallback electron / ion perpendicular
+    heat and toroidal momentum diffusivity [m²/s], used only when the kinetic file
+    carries no usable `chi_e`/`chi_i`/`chi_phi` profile (dataset absent or
+    all-zero); otherwise the file's χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) take precedence
+  - `D_perp`   -- perpendicular particle diffusivity [m²/s] (default 1.0), used
+    only by `P_perp_model = :D_perp`
+  - `P_perp_model` -- how the perpendicular Prandtl number is built: `:chi_perp_e`
+    (default), `:chi_perp_i`, `:P_phi` (P_perp = P_tor), `:D_perp`, or `:c_beta`
+    (P_perp = c_β²); see `InnerLayer.SLAYER.slayer_parameters`
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `dr_val` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
@@ -84,9 +89,9 @@ there is one consistent interface for resistive and kinetic profiles.
 
   - `profile_file`   -- path to a kinetic-profile file (relative to the run
     dir), required when SLAYER is enabled. HDF5 (`.h5`) files use the GPEC
-    kinetic schema and may carry `chi_e` (χ⊥) and `chi_phi` (χ_φ); ASCII
+    kinetic schema and may carry `chi_e` (χ⊥,e), `chi_i` (χ⊥,i) and `chi_phi` (χ_φ); ASCII
     tables are also accepted but carry no χ. When a χ dataset is absent or
-    all-zero, the scalar `chi_perp`/`chi_tor` fallbacks below are used (so a
+    all-zero, the scalar `chi_perp_e`/`chi_perp_i`/`chi_tor` fallbacks below are used (so a
     file can keep the χ keys set to 0 to defer to the scalars).
   - `profile_group`  -- group within the HDF5 file (default `"/"`)
 
@@ -107,8 +112,11 @@ there is one consistent interface for resistive and kinetic profiles.
     bt::Union{Float64,Nothing} = nothing
     mu_i::Float64 = 2.0
     zeff::Float64 = 1.0
-    chi_perp::Float64 = 1.0
+    chi_perp_e::Float64 = 1.0
     chi_tor::Float64 = 1.0
+    chi_perp_i::Float64 = 1.0
+    D_perp::Float64 = 1.0
+    P_perp_model::Symbol = :chi_perp_e
     dr_val::Union{Float64,Nothing} = nothing
     dgeo_val::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0
@@ -161,6 +169,7 @@ const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
+const _VALID_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
@@ -177,6 +186,9 @@ function validate(ctrl::SLAYERControl)
     ctrl.dc_type in _VALID_DC_TYPES ||
         throw(ArgumentError("SLAYERControl: dc_type=$(ctrl.dc_type) " *
                             "not in $(_VALID_DC_TYPES)"))
+    ctrl.P_perp_model in _VALID_P_PERP_MODELS ||
+        throw(ArgumentError("SLAYERControl: P_perp_model=$(ctrl.P_perp_model) " *
+                            "not in $(_VALID_P_PERP_MODELS)"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
         throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
                             "not in $(_VALID_RESISTIVITY_MODELS)"))
@@ -242,7 +254,7 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :dc_type,
-            :resistivity_model, :lnLambda_form)
+            :resistivity_model, :lnLambda_form, :P_perp_model)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
