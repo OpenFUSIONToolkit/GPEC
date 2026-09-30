@@ -206,7 +206,15 @@
         @test ref.P_perp ≈ ref.tau_r * 1.0 / ref.rs^2 rtol = 1e-14
         @test slayer_parameters(; base..., P_perp_model=:chi_perp_i, chi_perp_i=2.0).P_perp ≈ 2 * ref.P_perp
         @test slayer_parameters(; base..., P_perp_model=:P_phi).P_perp == ref.P_tor
-        @test slayer_parameters(; base..., P_perp_model=:D_perp, D_perp=3.0).P_perp ≈ 3 * ref.P_perp
+        # Eq. 16: with χ⊥,e = χ⊥,i = 0 only c_β²η/μ₀ survives, so P_perp = c_β²
+        grads = (dlnn=-1.0, dlnTe=-2.0, dlnTi=-3.0)
+        d0 = slayer_parameters(; base..., P_perp_model=:D_perp, grads..., chi_perp_e=0.0, chi_perp_i=0.0)
+        @test d0.P_perp ≈ d0.c_beta^2 rtol = 1e-12
+        # η_e = 2, η_i = 3, T_e = T_i ⇒ τ = 3/4, τ_e = 3/7, τ_i = 4/7
+        d1 = slayer_parameters(; base..., P_perp_model=:D_perp, grads..., chi_perp_i=2.0)
+        D_hand = d1.c_beta^2 * d1.eta / MU_0 + (2 / 3) * (1 - d1.c_beta^2) * ((2 / 3) * (3 / 7) * 1.0 + (3 / 4) * (4 / 7) * 2.0)
+        @test d1.P_perp ≈ d1.tau_r * D_hand / d1.rs^2 rtol = 1e-12
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:D_perp)
         @test slayer_parameters(; base..., P_perp_model=:c_beta).P_perp == ref.c_beta^2
         @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:bogus)
         te = slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1)

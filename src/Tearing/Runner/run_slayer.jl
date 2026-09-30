@@ -462,7 +462,7 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
             "(dataset absent or all-zero); using the scalar " *
             "control.chi_perp_e/chi_tor fallback for the missing one(s).")
         chi_perp_i = loaded.chi_perp_i === nothing ? control.chi_perp_i : loaded.chi_perp_i
-        (control.P_perp_model === :chi_perp_i && loaded.chi_perp_i === nothing) && @warn(
+        (control.P_perp_model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing) && @warn(
             "SLAYER: kinetic file has no usable chi_i profile; using the scalar " *
             "control.chi_perp_i fallback.")
         params = build_slayer_inputs(equil, surfaces, profiles;
@@ -472,7 +472,6 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
             chi_perp_e=chi_perp_e,
             chi_tor=chi_tor,
             chi_perp_i=chi_perp_i,
-            D_perp=control.D_perp,
             tau_E=something(control.tau_E, NaN),
             P_perp_model=control.P_perp_model,
             dr_val=control.dr_val,

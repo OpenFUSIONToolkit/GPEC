@@ -184,7 +184,8 @@ end
                         qval, sval_r, bt, rs, R0, mu_i, zeff,
                         chi_perp_e, chi_tor,
                         m, n,
-                        chi_perp_i=1.0, D_perp=1.0, tau_E=NaN,
+                        chi_perp_i=1.0, tau_E=NaN,
+                        dlnn=NaN, dlnTe=NaN, dlnTi=NaN,
                         P_perp_model=:chi_perp_e,
                         dr_val=0.0, dgeo_val=0.0,
                         dc_type=:none, ising=0,
@@ -217,13 +218,16 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `zeff`    -- effective charge
   - `chi_perp_e`, `chi_tor` -- electron perpendicular heat / toroidal momentum diffusivity [m²/s]
   - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s] (used by `P_perp_model=:chi_perp_i`)
-  - `D_perp`  -- perpendicular particle diffusivity [m²/s] (used by `P_perp_model=:D_perp`)
+  - `dlnn`, `dlnTe`, `dlnTi` -- radial log-gradients of n, T_e, T_i in any common radial variable
+    (only their ratios enter; required by `P_perp_model=:D_perp`)
   - `tau_E`   -- whole-plasma energy confinement time [s] (required by `P_perp_model=:tau_E`)
   - `P_perp_model` -- how `P_perp` is built:
       + `:chi_perp_e` (default) -- τ_R·χ⊥,e/r_s²
       + `:chi_perp_i` -- τ_R·χ⊥,i/r_s²
       + `:P_phi`  -- P_perp = P_tor (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 143)
-      + `:D_perp` -- τ_R/τ_⊥ with τ_⊥ = r_s²/D_⊥ (Fitzpatrick, Phys. Plasmas 29, 032507 (2022))
+      + `:D_perp` -- τ_R/τ_⊥ with τ_⊥ = r_s²/D_⊥ and D_⊥ from Eq. 16 of Fitzpatrick, Phys. Plasmas 29,
+        032507 (2022), with η_⊥ = η_∥:
+        D_⊥ = c_β² η/μ₀ + (2/3)(1 − c_β²)[η_e τ_e/(1+η_e) χ⊥,e + η_i τ_i/(1+η_i) χ⊥,i]
       + `:c_beta` -- P_perp = C² with C = c_β (Park et al., Phys. Plasmas 29, 122505 (2022))
       + `:tau_E`  -- P_perp = P_tor = τ_R/τ_E, overriding χ_φ (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 131)
     `chi_perp_e` still sets the critical-Δ `dc_tmp` in every mode.
@@ -281,7 +285,8 @@ function slayer_parameters(;
     rs::Real, R0::Real, mu_i::Real, zeff::Real,
     chi_perp_e::Real, chi_tor::Real,
     m::Integer, n::Integer,
-    chi_perp_i::Real=1.0, D_perp::Real=1.0, tau_E::Real=NaN,
+    chi_perp_i::Real=1.0, tau_E::Real=NaN,
+    dlnn::Real=NaN, dlnTe::Real=NaN, dlnTi::Real=NaN,
     P_perp_model::Symbol=:chi_perp_e,
     dr_val::Real=0.0, dgeo_val::Real=0.0,
     dc_type::Symbol=:none, ising::Integer=0,
@@ -400,7 +405,17 @@ function slayer_parameters(;
         # P_⊥ = P_φ (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 143)
         P_tor
     elseif P_perp_model === :D_perp
-        # τ_⊥ = r_s²/D_⊥, P_⊥ = τ_R/τ_⊥ (Fitzpatrick, Phys. Plasmas 29, 032507 (2022))
+        # D_⊥ from Fitzpatrick, Phys. Plasmas 29, 032507 (2022), Eqs. 4-6 and 16 (η_⊥ = η_∥), with
+        # η_s/(1+η_s) = dlnT_s/(dlnn+dlnT_s) and τ = (T_e/T_i)(1+η_e)/(1+η_i) written flat-density safe.
+        frac_e = dlnTe / (dlnn + dlnTe)
+        frac_i = dlnTi / (dlnn + dlnTi)
+        tau_F = (t_e / t_i) * (dlnn + dlnTe) / (dlnn + dlnTi)
+        D_perp = c_beta^2 * eta / MU_0 +
+                 (2 / 3) * (1 - c_beta^2) * (frac_e * tau_F / (1 + tau_F) * chi_perp_e + frac_i / (1 + tau_F) * chi_perp_i)
+        isfinite(D_perp) && D_perp > 0 ||
+            throw(ArgumentError("slayer_parameters: P_perp_model=:D_perp gave D_perp=$D_perp; " *
+                                "check dlnn/dlnTe/dlnTi (got $dlnn, $dlnTe, $dlnTi)"))
+        # τ_⊥ = r_s²/D_⊥, P_⊥ = τ_R/τ_⊥
         tau_r / (rs^2 / D_perp)
     elseif P_perp_model === :c_beta
         # C² = P_⊥ with C = c_β (Park et al., Phys. Plasmas 29, 122505 (2022))

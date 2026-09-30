@@ -58,7 +58,6 @@
             "mu_i" => 2.0,
             "dr_val" => 0.01,
             "P_perp_model" => "D_perp",
-            "D_perp" => 0.5,
             "scan_grid" => Dict{String,Any}(
                 "Q_re_range" => [-5.0, 5.0],
                 "Q_im_range" => [-1.0, 3.0],
@@ -82,7 +81,6 @@
         @test c.bt === 1.8
         @test c.dr_val == 0.01
         @test c.P_perp_model === :D_perp
-        @test c.D_perp == 0.5
         @test c.Q_re_range == (-5.0, 5.0)
         @test c.Q_im_range == (-1.0, 3.0)
         @test c.nre == 50

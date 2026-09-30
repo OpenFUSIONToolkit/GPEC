@@ -38,12 +38,10 @@ constructor.
     heat and toroidal momentum diffusivity [m²/s], used only when the kinetic file
     carries no usable `chi_e`/`chi_i`/`chi_phi` profile (dataset absent or
     all-zero); otherwise the file's χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) take precedence
-  - `D_perp`   -- perpendicular particle diffusivity [m²/s] (default 1.0), used
-    only by `P_perp_model = :D_perp`
   - `tau_E`    -- whole-plasma energy confinement time [s], required by
     `P_perp_model = :tau_E` (default `nothing`)
   - `P_perp_model` -- how the perpendicular Prandtl number is built: `:chi_perp_e`
-    (default), `:chi_perp_i`, `:P_phi` (P_perp = P_tor), `:D_perp`, `:c_beta`
+    (default), `:chi_perp_i`, `:P_phi` (P_perp = P_tor), `:D_perp` (D⊥ from χ⊥,e, χ⊥,i and the n, T gradients), `:c_beta`
     (P_perp = c_β²), or `:tau_E` (P_perp = P_tor = τ_R/τ_E); see
     `InnerLayer.SLAYER.slayer_parameters`
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
@@ -118,7 +116,6 @@ there is one consistent interface for resistive and kinetic profiles.
     chi_perp_e::Float64 = 1.0
     chi_tor::Float64 = 1.0
     chi_perp_i::Float64 = 1.0
-    D_perp::Float64 = 1.0
     tau_E::Union{Float64,Nothing} = nothing
     P_perp_model::Symbol = :chi_perp_e
     dr_val::Union{Float64,Nothing} = nothing
