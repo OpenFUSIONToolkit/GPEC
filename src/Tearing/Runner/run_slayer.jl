@@ -473,6 +473,7 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
             chi_tor=chi_tor,
             chi_perp_i=chi_perp_i,
             D_perp=control.D_perp,
+            tau_E=something(control.tau_E, NaN),
             P_perp_model=control.P_perp_model,
             dr_val=control.dr_val,
             dgeo_val=control.dgeo_val,

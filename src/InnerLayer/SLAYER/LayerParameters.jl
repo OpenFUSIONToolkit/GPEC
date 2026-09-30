@@ -105,7 +105,7 @@ end
 const ALLOWED_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
 
 # Allowed P_perp_model values selecting how P_perp is built. `:chi_perp_e` is the default.
-const ALLOWED_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta)
+const ALLOWED_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
 
 """
     r_based_shear(rs, q, dq_dpsi, da_dpsi) -> Float64
@@ -184,7 +184,7 @@ end
                         qval, sval_r, bt, rs, R0, mu_i, zeff,
                         chi_perp_e, chi_tor,
                         m, n,
-                        chi_perp_i=1.0, D_perp=1.0,
+                        chi_perp_i=1.0, D_perp=1.0, tau_E=NaN,
                         P_perp_model=:chi_perp_e,
                         dr_val=0.0, dgeo_val=0.0,
                         dc_type=:none, ising=0,
@@ -218,12 +218,14 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `chi_perp_e`, `chi_tor` -- electron perpendicular heat / toroidal momentum diffusivity [m²/s]
   - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s] (used by `P_perp_model=:chi_perp_i`)
   - `D_perp`  -- perpendicular particle diffusivity [m²/s] (used by `P_perp_model=:D_perp`)
+  - `tau_E`   -- whole-plasma energy confinement time [s] (required by `P_perp_model=:tau_E`)
   - `P_perp_model` -- how `P_perp` is built:
       + `:chi_perp_e` (default) -- τ_R·χ⊥,e/r_s²
       + `:chi_perp_i` -- τ_R·χ⊥,i/r_s²
       + `:P_phi`  -- P_perp = P_tor (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 143)
       + `:D_perp` -- τ_R/τ_⊥ with τ_⊥ = r_s²/D_⊥ (Fitzpatrick, Phys. Plasmas 29, 032507 (2022))
       + `:c_beta` -- P_perp = C² with C = c_β (Park et al., Phys. Plasmas 29, 122505 (2022))
+      + `:tau_E`  -- P_perp = P_tor = τ_R/τ_E, overriding χ_φ (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 131)
     `chi_perp_e` still sets the critical-Δ `dc_tmp` in every mode.
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
@@ -279,7 +281,7 @@ function slayer_parameters(;
     rs::Real, R0::Real, mu_i::Real, zeff::Real,
     chi_perp_e::Real, chi_tor::Real,
     m::Integer, n::Integer,
-    chi_perp_i::Real=1.0, D_perp::Real=1.0,
+    chi_perp_i::Real=1.0, D_perp::Real=1.0, tau_E::Real=NaN,
     P_perp_model::Symbol=:chi_perp_e,
     dr_val::Real=0.0, dgeo_val::Real=0.0,
     dc_type::Symbol=:none, ising::Integer=0,
@@ -384,11 +386,17 @@ function slayer_parameters(;
     # Effective Prandtl-like transport ratios
     tau_tor = rs^2 / chi_tor
     P_tor = tau_r / tau_tor
+    if P_perp_model === :tau_E
+        isfinite(tau_E) && tau_E > 0 ||
+            throw(ArgumentError("slayer_parameters: P_perp_model=:tau_E needs a positive tau_E, got $tau_E"))
+        # P_⊥ = P_φ = τ_R/τ_E (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 131)
+        P_tor = tau_r / tau_E
+    end
     P_perp = if P_perp_model === :chi_perp_e
         tau_r / (rs^2 / chi_perp_e)
     elseif P_perp_model === :chi_perp_i
         tau_r / (rs^2 / chi_perp_i)
-    elseif P_perp_model === :P_phi
+    elseif P_perp_model === :P_phi || P_perp_model === :tau_E
         # P_⊥ = P_φ (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 143)
         P_tor
     elseif P_perp_model === :D_perp

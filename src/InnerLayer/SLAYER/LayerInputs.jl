@@ -186,6 +186,8 @@ profiles, without an intermediate file round-trip.
   - `chi_perp_i`, `D_perp` -- ion perpendicular heat / perpendicular particle
     diffusivity [m²/s], scalar or callable of `psi` (default `1.0`); used only by
     the matching `P_perp_model`.
+  - `tau_E` -- whole-plasma energy confinement time [s], one scalar for every surface;
+    required by `P_perp_model=:tau_E`.
   - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
     (default `:chi_perp_e`).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
@@ -240,6 +242,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     chi_perp_e=1.0,
     chi_perp_i=1.0,
     D_perp=1.0,
+    tau_E::Real=NaN,
     P_perp_model::Symbol=:chi_perp_e,
     chi_tor=1.0,
     dr_val=nothing,
@@ -390,6 +393,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             chi_tor=_eval(chi_tor, psi),
             chi_perp_i=_eval(chi_perp_i, psi),
             D_perp=_eval(D_perp, psi),
+            tau_E=tau_E,
             P_perp_model=P_perp_model,
             m=m_res, n=n_res,
             dr_val=dr_val_k,

@@ -99,6 +99,9 @@
         # The renamed χ⊥,e key and bad P_perp_model values are rejected
         @test_throws ArgumentError slayer_control_from_toml(merge(section, Dict{String,Any}("chi_perp" => 1.0)))
         @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "bogus"))))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E"))))
+        c_te = slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => 0.05)))
+        @test c_te.tau_E == 0.05 && Runner.validate(c_te) === c_te
     end
 
     @testset "run_slayer: result-facing form forwards surfaces and Δ'" begin

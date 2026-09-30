@@ -209,6 +209,10 @@
         @test slayer_parameters(; base..., P_perp_model=:D_perp, D_perp=3.0).P_perp ≈ 3 * ref.P_perp
         @test slayer_parameters(; base..., P_perp_model=:c_beta).P_perp == ref.c_beta^2
         @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:bogus)
+        te = slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1)
+        @test te.P_tor == te.tau_r / 0.1
+        @test te.P_perp == te.P_tor
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:tau_E)
         # Only P_perp moves; the critical-Δ offset keeps using chi_perp_e.
         cb = slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))..., P_perp_model=:c_beta)
         @test cb.dc_tmp == slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))...).dc_tmp

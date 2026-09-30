@@ -40,9 +40,12 @@ constructor.
     all-zero); otherwise the file's χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) take precedence
   - `D_perp`   -- perpendicular particle diffusivity [m²/s] (default 1.0), used
     only by `P_perp_model = :D_perp`
+  - `tau_E`    -- whole-plasma energy confinement time [s], required by
+    `P_perp_model = :tau_E` (default `nothing`)
   - `P_perp_model` -- how the perpendicular Prandtl number is built: `:chi_perp_e`
-    (default), `:chi_perp_i`, `:P_phi` (P_perp = P_tor), `:D_perp`, or `:c_beta`
-    (P_perp = c_β²); see `InnerLayer.SLAYER.slayer_parameters`
+    (default), `:chi_perp_i`, `:P_phi` (P_perp = P_tor), `:D_perp`, `:c_beta`
+    (P_perp = c_β²), or `:tau_E` (P_perp = P_tor = τ_R/τ_E); see
+    `InnerLayer.SLAYER.slayer_parameters`
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `dr_val` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
@@ -116,6 +119,7 @@ there is one consistent interface for resistive and kinetic profiles.
     chi_tor::Float64 = 1.0
     chi_perp_i::Float64 = 1.0
     D_perp::Float64 = 1.0
+    tau_E::Union{Float64,Nothing} = nothing
     P_perp_model::Symbol = :chi_perp_e
     dr_val::Union{Float64,Nothing} = nothing
     dgeo_val::Union{Float64,Nothing} = nothing
@@ -169,7 +173,7 @@ const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
-const _VALID_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta)
+const _VALID_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
@@ -189,6 +193,8 @@ function validate(ctrl::SLAYERControl)
     ctrl.P_perp_model in _VALID_P_PERP_MODELS ||
         throw(ArgumentError("SLAYERControl: P_perp_model=$(ctrl.P_perp_model) " *
                             "not in $(_VALID_P_PERP_MODELS)"))
+    ctrl.P_perp_model !== :tau_E || (ctrl.tau_E !== nothing && ctrl.tau_E > 0) ||
+        throw(ArgumentError("SLAYERControl: P_perp_model=tau_E requires a positive tau_E [s]"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
         throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
                             "not in $(_VALID_RESISTIVITY_MODELS)"))
@@ -258,7 +264,7 @@ function slayer_control_from_toml(section::AbstractDict)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym in (:bt, :dr_val, :dgeo_val)
+        elseif sym in (:bt, :dr_val, :dgeo_val, :tau_E)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :boxes
