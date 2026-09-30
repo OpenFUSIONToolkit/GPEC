@@ -43,3 +43,9 @@ Modules = [GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibrium]
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibriumModes]
 ```
+
+## ErrorFields
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Analysis.ErrorFields]
+```
