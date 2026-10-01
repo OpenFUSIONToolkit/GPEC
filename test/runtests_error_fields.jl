@@ -96,6 +96,7 @@ include("h5_metadata_check.jl")
             h5open(h5path, "r") do h5
                 @test haskey(h5, "Info/Runtimes/error_fields")
                 @test read(h5["Info/Runtimes/error_fields"]) > 0
+                @test haskey(h5, "Info/Runtimes/forcing_terms")
                 @test haskey(h5, "Info/Runtimes/perturbed_equilibrium")
                 @test haskey(h5, "Info/Runtimes/kinetic_forces")
                 @test haskey(h5, "Info/Runtimes/total")

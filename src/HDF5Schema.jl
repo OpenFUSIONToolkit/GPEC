@@ -257,11 +257,15 @@ const RUNTIME_H5_ANNOTATIONS = [
     "Info/Runtimes/galerkin" => (; long_name="wall-clock time of the Galerkin outer-region solve (measured inside force_free_states, not additional to it)", units="s"),
     "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
     "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
+    "Info/Runtimes/forcing_terms" => (;
+        long_name="wall-clock time of the ForcingTerms forcing-mode materialization, incl. coil Biot-Savart onto the plasma surface (measured inside perturbed_equilibrium, not additional to it)",
+        units="s"
+    ),
     "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
     "Info/Runtimes/kinetic_forces" => (; long_name="wall-clock time of the KineticForces (NTV) stage", units="s"),
     "Info/Runtimes/error_fields" => (; long_name="wall-clock time of the ErrorFields stage (coil sensitivities, Monte Carlo, locking risk)", units="s"),
     "Info/Runtimes/total" =>
-        (; long_name="wall-clock time of the full GPEC run (the per-stage values nest rather than partition it, so they do not sum to this)", units="s"),
+        (; long_name="wall-clock time of the full GPEC run (the per-stage values nest rather than partition it, so they do not sum to this)", units="s")
 ]
 
 # Euler-Lagrange operator matrices: same wording per letter, Ideal/ and Kinetic/ variants.

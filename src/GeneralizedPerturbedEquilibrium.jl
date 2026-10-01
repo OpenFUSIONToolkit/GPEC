@@ -297,7 +297,7 @@ function main_from_inputs(
     end
 
     pe_start = time()
-    pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
+    pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets; runtimes=runtimes)
     # Record only when the stage ran; an absent [PerturbedEquilibrium] section would otherwise
     # stamp a ~0 s entry for work that never happened.
     if "PerturbedEquilibrium" in keys(inputs)
@@ -874,7 +874,8 @@ function run_perturbed_equilibrium(
     result::ForceFreeStatesResult,
     inputs::Dict{String,Any},
     forcing_modes_snapshot::Union{Nothing,Vector{ForcingTerms.ForcingMode}},
-    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}};
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
 )
     # ----------------------------------------------------------------
     # Perturbed Equilibrium
@@ -890,7 +891,7 @@ function run_perturbed_equilibrium(
         # The deck's forcing block is an unscaled RMPField, so the TOML path and the
         # scripting API share one stage.
         pe_state = perturbed_equilibrium(result, ForcingTerms.RMPField(ft_ctrl);
-            forcing_modes=forcing_modes_snapshot, coil_sets=preloaded_coil_sets,
+            forcing_modes=forcing_modes_snapshot, coil_sets=preloaded_coil_sets, runtimes=runtimes,
             (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...)
     end
 
@@ -900,7 +901,7 @@ function run_perturbed_equilibrium(
 end
 
 """
-    perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, kwargs...) -> PerturbedEquilibriumState
+    perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, runtimes=nothing, kwargs...) -> PerturbedEquilibriumState
 
 Compute the plasma response to the external field `rmp` on top of a force-free-states solve
 `ffs`, and write the perturbed-equilibrium outputs. `rmp` is an [`RMPField`](@ref); keyword
@@ -911,7 +912,8 @@ step warns and is skipped rather than erroring, so a Riccati- or Galerkin-fed re
 flows through.
 
 `forcing_modes` injects already-loaded modes (the gpec.h5 replay path) and `coil_sets`
-already-built coil geometry, both bypassing the corresponding read.
+already-built coil geometry, both bypassing the corresponding read. A `runtimes` collector,
+when given, receives the forcing-mode materialization's wall-clock seconds as `"forcing_terms" => dt`.
 
 ```julia
 pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
@@ -922,6 +924,7 @@ function perturbed_equilibrium(
     rmp::ForcingTerms.RMPField;
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing,
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing,
     kwargs...
 )
     ctrl = ffs.control
@@ -943,7 +946,7 @@ function perturbed_equilibrium(
         pe_intr.coil_sets = copy(coil_sets)
     end
 
-    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, rmp, pe_ctrl, pe_intr)
+    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, rmp, pe_ctrl, pe_intr; runtimes=runtimes)
 
     # Write perturbed equilibrium outputs to same HDF5 file
     if pe_ctrl.write_outputs_to_HDF5
