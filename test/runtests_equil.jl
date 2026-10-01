@@ -69,32 +69,13 @@
     end
 
     @testset "Round-trip check sees inter-knot ringing" begin
-        EQ = GeneralizedPerturbedEquilibrium.Equilibrium
-        # The ringing verdict needs a noise floor below the tolerance and a ratio threshold above 1.
-        @test EQ.ROUNDTRIP_RINGING_FLOOR < EQ.ROUNDTRIP_TOL
-        @test EQ.ROUNDTRIP_RATIO_TOL > 1
-        @test 0 < EQ.ROUNDTRIP_EDGE_FRAC < 1
-
-        # False-positive control: a cleanly traced deck stays at Info. DIII-D, since the CHEASE deck
-        # above already trips the pre-existing absolute tolerance.
-        cfg = EQ.EquilibriumConfig(;
-            eq_filename=joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk"),
-            eq_type="efit_by_inversion",
-            jac_type="hamada",
-            grid_type="log_asymptotic",
-            psilow=1e-4,
-            psihigh=0.995,
-            mpsi=128,
-            mtheta=128
-        )
-        logs, _ = Test.collect_test_logs(; min_level=Base.CoreLogging.Info) do
-            EQ.setup_equilibrium(cfg)
-        end
-        rt = filter(l -> occursin("round-trip error at edge", string(l.message)), logs)
-        @test length(rt) == 1
-        @test rt[1].level == Base.CoreLogging.Info
-        @test occursin("at knot midpoints", string(rt[1].message))
-        @test occursin("ratio", string(rt[1].message))
+        verdict = GeneralizedPerturbedEquilibrium.Equilibrium._roundtrip_verdict
+        # (on-knot, midpoint) residuals: DIII-D-like psihigh ladder, then a smooth-but-coarse CHEASE grid.
+        @test verdict(4.10e-6, 5.02e-6) == :ok          # psihigh 0.995
+        @test verdict(3.57e-6, 4.19e-6) == :ok          # 0.999
+        @test verdict(1.14e-5, 1.29e-3) == :ringing     # 0.9999: under the tolerance, only the ratio sees it
+        @test verdict(2.65e-5, 2.18e-2) == :too_large   # 0.99999
+        @test verdict(1.61e-4, 1.58e-4) == :ok          # large but smooth: ratio ~1, not ringing
     end
 
     @testset "Resolved psihigh" begin

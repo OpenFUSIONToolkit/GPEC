@@ -20,6 +20,13 @@ const ROUNDTRIP_RATIO_TOL = 10.0
 # Midpoint residual below which the ratio is ignored, as both residuals are then rounding noise.
 const ROUNDTRIP_RINGING_FLOOR = ROUNDTRIP_TOL / 20
 
+# :too_large, :ringing (midpoints far above knots though both are small), or :ok.
+function _roundtrip_verdict(knot_err, mid_err)
+    (knot_err > ROUNDTRIP_TOL || mid_err > ROUNDTRIP_TOL) && return :too_large
+    (mid_err > ROUNDTRIP_RINGING_FLOOR && mid_err > ROUNDTRIP_RATIO_TOL * knot_err) && return :ringing
+    return :ok
+end
+
 """
     _is_closed_curve(curve)
 
@@ -719,20 +726,14 @@ function equilibrium_solver_by_inversion(
     max_rt_err = rt_residual(knots)
     mids = [(knots[i] + knots[i+1]) / 2 for i in 1:(length(knots)-1)]
     rt_mid = isempty(mids) ? NaN : rt_residual(mids)
-    rt_ratio = rt_mid / max(max_rt_err, eps())
 
-    # Ignore the ratio while the midpoint residual is still at the rounding floor.
-    ringing = rt_mid > ROUNDTRIP_RINGING_FLOOR && rt_ratio > ROUNDTRIP_RATIO_TOL
-    too_large = max_rt_err > ROUNDTRIP_TOL || rt_mid > ROUNDTRIP_TOL
-    msg =
-        "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) on knots, " *
-        "$(@sprintf("%.2e", rt_mid)) at knot midpoints (ratio $(@sprintf("%.1f", rt_ratio)))"
-    if too_large
-        @warn "$msg; exceeds $(ROUNDTRIP_TOL), so accuracy near psihigh may be limited. Consider reducing psihigh or increasing resolution_factor."
-    elseif ringing
-        @warn "$msg; the midpoint residual is $(@sprintf("%.0f", rt_ratio))x the on-knot one, so the rzphi splines are ringing between knots even though both residuals are small. Consider reducing psihigh or increasing resolution_factor."
-    else
+    verdict = _roundtrip_verdict(max_rt_err, rt_mid)
+    msg = "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) on knots, $(@sprintf("%.2e", rt_mid)) at knot midpoints"
+    if verdict === :ok
         @info msg
+    else
+        problem = verdict === :ringing ? "ringing between knots" : "inaccurate"
+        @warn "$msg; the rzphi splines are $problem near psihigh. Consider reducing psihigh or increasing resolution_factor."
     end
 
     return pe
