@@ -159,35 +159,20 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
-    adopt_plasma_edge!(intr, odet, equil)
+    remove_singular_surfs!(intr; qmin=-Inf, psimax=intr.psilim) -> keep
 
-Bring the rest of the integration state in line with an `intr.psilim` / `intr.qlim` that has already
-been moved inward, as the edge-dW peak truncation does after integrating.
-
-`sing_lim!` derives `q1lim` from `psilim` and the setup filter drops rational surfaces outside it,
-but both run before the integration that can move the edge. Left stale, `q1lim` is reported for a
-boundary the run no longer has, and the perturbed-equilibrium coupling evaluates rows for surfaces
-outside the plasma by extrapolating off the end of the stored solution.
-
-Dropped surfaces are always the outermost ones, so the asymptotic coefficient stores on `odet` are
-trimmed to match and stay aligned with `intr.sing`.
+Drop rational surfaces with `q < qmin` or `psifac > psimax` from `intr.sing`, logging any dropped,
+and return the indices of those kept.
 """
-function adopt_plasma_edge!(intr::ForceFreeStatesInternal, odet::OdeState, equil::Equilibrium.PlasmaEquilibrium)
-    intr.q1lim = equil.profiles.q_deriv(intr.psilim)
-
-    intr.msing > 0 || return intr
-    keep = [j for j in 1:intr.msing if intr.sing[j].psifac <= intr.psilim]
-    length(keep) == intr.msing && return intr
-
-    dropped = [(intr.sing[j].m, intr.sing[j].q) for j in setdiff(1:intr.msing, keep)]
-    @info "Plasma edge moved to ψ = $(@sprintf("%.6f", intr.psilim)); dropped $(length(dropped)) rational surface(s) now outside it: $(dropped)"
-    intr.sing = intr.sing[keep]
-    intr.msing = length(keep)
-    if size(odet.ca_l, 4) > intr.msing
-        odet.ca_l = odet.ca_l[:, :, :, 1:intr.msing]
-        odet.ca_r = odet.ca_r[:, :, :, 1:intr.msing]
+function remove_singular_surfs!(intr::ForceFreeStatesInternal; qmin::Real=-Inf, psimax::Real=intr.psilim)
+    keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin && intr.sing[j].psifac <= psimax]
+    if length(keep) < intr.msing
+        excluded = [(intr.sing[j].m, intr.sing[j].q) for j in setdiff(1:intr.msing, keep)]
+        @info "Filtered $(length(excluded)) singular surface(s) outside integration domain: $(excluded)"
+        intr.sing = intr.sing[keep]
+        intr.msing = length(keep)
     end
-    return intr
+    return keep
 end
 
 """
