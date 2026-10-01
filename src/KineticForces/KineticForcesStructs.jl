@@ -519,6 +519,10 @@ Results for one NTV computation method across all flux surfaces.
     psi_grid::Vector{Float64} = Float64[]
     dtdpsi::Vector{ComplexF64} = ComplexF64[]
     t_cumulative::Vector{ComplexF64} = ComplexF64[]
+    # dT/dψ resolved by bounce harmonic ℓ, shape (length(psi_grid), length(ell)) with ell = -nl:nl.
+    # Summing over ℓ reproduces `dtdpsi`. Empty when no ψ profile was produced.
+    dtdpsi_ell::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    ell::Vector{Int} = Int[]
     psi_nsteps::Int = 0
     # ψ-quadrature panel boundaries and the located kinetic-resonance surfaces (first n)
     panel_psis::Vector{Float64} = Float64[]
