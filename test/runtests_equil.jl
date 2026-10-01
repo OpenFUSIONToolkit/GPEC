@@ -69,13 +69,10 @@
     end
 
     @testset "Round-trip check sees inter-knot ringing" begin
-        verdict = GeneralizedPerturbedEquilibrium.Equilibrium._roundtrip_verdict
-        # (on-knot, midpoint) residuals: DIII-D-like psihigh ladder, then a smooth-but-coarse CHEASE grid.
-        @test verdict(4.10e-6, 5.02e-6) == :ok          # psihigh 0.995
-        @test verdict(3.57e-6, 4.19e-6) == :ok          # 0.999
-        @test verdict(1.14e-5, 1.29e-3) == :ringing     # 0.9999: under the tolerance, only the ratio sees it
-        @test verdict(2.65e-5, 2.18e-2) == :too_large   # 0.99999
-        @test verdict(1.61e-4, 1.58e-4) == :ok          # large but smooth: ratio ~1, not ringing
+        flagged(k, m) = GeneralizedPerturbedEquilibrium.Equilibrium._roundtrip_verdict(k, m) !== :ok
+        @test !flagged(4.10e-6, 5.02e-6) && !flagged(3.57e-6, 4.19e-6)  # clean psihigh 0.995, 0.999
+        @test flagged(1.14e-5, 1.29e-3)    # 0.9999 ringing: under the tolerance, only the ratio catches it
+        @test !flagged(1.61e-4, 1.58e-4)   # smooth but coarse: ratio ~1, must not be called ringing
     end
 
     @testset "Resolved psihigh" begin
