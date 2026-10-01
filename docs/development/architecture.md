@@ -98,6 +98,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
        - Island half-widths and Chirikov parameters
        - Green's functions at interior flux surfaces
        - Surface inductance for singular surfaces
+     - `ResonantCoupling.jl` - `ResonantCoupling` (in-memory or from gpec.h5): windowed SVD for the dominant applied-field mode, and the normalization/overlap helpers that project coil spectra onto it
      - `Utils.jl` - Helper functions
    - Status: Core plasma response and singular coupling calculations implemented; active area of development
 
@@ -117,9 +118,14 @@ Splines are provided by the external `FastInterpolations` package rather than by
     - Neoclassical toroidal viscosity (NTV) torque and kinetic energy contributions
     - Reads kinetic profiles configured under `[KineticForces]`
 
+11. **ErrorFields** (`src/ErrorFields/`) - Error-field sensitivity to coil misalignment
+    - `Sensitivity.jl` - central-difference linearization of every coil set's control-surface spectrum with respect to its rigid shifts and tilts, on one shared boundary grid
+    - `sensitivity_table` projects that linearization onto any windowed dominant mode post hoc (in memory or from `gpec.h5`); consumes `PerturbedEquilibrium.ResonantCoupling` and `ForcingTerms.coil_forcing_modes`
+    - Configured under `[ErrorFields]`; writes `ErrorFields/CoilSensitivities/`
+
 ### Post-processing
 
-11. **Analysis** (`src/Analysis/`) - Plotting and post-processing
+12. **Analysis** (`src/Analysis/`) - Plotting and post-processing
     - Submodules mirror the physics modules they visualize, so their names shadow them
     - Not part of the solve path; consumes `gpec.h5`
 
@@ -183,7 +189,7 @@ The complete GPEC analysis pipeline:
 
 5. **Output**:
    - All results saved to single HDF5 file (default: `gpec.h5`)
-   - Top-level HDF5 groups: `Info/`, `Input/`, `Equilibrium/`, `ForceFreeStates/`, `LocalStability/`, `SingularSurfaces/`, `PerturbedEquilibrium/`, `KineticForces/`, `Tearing/`, `SurfaceGeometries/` (see `docs/development/hdf5-conventions.md`)
+   - Top-level HDF5 groups: `Info/`, `Input/`, `Equilibrium/`, `ForceFreeStates/`, `LocalStability/`, `SingularSurfaces/`, `PerturbedEquilibrium/`, `KineticForces/`, `ErrorFields/`, `Tearing/`, `SurfaceGeometries/` (see `docs/development/hdf5-conventions.md`)
 
 ## Key Data Structures
 
@@ -228,5 +234,6 @@ GeneralizedPerturbedEquilibrium
 ├── Vacuum (uses Splines, Equilibrium, Utilities)
 ├── ForcingTerms (data I/O)
 ├── ForceFreeStates (uses Equilibrium, Vacuum, Splines)
-└── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
+├── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
+└── ErrorFields (uses PerturbedEquilibrium, ForcingTerms, Equilibrium, Utilities)
 ```
