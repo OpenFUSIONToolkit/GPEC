@@ -48,7 +48,7 @@ kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 1              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
+ucrit = 1e3                    # Maximum fraction of solutions allowed before re-normalized
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
 integrator          = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)

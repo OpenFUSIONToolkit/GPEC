@@ -49,7 +49,7 @@ mthvac       = 960             # Number of points used in splines over poloidal 
 
 eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min             = 1e-4 # Fractional distance from rational q at which ideal jump enforced
-ucrit                   = 1e4  # Column-norm threshold that triggers solution renormalization
+ucrit                   = 1e3  # Column-norm threshold that triggers solution renormalization
 sing_order              = 6    # Order of the singular-surface (Frobenius) series expansion
 
 integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
