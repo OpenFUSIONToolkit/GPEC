@@ -20,7 +20,11 @@ Conventions: docs/development/naming.md
 Required on every PR (docs/development/regression-harness.md). Paste the report below and
 put the commit you ran it at in the harness stamp above; CI fails if src/ changed afterwards.
 
-    regress --cases diiid_n1 --refs develop,local
+Commit your work and compare branch refs: each git ref runs in its own worktree, so the run is
+unaffected by anything you edit while it is going. `local` runs in the live checkout instead,
+one subprocess per case, and an edit mid-run silently mixes code versions within one report.
+
+    regress --cases diiid_n1 --refs develop,<your-branch>
 -->
 
 ```

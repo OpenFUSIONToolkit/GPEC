@@ -63,10 +63,12 @@ Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to c
 ```bash
 alias regress='julia --project=regression-harness regression-harness/regress.jl'
 regress --list-cases
-regress --cases diiid_n1 --refs develop,local   # working tree vs develop
+regress --cases diiid_n1 --refs develop,my-branch   # commit first; each ref runs in its own worktree
 ```
 
 Full command reference (comparing branches/commits, tracking a quantity's history, git-bisect-style scans, sample report output) is in **[`docs/development/regression-harness.md`](docs/development/regression-harness.md)**.
+
+**Commit before you run it, and compare branch refs.** Only the `local` ref runs in the live checkout, one `julia` subprocess per case — an edit landing between two cases yields one report whose rows came from different code, with nothing in the table to say so. The same doc's *Run isolation* section covers the matching hazards in `test/runtests.jl` (in-process, so a mid-run `src/` edit reports green for code no longer on disk) and the output-path collisions between concurrent runs in one checkout, and *Three things named "regression"* disentangles the harness from `test/test_data/regression_*` and the golden-value tests.
 
 ## Architecture
 
