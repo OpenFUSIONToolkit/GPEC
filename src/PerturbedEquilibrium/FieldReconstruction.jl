@@ -19,7 +19,8 @@ where χ₁ = 2π·Ψ₀ [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10].
 Clebsch displacement components for PENTRC (matches Fortran gpout_xclebsch):
     ξ^ψ         = xsp_mn    (unregularized)
     ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + reg_spot²))
-    ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp), divided by χ₁ in output)
+    ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp) ideal, or ξ_s scaled by the same
+                             singfac factor when kinetic; divided by χ₁ in output)
 
 Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contra):
     ξ^ψ·J(m) = Σ_dm jmat(dm) · xsp(m+dm)
@@ -339,8 +340,9 @@ Matches Fortran gpeq_sol regularization + gpout_xclebsch output convention:
 
 When reg_spot=0, clebsch_psi1 = xi_psi1 and clebsch_alpha = xi_s/χ₁ (no regularization).
 
-The regularized xms is computed as -A⁻¹(B·xmp1 + C·xsp) matching Fortran gpeq_sol,
-where A, B, C are the stability matrices evaluated at each ψ from `mats`.
+Ideal runs re-solve the regularized xms = -A⁻¹(B·xmp1 + C·xsp) from `mats.ideal`. Kinetic runs
+instead scale the stored ξ_s by the same singfac factor and invert nothing — the kinetic A is
+non-Hermitian and never re-inverted here.
 """
 function compute_clebsch_displacements(
     xi_psi_modes::Matrix{ComplexF64},
@@ -367,8 +369,20 @@ function compute_clebsch_displacements(
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
 
-    # A/B/C of the active model, matching what the ODE integrated.
-    active_mats = mats.kinetic === nothing ? mats.ideal : mats.kinetic
+    # Kinetic runs regularize the stored ξ_s directly
+    if mats.kinetic !== nothing
+        hint = Ref(1)
+        for ipsi in 1:npsi
+            q = equil.profiles.q_spline(psi_grid[ipsi]; hint=hint)
+            for ipert in 1:mpert
+                singfac = (mlow + ipert - 1) - nn * q
+                reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
+                clebsch_psi1[ipsi, ipert] = xi_psi1_modes[ipsi, ipert] * reg_factor
+                clebsch_alpha[ipsi, ipert] = xi_s_modes[ipsi, ipert] * reg_factor / chi1
+            end
+        end
+        return clebsch_psi, clebsch_psi1, clebsch_alpha
+    end
 
     # Per-thread workspaces: matrix ops and spline hints are not safe to share across threads.
     # Size by maxthreadid() and index by threadid() under :static scheduling (GPEC convention).
@@ -401,21 +415,16 @@ function compute_clebsch_displacements(
             xmp1_vec[ipert] = clebsch_psi1[ipsi, ipert]
         end
 
-        # Compute regularized xms = -A⁻¹(B·xmp1 + C·xsp) (matches Fortran gpeq_sol)
-        # Evaluate stability matrices at this psi
-        active_mats.A_spline(view(amat, :), psi_norm; hint=hint)
-        active_mats.B_spline(view(bmat, :), psi_norm; hint=hint)
-        active_mats.C_spline(view(cmat_buf, :), psi_norm; hint=hint)
+        # Compute regularized xms = -A⁻¹(B·xmp1 + C·xsp)
+        mats.ideal.A_spline(view(amat, :), psi_norm; hint=hint)
+        mats.ideal.B_spline(view(bmat, :), psi_norm; hint=hint)
+        mats.ideal.C_spline(view(cmat_buf, :), psi_norm; hint=hint)
 
         # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
-        # cholesky! factorizes in place (amat is a per-thread scratch buffer, refilled by
-        # active_mats.A_spline each surface), avoiding a fresh factorization allocation per surface.
-        # NOTE: this assumes the ideal A (positive-definite Newcomb kinetic-energy form). The
-        # kinetic A is non-Hermitian and needs an LU, as compute_node_xi_s! does — see the
-        # `active_mats` binding above.
+        # ideal A only; the kinetic A is non-Hermitian and is treated separately above
         amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
         xms_vec .*= -1                                     # xms = -A\(B*xmp1 + C*xsp)
