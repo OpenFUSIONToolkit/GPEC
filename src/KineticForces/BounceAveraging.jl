@@ -17,6 +17,12 @@ const MAX_SPLINE_CELLS = 100_000
 const EXTREMUM_MERGE_TOL = 1e-12
 # Cells a hinted cell search may step before falling back to bisection.
 const HINT_STEP_BUDGET = 8
+# Slack on the conditioned root-count tests in _quadratic_real_roots and _real_cubic_roots.
+# Where a discriminant cancels to nothing, a value a rounding step past the boundary is a
+# repeated root, not a lost one. Generous by design: a wrongly admitted repeated root is
+# a near-touch at a stationary point, which cannot sit strictly inside the monotone window
+# _cell_level_root filters on, so it can only lose the residual ranking, never win it.
+const ROOT_COUNT_TOL = 64 * eps(Float64)
 
 # ============================================================================
 # BounceData struct
@@ -479,21 +485,12 @@ function _surface_b_field(B_vpar)
         push!(bknot, d)                      # S(0) = B at the cell's left knot
         push!(knot, cell.xR)
 
-        # S'(u) = c + 2b·u + 3a·u², u ∈ [0, h)
-        qa, qb, qc = 3a, 2b, c
-        if abs(qa) <= eps(Float64) * max(abs(qb), abs(qc), 1.0)
-            if qb != 0
-                u = -qc / qb
-                (0.0 <= u < h) && push!(theta, cell.xL + u)
-            end
-        else
-            disc = qb^2 - 4 * qa * qc
-            if disc >= 0
-                sq = sqrt(disc)
-                for u in ((-qb - sq) / (2qa), (-qb + sq) / (2qa))
-                    (0.0 <= u < h) && push!(theta, cell.xL + u)
-                end
-            end
+        # S'(u) = c + 2b·u + 3a·u², u ∈ [0, h). A double stationary point comes back twice
+        # and is merged by the dedupe below.
+        n, u1, u2, _ = _quadratic_real_roots(3a, 2b, c)
+        for (k, u) in ((1, u1), (2, u2))
+            k <= n || break
+            (0.0 <= u < h) && push!(theta, cell.xL + u)
         end
 
         cell.xR >= 1.0 && break
@@ -531,50 +528,65 @@ end
 
 """
 Real roots of `a·u³ + b·u² + c·u + d = 0`, returned as `(count, r1, r2, r3)` with
-unused slots `NaN`. Degenerate leading coefficients fall through to the quadratic and
-linear cases; three distinct real roots use the trigonometric form, which stays well
-conditioned where Cardano's radicals cancel.
+unused slots `NaN`. A degenerate leading coefficient falls through to
+`_quadratic_real_roots`. The root count comes from a conditioned ratio test on the
+depressed cubic, not from the sign of its discriminant, which cancels to rounding noise
+when two roots nearly coincide and then reports one root where there are three. Three
+real roots use the trigonometric form, which stays well conditioned where Cardano's
+radicals cancel.
 """
 function _real_cubic_roots(a::Float64, b::Float64, c::Float64, d::Float64)
-    scale = max(abs(b), abs(c), abs(d), 1.0)
-    if abs(a) <= eps(Float64) * scale
-        if abs(b) <= eps(Float64) * max(abs(c), abs(d), 1.0)
-            c == 0 && return (0, NaN, NaN, NaN)
-            return (1, -d / c, NaN, NaN)
-        end
-        disc = c * c - 4 * b * d
-        disc < 0 && return (0, NaN, NaN, NaN)
-        sq = sqrt(disc)
-        # Cancellation-free quadratic roots (Numerical Recipes §5.6).
-        q = c == 0 ? -0.5 * sq : -0.5 * (c + copysign(sq, c))
-        r1 = q / b
-        r2 = q == 0 ? r1 : d / q
-        return (2, r1, r2, NaN)
-    end
+    abs(a) <= eps(Float64) * max(abs(b), abs(c), abs(d), 1.0) && return _quadratic_real_roots(b, c, d)
 
     B, C, D = b / a, c / a, d / a
     shift = B / 3
     p = C - B * B / 3
     q = 2 * B^3 / 27 - B * C / 3 + D
-    disc = (q / 2)^2 + (p / 3)^3
 
-    if p == 0 && q == 0
-        return (1, -shift, NaN, NaN)               # triple root
-    elseif abs(disc) <= 8 * eps(Float64) * max((q / 2)^2, abs(p / 3)^3)
-        # Repeated root. The discriminant cancels to ~0 here, so the branches below
-        # would lose it: disc > 0 by a rounding step reports only the simple root.
-        t2 = -3q / (2p)
-        return (3, 3q / p - shift, t2 - shift, t2 - shift)
-    elseif disc > 0
-        s = sqrt(disc)
-        t = cbrt(-q / 2 + s) + cbrt(-q / 2 - s)
-        return (1, t - shift, NaN, NaN)
-    else
-        # Three real roots: t_k = 2r·cos(φ − 2πk/3), r = √(−p/3), φ = acos(−q/2r³)/3.
+    if p < 0
+        # Three real roots iff |q/2| ≤ r³ with r = √(−p/3). Testing that ratio against 1
+        # stays conditioned where the discriminant (q/2)² + (p/3)³ cancels to nothing; a
+        # ratio a rounding step past 1 is a repeated root, which the clamp returns as
+        # t_k = 2r·cos(φ − 2πk/3), φ = acos(−q/2r³)/3, with two of the three coincident.
         r = sqrt(-p / 3)
-        φ = acos(clamp(-q / (2 * r^3), -1.0, 1.0)) / 3
-        return (3, 2r * cos(φ) - shift, 2r * cos(φ - 2π / 3) - shift, 2r * cos(φ - 4π / 3) - shift)
+        arg = -q / (2 * r^3)
+        if abs(arg) <= 1 + ROOT_COUNT_TOL
+            φ = acos(clamp(arg, -1.0, 1.0)) / 3
+            return (3, 2r * cos(φ) - shift, 2r * cos(φ - 2π / 3) - shift, 2r * cos(φ - 4π / 3) - shift)
+        end
     end
+
+    # One real root: p ≥ 0 makes t³ + pt + q monotone, and p < 0 with |arg| > 1 is the
+    # single-crossing case. Cardano's radicals do not cancel here; the max guards the
+    # square root against the rounding step that the tolerance above just excluded.
+    s = sqrt(max(0.0, (q / 2)^2 + (p / 3)^3))
+    t = cbrt(-q / 2 + s) + cbrt(-q / 2 - s)
+    return (1, t - shift, NaN, NaN)
+end
+
+"""
+Real roots of `a·u² + b·u + c = 0`, in the `(count, r1, r2, r3)` shape of
+`_real_cubic_roots` with `r3` always `NaN`. A discriminant within rounding of zero is a
+double root rather than none: `b² − 4ac` cancels there and the sign it lands on is noise.
+A degenerate leading coefficient falls through to the linear case.
+"""
+function _quadratic_real_roots(a::Float64, b::Float64, c::Float64)
+    if abs(a) <= eps(Float64) * max(abs(b), abs(c), 1.0)
+        b == 0 && return (0, NaN, NaN, NaN)
+        return (1, -c / b, NaN, NaN)
+    end
+    disc = b * b - 4 * a * c
+    if abs(disc) <= ROOT_COUNT_TOL * max(b * b, abs(4 * a * c))
+        r = -b / (2a)
+        return (2, r, r, NaN)
+    end
+    disc < 0 && return (0, NaN, NaN, NaN)
+    sq = sqrt(disc)
+    # Cancellation-free form (Numerical Recipes §5.6).
+    q = b == 0 ? -0.5 * sq : -0.5 * (b + copysign(sq, b))
+    r1 = q / a
+    r2 = q == 0 ? r1 : c / q
+    return (2, r1, r2, NaN)
 end
 
 """
