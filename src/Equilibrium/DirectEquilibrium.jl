@@ -445,6 +445,9 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     end
 
     psi_nodes = if equil_params.grid_type in ("auto", "log_asymptotic")
+        psihigh > 0.98 ||
+            @warn "grid_type = \"$(equil_params.grid_type)\" needs psihigh > 0.98 (its grid has a fixed edge region on [0.98, psihigh]); " *
+                  "psihigh = $psihigh gives a non-monotonic ψ grid and the equilibrium will fail. Use grid_type = \"ldp\" instead."
         # Distribute mpsi across the three regions by log-weights
         log_core = log(0.03 / psilow)
         log_mid = log(0.98 / 0.03)
@@ -674,6 +677,7 @@ robustness.
 
     params = EquilibriumParameters()
     params.bt_sign = raw_profile.bt_sign
+    params.ip_sign = raw_profile.ip_sign
     params.psihigh_resolved = psihigh
 
     return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,

@@ -74,7 +74,7 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/tau" => (; long_name="temperature ratio τ = T_i/T_e per surface", dims=("surface",)),
     "PerSurface/lu" => (; long_name="Lundquist number S per surface", dims=("surface",)),
     "PerSurface/c_beta" => (; long_name="compressibility factor c_β = √(β_local/(1+β_local)) per surface", dims=("surface",)),
-    "PerSurface/D_norm" => (; long_name="Fitzpatrick normalized ion-sound/drift scale D = (d_β/r_s)·S^(1/3)·√(τ/(1+τ)) per surface", dims=("surface",)),
+    "PerSurface/D_norm" => (; long_name="Fitzpatrick normalized ion-sound/drift scale D = (d_β/r_s)·S^(1/3)·√ι_e per surface", dims=("surface",)),
     "PerSurface/P_perp" => (; long_name="perpendicular magnetic Prandtl number per surface", dims=("surface",)),
     "PerSurface/P_tor" => (; long_name="toroidal (momentum) magnetic Prandtl number per surface", dims=("surface",)),
     "PerSurface/Q_e" => (; long_name="normalized electron diamagnetic frequency Q_e per surface", dims=("surface",)),
