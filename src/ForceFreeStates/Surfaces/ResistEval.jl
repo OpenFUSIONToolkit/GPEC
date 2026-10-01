@@ -165,6 +165,8 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
         ff[itheta, 7] = B_here
         @views ff[itheta, :] .*= jac / v1
     end
+    # Snap the repeated endpoint exactly equal to the start
+    @views ff[end, :] .= ff[1, :]
 
     # Integrate each column around θ using the same periodic cubic-spline
     # integrator Mercier.jl uses

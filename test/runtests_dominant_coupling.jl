@@ -127,6 +127,17 @@ include("h5_metadata_check.jl")
             end
             @test_throws DimensionMismatch PE.rootarea_field(rc, ComplexF64[1, 2])
 
+            # The decomposition carries the (m, n) ordering it was built on, so projecting onto it
+            # can be checked. A decomposition from another run can have the same number of columns
+            # and mean something else, which a length check cannot see.
+            @test dom.m_modes == rc.m_modes && dom.n_modes == rc.n_modes
+            @test PE.check_mode_basis(dom, rc.m_modes, rc.n_modes, "same basis") === nothing
+            @test_throws ArgumentError PE.check_mode_basis(dom, rc.m_modes .+ 1, rc.n_modes, "shifted basis")
+            # Built from a bare matrix there are no labels to check against, and it must stay usable.
+            bare = PE.dominant_coupling(rc.C, rc.rational_psi)
+            @test isempty(bare.m_modes)
+            @test PE.check_mode_basis(bare, rc.m_modes .+ 1, rc.n_modes, "unlabelled") === nothing
+
             # Without the response step the conform operator is rebuilt from the equilibrium.
             pe.rootarea_to_area_weight = zeros(ComplexF64, 0, 0)
             @test PE.ResonantCoupling(pe, ffs).flux_conform ≈ rc.flux_conform
@@ -141,4 +152,17 @@ include("h5_metadata_check.jl")
             end
         end
     end
+end
+
+@testset "island diagnostics across toroidal modes" begin
+    PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+    # q = 2 surface (index 1) resonates at n = 1 and n = 2; q = 2.5 (index 2) at n = 2 only.
+    state = PE.PerturbedEquilibriumState()
+    state.rational_psi = [0.4, 0.4, 0.6]
+    state.rational_surface_idx = [1, 1, 2]
+    state.island_width_sq = ComplexF64[0.01, 0.0004, 0.0025]
+    PE.compute_island_diagnostics!(state, 3)
+    @test state.island_half_width ≈ [0.1, 0.02, 0.05]
+    # The repeated surface is not its own neighbour: every row sees the 0.2 gap to the other surface.
+    @test state.chirikov_parameter ≈ [0.1, 0.02, 0.05] ./ 0.1
 end

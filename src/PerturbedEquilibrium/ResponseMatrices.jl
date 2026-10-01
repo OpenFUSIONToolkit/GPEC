@@ -242,11 +242,10 @@ function calc_plasma_inductance(
 
     mpert = ffs.numpert_total
     chi1 = 2π * psio          # = Fortran's chi1 = twopi*psio
-    n = ffs.nlow
     qlim = ffs.qlim      # q at psilim
 
-    # Singular factors s_i = m_i - n*qlim  (same as Fortran: mfac(i) - nn*qlim)
-    s = [((i-1) % ffs.mpert + ffs.mlow) - n * qlim for i in 1:mpert]
+    # Singular factors s_i = m_i - n_i*qlim  (same as Fortran: mfac(i) - nn*qlim)
+    s = [m - n * qlim for (m, n) in (_mode_mn(ffs, i) for i in 1:mpert)]
 
     # Fortran idcon_norm: wt0 = wt0/(mu0*2)*psio^2
     # Julia's wt0 is raw wp+wv; Fortran additionally scales by psio^2/(mu0*2)
@@ -270,7 +269,7 @@ end
         ψ::Float64,
         mtheta::Int,
         m_modes::AbstractUnitRange{Int},
-        nn::Int
+        n_modes::Union{Integer,AbstractVector{<:Integer}}
     )::Matrix{ComplexF64}
 
 Surface inductance L at the flux surface ψ, from the vacuum surface-current matrix, solved
@@ -286,20 +285,20 @@ harmonics), so `Φ = L·I^v` (Park 2007, eq. 7 and following text) gives `L = μ
   - `ψ`: Normalized poloidal flux of the surface
   - `mtheta`: Number of vacuum poloidal grid points
   - `m_modes`: Poloidal mode range mlow:mhigh
-  - `nn`: Toroidal mode number
+  - `n_modes`: Toroidal mode number, or range nlow:nhigh
 
 ## Returns
 
-  - Surface inductance matrix in henries [mpert × mpert]
+  - Surface inductance matrix in henries [mpert·npert × mpert·npert]
 """
 function calc_surface_inductance(
     equil::Equilibrium.PlasmaEquilibrium,
     ψ::Float64,
     mtheta::Int,
     m_modes::AbstractUnitRange{Int},
-    nn::Int
+    n_modes::Union{Integer,AbstractVector{<:Integer}}
 )::Matrix{ComplexF64}
-    vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, [nn])
+    vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, vcat(n_modes))
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
     I_v = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true).I_v
     μ₀ = 4π * 1e-7
@@ -321,7 +320,7 @@ Calculate permeability matrix P = Λ·L⁻¹ (matches Fortran `gpresp_permeab`).
 
 ## Returns
 
-  - Permeability matrix P = Lambda * L^{-1} [mpert, mpert]
+  - Permeability matrix P = Lambda * L^{-1} [numpert_total, numpert_total]
 """
 function calc_permeability(
     plasma_inductance::Matrix{ComplexF64},
@@ -435,7 +434,7 @@ are automatically converted to unit-norm on load (see `ForcingMode` docstring).
 
 ## Returns
 
-  - Forcing vector in eigenmode basis [mpert]
+  - Forcing vector in eigenmode basis [numpert_total]
 """
 function map_forcing_to_eigenmodes(
     forcing_modes::Vector{ForcingMode},
