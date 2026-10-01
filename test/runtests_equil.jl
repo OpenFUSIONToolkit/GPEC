@@ -585,4 +585,12 @@
             @test pe.params.li3 > 0
         end
     end
+
+    @testset "field-line ODE failure is an error, not silent truncation" begin
+        # Checked in the source, since a non-closing field line is costly to synthesize; the EFIT
+        # testsets above are the control that neither guard false-fires.
+        src = read(joinpath(dirname(@__DIR__), "src", "Equilibrium", "DirectEquilibrium.jl"), String)
+        @test occursin("sol.retcode != ReturnCode.Success", src)
+        @test occursin("isapprox(sol.t[end], 2π", src)
+    end
 end

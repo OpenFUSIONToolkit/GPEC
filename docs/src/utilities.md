@@ -11,7 +11,7 @@ The Utilities module currently provides:
 ## API Reference
 
 ```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms]
+Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms, GeneralizedPerturbedEquilibrium.Utilities.AdaptiveSampling]
 ```
 
 ## Physical Constants
