@@ -70,17 +70,13 @@
 
     @testset "Round-trip check sees inter-knot ringing" begin
         EQ = GeneralizedPerturbedEquilibrium.Equilibrium
-        # The rzphi splines interpolate exactly at their own knots, so an on-knot residual is
-        # blind to ringing between them. The check therefore samples the knot midpoints too and
-        # compares the two, and the ringing verdict is not consulted while the midpoint residual
-        # is still at the rounding floor, where the ratio would measure noise.
+        # The ringing verdict needs a noise floor below the tolerance and a ratio threshold above 1.
         @test EQ.ROUNDTRIP_RINGING_FLOOR < EQ.ROUNDTRIP_TOL
         @test EQ.ROUNDTRIP_RATIO_TOL > 1
         @test 0 < EQ.ROUNDTRIP_EDGE_FRAC < 1
 
-        # False-positive control: a deck that traces cleanly must report both residuals and stay
-        # at Info. The DIII-D-like geqdsk is used because the CHEASE deck above is the case that
-        # already trips the pre-existing absolute tolerance on this path.
+        # False-positive control: a cleanly traced deck stays at Info. DIII-D, since the CHEASE deck
+        # above already trips the pre-existing absolute tolerance.
         cfg = EQ.EquilibriumConfig(;
             eq_filename=joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk"),
             eq_type="efit_by_inversion",

@@ -14,14 +14,10 @@ import Contour as Ctr
 const ROUNDTRIP_TOL = 2e-3
 # Fraction of the radial grid treated as "the edge" for the round-trip check.
 const ROUNDTRIP_EDGE_FRAC = 0.9
-# How much larger the midpoint residual may be than the on-knot one before the rzphi splines are
-# judged to be ringing between knots. Grid-invariant, being a ratio of two residuals measured the
-# same way. Calibrated on a DIII-D-like psihigh ladder, where it reads 1.2 while the ForceFreeStates
-# energies are sound and 10^2-10^3 once they are not; a separation that wide leaves the exact
-# threshold uncritical.
+# Max midpoint/on-knot residual ratio before the splines are judged to ring between knots;
+# healthy grids read ~1 and rung ones 10^2-10^3, so the exact value is uncritical.
 const ROUNDTRIP_RATIO_TOL = 10.0
-# Midpoint residual below which the ratio is not consulted, since both residuals are then at the
-# rounding floor and their ratio measures noise rather than ringing.
+# Midpoint residual below which the ratio is ignored, as both residuals are then rounding noise.
 const ROUNDTRIP_RINGING_FLOOR = ROUNDTRIP_TOL / 20
 
 """
@@ -706,15 +702,8 @@ function equilibrium_solver_by_inversion(
 
     pe = equilibrium_solver(inv_input; override_psi_nodes)
 
-    # Round-trip validation: (ψ,θ) → (R,Z) → ψ_spline − ψ_target, over 4 angles on the outer
-    # ROUNDTRIP_EDGE_FRAC of the radial grid. A large residual means Contour.jl resolution was
-    # insufficient near the x-point and the traced surface positions are inaccurate.
-    #
-    # Measured twice, at the ψ knots and at the knot midpoints, because the rzphi splines
-    # interpolate exactly at their own knots: an on-knot residual cannot see inter-knot ringing
-    # at all, and stays flat at ~1e-6 on a psihigh ladder whose stability energies degrade by
-    # six orders of magnitude. The midpoint residual tracks that degradation, and their RATIO is
-    # the usable signal — dimensionless, so it needs no per-grid calibration.
+    # Round-trip residual (ψ,θ) → (R,Z) → ψ on the outer grid, at knots and at knot midpoints:
+    # the splines are exact at their own knots, so only the midpoints can see inter-knot ringing.
     rt_residual(ψ_samples) = maximum(
         begin
             r2 = pe.rzphi_rsquared((ψ_check, θ_check))
@@ -732,9 +721,7 @@ function equilibrium_solver_by_inversion(
     rt_mid = isempty(mids) ? NaN : rt_residual(mids)
     rt_ratio = rt_mid / max(max_rt_err, eps())
 
-    # The ratio only means something once the midpoint residual is above the noise it would
-    # otherwise be measuring: on a clean grid both residuals sit near 1e-6, where their ratio is
-    # dominated by rounding rather than by ringing.
+    # Ignore the ratio while the midpoint residual is still at the rounding floor.
     ringing = rt_mid > ROUNDTRIP_RINGING_FLOOR && rt_ratio > ROUNDTRIP_RATIO_TOL
     too_large = max_rt_err > ROUNDTRIP_TOL || rt_mid > ROUNDTRIP_TOL
     msg =
