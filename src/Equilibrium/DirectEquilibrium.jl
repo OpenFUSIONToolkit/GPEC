@@ -293,10 +293,8 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
-    # A failed integration does not throw: it returns a solution truncated wherever it gave up,
-    # and the caller reads the last point as if it closed the field line at η = 2π. That is a
-    # silently wrong surface, so check the retcode and the endpoint. Surfaces very close to the
-    # separatrix are where this fires.
+    # A failed solve returns a truncated solution instead of throwing; check both the retcode and
+    # that the field line reached η = 2π, since a callback can end it early and still report Success.
     if sol.retcode != ReturnCode.Success
         error(
             "direct_fieldline_int: field-line integration failed at psifac = " *
