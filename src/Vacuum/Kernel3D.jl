@@ -119,7 +119,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
         x1 = 0.5 + 0.5 * qx[ir] * sin(dθ * (ia - 1))
 
         # Lower-left corner indices of INTERP_ORDER × INTERP_ORDER stencil centered on (x0,x1).
-        # Round, don't truncate: the stencil must be equivariant under the patch's π-rotation or stellarator symmetry is lost.
+        # Round, don't truncate, and keep INTERP_ORDER odd: the stencil must be equivariant under the patch's π-rotation or stellarator symmetry is lost.
         y0 = clamp(round(Int, x0 * (PATCH_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, PATCH_DIM - INTERP_ORDER)
         y1 = clamp(round(Int, x1 * (PATCH_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, PATCH_DIM - INTERP_ORDER)
 
@@ -292,6 +292,7 @@ function compute_3D_kernel_matrices!(
     sym_basis::Union{Nothing,StellSymBasis}=nothing
 )
     num_points = observer.mtheta * observer.nzeta
+    @assert num_points % length(phases) == 0 "full-torus grid ($num_points points) is not divisible by nfp ($(length(phases)))"
     num_points_per_fp = num_points ÷ length(phases) # observer/source points in one field period
     dθdζ = 4π^2 / num_points
 
@@ -304,6 +305,7 @@ function compute_3D_kernel_matrices!(
 
     # Each reflection pair's second row follows from its first, so only the representatives are evaluated
     observers = sym_basis === nothing ? (1:num_points_per_fp) : sym_basis.pair_reps
+    sym_basis === nothing || @assert isodd(INTERP_ORDER) "stellarator symmetry needs an odd INTERP_ORDER; an even stencil is not π-rotation equivariant"
 
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
     # Bound once into a new name: reassigning PATCH_RAD inside the branch would box it in the threaded closure below.

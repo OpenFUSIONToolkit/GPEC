@@ -263,8 +263,9 @@ class operator real and splitting a self-conjugate class into two half-size bloc
     classes = unique(mod.(n_modes, nfp))
     groups = get_conjugate_groups(classes, nfp)
 
-    # Real under stellarator symmetry, or when every class is self-conjugate (ω^k = ±1)
-    T = (σ_map !== nothing || all(k -> is_self_conjugate(k, nfp), classes)) ? Float64 : ComplexF64
+    # A class operator is real under stellarator symmetry, or when the class is self-conjugate (ω^k = ±1)
+    real_class(k) = σ_map !== nothing || is_self_conjugate(k, nfp)
+    any_real = any(real_class, classes)
 
     # grre/grri are O(n_obs · num_modes), small beside the O(n_obs²) operator, so both are allocated unconditionally
     grre = zeros!(pool, ComplexF64, n_obs, num_modes)
@@ -274,16 +275,17 @@ class operator real and splitting a self-conjugate class into two half-size bloc
     # Dense per-class accumulators for the wv / I_v projections
     wv_acc = zeros!(pool, ComplexF64, num_modes, num_modes)
     Iv_acc = zeros!(pool, ComplexF64, num_modes, num_modes)
-    # Split [Re Im] scratch; zero-sized (unallocated) when the operator is complex
-    rhs_real = zeros!(pool, Float64, T === Float64 ? n_obs : 0, 2 * num_modes)
-    rhs_real_int = zeros!(pool, Float64, T === Float64 ? n_obs : 0, 2 * num_modes)
-    basis_real = zeros!(pool, Float64, T === Float64 ? num_points_per_fp : 0, 2 * num_modes)
+    # Split [Re Im] scratch; zero-sized (unallocated) when no class operator is real
+    rhs_real = zeros!(pool, Float64, any_real ? n_obs : 0, 2 * num_modes)
+    rhs_real_int = zeros!(pool, Float64, any_real ? n_obs : 0, 2 * num_modes)
+    basis_real = zeros!(pool, Float64, any_real ? num_points_per_fp : 0, 2 * num_modes)
     real_scratch = (; basis_real, rhs_real, rhs_real_int)
 
     for group in groups
         # This class's operator is the only large allocation; rewind so peak memory stays at one class
         checkpoint!(pool)
         k = classes[group[1]]
+        T = real_class(k) ? Float64 : ComplexF64
         sym_basis = σ_map === nothing ? nothing : StellSymBasis(σ_map, mtheta, k, nfp)
         sizes = sym_basis === nothing ? [num_points_per_fp] : sym_basis.block_sizes
         offsets = cumsum([0; sizes])

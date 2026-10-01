@@ -819,8 +819,8 @@
         end
 
         # The 3D interior operator is the 2D one shifted by the same scalar, D_int = D_ext - 2I, so an axisymmetric boundary
-        # must give the same Iᵛ through both paths. Tolerances are loose because Iᵛ differences two solves and so amplifies
-        # the 3D toroidal discretization error (~8e-3 on wv here) tenfold; a wrong shift or sign gives O(1) instead.
+        # must give the same Iᵛ through both paths. Iᵛ differences two solves, so it needs a finer toroidal grid than wv:
+        # at nzeta = 96 the measured errors are 1.9e-4 (wv) and 1.1e-3 (Iᵛ); a wrong shift or sign gives O(1).
         @testset "compute_vacuum_response 3D I_v matches the 2D path" begin
             mtheta = 48
             θ = range(; start=0, length=mtheta, step=2π/mtheta)
@@ -833,10 +833,10 @@
             nowall = WallShapeSettings(shape="nowall")
 
             r2d = compute_vacuum_response(make(1), nowall; compute_Iv=true)
-            r3d = compute_vacuum_response(make(mtheta), nowall; compute_Iv=true)
+            r3d = compute_vacuum_response(make(96), nowall; compute_Iv=true)
 
-            @test norm(r3d.wv - r2d.wv) / norm(r2d.wv) < 2e-2
-            @test norm(r3d.I_v - r2d.I_v) / norm(r2d.I_v) < 0.2
+            @test norm(r3d.wv - r2d.wv) / norm(r2d.wv) < 1e-3
+            @test norm(r3d.I_v - r2d.I_v) / norm(r2d.I_v) < 5e-3
             # The imaginary parts must agree in sign, not be opposed — this is what pins the conjugation
             @test norm(imag.(r3d.I_v) - imag.(r2d.I_v)) < norm(imag.(r3d.I_v) + imag.(r2d.I_v))
         end
@@ -1023,7 +1023,7 @@
 
             # D̂_sym = U† D̂ U. nfp = 1 and k = 0 split into two real half-size blocks, k ≠ 0 becomes real at full size, and
             # nfp = 4, k = 2 is the self-conjugate class that needs the signed reflection rather than the half-twist.
-            for (nfp, k) in [(1, 1), (3, 0), (3, 1), (4, 2), (2, 1)]
+            for (nfp, k) in [(1, 0), (3, 0), (3, 1), (4, 2), (2, 1)]
                 inp = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=[k])
                 geom = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inp)
                 plas = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(geom)
@@ -1056,6 +1056,16 @@
                     cross = Us[1]' * (D_k[1] * Us[2])
                     @test maximum(abs, cross) ≤ 1e-9 * maximum(abs, D_k[1])
                 end
+            end
+
+            # Every reduced-vs-full check above uses a symmetric boundary; this takes the general complex path, with pairing
+            asym_red = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1, 2, 3, 4], odd=0.07)
+            asym_ref = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(asym_red)
+            for ws in (WallShapeSettings(shape="nowall"), walled)
+                red = compute_vacuum_response(asym_red, ws; compute_Iv=true)
+                ref = compute_vacuum_response(asym_ref, ws; compute_Iv=true)
+                @test isapprox(red.wv, ref.wv; rtol=1e-10)
+                @test isapprox(red.I_v, ref.I_v; rtol=1e-10)
             end
         end
 

@@ -86,9 +86,9 @@ end
 """
     stell_sym_map(plasma, wall, nfp) -> Union{Vector{Int},Nothing}
 
-Within-period map of `(θ, ζ) → (−θ, −ζ)` if both surfaces are stellarator symmetric, `nothing`
-otherwise. A symmetric boundary matches to round-off; an asymmetric one is off by a fraction of the
-minor radius, so the threshold is not delicate.
+Within-period map of `(θ, ζ) → (−θ, −ζ)` if both surfaces are stellarator symmetric to 1e-10 of the largest
+coordinate, `nothing` otherwise. A nearly symmetric boundary (e.g. one extracted from an equilibrium, off by
+~1e-3) is rejected and takes the general path; this test is the only guard on the symmetric path.
 """
 function stell_sym_map(plasma::PlasmaGeometry3D, wall::WallGeometry3D, nfp::Int)
     # This must be called after expand_field_periods, so nzeta_full is the full-torus nzeta
@@ -218,7 +218,8 @@ function store_kernel_row!(
             combined[x] = cp * kernel_row[x] + cq * partner[x]
         end
 
-        # Right U on the same block only; real(·) drops a ~0 imaginary residual
+        # Right U on the same block only. The result is real by construction (the partner row was built from the identity),
+        # so a boundary or stencil that breaks the symmetry is not detected here; stell_sym_map is the only guard.
         @inbounds for src_col in columns
             src_col.block == row_col.block || continue
             val = src_col.cp * combined[src_col.p]
@@ -243,7 +244,7 @@ function transform_mode_basis!(
 )
     # No stellarator basis: identity U, optionally conj(E) for the conjugate partner class
     if sym_basis === nothing
-        E_out[1] .= conjugate ? conj.(E) : E
+        conjugate ? (E_out[1] .= conj.(E)) : (E_out[1] .= E)
         return
     end
     maybe_conj = conjugate ? conj : identity
