@@ -146,7 +146,8 @@ quoted in so a caller never has to know which one a bare number was.
   - `mode`: index of the singular mode projected onto (1 is the dominant mode)
   - `delta`: `Vᴴb̃ / B_T0`, the dimensionless overlap
   - `resonant_field_t`: `Vᴴb̃`, tesla, the same projection unnormalized
-  - `resonant_fraction_percent`: `100·|Vᴴb̃| / ‖b̃‖`, how much of this set's own spectrum is resonant
+  - `resonant_fraction_percent`: `100·|Vᴴb̃| / ‖b̃‖`, how much of this set's own spectrum is resonant;
+    `NaN` when the set's field at the run's toroidal mode is round-off (see [`resonant_fraction_percent`](@ref))
   - `spectrum_norm_t`: `‖b̃‖` in tesla
   - `b_t0`: the axis toroidal field the normalization used, tesla
   - `spectrum`: b̃ itself, on the [`ResonantCoupling`](@ref) column ordering
@@ -180,12 +181,30 @@ cheaper path when only the overlaps are wanted.
 function coil_overlaps(ctx::ResonantDriveContext, coil_sets::AbstractVector{CoilSet}; mode::Int=1)
     1 <= mode <= length(ctx.dom.singular_values) ||
         throw(ArgumentError("mode $mode is outside the $(length(ctx.dom.singular_values)) singular modes of the decomposition"))
-    return map(coil_sets) do cs
-        b = applied_spectrum(cs, ctx.rc, ctx.grids)
+    spectra = [applied_spectrum(cs, ctx.rc, ctx.grids) for cs in coil_sets]
+    norms = norm.(spectra)
+    nrm_ref = isempty(norms) ? 0.0 : maximum(norms)
+    return map(zip(coil_sets, spectra, norms)) do (cs, b, nrm)
         raw = coupling_overlap(ctx.dom, b)[mode]
-        nrm = norm(b)
-        CoilOverlap(cs.name, mode, raw / ctx.b_t0, raw, nrm > 0 ? 100 * abs(raw) / nrm : 0.0, nrm, ctx.b_t0, b)
+        CoilOverlap(cs.name, mode, raw / ctx.b_t0, raw, resonant_fraction_percent(raw, nrm, nrm_ref), nrm, ctx.b_t0, b)
     end
+end
+
+const _RESONANT_FRACTION_FLOOR = 1e-8      # of the largest spectrum norm among the coil sets judged together
+const _RESONANT_FRACTION_FLOOR_T = 1e-12   # absolute, tesla
+
+"""
+    resonant_fraction_percent(raw, nrm, nrm_ref) -> Float64
+
+`100·|raw| / nrm`, the share of a coil set's applied field `b̃` (norm `nrm`) that lies along the
+dominant mode (`raw = Vᴴb̃`), or `NaN` when `nrm` is below `1e-8 × nrm_ref` (the largest norm among
+the coil sets judged together) or below `1e-12` T. An axisymmetric hoop at n = 1 has a field of
+round-off, and the ratio of two round-off vectors lands anywhere between 1 % and 30 %; that is not a
+fraction, and `0` would read as a genuine zero overlap of a finite field, which is a different fact.
+"""
+function resonant_fraction_percent(raw, nrm::Real, nrm_ref::Real)
+    nrm > max(_RESONANT_FRACTION_FLOOR * nrm_ref, _RESONANT_FRACTION_FLOOR_T) || return NaN
+    return 100 * abs(raw) / nrm
 end
 
 coil_overlaps(ctx::ResonantDriveContext, cs::CoilSet; kwargs...) = coil_overlaps(ctx, [cs]; kwargs...)
@@ -229,5 +248,6 @@ function combine_overlaps(overlaps::AbstractVector{CoilOverlap}, weights::Pair{<
     end
 
     nrm = norm(b)
-    return CoilOverlap(String(name), mode, raw / b_t0, raw, nrm > 0 ? 100 * abs(raw) / nrm : 0.0, nrm, b_t0, b)
+    nrm_ref = maximum(o.spectrum_norm_t for o in overlaps)
+    return CoilOverlap(String(name), mode, raw / b_t0, raw, resonant_fraction_percent(raw, nrm, max(nrm, nrm_ref)), nrm, b_t0, b)
 end

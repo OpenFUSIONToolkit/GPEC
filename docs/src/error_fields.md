@@ -401,6 +401,29 @@ dom = PerturbedEquilibrium.dominant_coupling(rc; psi_low=0.5)
 table = EF.sensitivity_table(run.coil_sensitivities, dom; mode=1)
 ```
 
+### How far the linear model holds
+
+Every sweep above assumes the overlap is linear in the misalignments out to the tolerance edge.
+The run checks that only at the finite-difference step (the stored `*_linearity_residual`
+ratios, `plot_linearity_residuals`). `linearity_check` displaces each coil set with a tolerance
+block by `±scale × tolerance` along each in-plane shift and tilt axis, rotates each coherent group
+as one body about its pivot, recomputes the overlap of the displaced geometry and reports the
+relative error of the linear prediction per row. Include the largest scale a tolerance scan
+will use, since that is the regime it relies on; the cost is one Biot–Savart pass per row.
+
+```julia
+lin = EF.linearity_check("gpec.h5"; scales=(1.0, 2.0, 8.0))
+maximum(filter(!isnan, lin.relative_error))      # the worst row
+AEF.plot_linearity_check(lin)                     # stems per coil, log axis
+AEF.plot_linearity_residuals("gpec.h5"; at=:step, yscale=:log10)   # the stored step residuals, readable below 1 %
+```
+
+A coil set whose field at the run's toroidal mode is round-off (an axisymmetric hoop at n = 1) has
+no resonant fraction: `coil_overlaps`, `combine_overlaps` and `plot_coil_sensitivities(quantity=:fraction)`
+report `NaN` for it rather than the ratio of two noise vectors, which would read as a fraction
+between 1 % and 30 %; the floor is `1e-8` of the largest field norm among the coil sets judged
+together (`resonant_fraction_percent`).
+
 ## Comparing coil revisions
 
 Assessing a *new* coil design against an existing run costs one Biot-Savart pass per coil set and
