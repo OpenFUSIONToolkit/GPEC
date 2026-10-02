@@ -1772,4 +1772,6 @@ export main, write_imas
 export solve, perturbed_equilibrium
 export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
 
+include("precompile.jl")
+
 end # module GeneralizedPerturbedEquilibrium

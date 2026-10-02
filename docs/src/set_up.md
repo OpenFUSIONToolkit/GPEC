@@ -361,6 +361,31 @@ See the example directories for complete configuration file templates.
 
 ## Developer Tips
 
+### Precompile workload
+
+Building the package runs a small Solovev case through the solver so that a fresh Julia process
+skips most first-call compilation, at the cost of a longer one-time build. Code compiled into the
+package image can round differently in the last bit from code compiled on first use, and
+near-marginal quantities such as Δ′ amplify that, so results are reproducible only within one
+build mode. The regression harness runs with the workload disabled. To disable it yourself (for a
+faster build, or to match harness numbers), set the preference by UUID from the project, without
+loading GPEC (which would first build it with the workload on). `Preferences` must be installed,
+e.g. in your global environment:
+
+```julia
+using Preferences, UUIDs
+set_preferences!(UUID("462872dd-e066-4d2e-b993-6468b5239634"), "precompile_workload" => false; force=true)
+```
+
+This writes `LocalPreferences.toml` next to the active `Project.toml` (the file is gitignored);
+delete the entry to re-enable. The regression harness overrides this file for its own runs.
+
+The workload runs only when Julia rebuilds the package image, not at the start of each run. That
+happens after any change under `src/` (a pull, a branch switch or a local edit) and after a change
+of dependency versions, Julia version or this preference. Repeated runs on an unchanged checkout
+reuse the cached image. If you edit `src/` and restart Julia often, disabling the workload keeps
+each rebuild short; within one Revise session nothing is rebuilt.
+
 ### Revise.jl
 
 When iterating on code, use [Revise.jl](https://timholy.github.io/Revise.jl/stable/) to avoid full recompilation on every change. It tracks source file modifications and recompiles only the affected code.

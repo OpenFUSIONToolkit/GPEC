@@ -19,6 +19,7 @@ Identity of the environment a run was produced in.
   - `manifest_sha::String` — SHA-256 of the `Manifest.toml` the run resolved against ("" if absent)
   - `nthreads::Int` — `Threads.nthreads()` in the run (-1 if unknown)
   - `blas_threads::Int` — `BLAS.get_num_threads()` in the run (-1 if unknown)
+  - `build_mode::String` — "aot" if the loaded GPEC was built with its precompile workload, "jit" otherwise ("" if unknown)
   - `pinned::Bool` — whether the harness copied its own Manifest into the run's project
 """
 struct EnvFingerprint
@@ -27,10 +28,11 @@ struct EnvFingerprint
     manifest_sha::String
     nthreads::Int
     blas_threads::Int
+    build_mode::String
     pinned::Bool
 end
 
-const UNKNOWN_ENV = EnvFingerprint("", "", "", -1, -1, false)
+const UNKNOWN_ENV = EnvFingerprint("", "", "", -1, -1, "", false)
 
 """
 Cache key for an environment.
@@ -49,7 +51,9 @@ end
 
 env_key(fp::EnvFingerprint) = env_key(fp.julia_version, fp.os_arch, fp.pinned ? fp.manifest_sha : "unpinned")
 
-"""SHA-256 of a file, or "" when it does not exist."""
+"""
+SHA-256 of a file, or "" when it does not exist.
+"""
 function file_sha256(path::AbstractString)::String
     isfile(path) || return ""
     return bytes2hex(SHA.sha256(read(path)))
@@ -103,16 +107,20 @@ function read_runinfo(path::String, pinned::Bool)
         getf("manifest_sha", ""),
         something(tryparse(Int, getf("nthreads", "")), -1),
         something(tryparse(Int, getf("blas_threads", "")), -1),
+        getf("build_mode", ""),
         pinned
     )
     return (something(runtime_s, NaN), fp)
 end
 
-"""One-line human-readable summary of an environment, for report headers."""
+"""
+One-line human-readable summary of an environment, for report headers.
+"""
 function describe_env(fp::EnvFingerprint)::String
     isempty(fp.julia_version) && return "environment unknown (cached before fingerprinting)"
     mani = isempty(fp.manifest_sha) ? "no Manifest" : "manifest " * fp.manifest_sha[1:min(8, end)]
     pin = fp.pinned ? "pinned" : "unpinned"
     threads = "$(fp.nthreads) thread$(fp.nthreads == 1 ? "" : "s")/$(fp.blas_threads) BLAS"
-    return "julia $(fp.julia_version), $(fp.os_arch), $mani ($pin), $threads"
+    mode = isempty(fp.build_mode) ? "" : ", $(fp.build_mode) build"
+    return "julia $(fp.julia_version), $(fp.os_arch), $mani ($pin), $threads$mode"
 end
