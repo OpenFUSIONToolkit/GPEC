@@ -891,6 +891,22 @@ end
 
 column_abstol(u::AbstractArray{<:Number,3}, rtol::Real) = column_abstol!(similar(u, Float64), u, rtol)
 
+function refresh_column_abstol!(integrator)
+    column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
+    u_modified!(integrator, false)
+end
+
+# Refresh-only callback for solves with no reduction, renormalization or storage of their own.
+const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refresh_column_abstol!; save_positions=(false, false))
+
+"""
+    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+
+Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
+A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
+"""
+solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK) = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
+
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
@@ -963,7 +979,7 @@ function integrate_el_region!(
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
     rtol = ctrl.eulerlagrange_tolerance
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(odet.u, rtol), callback=cb, save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol; callback=cb)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,

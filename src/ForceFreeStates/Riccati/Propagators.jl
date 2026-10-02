@@ -258,7 +258,7 @@ function riccati_integrate_chunk!(
     rtol = ctrl.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
         (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(odet.u, rtol), callback=cb, save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol; callback=cb)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
     # Renormalize end state to (S, I) convention for the next chunk.
@@ -331,8 +331,9 @@ the result in `prop.block_lower_ic`.
 storage for `sing_der!` side effects (`q`, `ud`, `spline_hint`). Multiple threads
 may call this function concurrently using distinct `odet_proxy` objects.
 
-No callback is used: the propagator integration proceeds without normalization or
-storage steps, since the identity ICs ensure bounded solutions within each chunk.
+The propagator integration proceeds without normalization or storage steps, since the
+identity ICs ensure bounded solutions within each chunk; its only callback refreshes the
+per-column abstol after every step (`solve_el`).
 """
 function integrate_propagator_chunk!(
     prop::ChunkPropagator,
@@ -361,7 +362,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u_upper, rtol), save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     prop.block_upper_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept  # thread-local; summed into odet after the BVP barrier
 
@@ -373,7 +374,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u_lower, rtol), save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     prop.block_lower_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept
 end
@@ -433,7 +434,7 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u0, rtol), save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     result[1:N, 1:N] .= sol.u[end][:, :, 1]
     result[(N+1):2N, 1:N] .= sol.u[end][:, :, 2]
 
@@ -443,7 +444,7 @@ function integrate_fm_with_ua_ic(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(u0, rtol), save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     result[1:N, (N+1):2N] .= sol.u[end][:, :, 1]
     result[(N+1):2N, (N+1):2N] .= sol.u[end][:, :, 2]
 

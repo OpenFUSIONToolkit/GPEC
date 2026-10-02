@@ -105,7 +105,7 @@ chunks concurrently using `Threads.@threads`, then re-integrates the outer plasm
     to sub-divide chunks for load balancing. The chunk count depends only on `intr.msing` and
     `ctrl.nchunks`, never on the thread count, so results are thread-independent.
  2. **Propagator phase**: `integrate_propagator_chunk!` integrates each chunk independently
-    from identity initial conditions (no accumulated state, no normalization/callback).
+    from identity initial conditions (no accumulated state, normalization or storage).
     Each thread uses a private `OdeState` proxy for `sing_der!` side effects.
  3. **Serial assembly**: propagators are applied sequentially with `apply_propagator!`.
     Rational surface crossings use `riccati_cross_ideal_singular_surf!` (no Gaussian
