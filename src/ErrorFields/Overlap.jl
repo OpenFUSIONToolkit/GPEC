@@ -134,6 +134,9 @@ end
 """
     CoilOverlap
 
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
+
 How strongly one coil set drives the resonant field, carrying every normalization the quantity is
 quoted in so a caller never has to know which one a bare number was.
 
@@ -142,9 +145,9 @@ quoted in so a caller never has to know which one a bare number was.
   - `coil_name`: name of the coil set
   - `mode`: index of the singular mode projected onto (1 is the dominant mode)
   - `delta`: `Vᴴb̃ / B_T0`, the dimensionless overlap
-  - `raw`: `Vᴴb̃`, the same projection unnormalized
-  - `fraction_percent`: `100·|Vᴴb̃| / ‖b̃‖`, how much of this set's own spectrum is resonant
-  - `spectrum_norm`: `‖b̃‖` in tesla
+  - `resonant_field_t`: `Vᴴb̃`, tesla, the same projection unnormalized
+  - `resonant_fraction_percent`: `100·|Vᴴb̃| / ‖b̃‖`, how much of this set's own spectrum is resonant
+  - `spectrum_norm_t`: `‖b̃‖` in tesla
   - `b_t0`: the axis toroidal field the normalization used, tesla
   - `spectrum`: b̃ itself, on the [`ResonantCoupling`](@ref) column ordering
 
@@ -155,9 +158,9 @@ struct CoilOverlap
     coil_name::String
     mode::Int
     delta::ComplexF64
-    raw::ComplexF64
-    fraction_percent::Float64
-    spectrum_norm::Float64
+    resonant_field_t::ComplexF64
+    resonant_fraction_percent::Float64
+    spectrum_norm_t::Float64
     b_t0::Float64
     spectrum::Vector{ComplexF64}
 end
@@ -222,7 +225,7 @@ function combine_overlaps(overlaps::AbstractVector{CoilOverlap}, weights::Pair{<
         length(o.spectrum) == length(b) ||
             throw(DimensionMismatch("combine_overlaps: \"$nm\" carries $(length(o.spectrum)) modes but the first entry carries $(length(b))"))
         b .+= w .* o.spectrum
-        raw += w * o.raw        # projection is linear, so this is exactly Vᴴ of the summed spectrum
+        raw += w * o.resonant_field_t        # projection is linear, so this is exactly Vᴴ of the summed spectrum
     end
 
     nrm = norm(b)

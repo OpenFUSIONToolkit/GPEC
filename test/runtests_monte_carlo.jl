@@ -16,7 +16,7 @@ using LinearAlgebra
         n = length(names)
         rms(M) = [sqrt((abs2(M[1, j]) + abs2(M[2, j])) / 2) for j in 1:n]
         canc(M) = [EF.cancelling_offset(δ0[j], M[1, j], M[2, j])[i] for i in 1:2, j in 1:n]
-        # delta_per_mm_shift, delta_per_deg_tilt, delta_per_mm_rim: the rim column is the tilt
+        # abs_delta_shift_per_mm, abs_delta_tilt_per_deg, abs_delta_rim_per_mm: the rim column is the tilt
         # sensitivity re-expressed per mm at the coil radius; these hoops carry no radius here, so
         # reuse the per-degree column. Nothing in this file reads it — the sampler uses shift/tilt.
         return EF.SensitivityTable(names, 1, ComplexF64.(δ0), ComplexF64.(S), ComplexF64.(T),
@@ -24,9 +24,9 @@ using LinearAlgebra
     end
     hoops(names; heights=zeros(length(names))) = [FT.make_pf_hoop(; radius=1.5, height=heights[i], name=nm) for (i, nm) in enumerate(names)]
     pdf_moments(res) = begin
-        centers = (res.bin_edges[1:end-1] .+ res.bin_edges[2:end]) ./ 2
-        w = diff(res.bin_edges)
-        (sum(res.pdf .* w), sum(centers .* res.pdf .* w))
+        centers = (res.abs_delta_bin_edges[1:end-1] .+ res.abs_delta_bin_edges[2:end]) ./ 2
+        w = diff(res.abs_delta_bin_edges)
+        (sum(res.abs_delta_pdf .* w), sum(centers .* res.abs_delta_pdf .* w))
     end
 
     @testset "one axisymmetric coil, Flat shift tolerance: box density" begin
@@ -44,16 +44,16 @@ using LinearAlgebra
         total, mean_δ = pdf_moments(res)
         @test total ≈ 1 atol = 1e-2
         @test isapprox(mean_δ, abs(Sx) * 1e-3; rtol=2e-2)
-        @test res.mean_abs_delta ≈ abs(Sx) * 1e-3 rtol = 2e-2
-        @test all(abs.(res.pdf .- 1 / (abs(Sx) * 2e-3)) .< 0.15 / (abs(Sx) * 2e-3))
+        @test res.abs_delta_sampled_mean ≈ abs(Sx) * 1e-3 rtol = 2e-2
+        @test all(abs.(res.abs_delta_pdf .- 1 / (abs(Sx) * 2e-3)) .< 0.15 / (abs(Sx) * 2e-3))
         @test res.clamped_fraction == 0
-        @test res.delta_nominal == 0
+        @test res.abs_delta_total_as_designed == 0
         # Everything is correctable: the corrected |δ| is the intrinsic one halved, a box on [0, |S|R/2].
         half = ctrl.nbins ÷ 2
-        @test all(abs.(res.pdf_efc[1:half] .- 2 / (abs(Sx) * 2e-3)) .< 0.3 / (abs(Sx) * 2e-3))
-        @test all(res.pdf_efc[half+1:end] .== 0)
-        @test res.mean_abs_delta_efc ≈ res.mean_abs_delta / 2 rtol = 2e-2
-        @test size(res.pdf_batches) == (100, 2)
+        @test all(abs.(res.abs_delta_efc_pdf[1:half] .- 2 / (abs(Sx) * 2e-3)) .< 0.3 / (abs(Sx) * 2e-3))
+        @test all(res.abs_delta_efc_pdf[half+1:end] .== 0)
+        @test res.abs_delta_efc_sampled_mean ≈ res.abs_delta_sampled_mean / 2 rtol = 2e-2
+        @test size(res.abs_delta_pdf_batches) == (100, 2)
     end
 
     @testset "reduction to the OMFIT model and seed reproducibility" begin
@@ -124,34 +124,37 @@ using LinearAlgebra
             δ_all[s] = abs(corr + unc + other)
             δ_efc[s] = abs((corr + other) / 2 + unc)
         end
-        edges = res.bin_edges
+        edges = res.abs_delta_bin_edges
         hist(x) = [count(v -> edges[i] <= v < edges[i+1], x) for i in 1:length(edges)-1] ./ (length(x) * (edges[2] - edges[1]))
         h_all = hist(δ_all)
         h_efc = hist(δ_efc)
         # Histograms agree to Monte Carlo noise: compare CDFs (max deviation) and means.
         cdf(p) = cumsum(p .* (edges[2] - edges[1]))
-        @test maximum(abs.(cdf(res.pdf) .- cdf(h_all))) < 0.01
-        @test maximum(abs.(cdf(res.pdf_efc) .- cdf(h_efc))) < 0.01
-        @test isapprox(res.mean_abs_delta, mean(δ_all); rtol=1e-2)
-        @test isapprox(res.mean_abs_delta_efc, mean(δ_efc); rtol=1e-2)
-        @test res.delta_nominal ≈ abs(sum(δ0))
+        @test maximum(abs.(cdf(res.abs_delta_pdf) .- cdf(h_all))) < 0.01
+        @test maximum(abs.(cdf(res.abs_delta_efc_pdf) .- cdf(h_efc))) < 0.01
+        @test isapprox(res.abs_delta_sampled_mean, mean(δ_all); rtol=1e-2)
+        @test isapprox(res.abs_delta_efc_sampled_mean, mean(δ_efc); rtol=1e-2)
+        @test res.abs_delta_total_as_designed ≈ abs(sum(δ0))
 
         # Same seed, any thread count or batch order: bit-identical.
         again = EF.run_monte_carlo(table, ts, hoops(names), ctrl)
-        @test again.pdf == res.pdf && again.pdf_efc == res.pdf_efc
-        @test again.pdf_batches == res.pdf_batches
+        @test again.abs_delta_pdf == res.abs_delta_pdf && again.abs_delta_efc_pdf == res.abs_delta_efc_pdf
+        @test again.abs_delta_pdf_batches == res.abs_delta_pdf_batches
         # A different seed differs; the tolerance scale widens the distribution.
         other_seed = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=300_000, nbatch=2, seed=12, nbins=200))
-        @test other_seed.pdf != res.pdf
+        @test other_seed.abs_delta_pdf != res.abs_delta_pdf
         wide = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=100_000, nbatch=1, seed=11, nbins=200, tolerance_scale=3.0))
-        @test wide.mean_abs_delta > res.mean_abs_delta
+        @test wide.abs_delta_sampled_mean > res.abs_delta_sampled_mean
         # Coil subset: only c1 sampled; c2 and c3 contribute their nominal overlap.
         sub = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=100_000, nbatch=1, seed=11, nbins=200, coil_subset=["c1"]))
-        @test sub.delta_worst < res.delta_worst
+        @test sub.abs_delta_worst_case < res.abs_delta_worst_case
         none = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=11, nbins=200, coil_subset=["zzz"]))
         # With nothing sampled but the ring budget, |δ| = |Σδ0 + 5e-5·e^{iφ}| lies within 5e-5 of the nominal.
-        @test none.mean_abs_delta ≈ res.delta_nominal rtol = 0.5
-        @test all(abs.(none.bin_edges[findall(>(0), none.pdf)] .- res.delta_nominal) .< 5e-5 + 2 * (none.bin_edges[2] - none.bin_edges[1]))
+        @test none.abs_delta_sampled_mean ≈ res.abs_delta_total_as_designed rtol = 0.5
+        @test all(
+            abs.(none.abs_delta_bin_edges[findall(>(0), none.abs_delta_pdf)] .- res.abs_delta_total_as_designed) .<
+            5e-5 + 2 * (none.abs_delta_bin_edges[2] - none.abs_delta_bin_edges[1])
+        )
     end
 
     @testset "coherent group tilt in metres needs one radius to mean one angle" begin
@@ -174,7 +177,7 @@ using LinearAlgebra
         @test EF.group_tilt_deg(only(in_m("same").groups), Dict(zip(names, same))) ≈ rad2deg(asin(0.01 / r_same))
 
         differ = [FT.make_pf_hoop(; radius=1.5, height=0.0, name="a"),
-                  FT.make_pf_hoop(; radius=2.5, height=0.0, name="b")]
+            FT.make_pf_hoop(; radius=2.5, height=0.0, name="b")]
         by_name = Dict(zip(names, differ))
         @test_throws ArgumentError EF.group_tilt_deg(only(in_m("differ").groups), by_name)
         # Reversing the member order must not change whether it is accepted.
@@ -222,7 +225,7 @@ using LinearAlgebra
             rotation_center_z_m = 0.0
             """)
         res0 = EF.run_monte_carlo(table, centered, sets, EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=2, nbins=50, delta_max=1e-2))
-        @test res0.mean_abs_delta < 1e-12
+        @test res0.abs_delta_sampled_mean < 1e-12
         offset = EF.parse_tolerance_toml("""
             [[ErrorFields.coherent_group]]
             name = "pair"
@@ -234,7 +237,7 @@ using LinearAlgebra
             """)
         # Rotation about the lower coil by 1° moves the upper coil by 1.0 m·deg2rad(1): |δ| = |S|·1.0·deg2rad(1).
         res1 = EF.run_monte_carlo(table, offset, sets, EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=2, nbins=50, delta_max=0.05))
-        @test res1.mean_abs_delta ≈ deg2rad(1.0) rtol = 1e-2
+        @test res1.abs_delta_sampled_mean ≈ deg2rad(1.0) rtol = 1e-2
         # Two groups sharing a phase_group move in the same direction: their shifts add coherently.
         shared = EF.parse_tolerance_toml("""
             [[ErrorFields.coherent_group]]
@@ -251,11 +254,11 @@ using LinearAlgebra
             phase_group = "same"
             """)
         res_s = EF.run_monte_carlo(table, shared, sets, EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=2, nbins=50, delta_max=5e-3))
-        @test res_s.mean_abs_delta ≈ 2e-3 rtol = 1e-2
+        @test res_s.abs_delta_sampled_mean ≈ 2e-3 rtol = 1e-2
         independent = EF.parse_tolerance_toml(replace(shared.raw, "phase_group = \"same\"" => ""))
         res_i = EF.run_monte_carlo(table, independent, sets, EF.MonteCarloControl(; nsample=50_000, nbatch=1, seed=2, nbins=50, delta_max=5e-3))
         # |e^{iφ1} + e^{iφ2}| averages 4/π for independent phases.
-        @test res_i.mean_abs_delta ≈ 1e-3 * 4 / π rtol = 2e-2
+        @test res_i.abs_delta_sampled_mean ≈ 1e-3 * 4 / π rtol = 2e-2
     end
 
     @testset "guards" begin

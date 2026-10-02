@@ -35,6 +35,9 @@ end
 """
     CoilSensitivities
 
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
+
 Linearization of each coil set's control-surface spectrum with respect to its six rigid-body
 degrees of freedom, on the (m, n) column ordering of the [`ResonantCoupling`](@ref) it was built
 against. Spectra are root-area-weighted fields b̃ in tesla, the vector the coupling matrix and
@@ -51,16 +54,16 @@ was evaluated with; `peak_current` and `winding_multiplier` let a user renormali
   - `m_modes`, `n_modes`: poloidal and toroidal mode number of each spectrum entry `[numpert_total]`
   - `b_t0`: toroidal field magnitude on axis, tesla — the normalization that makes the overlap a
     dimensionless δ
-  - `nominal_field`: b̃ of each set as built, tesla `[numpert_total × ncoil_set]`
-  - `shift_sensitivity`: ∂b̃/∂(Δx, Δy, Δz), tesla per metre `[numpert_total × 3 × ncoil_set]`
-  - `tilt_sensitivity`: ∂b̃/∂(θx, θy, θz), tesla per degree `[numpert_total × 3 × ncoil_set]`
+  - `field_as_designed`: b̃ of each set as built, tesla `[numpert_total × ncoil_set]`
+  - `shift_sensitivity_per_m`: ∂b̃/∂(Δx, Δy, Δz), tesla per metre `[numpert_total × 3 × ncoil_set]`
+  - `tilt_sensitivity_per_deg`: ∂b̃/∂(θx, θy, θz), tesla per degree `[numpert_total × 3 × ncoil_set]`
   - `shift_linearity_residual`, `tilt_linearity_residual`: ‖b̃(+h) + b̃(−h) − 2b̃(0)‖ of each tap
     relative to the set's largest first difference ‖b̃(+h) − b̃(−h)‖ over all six taps, a
     window-independent measure of how much second-order response the linearization drops at
     the step taken `[3 × ncoil_set]`
   - `peak_current`: largest conductor current magnitude of each set, amperes `[ncoil_set]`
   - `winding_multiplier`: turns per conductor element of each set `[ncoil_set]`
-  - `nominal_radius`: arc-length-weighted major radius of each set, metres `[ncoil_set]` — the lever
+  - `major_radius_m`: arc-length-weighted major radius of each set, metres `[ncoil_set]` — the lever
     arm that turns a tilt angle into the rim displacement engineering tolerances are written in
 """
 struct CoilSensitivities
@@ -68,18 +71,21 @@ struct CoilSensitivities
     m_modes::Vector{Int}
     n_modes::Vector{Int}
     b_t0::Float64
-    nominal_field::Matrix{ComplexF64}
-    shift_sensitivity::Array{ComplexF64,3}
-    tilt_sensitivity::Array{ComplexF64,3}
+    field_as_designed::Matrix{ComplexF64}
+    shift_sensitivity_per_m::Array{ComplexF64,3}
+    tilt_sensitivity_per_deg::Array{ComplexF64,3}
     shift_linearity_residual::Matrix{Float64}
     tilt_linearity_residual::Matrix{Float64}
     peak_current::Vector{Float64}
     winding_multiplier::Vector{Float64}
-    nominal_radius::Vector{Float64}
+    major_radius_m::Vector{Float64}
 end
 
 """
     SensitivityTable
+
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
 
 A [`CoilSensitivities`](@ref) projected onto one singular mode of a [`DominantCoupling`](@ref)
 and normalized by the axis toroidal field: the dimensionless overlap δ of each coil set and its
@@ -93,27 +99,27 @@ only magnitudes and relative phases within one table are meaningful.
 
   - `coil_names`: name of each coil set `[ncoil_set]`
   - `mode`: index of the singular mode projected onto (1 is the dominant mode)
-  - `delta_nominal`: overlap of each set as built `[ncoil_set]`
-  - `shift`: ∂δ/∂(Δx, Δy, Δz), per metre `[3 × ncoil_set]`
-  - `tilt`: ∂δ/∂(θx, θy, θz), per degree `[3 × ncoil_set]`
-  - `delta_per_mm_shift`: direction-averaged in-plane magnitude `√((|S_x|² + |S_y|²)/2)` of the
+  - `delta_as_designed`: overlap of each set as built `[ncoil_set]`
+  - `shift_sensitivity_per_m`: ∂δ/∂(Δx, Δy, Δz), per metre `[3 × ncoil_set]`
+  - `tilt_sensitivity_per_deg`: ∂δ/∂(θx, θy, θz), per degree `[3 × ncoil_set]`
+  - `abs_delta_shift_per_mm`: direction-averaged in-plane magnitude `√((|S_x|² + |S_y|²)/2)` of the
     shift sensitivity, per millimetre `[ncoil_set]` — the single-number sensitivity to placement
-  - `delta_per_deg_tilt`: the same average over the tilt sensitivities, per degree `[ncoil_set]`
-  - `delta_per_mm_rim`: that tilt sensitivity expressed as rim displacement at `nominal_radius`,
+  - `abs_delta_tilt_per_deg`: the same average over the tilt sensitivities, per degree `[ncoil_set]`
+  - `abs_delta_rim_per_mm`: that tilt sensitivity expressed as rim displacement at `major_radius_m`,
     per millimetre `[ncoil_set]` — the unit mechanical tolerances usually arrive in
-  - `cancelling_shift`: the in-plane shift `(Δx, Δy)` that cancels `delta_nominal`, metres
+  - `cancelling_shift_m`: the in-plane shift `(Δx, Δy)` that cancels `delta_as_designed`, metres
     `[2 × ncoil_set]`, see [`cancelling_offset`](@ref)
-  - `cancelling_tilt`: the in-plane tilt `(θx, θy)` that cancels `delta_nominal`, degrees `[2 × ncoil_set]`
+  - `cancelling_tilt_deg`: the in-plane tilt `(θx, θy)` that cancels `delta_as_designed`, degrees `[2 × ncoil_set]`
 """
 struct SensitivityTable
     coil_names::Vector{String}
     mode::Int
-    delta_nominal::Vector{ComplexF64}
-    shift::Matrix{ComplexF64}
-    tilt::Matrix{ComplexF64}
-    delta_per_mm_shift::Vector{Float64}
-    delta_per_deg_tilt::Vector{Float64}
-    delta_per_mm_rim::Vector{Float64}
-    cancelling_shift::Matrix{Float64}
-    cancelling_tilt::Matrix{Float64}
+    delta_as_designed::Vector{ComplexF64}
+    shift_sensitivity_per_m::Matrix{ComplexF64}
+    tilt_sensitivity_per_deg::Matrix{ComplexF64}
+    abs_delta_shift_per_mm::Vector{Float64}
+    abs_delta_tilt_per_deg::Vector{Float64}
+    abs_delta_rim_per_mm::Vector{Float64}
+    cancelling_shift_m::Matrix{Float64}
+    cancelling_tilt_deg::Matrix{Float64}
 end
