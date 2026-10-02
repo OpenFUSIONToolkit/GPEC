@@ -1,0 +1,178 @@
+@testset "Dispersion per-surface rotation shift" begin
+    using GeneralizedPerturbedEquilibrium.InnerLayer
+    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
+    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Runner: SLAYERControl,
+        slayer_control_from_toml, validate, _q_shifts, _omega_E_per_surface, _build_surface_coupling
+    using LinearAlgebra
+
+    # Linear inner layer Δ(Q) = a + b·Q makes the applied Q offset readable
+    # straight off the residual.
+    struct RotTestModel <: InnerLayerModel
+        a::ComplexF64
+        b::ComplexF64
+    end
+    GeneralizedPerturbedEquilibrium.InnerLayer.solve_inner(
+        m::RotTestModel, params, Q::Number) =
+        InnerLayerResponse(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
+
+    model = RotTestModel(0.0im, 1.0 + 0im)
+
+    @testset "q_shift defaults to zero and is inert" begin
+        sc = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0)
+        @test sc.q_shift == 0.0
+        # Unshifted residual is dp_diag - Δ(Q) = 1 - Q
+        @test sc(2.0 + 0im) ≈ (1.0 - 2.0) + 0im
+    end
+
+    @testset "q_shift offsets the layer Q argument on the scalar residual" begin
+        shift = 0.75
+        sc0 = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0)
+        scs = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0,
+            q_shift=shift)
+        @test scs.q_shift == shift
+        for Q in (0.0 + 0im, 2.0 - 1.0im, -3.5 + 0.25im)
+            @test scs(Q) ≈ sc0(Q + shift)
+        end
+    end
+
+    @testset "q_shift is real: it moves Re(Q), not Im(Q)" begin
+        # The shift models rotation, so it must not leak into the growth-rate
+        # axis. Δ(Q) = Q here, so the residual difference IS the applied offset.
+        sc0 = surface_coupling(model, nothing, 0.0 + 0im; scale=1.0, tauk=1.0)
+        scs = surface_coupling(model, nothing, 0.0 + 0im; scale=1.0, tauk=1.0,
+            q_shift=2.0)
+        applied = sc0(1.0 + 1.0im) - scs(1.0 + 1.0im)   # = Δ(Q+s) - Δ(Q) = s
+        @test real(applied) ≈ 2.0
+        @test imag(applied) ≈ 0.0 atol = 1e-14
+    end
+
+    @testset "Coupled determinant applies each surface's own shift" begin
+        # Diagonal Δ', so det = Π_k (dp_kk - Δ_k(Q·tauk_k/tauk_ref + shift_k)).
+        s1, s2 = 0.5, -1.25
+        sc1 = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0,
+            q_shift=s1)
+        sc2 = surface_coupling(model, nothing, 2.0 + 0im; scale=1.0, tauk=2.0,
+            q_shift=s2)
+        dp = ComplexF64[1.0 0.0; 0.0 2.0]
+        mc = multi_surface_coupling([sc1, sc2], dp)
+
+        Q = 1.5 + 0.5im
+        # Default :direct rescale: surface k sees Q·tauk_k/tauk_ref + q_shift_k.
+        expected = (1.0 - (Q * (1.0 / 1.0) + s1)) * (2.0 - (Q * (2.0 / 1.0) + s2))
+        @test mc(Q) ≈ expected
+
+        # Zero shifts reproduce the un-rotated determinant exactly.
+        sc1z = surface_coupling(model, nothing, 1.0 + 0im; scale=1.0, tauk=1.0)
+        sc2z = surface_coupling(model, nothing, 2.0 + 0im; scale=1.0, tauk=2.0)
+        mcz = multi_surface_coupling([sc1z, sc2z], dp)
+        @test mcz(Q) ≈ (1.0 - Q) * (2.0 - 2Q)
+    end
+
+    @testset "_q_shifts: kinetic-file Ω_E by default, omega_E_kHz override, n-scaled" begin
+        mk(; qval, rs, m, n) = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0,
+            omega_e=1.0e4, omega_i=5.0e3,
+            qval=qval, sval_r=1.0, bt=2.0, rs=rs, R0=1.7,
+            mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=n)
+        params = [mk(; qval=1.5, rs=0.5, m=3, n=2), mk(; qval=2.0, rs=0.6, m=4, n=2)]
+        Ω_file = [3.0e4, -1.0e4]   # rad/s per unit n, as carried by the kinetic file
+        qs(ctrl; omega_E=Float64[]) = _q_shifts(params, _omega_E_per_surface(ctrl, params, omega_E))
+
+        # No file rotation and no override: no shift anywhere.
+        @test qs(SLAYERControl()) == [0.0, 0.0]
+
+        # File rotation by default. The mode sees n·Ω_E, so Q_k = τ_k·(ω − n·Ω_E) and the offset
+        # is −τ_k·n·Ω_E.
+        got = qs(SLAYERControl(); omega_E=Ω_file)
+        @test got ≈ [-params[1].tauk * 2 * Ω_file[1], -params[2].tauk * 2 * Ω_file[2]]
+
+        # omega_E_kHz replaces the file value on each listed m/n, in the same per-unit-n convention.
+        ovr = qs(SLAYERControl(; omega_E_kHz=Dict("3/2" => 1.0, "4/2" => -2.0)); omega_E=Ω_file)
+        @test ovr ≈ [-params[1].tauk * 2 * 2π * 1e3 * 1.0, -params[2].tauk * 2 * 2π * 1e3 * -2.0]
+
+        # Unlisted surfaces keep the kinetic-file value.
+        part = qs(SLAYERControl(; omega_E_kHz=Dict("4/2" => -2.0)); omega_E=Ω_file)
+        @test part ≈ [-params[1].tauk * 2 * Ω_file[1], -params[2].tauk * 2 * 2π * 1e3 * -2.0]
+
+        # An m/n matching no analysed surface is an error, as is a file of the wrong length.
+        @test_throws "matching no analysed surface" qs(SLAYERControl(; omega_E_kHz=Dict("2/1" => 1.0)))
+        @test_throws ArgumentError qs(SLAYERControl(); omega_E=[1.0])
+    end
+
+    @testset "Real SLAYER surfaces: the lab-frame root moves with the E×B rotation" begin
+        # Q_layer = τ_k·ω_lab − τ_k·n·Ω_E, so the rotating determinant at Q + τ_ref·n·Ω_E equals the
+        # static one at Q: every root keeps its γ and moves by ω_lab(Ω_E) − ω_lab(0) = +n·Ω_E.
+        mk(; qval, rs, m, n) = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0,
+            omega_e=1.0e4, omega_i=5.0e3,
+            qval=qval, sval_r=1.0, bt=2.0, rs=rs, R0=1.7,
+            mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=n)
+        params = [mk(; qval=1.5, rs=0.5, m=3, n=2), mk(; qval=2.0, rs=0.6, m=4, n=2)]
+        slayer = SLAYERModel(; variant=:fitzpatrick)
+        dp = ComplexF64[-2.0 0.5; 0.5 -3.0]
+        lab_shift = 0.5                                        # τ_ref·n·Ω_E in the reference Q
+        Ω_rigid = lab_shift / (params[1].tauk * params[1].n)   # rad/s per unit n, on both surfaces
+        build(Ω) = [_build_surface_coupling(slayer, params[k], dp[k, k], q) for (k, q) in enumerate(_q_shifts(params, Ω))]
+        static = multi_surface_coupling(build(zeros(2)), dp; ref_idx=1, msing_max=2)
+        rotating = multi_surface_coupling(build(fill(Ω_rigid, 2)), dp; ref_idx=1, msing_max=2)
+        for Q in (0.3 + 0.2im, -0.4 + 0.6im, 0.1 + 1.1im)
+            # The layer arguments agree to rounding, which the adaptive layer ODE amplifies to ≲ 3e-6.
+            @test rotating(Q + lab_shift) ≈ static(Q) rtol = 1e-4
+            # The opposite Doppler sign (mode counter-rotating with the plasma) must not match.
+            @test !isapprox(rotating(Q - lab_shift), static(Q); rtol=1e-3)
+        end
+    end
+
+    @testset "Coupled roots do not depend on the reference surface" begin
+        # Diagonal Δ′ decouples the surfaces, so each coupled root must be that surface's own
+        # root in physical units whichever surface normalizes Q.
+        d = ComplexF64[1.0+1.0im, 3.0+2.0im]
+        tauk = [2.0e-4, 5.0e-4]
+        scs = [surface_coupling(model, nothing, d[k]; scale=1.0, tauk=tauk[k]) for k in 1:2]
+        # Δ(Q) = Q makes surface k's own root Q_k = d_k, i.e. ω + iγ = d_k/τ_k.
+        expected = sort(d ./ tauk; by=real)
+        for ref in 1:2
+            mc = multi_surface_coupling(scs, diagm(d); ref_idx=ref, msing_max=2)
+            # det is quadratic in Q: recover it from three samples and solve.
+            xs = ComplexF64[0, 1, 2]
+            c = [x^j for x in xs, j in 0:2] \ [mc(x) for x in xs]
+            disc = sqrt(c[2]^2 - 4c[3] * c[1])
+            roots = [(-c[2] + disc) / (2c[3]), (-c[2] - disc) / (2c[3])]
+            @test sort(roots ./ tauk[ref]; by=real) ≈ expected rtol = 1e-10
+        end
+    end
+
+    @testset "Rigid E×B rotation shifts ω by n·Ω_E and leaves γ unchanged" begin
+        d = ComplexF64[1.0+1.0im, 3.0+2.0im]
+        tauk = [2.0e-4, 5.0e-4]
+        nΩ = 700.0
+        static = [surface_coupling(model, nothing, d[k]; scale=1.0, tauk=tauk[k]) for k in 1:2]
+        rigid = [surface_coupling(model, nothing, d[k]; scale=1.0, tauk=tauk[k], q_shift=-tauk[k] * nΩ)
+                 for k in 1:2]
+        function physical_roots(scs)
+            mc = multi_surface_coupling(scs, diagm(d); ref_idx=1, msing_max=2)
+            xs = ComplexF64[0, 1, 2]
+            c = [x^j for x in xs, j in 0:2] \ [mc(x) for x in xs]
+            disc = sqrt(c[2]^2 - 4c[3] * c[1])
+            return sort([(-c[2] + disc) / (2c[3]), (-c[2] - disc) / (2c[3])] ./ tauk[1]; by=real)
+        end
+        r0, r1 = physical_roots(static), physical_roots(rigid)
+        @test real.(r1) ≈ real.(r0) .+ nΩ rtol = 1e-10
+        @test imag.(r1) ≈ imag.(r0) rtol = 1e-10
+    end
+
+    @testset "omega_E_kHz parses and validates from TOML" begin
+        ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2/1" => 0, " 3 / 1 " => 3.0)))
+        @test ctrl.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
+        @test ctrl.omega_E_kHz isa Dict{String,Float64}
+        # Default stays empty so existing decks are untouched.
+        @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_E_kHz)
+        # The positional list form is gone, and keys must read m/n.
+        @test_throws "table keyed by m/n" slayer_control_from_toml(Dict("omega_E_kHz" => [0.0, 3.0]))
+        @test_throws "not of the form" slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2:1" => 3.0)))
+        @test_throws "same m/n twice" slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2/1" => 1.0, "02/1" => 2.0)))
+        # A non-finite shift would silently poison every Q evaluation; the
+        # validator rejects it (TOML cannot express NaN, so go through validate).
+        @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=Dict("2/1" => NaN)))
+        @test_throws "not canonical" validate(SLAYERControl(; omega_E_kHz=Dict("02/1" => 1.0)))
+    end
+end

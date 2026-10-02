@@ -32,6 +32,13 @@ constructor.
   - `bt`       -- toroidal field `[T]`. `nothing` (default) resolves the physical
     `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
     callable of `psi` overrides it
+  - `omega_E_kHz` -- optional override of the per-surface E×B rotation, keyed by the surface's
+    `"m/n"` (TOML: `omega_E_kHz = {"2/1" = 0.0, "3/1" = 3.0}`). Per unit toroidal mode number
+    like the kinetic file's `omega_E`, but given as Ω_E/2π in kHz rather than the file's rad/s.
+    Surfaces not listed (all of them by default) take Ω_E from the kinetic file; a key matching
+    no analysed surface is an error. Rotation enters only the coupled determinant: surface `k`'s
+    inner-layer Q is Doppler-shifted by `ΔRe(Q_k) = −tauk_k · n · Ω_E,k`, so each layer sees the
+    mode in its own E×B frame
   - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- effective charge
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
@@ -151,6 +158,8 @@ there is one consistent interface for resistive and kinetic profiles.
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
 
+    omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
+
     profile_file::String = ""
     profile_group::String = "/"
 
@@ -185,11 +194,25 @@ function validate(ctrl::SLAYERControl)
                             "not in $(_VALID_LNLAMBDA_FORMS)"))
     ctrl.msing_max >= 1 ||
         throw(ArgumentError("SLAYERControl: msing_max=$(ctrl.msing_max) must be ≥ 1"))
+    all(isfinite, values(ctrl.omega_E_kHz)) ||
+        throw(ArgumentError("SLAYERControl: omega_E_kHz contains a " *
+                            "non-finite entry: $(ctrl.omega_E_kHz)"))
+    for key in keys(ctrl.omega_E_kHz)
+        _mn_key(key) == key ||
+            throw(ArgumentError("SLAYERControl: omega_E_kHz key \"$key\" is not canonical; write it as \"$(_mn_key(key))\""))
+    end
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
         throw(ArgumentError("SLAYERControl: amr_passes must be ≥ 0"))
     return ctrl
+end
+
+# Canonical "m/n" label of an omega_E_kHz key; throws on anything not of that form.
+function _mn_key(key::AbstractString)
+    mt = match(r"^\s*(-?\d+)\s*/\s*(\d+)\s*$", key)
+    mt === nothing && throw(ArgumentError("SLAYERControl: omega_E_kHz key \"$key\" is not of the form \"m/n\", e.g. \"2/1\""))
+    return "$(parse(Int, mt[1]))/$(parse(Int, mt[2]))"
 end
 
 # Helper: coerce range-like values to a 2-tuple of Float64
@@ -249,6 +272,14 @@ function slayer_control_from_toml(section::AbstractDict)
         elseif sym in (:bt, :dr_val, :dgeo_val)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
+        elseif sym === :omega_E_kHz
+            v isa AbstractDict ||
+                throw(ArgumentError("slayer_control_from_toml: omega_E_kHz must be a table keyed by m/n, " *
+                                    "e.g. omega_E_kHz = {\"2/1\" = 0.0, \"3/1\" = 3.0}; got $v"))
+            table = Dict{String,Float64}(_mn_key(String(key)) => Float64(x) for (key, x) in v)
+            length(table) == length(v) ||
+                throw(ArgumentError("slayer_control_from_toml: omega_E_kHz names the same m/n twice: $(collect(keys(v)))"))
+            kwargs[sym] = table
         elseif sym === :boxes
             # `boxes` is a Vector{NTuple{4,Float64}}; from TOML this comes
             # in as a list of 4-element arrays. Coerce each.
