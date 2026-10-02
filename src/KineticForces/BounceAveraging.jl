@@ -17,11 +17,8 @@ const MAX_SPLINE_CELLS = 100_000
 const EXTREMUM_MERGE_TOL = 1e-12
 # Cells a hinted cell search may step before falling back to bisection.
 const HINT_STEP_BUDGET = 8
-# Slack on the conditioned root-count tests in _quadratic_real_roots and _real_cubic_roots.
-# Where a discriminant cancels to nothing, a value a rounding step past the boundary is a
-# repeated root, not a lost one. Generous by design: a wrongly admitted repeated root is
-# a near-touch at a stationary point, which cannot sit strictly inside the monotone window
-# _cell_level_root filters on, so it can only lose the residual ranking, never win it.
+# Slack on the root-count tests below. Generous by design: a wrongly admitted repeated
+# root is a near-touch at a stationary point, which the monotone-window filter rejects.
 const ROOT_COUNT_TOL = 64 * eps(Float64)
 
 # ============================================================================
@@ -485,8 +482,7 @@ function _surface_b_field(B_vpar)
         push!(bknot, d)                      # S(0) = B at the cell's left knot
         push!(knot, cell.xR)
 
-        # S'(u) = c + 2b·u + 3a·u², u ∈ [0, h). A double stationary point comes back twice
-        # and is merged by the dedupe below.
+        # S'(u) = c + 2b·u + 3a·u² on [0, h); a double stationary point returns twice and dedupes below.
         n, u1, u2, _ = _quadratic_real_roots(3a, 2b, c)
         for (k, u) in ((1, u1), (2, u2))
             k <= n || break
@@ -527,13 +523,10 @@ end
 end
 
 """
-Real roots of `a·u³ + b·u² + c·u + d = 0`, returned as `(count, r1, r2, r3)` with
-unused slots `NaN`. A degenerate leading coefficient falls through to
-`_quadratic_real_roots`. The root count comes from a conditioned ratio test on the
-depressed cubic, not from the sign of its discriminant, which cancels to rounding noise
-when two roots nearly coincide and then reports one root where there are three. Three
-real roots use the trigonometric form, which stays well conditioned where Cardano's
-radicals cancel.
+Real roots of `a·u³ + b·u² + c·u + d = 0` as `(count, r1, r2, r3)`, unused slots `NaN`.
+The count comes from a conditioned ratio test rather than the sign of the discriminant,
+which cancels to rounding noise when two roots nearly coincide; three real roots use the
+trigonometric form. A degenerate leading coefficient falls through to `_quadratic_real_roots`.
 """
 function _real_cubic_roots(a::Float64, b::Float64, c::Float64, d::Float64)
     abs(a) <= eps(Float64) * max(abs(b), abs(c), abs(d), 1.0) && return _quadratic_real_roots(b, c, d)
@@ -544,10 +537,8 @@ function _real_cubic_roots(a::Float64, b::Float64, c::Float64, d::Float64)
     q = 2 * B^3 / 27 - B * C / 3 + D
 
     if p < 0
-        # Three real roots iff |q/2| ≤ r³ with r = √(−p/3). Testing that ratio against 1
-        # stays conditioned where the discriminant (q/2)² + (p/3)³ cancels to nothing; a
-        # ratio a rounding step past 1 is a repeated root, which the clamp returns as
-        # t_k = 2r·cos(φ − 2πk/3), φ = acos(−q/2r³)/3, with two of the three coincident.
+        # Three real roots iff |q/2| ≤ r³, r = √(−p/3): the ratio test stays conditioned where
+        # the discriminant cancels. A ratio a rounding step past 1 is a repeated root; clamp.
         r = sqrt(-p / 3)
         arg = -q / (2 * r^3)
         if abs(arg) <= 1 + ROOT_COUNT_TOL
@@ -556,19 +547,16 @@ function _real_cubic_roots(a::Float64, b::Float64, c::Float64, d::Float64)
         end
     end
 
-    # One real root: p ≥ 0 makes t³ + pt + q monotone, and p < 0 with |arg| > 1 is the
-    # single-crossing case. Cardano's radicals do not cancel here; the max guards the
-    # square root against the rounding step that the tolerance above just excluded.
+    # One real root (p ≥ 0: monotone; p < 0: |arg| > 1). The max guards sqrt against rounding.
     s = sqrt(max(0.0, (q / 2)^2 + (p / 3)^3))
     t = cbrt(-q / 2 + s) + cbrt(-q / 2 - s)
     return (1, t - shift, NaN, NaN)
 end
 
 """
-Real roots of `a·u² + b·u + c = 0`, in the `(count, r1, r2, r3)` shape of
-`_real_cubic_roots` with `r3` always `NaN`. A discriminant within rounding of zero is a
-double root rather than none: `b² − 4ac` cancels there and the sign it lands on is noise.
-A degenerate leading coefficient falls through to the linear case.
+Real roots of `a·u² + b·u + c = 0` in the `(count, r1, r2, r3)` shape of `_real_cubic_roots`,
+`r3` always `NaN`. A discriminant within rounding of zero is a double root rather than none;
+a degenerate leading coefficient falls through to the linear case.
 """
 function _quadratic_real_roots(a::Float64, b::Float64, c::Float64)
     if abs(a) <= eps(Float64) * max(abs(b), abs(c), 1.0)

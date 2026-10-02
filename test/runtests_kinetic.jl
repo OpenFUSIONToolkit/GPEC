@@ -191,10 +191,8 @@
                 end
             end
 
-            # Three genuine, distinct real roots with two of them nearly coincident. The
-            # discriminant (q/2)² + (p/3)³ cancels to the rounding floor and can land on
-            # either sign; a branch that trusts that sign reports one root and drops two.
-            # Built from the roots so the polynomial has them exactly.
+            # Three real roots, two nearly coincident: the discriminant cancels to rounding noise
+            # and a branch trusting its sign drops two roots. Built from the roots, so exact.
             for (x1, x2, x3) in ((0.37, 0.37000001, 0.91), (0.2, 0.8, 0.80000001), (-1.5, 0.5, 0.5 + 1e-7))
                 a = 1.0
                 b = -(x1 + x2 + x3)
@@ -215,9 +213,8 @@
         end
 
         @testset "near-double quadratic roots" begin
-            # b² − 4ac cancels to the rounding floor for a near-double root and can land on
-            # either sign; a branch trusting that sign returns no roots at all. Built from
-            # the roots so the polynomial has them exactly.
+            # b² − 4ac cancels to rounding noise for a near-double root; a branch trusting its
+            # sign returns no roots at all. Built from the roots, so exact.
             for (x1, x2) in ((0.5, 0.5 + 1e-9), (0.5, 0.5), (-0.3, -0.3 + 1e-10), (2.0, 2.0 + 1e-8))
                 a = 1.0
                 b = -(x1 + x2)
@@ -239,10 +236,8 @@
         end
 
         @testset "two stationary points in one cell" begin
-            # A coarse grid puts both stationary points bounding a monotone interval inside
-            # one spline cell, so the crossing is solved on the window between them rather
-            # than between knots. The fixture is checked to actually produce the case before
-            # anything is asserted about it.
+            # A coarse grid puts both stationary points of an interval inside one cell, so the
+            # crossing is solved between them, not between knots. Checked to occur before asserting.
             xs2 = collect(range(0.0, 1.0; length=11))
             B2 = @. 2.0 + 0.45 * cos(2pi * xs2) + 0.20 * cos(6pi * xs2)
             B2[end] = B2[1]
