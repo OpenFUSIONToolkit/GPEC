@@ -26,12 +26,12 @@ Settings of the tolerance Monte Carlo, the `[ErrorFields.MonteCarlo]` TOML table
     any thread count
   - `nbins`: histogram bins, linear on `[0, delta_max]`
   - `delta_max`: upper edge of the histogram; `0` means `1.5 ×` the worst-case alignment
-    `Σ(|δ_nominal| + tolerance × |sensitivity|)`, which the tolerance draws cannot exceed (only
+    `Σ(|δ_as_designed| + tolerance × |sensitivity|)`, which the tolerance draws cannot exceed (only
     the Gaussian uncertainties and the unattributed budget can, and those land in the last bin)
   - `tolerance_scale`: multiplies every shift and tilt tolerance, for allowable-tolerance scans;
     uncertainties and the unattributed budget are not scaled
   - `coil_subset`: coil set names whose tolerances are sampled; every other coil set contributes
-    only its nominal overlap, and a coherent group is sampled only if all its members are listed.
+    only its as-designed overlap, and a coherent group is sampled only if all its members are listed.
     Empty means all
 """
 Base.@kwdef struct MonteCarloControl
@@ -47,31 +47,34 @@ end
 """
     MonteCarloResult
 
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
+
 Histograms of the dominant-mode overlap magnitude over the sampled misalignments.
 
 ## Fields
 
-  - `bin_edges`: `|δ|` bin edges `[nbins + 1]`; samples above the last edge are counted in the last bin
-  - `pdf`, `pdf_efc`: probability density of the intrinsic and of the corrected `|δ|`, averaged
+  - `abs_delta_bin_edges`: `|δ|` bin edges `[nbins + 1]`; samples above the last edge are counted in the last bin
+  - `pdf`, `abs_delta_efc_pdf`: probability density of the intrinsic and of the corrected `|δ|`, averaged
     over batches `[nbins]`
-  - `pdf_batches`, `pdf_efc_batches`: the same per batch `[nbins × nbatch]`
-  - `delta_nominal`: `|Σ δ_nominal|`, the as-designed overlap with every coil at its nominal position
-  - `delta_worst`: the worst-case alignment bound used to size the histogram
-  - `mean_abs_delta`, `mean_abs_delta_efc`: sample means of the two magnitudes
-  - `clamped_fraction`: fraction of samples whose intrinsic `|δ|` landed beyond `bin_edges[end]`
+  - `abs_delta_pdf_batches`, `abs_delta_efc_pdf_batches`: the same per batch `[nbins × nbatch]`
+  - `abs_delta_total_as_designed`: `|Σ δ_as_designed|`, the as-designed overlap with every coil at its design position
+  - `abs_delta_worst_case`: the worst-case alignment bound used to size the histogram
+  - `abs_delta_sampled_mean`, `abs_delta_efc_sampled_mean`: sample means of the two magnitudes
+  - `clamped_fraction`: fraction of samples whose intrinsic `|δ|` landed beyond `abs_delta_bin_edges[end]`
     (the corrected histogram clamps too but is not separately tallied)
   - `nsample`, `nbatch`, `seed`: as run
 """
 struct MonteCarloResult
-    bin_edges::Vector{Float64}
-    pdf::Vector{Float64}
-    pdf_efc::Vector{Float64}
-    pdf_batches::Matrix{Float64}
-    pdf_efc_batches::Matrix{Float64}
-    delta_nominal::Float64
-    delta_worst::Float64
-    mean_abs_delta::Float64
-    mean_abs_delta_efc::Float64
+    abs_delta_bin_edges::Vector{Float64}
+    abs_delta_pdf::Vector{Float64}
+    abs_delta_efc_pdf::Vector{Float64}
+    abs_delta_pdf_batches::Matrix{Float64}
+    abs_delta_efc_pdf_batches::Matrix{Float64}
+    abs_delta_total_as_designed::Float64
+    abs_delta_worst_case::Float64
+    abs_delta_sampled_mean::Float64
+    abs_delta_efc_sampled_mean::Float64
     clamped_fraction::Float64
     nsample::Int
     nbatch::Int
@@ -131,7 +134,7 @@ overlap. Per sample and coil set `c` with sensitivities `S = (S_x, S_y)` per met
 `T = (T_x, T_y)` per degree,
 
 ```
-δ = Σ_c [δ_nominal,c + S_c·(Δ_c + u_c) + T_c·(θ_c + v_c)] + Σ_g [S_g·(Δ_g + Δ_rot) + T_g·θ_g] + δ_other
+δ = Σ_c [δ_as_designed,c + S_c·(Δ_c + u_c) + T_c·(θ_c + v_c)] + Σ_g [S_g·(Δ_g + Δ_rot) + T_g·θ_g] + δ_other
 ```
 
 where `(Δ_c, θ_c)` is the coil's own draw (additive: independent shift and tilt disks; cylinder:
@@ -143,7 +146,7 @@ group about its pivot (in the sense `apply_transforms` uses) gives a member at h
 The corrected histogram divides every correctable term (coils and groups not listed as
 uncorrectable, and the unattributed budget) by `efc_factor`.
 
-`coil_sets` supply the nominal radii for tilt tolerances given in metres and the heights of
+`coil_sets` supply the major radii for tilt tolerances given in metres and the heights of
 group members; coil sets of the run without a tolerance block contribute their nominal overlap
 only. The file form rebuilds the coupling from `gpec.h5`, windows it, projects the stored
 linearization, and reads the tolerance snapshot the run echoed; `kwargs` are
@@ -158,9 +161,9 @@ function run_monte_carlo(table::SensitivityTable, ts::ToleranceSet, coil_sets::V
     p_other = _radial_p(other.radial_shape)
     efc = ts.efc_factor
 
-    delta_nominal = abs(sum(table.delta_nominal))
-    delta_worst = _worst_case(table, coils, groups, other)
-    delta_max = ctrl.delta_max > 0 ? ctrl.delta_max : _HISTOGRAM_MARGIN * delta_worst
+    abs_delta_total_as_designed = abs(sum(table.delta_as_designed))
+    abs_delta_worst_case = _worst_case(table, coils, groups, other)
+    delta_max = ctrl.delta_max > 0 ? ctrl.delta_max : _HISTOGRAM_MARGIN * abs_delta_worst_case
     delta_max > 0 || throw(ArgumentError("the histogram range is zero: no nominal overlap, tolerance, or budget to sample"))
     edges = collect(range(0.0, delta_max; length=ctrl.nbins + 1))
     width = edges[2] - edges[1]
@@ -196,11 +199,11 @@ function run_monte_carlo(table::SensitivityTable, ts::ToleranceSet, coil_sets::V
     end
 
     norm = ctrl.nsample * width
-    pdf_batches = counts ./ norm
-    pdf_efc_batches = counts_efc ./ norm
+    abs_delta_pdf_batches = counts ./ norm
+    abs_delta_efc_pdf_batches = counts_efc ./ norm
     total = ctrl.nsample * ctrl.nbatch
-    return MonteCarloResult(edges, vec(sum(pdf_batches; dims=2)) ./ ctrl.nbatch, vec(sum(pdf_efc_batches; dims=2)) ./ ctrl.nbatch,
-        pdf_batches, pdf_efc_batches, delta_nominal, delta_worst, sum(sums) / total, sum(sums_efc) / total,
+    return MonteCarloResult(edges, vec(sum(abs_delta_pdf_batches; dims=2)) ./ ctrl.nbatch, vec(sum(abs_delta_efc_pdf_batches; dims=2)) ./ ctrl.nbatch,
+        abs_delta_pdf_batches, abs_delta_efc_pdf_batches, abs_delta_total_as_designed, abs_delta_worst_case, sum(sums) / total, sum(sums_efc) / total,
         sum(clamped) / total, ctrl.nsample, ctrl.nbatch, ctrl.seed)
 end
 
@@ -322,7 +325,8 @@ function _resolve_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
         model[i] = _model_code(t.tolerance_model)
         z_top[i] = t.cylinder_half_height_m
     end
-    coils = _CoilTerms(collect(table.delta_nominal), table.shift[1, :], table.shift[2, :], table.tilt[1, :], table.tilt[2, :],
+    coils = _CoilTerms(collect(table.delta_as_designed), table.shift_sensitivity_per_m[1, :], table.shift_sensitivity_per_m[2, :], table.tilt_sensitivity_per_deg[1, :],
+        table.tilt_sensitivity_per_deg[2, :],
         shift_tol, tilt_tol, shift_sigma, tilt_sigma, p_radial, model, z_top, [!(nm in uncorrectable) for nm in names])
 
     kept = [g for g in ts.groups if all(active, g.members)]
@@ -345,12 +349,12 @@ function _resolve_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
         for m in g.members
             i = index[m]
             h = _set_center(set_of[m])[3] - g.rotation_center_z_m
-            gSx[gi] += table.shift[1, i]
-            gSy[gi] += table.shift[2, i]
-            gTx[gi] += table.tilt[1, i]
-            gTy[gi] += table.tilt[2, i]
-            gRx[gi] += h * table.shift[1, i]
-            gRy[gi] += h * table.shift[2, i]
+            gSx[gi] += table.shift_sensitivity_per_m[1, i]
+            gSy[gi] += table.shift_sensitivity_per_m[2, i]
+            gTx[gi] += table.tilt_sensitivity_per_deg[1, i]
+            gTy[gi] += table.tilt_sensitivity_per_deg[2, i]
+            gRx[gi] += h * table.shift_sensitivity_per_m[1, i]
+            gRy[gi] += h * table.shift_sensitivity_per_m[2, i]
             m in uncorrectable && (g_corr[gi] = false)
         end
         g_shift[gi] = scale * g.shift_tol_m
@@ -366,7 +370,7 @@ end
 # Worst-case alignment bound used to size the histogram: every term at its tolerance edge and in
 # phase. Gaussian uncertainties enter at _WORST_CASE_SIGMA standard deviations, not a hard limit.
 function _worst_case(table::SensitivityTable, coils::_CoilTerms, groups::_GroupTerms, other::OtherFieldBudget)
-    w = sum(abs, table.delta_nominal)
+    w = sum(abs, table.delta_as_designed)
     for c in eachindex(coils.delta0)
         s_in = max(abs(coils.Sx[c]), abs(coils.Sy[c]))
         t_in = max(abs(coils.Tx[c]), abs(coils.Ty[c]))
@@ -387,14 +391,14 @@ end
     worst_case_terms(table, tolerances, coil_sets; tolerance_scale=1.0) -> NamedTuple
     worst_case_terms(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, tolerance_scale=1.0) -> NamedTuple
 
-The worst-case alignment bound `delta_worst` of [`run_monte_carlo`](@ref) split into the terms
-that make it up, so the tolerance budget can be read coil by coil. Per coil set: `nominal` is
-`|δ_nominal|`, `shift` is `max(|S_x|, |S_y|)·(shift_tol + 3σ_shift)` and `tilt` is
+The worst-case alignment bound `abs_delta_worst_case` of [`run_monte_carlo`](@ref) split into the terms
+that make it up, so the tolerance budget can be read coil by coil. Per coil set: `abs_delta_as_designed` is
+`|δ_as_designed|`, `abs_delta_shift_tolerance` is `max(|S_x|, |S_y|)·(shift_tol + 3σ_shift)` and `abs_delta_tilt_tolerance` is
 `max(|T_x|, |T_y|)·(tilt_reach + 3σ_tilt)`, where `tilt_reach` is the tilt tolerance in degrees
 or, under the cylinder model, the angle the axis line can reach, `atan(shift_tol / half_height)`.
-Per coherent group (`group_names`): `group_shift` and `group_tilt`, the latter including the
-lateral displacement a rigid rotation gives each member. `other` is the unattributed budget at
-`magnitude + 3σ`. `total` is `delta_worst` itself, the sum of every term; uncertainties enter at
+Per coherent group (`group_names`): `abs_delta_group_shift_tolerance` and `abs_delta_group_tilt_tolerance`, the latter including the
+lateral displacement a rigid rotation gives each member. `abs_delta_unattributed` is the unattributed budget at
+`magnitude + 3σ`. `abs_delta_worst_case` is the bound itself, the sum of every term; uncertainties enter at
 three standard deviations exactly as in the bound. Every coil set is counted (no `coil_subset`),
 and `tolerance_scale` multiplies the tolerances as in the Monte Carlo. The file form rebuilds the
 inputs from `gpec.h5` as `run_monte_carlo` does.
@@ -403,7 +407,7 @@ function worst_case_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::
     validate_tolerances(ts, table.coil_names)
     coils, groups = _resolve_terms(table, ts, coil_sets, MonteCarloControl(; tolerance_scale))
     other = ts.other_field
-    nominal = abs.(table.delta_nominal)
+    nominal = abs.(table.delta_as_designed)
     shift = similar(nominal)
     tilt = similar(nominal)
     for c in eachindex(coils.delta0)
@@ -424,8 +428,9 @@ function worst_case_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::
         group_tilt[g] = t_in * tilt_reach
     end
     group_names = [g.name for g in ts.groups]
-    return (; coil_names=copy(table.coil_names), nominal, shift, tilt, group_names, group_shift, group_tilt,
-        other=other.magnitude + _WORST_CASE_SIGMA * other.sigma, total=_worst_case(table, coils, groups, other))
+    return (; coil_names=copy(table.coil_names), abs_delta_as_designed=nominal, abs_delta_shift_tolerance=shift, abs_delta_tilt_tolerance=tilt, group_names,
+        abs_delta_group_shift_tolerance=group_shift, abs_delta_group_tilt_tolerance=group_tilt, abs_delta_unattributed=other.magnitude + _WORST_CASE_SIGMA * other.sigma,
+        abs_delta_worst_case=_worst_case(table, coils, groups, other))
 end
 function worst_case_terms(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1, tolerance_scale::Real=1.0)
     table, ts, coil_sets = _monte_carlo_inputs(h5path; psi_low, psi_high, mode)

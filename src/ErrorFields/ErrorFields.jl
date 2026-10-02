@@ -12,7 +12,7 @@ plasma solve or a new Biot-Savart integration.
 ## Module Structure
 
 - `ErrorFieldsStructs.jl`: `ErrorFieldsControl` (the `[ErrorFields]` TOML section),
-  `CoilSensitivities` (the cached linearization: nominal spectra and their derivatives),
+  `CoilSensitivities` (the cached linearization: as-designed spectra and their derivatives),
   `SensitivityTable` (that linearization projected onto one dominant coupling mode)
 - `Overlap.jl`: `ResonantDriveContext` (everything a finished run offers for judging coil geometry,
   gathered once), `coil_overlaps`, `combine_overlaps`, `applied_spectrum` — the entry point for
@@ -75,7 +75,7 @@ export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tole
 export RadialDistribution, Flat, UniformArea, Hollow, Ring, PowerLaw, randpow, radial_distribution
 export disk_radius, sample_disk, sample_uncertainty, sample_additive, sample_cylinder
 export MonteCarloControl, MonteCarloResult, run_monte_carlo, worst_case_terms
-export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_label, ScenarioParameters, nominal_threshold, threshold_samples
+export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_label, ScenarioParameters, fitted_threshold, threshold_samples
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
 export PhasingMap, phasing_map, extreme_phasing
 export NTVControl, EFCCoupling, residual_spectrum, correction_current, correction_current_upper, max_correctable_overlap, efc_current_curve, read_efc_couplings

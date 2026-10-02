@@ -36,33 +36,35 @@ _default_label(h5path::AbstractString) = basename(dirname(abspath(h5path)))
 _default_label(_) = "in memory"
 
 # Every field the plots read. One template so the HDF5 and in-memory loaders cannot drift apart.
-const _BLANK = (; coil_names=nothing, delta_nominal=nothing, delta_per_mm_shift=nothing,
-    delta_per_deg_tilt=nothing, delta_per_mm_rim=nothing, shift_sensitivity=nothing, tilt_sensitivity=nothing,
-    nominal_field=nothing, b_t0=nothing, fraction_percent=nothing, nominal_radius=nothing,
+const _BLANK = (; coil_names=nothing, delta_as_designed=nothing, abs_delta_shift_per_mm=nothing,
+    abs_delta_tilt_per_deg=nothing, abs_delta_rim_per_mm=nothing, shift_sensitivity_per_m=nothing, tilt_sensitivity_per_deg=nothing,
+    field_as_designed=nothing, b_t0=nothing, resonant_fraction_percent=nothing, major_radius_m=nothing,
     shift_linearity_residual=nothing, tilt_linearity_residual=nothing, fd_step_shift_m=nothing, fd_step_tilt_deg=nothing,
-    tolerances=nothing, bin_edges=nothing, pdf=nothing, pdf_efc=nothing, pdf_batches=nothing, mc_delta_nominal=nothing,
-    delta_worst=nothing, mean_abs_delta=nothing, clamped_fraction=nothing, threshold_pdf=nothing,
-    p_lock_given_delta=nothing, threshold_nominal=nothing, plock=nothing, plock_efc=nothing,
-    scan_scale=nothing, scan_plock=nothing, scan_plock_efc=nothing, scan_spread=nothing,
-    scan_spread_efc=nothing, dominant_v=nothing, singular_values=nothing, mn_index=nothing)
+    tolerances=nothing, abs_delta_bin_edges=nothing, abs_delta_pdf=nothing, abs_delta_efc_pdf=nothing, abs_delta_pdf_batches=nothing, abs_delta_total_as_designed=nothing,
+    abs_delta_worst_case=nothing, abs_delta_sampled_mean=nothing, clamped_fraction=nothing, threshold_pdf=nothing,
+    locking_probability_given_delta=nothing, threshold_fit=nothing, locking_probability_percent=nothing, locking_probability_efc_percent=nothing,
+    scan_scale=nothing, scan_locking_probability_percent=nothing, scan_locking_probability_efc_percent=nothing, scan_locking_probability_spread_percent=nothing,
+    scan_locking_probability_efc_spread_percent=nothing, dominant_v=nothing, singular_values=nothing, mn_index=nothing)
 
 _load(d::NamedTuple) = merge(_BLANK, d)
 _load(h5path::AbstractString) = _load(_load_h5(h5path))
 
-_load(t::EF.SensitivityTable) = _load((; coil_names=t.coil_names, delta_nominal=t.delta_nominal,
-    delta_per_mm_shift=t.delta_per_mm_shift, delta_per_deg_tilt=t.delta_per_deg_tilt,
-    delta_per_mm_rim=t.delta_per_mm_rim, shift_sensitivity=t.shift, tilt_sensitivity=t.tilt))
+_load(t::EF.SensitivityTable) = _load((; coil_names=t.coil_names, delta_as_designed=t.delta_as_designed,
+    abs_delta_shift_per_mm=t.abs_delta_shift_per_mm, abs_delta_tilt_per_deg=t.abs_delta_tilt_per_deg,
+    abs_delta_rim_per_mm=t.abs_delta_rim_per_mm, shift_sensitivity_per_m=t.shift_sensitivity_per_m, tilt_sensitivity_per_deg=t.tilt_sensitivity_per_deg))
 
-_load(s::EF.CoilSensitivities) = _load((; coil_names=s.coil_names, nominal_field=s.nominal_field, b_t0=s.b_t0,
-    shift_sensitivity=s.shift_sensitivity, tilt_sensitivity=s.tilt_sensitivity, nominal_radius=s.nominal_radius,
+_load(s::EF.CoilSensitivities) = _load((; coil_names=s.coil_names, field_as_designed=s.field_as_designed, b_t0=s.b_t0,
+    shift_sensitivity_per_m=s.shift_sensitivity_per_m, tilt_sensitivity_per_deg=s.tilt_sensitivity_per_deg, major_radius_m=s.major_radius_m,
     shift_linearity_residual=s.shift_linearity_residual, tilt_linearity_residual=s.tilt_linearity_residual))
 
-_load(r::EF.MonteCarloResult) = _load((; bin_edges=r.bin_edges, pdf=r.pdf, pdf_efc=r.pdf_efc, pdf_batches=r.pdf_batches,
-    mc_delta_nominal=r.delta_nominal, delta_worst=r.delta_worst, mean_abs_delta=r.mean_abs_delta, clamped_fraction=r.clamped_fraction))
+_load(r::EF.MonteCarloResult) =
+    _load((; abs_delta_bin_edges=r.abs_delta_bin_edges, abs_delta_pdf=r.abs_delta_pdf, abs_delta_efc_pdf=r.abs_delta_efc_pdf, abs_delta_pdf_batches=r.abs_delta_pdf_batches,
+        abs_delta_total_as_designed=r.abs_delta_total_as_designed, abs_delta_worst_case=r.abs_delta_worst_case, abs_delta_sampled_mean=r.abs_delta_sampled_mean,
+        clamped_fraction=r.clamped_fraction))
 
-_load(r::EF.RiskResult) = _load((; bin_edges=r.bin_edges, threshold_pdf=r.threshold_pdf,
-    p_lock_given_delta=r.p_lock_given_delta, threshold_nominal=r.threshold_nominal,
-    plock=r.plock, plock_efc=r.plock_efc))
+_load(r::EF.RiskResult) = _load((; abs_delta_bin_edges=r.abs_delta_bin_edges, threshold_pdf=r.threshold_pdf,
+    locking_probability_given_delta=r.locking_probability_given_delta, threshold_fit=r.threshold_fit,
+    locking_probability_percent=r.locking_probability_percent, locking_probability_efc_percent=r.locking_probability_efc_percent))
 
 # Drop the unset entries of a loaded source so two of them can be combined without one's blanks
 # erasing the other's values.
@@ -77,7 +79,7 @@ _load(pair::Tuple{EF.MonteCarloResult,EF.RiskResult}) =
     _load(merge(_present(_load(pair[1])), _present(_load(pair[2]))))
 
 _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name for o in ovs],
-    delta_nominal=[o.delta for o in ovs], fraction_percent=[o.fraction_percent for o in ovs],
+    delta_as_designed=[o.delta for o in ovs], resonant_fraction_percent=[o.resonant_fraction_percent for o in ovs],
     b_t0=isempty(ovs) ? nothing : first(ovs).b_t0))
 
 # The finite-difference steps the run's sensitivities were taken at, from the echoed deck; a
@@ -99,38 +101,38 @@ function _load_h5(h5path::AbstractString)
         h_shift, h_tilt = _fd_steps(f)
         (
             coil_names=has(cs) ? read(f["$cs/coil_name"]) : nothing,
-            delta_nominal=has(cs) ? read(f["$cs/DominantMode/delta_nominal"]) : nothing,
-            delta_per_mm_shift=has(cs) ? read(f["$cs/DominantMode/delta_per_mm_shift"]) : nothing,
-            delta_per_deg_tilt=has(cs) ? read(f["$cs/DominantMode/delta_per_deg_tilt"]) : nothing,
-            delta_per_mm_rim=has(cs) ? read(f["$cs/DominantMode/delta_per_mm_rim"]) : nothing,
-            shift_sensitivity=has(cs) ? read(f["$cs/DominantMode/shift_sensitivity"]) : nothing,
-            tilt_sensitivity=has(cs) ? read(f["$cs/DominantMode/tilt_sensitivity"]) : nothing,
-            nominal_field=has(cs) ? read(f["$cs/nominal_field"]) : nothing,
+            delta_as_designed=has(cs) ? read(f["$cs/DominantMode/delta_as_designed"]) : nothing,
+            abs_delta_shift_per_mm=has(cs) ? read(f["$cs/DominantMode/abs_delta_shift_per_mm"]) : nothing,
+            abs_delta_tilt_per_deg=has(cs) ? read(f["$cs/DominantMode/abs_delta_tilt_per_deg"]) : nothing,
+            abs_delta_rim_per_mm=has(cs) ? read(f["$cs/DominantMode/abs_delta_rim_per_mm"]) : nothing,
+            shift_sensitivity_per_m=has(cs) ? read(f["$cs/DominantMode/shift_sensitivity_per_m"]) : nothing,
+            tilt_sensitivity_per_deg=has(cs) ? read(f["$cs/DominantMode/tilt_sensitivity_per_deg"]) : nothing,
+            field_as_designed=has(cs) ? read(f["$cs/field_as_designed"]) : nothing,
             b_t0=has("Equilibrium/B_T_axis") ? Float64(read(f["Equilibrium/B_T_axis"])) : nothing,
-            nominal_radius=has(cs) ? read(f["$cs/nominal_radius"]) : nothing,
+            major_radius_m=has(cs) ? read(f["$cs/major_radius_m"]) : nothing,
             shift_linearity_residual=has(cs) ? read(f["$cs/shift_linearity_residual"]) : nothing,
             tilt_linearity_residual=has(cs) ? read(f["$cs/tilt_linearity_residual"]) : nothing,
             fd_step_shift_m=h_shift,
             fd_step_tilt_deg=h_tilt,
             tolerances=tolerances,
-            bin_edges=has(mc) ? read(f["$mc/bin_edges"]) : nothing,
-            pdf=has(mc) ? read(f["$mc/pdf"]) : nothing,
-            pdf_efc=has(mc) ? read(f["$mc/pdf_efc"]) : nothing,
-            pdf_batches=has(mc) ? read(f["$mc/pdf_batches"]) : nothing,
-            mc_delta_nominal=has(mc) ? read(f["$mc/delta_nominal"]) : nothing,
-            delta_worst=has(mc) ? read(f["$mc/delta_worst"]) : nothing,
-            mean_abs_delta=has(mc) ? read(f["$mc/mean_abs_delta"]) : nothing,
+            abs_delta_bin_edges=has(mc) ? read(f["$mc/abs_delta_bin_edges"]) : nothing,
+            abs_delta_pdf=has(mc) ? read(f["$mc/abs_delta_pdf"]) : nothing,
+            abs_delta_efc_pdf=has(mc) ? read(f["$mc/abs_delta_efc_pdf"]) : nothing,
+            abs_delta_pdf_batches=has(mc) ? read(f["$mc/abs_delta_pdf_batches"]) : nothing,
+            abs_delta_total_as_designed=has(mc) ? read(f["$mc/abs_delta_total_as_designed"]) : nothing,
+            abs_delta_worst_case=has(mc) ? read(f["$mc/abs_delta_worst_case"]) : nothing,
+            abs_delta_sampled_mean=has(mc) ? read(f["$mc/abs_delta_sampled_mean"]) : nothing,
             clamped_fraction=has(mc) ? read(f["$mc/clamped_fraction"]) : nothing,
             threshold_pdf=has(rk) ? read(f["$rk/threshold_pdf"]) : nothing,
-            p_lock_given_delta=has(rk) ? read(f["$rk/p_lock_given_delta"]) : nothing,
-            threshold_nominal=has(rk) ? read(f["$rk/threshold_nominal"]) : nothing,
-            plock=has(rk) ? read(f["$rk/plock_percent"]) : nothing,
-            plock_efc=has(rk) ? read(f["$rk/plock_efc_percent"]) : nothing,
-            scan_scale=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/scale"]) : nothing,
-            scan_plock=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_percent"]) : nothing,
-            scan_plock_efc=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_efc_percent"]) : nothing,
-            scan_spread=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_spread_percent"]) : nothing,
-            scan_spread_efc=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/plock_efc_spread_percent"]) : nothing,
+            locking_probability_given_delta=has(rk) ? read(f["$rk/locking_probability_given_delta"]) : nothing,
+            threshold_fit=has(rk) ? read(f["$rk/threshold_fit"]) : nothing,
+            locking_probability_percent=has(rk) ? read(f["$rk/locking_probability_percent"]) : nothing,
+            locking_probability_efc_percent=has(rk) ? read(f["$rk/locking_probability_efc_percent"]) : nothing,
+            scan_scale=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/tolerance_scale"]) : nothing,
+            scan_locking_probability_percent=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/locking_probability_percent"]) : nothing,
+            scan_locking_probability_efc_percent=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/locking_probability_efc_percent"]) : nothing,
+            scan_locking_probability_spread_percent=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/locking_probability_spread_percent"]) : nothing,
+            scan_locking_probability_efc_spread_percent=has("$rk/ToleranceScan") ? read(f["$rk/ToleranceScan/locking_probability_efc_spread_percent"]) : nothing,
             dominant_v=has("PerturbedEquilibrium/SingularCoupling/DominantMode") ? read(f["PerturbedEquilibrium/SingularCoupling/DominantMode/right_singular_vectors"]) : nothing,
             singular_values=has("PerturbedEquilibrium/SingularCoupling/DominantMode") ? read(f["PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values"]) : nothing,
             mn_index=has("Info/mn_index") ? read(f["Info/mn_index"]) : nothing
@@ -156,7 +158,7 @@ end
 
 Grouped bars of the per-coil-set dominant-mode sensitivity across runs, matched by coil set name.
 `quantity` is `:shift` (per millimetre of rigid in-plane shift), `:tilt` (per degree), `:rim` (the
-same tilt as rim displacement, the unit mechanical tolerances arrive in), `:nominal` (`|δ|` as
+same tilt as rim displacement, the unit mechanical tolerances arrive in), `:as_designed` (`|δ|` as
 built), or `:fraction` (the resonant share of the coil's own applied spectrum, `100·|δ|·B_T0/‖b̃‖`
 in percent, which separates a coil that couples weakly because it is small from one that couples
 weakly because its spectrum lies off the dominant mode). `coils` restricts and orders the coil
@@ -166,12 +168,12 @@ a logarithmic axis is set by the axis floor rather than by the data; non-positiv
 omitted.
 
 Each source is a `gpec.h5` path, a `SensitivityTable` already in memory, or a vector of
-`CoilOverlap` (`:nominal` and `:fraction` only), so a sweep of coil geometry that was never part of
+`CoilOverlap` (`:as_designed` and `:fraction` only), so a sweep of coil geometry that was never part of
 a run plots the same way a stored run does. `:fraction` needs the applied field as well as the
 overlap, so it is not available from a `SensitivityTable`.
 """
 function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, coils=nothing, yscale::Symbol=:identity, save_path=nothing)
-    quantity in (:shift, :tilt, :rim, :nominal, :fraction) || throw(ArgumentError("quantity must be :shift, :tilt, :rim, :nominal, or :fraction"))
+    quantity in (:shift, :tilt, :rim, :as_designed, :fraction) || throw(ArgumentError("quantity must be :shift, :tilt, :rim, :as_designed, or :fraction"))
     yscale in (:identity, :log10) || throw(ArgumentError("yscale must be :identity or :log10"))
     data = [(lbl, _load(src)) for (lbl, src) in sources]
     any(d -> d[2].coil_names === nothing, data) && return _empty("No ErrorFields/CoilSensitivities data — run with an [ErrorFields] section")
@@ -180,10 +182,10 @@ function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, coil
     ylabel =
         quantity === :shift ? "|δ| per mm of shift" :
         quantity === :tilt ? "|δ| per degree of tilt" :
-        quantity === :rim ? "|δ| per mm of rim displacement" : quantity === :nominal ? "|δ_nominal|" : "resonant fraction of |b̃| [%]"
+        quantity === :rim ? "|δ| per mm of rim displacement" : quantity === :as_designed ? "|δ_as_designed|" : "resonant fraction of |b̃| [%]"
     per = quantity === :shift ? "shift" : quantity === :tilt ? "tilt" : "rim displacement"
     title =
-        quantity === :nominal ? "Nominal dominant-mode overlap" :
+        quantity === :as_designed ? "As-designed dominant-mode overlap" :
         quantity === :fraction ? "Resonant fraction of each coil set's applied field" :
         "Dominant-mode error field per $per"
     n = length(names)
@@ -225,16 +227,16 @@ end
 function _sensitivity_values(lbl, d, names, quantity::Symbol)
     idx = _coil_indices(lbl, d, names)
     if quantity === :fraction
-        d.fraction_percent === nothing || return d.fraction_percent[idx]
-        (d.delta_nominal === nothing || d.nominal_field === nothing || d.b_t0 === nothing) &&
+        d.resonant_fraction_percent === nothing || return d.resonant_fraction_percent[idx]
+        (d.delta_as_designed === nothing || d.field_as_designed === nothing || d.b_t0 === nothing) &&
             throw(
                 ArgumentError(
                     "source \"$lbl\" cannot give the resonant fraction: it needs the applied field and B_T0 as well as δ (a gpec.h5 path or a vector of CoilOverlap, not a SensitivityTable)"
                 )
             )
-        return [(nrm = norm(d.nominal_field[:, i]); nrm > 0 ? 100 * abs(d.delta_nominal[i]) * d.b_t0 / nrm : 0.0) for i in idx]
+        return [(nrm = norm(d.field_as_designed[:, i]); nrm > 0 ? 100 * abs(d.delta_as_designed[i]) * d.b_t0 / nrm : 0.0) for i in idx]
     end
-    field = quantity === :shift ? :delta_per_mm_shift : quantity === :tilt ? :delta_per_deg_tilt : quantity === :rim ? :delta_per_mm_rim : :delta_nominal
+    field = quantity === :shift ? :abs_delta_shift_per_mm : quantity === :tilt ? :abs_delta_tilt_per_deg : quantity === :rim ? :abs_delta_rim_per_mm : :delta_as_designed
     vals = getfield(d, field)
     vals === nothing && throw(ArgumentError("source \"$lbl\" carries no $field, so quantity=:$quantity cannot be drawn from it"))
     return abs.(vals[idx])
@@ -259,21 +261,21 @@ function plot_tolerance_pdf(sources::Sources; corrected::Bool=true, normalize::B
     any_data = false
     for (j, (lbl, path)) in enumerate(sources)
         d = _load(path)
-        d.pdf === nothing && continue
+        d.abs_delta_pdf === nothing && continue
         any_data = true
-        c = _centers(d.bin_edges)
+        c = _centers(d.abs_delta_bin_edges)
         keep = xscale === :log10 ? c .> 0 : trues(length(c))
-        scale = normalize ? maximum(d.pdf) : 1.0
+        scale = normalize ? maximum(d.abs_delta_pdf) : 1.0
         clamped = ""
-        if show_batches && d.pdf_batches !== nothing
-            for b in axes(d.pdf_batches, 2)
-                plot!(p, c[keep], d.pdf_batches[keep, b] ./ scale; lw=1, c=j, alpha=0.35, label=b == 1 ? "$lbl batches ($(size(d.pdf_batches, 2)))" : "")
+        if show_batches && d.abs_delta_pdf_batches !== nothing
+            for b in axes(d.abs_delta_pdf_batches, 2)
+                plot!(p, c[keep], d.abs_delta_pdf_batches[keep, b] ./ scale; lw=1, c=j, alpha=0.35, label=b == 1 ? "$lbl batches ($(size(d.abs_delta_pdf_batches, 2)))" : "")
             end
             d.clamped_fraction === nothing || (clamped = " ($(round(100 * d.clamped_fraction; sigdigits=2)) % beyond last bin)")
         end
-        plot!(p, c[keep], d.pdf[keep] ./ scale; lw=2, c=j, label="$lbl intrinsic$clamped")
-        corrected && plot!(p, c[keep], d.pdf_efc[keep] ./ (normalize ? maximum(d.pdf_efc) : 1.0); lw=2, ls=:dash, c=j, label="$lbl corrected")
-        vline!(p, [d.mc_delta_nominal]; ls=:dot, c=j, label="$lbl as designed")
+        plot!(p, c[keep], d.abs_delta_pdf[keep] ./ scale; lw=2, c=j, label="$lbl intrinsic$clamped")
+        corrected && plot!(p, c[keep], d.abs_delta_efc_pdf[keep] ./ (normalize ? maximum(d.abs_delta_efc_pdf) : 1.0); lw=2, ls=:dash, c=j, label="$lbl corrected")
+        vline!(p, [d.abs_delta_total_as_designed]; ls=:dot, c=j, label="$lbl as designed")
     end
     any_data || return _empty("No ErrorFields/MonteCarlo data — run with a tolerance_file")
     return _save(p, save_path)
@@ -291,20 +293,20 @@ error field, one pointing against it cancels part of another coil's, and the sin
 `|Σδ|` a Monte Carlo starts from cannot tell those apart. One panel per source, since the mode
 phase is arbitrary between runs. Sources are a `gpec.h5` path, a `SensitivityTable`, or a vector
 of `CoilOverlap`; on a file the walk's end is checked against the stored Monte Carlo
-`delta_nominal` and a mismatch is warned about.
+`delta_as_designed` and a mismatch is warned about.
 """
 function plot_overlap_phasors(sources::Sources; coils=nothing, save_path=nothing)
     data = [(lbl, _load(src)) for (lbl, src) in sources]
-    any(d -> d[2].delta_nominal === nothing, data) && return _empty("No per-coil overlaps — run with an [ErrorFields] section")
+    any(d -> d[2].delta_as_designed === nothing, data) && return _empty("No per-coil overlaps — run with an [ErrorFields] section")
     panels = Plots.Plot[]
     for (lbl, d) in data
         names = coils === nothing ? d.coil_names : String.(collect(coils))
         idx = _coil_indices(lbl, d, names)
-        z = d.delta_nominal[idx]
+        z = d.delta_as_designed[idx]
         δ = abs.(z)
         total = sum(z)
-        if coils === nothing && d.mc_delta_nominal !== nothing && !isapprox(abs(total), d.mc_delta_nominal; rtol=1e-6, atol=eps(Float64))
-            @warn "$lbl: the head-to-tail total |Σδ| = $(abs(total)) differs from the stored Monte Carlo delta_nominal $(d.mc_delta_nominal)"
+        if coils === nothing && d.abs_delta_total_as_designed !== nothing && !isapprox(abs(total), d.abs_delta_total_as_designed; rtol=1e-6, atol=eps(Float64))
+            @warn "$lbl: the head-to-tail total |Σδ| = $(abs(total)) differs from the stored Monte Carlo abs_delta_total_as_designed $(d.abs_delta_total_as_designed)"
         end
         rot = abs(total) > 0 ? cis(-angle(total)) : one(ComplexF64)
         w = z .* rot
@@ -338,8 +340,8 @@ plot_overlap_phasors(source::SingleSource; kwargs...) = plot_overlap_phasors(_so
     plot_tolerance_budget(terms::NamedTuple; monte_carlo=nothing, sort=:total, top=nothing, save_path=nothing)
 
 The worst-case tolerance budget of a run as stacked horizontal bars, one per coil set, coherent
-group and the unattributed budget: the as-built `|δ_nominal|`, the shift term and the tilt term
-of `ErrorFields.worst_case_terms`, whose sum over every bar is the `delta_worst` the
+group and the unattributed budget: the as-designed `|δ_as_designed|`, the shift term and the tilt term
+of `ErrorFields.worst_case_terms`, whose sum over every bar is the `abs_delta_worst_case` the
 Monte Carlo sizes its histogram by. It shows which coil's tolerance the budget is spent on, and
 whether it is spent on the coil's shift, its tilt, or on the field it makes as designed.
 `sort` orders the bars by `:total` (largest at the top), `:name`, or `:none` (file order); `top`
@@ -352,18 +354,18 @@ function plot_tolerance_budget(terms::NamedTuple; monte_carlo=nothing, sort::Sym
     ng = length(terms.group_names)
     nc = length(terms.coil_names)
     labels = vcat(terms.coil_names, ["group $g" for g in terms.group_names], ["unattributed"])
-    nominal = vcat(terms.nominal, zeros(ng), 0.0)
-    shift = vcat(terms.shift, terms.group_shift, 0.0)
-    tilt = vcat(terms.tilt, terms.group_tilt, 0.0)
-    other = vcat(zeros(nc + ng), terms.other)
+    nominal = vcat(terms.abs_delta_as_designed, zeros(ng), 0.0)
+    shift = vcat(terms.abs_delta_shift_tolerance, terms.abs_delta_group_shift_tolerance, 0.0)
+    tilt = vcat(terms.abs_delta_tilt_tolerance, terms.abs_delta_group_tilt_tolerance, 0.0)
+    other = vcat(zeros(nc + ng), terms.abs_delta_unattributed)
     total = nominal .+ shift .+ tilt .+ other
     order = sort === :total ? sortperm(total) : sort === :name ? sortperm(labels; rev=true) : collect(reverse(eachindex(labels)))
     top === nothing || (order = order[max(1, end - top + 1):end])
     m = length(order)
     p = plot(; xlabel="worst-case contribution to |δ|", ylabel="", yticks=(1:m, labels[order]), ylims=(0.4, m + 0.6),
-        title="Tolerance budget by term  (Σ over every bar = delta_worst = $(round(terms.total; sigdigits=3)))", legend=:bottomright,
+        title="Tolerance budget by term  (Σ over every bar = abs_delta_worst_case = $(round(terms.abs_delta_worst_case; sigdigits=3)))", legend=:bottomright,
         size=(900, max(420, 26 * m + 160)), left_margin=12Plots.mm, bottom_margin=8Plots.mm, titlefontsize=12)
-    segments = (("as designed |δ_nominal|", nominal, :gray40), ("shift tolerance + 3σ", shift, 1), ("tilt tolerance + 3σ", tilt, 2), ("unattributed budget + 3σ", other, 3))
+    segments = (("as designed |δ_as_designed|", nominal, :gray40), ("shift tolerance + 3σ", shift, 1), ("tilt tolerance + 3σ", tilt, 2), ("unattributed budget + 3σ", other, 3))
     labelled = Set{String}()
     for (y, i) in enumerate(order)
         x0 = 0.0
@@ -377,8 +379,10 @@ function plot_tolerance_budget(terms::NamedTuple; monte_carlo=nothing, sort::Sym
     end
     if monte_carlo !== nothing
         d = _load(monte_carlo)
-        d.mean_abs_delta === nothing || vline!(p, [d.mean_abs_delta]; ls=:dash, c=:black, label="Monte Carlo mean |δ| = $(round(d.mean_abs_delta; sigdigits=3))")
-        d.mc_delta_nominal === nothing || vline!(p, [d.mc_delta_nominal]; ls=:dot, c=:black, label="as designed |Σδ| = $(round(d.mc_delta_nominal; sigdigits=3))")
+        d.abs_delta_sampled_mean === nothing ||
+            vline!(p, [d.abs_delta_sampled_mean]; ls=:dash, c=:black, label="Monte Carlo mean |δ| = $(round(d.abs_delta_sampled_mean; sigdigits=3))")
+        d.abs_delta_total_as_designed === nothing ||
+            vline!(p, [d.abs_delta_total_as_designed]; ls=:dot, c=:black, label="as designed |Σδ| = $(round(d.abs_delta_total_as_designed; sigdigits=3))")
     end
     return _save(p, save_path)
 end
@@ -388,7 +392,14 @@ end
 function plot_tolerance_budget(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PE.CORE_PSI_HIGH, mode::Int=1, tolerance_scale::Real=1.0, kwargs...)
     terms = EF.worst_case_terms(h5path; psi_low, psi_high, mode, tolerance_scale)
     d = _load(h5path)
-    mc = d.pdf === nothing ? nothing : (; bin_edges=d.bin_edges, pdf=d.pdf, mean_abs_delta=d.mean_abs_delta, mc_delta_nominal=d.mc_delta_nominal)
+    mc =
+        d.abs_delta_pdf === nothing ? nothing :
+        (;
+            abs_delta_bin_edges=d.abs_delta_bin_edges,
+            abs_delta_pdf=d.abs_delta_pdf,
+            abs_delta_sampled_mean=d.abs_delta_sampled_mean,
+            abs_delta_total_as_designed=d.abs_delta_total_as_designed
+        )
     return plot_tolerance_budget(terms; monte_carlo=mc, kwargs...)
 end
 
@@ -453,8 +464,8 @@ function _linearity_matrix(lbl, d, names, at::Symbol; tolerances=nothing, fd_ste
         shift_tol = t === nothing ? 0.0 : t.shift_tol_m
         tilt_tol =
             t === nothing ? 0.0 :
-            d.nominal_radius === nothing ? throw(ArgumentError("source \"$lbl\" carries no nominal radii, needed to convert a tilt tolerance in metres")) :
-            EF.tilt_tolerance_deg(t.tilt_tol, t.tilt_units, d.nominal_radius[i]; name="coil set $(d.coil_names[i])")
+            d.major_radius_m === nothing ? throw(ArgumentError("source \"$lbl\" carries no major radii, needed to convert a tilt tolerance in metres")) :
+            EF.tilt_tolerance_deg(t.tilt_tol, t.tilt_units, d.major_radius_m[i]; name="coil set $(d.coil_names[i])")
         r[1:3, k] .*= shift_tol / h_shift
         r[4:6, k] .*= tilt_tol / h_tilt
     end
@@ -478,10 +489,36 @@ function plot_locking_risk(sources::Sources; corrected::Bool=true, target_percen
         d = _load(path)
         d.scan_scale === nothing && continue
         any_data = true
-        plot!(p, d.scan_scale, max.(d.scan_plock, risk_floor); yerror=d.scan_spread ./ 2, marker=:circle, lw=2, c=j, label="$lbl intrinsic")
-        corrected && plot!(p, d.scan_scale, max.(d.scan_plock_efc, risk_floor); yerror=d.scan_spread_efc ./ 2, marker=:square, lw=2, ls=:dash, c=j, label="$lbl corrected")
+        plot!(
+            p,
+            d.scan_scale,
+            max.(d.scan_locking_probability_percent, risk_floor);
+            yerror=d.scan_locking_probability_spread_percent ./ 2,
+            marker=:circle,
+            lw=2,
+            c=j,
+            label="$lbl intrinsic"
+        )
+        corrected && plot!(
+            p,
+            d.scan_scale,
+            max.(d.scan_locking_probability_efc_percent, risk_floor);
+            yerror=d.scan_locking_probability_efc_spread_percent ./ 2,
+            marker=:square,
+            lw=2,
+            ls=:dash,
+            c=j,
+            label="$lbl corrected"
+        )
         if target_percent !== nothing
-            scan = EF.ToleranceScan(d.scan_scale, d.scan_plock, d.scan_plock_efc, d.scan_spread, d.scan_spread_efc, 0.0)
+            scan = EF.ToleranceScan(
+                d.scan_scale,
+                d.scan_locking_probability_percent,
+                d.scan_locking_probability_efc_percent,
+                d.scan_locking_probability_spread_percent,
+                d.scan_locking_probability_efc_spread_percent,
+                0.0
+            )
             for (corr, mk) in ((false, :diamond), (true, :star5))
                 (corr && !corrected) && continue
                 s = EF.allowable_tolerance(scan, target_percent; corrected=corr)
@@ -500,7 +537,7 @@ plot_locking_risk(source::SingleSource; kwargs...) = plot_locking_risk(_sources(
     plot_threshold_scaling(h5path; kwargs...)
 
 The sampled penetration-threshold density and `P(lock|δ)` of each run against its overlap
-distributions, on a logarithmic `|δ|` axis, with the nominal threshold marked.
+distributions, on a logarithmic `|δ|` axis, with the fitted threshold marked.
 """
 function plot_threshold_scaling(sources::Sources; save_path=nothing)
     p = plot(; xlabel="dominant-mode overlap |δ|", ylabel="normalized density  /  P(lock | δ)", xscale=:log10, legend=:topleft,
@@ -510,15 +547,15 @@ function plot_threshold_scaling(sources::Sources; save_path=nothing)
         d = _load(path)
         # Needs the overlap distribution and the threshold together; an in-memory source carrying
         # only one of the two is skipped rather than indexed into a nothing.
-        (d.threshold_pdf === nothing || d.pdf === nothing || d.bin_edges === nothing) && continue
+        (d.threshold_pdf === nothing || d.abs_delta_pdf === nothing || d.abs_delta_bin_edges === nothing) && continue
         any_data = true
-        c = _centers(d.bin_edges)
+        c = _centers(d.abs_delta_bin_edges)
         keep = c .> 0
-        plot!(p, c[keep], d.pdf[keep] ./ maximum(d.pdf); lw=2, c=j, label="$lbl intrinsic |δ|")
-        plot!(p, c[keep], d.pdf_efc[keep] ./ maximum(d.pdf_efc); lw=2, ls=:dash, c=j, label="$lbl corrected |δ|")
+        plot!(p, c[keep], d.abs_delta_pdf[keep] ./ maximum(d.abs_delta_pdf); lw=2, c=j, label="$lbl intrinsic |δ|")
+        plot!(p, c[keep], d.abs_delta_efc_pdf[keep] ./ maximum(d.abs_delta_efc_pdf); lw=2, ls=:dash, c=j, label="$lbl corrected |δ|")
         plot!(p, c[keep], d.threshold_pdf[keep] ./ maximum(d.threshold_pdf); lw=2, ls=:dot, c=j, label="$lbl threshold")
-        plot!(p, d.bin_edges[2:end], d.p_lock_given_delta[2:end]; lw=1.5, ls=:dashdot, c=j, label="$lbl P(lock | δ)")
-        vline!(p, [d.threshold_nominal]; ls=:dot, c=:black, label=j == 1 ? "nominal threshold" : "")
+        plot!(p, d.abs_delta_bin_edges[2:end], d.locking_probability_given_delta[2:end]; lw=1.5, ls=:dashdot, c=j, label="$lbl P(lock | δ)")
+        vline!(p, [d.threshold_fit]; ls=:dot, c=:black, label=j == 1 ? "fitted threshold" : "")
     end
     any_data || return _empty("No ErrorFields/Risk data — run with an [ErrorFields.scenario] table")
     return _save(p, save_path)
@@ -604,11 +641,11 @@ function plot_overlap_contributions(ctx::EF.ResonantDriveContext, overlaps::Abst
         title="Per-harmonic contribution, aligned to each coil's own overlap phase", legend=:topleft,
         left_margin=13Plots.mm, bottom_margin=7Plots.mm)
     for (j, o) in enumerate(overlaps)
-        o.spectrum_norm > 0 || continue
-        c = real.(conj.(v) .* o.spectrum .* cis(-angle(o.raw))) ./ o.spectrum_norm
+        o.spectrum_norm_t > 0 || continue
+        c = real.(conj.(v) .* o.spectrum .* cis(-angle(o.resonant_field_t))) ./ o.spectrum_norm_t
         ms, as = _step_series(m, c)
         plot!(p, ms, as; seriestype=:steppre, lw=2, c=j,
-            label="$(o.coil_name)  (sums to $(round(o.fraction_percent; digits=1))%)")
+            label="$(o.coil_name)  (sums to $(round(o.resonant_fraction_percent; digits=1))%)")
     end
     hline!(p, [0]; c=:black, ls=:dot, label="")
     return _save(p, save_path)
@@ -666,7 +703,7 @@ end
     plot_phasing_map(map::EF.PhasingMap; quantity=:delta_per_kat, save_path=nothing)
 
 Contour map of the dominant-mode overlap per kilo-ampere-turn (`:delta_per_kat`) or of the
-resonant fraction of the applied field (`:overlap_percent`) against the relative phases of two
+resonant fraction of the applied field (`:resonant_fraction_percent`) against the relative phases of two
 or three coil arrays (`EF.phasing_map`). Two arrays give a line, three a filled contour whose
 axes are the phase of the middle array relative to the first and of the third relative to the
 middle; the extreme is marked.
@@ -674,8 +711,8 @@ middle; the extreme is marked.
 function plot_phasing_map(map::EF.PhasingMap; quantity::Symbol=:delta_per_kat, save_path=nothing)
     arr =
         quantity === :delta_per_kat ? map.delta_per_kat :
-        quantity === :overlap_percent ? map.overlap_percent :
-        throw(ArgumentError("quantity must be :delta_per_kat or :overlap_percent"))
+        quantity === :resonant_fraction_percent ? map.resonant_fraction_percent :
+        throw(ArgumentError("quantity must be :delta_per_kat or :resonant_fraction_percent"))
     label = quantity === :delta_per_kat ? "|δ| per kAt" : "resonant fraction [%]"
     names = map.coil_names
     if length(map.phase_deg) == 1
@@ -709,8 +746,8 @@ found and the reference rotation, and the curve uses the torque balance (`model`
 `rotation_exponent` as in `efc_current_curve`). The zero-rotation limits are marked with the
 residual torque (circle) and with the whole field's torque (star); nonzero `torque_rtol` or
 `budget_rtol` shade the band between the pessimistic and optimistic curves and the range of the
-correctable limit. `delta_threshold` defaults to the run's nominal
-penetration threshold (`ErrorFields/Risk/threshold_nominal`); `torque_budget` is the torque,
+correctable limit. `delta_threshold` defaults to the run's fitted
+penetration threshold (`ErrorFields/Risk/threshold_fit`); `torque_budget` is the torque,
 N·m, that would bring the reference rotation to rest. `profiles` adds a panel of the torque
 integrated from the axis, `T(ψ)` per kAt² at zero rotation shift for the whole field and the
 residual, which shows where in the plasma the torque that survives correction is deposited.
@@ -787,11 +824,11 @@ function plot_efc_ntv_limits(h5path::AbstractString; torque_budget::Real, delta_
     # stored threshold. Say what to do about it rather than letting HDF5 raise a bare KeyError.
     δt = delta_threshold
     if δt === nothing
-        key = "$(EF._RISK_GROUP)/threshold_nominal"
+        key = "$(EF._RISK_GROUP)/threshold_fit"
         δt = h5open(h5path, "r") do f
             haskey(f, key) || throw(
                 ArgumentError(
-                    "$h5path has no $key, so there is no nominal penetration threshold to scale by. " *
+                    "$h5path has no $key, so there is no fitted penetration threshold to scale by. " *
                     "Pass delta_threshold, or re-run with an [ErrorFields.scenario] table.")
             )
             read(f[key])

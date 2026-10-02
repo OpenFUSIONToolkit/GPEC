@@ -51,11 +51,11 @@ verbose = false                 # Log per-coil-set progress and linearity diagno
 ```
 
 The stage runs after the perturbed equilibrium and writes `ErrorFields/CoilSensitivities/`:
-the spectra `nominal_field`, `shift_sensitivity`, `tilt_sensitivity`, a finite-difference
+the spectra `field_as_designed`, `shift_sensitivity_per_m`, `tilt_sensitivity_per_deg`, a finite-difference
 curvature diagnostic per tap, the current pattern the spectra were evaluated at, and a
-`DominantMode/` summary projected onto the run's full-window dominant mode (`delta_nominal`,
+`DominantMode/` summary projected onto the run's full-window dominant mode (`delta_as_designed`,
 its shift and tilt sensitivities, their direction-averaged in-plane magnitudes, and the in-plane
-shift and tilt that would cancel `delta_nominal`).
+shift and tilt that would cancel `delta_as_designed`).
 
 `examples/DIIID-like_error_field_example/` is a complete case: the DIII-D-like equilibrium with
 the C-coil as the nominal n = 1 source and the eighteen DIII-D F coils added as single-filament
@@ -184,9 +184,9 @@ tolerance scale, or a coil subset is a post-hoc re-run of the same kernel:
 
 ```julia
 mc = EF.run_monte_carlo("gpec.h5"; psi_low=0.5, tolerance_scale=2.0, coil_subset=["PF1U", "PF2U"])
-mc.pdf, mc.bin_edges           # intrinsic |δ| density
-mc.pdf_efc                     # corrected
-mc.mean_abs_delta, mc.delta_nominal
+mc.abs_delta_pdf, mc.abs_delta_bin_edges           # intrinsic |δ| density
+mc.abs_delta_efc_pdf                     # corrected
+mc.abs_delta_sampled_mean, mc.abs_delta_total_as_designed
 ```
 
 ## Locking risk and allowable tolerance
@@ -262,7 +262,7 @@ AEF.plot_error_field_summary("gpec.h5"; save_path="error_field_summary.png")
 Four more views answer the questions the assessment's single numbers hide. `plot_overlap_phasors`
 lays each coil's complex overlap head to tail, so a coil that adds to the error field is told
 apart from one that cancels another's; `plot_tolerance_budget` stacks the terms of the worst-case
-bound `delta_worst` (`EF.worst_case_terms`) per coil, group and unattributed budget, so the
+bound `abs_delta_worst_case` (`EF.worst_case_terms`) per coil, group and unattributed budget, so the
 tolerance the budget is spent on is visible; `plot_linearity_residuals` shows the curvature the
 linear sensitivity model neglects, at the finite-difference step or rescaled to each coil's own
 tolerance; and `quantity=:fraction` on the sensitivity bars is the resonant share of each coil's
@@ -273,9 +273,9 @@ AEF.plot_overlap_phasors("gpec.h5")                                  # one panel
 AEF.plot_tolerance_budget("gpec.h5"; sort=:total, top=10)            # largest budget terms first
 AEF.plot_linearity_residuals("gpec.h5"; at=:tolerance)               # curvature over the tolerance range
 AEF.plot_coil_sensitivities("gpec.h5"; quantity=:fraction)           # resonant fraction, in percent
-AEF.plot_coil_sensitivities("gpec.h5"; quantity=:nominal, yscale=:log10)   # stems, never bars, on a log axis
+AEF.plot_coil_sensitivities("gpec.h5"; quantity=:as_designed, yscale=:log10)   # stems, never bars, on a log axis
 AEF.plot_tolerance_pdf("gpec.h5"; show_batches=true)                 # batch spread and the clamped fraction
-EF.worst_case_terms("gpec.h5").total                                 # = ErrorFields/MonteCarlo/delta_worst
+EF.worst_case_terms("gpec.h5").total                                 # = ErrorFields/MonteCarlo/abs_delta_worst_case
 ```
 
 When several independently powered coil arrays share the job of correcting the error field,
@@ -288,7 +288,7 @@ line for two arrays, a contour for three):
 ```julia
 pmap = EF.phasing_map("gpec.h5", ["EFCC_L", "EFCC_M", "EFCC_U"]; psi_low=0.5)
 EF.extreme_phasing(pmap)                        # best |δ| per kAt and the phases giving it
-AEF.plot_phasing_map(pmap; quantity=:overlap_percent)
+AEF.plot_phasing_map(pmap; quantity=:resonant_fraction_percent)
 ```
 
 ## NTV limits of error-field correction
@@ -345,10 +345,10 @@ EF = GeneralizedPerturbedEquilibrium.ErrorFields
 
 # From the file: the coupling is rebuilt, windowed to 0.5 ≤ ψ_N ≤ 1, and projected onto mode 1
 table = EF.sensitivity_table("gpec.h5"; psi_low=0.5)
-table.delta_nominal            # complex overlap of each coil set
-table.delta_per_mm_shift       # direction-averaged |∂δ/∂Δ| per millimetre of shift, per coil set
-table.delta_per_mm_rim         # the same for tilt, as rim displacement at the coil's major radius
-table.tilt[1, :]               # ∂δ/∂θx per degree, per coil set
+table.delta_as_designed            # complex overlap of each coil set
+table.abs_delta_shift_per_mm       # direction-averaged |∂δ/∂Δ| per millimetre of shift, per coil set
+table.abs_delta_rim_per_mm         # the same for tilt, as rim displacement at the coil's major radius
+table.tilt_sensitivity_per_deg[1, :]               # ∂δ/∂θx per degree, per coil set
 
 # In memory, from the run's returned state (no I/O)
 rc  = PerturbedEquilibrium.ResonantCoupling(run.pe, run.ffs)
@@ -368,7 +368,7 @@ old = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(old_cfg, 1))
 new = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(new_cfg, 1))
 
 new[1].delta               # dimensionless overlap δ = Vᴴb̃ / B_T0
-new[1].fraction_percent    # how much of this coil's own spectrum is resonant
+new[1].resonant_fraction_percent    # how much of this coil's own spectrum is resonant
 new[1].spectrum            # b̃ itself, for the diagnostics below
 ```
 
@@ -394,6 +394,39 @@ contributing zero, so a coil renamed between revisions cannot quietly drop out o
 For sensitivities to rigid motion as well, `compute_coil_sensitivities` takes the same context.
 It costs thirteen spectrum evaluations per coil set instead of one, so reach for `coil_overlaps`
 when only the overlaps are wanted.
+
+## Result names
+
+Every result struct in `ErrorFields` (`CoilSensitivities`, `SensitivityTable`, `CoilOverlap`,
+`MonteCarloResult`, `RiskResult`, `ToleranceScan`, `PhasingMap`, `EFCCoupling`) names its fields by one
+grammar, and every field name is also its HDF5 dataset name under `ErrorFields/`:
+
+```
+<quantity>[_<instance>][_efc][_<statistic>][_<unit>]
+```
+
+- **quantity** is the physical thing, spelled out: `delta` is the dimensionless dominant-mode overlap
+  `v·b̃ / B_T0`, a complex phasor per coil set, and `abs_delta` its magnitude; `threshold` is the
+  penetration threshold in the same units; `locking_probability` is the probability of locking (never
+  abbreviated, and never called a risk in a name); `resonant_fraction` is `100·|v·b̃| / ‖b̃‖`;
+  `field`, `spectrum`, `torque`, `current`, `shift_sensitivity` and `tilt_sensitivity` are what they say.
+- **instance** says which geometry or value the quantity is evaluated for: `_as_designed`, the
+  unperturbed design; `_sampled`, over the Monte Carlo misalignment samples; `_worst_case`, every term
+  at its tolerance edge and in phase; `_fit`, a scaling-law value at the fitted exponents without the
+  fit's scatter; `_total`, the coherent sum over coil sets (a per-coil vector carries no qualifier and
+  documents its shape as `[ncoil_set]`). A result evaluated on whatever geometry the caller passed
+  (`CoilOverlap`, `EFCCoupling`) carries no instance qualifier. The word *nominal* is not used in names.
+- **`_efc`** marks a value with error-field correction applied, as in the TOML keys `efc_factor` and
+  `efc_coils`.
+- **statistic**: `_mean`, `_pdf`, `_batches`, `_spread` (range over the Monte Carlo batches),
+  `_samples`, `_bin_edges`.
+- **unit** is present whenever the quantity has one: `_percent`, `_t` (tesla), `_m`, `_mm`, `_deg`,
+  `_per_m`, `_per_deg`, `_per_mm`, `_per_kat`, `_per_kat2`. `delta` and probabilities given as fractions
+  carry none; a probability stored as a percentage always carries `_percent`.
+
+The order is fixed, so `locking_probability_efc_batches_percent` reads as "the locking probability,
+corrected, per batch, in percent", and `abs_delta_total_as_designed` as "the magnitude of the total
+overlap of the design as built".
 
 ## API Reference
 

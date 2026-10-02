@@ -68,7 +68,7 @@ noise_threshold = 1e-8
 order = 20
 
 [quantities.ef_delta_nominal]
-h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_nominal"
+h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_as_designed"
 type = "complex_vector"
 extract = "abs_first"
 label = "|delta_nominal| of coil set 1"

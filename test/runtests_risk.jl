@@ -16,7 +16,7 @@ using Statistics
     @testset "scaling table and nominal threshold" begin
         sc = EF.threshold_scaling(; n=1, dataset="O,L", fit="WLS")
         @test sc.alpha_c == (-3.46, 0.05) && sc.alpha_beta == (0.15, 0.07)
-        @test EF.nominal_threshold(sc, scen) ≈ 10.0^-3.46 * 2.0^0.64 * 2.0^-1.14 * 1.7^0.20 * 1.8^0.15
+        @test EF.fitted_threshold(sc, scen) ≈ 10.0^-3.46 * 2.0^0.64 * 2.0^-1.14 * 1.7^0.20 * 1.8^0.15
         @test_throws ArgumentError EF.threshold_scaling(; n=3)
         @test_throws ArgumentError EF.threshold_scaling(; n=1, fit="XYZ")
         @test length(EF.ITPA_THRESHOLD_SCALINGS) == 11
@@ -27,10 +27,10 @@ using Statistics
         @test_throws MethodError EF.ScenarioParameters(2.0, 2.0, 1.7, 1.8, 1.0)
         # Sampled thresholds: median near the nominal, log-normal-ish spread from the exponent errors.
         t = EF.threshold_samples(Xoshiro(1), sc, scen; nsample=100_000)
-        @test abs(log10(median(t)) - log10(EF.nominal_threshold(sc, scen))) < 0.01
+        @test abs(log10(median(t)) - log10(EF.fitted_threshold(sc, scen))) < 0.01
         @test all(>(0), t)
         flat = EF.threshold_samples(Xoshiro(1), sc, scen; nsample=50_000, dist="flat")
-        @test maximum(abs.(log10.(flat) .- log10(EF.nominal_threshold(sc, scen)))) < 0.05 + 0.09 * log10(2) + 0.12 * log10(2) + 0.08 * log10(1.7) + 0.07 * log10(1.8) + 1e-9
+        @test maximum(abs.(log10.(flat) .- log10(EF.fitted_threshold(sc, scen)))) < 0.05 + 0.09 * log10(2) + 0.12 * log10(2) + 0.08 * log10(1.7) + 0.07 * log10(1.8) + 1e-9
         trunc = EF.threshold_samples(Xoshiro(1), sc, scen; nsample=50_000, dist="normal_truncated")
         @test std(log10.(trunc)) < std(log10.(t))
         @test_throws ArgumentError EF.threshold_samples(Xoshiro(1), sc, scen; nsample=10, dist="cauchy")
@@ -54,21 +54,21 @@ using Statistics
         @test_throws ArgumentError EF.threshold_scaling(; n=1, year=2026, dataset="O,L,H")
 
         scen_ip = EF.ScenarioParameters(; n_e=2.0, b_t0=2.0, r_0=1.7, beta_n=1.8, l_i=1.0, i_p=1.2)   # I_p in MA
-        @test EF.nominal_threshold(ols, scen_ip) ≈ 10.0^-4.31 * 2.0^0.77 * 2.0^0.19 * 1.7^1.88 * 1.8^0.25 * 1.2^-0.97
-        @test EF.nominal_threshold(wls, scen_ip) ≈ 10.0^-4.26 * 2.0^0.56 * 2.0^0.30 * 1.7^1.57 * 1.8^0.13 * 1.2^-1.01
+        @test EF.fitted_threshold(ols, scen_ip) ≈ 10.0^-4.31 * 2.0^0.77 * 2.0^0.19 * 1.7^1.88 * 1.8^0.25 * 1.2^-0.97
+        @test EF.fitted_threshold(wls, scen_ip) ≈ 10.0^-4.26 * 2.0^0.56 * 2.0^0.30 * 1.7^1.57 * 1.8^0.13 * 1.2^-1.01
         # Without a current the 2026 fits refuse to evaluate; the 2020 fits never need one.
         @test isnan(scen.i_p)
-        @test_throws ArgumentError EF.nominal_threshold(wls, scen)
+        @test_throws ArgumentError EF.fitted_threshold(wls, scen)
         @test_throws ArgumentError EF.threshold_samples(Xoshiro(1), ols, scen; nsample=10)
         @test_throws ArgumentError EF.ScenarioParameters(; n_e=2.0, b_t0=2.0, r_0=1.7, beta_n=1.8, l_i=1.0, i_p=-1.2)
         # A fit without a current term draws no current exponent, so its sampled stream does not
         # depend on whether the scenario carries a current.
         sc20 = EF.threshold_scaling(; n=1, year=2020, dataset="O,L", fit="WLS")
         @test EF.threshold_samples(Xoshiro(3), sc20, scen; nsample=1000) == EF.threshold_samples(Xoshiro(3), sc20, scen_ip; nsample=1000)
-        @test EF.nominal_threshold(sc20, scen) == EF.nominal_threshold(sc20, scen_ip)
+        @test EF.fitted_threshold(sc20, scen) == EF.fitted_threshold(sc20, scen_ip)
         # With the current term the sampled median still sits at the nominal threshold.
         t = EF.threshold_samples(Xoshiro(1), wls, scen_ip; nsample=100_000)
-        @test abs(log10(median(t)) - log10(EF.nominal_threshold(wls, scen_ip))) < 0.01
+        @test abs(log10(median(t)) - log10(EF.fitted_threshold(wls, scen_ip))) < 0.01
     end
 
     # A Monte Carlo result with a known |δ| density: uniform on [a, b].
@@ -85,32 +85,33 @@ using Statistics
     @testset "risk in closed-form limits" begin
         mc = uniform_mc(1e-4, 3e-4)
         # A sharp threshold at δ_t: P_lock = fraction of the distribution above δ_t.
-        δt = mc.delta_nominal                                # = 2e-4, the midpoint
+        δt = mc.abs_delta_total_as_designed                                # = 2e-4, the midpoint
         risk = EF.locking_risk(mc, fill(δt, 1000), sc, scen)
-        @test risk.plock ≈ 50.0 atol = 1.0
-        @test risk.plock_nominal == 100.0                    # δ_nominal = δ_t counts as locked
-        @test risk.plock_batches ≈ fill(risk.plock, 2)
-        @test risk.p_lock_given_delta[1] == 0.0 && risk.p_lock_given_delta[end] == 1.0
-        @test sum(risk.threshold_pdf .* diff(risk.bin_edges)) ≈ 1.0
+        @test risk.locking_probability_percent ≈ 50.0 atol = 1.0
+        @test risk.locking_probability_as_designed_percent == 100.0                    # δ_nominal = δ_t counts as locked
+        @test risk.locking_probability_batches_percent ≈ fill(risk.locking_probability_percent, 2)
+        @test risk.locking_probability_given_delta[1] == 0.0 && risk.locking_probability_given_delta[end] == 1.0
+        @test sum(risk.threshold_pdf .* diff(risk.abs_delta_bin_edges)) ≈ 1.0
         # Thresholds entirely above the distribution: no risk; entirely below: certain.
-        @test EF.locking_risk(mc, fill(1e-3, 100), sc, scen).plock == 0.0
-        @test EF.locking_risk(mc, fill(1e-6, 100), sc, scen).plock ≈ 100.0 atol = 1e-9
+        @test EF.locking_risk(mc, fill(1e-3, 100), sc, scen).locking_probability_percent == 0.0
+        @test EF.locking_risk(mc, fill(1e-6, 100), sc, scen).locking_probability_percent ≈ 100.0 atol = 1e-9
         # Uniform thresholds on [1e-4, 3e-4] against a uniform |δ| on the same interval: P = 1/2.
         thr = collect(range(1e-4, 3e-4; length=20_001))
-        @test EF.locking_risk(mc, thr, sc, scen).plock ≈ 50.0 atol = 1.0
+        @test EF.locking_risk(mc, thr, sc, scen).locking_probability_percent ≈ 50.0 atol = 1.0
         # Sampled ITPA thresholds through the RiskControl path are reproducible and bounded.
         r1 = EF.locking_risk(mc, sc, scen; ctrl=EF.RiskControl(; nsample_threshold=50_000, seed=4))
         r2 = EF.locking_risk(mc, sc, scen; ctrl=EF.RiskControl(; nsample_threshold=50_000, seed=4))
-        @test r1.plock == r2.plock && 0 <= r1.plock <= 100 && r1.plock_efc <= r1.plock
-        @test r1.threshold_nominal == EF.nominal_threshold(sc, scen)
-        @test 0 <= r1.plock_sharp <= 100
+        @test r1.locking_probability_percent == r2.locking_probability_percent && 0 <= r1.locking_probability_percent <= 100 &&
+              r1.locking_probability_efc_percent <= r1.locking_probability_percent
+        @test r1.threshold_fit == EF.fitted_threshold(sc, scen)
+        @test 0 <= r1.locking_probability_fit_threshold_percent <= 100
     end
 
     @testset "tolerance scan and allowable tolerance" begin
         # One coil, S real, δ_nominal = 0, Flat 1 mm tolerance: |δ| uniform on [0, |S|·scale·1e-3].
         # With a sharp threshold the risk is analytic: P = 1 − δ_t / (|S|·scale·1e-3) once the edge passes δ_t.
         S = 0.2
-        # Columns are delta_per_mm_shift, delta_per_deg_tilt, delta_per_mm_rim; this coil has no
+        # Columns are abs_delta_shift_per_mm, abs_delta_tilt_per_deg, abs_delta_rim_per_mm; this coil has no
         # tilt sensitivity, so the last two are zero.
         table = EF.SensitivityTable(["a"], 1, [0.0im], ComplexF64[S; -im*S; 0.0;;], zeros(ComplexF64, 3, 1),
             [S], [0.0], [0.0], zeros(2, 1), zeros(2, 1))
@@ -120,15 +121,15 @@ using Statistics
         scales = [0.5, 0.6, 0.7, 0.8, 1.0, 2.0, 4.0]
         δt = 1e-4   # = |S| · 0.5 mm: the scale-0.5 edge
         # A degenerate scaling whose exponents have no spread gives a sharp threshold; pick one so
-        # that nominal_threshold == δt by construction.
+        # that fitted_threshold == δt by construction.
         sharp = EF.ThresholdScaling(1, 0, "test", "sharp", (log10(δt), 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0))
         scan = EF.tolerance_scan(table, ts, sets, mc_ctrl, sharp, scen; scales, risk_ctrl=EF.RiskControl(; nsample_threshold=1000))
         expected = [max(0.0, 1 - δt / (S * s * 1e-3)) * 100 for s in scales]
-        @test scan.scale == scales
-        @test all(abs.(scan.plock .- expected) .< 1.5)
-        @test all(scan.plock_efc .<= scan.plock .+ 1e-9)
-        @test all(scan.plock_spread .>= 0)
-        @test scan.plock_nominal == 0.0
+        @test scan.tolerance_scale == scales
+        @test all(abs.(scan.locking_probability_percent .- expected) .< 1.5)
+        @test all(scan.locking_probability_efc_percent .<= scan.locking_probability_percent .+ 1e-9)
+        @test all(scan.locking_probability_spread_percent .>= 0)
+        @test scan.locking_probability_as_designed_percent == 0.0
         # Inversion: the scale at which the risk reaches 25 %, from the analytic curve, is 0.5/(1−0.25) = 2/3,
         # bracketed by the 0.6 (16.7 %) and 0.7 (28.6 %) points.
         s25 = EF.allowable_tolerance(scan, 25.0)

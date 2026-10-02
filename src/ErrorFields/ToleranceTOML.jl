@@ -290,7 +290,7 @@ end
 A tilt tolerance in the degrees the stored sensitivities use. `"deg"` passes through; `"m"` is
 a rim displacement converted through the coil set's arc-length-weighted major radius exactly as
 `apply_transforms` converts `tilt_in_meters`: `asin(t / R_nom)`. The radius form takes that
-radius directly, as a run stores it in `ErrorFields/CoilSensitivities/nominal_radius`, for
+radius directly, as a run stores it in `ErrorFields/CoilSensitivities/major_radius_m`, for
 readers that have the file but not the geometry.
 """
 function tilt_tolerance_deg(tilt::Real, tilt_units::AbstractString, r_nom::Real; name::AbstractString="the coil set")
