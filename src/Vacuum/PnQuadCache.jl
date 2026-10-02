@@ -69,9 +69,7 @@ singular-quadrature data. Called after the precompile workload so no run state i
 into the package image.
 """
 function reset_caches!()
-    _PN_LAST_N[] = 0
     @lock _PN_CACHE_LOCK empty!(_PN_CACHE)
-    _PN_LAST_ENTRY[] = PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0)
     SINGULAR_QUAD_CACHE[] = nothing
     return nothing
 end
