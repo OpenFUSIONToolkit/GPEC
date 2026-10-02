@@ -1,4 +1,5 @@
 using TOML
+using LinearAlgebra
 
 # TODO: this helper may belong in a shared test-utilities file rather than here.
 # TODO: come up with a Gaussian reduction test that doesn't rely on external data.
@@ -90,6 +91,60 @@ end
         # Check all data is preserved
         @test all(odet.psi_store .== Float64.(1:odet.step))
         @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
+    end
+
+    @testset "truncate_integration! drops every trace of the old edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+            GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
+            GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+
+        mpert = 2
+        intr = F.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        intr.sing = [F.SingType(; psifac=p, q=q, m=[m], n=[1]) for (p, q, m) in ((0.30, 2.0, 2), (0.60, 3.0, 3), (0.90, 4.0, 4))]
+        intr.msing = 3
+        odet = F.OdeState(mpert, 10, 5, 3)
+        odet.step = 7
+        odet.psi_store[1:7] = [0.10, 0.25, 0.40, 0.55, 0.75, 0.85, 0.95]
+        odet.q_store[1:7] = 1 .+ odet.psi_store[1:7]
+        for i in 1:7
+            odet.u_store[:, :, 1, i] = ComplexF64[i 0; 0 i]
+            odet.u_store[:, :, 2, i] = ComplexF64[i+0.1 0; 0 i+0.1]
+        end
+        # Two fixups; the second lies past the new edge and is a singular-surface crossing with a zeroed column.
+        odet.ifix = 2
+        odet.fixstep[1:2] = [3, 6]
+        odet.sing_flag[1:2] = [false, true]
+        odet.zeroed_idx[1], odet.zeroed_idx[2] = Int[], [1]
+        for ifix in 1:2
+            odet.fixfac[:, :, ifix] = ComplexF64[1 0.5; 0 1]
+            odet.index[:, ifix] = [1, 2]
+        end
+
+        F.truncate_integration!(odet, intr, equil, 5)
+        @test odet.ifix == 1
+        @test intr.psilim == 0.75 && intr.msing == 2 && size(odet.ca_l, 4) == 2 && size(odet.ca_r, 4) == 2
+        @test intr.q1lim ≈ equil.profiles.q_deriv(0.75)
+
+        edge = copy(odet.u_store[:, :, 1, end])
+        F.transform_u!(odet, intr)
+        @test odet.u_store[:, :, 1, end] ≈ edge && rank(odet.u_store[:, :, 1, end]) == mpert  # rank-deficient before the fix
+    end
+
+    @testset "truncate_chunks! cuts the Riccati chunks back to the edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
+        chunks() = [F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0)
+                    for (i, (a, b)) in enumerate(((0.10, 0.29), (0.31, 0.59), (0.61, 0.89), (0.91, 0.99)))]
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.75, 2) == 3  # straddling chunk shortened, so re-integrate it
+        @test length(cs) == 3 && cs[3].psi_end == 0.75 && count(c -> c.needs_crossing, cs) == 2
+
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.89, 2) === nothing  # edge exactly at a chunk end: nothing to re-integrate
+        @test count(c -> c.needs_crossing, cs) == 2  # but its crossing onto the dropped surface is still cleared
     end
 
     @testset "transform_u!" begin
@@ -327,6 +382,49 @@ end
         @test size(odet.fixfac) == (numpert_total, numpert_total, numunorms_init)
         @test length(odet.unorm) == numpert_total
         @test length(odet.unorm0) == numpert_total
+    end
+
+    @testset "interior start falls back to the fixed initialization" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        inputs["ForceFreeStates"]["verbose"] = false
+        function axis_state(psilow; kwargs...)
+            eq_inputs = copy(inputs["Equilibrium"])
+            eq_inputs["psilow"] = psilow
+            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(eq_inputs, ex)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+            ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., kwargs...)
+            intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
+            intr.nlow = ctrl.nn_low
+            intr.nhigh = ctrl.nn_high
+            intr.npert = 1
+            FFS.sing_lim!(intr, ctrl, equil)
+            FFS.sing_find!(intr, equil)
+            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+            intr.mpert = intr.mhigh - intr.mlow + 1
+            intr.numpert_total = intr.mpert * intr.npert
+            mats = FFS.build_matrix_splines(equil, intr, FFS.make_metric(equil, intr.mpert))
+            odet = FFS.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+            return odet, ctrl, mats, equil, intr
+        end
+        # Near the axis the Frobenius start gives the regular solution: U₂ = I with a nonzero U₁.
+        odet, ctrl, mats, equil, intr = axis_state(1e-4)
+        FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test odet.u[:, :, 2] ≈ I
+        @test any(!iszero, odet.u[:, :, 1])
+        # An interior start switches to the fixed start (U₁ = 0, U₂ = I) and says so.
+        odet, ctrl, mats, equil, intr = axis_state(0.3)
+        @test_logs (:warn, r"fixed start") FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # The threshold is a control: raising it keeps the Frobenius start, and zero selects the fixed start silently.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.5)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test any(!iszero, odet.u[:, :, 1])
+        odet, ctrl, mats, equil, intr = axis_state(1e-4; frobenius_psi_max=0.0)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
     end
 
     @testset "chunk_el_integration_bounds tests" begin

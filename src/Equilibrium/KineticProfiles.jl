@@ -288,8 +288,10 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
         fsum <= 1.0 + 1e-6 ||
             error("ion_species fractions sum to $fsum > 1 — fractions are shares of the total main-ion density n_i")
         length(fracs) == length(ion_species) && abs(fsum - 1.0) > 1e-6 &&
-            error("ion_species fractions sum to $fsum ≠ 1 — with all species fraction-specified the shares must account for the full n_i " *
-                  "(the impurity content is set by the file's n_i/n_e deficit, not by a fraction shortfall)")
+            error(
+                "ion_species fractions sum to $fsum ≠ 1 — with all species fraction-specified the shares must account for the full n_i " *
+                "(the impurity content is set by the file's n_i/n_e deficit, not by a fraction shortfall)"
+            )
     end
 
     # The momentum-restoring zpitch closure assumes the declared main ions are lighter/lower-z than
@@ -560,4 +562,19 @@ extrapolation), matching Fortran's `spline_fit(...,"extrap")`.
 function _cubic_resample(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
     spl = cubic_interp(collect(Float64, x), collect(Float64, y); extrap=ExtendExtrap())
     return [spl(xv) for xv in x_new]
+end
+
+"""
+    shift_exb_rotation(kp::KineticProfileSplines, Δω::Real) -> KineticProfileSplines
+
+The same kinetic profiles with the E×B rotation rigidly shifted, `ω_E(ψ) + Δω` (rad/s), and
+every other profile unchanged. A rotation change moves the E×B frequency and leaves the
+diamagnetic frequencies, which the torque kernel derives from the density and temperature
+gradients, where they are; this is the scan variable of a torque-versus-rotation table.
+"""
+function shift_exb_rotation(kp::KineticProfileSplines, Δω::Real)
+    xs = kp.xs
+    sample(s) = Float64[s(ψ) for ψ in xs]
+    return KineticProfileSplines(xs, sample(kp.ni_spline), sample(kp.ne_spline), sample(kp.Ti_spline), sample(kp.Te_spline),
+        sample(kp.omegaE_spline) .+ Float64(Δω), sample(kp.loglam_spline), sample(kp.nui_spline), sample(kp.nue_spline), sample(kp.zeff_spline))
 end
