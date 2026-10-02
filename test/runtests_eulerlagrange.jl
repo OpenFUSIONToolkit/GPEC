@@ -303,6 +303,20 @@ end
         @test abs(odet.u[pivot_idx, 1, 1] - u_before[pivot_idx, 1, 1]) < 1e-10
     end
 
+    @testset "column_abstol" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        u = zeros(ComplexF64, 2, 2, 2)
+        u[:, 1, 1] .= [3.0, -4.0im]   # column 1: U₁ max 4, U₂ max 2
+        u[:, 1, 2] .= [2.0, 0.5]
+        u[:, 2, 2] .= [0.0, 1e-8]     # column 2: U₁ zero (fixed start), U₂ max 1e-8
+        tol = FFS.column_abstol(u, 1e-6)
+        @test size(tol) == size(u)
+        @test all(tol[:, 1, 1] .== 4e-6) && all(tol[:, 1, 2] .== 2e-6)
+        # A zero block takes its column's other block, so each column is controlled relative to its own scale
+        @test all(tol[:, 2, 1] .≈ 1e-14) && all(tol[:, 2, 2] .≈ 1e-14)
+        @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
+    end
+
     @testset "compute_solution_norms!" begin
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)

@@ -841,6 +841,41 @@ function cross_kinetic_singular_surf!(
     store_ode_data!(odet, odet.psifac, odet.u)
 end
 
+"""
+    column_abstol!(abstol, u, rtol) -> abstol
+
+Per-column absolute tolerance `max|u[:, j, k]|·rtol` for each column `j` of U₁ (`k = 1`) and U₂ (`k = 2`),
+refreshed before every step as in Fortran `ode_step`. An all-zero block (e.g. U₁ = 0 at a fixed start) takes
+its column's other block instead, where Fortran disables error control for it.
+"""
+function column_abstol!(abstol::AbstractArray{Float64,3}, u::AbstractArray{<:Number,3}, rtol::Real)
+    for j in axes(u, 2)
+        a1 = maximum(abs, @view u[:, j, 1])
+        a2 = maximum(abs, @view u[:, j, 2])
+        afill = max(a1, a2, floatmin(Float64))
+        abstol[:, j, 1] .= (a1 > 0 ? a1 : afill) * rtol
+        abstol[:, j, 2] .= (a2 > 0 ? a2 : afill) * rtol
+    end
+    return abstol
+end
+
+column_abstol(u::AbstractArray{<:Number,3}, rtol::Real) = column_abstol!(similar(u, Float64), u, rtol)
+
+function refresh_column_abstol!(integrator)
+    column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
+    u_modified!(integrator, false)
+end
+
+# Refresh-only callback for solves with no reduction, renormalization or storage of their own.
+const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refresh_column_abstol!; save_positions=(false, false))
+
+"""
+    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+
+Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
+A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
+"""
+solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK) = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
@@ -863,10 +898,7 @@ making it clear what region is being integrated.
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
 
-### TODOs
-
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Check absolute tolerances, currently only relative tolerances are updated
+The absolute tolerance is refreshed per solution column after every step (`column_abstol!`).
 """
 function integrate_el_region!(
     odet::OdeState,
@@ -897,6 +929,7 @@ function integrate_el_region!(
         steps_in_segment[] += 1
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
+        column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
@@ -915,7 +948,8 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    rtol = ctrl.eulerlagrange_tolerance
+    sol = solve_el(prob, rtol; callback=cb)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
