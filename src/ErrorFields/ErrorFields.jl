@@ -74,9 +74,9 @@ export ToleranceSet, CoilTolerance, CoherentGroupTolerance, OtherFieldBudget
 export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tolerance_deg
 export RadialDistribution, Flat, UniformArea, Hollow, Ring, PowerLaw, randpow, radial_distribution
 export disk_radius, sample_disk, sample_uncertainty, sample_additive, sample_cylinder
-export MonteCarloControl, MonteCarloResult, run_monte_carlo, worst_case_terms
+export MonteCarloControl, MonteCarloResult, run_monte_carlo, worst_case_terms, apply_current_factors, update
 export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_label, ScenarioParameters, fitted_threshold, threshold_samples
-export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance
+export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance, risk_convergence, single_toroidal_mode
 export PhasingMap, phasing_map, extreme_phasing
 export NTVControl, EFCCoupling, residual_spectrum, correction_current, correction_current_upper, max_correctable_overlap, efc_current_curve, read_efc_couplings
 export has_rotation_scan, rotation_scan_span, torque_at, torque_zero_crossings, rotation_shift, threshold_factor
