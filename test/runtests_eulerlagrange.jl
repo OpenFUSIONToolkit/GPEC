@@ -348,6 +348,43 @@ end
         @test odet.new == true  # fixup triggered
     end
 
+    @testset "ideal-crossing reduction isolates the resonant harmonic" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Column 1 has the largest norm but no resonant (row 3) component; column 2 carries the resonance.
+        # Growth order alone would lead with column 1 and pivot it on row 1, leaving row 3 in columns 2 and 3.
+        u0 = zeros(ComplexF64, 3, 3, 2)
+        u0[:, 1, 1] .= [6.0, 0.5, 0.0]
+        u0[:, 2, 1] .= [0.4, 0.3, 5.0]
+        u0[:, 3, 1] .= [0.2, 2.0, 1.5]
+        u0[:, :, 2] .= 1.0
+        intr = FFS.ForceFreeStatesInternal(; numpert_total=3)
+        ctrl = FFS.ForceFreeStatesControl(; ucrit=1e3)
+        fresh(u) = (odet = FFS.OdeState(3, 10, 10, 1); odet.u .= u; odet)
+
+        odet = fresh(u0)
+        odet.new = false
+        odet.unorm0 .= norm.(eachcol(u0[:, :, 1]))  # every column grown alike since the last reduction
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
+        @test odet.index[1, 1] == 2
+        @test odet.u[3, 2, 1] == u0[3, 2, 1]
+        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0  # only the lead column keeps the resonant harmonic
+        @test odet.sing_flag[1]
+
+        # A crossing right after a ucrit reduction (new = true) still reduces on the resonant row.
+        odet = fresh(u0)
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
+        @test odet.ifix == 1 && odet.index[1, 1] == 2 && odet.new
+        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0
+
+        # Without resonant rows the growth-ordered reduction is unchanged.
+        odet = fresh(u0)
+        odet.new = false
+        odet.unorm0 .= 1.0
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+        @test odet.index[1, 1] == 1
+        @test odet.u[3, 2, 1] != 0
+    end
+
     @testset "OdeState construction" begin
         # Test basic OdeState initialization
         numpert_total = 5
