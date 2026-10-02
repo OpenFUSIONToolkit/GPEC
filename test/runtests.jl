@@ -25,6 +25,7 @@ else
     include("./runtests_fouriertransforms.jl")
     include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
+    include("./runtests_equil_axis_newton.jl")
     include("./runtests_grid_refinement.jl")
     include("./runtests_coordinate_invariant.jl")
     include("./runtests_eulerlagrange.jl")
