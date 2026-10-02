@@ -194,17 +194,10 @@ function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, coil
     p = plot(; xlabel="coil set", ylabel=ylabel, title=title, xticks=(1:n, names), xrotation=45, legend=:topright,
         left_margin=12Plots.mm, bottom_margin=8Plots.mm)
     if yscale === :log10
-        positive = filter(v -> isfinite(v) && v > 0, reduce(vcat, values))
-        isempty(positive) && return _empty("No positive $quantity values to draw on a logarithmic axis")
-        ylo = minimum(positive) / 10
-        plot!(p; yscale=:log10, ylims=(ylo, 3 * maximum(positive)))
+        ylo = _log_floor!(p, reduce(vcat, values))
+        ylo === nothing && return _empty("No positive $quantity values to draw on a logarithmic axis")
         for (j, (lbl, _)) in enumerate(data)
-            x = (1:n) .+ (j - (k + 1) / 2) * width
-            keep = [isfinite(v) && v > 0 for v in values[j]]
-            xs = vec(vcat(x[keep]', x[keep]', fill(NaN, 1, count(keep))))
-            ys = vec(vcat(fill(ylo, 1, count(keep)), values[j][keep]', fill(NaN, 1, count(keep))))
-            plot!(p, xs, ys; lw=3, c=j, label="")
-            scatter!(p, x[keep], values[j][keep]; marker=:circle, ms=5, c=j, label=lbl)
+            _stems!(p, (1:n) .+ (j - (k + 1) / 2) * width, values[j], ylo; c=j, label=lbl)
         end
     else
         for (j, (lbl, _)) in enumerate(data)
@@ -213,6 +206,26 @@ function plot_coil_sensitivities(sources::Sources; quantity::Symbol=:shift, coil
         end
     end
     return _save(p, save_path)
+end
+
+# A logarithmic axis for stems: the floor a decade under the smallest positive value, or nothing
+# when there is none to draw. Bars on a log axis stretch to whatever the floor is; stems do not.
+function _log_floor!(p, values)
+    positive = filter(v -> isfinite(v) && v > 0, values)
+    isempty(positive) && return nothing
+    ylo = minimum(positive) / 10
+    plot!(p; yscale=:log10, ylims=(ylo, 3 * maximum(positive)))
+    return ylo
+end
+
+# Stems from the floor to each positive value, with a marker on top; non-positive values are skipped.
+function _stems!(p, x, values, ylo; c, label, marker=:circle, ms=5, lw=3)
+    keep = [isfinite(v) && v > 0 for v in values]
+    xs = vec(vcat(x[keep]', x[keep]', fill(NaN, 1, count(keep))))
+    ys = vec(vcat(fill(ylo, 1, count(keep)), values[keep]', fill(NaN, 1, count(keep))))
+    plot!(p, xs, ys; lw, c, label="")
+    scatter!(p, x[keep], values[keep]; marker, ms, c, label)
+    return p
 end
 
 # Positions of `names` among a source's coil sets, erroring on a coil the source does not carry
@@ -234,7 +247,9 @@ function _sensitivity_values(lbl, d, names, quantity::Symbol)
                     "source \"$lbl\" cannot give the resonant fraction: it needs the applied field and B_T0 as well as δ (a gpec.h5 path or a vector of CoilOverlap, not a SensitivityTable)"
                 )
             )
-        return [(nrm = norm(d.field_as_designed[:, i]); nrm > 0 ? 100 * abs(d.delta_as_designed[i]) * d.b_t0 / nrm : 0.0) for i in idx]
+        norms = [norm(d.field_as_designed[:, i]) for i in axes(d.field_as_designed, 2)]
+        nrm_ref = maximum(norms)
+        return [EF.resonant_fraction_percent(d.delta_as_designed[i] * d.b_t0, norms[i], nrm_ref) for i in idx]
     end
     field = quantity === :shift ? :abs_delta_shift_per_mm : quantity === :tilt ? :abs_delta_tilt_per_deg : quantity === :rim ? :abs_delta_rim_per_mm : :delta_as_designed
     vals = getfield(d, field)
@@ -404,7 +419,7 @@ function plot_tolerance_budget(h5path::AbstractString; psi_low::Real=0.0, psi_hi
 end
 
 """
-    plot_linearity_residuals(sources; at=:tolerance, coils=nothing, tolerances=nothing, fd_step_shift_m=nothing, fd_step_tilt_deg=nothing, save_path=nothing)
+    plot_linearity_residuals(sources; at=:tolerance, coils=nothing, tolerances=nothing, fd_step_shift_m=nothing, fd_step_tilt_deg=nothing, yscale=:identity, save_path=nothing)
     plot_linearity_residuals(source; kwargs...)
 
 How linear each coil set's field is in its rigid motions: for the six taps (shift and tilt about
@@ -419,11 +434,15 @@ curvature the linear model neglects over the coil's own tolerance range. Coheren
 amplitudes are not added. Tolerances come from the file's snapshot or `tolerances`; a coil
 without a tolerance block draws at zero. The steps come from the file's echoed deck, or from
 `fd_step_shift_m` and `fd_step_tilt_deg` for in-memory `CoilSensitivities`. The dashed line is
-the 1 % level at which the sensitivity calculation itself warns. One panel per source.
+the 1 % level at which the sensitivity calculation itself warns; on a linear axis it sets the
+scale and hides sub-percent residuals, so `yscale = :log10` draws them as stems and markers
+(never bars) over the decades they span. One panel per source. For the model's error at finite
+displacements rather than at the step, see [`plot_linearity_check`](@ref).
 """
 function plot_linearity_residuals(sources::Sources; at::Symbol=:tolerance, coils=nothing, tolerances=nothing, fd_step_shift_m=nothing,
-    fd_step_tilt_deg=nothing, save_path=nothing)
+    fd_step_tilt_deg=nothing, yscale::Symbol=:identity, save_path=nothing)
     at in (:step, :tolerance) || throw(ArgumentError("at must be :step or :tolerance"))
+    yscale in (:identity, :log10) || throw(ArgumentError("yscale must be :identity or :log10"))
     data = [(lbl, _load(src)) for (lbl, src) in sources]
     any(d -> d[2].shift_linearity_residual === nothing, data) && return _empty("No ErrorFields/CoilSensitivities linearity residuals — run with an [ErrorFields] section")
     taps = ("shift x", "shift y", "shift z", "tilt x", "tilt y", "tilt z")
@@ -436,9 +455,16 @@ function plot_linearity_residuals(sources::Sources; at::Symbol=:tolerance, coils
         p = plot(; xlabel="coil set", ylabel=at === :step ? "‖2nd diff‖ / max ‖1st diff‖  at the FD step" : "‖2nd diff‖ / max ‖1st diff‖  at the tolerance",
             title="Linearity of the rigid-motion response: $lbl", xticks=(1:n, names), xrotation=45, legend=:topright, size=(900, 520),
             left_margin=12Plots.mm, bottom_margin=8Plots.mm, titlefontsize=12)
-        for (t, tap) in enumerate(taps)
-            x = (1:n) .+ (t - 3.5) * width
-            bar!(p, x, r[t, :]; bar_width=width, label=tap, alpha=0.85, c=t <= 3 ? t : t + 2)
+        if yscale === :log10
+            ylo = _log_floor!(p, vcat(vec(r), 1e-2))
+            for (t, tap) in enumerate(taps)
+                _stems!(p, (1:n) .+ (t - 3.5) * width, r[t, :], ylo; c=t <= 3 ? t : t + 2, label=tap, lw=2, ms=4)
+            end
+        else
+            for (t, tap) in enumerate(taps)
+                x = (1:n) .+ (t - 3.5) * width
+                bar!(p, x, r[t, :]; bar_width=width, label=tap, alpha=0.85, c=t <= 3 ? t : t + 2)
+            end
         end
         hline!(p, [1e-2]; ls=:dash, c=:black, label="1 % (sensitivity warning level)")
         push!(panels, p)
@@ -447,6 +473,43 @@ function plot_linearity_residuals(sources::Sources; at::Symbol=:tolerance, coils
     return _save(plot(panels...; layout=(1, length(panels)), size=(900 * length(panels), 520)), save_path)
 end
 plot_linearity_residuals(source::SingleSource; kwargs...) = plot_linearity_residuals(_sources(source); kwargs...)
+
+"""
+    plot_linearity_check(check::EF.LinearityCheck; save_path=nothing)
+    plot_linearity_check(h5path; scales=(1.0, 2.0), save_path=nothing, kwargs...)
+
+The relative error of the linear sensitivity model at finite displacements, from
+`ErrorFields.linearity_check`: one stem per row on a logarithmic axis, grouped by coil set
+or coherent group, with the shift and tilt rows told apart by colour, the scale by marker, and the
+sign by fill. The dashed line is the 1 % level the sensitivity calculation warns at for its own step
+residuals. A row whose linear change vanishes has no relative error and is not drawn.
+"""
+function plot_linearity_check(check::EF.LinearityCheck; save_path=nothing)
+    isempty(check.name) && return _empty("No linearity rows: the tolerance set names no coil or group")
+    names = unique(check.name)
+    scales = sort(unique(check.scale))
+    markers = (:circle, :diamond, :utriangle, :square, :star5, :hexagon)
+    p = plot(; xlabel="coil set or coherent group", ylabel="|δ_actual − δ_linear| / |δ_linear − δ_as_designed|",
+        title="Linearity of the overlap at finite displacements", xticks=(1:length(names), names), xrotation=45, legend=:outerright,
+        size=(1000, 560), left_margin=12Plots.mm, bottom_margin=8Plots.mm, titlefontsize=12)
+    ylo = _log_floor!(p, vcat(check.relative_error, 1e-2))
+    ylo === nothing && return _empty("No finite relative errors to draw")
+    width = 0.8 / (4 * length(scales))
+    slot = 0
+    for (k, kind) in enumerate((:shift, :tilt)), a in 1:2, (si, s) in enumerate(scales)
+        slot += 1
+        for (sgn, fill) in ((1, true), (-1, false))
+            rows = findall(i -> check.kind[i] === kind && check.axis[i] == a && check.scale[i] == s && sign(check.displacement[i]) == sgn, eachindex(check.name))
+            isempty(rows) && continue
+            x = [findfirst(==(check.name[i]), names) + (slot - (4 * length(scales) + 1) / 2) * width for i in rows]
+            lbl = sgn > 0 ? "$kind $(a == 1 ? "x" : "y") × $s" : ""
+            _stems!(p, x, check.relative_error[rows], ylo; c=k, label=lbl, marker=markers[mod1(si, length(markers))], ms=fill ? 5 : 4, lw=1.5)
+        end
+    end
+    hline!(p, [1e-2]; ls=:dash, c=:black, label="1 %")
+    return _save(p, save_path)
+end
+plot_linearity_check(h5path::AbstractString; save_path=nothing, kwargs...) = plot_linearity_check(EF.linearity_check(h5path; kwargs...); save_path)
 
 # The six taps' residual ratios per coil set (6 × n), at the finite-difference step or rescaled
 # by tolerance / step to the coil's own tolerance.

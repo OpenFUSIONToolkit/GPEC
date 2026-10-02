@@ -260,6 +260,7 @@ include("h5_metadata_check.jl")
             # than the rendered series: the step recipe expands every point into two vertices.
             v_plot = ctx_plot.dom.right_singular_vectors[:, 1]
             for o in ovs_plot
+                isnan(o.resonant_fraction_percent) && continue   # the axisymmetric hoop has no n=1 field to be a fraction of
                 bars = real.(conj.(v_plot) .* o.spectrum .* cis(-angle(o.resonant_field_t))) ./ o.spectrum_norm_t
                 @test 100 * sum(bars) ≈ o.resonant_fraction_percent rtol = 1e-10
             end
@@ -270,9 +271,44 @@ include("h5_metadata_check.jl")
             @test frac[1][:yaxis][:guide] == "resonant fraction of |b̃| [%]"
             fraction_drawn = AEF._sensitivity_values("run", AEF._load(h5path), sens.coil_names, :fraction)
             for o in ovs_plot
-                @test fraction_drawn[findfirst(==(o.coil_name), sens.coil_names)] ≈ o.resonant_fraction_percent rtol = 1e-8
+                drawn = fraction_drawn[findfirst(==(o.coil_name), sens.coil_names)]
+                if isnan(o.resonant_fraction_percent)
+                    @test isnan(drawn)
+                else
+                    @test drawn ≈ o.resonant_fraction_percent rtol = 1e-8
+                end
             end
-            @test AEF._sensitivity_values("ovs", AEF._load(ovs_plot), sens.coil_names, :fraction) ≈ fraction_drawn rtol = 1e-8
+            # The resonant fraction is NaN, not a noise ratio and not zero, for the axisymmetric hoop,
+            # whose n=1 field is round-off next to the tilted hoop's; the tilted hoop's is finite.
+            @test isnan(only(o for o in ovs_plot if o.coil_name == "hoop_axi").resonant_fraction_percent)
+            @test 0 < only(o for o in ovs_plot if o.coil_name == "hoop_tilted").resonant_fraction_percent <= 100
+            @test isnan(EF.resonant_fraction_percent(1.0, 1e-20, 1.0)) && isnan(EF.resonant_fraction_percent(1.0, 1e-13, 0.0))
+            @test EF.resonant_fraction_percent(0.5, 1.0, 1.0) == 50.0
+            @test AEF.plot_coil_sensitivities(h5path; quantity=:fraction, yscale=:log10) isa Plots.Plot
+
+            # The linear model at finite displacements: the prediction is the table's, the error of the
+            # predicted change is small at the tolerance and shrinks with the displacement, and a
+            # coherent group is rotated as one body about its pivot.
+            lin = EF.linearity_check(ctx_plot, plot_sets, snapshot; scales=(1.0, 2.0))
+            @test length(lin.name) == 2 * 2 * 2 * 2 * 2 + 2 * 2 * 2          # two coils × (shift, tilt) × (x, y) × two scales × two signs, plus one group × (shift, tilt) × two scales × two signs
+            @test Set(lin.name) == Set(["hoop_tilted", "hoop_axi", "both_hoops"])
+            i_t = findfirst(==("hoop_tilted"), table.coil_names)
+            row = findfirst(i -> lin.name[i] == "hoop_tilted" && lin.kind[i] === :shift && lin.axis[i] == 1 && lin.scale[i] == 1.0 && lin.displacement[i] > 0, eachindex(lin.name))
+            @test lin.displacement[row] == 0.5e-3
+            @test lin.delta_as_designed[row] ≈ table.delta_as_designed[i_t] rtol = 1e-10
+            @test lin.delta_linear[row] ≈ table.delta_as_designed[i_t] + table.shift_sensitivity_per_m[1, i_t] * 0.5e-3 rtol = 1e-10
+            finite = filter(!isnan, lin.relative_error)
+            @test !isempty(finite) && maximum(finite) < 5e-2
+            small = EF.linearity_check(ctx_plot, plot_sets, snapshot; scales=(1e-2,))
+            @test maximum(filter(!isnan, small.relative_error)) < maximum(finite)
+            @test_throws ArgumentError EF.linearity_check(ctx_plot, plot_sets, snapshot; scales=(0.0,))
+            @test AEF.plot_linearity_check(lin; save_path=joinpath(dir, "linearity_check.png")) isa Plots.Plot
+            @test isfile(joinpath(dir, "linearity_check.png"))
+            @test AEF.plot_linearity_residuals(h5path; at=:step, yscale=:log10) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; yscale=:bogus)
+            @test all(
+                isnan(a) ? isnan(b) : isapprox(a, b; rtol=1e-8) for (a, b) in zip(AEF._sensitivity_values("ovs", AEF._load(ovs_plot), sens.coil_names, :fraction), fraction_drawn)
+            )
             @test_throws ArgumentError AEF.plot_coil_sensitivities(table; quantity=:fraction)
             @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; coils=["hoop_tilted", "no_such_coil"])
             @test_throws ArgumentError AEF.plot_coil_sensitivities(ovs_plot; quantity=:shift)
@@ -442,7 +478,11 @@ include("h5_metadata_check.jl")
                 @test o.resonant_field_t ≈ PE.coupling_overlap(dom, hand)[1] rtol = 1e-12
                 @test o.delta ≈ o.resonant_field_t / o.b_t0
                 @test o.spectrum_norm_t ≈ norm(hand)
-                @test o.resonant_fraction_percent ≈ 100 * abs(o.resonant_field_t) / norm(hand)
+                if norm(hand) > 1e-8 * maximum(x.spectrum_norm_t for x in ovs)
+                    @test o.resonant_fraction_percent ≈ 100 * abs(o.resonant_field_t) / norm(hand)
+                else
+                    @test isnan(o.resonant_fraction_percent)
+                end
                 # And it is the same number the sensitivity sweep gets for its nominal tap.
                 @test o.delta ≈ table.delta_as_designed[j] rtol = 1e-10
             end
@@ -465,7 +505,7 @@ include("h5_metadata_check.jl")
             # Rebuilt from the file instead: same magnitudes, up to the singular vectors' free phase.
             from_h5 = EF.coil_overlaps(h5path, sets)
             @test abs.(getfield.(from_h5, :delta)) ≈ abs.(getfield.(ovs, :delta)) rtol = 1e-8
-            @test getfield.(from_h5, :resonant_fraction_percent) ≈ getfield.(ovs, :resonant_fraction_percent) rtol = 1e-8
+            @test all(isnan(a) ? isnan(b) : isapprox(a, b; rtol=1e-8) for (a, b) in zip(getfield.(from_h5, :resonant_fraction_percent), getfield.(ovs, :resonant_fraction_percent)))
 
             # The grid override, and the warning when a deck is coarser than the converged default.
             @test EF.MIN_NZETA_PER_PERIOD == FT.NZETA_POINTS_PER_PERIOD
