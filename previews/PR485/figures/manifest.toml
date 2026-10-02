@@ -1,0 +1,43 @@
+# GPEC documentation-figure provenance manifest.
+# One [<module>.<figure>] entry per committed PNG under docs/src/figures/.
+# Regenerate a figure (and this entry) only when a file in its `depends`
+# list changes the numbers it shows — see docs/DOC_STANDARD.md.
+
+
+[ballooning.delta_prime_matching]
+commit = "legacy"
+date = "unknown"
+depends = ["src/ForceFreeStates/Ballooning.jl"]
+note = "Predates the provenance system; compared methods for extracting the ballooning Delta_prime and c_a1. Original generator script not preserved."
+script = "(not preserved)"
+
+[ballooning.mercier_comparison]
+commit = "legacy"
+date = "unknown"
+depends = ["src/ForceFreeStates/Ballooning.jl"]
+note = "Predates the provenance system; compared the since-removed standalone Mercier.jl against Bal.jl. Not reproducible from current code (Mercier.jl was removed once Bal.jl subsumed it)."
+script = "(not preserved)"
+
+[inner_layer.backend_regime_map]
+commit = "3a0837e3-dirty"
+date = "2026-07-08"
+depends = ["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/Galerkin.jl", "src/InnerLayer/GGJ/Shooting.jl"]
+script = "make_backend_regime_map.jl"
+
+[inner_layer.convergence_Sinvariance]
+commit = "3a0837e3-dirty"
+date = "2026-07-08"
+depends = ["src/InnerLayer/GGJ/Ray.jl"]
+script = "make_convergence_Sinvariance.jl"
+
+[inner_layer.rotated_ray_contour]
+commit = "3a0837e3-dirty"
+date = "2026-07-08"
+depends = ["src/InnerLayer/GGJ/Ray.jl"]
+script = "make_rotated_ray_contour.jl"
+
+[inner_layer.solution_profiles]
+commit = "3a0837e3-dirty"
+date = "2026-07-08"
+depends = ["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/RayAsymptotics.jl", "src/InnerLayer/GGJ/InnerAsymptotics.jl"]
+script = "make_solution_profiles.jl"
