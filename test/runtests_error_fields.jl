@@ -91,6 +91,17 @@ include("h5_metadata_check.jl")
             h5path = joinpath(dir, "gpec.h5")
 
             @test sens isa EF.CoilSensitivities
+            # Per-stage wall-clock records: the ErrorFields stage must appear now that it is a
+            # stage of the pipeline, alongside the stages that ran before it.
+            h5open(h5path, "r") do h5
+                @test haskey(h5, "Info/Runtimes/error_fields")
+                @test read(h5["Info/Runtimes/error_fields"]) > 0
+                @test haskey(h5, "Info/Runtimes/forcing_terms")
+                @test haskey(h5, "Info/Runtimes/perturbed_equilibrium")
+                @test haskey(h5, "Info/Runtimes/kinetic_forces")
+                @test haskey(h5, "Info/Runtimes/total")
+            end
+
             @test sens.coil_names == ["hoop_tilted", "hoop_axi"]
             N = ffs.numpert_total
             @test size(sens.nominal_field) == (N, 2)
@@ -465,6 +476,38 @@ include("h5_metadata_check.jl")
                 EF.ErrorFieldsControl(; rotation_center="pack"); psi=ffs.psilim, b_t0=sens.b_t0)
             @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; fd_step_shift_m=0.0); psi=ffs.psilim, b_t0=sens.b_t0)
+        end
+    end
+
+    @testset "runtimes follow the ErrorFields output file when it is the only writer" begin
+        # With every other write switched off, the timings must still land in the file ErrorFields
+        # wrote. Before the orchestrator mirrored this write gate they were dropped silently.
+        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        mktempdir() do dir
+            for name in readdir(template)
+                cp(joinpath(template, name), joinpath(dir, name))
+            end
+            toml_path = joinpath(dir, "gpec.toml")
+            inputs = TOML.parsefile(toml_path)
+            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
+            inputs["ForcingTerms"] = Dict{String,Any}(
+                "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
+                "coil_set" => [
+                    Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 1.5,
+                        "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0])
+                ])
+            inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+                "compute_response" => true, "compute_singular_coupling" => true,
+                "verbose" => false, "write_outputs_to_HDF5" => false)
+            inputs["ErrorFields"] = Dict{String,Any}(
+                "verbose" => false, "output_filename" => "ef_only.h5")
+            open(io -> TOML.print(io, inputs), toml_path, "w")
+
+            GPEC.main([dir])
+
+            h5open(joinpath(dir, "ef_only.h5"), "r") do h5
+                @test haskey(h5, "Info/Runtimes/error_fields")
+            end
         end
     end
 end
