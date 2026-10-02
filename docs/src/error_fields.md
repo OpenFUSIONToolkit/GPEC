@@ -383,20 +383,27 @@ ARC paper 5–20 N·m for ARC; pick a value for the machine being analysed.
 
 The NTV limits say how much correction current an array *may* carry; `correction_requirement`
 says how much it *needs*, and on which surfaces the correction falls short. For one array the
-dominant-mode answer is the ratio `−δ_source/δ_array`; the question worth a function is the joint
-one over every rational surface: the complex factors on all arrays that minimize the resonant
+dominant-mode answer is the ratio `−δ_source/δ_array`; for several arrays the dominant-mode
+condition alone does not fix the currents (one complex equation in several unknowns leaves a family
+of solutions in which any two arrays can cancel each other, of which the result names the
+member with the least total ampere-turns squared); the question worth a function is the joint one over every rational surface: the complex factors on all arrays that minimize the resonant
 field `C·(b̃_source + Σ_k f_k b̃_k)` in the least-squares sense, the field left on each surface
 after that and after each array's dominant-mode correction alone, and how much of the source's
-spectrum each array can see. Factors are multiples of each array's current as given. Any
-`CoilOverlap` can be a source or an array, so an as-built assembly (`combine_overlaps`) can be
-corrected with arrays that were never part of the run. Over the tolerance samples the needed
+spectrum each array can see. Each current comes twice: as a complex factor on the array's
+current as given, and in kilo-ampere-turns through the array's `ampere_turns_kat`
+(`|winding multiplier| × max|I| / 1000`, the same normalization as the EFC couplings), which is the
+form to compare arrays whose patterns were given at different currents and to set beside the
+NTV-limited current. Any `CoilOverlap` can be a source or an array, so an as-built assembly
+(`combine_overlaps`) can be corrected with arrays that were never part of the run. Over the tolerance samples the needed
 current is a distribution, and `uncorrectable_probability` is the fraction of the Monte Carlo's
 overlap beyond what the NTV-limited array can correct at all: the explicit-correction counterpart
 of the corrected locking probability's `efc_factor` model.
 
 ```julia
 req = EF.correction_requirement("gpec.h5", "F_coils_as_built", ["d3d_c", "iu", "il"])
-req.current_factor_least_squares, req.current_factor_dominant
+req.current_factor_least_squares, req.least_squares_rank      # unique when the rank is the number of arrays
+req.current_factor_dominant, req.current_factor_dominant_minimum_norm
+req.current_least_squares_kat                                   # the same in kilo-ampere-turns, comparable across arrays
 abs.(req.resonant_field_least_squares_t) ./ abs.(req.resonant_field_source_t)   # what is left, per surface
 AEF.plot_correction_requirement(req)
 mc = EF.MonteCarloResult("gpec.h5"); c = EF.read_efc_couplings("gpec.h5")[1]

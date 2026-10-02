@@ -9,18 +9,33 @@ Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_
 "Result names"); every field name is also its HDF5 dataset name.
 
 The linear correction requirement of one error-field source against a set of correction arrays, on
-the rational surfaces of one run. Currents are complex multiples of each array's current as given
-(magnitude and toroidal phase), so a factor of `−1` on an array identical to the source is the
-exact cancellation; multiply by the array's ampere-turns for a current.
+the rational surfaces of one run. Each needed current is given twice: as a complex factor on the
+array's current as given (so `−1` on an array identical to the source is the exact cancellation),
+and in kilo-ampere-turns through the array's `ampere_turns_kat`, which is the form that compares
+arrays with different pattern currents on one axis and sits next to the NTV-limited current.
 
 ## Fields
 
   - `source_name`, `array_names`: the coil sets, `[narray]` for the arrays
   - `rational_psi`, `rational_q`, `rational_m`, `rational_n`: the surfaces, `[nsurface]`
-  - `current_factor_dominant`: the factor on each array alone that cancels the source's
-    dominant-mode overlap, `−δ_source / δ_array`; `NaN` for an array with no overlap `[narray]`
+  - `current_factor_dominant`: the factor on each array *alone* that cancels the source's
+    dominant-mode overlap, `−δ_source / δ_array`; `NaN` for an array with no overlap `[narray]`.
+    This is not a solution for the set: the dominant-mode condition is one complex equation in
+    `narray` unknowns, so for two or more arrays its solutions form an `(narray − 1)`-dimensional
+    family in which any two arrays can cancel each other
+  - `current_factor_dominant_minimum_norm`: the one member of that family with the smallest
+    total current `Σ|I_k|²` `[narray]`, `I_k = −δ_source · conj(δ_k/a_k) / Σ|δ/a|²` with `a_k` the
+    array's ampere-turns (`a_k = 1`, a minimum in factor units, when any array's ampere-turns are
+    unknown); every other member adds a current pattern that cancels within the dominant mode and
+    only moves the other surfaces
   - `current_factor_least_squares`: the factors on every array together that minimize the resonant
-    field on every surface, `argmin ‖C·(b̃_source + Σ_k f_k b̃_k)‖` `[narray]`
+    field on every surface, `argmin ‖C·(b̃_source + Σ_k f_k b̃_k)‖` `[narray]`; unique when
+    `least_squares_rank == narray`, otherwise the minimizer with the smallest total current in the
+    same sense
+  - `least_squares_rank`: rank of the `nsurface × narray` system the least squares solves
+  - `current_dominant_kat`, `current_dominant_minimum_norm_kat`, `current_least_squares_kat`: the
+    three factors times each array's `ampere_turns_kat`, complex kilo-ampere-turns (magnitude and
+    toroidal phase) `[narray]`; `NaN` for an array whose ampere-turns are unknown
   - `resonant_field_source_t`: the source's resonant field on each surface, `C·b̃_source`, tesla `[nsurface]`
   - `resonant_field_dominant_t`: the same after each array's dominant-mode correction alone, tesla `[nsurface × narray]`
   - `resonant_field_least_squares_t`: the same after the joint least-squares correction, tesla `[nsurface]`
@@ -35,7 +50,12 @@ struct CorrectionRequirement
     rational_m::Vector{Int}
     rational_n::Vector{Int}
     current_factor_dominant::Vector{ComplexF64}
+    current_factor_dominant_minimum_norm::Vector{ComplexF64}
     current_factor_least_squares::Vector{ComplexF64}
+    least_squares_rank::Int
+    current_dominant_kat::Vector{ComplexF64}
+    current_dominant_minimum_norm_kat::Vector{ComplexF64}
+    current_least_squares_kat::Vector{ComplexF64}
     resonant_field_source_t::Vector{ComplexF64}
     resonant_field_dominant_t::Matrix{ComplexF64}
     resonant_field_least_squares_t::Vector{ComplexF64}
@@ -47,12 +67,16 @@ end
     correction_requirement(h5path, source_name, array_names; mode=1, coil_sets=nothing, kwargs...) -> CorrectionRequirement
 
 What it takes to correct one error field with a set of arrays, and what is left. The dominant-mode
-answer for one array is the ratio `−δ_source / δ_array`; the question worth a function is the joint
-one over every rational surface: the complex factors on all arrays that minimize the resonant field
-`C·(b̃_source + Σ_k f_k b̃_k)` in the least-squares sense (`\\` on the `nsurface × narray` system; the
-minimum-norm solution when there are more arrays than surfaces), the resonant field left on each
-surface after it and after each array's dominant-mode correction alone, and how much of the
-source's spectrum each array can see. Every input is a [`CoilOverlap`](@ref) carrying its
+answer for one array is the ratio `−δ_source / δ_array`; for several arrays the dominant-mode
+condition alone does not fix the currents, since one complex equation in `narray` unknowns leaves an
+`(narray − 1)`-dimensional family of solutions in which any two arrays can cancel each other, so the
+result reports each array's solo factor and the family's minimum-current member (least total
+ampere-turns squared when every array's ampere-turns are known), and the question
+worth a function is the joint one over every rational surface: the complex factors on all arrays
+that minimize the resonant field `C·(b̃_source + Σ_k f_k b̃_k)` in the least-squares sense (`\\` on
+the `nsurface × narray` system, unique when its rank is `narray` and the minimum-norm minimizer
+otherwise, which the result states), the resonant field left on each surface after it and after
+each array's solo dominant-mode correction, and how much of the source's spectrum each array can see. Every input is a [`CoilOverlap`](@ref) carrying its
 spectrum, so any geometry can be a source or an array, not only the run's coils. The `h5path`
 form takes names among the run's coil sets, or among `coil_sets` when given, and evaluates them
 on the run's control surface.
@@ -74,12 +98,18 @@ function correction_requirement(ctx::ResonantDriveContext, source::CoilOverlap, 
     R = hcat((C * o.spectrum for o in arrays)...)
     f_dom = [abs(o.delta) > 0 ? -source.delta / o.delta : NaN + NaN * im for o in arrays]
     r_dom = hcat((isnan(f_dom[k]) ? fill(NaN + NaN * im, length(r_source)) : r_source .+ R[:, k] .* f_dom[k] for k in eachindex(arrays))...)
-    f_ls = -(R \ r_source)
+    kat = [o.ampere_turns_kat for o in arrays]
+    # Minimum-norm solutions are taken in kilo-ampere-turns when every array's ampere-turns are known,
+    # so arrays given at different pattern currents are weighed by physical current, not bookkeeping.
+    a = all(k -> isfinite(k) && k > 0, kat) ? kat : ones(length(kat))
+    δ = [o.delta for o in arrays] ./ a
+    f_mn = sum(abs2, δ) > 0 ? (-source.delta .* conj.(δ) ./ sum(abs2, δ)) ./ a : fill(NaN + NaN * im, length(δ))
+    f_ls = -((R ./ a') \ r_source) ./ a
     r_ls = r_source .+ R * f_ls
     n_src = norm(source.spectrum)
     cosines = [(n = norm(o.spectrum); n > 0 && n_src > 0 ? abs(dot(o.spectrum, source.spectrum)) / (n * n_src) : NaN) for o in arrays]
     return CorrectionRequirement(source.coil_name, [o.coil_name for o in arrays], copy(ctx.rc.rational_psi), copy(ctx.rc.rational_q),
-        copy(ctx.rc.rational_m), copy(ctx.rc.rational_n), f_dom, f_ls, r_source, r_dom, r_ls, cosines)
+        copy(ctx.rc.rational_m), copy(ctx.rc.rational_n), f_dom, f_mn, f_ls, rank(R), f_dom .* kat, f_mn .* kat, f_ls .* kat, r_source, r_dom, r_ls, cosines)
 end
 function correction_requirement(h5path::AbstractString, source_name::AbstractString, array_names::AbstractVector{<:AbstractString}; mode::Int=1,
     coil_sets=nothing, psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, kwargs...)
@@ -94,15 +124,20 @@ end
 """
     needed_current_distribution(mc::MonteCarloResult, array::CoilOverlap) -> NamedTuple
 
-The Monte Carlo's intrinsic `|δ|` histogram re-expressed as the factor on `array`'s current that
-cancels each sampled overlap's dominant mode, `|δ| / |δ_array|`: fields `current_factor_bin_edges`
-and `current_factor_pdf` (density per unit factor, integrating to one). The needed current for the
-as-built machine is one number; over the tolerance samples it is this distribution.
+The Monte Carlo's intrinsic `|δ|` histogram re-expressed as the current on `array` that cancels
+each sampled overlap's dominant mode: as the factor `|δ| / |δ_array|` on the array's current as
+given, fields `current_factor_bin_edges` and `current_factor_pdf` (density per unit factor,
+integrating to one), and in kilo-ampere-turns through the array's `ampere_turns_kat`, fields
+`current_bin_edges_kat` and `current_pdf_per_kat` (`NaN` when the ampere-turns are unknown). The
+needed current for the as-built machine is one number; over the tolerance samples it is this
+distribution.
 """
 function needed_current_distribution(mc::MonteCarloResult, array::CoilOverlap)
     a = abs(array.delta)
     a > 0 || throw(ArgumentError("needed_current_distribution: array \"$(array.coil_name)\" has no dominant-mode overlap to correct with"))
-    return (; current_factor_bin_edges=mc.abs_delta_bin_edges ./ a, current_factor_pdf=mc.abs_delta_pdf .* a)
+    kat = array.ampere_turns_kat
+    return (; current_factor_bin_edges=mc.abs_delta_bin_edges ./ a, current_factor_pdf=mc.abs_delta_pdf .* a,
+        current_bin_edges_kat=mc.abs_delta_bin_edges .* (kat / a), current_pdf_per_kat=mc.abs_delta_pdf .* (a / kat))
 end
 
 """
