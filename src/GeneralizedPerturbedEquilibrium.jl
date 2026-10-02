@@ -1641,45 +1641,47 @@ function write_outputs_to_HDF5(
         out_h5["SurfaceGeometries/Wall/y"] = free_energies !== nothing ? free_energies.wall_pts[:, 2] : Float64[]
         out_h5["SurfaceGeometries/Wall/z"] = free_energies !== nothing ? free_energies.wall_pts[:, 3] : Float64[]
 
-        # Write fundamental matrices on the ψ grid
-        xs = equil.rzphi_xs
-        npsi = length(xs)
-        np = result.numpert_total
+        # Euler-Lagrange matrices on the ψ grid; opt-in since the group scales as mpert²·npsi.
+        if ctrl.write_el_matrices
+            xs = equil.rzphi_xs
+            npsi = length(xs)
+            np = result.numpert_total
 
-        # Helper: evaluate a matrix spline on the psi grid → (npsi, np, np) array
-        function _eval_mat_spline(spline)
-            arr = zeros(ComplexF64, npsi, np, np)
-            hint = Ref(1)
-            for i in 1:npsi
-                arr[i, :, :] .= reshape(spline(xs[i]; hint=hint), np, np)
+            # Helper: evaluate a matrix spline on the psi grid → (npsi, np, np) array
+            function _eval_mat_spline(spline)
+                arr = zeros(ComplexF64, npsi, np, np)
+                hint = Ref(1)
+                for i in 1:npsi
+                    arr[i, :, :] .= reshape(spline(xs[i]; hint=hint), np, np)
+                end
+                return arr
             end
-            return arr
-        end
 
-        elm = "ForceFreeStates/EulerLagrangeMatrices"
-        out_h5["$elm/psi"] = xs
-        # Ideal primitive matrices (A, B, C, D, E, H)
-        out_h5["$elm/Ideal/A"] = _eval_mat_spline(mats.ideal.A_spline)
-        out_h5["$elm/Ideal/B"] = _eval_mat_spline(mats.ideal.B_spline)
-        out_h5["$elm/Ideal/C"] = _eval_mat_spline(mats.ideal.C_spline)
-        out_h5["$elm/Ideal/D"] = _eval_mat_spline(mats.ideal.D_spline_prim)
-        out_h5["$elm/Ideal/E"] = _eval_mat_spline(mats.ideal.E_spline_prim)
-        out_h5["$elm/Ideal/H"] = _eval_mat_spline(mats.ideal.H_spline)
+            elm = "ForceFreeStates/EulerLagrangeMatrices"
+            out_h5["$elm/psi"] = xs
+            # Ideal primitive matrices (A, B, C, D, E, H)
+            out_h5["$elm/Ideal/A"] = _eval_mat_spline(mats.ideal.A_spline)
+            out_h5["$elm/Ideal/B"] = _eval_mat_spline(mats.ideal.B_spline)
+            out_h5["$elm/Ideal/C"] = _eval_mat_spline(mats.ideal.C_spline)
+            out_h5["$elm/Ideal/D"] = _eval_mat_spline(mats.ideal.D_spline_prim)
+            out_h5["$elm/Ideal/E"] = _eval_mat_spline(mats.ideal.E_spline_prim)
+            out_h5["$elm/Ideal/H"] = _eval_mat_spline(mats.ideal.H_spline)
 
-        # Ideal derived matrices (F, K, G)
-        out_h5["$elm/Ideal/F"] = _eval_mat_spline(mats.ideal.F_spline_lower)
-        out_h5["$elm/Ideal/K"] = _eval_mat_spline(mats.ideal.K_spline)
-        out_h5["$elm/Ideal/G"] = _eval_mat_spline(mats.ideal.G_spline)
+            # Ideal derived matrices (F, K, G)
+            out_h5["$elm/Ideal/F"] = _eval_mat_spline(mats.ideal.F_spline_lower)
+            out_h5["$elm/Ideal/K"] = _eval_mat_spline(mats.ideal.K_spline)
+            out_h5["$elm/Ideal/G"] = _eval_mat_spline(mats.ideal.G_spline)
 
-        # Kinetic-modified matrices
-        kin = mats.kinetic
-        if kin !== nothing
-            out_h5["$elm/Kinetic/A"] = _eval_mat_spline(kin.A_spline)
-            out_h5["$elm/Kinetic/B"] = _eval_mat_spline(kin.B_spline)
-            out_h5["$elm/Kinetic/C"] = _eval_mat_spline(kin.C_spline)
-            out_h5["$elm/Kinetic/f0"] = _eval_mat_spline(kin.F0_spline)
-            out_h5["$elm/Kinetic/K"] = _eval_mat_spline(kin.Kk_spline)
-            out_h5["$elm/Kinetic/G"] = _eval_mat_spline(kin.G_spline_adj)
+            # Kinetic-modified matrices
+            kin = mats.kinetic
+            if kin !== nothing
+                out_h5["$elm/Kinetic/A"] = _eval_mat_spline(kin.A_spline)
+                out_h5["$elm/Kinetic/B"] = _eval_mat_spline(kin.B_spline)
+                out_h5["$elm/Kinetic/C"] = _eval_mat_spline(kin.C_spline)
+                out_h5["$elm/Kinetic/f0"] = _eval_mat_spline(kin.F0_spline)
+                out_h5["$elm/Kinetic/K"] = _eval_mat_spline(kin.Kk_spline)
+                out_h5["$elm/Kinetic/G"] = _eval_mat_spline(kin.G_spline_adj)
+            end
         end
 
         # Self-describing metadata pass (long_name/units/dims + dimension scales).

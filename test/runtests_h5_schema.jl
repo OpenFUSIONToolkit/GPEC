@@ -50,6 +50,10 @@ include("h5_metadata_check.jl")
     @test !_group_name_ok("SingularSurfaces", "kinetic")
 end
 
+@testset "gpec.h5 schema: Euler-Lagrange matrices are opt-in" begin
+    @test !GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl().write_el_matrices
+end
+
 @testset "gpec.h5 schema naming" begin
     template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
@@ -58,7 +62,8 @@ end
             cp(joinpath(template_dir, name), joinpath(run_dir, name))
         end
         toml_path = joinpath(run_dir, "gpec.toml")
-        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_outputs_to_HDF5 = true"))
+        # Opt into the Euler-Lagrange matrices so the metadata pass below covers that group too.
+        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_el_matrices = true\nwrite_outputs_to_HDF5 = true"))
 
         GeneralizedPerturbedEquilibrium.main([run_dir])
         h5_path = joinpath(run_dir, "gpec.h5")
@@ -73,6 +78,18 @@ end
             # two moved under ForceFreeStates/ and are CamelCase, so pin them explicitly.
             @test !haskey(h5, "FreeBoundaryStability")
             @test !haskey(h5, "EdgeScan")
+
+            # Every ideal matrix is written as (npsi, np, np) on the ψ grid; an ideal run writes no kinetic set.
+            elm = "ForceFreeStates/EulerLagrangeMatrices"
+            @test haskey(h5, "$elm/psi")
+            npsi = length(read(h5["$elm/psi"]))
+            np = size(h5["$elm/Ideal/A"], 2)
+            @test np >= 1
+            for name in ("A", "B", "C", "D", "E", "H", "F", "K", "G")
+                @test haskey(h5, "$elm/Ideal/$name")
+                @test size(h5["$elm/Ideal/$name"]) == (npsi, np, np)
+            end
+            @test !haskey(h5, "$elm/Kinetic")
 
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")
