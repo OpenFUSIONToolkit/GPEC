@@ -89,6 +89,7 @@ tilt_units = "deg"               # "deg", or "m" for a rim displacement converte
 radial_shape = "hollow"          # Radial sampling density on the disk: flat, uniform_area, hollow, or ring
 tolerance_model = "additive"     # "additive" (independent shift and tilt) or "cylinder" (correlated axis line)
 cylinder_half_height_m = 0.0     # Cylinder half-height for the cylinder model [m]
+current_factor = 1.0             # Current as built relative to the run's; scales the coil's overlap and sensitivities
 
 # One block per coil set that moves on its own
 [[ErrorFields.coil]]
@@ -106,6 +107,7 @@ shift_tol_mm = 2.0               # Coherent shift amplitude shared by the group 
 tilt_tol = 0.0                   # Coherent tilt amplitude shared by the group, in tilt_units
 phase_group = "braces"           # Groups naming the same phase_group share the random direction
 rotation_center_z_m = 0.0        # Height of the pivot of the group's rigid rotation on the machine axis [m]
+tilt_lever_arm_m = 3.2           # Lever arm converting a tilt_tol in metres to the group's rotation angle [m] (optional)
 
 [ErrorFields.correctability]
 uncorrectable_coils = ["EFCC_U"] # Coil sets the error-field correction cannot reduce
@@ -124,12 +126,26 @@ arc-length-weighted major radius exactly as the coil loader's `tilt_in_meters` d
 group's tilt is a rigid rotation of all its members about a pivot on the machine axis at
 `rotation_center_z_m`, so a member at height `z` also shifts laterally by `(z − z_pivot)·θ`.
 Groups sharing a `phase_group` label draw the same random direction with independent
-amplitudes. A group is correctable only if none of its members is listed as uncorrectable.
-Coil sets of the run without a tolerance block contribute their nominal overlap only.
+amplitudes. A group's tilt given in metres is converted through `tilt_lever_arm_m` when the
+group has one (a reference structure's lever arm is its own, not any member coil's radius), and
+otherwise through the members' common major radius. A group is correctable only if none of its
+members is listed as uncorrectable. Coil sets of the run without a tolerance block contribute
+their as-designed overlap only. A coil's `current_factor` scales its as-designed overlap and its
+sensitivities together, since the field is linear in current: `0` switches a coil off, `0.5` runs
+it at half current, a negative value reverses it; this is the knob for a risk against the current
+in an uncorrectable coil.
 
 Every key is checked against the schema, so a misspelled key is an error rather than a silent
-default. `read_tolerance_toml` parses a file into a `ToleranceSet`, and `validate_tolerances`
-checks its names against a run's coil sets.
+default. `read_tolerance_toml` parses a file into a `ToleranceSet`, `validate_tolerances`
+checks its names against a run's coil sets, and `update` copies a set, a coil, a group or the
+unattributed budget with named fields replaced, which is how a programmatic scan over a
+quantity the file fixes (a sigma, a budget, a current factor) is written:
+
+```julia
+ts = EF.read_tolerance_snapshot("gpec.h5")
+half = EF.update(ts; coils=[c.name == "F6A" ? EF.update(c; current_factor=0.5) : c for c in ts.coils])
+tight = EF.update(ts; other_field=EF.update(ts.other_field; magnitude=1e-5))
+```
 
 ## Sampling a tolerance
 
@@ -177,7 +193,18 @@ nbins = 300                     # Histogram bins, linear on [0, delta_max]
 delta_max = 0.0                 # Upper histogram edge; 0 = 1.5 × the worst-case alignment bound
 tolerance_scale = 1.0           # Multiplies every shift and tilt tolerance (for tolerance scans)
 coil_subset = []                # Coil sets whose tolerances are sampled; empty = all
+scale_subset = []               # Coil sets and groups that tolerance_scale applies to; the rest hold their tolerance (empty = all)
+scale_map = {}                  # Extra multiplier per coil set or group name, e.g. {F6A = 2.0}
 ```
+
+`coil_subset` and `scale_subset` answer different questions. `coil_subset` samples only the
+named coils and gives every other coil zero tolerance, which isolates one coil's contribution.
+`scale_subset` applies `tolerance_scale` to the named coils and groups and leaves every other
+name at its own tolerance, which is the product question of a design review: how far can the
+tolerance of one class of coils be relaxed while the rest of the machine holds its own? Names
+in either that are not coil sets of the run or groups of the tolerance file are errors. Neither
+changes which random numbers are drawn, so runs with the same seed differ only through the
+tolerances they scale.
 
 The run's histogram is the full-window, dominant-mode summary. Any other window or mode, a
 tolerance scale, or a coil subset is a post-hoc re-run of the same kernel:
@@ -242,6 +269,24 @@ EF.allowable_tolerance(scan, 1.0; corrected=true)  # with error-field correction
 risk = EF.locking_risk("gpec.h5"; n_e=5.0, psi_low=0.7, risk_ctrl=EF.RiskControl(; dataset="O,L,H"))
 risk26 = EF.locking_risk("gpec.h5"; n_e=5.0, risk_ctrl=EF.RiskControl(; year=2026, fit="OLS"))
 scan2 = EF.tolerance_scan("gpec.h5"; n_e=5.0, scales=[0.5, 1, 2, 4], coil_subset=["F6A", "F7A"])
+scan3 = EF.tolerance_scan("gpec.h5"; n_e=5.0, scales=[0.5, 1, 2, 4], scale_subset=["F6A", "F7A"])  # scan the outboard pair, hold the rest
+```
+
+A threshold scaling is fitted for one toroidal mode number, so the in-run risk and every
+file-path entry point refuse a run that spans several (`single_toroidal_mode`); project onto one
+n's coupling first.
+
+A number quoted at the target risk level should be shown free of sampling and binning bias.
+`risk_convergence` repeats the Monte Carlo over a list of sample counts and a list of bin
+counts, holding the other at its control value, and returns the locking probability with its
+batch spread for each: the spread must fall as `1/√nsample`, and the value must not move with
+`nbins` by more than the spread. The spread alone cannot see a binning bias, which is why the bin
+sweep is there.
+
+```julia
+conv = EF.risk_convergence(table, ts, coil_sets, sc, scen; nsamples=[10^5, 10^6, 10^7], nbins_list=[100, 300, 3000])
+conv.locking_probability_percent_by_nsample, conv.locking_probability_spread_percent_by_nsample
+conv.locking_probability_percent_by_nbins
 ```
 
 ## Plots and coil-array phasing

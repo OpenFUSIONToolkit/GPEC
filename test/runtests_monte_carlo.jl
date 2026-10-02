@@ -155,6 +155,51 @@ using LinearAlgebra
             abs.(none.abs_delta_bin_edges[findall(>(0), none.abs_delta_pdf)] .- res.abs_delta_total_as_designed) .<
             5e-5 + 2 * (none.abs_delta_bin_edges[2] - none.abs_delta_bin_edges[1])
         )
+
+        # Scan controls. Multipliers of one change nothing, bit for bit; scale_subset holds the
+        # unnamed coils at their own tolerance where coil_subset zeroes them; names the run does
+        # not know are errors.
+        same_ctrl = (f => getfield(ctrl, f) for f in fieldnames(EF.MonteCarloControl))
+        unit_map = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; same_ctrl..., scale_map=Dict("c1" => 1.0, "c3" => 1.0)))
+        @test unit_map.abs_delta_pdf == res.abs_delta_pdf && unit_map.abs_delta_efc_pdf == res.abs_delta_efc_pdf
+        all_sub = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; same_ctrl..., scale_subset=names))
+        @test all_sub.abs_delta_pdf == res.abs_delta_pdf
+        terms = EF.worst_case_terms(table, ts, hoops(names))
+        held = EF.worst_case_terms(table, ts, hoops(names); tolerance_scale=3.0, scale_subset=["c1"])
+        @test held.abs_delta_shift_tolerance[2:3] == terms.abs_delta_shift_tolerance[2:3]
+        @test held.abs_delta_tilt_tolerance[2:3] == terms.abs_delta_tilt_tolerance[2:3]
+        @test held.abs_delta_shift_tolerance[1] > terms.abs_delta_shift_tolerance[1]
+        @test held.abs_delta_worst_case < EF.worst_case_terms(table, ts, hoops(names); tolerance_scale=3.0).abs_delta_worst_case
+        mapped = EF.worst_case_terms(table, ts, hoops(names); scale_map=Dict("c2" => 2.0))
+        @test mapped.abs_delta_shift_tolerance[2] ≈ 2 * terms.abs_delta_shift_tolerance[2]   # c2 carries no placement uncertainty
+        @test mapped.abs_delta_tilt_tolerance[2] ≈ 2 * terms.abs_delta_tilt_tolerance[2]
+        @test mapped.abs_delta_shift_tolerance[[1, 3]] == terms.abs_delta_shift_tolerance[[1, 3]]
+        # A zero multiplier on c2 draws the same numbers as leaving c2 out of coil_subset (c2 has no sigma).
+        zero_c2 = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=50_000, nbatch=1, seed=11, nbins=200, scale_map=Dict("c2" => 0.0)))
+        without_c2 = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=50_000, nbatch=1, seed=11, nbins=200, coil_subset=["c1", "c3"]))
+        @test zero_c2.abs_delta_pdf == without_c2.abs_delta_pdf
+        @test_throws ArgumentError EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=10, nbatch=1, scale_subset=["zzz"]))
+        @test_throws ArgumentError EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=10, nbatch=1, scale_map=Dict("zzz" => 1.0)))
+        @test_throws ArgumentError EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=10, nbatch=1, scale_map=Dict("c1" => -1.0)))
+
+        # Current factors scale a coil's as-designed overlap and its sensitivities together and
+        # leave the unattributed budget alone; factors of one return the table itself.
+        @test EF.apply_current_factors(table, ts) === table
+        half = EF.update(ts; coils=[EF.update(c; current_factor=0.5) for c in ts.coils])
+        t_half = EF.worst_case_terms(table, half, hoops(names))
+        @test t_half.abs_delta_as_designed ≈ terms.abs_delta_as_designed ./ 2
+        @test t_half.abs_delta_shift_tolerance ≈ terms.abs_delta_shift_tolerance ./ 2
+        @test t_half.abs_delta_tilt_tolerance ≈ terms.abs_delta_tilt_tolerance ./ 2
+        @test t_half.abs_delta_unattributed == terms.abs_delta_unattributed
+        mc_half = EF.run_monte_carlo(table, half, hoops(names), ctrl)
+        @test mc_half.abs_delta_total_as_designed ≈ res.abs_delta_total_as_designed / 2
+        @test mc_half.abs_delta_worst_case ≈ (res.abs_delta_worst_case - terms.abs_delta_unattributed) / 2 + terms.abs_delta_unattributed
+        off = EF.update(ts; coils=[c.name == "c2" ? EF.update(c; current_factor=0.0) : c for c in ts.coils])
+        t_off = EF.worst_case_terms(table, off, hoops(names))
+        @test t_off.abs_delta_as_designed[2] == 0 && t_off.abs_delta_shift_tolerance[2] == 0
+        @test t_off.abs_delta_as_designed[[1, 3]] == terms.abs_delta_as_designed[[1, 3]]
+        reversed = EF.update(ts; coils=[EF.update(c; current_factor=-1.0) for c in ts.coils])
+        @test EF.run_monte_carlo(table, reversed, hoops(names), ctrl).abs_delta_total_as_designed == res.abs_delta_total_as_designed
     end
 
     @testset "coherent group tilt in metres needs one radius to mean one angle" begin
@@ -202,6 +247,20 @@ using LinearAlgebra
             rotation_center_z_m = 0.0
             """)
         @test EF.group_tilt_deg(only(in_deg.groups), by_name) == 0.25
+        # A lever arm names the angle without any member's radius, so unequal radii are accepted.
+        with_arm = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "differ"
+            members = ["a", "b"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.01
+            tilt_units = "m"
+            rotation_center_z_m = 0.0
+            tilt_lever_arm_m = 4.0
+            """)
+        @test EF.group_tilt_deg(only(with_arm.groups), by_name) ≈ rad2deg(asin(0.01 / 4.0))
+        @test_throws ArgumentError EF.group_tilt_deg(EF.update(only(with_arm.groups); tilt_lever_arm_m=NaN), by_name)
+        @test EF.group_tilt_deg(EF.update(only(with_arm.groups); tilt_units="deg", tilt_tol=0.3), by_name) == 0.3
     end
 
     @testset "coherent group: shared draw and rigid rotation" begin

@@ -1,5 +1,6 @@
 using HDF5
 using Random
+using SpecialFunctions
 using Statistics
 
 # The locking-risk model: the ITPA threshold table and its nominal value, the sampled threshold
@@ -139,7 +140,60 @@ using Statistics
         @test_throws ArgumentError EF.tolerance_scan(table, ts, sets, mc_ctrl, sharp, scen; scales=Float64[])
     end
 
+    @testset "far-tail risk against the closed form, binning and sample convergence" begin
+        # One coil with no tolerance disk and a Gaussian placement uncertainty σ: δ = S·conj(u) with
+        # u = σ·r·e^{iφ} and r ~ N(0, 1), so |δ| = |S|·σ·|r| is half-normal with scale a = |S|·σ and
+        # the locking probability against a sharp threshold t is erfc(t / (a√2)) exactly; against a
+        # Gaussian threshold it is that integrated over the threshold density. The regime is the
+        # far tail, where the risk requirement lives and where a binning bias could hide behind a
+        # small batch spread. Tolerances are in units of the batch standard error plus the bin
+        # discretization of P(lock|δ), never magic numbers.
+        S = 0.2
+        σ = 1e-3
+        a = S * σ
+        table = EF.SensitivityTable(["a"], 1, [0.0im], ComplexF64[S; -im*S; 0.0;;], zeros(ComplexF64, 3, 1), [S], [0.0], [0.0], zeros(2, 1), zeros(2, 1))
+        ts = EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\nshift_tol_mm = 0.0\nshift_sigma_mm = $(1e3 * σ)\n")
+        sets = [FT.make_pf_hoop(; radius=1.5, height=0.0, name="a")]
+        ctrl = EF.MonteCarloControl(; nsample=400_000, nbatch=10, seed=21, nbins=300)
+        mc = EF.run_monte_carlo(table, ts, sets, ctrl)
+        @test mc.abs_delta_sampled_mean ≈ a * sqrt(2 / π) rtol = 2e-2
+        exact_sharp(t) = 100 * erfc(t / (a * sqrt(2)))
+        bin = mc.abs_delta_bin_edges[2] - mc.abs_delta_bin_edges[1]
+        for k in (3.0, 4.0)
+            t = k * a
+            risk = EF.locking_risk(mc, fill(t, 100), sc, scen)
+            se = std(risk.locking_probability_batches_percent) / sqrt(ctrl.nbatch)
+            # P(lock|δ) is a step on the bin edges, so the sharp threshold is resolved to one bin.
+            @test abs(risk.locking_probability_percent - exact_sharp(t)) < 4 * se + abs(exact_sharp(t + bin) - exact_sharp(t - bin))
+        end
+        # Gaussian threshold T ~ N(4a, a/2): the expected risk is ∫ pdf_T(t) erfc(t/(a√2)) dt.
+        μ, w = 4a, a / 2
+        thr = μ .+ w .* randn(Xoshiro(5), 2_000_000)
+        tgrid = range(μ - 8w, μ + 8w; length=20_001)
+        pdf_t = exp.(-((tgrid .- μ) ./ w) .^ 2 ./ 2) ./ (w * sqrt(2π))
+        expected = sum(pdf_t .* exact_sharp.(max.(tgrid, 0.0))) * step(tgrid)
+        risk_g = EF.locking_risk(mc, thr, sc, scen)
+        se_g = std(risk_g.locking_probability_batches_percent) / sqrt(ctrl.nbatch)
+        @test abs(risk_g.locking_probability_percent - expected) < 4 * se_g + 0.05 * expected
+        # Binning and sampling: 300 against 3000 bins agree within the batch spread, the value stays
+        # at the closed form at every sample count, and the spread falls as 1/√N.
+        sharp = EF.ThresholdScaling(1, 0, "test", "sharp", (log10(3a), 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0))
+        conv = EF.risk_convergence(table, ts, sets, sharp, scen; nsamples=[25_000, 100_000, 400_000], nbins_list=[300, 3000], ctrl=ctrl,
+            risk_ctrl=EF.RiskControl(; nsample_threshold=1000))
+        @test conv.nsample == [25_000, 100_000, 400_000] && conv.nbins == [300, 3000]
+        p300, p3000 = conv.locking_probability_percent_by_nbins
+        @test abs(p300 - p3000) < maximum(conv.locking_probability_spread_percent_by_nbins) + abs(exact_sharp(3a + bin) - exact_sharp(3a - bin))
+        @test all(
+            abs.(conv.locking_probability_percent_by_nsample .- exact_sharp(3a)) .<
+            conv.locking_probability_spread_percent_by_nsample .+ abs(exact_sharp(3a + bin) - exact_sharp(3a - bin))
+        )
+        s = conv.locking_probability_spread_percent_by_nsample
+        @test 2.0 < s[1] / s[3] < 8.0            # sixteen times the samples: the spread falls by about four
+    end
+
     @testset "a threshold scaling describes one toroidal mode number" begin
+        @test EF.single_toroidal_mode(2, 2) == 2
+        @test_throws ArgumentError EF.single_toroidal_mode(1, 3; where="a multi-n run")
         # The ITPA fits are per n, but a dominant mode spans every n the run carried. Silently
         # taking the lowest would apply an n = 1 threshold to a partly n = 2 mode.
         mktempdir() do dir
