@@ -306,6 +306,39 @@ include("h5_metadata_check.jl")
             @test isfile(joinpath(dir, "linearity_check.png"))
             @test AEF.plot_linearity_residuals(h5path; at=:step, yscale=:log10) isa Plots.Plot
             @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; yscale=:bogus)
+
+            # The correction requirement. An array identical to the source needs exactly −1 of its
+            # current and the joint least squares leaves nothing; a second, differently tilted hoop
+            # alone cancels the dominant mode and leaves no more on any surface than the least squares
+            # does; with both arrays the least squares finds the exact cancellation.
+            src = only(o for o in ovs_plot if o.coil_name == "hoop_tilted")
+            self_req = EF.correction_requirement(ctx_plot, src, [src])
+            @test self_req.current_factor_dominant ≈ [-1.0 + 0im] atol = 1e-10
+            @test self_req.current_factor_least_squares ≈ [-1.0 + 0im] atol = 1e-10
+            @test norm(self_req.resonant_field_least_squares_t) < 1e-10 * norm(self_req.resonant_field_source_t)
+            @test self_req.resonant_field_source_t ≈ ctx_plot.rc.C * src.spectrum
+            @test self_req.cosine_similarity ≈ [1.0] && self_req.rational_psi == ctx_plot.rc.rational_psi
+            cfg_y = FT.CoilConfig(; machine=ctx_plot.cfg.machine, dat_dir=ctx_plot.cfg.dat_dir, mtheta_coil=ctx_plot.cfg.mtheta_coil, nzeta_coil=ctx_plot.cfg.nzeta_coil,
+                coil_sets=[FT.CoilSetConfig(; name="hoop_y", source="pf_hoop", radius=1.6, height=-0.3, currents=[2.0e3], tilty=[3.0])])
+            arr_y = only(EF.coil_overlaps(ctx_plot, FT.load_coil_sets(cfg_y, 1; equil=ctx_plot.equil)))
+            one = EF.correction_requirement(ctx_plot, src, [arr_y])
+            @test abs(src.delta + one.current_factor_dominant[1] * arr_y.delta) < 1e-12 * abs(src.delta)
+            @test norm(one.resonant_field_least_squares_t) <= norm(one.resonant_field_dominant_t[:, 1]) + 1e-15
+            @test norm(one.resonant_field_least_squares_t) <= norm(one.resonant_field_source_t)
+            two = EF.correction_requirement(ctx_plot, src, [src, arr_y])
+            @test norm(two.resonant_field_least_squares_t) < 1e-8 * norm(two.resonant_field_source_t)
+            @test two.current_factor_least_squares ≈ [-1.0, 0.0] atol = 1e-6
+            @test_throws ArgumentError EF.correction_requirement(ctx_plot, src, EF.CoilOverlap[])
+            from_file = EF.correction_requirement(h5path, "hoop_tilted", ["hoop_tilted"])
+            @test from_file.current_factor_dominant ≈ self_req.current_factor_dominant atol = 1e-10
+            @test_throws ArgumentError EF.correction_requirement(h5path, "hoop_tilted", ["no_such"])
+            @test AEF.plot_correction_requirement(two; save_path=joinpath(dir, "requirement.png")) isa Plots.Plot
+            @test isfile(joinpath(dir, "requirement.png"))
+            # The needed-current distribution is the |δ| histogram rescaled by the array's overlap.
+            nd = EF.needed_current_distribution(mc, src)
+            @test sum(nd.current_factor_pdf .* diff(nd.current_factor_bin_edges)) ≈ 1 atol = 1e-6
+            @test nd.current_factor_bin_edges[end] ≈ mc.abs_delta_bin_edges[end] / abs(src.delta)
+            @test AEF.plot_needed_current(mc, src) isa Plots.Plot
             @test all(
                 isnan(a) ? isnan(b) : isapprox(a, b; rtol=1e-8) for (a, b) in zip(AEF._sensitivity_values("ovs", AEF._load(ovs_plot), sens.coil_names, :fraction), fraction_drawn)
             )
@@ -434,6 +467,18 @@ include("h5_metadata_check.jl")
                 @test isempty(_collect_metadata_violations(f))
             end
             curve = EF.efc_current_curve(c; delta_threshold=risk.threshold_fit, torque_budget=1.0)
+            # The exceedance of the NTV-limited correctable overlap is the histogram's mass beyond it.
+            unc = EF.uncorrectable_probability(mc, c; delta_threshold=risk.threshold_fit, torque_budget=1.0)
+            @test unc.abs_delta_max_correctable == EF.max_correctable_overlap(c; delta_threshold=risk.threshold_fit, torque_budget=1.0).with_ntv
+            @test 0 <= unc.probability_percent <= 100
+            mass_beyond =
+                100 * sum(
+                    mc.abs_delta_pdf[i] * max(0.0, mc.abs_delta_bin_edges[i+1] - max(mc.abs_delta_bin_edges[i], unc.abs_delta_max_correctable)) for i in eachindex(mc.abs_delta_pdf)
+                )
+            @test unc.probability_percent ≈ clamp(mass_beyond, 0, 100) rtol = 1e-10
+            @test EF.uncorrectable_probability(mc, c; delta_threshold=1e3 * mc.abs_delta_bin_edges[end], torque_budget=1.0).probability_percent == 0
+            @test AEF.plot_needed_current(mc, src; coupling=c, delta_threshold=risk.threshold_fit, torque_budget=1.0) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_needed_current(mc, src; coupling=c)
             @test length(curve.delta_ef) == 500 && all(curve.current_linear .>= 0)
             ntv_plot = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png"))
             @test length(ntv_plot.series_list) >= 2                        # the single-mode and NTV-limited currents

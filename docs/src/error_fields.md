@@ -379,6 +379,31 @@ AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0, profiles=true)   # adds T(
 The torque budget is the plasma's intrinsic torque. The SPARC paper uses 4 N·m for SPARC and the
 ARC paper 5–20 N·m for ARC; pick a value for the machine being analysed.
 
+### Designing the correction
+
+The NTV limits say how much correction current an array *may* carry; `correction_requirement`
+says how much it *needs*, and on which surfaces the correction falls short. For one array the
+dominant-mode answer is the ratio `−δ_source/δ_array`; the question worth a function is the joint
+one over every rational surface: the complex factors on all arrays that minimize the resonant
+field `C·(b̃_source + Σ_k f_k b̃_k)` in the least-squares sense, the field left on each surface
+after that and after each array's dominant-mode correction alone, and how much of the source's
+spectrum each array can see. Factors are multiples of each array's current as given. Any
+`CoilOverlap` can be a source or an array, so an as-built assembly (`combine_overlaps`) can be
+corrected with arrays that were never part of the run. Over the tolerance samples the needed
+current is a distribution, and `uncorrectable_probability` is the fraction of the Monte Carlo's
+overlap beyond what the NTV-limited array can correct at all: the explicit-correction counterpart
+of the corrected locking probability's `efc_factor` model.
+
+```julia
+req = EF.correction_requirement("gpec.h5", "F_coils_as_built", ["d3d_c", "iu", "il"])
+req.current_factor_least_squares, req.current_factor_dominant
+abs.(req.resonant_field_least_squares_t) ./ abs.(req.resonant_field_source_t)   # what is left, per surface
+AEF.plot_correction_requirement(req)
+mc = EF.MonteCarloResult("gpec.h5"); c = EF.read_efc_couplings("gpec.h5")[1]
+EF.uncorrectable_probability(mc, c; delta_threshold=1.4e-4, torque_budget=4.0)
+AEF.plot_needed_current(mc, array; coupling=c, delta_threshold=1.4e-4, torque_budget=4.0)
+```
+
 ## Analysis after the run
 
 Window the coupling to any range of rational surfaces and project onto any singular mode

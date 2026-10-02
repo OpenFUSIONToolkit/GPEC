@@ -901,6 +901,73 @@ function plot_efc_ntv_limits(h5path::AbstractString; torque_budget::Real, delta_
 end
 
 """
+    plot_correction_requirement(req::EF.CorrectionRequirement; save_path=nothing)
+    plot_correction_requirement(h5path, source_name, array_names; save_path=nothing, kwargs...)
+
+Two panels of a `ErrorFields.correction_requirement`: the resonant field on each rational
+surface before correction, after each array's dominant-mode correction alone and after the joint
+least-squares correction, as stems on a logarithmic axis against the surface's ψ_N; and the complex
+current factors each array needs, magnitude as bars with the toroidal phase printed, dominant-mode
+and least-squares side by side. A factor far from the dominant-mode one, or a surface left with
+most of its field, says the single-mode picture of the correction is not the whole story.
+"""
+function plot_correction_requirement(req::EF.CorrectionRequirement; save_path=nothing)
+    n = length(req.rational_psi)
+    labels = ["$(m)/$(nn)\nψ=$(round(x; digits=3))" for (m, nn, x) in zip(req.rational_m, req.rational_n, req.rational_psi)]
+    # One slot per surface in ψ order rather than a position at ψ itself, so neighbouring edge surfaces do not overprint.
+    p = plot(; xlabel="rational surface (m/n, ψ_N)", ylabel="|resonant field| [T]", title="Resonant field per surface: $(req.source_name) and its correction",
+        xticks=(1:n, labels), legend=:outerright, size=(1000, 520), left_margin=12Plots.mm, bottom_margin=12Plots.mm, titlefontsize=12)
+    vals = vcat(abs.(req.resonant_field_source_t), vec(abs.(req.resonant_field_dominant_t)), abs.(req.resonant_field_least_squares_t))
+    ylo = _log_floor!(p, vals)
+    ylo === nothing && return _empty("No finite resonant field to draw")
+    k = length(req.array_names)
+    width = 0.8 / (k + 2)
+    offsets = ((1:(k+2)) .- (k + 3) / 2) .* width
+    _stems!(p, (1:n) .+ offsets[1], abs.(req.resonant_field_source_t), ylo; c=:black, label="source as built", marker=:circle, ms=6, lw=3)
+    for (j, nm) in enumerate(req.array_names)
+        _stems!(p, (1:n) .+ offsets[j+1], abs.(req.resonant_field_dominant_t[:, j]), ylo; c=j, label="after $nm, dominant mode only", marker=:diamond, ms=5, lw=2)
+    end
+    _stems!(p, (1:n) .+ offsets[end], abs.(req.resonant_field_least_squares_t), ylo; c=:red, label="after joint least squares", marker=:star5, ms=7, lw=2)
+    q = plot(; xlabel="correction array", ylabel="|current factor| (× the array's current as given)", title="Needed current factors", xticks=(1:k, req.array_names), xrotation=30,
+        legend=:topright, left_margin=12Plots.mm, bottom_margin=10Plots.mm, titlefontsize=12)
+    for (j, (f, lbl, col)) in enumerate(((req.current_factor_dominant, "dominant mode only", :gray50), (req.current_factor_least_squares, "joint least squares", :red)))
+        x = (1:k) .+ (j - 1.5) * 0.35
+        bar!(q, x, abs.(f); bar_width=0.35, c=col, label=lbl, alpha=0.85)
+        for (i, v) in enumerate(f)
+            isfinite(v) && annotate!(q, x[i], abs(v), text("$(round(rad2deg(angle(v)); digits=0))°", 7, :bottom))
+        end
+    end
+    return _save(plot(p, q; layout=(1, 2), size=(1500, 520)), save_path)
+end
+plot_correction_requirement(h5path::AbstractString, source_name::AbstractString, array_names; save_path=nothing, kwargs...) =
+    plot_correction_requirement(EF.correction_requirement(h5path, source_name, array_names; kwargs...); save_path)
+
+"""
+    plot_needed_current(mc, array::EF.CoilOverlap; coupling=nothing, delta_threshold=nothing, torque_budget=nothing, save_path=nothing)
+
+The distribution of the factor on `array`'s current that the sampled machine needs to cancel its
+dominant-mode overlap (`ErrorFields.needed_current_distribution`), with the as-designed
+factor marked and, when the array's `EFCCoupling`, the threshold and the torque budget are given,
+the NTV-limited correctable overlap as a vertical line and the fraction beyond it
+(`ErrorFields.uncorrectable_probability`) in the legend.
+"""
+function plot_needed_current(mc::EF.MonteCarloResult, array::EF.CoilOverlap; coupling=nothing, delta_threshold=nothing, torque_budget=nothing, save_path=nothing)
+    d = EF.needed_current_distribution(mc, array)
+    c = _centers(d.current_factor_bin_edges)
+    p = plot(; xlabel="needed factor on $(array.coil_name)'s current (|δ| / |δ_$(array.coil_name)|)", ylabel="probability density",
+        title="Correction current the sampled machine needs", legend=:topright, left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+    plot!(p, c, d.current_factor_pdf; lw=2, c=1, label="intrinsic |δ| over the tolerance samples")
+    vline!(p, [mc.abs_delta_total_as_designed / abs(array.delta)]; ls=:dot, c=:black, label="as designed")
+    if coupling !== nothing
+        (delta_threshold === nothing || torque_budget === nothing) && throw(ArgumentError("give delta_threshold and torque_budget with the coupling"))
+        u = EF.uncorrectable_probability(mc, coupling; delta_threshold, torque_budget)
+        isfinite(u.abs_delta_max_correctable) && vline!(p, [u.abs_delta_max_correctable / abs(array.delta)]; ls=:dash, c=:red, lw=2,
+            label="NTV-limited correctable overlap ($(u.model)); $(round(u.probability_percent; sigdigits=2)) % of samples beyond")
+    end
+    return _save(p, save_path)
+end
+
+"""
     plot_error_field_summary(h5path; save_path=nothing)
 
 Four panels of a run's error-field assessment: coil sensitivities to shift, the tolerance
