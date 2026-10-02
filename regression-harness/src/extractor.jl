@@ -112,6 +112,19 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         json_str = JSON.json(pairs; allownan=true)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
+    elseif startswith(spec.extract, "toml_key:")
+        # Pin a deck's declared control value from the Input/ snapshot; an unset key pins as
+        # "<unset>" so starting or stopping to declare it is itself a change.
+        keypath = spec.extract[(length("toml_key:")+1):end]
+        table = TOML.parse(raw isa AbstractString ? raw : String(raw))
+        node = table
+        for key in split(keypath, ".")
+            node = (node isa AbstractDict && haskey(node, key)) ? node[key] : nothing
+            node === nothing && break
+        end
+        token = node === nothing ? "<unset>" : string(node)
+        return ExtractedQuantity(name, label, nothing, nothing, token, "token", threshold)
+
     elseif spec.extract == "checksum"
         bytes = reinterpret(UInt8, vec(collect(raw)))
         hash = bytes2hex(sha256(bytes))
@@ -132,6 +145,7 @@ function _json_element_diff(a, b)::Float64
         (isnan(Float64(a)) && isnan(Float64(b))) && return 0.0
         return abs(Float64(a) - Float64(b))
     elseif a isa Vector && b isa Vector
+        length(a) == length(b) || return Inf
         return sqrt(sum(_json_element_diff(ai, bi)^2 for (ai, bi) in zip(a, b)))
     else
         return Inf
@@ -218,7 +232,7 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         status = max_diff <= threshold ? "OK" : "CHANGED"
         return (max_diff, rel_diff, status)
 
-    elseif vtype == "checksum"
+    elseif vtype == "checksum" || vtype == "token"
         t1 = q1.value_text
         t2 = q2.value_text
         if t1 === nothing || t2 === nothing

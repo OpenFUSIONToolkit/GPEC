@@ -14,6 +14,9 @@ function load_case(filepath::String)::CaseSpec
     quantities = QuantitySpec[]
     if haskey(data, "quantities")
         for (qty_name, qty_data) in data["quantities"]
+            # Every quantity declares its golden tolerance class; there is no inference from its name.
+            haskey(qty_data, "class") || error("$filepath: quantity '$qty_name' has no `class`; declare one of $(join(TOLERANCE_CLASSES, ", "))")
+            qty_data["class"] in TOLERANCE_CLASSES || error("$filepath: quantity '$qty_name' has unknown class '$(qty_data["class"])'")
             push!(
                 quantities,
                 QuantitySpec(
@@ -23,7 +26,8 @@ function load_case(filepath::String)::CaseSpec
                     qty_data["extract"],
                     get(qty_data, "label", qty_name),
                     get(qty_data, "noise_threshold", 1e-10),
-                    get(qty_data, "order", 1000)
+                    get(qty_data, "order", 1000),
+                    qty_data["class"]
                 )
             )
         end

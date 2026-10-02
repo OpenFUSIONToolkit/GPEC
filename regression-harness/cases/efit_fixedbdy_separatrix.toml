@@ -19,6 +19,7 @@ extract = "value"
 label = "psio (total poloidal flux)"
 noise_threshold = 1e-12
 order = 10
+class = "equilibrium_scalar"
 
 [quantities.q0]
 h5path = "Equilibrium/q_axis"
@@ -27,6 +28,7 @@ extract = "value"
 label = "q0"
 noise_threshold = 1e-12
 order = 11
+class = "equilibrium_scalar"
 
 [quantities.q95]
 h5path = "Equilibrium/q_95"
@@ -35,6 +37,7 @@ extract = "value"
 label = "q95"
 noise_threshold = 1e-12
 order = 12
+class = "equilibrium_scalar"
 
 [quantities.betat]
 h5path = "Equilibrium/beta_t"
@@ -43,6 +46,7 @@ extract = "value"
 label = "beta_t"
 noise_threshold = 1e-12
 order = 13
+class = "equilibrium_scalar"
 
 [quantities.betan]
 h5path = "Equilibrium/beta_N"
@@ -51,6 +55,7 @@ extract = "value"
 label = "beta_n"
 noise_threshold = 1e-12
 order = 14
+class = "equilibrium_scalar"
 
 [quantities.runtime]
 h5path = ""
@@ -59,3 +64,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 90
+class = "diagnostic"

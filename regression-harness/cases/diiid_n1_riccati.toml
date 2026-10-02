@@ -10,23 +10,38 @@ name = "diiid_n1_riccati"
 description = "DIII-D-like equilibrium, n=1, Riccati integrator Δ' matrix"
 example_dir = "examples/DIIID-like_riccati_deltaprime_example"
 
+# Which formalism produced the Δ′ below. The Δ′ matrix is written to one canonical
+# SingularSurfaces/ path whichever integrator computed it, so the numbers alone cannot say
+# whether a gold pinned from the BVP is being compared against a Galerkin run. Pinning the
+# deck's declared choice makes a formalism swap a loud failure instead of a silent re-gold.
+[quantities.integrator]
+h5path = "Input/gpec_toml_raw"
+type = "token"
+extract = "toml_key:ForceFreeStates.integrator"
+label = "integrator (Δ′ provenance)"
+noise_threshold = 0
+order = 1
+class = "topological"
+
 # Tearing stability Δ' — the msing×msing BVP matrix diagonal, and the raw side-major
 # outer-region matrix it is projected from.
 [quantities.delta_prime]
 h5path = "SingularSurfaces/Delta_prime_matrix"
 type = "complex_matrix"
 extract = "diagonal_complex"
-label = "delta prime (BVP diagonal)"
+label = "Δ′ STRIDE-like BVP (PEST3) diagonal"
 noise_threshold = 1e-8
 order = 10
+class = "physics_converged"
 
 [quantities.delta_prime_raw]
 h5path = "SingularSurfaces/Delta_prime_raw"
 type = "complex_matrix"
 extract = "all_complex"
-label = "delta prime (raw side-major)"
+label = "Δ′ STRIDE-like BVP (PEST3) raw side-major"
 noise_threshold = 1e-8
 order = 11
+class = "physics_converged"
 
 [quantities.delta_coil]
 h5path = "SingularSurfaces/Delta_coil"
@@ -35,6 +50,7 @@ extract = "all_complex"
 label = "edge coil response delta_coil"
 noise_threshold = 1e-8
 order = 12
+class = "physics_converged"
 
 # Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
 [quantities.et_real]
@@ -44,6 +60,7 @@ extract = "real_first"
 label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 [quantities.ep_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
@@ -52,6 +69,7 @@ extract = "real_first"
 label = "plasma energy Re(ep[1])"
 noise_threshold = 1e-10
 order = 21
+class = "physics_converged"
 
 [quantities.ev_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
@@ -60,6 +78,7 @@ extract = "real_first"
 label = "vacuum energy Re(ev[1])"
 noise_threshold = 1e-10
 order = 22
+class = "physics_converged"
 
 [quantities.et_all]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -68,6 +87,7 @@ extract = "all_complex"
 label = "total energy (all)"
 noise_threshold = 1e-10
 order = 23
+class = "physics_converged"
 
 # Singular surfaces — the Δ' matrix is indexed by these, so a shift here explains a Δ' shift.
 [quantities.msing]
@@ -77,6 +97,7 @@ extract = "value"
 label = "# singular surfaces"
 noise_threshold = 0
 order = 30
+class = "topological"
 
 [quantities.sing_psi]
 h5path = "SingularSurfaces/rational_psi"
@@ -85,6 +106,7 @@ extract = "all_real"
 label = "singular psi locations"
 noise_threshold = 1e-8
 order = 31
+class = "physics_converged"
 
 [quantities.sing_q]
 h5path = "SingularSurfaces/rational_q"
@@ -93,6 +115,7 @@ extract = "all_real"
 label = "singular q values"
 noise_threshold = 1e-8
 order = 32
+class = "physics_converged"
 
 # Integration — chunk-endpoint step counts move when the chunk sizing changes.
 [quantities.nstep]
@@ -102,6 +125,7 @@ extract = "value"
 label = "ODE steps (saved)"
 noise_threshold = 0
 order = 40
+class = "diagnostic"
 
 [quantities.nstep_total]
 h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
@@ -110,6 +134,7 @@ extract = "value"
 label = "ODE steps (total)"
 noise_threshold = 0
 order = 41
+class = "diagnostic"
 
 # Mode numbers
 [quantities.mpert]
@@ -119,6 +144,7 @@ extract = "value"
 label = "mpert"
 noise_threshold = 0
 order = 50
+class = "topological"
 
 [quantities.npert]
 h5path = "Info/npert"
@@ -127,6 +153,7 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 order = 51
+class = "topological"
 
 # Equilibrium — shared with diiid_n1; confirms the two cases sit on the same equilibrium.
 [quantities.q0]
@@ -136,6 +163,7 @@ extract = "value"
 label = "q0"
 noise_threshold = 1e-12
 order = 60
+class = "equilibrium_scalar"
 
 [quantities.q95]
 h5path = "Equilibrium/q_95"
@@ -144,6 +172,7 @@ extract = "value"
 label = "q95"
 noise_threshold = 1e-12
 order = 61
+class = "equilibrium_scalar"
 
 [quantities.betan]
 h5path = "Equilibrium/beta_N"
@@ -152,6 +181,7 @@ extract = "value"
 label = "beta_n"
 noise_threshold = 1e-12
 order = 62
+class = "equilibrium_scalar"
 
 # Runtime
 [quantities.runtime]
@@ -161,3 +191,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"
