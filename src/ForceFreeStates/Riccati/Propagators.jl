@@ -212,10 +212,6 @@ function riccati_integrator_callback!(integrator)
 
     odet.total_steps += 1  # count every accepted solver step (saved or not), as segment_callback! does
 
-    # Same tolerances as integrate_el_region!: unified reltol, per-column abstol
-    integrator.opts.reltol = ctrl.eulerlagrange_tolerance
-    column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
-
     # Renormalize when norms exceed ucrit (analogous to Gaussian reduction in integrator_callback!)
     # During sing_der! integration: u[:,:,1]=U₁ (grows), u[:,:,2]=U₂ (grows).
     # Renorm computes S = U₁·U₂⁻¹ and resets U₂ = I, keeping inputs bounded.
@@ -223,6 +219,10 @@ function riccati_integrator_callback!(integrator)
        maximum(abs, @view(integrator.u[:, :, 2])) > ctrl.ucrit
         renormalize_riccati_inplace!(integrator.u, intr.numpert_total)
     end
+
+    # Same tolerances as integrate_el_region!, refreshed after any renorm so they match the state.
+    integrator.opts.reltol = ctrl.eulerlagrange_tolerance
+    column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
 
     # Determine if we should save this step. Always save the first 1-2 steps of a segment
     # and the last few steps near the right endpoint (relative band SAVE_NEAR_END_FRAC of the
@@ -430,8 +430,6 @@ function integrate_fm_with_ua_ic(
     u0 = zeros(ComplexF64, N, N, 2)
     u0[:, :, 1] .= ua[:, 1:N, 1]
     u0[:, :, 2] .= ua[:, 1:N, 2]
-    # Per-column absolute tolerance so a batch's largest column cannot set the error floor of its smallest:
-    # otherwise the resonant small-solution column inherits an absolute error set by the big solution's magnitude.
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
