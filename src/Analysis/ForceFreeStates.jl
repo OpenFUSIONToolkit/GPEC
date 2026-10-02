@@ -378,7 +378,7 @@ pressure gradient α (solid) and the first stability boundary α_crit (dashed) v
 normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
 are ballooning-unstable. Reads `LocalStability/ballooning_psi`, `LocalStability/alpha`, and
 `LocalStability/alpha_critical` (populated when ForceFreeStates runs with
-`local_stability_flag = true`).
+`local_stability_flag = true` and `alpha_boundary_scan = true`).
 
 ### Arguments
 
@@ -400,7 +400,7 @@ function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
         read(fid["LocalStability/ballooning_psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
     end
 
-    isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
+    isempty(alpha) && return plot(; title="No α-boundary data (set local_stability_flag and alpha_boundary_scan)", legend=false)
 
     p = plot(;
         xlims=(psi_min, 1),
