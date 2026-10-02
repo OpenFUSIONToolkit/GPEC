@@ -93,6 +93,60 @@ end
         @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
     end
 
+    @testset "truncate_integration! drops every trace of the old edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+            GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
+            GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+
+        mpert = 2
+        intr = F.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        intr.sing = [F.SingType(; psifac=p, q=q, m=[m], n=[1]) for (p, q, m) in ((0.30, 2.0, 2), (0.60, 3.0, 3), (0.90, 4.0, 4))]
+        intr.msing = 3
+        odet = F.OdeState(mpert, 10, 5, 3)
+        odet.step = 7
+        odet.psi_store[1:7] = [0.10, 0.25, 0.40, 0.55, 0.75, 0.85, 0.95]
+        odet.q_store[1:7] = 1 .+ odet.psi_store[1:7]
+        for i in 1:7
+            odet.u_store[:, :, 1, i] = ComplexF64[i 0; 0 i]
+            odet.u_store[:, :, 2, i] = ComplexF64[i+0.1 0; 0 i+0.1]
+        end
+        # Two fixups; the second lies past the new edge and is a singular-surface crossing with a zeroed column.
+        odet.ifix = 2
+        odet.fixstep[1:2] = [3, 6]
+        odet.sing_flag[1:2] = [false, true]
+        odet.zeroed_idx[1], odet.zeroed_idx[2] = Int[], [1]
+        for ifix in 1:2
+            odet.fixfac[:, :, ifix] = ComplexF64[1 0.5; 0 1]
+            odet.index[:, ifix] = [1, 2]
+        end
+
+        F.truncate_integration!(odet, intr, equil, 5)
+        @test odet.ifix == 1
+        @test intr.psilim == 0.75 && intr.msing == 2 && size(odet.ca_l, 4) == 2 && size(odet.ca_r, 4) == 2
+        @test intr.q1lim ≈ equil.profiles.q_deriv(0.75)
+
+        edge = copy(odet.u_store[:, :, 1, end])
+        F.transform_u!(odet, intr)
+        @test odet.u_store[:, :, 1, end] ≈ edge && rank(odet.u_store[:, :, 1, end]) == mpert  # rank-deficient before the fix
+    end
+
+    @testset "truncate_chunks! cuts the Riccati chunks back to the edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
+        chunks() = [F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0)
+                    for (i, (a, b)) in enumerate(((0.10, 0.29), (0.31, 0.59), (0.61, 0.89), (0.91, 0.99)))]
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.75, 2) == 3  # straddling chunk shortened, so re-integrate it
+        @test length(cs) == 3 && cs[3].psi_end == 0.75 && count(c -> c.needs_crossing, cs) == 2
+
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.89, 2) === nothing  # edge exactly at a chunk end: nothing to re-integrate
+        @test count(c -> c.needs_crossing, cs) == 2  # but its crossing onto the dropped surface is still cleared
+    end
+
     @testset "transform_u!" begin
         # Test transformation of solution vectors
         mpert = 2

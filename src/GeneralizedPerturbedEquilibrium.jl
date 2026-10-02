@@ -77,7 +77,7 @@ include("Rerun.jl")
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings
 using .ForceFreeStates: ForceFreeStatesResult, build_result
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
@@ -562,21 +562,8 @@ function prepare_force_free_states!(
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
-    # Filter out surfaces outside the integration domain [qlow, qlim].
-    # Fortran STRIDE excludes these at the integration level; we remove them
-    # from intr.sing so the Δ' BVP sees only crossable surfaces.
-    if intr.msing > 0
-        qmin_integration = max(ctrl.qlow, equil.params.qmin)
-        n_before = intr.msing
-        keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin_integration && intr.sing[j].psifac <= intr.psilim]
-        if length(keep) < n_before
-            excluded = setdiff(1:n_before, keep)
-            excluded_mq = [(intr.sing[j].m, intr.sing[j].q) for j in excluded]
-            @info "Filtered $(n_before - length(keep)) singular surface(s) outside integration domain: $(excluded_mq)"
-            intr.sing = intr.sing[keep]
-            intr.msing = length(keep)
-        end
-    end
+    # Keep only surfaces inside the integration domain [qlow, qlim], so the Δ' BVP sees only crossable ones.
+    remove_singular_surfs!(intr; qmin=max(ctrl.qlow, equil.params.qmin))
 
     # For the outer-region Galerkin solve, exclude the q < qlow core (incl. any q≤1 sawtooth
     # surfaces) by raising psilow to where q = qlow (RDCON sing_min). Without this, the gal FEM
