@@ -387,37 +387,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     odet.step -= 1
     trim_storage!(odet)
 
-    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
-    # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
-    # findmax_dW_edge! also (re)allocates odet.edge_scan; that field is the diagnostic
-    # product and is intentionally NOT restored.
-    #
-    # Default (ctrl.truncate_at_dW_peak = false): diagnostic-only. Integration domain is
-    # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
-    # location. Legacy path (true) reproduces the ode_record_edge heuristic from Fortran
-    # STRIDE — psilim/qlim/u are pulled back to the dW peak. Preserved for experimental
-    # work; see the ForceFreeStatesControl docstring for the reliability caveats.
-    if ctrl.psiedge < intr.psilim
-        saved_psifac, saved_u = odet.psifac, copy(odet.u)
-        peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
-        if ctrl.truncate_at_dW_peak
-            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
-            odet.step = peak_step
-            trim_storage!(odet)
-            intr.psilim = odet.psi_store[end]
-            intr.qlim = odet.q_store[end]
-            odet.u .= odet.u_store[:, :, :, end]
-            if verbose
-                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
-            end
-        else
-            odet.psifac = saved_psifac
-            odet.u .= saved_u
-            if verbose
-                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.3f" odet.psi_store[peak_step])),  q = $((@sprintf "%.3f" odet.q_store[peak_step])); integration domain unchanged"
-            end
-        end
-    end
+    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose)
 
     # Evaluate stability criterion (critical determinant) of saved solutions
     if verbose
@@ -1150,6 +1120,30 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
 end
 
 """
+    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose=ctrl.verbose) -> Bool
+
+Record the edge-dW scan over [psiedge, psilim] on `odet.edge_scan`. With `truncate_at_dW_peak`, the
+scan's peak becomes the plasma edge via `truncate_integration!`; otherwise the integration is left
+untouched. Returns whether it truncated.
+"""
+function scan_edge_dW!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    mats::MatrixSplines, intr::ForceFreeStatesInternal; verbose::Bool=ctrl.verbose)
+    ctrl.psiedge < intr.psilim || return false
+    saved_psifac, saved_u = odet.psifac, copy(odet.u)
+    peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
+    psi_peak, q_peak = odet.psi_store[peak_step], odet.q_store[peak_step]
+    if ctrl.truncate_at_dW_peak
+        truncate_integration!(odet, intr, equil, peak_step)
+    else
+        odet.psifac = saved_psifac
+        odet.u .= saved_u
+    end
+    verbose && @info "Edge-dW peak at ψ = $(@sprintf("%.4f", psi_peak)), q = $(@sprintf("%.3f", q_peak)); " *
+          (ctrl.truncate_at_dW_peak ? "adopted as the plasma edge" : "integration domain unchanged")
+    return ctrl.truncate_at_dW_peak
+end
+
+"""
     transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
 Constructs the transformation matrices to form the true solution vectors. Effectively
@@ -1209,10 +1203,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     jfix = 1
     for ifix in 1:(odet.ifix+1)
         # If after the last fixup, go to the end of integration.
-        # Cap kfix at odet.step: fixstep entries from fixups AFTER the peak (set during integration
-        # before trim_storage!) can exceed the trimmed storage size and must be clamped.
-        kfix = ifix != odet.ifix + 1 ? min(odet.fixstep[ifix], odet.step) : odet.step
-        jfix > odet.step && break
+        kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
             mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])

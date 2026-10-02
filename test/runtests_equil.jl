@@ -68,6 +68,13 @@
         @test all(>(0), B_nodes)
     end
 
+    @testset "Round-trip check sees inter-knot ringing" begin
+        flagged(k, m) = GeneralizedPerturbedEquilibrium.Equilibrium._roundtrip_verdict(k, m) !== :ok
+        @test !flagged(4.10e-6, 5.02e-6) && !flagged(3.57e-6, 4.19e-6)  # clean psihigh 0.995, 0.999
+        @test flagged(1.14e-5, 1.29e-3)    # 0.9999 ringing: under the tolerance, only the ratio catches it
+        @test !flagged(1.61e-4, 1.58e-4)   # smooth but coarse: ratio ~1, must not be called ringing
+    end
+
     @testset "Resolved psihigh" begin
         # The config holds the user's request and is never written to; the value the
         # equilibrium is actually formed on rides on params.psihigh_resolved.

@@ -159,11 +159,10 @@ function riccati_eulerlagrange_integration(
     _reintegrate_outer_plasma!(odet, last_crossing_step, ctrl, equil, mats, intr)
 
     chunks, propagators = _handle_edge_dW_scan!(odet, chunks, propagators, ctrl, equil, mats, intr)
+    resize!(S_at_surface_left, intr.msing)  # one per surviving surface, as the Δ' BVP requires
 
-    # compute_delta_prime_matrix! is called from the main pipeline (after free_run) so
-    # that vacuum response wv is available for the edge BC. With self-consistent truncation,
-    # the propagators/chunks returned here match intr.psilim exactly, so Δ' is well-defined
-    # for both truncate_at_dW_peak=false (full domain) and =true (peak).
+    # compute_delta_prime_matrix! runs later in the pipeline (after free_run), once the vacuum
+    # response wv for the edge BC is available.
     if ctrl.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
@@ -306,14 +305,7 @@ function _reintegrate_outer_plasma!(odet::OdeState, last_crossing_step::Int,
     # Post: odet.u is in (S, I) form; odet.step points to next empty slot.
 end
 
-# Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5. By default
-# (truncate_at_dW_peak=false) it's diagnostic-only: integration domain is unchanged.
-# When truncate_at_dW_peak=true, the dW peak becomes the new physical edge: intr.psilim,
-# odet, propagators, and chunks are made self-consistent (straddling chunk rebuilt with
-# shorter psi_end; chunks past the new boundary dropped). Without that rebuild, the Δ' BVP
-# would apply the edge BC at the truncated psilim to a propagator still extending to the
-# original psilim — silently shifting the outermost rational's Δ' by tens of percent.
-# Returns the (possibly truncated) chunks and propagators arrays.
+# Edge-dW scan; on truncation, also cut the Δ' chunks and propagators back to the new edge.
 function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
     propagators::Vector{ChunkPropagator},
     ctrl::ForceFreeStatesControl,
@@ -322,56 +314,35 @@ function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
     N = intr.numpert_total
     odet.step -= 1
     trim_storage!(odet)
-    ctrl.psiedge < intr.psilim || return chunks, propagators
+    scan_edge_dW!(odet, ctrl, equil, mats, intr) || return chunks, propagators
 
-    saved_psifac, saved_u = odet.psifac, copy(odet.u)
-    peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
-
-    if !ctrl.truncate_at_dW_peak
-        odet.psifac = saved_psifac
-        odet.u .= saved_u
-        if ctrl.verbose
-            @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.2f" odet.psi_store[peak_step])),  q = $((@sprintf "%.2f" odet.q_store[peak_step])); integration domain unchanged"
-        end
-        return chunks, propagators
-    end
-
-    # Truncate to dW peak: relocate intr.psilim and rebuild Δ' BVP self-consistently.
-    n_chunks_before = length(chunks)
-    odet.step = peak_step
-    trim_storage!(odet)
-    intr.psilim = odet.psi_store[end]
-    intr.qlim = odet.q_store[end]
-    odet.u .= odet.u_store[:, :, :, end]
     renormalize_riccati_inplace!(odet.u, N)  # stored snapshot may be pre-renorm
-
-    peak_psi = odet.psi_store[end]
-    last_chunk_idx = findlast(c -> c.psi_start < peak_psi, chunks)
-    if last_chunk_idx === nothing
-        error("truncate_at_dW_peak: peak ψ=$peak_psi lies before all chunk starts")
-    end
-    straddling = chunks[last_chunk_idx]
-    if straddling.psi_end > peak_psi
-        new_chunk = IntegrationChunk(;
-            psi_start=straddling.psi_start,
-            psi_end=peak_psi,
-            needs_crossing=straddling.needs_crossing,
-            ising=straddling.ising,
-            direction=straddling.direction
-        )
-        chunks[last_chunk_idx] = new_chunk
-        odet_proxy = OdeState(N, 1, 1, 0)
-        integrate_propagator_chunk!(propagators[last_chunk_idx], new_chunk,
-            ctrl, equil, mats, intr, odet_proxy)
-    end
-    n_dropped = 0
-    if last_chunk_idx < length(chunks)
-        n_dropped = length(chunks) - last_chunk_idx
-        chunks = chunks[1:last_chunk_idx]
-        propagators = propagators[1:last_chunk_idx]
-    end
-    if ctrl.verbose
-        @info "Truncating integration at peak edge dW (self-consistent): ψ = $((@sprintf "%.4f" peak_psi)),  q = $((@sprintf "%.3f" odet.q_store[end])).  Rebuilt chunk $last_chunk_idx; dropped $n_dropped of $n_chunks_before outer chunks."
+    rebuild = truncate_chunks!(chunks, intr.psilim, intr.msing)
+    resize!(propagators, length(chunks))
+    if rebuild !== nothing
+        integrate_propagator_chunk!(propagators[rebuild], chunks[rebuild], ctrl, equil, mats, intr, OdeState(N, 1, 1, 0))
     end
     return chunks, propagators
+end
+
+"""
+    truncate_chunks!(chunks, psi_edge, msing) -> Union{Int,Nothing}
+
+Cut `chunks` back to an edge at `psi_edge`: drop those past it, end the straddling one at it, and
+clear any crossing onto a surface no longer in the plasma. Returns the index of a chunk that was
+shortened and so must be re-integrated.
+"""
+function truncate_chunks!(chunks::Vector{IntegrationChunk}, psi_edge::Real, msing::Int)
+    last = findlast(c -> c.psi_start < psi_edge, chunks)
+    last === nothing && error("truncate_chunks!: edge ψ=$psi_edge lies before all chunk starts")
+    resize!(chunks, last)
+    c = chunks[last]
+    shortened = c.psi_end > psi_edge
+    # ising <= msing means the surface survived: edge truncation drops surfaces from the outside only.
+    crosses = c.needs_crossing && c.ising <= msing
+    if shortened || crosses != c.needs_crossing
+        chunks[last] = IntegrationChunk(; psi_start=c.psi_start, psi_end=min(c.psi_end, psi_edge),
+            needs_crossing=crosses, ising=crosses ? c.ising : 0, direction=c.direction)
+    end
+    return shortened ? last : nothing
 end
