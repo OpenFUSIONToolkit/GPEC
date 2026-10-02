@@ -380,6 +380,12 @@ set_preferences!(UUID("462872dd-e066-4d2e-b993-6468b5239634"), "precompile_workl
 This writes `LocalPreferences.toml` next to the active `Project.toml` (the file is gitignored);
 delete the entry to re-enable. The regression harness overrides this file for its own runs.
 
+The workload runs only when Julia rebuilds the package image, not at the start of each run. That
+happens after any change under `src/` (a pull, a branch switch or a local edit) and after a change
+of dependency versions, Julia version or this preference. Repeated runs on an unchanged checkout
+reuse the cached image. If you edit `src/` and restart Julia often, disabling the workload keeps
+each rebuild short; within one Revise session nothing is rebuilt.
+
 ### Revise.jl
 
 When iterating on code, use [Revise.jl](https://timholy.github.io/Revise.jl/stable/) to avoid full recompilation on every change. It tracks source file modifications and recompiles only the affected code.
