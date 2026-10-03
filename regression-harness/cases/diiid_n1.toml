@@ -349,6 +349,7 @@ extract = "all_real"
 label = "dominant-coupling singular values"
 noise_threshold = 1e-8
 order = 84
+class = "physics_converged"
 
 [quantities.dominant_forcing_overlap]
 h5path = "PerturbedEquilibrium/SingularCoupling/DominantMode/forcing_overlap"
@@ -357,6 +358,7 @@ extract = "abs_first"
 label = "|forcing overlap with dominant mode|"
 noise_threshold = 1e-8
 order = 85
+class = "physics_converged"
 
 # Perturbed equilibrium: energies
 [quantities.pe_plasma_energy]
@@ -480,6 +482,7 @@ extract = "abs_first"
 label = "|delta_nominal| of coil set 1"
 noise_threshold = 1e-10
 order = 86
+class = "physics_converged"
 
 [quantities.ef_shift_sensitivity]
 h5path = "ErrorFields/CoilSensitivities/DominantMode/shift_sensitivity"
@@ -488,6 +491,7 @@ extract = "norm"
 label = "||ddelta/d(shift)|| over coil sets"
 noise_threshold = 1e-10
 order = 87
+class = "physics_converged"
 
 [quantities.ef_tilt_sensitivity]
 h5path = "ErrorFields/CoilSensitivities/DominantMode/tilt_sensitivity"
@@ -496,6 +500,7 @@ extract = "norm"
 label = "||ddelta/d(tilt)|| over coil sets"
 noise_threshold = 1e-10
 order = 88
+class = "physics_converged"
 
 # Runtime
 [quantities.runtime]

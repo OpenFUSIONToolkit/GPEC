@@ -16,6 +16,7 @@ extract = "all_real"
 label = "EFC overlap per kAt"
 noise_threshold = 1e-10
 order = 10
+class = "physics_converged"
 
 [quantities.efc_torque_full]
 h5path = "ErrorFields/NTV/torque_full_per_kat2"
@@ -24,6 +25,7 @@ extract = "all_real"
 label = "EFC whole-field NTV torque per kAt² [N·m]"
 noise_threshold = 1e-8
 order = 11
+class = "physics_converged"
 
 [quantities.efc_torque_residual]
 h5path = "ErrorFields/NTV/torque_residual_per_kat2"
@@ -32,6 +34,7 @@ extract = "all_real"
 label = "EFC residual-field NTV torque per kAt² [N·m]"
 noise_threshold = 1e-8
 order = 12
+class = "physics_converged"
 
 # The torque-versus-rotation table: reference rotation, the adaptive shift grid and the residual torque on it.
 [quantities.efc_omega_reference]
@@ -41,6 +44,7 @@ extract = "all_real"
 label = "EFC reference rotation ω_ref [rad/s]"
 noise_threshold = 1e-6
 order = 13
+class = "physics_converged"
 
 [quantities.efc_rotation_shift]
 h5path = "ErrorFields/NTV/RotationScan/rotation_shift"
@@ -49,6 +53,7 @@ extract = "all_real"
 label = "EFC rotation-scan shifts [rad/s]"
 noise_threshold = 1e-6
 order = 14
+class = "physics_converged"
 
 [quantities.efc_torque_residual_scan]
 h5path = "ErrorFields/NTV/RotationScan/torque_residual"
@@ -57,6 +62,7 @@ extract = "all_real"
 label = "EFC residual torque against rotation [N·m/kAt²]"
 noise_threshold = 1e-8
 order = 15
+class = "physics_converged"
 
 # Anchors of the stages feeding the couplings.
 [quantities.dominant_singular_values]
@@ -66,6 +72,7 @@ extract = "all_real"
 label = "dominant-coupling singular values"
 noise_threshold = 1e-8
 order = 20
+class = "physics_converged"
 
 [quantities.ef_delta_nominal]
 h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_nominal"
@@ -74,6 +81,7 @@ extract = "abs_first"
 label = "|delta_nominal| of coil set 1"
 noise_threshold = 1e-10
 order = 21
+class = "physics_converged"
 
 [quantities.runtime]
 h5path = ""
@@ -81,3 +89,4 @@ type = "runtime"
 extract = "value"
 label = "Runtime (s)"
 order = 99
+class = "diagnostic"

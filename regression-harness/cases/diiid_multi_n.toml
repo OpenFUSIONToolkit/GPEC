@@ -16,6 +16,7 @@ extract = "real_first"
 label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
+class = "physics_converged"
 
 [quantities.et_all]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -24,6 +25,7 @@ extract = "all_complex"
 label = "total energy (all)"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 # Integration
 [quantities.nstep]
@@ -33,6 +35,7 @@ extract = "value"
 label = "ODE steps (saved)"
 noise_threshold = 0
 order = 30
+class = "diagnostic"
 
 # Mode space
 [quantities.mpert]
@@ -42,6 +45,7 @@ extract = "value"
 label = "mpert"
 noise_threshold = 0
 order = 40
+class = "topological"
 
 [quantities.npert]
 h5path = "Info/npert"
@@ -50,6 +54,7 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 order = 41
+class = "topological"
 
 [quantities.mode_n]
 h5path = "PerturbedEquilibrium/mode_n"
@@ -58,6 +63,7 @@ extract = "checksum"
 label = "toroidal mode label of each mode index (checksum)"
 noise_threshold = 0
 order = 42
+class = "physics_converged"
 
 # Control-surface response, one block per n (b~ space)
 [quantities.permeability_diag]
@@ -67,6 +73,7 @@ extract = "diagonal_complex"
 label = "permeability diagonal P~_ii (all n blocks)"
 noise_threshold = 1e-8
 order = 50
+class = "physics_converged"
 
 [quantities.forcing_b_rootarea]
 h5path = "PerturbedEquilibrium/forcing_b_root_area"
@@ -75,6 +82,7 @@ extract = "all_complex"
 label = "forcing b~ (root-area-weighted), n = 1, 2"
 noise_threshold = 1e-10
 order = 51
+class = "physics_converged"
 
 [quantities.response_b_rootarea]
 h5path = "PerturbedEquilibrium/response_b_root_area"
@@ -83,6 +91,7 @@ extract = "all_complex"
 label = "response b~ (root-area-weighted), n = 1, 2"
 noise_threshold = 1e-8
 order = 52
+class = "physics_converged"
 
 # Perturbed equilibrium energies and the Σ_n torque
 [quantities.pe_plasma_energy]
@@ -92,6 +101,7 @@ extract = "value"
 label = "PE plasma energy (sum over n)"
 noise_threshold = 1e-10
 order = 60
+class = "physics_converged"
 
 [quantities.pe_vacuum_energy]
 h5path = "PerturbedEquilibrium/Energies/vacuum_energy"
@@ -100,6 +110,7 @@ extract = "value"
 label = "PE vacuum energy (sum over n)"
 noise_threshold = 1e-10
 order = 61
+class = "physics_converged"
 
 [quantities.pe_surface_energy]
 h5path = "PerturbedEquilibrium/Energies/surface_energy"
@@ -108,6 +119,7 @@ extract = "value"
 label = "PE surface energy (sum over n)"
 noise_threshold = 1e-10
 order = 62
+class = "physics_converged"
 
 [quantities.pe_toroidal_torque]
 h5path = "PerturbedEquilibrium/Energies/toroidal_torque"
@@ -116,6 +128,7 @@ extract = "value"
 label = "PE toroidal torque sum_n -2n Im(Phi_n' Lambda_nn^-1 Phi_n)/4"
 noise_threshold = 1e-12
 order = 63
+class = "physics_converged"
 
 # Singular coupling: one row per resonant (surface, n); integer-q surfaces appear once per n
 [quantities.rational_n]
@@ -125,6 +138,7 @@ extract = "all_real"
 label = "resonant n per row (rows sorted by psi across n)"
 noise_threshold = 0
 order = 70
+class = "physics_converged"
 
 [quantities.rational_m]
 h5path = "PerturbedEquilibrium/SingularCoupling/rational_m"
@@ -133,6 +147,7 @@ extract = "all_real"
 label = "resonant m per row"
 noise_threshold = 0
 order = 71
+class = "physics_converged"
 
 [quantities.resonant_area_weighted_field_all]
 h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
@@ -141,6 +156,7 @@ extract = "all_complex"
 label = "resonant area-weighted field b^r per row"
 noise_threshold = 1e-8
 order = 72
+class = "physics_converged"
 
 [quantities.island_half_width]
 h5path = "PerturbedEquilibrium/SingularCoupling/island_half_width"
@@ -149,6 +165,7 @@ extract = "all_real"
 label = "island half-widths per row"
 noise_threshold = 1e-8
 order = 73
+class = "physics_converged"
 
 [quantities.chirikov_parameter]
 h5path = "PerturbedEquilibrium/SingularCoupling/chirikov_parameter"
@@ -157,6 +174,7 @@ extract = "all_real"
 label = "Chirikov parameter per row"
 noise_threshold = 1e-8
 order = 74
+class = "physics_converged"
 
 [quantities.delta_prime_all]
 h5path = "PerturbedEquilibrium/SingularCoupling/Delta_prime"
@@ -165,6 +183,7 @@ extract = "all_complex"
 label = "forcing-driven Delta' per row"
 noise_threshold = 1e-8
 order = 75
+class = "physics_converged"
 
 # Runtime
 [quantities.runtime]
@@ -174,3 +193,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"
