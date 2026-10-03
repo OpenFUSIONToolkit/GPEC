@@ -397,7 +397,12 @@ NTV-limited current. Any `CoilOverlap` can be a source or an array, so an as-bui
 (`combine_overlaps`) can be corrected with arrays that were never part of the run. Over the tolerance samples the needed
 current is a distribution, and `uncorrectable_probability` is the fraction of the Monte Carlo's
 overlap beyond what the NTV-limited array can correct at all: the explicit-correction counterpart
-of the corrected locking probability's `efc_factor` model.
+of the corrected locking probability's `efc_factor` model. The Monte Carlo's overlap sums every
+coil set the run energized, so when the deck energizes the correction array itself (the bundled
+example runs its C-coil at its 20 A pattern) that as-given field is part of the sampled overlap
+and the needed current comes on top of it; a `correction_requirement` whose source is built from
+`combine_overlaps` over the error-field coils alone leaves it out, which is why the two as-designed
+currents can differ by the array's own contribution.
 
 ```julia
 req = EF.correction_requirement("gpec.h5", "F_coils_as_built", ["d3d_c", "iu", "il"])
