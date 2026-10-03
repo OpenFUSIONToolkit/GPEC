@@ -100,14 +100,15 @@ via periodic cubic splines on the resulting R(θ_norm), Z(θ_norm) data.
 
 The toroidal grid direction follows the Fortran GPEC convention:
 `phi_j = -helicity × 2π × j/nzeta`   where `helicity = sign(Bt) × sign(Ip)`.
-This is derived from `equil.params.bt_sign` and `equil.params.crnt`.
+This is derived from `equil.params.bt_sign` and `equil.params.ip_sign` (the signs the equilibrium
+file states; the computed current `crnt` is always positive and carries no direction).
 For DIII-D (Bt < 0, Ip > 0 → helicity = -1): phi increases with j (standard direction).
 For positive-helicity machines (Bt > 0, Ip > 0 → helicity = +1): phi decreases with j.
 """
 function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int, nzeta::Int;
     psi::Float64=equil.rzphi_xs[end])
     # Build uniform theta grid (same convention as equil.rzphi_ys, but potentially finer)
-    theta_grid = range(0; length=mtheta, step=1.0/mtheta)
+    theta_grid = range(0; length=mtheta, step=1.0 / mtheta)
 
     R_arr = zeros(mtheta)
     Z_arr = zeros(mtheta)
@@ -136,10 +137,8 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
 
     # Helicity sets the direction of the toroidal angle grid to match Fortran convention:
     #   phi_j = -helicity × 2π × j/nzeta,  helicity = sign(Bt) × sign(Ip)
-    bt_sign = !isnothing(equil.params.bt_sign) ? equil.params.bt_sign : 1
-    ip_sign = !isnothing(equil.params.crnt) ? Int(sign(equil.params.crnt)) : 1
-    helicity = bt_sign * ip_sign
-    phi_grid = collect(range(0; length=nzeta, step=(-helicity * 2π/nzeta)))
+    helicity = equil.params.bt_sign * equil.params.ip_sign
+    phi_grid = collect(range(0; length=nzeta, step=(-helicity * 2π / nzeta)))
 
     # Toroidal angle offset ν(ψ, θ_SFL): in SFL coordinates the physical toroidal angle at
     # grid point (θ_SFL, ζ_SFL) is  φ_phys = -helicity*(2π*ζ_SFL + ν(ψ,θ_SFL)).

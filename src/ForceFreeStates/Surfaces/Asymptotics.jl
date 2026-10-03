@@ -74,7 +74,7 @@ function compute_sing_asymptotics(
 
     # This is the parameter α but for all modes - α = 0 for non-resonant modes
     power[ipert_res] .= -alpha
-    power[ipert_res .+ intr.numpert_total] .= alpha
+    power[ipert_res.+intr.numpert_total] .= alpha
 
     # Zeroth-order non-resonant solutions
     for ipert in 1:intr.numpert_total
@@ -111,7 +111,7 @@ function compute_sing_asymptotics(
         msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1, 2]), imag(m0mat[1, 2]))
         msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2, 1]), imag(m0mat[2, 1]))
         msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2, 2]), imag(m0mat[2, 2]))
-        di = m0mat[1, 1]*m0mat[2, 2] - m0mat[2, 1]*m0mat[1, 2]
+        di = m0mat[1, 1] * m0mat[2, 2] - m0mat[2, 1] * m0mat[1, 2]
         msg *= @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei\n", real(di), real(alpha[1]), imag(alpha[1]))
         msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
         msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0, 2, 1]), imag(vmat[ipert0, ipert0, 2, 1]))
@@ -579,7 +579,7 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
 
     # Restore powers (unshear v→u) — matches Fortran STRIDE sing_get_ua
     for i in eachindex(r1)
-        pfac = pfac_base ^ sing_asymp.alpha[i]  # dpsi^α
+        pfac = pfac_base^sing_asymp.alpha[i]  # dpsi^α
         ua[:, r2[2*i-1], :] ./= pfac  # big solution column: /dpsi^α
         ua[:, r2[2*i], :] .*= pfac    # small solution column: *dpsi^α
         ua[r1[i], :, 1] ./= sqrtfac   # resonant row ξ: /√dpsi

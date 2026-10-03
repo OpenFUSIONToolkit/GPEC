@@ -67,6 +67,8 @@ function read_efit(config::EquilibriumConfig)
     header_vals = _read_1d_gfile_format(lines[2:5], 20)
     rdim, zdim, rcentr, rleft, zmid = header_vals[1:5]
     rmaxis, zmaxis, simag, sibry = header_vals[6:9]
+    ip_sign = Int(sign(header_vals[11]))  # the g-file's plasma current; its sign sets the helicity
+    ip_sign == 0 && (ip_sign = 1)
 
     # --- Parse Data Blocks ---
     current_line_idx = 6
@@ -120,9 +122,9 @@ function read_efit(config::EquilibriumConfig)
 
     # Capture the raw arrays that reconstruct sq_in and psi_in, so the rerun path
     # (gpec.h5 → setup_equilibrium) can skip the g-file parse entirely.
-    ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, psi_proc, rmin, rmax, zmin, zmax, psio, fpol_sign)
+    ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, psi_proc, rmin, rmax, zmin, zmax, psio, fpol_sign, ip_sign)
 
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign, ingest)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign, ip_sign, ingest)
 end
 
 
@@ -152,7 +154,7 @@ function read_chease_binary(config::EquilibriumConfig)
 
         # 1D array allocation
         zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim =
-            [zeros(i == 1 || i == 10 ? npsi1-1 : npsi1) for i in 1:10]
+            [zeros(i == 1 || i == 10 ? npsi1 - 1 : npsi1) for i in 1:10]
 
         for arr in (zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim)
             read(io, UInt32)
@@ -275,7 +277,7 @@ function read_chease_ascii(config::EquilibriumConfig)
         data = Float64[]
         for line in lines[lines_range]
             for i in 0:4
-                s = strip(line[(22*i+1):min(end, 22*(i+1))])
+                s = strip(line[(22*i+1):min(end, 22 * (i + 1))])
                 if !isempty(s)
                     push!(data, parse(Float64, s))
                 end
@@ -405,7 +407,7 @@ function build_direct_from_ingest(config::EquilibriumConfig, ingest::DirectInges
     sq_in = cubic_interp(ingest.sq_xs, Series(ingest.sq_fs); extrap=ExtendExtrap())
     psi_in = cubic_interp((ingest.psi_xs, ingest.psi_ys), ingest.psi_rz; extrap=ExtendExtrap())
     return DirectRunInput(config, sq_in, psi_in, ingest.psi_xs, ingest.psi_ys,
-        ingest.rmin, ingest.rmax, ingest.zmin, ingest.zmax, ingest.psio, ingest.bt_sign, ingest)
+        ingest.rmin, ingest.rmax, ingest.zmin, ingest.zmax, ingest.psio, ingest.bt_sign, ingest.ip_sign, ingest)
 end
 
 """
@@ -432,15 +434,19 @@ Load an equilibrium from an IMAS data dictionary and return a `DirectRunInput`.
 The `dd.equilibrium.time_slice[]` is used (active time slice). Poloidal flux is
 converted from the IMAS COCOS convention (set by `config.imas_cocos`) to the
 internal COCOS 2 convention:
+
   - `imas_cocos = 11` (default, IMAS standard): divide ψ by 2π
   - `imas_cocos = 2` (GPEC internal): no conversion
 
 ## Arguments
-- `config`: `EquilibriumConfig` with `eq_type = "imas"` and `imas_cocos` set.
-- `dd`: populated `IMASdd.dd` with `dd.equilibrium.time_slice[]` containing:
-  - `global_quantities.psi_axis`, `global_quantities.psi_boundary`
-  - `profiles_1d.psi`, `profiles_1d.f`, `profiles_1d.pressure`, `profiles_1d.q`
-  - `profiles_2d[1].grid.dim1` (R), `profiles_2d[1].grid.dim2` (Z), `profiles_2d[1].psi`
+
+  - `config`: `EquilibriumConfig` with `eq_type = "imas"` and `imas_cocos` set.
+
+  - `dd`: populated `IMASdd.dd` with `dd.equilibrium.time_slice[]` containing:
+
+      + `global_quantities.psi_axis`, `global_quantities.psi_boundary`
+      + `profiles_1d.psi`, `profiles_1d.f`, `profiles_1d.pressure`, `profiles_1d.q`
+      + `profiles_2d[1].grid.dim1` (R), `profiles_2d[1].grid.dim2` (Z), `profiles_2d[1].psi`
 """
 function read_imas(config::EquilibriumConfig, dd)
     @info "Processing IMAS equilibrium at global_time = $(dd.global_time) s"
@@ -480,6 +486,10 @@ function read_imas(config::EquilibriumConfig, dd)
     # Capture toroidal-field sign from the boundary F value before abs() below.
     bt_sign = isempty(f_1d) ? 1 : Int(sign(f_1d[end]))
     bt_sign == 0 && (bt_sign = 1)
+    # Plasma-current sign from the IMAS global quantity (missing or zero → +1).
+    # The current is optional in IMAS, and reading an absent one throws rather than returning missing.
+    ip_imas = getproperty(eqt.global_quantities, :ip, 0.0)
+    ip_sign = ip_imas == 0 ? 1 : Int(sign(ip_imas))
 
     nw = length(psi_1d)
     psi_norm_grid = range(0.0, 1.0; length=nw)
@@ -528,7 +538,7 @@ function read_imas(config::EquilibriumConfig, dd)
           "\n    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m"
 
     # Capture the raw arrays so an IMAS run can be replayed from gpec.h5 without the dd source.
-    ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, Matrix(psi_proc), rmin, rmax, zmin, zmax, psio, bt_sign)
+    ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, Matrix(psi_proc), rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign)
 
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign, ingest)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest)
 end

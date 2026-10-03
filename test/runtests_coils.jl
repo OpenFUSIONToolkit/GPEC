@@ -1,6 +1,7 @@
 using Test
 using TOML
 using Statistics
+using Printf
 using HDF5
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.ForcingTerms
@@ -553,4 +554,35 @@ end
         @test byname["hoopA"].x ≈ sets_in[1].x
         @test byname["wp"].ncoil == 3
     end
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: helicity follows the g-file current sign" begin
+    # The internal flux is made positive at the axis, so the computed current is always
+    # positive; the handedness of the toroidal grid must come from the file's stated signs.
+    gfile = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk")
+    lines = readlines(gfile)
+    flipped = tempname() * ".geqdsk"
+    open(flipped, "w") do io
+        for (i, l) in enumerate(lines)
+            if i == 4   # header line 4 starts with the plasma current
+                vals = [l[j:min(j + 15, end)] for j in 1:16:length(l)]
+                cur = -parse(Float64, strip(vals[1]))
+                l = @sprintf("%16.9E", cur) * l[17:end]
+            end
+            println(io, l)
+        end
+    end
+    cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="ldp", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
+    eq_pos = Equilibrium.setup_equilibrium(cfg(gfile))
+    eq_neg = Equilibrium.setup_equilibrium(cfg(flipped))
+    @test eq_pos.params.ip_sign == 1 && eq_neg.params.ip_sign == -1
+    @test eq_pos.params.bt_sign == eq_neg.params.bt_sign == -1
+    @test eq_pos.params.crnt > 0 && eq_neg.params.crnt > 0          # the computed current carries no sign
+    g_pos = ForcingTerms.sample_boundary_grid(eq_pos, 16, 8; psi=0.9)
+    g_neg = ForcingTerms.sample_boundary_grid(eq_neg, 16, 8; psi=0.9)
+    @test g_pos.phi_grid[2] ≈ 2π / 8                                # helicity −1: φ increases with j
+    @test g_neg.phi_grid[2] ≈ -2π / 8                               # helicity +1: φ decreases with j
+    @test g_neg.phi_offset ≈ -g_pos.phi_offset
+    rm(flipped)
 end
