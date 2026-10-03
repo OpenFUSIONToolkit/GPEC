@@ -446,7 +446,7 @@ internal COCOS 2 convention:
 
       + `global_quantities.psi_axis`, `global_quantities.psi_boundary`
       + `profiles_1d.psi`, `profiles_1d.f`, `profiles_1d.pressure`, `profiles_1d.q`
-      + `profiles_2d[1].grid.dim1` (R), `profiles_2d[1].grid.dim2` (Z), `profiles_2d[1].psi`
+      + the `profiles_2d` entry with `grid_type.index == 1` (rectangular), supplying `grid.dim1` (R), `grid.dim2` (Z) and `psi`
 """
 function read_imas(config::EquilibriumConfig, dd)
     @info "Processing IMAS equilibrium at global_time = $(dd.global_time) s"
@@ -511,7 +511,10 @@ function read_imas(config::EquilibriumConfig, dd)
         error("read_imas: no profiles_2d found in equilibrium time slice. " *
               "Ensure the 2D ψ(R,Z) map is stored in dd.equilibrium.")
     end
-    prof2d = eqt.profiles_2d[1]
+    # Select the 2D ψ(R,Z) map on the rectangular grid (IMAS grid_type.index == 1).
+    rect_idx = findfirst(p -> getproperty(p.grid_type, :index, 1) == 1, eqt.profiles_2d)
+    rect_idx === nothing && error("read_imas: no rectangular (grid_type.index == 1) profiles_2d found.")
+    prof2d = eqt.profiles_2d[rect_idx]
     r_grid = prof2d.grid.dim1
     z_grid = prof2d.grid.dim2
 
