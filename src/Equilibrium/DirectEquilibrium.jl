@@ -228,33 +228,51 @@ function direct_position!(raw_profile::DirectRunInput)
 end
 
 """
-    eta_at_sfl_angle(sol, y_out, x, total_x) -> Float64
+    sfl_sample_time(sol, ts, sfl, sfl_index, x) -> (t, lo)
 
-Integration angle η at which the normalised straight-fieldline angle ∫jac·dl/Bp reaches `x`.
-
-`y_out[:, 5]` is monotone in η, so it brackets the root to one solver step and Brent converges in
-a handful of dense-output evaluations. Used to sample every flux surface at the *same* SFL angles
-instead of resampling each surface's own solver steps (issue #376).
+Solver time `t` at which the normalised straight-fieldline angle reaches `x` ∈ [0, 1], and the index
+`lo` of the saved step that starts its bracket. `sfl` is the SFL integral ∫jac·dl/Bp at the saved
+times `ts`; it is monotone, so it brackets the root to one step, and Brent finishes on component
+`sfl_index` of the dense solution.
 """
-function eta_at_sfl_angle(sol, y_out::Matrix{Float64}, x::Float64, total_x::Float64)
-    x <= 0 && return y_out[1, 1]
-    x >= 1 && return y_out[end, 1]
-    target = x * total_x
-    hi = searchsortedfirst(view(y_out, :, 5), target)
-    hi = clamp(hi, 2, size(y_out, 1))
+function sfl_sample_time(sol, ts::Vector{Float64}, sfl::AbstractVector{Float64}, sfl_index::Int, x::Float64)
+    n = length(ts)
+    x <= 0 && return ts[1], 1
+    x >= 1 && return ts[n], n - 1
+    target = x * sfl[n]
+    hi = clamp(searchsortedfirst(sfl, target), 2, n)
     lo = hi - 1
-    eta_lo, eta_hi = y_out[lo, 1], y_out[hi, 1]
-    f(eta) = sol(eta)[4] - target
-    flo, fhi = f(eta_lo), f(eta_hi)
-    # Degenerate bracket (repeated η, or the root sitting exactly on a step) needs no solve.
-    flo == 0 && return eta_lo
-    fhi == 0 && return eta_hi
-    (flo * fhi > 0 || eta_hi <= eta_lo) && return eta_lo + (eta_hi - eta_lo) * (target - y_out[lo, 5]) / max(y_out[hi, 5] - y_out[lo, 5], eps())
-    return find_zero(f, (eta_lo, eta_hi), Roots.Brent())
+    flo, fhi = sfl[lo] - target, sfl[hi] - target
+    flo == 0 && return ts[lo], lo
+    fhi == 0 && return ts[hi], lo
+    flo < 0 < fhi || error("sfl_sample_time: SFL integral is not monotone across a solver step (x = $x)")
+    return find_zero(t -> sol(t)[sfl_index] - target, (ts[lo], ts[hi]), Roots.Brent()), lo
 end
 
 """
-    direct_fieldline_int(psifac, raw_profile, ro, zo, rs2)
+    sample_trace_at_sfl_angles(sol, y_out, sfl_index, theta_nodes, state_row) -> Matrix{Float64}
+
+Sample a traced flux surface at the straight-fieldline angles `theta_nodes` (0 to 1). Row `i` is
+`state_row(sol(t), t, lo)` at the time `t` where the normalised SFL angle reaches `theta_nodes[i]`
+(see `sfl_sample_time`), in the 5-column `y_out` layout. The last row is the saved closed endpoint,
+so the surface totals `y_out[end, :]` are exact. Every surface sharing the same abscissae keeps the
+resample error from varying between neighbouring surfaces. Every field-line tracer must return its
+surface through this function.
+"""
+function sample_trace_at_sfl_angles(sol, y_out::Matrix{Float64}, sfl_index::Int, theta_nodes, state_row::F) where {F}
+    ts = sol.t::Vector{Float64}
+    sfl = view(y_out, :, 5)
+    samples = Matrix{Float64}(undef, length(theta_nodes), 5)
+    for i in 1:(length(theta_nodes)-1)
+        t, lo = sfl_sample_time(sol, ts, sfl, sfl_index, Float64(theta_nodes[i]))
+        samples[i, :] .= state_row(sol(t), t, lo)
+    end
+    samples[end, :] .= @view y_out[end, :]
+    return samples
+end
+
+"""
+    direct_fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)
 
 Performs the field-line integration for a single flux surface. This is a Julia adaptation
 of the Fortran `direct_fl_int` subroutine. Note that the array `y_out` is now indexed
@@ -266,22 +284,22 @@ from 1:5 rather than 0:4 as in Fortran.
   - `raw_profile`: `DirectRunInput` object containing splines and parameters.
   - `ro`, `zo`: Coordinates of the magnetic axis [m].
   - `rs2`: R-coordinate of the outboard separatrix [m].
+  - `theta_nodes`: straight-fieldline angles (0 to 1) at which to sample the surface.
 
 ## Returns:
 
-    - `y_out`: A matrix containing the integrated quantities vs. the geometric angle `η`.
+    - `y_out`: A matrix containing the integrated quantities at each of `theta_nodes`
+      (see `sample_trace_at_sfl_angles`).
         - `y_out[:, 1]`: η (geometric poloidal angle)
         - `y_out[:, 2]`: ∫(dl/Bp)
         - `y_out[:, 3]`: rfac (radial distance from magnetic axis)
         - `y_out[:, 4]`: ∫(dl/(R²Bp))
         - `y_out[:, 5]`: ∫(jac*dl/Bp)
 
-  - `sol`: the dense ODE solution, so callers can evaluate the trace at prescribed SFL angles
-    rather than resampling this surface's own solver steps (`nothing` for tracers without it).
-
   - `bfield`: A `DirectBField` object with values at the integration start point.
 """
-function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)
+function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64,
+    theta_nodes)::Tuple{Matrix{Float64},DirectBField}
 
     # Find the starting point on the flux surface (outboard midplane)
     psi0_guess = raw_profile.psio * (1.0 - psifac)
@@ -320,12 +338,13 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
-    # Dense output lets the caller evaluate the trace at the SFL angles it actually wants, instead
-    # of splining this surface's solver-chosen steps and resampling (issue #376).
+    # Dense output so the surface can be sampled at prescribed SFL angles between solver steps.
     sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=true)
 
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
-    return hcat(sol.t::Vector{Float64}, sol_matrix), bfield, sol
+    y_out = hcat(sol.t::Vector{Float64}, sol_matrix)
+    # State is [∫dl/Bp, rfac, ∫dl/(R²Bp), ∫jac·dl/Bp] and the integration variable is η itself.
+    return sample_trace_at_sfl_angles(sol, y_out, 4, theta_nodes, (u, eta, _) -> (eta, u[1], u[2], u[3], u[4])), bfield
 end
 
 """
@@ -495,6 +514,9 @@ robustness.
 
   - `raw_profile`: A `DirectRunInput` object containing the initial splines (`psi_in`, `sq_in`)
     and run parameters (`equil_input`).
+  - `fieldline_int`: the flux-surface tracer, called as `fieldline_int(psifac, raw_profile, ro, zo,
+    rs2, theta_nodes) -> (y_out, bfield)` with `y_out` already sampled at `theta_nodes` through
+    `sample_trace_at_sfl_angles`.
 
 ## Returns:
 
@@ -520,45 +542,22 @@ robustness.
     mpsi = length(psi_nodes) - 1
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
+    ff_x_nodes = collect(theta_nodes)
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
     rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
     ff_val = zeros!(pool, Float64, 4)
     ff_deriv_val = zeros!(pool, Float64, 4)
 
     for ipsi in (mpsi+1):-1:1  # outermost to innermost
-        y_out, bfield, sol = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
+        # Every tracer returns the surface sampled at theta_nodes, so all surfaces share SFL abscissae.
+        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2, theta_nodes)
         checkpoint!(pool, Float64)
 
-        # Straight-fieldline angle x = normalised ∫jac·dl/Bp, monotone in the integration angle η.
-        #
-        # Sampling x at this surface's own solver steps and resampling onto theta_nodes leaves a
-        # resample error that is uncorrelated between neighbouring surfaces, i.e. white noise in ψ
-        # that grid refinement then amplifies (issue #376). With dense output we instead solve for
-        # the η where x hits each target node and evaluate there, so every surface is sampled at
-        # the same abscissae and the resample error at the output nodes is zero.
-        nff = sol === nothing ? size(y_out, 1) : mtheta + 1
-        ff_x_nodes = acquire!(pool, Float64, nff)
-        ff_fs_nodes = acquire!(pool, Float64, nff, 4)
-
-        if sol === nothing
-            @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
-            @. ff_fs_nodes[:, 1] = @view(y_out[:, 3])^2
-            @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
-            @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
-            @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
-        else
-            total_x = y_out[end, 5]
-            for itheta in 1:(mtheta+1)
-                x = theta_nodes[itheta]
-                eta = eta_at_sfl_angle(sol, y_out, x, total_x)
-                u = sol(eta)
-                ff_x_nodes[itheta] = x
-                ff_fs_nodes[itheta, 1] = u[2]^2
-                ff_fs_nodes[itheta, 2] = eta / (2π) - x
-                ff_fs_nodes[itheta, 3] = bfield.f * (u[3] - x * y_out[end, 4])
-                ff_fs_nodes[itheta, 4] = u[1] / y_out[end, 2] - x
-            end
-        end
+        ff_fs_nodes = acquire!(pool, Float64, mtheta + 1, 4)
+        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3])^2
+        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
+        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
 
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
 
