@@ -91,6 +91,21 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test psi_center >= 0.0   # ψ should be non-negative at magnetic axis region
     end
 
+    @testset "read_imas: non-uniform profiles_1d grid" begin
+        dd, psi_bnd_int = make_mock_dd()
+        psi_n = range(0.0, 1.0; length=64) .^ 2
+        prof1d = dd.equilibrium.time_slice[1].profiles_1d
+        prof1d.psi = psi_n .* psi_bnd_int .* 2π
+        prof1d.pressure = 1e4 .* (1 .- psi_n)
+
+        config = EquilibriumConfig(; eq_type="imas", eq_filename="mock", imas_cocos=11)
+        result = Equilibrium.read_imas(config, dd)
+
+        buf = zeros(4)
+        result.sq_in(buf, 0.5)
+        @test isapprox(buf[2], Equilibrium.mu0 * 5e3; rtol=1e-3)
+    end
+
     # An imas run started via `main(; dd)` must thread the dd through to `additional_input`;
     # guards against the dispatch silently dropping it.
     @testset "main dd dispatch: dd reaches additional_input" begin

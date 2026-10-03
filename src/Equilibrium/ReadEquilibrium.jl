@@ -492,7 +492,7 @@ function read_imas(config::EquilibriumConfig, dd)
     ip_sign = ip_imas == 0 ? 1 : Int(sign(ip_imas))
 
     nw = length(psi_1d)
-    psi_norm_grid = range(0.0, 1.0; length=nw)
+    psi_norm_grid = clamp.((psi_1d .- psi_axis) ./ (psi_boundary - psi_axis), 0.0, 1.0)
 
     # Build equilibrium source terms for spline interpolation
     # abs(f_1d): F(ψ) can be negative depending on toroidal field direction convention;
