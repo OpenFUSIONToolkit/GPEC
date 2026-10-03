@@ -63,13 +63,16 @@ include("h5_metadata_check.jl")
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
-            # Two PF hoops outside the plasma (Solovev R ≈ 0.67–1.33 m): one tilted so the run has
-            # a nominal n=1 forcing, one axisymmetric so its rigid-motion response is known exactly.
+            # Three PF hoops outside the plasma (Solovev R ≈ 0.67–1.33 m): one tilted so the run has
+            # a nominal n=1 forcing, one axisymmetric so its rigid-motion response is known exactly,
+            # and one tilted the other way as the correction array, which is swept but is not an
+            # error-field source.
             inputs["ForcingTerms"] = Dict{String,Any}(
                 "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                 "coil_set" => [
                     Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0]),
-                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 1.5, "height" => -0.4, "currents" => [2.0e3])
+                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 1.5, "height" => -0.4, "currents" => [2.0e3]),
+                    Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
                 "compute_response" => true, "compute_singular_coupling" => true,
@@ -83,7 +86,7 @@ include("h5_metadata_check.jl")
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
                 # The smallest rotation scan that exercises the table path (three shifts, no refinement).
-                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"], "rotation_scan_points" => 3, "rotation_scan_max_points" => 3))
+                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_efc"], "rotation_scan_points" => 3, "rotation_scan_max_points" => 3))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -102,13 +105,13 @@ include("h5_metadata_check.jl")
                 @test haskey(h5, "Info/Runtimes/total")
             end
 
-            @test sens.coil_names == ["hoop_tilted", "hoop_axi"]
+            @test sens.coil_names == ["hoop_tilted", "hoop_axi", "hoop_efc"]
             N = ffs.numpert_total
-            @test size(sens.nominal_field) == (N, 2)
-            @test size(sens.shift_sensitivity) == (N, 3, 2)
-            @test size(sens.tilt_sensitivity) == (N, 3, 2)
+            @test size(sens.nominal_field) == (N, 3)
+            @test size(sens.shift_sensitivity) == (N, 3, 3)
+            @test size(sens.tilt_sensitivity) == (N, 3, 3)
             @test sens.b_t0 == ffs.equil.params.bt0
-            @test sens.peak_current == [2.0e3, 2.0e3]
+            @test sens.peak_current == [2.0e3, 2.0e3, 2.0e3]
             @test all(<(1e-2), sens.shift_linearity_residual)
             @test all(<(1e-2), sens.tilt_linearity_residual)
 
@@ -145,7 +148,17 @@ include("h5_metadata_check.jl")
             # The bare-matrix construction carries no basis, so it stays permitted.
             @test EF.sensitivity_table(sens, PE.dominant_coupling(rc.C, rc.rational_psi)) isa EF.SensitivityTable
             windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[end]))
-            @test length(windowed.delta_nominal) == 2
+            @test length(windowed.delta_nominal) == 3
+            # The correction array is swept with the others but is not an error-field source: the run
+            # excludes the NTV efc_coils from the error field, and the table helper drops them.
+            @test EF.excluded_coil_names(h5path) == ["hoop_efc"]
+            ef_table = EF.without_coils(table, ["hoop_efc"])
+            @test ef_table.coil_names == ["hoop_tilted", "hoop_axi"] && ef_table.delta_nominal == table.delta_nominal[1:2]
+            @test ef_table.shift == table.shift[:, 1:2] && ef_table.cancelling_tilt == table.cancelling_tilt[:, 1:2]
+            @test EF.without_coils(table, String[]).coil_names == table.coil_names
+            @test_throws ArgumentError EF.without_coils(table, ["no_such"])
+            @test EF.excluded_coil_names(Dict{String,Any}("exclude_coils" => ["a"], "NTV" => Dict{String,Any}("efc_coils" => ["b", "a"]))) == ["a", "b"]
+            @test EF.excluded_coil_names(Dict{String,Any}()) == String[]
 
             # HDF5: self-describing, and the reader and file-based table reproduce memory exactly.
             h5open(h5path, "r") do f
@@ -163,7 +176,12 @@ include("h5_metadata_check.jl")
             mc = res.monte_carlo
             @test mc isa EF.MonteCarloResult
             @test mc.nsample == 20_000 && mc.nbatch == 2 && mc.seed == 5
-            @test mc.delta_nominal ≈ abs(sum(table.delta_nominal))
+            @test mc.delta_nominal ≈ abs(sum(ef_table.delta_nominal))
+            @test !(mc.delta_nominal ≈ abs(sum(table.delta_nominal)))
+            # A tolerance on the excluded array is an error, in each of the three places a name can appear.
+            @test EF.check_excluded_tolerances(snapshot, ["hoop_efc"]) === snapshot
+            @test_throws ArgumentError EF.check_excluded_tolerances(snapshot, ["hoop_tilted"])
+            @test_throws ArgumentError EF.check_excluded_tolerances(snapshot, ["hoop_axi"])
             @test sum(mc.pdf .* diff(mc.bin_edges)) ≈ 1 atol = 1e-6
             @test mc.mean_abs_delta_efc < mc.mean_abs_delta
             mc_file = EF.MonteCarloResult(h5path)
@@ -171,7 +189,7 @@ include("h5_metadata_check.jl")
             rerun = EF.run_monte_carlo(h5path; nsample=20_000, nbatch=2, seed=5, nbins=100)
             @test rerun.pdf == mc.pdf
             windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[end], nsample=5_000, nbatch=1, seed=5, nbins=50)
-            @test windowed_mc.delta_nominal ≈ abs(sum(windowed.delta_nominal))
+            @test windowed_mc.delta_nominal ≈ abs(sum(EF.without_coils(windowed, ["hoop_efc"]).delta_nominal))
 
             # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
             risk = res.locking_risk
@@ -250,7 +268,7 @@ include("h5_metadata_check.jl")
             end
             @test AEF.plot_applied_spectra(h5path, plot_sets) isa Plots.Plot
             @test AEF.plot_applied_spectra(ctx_plot, ovs_plot; normalize=false)[1][:yaxis][:guide] == "|b̃| (T)"
-            @test length(AEF.plot_surface_overlay(ctx_plot, ovs_plot; ntheta=32, nzeta=24).subplots) == length(ovs_plot)
+            @test length(AEF.plot_surface_overlay(ctx_plot, ovs_plot; ntheta=32, nzeta=24).subplots) == 2 * cld(length(ovs_plot), 2)   # a two-column grid
 
             # The per-harmonic contributions the plot draws sum to each coil's resonant fraction,
             # which is what makes them readable as a decomposition. Asserted on the numbers rather
@@ -283,7 +301,7 @@ include("h5_metadata_check.jl")
             # starts from; the tilted hoop carries the whole n=1 overlap and the axisymmetric one none.
             phasors = AEF.plot_overlap_phasors(h5path; save_path=joinpath(dir, "phasors.png"))
             @test phasors isa Plots.Plot
-            @test abs(sum(AEF._load(h5path).delta_nominal)) ≈ mc.delta_nominal rtol = 1e-10
+            @test abs(sum(AEF._load(h5path).delta_nominal[1:2])) ≈ mc.delta_nominal rtol = 1e-10
             @test length(AEF.plot_overlap_phasors(["file" => h5path, "memory" => table]).subplots) == 2
             @test AEF.plot_overlap_phasors(ovs_plot; coils=["hoop_axi"]) isa Plots.Plot
             @test_throws ArgumentError AEF.plot_overlap_phasors(h5path; coils=["no_such_coil"])
@@ -291,11 +309,11 @@ include("h5_metadata_check.jl")
             # The worst-case budget's terms sum to the bound the Monte Carlo sized its histogram
             # by, from memory and from the file, and each term is what the bound charges: the
             # cylinder coil's tilt reach is the angle its axis line can reach, not its tilt_tol.
-            terms = EF.worst_case_terms(table, snapshot, plot_sets)
+            terms = EF.worst_case_terms(ef_table, snapshot, plot_sets)
             @test terms.total ≈ mc.delta_worst rtol = 1e-12
             @test sum(terms.nominal) + sum(terms.shift) + sum(terms.tilt) + sum(terms.group_shift) + sum(terms.group_tilt) + terms.other ≈ mc.delta_worst rtol = 1e-12
-            @test terms.coil_names == sens.coil_names && terms.group_names == ["both_hoops"]
-            @test terms.nominal ≈ abs.(table.delta_nominal)
+            @test terms.coil_names == ef_table.coil_names && terms.group_names == ["both_hoops"]
+            @test terms.nominal ≈ abs.(ef_table.delta_nominal)
             @test terms.other ≈ 8.2e-6 + 3 * 1.0e-6
             i_axi = findfirst(==("hoop_axi"), sens.coil_names)
             reach = rad2deg(atan(2.0e-3 / 1.5))
@@ -324,7 +342,7 @@ include("h5_metadata_check.jl")
             @test tilt_deg ≈ EF.tilt_tolerance_deg(0.002, "m", plot_sets[findfirst(cs -> cs.name == "hoop_tilted", plot_sets)])
             @test_throws ArgumentError EF.tilt_tolerance_deg(5.0, "m", 1.5)
             at_tol = AEF._linearity_matrix("run", AEF._load(h5path), sens.coil_names, :tolerance)
-            @test size(at_tol) == (6, 2)
+            @test size(at_tol) == (6, 3)
             @test at_tol[1, i_tilted] ≈ sens.shift_linearity_residual[1, i_tilted] * (0.5e-3 / 1e-3) rtol = 1e-12
             @test at_tol[4, i_tilted] ≈ sens.tilt_linearity_residual[1, i_tilted] * (tilt_deg / 0.1) rtol = 1e-12
             @test at_tol[6, i_axi] ≈ sens.tilt_linearity_residual[3, i_axi] * (0.019 / 0.1) rtol = 1e-12
@@ -366,15 +384,15 @@ include("h5_metadata_check.jl")
             @test post_hoc.shift_sensitivity ≈ sens.shift_sensitivity rtol = 1e-10
             @test post_hoc.tilt_sensitivity ≈ sens.tilt_sensitivity rtol = 1e-10
 
-            # Correction-coil couplings: the tilted hoop as the correction array. Its overlap per kAt is
+            # Correction-coil couplings: the third hoop as the correction array. Its overlap per kAt is
             # the table's nominal overlap over its ampere-turns; the residual field carries no dominant
             # mode; the torques are finite and written with the metadata contract.
             couplings = res.efc_couplings
             @test couplings isa Vector{EF.EFCCoupling} && length(couplings) == 1
             c = couplings[1]
-            kat = sets[1].nw * 2.0e3 / 1e3
-            @test c.coil_name == "hoop_tilted"
-            @test c.delta_per_kat ≈ abs(table.delta_nominal[1]) / kat rtol = 1e-6
+            kat = sets[3].nw * 2.0e3 / 1e3
+            @test c.coil_name == "hoop_efc"
+            @test c.delta_per_kat ≈ abs(table.delta_nominal[3]) / kat rtol = 1e-6
             @test 0 < c.overlap_percent <= 100
             @test isfinite(c.torque_full_per_kat2) && isfinite(c.torque_residual_per_kat2)
             # The rotation scan the run tabulated: symmetric about the unshifted point, whose torques
@@ -385,7 +403,7 @@ include("h5_metadata_check.jl")
             @test isfinite(c.omega_reference) && c.omega_reference != 0
             @test c.psi[1] == 0.0 && c.psi[end] == 1.0 && issorted(c.psi)
             @test size(c.torque_full_profile) == (length(c.psi), 3) && c.torque_full_profile[1, 2] == 0.0
-            @test abs(dot(dom.right_singular_vectors[:, 1], EF.residual_spectrum(dom, sens.nominal_field[:, 1]))) < 1e-12
+            @test abs(dot(dom.right_singular_vectors[:, 1], EF.residual_spectrum(dom, sens.nominal_field[:, 3]))) < 1e-12
             @test EF.read_efc_couplings(h5path)[1] == c
             h5open(h5path, "r") do f
                 @test haskey(f, "ErrorFields/NTV/torque_residual_per_kat2")
