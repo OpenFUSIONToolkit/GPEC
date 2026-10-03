@@ -7,7 +7,7 @@ The 2D vacuum calculations follow the approach outlined in [Chance Phys. Plasmas
 
 The module provides:
 
-- Vacuum response calculations (`compute_vacuum_response`, `compute_vacuum_field`)
+- Vacuum response calculations (`compute_vacuum_response`)
 - Support for various wall geometries (conformal, elliptical, dee-shaped, or custom)
 - Pre-computed Legendre functions using Bulirsch elliptic integrals for improved accuracy
 
@@ -41,11 +41,6 @@ Modules = [GeneralizedPerturbedEquilibrium.Vacuum]
 GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response
 ```
 
-### compute_vacuum_field
-```@docs
-GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_field
-```
-
 ## Example Usage
 
 ### Basic Vacuum Response Calculation
@@ -75,17 +70,6 @@ wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(
 
 # Compute vacuum response; returns a VacuumResponse with wv, I_v, plasma_pts, wall_pts
 vac = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wall_settings)
-```
-
-### Vacuum Field Calculation at Observation Points
-
-```julia
-# Compute vacuum field at specific observation points
-# xi, eta are the real and imaginary parts of the perturbation amplitudes
-R_obs = 2.0  # Major radius of observation point
-Z_obs = 0.0  # Height of observation point
-
-chi = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_field(R_obs, Z_obs, inputs, xi, eta, plasma_surf)
 ```
 
 ## Notes
