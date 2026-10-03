@@ -19,8 +19,7 @@ where χ₁ = 2π·Ψ₀ [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10].
 Clebsch displacement components for PENTRC (matches Fortran gpout_xclebsch):
     ξ^ψ         = xsp_mn    (unregularized)
     ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + reg_spot²))
-    ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp) ideal, or ξ_s scaled by the same
-                             singfac factor when kinetic; divided by χ₁ in output)
+    ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp) ideal, ξ_s·singfac factor kinetic; divided by χ₁ in output)
 
 Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contra):
     ξ^ψ·J(m) = Σ_dm jmat(dm) · xsp(m+dm)
@@ -340,9 +339,8 @@ Matches Fortran gpeq_sol regularization + gpout_xclebsch output convention:
 
 When reg_spot=0, clebsch_psi1 = xi_psi1 and clebsch_alpha = xi_s/χ₁ (no regularization).
 
-Ideal runs re-solve the regularized xms = -A⁻¹(B·xmp1 + C·xsp) from `mats.ideal`. Kinetic runs
-instead scale the stored ξ_s by the same singfac factor and invert nothing — the kinetic A is
-non-Hermitian and never re-inverted here.
+Ideal runs re-solve the regularized xms = -A⁻¹(B·xmp1 + C·xsp) from `mats.ideal`.
+Kinetic runs scale the stored ξ_s by the same singfac factor (Fortran gpeq.f), since the kinetic A is non-Hermitian.
 """
 function compute_clebsch_displacements(
     xi_psi_modes::Matrix{ComplexF64},
