@@ -6,8 +6,11 @@ using TOML
 using Printf
 using HDF5
 using FastInterpolations
+import LinearAlgebra: dot, norm
 import IMASdd
 import AdaptiveArrayPools: @with_pool
+
+import CommonSolve: solve
 
 const _BANNER = "="^60
 const _SECTION = "-"^40
@@ -19,6 +22,11 @@ export Utilities
 include("Equilibrium/Equilibrium.jl")
 import .Equilibrium as Equilibrium
 export Equilibrium
+
+# Local high-n stability (Mercier, resistive interchange, ballooning Δ'); depends only on Equilibrium.
+include("LocalStability/LocalStability.jl")
+import .LocalStability as LocalStability
+export LocalStability
 
 include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
@@ -55,22 +63,35 @@ include("KineticForces/KineticForces.jl")
 import .KineticForces as KineticForces
 export KineticForces
 
+include("ErrorFields/ErrorFields.jl")
+import .ErrorFields as ErrorFields
+export ErrorFields
+
 include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
 
+include("HDF5Schema.jl")
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
-using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
-using .ForceFreeStates: compute_local_stability, compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
-using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
+using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings
+using .ForceFreeStates: ForceFreeStatesResult, build_result
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
+using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
-using .ForceFreeStates: eulerlagrange_integration, free_run!
-using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
+using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
+using .ForceFreeStates: galerkin_solve, write_galerkin!
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag")
+# Scripting-API surface: the integrator selectors, the published result, the equilibrium
+# constructor and the forcing description, re-exported so a user needs one `using`.
+using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, ResistiveMatch
+using .Equilibrium: PlasmaEquilibrium
+using .ForcingTerms: RMPField
+
+const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
+    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
+    "gal_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -154,12 +175,17 @@ analytic `*Config` or IMAS `dd` (TOML path), or `nothing` for file-based equilib
 already read from the source HDF5 snapshot, so `compute_perturbed_equilibrium`
 does not have to touch the original `forcing.dat` path. When `nothing`, the
 ForcingTerms data is loaded from disk at snapshot time (if PerturbedEquilibrium
-is enabled) so it still ends up in `input/raw_inputs/forcing_terms/`.
+is enabled) so it still ends up in `Input/RawInputs/ForcingTerms/`.
 
 `preloaded_coil_sets` similarly lets the rerun path inject coil geometry read from
-`input/raw_inputs/coils/` so a coil run can be replayed (recomputing the field
+`Input/RawInputs/Coils/` so a coil run can be replayed (recomputing the field
 against the current equilibrium) without the original `.dat`/`.h5` files. The coil
-geometry actually used by the run is always written back into `input/raw_inputs/coils/`.
+geometry actually used by the run is always written back into `Input/RawInputs/Coils/`.
+
+Returns `(; ffs, pe, slayer)`: the `ForceFreeStates.ForceFreeStatesResult`, the
+`PerturbedEquilibriumState` (`nothing` when that stage did not run) and the SLAYER result
+(`nothing` when that stage did not run or failed). An equilibrium-only run
+(`force_termination` in `[Equilibrium]`) returns `nothing` — it never reaches the solve.
 """
 function main_from_inputs(
     inputs::Dict{String,Any},
@@ -171,6 +197,11 @@ function main_from_inputs(
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing
 )
     total_start = time()
+    # Per-stage wall-clock seconds, written to Info/Runtimes at the end of the run.
+    runtimes = Vector{Pair{String,Float64}}()
+    # Output file this run actually wrote, last writer wins (matching where the SLAYER stage
+    # appends). `nothing` means no stage produced a file, so there is nothing to stamp.
+    written_h5 = nothing
 
     # ----------------------------------------------------------------
     # Equilibrium
@@ -184,6 +215,157 @@ function main_from_inputs(
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
+    resolve_mode_space!(intr, ctrl)
+
+    equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
+
+    kf_ctrl, kinetic_profiles, kf_species = load_kinetic_context(inputs, intr, ctrl, equil)
+    equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles)
+
+    equil_dt = time() - equil_start
+    push!(runtimes, "equilibrium" => equil_dt)
+    @info "Equilibrium construction completed in $(@sprintf("%.3f", equil_dt)) s"
+
+    # Early exit if user only requested equilibrium setup
+    if equil.config.force_termination
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        return
+    end
+
+    if "Wall" in keys(inputs)
+        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+    else
+        intr.wall_settings = Vacuum.WallShapeSettings()
+    end
+
+    if "DEBUG" in keys(inputs)
+        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+    else
+        intr.debug_settings = DebugSettings()
+    end
+
+    forcing_modes_snapshot = snapshot_forcing_modes(inputs, path, ctrl, preloaded_forcing_modes)
+
+    # ----------------------------------------------------------------
+    # Force-Free States
+    # ----------------------------------------------------------------
+    @info "\n  Force-Free States\n$_SECTION"
+    ffs_start = time()
+
+    locstab, ballooning_boundary = run_local_stability(ctrl, equil)
+    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles; species=kf_species)
+    ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric; runtimes=runtimes)
+
+    if ctrl.write_outputs_to_HDF5
+        write_outputs_to_HDF5(
+            ffs_result;
+            git_version=git_version,
+            inputs=inputs,
+            forcing_modes=forcing_modes_snapshot,
+            locstab=locstab,
+            ballooning_boundary=ballooning_boundary
+        )
+        written_h5 = ctrl.HDF5_filename
+        @info "Results written to $(ctrl.HDF5_filename)"
+    end
+
+    ffs_dt = time() - ffs_start
+    push!(runtimes, "force_free_states" => ffs_dt)
+    @info "Force-Free States completed in $(@sprintf("%.3f", ffs_dt)) s"
+
+    # Early exit if user only requested force-free states (SLAYER still runs).
+    if ctrl.force_termination
+        slayer_result = run_slayer_stage(ffs_result, inputs, nothing; runtimes=runtimes)
+        # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
+        slayer_result === nothing || (written_h5 = ctrl.HDF5_filename)
+        total_dt = time() - total_start
+        push!(runtimes, "total" => total_dt)
+        if written_h5 !== nothing
+            _write_runtimes!(joinpath(intr.dir_path, written_h5), runtimes)
+        end
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
+        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, coil_sensitivities=nothing, monte_carlo=nothing, locking_risk=nothing, efc_couplings=nothing)
+    end
+
+    # PE (and SLAYER, which appends after it) writes to PE's own output filename when set,
+    # falling back to the ForceFreeStates file.
+    pe_file = if "PerturbedEquilibrium" in keys(inputs)
+        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
+        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
+    else
+        ctrl.HDF5_filename
+    end
+
+    pe_start = time()
+    pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets; runtimes=runtimes)
+    # Record only when the stage ran; an absent [PerturbedEquilibrium] section would otherwise
+    # stamp a ~0 s entry for work that never happened.
+    if "PerturbedEquilibrium" in keys(inputs)
+        push!(runtimes, "perturbed_equilibrium" => time() - pe_start)
+        # Mirrors the write gate inside `perturbed_equilibrium` (write flag defaults to true).
+        if get(inputs["PerturbedEquilibrium"], "write_outputs_to_HDF5", true)
+            written_h5 = pe_file
+        end
+    end
+
+    kf_start = time()
+    run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles, kf_species)
+    if "KineticForces" in keys(inputs)
+        push!(runtimes, "kinetic_forces" => time() - kf_start)
+        # Mirrors the write gate inside `run_kinetic_forces` (needs a PE state to contract against).
+        if pe_state !== nothing && kf_ctrl.write_outputs_to_HDF5
+            written_h5 = kf_ctrl.HDF5_filename
+        end
+    end
+
+    ef_start = time()
+    error_fields = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles)
+    coil_sensitivities, monte_carlo, locking_risk, efc_couplings = error_fields === nothing ? (nothing, nothing, nothing, nothing) : error_fields
+    if "ErrorFields" in keys(inputs)
+        push!(runtimes, "error_fields" => time() - ef_start)
+        # Mirrors the write gate inside `run_error_fields` (write flag defaults to true, filename
+        # falls back to the ForceFreeStates file since the result carries this same control).
+        ef_raw = inputs["ErrorFields"]
+        if get(ef_raw, "write_outputs_to_HDF5", true)
+            ef_out = get(ef_raw, "output_filename", "")
+            written_h5 = isempty(ef_out) ? ctrl.HDF5_filename : ef_out
+        end
+    end
+
+    slayer_result = run_slayer_stage(ffs_result, inputs, pe_file; runtimes=runtimes)
+    # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
+    slayer_result === nothing || (written_h5 = pe_file)
+
+    # ----------------------------------------------------------------
+    # Done
+    # ----------------------------------------------------------------
+    total_dt = time() - total_start
+    push!(runtimes, "total" => total_dt)
+    if written_h5 !== nothing
+        _write_runtimes!(joinpath(intr.dir_path, written_h5), runtimes)
+    end
+    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
+
+    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
+
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
+
+end
+
+"""
+    _mode_range_label(intr) -> String
+
+Compact label for the resolved toroidal mode range, `"1"` for a single `n` and `"1:3"` for a range.
+"""
+_mode_range_label(intr::ForceFreeStatesInternal) = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
+
+"""
+    resolve_mode_space!(intr, ctrl) -> intr
+
+Resolve the requested toroidal mode range onto `intr`, filling an unspecified bound from the
+other one and rejecting ranges that contain no supported `n >= 1` mode.
+"""
+function resolve_mode_space!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
     # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     intr.nlow, intr.nhigh = ctrl.nn_low, ctrl.nn_high
     if intr.nlow == 0 && intr.nhigh == 0
@@ -205,15 +387,25 @@ function main_from_inputs(
         intr.nlow = 1
     end
     intr.npert = intr.nhigh - intr.nlow + 1
-    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
+    return intr
+end
 
-    equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
+"""
+    load_kinetic_context(inputs, intr, ctrl, equil) -> (kf_ctrl, kinetic_profiles, species)
 
-    # Build KineticForces control and load kinetic profiles once — reused by the grid
-    # refinement below, the stability kinetic callback (via `calculated_cb`), and the
-    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in stability
-    # does not need kinetic_profiles, but the post-PE block always does, so we load
-    # whenever a [KineticForces] section is present or the stability path requests the
+Build the KineticForces control and load the kinetic profiles once for the whole run.
+`kinetic_profiles` is `nothing` when no stage asks for them.
+"""
+function load_kinetic_context(
+    inputs::Dict{String,Any},
+    intr::ForceFreeStatesInternal,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium
+)
+    # The profiles are reused by the grid refinement, the stability kinetic callback (via
+    # `calculated_cb`), and the post-PE torque diagnostics block. The `"fixed"` kinetic source
+    # path in stability does not need kinetic_profiles, but the post-PE block always does, so we
+    # load whenever a [KineticForces] section is present or the stability path requests the
     # calculated source. psio is invariant across grid re-formation.
     kf_ctrl =
         haskey(inputs, "KineticForces") ?
@@ -222,6 +414,7 @@ function main_from_inputs(
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
+    species = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
                              (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
@@ -233,67 +426,83 @@ function main_from_inputs(
             density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
             ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
             chi1=2π * equil.psio)
-    end
-
-    # Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry,
-    # kinetic profiles), pin knots on rational surfaces, and re-form on the refined grid
-    # from the in-memory input — no file re-read.
-    if Equilibrium.wants_two_pass(eq_config)
-        mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
-        # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
-        # so the rational-surface brackets clear a zone large enough for every mode.
-        n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
-        psi_nodes = Equilibrium.refined_psi_grid(equil;
-            tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
-            singfac_min=ctrl.singfac_min, n_min=n_min)
-        rerun_input = if additional_input !== nothing
-            # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
-            # path re-runs read_imas, which must resolve the same psihigh both passes;
-            # _validate_psi_nodes errors loudly if it does not.
-            additional_input
-        elseif equil.ingest isa Equilibrium.DirectIngest
-            Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
-        elseif equil.ingest isa Equilibrium.InverseIngest
-            Equilibrium.build_inverse_from_ingest(eq_config, equil.ingest)
-        else
-            nothing  # fall back to re-reading the input file
+        if !isempty(kf_ctrl.ion_species) || kf_ctrl.electron
+            speclist = isempty(kf_ctrl.ion_species) ?
+                       [KineticForces.IonSpecies(; z=kf_ctrl.zi, m=kf_ctrl.mi, fraction=1.0)] : kf_ctrl.ion_species
+            species = Equilibrium.resolve_ntv_species(kinetic_file, speclist;
+                electron=kf_ctrl.electron, zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp,
+                density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+                ExB_rotation_factor=kf_ctrl.ExB_rotation_factor,
+                toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
         end
-        equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
-        implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
-        if implied > 1.5 * (length(psi_nodes) - 1)
-            @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
-                  "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
-        end
-        @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$nstring)"
     end
 
-    @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
+    return kf_ctrl, kinetic_profiles, species
+end
 
-    # Early exit if user only requested equilibrium setup
-    if equil.config.force_termination
-        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return
-    end
+"""
+    maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles) -> equil
 
-    if "Wall" in keys(inputs)
-        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, kinetic
+profiles), pin knots on rational surfaces, and re-form on the refined grid from the in-memory
+input — no file re-read. Returns `equil` untouched when the configuration wants a single pass.
+"""
+function maybe_reform_equilibrium(
+    equil::Equilibrium.PlasmaEquilibrium,
+    eq_config::Equilibrium.EquilibriumConfig,
+    additional_input,
+    intr::ForceFreeStatesInternal,
+    ctrl::ForceFreeStatesControl,
+    kinetic_profiles
+)
+    Equilibrium.wants_two_pass(eq_config) || return equil
+
+    mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+    # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
+    # so the rational-surface brackets clear a zone large enough for every mode.
+    n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
+    psi_nodes = Equilibrium.refined_psi_grid(equil;
+        tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+        singfac_min=ctrl.singfac_min, n_min=n_min)
+    rerun_input = if additional_input !== nothing
+        # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
+        # path re-runs read_imas, which must resolve the same psihigh both passes;
+        # _validate_psi_nodes errors loudly if it does not.
+        additional_input
+    elseif equil.ingest isa Equilibrium.DirectIngest
+        Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
+    elseif equil.ingest isa Equilibrium.InverseIngest
+        Equilibrium.build_inverse_from_ingest(eq_config, equil.ingest)
     else
-        intr.wall_settings = Vacuum.WallShapeSettings()
+        nothing  # fall back to re-reading the input file
     end
-
-    if "DEBUG" in keys(inputs)
-        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
-    else
-        intr.debug_settings = DebugSettings()
+    equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+    implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
+    if implied > 1.5 * (length(psi_nodes) - 1)
+        @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
+              "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
     end
+    @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$(_mode_range_label(intr)))"
 
-    # Forcing-data snapshot: when PerturbedEquilibrium is enabled, load forcing
-    # modes early so they can be written into `input/raw_inputs/forcing_terms/`
-    # alongside the TOML blob. On the rerun path the caller passes the modes in
-    # directly via `preloaded_forcing_modes`, bypassing the original file. Coil
-    # forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on
-    # replay, so only the file-based formats need their modes captured here.
-    forcing_modes_snapshot = preloaded_forcing_modes
+    return equil
+end
+
+"""
+    snapshot_forcing_modes(inputs, path, ctrl, preloaded) -> Union{Nothing,Vector{ForcingMode}}
+
+Capture the file-based forcing modes before the solve, when PerturbedEquilibrium is enabled, so
+they land in `Input/RawInputs/ForcingTerms/` alongside the TOML blob. Returns `preloaded`
+unchanged when the caller (the rerun path) already supplied the modes.
+"""
+function snapshot_forcing_modes(
+    inputs::Dict{String,Any},
+    path::String,
+    ctrl::ForceFreeStatesControl,
+    preloaded::Union{Nothing,Vector{ForcingTerms.ForcingMode}}
+)
+    # Coil forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on replay,
+    # so only the file-based formats need their modes captured here.
+    forcing_modes_snapshot = preloaded
     if forcing_modes_snapshot === nothing && "PerturbedEquilibrium" in keys(inputs)
         ft_raw = get(inputs, "ForcingTerms", Dict{String,Any}())
         scalar_forcing = filter(p -> p.first != "coil_set", ft_raw)
@@ -311,59 +520,56 @@ function main_from_inputs(
             )
         end
     end
+    return forcing_modes_snapshot
+end
 
-    # ----------------------------------------------------------------
-    # Force-Free States
-    # ----------------------------------------------------------------
-    @info "\n  Force-Free States\n$_SECTION"
-    ffs_start = time()
+"""
+    run_local_stability(ctrl, equil) -> (locstab, ballooning_boundary)
 
-    # Determine psilim and qlim (where we will integrate to)
-    sing_lim!(intr, ctrl, equil)
-
-    # If truncating before psihigh, reform equilibrium if desired
-    if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
-        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.psihigh)."
-        # JMH - Nik please put the logic we discussed here
-        # something like ?
-        # equil.config.psihigh = intr.psilim
-        # equil = set_up_equilibrium(equil.config)
-    end
-
-    # Compute local stability (if desired). `locstab` holds `D_I` from the ballooning
-    # coefficient system and the local ballooning result; `nothing` when not computed.
+Run the LocalStability stage when `local_stability_flag` is set. `locstab` holds `D_I` from the
+ballooning coefficient system and the local ballooning result, `ballooning_boundary` the first
+α-vs-ψ_N stability boundary; both are empty placeholders when the stage is off.
+"""
+function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
     locstab = nothing
     ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     if ctrl.local_stability_flag
-        locstab = compute_local_stability(ctrl, equil)
+        locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
         # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
-        ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
+        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
     end
+    return locstab, ballooning_boundary
+end
+
+"""
+    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, mats)
+
+Set up the force-free-states solve on `intr`: integration limits, the surviving singular
+surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
+Euler-Lagrange (and, when requested, kinetic) matrices.
+"""
+function prepare_force_free_states!(
+    intr::ForceFreeStatesInternal,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    kf_ctrl::KineticForces.KineticForcesControl,
+    kinetic_profiles;
+    species=nothing
+)
+    # Determine psilim and qlim (where we will integrate to)
+    sing_lim!(intr, ctrl, equil)
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
-    # Filter out surfaces outside the integration domain [qlow, qlim].
-    # Fortran STRIDE excludes these at the integration level; we remove them
-    # from intr.sing so the Δ' BVP sees only crossable surfaces.
-    if intr.msing > 0
-        qmin_integration = max(ctrl.qlow, equil.params.qmin)
-        n_before = intr.msing
-        keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin_integration && intr.sing[j].psifac <= intr.psilim]
-        if length(keep) < n_before
-            excluded = setdiff(1:n_before, keep)
-            excluded_mq = [(intr.sing[j].m, intr.sing[j].q) for j in excluded]
-            @info "Filtered $(n_before - length(keep)) singular surface(s) outside integration domain: $(excluded_mq)"
-            intr.sing = intr.sing[keep]
-            intr.msing = length(keep)
-        end
-    end
+    # Keep only surfaces inside the integration domain [qlow, qlim], so the Δ' BVP sees only crossable ones.
+    remove_singular_surfs!(intr; qmin=max(ctrl.qlow, equil.params.qmin))
 
     # For the outer-region Galerkin solve, exclude the q < qlow core (incl. any q≤1 sawtooth
     # surfaces) by raising psilow to where q = qlow (RDCON sing_min). Without this, the gal FEM
     # integrates through the unhandled q≤1 ideal singularity and contaminates Δ′ at the innermost
     # kept surface when q0 < qlow. No-op (keeps the axis bound) when qlow ≤ qmin.
-    if ctrl.gal_flag
+    if ctrl.integrator == "galerkin"
         sing_min!(intr, ctrl, equil)
     end
 
@@ -412,8 +618,8 @@ function main_from_inputs(
         @info "Computing F, G, and K matrices"
     end
 
-    # Compute matrices and populate FourFitVars struct
-    ffit = make_matrix(equil, intr, metric)
+    # Compute matrices and build the MatrixSplines container
+    mats = build_matrix_splines(equil, intr, metric)
 
     if ctrl.kinetic_factor > 0
         if ctrl.verbose
@@ -425,128 +631,239 @@ function main_from_inputs(
         calculated_cb = (c, e, i, m, f) ->
             KineticForces.compute_calculated_kinetic_matrices(
                 c, e, i, m, f;
-                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
-        make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species)
+        mats = build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
             calculated_source=calculated_cb)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
         # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
         # singfac_min == 0 preserves single-chunk behavior.
         if ctrl.singfac_min > 0
-            find_kinetic_singular_surfaces!(ffit, equil, intr)
+            find_kinetic_singular_surfaces!(mats, equil, intr)
         end
     end
 
-    # Integrate Euler-Lagrange Equation
-    if ctrl.verbose
-        @info "Integrating Euler-Lagrange equation"
-    end
-    odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
-    if odet.nzero > 0 && ctrl.verbose
-        @warn "Fixed-boundary mode unstable for n = $nstring"
-    end
+    return metric, mats
+end
 
-    # Compute free boundary energies
-    if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
-        if ctrl.verbose
-            wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
-            @info "Computing free boundary energies ($wall_desc)"
-        end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
-        if real(vac_data.et[1]) < 0
-            if ctrl.verbose
-                @warn "Free-boundary mode unstable for n = $nstring"
-            end
-        else
-            if ctrl.verbose
-                @info "All free-boundary modes stable for n = $nstring"
-            end
-        end
+"""
+    run_force_free_states(ctrl, equil, mats, intr, metric) -> ForceFreeStatesResult
 
-        # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
-        # Requires propagators from parallel FM path and wv from free_run!.
-        if ctrl.kinetic_factor == 0 && intr.msing > 0 && fm_propagators !== nothing
-            if ctrl.verbose
-                @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
-            end
-            ForceFreeStates.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
-                wv=vac_data.wv, psio=equil.psio, debug=ctrl.verbose,
-                S_at_surface_left=fm_S_left,
-                ctrl=ctrl, equil=equil, ffit=ffit)
-        end
-    end
+Run the formalism selected by `ctrl.integrator` — the standalone Galerkin solve, or the
+Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publish its products as a
+`ForceFreeStatesResult`. A `runtimes` collector, when given, receives the Galerkin solve's
+wall-clock seconds as a `"galerkin" => dt` pair for the `Info/Runtimes` record.
+"""
+function run_force_free_states(
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    mats,
+    intr::ForceFreeStatesInternal,
+    metric;
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+)
+    nstring = _mode_range_label(intr)
 
-    # Outer-region resistive Δ′ matrix via the singular Galerkin method (RDCON gal_solve)
+    # The three formalisms are exclusive. Galerkin solves the same Euler-Lagrange system
+    # variationally rather than by radial ODE integration, so it replaces both the integration
+    # and the free-boundary energies, and supplies its own vacuum response at psilim.
+    odet = nothing
+    free_energies = nothing
     gal_data = nothing
-    if ctrl.gal_flag
+    gal_dp = nothing
+    if ctrl.integrator == "galerkin"
+        ctrl.kinetic_factor == 0 ||
+            error("integrator = \"galerkin\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         gal_start = time()
-        gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
-        @info "Galerkin solve completed in $(@sprintf("%.3f", time() - gal_start)) s"
+        wv = ctrl.vac_flag ? first(ForceFreeStates.compute_scaled_wv(ctrl, equil, intr)) : nothing
+        gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv)
+        gal_dt = time() - gal_start
+        runtimes === nothing || push!(runtimes, "galerkin" => gal_dt)
+        @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
+    else
+        # Integrate Euler-Lagrange Equation
+        if ctrl.verbose
+            @info "Integrating Euler-Lagrange equation"
+        end
+        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, mats, intr)
+        if odet.nzero > 0 && ctrl.verbose
+            @warn "Fixed-boundary mode unstable for n = $nstring"
+        end
+
+        # Compute free boundary energies.
+        if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
+            if ctrl.verbose
+                wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
+                @info "Computing free boundary energies ($wall_desc)"
+            end
+            free_energies = free_run(odet, ctrl, equil, mats, intr)
+            normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
+            if real(free_energies.et[1]) < 0
+                if ctrl.verbose
+                    @warn "Free-boundary mode unstable for n = $nstring"
+                end
+            else
+                if ctrl.verbose
+                    @info "All free-boundary modes stable for n = $nstring"
+                end
+            end
+
+            # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
+            # Requires propagators from parallel FM path and wv from free_run.
+            if ctrl.kinetic_factor == 0 && intr.msing > 0 && fm_propagators !== nothing
+                if ctrl.verbose
+                    @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
+                end
+                ForceFreeStates.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
+                    wv=free_energies.wv, psio=equil.psio, debug=ctrl.verbose,
+                    S_at_surface_left=fm_S_left,
+                    ctrl=ctrl, equil=equil, mats=mats)
+            end
+        end
     end
+
+    # Publish the solve: from here on the downstream stages read the result, never `intr`.
+    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+end
+
+"""
+    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(), match=nothing,
+                         dir_path=".", debug=DebugSettings(), kwargs...)
+
+The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
+the perturbed potential energy whose solutions are the force-free (and, via the TOML path,
+kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
+[`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
+names this one, so `solve` stays unambiguous as other problem classes appear.
+
+`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `match` an
+optional [`ResistiveMatch`](@ref) closing the basis with an inner-layer solution instead of
+the ideal jump, `dir_path` the working directory outputs are written to, and `debug` the
+diagnostic dump settings of the DEBUG deck section. Any remaining keyword is a
+`ForceFreeStatesControl` field, so the TOML keys and the problem keywords are the same
+knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
+
+## Fields
+
+  - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
+  - `wall::Vacuum.WallShapeSettings` - Vacuum wall shape for the free-boundary energies.
+  - `match::Union{Nothing,ForceFreeStates.ResistiveMatch}` - Optional inner-layer closure.
+  - `dir_path::String` - Working directory for outputs.
+  - `debug::DebugSettings` - Diagnostic dump settings.
+  - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
+"""
+struct EulerLagrangeProblem
+    equil::Equilibrium.PlasmaEquilibrium
+    wall::Vacuum.WallShapeSettings
+    match::Union{Nothing,ForceFreeStates.ResistiveMatch}
+    dir_path::String
+    debug::DebugSettings
+    ctrl_kwargs::Dict{Symbol,Any}
+end
+
+function EulerLagrangeProblem(
+    equil::Equilibrium.PlasmaEquilibrium;
+    nn::Union{Int,AbstractUnitRange{Int}},
+    wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
+    match::Union{Nothing,ForceFreeStates.ResistiveMatch}=nothing,
+    dir_path::AbstractString=".",
+    debug::DebugSettings=DebugSettings(),
+    kwargs...
+)
+    ctrl_kwargs = Dict{Symbol,Any}(kwargs)
+    (haskey(ctrl_kwargs, :nn_low) || haskey(ctrl_kwargs, :nn_high)) &&
+        error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
+    ctrl_kwargs[:nn_low] = first(nn)
+    ctrl_kwargs[:nn_high] = last(nn)
+    return EulerLagrangeProblem(equil, wall, match, String(dir_path), debug, ctrl_kwargs)
+end
+
+"""
+    solve(prob::EulerLagrangeProblem, alg) -> ForceFreeStatesResult
+    solve(equil, alg; nn, kwargs...) -> ForceFreeStatesResult
+
+Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `alg` —
+[`Forward`](@ref), [`Riccati`](@ref) or [`Galerkin`](@ref) — and return the published
+[`ForceFreeStatesResult`](@ref). This is the scripting entry point; it runs the same stages
+a `gpec.toml` run of `main` does and produces the same result object. The second form is
+sugar building the problem from an equilibrium and the problem keywords in one call.
+
+Knobs owned by `alg` or `match` are rejected as `ForceFreeStatesControl` keywords. Kinetic
+runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]` profiles
+and errors here.
+
+```julia
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
+ffs = solve(prob, Riccati())
+ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
+```
+"""
+function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
+    total_start = time()
+
+    equil = prob.equil
+    ctrl_kwargs = copy(prob.ctrl_kwargs)
+    ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
+    ForceFreeStates._apply_match!(ctrl_kwargs, prob.match, alg)
+    ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
+
+    ctrl.kinetic_factor > 0 &&
+        error("kinetic runs (kinetic_factor > 0) need the [KineticForces] profiles and are TOML-driven; run them through `main`")
+
+    intr = ForceFreeStatesInternal(; dir_path=prob.dir_path)
+    intr.wall_settings = prob.wall
+    intr.debug_settings = prob.debug
+
+    resolve_mode_space!(intr, ctrl)
+
+    # The API path never reads kinetic profiles, so the KineticForces control is only the
+    # placeholder `prepare_force_free_states!` threads into its (unused) callback.
+    kf_ctrl = KineticForces.KineticForcesControl()
+
+    if Equilibrium.wants_two_pass(equil.config) && equil.ingest === nothing
+        @warn "Two-pass auto grid needs the equilibrium's raw ingest, which analytic and IMAS equilibria do not carry; " *
+              "solving on the single-pass grid. Set mpsi explicitly to choose the grid."
+    else
+        equil = maybe_reform_equilibrium(equil, equil.config, nothing, intr, ctrl, nothing)
+    end
+
+    locstab, ballooning_boundary = run_local_stability(ctrl, equil)
+    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
+    result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(
-            ctrl,
-            equil,
-            intr,
-            odet,
-            ctrl.vac_flag ? vac_data : nothing,
-            ffit,
-            git_version,
-            inputs,
-            forcing_modes_snapshot,
-            gal_data;
-            locstab=locstab,
-            ballooning_boundary=ballooning_boundary
-        )
+        write_outputs_to_HDF5(result; locstab=locstab, ballooning_boundary=ballooning_boundary)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
-    @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
+    @info "Force-Free States completed in $(@sprintf("%.3f", time() - total_start)) s"
 
-    # SLAYER tearing-mode analysis stage. Needs only equil + intr, so it runs in
-    # both the force_termination=true path and the full pipeline. `pe_file` is the
-    # HDF5 file PE wrote (to append into), or `nothing` if PE did not run.
-    function _run_slayer_stage(pe_file::Union{String,Nothing})
-        ("SLAYER" in keys(inputs)) || return nothing
-        # SLAYER is a post-processing diagnostic. A failure here must not
-        # discard the equilibrium / stability / PE results already computed,
-        # so the whole stage is guarded: on error we log loudly and return
-        # `nothing` for the `slayer` field rather than propagating.
-        try
-            slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-            slayer_ctrl.enabled || return nothing
-            @info "\n  SLAYER\n$_SECTION"
-            slayer_start = time()
-            result = Runner.run_slayer(equil, intr, slayer_ctrl;
-                dir_path=intr.dir_path)
-            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
-            h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
-            h5_path = joinpath(intr.dir_path, h5_filename)
-            # Append the slayer/ group; create the file if no prior stage wrote
-            # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
-            HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
-                Runner.write_slayer_hdf5!(f, result)
-            end
-            @info "SLAYER results written to $h5_filename"
-            return result
-        catch err
-            @error "SLAYER stage failed; continuing without tearing results. " *
-                   "Equilibrium / stability / PE outputs are unaffected." exception =
-                (err, catch_backtrace())
-            return nothing
-        end
-    end
+    return result
+end
 
-    # Early exit if user only requested force-free states (SLAYER still runs).
-    if ctrl.force_termination
-        slayer_result = _run_slayer_stage(nothing)
-        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
-            vac_data=ctrl.vac_flag ? vac_data : nothing,
-            slayer=slayer_result)
-    end
+"""
+    solve(equil::PlasmaEquilibrium, alg; nn, kwargs...) -> ForceFreeStatesResult
 
+Convenience form of [`solve`](@ref): builds the [`EulerLagrangeProblem`](@ref) from the
+equilibrium and the problem keywords, then solves it with `alg`.
+"""
+solve(equil::Equilibrium.PlasmaEquilibrium, alg::ForceFreeStates.AbstractIntegrator; kwargs...) =
+    solve(EulerLagrangeProblem(equil; kwargs...), alg)
+
+"""
+    run_perturbed_equilibrium(result, inputs, forcing_modes_snapshot, preloaded_coil_sets) -> pe_state
+
+Run the perturbed-equilibrium stage against a published force-free-states `result` and write its
+outputs. Returns `nothing` when the deck carries no `[PerturbedEquilibrium]` section.
+"""
+function run_perturbed_equilibrium(
+    result::ForceFreeStatesResult,
+    inputs::Dict{String,Any},
+    forcing_modes_snapshot::Union{Nothing,Vector{ForcingTerms.ForcingMode}},
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}};
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+)
     # ----------------------------------------------------------------
     # Perturbed Equilibrium
     # ----------------------------------------------------------------
@@ -554,295 +871,689 @@ function main_from_inputs(
     pe_start = time()
 
     # Check for PerturbedEquilibrium section and run if present
+    pe_state = nothing
     if "PerturbedEquilibrium" in keys(inputs)
-        # Read ForcingTerms control parameters
-        if "ForcingTerms" in keys(inputs)
-            forcing_raw = inputs["ForcingTerms"]
-            # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
-            # kwarg splatting and handled separately via coil_sets_raw field
-            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
-            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
-            ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in scalar_forcing)...
-            )
-            ft_ctrl.coil_sets_raw = coil_sets_raw
-        else
-            ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
-        end
+        ft_ctrl = forcing_terms_control(inputs)
 
-        pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(;
-            (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...
-        )
-        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=intr.dir_path)
-
-        # DRIVEN (RPEC): feed the coil-matched gal solution to PE instead of the shooting solution.
-        # The matched OdeState is in the identity-at-edge basis; build_flux_matrix rederives the edge BC
-        # from u_store[:,:,1,step], so PE consumes it unchanged. The shooting odet is left untouched for
-        # the Force-Free States HDF5 output.
-        pe_odet = odet
-        if ctrl.gal_flag && ctrl.gal_match_flag && gal_data !== nothing && gal_data.match !== nothing
-            @info "PerturbedEquilibrium: using the RPEC-matched gal solution"
-            pe_odet = gal_matched_odestate(gal_data, ffit, intr)
-            pe_intr.odet_from_gal = true
-            pe_intr.inner_bpen = gal_data.match.bpen
-        else
-            pe_intr.inner_bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
-        end
-
-        # Reuse the forcing modes loaded at snapshot time (or injected by
-        # `build_inputs_from_h5`) so the PE compute step never re-reads the original
-        # forcing file. `compute_perturbed_equilibrium` short-circuits
-        # `load_forcing_data!` when `pe_intr.forcing_modes` is non-empty.
-        if forcing_modes_snapshot !== nothing
-            pe_intr.forcing_modes = copy(forcing_modes_snapshot)
-        end
-
-        # Inject preloaded coil geometry (gpec.h5 replay with `--coil-source coils`)
-        # so the coil field is recomputed from stored geometry without the .dat/.h5 file.
-        if preloaded_coil_sets !== nothing
-            pe_intr.coil_sets = copy(preloaded_coil_sets)
-        end
-
-        # Run perturbed equilibrium calculations
-        # Pass vac_data and intr for response matrix calculations
-        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, pe_odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
-            metric, ffit
-        )
-
-        # Write perturbed equilibrium outputs to same HDF5 file
-        if pe_ctrl.write_outputs_to_HDF5
-            output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
-            PerturbedEquilibrium.write_outputs_to_HDF5(
-                pe_state, pe_intr, joinpath(intr.dir_path, output_file)
-            )
-            @info "Results written to $output_file"
-        end
-
-        # Snapshot the coil geometry actually used into the gpec.h5 output so the run
-        # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
-        if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
-            _write_coil_snapshot!(joinpath(intr.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
-        end
+        # The deck's forcing block is an unscaled RMPField, so the TOML path and the
+        # scripting API share one stage.
+        pe_state = perturbed_equilibrium(result, ForcingTerms.RMPField(ft_ctrl);
+            forcing_modes=forcing_modes_snapshot, coil_sets=preloaded_coil_sets, runtimes=runtimes,
+            (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...)
     end
 
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
 
-    # ----------------------------------------------------------------
-    # KineticForces (Neoclassical Toroidal Viscosity)
-    # ----------------------------------------------------------------
-    if "KineticForces" in keys(inputs)
-        @info "\n  KineticForces\n$_SECTION"
-        kf_start = time()
-
-        # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
-        # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
-        if !@isdefined(pe_state)
-            @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
-        else
-            # kf_ctrl and kinetic_profiles were loaded once above the stability block.
-            kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
-            KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
-
-            kf_state = KineticForces.KineticForcesState()
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
-
-            if kf_ctrl.write_outputs_to_HDF5
-                h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
-                    KineticForces.write_to_hdf5!(h5file, kf_state)
-                end
-            end
-        end
-
-        @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
-    end
-
-    # ----------------------------------------------------------------
-    # SLAYER tearing-mode analysis (after PE so it appends to the PE output
-    # file; falls back to the ForceFreeStates file when PE did not run).
-    # ----------------------------------------------------------------
-    pe_file = if "PerturbedEquilibrium" in keys(inputs)
-        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
-        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
-    else
-        ctrl.HDF5_filename
-    end
-    slayer_result = _run_slayer_stage(pe_file)
-
-    # ----------------------------------------------------------------
-    # Done
-    # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-
-    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
-
-    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
-        vac_data=ctrl.vac_flag ? vac_data : nothing,
-        slayer=slayer_result)
-
+    return pe_state
 end
 
 """
-    write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState)
+    perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, runtimes=nothing, kwargs...) -> PerturbedEquilibriumState
 
-Helper function to write the HDF5 output file with relevant run and equilibrium parameters.
-This combines the functionality of several pieces of the Fortran code in `ode_output.f`,
-primarily `ode_output_open` and the various `bin_euler` writes that occur throughout the
-integration. Some parameters are only dumped in their respective flags are true, e.g.
-vacuum data if `vac_flag` is true.
+Compute the plasma response to the external field `rmp` on top of a force-free-states solve
+`ffs`, and write the perturbed-equilibrium outputs. `rmp` is an [`RMPField`](@ref); keyword
+arguments are `PerturbedEquilibrium.PerturbedEquilibriumControl` fields.
+
+Products the producing integrator could not supply gate the corresponding calculation: the
+step warns and is skipped rather than erroring, so a Riccati- or Galerkin-fed result still
+flows through.
+
+`forcing_modes` injects already-loaded modes (the gpec.h5 replay path) and `coil_sets`
+already-built coil geometry, both bypassing the corresponding read. A `runtimes` collector,
+when given, receives the forcing-mode materialization's wall-clock seconds as `"forcing_terms" => dt`.
+
+```julia
+pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
+```
+"""
+function perturbed_equilibrium(
+    ffs::ForceFreeStatesResult,
+    rmp::ForcingTerms.RMPField;
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing,
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing,
+    kwargs...
+)
+    ctrl = ffs.control
+    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; kwargs...)
+    pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
+
+    # Inner-layer penetrated resonant field; zeros under ideal closure.
+    pe_intr.inner_bpen = ffs.bpen
+
+    # Reuse forcing modes loaded at snapshot time (or injected by `build_inputs_from_h5`) so
+    # the materialization step never re-reads the original forcing file.
+    if forcing_modes !== nothing
+        pe_intr.forcing_modes = copy(forcing_modes)
+    end
+
+    # Injected coil geometry (gpec.h5 replay with `--coil-source coils`) lets the coil field
+    # be recomputed from stored geometry without the .dat/.h5 files.
+    if coil_sets !== nothing
+        pe_intr.coil_sets = copy(coil_sets)
+    end
+
+    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, rmp, pe_ctrl, pe_intr; runtimes=runtimes)
+
+    # Write perturbed equilibrium outputs to same HDF5 file
+    if pe_ctrl.write_outputs_to_HDF5
+        output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
+        PerturbedEquilibrium.write_outputs_to_HDF5(
+            pe_state, pe_intr, joinpath(ffs.dir_path, output_file)
+        )
+        @info "Results written to $output_file"
+    end
+
+    # Snapshot the coil geometry actually used into the gpec.h5 output so the run
+    # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
+    if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
+        _write_coil_snapshot!(joinpath(ffs.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
+    end
+
+    return pe_state
+end
+
+"""
+    run_kinetic_forces(inputs, result, pe_state, kf_ctrl, kinetic_profiles)
+
+Compute and write the neoclassical toroidal viscosity torque diagnostics when the deck carries a
+`[KineticForces]` section. No-op when the perturbed-equilibrium state the operators contract
+against is missing.
+"""
+function run_kinetic_forces(
+    inputs::Dict{String,Any},
+    result::ForceFreeStatesResult,
+    pe_state,
+    kf_ctrl::KineticForces.KineticForcesControl,
+    kinetic_profiles,
+    species=nothing
+)
+    # ----------------------------------------------------------------
+    # KineticForces (Neoclassical Toroidal Viscosity)
+    # ----------------------------------------------------------------
+    ("KineticForces" in keys(inputs)) || return nothing
+
+    @info "\n  KineticForces\n$_SECTION"
+    kf_start = time()
+
+    # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
+    # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
+    if pe_state === nothing
+        @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (e.g. kinetic_source=\"calculated\")."
+    else
+        # kf_ctrl and kinetic_profiles were loaded once before the equilibrium was re-formed.
+        kf_intr = KineticForces.KineticForcesInternal(result.equil; verbose=kf_ctrl.verbose)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, result, result.equil, result.metric)
+
+        if species === nothing
+            kf_state = KineticForces.KineticForcesState()
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles)
+            if kf_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                    KineticForces.write_to_hdf5!(h5file, kf_state;
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                end
+            end
+        else
+            states = KineticForces.KineticForcesState[]
+            labels = String[]
+            for sp in species
+                # KineticForcesControl is immutable, so each species gets a fresh control
+                # built from the run's control with only its own identity overridden.
+                sctrl = KineticForces.KineticForcesControl(;
+                    (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
+                    zi=sp.z, mi=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
+                st = KineticForces.KineticForcesState()
+                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles)
+                push!(states, st)
+                push!(labels, sp.label)
+            end
+            kf_state = KineticForces.combine_species_states(states)
+            if kf_ctrl.write_outputs_to_HDF5
+                h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                    for (st, label) in zip(states, labels)
+                        KineticForces.write_to_hdf5!(h5file, st;
+                            dVdpsi_spline=result.equil.profiles.dVdpsi_spline, species_label=label)
+                    end
+                    KineticForces.write_to_hdf5!(h5file, kf_state;
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                end
+            end
+        end
+    end
+
+    @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
+
+    return nothing
+end
+
+"""
+    forcing_terms_control(inputs) -> ForcingTermsControl
+
+The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent. The
+`[[ForcingTerms.coil_set]]` array of tables is passed through as `coil_sets_raw` rather than
+splatted with the scalar keys.
+"""
+function forcing_terms_control(inputs::Dict{String,Any})
+    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl()
+    forcing_raw = inputs["ForcingTerms"]
+    coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+    scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
+    return ForcingTerms.ForcingTermsControl(; (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw)
+end
+
+"""
+    run_error_fields(inputs, result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles) -> (sensitivities, monte_carlo, risk, couplings) or nothing
+
+Linearize every coil set's resonant drive with respect to its rigid shifts and tilts and write
+`ErrorFields/CoilSensitivities/` when the deck carries an `[ErrorFields]` section. When the
+section names a `tolerance_file`, read, validate and echo it, then run the tolerance Monte
+Carlo on the full-window dominant mode with the `[ErrorFields.MonteCarlo]` settings and write
+`ErrorFields/MonteCarlo/`; with an `[ErrorFields.scenario]` table as well, evaluate the locking
+risk (and the tolerance scan when `[ErrorFields.Risk]` names `scan_scales`) and write
+`ErrorFields/Risk/`; with `[ErrorFields.NTV]` naming correction arrays, evaluate their overlap and NTV
+torque couplings per kilo-ampere-turn (needs the kinetic context) and write `ErrorFields/NTV/`.
+Stages not requested return `nothing`. Needs the
+perturbed-equilibrium state's singular-coupling matrix and coil-format forcing, and errors
+otherwise: a deck asking for error-field sensitivities without them is a misconfiguration, not a
+case to skip silently. Coil geometry is rebuilt from the deck unless a replay injected it.
+"""
+function run_error_fields(
+    inputs::Dict{String,Any},
+    result::ForceFreeStatesResult,
+    pe_state,
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}},
+    kf_ctrl::KineticForces.KineticForcesControl=KineticForces.KineticForcesControl(),
+    kinetic_profiles=nothing
+)
+    ("ErrorFields" in keys(inputs)) || return nothing
+
+    @info "\n  ErrorFields\n$_SECTION"
+    ef_start = time()
+
+    # [ErrorFields.MonteCarlo], [ErrorFields.Risk] and [ErrorFields.scenario] are nested tables,
+    # excluded from the control-struct splat.
+    ef_raw = inputs["ErrorFields"]
+    nested = ("MonteCarlo", "Risk", "scenario", "NTV")
+    ef_ctrl = ErrorFields.ErrorFieldsControl(; (Symbol(k) => v for (k, v) in ef_raw if !(k in nested))...)
+    mc_ctrl = ErrorFields.MonteCarloControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "MonteCarlo", Dict{String,Any}()))...)
+    risk_ctrl = ErrorFields.RiskControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "Risk", Dict{String,Any}()))...)
+    scenario_raw = get(ef_raw, "scenario", nothing)
+    ntv_ctrl = ErrorFields.NTVControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "NTV", Dict{String,Any}()))...)
+    pe_state === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section with compute_singular_coupling = true")
+    ft_ctrl = forcing_terms_control(inputs)
+    ft_ctrl.forcing_data_format == "coil" ||
+        error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(ft_ctrl.forcing_data_format)\")")
+
+    cfg = ForcingTerms.CoilConfig(ft_ctrl)
+    coil_sets = preloaded_coil_sets === nothing ? ForcingTerms.load_coil_sets(cfg, result.nlow; equil=result.equil) : preloaded_coil_sets
+    rc = PerturbedEquilibrium.ResonantCoupling(pe_state, result)
+    sens = ErrorFields.compute_coil_sensitivities(coil_sets, rc, result.equil, cfg, ef_ctrl;
+        psi=result.psilim, b_t0=result.equil.params.bt0)
+
+    tolerances = nothing
+    if !isempty(ef_ctrl.tolerance_file)
+        tol_path = joinpath(result.dir_path, ef_ctrl.tolerance_file)
+        isfile(tol_path) || error("[ErrorFields] tolerance_file not found: $tol_path")
+        tolerances = ErrorFields.validate_tolerances(ErrorFields.read_tolerance_toml(tol_path), sens.coil_names)
+        @info "Tolerances: $(length(tolerances.coils)) coil sets, $(length(tolerances.groups)) coherent groups from $(ef_ctrl.tolerance_file)"
+    end
+
+    # The run's Monte Carlo is the full-window, dominant-mode summary; other windows are re-run
+    # post hoc with ErrorFields.run_monte_carlo.
+    dom = PerturbedEquilibrium.dominant_coupling(rc)
+    monte_carlo = nothing
+    if tolerances !== nothing
+        mc_start = time()
+        monte_carlo = ErrorFields.run_monte_carlo(ErrorFields.sensitivity_table(sens, dom), tolerances, coil_sets, mc_ctrl)
+        @info "Monte Carlo: $(mc_ctrl.nbatch) × $(mc_ctrl.nsample) samples in $(@sprintf("%.2f", time() - mc_start)) s; " *
+              "⟨|δ|⟩ = $(@sprintf("%.3e", monte_carlo.mean_abs_delta)) intrinsic, $(@sprintf("%.3e", monte_carlo.mean_abs_delta_efc)) corrected " *
+              "(nominal $(@sprintf("%.3e", monte_carlo.delta_nominal)))"
+    end
+
+    # Locking risk needs the operating point: [ErrorFields.scenario] with at least n_e.
+    risk = nothing
+    scan = nothing
+    if monte_carlo !== nothing && scenario_raw !== nothing
+        haskey(scenario_raw, "n_e") || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
+        scen = ErrorFields.ScenarioParameters(result.equil; (Symbol(k) => v for (k, v) in scenario_raw)...)
+        sc = ErrorFields.threshold_scaling(; n=result.nlow, year=risk_ctrl.year, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
+        risk_start = time()
+        risk = ErrorFields.locking_risk(monte_carlo, sc, scen; ctrl=risk_ctrl)
+        @info "Locking risk ($(ErrorFields.scaling_label(sc))): threshold $(@sprintf("%.3e", risk.threshold_nominal)); " *
+              "P_lock = $(@sprintf("%.2f", risk.plock)) % intrinsic, $(@sprintf("%.2f", risk.plock_efc)) % corrected, " *
+              "$(@sprintf("%.2f", risk.plock_nominal)) % as designed ($(@sprintf("%.2f", time() - risk_start)) s)"
+        if !isempty(risk_ctrl.scan_scales)
+            scan_start = time()
+            scan = ErrorFields.tolerance_scan(ErrorFields.sensitivity_table(sens, dom), tolerances, coil_sets, mc_ctrl, sc, scen;
+                scales=risk_ctrl.scan_scales, risk_ctrl)
+            @info "Tolerance scan over $(length(scan.scale)) scales in $(@sprintf("%.2f", time() - scan_start)) s"
+        end
+    end
+
+    # Correction-coil couplings: overlap per kAt and the NTV torque of the full and residual fields.
+    couplings = nothing
+    if !isempty(ntv_ctrl.efc_coils)
+        efc_sets = [cs for cs in coil_sets if cs.name in ntv_ctrl.efc_coils]
+        missing = setdiff(ntv_ctrl.efc_coils, [cs.name for cs in efc_sets])
+        isempty(missing) || error("[ErrorFields.NTV] efc_coils not among the run's coil sets: $(join(missing, ", "))")
+        ntv_start = time()
+        couplings = efc_couplings(result, efc_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; method=ntv_ctrl.method, verbose=ntv_ctrl.verbose,
+            rotation_scan=ntv_ctrl.rotation_scan, scan_points=ntv_ctrl.rotation_scan_points, scan_max_points=ntv_ctrl.rotation_scan_max_points,
+            scan_tolerance=ntv_ctrl.rotation_scan_tolerance, span_factor=ntv_ctrl.rotation_span_factor, offset_factor=ntv_ctrl.rotation_offset_factor)
+        @info "NTV couplings of $(length(couplings)) correction arrays in $(@sprintf("%.1f", time() - ntv_start)) s"
+    end
+
+    if ef_ctrl.write_outputs_to_HDF5
+        output_file = isempty(ef_ctrl.output_filename) ? result.control.HDF5_filename : ef_ctrl.output_filename
+        h5open(joinpath(result.dir_path, output_file), "cw") do h5file
+            ErrorFields.write_to_hdf5!(h5file, sens, dom)
+            # Raw echo of the tolerance input for replay (read back by ErrorFields.read_tolerance_snapshot).
+            tolerances === nothing || ErrorFields.write_tolerance_snapshot!(h5file, tolerances)
+            monte_carlo === nothing || ErrorFields.write_to_hdf5!(h5file, monte_carlo)
+            risk === nothing || ErrorFields.write_to_hdf5!(h5file, risk; scan)
+            couplings === nothing || ErrorFields.write_to_hdf5!(h5file, couplings)
+        end
+        @info "Results written to $output_file"
+    end
+
+    @info "ErrorFields completed in $(@sprintf("%.3f", time() - ef_start)) s"
+
+    return sens, monte_carlo, risk, couplings
+end
+
+"""
+    efc_couplings(ffs, coil_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; mode=1, method="fgar", verbose=false) -> Vector{ErrorFields.EFCCoupling}
+
+The couplings of each correction coil array in `coil_sets` per kilo-ampere-turn: its
+dominant-mode overlap and resonant fraction from its spectrum on the control surface, and its
+NTV torque for the whole field and for the field with mode `mode` of `dom` projected out. The
+torque is a quadratic form of the applied spectrum, so each is one plasma-response evaluation
+of the unit-current spectrum (injected as forcing modes, nothing written) followed by the
+kinetic torque of `method`; both scale exactly with the square of the current. `cfg` is the
+run's `[ForcingTerms]` coil configuration, so the boundary grid matches the one the run's
+sensitivities were evaluated on; `rc` must be the coupling of `ffs`'s own solve and
+`kinetic_profiles` its kinetic context. The spectrum is normalized by the magnitude of the
+array's ampere-turns, `|nw| × max|I|`, keeping its winding sense and current pattern as the
+phase reference; the torque is stored with its sign.
+"""
+function efc_couplings(
+    ffs::ForceFreeStatesResult,
+    coil_sets::Vector{ForcingTerms.CoilSet},
+    rc::PerturbedEquilibrium.ResonantCoupling,
+    dom::PerturbedEquilibrium.DominantCoupling,
+    cfg::ForcingTerms.CoilConfig,
+    kf_ctrl::KineticForces.KineticForcesControl,
+    kinetic_profiles;
+    mode::Int=1,
+    method::AbstractString="fgar",
+    rotation_scan::Bool=true,
+    scan_points::Int=9,
+    scan_max_points::Int=21,
+    scan_tolerance::Real=0.05,
+    span_factor::Real=1.0,
+    offset_factor::Real=2.0,
+    verbose::Bool=false
+)
+    kinetic_profiles === nothing && error("efc_couplings needs kinetic profiles: add a [KineticForces] section with a kinetic_file")
+    getfield(kf_ctrl, Symbol(method * "_flag")) || error("efc_couplings: KineticForces method \"$method\" is not enabled in the control")
+    equil = ffs.equil
+    grids = [(n, ForcingTerms.CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)) for n in sort(unique(rc.n_modes))]
+    m_low, m_high = extrema(rc.m_modes)
+    v = dom.right_singular_vectors[:, mode]
+    quiet = PerturbedEquilibrium.PerturbedEquilibriumControl(; compute_response=true, compute_singular_coupling=false, verbose=verbose, write_outputs_to_HDF5=false)
+
+    # Reference rotation and scan span from the kinetic profiles, with the torque kernel's own
+    # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
+    kp = kinetic_profiles
+    chi1 = 2π * equil.psio
+    chrg = kf_ctrl.zi * Utilities.E_CHG
+    ψk = kp.xs
+    ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
+    ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
+    ω_star_n = [(n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk]
+    ω_φ = ω_E .+ ω_star_n .+ ω_star_T
+    # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
+    w = [ψ <= ffs.psilim ? max(kp.ni_spline(ψ), 0.0) * equil.profiles.dVdpsi_spline(clamp(ψ, equil.profiles.xs[1], equil.profiles.xs[end])) : 0.0 for ψ in ψk]
+    ω_ref = sum(w .* ω_φ) / sum(w)
+    span, ω_offset = ErrorFields.rotation_scan_span(ω_E[1], ω_star_T[1]; span_factor, offset_factor)
+    npts = isodd(scan_points) ? scan_points : scan_points + 1
+    grid0 = rotation_scan ? collect(range(-span, span; length=max(npts, 3))) : [0.0]
+    verbose && @info "NTV couplings: ω_ref = $(@sprintf("%.3e", ω_ref)) rad/s, rough offset $(@sprintf("%.3e", ω_offset)) rad/s, " *
+          "scan ±$(@sprintf("%.3e", span)) rad/s on $(length(grid0)) initial points (max $(scan_max_points))"
+
+    function response_of(modes::Vector{ForcingTerms.ForcingMode})
+        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
+        pe_intr.inner_bpen = ffs.bpen
+        pe_intr.forcing_modes = modes
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, ForcingTerms.RMPField(ForcingTerms.ForcingTermsControl()), quiet, pe_intr)
+        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=verbose)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
+        return kf_intr
+    end
+    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.
+    function torque_of(kf_intr, profiles)
+        kf_state = KineticForces.KineticForcesState()
+        logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
+        Base.CoreLogging.with_logger(logger) do
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, profiles)
+        end
+        r = kf_state.method_results[String(method)]
+        T = real(r.total_torque)
+        prof = zeros(Float64, length(ψk))
+        if length(r.psi_grid) >= 2
+            # Cubic spline of the cumulative torque on the quadrature's own ψ points (deduplicated), zero
+            # inside the first point and the total beyond the last.
+            keep = [i == 1 || r.psi_grid[i] > r.psi_grid[i-1] for i in eachindex(r.psi_grid)]
+            pg, tc = r.psi_grid[keep], real.(r.t_cumulative[keep])
+            spl = length(pg) >= 4 ? cubic_interp(pg, tc) : nothing
+            for (k, ψ) in enumerate(ψk)
+                prof[k] = ψ <= pg[1] ? 0.0 : ψ >= pg[end] ? tc[end] : spl === nothing ? tc[searchsortedlast(pg, ψ)] : spl(ψ)
+            end
+        end
+        return T, prof
+    end
+
+    out = ErrorFields.EFCCoupling[]
+    for cs in coil_sets
+        kat = abs(cs.nw) * maximum(abs, cs.currents) / 1e3
+        kat > 0 || error("efc_couplings: coil set \"$(cs.name)\" carries no current")
+        # Unit-current spectrum: per kilo-ampere-turn of the array's current pattern.
+        modes = ForcingTerms.ForcingMode[]
+        for (n, grid) in grids
+            append!(modes, ForcingTerms.coil_forcing_modes(cs, grid, n, m_low, m_high))
+        end
+        modes = [ForcingTerms.ForcingMode(; n=m.n, m=m.m, amplitude=m.amplitude / kat) for m in modes]
+        b̃ = PerturbedEquilibrium.rootarea_field(rc, modes)
+        δ = dot(v, b̃) / equil.params.bt0
+        overlap = 100 * abs(dot(v, b̃)) / norm(b̃)
+        # The residual field as forcing modes: back through the conform operator to Φ_x.
+        Φ_res = rc.flux_conform * ErrorFields.residual_spectrum(dom, b̃; mode)
+        residual_modes = [ForcingTerms.ForcingMode(; n=rc.n_modes[k], m=rc.m_modes[k], amplitude=Φ_res[k]) for k in eachindex(Φ_res)]
+        t_start = time()
+        kf_full = response_of(modes)
+        kf_res = response_of(residual_modes)
+        profiles_full = Dict{Float64,Vector{Float64}}()
+        profiles_res = Dict{Float64,Vector{Float64}}()
+        function torques(Δ)
+            profiles = Δ == 0 ? kp : Equilibrium.shift_exb_rotation(kp, Δ)
+            T_f, p_f = torque_of(kf_full, profiles)
+            T_r, p_r = torque_of(kf_res, profiles)
+            profiles_full[Δ] = p_f
+            profiles_res[Δ] = p_r
+            verbose && @info "    $(cs.name) Δω = $(@sprintf("%+.3e", Δ)) rad/s: torque $(@sprintf("%.3e", T_f)) N·m per kAt² (residual $(@sprintf("%.3e", T_r)))"
+            return [T_f, T_r]
+        end
+        if rotation_scan
+            Δs, Ts = Utilities.adaptive_sample(torques, grid0; max_points=scan_max_points, rtol=scan_tolerance)
+        else
+            Δs = [0.0]
+            Ts = permutedims(torques(0.0))
+        end
+        i0 = findfirst(==(0.0), Δs)
+        T_full, T_res = Ts[i0, 1], Ts[i0, 2]
+        c = ErrorFields.EFCCoupling(cs.name, abs(δ), overlap, T_full, T_res, Δs, Ts[:, 1], Ts[:, 2],
+            rotation_scan ? ω_ref : NaN, rotation_scan ? ω_offset : NaN, rotation_scan ? collect(ψk) : Float64[],
+            rotation_scan ? reduce(hcat, profiles_full[Δ] for Δ in Δs) : zeros(0, 1),
+            rotation_scan ? reduce(hcat, profiles_res[Δ] for Δ in Δs) : zeros(0, 1))
+        if rotation_scan
+            crossings = ErrorFields.torque_zero_crossings(c)
+            isempty(crossings) && @warn "NTV couplings: the residual torque of $(cs.name) does not change sign within ±$(@sprintf("%.3e", span)) rad/s; " *
+                  "raise rotation_span_factor to reach the neoclassical offset"
+        end
+        verbose && @info "  $(cs.name): |δ| = $(@sprintf("%.3e", abs(δ))) per kAt, resonant fraction $(@sprintf("%.1f", overlap)) %, " *
+              "torque $(@sprintf("%.3e", T_full)) N·m per kAt² (residual $(@sprintf("%.3e", T_res))) at the nominal rotation, " *
+              "$(length(Δs)) scan points in $(@sprintf("%.1f", time() - t_start)) s"
+        push!(out, c)
+    end
+    return out
+end
+
+"""
+    run_slayer_stage(result, inputs, pe_file) -> slayer_result
+
+Run the SLAYER tearing-mode analysis off the force-free-states `result`, appending its group to
+`pe_file` (or the force-free-states output when PE did not run). Needs only the result, so it
+runs in both the `force_termination = true` path and the full pipeline. A `runtimes` collector,
+when given, receives the solver's wall-clock seconds as a `"tearing" => dt` pair for the
+`Info/Runtimes` record.
+"""
+function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any}, pe_file::Union{String,Nothing};
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing)
+    ("SLAYER" in keys(inputs)) || return nothing
+    # SLAYER is a post-processing diagnostic. A failure here must not
+    # discard the equilibrium / stability / PE results already computed,
+    # so the whole stage is guarded: on error we log loudly and return
+    # `nothing` for the `slayer` field rather than propagating.
+    try
+        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+        slayer_ctrl.enabled || return nothing
+        @info "\n  SLAYER\n$_SECTION"
+        slayer_start = time()
+        slayer_result = Runner.run_slayer(result, slayer_ctrl;
+            dir_path=result.dir_path)
+        slayer_dt = time() - slayer_start
+        runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
+        @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
+        h5_filename = pe_file === nothing ? result.control.HDF5_filename : pe_file
+        h5_path = joinpath(result.dir_path, h5_filename)
+        # Append the Tearing/ group; create the file if no prior stage wrote
+        # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+        HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+            Runner.write_slayer_hdf5!(f, slayer_result)
+        end
+        @info "SLAYER results written to $h5_filename"
+        return slayer_result
+    catch err
+        @error "SLAYER stage failed; continuing without tearing results. " *
+               "Equilibrium / stability / PE outputs are unaffected." exception =
+            (err, catch_backtrace())
+        return nothing
+    end
+end
+
+"""
+    write_outputs_to_HDF5(result::ForceFreeStatesResult; git_version, inputs, forcing_modes,
+                          locstab, ballooning_boundary)
+
+Write the HDF5 output file with the run, equilibrium and stability products carried by a
+force-free-states `result`. This combines the functionality of several pieces of the Fortran
+code in `ode_output.f`, primarily `ode_output_open` and the various `bin_euler` writes that
+occur throughout the integration. Groups fed by an optional result field fall back to empty
+datasets when the producing integrator did not supply it, so the schema is the same shape
+whatever ran.
+
+The solution-adjacent datasets come from two independent sources: the dense
+`Solutions/ForwardIntegration/xi_*` arrays from `result.solution` when it is in the forward
+`:el_axis` basis (a matched Galerkin solution is persisted in full under the Galerkin group
+instead), and ψ, q, the step counts, `crit`, the asymptotic coefficients and the edge scan
+from `result.diagnostics`. Either may be absent, and is then written empty.
+
+`locstab` and `ballooning_boundary` come from the LocalStability stage, which is not part of
+the force-free-states solve.
 
 ### TODOs
 
 Combine spline unpacking if possible, too many extra lines
 """
 function write_outputs_to_HDF5(
-    ctrl::ForceFreeStatesControl,
-    equil::Equilibrium.PlasmaEquilibrium,
-    intr::ForceFreeStatesInternal,
-    odet::OdeState,
-    vac_data::Union{VacuumData,Nothing},
-    ffit::Union{FourFitVars,Nothing}=nothing,
+    result::ForceFreeStatesResult;
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
-    gal_data::Union{GalerkinResult,Nothing}=nothing;
     locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
     ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
-    h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
+    ctrl = result.control
+    equil = result.equil
+    mats = result.mats
+    free_energies = result.free_boundary
+    gal_data = result.galerkin
+    diag = result.diagnostics
+    msing = length(result.surfaces)
+    # Closed ξ profiles are written into the producing formalism's Solutions group with the
+    # same dataset names and (mode, solution, psi) axis order: ForwardIntegration for the
+    # axis-basis sweep, GalerkinIntegration for the matched gal solution (its own grid).
+    xi_solution = (result.solution !== nothing && result.solution.basis === :el_axis) ? result.solution : nothing
+    gal_solution = (result.solution !== nothing && result.solution.basis === :gal_native) ? result.solution : nothing
+
+    h5open(joinpath(result.dir_path, ctrl.HDF5_filename), "w") do out_h5
+
+        # File-level metadata contract (schema_version, Conventions, title, date).
+        Utilities.HDF5Annotations.write_root_attrs!(out_h5; title="GPEC output: $(basename(abspath(result.dir_path)))")
 
         # Store git version for reproducibility
-        out_h5["info/git_version"] = git_version
+        out_h5["Info/git_version"] = git_version
 
-        # Outer-region Galerkin Δ′ matrix (RDCON), if computed
+        # Outer-region Galerkin solver outputs (RDCON), if it ran
         if gal_data !== nothing
-            write_galerkin!(out_h5, gal_data)
+            write_galerkin!(out_h5, gal_data; basis_output=result.debug_settings.gal_basis_output)
+        end
+
+        if gal_solution !== nothing
+            gal = "ForceFreeStates/Solutions/GalerkinIntegration"
+            out_h5["$gal/psi"] = gal_solution.psi_store
+            out_h5["$gal/q"] = gal_solution.q_store
+            out_h5["$gal/xi_psi"] = gal_solution.u_store[:, :, 1, :]
+            out_h5["$gal/dxi_psidpsi"] = gal_solution.du_store
+            out_h5["$gal/xi_s"] = gal_solution.xi_s_store
         end
 
         # Self-contained run snapshot: the full merged TOML (so a rerun can reconstruct every
         # ForceFreeStates/Equilibrium/Wall/PE control struct), plus the equilibrium ingest
         # arrays so a file-based rerun never needs the original g-file / CHEASE / IMAS source.
         if inputs !== nothing
-            out_h5["input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+            out_h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
         end
         if equil.ingest !== nothing  # analytic equilibria are regenerated from their TOML section
-            eq_group = "input/raw_inputs/equilibrium"
+            eq_group = "Input/RawInputs/Equilibrium"  # read back by Rerun.read_equilibrium_ingest
             out_h5["$eq_group/ingest_kind"] = equil.ingest isa Equilibrium.DirectIngest ? "direct" : "inverse"
             for f in fieldnames(typeof(equil.ingest))
                 out_h5["$eq_group/$f"] = getfield(equil.ingest, f)
             end
         end
         if forcing_modes !== nothing
-            forcing_group = create_group(out_h5, "input/raw_inputs/forcing_terms")
+            forcing_group = create_group(out_h5, "Input/RawInputs/ForcingTerms")
             ForcingTerms.save_forcing_to_h5(forcing_modes, forcing_group)
         end
 
         # Write derived run parameters
-        out_h5["info/mpert"] = intr.mpert
-        out_h5["info/mlow"] = intr.mlow
-        out_h5["info/mhigh"] = intr.mhigh
-        out_h5["info/npert"] = intr.npert
-        out_h5["info/nlow"] = intr.nlow
-        out_h5["info/nhigh"] = intr.nhigh
-        m = [(i - 1) % intr.mpert + intr.mlow for i in 1:(intr.numpert_total)]
-        n = [(i - 1) ÷ intr.mpert + intr.nlow for i in 1:(intr.numpert_total)]
-        out_h5["info/mn_index"] = hcat(m, n)   # (N, 2) matrix
-        out_h5["info/psilim"] = intr.psilim
-        out_h5["info/qlim"] = intr.qlim
-        out_h5["info/q1lim"] = intr.q1lim
+        out_h5["Info/mpert"] = result.mpert
+        out_h5["Info/mlow"] = result.mlow
+        out_h5["Info/mhigh"] = result.mhigh
+        out_h5["Info/npert"] = result.npert
+        out_h5["Info/nlow"] = result.nlow
+        out_h5["Info/nhigh"] = result.nhigh
+        m = [(i - 1) % result.mpert + result.mlow for i in 1:(result.numpert_total)]
+        n = [(i - 1) ÷ result.mpert + result.nlow for i in 1:(result.numpert_total)]
+        out_h5["Info/mn_index"] = hcat(m, n)   # (N, 2) matrix
+        out_h5["Info/psilim"] = result.psilim
+        out_h5["Info/qlim"] = result.qlim
+        out_h5["Info/dqdpsi_lim"] = result.q1lim
 
-        # Write derived equilibrium parameters
-        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumParameters), getfield.(Ref(equil.params), fieldnames(Equilibrium.EquilibriumParameters)))
-            if val !== nothing # TODO: looks like ro, zo, psio, and b_norm are not set, so skipping those for now but should fix eventually
-                out_h5["equil/$key"] = val
-            end
+        # Write derived equilibrium parameters. The struct keeps its legacy field spellings;
+        # EQUIL_H5_NAMES maps them to literature dataset names and EQUIL_H5_SKIP drops
+        # duplicates and control-flag echoes. Fields left `nothing` are not written.
+        for f in fieldnames(Equilibrium.EquilibriumParameters)
+            f in EQUIL_H5_SKIP && continue
+            val = getfield(equil.params, f)
+            val === nothing && continue
+            out_h5["Equilibrium/$(get(EQUIL_H5_NAMES, f, String(f)))"] = val
         end
-        out_h5["equil/psio"] = equil.psio
-        out_h5["equil/ro"] = equil.ro
-        out_h5["equil/zo"] = equil.zo
+        out_h5["Equilibrium/psi_total"] = equil.psio
+        out_h5["Equilibrium/R_axis"] = equil.ro
+        out_h5["Equilibrium/Z_axis"] = equil.zo
 
-        # Write spline arrays (using profiles with named splines)
+        # Write equilibrium profile and geometry arrays (from the named splines)
         profiles = equil.profiles
-        out_h5["splines/profiles/xs"] = profiles.xs
-        out_h5["splines/profiles/2piF"] = profiles.F_spline.y
-        out_h5["splines/profiles/mu0p"] = profiles.P_spline.y
-        out_h5["splines/profiles/dVdpsi"] = profiles.dVdpsi_spline.y
-        out_h5["splines/profiles/q"] = profiles.q_spline.y
-        out_h5["splines/rzphi/xs"] = equil.rzphi_xs
-        out_h5["splines/rzphi/ys"] = equil.rzphi_ys
+        out_h5["Equilibrium/Profiles/psi"] = profiles.xs
+        out_h5["Equilibrium/Profiles/2piF"] = profiles.F_spline.y
+        out_h5["Equilibrium/Profiles/mu0p"] = profiles.P_spline.y
+        out_h5["Equilibrium/Profiles/dVdpsi"] = profiles.dVdpsi_spline.y
+        out_h5["Equilibrium/Profiles/q"] = profiles.q_spline.y
+        out_h5["Equilibrium/Geometry/psi"] = equil.rzphi_xs
+        out_h5["Equilibrium/Geometry/theta"] = equil.rzphi_ys
         # Extract grid point values from interpolants for HDF5 output
-        out_h5["splines/rzphi/rcoords"] = equil.rzphi_rsquared.nodal_derivs.partials[1, :, :]
-        out_h5["splines/rzphi/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
-        out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
-        out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
+        out_h5["Equilibrium/Geometry/rcoords"] = equil.rzphi_rsquared.nodal_derivs.partials[1, :, :]
+        out_h5["Equilibrium/Geometry/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
+        out_h5["Equilibrium/Geometry/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
+        out_h5["Equilibrium/Geometry/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
         # Write local stability data; always write all entries, using empty arrays when not computed.
-        # locstab/di = Mercier D_I (det(d0bar)); locstab/dr = resistive interchange D_R;
-        # locstab/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
-        # tearing Δ' under perturbed_equilibrium/singular_coupling/delta_prime).
+        # LocalStability/D_I = Mercier D_I (det(d0bar)); LocalStability/D_R = resistive interchange D_R;
+        # LocalStability/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
+        # tearing Δ' under PerturbedEquilibrium/SingularCoupling/Delta_prime).
         if locstab !== nothing
             locstab_xs = locstab.cache.x
-            out_h5["locstab/di"] = locstab.y[:, 1] ./ locstab_xs
-            out_h5["locstab/dr"] = locstab.y[:, 2] ./ locstab_xs
+            out_h5["LocalStability/psi"] = collect(locstab_xs)  # cached vector → dense for HDF5
+            out_h5["LocalStability/D_I"] = locstab.y[:, 1] ./ locstab_xs
+            out_h5["LocalStability/D_R"] = locstab.y[:, 2] ./ locstab_xs
         else
-            out_h5["locstab/di"] = Float64[]
-            out_h5["locstab/dr"] = Float64[]
+            out_h5["LocalStability/psi"] = Float64[]
+            out_h5["LocalStability/D_I"] = Float64[]
+            out_h5["LocalStability/D_R"] = Float64[]
         end
-        out_h5["singular/di0"] = (locstab !== nothing && !isempty(intr.sing)) ?
-                                 [locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["locstab/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
+        out_h5["SingularSurfaces/D_I"] = (locstab !== nothing && !isempty(result.surfaces)) ?
+                                         [locstab(sing.psifac)[1] / sing.psifac for sing in result.surfaces] : Float64[]
+        out_h5["LocalStability/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
 
         # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
-        out_h5["locstab/psi"] = ballooning_boundary.psi
-        out_h5["locstab/alpha"] = ballooning_boundary.alpha
-        out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
+        # Its own scan grid, distinct from the LocalStability/psi profile grid above.
+        out_h5["LocalStability/ballooning_psi"] = ballooning_boundary.psi
+        out_h5["LocalStability/alpha"] = ballooning_boundary.alpha
+        out_h5["LocalStability/alpha_critical"] = ballooning_boundary.alpha_critical
 
-        # Write integration data
-        out_h5["integration/nstep"] = odet.step            # Number of saved solution snapshots
-        out_h5["integration/nstep_total"] = odet.total_steps  # Total ODE solver steps taken
-        out_h5["integration/psi"] = odet.psi_store
-        out_h5["integration/q"] = odet.q_store
-        out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
-        out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["integration/dxi_psi"] = odet.du_store[:, :, 1, :]
-        out_h5["integration/xi_s"] = odet.xi_s_store
-        out_h5["integration/crit"] = odet.crit_store
+        # Write integration data: the ψ trace and integrator diagnostics from the raw ODE state,
+        # the ξ profiles from the solution. Either may be absent (Galerkin has no ODE state;
+        # Riccati has no ξ solution), in which case the datasets are written empty.
+        fwd = "ForceFreeStates/Solutions/ForwardIntegration"
+        out_h5["$fwd/nstep"] = diag !== nothing ? diag.step : 0            # Number of saved solution snapshots
+        out_h5["$fwd/nstep_total"] = diag !== nothing ? diag.total_steps : 0  # Total ODE solver steps taken
+        out_h5["$fwd/psi"] = diag !== nothing ? diag.psi_store : Float64[]
+        out_h5["$fwd/q"] = diag !== nothing ? diag.q_store : Float64[]
+        out_h5["$fwd/xi_psi"] = xi_solution !== nothing ? xi_solution.u_store[:, :, 1, :] : ComplexF64[]
+        out_h5["$fwd/u2"] = xi_solution !== nothing ? xi_solution.u_store[:, :, 2, :] : ComplexF64[] # TODO: what to name this? These are the "conjugate momenta" of u1
+        out_h5["$fwd/dxi_psidpsi"] = xi_solution !== nothing ? xi_solution.du_store : ComplexF64[]
+        out_h5["$fwd/xi_s"] = xi_solution !== nothing ? xi_solution.xi_s_store : ComplexF64[]
+        out_h5["$fwd/crit"] = diag !== nothing ? diag.crit_store : Float64[]
 
         # Write edge stability scan data (only present when psiedge < psilim).
         # Generalized (W, N) pencil energies — power-normalized, Jacobian-invariant; these are
         # the values findmax_dW_edge! uses to choose the truncation point.
-        if !isempty(odet.edge_scan.psi)
-            es = odet.edge_scan
-            out_h5["EdgeScan/psi"] = es.psi
-            out_h5["EdgeScan/q"] = es.q
-            out_h5["EdgeScan/total_energy"] = es.total_eigenvalue
-            out_h5["EdgeScan/plasma_energy"] = es.plasma_energy
-            out_h5["EdgeScan/vacuum_energy"] = es.vacuum_energy
-            out_h5["EdgeScan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
+        if diag !== nothing && !isempty(diag.edge_scan.psi)
+            es = diag.edge_scan
+            out_h5["ForceFreeStates/EdgeScan/psi"] = es.psi
+            out_h5["ForceFreeStates/EdgeScan/q"] = es.q
+            out_h5["ForceFreeStates/EdgeScan/total_energy"] = es.total_eigenvalue
+            out_h5["ForceFreeStates/EdgeScan/plasma_energy"] = es.plasma_energy
+            out_h5["ForceFreeStates/EdgeScan/vacuum_energy"] = es.vacuum_energy
+            out_h5["ForceFreeStates/EdgeScan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
         end
 
         # Write singular surface data
-        out_h5["singular/msing"] = intr.msing
-        out_h5["singular/psi"] = [sing.psifac for sing in intr.sing]
-        out_h5["singular/q"] = [sing.q for sing in intr.sing]
-        out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
-        out_h5["singular/ca_left"] = odet.ca_l
-        out_h5["singular/ca_right"] = odet.ca_r
+        out_h5["SingularSurfaces/rational_count"] = msing
+        out_h5["SingularSurfaces/rational_psi"] = [sing.psifac for sing in result.surfaces]
+        out_h5["SingularSurfaces/rational_q"] = [sing.q for sing in result.surfaces]
+        out_h5["SingularSurfaces/dqdpsi"] = [sing.q1 for sing in result.surfaces]
+        # Kinetic and galerkin-matched runs never populate ca_l/ca_r (only ideal surface
+        # crossings do); emit zero-extent sentinels instead of unpopulated arrays.
+        out_h5["SingularSurfaces/ca_left"] = (diag !== nothing && diag.ca_populated) ? diag.ca_l : zeros(ComplexF64, 0, 0, 0, 0)
+        out_h5["SingularSurfaces/ca_right"] = (diag !== nothing && diag.ca_populated) ? diag.ca_r : zeros(ComplexF64, 0, 0, 0, 0)
 
-        if intr.msing > 0
+        if msing > 0
             # Mode numbers at each surface (jagged — pad with 0 to max_modes width)
-            max_modes = maximum(s -> length(s.m), intr.sing)
-            m_matrix = zeros(Int, intr.msing, max_modes)
-            n_matrix = zeros(Int, intr.msing, max_modes)
-            for (s, sing) in enumerate(intr.sing)
+            max_modes = maximum(s -> length(s.m), result.surfaces)
+            m_matrix = zeros(Int, msing, max_modes)
+            n_matrix = zeros(Int, msing, max_modes)
+            for (s, sing) in enumerate(result.surfaces)
                 for i in 1:length(sing.m)
                     m_matrix[s, i] = sing.m[i]
                     n_matrix[s, i] = sing.n[i]
                 end
             end
-            out_h5["singular/m"] = m_matrix
-            out_h5["singular/n"] = n_matrix
+            out_h5["SingularSurfaces/rational_m"] = m_matrix
+            out_h5["SingularSurfaces/rational_n"] = n_matrix
 
             # Glasser-Greene-Johnson geometric coefficients + surface averages
             # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
@@ -850,55 +1561,60 @@ function write_outputs_to_HDF5(
             # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
             # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
             # can reconstruct τ_A / τ_R from any kinetic-profile source.
-            if all(s -> s.restype !== nothing, intr.sing)
-                out_h5["singular/E"] = [s.restype.E for s in intr.sing]
-                out_h5["singular/F"] = [s.restype.F for s in intr.sing]
-                out_h5["singular/G"] = [s.restype.G for s in intr.sing]
-                out_h5["singular/H"] = [s.restype.H for s in intr.sing]
-                out_h5["singular/K"] = [s.restype.K for s in intr.sing]
-                out_h5["singular/M"] = [s.restype.M for s in intr.sing]
-                out_h5["singular/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in intr.sing]
-                out_h5["singular/avg_bsq"] = [s.restype.avg_bsq for s in intr.sing]
-                out_h5["singular/p_local"] = [s.restype.p_local for s in intr.sing]
-                out_h5["singular/p1_local"] = [s.restype.p1_local for s in intr.sing]
-                out_h5["singular/v1_local"] = [s.restype.v1_local for s in intr.sing]
+            if all(s -> s.restype !== nothing, result.surfaces)
+                out_h5["SingularSurfaces/E"] = [s.restype.E for s in result.surfaces]
+                out_h5["SingularSurfaces/F"] = [s.restype.F for s in result.surfaces]
+                out_h5["SingularSurfaces/G"] = [s.restype.G for s in result.surfaces]
+                out_h5["SingularSurfaces/H"] = [s.restype.H for s in result.surfaces]
+                out_h5["SingularSurfaces/K"] = [s.restype.K for s in result.surfaces]
+                out_h5["SingularSurfaces/M"] = [s.restype.M for s in result.surfaces]
+                out_h5["SingularSurfaces/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in result.surfaces]
+                out_h5["SingularSurfaces/avg_bsq"] = [s.restype.avg_bsq for s in result.surfaces]
+                out_h5["SingularSurfaces/mu0p"] = [s.restype.p_local for s in result.surfaces]
+                out_h5["SingularSurfaces/dmu0pdpsi"] = [s.restype.p1_local for s in result.surfaces]
+                out_h5["SingularSurfaces/dVdpsi"] = [s.restype.v1_local for s in result.surfaces]
             end
         end
 
         # Per-surface ca-based Δ' (`sing.delta_prime`) is a stub; only the BVP matrix is emitted (see SingType.delta_prime docstring).
 
-        # Write inter-surface Δ' matrix if computed (parallel FM path only).
-        # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
-        if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
-            out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
-        end
+        # Write the Δ' payload on one set of canonical paths, whichever formalism produced it
+        # (Riccati BVP or Galerkin): both compute the same quantities in the same PEST-3
+        # convention. Surface indexing follows the producing formalism's surface list, which for
+        # Galerkin is the in-domain in-band subset of `SingularSurfaces/`.
+        dp = result.delta_prime
+        if msing > 0 && dp !== nothing
+            # Inter-surface Δ' matrix, shape [msing × msing] — PEST3-convention deltap.
+            out_h5["SingularSurfaces/Delta_prime_matrix"] = dp.matrix
 
-        # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side) to match
-        # the galerkin/delta_coil layout so H5Web heatmaps share axes (x = edge mode, y = surface-side).
-        # Internal intr.delta_coil stays (2msing × numpert_total); transpose only at write.
-        if intr.msing > 0 && !isempty(intr.delta_coil)
-            dc = permutedims(intr.delta_coil)
-            out_h5["singular/delta_coil"] = dc
-        end
+            # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side)
+            # so H5Web heatmaps read x = edge mode, y = surface-side. The carried matrix stays
+            # (2msing × numpert_total); transpose only at write.
+            isempty(dp.coil) || (out_h5["SingularSurfaces/Delta_coil"] = permutedims(dp.coil))
 
-        # Write raw 2msing×2msing outer-region D' matrix in side-major ordering
-        # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
-        # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
-        # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
-        # pest3_decompose to recover (A', B', Γ', Δ').
-        if intr.msing > 0 && !isempty(intr.delta_prime_raw)
-            out_h5["singular/delta_prime_raw"] = intr.delta_prime_raw
+            # Raw 2msing×2msing outer-region D' matrix in side-major ordering
+            # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
+            # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
+            # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
+            # pest3_decompose to recover (A', B', Γ', Δ').
+            isempty(dp.raw) || (out_h5["SingularSurfaces/Delta_prime_raw"] = dp.raw)
+
+            # Remaining PEST-3 parity blocks, when the formalism persisted them (Galerkin);
+            # Riccati recovers them from Delta_prime_raw via pest3_decompose.
+            dp.A === nothing || (out_h5["SingularSurfaces/pest3_A"] = dp.A)
+            dp.B === nothing || (out_h5["SingularSurfaces/pest3_B"] = dp.B)
+            dp.Gamma === nothing || (out_h5["SingularSurfaces/pest3_Gamma"] = dp.Gamma)
         end
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
         # used to find them. Populated only when kinetic crossings were searched for.
-        out_h5["singular/kinetic/kmsing"] = intr.kmsing
-        out_h5["singular/kinetic/psi"] = [s.psifac for s in intr.kinsing]
-        out_h5["singular/kinetic/q"] = [s.q for s in intr.kinsing]
-        out_h5["singular/kinetic/q1"] = [s.q1 for s in intr.kinsing]
-        out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
-        out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
-        out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
+        out_h5["SingularSurfaces/Kinetic/rational_count"] = result.kinetic.kmsing
+        out_h5["SingularSurfaces/Kinetic/rational_psi"] = [s.psifac for s in result.kinetic.kinsing]
+        out_h5["SingularSurfaces/Kinetic/rational_q"] = [s.q for s in result.kinetic.kinsing]
+        out_h5["SingularSurfaces/Kinetic/dqdpsi"] = [s.q1 for s in result.kinetic.kinsing]
+        out_h5["SingularSurfaces/Kinetic/scan_psi"] = result.kinetic.scan_psi
+        out_h5["SingularSurfaces/Kinetic/scan_cond"] = result.kinetic.scan_cond
+        out_h5["SingularSurfaces/Kinetic/scan_threshold"] = result.kinetic.scan_threshold
 
         # Write free-boundary stability data. The eigenmode energies are the generalized
         # eigenvalues of the pencil (W, N) with N the power-normalization (surface-norm) matrix:
@@ -906,96 +1622,106 @@ function write_outputs_to_HDF5(
         # working (Jacobian) coordinate. W_freeboundary_eigenmodes holds the generalized
         # eigenvectors, columns sorted most-unstable first, normalized to unit power norm with
         # the largest-magnitude entry made real-positive.
-        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
-        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
-        out_h5["FreeBoundaryStability/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
+        fbs = "ForceFreeStates/FreeBoundaryStability"
+        out_h5["$fbs/W_freeboundary"] = free_energies !== nothing ? free_energies.wt0 : ComplexF64[]
+        out_h5["$fbs/W_plasma"] = free_energies !== nothing ? free_energies.wp : ComplexF64[]
+        out_h5["$fbs/W_vacuum"] = free_energies !== nothing ? free_energies.wv : ComplexF64[]
+        out_h5["$fbs/W_freeboundary_eigenmodes"] = free_energies !== nothing ? free_energies.wt : ComplexF64[]
+        out_h5["$fbs/eigenmode_energies"] = free_energies !== nothing ? free_energies.et : ComplexF64[]
+        out_h5["$fbs/eigenmode_plasma_energies"] = free_energies !== nothing ? free_energies.ep : ComplexF64[]
+        out_h5["$fbs/eigenmode_vacuum_energies"] = free_energies !== nothing ? free_energies.ev : ComplexF64[]
+        out_h5["$fbs/vacuum_eigenvalue"] = free_energies !== nothing ? free_energies.vacuum_eigenvalue : NaN
 
         # Cartesian surface point clouds used downstream for visualisation and
         # perturbed-equilibrium plotting.
-        out_h5["SurfaceGeometries/Plasma/x"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
-        out_h5["SurfaceGeometries/Plasma/y"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
-        out_h5["SurfaceGeometries/Plasma/z"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
-        out_h5["SurfaceGeometries/Wall/x"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
-        out_h5["SurfaceGeometries/Wall/y"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
-        out_h5["SurfaceGeometries/Wall/z"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
-
-        # Write kinetic parameters when kinetic mode is enabled
-        if ctrl.kinetic_factor > 0
-            out_h5["kinetic/kinetic_source"] = ctrl.kinetic_source
-            out_h5["kinetic/kinetic_factor"] = ctrl.kinetic_factor
-        end
+        out_h5["SurfaceGeometries/Plasma/x"] = free_energies !== nothing ? free_energies.plasma_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/y"] = free_energies !== nothing ? free_energies.plasma_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/z"] = free_energies !== nothing ? free_energies.plasma_pts[:, 3] : Float64[]
+        out_h5["SurfaceGeometries/Wall/x"] = free_energies !== nothing ? free_energies.wall_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Wall/y"] = free_energies !== nothing ? free_energies.wall_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Wall/z"] = free_energies !== nothing ? free_energies.wall_pts[:, 3] : Float64[]
 
         # Write fundamental matrices on the ψ grid
-        if ffit !== nothing
-            xs = equil.rzphi_xs
-            npsi = length(xs)
-            np = intr.numpert_total
+        xs = equil.rzphi_xs
+        npsi = length(xs)
+        np = result.numpert_total
 
-            # Helper: evaluate a matrix spline on the psi grid → (npsi, np, np) array
-            function _eval_mat_spline(spline)
-                arr = zeros(ComplexF64, npsi, np, np)
-                hint = Ref(1)
-                for i in 1:npsi
-                    arr[i, :, :] .= reshape(spline(xs[i]; hint=hint), np, np)
-                end
-                return arr
+        # Helper: evaluate a matrix spline on the psi grid → (npsi, np, np) array
+        function _eval_mat_spline(spline)
+            arr = zeros(ComplexF64, npsi, np, np)
+            hint = Ref(1)
+            for i in 1:npsi
+                arr[i, :, :] .= reshape(spline(xs[i]; hint=hint), np, np)
             end
-
-            out_h5["matrices/psi"] = xs
-            # Ideal primitive matrices (A, B, C, D, E, H)
-            # When kinetic mode is on, amats/bmats/cmats hold kinetic-modified values,
-            # so we write those as the "effective" matrices and save raw kinetic
-            # components separately below.
-            # Ideal primitive matrices (A, B, C, D, E, H)
-            if ctrl.kinetic_factor > 0
-                # Use preserved ideal copies (before kinetic overwrite)
-                out_h5["matrices/ideal/A"] = _eval_mat_spline(ffit.amats_ideal)
-                out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats_ideal)
-                out_h5["matrices/ideal/C"] = _eval_mat_spline(ffit.cmats_ideal)
-            else
-                out_h5["matrices/ideal/A"] = _eval_mat_spline(ffit.amats)
-                out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats)
-                out_h5["matrices/ideal/C"] = _eval_mat_spline(ffit.cmats)
-            end
-            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats_prim)
-            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats_prim)
-            out_h5["matrices/ideal/H"] = _eval_mat_spline(ffit.hmats)
-
-            # Ideal derived matrices (F, K, G)
-            out_h5["matrices/ideal/F"] = _eval_mat_spline(ffit.fmats_lower)
-            out_h5["matrices/ideal/K"] = _eval_mat_spline(ffit.kmats)
-            out_h5["matrices/ideal/G"] = _eval_mat_spline(ffit.gmats)
-
-            # Kinetic-modified matrices
-            if ctrl.kinetic_factor > 0
-                out_h5["matrices/kinetic/A"] = _eval_mat_spline(ffit.amats)
-                out_h5["matrices/kinetic/B"] = _eval_mat_spline(ffit.bmats)
-                out_h5["matrices/kinetic/C"] = _eval_mat_spline(ffit.cmats)
-                out_h5["matrices/kinetic/f0"] = _eval_mat_spline(ffit.f0mats)
-                out_h5["matrices/kinetic/K"] = _eval_mat_spline(ffit.kkmats)
-                out_h5["matrices/kinetic/G"] = _eval_mat_spline(ffit.gaats)
-            end
+            return arr
         end
+
+        elm = "ForceFreeStates/EulerLagrangeMatrices"
+        out_h5["$elm/psi"] = xs
+        # Ideal primitive matrices (A, B, C, D, E, H)
+        out_h5["$elm/Ideal/A"] = _eval_mat_spline(mats.ideal.A_spline)
+        out_h5["$elm/Ideal/B"] = _eval_mat_spline(mats.ideal.B_spline)
+        out_h5["$elm/Ideal/C"] = _eval_mat_spline(mats.ideal.C_spline)
+        out_h5["$elm/Ideal/D"] = _eval_mat_spline(mats.ideal.D_spline_prim)
+        out_h5["$elm/Ideal/E"] = _eval_mat_spline(mats.ideal.E_spline_prim)
+        out_h5["$elm/Ideal/H"] = _eval_mat_spline(mats.ideal.H_spline)
+
+        # Ideal derived matrices (F, K, G)
+        out_h5["$elm/Ideal/F"] = _eval_mat_spline(mats.ideal.F_spline_lower)
+        out_h5["$elm/Ideal/K"] = _eval_mat_spline(mats.ideal.K_spline)
+        out_h5["$elm/Ideal/G"] = _eval_mat_spline(mats.ideal.G_spline)
+
+        # Kinetic-modified matrices
+        kin = mats.kinetic
+        if kin !== nothing
+            out_h5["$elm/Kinetic/A"] = _eval_mat_spline(kin.A_spline)
+            out_h5["$elm/Kinetic/B"] = _eval_mat_spline(kin.B_spline)
+            out_h5["$elm/Kinetic/C"] = _eval_mat_spline(kin.C_spline)
+            out_h5["$elm/Kinetic/f0"] = _eval_mat_spline(kin.F0_spline)
+            out_h5["$elm/Kinetic/K"] = _eval_mat_spline(kin.Kk_spline)
+            out_h5["$elm/Kinetic/G"] = _eval_mat_spline(kin.G_spline_adj)
+        end
+
+        # Self-describing metadata pass (long_name/units/dims + dimension scales).
+        apply_main_h5_metadata!(out_h5, result)
     end
 end
 
 """
     _write_coil_snapshot!(h5_path::String, coil_sets::Vector{CoilSet})
 
-Append the coil geometry used by a run into `input/raw_inputs/coils/` of an existing
+Append the coil geometry used by a run into `Input/RawInputs/Coils/` of an existing
 gpec.h5 file (opened in append mode), so the run can be replayed from the output alone.
 One subgroup per coil set; see `ForcingTerms.save_coils_to_h5`.
 """
 function _write_coil_snapshot!(h5_path::String, coil_sets::Vector{ForcingTerms.CoilSet})
     isfile(h5_path) || return nothing
     h5open(h5_path, "r+") do out_h5
-        haskey(out_h5, "input/raw_inputs/coils") && return nothing
-        ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, "input/raw_inputs/coils"))
+        haskey(out_h5, "Input/RawInputs/Coils") && return nothing
+        ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, "Input/RawInputs/Coils"))
+    end
+    return nothing
+end
+
+"""
+    _write_runtimes!(h5_path::String, runtimes)
+
+Write the per-stage wall-clock seconds collected during a run into `Info/Runtimes/` of an
+existing gpec.h5 file. `runtimes` iterates `stage => seconds` pairs; only the stages that ran
+are recorded. Metadata comes from `RUNTIME_H5_ANNOTATIONS`, which skips the absent stages.
+These timings are informational only — machine- and load-dependent, never a regression quantity.
+
+Call it only when this run produced the file; the `isfile` guard alone would also stamp a
+stale gpec.h5 left over from an earlier run.
+"""
+function _write_runtimes!(h5_path::String, runtimes)
+    isfile(h5_path) || return nothing
+    h5open(h5_path, "r+") do out_h5
+        haskey(out_h5, "Info/Runtimes") && HDF5.delete_object(out_h5, "Info/Runtimes")
+        for (stage, dt) in runtimes
+            out_h5["Info/Runtimes/$stage"] = dt
+        end
+        Utilities.HDF5Annotations.annotate!(out_h5, RUNTIME_H5_ANNOTATIONS)
     end
     return nothing
 end
@@ -1009,13 +1735,17 @@ for that `n_tor`. For multi-n runs the eigenvalue array `et` is sorted by stabil
 n-blocks; `n_tor_idx[i]` identifies which n-block eigenvalue `i` belongs to, so each n_tor
 receives the correct least-stable δW regardless of how modes are interleaved in `et`.
 
-The `result` argument is the named tuple returned by `main`.
+The `result` argument is the named tuple returned by `main`; its `ffs` field carries the
+force-free-states result the energies are read from.
 """
 function write_imas(dd, result)
-    result.vac_data === nothing && return
-
-    vac_data = result.vac_data
-    intr = result.intr
+    ffs = result.ffs
+    if ffs.free_boundary === nothing
+        @warn "Skipping IMAS mhd_linear write: the $(ffs.integrator) run produced no free-boundary energies. " *
+              "Set vac_flag=true in [ForceFreeStates]."
+        return
+    end
+    free_energies = ffs.free_boundary
 
     # Top-level metadata
     dd.mhd_linear.code.name = "GPEC"
@@ -1027,17 +1757,19 @@ function write_imas(dd, result)
 
     # Write the least-stable energy for each toroidal mode number
     # n_tor_idx[i] (0-based) identifies which n-block eigenvalue i belongs to.
-    resize!(ts.toroidal_mode, intr.npert)
-    for j in 0:(intr.npert-1)
-        n_indices = findall(==(j), vac_data.n_tor_idx) # indices of eigenvalues in the j-th n-block
+    resize!(ts.toroidal_mode, ffs.npert)
+    for j in 0:(ffs.npert-1)
+        n_indices = findall(==(j), free_energies.n_tor_idx) # indices of eigenvalues in the j-th n-block
         mode = ts.toroidal_mode[j+1]
-        mode.n_tor = intr.nlow + j
-        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices])) # least-stable energy for this n-toroidal mode
+        mode.n_tor = ffs.nlow + j
+        mode.energy_perturbed = minimum(real.(free_energies.et[n_indices])) # least-stable energy for this n-toroidal mode
     end
 
     return dd
 end
 
 export main, write_imas
+export solve, perturbed_equilibrium
+export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
 
 end # module GeneralizedPerturbedEquilibrium

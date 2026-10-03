@@ -3,7 +3,7 @@ using LinearAlgebra, Random, TOML
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
 # Configure a fresh ForceFreeStatesInternal from an already-built equilibrium.
-# Cheap (sing_lim! + sing_find! + field assignment). Separate from equil/ffit
+# Cheap (sing_lim! + sing_find! + field assignment). Separate from equil/mats
 # setup because intr is mutated by each integration (sing[s].delta_prime etc.).
 function make_solovev_intr(inputs, ctrl, equil, ex)
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
@@ -86,14 +86,14 @@ end
 
     # ── Shared Solovev setup ──────────────────────────────────────────────────
     #
-    # equil (Grad-Shafranov solve) and ffit (metric matrices) are expensive and
+    # equil (Grad-Shafranov solve) and mats (metric matrices) are expensive and
     # immutable after construction — built ONCE and shared across all tests below.
     # intr is cheap to (re)initialize but is mutated by each integration run
     # (sing[s].delta_prime etc.), so a fresh copy is made for each integration.
     #
     # Integration runs:
     #   intr_ric / odet_ric — Riccati path (shared by most tests)
-    #   intr_std / odet_std — Standard path (energy comparison only)
+    #   intr_fwd / odet_fwd — Forward path (energy comparison only)
 
     ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
@@ -107,37 +107,38 @@ end
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
     metric = FFS.make_metric(equil, intr_tmp.mpert)
-    ffit = FFS.make_matrix(equil, intr_tmp, metric)
+    mats = FFS.build_matrix_splines(equil, intr_tmp, metric)
     N = intr_tmp.numpert_total
 
-    # Riccati integration
+    # Riccati integration. The driver returns (odet, propagators, chunks, S_at_surface_left);
+    # only odet is used here.
     intr_ric = make_solovev_intr(inputs, ctrl, equil, ex)
-    odet_ric = FFS.riccati_eulerlagrange_integration(ctrl, equil, ffit, intr_ric)
+    odet_ric, _, _, _ = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr_ric)
 
     # Save inline Δ' values before any test that calls compute_delta_prime_from_ca!
     # (which overwrites intr_ric.sing[s].delta_prime)
     delta_prime_inline = [copy(intr_ric.sing[s].delta_prime) for s in 1:intr_ric.msing]
 
-    vac_ric = FFS.free_run!(odet_ric, ctrl, equil, ffit, intr_ric)
+    vac_ric = FFS.free_run(odet_ric, ctrl, equil, mats, intr_ric)
     et_ric = real(vac_ric.et[1])
 
-    # Standard integration (needed only for energy comparison).  eulerlagrange_integration
-    # returns (odet, propagators, chunks, S_at_surface_left); only odet is used here.
-    intr_std = make_solovev_intr(inputs, ctrl, equil, ex)
-    odet_std, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr_std)
-    vac_std = FFS.free_run!(odet_std, ctrl, equil, ffit, intr_std)
-    et_std = real(vac_std.et[1])
+    # Forward integration (needed only for energy comparison).
+    intr_fwd = make_solovev_intr(inputs, ctrl, equil, ex)
+    odet_fwd, _, _, _ = FFS.forward_eulerlagrange_integration(ctrl, equil, mats, intr_fwd)
+    vac_fwd = FFS.free_run(odet_fwd, ctrl, equil, mats, intr_fwd)
+    et_fwd = real(vac_fwd.et[1])
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    @testset "Riccati integration matches standard ODE — Solovev example" begin
-        # PR description claims Solovev energy eigenvalue error 0.006 % vs standard path.
-        # Tightened to rtol=1e-4 (matches the PR's headline claim within ≈2×). A regression
-        # of the Riccati/renormalization algorithm to ~1 % error would fail here loudly.
-        @test isapprox(et_ric, et_std; rtol=1e-4)
+    @testset "Riccati integration matches forward ODE — Solovev example" begin
+        # The two formalisms solve the same system, so the leading energy eigenvalue must
+        # agree closely; the measured Solovev disagreement is ≈5e-5. A regression of the
+        # Riccati/renormalization algorithm to ~1 % error would fail here loudly.
+        @test isapprox(et_ric, et_fwd; rtol=1e-4)
 
-        # Riccati uses no more than 2x as many steps as standard
-        @test odet_ric.step <= 2 * odet_std.step
+        # Riccati stores chunk endpoints, the forward path stores every saved ODE step,
+        # so the Riccati store is always the sparser of the two.
+        @test odet_ric.step <= odet_fwd.step
     end
 
     # Note: a Solovev per-surface Δ' regression testset previously lived here,
@@ -148,8 +149,8 @@ end
     # STRIDE BVP Δ' matrix (see runtests_parallel_integration.jl).
 
     @testset "Riccati end state has U₂ ≈ I" begin
-        # After riccati_eulerlagrange_integration, odet.u[:,:,2] should be identity
-        # (canonical Riccati convention after final renorm)
+        # The outer-region re-integration that closes riccati_eulerlagrange_integration
+        # leaves odet.u[:,:,2] as the identity (canonical Riccati convention after final renorm)
         @test odet_ric.u[:, :, 2] ≈ I(N) rtol=1e-10
     end
 
@@ -164,7 +165,7 @@ end
 
         # Use an initialized OdeState just for spline_hint and chunk bounds
         odet_tmp = FFS.OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr_ric.msing)
-        FFS.initialize_el_at_axis!(odet_tmp, ctrl, ffit, equil.profiles, intr_ric)
+        FFS.initialize_el_at_axis!(odet_tmp, ctrl, mats, equil.profiles, intr_ric)
         chunks = FFS.chunk_el_integration_bounds(odet_tmp, ctrl, intr_ric)
 
         # 30% into each chunk: away from singularities at psi_end
@@ -180,9 +181,9 @@ end
             L = zeros(ComplexF64, N, N)
             Kmat = zeros(ComplexF64, N, N)
             Gmat = zeros(ComplexF64, N, N)
-            ffit.fmats_lower(vec(L), psi; hint=ffit._hint)
-            ffit.kmats(vec(Kmat), psi; hint=ffit._hint)
-            ffit.gmats(vec(Gmat), psi; hint=ffit._hint)
+            mats.ideal.F_spline_lower(vec(L), psi; hint=mats._hint)
+            mats.ideal.K_spline(vec(Kmat), psi; hint=mats._hint)
+            mats.ideal.G_spline(vec(Gmat), psi; hint=mats._hint)
             q = equil.profiles.q_spline(psi)
             singfac = vec(1.0 ./ ((intr_ric.mlow:intr_ric.mhigh) .-
                                   q .* (intr_ric.nlow:intr_ric.nhigh)'))
@@ -201,7 +202,7 @@ end
             u_ric[:, :, 1] .= S
             u_ric[:, :, 2] .= Matrix{ComplexF64}(I, N, N)
             dummy = FFS.IntegrationChunk(psi, psi, false, 0, 1)
-            params = (ctrl, equil, ffit, intr_ric, odet_tmp, dummy)
+            params = (ctrl, equil, mats, intr_ric, odet_tmp, dummy)
             FFS.riccati_der!(du_ric, u_ric, params, psi)
 
             rel_err = norm(du_ric[:, :, 1] - dS_manual) / max(norm(dS_manual), 1e-10)
@@ -215,7 +216,7 @@ end
         # result must be bit-for-bit identical (not just approximately equal).
         #
         # Note: this call overwrites intr_ric.sing[s].delta_prime; delta_prime_inline was
-        # saved before free_run! above so it holds the original inline values.
+        # saved before free_run above so it holds the original inline values.
         #
         # See benchmarks/benchmark_delta_prime_methods.jl for the extended version.
         FFS.compute_delta_prime_from_ca!(odet_ric, intr_ric, equil)

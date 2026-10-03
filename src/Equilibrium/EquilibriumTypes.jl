@@ -5,8 +5,8 @@ end
 """
     EquilibriumConfig(...)
 
-A mutable struct containing configuration parameters for equilibrium reconstruction.
-Bundles all necessary settings originally specified in the equil fortran namelists.
+An immutable struct containing configuration parameters for equilibrium reconstruction
+specified in the input.
 
 ## Fields
 
@@ -27,7 +27,8 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
     "log_asymptotic" is a legacy alias for "auto")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
-  - `psihigh::Float64` - Upper limit of normalized flux coordinate
+  - `psihigh::Float64` - Requested upper limit of normalized flux coordinate; the value the
+    equilibrium is actually formed on is `EquilibriumParameters.psihigh_resolved`.
   - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
     two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
     pins knots on rational surfaces, and re-forms on the refined grid. Standalone `setup_equilibrium`
@@ -35,12 +36,13 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
     two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
-  - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
+  - `newq0::Float64` - Target on-axis safety factor q(0); the q and F profiles are rescaled to
+    meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
   - `etol::Float64` - Error tolerance for equilibrium solver
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
-@kwdef mutable struct EquilibriumConfig
+@kwdef struct EquilibriumConfig
     eq_type::String = "efit"
     eq_filename::String = "mypath"
     r0exp::Float64 = 1.0
@@ -64,7 +66,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     psi_accuracy::Float64 = 0.001
     mtheta::Int = 512
 
-    newq0::Int = 0
+    newq0::Float64 = 0.0
     etol::Float64 = 1e-10
 
     force_termination::Bool = false
@@ -176,15 +178,14 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
         end
     end
 
-    # Construct validated struct
-    config = EquilibriumConfig(; symbolize_keys(config_data)...)
-    # Only resolve `eq_filename` against `base_path` if the user actually
-    # supplied one (otherwise leave the kwdef sentinel for the embedded path).
-    if haskey(config_data, "eq_filename") && !isabspath(config.eq_filename)
-        config.eq_filename = normpath(joinpath(base_path, config.eq_filename))
+    # Only resolve `eq_filename` against `base_path` if the user actually supplied one
+    # (otherwise leave the kwdef sentinel for the embedded path). The empty string is the
+    # rerun path's "no input file" marker and must stay empty, not become `base_path`.
+    if haskey(config_data, "eq_filename") && !isempty(config_data["eq_filename"]) && !isabspath(config_data["eq_filename"])
+        config_data["eq_filename"] = normpath(joinpath(base_path, config_data["eq_filename"]))
     end
 
-    return config
+    return EquilibriumConfig(; symbolize_keys(config_data)...)
 end
 
 """
@@ -208,12 +209,7 @@ function EquilibriumConfig(path::String)
     end
 
     # Construct validated struct
-    config = EquilibriumConfig(; symbolize_keys(config_data)...)
-    if !isabspath(config.eq_filename)
-        config.eq_filename = normpath(joinpath(dirname(path), config.eq_filename))
-    end
-
-    return config
+    return EquilibriumConfig(Dict{String,Any}(config_data), dirname(path))
 end
 
 """
@@ -408,6 +404,7 @@ not serializable; they are reconstructed from these nodes by `build_direct_from_
   - `rmin/rmax/zmin/zmax::Float64` — computational-grid bounds [m]
   - `psio::Float64` — total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
   - `bt_sign::Int` — sign of the toroidal field (+1 or -1)
+  - `ip_sign::Int` — sign of the plasma current (+1 or -1) as the source file states it
 """
 struct DirectIngest
     sq_xs::Vector{Float64}
@@ -421,6 +418,7 @@ struct DirectIngest
     zmax::Float64
     psio::Float64
     bt_sign::Int
+    ip_sign::Int
 end
 
 """
@@ -500,8 +498,18 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
   - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
+  - `ip_sign::Int` — Sign of the plasma current (+1 or -1); read from the `current` header value
+    in EFIT g-files and `global_quantities.ip` in IMAS. The internal flux is always made
+    positive at the axis, so the sign is kept here (never recovered from the computed current)
+    and fixes the SFL→machine toroidal-angle handedness `helicity = bt_sign × ip_sign`.
   - `ingest::EquilibriumIngest` — captured raw arrays for the `gpec.h5` rerun snapshot
     (a [`DirectIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
+  - `psihigh_resolved::Float64` — outer flux limit the equilibrium is formed on: `config.psihigh`
+    clamped to the outermost closed flux surface by [`resolve_psihigh!`](@ref). Defaults to
+    `config.psihigh` and only differs for efit-family equilibria whose requested limit falls
+    outside the closed-flux region. The solvers build their ψ grid from this field. IMAS
+    equilibria are read into this struct but are not in `EFIT_KINDS`, so they are never
+    clamped and always keep the request.
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -515,8 +523,17 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
     bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
+    ip_sign::Int     # Sign of the plasma current: +1 or -1 (from the g-file current / IMAS ip)
     ingest::EquilibriumIngest
+    psihigh_resolved::Float64
 end
+
+# Readers construct without a resolved psihigh; it starts at the request and `resolve_psihigh!`
+# clamps it for efit-family equilibria.
+DirectRunInput(config::EquilibriumConfig, sq_in, psi_in, psi_in_xs, psi_in_ys,
+    rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest) =
+    DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys,
+        rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest, config.psihigh)
 
 """
     InverseRunInput(...)
@@ -536,6 +553,9 @@ A container struct for inputs to the `inverse_run` function.
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
   - `ingest::EquilibriumIngest` - captured raw arrays for the `gpec.h5` rerun snapshot
     (an [`InverseIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
+  - `psihigh_resolved::Float64` - outer flux limit the equilibrium is formed on; see
+    [`DirectRunInput`](@ref). Equals `config.psihigh` for every inverse reader (CHEASE,
+    analytic); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
 """
 mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -548,7 +568,13 @@ mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<
     zo::Float64                 # Z axis location
     psio::Float64               # Total flux difference |psi_axis - psi_boundary|
     ingest::EquilibriumIngest
+    psihigh_resolved::Float64
 end
+
+InverseRunInput(config::EquilibriumConfig, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z,
+    ro, zo, psio, ingest) =
+    InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z,
+        ro, zo, psio, ingest, config.psihigh)
 
 """
     EquilibriumParameters
@@ -560,6 +586,8 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `ro::Union{Nothing,Float64}` - R-coordinate of the magnetic axis [m]
   - `zo::Union{Nothing,Float64}` - Z-coordinate of the magnetic axis [m]
   - `psio::Union{Nothing,Float64}` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+  - `psihigh_resolved::Union{Nothing,Float64}` - Outer flux limit the equilibrium was formed on
+    (the outermost ψ node); the plasma edge downstream of `setup_equilibrium`.
   - `rsep::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma boundary [m]
   - `zsep::Union{Nothing,Vector{Float64}}` - Z-coordinates of the plasma boundary [m]
   - `rext::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma edge [m]
@@ -612,6 +640,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     ro::Union{Nothing,Float64} = nothing # R-coordinate of the magnetic axis [m]
     zo::Union{Nothing,Float64} = nothing # Z-coordinate of the magnetic axis [m]
     psio::Union{Nothing,Float64} = nothing # Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+    psihigh_resolved::Union{Nothing,Float64} = nothing # Outer flux limit actually formed on (clamped config.psihigh)
     rsep::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma boundary [m]
     zsep::Union{Nothing,Vector{Float64}} = nothing # Z-coordinates of the plasma boundary [m]
     rext::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma edge [m]
@@ -646,6 +675,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
     crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
     bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
+    ip_sign::Int = 1 # Sign of the plasma current as the source file states it: +1 or -1 (crnt is always positive)
     bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
     verbose::Bool = false # Whether to print verbose output
     diagnose_src::Bool = false # Whether to diagnose source data

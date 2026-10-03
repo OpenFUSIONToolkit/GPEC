@@ -26,6 +26,7 @@ makedocs(;
         "Home" => "index.md",
         "Setup" => "set_up.md",
         "Workflow" => "workflow.md",
+        "Scripting API" => "api.md",
         "Conventions Reference" => "conventions.md",
         "API Reference" => [
             "Vacuum" => "vacuum.md",
@@ -36,6 +37,7 @@ makedocs(;
             "KineticForces" => "kinetic_forces.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
+            "Error Fields" => "error_fields.md",
             "Tearing" => "inner_layer.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"

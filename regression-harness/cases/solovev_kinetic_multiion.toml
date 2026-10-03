@@ -1,0 +1,67 @@
+# Regression case: Solovev n=1 + PE + MULTI-ION NTV torque. The Solovev main ion is modelled as a
+# 50/50 D-T mix, so the KineticForces quadrature sums over D + T + electrons (this fixture is a pure
+# plasma, n_e = n_i, so no impurity species is present). Tracks the summed total AND each per-species
+# contribution, pinning the multi-species loop (resolve_ntv_species + combine_species_states) and the
+# full-composition Zeff. The impurity-species path is covered by the unit tests + the TC-24 case.
+[case]
+name = "solovev_kinetic_multiion"
+description = "Solovev n=1, ideal + PE + multi-ion NTV (D + T + electron summed)"
+example_dir = "examples/Solovev_kinetic_multiion_example"
+
+# Summed total NTV over all species — the headline multi-ion quantity.
+[quantities.ntv_total]
+h5path = "KineticForces/fgar/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "NTV total (D+T+imp+e) [N·m]"
+noise_threshold = 1e-8
+order = 10
+
+[quantities.ntv_D]
+h5path = "KineticForces/PerSpecies/ion_z1_m2/fgar/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "NTV Deuterium [N·m]"
+noise_threshold = 1e-8
+order = 11
+
+[quantities.ntv_T]
+h5path = "KineticForces/PerSpecies/ion_z1_m3/fgar/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "NTV Tritium [N·m]"
+noise_threshold = 1e-8
+order = 12
+
+[quantities.ntv_electron]
+h5path = "KineticForces/PerSpecies/electron/fgar/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "NTV electron [N·m]"
+noise_threshold = 1e-8
+order = 14
+
+# Stability anchors — confirm the upstream FFS/PE stages feeding the NTV diagnostic.
+[quantities.et_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+order = 20
+
+[quantities.msing]
+h5path = "SingularSurfaces/rational_count"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+order = 21
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 90

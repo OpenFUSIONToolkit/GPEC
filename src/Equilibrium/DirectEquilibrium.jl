@@ -293,6 +293,24 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
+    # A failed solve returns a truncated solution instead of throwing; check both the retcode and
+    # that the field line reached η = 2π, since a callback can end it early and still report Success.
+    if sol.retcode != ReturnCode.Success
+        error(
+            "direct_fieldline_int: field-line integration failed at psifac = " *
+            "$(@sprintf("%.6f", psifac)) (retcode $(sol.retcode)); the flux surface did not " *
+            "close. This usually means psihigh is too close to the separatrix for the " *
+            "equilibrium grid to resolve."
+        )
+    end
+    if !isapprox(sol.t[end], 2π; atol=1e-8)
+        error(
+            "direct_fieldline_int: field-line integration at psifac = " *
+            "$(@sprintf("%.6f", psifac)) stopped at eta = $(@sprintf("%.6f", sol.t[end])) " *
+            "instead of 2*pi; the flux surface did not close."
+        )
+    end
+
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
 end
@@ -425,6 +443,9 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     end
 
     psi_nodes = if equil_params.grid_type in ("auto", "log_asymptotic")
+        psihigh > 0.98 ||
+            @warn "grid_type = \"$(equil_params.grid_type)\" needs psihigh > 0.98 (its grid has a fixed edge region on [0.98, psihigh]); " *
+                  "psihigh = $psihigh gives a non-monotonic ψ grid and the equilibrium will fail. Use grid_type = \"ldp\" instead."
         # Distribute mpsi across the three regions by log-weights
         log_core = log(0.03 / psilow)
         log_mid = log(0.98 / 0.03)
@@ -478,7 +499,7 @@ robustness.
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
-    psihigh = equil_params.psihigh
+    psihigh = raw_profile.psihigh_resolved
 
     # Locate the magnetic axis and separatrix for the field-line integrations
     ro, zo, _, rs2 = direct_position!(raw_profile)
@@ -545,15 +566,18 @@ robustness.
     if q0 <= 0.0
         @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
     end
-    if equil_params.newq0 == -1
-        equil_params.newq0 = -q0
+    # The -1 sentinel means "flip the extrapolated q0"; resolve it into a local so the
+    # config stays the user's request (matches equilibrium_solver(::InverseRunInput)).
+    newq0 = equil_params.newq0
+    if newq0 == -1
+        newq0 = -q0
     end
-    if equil_params.newq0 != 0.0
-        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", equil_params.newq0))"
+    if newq0 != 0.0
+        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", newq0))"
         f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
-        f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
+        f0fac = f0^2 * ((newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.newq0)
+            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(newq0)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
@@ -651,6 +675,8 @@ robustness.
 
     params = EquilibriumParameters()
     params.bt_sign = raw_profile.bt_sign
+    params.ip_sign = raw_profile.ip_sign
+    params.psihigh_resolved = psihigh
 
     return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
         rzphi_xs, rzphi_ys,

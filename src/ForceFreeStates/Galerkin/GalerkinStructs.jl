@@ -188,26 +188,24 @@ end
 """
     GalerkinResult
 
-Outputs of the outer-region Galerkin solve.
+Solver internals and FEM diagnostics of the outer-region Galerkin solve. Its Δ′ payload (Δ′
+matrix, raw D′, PEST-3 blocks, coil-response block) is NOT carried here: `galerkin_solve`
+returns it separately as a [`DeltaPrimeData`](@ref), the one formalism-independent Δ′ type,
+published as `ForceFreeStatesResult.delta_prime`.
 
 ## Fields
 
-  - `delta::Matrix{ComplexF64}` — Δ′ matrix, `(nsol, 2*msing)` with `nsol = 2*msing`; the small
-    resonant coefficients (Fortran `delta`, gal.f).
-  - `Ap, Bp, Gammap, Deltap::Matrix{ComplexF64}` — PEST-3 matching blocks, each `(msing, msing)`
-    (Fortran `gal_write_pest3_data`, gal.f).
-  - `msing::Int` — number of resonant singular surfaces included.
-  - `sing_psi, sing_q::Vector{Float64}`, `sing_m, sing_n::Vector{Int}` — per-surface identifiers.
+  - `msing::Int` — number of resonant singular surfaces in the Galerkin solve. May be fewer than
+    `result.surfaces`: only surfaces inside the integration domain and the resolved m-band are
+    kept (`gal_resonant_surfaces`).
+  - `sing_psi, sing_q::Vector{Float64}`, `sing_m, sing_n::Vector{Int}` — per-surface identifiers,
+    core→edge, in the order the Δ′ matrices are indexed.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
   - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
     gal-native grid; `nothing` if no resonant surfaces.
+  - `match::Union{Nothing,GalMatchResult}` — RPEC matched solution (`gal_match_flag`); `nothing` otherwise.
 """
 struct GalerkinResult
-    delta::Matrix{ComplexF64}
-    Ap::Matrix{ComplexF64}
-    Bp::Matrix{ComplexF64}
-    Gammap::Matrix{ComplexF64}
-    Deltap::Matrix{ComplexF64}
     msing::Int
     sing_psi::Vector{Float64}
     sing_q::Vector{Float64}
@@ -215,7 +213,6 @@ struct GalerkinResult
     sing_n::Vector{Int}
     di::Vector{Float64}
     alpha::Vector{ComplexF64}
-    delta_coil::Matrix{ComplexF64}   # (mpert, 2*msing) coil-response block (rpec_flag); empty if not computed
     solution::Union{Nothing,GalerkinSolution}
-    match::Union{Nothing,GalMatchResult}   # RPEC matched solution (gal_match_flag); nothing otherwise
+    match::Union{Nothing,GalMatchResult}
 end

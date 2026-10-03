@@ -28,7 +28,7 @@ include("KineticProfiles.jl")
 # --- Expose types and functions to the user ---
 export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
-    KineticProfileSplines, load_kinetic_profiles,
+    KineticProfileSplines, load_kinetic_profiles, shift_exb_rotation,
     KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
 export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, bracket_mandatory_nodes, enforce_min_spacing, implied_knot_count
@@ -94,27 +94,16 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     if additional_input isa DirectRunInput
         eq_input = additional_input
         eq_input.config = eq_config
-        # Re-run the separatrix clamp for efit-family replays so an overridden
-        # psihigh from the rerun TOML is re-validated against the closed flux region.
-        if eq_type in EFIT_KINDS
-            psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
-            if adjusted
-                @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
-                      "clamped to $(round(psihigh_safe; sigdigits=7))"
-                eq_input.config.psihigh = psihigh_safe
-            end
-        end
+        # Reset before re-resolving: a pass-1 clamped value must not shadow a psihigh
+        # overridden in the rerun TOML.
+        eq_input.psihigh_resolved = eq_config.psihigh
+        eq_type in EFIT_KINDS && resolve_psihigh!(eq_input)
     elseif additional_input isa InverseRunInput
         eq_input = additional_input
         eq_input.config = eq_config
+        eq_input.psihigh_resolved = eq_config.psihigh
     elseif eq_type in EFIT_KINDS
-        eq_input = read_efit(eq_config)
-        psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
-        if adjusted
-            @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
-                  "clamped to $(round(psihigh_safe; sigdigits=7))"
-            eq_input.config.psihigh = psihigh_safe
-        end
+        eq_input = resolve_psihigh!(read_efit(eq_config))
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
@@ -155,6 +144,27 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     equilibrium_gse!(plasma_equilibrium)
 
     return plasma_equilibrium
+end
+
+"""
+    PlasmaEquilibrium(path::AbstractString; eq_type="efit", kwargs...) -> PlasmaEquilibrium
+
+Read the equilibrium file at `path` and return the processed equilibrium. Convenience entry
+point of the scripting API: `kwargs` are [`EquilibriumConfig`](@ref) fields, so
+`PlasmaEquilibrium("g000001.00001"; jac_type="hamada", mpsi=128)` is the whole setup.
+
+Only file-based equilibria go through this constructor. Analytic kinds (`sol`, `lar`,
+`tj_analytic`) take their parameters from a separate config object and are built with
+`setup_equilibrium(config, analytic_config)` instead.
+
+```julia
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
+```
+"""
+function PlasmaEquilibrium(path::AbstractString; eq_type::String="efit", kwargs...)
+    haskey(ANALYTIC_EQ, eq_type) &&
+        error("$eq_type is an analytic equilibrium: build it with setup_equilibrium(config, $(ANALYTIC_EQ[eq_type].config_type)(...)) instead")
+    return setup_equilibrium(EquilibriumConfig(; eq_type, eq_filename=abspath(path), kwargs...))
 end
 
 """
@@ -322,10 +332,10 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     P_vals = profiles.P_spline.y
     dVdpsi_vals = profiles.dVdpsi_spline.y
 
-    fsi_pdv  = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
-    fsi_dv   = fsi(dVdpsi_vals)                   # ∫ dV/dψ
+    fsi_pdv = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
+    fsi_dv = fsi(dVdpsi_vals)                   # ∫ dV/dψ
     fsi_p2dv = fsi(P_vals .^ 2 .* dVdpsi_vals)    # ∫ p² dV/dψ
-    volume   = fsi_dv                             # same integrand as hs col 2 in Fortran
+    volume = fsi_dv                             # same integrand as hs col 2 in Fortran
 
     # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J).
     # This is Fortran equil_out.f's hs%fs(:,3) and is the correct integrand for
@@ -335,21 +345,21 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     for ipsi in 0:mpsi
         acc = 0.0
         for itheta in 0:mtheta
-            r2       = pe.rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1]
-            offset   = pe.rzphi_offset.nodal_derivs.partials[1,    ipsi+1, itheta+1]
-            jac      = pe.rzphi_jac.nodal_derivs.partials[1,       ipsi+1, itheta+1]
-            r2_y     = pe.rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1]
-            offset_y = pe.rzphi_offset.nodal_derivs.partials[3,    ipsi+1, itheta+1]
+            r2 = pe.rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            offset = pe.rzphi_offset.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            jac = pe.rzphi_jac.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            r2_y = pe.rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1]
+            offset_y = pe.rzphi_offset.nodal_derivs.partials[3, ipsi+1, itheta+1]
 
             jacfac = π / jac
-            rfac   = sqrt(r2)
-            eta    = 2π * (pe.rzphi_ys[itheta+1] + offset)
-            r      = pe.ro + rfac * cos(eta)
-            v21    = jacfac * r2_y / (2π * rfac)
-            v22    = jacfac * (1 + offset_y) * (2 * rfac)
-            v33    = jacfac * 2π * (r / π)
-            dvsq   = (v21^2 + v22^2) * (v33 * jac^2)^2
-            acc   += dvsq / (r^2) / jac
+            rfac = sqrt(r2)
+            eta = 2π * (pe.rzphi_ys[itheta+1] + offset)
+            r = pe.ro + rfac * cos(eta)
+            v21 = jacfac * r2_y / (2π * rfac)
+            v22 = jacfac * (1 + offset_y) * (2 * rfac)
+            v33 = jacfac * 2π * (r / π)
+            dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
+            acc += dvsq / (r^2) / jac
         end
         # Periodic trapezoidal rule on uniform θ grid reduces to a plain mean
         # because the first and last grid points coincide — matches the int1/int2
@@ -359,15 +369,15 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     fsi_bp2 = fsi(hs_bp2)
 
     p0 = P_vals[1] - profiles.P_deriv(profiles.xs[1]; hint=Ref(1)) * profiles.xs[1]  # linear extrapolation
-    betat  = 2 * (fsi_pdv / fsi_dv) / bt0^2
-    betaj  = 2 * sqrt(fsi_p2dv / fsi_dv) / bwall^2
-    betan  = 100 * amean * bt0 * betat / crnt
+    betat = 2 * (fsi_pdv / fsi_dv) / bt0^2
+    betaj = 2 * sqrt(fsi_p2dv / fsi_dv) / bwall^2
+    betan = 100 * amean * bt0 * betat / crnt
     betap1 = 2 * (fsi_pdv / fsi_dv) / bp0^2
     betap2 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * pe.ro)
     betap3 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * rmean)
-    li1    = fsi_bp2 / fsi_dv / bp0^2
-    li2    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * pe.ro)
-    li3    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * rmean)
+    li1 = fsi_bp2 / fsi_dv / bp0^2
+    li2 = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * pe.ro)
+    li3 = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * rmean)
 
     pe.params.psi0 = psio
     pe.params.psi_axis = pe.psio

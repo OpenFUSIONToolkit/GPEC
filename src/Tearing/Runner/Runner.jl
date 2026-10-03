@@ -19,7 +19,7 @@
 #                   find_growth_rates
 #                            │
 #                            ▼
-#                      SLAYERResult  →  HDF5 (`slayer/` group)
+#                      SLAYERResult  →  HDF5 (`Tearing/` group)
 
 module Runner
 

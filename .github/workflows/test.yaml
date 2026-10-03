@@ -10,9 +10,7 @@ on:
       - main
       - develop
 
-# needed to allow julia-actions/cache to delete old caches that it has created
 permissions:
-  actions: write
   contents: read
 
 concurrency:
@@ -56,11 +54,12 @@ jobs:
 
           # Allowlist of what test/runtests.jl actually exercises: the package
           # itself, the tests and their fixtures, the example decks the tests run
-          # end-to-end, the dependency set, and this workflow. Anything not listed
-          # here does not trigger a run, so new untested Julia (benchmarks, docs
-          # scripts, a future tools/ directory) is excluded by default rather than
-          # by remembering to exclude it.
-          tested='(^src/|^test/|^examples/|^Project\.toml$|^\.github/workflows/test\.yaml$)'
+          # end-to-end, the dependency set (declared in Project.toml and pinned in
+          # ci/manifests), and this workflow. Anything not listed here does not
+          # trigger a run, so new untested Julia (benchmarks, docs scripts, a
+          # future tools/ directory) is excluded by default rather than by
+          # remembering to exclude it.
+          tested='(^src/|^test/|^examples/|^ci/manifests/|^Project\.toml$|^\.github/workflows/test\.yaml$)'
 
           relevant=$(printf '%s\n' "$files" | grep -E "$tested" || true)
 
@@ -101,20 +100,67 @@ jobs:
         os:
           - ubuntu-latest
 
+    env:
+      DEPOT_PATHS: |
+        ~/.julia/artifacts
+        ~/.julia/packages
+        ~/.julia/registries
+        ~/.julia/compiled
+        ~/.julia/scratchspaces
+        ~/.julia/logs
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
       - name: Set up Julia
+        id: julia
         uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
 
-      - name: Cache Julia packages
-        uses: julia-actions/cache@v3
+      # Keyed on the resolved Julia version, not the matrix label: precompiled .ji
+      # files are tied to the exact Julia build, so a patch release invalidates
+      # every one of them. Cache entries are immutable, so were the key not to
+      # rotate the run would recompile the whole tree, hit the unchanged key, skip
+      # the save as having nothing new, and repeat that forever. The version-only
+      # fallback still reuses packages, artifacts and registries across a bump; the
+      # next push to the default branch repopulates under the new key.
+      - name: Restore the Julia depot
+        id: depot
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          restore-keys: |
+            julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-
+            julia-depot-${{ matrix.os }}-${{ matrix.version }}-
+
+      - name: Pin the CI dependency set
+        run: |
+          set -euo pipefail
+
+          minor=$(julia -e 'print(VERSION.major, ".", VERSION.minor)')
+          pinned="ci/manifests/Manifest-v${minor}.toml"
+
+          if [ ! -f "$pinned" ]; then
+            echo "::warning::No pinned dependency set for Julia ${minor}; resolving fresh. Generate one with 'julia +${minor} ci/manifests/update.jl'."
+            exit 0
+          fi
+
+          cp "$pinned" Manifest.toml
+          echo "Pinned dependency set: ${pinned}"
+
+          recorded=$(cat ci/manifests/project.sha256)
+          actual=$(shasum -a 256 Project.toml | cut -d ' ' -f 1)
+          if [ "$recorded" != "$actual" ]; then
+            echo "::warning::Project.toml has changed since the pinned dependency sets were generated, so ${pinned} may be stale. Regenerate with ci/manifests/update.jl."
+          fi
 
       - name: Build Julia packages
         uses: julia-actions/julia-buildpkg@v1
+        with:
+          ignore-no-cache: true
 
       # Coverage instrumentation is off: nothing consumes the .cov files (they are
       # gitignored and never uploaded), and instrumenting slows compute-heavy
@@ -124,6 +170,24 @@ jobs:
         uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
+
+      # An exact hit has nothing new to store. Otherwise pushes refresh the shared
+      # default-branch entry, and a pull request writes one only when it restored
+      # nothing at all -- which happens when this key prefix is cold, as it is the
+      # first time this runs, after a matrix version is added, or once entries age
+      # out. That entry is scoped to the pull request's own ref and so cannot be
+      # reused by another, but seeding it beats discarding a full compile; once the
+      # default branch has an entry, pull requests always prefix-match and skip.
+      - name: Prune the depot before caching
+        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
+        run: julia --project=. -e 'using Pkg; Pkg.gc()'
+
+      - name: Save the Julia depot
+        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
 
   # Stable check that is present on every pull request, whether or not the suite
   # ran. Point branch protection at this job so skipped runs do not block merges.

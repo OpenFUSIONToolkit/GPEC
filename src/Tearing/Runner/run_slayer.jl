@@ -1,8 +1,8 @@
 # Runner.jl
 #
 # Top-level orchestration for the SLAYER tearing-mode analysis. Given a
-# fully-solved `PlasmaEquilibrium` + `ForceFreeStatesInternal` (which
-# supplies the rational-surface list and the outer-region Δ' matrix) + a
+# `ForceFreeStatesResult` (which supplies the equilibrium, the rational-surface
+# list and the outer-region Δ' matrix) + a
 # populated `SLAYERControl`, `run_slayer` loads kinetic profiles, builds
 # per-surface SLAYER parameters, runs the requested scan mode, extracts
 # growth rates by contour intersection, and returns a `SLAYERResult`.
@@ -152,6 +152,48 @@ function _build_surface_coupling(model::GGJModel, params::GGJParameters,
 end
 
 # ---------------------------------------------------------------------
+# Reference-length conversion of the outer Δ' for the slab layer
+# ---------------------------------------------------------------------
+"""
+    delta_prime_to_rs_reference(dp_matrix, params) -> Matrix{ComplexF64}
+
+Convert the outer-region Δ' matrix from its ψ_N reference length (the
+STRIDE/BVP convention: Frobenius coefficients normalized per unit Δψ_N) to
+the r_s-based `x̂ = (r − r_s)/r_s` reference the slab layer works in
+(Fitzpatrick 2023 convention — the same reference used by `dc_tmp` and by
+the `S^(1/3)` Δ(Q) scale, both built on r_s).
+
+Near surface `k` the outer solution combines the large and small Frobenius
+solutions with the Mercier exponent `α = √(−D_I)`, `D_I = E + F + H − 1/4`
+(Glasser, Greene & Johnson 1975, Eq. 48; STRIDE's `alpha`). The displacement
+scales as `|x|^(−1/2 ± α)` (Glasser, Wang & Park 2016, Eq. 26), so the
+flux-like variable `ψ ∝ x·ξ` of the slab Δ' definition scales as
+`A_L·|x|^(1/2−α) + A_S·|x|^(1/2+α)`. Rescaling the radial variable
+`x_ψ = K·x̂` with `K = r_s·(dψ_N/dr)|_s` maps the flux coefficients as
+`Â_L = A_L·K^(1/2−α)` and `Â_S = A_S·K^(1/2+α)`, so the response matrix
+(small coefficient at surface `i` per unit large coefficient at surface `j`)
+transforms as
+
+    Δ̂_ij = K_i^(1/2+α_i) · Δ'_ij · K_j^(α_j−1/2)
+
+whose diagonal is `K^(2α)·Δ'_kk`; at D_I = −1/4 (α = 1/2) this reduces to
+the textbook `Δ̂ = r_s·Δ'_phys`. The diagonal factor is the exponent gap and
+is the same whichever variable carries the coefficients; using the
+displacement instead shifts both exponents by one and changes the
+off-diagonal split by `K_i/K_j`, a diagonal similarity transform `D·Δ'·D⁻¹`
+that leaves every uncoupled and coupled dispersion root unchanged. `K` and
+`α` are carried per surface in `SLAYERParameters.k_ref` / `.alpha_mercier`;
+hand-built parameters default to `k_ref = 1`, making the conversion the
+identity.
+"""
+function delta_prime_to_rs_reference(dp_matrix::AbstractMatrix,
+    params::AbstractVector{<:SLAYERParameters})
+    dl = [p.k_ref^(0.5 + p.alpha_mercier) for p in params]
+    dr = [p.k_ref^(p.alpha_mercier - 0.5) for p in params]
+    return Diagonal(dl) * Matrix{ComplexF64}(dp_matrix) * Diagonal(dr)
+end
+
+# ---------------------------------------------------------------------
 # Core analysis entry point that takes pre-built parameters.
 # ---------------------------------------------------------------------
 """
@@ -167,7 +209,9 @@ from cached HDF5 output).
 """
 function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     dp_matrix::AbstractMatrix,
-    control::SLAYERControl)
+    control::SLAYERControl;
+    rational_psi::Vector{Float64}=Float64[],
+    rational_q::Vector{Float64}=Float64[])
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(params) && return empty_slayer_result(control)
@@ -191,6 +235,14 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
                 "$(eltype(params)). Build inputs with the matching builder " *
                 "(build_slayer_inputs for SLAYER, build_ggj_inputs for GGJ).")
         )
+
+    # Slab-layer path: convert Δ' from its ψ_N reference length to the
+    # r_s-based convention shared by the layer Δ(Q) and the critical-Δ (see
+    # `delta_prime_to_rs_reference`). GGJ is genuinely toroidal/ψ-based
+    # (its `rescale_delta` handles inner→outer units natively) — no conversion.
+    if !_is_ggj(model)
+        dp = delta_prime_to_rs_reference(dp, params)
+    end
 
     # The coupled determinant uses the reduced m×m (tearing-only) form, which
     # drops the interchange channel. For GGJ that channel carries the Glasser
@@ -309,7 +361,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         control.store_scan && push!(scan_data_list, scan)
     end
 
-    return SLAYERResult(true, control, params, dp,
+    return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
         layer_widths, scan_data_list)
@@ -349,26 +401,39 @@ end
 # Full pipeline: equilibrium + ForceFreeStates → parameters → analysis
 # ---------------------------------------------------------------------
 """
-    run_slayer(equil, ffs_intr, control; dir_path="./") -> SLAYERResult
+    run_slayer(result, control; dir_path="./") -> SLAYERResult
 
-Orchestrate the full SLAYER analysis against a solved
-`PlasmaEquilibrium` and `ForceFreeStatesInternal`. Kinetic profiles are
+Orchestrate the full SLAYER analysis against a `ForceFreeStates.ForceFreeStatesResult`,
+reading its equilibrium, singular surfaces and Δ' matrix. Kinetic profiles are
 read from `control.profile_file` (relative to `dir_path`) through the shared
 `Equilibrium.read_kinetic_file` reader; when the file carries `chi_e`/`chi_phi`
 profiles they set χ⊥(ψ)/χ_φ(ψ), otherwise the scalar `control.chi_perp`/
-`chi_tor` fallbacks are used. Per-surface parameters are built via
-`build_slayer_inputs`; the outer-region Δ' matrix is pulled from
-`ffs_intr.delta_prime_matrix` (or, if empty, from the diagonal
-`sing.delta_prime` entries).
+`chi_tor` fallbacks are used.
+
+The toroidal field comes from `control.bt`; leaving it unset (the default) makes
+`build_slayer_inputs` evaluate the physical `B_T = F(ψ)/(2π·R₀)` per surface.
 
 Returns an `enabled=false` `SLAYERResult` when `control.enabled` is
 false.
 """
-function run_slayer(equil, ffs_intr, control::SLAYERControl;
-    dir_path::AbstractString="./")
+function run_slayer(result, control::SLAYERControl; dir_path::AbstractString="./")
+    dpm = result.delta_prime === nothing ? Matrix{ComplexF64}(undef, 0, 0) : result.delta_prime.matrix
+    return run_slayer(result.equil, result.surfaces, dpm, control; dir_path=dir_path)
+end
+
+"""
+    run_slayer(equil, surfaces, delta_prime_matrix, control; dir_path="./") -> SLAYERResult
+
+Loose-argument form of [`run_slayer`](@ref), taking the equilibrium, the singular-surface
+vector and the outer-region Δ' matrix directly. Per-surface parameters are built via
+`build_slayer_inputs`; an empty or wrong-sized `delta_prime_matrix` falls back to a diagonal
+built from the `sing.delta_prime` stubs.
+"""
+function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::AbstractMatrix,
+    control::SLAYERControl; dir_path::AbstractString="./")
     validate(control)
     control.enabled || return empty_slayer_result(control)
-    isempty(ffs_intr.sing) && return empty_slayer_result(control)
+    isempty(surfaces) && return empty_slayer_result(control)
 
     loaded = _load_profiles(control, dir_path)
     profiles = loaded.profiles
@@ -376,13 +441,18 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl;
     if control.inner_model in (:ggj_shooting, :ggj_galerkin)
         # GGJ γ-extraction is future work; `run_slayer_from_inputs` emits the
         # warning once the model is built (so direct callers see it too).
-        params = build_ggj_inputs(equil, ffs_intr.sing, profiles;
+        params = build_ggj_inputs(equil, surfaces, profiles;
             mu_i=control.mu_i,
             zeff=control.zeff,
             resistivity_model=_build_resistivity_model(control.resistivity_model),
             lnLambda_form=control.lnLambda_form)
     else
-        bt = control.bt === nothing ? equil.config.b0exp : control.bt
+        # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
+        # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
+        # control value through instead: `nothing` makes build_slayer_inputs compute the
+        # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
+        # what its docstring already prescribes.
+        bt = control.bt
         # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
         chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
         chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
@@ -390,7 +460,7 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl;
             "SLAYER: kinetic file has no usable chi_e/chi_phi profile(s) " *
             "(dataset absent or all-zero); using the scalar " *
             "control.chi_perp/chi_tor fallback for the missing one(s).")
-        params = build_slayer_inputs(equil, ffs_intr.sing, profiles;
+        params = build_slayer_inputs(equil, surfaces, profiles;
             bt=bt,
             mu_i=control.mu_i,
             zeff=control.zeff,
@@ -406,18 +476,18 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl;
 
     # Δ' matrix: prefer the full parallel-FM matrix; fall back to a
     # diagonal built from each SingType's scalar delta_prime.
-    dp = if !isempty(ffs_intr.delta_prime_matrix) &&
-       size(ffs_intr.delta_prime_matrix) == (length(params), length(params))
-        Matrix{ComplexF64}(ffs_intr.delta_prime_matrix)
+    dp = if !isempty(delta_prime_matrix) &&
+       size(delta_prime_matrix) == (length(params), length(params))
+        Matrix{ComplexF64}(delta_prime_matrix)
     else
         # The full Δ' matrix is unavailable (e.g. the parallel-FM stage that
         # populates it was not run). The scalar-diagonal fallback uses
         # `sing.delta_prime`, which is a coarse per-surface stub; surfaces
         # with no entry default to Δ'=0, giving γ computed from zero drive.
-        n_missing = count(s -> isempty(s.delta_prime), ffs_intr.sing)
+        n_missing = count(s -> isempty(s.delta_prime), surfaces)
         @warn(
-            "SLAYER: ffs_intr.delta_prime_matrix is empty or wrong-sized " *
-            "($(size(ffs_intr.delta_prime_matrix)) vs " *
+            "SLAYER: delta_prime_matrix is empty or wrong-sized " *
+            "($(size(delta_prime_matrix)) vs " *
             "($(length(params)),$(length(params)))); falling back to the " *
             "diagonal `sing.delta_prime` stub. Growth rates use a coarse " *
             "per-surface Δ' and may be unreliable" *
@@ -425,11 +495,13 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl;
                              "default to Δ'=0 (zero tearing drive)." : ".")
         )
         M = zeros(ComplexF64, length(params), length(params))
-        for (k, s) in enumerate(ffs_intr.sing)
+        for (k, s) in enumerate(surfaces)
             M[k, k] = isempty(s.delta_prime) ? 0.0 + 0im : s.delta_prime[1]
         end
         M
     end
 
-    return run_slayer_from_inputs(params, dp, control)
+    rational_psi = Float64[surfaces[p.ising].psifac for p in params]
+    rational_q = Float64[surfaces[p.ising].q for p in params]
+    return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
 end

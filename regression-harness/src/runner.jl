@@ -27,22 +27,24 @@ end
 Materialize the directory GPEC will actually run in.
 
 With no `overrides`, the example deck runs in place (returns it untouched). With overrides,
-the deck is copied to a throwaway temp dir and the named gpec.toml keys are patched there,
-so one shared example can serve several cases (e.g. a collisionless variant via
-`"KineticForces.nutype" => "zero"`). Override keys are dotted paths into the TOML; missing
-intermediate tables are created. Returns `(rundir, is_temp)`; the caller removes the temp
-tree when `is_temp`.
+the deck is copied to a uniquely named throwaway sibling of the example dir and the named gpec.toml keys are
+patched there, so one shared example can serve several cases (e.g. a collisionless variant via
+`"KineticForces.nutype" => "zero"`). The copy sits beside the original so relative file
+references in the deck (e.g. `SLAYER.profile_file = "../<other_example>/..."`) still resolve.
+Override keys are dotted paths into the TOML; missing intermediate tables are created.
+Returns `(rundir, is_temp)`; the caller removes `rundir` when `is_temp`.
 """
 function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
     isempty(overrides) && return (example_path, false)
-    rundir = joinpath(mktempdir(), "deck")
-    cp(example_path, rundir)
+    # Unique per invocation, so concurrent runs from one checkout cannot share (and race on) a rundir.
+    rundir = mktempdir(dirname(example_path); prefix=".regress-override-" * basename(example_path) * "-", cleanup=false)
+    cp(example_path, rundir; force=true)
     rm(joinpath(rundir, "gpec.h5"); force=true)   # drop any stale output copied along
     cfg = TOML.parsefile(joinpath(rundir, "gpec.toml"))
     for (dotted, val) in overrides
         ks = split(dotted, ".")
         d = cfg
-        for k in ks[1:(end - 1)]
+        for k in ks[1:(end-1)]
             d = get!(d, k, Dict{String,Any}())
         end
         d[ks[end]] = val
@@ -52,6 +54,12 @@ function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
     end
     return (rundir, true)
 end
+
+# Thread count for GPEC subprocesses ("auto" = all cores); GPEC's threaded kernels
+# (Riccati parallel FM, ballooning, field reconstruction, kinetic forces) otherwise
+# run single-threaded. Override with e.g. GPEC_REGRESS_THREADS=1. The actual count
+# is recorded in each run's environment fingerprint.
+const SUBPROCESS_THREADS = get(ENV, "GPEC_REGRESS_THREADS", "auto")
 
 const RUNNER_SCRIPT_TEMPLATE = """
 using Pkg
@@ -134,11 +142,11 @@ t_start = time()
 pe = Equilibrium.setup_equilibrium(cfg)
 elapsed = time() - t_start
 h5open(ARGS[1], "w") do fid
-    fid["equil/psio"]  = pe.psio
-    fid["equil/q0"]    = pe.params.q0
-    fid["equil/q95"]   = pe.params.q95
-    fid["equil/betat"] = pe.params.betat
-    fid["equil/betan"] = pe.params.betan
+    fid["Equilibrium/psi_total"]  = pe.psio
+    fid["Equilibrium/q_axis"]    = pe.params.q0
+    fid["Equilibrium/q_95"]   = pe.params.q95
+    fid["Equilibrium/beta_t"] = pe.params.betat
+    fid["Equilibrium/beta_N"] = pe.params.betan
 end
 %RUNINFO%
 """
@@ -159,31 +167,84 @@ the working tree or run_at_commit for a git ref.
 `pin_manifest` is the path to a resolved `Manifest.toml` copied into each worktree so every ref
 runs against the same package set; `nothing` disables pinning. `expected_key` is the environment
 key a fresh run will carry — a cached run whose key differs is re-run rather than reused.
+`worktree_path`, when given, is reused instead of creating/removing a fresh worktree for this
+call — see [`run_cases_at_ref`](@ref), which shares one worktree (and thus one
+`Pkg.instantiate`/precompile) across every case at a commit.
 """
 function run_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
-                    case_spec::CaseSpec, repo_root::String;
-                    force::Bool=false, verbose::Bool=false,
-                    no_instantiate::Bool=false,
-                    pin_manifest::Union{String,Nothing}=nothing,
-                    expected_key::Union{String,Nothing}=nothing)
+    case_spec::CaseSpec, repo_root::String;
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing,
+    worktree_path::Union{String,Nothing}=nothing)
     if case_spec.kind == "computed"
         if commit_hash == LOCAL_REF
             return run_computed_local(db, case_spec, repo_root;
-                                      verbose=verbose, no_instantiate=no_instantiate,
-                                      pin_manifest=pin_manifest)
+                verbose=verbose, no_instantiate=no_instantiate,
+                pin_manifest=pin_manifest)
         end
         return run_computed_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
-                                      force=force, verbose=verbose, no_instantiate=no_instantiate,
-                                      pin_manifest=pin_manifest, expected_key=expected_key)
+            force=force, verbose=verbose, no_instantiate=no_instantiate,
+            pin_manifest=pin_manifest, expected_key=expected_key,
+            worktree_path=worktree_path)
     end
     if commit_hash == LOCAL_REF
         return run_local(db, case_spec, repo_root;
-                         force=force, verbose=verbose, no_instantiate=no_instantiate,
-                         pin_manifest=pin_manifest)
+            force=force, verbose=verbose, no_instantiate=no_instantiate,
+            pin_manifest=pin_manifest)
     end
     return run_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
-                         force=force, verbose=verbose, no_instantiate=no_instantiate,
-                         pin_manifest=pin_manifest, expected_key=expected_key)
+        force=force, verbose=verbose, no_instantiate=no_instantiate,
+        pin_manifest=pin_manifest, expected_key=expected_key,
+        worktree_path=worktree_path)
+end
+
+"""
+Run every case in `case_specs` against `ref`. For a git ref (not `"local"`), a single
+worktree is created and reused across all cases at that commit — each case still spawns
+its own `julia` subprocess, but since they share the same `--project` path (and the same
+pinned Manifest, when pinning is on), only the first subprocess pays for
+`Pkg.instantiate()`/precompilation; the rest hit Julia's on-disk pkgimage cache for that
+path. Worktree creation is skipped entirely when every case is already cached in the
+expected environment (and `force` is false). If the worktree cannot be created, the
+failure is recorded for each case needing a run and the remaining refs still proceed.
+"""
+function run_cases_at_ref(db::SQLite.DB, ref::ResolvedRef, case_specs::Vector{CaseSpec}, repo_root::String;
+    force::Bool=false, verbose::Bool=false, no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing)
+    needs_worktree = !is_local_ref(ref) &&
+                     (force || any(!is_cached(db, ref.commit_hash, cs.name; expected_key=expected_key) for cs in case_specs))
+
+    worktree_path = nothing
+    if needs_worktree
+        try
+            worktree_path = create_worktree(ref.commit_hash, repo_root; pin_manifest_from=pin_manifest)
+        catch e
+            info = get_commit_info(ref.commit_hash, repo_root)
+            @warn "Worktree creation failed for $(info.short): $(sprint(showerror, e))"
+            # Record the failure only for cases needing a run; cached results stay intact.
+            for case_spec in case_specs
+                if force || !is_cached(db, ref.commit_hash, case_spec.name; expected_key=expected_key)
+                    store_failed_run(db, ref.commit_hash, info.short, info.date, info.msg,
+                        case_spec.name, "Worktree creation failed: $(sprint(showerror, e))")
+                end
+            end
+            return
+        end
+    end
+
+    try
+        for case_spec in case_specs
+            run_commit(db, ref.commit_hash, ref.name, case_spec, repo_root;
+                force=force, verbose=verbose, no_instantiate=no_instantiate,
+                pin_manifest=pin_manifest, expected_key=expected_key,
+                worktree_path=worktree_path)
+        end
+    finally
+        worktree_path === nothing || remove_worktree(worktree_path, repo_root)
+    end
 end
 
 """
@@ -208,19 +269,19 @@ import GeneralizedPerturbedEquilibrium), reads the resulting tempfile h5 with
 so callers can handle store_failed_run uniformly.
 """
 function _execute_computed(case_spec::CaseSpec, project_root::String;
-                           verbose::Bool, no_instantiate::Bool,
-                           stderr_buf::IO, pin_manifest::Union{String,Nothing}=nothing)
+    verbose::Bool, no_instantiate::Bool,
+    stderr_buf::IO, pin_manifest::Union{String,Nothing}=nothing)
     script_content = _render_script(_computed_script_template(case_spec); no_instantiate=no_instantiate)
     tmpscript = tempname() * ".jl"
     h5path = tempname() * ".h5"
     runinfo_file = tempname() * ".runinfo"
     try
         write(tmpscript, script_content)
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $runinfo_file`
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $runinfo_file`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $h5path $runinfo_file`,
-                         stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
@@ -252,20 +313,20 @@ end
 Run a kind="computed" case against the working tree.
 """
 function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
-                            verbose::Bool=false, no_instantiate::Bool=false,
-                            pin_manifest::Union{String,Nothing}=nothing)
+    verbose::Bool=false, no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing)
     delete_cached(db, LOCAL_REF, case_spec.name)
     date = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
     @info "Running: $(case_spec.name) @ local (working tree, computed)"
     stderr_buf = IOBuffer()
     try
         extracted, runtime_s, fingerprint = _execute_computed(case_spec, repo_root;
-                                                              verbose=verbose,
-                                                              no_instantiate=no_instantiate,
-                                                              stderr_buf=stderr_buf,
-                                                              pin_manifest=pin_manifest)
+            verbose=verbose,
+            no_instantiate=no_instantiate,
+            stderr_buf=stderr_buf,
+            pin_manifest=pin_manifest)
         store_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                  runtime_s, extracted; fingerprint=fingerprint)
+            runtime_s, extracted; fingerprint=fingerprint)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
         err_msg = if e isa ProcessFailedException
@@ -280,19 +341,22 @@ function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::Strin
         err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (local computed): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                         err_msg_short)
+            err_msg_short)
     end
 end
 
 """
 Run a kind="computed" case at a specific git commit via worktree.
+If `worktree_path` is given, the caller owns the (already pinned) worktree and this
+function will not remove it; otherwise one is created and removed here.
 """
 function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
-                                case_spec::CaseSpec, repo_root::String;
-                                force::Bool=false, verbose::Bool=false,
-                                no_instantiate::Bool=false,
-                                pin_manifest::Union{String,Nothing}=nothing,
-                                expected_key::Union{String,Nothing}=nothing)
+    case_spec::CaseSpec, repo_root::String;
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing,
+    worktree_path::Union{String,Nothing}=nothing)
     if !force && is_cached(db, commit_hash, case_spec.name; expected_key=expected_key)
         info = get_run_info(db, commit_hash, case_spec.name)
         if info !== nothing
@@ -309,17 +373,17 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
     @info "Running: $(case_spec.name) @ $(commit_info.short) ($(commit_info.date)) [computed]"
     @info "  $(commit_info.msg)"
 
-    worktree_path = nothing
+    own_worktree = worktree_path === nothing
     stderr_buf = IOBuffer()
     try
-        worktree_path = create_worktree(commit_hash, repo_root; pin_manifest_from=pin_manifest)
+        own_worktree && (worktree_path = create_worktree(commit_hash, repo_root; pin_manifest_from=pin_manifest))
         extracted, runtime_s, fingerprint = _execute_computed(case_spec, worktree_path;
-                                                              verbose=verbose,
-                                                              no_instantiate=no_instantiate,
-                                                              stderr_buf=stderr_buf,
-                                                              pin_manifest=pin_manifest)
+            verbose=verbose,
+            no_instantiate=no_instantiate,
+            stderr_buf=stderr_buf,
+            pin_manifest=pin_manifest)
         store_run(db, commit_hash, commit_info.short, commit_info.date,
-                  commit_info.msg, case_spec.name, runtime_s, extracted; fingerprint=fingerprint)
+            commit_info.msg, case_spec.name, runtime_s, extracted; fingerprint=fingerprint)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
         err_msg = if e isa ProcessFailedException
@@ -334,9 +398,9 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
         err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (computed) for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                         commit_info.msg, case_spec.name, err_msg_short)
+            commit_info.msg, case_spec.name, err_msg_short)
     finally
-        if worktree_path !== nothing
+        if own_worktree && worktree_path !== nothing
             remove_worktree(worktree_path, repo_root)
         end
     end
@@ -366,7 +430,7 @@ package set — the exact situation that used to be silently reused and reported
 regression. Says so, once, before re-running.
 """
 function _warn_env_invalidated(db::SQLite.DB, commit_hash::String, case_name::String,
-                               expected_key::Union{String,Nothing}, force::Bool)
+    expected_key::Union{String,Nothing}, force::Bool)
     (force || expected_key === nothing) && return
     stored = cached_env_key(db, commit_hash, case_name)
     stored == expected_key && return
@@ -383,9 +447,9 @@ Run GPEC in the current working tree (uncommitted changes included).
 Always re-runs (local results are never cached since the working tree is mutable).
 """
 function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
-                   force::Bool=false, verbose::Bool=false,
-                   no_instantiate::Bool=false,
-                   pin_manifest::Union{String,Nothing}=nothing)
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing)
     # Always delete previous local results and re-run
     delete_cached(db, LOCAL_REF, case_spec.name)
 
@@ -396,7 +460,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     if !isdir(example_path)
         @warn "Example directory not found: $(case_spec.example_dir)"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                         "Example directory not found: $(case_spec.example_dir)")
+            "Example directory not found: $(case_spec.example_dir)")
         return
     end
 
@@ -408,17 +472,18 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
 
     try
         (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+        rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output would mask a failed run
 
         script_content = _render_script(RUNNER_SCRIPT_TEMPLATE; no_instantiate=no_instantiate)
         tmpscript = tempname() * ".jl"
         runinfo_file = tempname() * ".runinfo"
         write(tmpscript, script_content)
 
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $runinfo_file`
         if verbose
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $runinfo_file`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$repo_root $tmpscript $rundir $runinfo_file`,
-                         stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
@@ -428,13 +493,13 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         if !isfile(h5path)
             @warn "gpec.h5 not produced"
             store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                             "gpec.h5 not produced after successful run")
+                "gpec.h5 not produced after successful run")
             return
         end
 
         extracted = extract_quantities(h5path, case_spec.quantities, runtime_s)
         store_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                  runtime_s, extracted; fingerprint=fingerprint)
+            runtime_s, extracted; fingerprint=fingerprint)
 
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
@@ -451,7 +516,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed (local): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
-                         err_msg_short)
+            err_msg_short)
     finally
         if tmpscript !== nothing
             rm(tmpscript; force=true)
@@ -460,7 +525,8 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
             rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
-            rm(dirname(rundir); recursive=true, force=true)
+            # rundir sits beside the example; removing its parent would delete examples/ itself
+            rm(rundir; recursive=true, force=true)
         end
     end
 end
@@ -468,13 +534,16 @@ end
 """
 Run GPEC for a specific git commit via worktree. Stores results in the database.
 Skips if already cached in the same environment (unless force=true).
+If `worktree_path` is given, the caller owns the (already pinned) worktree and this
+function will not remove it; otherwise one is created and removed here.
 """
 function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
-                       case_spec::CaseSpec, repo_root::String;
-                       force::Bool=false, verbose::Bool=false,
-                       no_instantiate::Bool=false,
-                       pin_manifest::Union{String,Nothing}=nothing,
-                       expected_key::Union{String,Nothing}=nothing)
+    case_spec::CaseSpec, repo_root::String;
+    force::Bool=false, verbose::Bool=false,
+    no_instantiate::Bool=false,
+    pin_manifest::Union{String,Nothing}=nothing,
+    expected_key::Union{String,Nothing}=nothing,
+    worktree_path::Union{String,Nothing}=nothing)
     # Check cache
     if !force && is_cached(db, commit_hash, case_spec.name; expected_key=expected_key)
         info = get_run_info(db, commit_hash, case_spec.name)
@@ -495,7 +564,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     @info "Running: $(case_spec.name) @ $(commit_info.short) ($(commit_info.date))"
     @info "  $(commit_info.msg)"
 
-    worktree_path = nothing
+    own_worktree = worktree_path === nothing
     tmpscript = nothing
     runinfo_file = nothing
     rundir = nothing
@@ -503,20 +572,21 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     stderr_buf = IOBuffer()
 
     try
-        # Create worktree, pinning the package set when the caller supplied a Manifest
-        worktree_path = create_worktree(commit_hash, repo_root; pin_manifest_from=pin_manifest)
+        # Create worktree (unless one was shared with us), pinning the package set when the caller supplied a Manifest
+        own_worktree && (worktree_path = create_worktree(commit_hash, repo_root; pin_manifest_from=pin_manifest))
 
         # Check example directory exists in this commit
         example_path = joinpath(worktree_path, case_spec.example_dir)
         if !isdir(example_path)
             @warn "Example directory not found at commit $(commit_info.short): $(case_spec.example_dir)"
             store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                             commit_info.msg, case_spec.name,
-                             "Example directory not found: $(case_spec.example_dir)")
+                commit_info.msg, case_spec.name,
+                "Example directory not found: $(case_spec.example_dir)")
             return
         end
 
         (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+        rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output (e.g. from an earlier case sharing the worktree) would mask a failed run
 
         # Write temp runner script
         script_content = _render_script(RUNNER_SCRIPT_TEMPLATE; no_instantiate=no_instantiate)
@@ -527,11 +597,11 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         # Run GPEC in subprocess
         project_root = worktree_path
 
+        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $runinfo_file`
         if verbose
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $runinfo_file`))
+            run(pipeline(cmd))
         else
-            run(pipeline(`julia --project=$project_root $tmpscript $rundir $runinfo_file`,
-                         stdout=devnull, stderr=stderr_buf))
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
         end
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
@@ -542,8 +612,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         if !isfile(h5path)
             @warn "gpec.h5 not produced at $(commit_info.short)"
             store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                             commit_info.msg, case_spec.name,
-                             "gpec.h5 not produced after successful run")
+                commit_info.msg, case_spec.name,
+                "gpec.h5 not produced after successful run")
             return
         end
 
@@ -552,7 +622,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
 
         # Store in database
         store_run(db, commit_hash, commit_info.short, commit_info.date,
-                  commit_info.msg, case_spec.name, runtime_s, extracted; fingerprint=fingerprint)
+            commit_info.msg, case_spec.name, runtime_s, extracted; fingerprint=fingerprint)
 
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
@@ -570,7 +640,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         err_msg_short = _hint_pin_incompatible(err_msg, length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg)
         @warn "Run failed for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
-                         commit_info.msg, case_spec.name, err_msg_short)
+            commit_info.msg, case_spec.name, err_msg_short)
     finally
         # Clean up
         if tmpscript !== nothing
@@ -580,9 +650,10 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             rm(runinfo_file; force=true)
         end
         if rundir_is_temp && rundir !== nothing
-            rm(dirname(rundir); recursive=true, force=true)
+            # rundir sits beside the example; removing its parent would delete examples/ itself
+            rm(rundir; recursive=true, force=true)
         end
-        if worktree_path !== nothing
+        if own_worktree && worktree_path !== nothing
             remove_worktree(worktree_path, repo_root)
         end
     end

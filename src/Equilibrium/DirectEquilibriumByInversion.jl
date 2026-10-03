@@ -10,6 +10,23 @@ Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 
 import Contour as Ctr
 
+# Round-trip (ψ,θ)→(R,Z)→ψ residual above which the traced edge geometry is not trusted.
+const ROUNDTRIP_TOL = 2e-3
+# Fraction of the radial grid treated as "the edge" for the round-trip check.
+const ROUNDTRIP_EDGE_FRAC = 0.9
+# Max midpoint/on-knot residual ratio before the splines are judged to ring between knots;
+# healthy grids read ~1 and rung ones 10^2-10^3, so the exact value is uncritical.
+const ROUNDTRIP_RATIO_TOL = 10.0
+# Midpoint residual below which the ratio is ignored, as both residuals are then rounding noise.
+const ROUNDTRIP_RINGING_FLOOR = ROUNDTRIP_TOL / 20
+
+# :too_large, :ringing (midpoints far above knots though both are small), or :ok.
+function _roundtrip_verdict(knot_err, mid_err)
+    (knot_err > ROUNDTRIP_TOL || mid_err > ROUNDTRIP_TOL) && return :too_large
+    (mid_err > ROUNDTRIP_RINGING_FLOOR && mid_err > ROUNDTRIP_RATIO_TOL * knot_err) && return :ringing
+    return :ok
+end
+
 """
     _is_closed_curve(curve)
 
@@ -73,12 +90,12 @@ end
 """
     clamp_psihigh_to_separatrix(raw_profile) -> (clamped_psihigh, was_adjusted)
 
-Binary-searches for the highest psihigh ≤ raw_profile.config.psihigh at which the
+Binary-searches for the highest psihigh ≤ `raw_profile.psihigh_resolved` at which the
 ψ level set is still a closed curve in the EFIT grid. Returns the safe value and a
 Bool indicating whether any clamping occurred.
 """
 function clamp_psihigh_to_separatrix(raw_profile::DirectRunInput)
-    psihigh = raw_profile.config.psihigh
+    psihigh = raw_profile.psihigh_resolved
     ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
 
     has_closed_contour(ψ_high) = any(
@@ -97,6 +114,22 @@ function clamp_psihigh_to_separatrix(raw_profile::DirectRunInput)
         has_closed_contour(mid) ? (lo = mid) : (hi = mid)
     end
     return (lo, true)
+end
+
+"""
+    resolve_psihigh!(raw_profile) -> raw_profile
+
+Clamp `raw_profile.psihigh_resolved` to the outermost closed flux surface, warning if the
+requested `psihigh` had none. Mutates and returns the input; `config.psihigh` keeps the request.
+"""
+function resolve_psihigh!(raw_profile::DirectRunInput)
+    psihigh_safe, adjusted = clamp_psihigh_to_separatrix(raw_profile)
+    if adjusted
+        @warn "psihigh=$(raw_profile.psihigh_resolved) has no closed flux surface in EFIT grid; " *
+              "clamped to $(round(psihigh_safe; sigdigits=7))"
+        raw_profile.psihigh_resolved = psihigh_safe
+    end
+    return raw_profile
 end
 
 """
@@ -408,7 +441,7 @@ function equilibrium_solver_by_inversion(
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
-    psihigh = equil_params.psihigh
+    psihigh = raw_profile.psihigh_resolved
 
     # Locate the magnetic axis and separatrix for the contour tracing
     ro, zo, _, rs2 = direct_position!(raw_profile)
@@ -672,31 +705,35 @@ function equilibrium_solver_by_inversion(
     # Intermediate inverse input; the captured DirectIngest rides on the original eq_input,
     # which setup_equilibrium forwards onto the equilibrium, so this one carries ingest=nothing.
     inv_input = InverseRunInput(raw_profile.config, raw_profile.sq_in,
-        rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, nothing)
+        rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, nothing, raw_profile.psihigh_resolved)
 
     pe = equilibrium_solver(inv_input; override_psi_nodes)
 
-    # Round-trip validation: (ψ,θ) → (R,Z) → ψ_spline − ψ_target.
-    # Checks 4 angles at the outermost surface and at 75% of the radial grid.
-    # A large error indicates that Contour.jl resolution was insufficient near the
-    # x-point and the traced surface positions are inaccurate.
-    max_rt_err = 0.0
-    for ψ_check in (pe.rzphi_xs[end], pe.rzphi_xs[max(1, length(pe.rzphi_xs) * 3 ÷ 4)])
-        for θ_check in (0.0, 0.25, 0.5, 0.75)
+    # Round-trip residual (ψ,θ) → (R,Z) → ψ on the outer grid, at knots and at knot midpoints:
+    # the splines are exact at their own knots, so only the midpoints can see inter-knot ringing.
+    rt_residual(ψ_samples) = maximum(
+        begin
             r2 = pe.rzphi_rsquared((ψ_check, θ_check))
             off = pe.rzphi_offset((ψ_check, θ_check))
             rfac = sqrt(max(r2, 0.0))
             η = 2π * (θ_check + off)
-            R = pe.ro + rfac * cos(η)
-            Z = pe.zo + rfac * sin(η)
-            ψ_rt = 1.0 - raw_profile.psi_in((R, Z)) / psio
-            max_rt_err = max(max_rt_err, abs(ψ_rt - ψ_check))
+            abs((1.0 - raw_profile.psi_in((pe.ro + rfac * cos(η), pe.zo + rfac * sin(η))) / psio) - ψ_check)
         end
-    end
-    if max_rt_err > 2e-3
-        @warn "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) > 2e-3; accuracy near psihigh may be limited. Consider reducing psihigh or increasing resolution_factor."
+        for ψ_check in ψ_samples, θ_check in (0.0, 0.25, 0.5, 0.75))
+
+    xs = pe.rzphi_xs
+    knots = @view xs[max(1, ceil(Int, length(xs) * ROUNDTRIP_EDGE_FRAC)):end]
+    max_rt_err = rt_residual(knots)
+    mids = [(knots[i] + knots[i+1]) / 2 for i in 1:(length(knots)-1)]
+    rt_mid = isempty(mids) ? NaN : rt_residual(mids)
+
+    verdict = _roundtrip_verdict(max_rt_err, rt_mid)
+    msg = "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) on knots, $(@sprintf("%.2e", rt_mid)) at knot midpoints"
+    if verdict === :ok
+        @info msg
     else
-        @info "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err))"
+        problem = verdict === :ringing ? "ringing between knots" : "inaccurate"
+        @warn "$msg; the rzphi splines are $problem near psihigh. Consider reducing psihigh or increasing resolution_factor."
     end
 
     return pe

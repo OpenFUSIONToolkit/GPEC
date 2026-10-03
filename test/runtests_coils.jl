@@ -1,6 +1,7 @@
 using Test
 using TOML
 using Statistics
+using Printf
 using HDF5
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.ForcingTerms
@@ -27,6 +28,28 @@ const D3D_IL = joinpath(COIL_DIR, "d3d_il.dat")
 
     # Size check
     @test size(cs.x) == (6, 1, 126)
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilGeometry: conductors" begin
+    cs = ForcingTerms.read_coil_dat(D3D_IL)
+    parts = ForcingTerms.conductors(cs)
+
+    @test length(parts) == cs.ncoil
+    @test all(p -> p.ncoil == 1, parts)
+    @test [p.name for p in parts] == ["$(cs.name)_$j" for j in 1:cs.ncoil]
+
+    for (j, p) in enumerate(parts)
+        @test p.x[1, :, :] == cs.x[j, :, :]
+        @test p.y[1, :, :] == cs.y[j, :, :]
+        @test p.z[1, :, :] == cs.z[j, :, :]
+        @test p.currents == [cs.currents[j]]
+        @test (p.s, p.nw, p.nsec) == (cs.s, cs.nw, cs.nsec)
+    end
+
+    # A set that already holds one conductor is handed back untouched.
+    single = ForcingTerms.make_pf_hoop(; radius=1.5, height=0.3)
+    @test ForcingTerms.conductors(single)[1] === single
 end
 
 # ---------------------------------------------------------------------------
@@ -201,6 +224,34 @@ end
 end
 
 # ---------------------------------------------------------------------------
+@testset "CoilFourier: reconstruct_bn inverts the decomposition" begin
+    # A wrong sign in the reconstruction basis mirrors the pattern in zeta instead of failing,
+    # so compare against the analytic signal the modes came from rather than against itself.
+    mtheta, nzeta, m0, n0 = 128, 64, 5, 2
+    theta_grid = range(0; length=mtheta, step=2π / mtheta)
+    zeta_grid = range(0; length=nzeta, step=2π / nzeta)
+    bn = [cos(m0 * θ - n0 * ζ) for θ in theta_grid, ζ in zeta_grid]
+    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta, ones(mtheta), zeros(mtheta),
+        collect(zeta_grid), zeros(mtheta), ones(mtheta), zeros(mtheta))
+    modes = ForcingTerms.fourier_decompose_bn(bn, grid, n0, 1, 10)
+
+    rec = ForcingTerms.reconstruct_bn(modes; ntheta=48, nzeta=36, theta_range=(0, 2π))
+    expected = [cos(m0 * θ - n0 * ζ) for θ in rec.theta, ζ in rec.zeta]
+    @test size(rec.bn) == (48, 36)
+    @test rec.bn ≈ expected atol = 1e-10
+
+    # Reversing the toroidal sign is the failure this test exists to catch.
+    mirrored = [cos(m0 * θ + n0 * ζ) for θ in rec.theta, ζ in rec.zeta]
+    @test !isapprox(rec.bn, mirrored; atol=1e-3)
+
+    # The default window centres the outboard midplane rather than cutting it at the edges.
+    centred = ForcingTerms.reconstruct_bn(modes; ntheta=16, nzeta=8)
+    @test centred.theta[1] ≈ -π && centred.theta[end] ≈ π
+
+    @test_throws DimensionMismatch ForcingTerms.reconstruct_bn([1.0 + 0im], [1, 2], [1, 1])
+end
+
+# ---------------------------------------------------------------------------
 @testset "CoilFourier: project_normal_flux! R-factor" begin
     # A uniform vertical field B_Z = B0 on a circular boundary of radius `a`
     # centred at major radius R0.  In unit-norm convention the flux element is:
@@ -299,6 +350,28 @@ end
     # Dominant mode should be in the resonant range for DIII-D geometry
     dominant_m = forcing_modes[argmax(amplitudes)].m
     @test m_low <= dominant_m <= m_high
+
+    # Per-set evaluation on one shared grid: the assembly through the shared path is the same
+    # numbers as the top-level entry point, and the field's linearity in the coils makes the
+    # per-set spectra sum to it.
+    forcing_grid = ForcingTerms.CoilForcingGrid(equil, cfg, n_test)
+    @test length(forcing_grid.obs_R) == cfg.mtheta_coil * cfg.nzeta_coil
+    both = ForcingTerms.coil_forcing_modes([il_set, iu_set], forcing_grid, n_test, m_low, m_high)
+    @test [m.amplitude for m in both] == [m.amplitude for m in forcing_modes]
+    il_modes = ForcingTerms.coil_forcing_modes(il_set, forcing_grid, n_test, m_low, m_high)
+    iu_modes = ForcingTerms.coil_forcing_modes(iu_set, forcing_grid, n_test, m_low, m_high)
+    @test [m.m for m in il_modes] == [m.m for m in forcing_modes]
+    summed = [a.amplitude + b.amplitude for (a, b) in zip(il_modes, iu_modes)]
+    @test summed ≈ [m.amplitude for m in forcing_modes] rtol = 1e-12
+    @test maximum(abs.(getfield.(il_modes, :amplitude))) > 1e-6
+
+    # Splitting a multi-conductor set the same way: each conductor keeps its own current, so the
+    # per-conductor spectra sum back to the whole set's.
+    part_sum = zeros(ComplexF64, length(il_modes))
+    for p in ForcingTerms.conductors(il_set)
+        part_sum .+= [m.amplitude for m in ForcingTerms.coil_forcing_modes(p, forcing_grid, n_test, m_low, m_high)]
+    end
+    @test part_sum ≈ [m.amplitude for m in il_modes] rtol = 1e-12
 end
 
 # ---------------------------------------------------------------------------
@@ -541,11 +614,11 @@ end
     mktempdir() do dir
         path = joinpath(dir, "snap.h5")
         HDF5.h5open(path, "w") do f
-            ForcingTerms.save_coils_to_h5(sets_in, HDF5.create_group(f, "input/raw_inputs/coils"))
+            ForcingTerms.save_coils_to_h5(sets_in, HDF5.create_group(f, "Input/RawInputs/Coils"))
         end
         sets_out = ForcingTerms.CoilSet[]
         HDF5.h5open(path, "r") do f
-            ForcingTerms.load_coils_from_h5_group!(sets_out, f["input/raw_inputs/coils"])
+            ForcingTerms.load_coils_from_h5_group!(sets_out, f["Input/RawInputs/Coils"])
         end
         @test length(sets_out) == 2
         byname = Dict(s.name => s for s in sets_out)
@@ -553,4 +626,35 @@ end
         @test byname["hoopA"].x ≈ sets_in[1].x
         @test byname["wp"].ncoil == 3
     end
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: helicity follows the g-file current sign" begin
+    # The internal flux is made positive at the axis, so the computed current is always
+    # positive; the handedness of the toroidal grid must come from the file's stated signs.
+    gfile = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk")
+    lines = readlines(gfile)
+    flipped = tempname() * ".geqdsk"
+    open(flipped, "w") do io
+        for (i, l) in enumerate(lines)
+            if i == 4   # header line 4 starts with the plasma current
+                vals = [l[j:min(j + 15, end)] for j in 1:16:length(l)]
+                cur = -parse(Float64, strip(vals[1]))
+                l = @sprintf("%16.9E", cur) * l[17:end]
+            end
+            println(io, l)
+        end
+    end
+    cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="ldp", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
+    eq_pos = Equilibrium.setup_equilibrium(cfg(gfile))
+    eq_neg = Equilibrium.setup_equilibrium(cfg(flipped))
+    @test eq_pos.params.ip_sign == 1 && eq_neg.params.ip_sign == -1
+    @test eq_pos.params.bt_sign == eq_neg.params.bt_sign == -1
+    @test eq_pos.params.crnt > 0 && eq_neg.params.crnt > 0          # the computed current carries no sign
+    g_pos = ForcingTerms.sample_boundary_grid(eq_pos, 16, 8; psi=0.9)
+    g_neg = ForcingTerms.sample_boundary_grid(eq_neg, 16, 8; psi=0.9)
+    @test g_pos.phi_grid[2] ≈ 2π / 8                                # helicity −1: φ increases with j
+    @test g_neg.phi_grid[2] ≈ -2π / 8                               # helicity +1: φ decreases with j
+    @test g_neg.phi_offset ≈ -g_pos.phi_offset
+    rm(flipped)
 end

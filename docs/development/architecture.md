@@ -12,24 +12,20 @@ This workflow is reflected in the modular structure and data flow.
 
 ## Module Structure
 
-GPEC consists of **seven main modules** organized in `src/`:
+GPEC consists of physics modules organized in `src/`. These names are the canonical Areas used in commit subjects and PR titles; see [`naming.md`](naming.md).
+
+Splines are provided by the external `FastInterpolations` package rather than by a module here.
 
 ### Foundation Modules
 
-1. **Splines** (`src/Splines/`) - Numerical interpolation library
-   - `CubicSpline.jl` - 1D cubic spline interpolation
-   - `BicubicSpline.jl` - 2D bicubic spline interpolation
-   - `FourierSpline.jl` - Fourier-based spline interpolation
-   - Status: Mature, pure Julia implementation
-
-2. **Utilities** (`src/Utilities/`) - Shared computational tools
+1. **Utilities** (`src/Utilities/`) - Shared computational tools
    - `FourierTransforms.jl` - Efficient Fourier transform utilities with pre-computed basis functions
    - Provides type-stable functor pattern for repeated transforms
    - Used by Vacuum and PerturbedEquilibrium modules
 
 ### Core Physics Modules
 
-3. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
+2. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
    - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
@@ -44,29 +40,40 @@ GPEC consists of **seven main modules** organized in `src/`:
      - `AnalyticEquilibrium.jl` - Analytical solutions
    - Status: Stable and feature-complete
 
-4. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
+3. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
    - Computes vacuum response matrices for ideal MHD analysis
-   - Calculates both **interior** (grri) and **exterior** (grre) Green's functions
+   - Solves the exterior boundary-integral system for the vacuum energy matrix `wv`, and optionally
+     (`compute_Iv=true`) the interior system as well to build the surface-current matrix `I_v`
+     (Park 2007 eq. 21b). The interior/exterior Green's functions themselves are internal scratch.
    - Main functions:
-     - `compute_vacuum_response()` - Pure Julia implementation
+     - `compute_vacuum_response()` / `compute_vacuum_response!()` - allocating and in-place entry points
    - Key files:
-     - `VacuumStructs.jl` - Data structures
-     - `VacuumInternals.jl` - Core algorithms
-     - `VacuumFromEquilibrium.jl` - Integration with equilibrium data
+     - `DataTypes.jl` - Data structures (`VacuumInput`, `PlasmaGeometry`, `WallGeometry`)
+     - `Kernel2D.jl` / `Kernel3D.jl` - Single-/double-layer kernel assembly
+     - `Field.jl` - Vacuum field and potential evaluation off the surface
    - Status: **Pure Julia implementation complete and available**
 
-5. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
+4. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
    - Solves ideal MHD eigenvalue problem with force-free boundary conditions
    - Identifies singular surfaces where ξ·∇ψ = 0
    - Key files:
-     - `ForceFreeStatesStructs.jl` - Core data structures
-     - `Ode.jl` - ODE solver for Euler-Lagrange equations
-     - `Sing.jl` - Singular point handling and layer analysis
-     - `Fourfit.jl` - Fourier fitting routines
+     - `CoreTypes.jl` - Module-wide types (`ForceFreeStatesControl`, `ForceFreeStatesInternal`)
+     - `Result.jl` - `ForceFreeStatesResult`, the published solve product every downstream stage reads
+     - `EulerLagrange.jl` - ODE integration of the Euler-Lagrange equations (`OdeState`, derivative kernel)
+     - `Surfaces/` - Singular-surface finding, Frobenius asymptotics, and GGJ coefficients
+     - `Riccati/` - Chunked fundamental-matrix (STRIDE) driver and Δ' boundary-value problem
+     - `Galerkin/` - RDCON outer-region singular Galerkin Δ' solver
+     - `Matching/` - Outer↔inner resistive matching (`DeltaPrimeData`, `resonant_match_rpec`)
+     - `Fourfit.jl` - Fourier fitting routines (`MatrixSplines`)
      - `FixedBoundaryStability.jl` - Fixed boundary analysis
      - `Free.jl` - Free boundary stability
-     - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Status: Stable, core DCON functionality implemented
+
+5. **LocalStability** (`src/LocalStability/`) - Local high-n stability
+   - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
+   - Depends only on Equilibrium (plus math libraries); carries no stability-solver state
+   - Main entry points: `compute_local_stability`, `ballooning_alpha_boundary`
+   - Status: Stable
 
 ### Perturbed Equilibrium Modules
 
@@ -91,8 +98,36 @@ GPEC consists of **seven main modules** organized in `src/`:
        - Island half-widths and Chirikov parameters
        - Green's functions at interior flux surfaces
        - Surface inductance for singular surfaces
+     - `ResonantCoupling.jl` - `ResonantCoupling` (in-memory or from gpec.h5): windowed SVD for the dominant applied-field mode, and the normalization/overlap helpers that project coil spectra onto it
      - `Utils.jl` - Helper functions
    - Status: Core plasma response and singular coupling calculations implemented; active area of development
+
+### Resistive and Kinetic Modules
+
+8. **InnerLayer** (`src/InnerLayer/`) - Resistive inner-layer physics
+   - `GGJ/` - Glasser-Greene-Johnson layer model
+   - `SLAYER/` - Layer solver used for growth-rate extraction
+   - Both are submodules and are valid Areas in their own right (`InnerLayer.GGJ`, `InnerLayer.SLAYER`)
+
+9. **Tearing** (`src/Tearing/`) - Tearing mode dispersion and drivers
+   - `Dispersion/` - Dispersion relation solvers
+   - `Runner/` - Orchestration across surfaces and toroidal mode numbers
+   - Re-binds `InnerLayer` and exposes it alongside its own submodules
+
+10. **KineticForces** (`src/KineticForces/`) - Kinetic contributions to the force balance
+    - Neoclassical toroidal viscosity (NTV) torque and kinetic energy contributions
+    - Reads kinetic profiles configured under `[KineticForces]`
+
+11. **ErrorFields** (`src/ErrorFields/`) - Error-field sensitivity to coil misalignment
+    - `Sensitivity.jl` - central-difference linearization of every coil set's control-surface spectrum with respect to its rigid shifts and tilts, on one shared boundary grid
+    - `sensitivity_table` projects that linearization onto any windowed dominant mode post hoc (in memory or from `gpec.h5`); consumes `PerturbedEquilibrium.ResonantCoupling` and `ForcingTerms.coil_forcing_modes`
+    - Configured under `[ErrorFields]`; writes `ErrorFields/CoilSensitivities/`
+
+### Post-processing
+
+12. **Analysis** (`src/Analysis/`) - Plotting and post-processing
+    - Submodules mirror the physics modules they visualize, so their names shadow them
+    - Not part of the solve path; consumes `gpec.h5`
 
 ## Configuration
 
@@ -130,8 +165,7 @@ The complete GPEC analysis pipeline:
 
 2. **Vacuum Response**:
    - Initialize plasma and wall surfaces from equilibrium
-   - Compute vacuum response matrices (wv, grri, grre)
-   - Calculate both interior and exterior Green's functions
+   - Compute the vacuum energy matrix `wv` (and `I_v` when `compute_Iv=true`)
    - Pure Julia implementation
 
 3. **Stability Analysis** (ForceFreeStates):
@@ -140,7 +174,7 @@ The complete GPEC analysis pipeline:
    - Compute Δ' at each singular surface
    - Calculate potential and kinetic energies
    - Check Mercier and ballooning stability criteria
-   - Outputs: Eigenmode structure ξ(ψ,θ)
+   - Outputs: `ForceFreeStatesResult` carrying the eigenmode structure ξ(ψ,θ) and the per-integrator products
 
 4. **Perturbed Equilibrium** (GPEC-style):
    - Load external forcing data (coil fields, RMP configuration)
@@ -155,7 +189,7 @@ The complete GPEC analysis pipeline:
 
 5. **Output**:
    - All results saved to single HDF5 file (default: `gpec.h5`)
-   - HDF5 groups: `input/`, `info/`, `equil/`, `splines/`, `locstab/`, `integration/`, `singular/`, `vacuum/`, and perturbed equilibrium data
+   - Top-level HDF5 groups: `Info/`, `Input/`, `Equilibrium/`, `ForceFreeStates/`, `LocalStability/`, `SingularSurfaces/`, `PerturbedEquilibrium/`, `KineticForces/`, `ErrorFields/`, `Tearing/`, `SurfaceGeometries/` (see `docs/development/hdf5-conventions.md`)
 
 ## Key Data Structures
 
@@ -169,11 +203,15 @@ The complete GPEC analysis pipeline:
 
 ### Stability
 - `SingType` - Singular surface data including:
-  - Rational surface location (ψ, q = m/n)
-  - Δ' (tearing stability parameter)
-  - Eigenmode structure at singular surface
-  - Green's functions (grri, grre) at interior singular surfaces
-  - Surface inductance
+  - Rational surface location (ψ, ρ, q = m/n, dq/dψ)
+  - Δ' (tearing stability parameter) — **stub**; the valid Δ' is `ForceFreeStatesResult.delta_prime.matrix`
+  - Asymptotic solution bases at the inner-layer boundaries
+- `ForceFreeStatesResult` - Published product of a solve: mode space, metric/matrix fits, singular
+  surfaces, and the per-integrator products (ξ solution and its basis, free-boundary energies,
+  STRIDE Δ', Galerkin solve). Optional products are `nothing` when the integrator that ran cannot
+  supply them, and consumers warn-and-skip via `require` / `require_solution`.
+- `ForceFreeStatesInternal` - Solve-time scratch; does not cross a module boundary once the result
+  is built
 
 ### Perturbed Equilibrium
 - `PerturbedEquilibriumControl` - User-facing TOML configuration parameters
@@ -192,8 +230,10 @@ GeneralizedPerturbedEquilibrium
 ├── Utilities (shared tools)
 │   └── FourierTransforms
 ├── Equilibrium (uses Splines)
+├── LocalStability (uses Equilibrium)
 ├── Vacuum (uses Splines, Equilibrium, Utilities)
 ├── ForcingTerms (data I/O)
 ├── ForceFreeStates (uses Equilibrium, Vacuum, Splines)
-└── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
+├── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
+└── ErrorFields (uses PerturbedEquilibrium, ForcingTerms, Equilibrium, Utilities)
 ```

@@ -5,6 +5,8 @@
     using GeneralizedPerturbedEquilibrium.Runner
     using HDF5
 
+    include("h5_metadata_check.jl")
+
     # ------- Helper: build a synthetic SLAYERParameters with full control
     function _mk_params(; rs=0.5, lu=1e7, tauk=1e-4,
         Q_e=-1.0, Q_i=0.5, m=2, n=1, ising=1,
@@ -92,6 +94,48 @@
         @test_throws ArgumentError slayer_control_from_toml(bad)
     end
 
+    @testset "run_slayer: result-facing form forwards surfaces and Δ'" begin
+        # A result with no singular surfaces short-circuits before any equilibrium access,
+        # so a stand-in result is enough to pin the forwarding of surfaces / delta_prime.
+        c = SLAYERControl(; enabled=true, profile_file="unused.h5")
+        no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
+            delta_prime=nothing)
+        r = run_slayer(no_surfaces, c)
+        @test isempty(r.params)
+
+        # A disabled control never looks at the result at all.
+        r_off = run_slayer(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5"))
+        @test r_off.enabled == false
+    end
+
+    # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one
+    # does: `result.delta_prime.matrix` is populated and already sized to the surface list, which
+    # is the predicate `run_slayer` uses to accept it over the per-surface diagonal stub.
+    @testset "Galerkin-fed SLAYER: gal Δ' drives the coupled solve" begin
+        mktempdir() do dir
+            deck = joinpath(@__DIR__, "..", "examples", "LAR_ideal_match_test")
+            for name in readdir(deck)
+                cp(joinpath(deck, name), joinpath(dir, name))
+            end
+            ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
+            @test ffs.integrator === :galerkin
+
+            dpm = ffs.delta_prime.matrix
+            @test size(dpm) == (length(ffs.surfaces), length(ffs.surfaces))
+            @test size(dpm, 1) == 2
+
+            # The gal Δ′ goes through SLAYER's coupled dispersion solve unmodified; the surface
+            # parameters are synthetic because the LAR deck carries no kinetic profiles.
+            params = [_mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, ising=1),
+                _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, ising=2)]
+            c = SLAYERControl(; enabled=true, coupling_mode=:coupled, scan_mode=:brute_force,
+                Q_re_range=(-1.0, 1.0), Q_im_range=(-0.5, 0.8), nre=20, nim=20, pole_threshold=1e5)
+            r = run_slayer_from_inputs(params, dpm, c)
+            @test r.enabled
+            @test r.coupled_extraction isa GrowthRateResult
+        end
+    end
+
     @testset "run_slayer_from_inputs: disabled path is a no-op" begin
         c = SLAYERControl(; enabled=false)
         params = [_mk_params()]
@@ -107,6 +151,41 @@
         params = [_mk_params()]
         bad_dp = ComplexF64[0.0 0.0; 0.0 0.0]
         @test_throws ArgumentError run_slayer_from_inputs(params, bad_dp, c)
+    end
+
+    @testset "delta_prime_to_rs_reference: ψ_N → r_s conversion" begin
+        # Two surfaces with distinct K and α; the transform is
+        # Δ̂_ij = K_i^(1/2+α_i) · Δ'_ij · K_j^(α_j−1/2).
+        K1, alpha1 = 0.9, 0.54
+        K2, alpha2 = 1.2, 0.60
+        p1 = SLAYERParameters(; tau=1.0, lu=1e7, c_beta=0.1, D_norm=2.0,
+            P_perp=20.0, P_tor=10.0, Q_e=-1.0, Q_i=0.5, iota_e=2 / 3,
+            tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.4, R0=1.7, bt=2.0,
+            sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=2, n=1, ising=1,
+            k_ref=K1, alpha_mercier=alpha1)
+        p2 = SLAYERParameters(; tau=1.0, lu=1e7, c_beta=0.1, D_norm=2.0,
+            P_perp=20.0, P_tor=10.0, Q_e=-1.0, Q_i=0.5, iota_e=2 / 3,
+            tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.5, R0=1.7, bt=2.0,
+            sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=3, n=1, ising=2,
+            k_ref=K2, alpha_mercier=alpha2)
+        dp = ComplexF64[10.0+1im 2.0-0.5im; 3.0+0im 1.5+2im]
+        out = Runner.delta_prime_to_rs_reference(dp, [p1, p2])
+        # Diagonal carries the scalar K^(2α)
+        @test out[1, 1] ≈ K1^(2alpha1) * dp[1, 1]
+        @test out[2, 2] ≈ K2^(2alpha2) * dp[2, 2]
+        # Off-diagonals carry the split row/column factors
+        @test out[1, 2] ≈ K1^(0.5 + alpha1) * K2^(alpha2 - 0.5) * dp[1, 2]
+        @test out[2, 1] ≈ K2^(0.5 + alpha2) * K1^(alpha1 - 0.5) * dp[2, 1]
+        # At the slab point α = 1/2 the diagonal factor is exactly K
+        pslab = SLAYERParameters(; tau=1.0, lu=1e7, c_beta=0.1, D_norm=2.0,
+            P_perp=20.0, P_tor=10.0, Q_e=-1.0, Q_i=0.5, iota_e=2 / 3,
+            tauk=1e-4, tau_r=1.0, delta_n=1.0, rs=0.4, R0=1.7, bt=2.0,
+            sval_r=1.0, eta=2.5e-8, d_beta=4e-3, m=2, n=1, ising=1,
+            k_ref=0.8, alpha_mercier=0.5)
+        dp1 = ComplexF64[5.0+0im;;]
+        @test Runner.delta_prime_to_rs_reference(dp1, [pslab])[1, 1] ≈ 0.8 * 5.0
+        # Default parameters (k_ref = 1) give the identity regardless of α
+        @test Runner.delta_prime_to_rs_reference(dp, [_mk_params(), _mk_params()]) ≈ dp
     end
 
     @testset "run_slayer_from_inputs: coupled mode finds known root" begin
@@ -166,53 +245,82 @@
             nre=40, nim=40,
             pole_threshold=1e5,
             store_scan=true)
-        r = run_slayer_from_inputs(params, dp, c)
+        r = run_slayer_from_inputs(params, dp, c;
+            rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
 
         mktemp() do path, io
             close(io)
             h5open(path, "w") do f
                 write_slayer_hdf5!(f, r)
             end
-            h5open(path, "r") do f
-                g = f["slayer"]
-                @test haskey(g, "enabled") && read(g["enabled"]) == 1
-                @test haskey(g, "settings")
-                @test haskey(g, "per_surface")
-                @test haskey(g, "roots")
-                @test haskey(g, "diagnostics")
-                @test haskey(g, "scan")
 
-                # Settings round-trip
-                @test read(g["settings/inner_model"]) == "slayer_fitzpatrick"
-                @test read(g["settings/scan_mode"]) == "brute_force"
-                @test read(g["settings/coupling_mode"]) == "coupled"
-                @test read(g["settings/nre"]) == 40
+            # Metadata contract must hold for Tearing/ too — the full-run schema test
+            # only exercises an ideal deck, which writes no Tearing/ group.
+            h5open(path, "r") do f
+                viol = _collect_metadata_violations(f)
+                isempty(viol) || @error "metadata contract violations in Tearing/" viol
+                @test isempty(viol)
+                @test attrs(f["Tearing"])["layer_model"] == "slayer"
+            end
+
+            h5open(path, "r") do f
+                g = f["Tearing"]
+                @test haskey(g, "enabled") && read(g["enabled"]) == 1
+                # Settings are not echoed — inputs live only under Input/ (the merged TOML).
+                @test !haskey(g, "Settings")
+                @test haskey(g, "PerSurface")
+                # Surface identity: present when the caller supplied it, so Tearing
+                # results plot against psi/q even when SLAYER analyzed a surface subset.
+                @test read(g["PerSurface/rational_psi"]) == [0.45, 0.72]
+                @test read(g["PerSurface/rational_q"]) == [2.0, 3.0]
+                @test haskey(g, "Roots")
+                @test haskey(g, "Diagnostics")
+                @test haskey(g, "Scan")
 
                 # Per-surface arrays have the right length
-                @test length(read(g["per_surface/ising"])) == 2
-                @test read(g["per_surface/ising"]) == [1, 2]
-                @test read(g["per_surface/lu"])[1] ≈ 1.0e7
-                @test read(g["per_surface/lu"])[2] ≈ 2.0e7
+                @test length(read(g["PerSurface/rational_index"])) == 2
+                @test read(g["PerSurface/rational_index"]) == [1, 2]
+                @test read(g["PerSurface/lu"])[1] ≈ 1.0e7
+                @test read(g["PerSurface/lu"])[2] ≈ 2.0e7
 
                 # Roots arrays
-                @test length(read(g["roots/Q_root_real"])) == 1    # coupled
-                @test length(read(g["roots/omega_Hz"])) == 1
+                @test length(read(g["Roots/Q_root"])) == 1    # coupled
+                @test length(read(g["Roots/omega"])) == 1
 
                 # Layer-thickness diagnostic: one entry per surface, with
                 # the physical thickness [m] and the drift scale.
-                @test length(read(g["layer_widths/delta_s_m"])) == 2
-                @test all(read(g["layer_widths/delta_s_m"]) .>= 0)
-                @test haskey(g["layer_widths"], "dels_db_real")
-                @test haskey(g["layer_widths"], "d_beta")
+                @test length(read(g["LayerWidths/delta_s_abs"])) == 2
+                @test all(read(g["LayerWidths/delta_s_abs"]) .>= 0)
+                @test haskey(g["LayerWidths"], "delta_s_over_d_beta")
+                @test haskey(g["LayerWidths"], "d_beta")
 
                 # Ragged diagnostics use flat+offsets encoding
-                @test haskey(g["diagnostics/valid_roots"], "flat_real")
-                @test haskey(g["diagnostics/valid_roots"], "flat_imag")
-                @test haskey(g["diagnostics/valid_roots"], "offsets")
+                @test haskey(g["Diagnostics/ValidRoots"], "flat")
+                @test haskey(g["Diagnostics/ValidRoots"], "offsets")
 
                 # Scan group present (store_scan=true)
-                @test haskey(g, "scan/surface_1")
-                @test read(g["scan/surface_1/kind"]) == "brute_force"
+                @test haskey(g, "Scan/Surface_1")
+                @test read(g["Scan/Surface_1/kind"]) == "brute_force"
+            end
+        end
+    end
+
+    @testset "GGJ per-surface writer: metadata contract" begin
+        # The GGJ branch of _write_per_surface! is unreachable from the SLAYER
+        # round-trip above; enforce its annotation-table rows on a synthetic write.
+        params = [GGJParameters(; E=0.1, F=0.2, G=0.3, H=0.4, K=0.5, taua=1e-6, taur=1.0, ising=i) for i in 1:2]
+        dp = ComplexF64[1.0 0.0; 0.0 2.0]
+        mktemp() do path, io
+            close(io)
+            h5open(path, "w") do f
+                g = HDF5.create_group(f, "Tearing")
+                Runner._write_per_surface!(g, params, dp)
+                Runner._annotate_tearing!(g)
+            end
+            h5open(path, "r") do f
+                viol = _collect_metadata_violations(f)
+                isempty(viol) || @error "metadata contract violations in GGJ PerSurface/" viol
+                @test isempty(viol)
             end
         end
     end
@@ -226,11 +334,12 @@
                 write_slayer_hdf5!(f, r)
             end
             h5open(path, "r") do f
-                g = f["slayer"]
+                g = f["Tearing"]
                 @test read(g["enabled"]) == 0
-                @test !haskey(g, "settings")      # no further groups
-                @test !haskey(g, "per_surface")
+                @test !haskey(g, "PerSurface")    # no further groups
+                @test !haskey(g, "Roots")
             end
         end
     end
+
 end

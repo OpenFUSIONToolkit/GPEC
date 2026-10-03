@@ -69,7 +69,7 @@ function run_ffs_et1(config_path::String, eq_type::String, psihigh::Float64)::Fl
         try
             GeneralizedPerturbedEquilibrium.main([tmpdir])
             h5open(joinpath(tmpdir, "gpec.h5"), "r") do h5
-                et = read(h5["FreeBoundaryStability/eigenmode_energies"])
+                et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
                 return real(et[1])
             end
         catch

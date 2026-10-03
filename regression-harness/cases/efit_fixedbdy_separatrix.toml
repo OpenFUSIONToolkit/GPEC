@@ -13,7 +13,7 @@ description = "Fixed-boundary EFIT (box hugs LCFS), Newton separatrix-find regre
 kind = "computed"
 
 [quantities.psio]
-h5path = "equil/psio"
+h5path = "Equilibrium/psi_total"
 type = "real_scalar"
 extract = "value"
 label = "psio (total poloidal flux)"
@@ -21,7 +21,7 @@ noise_threshold = 1e-12
 order = 10
 
 [quantities.q0]
-h5path = "equil/q0"
+h5path = "Equilibrium/q_axis"
 type = "real_scalar"
 extract = "value"
 label = "q0"
@@ -29,7 +29,7 @@ noise_threshold = 1e-12
 order = 11
 
 [quantities.q95]
-h5path = "equil/q95"
+h5path = "Equilibrium/q_95"
 type = "real_scalar"
 extract = "value"
 label = "q95"
@@ -37,7 +37,7 @@ noise_threshold = 1e-12
 order = 12
 
 [quantities.betat]
-h5path = "equil/betat"
+h5path = "Equilibrium/beta_t"
 type = "real_scalar"
 extract = "value"
 label = "beta_t"
@@ -45,7 +45,7 @@ noise_threshold = 1e-12
 order = 13
 
 [quantities.betan]
-h5path = "equil/betan"
+h5path = "Equilibrium/beta_N"
 type = "real_scalar"
 extract = "value"
 label = "beta_n"

@@ -59,8 +59,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Outputs**:
 - `wv` — Vacuum response matrix (scaled by the singular factor (m - nq)(m' - nq), see Chance 1997)
-- `grri` — Interior Green's function matrix (plasma boundary → plasma boundary)
-- `grre` — Exterior Green's function matrix (plasma boundary → wall)
+- `I_v` — Vacuum surface-current matrix Iᵛ when `compute_Iv=true` (otherwise zeros); PerturbedEquilibrium inverts this to surface inductance `L`
 
 **Key references**: [Chance et al. (1997)](citations.md#Vacuum-Module), [Chance et al. (2007)](citations.md#Vacuum-Module)
 
@@ -166,21 +165,23 @@ Setting `force_termination = true` in any section stops the pipeline after that 
 Example configuration files are provided in:
 - `examples/Solov'ev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
+- `examples/DIIID-like_error_field_example/gpec.toml` (coil-forced run with the `[ErrorFields]` sensitivity stage)
 
 ---
 
 ## Output File: `gpec.h5`
 
-All results are written to a single HDF5 file (default: `gpec.h5`). The file is organized into groups corresponding to pipeline stages:
+All results are written to a single HDF5 file (default: `gpec.h5`). The top-level groups are organized by physics topic (see the schema conventions in `docs/development/hdf5-conventions.md`):
 
 | Group | Contents |
 |---|---|
-| `input/` | Copy of the input configuration and equilibrium data |
-| `info/` | Run metadata (version, timestamp, git hash) |
-| `equil/` | Equilibrium profiles: q(ψ), pressure, current density, β |
-| `splines/` | Spline coefficients for field quantities |
-| `locstab/` | Local stability: Mercier criterion, shear |
-| `integration/` | ODE integration results: energy matrices, eigenvalues |
-| `singular/` | Per-surface data: ψ_s, m/n, Δ', small solution coefficients |
-| `vacuum/` | Vacuum response matrices: wv, grri, grre |
-| `perturbed/` | Perturbed equilibrium: ξ, b in mode space, island diagnostics |
+| `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
+| `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
+| `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
+| `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |
+| `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ'/PEST-3 matching matrices, kinetic surfaces (`Kinetic/`) |
+| `PerturbedEquilibrium/` | Plasma response: `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/` |
+| `KineticForces/` | NTV torque per method: energy integrals, kinetic matrices |
+| `Tearing/` | SLAYER/GGJ inner-layer growth rates: `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `Scan/` |
+| `SurfaceGeometries/` | Plasma and wall surface point clouds for visualization |

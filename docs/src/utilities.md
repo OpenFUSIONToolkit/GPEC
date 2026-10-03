@@ -11,7 +11,7 @@ The Utilities module currently provides:
 ## API Reference
 
 ```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms]
+Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms, GeneralizedPerturbedEquilibrium.Utilities.AdaptiveSampling]
 ```
 
 ## Physical Constants
@@ -27,6 +27,15 @@ neoclassical models) used to set the Lundquist number in the tearing stack.
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Utilities.NeoclassicalResistivity]
+```
+
+## HDF5 Annotations
+
+Self-describing metadata for `gpec.h5` (long_name/units/dims attributes and HDF5
+Dimension Scales); see the metadata contract in `docs/development/hdf5-conventions.md`.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Utilities.HDF5Annotations]
 ```
 
 ## IMAS Output
