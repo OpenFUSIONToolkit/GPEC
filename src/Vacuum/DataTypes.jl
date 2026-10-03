@@ -193,7 +193,7 @@ Struct containing input settings for vacuum wall geometry.
   - `shape::String`: String selecting wall shape. Options are:
 
         + `"nowall"`: No wall
-        + `"conformal"`: Wall conformal to plasma surface at distance `a`
+        + `"conformal"`: Wall conformal to plasma surface at `standoff_fraction` minor radii
         + `"elliptical"`: Elliptical wall
         + `"dee"`: Dee-shaped wall
         + `"mod_dee"`: Modified Dee-shaped wall
@@ -202,20 +202,21 @@ Struct containing input settings for vacuum wall geometry.
     A non-axisymmetric boundary (`nzeta_in > 1`) supports `"nowall"` and `"conformal"`; the others
     are poloidal contours that get revolved and so need `nzeta_in == 1`.
 
-  - `a::Float64`: Distance of wall from plasma in units of the minor radius `0.5(max R - min R)`
-    (conformal), or shape parameter (others). On a non-axisymmetric boundary the extrema are taken
-    over the whole torus, so `a` scales with half the global R-extent rather than a cross-section
-    minor radius; it reduces to the axisymmetric definition when the boundary is axisymmetric.
+  - `standoff_fraction::Float64`: Wall standoff in units of the plasma minor radius `0.5(max R - min R)`
+    ("conformal" and "dee"). On a non-axisymmetric boundary the extrema are taken over the whole torus,
+    so it scales with half the global R-extent; this reduces to the axisymmetric definition.
 
-  - `aw::Float64`: Half-thickness parameter for Dee-shaped walls
+  - `minor_radius::Float64`: Wall minor radius [m] ("elliptical" and "mod_dee")
 
-  - `bw::Float64`: Elongation parameter for wall shapes
+  - `half_thickness::Float64`: Half-thickness parameter for Dee-shaped walls
 
-  - `cw::Float64`: Offset of the center of the wall from the major radius
+  - `elongation::Float64`: Elongation parameter for wall shapes
 
-  - `dw::Float64`: Triangularity parameter for wall shapes
+  - `center_offset::Float64`: Offset of the wall center from the major radius ("dee", in minor radii); wall center R [m] ("mod_dee")
 
-  - `tw::Float64`: Sharpness of the corners of the wall (try 0.05 as initial value)
+  - `triangularity::Float64`: Triangularity parameter for wall shapes
+
+  - `corner_sharpness::Float64`: Sharpness of the corners of the wall (try 0.05 as initial value)
 
     # Core shape selection
 
@@ -230,12 +231,13 @@ Struct containing input settings for vacuum wall geometry.
     shape::String = "nowall"
 
     # Standard geometric parameters for Dee/Mod-Dee
-    a::Float64 = 0.3
-    aw::Float64 = 0.05
-    bw::Float64 = 1.5
-    cw::Float64 = 0.0
-    dw::Float64 = 0.5
-    tw::Float64 = 0.05
+    standoff_fraction::Float64 = 0.3
+    minor_radius::Float64 = 0.3
+    half_thickness::Float64 = 0.05
+    elongation::Float64 = 1.5
+    center_offset::Float64 = 0.0
+    triangularity::Float64 = 0.5
+    corner_sharpness::Float64 = 0.05
 
     # Algorithmic options
     equal_arc_wall::Bool = true
@@ -513,7 +515,10 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     r_major = 0.5 * (xmax + xmin)
 
     # Destructuring settings for readability
-    (; aw, bw, cw, dw, tw, a) = wall_settings
+    # Short Fortran vac.in names for the shape formulas; `a` is the standoff or wall radius per shape
+    aw, bw, cw, dw, tw = wall_settings.half_thickness, wall_settings.elongation, wall_settings.center_offset,
+    wall_settings.triangularity, wall_settings.corner_sharpness
+    a = wall_settings.shape in ("elliptical", "mod_dee") ? wall_settings.minor_radius : wall_settings.standoff_fraction
     wcentr = 0.0 # Initialize
 
     if wall_settings.shape == "conformal"
@@ -531,7 +536,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
         end
 
         if any(x_wall .<= centerstack_min + eps(Float64))
-            @warn "Conformal wall with a=$a would cross R=0 axis; forcing minimum wall R to $(@sprintf "%.2e" centerstack_min) m to avoid unphysical geometry."
+            @warn "Conformal wall with standoff_fraction=$a would cross R=0 axis; forcing minimum wall R to $(@sprintf "%.2e" centerstack_min) m to avoid unphysical geometry."
         end
 
     elseif wall_settings.shape == "elliptical"
@@ -743,9 +748,9 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         wall_settings.equal_arc_wall &&
             @info "equal_arc_wall is ignored for non-axisymmetric (nzeta_in > 1) walls: it re-parameterizes a 2D contour and would break the plasma/wall index alignment the near-field patch relies on."
 
-        # Same logic as 2D, with the extrema taken over the whole torus (see WallShapeSettings.a)
+        # Same logic as 2D, with the extrema taken over the whole torus (see WallShapeSettings.standoff_fraction)
         R_plasma = [hypot(plasma_surf.r[idx, 1], plasma_surf.r[idx, 2]) for idx in axes(plasma_surf.r, 1)]
-        offset_gap = wall_settings.a * 0.5 * (maximum(R_plasma) - minimum(R_plasma))
+        offset_gap = wall_settings.standoff_fraction * 0.5 * (maximum(R_plasma) - minimum(R_plasma))
         @info "Calculating conformal wall shape $((@sprintf "%.2e" offset_gap)) m from plasma surface."
 
         # Plasma normal points into the plasma, so the displacement is along -normal

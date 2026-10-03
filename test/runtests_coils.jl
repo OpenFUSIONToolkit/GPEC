@@ -568,6 +568,9 @@ end
     # A 10° X-tilt should move the (originally flat) hoop out of the z=0.2 plane
     @test !all(isapprox.(out[1].z, 0.2; atol=1e-6))
 
+    # A misspelled or retired coil_set key is an error, not silently ignored
+    @test_throws ArgumentError ForcingTerms._parse_coil_set_config(Dict{String,Any}("source" => "pf_hoop", "xnom" => [1.0]))
+
     # File source dispatches on extension: .h5 -> read_coil_h5, .dat -> read_coil_dat
     mktempdir() do dir
         h5 = joinpath(dir, "il.h5")
@@ -590,7 +593,7 @@ end
     # window_pane standoff mode requires an equilibrium
     cfg_standoff = ForcingTerms.CoilConfig(;
         coil_sets=[
-            ForcingTerms.CoilSetConfig(; source="window_pane", ncoil_gen=2,
+            ForcingTerms.CoilSetConfig(; source="window_pane", n_coils=2,
                 standoff=0.2, poloidal_angle=0.0, poloidal_length=0.6, currents=[1.0, -1.0])
         ]
     )
@@ -599,7 +602,7 @@ end
     # Supplying both rz_corners and standoff is ambiguous
     cfg_both = ForcingTerms.CoilConfig(;
         coil_sets=[
-            ForcingTerms.CoilSetConfig(; source="window_pane", ncoil_gen=2,
+            ForcingTerms.CoilSetConfig(; source="window_pane", n_coils=2,
                 rz_corners=[[2.2, -0.5], [2.2, 0.5]], standoff=0.2, poloidal_angle=0.0)
         ]
     )
@@ -645,7 +648,7 @@ end
             println(io, l)
         end
     end
-    cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="ldp", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
+    cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="core_edge_packed", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
     eq_pos = Equilibrium.setup_equilibrium(cfg(gfile))
     eq_neg = Equilibrium.setup_equilibrium(cfg(flipped))
     @test eq_pos.params.ip_sign == 1 && eq_neg.params.ip_sign == -1

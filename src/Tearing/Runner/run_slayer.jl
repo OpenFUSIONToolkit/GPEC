@@ -442,12 +442,12 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
         # GGJ γ-extraction is future work; `run_slayer_from_inputs` emits the
         # warning once the model is built (so direct callers see it too).
         params = build_ggj_inputs(equil, surfaces, profiles;
-            mu_i=control.mu_i,
+            mu_i=control.ion_mass,
             zeff=control.zeff,
             resistivity_model=_build_resistivity_model(control.resistivity_model),
             lnLambda_form=control.lnLambda_form)
     else
-        # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
+        # `equil.config.b0_norm` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
         # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
         # control value through instead: `nothing` makes build_slayer_inputs compute the
         # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
@@ -462,13 +462,13 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
             "control.chi_perp/chi_tor fallback for the missing one(s).")
         params = build_slayer_inputs(equil, surfaces, profiles;
             bt=bt,
-            mu_i=control.mu_i,
+            mu_i=control.ion_mass,
             zeff=control.zeff,
             chi_perp=chi_perp,
             chi_tor=chi_tor,
-            dr_val=control.dr_val,
-            dgeo_val=control.dgeo_val,
-            dc_type=control.dc_type,
+            dr_val=control.D_R,
+            dgeo_val=control.D_geo,
+            dc_type=control.D_c_type,
             theta=control.theta_sample,
             resistivity_model=_build_resistivity_model(control.resistivity_model),
             lnLambda_form=control.lnLambda_form)

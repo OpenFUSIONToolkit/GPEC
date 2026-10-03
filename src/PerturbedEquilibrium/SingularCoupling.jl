@@ -222,7 +222,7 @@ end
         state::PerturbedEquilibriumState,
         equil::Equilibrium.PlasmaEquilibrium,
         solution::SolutionProfiles,
-        mthvac::Int,
+        mtheta_vacuum::Int,
         ffs::ForceFreeStatesResult,
         intr::PerturbedEquilibriumInternal,
         ctrl::PerturbedEquilibriumControl,
@@ -254,7 +254,7 @@ function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
     solution::SolutionProfiles,
-    mthvac::Int,
+    mtheta_vacuum::Int,
     ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
@@ -277,7 +277,7 @@ function compute_singular_coupling_metrics!(
 
     chi1 = 2π * equil.psio
     twopi = 2π
-    mtheta = mthvac
+    mtheta = mtheta_vacuum
 
     # Phase 1: Collect all resonant (surface, n) pairs in psi order
     resonant_pairs = Tuple{Int,Int}[]

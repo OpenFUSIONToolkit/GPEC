@@ -9,26 +9,26 @@
 [Equilibrium]
 eq_type   = "tj_analytic"      # Type of the input 2D equilibrium (analytic large-aspect-ratio model)
 jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
-grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
+grid_type = "core_edge_packed" # Radial grid packing type (core_edge_packed = sin² spacing, dense at axis and edge)
 psilow    = 0.01               # Lower limit of normalized flux coordinate
 psihigh   = 0.995              # Upper limit of normalized flux coordinate
 mpsi      = 128                # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta    = 512                # Number of poloidal grid points
 
 [TJ_ANALYTIC_INPUT]
-lar_r0 = 2.0                   # Major radius R0 [m]
-lar_a  = 0.4                   # Minor radius a [m] (epsilon = a/R0 = 0.2)
-qc     = 1.5                   # On-axis safety factor
-qa     = 3.6                   # Edge safety factor
-pc     = 0.01                  # Normalized on-axis pressure
-mu     = 2.0                   # Pressure peaking exponent: p2 = pc*(1-r^2)^mu
-B0     = 12.0                  # On-axis toroidal field [T]
-ma     = 128                   # Radial grid points
-mtau   = 128                   # Poloidal grid points
+r0               = 2.0         # Major radius R0 [m]
+a                = 0.4         # Minor radius a [m] (epsilon = a/R0 = 0.2)
+q0               = 1.5         # On-axis safety factor
+qa               = 3.6         # Edge safety factor
+p0               = 0.01        # Normalized on-axis pressure
+pressure_peaking = 2.0         # Pressure peaking exponent: p2 = p0*(1-r^2)^pressure_peaking
+B0               = 12.0        # On-axis toroidal field [T]
+ma               = 128         # Radial grid points
+mtheta           = 128         # Poloidal grid points
 
 [Wall]
 shape = "conformal"            # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a     = 20                     # Distance from plasma (conformal) or shape parameter
+standoff_fraction = 20         # Wall standoff in plasma minor radii (conformal, dee)
 
 [ForceFreeStates]
 HDF5_filename        = "gpec_lar_ideal.h5"  # Output filename for the stability-stage results
@@ -42,17 +42,17 @@ nn_low      = 1                # Smallest toroidal mode number to include
 nn_high     = 1                # Largest toroidal mode number to include
 delta_mlow  = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8                # Expands upper bound of Fourier harmonics
-mthvac      = 960              # Number of points used in splines over poloidal angle at plasma-vacuum interface
+mtheta_vacuum = 960            # Number of points used in splines over poloidal angle at plasma-vacuum interface
 
 eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min             = 1e-4  # Fractional distance from rational q at which ideal jump enforced
-ucrit                   = 1e4   # Maximum fraction of solutions allowed before re-normalized
-sing_order              = 6     # Power-series order for the singular-surface asymptotics
+renorm_threshold        = 1e4   # Column-norm threshold that triggers solution renormalization
+frobenius_order         = 6     # Power-series order for the singular-surface asymptotics
 save_interval           = 3     # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 
 integrator            = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
-set_psilim_via_dmlim  = false  # Keep psilim at psihigh (do not truncate at last_rational_q + dmlim)
-dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n (only used when set_psilim_via_dmlim = true)
+truncate_at_rational_offset = false # Keep psilim at psihigh (do not truncate at last_rational_q + rational_offset_fraction)
+rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n (only used when truncate_at_rational_offset = true)
 force_termination     = true   # Terminate after the stability stage (no perturbed-equilibrium section here)
 write_outputs_to_HDF5 = true   # Write stability outputs to HDF5
 

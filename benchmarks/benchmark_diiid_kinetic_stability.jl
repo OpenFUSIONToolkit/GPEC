@@ -130,7 +130,7 @@ psihigh = 0.993
 mpsi = 128
 mtheta = 256
 newq0 = 0
-etol = 1e-7
+flux_surface_rtol = 1e-7
 
 [Wall]
 shape = "nowall"
@@ -140,7 +140,7 @@ local_stability_flag = true
 vac_flag = true
 force_termination = true       # Skip PE+KF post-processing — we only need FFS eigenvalues
 
-psiedge = 1.0                 # No edge-scan truncation (dmlim mechanism removed in develop)
+dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
 qhigh = 1e3
 sing_start = 0
@@ -149,14 +149,14 @@ nn_low = 1
 nn_high = 1
 delta_mlow = 8
 delta_mhigh = 8
-mthvac = 512
+mtheta_vacuum = 512
 thmax0 = 1
 
 kinetic_source = "calculated"
 kinetic_factor = 1.0
 eulerlagrange_tolerance = 1e-7
 singfac_min = 1e-4
-ucrit = 1e4
+renorm_threshold = 1e4
 write_outputs_to_HDF5 = true
 
 [KineticForces]

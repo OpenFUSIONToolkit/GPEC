@@ -67,9 +67,9 @@ const THETA_STRIDE = 8
 # for the pass-1→pass-2 shift of ψ_s.
 const BRACKET_COEF = 4.0
 # Global minimum knot spacing. No grid — auto refinement, the near-surface bracket, or a fixed
-# ldp/pow1 grid packing its edge at high mpsi — may place nodes closer than this. Below it, cubic
+# core_edge_packed/pow1 grid packing its edge at high mpsi — may place nodes closer than this. Below it, cubic
 # high derivatives are dominated by field-line integration noise rather than curvature (e.g. an
-# ldp grid at mpsi=2048 packs the edge to ~6e-7, deep in noise). Chosen well under the spacing of a
+# core_edge_packed grid at mpsi=2048 packs the edge to ~6e-7, deep in noise). Chosen well under the spacing of a
 # converged uniform reference (~5e-4 at mpsi=2048) so it clips only pathological clustering.
 const MIN_KNOT_SPACING = 1.0e-4
 # Near-rational resolution patch. The Δ′ extraction samples the equilibrium splines' 3rd
@@ -80,7 +80,7 @@ const MIN_KNOT_SPACING = 1.0e-4
 # `bracket_mandatory_nodes` then centers the surface within. The spacing is **fixed** (τ-independent):
 # Δ′ is a property of the rational surface, so its accuracy must not depend on the global accuracy
 # target τ (that only sizes the pedestal/edge grid) — a τ-dependent patch would leave Δ′ far from
-# converged at the default τ. RATIONAL_RES_SPACING is set where the q‴ estimate converges (the ldp
+# converged at the default τ. RATIONAL_RES_SPACING is set where the q‴ estimate converges (the core_edge_packed
 # mpsi ladder converges the q=2 Δ′ by h ≈ 5e-4).
 const RATIONAL_RES_SPACING = 5.0e-4
 const RATIONAL_RES_RADIUS = 5.0e-3
@@ -345,7 +345,7 @@ end
 
 Drop interior nodes so no two kept nodes are closer than `hmin`, preserving both endpoints.
 Guards against noise-level packing from any generator — the auto-grid near-surface bracket, or a
-fixed `ldp`/`pow1` grid whose edge spacing collapses (`~(π/2·mpsi)⁻²` for `ldp`) at high mpsi,
+fixed `core_edge_packed`/`pow1` grid whose edge spacing collapses (`~(π/2·mpsi)⁻²` for `core_edge_packed`) at high mpsi,
 below which cubic high derivatives are integration noise, not curvature. A no-op when the grid is
 already coarser than `hmin` everywhere (e.g. a converged uniform reference).
 """

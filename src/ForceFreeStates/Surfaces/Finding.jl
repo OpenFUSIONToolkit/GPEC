@@ -97,17 +97,17 @@ end
 
 Compute and set integration ψ, q, and q' limits by handling cases where user truncates
 before the last singular surface. Performs a similar function to `sing_lim`
-in the Fortran code. Main differences include renaming of sas_flag -> set_psilim_via_dmlim,
+in the Fortran code. Main differences include renaming of sas_flag -> truncate_at_rational_offset,
 removing dW edge storage variables since we now store all integration terms in memory, and
 simplification of the logic.
 
 The target value `qlim` is first determined from user-specified control parameters
-(`ctrl.qhigh` or `ctrl.dmlim`), subject to the constraint that it does not exceed
-`equil.params.qmax`. If `set_psilim_via_dmlim` is true, `qlim` is adjusted to the largest
-rational surface such that `nq + dmlim < qmax`. If `qlim < qmax`, a Newton iteration is
+(`ctrl.qhigh` or `ctrl.rational_offset_fraction`), subject to the constraint that it does not exceed
+`equil.params.qmax`. If `truncate_at_rational_offset` is true, `qlim` is adjusted to the largest
+rational surface such that `nq + rational_offset_fraction < qmax`. If `qlim < qmax`, a Newton iteration is
 performed to find the corresponding `psilim` to integrate to.
 
-Note that the Newton iteration will be triggered if either `set_psilim_via_dmlim` is true
+Note that the Newton iteration will be triggered if either `truncate_at_rational_offset` is true
 or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
@@ -119,22 +119,22 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.params.psihigh_resolved
 
-    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent). The cutoff reads
+    # Optionally override qlim based on rational_offset_fraction (Fortran sas_flag=t equivalent). The cutoff reads
     # the *resolved* toroidal range on `intr`, so callers must assign intr.nlow / intr.nhigh
     # before calling; an unresolved range is an error rather than a silent change of truncation
-    # strategy. Multi-n runs are not supported — the "outermost rational + dmlim/n" cutoff depends
+    # strategy. Multi-n runs are not supported — the "outermost rational + rational_offset_fraction/n" cutoff depends
     # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
-    if ctrl.set_psilim_via_dmlim && intr.nlow <= 0
-        error("sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+    if ctrl.truncate_at_rational_offset && intr.nlow <= 0
+        error("sing_lim!: truncate_at_rational_offset = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
               "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
-              "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead.")
-    elseif ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
-        @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
-    elseif ctrl.set_psilim_via_dmlim
-        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
-        # Normalize dmlim ∈ [0,1)
-        dmlim = mod(ctrl.dmlim, 1.0)
-        intr.qlim = (trunc(Int, intr.nlow * intr.qlim) + dmlim) / intr.nlow
+              "or set truncate_at_rational_offset = false to truncate via qhigh / psihigh instead.")
+    elseif ctrl.truncate_at_rational_offset && intr.nlow != intr.nhigh
+        @warn "truncate_at_rational_offset = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
+    elseif ctrl.truncate_at_rational_offset
+        @info "Setting psilim via rational_offset_fraction: initial qlim = $(@sprintf("%.3f", intr.qlim)), rational_offset_fraction = $(@sprintf("%.3f", ctrl.rational_offset_fraction))"
+        # Normalize rational_offset_fraction ∈ [0,1)
+        rational_offset_fraction = mod(ctrl.rational_offset_fraction, 1.0)
+        intr.qlim = (trunc(Int, intr.nlow * intr.qlim) + rational_offset_fraction) / intr.nlow
 
         # Reduce qlim if above qmax
         while intr.qlim > equil.params.qmax
@@ -142,7 +142,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         end
     end
 
-    # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
+    # If truncate_at_rational_offset decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))

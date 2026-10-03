@@ -15,17 +15,17 @@ mpsi = 0                       # Number of radial grid points (0 = auto-compute 
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
-etol = 1e-10                   # Error tolerance for equilibrium solver
+flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace each flux surface
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
 shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a = 0.2415                     # Distance from plasma (conformal) or shape parameter
-aw = 0.05                      # Half-thickness parameter for Dee-shaped walls
-bw = 1.5                       # Elongation parameter for wall shapes
-cw = 0                         # Offset of wall center from major radius
-dw = 0.5                       # Triangularity parameter for wall shapes
-tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial value)
+standoff_fraction = 0.2415     # Wall standoff in plasma minor radii (conformal, dee)
+half_thickness = 0.05          # Half-thickness parameter for Dee-shaped walls
+elongation = 1.5               # Elongation parameter for wall shapes
+center_offset = 0              # Offset of wall center from major radius
+triangularity = 0.5            # Triangularity parameter for wall shapes
+corner_sharpness = 0.05        # Sharpness of wall corners (try 0.05 as initial value)
 equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
@@ -33,7 +33,7 @@ force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+dW_edge_scan_start = 0.99      # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
@@ -42,19 +42,19 @@ nn_low = 1                     # Smallest toroidal mode number to include
 nn_high = 1                    # Largest toroidal mode number to include
 delta_mlow = 8                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 8                # Expands upper bound of Fourier harmonics
-mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+mtheta_vacuum = 512            # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
 kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
+renorm_threshold = 1e4         # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
 integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
-set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost
-dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n
+truncate_at_rational_offset = true # TRUE for diverted geqdsks — q → ∞ at separatrix, so rational_offset_fraction truncation avoids the δW kink instability at negligible domain cost
+rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n
 
 [SLAYER]
 # SLAYER tearing-mode growth-rate analysis on the DIII-D-like H-mode equilibrium.
@@ -70,8 +70,8 @@ enabled                 = true       # Run the SLAYER tearing-mode analysis
 inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
 scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive refinement) or "brute_force"
 coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
-dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar", "rfitzp", or "toroidal"
-mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
+D_c_type                = "none"     # Critical-Δ offset selector: "none", "lar", "fitzpatrick", or "toroidal"
+ion_mass                = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
 zeff                    = 1.0        # Effective charge
 chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)

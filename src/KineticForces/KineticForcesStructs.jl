@@ -110,26 +110,26 @@ builds a second control for its differing tolerance).
     prmm_flag::Bool = false         # Passing MXM E-L torque matrix norm
 
     # Plasma species parameters
-    zi::Int = 1                     # Ion charge (fundamental units)
-    mi::Int = 2                     # Ion mass (proton masses)
-    zimp::Int = 6                   # Impurity charge
-    mimp::Int = 12                  # Impurity mass
+    ion_charge::Int = 1             # Ion charge (fundamental units)
+    ion_mass::Int = 2               # Ion mass (proton masses)
+    impurity_charge::Int = 6        # Impurity charge
+    impurity_mass::Int = 12         # Impurity mass
     electron::Bool = false          # Add electron NTV in addition to the ion species
     ion_species::Vector{IonSpecies} = IonSpecies[]   # multi-main-ion set; empty ⇒ single ion
 
     # Mode numbers
     nn::Int = 1                     # Toroidal mode number
-    nl::Int = 1                     # Bounce harmonic number
+    bounce_harmonic_max::Int = 1    # Bounce harmonics summed over ℓ = -max:max
 
     # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy).
     # Each level must be resolved more tightly than the one enclosing it, or the outer
     # integrator chases its integrand's own quadrature noise instead of converging.
-    # *_xlmda: tolerances for the λ (pitch) integration
+    # *_pitch: tolerances for the λ (pitch) integration
     # *_x:     tolerances for the x (energy) integration nested inside it; NaN ⇒ derive as
     #          nested_tolerance_margin × the pitch tolerances
     # *_psi:   tolerances for the outer ψ quadrature
-    atol_xlmda::Float64 = 1e-8     # Absolute tolerance for the inner pitch integration
-    rtol_xlmda::Float64 = 1e-5     # Relative tolerance for the inner pitch integration
+    atol_pitch::Float64 = 1e-8      # Absolute tolerance for the inner pitch integration
+    rtol_pitch::Float64 = 1e-5      # Relative tolerance for the inner pitch integration
     atol_x::Float64 = NaN          # Absolute tolerance for the energy integration (NaN ⇒ derived)
     rtol_x::Float64 = NaN          # Relative tolerance for the energy integration (NaN ⇒ derived)
     # The pitch integrand IS the energy integral, so the energy level is resolved this much
@@ -137,7 +137,7 @@ builds a second control for its differing tolerance).
     nested_tolerance_margin::Float64 = 1e-2   # Factor relating derived energy tolerances to the pitch ones
     # rtol_psi is the primary convergence knob: ~2 significant figures matches the validity
     # of the NTV model approximations. Do not set it tighter than the noise floor of the
-    # inner integrals (keep rtol_psi ≳ 10 × rtol_xlmda).
+    # inner integrals (keep rtol_psi ≳ 10 × rtol_pitch).
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
     # atol_psi is in N·m and therefore amplitude-sensitive: NTV scales as δB², so a 10×
     # weaker applied field gives a 100× smaller torque and any fixed absolute tolerance can
@@ -153,15 +153,15 @@ builds a second control for its differing tolerance).
     density_factor::Float64 = 1.0            # Density scaling (ni, ne)
     temperature_factor::Float64 = 1.0        # Temperature scaling (Ti, Te)
     ExB_rotation_factor::Float64 = 1.0       # ExB rotation scaling (omegaE)
-    wdfac::Float64 = 1.0                     # Magnetic drift scaling
+    magnetic_drift_factor::Float64 = 1.0 # Magnetic drift scaling
     toroidal_rotation_factor::Float64 = 1.0  # Total toroidal rotation scaling (wphi)
 
-    nufac::Float64 = 1.0           # Collisionality scaling
-    divxfac::Float64 = 1.0         # div(xi_perp) scaling
+    collisionality_factor::Float64 = 1.0 # Collisionality scaling
+    divxi_factor::Float64 = 1.0     # div(xi_perp) scaling
 
     # Energy integration parameters
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
-    f0type::String = "maxwellian"   # Distribution function: "maxwellian", "jkp", "cgl"
+    f0type::String = "maxwellian"   # Distribution function: "maxwellian", "park", "cgl"
 
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi

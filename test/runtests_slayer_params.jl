@@ -100,14 +100,14 @@
         @test p_none.dc_tmp == 0.0   # :none ignores dr_val
 
         p_lar = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:lar)...)
-        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:rfitzp)...)
+        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:fitzpatrick)...)
         p_tor = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:toroidal)...)
 
         @test isfinite(p_lar.dc_tmp)
         @test isfinite(p_rf.dc_tmp)
         @test isfinite(p_tor.dc_tmp)
         # dr_val > 0 with the (-dr_val) prefactor ⇒ negative dc_tmp for
-        # :lar, :rfitzp, :toroidal branches.
+        # :lar, :fitzpatrick, :toroidal branches.
         @test p_lar.dc_tmp < 0
         @test p_rf.dc_tmp < 0
         @test p_tor.dc_tmp < 0

@@ -201,7 +201,7 @@ Callback function for the Riccati ODE integrator. Handles tolerance updates,
 renormalization, and storage at each step.
 
 Uses `sing_der!` as the ODE RHS: u[:,:,1] = U₁ (starts as S), u[:,:,2] = U₂ (starts as I).
-When max(|U₁|) or max(|U₂|) exceeds `ctrl.ucrit`, applies `renormalize_riccati_inplace!`
+When max(|U₁|) or max(|U₂|) exceeds `ctrl.renorm_threshold`, applies `renormalize_riccati_inplace!`
 to compute S = U₁·U₂⁻¹ and reset U₂ = I. This is the Riccati analogue of Gaussian
 reduction in the standard `integrator_callback!`, and keeps the ODE inputs bounded.
 """
@@ -214,11 +214,11 @@ function riccati_integrator_callback!(integrator)
     # Use unified tolerance (matches integrate_el_region! on develop)
     integrator.opts.reltol = ctrl.eulerlagrange_tolerance
 
-    # Renormalize when norms exceed ucrit (analogous to Gaussian reduction in integrator_callback!)
+    # Renormalize when norms exceed renorm_threshold (analogous to Gaussian reduction in integrator_callback!)
     # During sing_der! integration: u[:,:,1]=U₁ (grows), u[:,:,2]=U₂ (grows).
     # Renorm computes S = U₁·U₂⁻¹ and resets U₂ = I, keeping inputs bounded.
-    if maximum(abs, @view(integrator.u[:, :, 1])) > ctrl.ucrit ||
-       maximum(abs, @view(integrator.u[:, :, 2])) > ctrl.ucrit
+    if maximum(abs, @view(integrator.u[:, :, 1])) > ctrl.renorm_threshold ||
+       maximum(abs, @view(integrator.u[:, :, 2])) > ctrl.renorm_threshold
         renormalize_riccati_inplace!(integrator.u, intr.numpert_total)
     end
 
@@ -244,7 +244,7 @@ end
 Integrate the dual Riccati ODE from `chunk.psi_start` to `chunk.psi_end`.
 
 Uses `sing_der!` as the ODE RHS with `riccati_integrator_callback!`, which applies
-`renormalize_riccati_inplace!` (instead of Gaussian reduction) when norms exceed ucrit.
+`renormalize_riccati_inplace!` (instead of Gaussian reduction) when norms exceed renorm_threshold.
 Starting state: u[:,:,1] = S_prev, u[:,:,2] = I (set by initialization or previous renorm).
 Ending state: u[:,:,1] = U₁, u[:,:,2] = U₂ (ratio S = U₁·U₂⁻¹ is the updated Riccati matrix).
 """
@@ -263,7 +263,7 @@ function riccati_integrate_chunk!(
     # When a crossing follows (needs_crossing=true), skip renorm so that ca_l is computed
     # from the bounded (U₁, U₂) state in riccati_cross_ideal_singular_surf!: this gives
     # consistent normalization with ca_r (also from pre-renorm state), enabling correct Δ'.
-    # The callback guarantees max(|U₁|), max(|U₂|) ≤ ucrit, so the state is bounded.
+    # The callback guarantees max(|U₁|), max(|U₂|) ≤ renorm_threshold, so the state is bounded.
     if !chunk.needs_crossing
         renormalize_riccati_inplace!(odet.u, intr.numpert_total)
     end
@@ -302,7 +302,7 @@ In-place Riccati renormalization on an arbitrary N×N×2 array:
   u[:,:,2] = I
 
 Used in `riccati_integrator_callback!` to renormalize the integrator's live state
-when column norms grow beyond `ctrl.ucrit`, analogous to Gaussian reduction in the
+when column norms grow beyond `ctrl.renorm_threshold`, analogous to Gaussian reduction in the
 standard ODE. This keeps the inputs to `sing_der!` bounded, preventing the same
 exponential growth that occurs in the standard (non-Riccati) ODE without Gaussian reduction.
 """

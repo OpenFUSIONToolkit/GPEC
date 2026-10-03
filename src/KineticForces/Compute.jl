@@ -23,7 +23,7 @@ Build the ψ-quadrature node list `[x0, interior points strictly inside (x0, xou
 resonances); this function owns the ordering: sort, drop near-duplicates (closer than
 `PANEL_MERGE_ATOL`, e.g. a kinetic resonance coinciding with a rational), and drop points
 within `PANEL_MERGE_ATOL` of a bound to avoid degenerate panels. Paneling the integral at
-these surfaces puts the resonant torque-density peaks (reg_spot/collisionally broadened, but
+these surfaces puts the resonant torque-density peaks (regularization_width/collisionally broadened, but
 narrow in ψ) on Gauss-Kronrod interval endpoints, which the rule handles natively instead of
 hunting them by adaptive bisection.
 """
@@ -137,7 +137,7 @@ function integrate_psi_quadgk(
                 tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
                     electron, method, equil, thread_intrs[tid], kinetic_profiles;
                     op_wmats=w,
-                    atol_xlmda=ctrl.atol_xlmda, rtol_xlmda=ctrl.rtol_xlmda,
+                    atol_xlmda=ctrl.atol_pitch, rtol_xlmda=ctrl.rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
                 harm_vals[ell_idx] = thread_tpsi[tid][]
@@ -334,8 +334,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
 
             # Adaptive QuadGK integration over ψ (serial BatchIntegrand)
             result = integrate_psi_quadgk(
-                n, ctrl.nl, ctrl.zi, ctrl.mi,
-                ctrl.wdfac, ctrl.divxfac, ctrl.electron,
+                n, ctrl.bounce_harmonic_max, ctrl.ion_charge, ctrl.ion_mass,
+                ctrl.magnetic_drift_factor, ctrl.divxi_factor, ctrl.electron,
                 method, equil, intr, ctrl, kinetic_profiles;
                 psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
 

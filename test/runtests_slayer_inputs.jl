@@ -115,16 +115,16 @@
     end
 
     @testset "build_slayer_inputs: bt defaults to the physical B_T, not a normalization" begin
-        # `b0exp` is a normalization, not a field; passing it as `bt` ran the layer physics at the
+        # `b0_norm` is a normalization, not a field; passing it as `bt` ran the layer physics at the
         # wrong toroidal field. Asserted behaviourally rather than by grepping the source, so a
         # refactor cannot silently break the check and a reintroduction anywhere in the chain still
         # fails: tau_h = R0*sqrt(mu0*rho)/(n*sval_r*bt), so lu is linear in the field actually used
         # and the resolved bt is recoverable from the returned parameters.
         #
         # Note this fixture cannot exhibit the original bug: Solovev is normalized so that
-        # b0exp == 1.0 and F(psi)/(2*pi*R0) == 1.0 to roundoff, which is exactly why the defect
+        # b0_norm == 1.0 and F(psi)/(2*pi*R0) == 1.0 to roundoff, which is exactly why the defect
         # survived. It shows up on a deck whose normalization differs from its field -- the
-        # DIII-D-like EFIT deck has b0exp = 1.0 against a physical ~1.95 T. What is pinned here is
+        # DIII-D-like EFIT deck has b0_norm = 1.0 against a physical ~1.95 T. What is pinned here is
         # therefore the resolution rule itself, which is deck-independent.
         sings = [_mk_sing(psi=0.3, q=2.0, q1=1.5, m=2, n=1)]
         bt_phys = Float64(equil.profiles.F_spline(0.3)) / (2π * equil.ro)
@@ -193,14 +193,14 @@
             bt=2.0, dc_type=:none, dr_val=0.0)
         @test sl_none[1].dc_tmp == 0.0
 
-        # dc_type=:rfitzp with dr_val = 0 still gives zero
+        # dc_type=:fitzpatrick with dr_val = 0 still gives zero
         sl_rf0 = build_slayer_inputs(equil, sings, profiles;
-            bt=2.0, dc_type=:rfitzp, dr_val=0.0)
+            bt=2.0, dc_type=:fitzpatrick, dr_val=0.0)
         @test sl_rf0[1].dc_tmp == 0.0
 
-        # dc_type=:rfitzp with dr_val > 0 → nonzero negative offset
+        # dc_type=:fitzpatrick with dr_val > 0 → nonzero negative offset
         sl_rf = build_slayer_inputs(equil, sings, profiles;
-            bt=2.0, dc_type=:rfitzp, dr_val=0.01)
+            bt=2.0, dc_type=:fitzpatrick, dr_val=0.01)
         @test sl_rf[1].dc_tmp < 0
         @test isfinite(sl_rf[1].dc_tmp)
     end

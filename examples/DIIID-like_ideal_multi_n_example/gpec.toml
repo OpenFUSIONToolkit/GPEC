@@ -12,30 +12,30 @@
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
-grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
+grid_type = "core_edge_packed" # Radial grid packing type (core_edge_packed = sin² spacing, dense at axis and edge)
 psilow = 1e-4                  # Lower limit of normalized poloidal flux
 psihigh = 0.9                  # Upper limit of normalized poloidal flux
 mpsi = 128                     # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
-etol = 1e-10                   # Error tolerance for equilibrium solver
+flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace each flux surface
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
 shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a = 0.2415                     # Distance from plasma (conformal) or shape parameter
-aw = 0.05                      # Half-thickness parameter for Dee-shaped walls
-bw = 1.5                       # Elongation parameter for wall shapes
-cw = 0                         # Offset of wall center from major radius
-dw = 0.5                       # Triangularity parameter for wall shapes
-tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial value)
+standoff_fraction = 0.2415     # Wall standoff in plasma minor radii (conformal, dee)
+half_thickness = 0.05          # Half-thickness parameter for Dee-shaped walls
+elongation = 1.5               # Elongation parameter for wall shapes
+center_offset = 0              # Offset of wall center from major radius
+triangularity = 0.5            # Triangularity parameter for wall shapes
+corner_sharpness = 0.05        # Sharpness of wall corners (try 0.05 as initial value)
 equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+dW_edge_scan_start = 0.99      # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
 qhigh = 3.83                   # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
@@ -45,19 +45,19 @@ nn_low = 1                     # Smallest toroidal mode number to include
 nn_high = 2                    # Largest toroidal mode number to include
 delta_mlow = 4                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 6                # Expands upper bound of Fourier harmonics
-mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+mtheta_vacuum = 512            # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
 kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+renorm_threshold = 1e4         # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
 integrator            = "forward" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
-set_psilim_via_dmlim  = false  # FALSE for multi-n — dmlim truncation is ambiguous when n varies; qhigh sets the edge instead
-dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
+truncate_at_rational_offset = false # FALSE for multi-n — rational_offset_fraction truncation is ambiguous when n varies; qhigh sets the edge instead
+rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction)/n (used when truncate_at_rational_offset = true)
 
 [ForcingTerms]
 forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
@@ -76,4 +76,4 @@ compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
-reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
+regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)

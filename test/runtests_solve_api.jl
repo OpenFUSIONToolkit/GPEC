@@ -2,7 +2,7 @@ using TOML
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
 # same pipeline the TOML driver does. Every assertion is anchored on the coarse Solovev fixture
-# deck (mpsi=16, mthvac=64, delta_m=0), so an API run is compared against `main` on the same deck.
+# deck (mpsi=16, mtheta_vacuum=64, delta_m=0), so an API run is compared against `main` on the same deck.
 @testset "solve API" begin
     GPEC = GeneralizedPerturbedEquilibrium
     FFS = GPEC.ForceFreeStates
