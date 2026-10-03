@@ -33,8 +33,11 @@ julia --project=regression-harness regression-harness/regress.jl
 
 Useful invocations:
 - `--list-cases` — enumerate available cases. **Always run this first** to get the current set;
-  cases are added over time, so never assume the list. (At time of writing it included
-  `diiid_n1`, `solovev_n1`, `solovev_multi_n`, `solovev_kinetic_calculated`, `ggj_reference`.)
+  cases are added over time, so never assume the list. (At time of writing: `diiid_n1`,
+  `diiid_n1_riccati`, `diiid_slayer_n1`, `efit_fixedbdy_separatrix`, `gal_resistive_diiid`,
+  `gal_resistive_pe`, `ggj_ray_q500i`, `ggj_reference`, `solovev_n1`, `solovev_multi_n`,
+  `solovev_kinetic_calculated`, `solovev_kinetic_multiion`, `solovev_kinetic_ntv`,
+  `solovev_kinetic_nuzero`.)
 - `--cases <case[,case]> --refs <refA,refB>` — compare two refs (branches/commits), e.g.
   `--refs develop,my-feature-branch`. `local` names the uncommitted working tree; prefer a branch
   ref (see "Which refs to compare" below).
@@ -53,20 +56,12 @@ When in doubt, run `diiid_n1` plus whichever case targets the module you changed
 
 ## Which refs to compare
 
-Default to `--refs develop,<feature-branch>`, and ask the user to commit outstanding work first if
-the branch is behind the working tree.
-
-Each git ref runs in its own detached worktree, so a branch-ref comparison is immune to edits made
-while it runs. The `local` ref is not: it runs GPEC in the live checkout, one fresh `julia`
-subprocess per case, each loading `src/` from disk as it starts. An edit landing between two cases
-produces a single report whose rows were built from different code, and nothing in the table says
-so. Full account in `docs/development/regression-harness.md` ("Run isolation").
-
-So: use `local` only for a quick spot check the user explicitly asked for on uncommitted work, and
-say plainly in your report which ref you ran. Never silently substitute one for the other.
-
-While any run is live, do not edit the repository, and say so when you start — the invoking session
-may be waiting on you and editing meanwhile.
+Default to `--refs develop,<feature-branch>`; ask the user to commit outstanding work first.
+`develop` resolves to the *local* branch, so fetch and fast-forward it before the run (the
+`!! STALE BASELINE` banner only fires after a fetch). Use `local` only for a quick spot check the
+user explicitly asked for on uncommitted work; it runs in the live checkout and a mid-run edit
+silently mixes code versions (`docs/development/regression-harness.md`, "Run isolation"). Say
+plainly in your report which refs you ran, and do not edit the repository while a run is live.
 
 ## Your workflow
 

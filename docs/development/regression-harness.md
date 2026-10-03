@@ -113,28 +113,31 @@ They share the word and nothing else, which is a reliable source of confusion:
 - **This harness** (`regression-harness/`) tracks numerical quantities across commits. Its cases
   live in `regression-harness/cases/*.toml` and point at decks under `examples/`. This is what the
   pull-request checklist means by "the regression harness".
-- **`test/test_data/regression_*/`** are *input decks for the unit tests* — a `gpec.toml`, and a
-  `kinetic.dat` for the kinetic ones. They are not harness cases and the harness never reads them.
+- **`test/test_data/regression_*/`** are *input decks for the unit tests* — a `gpec.toml`, plus a
+  `kinetic.dat` where the kinetic profiles are tabulated. They are not harness cases and the
+  harness never reads them.
 - **`test/runtests_*.jl`** are the unit and golden-value tests. Their expected numbers live in the
   test files themselves, so moving one is a hand edit that has to be justified in review.
 
 ## Run isolation
 
 Every git ref in a comparison is checked out into its own detached worktree, so a harness run is
-already insulated from whatever you do to the working tree while it runs. The `local` ref is the
-exception: it runs GPEC in the live checkout.
-
-That matters more than it first appears, because each case runs as a **fresh `julia` subprocess**
-that loads `src/` from disk when it starts. A multi-case `--refs develop,local` run therefore reads
-the source once per case, and an edit landing between two cases yields a single report whose rows
-were produced by different code — with nothing in the output to say so.
+insulated from whatever you do to the working tree while it runs. The `local` ref is the exception:
+it runs GPEC in the live checkout, as a **fresh `julia` subprocess per case** that loads `src/` from
+disk when it starts. An edit landing between two cases of a `--refs develop,local` run yields a
+single report whose rows were produced by different code — with nothing in the output to say so.
 
 For anything you intend to cite — a pull-request report, a bisect, a number you will act on —
 commit the work to the feature branch and compare branch refs:
 
 ```bash
+git fetch && git checkout develop && git merge --ff-only origin/develop
 regress --cases diiid_n1 --refs develop,my-feature-branch
 ```
+
+`develop` resolves to your **local** branch, and the harness never fetches, so the first line is
+what keeps the baseline current (or pass `origin/develop` directly). After a fetch, a local pointer
+that still lags its remote prints a `!! STALE BASELINE` banner; without one the banner is silent.
 
 `local` stays the right tool for a quick spot check on uncommitted work, provided you leave the tree
 alone until it finishes.
