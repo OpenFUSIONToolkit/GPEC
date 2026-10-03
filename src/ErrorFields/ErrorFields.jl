@@ -35,6 +35,9 @@ plasma solve or a new Biot-Savart integration.
   relative current-pattern phases
 - `NTVLimits.jl`: how much error field a correction coil can cancel before its own NTV torque
   costs the rotation that holds the threshold up (`EFCCoupling`, `correction_current`)
+- `Correction.jl`: `correction_requirement`, the currents a set of arrays needs to cancel an error
+  field on every rational surface and what remains, and `uncorrectable_probability`, how often the
+  Monte Carlo's overlap exceeds what an NTV-limited array can correct
 
 The stored primitive is the derivative of each coil set's root-area-weighted control-surface
 spectrum b̃, not a scalar: the overlap with any dominant mode is linear in b̃, so the ψ_N window,
@@ -67,6 +70,7 @@ include("Linearity.jl")
 include("Risk.jl")
 include("Phasing.jl")
 include("NTVLimits.jl")
+include("Correction.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
@@ -82,6 +86,7 @@ export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_lab
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance, risk_convergence, single_toroidal_mode
 export PhasingMap, phasing_map, extreme_phasing
 export NTVControl, EFCCoupling, residual_spectrum, correction_current, correction_current_upper, max_correctable_overlap, efc_current_curve, read_efc_couplings
+export CorrectionRequirement, correction_requirement, needed_current_distribution, uncorrectable_probability
 export has_rotation_scan, rotation_scan_span, torque_at, torque_zero_crossings, rotation_shift, threshold_factor
 
 end # module ErrorFields

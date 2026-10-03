@@ -306,6 +306,61 @@ include("h5_metadata_check.jl")
             @test isfile(joinpath(dir, "linearity_check.png"))
             @test AEF.plot_linearity_residuals(h5path; at=:step, yscale=:log10) isa Plots.Plot
             @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; yscale=:bogus)
+
+            # The correction requirement. An array identical to the source needs exactly −1 of its
+            # current and the joint least squares leaves nothing; a second, differently tilted hoop
+            # alone cancels the dominant mode and leaves no more on any surface than the least squares
+            # does; with both arrays the least squares finds the exact cancellation.
+            src = only(o for o in ovs_plot if o.coil_name == "hoop_tilted")
+            self_req = EF.correction_requirement(ctx_plot, src, [src])
+            @test self_req.current_factor_dominant ≈ [-1.0 + 0im] atol = 1e-10
+            @test self_req.current_factor_least_squares ≈ [-1.0 + 0im] atol = 1e-10
+            @test norm(self_req.resonant_field_least_squares_t) < 1e-10 * norm(self_req.resonant_field_source_t)
+            @test self_req.resonant_field_source_t ≈ ctx_plot.rc.C * src.spectrum
+            @test self_req.cosine_similarity ≈ [1.0] && self_req.rational_psi == ctx_plot.rc.rational_psi
+            # Currents in kilo-ampere-turns are the factors times the array's ampere-turns as given.
+            cs_t = only(cs for cs in plot_sets if cs.name == "hoop_tilted")
+            kat_t = abs(cs_t.nw) * maximum(abs, cs_t.currents) / 1e3
+            @test src.ampere_turns_kat ≈ kat_t && kat_t > 0
+            @test self_req.current_dominant_kat ≈ [-kat_t + 0im] atol = 1e-10 * kat_t
+            @test self_req.current_least_squares_kat ≈ [-kat_t + 0im] atol = 1e-10 * kat_t
+            @test isnan(EF.combine_overlaps(ovs_plot, "hoop_tilted" => 1.0).ampere_turns_kat)
+            cfg_y = FT.CoilConfig(; machine=ctx_plot.cfg.machine, dat_dir=ctx_plot.cfg.dat_dir, mtheta_coil=ctx_plot.cfg.mtheta_coil, nzeta_coil=ctx_plot.cfg.nzeta_coil,
+                coil_sets=[FT.CoilSetConfig(; name="hoop_y", source="pf_hoop", radius=1.6, height=-0.3, currents=[2.0e3], tilty=[3.0])])
+            arr_y = only(EF.coil_overlaps(ctx_plot, FT.load_coil_sets(cfg_y, 1; equil=ctx_plot.equil)))
+            one = EF.correction_requirement(ctx_plot, src, [arr_y])
+            @test abs(src.delta + one.current_factor_dominant[1] * arr_y.delta) < 1e-12 * abs(src.delta)
+            @test norm(one.resonant_field_least_squares_t) <= norm(one.resonant_field_dominant_t[:, 1]) + 1e-15
+            @test norm(one.resonant_field_least_squares_t) <= norm(one.resonant_field_source_t)
+            two = EF.correction_requirement(ctx_plot, src, [src, arr_y])
+            @test norm(two.resonant_field_least_squares_t) < 1e-8 * norm(two.resonant_field_source_t)
+            @test two.least_squares_rank == 2 && one.least_squares_rank == 1
+            @test two.current_factor_least_squares ≈ [-1.0, 0.0] atol = 1e-6
+            # With two arrays the dominant-mode condition is one equation in two unknowns: the
+            # minimum-current member of its family cancels the mode exactly and carries less current
+            # than the exact solution (−1, 0), which is also in the family.
+            fm = two.current_factor_dominant_minimum_norm
+            @test abs(src.delta + fm[1] * src.delta + fm[2] * arr_y.delta) < 1e-12 * abs(src.delta)
+            # The minimum is taken over the total current in ampere-turns, and it carries less than
+            # the exact solution (−1, 0), which spends all of the source array's own current.
+            kat2 = [src.ampere_turns_kat, arr_y.ampere_turns_kat]
+            @test norm(fm .* kat2) ≈ abs(src.delta) / norm([src.delta, arr_y.delta] ./ kat2)
+            @test norm(two.current_dominant_minimum_norm_kat) ≈ norm(fm .* kat2) < src.ampere_turns_kat
+            @test self_req.current_factor_dominant_minimum_norm ≈ [-1.0 + 0im] atol = 1e-10
+            @test_throws ArgumentError EF.correction_requirement(ctx_plot, src, EF.CoilOverlap[])
+            from_file = EF.correction_requirement(h5path, "hoop_tilted", ["hoop_tilted"])
+            @test from_file.current_factor_dominant ≈ self_req.current_factor_dominant atol = 1e-10
+            @test_throws ArgumentError EF.correction_requirement(h5path, "hoop_tilted", ["no_such"])
+            @test AEF.plot_correction_requirement(two; save_path=joinpath(dir, "requirement.png")) isa Plots.Plot
+            @test length(AEF.plot_correction_requirement(two).subplots) == 1 + 2   # the surfaces, then one polar panel per array
+            @test isfile(joinpath(dir, "requirement.png"))
+            # The needed-current distribution is the |δ| histogram rescaled by the array's overlap.
+            nd = EF.needed_current_distribution(mc, src)
+            @test sum(nd.current_factor_pdf .* diff(nd.current_factor_bin_edges)) ≈ 1 atol = 1e-6
+            @test nd.current_factor_bin_edges[end] ≈ mc.abs_delta_bin_edges[end] / abs(src.delta)
+            @test nd.current_bin_edges_kat ≈ nd.current_factor_bin_edges .* src.ampere_turns_kat
+            @test sum(nd.current_pdf_per_kat .* diff(nd.current_bin_edges_kat)) ≈ 1 atol = 1e-6
+            @test AEF.plot_needed_current(mc, src) isa Plots.Plot
             @test all(
                 isnan(a) ? isnan(b) : isapprox(a, b; rtol=1e-8) for (a, b) in zip(AEF._sensitivity_values("ovs", AEF._load(ovs_plot), sens.coil_names, :fraction), fraction_drawn)
             )
@@ -434,6 +489,21 @@ include("h5_metadata_check.jl")
                 @test isempty(_collect_metadata_violations(f))
             end
             curve = EF.efc_current_curve(c; delta_threshold=risk.threshold_fit, torque_budget=1.0)
+            # The exceedance of the NTV-limited correctable overlap is the histogram's mass beyond it.
+            unc = EF.uncorrectable_probability(mc, c; delta_threshold=risk.threshold_fit, torque_budget=1.0)
+            # The overlap's ampere-turns normalize exactly as the coupling's per-kAt overlap, so the
+            # needed current and the NTV-limited allowance share one kilo-ampere-turn axis.
+            @test c.delta_per_kat ≈ abs(src.delta) / src.ampere_turns_kat rtol = 1e-8
+            @test unc.abs_delta_max_correctable == EF.max_correctable_overlap(c; delta_threshold=risk.threshold_fit, torque_budget=1.0).with_ntv
+            @test 0 <= unc.probability_percent <= 100
+            mass_beyond =
+                100 * sum(
+                    mc.abs_delta_pdf[i] * max(0.0, mc.abs_delta_bin_edges[i+1] - max(mc.abs_delta_bin_edges[i], unc.abs_delta_max_correctable)) for i in eachindex(mc.abs_delta_pdf)
+                )
+            @test unc.probability_percent ≈ clamp(mass_beyond, 0, 100) rtol = 1e-10
+            @test EF.uncorrectable_probability(mc, c; delta_threshold=1e3 * mc.abs_delta_bin_edges[end], torque_budget=1.0).probability_percent == 0
+            @test AEF.plot_needed_current(mc, src; coupling=c, delta_threshold=risk.threshold_fit, torque_budget=1.0) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_needed_current(mc, src; coupling=c)
             @test length(curve.delta_ef) == 500 && all(curve.current_linear .>= 0)
             ntv_plot = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png"))
             @test length(ntv_plot.series_list) >= 2                        # the single-mode and NTV-limited currents
