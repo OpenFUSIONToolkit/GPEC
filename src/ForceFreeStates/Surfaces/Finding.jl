@@ -185,6 +185,23 @@ function check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.Plas
 end
 
 """
+    remove_singular_surfs!(intr; qmin=-Inf, psimax=intr.psilim) -> keep
+
+Drop rational surfaces with `q < qmin` or `psifac > psimax` from `intr.sing`, logging any dropped,
+and return the indices of those kept.
+"""
+function remove_singular_surfs!(intr::ForceFreeStatesInternal; qmin::Real=-Inf, psimax::Real=intr.psilim)
+    keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin && intr.sing[j].psifac <= psimax]
+    if length(keep) < intr.msing
+        excluded = [(intr.sing[j].m, intr.sing[j].q) for j in setdiff(1:intr.msing, keep)]
+        @info "Filtered $(length(excluded)) singular surface(s) outside integration domain: $(excluded)"
+        intr.sing = intr.sing[keep]
+        intr.msing = length(keep)
+    end
+    return keep
+end
+
+"""
     sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
 Set the lower integration bound `intr.psilow`. Port of Fortran RDCON `sing_min` (sing.f):

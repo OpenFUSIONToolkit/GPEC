@@ -1,0 +1,79 @@
+# DIII-D-like H-mode equilibrium — n = 1 and 2 in one ideal stability + perturbed equilibrium run.
+# Same plasma as DIIID-like_ideal_example, with both toroidal modes solved together and driven by
+# mixed-n C-coil currents. The integration stops at q = qhigh, placed between rationals so no n has a
+# small edge singular factor. The q = 2 and q = 3 surfaces resonate at both n, so SingularCoupling
+# repeats them across rows. psihigh and delta_mhigh keep the case small for the regression harness;
+# every n block spans m = -8..20, which a single-n n = 1 run matches only with delta_mhigh = 8.
+# frobenius_psi_max = 0 uses the fixed axis start: the Frobenius start's m = 0 branch is picked by
+# roundoff, which makes the n = 1 anti-Hermitian part of W (and so the torque) differ between
+# otherwise identical runs.
+
+[Equilibrium]
+eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
+eq_type = "efit"               # Type of the input 2D equilibrium file
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
+psilow = 1e-4                  # Lower limit of normalized poloidal flux
+psihigh = 0.9                  # Upper limit of normalized poloidal flux
+mpsi = 128                     # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+mtheta = 256                   # Number of poloidal grid points
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
+etol = 1e-10                   # Error tolerance for equilibrium solver
+force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
+
+[Wall]
+shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.2415                     # Distance from plasma (conformal) or shape parameter
+aw = 0.05                      # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                       # Elongation parameter for wall shapes
+cw = 0                         # Offset of wall center from major radius
+dw = 0.5                       # Triangularity parameter for wall shapes
+tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true          # Equal arc length distribution of nodes on wall
+
+[ForceFreeStates]
+local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
+
+psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
+qhigh = 3.83                   # Integration terminated at q limit determined by min(qa, qhigh)
+sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
+frobenius_psi_max = 0          # Largest starting ψ_N at which the Frobenius axis start is used (0 = fixed start U₁ = 0, U₂ = I everywhere)
+
+nn_low = 1                     # Smallest toroidal mode number to include
+nn_high = 2                    # Largest toroidal mode number to include
+delta_mlow = 4                 # Expands lower bound of Fourier harmonics
+delta_mhigh = 6                # Expands upper bound of Fourier harmonics
+mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+
+kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
+kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
+eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
+save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
+ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+
+# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+integrator            = "forward" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
+set_psilim_via_dmlim  = false  # FALSE for multi-n — dmlim truncation is ambiguous when n varies; qhigh sets the edge instead
+dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
+
+[ForcingTerms]
+forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
+machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
+mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
+nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
+
+[[ForcingTerms.coil_set]]
+name = "c"                              # Coil set; resolves to coil_geometries/d3d_c.dat (DIII-D C-coil, 6 coils)
+currents = [1800.0, -50.0, -450.0, -800.0, -450.0, -50.0]  # Sum of n=1, 2, 3 cosine phasings with 1000, 500, 300 A peaks; n=3 lies outside nn_high [A]
+
+[PerturbedEquilibrium]
+fixed_boundary = false                  # Use fixed boundary conditions
+output_eigenmodes = true                # Output eigenmode fields as b-fields
+compute_response = true                 # Compute plasma response to forcing
+compute_singular_coupling = true        # Compute singular layer coupling metrics
+verbose = false                         # Enable verbose logging
+write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
+reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
