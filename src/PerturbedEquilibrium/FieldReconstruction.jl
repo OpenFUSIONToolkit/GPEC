@@ -375,7 +375,8 @@ function compute_clebsch_displacements(
         for ipsi in 1:npsi
             q = equil.profiles.q_spline(psi_grid[ipsi]; hint=hint)
             for ipert in 1:mpert
-                singfac = (mlow + ipert - 1) - nn * q
+                m, nn = _mode_mn(ffs, ipert)
+                singfac = m - nn * q
                 reg_factor = singfac^2 / (singfac^2 + reg_spot^2)
                 clebsch_psi1[ipsi, ipert] = xi_psi1_modes[ipsi, ipert] * reg_factor
                 clebsch_alpha[ipsi, ipert] = xi_s_modes[ipsi, ipert] * reg_factor / chi1
