@@ -12,7 +12,7 @@ const RUNINFO_EPILOGUE = """
 using SHA
 using LinearAlgebra: BLAS
 let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml"), gpec = GeneralizedPerturbedEquilibrium
-    has_workload = isfile(joinpath(dirname(pathof(gpec)), "precompile.jl"))
+    has_workload = isfile(joinpath(dirname(pathof(gpec)), "Precompile.jl"))
     workload_on = get(Base.get_preferences(Base.PkgId(gpec).uuid), "precompile_workload", true) == true
     open(ARGS[2], "w") do f
         println(f, "runtime_s=", elapsed)
