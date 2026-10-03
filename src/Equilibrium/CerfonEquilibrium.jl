@@ -416,5 +416,5 @@ function cerfon_run(equil_inputs::EquilibriumConfig, cerfon_inputs::CerfonConfig
 
     # 1 is bt_sign=+1: F = +sqrt(F²) by construction. Analytic: ingest=nothing — replay
     # regenerates from the [CERFON_INPUT] TOML section.
-    return DirectRunInput(equil_inputs, sq_in, psi_in, r, z, rmin, rmax, zbot, ztop, psio, 1, nothing)
+    return DirectRunInput(equil_inputs, sq_in, psi_in, r, z, rmin, rmax, zbot, ztop, psio, 1, 1, nothing)
 end
