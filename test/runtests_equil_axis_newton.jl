@@ -11,8 +11,9 @@
     # conical cusp -A·ρ·exp(-(ρ/w)⁴) at the axis: the cells there carry a curvature spike, and the
     # cusp strength A is set so that a Newton step overshoots the axis by `ncell` grid cells.
     # `r_in`, `r_out` set the grid's extent about r0 in units of a; with r_in > r_out the grid's R-midpoint lies inboard
-    # of the axis, so the midplane march takes a step and brackets the axis in R.
-    function cusp_solovev(; ncell, nr=96, r_in=1.4, r_out=1.6)
+    # of the axis, so the midplane march takes a step and brackets the axis in R. `z_shift` moves the grid, and with it
+    # the march's midplane, in Z in units of a.
+    function cusp_solovev(; ncell, nr=96, r_in=1.4, r_out=1.6, z_shift=0.0)
         sol = SolovevConfig(; mr=nr, mz=nr)
         cfg = EquilibriumConfig(; eq_type="sol")
         (; e, a, r0, q0, b0fac) = sol
@@ -20,7 +21,7 @@
         psifac = psio / (a * r0)^2
         rs = collect(range(r0 - r_in * a, r0 + r_out * a; length=nr + 1))
         zh = collect(range(0.0, 1.5e * a; length=nr ÷ 2 + 1))
-        zs = vcat(-reverse(zh[2:end]), zh)
+        zs = z_shift * a .+ vcat(-reverse(zh[2:end]), zh)
         h = rs[2] - rs[1]
         A = ncell * 2 * psifac * r0^2 * h
         cusp(ρ) = A * ρ * exp(-(ρ / (0.5a))^4)
@@ -67,6 +68,18 @@
         test_axis_is_o_point(rp, ro, zo)
         @test abs(zo) <= eps(ro)
         @test abs(ro - r0) < h
+    end
+
+    @testset "axis outside the midplane march bracket is accepted on the plain Newton path" begin
+        # Off the axis's midplane the Solovev B_z changes sign at R² = r0² - 2Z²/e², inboard of the axis, and the
+        # march stops between that point and the axis.
+        (; e, a) = SolovevConfig()
+        rp, r0, h = cusp_solovev(; ncell=0.0, r_in=1.7, r_out=1.3, z_shift=0.7)
+        r_mid, z_mid, dr = (rp.rmin + rp.rmax) / 2, (rp.zmin + rp.zmax) / 2, (rp.rmax - rp.rmin) / 20
+        @test r_mid < sqrt(r0^2 - 2 * z_mid^2 / e^2) < r_mid + dr < r0
+        ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
+        test_axis_is_o_point(rp, ro, zo)
+        @test hypot(ro - r0, zo) < h
     end
 
     @testset "Newton converging off the ψ grid is an error" begin
