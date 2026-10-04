@@ -70,14 +70,20 @@
         @test abs(ro - r0) < h
     end
 
-    @testset "axis outside the midplane march bracket is accepted on the plain Newton path" begin
+    @testset "axis outside the R-bracket of the midplane march is found on either path" begin
         # Off the axis's midplane the Solovev B_z changes sign at R² = r0² - 2Z²/e², inboard of the axis, and the
-        # march stops between that point and the axis.
+        # march stops between that point and the axis, so the axis lies outside the march's last step.
         (; e, a) = SolovevConfig()
-        rp, r0, h = cusp_solovev(; ncell=0.0, r_in=1.7, r_out=1.3, z_shift=0.7)
+        shifted = (; r_in=1.7, r_out=1.3, z_shift=0.7)
+        rp, r0, h = cusp_solovev(; ncell=0.0, shifted...)
         r_mid, z_mid, dr = (rp.rmin + rp.rmax) / 2, (rp.zmin + rp.zmax) / 2, (rp.rmax - rp.rmin) / 20
         @test r_mid < sqrt(r0^2 - 2 * z_mid^2 / e^2) < r_mid + dr < r0
         ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
+        test_axis_is_o_point(rp, ro, zo)
+        @test hypot(ro - r0, zo) < h
+
+        rp, r0, h = cusp_solovev(; ncell=1.75, shifted...)
+        ro, zo, _, _ = @test_logs (:warn, fallback) match_mode = :any direct_position!(rp)
         test_axis_is_o_point(rp, ro, zo)
         @test hypot(ro - r0, zo) < h
     end

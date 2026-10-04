@@ -131,14 +131,8 @@ axis must
   - lie inside the ψ grid;
   - be an O-point, `det ∂(B_R,B_Z)/∂(R,Z) > 0`.
 
-An axis found by the restart must also
-
-  - lie inside the R-bracket `[R - ΔR, R]` of the march's last step, when the march took at least one step;
-  - satisfy `|B_p| ≤ 1e-10 B_scale` with `B_scale = |ψ₀| / (R_axis (R_max - R_min))`.
-
-A warning then reports `|B_p|`. Any violation is an error. The bracket is not required of the direct
-Newton result, because the axis of an up-down asymmetric equilibrium need not share its `R` with the
-midplane `B_z` sign change.
+An axis found by the restart must also satisfy `|B_p| ≤ 1e-10 B_scale` with
+`B_scale = |ψ₀| / (R_axis (R_max - R_min))`, and a warning reports `|B_p|`. Any violation is an error.
 
 ## Arguments:
 
@@ -165,22 +159,17 @@ function direct_position!(raw_profile::DirectRunInput)
     z = (raw_profile.zmax + raw_profile.zmin) / 2.0
     dr = (raw_profile.rmax - raw_profile.rmin) / 20.0
 
-    r_start = r
-    r_prev = r
     for _ in 1:max_iterations
         direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
         if bfield.bz >= 0.0
             break
         end
-        r_prev = r
         r += dr
     end
 
     # If we never exited early, the loop failed to find bz = 0
     !(bfield.bz >= 0) && error("Took too many iterations to get bz=0.")
     r_march, z_march = r, z
-    # The march brackets the midplane B_z sign change in R only if it took at least one step.
-    has_march_bracket = r_march != r_start
 
     # Newton iteration for the O-point (magnetic axis), where B_r = B_z = 0, with each step capped
     # at `cap`. Every attempt uses the same convergence test on the step size, and returns a status of
@@ -252,13 +241,7 @@ function direct_position!(raw_profile::DirectRunInput)
         "(det ∂(B_R,B_Z)/∂(R,Z) = $det_axis ≤ 0, |B_p| = $residual T)."
     )
     if status !== :converged
-        # The restart's step test alone does not certify the axis, so also require it inside the R-bracket of the
-        # midplane B_z sign change, when the march found one, and bound |B_p| against a typical poloidal field.
-        has_march_bracket && !(r_prev <= r <= r_march) &&
-            error(
-                "Failed to find magnetic axis: the restarted Newton converged at (R, Z) = ($r, $z), outside the R-bracket " *
-                "[$r_prev, $r_march] of the B_z sign change found by the midplane march along Z = $z_march."
-            )
+        # The fallback's step test alone does not certify a root, so also bound |B_p| against a typical poloidal field.
         axis_residual_rtol = 1e-10
         b_scale = abs(raw_profile.psio) / (r * (rmax - rmin))
         residual <= axis_residual_rtol * b_scale || error(
