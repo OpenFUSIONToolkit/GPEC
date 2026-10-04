@@ -154,6 +154,22 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
     return (_rs_at, _da_dpsi_at)
 end
 
+# Reference-length factor K = r_s·(dψ_N/dr)|_s. When da/dψ is not a usable positive number (zero, negative
+# or non-finite would corrupt the Δ' diagonal), Δ' is left unconverted with K = 1; under dc_type=:toroidal
+# that is an error, because the critical Δ would be compared with Δ' in a different reference.
+function _reference_length_factor(rs::Real, da_dpsi::Real, psi::Real, dc_type::Symbol)
+    isfinite(da_dpsi) && da_dpsi > 0.0 && return rs / da_dpsi
+    dc_type === :toroidal && throw(
+        ArgumentError(
+            "build_slayer_inputs: da/dψ = $da_dpsi at ψ = $psi is not usable, so the toroidal critical-Δ " *
+            "cannot be converted to the r_s reference at this surface."
+        )
+    )
+    @warn("build_slayer_inputs: da/dψ = $da_dpsi at ψ = $psi is not usable; leaving " *
+          "Δ' unconverted (k_ref = 1) at this surface.", maxlog = 3)
+    return 1.0
+end
+
 """
     toroidal_dgeo(; chi1, v1, q, q1, n, avg_bsq, avg_dpsisq, k_ref) -> Float64
 
@@ -406,15 +422,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         # Reference-length conversion inputs for the outer Δ': K = r_s·(dψ_N/dr)|_s and
         # α = √(−D_I) (Glasser-Greene-Johnson 1975 Eq. 48), with α clamped to 0 on Mercier-unstable
-        # surfaces (the factor turns complex there) and K = 1 whenever da/dψ is not a usable
-        # positive number (zero/non-finite/negative would corrupt the Δ' diagonal).
-        k_ref_k = if isfinite(da_dpsi) && da_dpsi > 0.0
-            rs / da_dpsi
-        else
-            @warn("build_slayer_inputs: da/dψ = $da_dpsi at ψ = $psi is not usable; leaving " *
-                  "Δ' and the toroidal critical-Δ unconverted (k_ref = 1) at this surface.", maxlog = 3)
-            1.0
-        end
+        # surfaces (the factor turns complex there).
+        k_ref_k = _reference_length_factor(rs, da_dpsi, psi, dc_type)
 
         # dgeo_val and kpar_val: Connor et al. 2015 Eq. 59 geometric factor in the r_s reference and
         # the Eq. 20 parallel-wavenumber gradient (see `toroidal_dgeo`, `toroidal_kpar`), derived
