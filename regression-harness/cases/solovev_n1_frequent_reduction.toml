@@ -22,6 +22,7 @@ extract = "real_first"
 label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
+class = "physics_converged"
 
 [quantities.et_imag]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -30,6 +31,7 @@ extract = "imag_first"
 label = "total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
+class = "physics_converged"
 
 [quantities.ep_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
@@ -38,6 +40,7 @@ extract = "real_first"
 label = "plasma energy Re(ep[1])"
 noise_threshold = 1e-10
 order = 12
+class = "physics_converged"
 
 [quantities.ev_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
@@ -46,3 +49,4 @@ extract = "real_first"
 label = "vacuum energy Re(ev[1])"
 noise_threshold = 1e-10
 order = 13
+class = "physics_converged"
