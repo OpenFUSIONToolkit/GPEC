@@ -118,6 +118,7 @@ extract = "all_real"
 label = "SLAYER toroidal critical-Δ factor D_geo"
 noise_threshold = 1e-10
 order = 22
+class = "physics_converged"
 
 # Tearing eigenvalue (coupled mode → length 1). The headline deliverable:
 # a real, nonzero growth rate on a realistic equilibrium. Root-extraction
