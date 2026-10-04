@@ -20,6 +20,7 @@ extract = "real_first"
 label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
+class = "physics_converged"
 
 [quantities.et_imag]
 h5path = "FreeBoundaryStability/eigenmode_energies"
@@ -28,6 +29,7 @@ extract = "imag_first"
 label = "total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
+class = "physics_converged"
 
 [quantities.ep_real]
 h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
@@ -36,6 +38,7 @@ extract = "real_first"
 label = "plasma energy Re(ep[1])"
 noise_threshold = 1e-10
 order = 12
+class = "physics_converged"
 
 [quantities.ev_real]
 h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
@@ -44,6 +47,7 @@ extract = "real_first"
 label = "vacuum energy Re(ev[1])"
 noise_threshold = 1e-10
 order = 13
+class = "physics_converged"
 
 [quantities.vacuum_eigenvalue]
 h5path = "FreeBoundaryStability/vacuum_eigenvalue"
@@ -52,6 +56,7 @@ extract = "value"
 label = "vacuum matrix min eigenvalue"
 noise_threshold = 1e-10
 order = 14
+class = "physics_converged"
 
 [quantities.et_all]
 h5path = "FreeBoundaryStability/eigenmode_energies"
@@ -60,6 +65,7 @@ extract = "all_complex"
 label = "total energy (all)"
 noise_threshold = 1e-10
 order = 20
+class = "physics_converged"
 
 # Integration
 [quantities.nstep]
@@ -69,6 +75,7 @@ extract = "value"
 label = "ODE steps (saved)"
 noise_threshold = 0
 order = 30
+class = "diagnostic"
 
 [quantities.nstep_total]
 h5path = "integration/nstep_total"
@@ -77,6 +84,7 @@ extract = "value"
 label = "ODE steps (total)"
 noise_threshold = 0
 order = 31
+class = "diagnostic"
 
 # Equilibrium — q95 and q0 pin the flux scale, which is solved from the requested on-axis q.
 [quantities.q0]
@@ -86,6 +94,7 @@ extract = "value"
 label = "q0"
 noise_threshold = 1e-12
 order = 40
+class = "equilibrium_scalar"
 
 [quantities.q95]
 h5path = "equil/q95"
@@ -94,6 +103,7 @@ extract = "value"
 label = "q95"
 noise_threshold = 1e-12
 order = 41
+class = "equilibrium_scalar"
 
 [quantities.betat]
 h5path = "equil/betat"
@@ -102,6 +112,7 @@ extract = "value"
 label = "beta_t"
 noise_threshold = 1e-12
 order = 42
+class = "equilibrium_scalar"
 
 [quantities.betan]
 h5path = "equil/betan"
@@ -110,6 +121,7 @@ extract = "value"
 label = "beta_n"
 noise_threshold = 1e-12
 order = 43
+class = "equilibrium_scalar"
 
 # Singular surfaces — the outermost rational is set by where psihigh cuts the diverging q,
 # so these are the quantities that expose a change in truncation behaviour.
@@ -120,6 +132,7 @@ extract = "value"
 label = "# singular surfaces"
 noise_threshold = 0
 order = 50
+class = "topological"
 
 [quantities.sing_psi]
 h5path = "singular/psi"
@@ -128,6 +141,7 @@ extract = "all_real"
 label = "singular psi locations"
 noise_threshold = 1e-8
 order = 51
+class = "physics_converged"
 
 [quantities.sing_q]
 h5path = "singular/q"
@@ -136,6 +150,7 @@ extract = "all_real"
 label = "singular q values"
 noise_threshold = 1e-8
 order = 52
+class = "physics_converged"
 
 # Mode numbers
 [quantities.mpert]
@@ -145,6 +160,7 @@ extract = "value"
 label = "mpert"
 noise_threshold = 0
 order = 60
+class = "topological"
 
 [quantities.npert]
 h5path = "info/npert"
@@ -153,6 +169,7 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 order = 61
+class = "topological"
 
 # Profiles (checksums for fast comparison of large arrays)
 [quantities.q_profile]
@@ -162,6 +179,7 @@ extract = "checksum"
 label = "q profile (checksum)"
 noise_threshold = 0
 order = 70
+class = "physics_converged"
 
 [quantities.pressure_profile]
 h5path = "splines/profiles/mu0p"
@@ -170,6 +188,7 @@ extract = "checksum"
 label = "pressure profile (checksum)"
 noise_threshold = 0
 order = 71
+class = "physics_converged"
 
 # Runtime (special: not from H5)
 [quantities.runtime]
@@ -179,3 +198,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"
