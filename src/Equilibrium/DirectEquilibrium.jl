@@ -254,10 +254,11 @@ function direct_position!(raw_profile::DirectRunInput)
     if status !== :converged
         # The restart's step test alone does not certify the axis, so also require it inside the R-bracket of the
         # midplane B_z sign change, when the march found one, and bound |B_p| against a typical poloidal field.
-        has_march_bracket && !(r_prev <= r <= r_march) && error(
-            "Failed to find magnetic axis: the restarted Newton converged at (R, Z) = ($r, $z), outside the R-bracket " *
-            "[$r_prev, $r_march] of the B_z sign change found by the midplane march along Z = $z_march."
-        )
+        has_march_bracket && !(r_prev <= r <= r_march) &&
+            error(
+                "Failed to find magnetic axis: the restarted Newton converged at (R, Z) = ($r, $z), outside the R-bracket " *
+                "[$r_prev, $r_march] of the B_z sign change found by the midplane march along Z = $z_march."
+            )
         axis_residual_rtol = 1e-10
         b_scale = abs(raw_profile.psio) / (r * (rmax - rmin))
         residual <= axis_residual_rtol * b_scale || error(
