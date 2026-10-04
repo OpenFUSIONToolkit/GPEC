@@ -169,6 +169,18 @@ Absolute tolerance of an equilibrium ODE solve: follows `etol` but is never loos
 equil_abstol(etol::Real, cap::Real=EQUIL_ABSTOL_MAX) = min(etol, cap)
 
 """
+    check_equil_solve(sol, what)
+
+Return the equilibrium ODE solution `sol`, or raise an error naming the solve `what` if the integrator
+stopped early (step limit, step-size underflow, instability) instead of finishing or terminating on its callback.
+"""
+function check_equil_solve(sol, what::AbstractString)
+    OrdinaryDiffEq.SciMLBase.successful_retcode(sol) ||
+        error("Equilibrium ODE solve ($what) stopped early at t = $(sol.t[end]) with retcode $(sol.retcode).")
+    return sol
+end
+
+"""
 Outer constructor for EquilibriumConfig from a parsed TOML dictionary
 """
 function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")

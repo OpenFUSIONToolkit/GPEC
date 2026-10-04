@@ -115,6 +115,7 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     abstol_vec = [equil_abstol(equil_config.etol), equil_abstol(equil_config.etol), 1e20, 1e20, 1e20]
     sol = solve(prob, BS5(); callback=callback, reltol=reltol_vec, abstol=abstol_vec,
         dt=2π / 200, adaptive=true, dense=false)
+    check_equil_solve(sol, "arc-length field line at ψ_N = $psifac")
 
     n = length(sol.u)
     y_out = Matrix{Float64}(undef, n, 5)

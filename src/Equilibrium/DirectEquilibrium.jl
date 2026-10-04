@@ -292,6 +292,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=equil_abstol(equil_config.etol), dt=2π / 200, adaptive=true, dense=false)
+    check_equil_solve(sol, "field line at ψ_N = $psifac")
 
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield

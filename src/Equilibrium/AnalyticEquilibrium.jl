@@ -140,7 +140,9 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol), maxiters=10000, dense=false)
+    # The second-order method takes ~2e4 steps at the default etol = 1e-10, and about 3× more per decade below it.
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol), maxiters=10^6, dense=false)
+    check_equil_solve(sol, "large-aspect-ratio radial profiles")
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -377,11 +379,12 @@ function tj_analytic_shape_solve(p::TJAnalyticShapeParams, nu::Float64;
     saveat=nothing)
     rhs_params = (; p.a, p.B0, p.qc, p.mu, p.pc, p.epsa2, nu=nu)
     prob = ODEProblem(tj_analytic_shape_rhs!, tj_analytic_shape_initial(p, nu), (p.r0, p.a), rhs_params)
-    if saveat === nothing
-        return solve(prob, Vern9(); reltol, abstol, maxiters=10000, dense=false)
+    sol = if saveat === nothing
+        solve(prob, Vern9(); reltol, abstol, maxiters=10000, dense=false)
     else
-        return solve(prob, Vern9(); reltol, abstol, maxiters=10000, saveat=saveat)
+        solve(prob, Vern9(); reltol, abstol, maxiters=10000, saveat=saveat)
     end
+    return check_equil_solve(sol, "TJ-analytic shaping functions at ν = $nu")
 end
 
 """

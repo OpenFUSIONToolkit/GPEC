@@ -136,6 +136,18 @@
         @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; etol=1e-8).etol == 1e-8
     end
 
+    @testset "an equilibrium ODE solve that stops early is an error" begin
+        using OrdinaryDiffEq
+        check = GeneralizedPerturbedEquilibrium.Equilibrium.check_equil_solve
+        prob = ODEProblem((u, p, t) -> u, 1.0, (0.0, 10.0))
+        sol = solve(prob, Vern9())
+        @test check(sol, "test") === sol
+        stopped = @test_logs (:warn, r"maxiters") match_mode = :any solve(prob, Vern9(); maxiters=1)
+        @test_throws r"stopped early at t = .* with retcode MaxIters" check(stopped, "test")
+        terminated = solve(prob, Vern9(); callback=ContinuousCallback((u, t, integrator) -> t - 0.5, terminate!))
+        @test check(terminated, "test") === terminated
+    end
+
     @testset "Deprecated TOML keys are dropped, not fatal" begin
         # Removed control knobs must keep old gpec.toml decks (and older gpec.h5 replays,
         # whose stored TOML blob goes through the same path) parsing with a warning.
