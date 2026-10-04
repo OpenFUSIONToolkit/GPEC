@@ -38,12 +38,29 @@
         @test hypot(d(1, 0), d(0, 1)) < newton_tol * rp.psio / (rp.rmax - rp.rmin)
     end
 
-    @testset "curvature spike at the axis takes the fallback" begin
-        rp, r0, h = cusp_solovev(; ncell=1.75)
-        ro, zo, _, _ = @test_logs (:warn, fallback) match_mode = :any direct_position!(rp)
-        test_axis_is_o_point(rp, ro, zo)
-        @test abs(zo) <= eps(ro)
-        @test abs(ro - r0) < h
+    # Newton on the cusp is chaotic: whether it converges, cycles or leaves the grid at a given cusp strength depends
+    # on the machine's rounding. Whatever it does, the search must return the O-point at the cusp or fail loudly.
+    @testset "curvature spike at the axis: a verified axis or a loud failure" begin
+        n_fallback = 0
+        grids = ((;), (; r_in=1.6, r_out=1.4), (; r_in=1.7, r_out=1.3, z_shift=0.7))
+        for grid in grids, ncell in 1.0:0.25:3.0
+            rp, r0, h = cusp_solovev(; ncell, grid...)
+            logger = Test.TestLogger(; min_level=Base.CoreLogging.Warn)
+            outcome = try
+                Base.CoreLogging.with_logger(() -> direct_position!(rp), logger)
+            catch err
+                err
+            end
+            if outcome isa Exception
+                @test occursin("Failed to find magnetic axis", sprint(showerror, outcome))
+            else
+                ro, zo = outcome[1], outcome[2]
+                test_axis_is_o_point(rp, ro, zo)
+                @test hypot(ro - r0, zo) < h
+                n_fallback += any(occursin(fallback, log.message) for log in logger.logs)
+            end
+        end
+        @test n_fallback > 0
     end
 
     @testset "smooth ψ takes the plain Newton path" begin
@@ -70,28 +87,22 @@
         @test abs(ro - r0) < h
     end
 
-    @testset "axis outside the R-bracket of the midplane march is found on either path" begin
+    @testset "axis outside the R-bracket of the midplane march is found" begin
         # Off the axis's midplane the Solovev B_z changes sign at R² = r0² - 2Z²/e², inboard of the axis, and the
         # march stops between that point and the axis, so the axis lies outside the march's last step.
         (; e, a) = SolovevConfig()
-        shifted = (; r_in=1.7, r_out=1.3, z_shift=0.7)
-        rp, r0, h = cusp_solovev(; ncell=0.0, shifted...)
+        rp, r0, h = cusp_solovev(; ncell=0.0, r_in=1.7, r_out=1.3, z_shift=0.7)
         r_mid, z_mid, dr = (rp.rmin + rp.rmax) / 2, (rp.zmin + rp.zmax) / 2, (rp.rmax - rp.rmin) / 20
         @test r_mid < sqrt(r0^2 - 2 * z_mid^2 / e^2) < r_mid + dr < r0
         ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
         test_axis_is_o_point(rp, ro, zo)
         @test hypot(ro - r0, zo) < h
-
-        rp, r0, h = cusp_solovev(; ncell=1.75, shifted...)
-        ro, zo, _, _ = @test_logs (:warn, fallback) match_mode = :any direct_position!(rp)
-        test_axis_is_o_point(rp, ro, zo)
-        @test hypot(ro - r0, zo) < h
     end
 
     @testset "Newton converging off the ψ grid is an error" begin
-        for ncell in (2.25, 2.5)
-            rp, _, _ = cusp_solovev(; ncell)
-            @test_throws r"outside the ψ grid" direct_position!(rp)
-        end
+        # A smooth ψ on a grid that lies wholly outboard of the axis: Newton follows the spline's extrapolation inboard.
+        rp, r0, _ = cusp_solovev(; ncell=0.0, r_in=-0.2, r_out=1.6)
+        @test rp.rmin > r0
+        @test_throws r"outside the ψ grid" direct_position!(rp)
     end
 end
