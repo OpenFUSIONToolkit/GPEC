@@ -138,6 +138,35 @@ terms respectively, and do not modify the stored kinetic profile splines.
        when computing the `toroidal_rotation_factor` back-solve. Julia uses a
        clean reimplementation with consistent pre-scaling derivatives throughout.
 
+## Regularization: why kinetic runs set `reg_spot = 0`
+
+`[PerturbedEquilibrium] reg_spot` smooths the displacements before they drive the NTV
+integrand, multiplying ``\xi^{\psi\prime}`` and ``\xi^\alpha`` by
+``Q^2/(Q^2 + \mathrm{reg\_spot}^2)`` with ``Q = m - nq``. It exists because **ideal** MHD is
+singular at the rationals: ``\bar F_\mathrm{ideal} = Q F Q`` has ``\det \bar F = 0`` there, so
+those two components diverge as ``1/Q`` and the torque integral does not converge.
+
+The **self-consistent kinetic** workflow has no such singularity. Park & Logan
+([Phys. Plasmas 24, 032505 (2017)](https://doi.org/10.1063/1.4978562), §III D) decompose the
+kinetic composite matrix as ``F_k = Q \bar F_k Q - P_l^\dagger Q - Q P_u + R_1`` where
+``R_1 \neq 0`` at ``Q = 0``; with finite torque ``\det \bar F`` is complex, its zeros leave the
+real ``\psi`` axis, and the singularity is removed from both the solution and the torque
+integral. (Torque-free kinetic energy principles instead *shift and split* the zeros to
+``\psi_r \mp r_{L,R}``, where the singularity is logarithmic and integrable — still not a case
+for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmetries* (PhD thesis,
+Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
+notation.
+
+GPEC therefore **forces `reg_spot = 0` whenever `kinetic_factor > 0`**, logging the override.
+Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
+is never regularized, so damping the other two breaks their near-resonance cancellation in
+``\delta B/B`` and leaves a spurious residue driving the NTV integrand.
+
+The check that this is right is that the NTV torque and the Euler–Lagrange solution's own
+dissipation ``-2n\,\mathrm{Im}\langle \xi, u_2\rangle/4\mu_0`` — two independent calculations
+of the same quantity — agree to a fraction of a percent with the regularization off, and disagree
+by tens of percent with it on.
+
 ## HDF5 outputs: complex torque convention and the EnergyIntegrals layout
 
 The method level of `KineticForces/<method>/` reports the two physical scalars a user
