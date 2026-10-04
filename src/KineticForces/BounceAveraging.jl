@@ -10,6 +10,14 @@ Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 Ports Fortran torque.F90 lines 530-816.
 """
 
+# Guard against a non-terminating spline cell walk; θ grids are O(10²) cells.
+const MAX_SPLINE_CELLS = 100_000
+# Stationary points closer than this in θ are the same root seen from both sides
+# of a cell boundary.
+const EXTREMUM_MERGE_TOL = 1e-12
+# Cells a hinted cell search may step before falling back to bisection.
+const HINT_STEP_BUDGET = 8
+
 # ============================================================================
 # BounceData struct
 # ============================================================================
@@ -208,6 +216,14 @@ function compute_bounce_data(
     # Per-surface scratch, reused across all λ.
     scr = BounceScratch(ntheta, mpert)
 
+    # B(θ) is decomposed once per surface into its cells and stationary points; every
+    # λ then reuses it instead of rescanning [0,1].
+    bf = _surface_b_field(B_vpar)
+    bpts_buf = Float64[]
+    # One resumable cell hint per monotone interval; λ ascends, so each interval's
+    # crossing advances steadily and the next λ starts where the last one finished.
+    hints = ones(Int, length(bf.theta) + 1)
+
     # Trapped-passing boundary and λ range
     lmdatpb = bo / bmax
     lmdamax = bo / bmin
@@ -241,7 +257,7 @@ function compute_bounce_data(
 
         # Find bounce points and build θ sub-grid
         _, _, tdt_pts, tdt_wts = _find_bounce_points_and_grid(
-            lmda, bo, sigma, B_vpar, theta_bmax, psi, ntheta)
+            lmda, bo, sigma, B_vpar, theta_bmax, psi, ntheta, bf, bpts_buf, hints)
 
         # Bounce integrals over θ (Fortran lines 674-735)
         wbbar, wdbar, dJdJ_val, wmats_lmda = _bounce_integrate(
@@ -418,20 +434,335 @@ consistent with the bounce-point roots as in Fortran's `vspl`.
 
 
 """
+    SurfaceBField
+
+The periodic cubic B(θ) of one flux surface, decomposed once and reused for every λ.
+Holds the per-cell polynomial coefficients, B at every knot, and the stationary points
+of B. Consecutive stationary points bound intervals on which B is monotone, so each
+holds at most one bounce point; within such an interval the cached knot values locate
+the cell by bisection and the cell's cubic is then solved in closed form.
+
+## Fields
+- `knot::Vector{Float64}`: cell boundaries, ascending, `knot[1] = 0`, `knot[end] = 1`
+- `bknot::Vector{Float64}`: B at each knot
+- `poly::Vector{NTuple{4,Float64}}`: per-cell `(d, c, b, a)` of `S(u) = d + cu + bu² + au³`,
+  in the cell-local coordinate `u = θ − knot[i]`
+- `theta::Vector{Float64}`: stationary points of B, ascending, in [0,1)
+- `bval::Vector{Float64}`: B at each stationary point
+"""
+struct SurfaceBField
+    knot::Vector{Float64}
+    bknot::Vector{Float64}
+    poly::Vector{NTuple{4,Float64}}
+    theta::Vector{Float64}
+    bval::Vector{Float64}
+end
+
+"""
+Decompose the cubic `B_vpar` by walking its cells once, recording each cell's
+polynomial and endpoint value and solving the quadratic dS/dθ = 0 on each to get the
+exact stationary points. Uses only the public `coeffs`/`CellPoly` interface, so it
+holds for whatever θ grid the surface interpolant was built on.
+"""
+function _surface_b_field(B_vpar)
+    knot = Float64[0.0]
+    bknot = Float64[]
+    poly = NTuple{4,Float64}[]
+    theta = Float64[]
+
+    x = 0.0
+    while true
+        cell = coeffs(B_vpar, x)
+        h = cell.xR - cell.xL
+        d, c, b, a = cell.p
+        push!(poly, (d, c, b, a))
+        push!(bknot, d)                      # S(0) = B at the cell's left knot
+        push!(knot, cell.xR)
+
+        # S'(u) = c + 2b·u + 3a·u², u ∈ [0, h)
+        qa, qb, qc = 3a, 2b, c
+        if abs(qa) <= eps(Float64) * max(abs(qb), abs(qc), 1.0)
+            if qb != 0
+                u = -qc / qb
+                (0.0 <= u < h) && push!(theta, cell.xL + u)
+            end
+        else
+            disc = qb^2 - 4 * qa * qc
+            if disc >= 0
+                sq = sqrt(disc)
+                for u in ((-qb - sq) / (2qa), (-qb + sq) / (2qa))
+                    (0.0 <= u < h) && push!(theta, cell.xL + u)
+                end
+            end
+        end
+
+        cell.xR >= 1.0 && break
+        x = cell.xR
+        length(poly) > MAX_SPLINE_CELLS && error("ERROR: _surface_b_field - cell walk did not reach θ=1")
+    end
+    push!(bknot, evalpoly(knot[end] - knot[end-1], poly[end]))   # B at θ = 1
+
+    sort!(theta)
+    # A stationary point on a cell boundary is reported by both neighbouring cells.
+    if length(theta) > 1
+        keep = 1
+        for i in 2:length(theta)
+            if theta[i] - theta[keep] > EXTREMUM_MERGE_TOL
+                keep += 1
+                theta[keep] = theta[i]
+            end
+        end
+        resize!(theta, keep)
+    end
+
+    bval = [_b_at(knot, poly, t) for t in theta]
+    return SurfaceBField(knot, bknot, poly, theta, bval)
+end
+
+"""Cell index holding θ ∈ [0,1], from the ascending knot vector."""
+@inline _cell_index(knot::Vector{Float64}, θ::Float64) =
+    clamp(searchsortedlast(knot, θ), 1, length(knot) - 1)
+
+"""Evaluate B at θ from the cached cell polynomials."""
+@inline function _b_at(knot::Vector{Float64}, poly::Vector{NTuple{4,Float64}}, θ::Float64)
+    i = _cell_index(knot, θ)
+    return evalpoly(θ - knot[i], poly[i])
+end
+
+"""
+Real roots of `a·u³ + b·u² + c·u + d = 0`, returned as `(count, r1, r2, r3)` with
+unused slots `NaN`. Degenerate leading coefficients fall through to the quadratic and
+linear cases; three distinct real roots use the trigonometric form, which stays well
+conditioned where Cardano's radicals cancel.
+"""
+function _real_cubic_roots(a::Float64, b::Float64, c::Float64, d::Float64)
+    scale = max(abs(b), abs(c), abs(d), 1.0)
+    if abs(a) <= eps(Float64) * scale
+        if abs(b) <= eps(Float64) * max(abs(c), abs(d), 1.0)
+            c == 0 && return (0, NaN, NaN, NaN)
+            return (1, -d / c, NaN, NaN)
+        end
+        disc = c * c - 4 * b * d
+        disc < 0 && return (0, NaN, NaN, NaN)
+        sq = sqrt(disc)
+        # Cancellation-free quadratic roots (Numerical Recipes §5.6).
+        q = c == 0 ? -0.5 * sq : -0.5 * (c + copysign(sq, c))
+        r1 = q / b
+        r2 = q == 0 ? r1 : d / q
+        return (2, r1, r2, NaN)
+    end
+
+    B, C, D = b / a, c / a, d / a
+    shift = B / 3
+    p = C - B * B / 3
+    q = 2 * B^3 / 27 - B * C / 3 + D
+    disc = (q / 2)^2 + (p / 3)^3
+
+    if p == 0 && q == 0
+        return (1, -shift, NaN, NaN)               # triple root
+    elseif abs(disc) <= 8 * eps(Float64) * max((q / 2)^2, abs(p / 3)^3)
+        # Repeated root. The discriminant cancels to ~0 here, so the branches below
+        # would lose it: disc > 0 by a rounding step reports only the simple root.
+        t2 = -3q / (2p)
+        return (3, 3q / p - shift, t2 - shift, t2 - shift)
+    elseif disc > 0
+        s = sqrt(disc)
+        t = cbrt(-q / 2 + s) + cbrt(-q / 2 - s)
+        return (1, t - shift, NaN, NaN)
+    else
+        # Three real roots: t_k = 2r·cos(φ − 2πk/3), r = √(−p/3), φ = acos(−q/2r³)/3.
+        r = sqrt(-p / 3)
+        φ = acos(clamp(-q / (2 * r^3), -1.0, 1.0)) / 3
+        return (3, 2r * cos(φ) - shift, 2r * cos(φ - 2π / 3) - shift, 2r * cos(φ - 4π / 3) - shift)
+    end
+end
+
+"""
+Solve `B(θ) = btarget` inside cell `ic`, restricted to `θ ∈ [θlo, θhi]`. The cubic is
+solved in closed form and polished with one Newton step, which recovers the digits the
+closed form loses when two of its roots are nearly coincident. Returns `NaN` if no root
+lies in the restricted range.
+"""
+function _cell_level_root(bf::SurfaceBField, ic::Int, btarget::Float64, θlo::Float64, θhi::Float64)
+    d, c, b, a = bf.poly[ic]
+    x0 = bf.knot[ic]
+    ulo, uhi = θlo - x0, θhi - x0
+    # Admit roots a rounding step outside the cell: θlo/θhi are stationary points and
+    # cell edges, and the root can sit exactly on one.
+    pad = 8 * eps(Float64) * max(abs(ulo), abs(uhi), bf.knot[ic+1] - x0)
+
+    n, r1, r2, r3 = _real_cubic_roots(a, b, c, d - btarget)
+    best, bestres = NaN, Inf
+    for k in 1:n
+        u = k == 1 ? r1 : (k == 2 ? r2 : r3)
+        (isfinite(u) && ulo - pad <= u <= uhi + pad) || continue
+        u = clamp(u, ulo, uhi)
+        # One Newton step on S(u) − btarget, skipped at a stationary point.
+        deriv = c + u * (2b + u * 3a)
+        if deriv != 0
+            un = u - (evalpoly(u, (d - btarget, c, b, a))) / deriv
+            (ulo - pad <= un <= uhi + pad) && (u = clamp(un, ulo, uhi))
+        end
+        res = abs(evalpoly(u, (d - btarget, c, b, a)))
+        if res < bestres
+            best, bestres = u, res
+        end
+    end
+    return isnan(best) ? NaN : x0 + best
+end
+
+"""
+Where `btarget` sits relative to cell `ic` of a monotone span: `-1` before it, `0`
+inside, `+1` past it. `s` carries the span's direction so one comparison serves both.
+The span's first and last cells are entered part-way, at the stationary points bounding
+it, so their outer edge value comes from `ba`/`bb` rather than from a knot.
+"""
+@inline function _cell_position(
+    bf::SurfaceBField, ic::Int, ia::Int, ib::Int,
+    ba::Float64, bb::Float64, btarget::Float64, s::Float64
+)
+    left = ic == ia ? ba : bf.bknot[ic]
+    right = ic == ib ? bb : bf.bknot[ic+1]
+    s * btarget < s * left && return -1
+    s * btarget > s * right && return 1
+    return 0
+end
+
+"""
+Cell holding the `B = btarget` crossing on a monotone span running from cell `ia` to
+cell `ib`.
+
+λ advances monotonically through `compute_bounce_data`, so `btarget = bo/λ` falls
+monotonically and each interval's crossing walks steadily along the cells in one
+direction. Resuming from the previous λ's cell therefore costs a step or two, the same
+hint idiom FastInterpolations uses for its own searches. Bisection stays as the fallback
+for the first λ of a surface and for the sweep near a stationary point, where B is flat
+and the crossing can cross many cells between consecutive λ.
+"""
+function _locate_cell(
+    bf::SurfaceBField, ia::Int, ib::Int, ba::Float64, bb::Float64,
+    btarget::Float64, hint::Int
+)
+    s = bb >= ba ? 1.0 : -1.0
+    ic = clamp(hint, ia, ib)
+    pos = _cell_position(bf, ic, ia, ib, ba, bb, btarget, s)
+    steps = 0
+    while pos != 0 && steps < HINT_STEP_BUDGET
+        ic += pos
+        (ia <= ic <= ib) || return _bisect_cell(bf, ia, ib, btarget, s)
+        pos = _cell_position(bf, ic, ia, ib, ba, bb, btarget, s)
+        steps += 1
+    end
+    return pos == 0 ? ic : _bisect_cell(bf, ia, ib, btarget, s)
+end
+
+"""Bisection on the span's monotone knot values, for when the hint does not pay off."""
+function _bisect_cell(bf::SurfaceBField, ia::Int, ib::Int, btarget::Float64, s::Float64)
+    ia >= ib && return ia
+    s * bf.bknot[ia+1] > s * btarget && return ia
+    s * bf.bknot[ib] <= s * btarget && return ib
+    lo, hi = ia + 1, ib
+    while hi - lo > 1
+        mid = (lo + hi) >>> 1
+        s * bf.bknot[mid] <= s * btarget ? (lo = mid) : (hi = mid)
+    end
+    return lo
+end
+
+"""
+Solve the single `B = btarget` crossing on `[θa, θb]`, a span on which B is monotone and
+which does not cross the θ = 0/1 seam. Returns `(θ, cell)`; the cell feeds back as the
+next λ's hint. `θ` is `NaN` when no root lies in the span.
+"""
+function _monotone_segment_root(
+    bf::SurfaceBField, θa::Float64, θb::Float64,
+    btarget::Float64, hint::Int
+)
+    ia = _cell_index(bf.knot, θa)
+    ib = max(_cell_index(bf.knot, θb), ia)
+    ba = _b_at(bf.knot, bf.poly, θa)
+    bb = _b_at(bf.knot, bf.poly, θb)
+
+    ic = ia == ib ? ia : _locate_cell(bf, ia, ib, ba, bb, btarget, hint)
+    root = _cell_level_root(bf, ic, btarget, max(θa, bf.knot[ic]), min(θb, bf.knot[ic+1]))
+    # A target landing within rounding of a knot can select the neighbouring cell.
+    isnan(root) && ic > ia && (root = _cell_level_root(bf, ic - 1, btarget, max(θa, bf.knot[ic-1]), min(θb, bf.knot[ic])))
+    isnan(root) && ic < ib && (root = _cell_level_root(bf, ic + 1, btarget, max(θa, bf.knot[ic+1]), min(θb, bf.knot[ic+2])))
+    return root, ic
+end
+
+"""
+Bounce points of `v_par(θ) = 1 − (λ/bo)·B(θ)` for a trapped particle. `B = bo/λ` at a
+bounce point, so a monotone interval between stationary points of B contains one iff
+`bo/λ` lies strictly between its endpoint B values — a scalar test against cached
+values. The crossing is then solved directly from the cell's cubic coefficients: no
+iteration, no spline evaluation, and no blind search, since `hints` carries each
+interval's cell over from the previous λ.
+
+Returns roots sorted descending, the order the deepest-well and marginally-trapped logic
+downstream assumes; fewer than two roots signals a degenerate λ and sends the caller to
+the fallback. `hints` is sized `length(bf.theta) + 1`, the extra slot being the far half
+of the interval that wraps through the seam.
+"""
+function _bounce_points_at_lambda!(
+    bpts::Vector{Float64}, hints::Vector{Int},
+    bf::SurfaceBField, lmda::Float64, bo::Float64
+)
+    empty!(bpts)
+    k = length(bf.theta)
+    k < 2 && return bpts
+
+    btarget = bo / lmda
+    for i in 1:k
+        j = i == k ? 1 : i + 1
+        (bf.bval[i] - btarget) * (bf.bval[j] - btarget) < 0 || continue
+        θa, θb = bf.theta[i], bf.theta[j]
+
+        root = NaN
+        if i < k
+            root, hints[i] = _monotone_segment_root(bf, θa, θb, btarget, hints[i])
+        else
+            # The last interval wraps through θ = 0/1. Split it at the seam, where B is
+            # continuous for the periodic fit, and solve whichever half spans btarget.
+            if (bf.bval[i] - btarget) * (bf.bknot[end] - btarget) <= 0
+                root, hints[k] = _monotone_segment_root(bf, θa, 1.0, btarget, hints[k])
+            else
+                root, hints[k+1] = _monotone_segment_root(bf, 0.0, θb, btarget, hints[k+1])
+            end
+        end
+
+        isnan(root) && return empty!(bpts)
+        push!(bpts, mod(root, 1.0))
+    end
+
+    sort!(bpts; rev=true)
+    return bpts
+end
+
+
+"""
 Find bounce points for trapped/passing particles and build θ sub-grid.
 Returns (t1, t2, theta_points, theta_weights).
 """
 function _find_bounce_points_and_grid(
     lmda::Float64, bo::Float64, sigma::Int,
     B_vpar, theta_bmax::Float64, psi::Float64,
-    ntheta::Int
+    ntheta::Int, bf::SurfaceBField, bpts_buf::Vector{Float64}, hints::Vector{Int}
 )
     if sigma == 0  # trapped
         # Bounce points: all roots of v_par(θ) = 1 − (λ/bo)·B_vpar(θ) in (0,1),
         # sorted descending — the same order as Fortran spline_roots, which the
         # marginally-trapped and deepest-well wrap logic below assume.
-        vpar_fn = θ -> _vpar_from_spline(B_vpar, lmda, bo, θ)
-        bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
+        bpts = _bounce_points_at_lambda!(bpts_buf, hints, bf, lmda, bo)
+
+        if length(bpts) < 2
+            # Degenerate λ: v_par is tangent to zero at an extremum of B (so no
+            # interval brackets strictly), or B has fewer than two stationary
+            # points. Rare — the λ grid excludes both trapped-passing endpoints —
+            # so fall back to the adaptive whole-interval scan and keep its behaviour.
+            vpar_fn = θ -> _vpar_from_spline(B_vpar, lmda, bo, θ)
+            bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
+        end
 
         nbpts = length(bpts)
         if nbpts < 1
