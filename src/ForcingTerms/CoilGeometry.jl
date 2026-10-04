@@ -53,7 +53,7 @@ A coil set comes from one of several sources, selected by `source`:
   - `"window_pane"`: an analytic rectangular picture-frame array, placed EITHER by explicit
     corners (`rz_corners`) OR by physical standoff from the plasma surface (`standoff`,
     `poloidal_angle`, `poloidal_length`, `poloidal_tilt`); shared toroidal layout via
-    `ncoil_gen`, `gap_fraction`, `phi0`.
+    `n_coils`, `gap_fraction`, `phi0`.
   - `"helical"`: an analytic helical array on a circular cross-section torus
     (`R0`, `a`, `m_hel`, `n_hel`, `theta_lo`, `theta_hi`, `n_coils`, `gap_fraction`, `phi0`, `offset`).
 
@@ -69,23 +69,22 @@ Shifts/tilts apply to every source (the analytic geometry is built first, then t
   - `currents`: current [A] per conductor `[ncoil]`; shorter arrays pad with zeros
   - `shiftx`, `shifty`, `shiftz`: per-conductor translation [m] `[ncoil]`
   - `tiltx`, `tilty`, `tiltz`: per-conductor tilt in degrees (or meters if `tilt_in_meters`)
-  - `xnom`, `ynom`, `znom`: explicit rotation center [m]; defaults to arc-length-weighted center of mass
+  - `rotation_center_x`, `rotation_center_y`, `rotation_center_z`: explicit rotation center [m]; defaults to arc-length-weighted center of mass
   - `n_tilt`: toroidal mode number for tilt/shift modulation; -1 means inherit run's n
   - `tilt_in_meters`: interpret tilt as displacement [m] instead of angle [degrees]
 
 Analytic-source parameters (used only for the matching `source`):
 
   - `radius`, `height`: PF hoop circle radius and Z height [m]
-  - `ncoil_gen`: number of generated coils (window-pane / helical arrays)
   - `rz_corners`: window-pane cross-section as two opposite `[R, Z]` corners in m (corner mode)
   - `gap_fraction`: toroidal gap between adjacent coils as a fraction of their spacing
   - `phi0`: toroidal angle offset of the first generated coil [rad]
   - `R0`, `a`: helical torus major radius and minor (circle) radius [m]
   - `m_hel`, `n_hel`: helical poloidal/toroidal mode numbers setting the pitch
   - `theta_lo`, `theta_hi`: helical poloidal extent in degrees; a full turn when `theta_hi-theta_lo == 360`
-  - `n_coils`: number of helical coils in the array
+  - `n_coils`: number of coils in a generated window-pane or helical array
   - `offset`: helical coil radial offset from the torus surface [m]
-  - `nsec_gen`: optional override of the generated point count per coil
+  - `points_per_coil`: optional override of the generated point count per coil
 
 Window-pane standoff placement (alternative to `rz_corners`; needs an equilibrium):
 
@@ -106,16 +105,15 @@ Base.@kwdef struct CoilSetConfig
     tiltx::Vector{Float64} = Float64[]
     tilty::Vector{Float64} = Float64[]
     tiltz::Vector{Float64} = Float64[]
-    xnom::Vector{Float64} = Float64[]
-    ynom::Vector{Float64} = Float64[]
-    znom::Vector{Float64} = Float64[]
+    rotation_center_x::Vector{Float64} = Float64[]
+    rotation_center_y::Vector{Float64} = Float64[]
+    rotation_center_z::Vector{Float64} = Float64[]
     n_tilt::Int = -1
     tilt_in_meters::Bool = false
 
     # Analytic-source parameters
     radius::Float64 = 0.0
     height::Float64 = 0.0
-    ncoil_gen::Int = 0
     rz_corners::Vector{Vector{Float64}} = Vector{Float64}[]
     gap_fraction::Float64 = 0.0
     phi0::Float64 = 0.0
@@ -127,7 +125,7 @@ Base.@kwdef struct CoilSetConfig
     theta_hi::Float64 = 360.0
     n_coils::Int = 0
     offset::Float64 = 0.0
-    nsec_gen::Int = 0
+    points_per_coil::Int = 0
 
     # Window-pane standoff placement (alternative to rz_corners)
     standoff::Float64 = NaN
@@ -180,6 +178,9 @@ function CoilConfig(ft_ctrl::ForcingTermsControl)
 end
 
 function _parse_coil_set_config(d::Dict{String,Any})
+    known = Set(String.(fieldnames(CoilSetConfig)))
+    unknown = sort([k for k in keys(d) if !(k in known)])
+    isempty(unknown) || throw(ArgumentError("unknown keys $(unknown) in [[ForcingTerms.coil_set]]. Known: $(sort(collect(known)))."))
     fvec(key) = Float64.(get(d, key, Float64[]))
     # rz_corners arrives as a Vector of [R, Z] pairs (TOML array of arrays)
     corners = [Float64.(c) for c in get(d, "rz_corners", Vector{Float64}[])]
@@ -195,14 +196,13 @@ function _parse_coil_set_config(d::Dict{String,Any})
         tiltx=fvec("tiltx"),
         tilty=fvec("tilty"),
         tiltz=fvec("tiltz"),
-        xnom=fvec("xnom"),
-        ynom=fvec("ynom"),
-        znom=fvec("znom"),
+        rotation_center_x=fvec("rotation_center_x"),
+        rotation_center_y=fvec("rotation_center_y"),
+        rotation_center_z=fvec("rotation_center_z"),
         n_tilt=get(d, "n_tilt", -1),
         tilt_in_meters=get(d, "tilt_in_meters", false),
         radius=Float64(get(d, "radius", 0.0)),
         height=Float64(get(d, "height", 0.0)),
-        ncoil_gen=get(d, "ncoil_gen", 0),
         rz_corners=corners,
         gap_fraction=Float64(get(d, "gap_fraction", 0.0)),
         phi0=Float64(get(d, "phi0", 0.0)),
@@ -214,7 +214,7 @@ function _parse_coil_set_config(d::Dict{String,Any})
         theta_hi=Float64(get(d, "theta_hi", 360.0)),
         n_coils=get(d, "n_coils", 0),
         offset=Float64(get(d, "offset", 0.0)),
-        nsec_gen=get(d, "nsec_gen", 0),
+        points_per_coil=get(d, "points_per_coil", 0),
         standoff=Float64(get(d, "standoff", NaN)),
         poloidal_angle=Float64(get(d, "poloidal_angle", NaN)),
         poloidal_length=Float64(get(d, "poloidal_length", 0.0)),
@@ -834,7 +834,7 @@ Apply per-conductor shifts and tilts to a coil set, returning a modified copy.
 
 Replicates the Fortran `coil_read` shift/tilt logic (coil.F lines 240–340):
 
-  - Tilts are rotations around the arc-length-weighted center of mass (unless `xnom/ynom/znom` specified)
+  - Tilts are rotations around the arc-length-weighted center of mass (unless `rotation_center_x/_y/_z` specified)
   - `n_tilt` controls the toroidal periodicity of tilt/shift modulation
   - n_tilt = 0: rigid shift only (no tilts applied)
   - n_tilt ≥ 1: n-fold modulated perturbations
@@ -854,9 +854,9 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
     tilty_cfg = _pad(cfg.tilty, ncoil)
     tiltz_cfg = _pad(cfg.tiltz, ncoil)
 
-    xnom_cfg = _pad(isempty(cfg.xnom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.xnom, ncoil)
-    ynom_cfg = _pad(isempty(cfg.ynom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.ynom, ncoil)
-    znom_cfg = _pad(isempty(cfg.znom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.znom, ncoil)
+    xnom_cfg = _pad(isempty(cfg.rotation_center_x) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_x, ncoil)
+    ynom_cfg = _pad(isempty(cfg.rotation_center_y) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_y, ncoil)
+    znom_cfg = _pad(isempty(cfg.rotation_center_z) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_z, ncoil)
 
     # Check if n_tilt = 0 suppresses tilts (Fortran: "no n=0 component")
     apply_tilt = n_tilt != 0
@@ -988,7 +988,7 @@ shifts/tilts are applied by the caller, so all sources share the same downstream
 """
 function _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig; equil=nothing)
     if sc.source == "pf_hoop"
-        kw = sc.nsec_gen > 0 ? (; nsec=sc.nsec_gen) : (;)
+        kw = sc.points_per_coil > 0 ? (; nsec=sc.points_per_coil) : (;)
         return make_pf_hoop(; radius=sc.radius, height=sc.height,
             name=isempty(sc.name) ? "pf_hoop" : sc.name, kw...)
     elseif sc.source == "window_pane"
@@ -1003,11 +1003,11 @@ function _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig; equil=nothing)
                       "pass `equil` to load_coil_sets, or use rz_corners for corner mode")
             return make_window_pane_standoff(equil; standoff=sc.standoff,
                 poloidal_angle=sc.poloidal_angle, poloidal_length=sc.poloidal_length,
-                poloidal_tilt=sc.poloidal_tilt, ncoil=sc.ncoil_gen,
+                poloidal_tilt=sc.poloidal_tilt, ncoil=sc.n_coils,
                 gap_fraction=sc.gap_fraction, phi0=sc.phi0,
                 name=isempty(sc.name) ? "window_pane" : sc.name)
         elseif has_corners
-            return make_window_pane(; ncoil=sc.ncoil_gen, rz_corners=sc.rz_corners,
+            return make_window_pane(; ncoil=sc.n_coils, rz_corners=sc.rz_corners,
                 gap_fraction=sc.gap_fraction, phi0=sc.phi0,
                 name=isempty(sc.name) ? "window_pane" : sc.name)
         else
@@ -1015,7 +1015,7 @@ function _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig; equil=nothing)
                   "standoff+poloidal_angle (standoff mode)")
         end
     elseif sc.source == "helical"
-        kw = sc.nsec_gen > 0 ? (; npts=sc.nsec_gen) : (;)
+        kw = sc.points_per_coil > 0 ? (; npts=sc.points_per_coil) : (;)
         return make_helical(; R0=sc.R0, a=sc.a, m=sc.m_hel, n=sc.n_hel,
             theta_lo=sc.theta_lo, theta_hi=sc.theta_hi, n_coils=sc.n_coils,
             gap_fraction=sc.gap_fraction, phi0=sc.phi0, offset=sc.offset,

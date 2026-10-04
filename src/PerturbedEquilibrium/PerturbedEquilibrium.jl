@@ -74,7 +74,7 @@ function compute_perturbed_equilibrium(
     state = PerturbedEquilibriumState()
     equil = ffs.equil
     mats = ffs.mats
-    mthvac = ffs.control.mthvac
+    mtheta_vacuum = ffs.control.mtheta_vacuum
 
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs)
@@ -99,14 +99,14 @@ function compute_perturbed_equilibrium(
     if ctrl.compute_response &&
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
-        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, mats)
+        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mtheta_vacuum, ffs, intr, ctrl, ffs.metric, mats)
     end
 
     # Step 3: Compute singular coupling metrics
     if ctrl.compute_singular_coupling &&
        ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
        ForceFreeStates.require_solution(ffs, "singular coupling calculation")
-        compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, mats)
+        compute_singular_coupling_metrics!(state, equil, solution, mtheta_vacuum, ffs, intr, ctrl, mats)
         compute_dominant_coupling!(state, ctrl)
     end
 
@@ -163,7 +163,7 @@ function materialize_forcing_modes(
             # Same control surface as the coil branch above: psilim, the integration
             # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
             # the normalization was taken on the equilibrium-spline limit, which differs
-            # whenever dmlim/qhigh/psiedge truncation moves psilim inward.
+            # whenever rational_offset_fraction/qhigh/dW_edge_scan_start truncation moves psilim inward.
             convert_forcing_normalization!(modes_n, norm_tag, equil, n,
                 minimum(m_vals), maximum(m_vals); psi=ffs.psilim)
         end

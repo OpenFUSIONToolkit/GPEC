@@ -102,7 +102,7 @@ scaled in place.
 """
 function compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
     (; mlow, mhigh, nlow, nhigh, psilim, qlim, wall_settings) = intr
-    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mlow:mhigh, nlow:nhigh)
+    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mtheta_vacuum, ctrl.nzeta_vacuum, mlow:mhigh, nlow:nhigh)
     vac = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
     wv = vac.wv
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
@@ -219,7 +219,7 @@ q-window minimum.
 
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
-    qedge = profiles.q_spline(ctrl.psiedge)
+    qedge = profiles.q_spline(ctrl.dW_edge_scan_start)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
     psi_array = zeros!(pool, Float64, npsi + 1)
     wv_array = zeros!(pool, ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
@@ -228,7 +228,7 @@ q-window minimum.
         # Space points evenly in q over [qedge, qlim] (i=1 → qedge, i=npsi+1 → qlim)
         qi = qedge + (intr.qlim - qedge) * ((i - 1) / npsi)
 
-        psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
+        psii = ctrl.dW_edge_scan_start + (intr.psilim - ctrl.dW_edge_scan_start) * ((i - 1) / npsi)
         psi_array[i] = find_zero(
             (psi -> profiles.q_spline(psi) - qi,
                 psi -> profiles.q_deriv(psi)),
@@ -236,7 +236,7 @@ q-window minimum.
         )
 
         # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
-        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh)
+        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mtheta_vacuum, ctrl.nzeta_vacuum, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh)
         vac = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
         @views wv_array[i, :, :] .= vac.wv
     end
@@ -256,7 +256,7 @@ end
 
 Compute total complex energy eigenvalue (total1). This is a trimmed down version of `free_run`
 that only computes the total energy eigenvalue for the mode unstable mode, used in `findmax_dW_edge!`
-which calls this function at each step in the psiedge -> psilim region of integration. This performs
+which calls this function at each step in the dW_edge_scan_start -> psilim region of integration. This performs
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
 wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvmat` (a complex-valued spline).
 """

@@ -102,7 +102,7 @@ end
 
 # Allowed dc_type values for the critical-Δ offset. `:none` is the default
 # `dc_tmp = 0` branch.
-const ALLOWED_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
+const ALLOWED_DC_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 
 """
     r_based_shear(rs, q, dq_dpsi, da_dpsi) -> Float64
@@ -167,7 +167,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
         return 0.5 * (-dr_val) * π^1.5 *
                (chi_par / chi_perp)^0.25 *
                sqrt((n_tor * abs(sval_r)) / (R0 * rs))
-    elseif dc_type === :rfitzp
+    elseif dc_type === :fitzpatrick
         return -(sqrt(2.0) * π^1.5 * dr_val) / Wd
     elseif dc_type === :toroidal
         return 0.5 * (-dr_val) * π^1.5 *
@@ -213,7 +213,7 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
-  - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
+  - `dc_type` -- one of `:none`, `:lar`, `:fitzpatrick`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
   - `k_ref`   -- reference-length ratio K = r_s·(dψ_N/dr) at the surface,
     used by the Tearing runner to convert the ψ_N-referenced outer Δ' to

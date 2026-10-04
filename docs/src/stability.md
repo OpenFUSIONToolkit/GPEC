@@ -93,7 +93,7 @@ than integrating the quadratic Riccati ODE directly (which blows up when ``|S|``
 the code integrates the linear EL system with `sing_der!` as the RHS and recovers
 ``S = U_1 U_2^{-1}`` via periodic renormalization — an approach that is mathematically
 equivalent to O(Δψ) but uses `Vern9`'s full 9th-order accuracy.  Renormalization is
-triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `ucrit`, and is
+triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `renorm_threshold`, and is
 forced at the end of each chunk.  At singular surface crossings,
 `riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching directly in column
 `ipert_res` — without Gaussian reduction — and renormalizes to ``(S, I)``.

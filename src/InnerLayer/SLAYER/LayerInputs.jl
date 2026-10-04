@@ -176,7 +176,7 @@ profiles, without an intermediate file round-trip.
   - `bt`        -- toroidal field [T]. Scalar, callable of `psi`, or
     `nothing` (default). When `nothing`, the physical `B_T = F(ψ) / (2π·R₀)`
     is computed per surface from the equilibrium's F-spline. Note:
-    `equil.config.b0exp` is a *normalization* (often just `1.0`), not the
+    `equil.config.b0_norm` is a *normalization* (often just `1.0`), not the
     physical field, so passing it as a scalar is almost always wrong.
 
   - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
@@ -187,7 +187,7 @@ profiles, without an intermediate file round-trip.
     of `psi` (default `1.0`).
   - `dr_val`    -- resistive interchange index `D_R = E + F + H²`
     (Glasser-Greene-Johnson 1975) feeding the critical-Δ formulas
-    (`:lar`, `:rfitzp`, `:toroidal`). When `nothing` (default), Julia
+    (`:lar`, `:fitzpatrick`, `:toroidal`). When `nothing` (default), Julia
     derives it per-surface from the equilibrium as
     `dr_val_k = D_R(ψ_k) = E_k + F_k + H_k²`,
     consistent with Connor-Hastie-Helander 2015 (PPCF 57 065001) Eq. 59
@@ -204,9 +204,9 @@ profiles, without an intermediate file round-trip.
     raised if `dc_type=:toroidal` is also requested — the auto-derived
     formula additionally needs ⟨|∇ψ|²⟩ FSA which `ResistGeometry`
     doesn't currently expose. Pass a scalar / vector / callable to use
-    a prescribed value. (For `dc_type=:rfitzp` and `:lar`, dgeo_val is
+    a prescribed value. (For `dc_type=:fitzpatrick` and `:lar`, dgeo_val is
     not consulted.)
-  - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
+  - `dc_type`   -- `:none` (default), `:lar`, `:fitzpatrick`, or `:toroidal`.
   - `rs_method` -- radial label defining `r_s` for the whole layer stack:
     `:midplane` (default), `:halfwidth`, `:fsa`, `:volume`, or `:flux`. See
     [`radial_label`](@ref) for the definitions. S, the r-based shear, W_d,

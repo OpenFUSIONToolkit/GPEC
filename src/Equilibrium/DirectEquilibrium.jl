@@ -291,7 +291,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
-    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
+    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.flux_surface_rtol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
     # A failed solve returns a truncated solution instead of throwing; check both the retcode and
     # that the field line reached η = 2π, since a callback can end it early and still report Success.
@@ -445,7 +445,7 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     psi_nodes = if equil_params.grid_type in ("auto", "log_asymptotic")
         psihigh > 0.98 ||
             @warn "grid_type = \"$(equil_params.grid_type)\" needs psihigh > 0.98 (its grid has a fixed edge region on [0.98, psihigh]); " *
-                  "psihigh = $psihigh gives a non-monotonic ψ grid and the equilibrium will fail. Use grid_type = \"ldp\" instead."
+                  "psihigh = $psihigh gives a non-monotonic ψ grid and the equilibrium will fail. Use grid_type = \"core_edge_packed\" instead."
         # Distribute mpsi across the three regions by log-weights
         log_core = log(0.03 / psilow)
         log_mid = log(0.98 / 0.03)
@@ -455,7 +455,7 @@ function _build_psi_grid(equil_params, psilow, psihigh)
         N_core = round(Int, mpsi * log_core / log_total)
         N_mid = mpsi - N_edge - N_core
         make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
-    elseif equil_params.grid_type == "ldp"
+    elseif equil_params.grid_type == "core_edge_packed"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
     elseif equil_params.grid_type == "pow1"
         # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
@@ -466,7 +466,7 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
-    # Floor node spacing on the fixed grids: ldp/pow1 pack the edge as ~(π/2·mpsi)⁻² and at high
+    # Floor node spacing on the fixed grids: core_edge_packed/pow1 pack the edge as ~(π/2·mpsi)⁻² and at high
     # mpsi drive it below the integration-noise scale (garbage curvature). The auto grid floors its
     # refined pass-2 grid in refined_psi_grid, so it is left untouched here.
     return equil_params.grid_type in ("auto", "log_asymptotic") ? psi_nodes : enforce_min_spacing(psi_nodes, MIN_KNOT_SPACING)

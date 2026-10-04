@@ -41,8 +41,8 @@ paths: the post-PE ψ-quadrature diagnostic and the self-consistent
 [KineticForces]
 kinetic_file = "kinetic.h5"    # n_i column/dataset = TOTAL main-ion density
 electron = true                # add electron NTV in addition to the ion species
-zimp = 6                       # impurity charge (closes quasineutrality)
-mimp = 12                      # impurity mass
+impurity_charge = 6            # impurity charge (closes quasineutrality)
+impurity_mass = 12             # impurity mass
 
 [[KineticForces.ion_species]]
 z = 1
@@ -58,8 +58,8 @@ Each species sets exactly one of `fraction` (share of the file's total `n_i`)
 or `density` (a named `n_*` dataset). An all-fraction list must sum to 1; in a
 mixed list the impurity content is set by the file's `n_i`/`n_e` deficit, not
 by a fraction shortfall, and fractions may sum below (never above) 1. Every
-main-ion charge must satisfy `z < zimp`. An empty `ion_species` list runs the
-single main ion from `zi`/`mi` (with `electron = true` still adding the
+main-ion charge must satisfy `z < impurity_charge`. An empty `ion_species` list runs the
+single main ion from `ion_charge`/`ion_mass` (with `electron = true` still adding the
 electron species — the electron flag always means *in addition to* the ions).
 
 The summed total is written to `KineticForces/<method>/` exactly as in a single-ion
@@ -85,9 +85,9 @@ profiles and physics parameters for sensitivity studies:
 | `temperature_factor` | 1.0 | Profile loader | Temperature scaling (Ti, Te) |
 | `ExB_rotation_factor` | 1.0 | Profile loader | ExB rotation scaling (omegaE) |
 | `toroidal_rotation_factor` | 1.0 | Profile loader | Total toroidal rotation scaling (wphi) |
-| `wdfac` | 1.0 | Evaluation time | Magnetic drift frequency scaling |
-| `nufac` | 1.0 | Evaluation time | Collisionality scaling |
-| `divxfac` | 1.0 | Evaluation time | ``\nabla \cdot \xi_\perp`` scaling |
+| `magnetic_drift_factor` | 1.0 | Evaluation time | Magnetic drift frequency scaling |
+| `collisionality_factor` | 1.0 | Evaluation time | Collisionality scaling |
+| `divxi_factor` | 1.0 | Evaluation time | ``\nabla \cdot \xi_\perp`` scaling |
 
 ### Profile-loader knobs (`density_factor`, `temperature_factor`, `ExB_rotation_factor`, `toroidal_rotation_factor`)
 
@@ -119,7 +119,7 @@ The scaling sequence is:
 6. Recompute collisionality from scaled density and temperature
 7. Build final splines from scaled arrays
 
-### Evaluation-time knobs (`wdfac`, `nufac`, `divxfac`)
+### Evaluation-time knobs (`magnetic_drift_factor`, `collisionality_factor`, `divxi_factor`)
 
 These three knobs are applied during the bounce-averaged kinetic matrix and
 torque calculations in `KineticForces/Torque.jl` and related modules. They
@@ -131,7 +131,7 @@ terms respectively, and do not modify the stored kinetic profile splines.
        (``\nu_i``, ``\nu_e``) from the scaled density and temperature arrays.
        Fortran PENTRC (`inputs.f90:237-246`) computes collisionality from
        **unscaled** profiles. If you need independent collisionality scaling
-       without changing the density/temperature profiles, use `nufac`.
+       without changing the density/temperature profiles, use `collisionality_factor`.
 
     2. **Consistent derivative ordering:** Fortran's `inputs.f90:269-272`
        mixes pre-scaling spline derivatives with post-scaling array values

@@ -137,8 +137,8 @@ normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object
 function read_chease_binary(config::EquilibriumConfig)
     @info "Reading CHEASE file (Binary): $(config.eq_filename)"
 
-    R0EXP = config.r0exp
-    B0EXP = config.b0exp
+    R0EXP = config.r0_norm
+    B0EXP = config.b0_norm
 
     open(config.eq_filename, "r") do io
         seekstart(io)
@@ -244,8 +244,8 @@ them into a `InverseRunInput` object.
 function read_chease_ascii(config::EquilibriumConfig)
     @info "Reading CHEASE file (ASCII): $(config.eq_filename)"
     lines = readlines(config.eq_filename)
-    R0EXP = config.r0exp
-    B0EXP = config.b0exp
+    R0EXP = config.r0_norm
+    B0EXP = config.b0_norm
 
     # --- Parse Header (FORMAT 10: 3I5) ---
     header_parts = split(lines[1])

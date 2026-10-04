@@ -120,32 +120,28 @@ gpec.toml.
   - `verbose::Bool` - Enable verbose output
   - `local_stability_flag::Bool` - Enable local stability analysis (`D_I` and ballooning)
   - `vac_flag::Bool` - Enable vacuum region calculation
-  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
-  - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
+  - `mtheta_vacuum::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+  - `nzeta_vacuum::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
   - `frobenius_psi_max::Float64` - Largest starting ψ_N at which the Frobenius start is used. The Frobenius start [Glasser 2016 Eq. 51] is a power series about the magnetic axis, so an integration beginning above this value (an interior start from a raised `psilow`, or `qlow` above q₀) instead starts every solution with zero displacement and unit "momentum" (U₁ = 0, U₂ = I), the initialization Fortran DCON always uses, and warns that it did. `0` selects the fixed start everywhere, silently. Default 0.01, which keeps every axis-started case on the Frobenius start.
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `nstep::Int` - Maximum number of integration steps (not yet implemented)
-  - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
-  - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e4` empirically keeps max(|U₁|, |U₂|) in O(1)–O(10⁴) over the integration domain on DIII-D / Solovev sweeps; lower triggers excess renorms without accuracy gain, higher risks overflow before the next renorm.
+  - `renorm_threshold::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e4` empirically keeps max(|U₁|, |U₂|) in O(1)–O(10⁴) over the integration domain on DIII-D / Solovev sweeps; lower triggers excess renorms without accuracy gain, higher risks overflow before the next renorm.
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
-  - `set_psilim_via_dmlim::Bool` - Truncate the integration domain at `(last_rational_q + dmlim) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`dmlim = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `set_psilim_via_dmlim = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `set_psilim_via_dmlim = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + dmlim / n" depends on which `n`); when `set_psilim_via_dmlim = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
-  - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
-  - `sing_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
+  - `truncate_at_rational_offset::Bool` - Truncate the integration domain at `(last_rational_q + rational_offset_fraction) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`rational_offset_fraction = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `truncate_at_rational_offset = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `truncate_at_rational_offset = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + rational_offset_fraction / n" depends on which `n`); when `truncate_at_rational_offset = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
+  - `rational_offset_fraction::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `truncate_at_rational_offset` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
+  - `frobenius_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
-  - `psiedge::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [psiedge, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
-  - `truncate_at_dW_peak::Bool` - When `true` and `psiedge < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `dmlim`.
-  - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
-  - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
+  - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
+  - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `rational_offset_fraction`.
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
@@ -158,31 +154,27 @@ gpec.toml.
     verbose::Bool = true
     local_stability_flag::Bool = false
     vac_flag::Bool = false
-    mthvac::Int = 480
-    nzvac::Int = 1
+    mtheta_vacuum::Int = 480
+    nzeta_vacuum::Int = 1
     sing_start::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    nstep::Int = typemax(Int)
-    ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-8
-    ucrit::Float64 = 1e4
+    renorm_threshold::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
     singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
-    set_psilim_via_dmlim::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
-    dmlim::Float64 = 0.2
-    sing_order::Int = 6
+    truncate_at_rational_offset::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
+    rational_offset_fraction::Float64 = 0.2
+    frobenius_order::Int = 6
     qhigh::Float64 = 1e3
     kinetic_source::String = "fixed"
     kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
-    psiedge::Float64 = 0.99
+    dW_edge_scan_start::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
-    diagnose::Bool = false
-    diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
     save_interval::Int = 3

@@ -29,7 +29,7 @@ Regularization:
 
 # High Priority (MWE)
 
-  - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
+  - `regularization_width::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
 @kwdef struct PerturbedEquilibriumControl
     # High Priority (MWE)
@@ -49,7 +49,7 @@ Regularization:
 
     # Regularization width for singular surface smoothing (matches Fortran gpec.f reg_spot).
     # Set to 0 to disable regularization. Must be non-negative.
-    reg_spot::Float64 = 5e-2
+    regularization_width::Float64 = 5e-2
 end
 
 """

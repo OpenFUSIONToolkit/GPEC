@@ -1,6 +1,6 @@
 """
     compute_plasma_response!(
-        state, equil, solution, wt0, mthvac, ffs,
+        state, equil, solution, wt0, mtheta_vacuum, ffs,
         intr, ctrl, metric, mats
     )
 
@@ -19,7 +19,7 @@ function compute_plasma_response!(
     equil::Equilibrium.PlasmaEquilibrium,
     solution::SolutionProfiles,
     wt0::Matrix{ComplexF64},
-    mthvac::Int,
+    mtheta_vacuum::Int,
     ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
@@ -37,7 +37,7 @@ function compute_plasma_response!(
     plasma_inductance = calc_plasma_inductance(wt0, ffs, equil.psio)
 
     # Surface inductance L from vacuum surface-current matrix at psilim, block-diagonal in n.
-    surface_inductance = calc_surface_inductance(equil, ffs.psilim, mthvac, ffs.mlow:ffs.mhigh, ffs.nlow:ffs.nhigh)
+    surface_inductance = calc_surface_inductance(equil, ffs.psilim, mtheta_vacuum, ffs.mlow:ffs.mhigh, ffs.nlow:ffs.nhigh)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
