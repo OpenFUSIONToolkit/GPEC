@@ -57,9 +57,9 @@ kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\t
 
 ### Toroidal Coordinate ``\zeta`` and ``\phi``
 
-- The magnetic coordinate toroidal angle is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
-  a single-valued straight-field-line offset that depends on the working coordinate. PEST
-  coordinates have ``\nu = 0``.
+- The magnetic coordinate toroidal angle is ``\zeta = (\phi - \nu(\psi,\theta))/(2\pi)``, where ``\phi`` is GPEC's internal
+  toroidal angle (the physical angle is ``-\mathrm{helicity}\,\phi``, below) and ``\nu`` is a single-valued
+  straight-field-line offset that depends on the working coordinate. PEST coordinates have ``\nu = 0``.
 - The physical toroidal angle is reconstructed as
   ``\phi = -\,\mathrm{helicity}\,(2\pi\zeta + \nu)`` (`sample_boundary_grid` in
   `src/ForcingTerms/CoilFourier.jl`). Thus ``\phi`` is effectively **counter-clockwise** (viewed
@@ -196,8 +196,12 @@ conjugate is taken.
 
 ### Interfacing with Vacuum
 
-The Vacuum code uses CCW ``\phi`` and downward-outboard ``\theta``. GPEC uses the complex conjugate
-of RH configurations when interfacing with Vacuum.
+The Vacuum module works in GPEC's own angles: ``\theta`` upward-outboard (counter-clockwise in the
+``(R, Z)`` plane) and the Fourier basis ``\exp(-i(m\theta - 2\pi n\zeta))``, so the matrices it returns are in the same
+Fourier frame as the plasma matrices and need no conversion. A plasma contour passed in clockwise is rejected;
+a clockwise wall file is reversed with a warning. The ``\nu`` passed to Vacuum is GPEC's ``\nu = \phi - 2\pi\zeta``.
+Chance 1997 eq. 97 writes ``\zeta = \phi + \nu`` for the same ``\nu`` because VACUUM's ``\theta`` and ``\phi`` both
+run opposite to GPEC's.
 
 ## Field Amplitudes and Units
 
