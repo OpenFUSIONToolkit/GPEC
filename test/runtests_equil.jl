@@ -68,6 +68,13 @@
         @test all(>(0), B_nodes)
     end
 
+    @testset "Round-trip check sees inter-knot ringing" begin
+        flagged(k, m) = GeneralizedPerturbedEquilibrium.Equilibrium._roundtrip_verdict(k, m) !== :ok
+        @test !flagged(4.10e-6, 5.02e-6) && !flagged(3.57e-6, 4.19e-6)  # clean psihigh 0.995, 0.999
+        @test flagged(1.14e-5, 1.29e-3)    # 0.9999 ringing: under the tolerance, only the ratio catches it
+        @test !flagged(1.61e-4, 1.58e-4)   # smooth but coarse: ratio ~1, must not be called ringing
+    end
+
     @testset "Resolved psihigh" begin
         # The config holds the user's request and is never written to; the value the
         # equilibrium is actually formed on rides on params.psihigh_resolved.
@@ -551,5 +558,13 @@
             @test pe.params.li2 > 0
             @test pe.params.li3 > 0
         end
+    end
+
+    @testset "field-line ODE failure is an error, not silent truncation" begin
+        # Checked in the source, since a non-closing field line is costly to synthesize; the EFIT
+        # testsets above are the control that neither guard false-fires.
+        src = read(joinpath(dirname(@__DIR__), "src", "Equilibrium", "DirectEquilibrium.jl"), String)
+        @test occursin("sol.retcode != ReturnCode.Success", src)
+        @test occursin("isapprox(sol.t[end], 2π", src)
     end
 end
