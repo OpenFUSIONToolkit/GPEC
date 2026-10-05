@@ -74,14 +74,16 @@ dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar
 mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
 zeff                    = 1.0        # Effective charge
 chi_perp_e              = 1.0       # fallback only; the kinetic file supplies χ⊥,e(ψ)
+chi_perp_i              = 1.0       # fallback only; the kinetic file supplies χ⊥,i(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
+P_perp_model            = "chi_perp_e" # Perpendicular Prandtl number model: "chi_perp_e", "chi_perp_i", "P_phi", "D_perp", "c_beta", or "tau_E" (needs tau_E [s])
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
 filter_above_poles      = true       # Discard roots above the highest pole γ
 filter_outside_re       = true       # Condition the above-pole filter on the +γ step exiting the Re(Δ)=0 contour loop
 polish_roots            = true       # refine each root to the true zero; enables the validity gate
 store_scan              = false      # per-surface scans omitted from HDF5 (uncoupled has one per surface)
 # Standardized kinetic-profile file (GPEC HDF5 kinetic schema), shared with the
-# sibling ideal example; carries n_e, T_e, T_i, omega_E, chi_e (χ⊥), chi_phi (χ_φ).
+# sibling ideal example; carries n_e, T_e, T_i, omega_E, chi_e (χ⊥,e), chi_i (χ⊥,i), chi_phi (χ_φ).
 profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (relative to the run dir), required when SLAYER is enabled
 
 [SLAYER.scan_grid]
