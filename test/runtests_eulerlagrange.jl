@@ -311,10 +311,17 @@ end
         u[:, 2, 2] .= [0.0, 1e-8]     # column 2: U₁ zero (fixed start), U₂ max 1e-8
         tol = FFS.column_abstol(u, 1e-6)
         @test size(tol) == size(u)
-        @test all(tol[:, 1, 1] .== 4e-6) && all(tol[:, 1, 2] .== 2e-6)
+        @test all(tol[:, 1, 1] .== 4e-6)
+        @test all(tol[:, 1, 2] .== 2e-6)
         # A zero block takes its column's other block, so each column is controlled relative to its own scale
-        @test all(tol[:, 2, 1] .≈ 1e-14) && all(tol[:, 2, 2] .≈ 1e-14)
+        @test all(tol[:, 2, 1] .≈ 1e-14)
+        @test all(tol[:, 2, 2] .≈ 1e-14)
+        @test FFS.column_abstol!(tol, u, 1e-6) === tol
         @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
+        # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
+        c = FFS.ForceFreeStatesControl()
+        @test c.ucrit == 1e3
+        @test c.save_interval == 1
     end
 
     @testset "compute_solution_norms!" begin

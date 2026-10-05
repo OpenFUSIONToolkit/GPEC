@@ -845,14 +845,14 @@ end
     column_abstol!(abstol, u, rtol) -> abstol
 
 Per-column absolute tolerance `max|u[:, j, k]|·rtol` for each column `j` of U₁ (`k = 1`) and U₂ (`k = 2`),
-refreshed before every step as in Fortran `ode_step`. An all-zero block (e.g. U₁ = 0 at a fixed start) takes
-its column's other block instead, where Fortran disables error control for it.
+so each solution column's error is controlled relative to its own magnitude. An all-zero block (e.g. U₁ = 0
+at a fixed start) takes the scale of its column's other block; the blocks differ in units, so this is a first-step safeguard.
 """
 function column_abstol!(abstol::AbstractArray{Float64,3}, u::AbstractArray{<:Number,3}, rtol::Real)
     for j in axes(u, 2)
         a1 = maximum(abs, @view u[:, j, 1])
         a2 = maximum(abs, @view u[:, j, 2])
-        afill = max(a1, a2, floatmin(Float64))
+        afill = max(a1, a2, floatmin(Float64))  # floor only keeps an all-zero column's abstol nonzero; no caller produces one
         abstol[:, j, 1] .= (a1 > 0 ? a1 : afill) * rtol
         abstol[:, j, 2] .= (a2 > 0 ? a2 : afill) * rtol
     end
@@ -898,7 +898,6 @@ making it clear what region is being integrated.
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
 
-The absolute tolerance is refreshed per solution column after every step (`column_abstol!`).
 """
 function integrate_el_region!(
     odet::OdeState,
