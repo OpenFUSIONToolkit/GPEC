@@ -16,7 +16,7 @@
 
 Dimensionless layer-physics parameters at one rational surface for the
 Fitzpatrick two-fluid drift-MHD SLAYER inner-layer model (Fitzpatrick
-2023; Park et al. 2022), plus dimensional auxiliaries required for
+2023; Park 2022), plus dimensional auxiliaries required for
 de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 `D_norm` (not the older `pr`/`pe`/`ds` set).
 
@@ -228,7 +228,9 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
       + `:D_perp` -- τ_R/τ_⊥ with τ_⊥ = r_s²/D_⊥ and D_⊥ from Eq. 16 of Fitzpatrick, Phys. Plasmas 29,
         032507 (2022), with η_⊥ = η_∥:
         D_⊥ = c_β² η/μ₀ + (2/3)(1 − c_β²)[η_e τ_e/(1+η_e) χ⊥,e + η_i τ_i/(1+η_i) χ⊥,i]
-      + `:c_beta` -- P_perp = C² with C = c_β (Park et al., Phys. Plasmas 29, 122505 (2022))
+      + `:c_beta` -- P_perp = C² with C = c_β (J.-K. Park, Phys. Plasmas 29, 072506 (2022), Eq. 10, with the
+        thermal-conduction term K dropped). This is the χ⊥ → 0 limit of `:D_perp` (P_⊥ = μ₀D_⊥/η = c_β²), so it is
+        a floor on P_perp; realistic anomalous transport makes D_⊥ much larger.
       + `:tau_E`  -- P_perp = P_tor = τ_R/τ_E, overriding χ_φ (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 131)
     `chi_perp_e` still sets the critical-Δ `dc_tmp` in every mode.
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
@@ -418,7 +420,7 @@ function slayer_parameters(;
         # τ_⊥ = r_s²/D_⊥, P_⊥ = τ_R/τ_⊥
         tau_r / (rs^2 / D_perp)
     elseif P_perp_model === :c_beta
-        # C² = P_⊥ with C = c_β (Park et al., Phys. Plasmas 29, 122505 (2022))
+        # C² = P_⊥ with C = c_β (J.-K. Park, Phys. Plasmas 29, 072506 (2022), Eq. 10, K = 0)
         c_beta^2
     else
         throw(ArgumentError("slayer_parameters: unknown P_perp_model=$P_perp_model. " *

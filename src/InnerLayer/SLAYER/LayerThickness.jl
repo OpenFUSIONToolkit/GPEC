@@ -2,7 +2,7 @@
 #
 # Resistive inner-layer *width* (del_s) diagnostic for the SLAYER two-fluid
 # drift-MHD slab layer (Fitzpatrick, Tearing Mode Dynamics in Tokamak
-# Plasmas, IOP 2023; Park et al. 2022, Phys. Plasmas 29, 122505; Burgess
+# Plasmas, IOP 2023; Park 2022, Phys. Plasmas 29, 072506; Burgess
 # et al. 2026). This is a distinct quantity from the matching index
 # Δ = π/W' returned by the dispersion solver (Riccati.jl): it integrates a
 # separate reduced Riccati ODE evaluated at the electron diamagnetic
