@@ -387,37 +387,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     odet.step -= 1
     trim_storage!(odet)
 
-    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
-    # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
-    # findmax_dW_edge! also (re)allocates odet.edge_scan; that field is the diagnostic
-    # product and is intentionally NOT restored.
-    #
-    # Default (ctrl.truncate_at_dW_peak = false): diagnostic-only. Integration domain is
-    # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
-    # location. Legacy path (true) reproduces the ode_record_edge heuristic from Fortran
-    # STRIDE — psilim/qlim/u are pulled back to the dW peak. Preserved for experimental
-    # work; see the ForceFreeStatesControl docstring for the reliability caveats.
-    if ctrl.psiedge < intr.psilim
-        saved_psifac, saved_u = odet.psifac, copy(odet.u)
-        peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
-        if ctrl.truncate_at_dW_peak
-            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
-            odet.step = peak_step
-            trim_storage!(odet)
-            intr.psilim = odet.psi_store[end]
-            intr.qlim = odet.q_store[end]
-            odet.u .= odet.u_store[:, :, :, end]
-            if verbose
-                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
-            end
-        else
-            odet.psifac = saved_psifac
-            odet.u .= saved_u
-            if verbose
-                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.3f" odet.psi_store[peak_step])),  q = $((@sprintf "%.3f" odet.q_store[peak_step])); integration domain unchanged"
-            end
-        end
-    end
+    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose)
 
     # Evaluate stability criterion (critical determinant) of saved solutions
     if verbose
@@ -871,6 +841,41 @@ function cross_kinetic_singular_surf!(
     store_ode_data!(odet, odet.psifac, odet.u)
 end
 
+"""
+    column_abstol!(abstol, u, rtol) -> abstol
+
+Per-column absolute tolerance `max|u[:, j, k]|·rtol` for each column `j` of U₁ (`k = 1`) and U₂ (`k = 2`),
+so each solution column's error is controlled relative to its own magnitude. An all-zero block (e.g. U₁ = 0
+at a fixed start) takes the scale of its column's other block; the blocks differ in units, so this is a first-step safeguard.
+"""
+function column_abstol!(abstol::AbstractArray{Float64,3}, u::AbstractArray{<:Number,3}, rtol::Real)
+    for j in axes(u, 2)
+        a1 = maximum(abs, @view u[:, j, 1])
+        a2 = maximum(abs, @view u[:, j, 2])
+        afill = max(a1, a2, floatmin(Float64))  # floor only keeps an all-zero column's abstol nonzero; no caller produces one
+        abstol[:, j, 1] .= (a1 > 0 ? a1 : afill) * rtol
+        abstol[:, j, 2] .= (a2 > 0 ? a2 : afill) * rtol
+    end
+    return abstol
+end
+
+column_abstol(u::AbstractArray{<:Number,3}, rtol::Real) = column_abstol!(similar(u, Float64), u, rtol)
+
+function refresh_column_abstol!(integrator)
+    column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
+    u_modified!(integrator, false)
+end
+
+# Refresh-only callback for solves with no reduction, renormalization or storage of their own.
+const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refresh_column_abstol!; save_positions=(false, false))
+
+"""
+    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+
+Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
+A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
+"""
+solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK) = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
@@ -893,10 +898,6 @@ making it clear what region is being integrated.
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
 
-### TODOs
-
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(
     odet::OdeState,
@@ -927,6 +928,7 @@ function integrate_el_region!(
         steps_in_segment[] += 1
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
+        column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
@@ -945,7 +947,8 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    rtol = ctrl.eulerlagrange_tolerance
+    sol = solve_el(prob, rtol; callback=cb)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
@@ -1116,6 +1119,30 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
 end
 
 """
+    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose=ctrl.verbose) -> Bool
+
+Record the edge-dW scan over [psiedge, psilim] on `odet.edge_scan`. With `truncate_at_dW_peak`, the
+scan's peak becomes the plasma edge via `truncate_integration!`; otherwise the integration is left
+untouched. Returns whether it truncated.
+"""
+function scan_edge_dW!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    mats::MatrixSplines, intr::ForceFreeStatesInternal; verbose::Bool=ctrl.verbose)
+    ctrl.psiedge < intr.psilim || return false
+    saved_psifac, saved_u = odet.psifac, copy(odet.u)
+    peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
+    psi_peak, q_peak = odet.psi_store[peak_step], odet.q_store[peak_step]
+    if ctrl.truncate_at_dW_peak
+        truncate_integration!(odet, intr, equil, peak_step)
+    else
+        odet.psifac = saved_psifac
+        odet.u .= saved_u
+    end
+    verbose && @info "Edge-dW peak at ψ = $(@sprintf("%.4f", psi_peak)), q = $(@sprintf("%.3f", q_peak)); " *
+          (ctrl.truncate_at_dW_peak ? "adopted as the plasma edge" : "integration domain unchanged")
+    return ctrl.truncate_at_dW_peak
+end
+
+"""
     transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
 Constructs the transformation matrices to form the true solution vectors. Effectively
@@ -1175,10 +1202,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     jfix = 1
     for ifix in 1:(odet.ifix+1)
         # If after the last fixup, go to the end of integration.
-        # Cap kfix at odet.step: fixstep entries from fixups AFTER the peak (set during integration
-        # before trim_storage!) can exceed the trimmed storage size and must be clamped.
-        kfix = ifix != odet.ifix + 1 ? min(odet.fixstep[ifix], odet.step) : odet.step
-        jfix > odet.step && break
+        kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
             mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])
