@@ -131,7 +131,7 @@ gpec.toml.
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
-  - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e4` empirically keeps max(|U₁|, |U₂|) in O(1)–O(10⁴) over the integration domain on DIII-D / Solovev sweeps; lower triggers excess renorms without accuracy gain, higher risks overflow before the next renorm.
+  - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e3`. The trigger compares column-norm growth, not conditioning, so near-parallel columns can leave an error in the free-boundary energies that does not shrink with `eulerlagrange_tolerance`.
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
@@ -148,7 +148,7 @@ gpec.toml.
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
-  - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
+  - `save_interval::Int` - Save every Nth ODE step (1=all). Always saves near rational surfaces. Default `1`: PerturbedEquilibrium and KineticForces interpolate ξ(ψ) between saved steps, so their accuracy follows the saved-step density.
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
   - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
@@ -168,7 +168,7 @@ gpec.toml.
     nstep::Int = typemax(Int)
     ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-8
-    ucrit::Float64 = 1e4
+    ucrit::Float64 = 1e3
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
     singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
@@ -185,7 +185,7 @@ gpec.toml.
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
-    save_interval::Int = 3
+    save_interval::Int = 1
     force_termination::Bool = false
     integrator::String = "riccati"   # Default: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream. Use "forward" for dense ξ (PerturbedEquilibrium) or kinetic runs.
     nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
