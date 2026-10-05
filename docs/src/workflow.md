@@ -165,6 +165,7 @@ Setting `force_termination = true` in any section stops the pipeline after that 
 Example configuration files are provided in:
 - `examples/Solov'ev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
+- `examples/DIIID-like_error_field_example/gpec.toml` (coil-forced run with the `[ErrorFields]` sensitivity stage)
 
 ---
 
@@ -174,7 +175,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 
 | Group | Contents |
 |---|---|
-| `Info/` | Run metadata: git version, mode-number ranges, ψ limit |
+| `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
 | `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
 | `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |

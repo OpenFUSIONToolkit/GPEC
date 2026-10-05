@@ -294,6 +294,24 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=equil_abstol(equil_config.etol), dt=2π / 200, adaptive=true, dense=false)
     check_equil_solve(sol, "field line at ψ_N = $psifac")
 
+    # A failed solve returns a truncated solution instead of throwing; check both the retcode and
+    # that the field line reached η = 2π, since a callback can end it early and still report Success.
+    if sol.retcode != ReturnCode.Success
+        error(
+            "direct_fieldline_int: field-line integration failed at psifac = " *
+            "$(@sprintf("%.6f", psifac)) (retcode $(sol.retcode)); the flux surface did not " *
+            "close. This usually means psihigh is too close to the separatrix for the " *
+            "equilibrium grid to resolve."
+        )
+    end
+    if !isapprox(sol.t[end], 2π; atol=1e-8)
+        error(
+            "direct_fieldline_int: field-line integration at psifac = " *
+            "$(@sprintf("%.6f", psifac)) stopped at eta = $(@sprintf("%.6f", sol.t[end])) " *
+            "instead of 2*pi; the flux surface did not close."
+        )
+    end
+
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
 end
@@ -426,6 +444,9 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     end
 
     psi_nodes = if equil_params.grid_type in ("auto", "log_asymptotic")
+        psihigh > 0.98 ||
+            @warn "grid_type = \"$(equil_params.grid_type)\" needs psihigh > 0.98 (its grid has a fixed edge region on [0.98, psihigh]); " *
+                  "psihigh = $psihigh gives a non-monotonic ψ grid and the equilibrium will fail. Use grid_type = \"ldp\" instead."
         # Distribute mpsi across the three regions by log-weights
         log_core = log(0.03 / psilow)
         log_mid = log(0.98 / 0.03)
