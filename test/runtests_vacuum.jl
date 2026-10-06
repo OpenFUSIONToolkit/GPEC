@@ -1126,7 +1126,11 @@
         VAC = GeneralizedPerturbedEquilibrium.Vacuum
         KF = GeneralizedPerturbedEquilibrium.KineticForces
         VAC.get_pn_quad_cache(3)
+        VAC.get_singular_quadrature(3, 8, 5)
+        KF._quadrature_weights(8)
         @test !isempty(VAC._PN_CACHE)
+        @test VAC.SINGULAR_QUAD_CACHE[] !== nothing
+        @test !isempty(KF._QUAD_WEIGHTS)
         @test VAC.reset_caches!() === nothing
         @test isempty(VAC._PN_CACHE)
         @test VAC.SINGULAR_QUAD_CACHE[] === nothing

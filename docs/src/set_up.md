@@ -383,7 +383,8 @@ delete the entry to re-enable. The regression harness overrides this file for it
 The workload runs only when Julia rebuilds the package image, not at the start of each run. That
 happens after any change under `src/` (a pull, a branch switch or a local edit) and after a change
 of dependency versions, Julia version or this preference. Repeated runs on an unchanged checkout
-reuse the cached image. If you edit `src/` and restart Julia often, disabling the workload keeps
+reuse the cached image. Julia keeps a separate image per set of compile flags, so the first
+`Pkg.test()` after such a change (which checks array bounds) runs the workload once more. If you edit `src/` and restart Julia often, disabling the workload keeps
 each rebuild short; within one Revise session nothing is rebuilt.
 
 ### Revise.jl
