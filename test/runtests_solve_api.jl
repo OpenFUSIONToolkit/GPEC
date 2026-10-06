@@ -196,11 +196,24 @@ using TOML
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
+        # A calculated-source kinetic solve gates on profiles attached to the equilibrium.
+        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs...,
+            kinetic_factor=0.5, kinetic_source="calculated")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., match=ResistiveMatch())
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., match=ResistiveMatch())
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
+    end
+
+    @testset "kinetic profiles live on the equilibrium" begin
+        @test equil.kinetic === nothing
+        kin_file = joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat")
+        attach_kinetic_profiles!(equil, kin_file; zi=1)
+        @test equil.kinetic isa GPEC.Equilibrium.KineticProfileSplines
+        @test equil.kinetic.ni_spline(0.5) > 0
+        # With profiles attached, the calculated-source gate passes construction (the solve
+        # itself is exercised by the kinetic regression decks, not here).
+        equil.kinetic = nothing
     end
 end

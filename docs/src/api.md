@@ -88,8 +88,14 @@ ffs = solve(eq, Galerkin(); nn=1,
 ```
 
 Only the Galerkin formalism implements the match today; requesting one from `Forward` or
-`Riccati` errors. Kinetic runs (`kinetic_factor > 0`) need the `[KineticForces]` profiles and
-remain TOML-driven.
+`Riccati` errors. Kinetic runs (`kinetic_factor > 0`) need kinetic profiles attached to the
+equilibrium — either at construction or explicitly on an existing one:
+
+```julia
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada", kinetic_file="kin.h5", zi=1)
+attach_kinetic_profiles!(eq, "kin.h5"; zi=1)                  # equivalent, post-hoc
+ffs = solve(eq, Forward(); nn=1, kinetic_factor=1.0)
+```
 
 ## Entry points
 
