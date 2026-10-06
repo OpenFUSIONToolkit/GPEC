@@ -150,6 +150,9 @@ quoted in so a caller never has to know which one a bare number was.
     `NaN` when the set's field at the run's toroidal mode is round-off (see [`resonant_fraction_percent`](@ref))
   - `spectrum_norm_t`: `‖b̃‖` in tesla
   - `b_t0`: the axis toroidal field the normalization used, tesla
+  - `ampere_turns_kat`: the set's current as given, in kilo-ampere-turns, `|winding multiplier| × max |conductor current| / 1000`, so a current factor on this set converts to kAt by one
+    multiplication and arrays with different pattern currents compare on one axis; `NaN` for a
+    combination of sets
   - `spectrum`: b̃ itself, on the [`ResonantCoupling`](@ref) column ordering
 
 The spectrum travels with the result so a diagnostic can ask *why* a coil couples as it does without
@@ -163,6 +166,7 @@ struct CoilOverlap
     resonant_fraction_percent::Float64
     spectrum_norm_t::Float64
     b_t0::Float64
+    ampere_turns_kat::Float64
     spectrum::Vector{ComplexF64}
 end
 
@@ -186,7 +190,7 @@ function coil_overlaps(ctx::ResonantDriveContext, coil_sets::AbstractVector{Coil
     nrm_ref = isempty(norms) ? 0.0 : maximum(norms)
     return map(zip(coil_sets, spectra, norms)) do (cs, b, nrm)
         raw = coupling_overlap(ctx.dom, b)[mode]
-        CoilOverlap(cs.name, mode, raw / ctx.b_t0, raw, resonant_fraction_percent(raw, nrm, nrm_ref), nrm, ctx.b_t0, b)
+        CoilOverlap(cs.name, mode, raw / ctx.b_t0, raw, resonant_fraction_percent(raw, nrm, nrm_ref), nrm, ctx.b_t0, abs(cs.nw) * maximum(abs, cs.currents) / 1e3, b)
     end
 end
 
@@ -249,5 +253,5 @@ function combine_overlaps(overlaps::AbstractVector{CoilOverlap}, weights::Pair{<
 
     nrm = norm(b)
     nrm_ref = maximum(o.spectrum_norm_t for o in overlaps)
-    return CoilOverlap(String(name), mode, raw / b_t0, raw, resonant_fraction_percent(raw, nrm, max(nrm, nrm_ref)), nrm, b_t0, b)
+    return CoilOverlap(String(name), mode, raw / b_t0, raw, resonant_fraction_percent(raw, nrm, max(nrm, nrm_ref)), nrm, b_t0, NaN, b)
 end
