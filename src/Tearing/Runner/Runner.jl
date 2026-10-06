@@ -27,10 +27,10 @@ using LinearAlgebra
 using Statistics: mean, median
 using HDF5
 
-
 using FastInterpolations: cubic_interp
 using ..Utilities
 using ..Utilities: KineticProfiles
+using ...Equilibrium: read_kinetic_file, KineticProfileData
 using ..InnerLayer
 using ..InnerLayer:
     InnerLayerParameters, InnerLayerResponse, solve_inner,
@@ -38,8 +38,6 @@ using ..InnerLayer:
     GGJModel, GGJParameters,
     LayerWidths, slayer_layer_thickness
 import ..build_ggj_inputs   # defined at the Tearing level (needs ForceFreeStates)
-import ...Equilibrium as Equilibrium
-using ...Equilibrium: read_kinetic_file, KineticProfileData, load_kinetic_profiles
 using ..Dispersion
 using ..Dispersion: SurfaceCoupling, surface_coupling,
     MultiSurfaceCoupling, multi_surface_coupling,
@@ -59,8 +57,7 @@ export SLAYERResult, empty_slayer_result
 export run_slayer, run_slayer_from_inputs, ggj_inner_deltas
 export write_slayer_hdf5!
 export CriticalResonantFieldControl, critical_resonant_field_control_from_toml
-export CriticalResonantFieldResult, empty_critical_resonant_field_result
+export CriticalResonantFieldScan, CriticalResonantFieldResult, empty_critical_resonant_field_result
 export run_critical_resonant_field
-export write_critical_resonant_field_hdf5!
 
 end # module Runner

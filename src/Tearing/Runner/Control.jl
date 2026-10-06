@@ -4,44 +4,45 @@
 # growth-rate analysis. Populated either directly via the `@kwdef`
 # constructor or by parsing the `[SLAYER]` (and nested `[SLAYER.*]`)
 # section(s) of a `gpec.toml`.
-#
-# `CriticalResonantFieldControl` holds the user-facing knobs that drive the critical resonant field
-# analysis. Populated either directly via the `@kwdef` constructor or by parsing the `[CriticalResonantField]` section of a `gpec.toml`.
+
 """
     CriticalResonantFieldControl
 
-Configuration for the critical resonant field analysis. All fields are
-user-facing: read from the `[CriticalResonantField]` TOML section of a `gpec.toml` via
-`critical_resonant_field_control_from_toml`, or built directly via the `@kwdef` keyword
-constructor.
+Configuration for the critical resonant field (torque-balance) analysis, read from the
+`[SLAYER.CriticalResonantField]` TOML section via `critical_resonant_field_control_from_toml`
+or built with the `@kwdef` keyword constructor. The magnetic Prandtl number is the per-surface
+`P_tor` of the SLAYER layer parameters.
+
+## Fields
+
+  - `enabled`    -- run the analysis after SLAYER
+  - `Qmin`, `Qmax` -- override the real-Q scan window; `nothing` derives it per surface from Q0, Q_e and Q_i
+  - `n`          -- number of Q samples per surface
+  - `store_scan` -- write the per-surface Q, torque balance and Δ samples to `gpec.h5`
 """
 @kwdef struct CriticalResonantFieldControl
     enabled::Bool = false
-    Qmin::Float64 = -10.0
-    Qmax::Float64 = 10.0
-    n::Int = 200
-    viscous_input_type::String = "angular_momentum_diffusivity" # Either "angular_momentum_diffusivity" or "magnetic_prandtl_number"
-    viscous_input::Any = 1.0
+    Qmin::Union{Nothing,Float64} = nothing
+    Qmax::Union{Nothing,Float64} = nothing
+    n::Int = 2000
     store_scan::Bool = false
 end
 
+"""
+    critical_resonant_field_control_from_toml(section::AbstractDict) -> CriticalResonantFieldControl
+
+Parse a `[SLAYER.CriticalResonantField]` TOML section. Unknown keys raise an error.
+"""
 function critical_resonant_field_control_from_toml(section::AbstractDict)
-    flat = Dict{String,Any}()
-    for (k, v) in section
-        flat[k] = v
-    end
-
-    kwargs = Dict{Symbol,Any}()
-    for (k, v) in flat
-        sym = Symbol(k)
-        if sym in (:inner_model,)
-            kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
-        else
-            kwargs[sym] = v
-        end
-    end
-
-    return CriticalResonantFieldControl(; kwargs...)
+    field_names = Set(String.(fieldnames(CriticalResonantFieldControl)))
+    unknown = [k for k in keys(section) if !(k in field_names)]
+    isempty(unknown) ||
+        throw(
+            ArgumentError("critical_resonant_field_control_from_toml: unknown keys " *
+                          "$(unknown) in [SLAYER.CriticalResonantField]. Known: " *
+                          "$(sort(collect(field_names))).")
+        )
+    return CriticalResonantFieldControl(; (Symbol(k) => v for (k, v) in section)...)
 end
 
 """
@@ -133,6 +134,11 @@ there is one consistent interface for resistive and kinetic profiles.
 
   - `store_scan`  -- write the full Q/Δ scan grid to HDF5. `false` by
     default to keep the output file small.
+
+# Critical resonant field
+
+  - `critical_resonant_field` -- `CriticalResonantFieldControl` from the
+    `[SLAYER.CriticalResonantField]` subsection; requires `inner_model = :slayer_fitzpatrick`
 """
 @kwdef struct SLAYERControl
     enabled::Bool = false
@@ -195,7 +201,6 @@ there is one consistent interface for resistive and kinetic profiles.
 
     store_scan::Bool = false
 
-    # Critical resonant field analysis. Enabled via `[SLAYER.CriticalResonantField]` TOML section.
     critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
 end
 
@@ -231,6 +236,10 @@ function validate(ctrl::SLAYERControl)
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
         throw(ArgumentError("SLAYERControl: amr_passes must be ≥ 0"))
+    !ctrl.critical_resonant_field.enabled || ctrl.inner_model === :slayer_fitzpatrick ||
+        throw(ArgumentError("SLAYERControl: CriticalResonantField requires inner_model=:slayer_fitzpatrick"))
+    ctrl.critical_resonant_field.n >= 3 ||
+        throw(ArgumentError("SLAYERControl: CriticalResonantField n must be ≥ 3"))
     return ctrl
 end
 
@@ -267,9 +276,7 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
             haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
         elseif k == "CriticalResonantField" && v isa AbstractDict
-            flat["critical_resonant_field"] =
-                critical_resonant_field_control_from_toml(v)
-
+            flat["critical_resonant_field"] = critical_resonant_field_control_from_toml(v)
         else
             flat[k] = v
         end

@@ -4,40 +4,53 @@
 # per-surface layer parameters, the extracted tearing eigenvalues, and (if
 # `control.store_scan`) the full Q-plane scan data for plotting.
 #
-# `CriticalResonantFieldResult` packages the output of the critical resonant field analysis run:
-# per-surface critical resoant field. If `control.store_scan` is true, the full Q scan data,
-# viscous torque, and electromagnetic torque are also stored for plotting.
+# `CriticalResonantFieldResult` packages the per-surface critical resonant field
+# from the torque-balance analysis (and, if requested, its Q scans).
+
+"""
+    CriticalResonantFieldScan
+
+Real-Q torque-balance samples at one surface.
+
+## Fields
+
+  - `Q`       -- sampled normalized frequencies (Cole's axis)
+  - `balance` -- torque-balance value 2·P·(Q0 − Q)/Im[−1/(α + Δ)] at each Q
+  - `Delta`   -- inner-layer Δ(Q) at each Q
+"""
+struct CriticalResonantFieldScan
+    Q::Vector{Float64}
+    balance::Vector{Float64}
+    Delta::Vector{ComplexF64}
+end
 
 """
     CriticalResonantFieldResult
 
-Output of `run_critical_resonant_field`. Carries both summary critical resonant field values and if `control.store_scan` is true, the full Q scan data, viscous torque, and electromagnetic torque for plotting.
-"""
+Output of `run_critical_resonant_field`, one entry per SLAYER surface.
 
+## Fields
+
+  - `enabled`        -- the analysis ran
+  - `rational_index` -- rational-surface index of each entry
+  - `q_peak`         -- normalized frequency Q at the torque-balance maximum (NaN if none)
+  - `br_crit`        -- critical normalized resonant field b_r/B_φ (NaN if none)
+  - `q0`             -- normalized natural E×B rotation τ_k·n·ω_E
+  - `p_phi`          -- magnetic Prandtl number used (the layer `P_tor`)
+  - `scan`           -- per-surface Q scans; empty unless `store_scan`
+"""
 struct CriticalResonantFieldResult
     enabled::Bool
-    params::AbstractVector{<:InnerLayerParameters}
-    surface_index::Vector{Int}
-    Qpeak::Vector{Float64}
+    rational_index::Vector{Int}
+    q_peak::Vector{Float64}
     br_crit::Vector{Float64}
-    Q0::Vector{Float64}
-    P::Vector{Float64}
-    scan_data::Vector{NamedTuple}
+    q0::Vector{Float64}
+    p_phi::Vector{Float64}
+    scan::Vector{CriticalResonantFieldScan}
 end
 
-function empty_critical_resonant_field_result()
-    return CriticalResonantFieldResult(
-        false,
-        InnerLayerParameters[],
-        Int[],
-        Float64[],
-        Float64[],
-        Float64[],
-        Float64[],
-        NamedTuple[]
-    )
-end
-
+empty_critical_resonant_field_result() =
+    CriticalResonantFieldResult(false, Int[], Float64[], Float64[], Float64[], Float64[], CriticalResonantFieldScan[])
 
 """
     SLAYERResult
@@ -60,6 +73,7 @@ downstream inspection and HDF5 output.
     `delta_prime_to_rs_reference`, written as `PerSurface/Delta_prime_matrix_rs`);
     GGJ path: the ψ_N matrix unchanged (written as `PerSurface/Delta_prime_matrix`)
   - `Q_root`              -- tearing eigenvalue(s) in normalized Q
+
       + length `nsurfaces` in `:uncoupled` mode
       + length `1` in `:coupled` mode (global eigenvalue normalized by
         `params[1].tauk`)
@@ -74,6 +88,8 @@ downstream inspection and HDF5 output.
     plus FKR / visco-resistive sanity scales. Empty when disabled.
   - `scan_data`           -- scan results (per-surface in uncoupled, single
     entry in coupled). Empty unless `control.store_scan == true`.
+  - `critical_resonant_field` -- `CriticalResonantFieldResult`; `enabled=false`
+    unless `control.critical_resonant_field.enabled`
 """
 struct SLAYERResult
     enabled::Bool

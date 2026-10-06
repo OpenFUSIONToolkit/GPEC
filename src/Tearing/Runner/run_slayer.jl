@@ -53,40 +53,7 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
                      cubic_interp(psi_xs, collect(Float64, v))
     chi_perp = _chi_spline(data.chi_e)
     chi_tor = _chi_spline(data.chi_phi)
-
-    # If present, load viscosity data for the critical resonant field.
-    viscous_input = control.critical_resonant_field.viscous_input
-    if viscous_input isa AbstractString
-        profile_name = String(viscous_input)
-        isempty(profile_name) &&
-            error("run_slayer: CriticalResonantField.viscous_input is an empty profile name.")
-
-        viscous_data = HDF5.h5open(path, "r") do f
-            grp = control.profile_group == "/" ? f : f[control.profile_group]
-
-            haskey(grp, profile_name) ||
-                error("run_slayer: kinetic file '$path' is missing requested " *
-                      "CriticalResonantField profile '$profile_name'.")
-
-            collect(Float64, read(grp[profile_name]))
-        end
-
-        length(viscous_data) == npsi ||
-            error("run_slayer: CriticalResonantField profile '$profile_name' " *
-                  "has length $(length(viscous_data)), expected $npsi.")
-
-        viscous_input = cubic_interp(
-            collect(Float64, data.psi),
-            viscous_data
-        )
-    end
-
-    return (
-        profiles=profiles,
-        chi_perp=chi_perp,
-        chi_tor=chi_tor,
-        viscous_input=viscous_input
-    )
+    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor)
 end
 
 # ---------------------------------------------------------------------
@@ -429,222 +396,36 @@ function ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
     end
     return out
 end
+
 # ---------------------------------------------------------------------
-# Critical Resonant Field (Torque-Balance) Workflow
+# Critical resonant field (torque balance)
 # ---------------------------------------------------------------------
 """
-    Critical Resonant Field (Torque-Balance) Workflow
+    run_critical_resonant_field(params, rational_psi, profiles, ctrl) -> CriticalResonantFieldResult
 
-    The critical resonant field is the minimum resonant magnetic perturbation
-    amplitude that can drive a tearing mode unstable.
-
-    Returns a `CriticalResonantFieldResult` containing the critical resonant field
-    and the corresponding critical resonant field values for each rational surface.
+Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
+surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
+Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
+E×B frequency of the m/n mode, Q0 = τ_k·n·ω_E, with ω_E read from `profiles` at
+`rational_psi`.
 """
-
-function run_critical_resonant_field(
-    equil, intr, ctrl;
-    dir_path="./",
-    slayer_result=nothing,
-    profiles=nothing,
-    chi_prof=nothing,
-    viscous_profile=nothing
-)
-    slayer_ctrl = ctrl
-    ctrl = slayer_ctrl.critical_resonant_field
+function run_critical_resonant_field(params::AbstractVector{SLAYERParameters}, rational_psi::AbstractVector{<:Real},
+    profiles::KineticProfiles, ctrl::CriticalResonantFieldControl)
     ctrl.enabled || return empty_critical_resonant_field_result()
-
-    _eval(x, ψ) = x isa Real ? Float64(x) : Float64(x(ψ))
-
-    profiles === nothing &&
-        throw(ArgumentError("CriticalResonantField requires kinetic profiles."))
-
-    params = if slayer_result !== nothing && slayer_result.enabled && !isempty(slayer_result.params)
-        slayer_result.params
-    else
-        throw(ArgumentError(
-            "CriticalResonantField requires SLAYERParameters; " *
-            "run SLAYER first or provide compatible params."
-        ))
+    model = SLAYERModel{:fitzpatrick}()
+    nsurf = length(params)
+    q_peak, br_crit, q0 = fill(NaN, nsurf), fill(NaN, nsurf), zeros(nsurf)
+    scan = CriticalResonantFieldScan[]
+    for (k, p) in enumerate(params)
+        # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
+        q0[k] = p.tauk * p.n * profiles(rational_psi[k]).omega
+        tb = TorqueBalance(model, p, q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2)
+        Qs, bal, q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
+        ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Qs), bal, Δs))
     end
-
-    all(p -> p isa SLAYERParameters, params) ||
-        throw(ArgumentError(
-            "CriticalResonantField requires SLAYERParameters; " *
-            "run SLAYER first or provide compatible params."
-        ))
-
-    surface_index = Int[]
-    Qpeak_vec = Float64[]
-    br_vec = Float64[]
-    Q0_vec = Float64[]
-    P_vec = Float64[]
-    scan_data = NamedTuple[]
-
-    chi_vec = nothing
-    P_input = nothing
-    use_P = false
-
-    if ctrl.viscous_input_type === "angular_momentum_diffusivity"
-
-        if ctrl.viscous_input === false
-            chi_vec = nothing
-
-        elseif ctrl.viscous_input isa AbstractArray
-            length(ctrl.viscous_input) == length(params) ||
-                throw(ArgumentError(
-                    "CriticalResonantField viscous_input has length " *
-                    "$(length(ctrl.viscous_input)), expected $(length(params))."
-                ))
-            chi_vec = ctrl.viscous_input
-
-        elseif ctrl.viscous_input isa Number
-            chi_vec = fill(Float64(ctrl.viscous_input), length(params))
-
-        elseif ctrl.viscous_input isa String
-            viscous_profile === nothing &&
-                throw(ArgumentError(
-                    "CriticalResonantField profile " *
-                    "'$(ctrl.viscous_input)' was not loaded."
-                ))
-            chi_vec = viscous_profile
-
-        else
-            throw(ArgumentError(
-                "Invalid viscous_input for angular_momentum_diffusivity."
-            ))
-        end
-
-    elseif ctrl.viscous_input_type === "magnetic_prandtl_number"
-
-        use_P = true
-
-        if ctrl.viscous_input isa AbstractArray
-            length(ctrl.viscous_input) == length(params) ||
-                throw(ArgumentError(
-                    "CriticalResonantField viscous_input has length " *
-                    "$(length(ctrl.viscous_input)), expected $(length(params))."
-                ))
-            P_input = ctrl.viscous_input
-
-        elseif ctrl.viscous_input isa Number
-            P_input = fill(Float64(ctrl.viscous_input), length(params))
-
-        elseif ctrl.viscous_input isa String
-            viscous_profile === nothing &&
-                throw(ArgumentError(
-                    "CriticalResonantField profile " *
-                    "'$(ctrl.viscous_input)' was not loaded."
-                ))
-            P_input = viscous_profile
-
-        elseif ctrl.viscous_input === false
-            use_P = false
-
-        else
-            throw(ArgumentError(
-                "Invalid viscous_input for magnetic_prandtl_number."
-            ))
-        end
-
-    else
-        throw(ArgumentError(
-            "Invalid viscous_input_type: $(ctrl.viscous_input_type). " *
-            "Must be 'angular_momentum_diffusivity' or " *
-            "'magnetic_prandtl_number'."
-        ))
-    end
-
-    for (isurf, p) in enumerate(params)
-
-        psi_here = intr[isurf].psifac
-        omega_here = profiles(psi_here).omega
-        Q0_here = p.tauk * omega_here
-        eta_here = p.eta
-
-        if use_P
-            P_here = P_input isa AbstractArray ?
-                     Float64(P_input[isurf]) :
-                     _eval(P_input, psi_here)
-
-        elseif chi_vec === nothing
-            if chi_prof === nothing
-                @warn "CriticalResonantField: chi_prof is not provided, using control chi_perp as fallback."
-                chi_here = slayer_ctrl.chi_perp
-            else
-                chi_here = _eval(chi_prof, psi_here)
-            end
-
-            P_here = (4π * 1e-7) * abs(chi_here) / eta_here
-
-        else
-            chi_here = chi_vec isa AbstractArray ?
-                       Float64(chi_vec[isurf]) :
-                       _eval(chi_vec, psi_here)
-
-            P_here = (4π * 1e-7) * abs(chi_here) / eta_here
-        end
-
-
-        if P_here < 1
-            @warn "CriticalResonantField: P < 1 at surface $isurf (P = $P_here)."
-        end
-
-        tb = TorqueBalance(
-            SLAYERModel{:fitzpatrick}(),
-            p,
-            Q0_here,
-            P_here,
-            p.lu,
-            p.sval_r
-        )
-
-        Qs, bal, Qpeak, br_crit, _, Δs =
-            torque_balance_scan(
-                tb;
-                Qmin=ctrl.Qmin,
-                Qmax=ctrl.Qmax,
-                n=ctrl.n
-            )
-
-        push!(surface_index, isurf)
-        push!(Qpeak_vec, Qpeak)
-        push!(br_vec, br_crit)
-        push!(Q0_vec, Q0_here)
-        push!(P_vec, P_here)
-
-        push!(
-            scan_data,
-            (
-                surface=isurf,
-                Q=collect(Qs),
-                balance=collect(bal),
-                delta=collect(Δs),
-                Qpeak=Qpeak,
-                br_crit=br_crit,
-                Q0=Q0_here,
-                P=P_here,
-                lu=p.lu,
-                sval=p.sval_r,
-                m=p.m,
-                n=p.n,
-                params=p
-            )
-        )
-    end
-
-    return CriticalResonantFieldResult(
-        true,
-        params,
-        surface_index,
-        Qpeak_vec,
-        br_vec,
-        Q0_vec,
-        P_vec,
-        scan_data
-    )
+    return CriticalResonantFieldResult(true, Int[p.ising for p in params], q_peak, br_crit, q0,
+        Float64[p.P_tor for p in params], scan)
 end
-
 
 # ---------------------------------------------------------------------
 # Full pipeline: equilibrium + ForceFreeStates → parameters → analysis
@@ -752,34 +533,8 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
 
     rational_psi = Float64[surfaces[p.ising].psifac for p in params]
     rational_q = Float64[surfaces[p.ising].q for p in params]
-    # include critical resonant field workflow here
-    if control.critical_resonant_field.enabled
-        slayer_result = run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
-        crf_result = run_critical_resonant_field(equil, surfaces, control;
-            dir_path=dir_path,
-            slayer_result=slayer_result,
-            profiles=profiles,
-            chi_prof=chi_perp,
-            viscous_profile=loaded.viscous_input)
-        combined_result = SLAYERResult(
-            slayer_result.enabled,
-            slayer_result.control,
-            slayer_result.params,
-            slayer_result.rational_psi,
-            slayer_result.rational_q,
-            slayer_result.dp_matrix,
-            slayer_result.Q_root,
-            slayer_result.omega_Hz,
-            slayer_result.gamma_Hz,
-            slayer_result.per_surface_extraction,
-            slayer_result.coupled_extraction,
-            slayer_result.layer_widths,
-            slayer_result.scan_data,
-            crf_result
-        )
-        @info("SLAYER: critical resonant field workflow completed; " *
-              "critical br values for each rational surface are available in the result.")
-        return combined_result
-    end
-    return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
+    result = run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
+    control.critical_resonant_field.enabled || return result
+    crf = run_critical_resonant_field(params, rational_psi, profiles, control.critical_resonant_field)
+    return SLAYERResult((f === :critical_resonant_field ? crf : getfield(result, f) for f in fieldnames(SLAYERResult))...)
 end

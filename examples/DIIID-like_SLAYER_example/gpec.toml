@@ -89,3 +89,11 @@ Q_re_range = [-2.0, 2.0]       # Scan box in the normalized Q plane, Re(Q) axis
 Q_im_range = [-0.5, 3.0]       # Scan box in the normalized Q plane, Im(Q) axis
 nre        = 41                # Grid resolution along the Re(Q) axis
 nim        = 31                # Grid resolution along the Im(Q) axis
+
+[SLAYER.CriticalResonantField]
+# Critical resonant field b_r/B_φ for error-field penetration at each SLAYER surface, from the
+# Cole-Fitzpatrick 2006 torque balance with P = P_tor of each layer. Qmin/Qmax may be set to
+# override the per-surface scan window derived from Q0, Q_e and Q_i.
+enabled    = true      # run the analysis after SLAYER
+n          = 2000      # number of Q samples per surface
+store_scan = false     # write the per-surface Q, torque balance and Δ samples to gpec.h5
