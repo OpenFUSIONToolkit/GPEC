@@ -113,4 +113,4 @@ The KineticForces module (formerly PENTRC) implements neoclassical toroidal visc
   - Location: not in `docs/resources/`; preprint at https://arxiv.org/abs/1410.7240
   - Published: Plasma Physics and Controlled Fusion **57**, 065001 (2015)
   - Link: https://doi.org/10.1088/0741-3335/57/6/065001
-  - Describes: Toroidal critical Δ′ from finite parallel thermal conduction at a rational surface. Eq. 59 gives the geometric factor (`toroidal_dgeo`), Eq. 20 the parallel-wavenumber gradient (`toroidal_kpar`), and Eqs. 61 and 65 the critical width `W_d` used by `dc_type = :toroidal` in `InnerLayer.SLAYER`
+  - Describes: Toroidal critical Δ′ from finite parallel thermal conduction at a rational surface. Eq. 59 gives the geometric factor (`toroidal_dgeo`) and Eq. 20 the parallel-wavenumber gradient (`toroidal_kpar`) used by `dc_type = :toroidal` in `InnerLayer.SLAYER`; Eq. 61 is the large-aspect-ratio form of Eq. 59, and Eq. 65 gives the corresponding critical island width of Fitzpatrick (1995)
