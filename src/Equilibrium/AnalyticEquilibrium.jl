@@ -140,8 +140,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    # The second-order method takes ~2e4 steps at the default etol = 1e-10, and about 3× more per decade below it.
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol), maxiters=10^6, dense=false)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol), dense=false)
     check_equil_solve(sol, "large-aspect-ratio radial profiles")
 
     r_arr = sol.t
