@@ -95,6 +95,13 @@ end
             fwd = "ForceFreeStates/Solutions/ForwardIntegration"
             @test HDF5.API.h5ds_is_scale(h5["$fwd/psi"])
             @test HDF5.API.h5ds_is_attached(h5["$fwd/q"], h5["$fwd/psi"], 0)
+
+            # Ideal run with rational surfaces: the asymptotic ca coefficients are
+            # populated and finite (the kinetic/galerkin not-computed case emits
+            # zero-extent sentinels instead — asserted in runtests_fullruns.jl).
+            ca_l = read(h5["SingularSurfaces/ca_left"])
+            @test !isempty(ca_l)
+            @test all(isfinite, ca_l)
         end
     end
 end

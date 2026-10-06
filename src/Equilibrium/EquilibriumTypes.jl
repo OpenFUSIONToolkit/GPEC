@@ -352,6 +352,7 @@ not serializable; they are reconstructed from these nodes by `build_direct_from_
   - `rmin/rmax/zmin/zmax::Float64` — computational-grid bounds [m]
   - `psio::Float64` — total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
   - `bt_sign::Int` — sign of the toroidal field (+1 or -1)
+  - `ip_sign::Int` — sign of the plasma current (+1 or -1) as the source file states it
 """
 struct DirectIngest
     sq_xs::Vector{Float64}
@@ -365,6 +366,7 @@ struct DirectIngest
     zmax::Float64
     psio::Float64
     bt_sign::Int
+    ip_sign::Int
 end
 
 """
@@ -425,7 +427,6 @@ raw equilibrium data and preparing the initial splines.
      2. `μ₀ * Pressure` — plasma pressure (non-negative) [T²]
      3. `q` — safety factor profile
      4. `√ψ_norm` — square root of normalized flux
-
   - `psi_in`
     2D cubic interpolant on the (R, Z) grid [m].
     The values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
@@ -437,23 +438,18 @@ raw equilibrium data and preparing the initial splines.
 
           * 1D profiles are represented by `CubicInterpolant` or `CubicSeriesInterpolant`
           * 2D flux surfaces by `CubicInterpolantND`
-
   - `psi_in_xs::Vector{Float64}` — R coordinate grid for psi_in [m]
-
   - `psi_in_ys::Vector{Float64}` — Z coordinate grid for psi_in [m]
-
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
-
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
-
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
-
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
-
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
-
   - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
-
+  - `ip_sign::Int` — Sign of the plasma current (+1 or -1); read from the `current` header value
+    in EFIT g-files and `global_quantities.ip` in IMAS. The internal flux is always made
+    positive at the axis, so the sign is kept here (never recovered from the computed current)
+    and fixes the SFL→machine toroidal-angle handedness `helicity = bt_sign × ip_sign`.
   - `ingest::EquilibriumIngest` — captured raw arrays for the `gpec.h5` rerun snapshot
     (a [`DirectIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
   - `psihigh_resolved::Float64` — outer flux limit the equilibrium is formed on: `config.psihigh`
@@ -475,6 +471,7 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
     bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
+    ip_sign::Int     # Sign of the plasma current: +1 or -1 (from the g-file current / IMAS ip)
     ingest::EquilibriumIngest
     psihigh_resolved::Float64
 end
@@ -482,9 +479,9 @@ end
 # Readers construct without a resolved psihigh; it starts at the request and `resolve_psihigh!`
 # clamps it for efit-family equilibria.
 DirectRunInput(config::EquilibriumConfig, sq_in, psi_in, psi_in_xs, psi_in_ys,
-    rmin, rmax, zmin, zmax, psio, bt_sign, ingest) =
+    rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest) =
     DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys,
-        rmin, rmax, zmin, zmax, psio, bt_sign, ingest, config.psihigh)
+        rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest, config.psihigh)
 
 """
     InverseRunInput(...)
@@ -626,6 +623,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
     crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
     bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
+    ip_sign::Int = 1 # Sign of the plasma current as the source file states it: +1 or -1 (crnt is always positive)
     bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
     verbose::Bool = false # Whether to print verbose output
     diagnose_src::Bool = false # Whether to diagnose source data
@@ -861,21 +859,17 @@ This object provides a complete representation of the processed plasma equilibri
 
   - `params::EquilibriumParameters`:
     Computed equilibrium parameters and diagnostics.
-
   - `profiles::ProfileSplines`:
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
-
   - `geometry::GeometryProfileSplines`:
     Named 1D splines for flux-surface-averaged geometry (area, ⟨r⟩, ⟨R⟩),
     populated automatically by `compute_geometry_profiles` during construction.
-
   - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
 
       + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
       + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
-
   - **Geometric quantities (rzphi, 4 interpolants):**
     2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
 
@@ -885,7 +879,6 @@ This object provides a complete representation of the processed plasma equilibri
       + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
       + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
       + `rzphi_jac::CubicInterpolantND`: Jacobian
-
   - **Physics quantities (eqfun, 3 interpolants):**
     2D cubic interpolants storing local physics and geometric quantities.
 
@@ -894,13 +887,9 @@ This object provides a complete representation of the processed plasma equilibri
       + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
       + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
       + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
-
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
-
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
-
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
-
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)

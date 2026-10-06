@@ -38,4 +38,6 @@ scratch/
 
 # Local profiling scratch (one-off study scripts, not part of the package)
 profiling/
-src/Tearing/CriticalResonantField/CRF Dev/
+
+# Override-case rundirs materialized beside their example by the regression harness
+.regress-override-*

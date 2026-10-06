@@ -61,17 +61,15 @@ Gauss-Kronrod quadrature. Uses `QuadGK.quadgk!` with an in-place ComplexF64
 kernel buffer.
 
 The fbnce interpolant returns [ωb, ωd, f₁, f₂, ...] at each λ, where:
-
-  - f₁ = ωb|δJ|²/ro² (scalar torque)
-  - f₂:end = ωb·W_outer_products/ro² (kinetic matrix elements, if present)
+- f₁ = ωb|δJ|²/ro² (scalar torque)
+- f₂:end = ωb·W_outer_products/ro² (kinetic matrix elements, if present)
 
 Splits the domain at the trapped/passing boundary so Gauss-Kronrod resolves
 the kink in leff = ell + n*q (circulating) → ell (trapped). One `quadgk!`
 call writes all `nqty` complex quantities per λ-evaluation.
 
 # Returns
-
-  - `Vector{ComplexF64}` of length nqty: integrated pitch-angle results
+- `Vector{ComplexF64}` of length nqty: integrated pitch-angle results
 """
 function integrate_pitch_gar_quadgk(
     wn::Float64, wt::Float64, we::Float64, nuk::Float64,
@@ -98,17 +96,13 @@ function integrate_pitch_gar_quadgk(
     # Split domain at trapped/passing boundary so Gauss-Kronrod resolves
     # the kink in leff = ell + n*q (circulating) → ell (trapped).
     bobmax_clip = clamp(bobmax, lambda_min, lambda_max)
-    segments = if lambda_min < bobmax_clip < lambda_max
-        (lambda_min, bobmax_clip, lambda_max)
-    else
-        (lambda_min, lambda_max)
-    end
-
-    # In-place quadgk! buffer; copy the result out so the returned vector is
-    # owned by the caller.
     buf = zeros(ComplexF64, nqty)
     kernel! = (out, λ) -> _pitch_gar_kernel_quadgk!(out, λ, params)
-    I, _ = quadgk!(kernel!, buf, segments...; atol=pitch_atol, rtol=pitch_rtol)
+    I, _ = if lambda_min < bobmax_clip < lambda_max
+        quadgk!(kernel!, buf, lambda_min, bobmax_clip, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    else
+        quadgk!(kernel!, buf, lambda_min, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    end
     return copy(I)
 end
 
@@ -131,28 +125,28 @@ function _pitch_gar_kernel_quadgk!(out::Vector{ComplexF64}, lambda, p::PitchGARP
 
     if is_circulating
         xint_co = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
-            p.ell, leff, p.n, p.psi, lambda, p.method;
-            nutype=p.nutype, f0type=p.f0type,
-            nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-            atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
+                                        p.ell, leff, p.n, p.psi, lambda, p.method;
+                                        nutype=p.nutype, f0type=p.f0type,
+                                        nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                        atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint_counter = integrate_energy(p.wn, p.wt, p.we, wd, -wb, nueff,
-            p.ell, leff, p.n, p.psi, lambda, p.method;
-            nutype=p.nutype, f0type=p.f0type,
-            nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-            atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
+                                             p.ell, leff, p.n, p.psi, lambda, p.method;
+                                             nutype=p.nutype, f0type=p.f0type,
+                                             nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                             atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint = xint_co + xint_counter
     else
         xint = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
-            p.ell, leff, p.n, p.psi, lambda, p.method;
-            nutype=p.nutype, f0type=p.f0type,
-            nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-            atol=p.energy_atol, rtol=p.energy_rtol)
+                                     p.ell, leff, p.n, p.psi, lambda, p.method;
+                                     nutype=p.nutype, f0type=p.f0type,
+                                     nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                     atol=p.energy_atol, rtol=p.energy_rtol)
     end
 
     xint_decomposed = complex(p.rex * real(xint), p.imx * imag(xint))
 
     @inbounds for i in 1:p.nqty
-        out[i] = fvals[i+2] * xint_decomposed
+        out[i] = fvals[i + 2] * xint_decomposed
     end
     return nothing
 end
@@ -197,15 +191,13 @@ function integrate_pitch_gar_quadgk_wt(
     lambda_max = last(fbnce.cache.x)
 
     bobmax_clip = clamp(bobmax, lambda_min, lambda_max)
-    segments = if lambda_min < bobmax_clip < lambda_max
-        (lambda_min, bobmax_clip, lambda_max)
-    else
-        (lambda_min, lambda_max)
-    end
-
     buf = zeros(ComplexF64, 2 * nqty)
     kernel! = (out, λ) -> _pitch_gar_kernel_quadgk_wt!(out, λ, params)
-    I, _ = quadgk!(kernel!, buf, segments...; atol=pitch_atol, rtol=pitch_rtol)
+    I, _ = if lambda_min < bobmax_clip < lambda_max
+        quadgk!(kernel!, buf, lambda_min, bobmax_clip, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    else
+        quadgk!(kernel!, buf, lambda_min, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    end
     return copy(I)
 end
 
@@ -214,8 +206,8 @@ end
     _pitch_gar_kernel_quadgk_wt!(out::Vector{ComplexF64}, lambda, p::PitchGARParams)
 
 Dual-output pitch kernel. Fills a length-`2*nqty` buffer:
-out[1:nqty]          — fwmm half: `fvals * complex(0, imag(xint))`
-out[nqty+1:2*nqty]   — ftmm half: `fvals * complex(real(xint), 0)`
+  out[1:nqty]          — fwmm half: `fvals * complex(0, imag(xint))`
+  out[nqty+1:2*nqty]   — ftmm half: `fvals * complex(real(xint), 0)`
 
 One energy integration per λ; both halves share it.
 """
@@ -231,22 +223,22 @@ function _pitch_gar_kernel_quadgk_wt!(out::Vector{ComplexF64}, lambda, p::PitchG
 
     if is_circulating
         xint_co = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
-            p.ell, leff, p.n, p.psi, lambda, p.method;
-            nutype=p.nutype, f0type=p.f0type,
-            nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-            atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
+                                        p.ell, leff, p.n, p.psi, lambda, p.method;
+                                        nutype=p.nutype, f0type=p.f0type,
+                                        nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                        atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint_counter = integrate_energy(p.wn, p.wt, p.we, wd, -wb, nueff,
-            p.ell, leff, p.n, p.psi, lambda, p.method;
-            nutype=p.nutype, f0type=p.f0type,
-            nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-            atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
+                                             p.ell, leff, p.n, p.psi, lambda, p.method;
+                                             nutype=p.nutype, f0type=p.f0type,
+                                             nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                             atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint = xint_co + xint_counter
     else
         xint = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
-            p.ell, leff, p.n, p.psi, lambda, p.method;
-            nutype=p.nutype, f0type=p.f0type,
-            nufac=p.nufac, ximag=p.ximag, qt=p.qt,
-            atol=p.energy_atol, rtol=p.energy_rtol)
+                                     p.ell, leff, p.n, p.psi, lambda, p.method;
+                                     nutype=p.nutype, f0type=p.f0type,
+                                     nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                     atol=p.energy_atol, rtol=p.energy_rtol)
     end
 
     xint_w = complex(0.0, imag(xint))   # fwmm: rex=0, imx=1
@@ -254,9 +246,9 @@ function _pitch_gar_kernel_quadgk_wt!(out::Vector{ComplexF64}, lambda, p::PitchG
 
     nq = p.nqty
     @inbounds for i in 1:nq
-        f = fvals[i+2]
-        out[i] = f * xint_w
-        out[i+nq] = f * xint_t
+        f = fvals[i + 2]
+        out[i]      = f * xint_w
+        out[i + nq] = f * xint_t
     end
     return nothing
 end

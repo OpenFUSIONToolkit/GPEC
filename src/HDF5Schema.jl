@@ -44,6 +44,7 @@ const EQUIL_H5_NAMES = Dict(
     :li2 => "l_i_2",
     :li3 => "l_i_3",
     :bt_sign => "B_T_sign",
+    :ip_sign => "I_p_sign",
     :psio => "psi_total"
 )
 const EQUIL_H5_SKIP = Set([:psi0, :psi_axis, :psi_axis_norm, :zsep, :verbose, :diagnose_src, :diagnose_maxima])
@@ -98,6 +99,7 @@ const MAIN_H5_ANNOTATIONS = [
     "Equilibrium/l_i_3" => (; long_name="internal inductance (definition 3)"),
     "Equilibrium/volume" => (; long_name="plasma volume", units="m^3"),
     "Equilibrium/B_T_sign" => (; long_name="sign of the toroidal field"),
+    "Equilibrium/I_p_sign" => (; long_name="sign of the plasma current as stated by the equilibrium file"),
     "Equilibrium/psi_norm" => (; long_name="normalized poloidal flux at the magnetic axis (0 by definition of ψ_N)"),
     "Equilibrium/psi_boundary" => (; long_name="poloidal flux at the plasma boundary in the internal normalized convention (1 by construction, not a Wb/rad datum)"),
     "Equilibrium/psi_boundary_norm" => (; long_name="normalized poloidal flux at the plasma boundary (1 by definition of ψ_N)"),
@@ -181,9 +183,11 @@ const MAIN_H5_ANNOTATIONS = [
     "SingularSurfaces/D_I" =>
         (; long_name="Mercier D_I evaluated at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/ca_left" =>
-        (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface", dims=("mode", "solution", "large_small", "surface")),
+        (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface (zero-extent when not computed — ideal crossings only)",
+            dims=("mode", "solution", "large_small", "surface")),
     "SingularSurfaces/ca_right" =>
-        (; long_name="asymptotic large/small-solution coefficient matrices just right of each surface", dims=("mode", "solution", "large_small", "surface")),
+        (; long_name="asymptotic large/small-solution coefficient matrices just right of each surface (zero-extent when not computed — ideal crossings only)",
+            dims=("mode", "solution", "large_small", "surface")),
     "SingularSurfaces/E" =>
         (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/F" =>
@@ -244,6 +248,24 @@ const MAIN_H5_ANNOTATIONS = [
     "SurfaceGeometries/Wall/x" => (; long_name="Cartesian x of wall point cloud", units="m"),
     "SurfaceGeometries/Wall/y" => (; long_name="Cartesian y of wall point cloud", units="m"),
     "SurfaceGeometries/Wall/z" => (; long_name="Cartesian z of wall point cloud", units="m")
+]
+
+# Per-stage wall-clock records written by `_write_runtimes!` after every stage has run.
+# Stages that did not run leave their path absent and are skipped by `annotate!`.
+const RUNTIME_H5_ANNOTATIONS = [
+    "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
+    "Info/Runtimes/galerkin" => (; long_name="wall-clock time of the Galerkin outer-region solve (measured inside force_free_states, not additional to it)", units="s"),
+    "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
+    "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
+    "Info/Runtimes/forcing_terms" => (;
+        long_name="wall-clock time of the ForcingTerms forcing-mode materialization, incl. coil Biot-Savart onto the plasma surface (measured inside perturbed_equilibrium, not additional to it)",
+        units="s"
+    ),
+    "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
+    "Info/Runtimes/kinetic_forces" => (; long_name="wall-clock time of the KineticForces (NTV) stage", units="s"),
+    "Info/Runtimes/error_fields" => (; long_name="wall-clock time of the ErrorFields stage (coil sensitivities, Monte Carlo, locking risk)", units="s"),
+    "Info/Runtimes/total" =>
+        (; long_name="wall-clock time of the full GPEC run (the per-stage values nest rather than partition it, so they do not sum to this)", units="s")
 ]
 
 # Euler-Lagrange operator matrices: same wording per letter, Ideal/ and Kinetic/ variants.

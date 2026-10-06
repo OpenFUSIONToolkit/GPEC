@@ -114,12 +114,9 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-            eq_config,
-            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-        )
-        intr.nlow = ctrl.nn_low
-        intr.nhigh = ctrl.nn_high
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -129,10 +126,10 @@ using TOML
         intr.numpert_total = intr.mpert * intr.npert
 
         metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         balanced = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
@@ -204,12 +201,9 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-            eq_config,
-            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-        )
-        intr.nlow = ctrl.nn_low
-        intr.nhigh = ctrl.nn_high
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -219,10 +213,10 @@ using TOML
         intr.numpert_total = intr.mpert * intr.npert
 
         metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
         # Default (bidirectional=false): all chunks should have direction=+1
         chunks_fwd = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
@@ -268,14 +262,11 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-                eq_config,
-                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-            )
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            intr.nlow = ctrl.nn_low
-            intr.nhigh = ctrl.nn_high
+            intr.nlow = ctrl.nn_low;
+            intr.nhigh = ctrl.nn_high;
             intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -284,9 +275,9 @@ using TOML
             intr.mpert = intr.mhigh - intr.mlow + 1
             intr.numpert_total = intr.mpert * intr.npert
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-            ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
+            mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
             return real(vac.et[1]), intr
         end
 
@@ -320,10 +311,7 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-                eq_config,
-                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-            )
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             # Apply the two-pass auto grid exactly as the main driver does (the example ships
             # grid_type="auto", mpsi=0): measured-curvature refinement with rational surfaces
             # pinned as mandatory knots, re-formed from the captured ingest. The pinned values
@@ -336,8 +324,8 @@ using TOML
             end
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            intr.nlow = ctrl.nn_low
-            intr.nhigh = ctrl.nn_high
+            intr.nlow = ctrl.nn_low;
+            intr.nhigh = ctrl.nn_high;
             intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -346,9 +334,9 @@ using TOML
             intr.mpert = intr.mhigh - intr.mlow + 1
             intr.numpert_total = intr.mpert * intr.npert
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-            ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
+            mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
             return real(vac.et[1]), intr
         end
 
@@ -384,12 +372,9 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-            eq_config,
-            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-        )
-        intr.nlow = ctrl.nn_low
-        intr.nhigh = ctrl.nn_high
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -399,11 +384,11 @@ using TOML
         intr.numpert_total = intr.mpert * intr.npert
 
         metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
 
         # Use the first chunk from chunk_el_integration_bounds: guaranteed rational-free interior
         odet_tmp = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, 10, 5, intr.msing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet_tmp, ctrl, ffit, equil.profiles, intr)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet_tmp, ctrl, mats, equil.profiles, intr)
         chunks_tmp = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet_tmp, ctrl, intr)
         chunk1 = chunks_tmp[1]
         a = chunk1.psi_start
@@ -438,14 +423,11 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-                eq_config,
-                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-            )
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            intr.nlow = ctrl.nn_low
-            intr.nhigh = ctrl.nn_high
+            intr.nlow = ctrl.nn_low;
+            intr.nhigh = ctrl.nn_high;
             intr.npert = 1
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
             GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -454,10 +436,10 @@ using TOML
             intr.mpert = intr.mhigh - intr.mlow + 1
             intr.numpert_total = intr.mpert * intr.npert
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-            ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
             # Derivatives are recomputed on demand; materialize so the stores can be compared.
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, ffit, intr)
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, mats, intr)
             return odet
         end
 
@@ -494,10 +476,7 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
-            eq_config,
-            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-        )
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
         # Apply the two-pass auto grid (measured-curvature refinement, rational surfaces pinned
         # as mandatory knots) exactly as the main driver does (see the FM testset above); the
         # pinned values below are for this grid, the production default.
@@ -509,8 +488,8 @@ using TOML
         end
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
             (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-        intr.nlow = ctrl.nn_low
-        intr.nhigh = ctrl.nn_high
+        intr.nlow = ctrl.nn_low;
+        intr.nhigh = ctrl.nn_high;
         intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
@@ -519,14 +498,14 @@ using TOML
         intr.mpert = intr.mhigh - intr.mlow + 1
         intr.numpert_total = intr.mpert * intr.npert
         metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
         odet, fm_propagators, fm_chunks, fm_S_left =
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
+        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
             intr, fm_propagators, fm_chunks;
             wv=vac.wv, psio=equil.psio,
-            S_at_surface_left=fm_S_left, ctrl=ctrl, equil=equil, ffit=ffit)
+            S_at_surface_left=fm_S_left, ctrl=ctrl, equil=equil, mats=mats)
 
         msing = intr.msing
         dpm = intr.delta_prime_matrix

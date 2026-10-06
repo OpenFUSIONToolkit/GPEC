@@ -27,7 +27,7 @@ include("KineticProfiles.jl")
 # --- Expose types and functions to the user ---
 export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
-    KineticProfileSplines, load_kinetic_profiles,
+    KineticProfileSplines, load_kinetic_profiles, shift_exb_rotation,
     KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
 export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, bracket_mandatory_nodes, enforce_min_spacing, implied_knot_count

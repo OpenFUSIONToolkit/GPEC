@@ -21,8 +21,8 @@ function run_ffs(ex; integrator)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low
-    intr.nhigh = ctrl.nn_high
+    intr.nlow = ctrl.nn_low;
+    intr.nhigh = ctrl.nn_high;
     intr.npert = 1
     GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
     intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
@@ -30,9 +30,9 @@ function run_ffs(ex; integrator)
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
     metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-    ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-    odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-    vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, ffit, intr)
+    mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+    odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
+    vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
     return real(vac.et[1]), intr.numpert_total
 end
 

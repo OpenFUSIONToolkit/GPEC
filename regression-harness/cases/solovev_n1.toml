@@ -182,6 +182,16 @@ label = "pressure profile (checksum)"
 noise_threshold = 0
 order = 71
 
+# Bitwise reproducibility guard for the ideal asymptotic coefficients (issue: kinetic
+# runs used to dump uninitialized memory here; ideal values must stay byte-stable).
+[quantities.ca_left]
+h5path = "SingularSurfaces/ca_left"
+type = "complex_matrix"
+extract = "checksum"
+label = "ca_left (checksum)"
+noise_threshold = 0
+order = 72
+
 # Runtime (special: not from H5)
 [quantities.runtime]
 h5path = ""

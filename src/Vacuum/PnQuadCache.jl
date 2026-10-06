@@ -11,9 +11,8 @@
 #     but not on the Legendre argument s. Since n is fixed per vacuum run, we
 #     cache them on first use and serve millions of subsequent calls from reads.
 #
-# Thread safety: Dict + SpinLock for storage, atomic last-used entry for
-# lock-free fast path. Since n is constant within a vacuum run, the fast
-# path (same n as last call) hits ~100% of the time.
+# Thread safety: Dict + SpinLock. Callers look the entry up once per kernel
+# call (n is fixed there) and pass it down, so the lock stays off the hot path.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Quadrature node constants (integration limits: xl=0, xu=5) ───────────────
@@ -62,35 +61,13 @@ end
 const _PN_CACHE = Dict{Int,PnQuadEntry}()
 const _PN_CACHE_LOCK = Threads.SpinLock()
 
-# Fast-path: last-used n. Since n is constant within a vacuum run,
-# this avoids Dict lookup + lock for ~100% of calls.
-#
-# Thread safety: _PN_LAST_ENTRY (plain Ref) is safe because the slow path
-# always writes the entry *before* updating the atomic sentinel _PN_LAST_N.
-# A reader that sees _PN_LAST_N == n is therefore guaranteed to see a valid
-# entry — the atomic store acts as a release fence for the preceding write.
-const _PN_LAST_N = Threads.Atomic{Int}(0)
-const _PN_LAST_ENTRY = Ref{PnQuadEntry}(PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0))
-
 """
     get_pn_quad_cache(n::Int) -> PnQuadEntry
 
 Return cached sinh/cosh values for toroidal mode `n`, computing on first access.
-Works for any `n ≥ 1` with no upper limit.
-
-The fast path (same `n` as last call) is lock-free: one atomic read + comparison.
+Takes a lock, so call it once per kernel call and pass the entry down.
 """
-@inline function get_pn_quad_cache(n::Int)
-    _PN_LAST_N[] == n && return _PN_LAST_ENTRY[]
-    return _get_pn_quad_cache_slow(n)
-end
-
-@noinline function _get_pn_quad_cache_slow(n::Int)
-    entry = @lock _PN_CACHE_LOCK get!(() -> _make_pn_quad_entry(n), _PN_CACHE, n)
-    _PN_LAST_ENTRY[] = entry   # plain store (data) — must precede sentinel
-    _PN_LAST_N[] = n           # seq_cst store-release — makes data visible
-    return entry
-end
+get_pn_quad_cache(n::Int) = @lock _PN_CACHE_LOCK get!(() -> _make_pn_quad_entry(n), _PN_CACHE, n)
 
 function _make_pn_quad_entry(n::Int)
     @assert n >= 1 "PnQuadEntry is only defined for n ≥ 1 (Γ(1/2 - n) diverges at n = 0)"

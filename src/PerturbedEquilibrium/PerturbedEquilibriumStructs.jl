@@ -92,10 +92,10 @@ Results from perturbed equilibrium calculations.
 
 Response fields (mode space):
 
-  - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, mpert]
-  - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, mpert]
-  - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, mpert]
+  - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, numpert_total]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
+  - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, numpert_total]
+  - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, numpert_total]
 
 Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
 Each row maps the full applied field to the resonant response at that surface.
@@ -120,6 +120,16 @@ Diagnostics [n_rational]:
 Metadata [n_rational] — identifies each (surface, n) row:
 
   - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
+
+Dominant resonant-coupling modes — the run summary SVD `U·diag(σ)·Vᴴ` of
+`C_resonant_area_weighted_field` over every resonant row (window post hoc with `dominant_coupling`
+on a `ResonantCoupling`):
+
+  - `dominant_singular_values` - σ, descending [rank]
+  - `dominant_right_singular_vectors` - V, applied-b̃ spectra ranked by resonant drive [numpert_total × rank]
+  - `dominant_left_singular_vectors` - U, resonant-field patterns over the retained surfaces [n_retained × rank]
+  - `dominant_rational_index` - rows of the `rational_*` arrays retained in the window [n_retained]
+  - `dominant_forcing_overlap` - Vᴴ·b̃_x, the applied forcing's coefficient on each mode [rank]
 
 Control-surface forcing/response spectra [numpert_total], in the three Pharr (2026) field
 representations (all tesla; no flux/weber is stored):
@@ -147,18 +157,22 @@ well-conditioned flux-space inductances L, Λ:
 
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
-  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")    # Response fields in mode space [npsi, mpert]
-  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
+  - `plasma_energy`  - Σₙ Re( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ ) / 4 over the diagonal n blocks of Λ (energy to
+    perturb the plasma; Fortran's "total energy")
+  - `toroidal_torque` - Σₙ −2n·Im( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ / 4 ) [Park 2011 PoP 18 110702, eq. 1] —
+    the boundary-response torque, zero for ideal
+    (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
+    self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
     psi_grid::Vector{Float64} = Float64[]
 
-    # Response fields in mode space [npsi, mpert]
+    # Response fields in mode space [npsi, numpert_total]
     xi_modes::Union{Nothing,NamedTuple} = nothing
     b_modes::Union{Nothing,NamedTuple} = nothing
-    b_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal field b_n [npsi, mpert]
-    xi_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, mpert]
+    b_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal field b_n [npsi, numpert_total]
+    xi_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, numpert_total]
 
     # Coupling matrices [n_rational × numpert_total]
     C_resonant_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
@@ -186,6 +200,13 @@ well-conditioned flux-space inductances L, Λ:
     rational_m_res::Vector{Int} = Int[]
     rational_n::Vector{Int} = Int[]
     rational_surface_idx::Vector{Int} = Int[]
+
+    # Dominant resonant-coupling modes: SVD of C_resonant_area_weighted_field over the retained rows
+    dominant_singular_values::Vector{Float64} = Float64[]
+    dominant_right_singular_vectors::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # V [numpert_total × rank]
+    dominant_left_singular_vectors::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)   # U [n_retained × rank]
+    dominant_rational_index::Vector{Int} = Int[]                                  # retained rows of rational_*
+    dominant_forcing_overlap::Vector{ComplexF64} = ComplexF64[]                    # Vᴴ·b̃_x [rank]
 
     # Control-surface forcing/response spectra in the three weightings of field representations [numpert_total], tesla
     forcing_b::Vector{ComplexF64} = ComplexF64[]  # bare normal field b (forcing Φ_x)

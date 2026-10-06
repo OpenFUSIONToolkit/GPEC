@@ -156,12 +156,12 @@ function _solution_at(
 end
 
 """
-    _el_solution_at(psi, resnum, odet, ffit, equil, ffs, nstep) -> (u, du)
+    _el_solution_at(psi, resnum, odet, mats, equil, ffs, nstep) -> (u, du)
 
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored ODE solution via the
 ideal Euler-Lagrange relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u₁) [Glasser 2016 eqs. 22-24],
 with u₁, u₂ Hermite-interpolated to `psi`. Only valid for ideal runs where
-`ffit.fmats_lower` and `kmats` generated the solution.
+`mats.ideal.F_spline_lower` and `K_spline` generated the solution.
 
 The Hermite slopes need du₂ as well as du₁, and du₂ is not stored: both are evaluated here
 from the derivative kernel at the two bracketing nodes, which is where the handful of
@@ -171,7 +171,7 @@ function _el_solution_at(
     psi::Float64,
     resnum::Int,
     odet::SolutionProfiles,
-    ffit::FourFitVars,
+    mats::MatrixSplines,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
     nstep::Int
@@ -190,8 +190,8 @@ function _el_solution_at(
     q_hint = Ref(1)
     du_a = zeros(ComplexF64, npert, npert, 2)
     du_b = zeros(ComplexF64, npert, npert, 2)
-    ForceFreeStates.el_derivatives!(du_a, odet.u_store[:, :, :, il], false, equil, ffit, ffs, psi_a, q_hint, hint)
-    ForceFreeStates.el_derivatives!(du_b, odet.u_store[:, :, :, ir], false, equil, ffit, ffs, psi_b, q_hint, hint)
+    ForceFreeStates.el_derivatives!(du_a, odet.u_store[:, :, :, il], false, equil, mats, ffs, psi_a, q_hint, hint)
+    ForceFreeStates.el_derivatives!(du_b, odet.u_store[:, :, :, ir], false, equil, mats, ffs, psi_b, q_hint, hint)
     du1_a = @view du_a[:, :, 1]
     du1_b = @view du_b[:, :, 1]
     du2_a = @view du_a[:, :, 2]
@@ -206,8 +206,8 @@ function _el_solution_at(
     q_e = equil.profiles.q_spline(psi)
     singfac_inv = vec([1.0 / (m - q_e * n) for m in ffs.mlow:ffs.mhigh, n in ffs.nlow:ffs.nhigh])
     fmat_lower = Matrix{ComplexF64}(undef, npert, npert)
-    ffit.fmats_lower(vec(fmat_lower), psi; hint=hint)
-    ffit.kmats(vec(kmat), psi; hint=hint)
+    mats.ideal.F_spline_lower(vec(fmat_lower), psi; hint=hint)
+    mats.ideal.K_spline(vec(kmat), psi; hint=hint)
     du1_e = u2_e .* singfac_inv
     du1_e .-= kmat * u1_e
     ldiv!(LowerTriangular(fmat_lower), du1_e)
@@ -226,7 +226,7 @@ end
         ffs::ForceFreeStatesResult,
         intr::PerturbedEquilibriumInternal,
         ctrl::PerturbedEquilibriumControl,
-        ffit::FourFitVars
+        mats::MatrixSplines
     )
 
 Compute singular layer coupling matrices and applied resonant vectors.
@@ -258,7 +258,7 @@ function compute_singular_coupling_metrics!(
     ffs::ForceFreeStatesResult,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
-    ffit::FourFitVars
+    mats::MatrixSplines
 )
     ctrl.verbose && @info "Computing singular coupling metrics (GPEC method)"
 
@@ -290,6 +290,8 @@ function compute_singular_coupling_metrics!(
             push!(resonant_pairs, (s, nn))
         end
     end
+    # Rows run outward in ψ across every n; an integer-q surface keeps its n order.
+    sort!(resonant_pairs; by=((s, nn),) -> (ffs.surfaces[s].psifac, nn))
 
     n_rational = length(resonant_pairs)
     if n_rational == 0
@@ -342,7 +344,7 @@ function compute_singular_coupling_metrics!(
     # @threads region.
     nstep = solution.step
     # ξ′ evaluation preference: the ideal EL relation, or the interpolated stored RHS for kinetic runs.
-    use_el = !ffit.kinetic_populated
+    use_el = mats.kinetic === nothing
     _blas_nthreads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
@@ -387,8 +389,8 @@ function compute_singular_coupling_metrics!(
                 u_r, ud_r = _gal_solution_at(rpsi, resnum, solution, nstep)
             elseif use_el
                 # interpolate u and evaluate dξ/dψ from the ideal EL relation
-                u_l, ud_l = _el_solution_at(lpsi, resnum, solution, ffit, equil, ffs, nstep)
-                u_r, ud_r = _el_solution_at(rpsi, resnum, solution, ffit, equil, ffs, nstep)
+                u_l, ud_l = _el_solution_at(lpsi, resnum, solution, mats, equil, ffs, nstep)
+                u_r, ud_r = _el_solution_at(rpsi, resnum, solution, mats, equil, ffs, nstep)
             else
                 # interpolate u and the stored dξ/dψ, weighted to remove the resonant pole
                 u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
@@ -648,7 +650,8 @@ end
 Compute island half-width and Chirikov parameter from applied resonant vectors.
 
   - `island_half_width[row]` = √|island_width_sq[row]|
-  - `chirikov_parameter[row]` = half-width / (half-distance to nearest neighbor in rational_psi)
+  - `chirikov_parameter[row]` = half-width / (half-distance to the nearest other rational surface);
+    rows on the same surface at another n (integer q) are not neighbors
 """
 function compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rational::Int)
     state.island_half_width = sqrt.(abs.(state.island_width_sq))
@@ -660,7 +663,7 @@ function compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rationa
         psi_row = state.rational_psi[row]
         min_dist = Inf
         for row2 in 1:n_rational
-            row2 == row && continue
+            state.rational_surface_idx[row2] == state.rational_surface_idx[row] && continue
             dist = abs(state.rational_psi[row2] - psi_row)
             min_dist = min(min_dist, dist)
         end

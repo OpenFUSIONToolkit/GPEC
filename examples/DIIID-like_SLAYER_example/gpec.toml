@@ -1,7 +1,7 @@
-# DIII-D-like SLAYER tearing-mode growth-rate example with Critical Resonant Field calculations.
+# DIII-D-like SLAYER tearing-mode growth-rate example.
 # Reuses the equilibrium and H-mode kinetic profiles of the sibling
 # DIIID-like_ideal_example (geqdsk referenced by relative path; not
-# duplicated). Runs equilibrium + ForceFreeStates + SLAYER + CriticalResonantField and skips
+# duplicated). Runs equilibrium + ForceFreeStates + SLAYER and skips
 # PerturbedEquilibrium (ForceFreeStates.force_termination = true).
 
 [Equilibrium]
@@ -30,10 +30,10 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
-local_stability_flag = false    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                 # Edge dW scan band: diagnostic dW(ψ) computed for ψ ∈ [psiedge, psilim]; integration domain set by qhigh / psihigh / dmlim
+psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
@@ -47,9 +47,9 @@ mthvac = 512                   # Number of points used in splines over poloidal 
 kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
-save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
+save_interval = 1              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
+ucrit = 1e3                    # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
 integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
@@ -61,8 +61,11 @@ dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmli
 # Runs in the force_termination path (PE skipped). Kinetic profiles (incl. the
 # χ⊥/χ_φ heat/momentum diffusivities) are read from the standardized HDF5
 # kinetic file shared with the kinetic/NTV physics. Per-surface (uncoupled)
-# analysis: the headline is the unstable 2/1; the validity gate drops surfaces
-# with no real root (e.g. the 5/1, whose Δ' BVP yields a huge uncancellable Δ').
+# analysis: track the 2/1, 3/1, and 4/1 (the headline is the unstable 2/1).
+# The 5/1 and 6/1 sit near the edge (ψ_N ≥ 0.97), far from the core where the
+# slab-layer approximation holds; their Δ' are excessively large and likely
+# invalid, no Re/Im contour crossing polishes to a true zero, and the validity
+# gate correctly reports them as no_root rather than a spurious growth rate.
 enabled                 = true       # Run the SLAYER tearing-mode analysis
 inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
 scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive refinement) or "brute_force"
@@ -86,12 +89,3 @@ Q_re_range = [-2.0, 2.0]       # Scan box in the normalized Q plane, Re(Q) axis
 Q_im_range = [-0.5, 3.0]       # Scan box in the normalized Q plane, Im(Q) axis
 nre        = 41                # Grid resolution along the Re(Q) axis
 nim        = 31                # Grid resolution along the Im(Q) axis
-
-[SLAYER.CriticalResonantField]                          # CriticalResonantField used to find the critical resonant field sufficent for tearing onset at each rational surface.
-enabled = true                                          # Run CriticalResonantField analysis
-Qmin = -10                                              # Minimum normalized rotation scanned
-Qmax = 10                                               # Maximum normalized rotation scanned
-n = 2000                                                # Number of rotation points scanned
-viscous_input_type = "magnetic_prandtl_number"          # "angular_momentum_diffusivity"     # Either "angular_momentum_diffusivity" or "magnetic_prandtl_number"
-viscous_input = "test_ang_mom_diff"                     # Either Prandlt number or angular momentum diffusivity (based on viscous_input_type). Takes in either a string name for the .h5 profile file, a single value for all, or false, which falls back on chi_perp ~ chi_e, electron thermal diffusivity.
-store_scan = true                                       # Per surface torque and inner layer quantities

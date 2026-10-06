@@ -1,7 +1,7 @@
 """
     compute_plasma_response!(
         state, equil, solution, wt0, mthvac, ffs,
-        intr, ctrl, metric, ffit
+        intr, ctrl, metric, mats
     )
 
 Compute plasma response to external forcing using ForceFreeStates eigenmode solutions.
@@ -24,7 +24,7 @@ function compute_plasma_response!(
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl,
     metric::MetricData,
-    ffit::FourFitVars
+    mats::MatrixSplines
 )
     if ctrl.verbose
         @info "Computing plasma response (wt0-based inductance)"
@@ -36,9 +36,8 @@ function compute_plasma_response!(
     # Plasma inductance Lambda (wt0 formula, Fortran resp_induct_flag=TRUE default)
     plasma_inductance = calc_plasma_inductance(wt0, ffs, equil.psio)
 
-    # Surface inductance L from vacuum surface-current matrix at psilim.
-    nn = ffs.nlow
-    surface_inductance = calc_surface_inductance(equil, ffs.psilim, mthvac, ffs.mlow:ffs.mhigh, nn)
+    # Surface inductance L from vacuum surface-current matrix at psilim, block-diagonal in n.
+    surface_inductance = calc_surface_inductance(equil, ffs.psilim, mthvac, ffs.mlow:ffs.mhigh, ffs.nlow:ffs.nhigh)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
@@ -88,18 +87,26 @@ function compute_plasma_response!(
     # the well-conditioned flux-space inductances — the b̃ form routes through inv(R⁻¹LR⁻†) and is
     # needlessly ill-conditioned. The result is a physical scalar, not a stored flux quantity.
     L_surf_inv = inv(surface_inductance)
-    L_plas_inv = inv(plasma_inductance)
     vy = dot(forcing_flux, L_surf_inv * forcing_flux) / 4
     sy = dot(response_flux, L_surf_inv * response_flux) / 4
-    py = dot(response_flux, L_plas_inv * response_flux) / 4
     state.vacuum_energy = real(vy)
     state.surface_energy = real(sy)
+    # Plasma energy py = Σₙ Φₙ†·Λₙₙ⁻¹·Φₙ/4 and torque T = Σₙ −2n·Im(py_n), from T = −2n·Im(δW)
+    # [Park 2011 PoP 18 110702, eq. 1]. Only the diagonal n blocks of Λ enter
+    py = zero(ComplexF64)
+    state.toroidal_torque = 0.0
+    for (in, nn) in enumerate(ffs.nlow:ffs.nhigh)
+        blk = ((in - 1) * ffs.mpert + 1):(in * ffs.mpert)
+        Φ_n = response_flux[blk]
+        py_n = dot(Φ_n, inv(plasma_inductance[blk, blk]) * Φ_n) / 4
+        py += py_n
+        state.toroidal_torque += -2 * nn * imag(py_n)
+    end
     state.plasma_energy = real(py)              # Fortran's "total energy" is this pengy
-    state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(
         response_flux, flux_matrix, solution, equil, ffs, intr,
-        metric, ffit, ctrl
+        metric, mats, ctrl
     )
 
     npsi = size(solution.u_store, 4)

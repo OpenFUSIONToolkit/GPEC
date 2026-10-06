@@ -55,6 +55,7 @@ Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeS
 
 ```
 PerturbedEquilibrium/
+├── mode_m / mode_n  # (m, n) of each entry along every `mode` axis below [numpert_total]
 ├── ForcingModes/
 │   ├── n              # Toroidal mode numbers
 │   ├── m              # Poloidal mode numbers
@@ -63,11 +64,11 @@ PerturbedEquilibrium/
 ├── response_b / response_b_root_area / response_b_area   # control-surface response spectrum (b, b̃, b̄) [numpert_total], tesla
 ├── Response/
 │   ├── psi             # Radial abscissa ψ_N [npsi] shared by every response profile below
-│   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
+│   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, numpert_total])
 │   ├── Jxi_psi        # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
-│   ├── b_psi_area_weighted       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, mpert])
-│   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, mpert])
-│   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
+│   ├── b_psi_area_weighted       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, numpert_total])
+│   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, numpert_total])
+│   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, numpert_total])
 │   ├── Jb_theta
 │   └── Jb_zeta
 ├── ResponseMatrices/         # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
@@ -93,7 +94,13 @@ PerturbedEquilibrium/
 │   ├── rational_psi         # [n_rational] surface metadata
 │   ├── rational_q
 │   ├── rational_m
-│   └── rational_n
+│   ├── rational_n
+│   └── DominantMode/        # SVD U·diag(σ)·Vᴴ of C_resonant_area_weighted_field over the core-window rational surfaces (ψ_N ≤ 0.9)
+│       ├── singular_values          # σ, descending [rank]
+│       ├── right_singular_vectors   # V: applied-b̃ spectra ranked by resonant drive [numpert_total × rank]
+│       ├── left_singular_vectors    # U: resonant-field patterns over the retained surfaces [n_retained × rank]
+│       ├── rational_index           # rows of rational_* retained in the ψ_N window [n_retained]
+│       └── forcing_overlap          # Vᴴ·b̃_x, applied forcing's coefficient on each mode [rank]
 └── Energies/
     ├── vacuum_energy
     ├── surface_energy
@@ -114,6 +121,10 @@ function write_outputs_to_HDF5(
         forcing_group["n"] = [mode.n for mode in intr.forcing_modes]
         forcing_group["m"] = [mode.m for mode in intr.forcing_modes]
         forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
+
+        # Labels of the mode axis shared by the spectra, matrices and profiles below
+        !isempty(intr.m_modes) && (pe_group["mode_m"] = intr.m_modes)
+        !isempty(intr.n_modes) && (pe_group["mode_n"] = intr.n_modes)
 
         # Control-surface forcing/response spectra in the three Pharr field representations
         # (all tesla; flux/weber is never stored). b̃ = root-area-weighted (coordinate-invariant).
@@ -219,6 +230,16 @@ function write_outputs_to_HDF5(
         !isempty(state.rational_m_res) && (coupling_group["rational_m"] = state.rational_m_res)
         !isempty(state.rational_n) && (coupling_group["rational_n"] = state.rational_n)
 
+        # Dominant resonant-coupling modes (SVD of the b̃-space coupling matrix over the retained rows)
+        if !isempty(state.dominant_singular_values)
+            dominant_group = haskey(coupling_group, "DominantMode") ? coupling_group["DominantMode"] : create_group(coupling_group, "DominantMode")
+            dominant_group["singular_values"] = state.dominant_singular_values
+            dominant_group["right_singular_vectors"] = state.dominant_right_singular_vectors
+            dominant_group["left_singular_vectors"] = state.dominant_left_singular_vectors
+            dominant_group["rational_index"] = state.dominant_rational_index
+            !isempty(state.dominant_forcing_overlap) && (dominant_group["forcing_overlap"] = state.dominant_forcing_overlap)
+        end
+
         # Energies
         energy_group = haskey(pe_group, "Energies") ? pe_group["Energies"] : create_group(pe_group, "Energies")
         energy_group["vacuum_energy"] = state.vacuum_energy
@@ -238,6 +259,8 @@ const PE_H5_ANNOTATIONS = [
     "ForcingModes/n" => (; long_name="toroidal mode number of each forcing mode"),
     "ForcingModes/m" => (; long_name="poloidal mode number of each forcing mode"),
     "ForcingModes/amplitude" => (; long_name="complex forcing amplitude of each mode", units="T"),
+    "mode_m" => (; long_name="poloidal mode number m of each entry along the mode axis (m fastest, one block per n)", units="1", dims=("mode",)),
+    "mode_n" => (; long_name="toroidal mode number n of each entry along the mode axis (m fastest, one block per n)", units="1", dims=("mode",)),
     "forcing_b" => (; long_name="control-surface forcing spectrum, bare normal field b", units="T", dims=("mode",)),
     "forcing_b_root_area" => (; long_name="control-surface forcing spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
     "forcing_b_area" => (; long_name="control-surface forcing spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),
@@ -344,10 +367,27 @@ const PE_H5_ANNOTATIONS = [
     "SingularCoupling/rational_n" =>
         (; long_name="resonant toroidal mode number n at each rational surface",
             dims=("surface",), attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/DominantMode/singular_values" =>
+        (;
+            long_name="singular values σ (descending) of the applied-b̃ → resonant-field coupling matrix over the retained rational surfaces (core window ψ_N ≤ 0.9)",
+            dims=("rank",)
+        ),
+    "SingularCoupling/DominantMode/right_singular_vectors" =>
+        (; long_name="right singular vectors V: applied root-area-weighted field spectra ranked by resonant drive; overlap of b̃ with mode k is dot(V[:,k], b̃)",
+            dims=("mode", "rank")),
+    "SingularCoupling/DominantMode/left_singular_vectors" =>
+        (; long_name="left singular vectors U: resonant area-weighted field patterns over the retained rational surfaces", dims=("surface_retained", "rank")),
+    "SingularCoupling/DominantMode/rational_index" =>
+        (; long_name="1-based index into the SingularCoupling rational_* arrays of each rational surface retained in the SVD window", dims=("surface_retained",)),
+    "SingularCoupling/DominantMode/forcing_overlap" =>
+        (; long_name="coefficient of the applied forcing b̃_x on each singular mode, Vᴴ·b̃_x", units="T", dims=("rank",)),
     "Energies/vacuum_energy" => (; long_name="perturbed vacuum energy", units="J"),
     "Energies/surface_energy" => (; long_name="perturbed surface energy", units="J"),
     "Energies/plasma_energy" => (; long_name="perturbed plasma energy", units="J"),
-    "Energies/toroidal_torque" => (; long_name="net toroidal torque on the plasma", units="N*m")
+    "Energies/toroidal_torque" => (;
+        long_name="boundary-response toroidal torque −2n·Im⟨Φ_tot,Λ⁻¹Φ_tot⟩/4: equals the volume-integrated Euler-Lagrange kinetic torque for converged self-consistent solutions; distinct construction from the KineticForces NTV torque",
+        units="N*m"
+    )
 ]
 
 # Attach long_name/units/dims + dimension scales (declared in-table) to the

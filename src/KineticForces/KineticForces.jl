@@ -17,7 +17,7 @@ to MHD stability through torque and energy deposition calculations.
 - `Compute.jl`: Orchestration routines
   - compute_torque_all_methods!()
 - `CalculatedKineticMatrices.jl`: compute_calculated_kinetic_matrices()
-  ← Callback registered with ForceFreeStates.make_kinetic_matrix when
+  ← Callback registered with ForceFreeStates.build_kinetic_matrix_splines when
   kinetic_source="calculated"
 
 ### Supporting Functions
@@ -59,11 +59,11 @@ include("CalculatedKineticMatrices.jl")
 # ============================================================================
 const mp = 1.672_614e-27      # proton mass (kg)
 const me = 9.109_1e-31        # electron mass (kg)
-const e = 1.602_191_7e-19    # elementary charge (C)
+const e  = 1.602_191_7e-19    # elementary charge (C)
 const eV = e                  # joules per electron-volt
 
 const twopi = 2π
-const μ₀ = 4e-7 * π
+const μ₀    = 4e-7 * π
 const rad2deg = 180 / π
 const deg2rad = π / 180
 const iunit = 1im               # equivalent to Fortran's (0,1)

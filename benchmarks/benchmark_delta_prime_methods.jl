@@ -32,8 +32,8 @@ function setup_and_run_solovev()
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     FFS.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low
-    intr.nhigh = ctrl.nn_high
+    intr.nlow = ctrl.nn_low;
+    intr.nhigh = ctrl.nn_high;
     intr.npert = 1
     FFS.sing_find!(intr, equil)
     intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
@@ -41,16 +41,16 @@ function setup_and_run_solovev()
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
     metric = FFS.make_metric(equil, intr.mpert)
-    ffit = FFS.make_matrix(equil, intr, metric)
-    odet, _, _, _ = FFS.riccati_eulerlagrange_integration(ctrl, equil, ffit, intr)
-    return ctrl, equil, ffit, intr, odet
+    mats = FFS.build_matrix_splines(equil, intr, metric)
+    odet, _, _, _ = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
+    return ctrl, equil, mats, intr, odet
 end
 
 println("\n=== compute_delta_prime_from_ca! consistency check ===")
 println("Verifies the standalone Δ' formula matches the inline Riccati crossing computation.")
 println("Expected error: exactly zero (same formula, same data).\n")
 
-ctrl, equil, ffit, intr, odet = setup_and_run_solovev()
+ctrl, equil, mats, intr, odet = setup_and_run_solovev()
 msing = intr.msing
 
 # Capture Δ' values set inline by riccati_cross_ideal_singular_surf! during integration

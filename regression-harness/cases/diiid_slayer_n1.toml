@@ -1,6 +1,8 @@
 # Regression case: DIII-D-like H-mode n=1 SLAYER tearing-mode growth rates.
 # Uncoupled per-surface analysis with the AMR Q-plane scan; tracks the per-surface
-# layer parameters and the extracted roots (Q, ω, γ) for the inner three rationals.
+# layer parameters, the diamagnetic drive Q_e/Q_i, and the extracted roots (Q, ω, γ)
+# for the inner three rationals. The n-scaling of Q_e/Q_i, which no single-n case can
+# constrain, is covered by a unit test in test/runtests_slayer_inputs.jl instead.
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
 # and the noise floor below which a difference is treated as zero.
 [case]
@@ -88,6 +90,24 @@ extract = "all_real"
 label = "SLAYER iota_e"
 noise_threshold = 1e-12
 order = 19
+
+# Normalized diamagnetic frequencies. iota_e above is their ratio, so it is blind
+# to a common factor on both; these pin the drive itself.
+[quantities.slayer_Q_e]
+h5path = "Tearing/PerSurface/Q_e"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Q_e"
+noise_threshold = 1e-12
+order = 20
+
+[quantities.slayer_Q_i]
+h5path = "Tearing/PerSurface/Q_i"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Q_i"
+noise_threshold = 1e-12
+order = 21
 
 # Tearing eigenvalue (coupled mode → length 1). The headline deliverable:
 # a real, nonzero growth rate on a realistic equilibrium. Root-extraction

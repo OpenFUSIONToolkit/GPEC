@@ -68,6 +68,13 @@
         @test all(>(0), B_nodes)
     end
 
+    @testset "Round-trip check sees inter-knot ringing" begin
+        flagged(k, m) = GeneralizedPerturbedEquilibrium.Equilibrium._roundtrip_verdict(k, m) !== :ok
+        @test !flagged(4.10e-6, 5.02e-6) && !flagged(3.57e-6, 4.19e-6)  # clean psihigh 0.995, 0.999
+        @test flagged(1.14e-5, 1.29e-3)    # 0.9999 ringing: under the tolerance, only the ratio catches it
+        @test !flagged(1.61e-4, 1.58e-4)   # smooth but coarse: ratio ~1, must not be called ringing
+    end
+
     @testset "Resolved psihigh" begin
         # The config holds the user's request and is never written to; the value the
         # equilibrium is actually formed on rides on params.psihigh_resolved.
@@ -143,7 +150,7 @@
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 10% to allow for method-specific discretisation differences.
-        q_efit = plasma_eq_efit.profiles.q_spline.y
+        q_efit      = plasma_eq_efit.profiles.q_spline.y
         q_arclength = plasma_eq_arclength.profiles.q_spline.y
         q_inversion = plasma_eq_inversion.profiles.q_spline.y
 
@@ -242,7 +249,7 @@
         b0exp = 7.4  # CHEASE normalization field [T]
 
         B_nodes_binary = plasma_eq_binary.eqfun_B.nodal_derivs.partials[1, :, :]
-        B_nodes_ascii = plasma_eq_ascii.eqfun_B.nodal_derivs.partials[1, :, :]
+        B_nodes_ascii  = plasma_eq_ascii.eqfun_B.nodal_derivs.partials[1, :, :]
 
         # B field must be finite and positive everywhere
         @test all(isfinite, B_nodes_binary)
@@ -258,7 +265,7 @@
 
         # q must be finite, positive, and in a physically reasonable range
         q_binary = plasma_eq_binary.profiles.q_spline.y
-        q_ascii = plasma_eq_ascii.profiles.q_spline.y
+        q_ascii  = plasma_eq_ascii.profiles.q_spline.y
         @test all(isfinite, q_binary)
         @test all(isfinite, q_ascii)
         @test all(>(0), q_binary)
@@ -436,7 +443,7 @@
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
 
         function build_solovev_equilibrium(; e=1.6, a=0.33, r0=1.0, q0=1.9,
-            mpsi=64, mtheta=128)
+                mpsi=64, mtheta=128)
             eq_config = Eq.EquilibriumConfig(;
                 eq_type="sol", eq_filename="unused",
                 jac_type="pest", grid_type="ldp",
@@ -515,24 +522,24 @@
             @test pe.params.zsep[1] > pe.params.zsep[2]
 
             # Shape parameters — all physically positive quantities.
-            @test pe.params.amean > 0
-            @test pe.params.rmean > 0
+            @test pe.params.amean  > 0
+            @test pe.params.rmean  > 0
             @test pe.params.aratio > 0
-            @test pe.params.kappa > 0
-            @test pe.params.kappa ≈ 1.6 rtol=0.02
+            @test pe.params.kappa  > 0
+            @test pe.params.kappa  ≈ 1.6 rtol=0.02
 
             # For Solovev (e=1.6, a=0.33, r0=1.0) the shape is approximately
             # recovered (Shafranov shift loosens the match).
             @test pe.params.amean ≈ 0.33 rtol=0.15
-            @test pe.params.rmean ≈ 1.0 rtol=0.15
+            @test pe.params.rmean ≈ 1.0  rtol=0.15
 
             # Consistency with separatrix formulae.
             @test pe.params.rmean ≈ (pe.params.rsep[1] + pe.params.rsep[2]) / 2
             @test pe.params.amean ≈ (pe.params.rsep[1] - pe.params.rsep[2]) / 2
 
             # Beta and field quantities — all physically positive.
-            @test pe.params.bt0 > 0
-            @test pe.params.crnt > 0
+            @test pe.params.bt0   > 0
+            @test pe.params.crnt  > 0
             @test pe.params.bwall > 0
             @test pe.params.betat > 0
             @test pe.params.betan > 0
@@ -551,5 +558,13 @@
             @test pe.params.li2 > 0
             @test pe.params.li3 > 0
         end
+    end
+
+    @testset "field-line ODE failure is an error, not silent truncation" begin
+        # Checked in the source, since a non-closing field line is costly to synthesize; the EFIT
+        # testsets above are the control that neither guard false-fires.
+        src = read(joinpath(dirname(@__DIR__), "src", "Equilibrium", "DirectEquilibrium.jl"), String)
+        @test occursin("sol.retcode != ReturnCode.Success", src)
+        @test occursin("isapprox(sol.t[end], 2π", src)
     end
 end

@@ -3,13 +3,12 @@
 
 Single source of truth for the NTV calculation methods. Each entry is a NamedTuple
 `(name, flag, kind, doc)`:
-
-  - `name`  — short method identifier used as the HDF5 group key and in `intr.method`
-  - `flag`  — the `KineticForcesControl` field symbol that enables the method
-  - `kind`  — dispatch routing tag consumed by `method_kind` / `Torque.jl`
-    (`:gar` for the GAR/matrix family, `:fcgl`/`:rlar`/`:clar` for the
-    three special-cased methods)
-  - `doc`   — one-line description printed in verbose output
+- `name`  — short method identifier used as the HDF5 group key and in `intr.method`
+- `flag`  — the `KineticForcesControl` field symbol that enables the method
+- `kind`  — dispatch routing tag consumed by `method_kind` / `Torque.jl`
+            (`:gar` for the GAR/matrix family, `:fcgl`/`:rlar`/`:clar` for the
+            three special-cased methods)
+- `doc`   — one-line description printed in verbose output
 
 The method names/docs and the `Compute.jl` enable list are all derived from this
 tuple, and `Torque.jl` routes on `kind`, so the methods are enumerated in one place.
@@ -78,9 +77,8 @@ User-facing control parameters from the TOML `[KineticForces]` section.
 Configures which NTV methods to run, species parameters, tolerances, and output options.
 
 Constructed via keyword arguments or from a TOML dict:
-
 ```julia
-ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs[\"KineticForces\"])...)
+ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
 
 Immutable: vary a field by building a new control rather than assigning to one (the
@@ -123,11 +121,20 @@ builds a second control for its differing tolerance).
     nn::Int = 1                     # Toroidal mode number
     nl::Int = 1                     # Bounce harmonic number
 
-    # Tolerances.
-    # *_xlmda: shared tolerances for inner λ (pitch) and x (energy) integrations
-    # *_psi:   tolerances for outer ψ quadrature
-    atol_xlmda::Float64 = 1e-8     # Absolute tolerance for inner pitch + energy integrations
-    rtol_xlmda::Float64 = 1e-5     # Relative tolerance for inner pitch + energy integrations
+    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy).
+    # Each level must be resolved more tightly than the one enclosing it, or the outer
+    # integrator chases its integrand's own quadrature noise instead of converging.
+    # *_xlmda: tolerances for the λ (pitch) integration
+    # *_x:     tolerances for the x (energy) integration nested inside it; NaN ⇒ derive as
+    #          nested_tolerance_margin × the pitch tolerances
+    # *_psi:   tolerances for the outer ψ quadrature
+    atol_xlmda::Float64 = 1e-8     # Absolute tolerance for the inner pitch integration
+    rtol_xlmda::Float64 = 1e-5     # Relative tolerance for the inner pitch integration
+    atol_x::Float64 = NaN          # Absolute tolerance for the energy integration (NaN ⇒ derived)
+    rtol_x::Float64 = NaN          # Relative tolerance for the energy integration (NaN ⇒ derived)
+    # The pitch integrand IS the energy integral, so the energy level is resolved this much
+    # tighter than the pitch level by default.
+    nested_tolerance_margin::Float64 = 1e-2   # Factor relating derived energy tolerances to the pitch ones
     # rtol_psi is the primary convergence knob: ~2 significant figures matches the validity
     # of the NTV model approximations. Do not set it tighter than the noise floor of the
     # inner integrals (keep rtol_psi ≳ 10 × rtol_xlmda).
@@ -204,13 +211,12 @@ Internal working state for KineticForces calculations.
 Holds equilibrium-derived quantities, profile interpolants, and integration results.
 
 Fields replacing former module-level globals:
-
-  - `ro`, `bo`, `chi1`: Equilibrium geometry parameters
-  - `mthsurf`, `mfac`: Poloidal grid info
-  - `dbob_m`, `divx_m`: Perturbation mode interpolants
-  - `sing_psis`: Rational-surface ψ locations (sorted, from the stability analysis), used as
-    panel boundaries for the outer ψ torque quadrature so the resonant peaks fall on
-    Gauss-Kronrod interval endpoints instead of driving deep adaptive bisection
+- `ro`, `bo`, `chi1`: Equilibrium geometry parameters
+- `mthsurf`, `mfac`: Poloidal grid info
+- `dbob_m`, `divx_m`: Perturbation mode interpolants
+- `sing_psis`: Rational-surface ψ locations (sorted, from the stability analysis), used as
+  panel boundaries for the outer ψ torque quadrature so the resonant peaks fall on
+  Gauss-Kronrod interval endpoints instead of driving deep adaptive bisection
 
 Equilibrium and kinetic profile data are read directly from the
 `PlasmaEquilibrium` (`equil.profiles`, `equil.geometry`) and the
@@ -300,17 +306,17 @@ function KineticForcesInternal(equil; verbose::Bool=false)
     # Axis toroidal field F(0)/ro that normalizes λ = μ·bo/E; F_spline stores 2πF.
     bo_axis = abs(equil.profiles.F_spline(0.0)) / (2π * equil.ro)
     KineticForcesInternal(;
-        ro=equil.ro,
-        bo=bo_axis,
-        chi1=2π * equil.psio,
+        ro      = equil.ro,
+        bo      = bo_axis,
+        chi1    = 2π * equil.psio,
         mthsurf,
-        tpsi_xs=collect(range(0.0, 1.0; length=nth)),
-        tpsi_B=Vector{Float64}(undef, nth),
-        tpsi_dBdpsi=Vector{Float64}(undef, nth),
-        tpsi_dBdtheta=Vector{Float64}(undef, nth),
-        tpsi_jac=Vector{Float64}(undef, nth),
-        tpsi_djdpsi=Vector{Float64}(undef, nth),
-        verbose
+        tpsi_xs       = collect(range(0.0, 1.0, length=nth)),
+        tpsi_B        = Vector{Float64}(undef, nth),
+        tpsi_dBdpsi   = Vector{Float64}(undef, nth),
+        tpsi_dBdtheta = Vector{Float64}(undef, nth),
+        tpsi_jac      = Vector{Float64}(undef, nth),
+        tpsi_djdpsi   = Vector{Float64}(undef, nth),
+        verbose,
     )
 end
 
@@ -320,22 +326,22 @@ end
 Populate perturbation data from PerturbedEquilibriumState into KineticForcesInternal.
 
 Builds three interpolant sets from PE Clebsch displacements:
-
- 1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] CubicSeriesInterpolants over ψ
- 2. `dbob_m` — δB/B Fourier modes via JBB deweighting (Fortran set_peq)
- 3. `divx_m` — ∇·ξ⊥ Fourier modes via JBB deweighting
+1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] CubicSeriesInterpolants over ψ
+2. `dbob_m` — δB/B Fourier modes via JBB deweighting (Fortran set_peq)
+3. `divx_m` — ∇·ξ⊥ Fourier modes via JBB deweighting
 
 The JBB deweighting algorithm (Fortran pentrc/inputs.f90:828-868):
-
- 1. Apply geometric matrices S,T,X,Y,Z in m-space
- 2. Inverse DFT to θ-space
- 3. Divide by J·B² at each θ
- 4. Forward DFT back to m-space
+1. Apply geometric matrices S,T,X,Y,Z in m-space
+2. Inverse DFT to θ-space
+3. Divide by J·B² at each θ
+4. Forward DFT back to m-space
 """
 function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
                                 ffs::ForceFreeStates.ForceFreeStatesResult,
                                 equil::Equilibrium.PlasmaEquilibrium,
                                 metric::ForceFreeStates.MetricData)
+    ffs.npert == 1 || error("KineticForces supports a single toroidal mode; this run has n = $(ffs.nlow):$(ffs.nhigh).")
+
     # Copy mode numbers from FFS
     kf_intr.mlow = ffs.mlow
     kf_intr.mhigh = ffs.mhigh
@@ -404,9 +410,9 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
         psi = psi_grid[ipsi]
 
         # Get Clebsch displacement vectors at this ψ
-        xsp = view(xi_modes.clebsch_psi, ipsi, :)       # ξ^ψ [mpert]
+        xsp  = view(xi_modes.clebsch_psi,  ipsi, :)       # ξ^ψ [mpert]
         xmp1 = view(xi_modes.clebsch_psi1, ipsi, :)       # ∂ξ^ψ/∂ψ [mpert]
-        xms = view(clebsch_alpha_mat, ipsi, :)            # ξ^α [mpert]
+        xms  = view(clebsch_alpha_mat, ipsi, :)            # ξ^α [mpert]
 
         # Evaluate geometric matrices at ψ → mpert² flat vectors, reshape to mpert×mpert
         geom_mats.smats(smat_flat, psi; hint=hint_s)
@@ -426,8 +432,8 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
         mul!(jbb_kapx, smat, xsp)
         mul!(jbb_kapx, tmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)   # += tmat * xms
         mul!(jbb_divx, xmat, xmp1)
-        mul!(jbb_divx, ymat, xsp, 1.0 + 0.0im, 1.0 + 0.0im)  # += ymat * xsp
-        mul!(jbb_divx, zmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)  # += zmat * xms
+        mul!(jbb_divx, ymat, xsp,  1.0 + 0.0im, 1.0 + 0.0im)  # += ymat * xsp
+        mul!(jbb_divx, zmat, xms,  1.0 + 0.0im, 1.0 + 0.0im)  # += zmat * xms
         @. jbb_dbob = -(jbb_divx + jbb_kapx)
 
         # Inverse DFT to θ-space, divide by J·B², forward DFT back
@@ -454,9 +460,9 @@ Matches Fortran set_peq lines 859-868: transforms JBB-weighted m-space data
 to θ-space, removes the J·B² weighting at each poloidal angle, and transforms back.
 """
 function _jbb_deweight!(out::AbstractVector{ComplexF64}, jbb_modes::Vector{ComplexF64},
-    ft::Utilities.FourierTransforms.FourierTransform,
-    psi::Float64, equil::Equilibrium.PlasmaEquilibrium,
-    mthsurf::Int, theta_buf::Vector{ComplexF64})
+                        ft::Utilities.FourierTransforms.FourierTransform,
+                        psi::Float64, equil::Equilibrium.PlasmaEquilibrium,
+                        mthsurf::Int, theta_buf::Vector{ComplexF64})
     # Inverse DFT: m-space → θ-space
     theta_buf .= Utilities.FourierTransforms.inverse(ft, jbb_modes)
 
@@ -526,8 +532,8 @@ Accumulated results from all KineticForces computations.
 Written to gpec.h5 under the "KineticForces" group.
 """
 @kwdef mutable struct KineticForcesState
-    method_results::Dict{String,MethodResult} = Dict{String,MethodResult}()
+    method_results::Dict{String, MethodResult} = Dict{String, MethodResult}()
     # Block-diagonal kinetic matrices: key=method, value=(numpert_total, numpert_total, 6)
-    kinetic_matrices::Dict{String,Array{ComplexF64,3}} = Dict{String,Array{ComplexF64,3}}()
+    kinetic_matrices::Dict{String, Array{ComplexF64,3}} = Dict{String, Array{ComplexF64,3}}()
     completed::Bool = false
 end

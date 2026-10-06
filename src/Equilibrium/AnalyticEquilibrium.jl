@@ -242,10 +242,10 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 function tj_analytic_f1(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
         x2 = x * x
-        return x2 * (1 - (nu-1)*x2/2 + (nu-1)*(nu-2)*x2*x2/6 -
-                     (nu-1)*(nu-2)*(nu-3)*x2*x2*x2/24) / qc
+        return x2 * (1 - (nu - 1) * x2 / 2 + (nu - 1) * (nu - 2) * x2 * x2 / 6 -
+                     (nu - 1) * (nu - 2) * (nu - 3) * x2 * x2 * x2 / 24) / qc
     else
-        return (1 - (1 - x*x)^nu) / (nu * qc)
+        return (1 - (1 - x * x)^nu) / (nu * qc)
     end
 end
 
@@ -259,10 +259,10 @@ parameterization.
 function tj_analytic_f1p(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
         x2 = x * x
-        return 2 * x * (1 - (nu-1)*x2 + (nu-1)*(nu-2)*x2*x2/2 -
-                        (nu-1)*(nu-2)*(nu-3)*x2*x2*x2/6) / qc
+        return 2 * x * (1 - (nu - 1) * x2 + (nu - 1) * (nu - 2) * x2 * x2 / 2 -
+                        (nu - 1) * (nu - 2) * (nu - 3) * x2 * x2 * x2 / 6) / qc
     else
-        return 2 * x * (1 - x*x)^(nu-1) / qc
+        return 2 * x * (1 - x * x)^(nu - 1) / qc
     end
 end
 
@@ -762,7 +762,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
 
     # Analytic: ingest=nothing — replay regenerates from the [TJ_ANALYTIC_INPUT] TOML section.
     return DirectRunInput(equil_input, sq_in, psi_in, psi_in_xs, psi_in_ys,
-        rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1, nothing)
+        rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1, 1, nothing)
 end
 
 """
@@ -842,7 +842,6 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     @info "Generating Solovev equilibrium: mr=$mr, mz=$mz, ma=$ma, e=$(@sprintf("%.3f", e)), a=$(@sprintf("%.3f", a)), r0=$(@sprintf("%.3f", r0)), q0=$(@sprintf("%.3f", q0))"
 
     # 1 is bt_sign=+1: Solovev has positive Bt by construction (f0 = r0 * b0fac > 0).
-    # No ip_sign field is needed; sign(crnt) is recovered from params.crnt downstream.
-    # Analytic: ingest=nothing — replay regenerates from the [SOL_INPUT] TOML section.
-    return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, 1, nothing)
+    # Analytic equilibria carry positive field and current; ingest=nothing — replay regenerates from the [SOL_INPUT] TOML section.
+    return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, 1, 1, nothing)
 end

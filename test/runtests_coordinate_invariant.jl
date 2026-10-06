@@ -97,3 +97,40 @@ end
     e_old = sort(real.(eigvals(Mold' * W * Mold)))
     @test e_new ≈ e_old rtol = 1e-12
 end
+
+# The √weight operator on a real flux surface: its diagonal is the θ-average of √(J|∇ψ|), it is
+# Hermitian, it carries the area-weighted field energy exactly (Parseval with the weight), and
+# it inverts against area_to_rootarea_weight. A wrong transform convention (sign of the
+# exponent or a stray 1/N) fails every one of these.
+@testset "sqrtamat on the Solovev surface" begin
+    using TOML
+    EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+    equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
+    eq_config = EQ.EquilibriumConfig(inputs["Equilibrium"], equil_dir)
+    equil = EQ.setup_equilibrium(eq_config, EQ.SolovevConfig(inputs["SOL_INPUT"]))
+    psi = equil.rzphi_xs[end]
+    mtheta = length(equil.rzphi_ys)
+    mpert, mlow = 21, -8
+    ft = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms.FourierTransform(mtheta, mpert, mlow)
+    w = EQ.compute_sqrt_jac_delpsi(equil, psi, mtheta)
+    jarea = EQ.flux_surface_area(equil, psi, mtheta)
+    Σ = EQ.compute_sqrtamat(equil, psi, ft)
+    S = EQ.rootarea_to_area_weight(equil, psi, ft)
+    @test size(Σ) == (mpert, mpert)
+    @test all(isapprox.(diag(Σ), sum(w) / mtheta; rtol=1e-12))
+    @test norm(Σ - Σ') / norm(Σ) < 1e-12
+    @test all(0 .< real.(diag(S)) .<= 1)          # Cauchy–Schwarz: ⟨√(J|∇ψ|)⟩ ≤ √⟨J|∇ψ|⟩
+    @test S ≈ Σ ./ sqrt(jarea)
+    # Each column is the forward transform of the weighted unit mode (the definition).
+    b = ComplexF64[cis(0.7k) * (1 + 0.1k) for k in 1:mpert]
+    @test Σ * b ≈ ft(w .* (adjoint(ft.basis) * b)) rtol = 1e-12
+    # Weighted Parseval on the complete basis (mpert = mtheta, no truncation):
+    # ‖Σ·b‖² = (1/N) Σ_j J|∇ψ|_j |f_j|², f the θ-space field of b (θ ∈ [0,1)).
+    ft_full = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms.FourierTransform(mtheta, mtheta, -(mtheta ÷ 2))
+    Σ_full = EQ.compute_sqrtamat(equil, psi, ft_full)
+    b_full = ComplexF64[cis(0.3k) / (1 + abs(k - mtheta ÷ 2)) for k in 1:mtheta]
+    f_full = adjoint(ft_full.basis) * b_full
+    @test sum(abs2, Σ_full * b_full) ≈ sum(w .^ 2 .* abs2.(f_full)) / mtheta rtol = 1e-10
+    @test S * EQ.area_to_rootarea_weight(equil, psi, ft) ≈ I atol = 1e-10
+end
