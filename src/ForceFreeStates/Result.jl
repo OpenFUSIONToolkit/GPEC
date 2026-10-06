@@ -183,9 +183,9 @@ end
 
 Assemble the published result once the solve is finished — the one place that decides what a
 formalism's raw output means downstream. Beyond materializing the forward path's derivative
-stores, packing the matched Galerkin solution, and forming the fixed-boundary `W_p` when the
-free-boundary stage did not run, every field is copied or aliased from what the stages
-already produced.
+stores and forming the fixed-boundary `W_p` when the free-boundary stage did not run, every
+field is copied or aliased from what the stages already produced. The integrator always
+publishes the ideal closure; a `MatchProblem` solve transforms the result afterwards.
 
 `odet` is the integrator's ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` the Galerkin
 solver internals and its Δ′ payload (`nothing` otherwise). The two formalisms are never both
@@ -203,16 +203,12 @@ function build_result(
     gal_data::Union{Nothing,GalerkinResult},
     gal_dp::Union{Nothing,DeltaPrimeData}
 )
-    matched = gal_data !== nothing && gal_data.match !== nothing
-
     # The forward sweep is the only formalism whose stores need materializing; doing it here
     # keeps `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
     solution = if integrator === :forward && odet !== nothing
         materialize_derivative_stores!(odet, equil, mats, intr)
         SolutionProfiles(:el_axis, odet.step, odet.psi_store, odet.q_store,
             odet.u_store, odet.du_store, odet.xi_s_store)
-    elseif matched
-        _matched_gal_profiles(gal_data, mats, intr)
     else
         nothing
     end
@@ -229,11 +225,8 @@ function build_result(
     kinetic = (kmsing=intr.kmsing, kinsing=intr.kinsing, scan_psi=intr.kinsing_scan_psi,
         scan_cond=intr.kinsing_scan_cond, scan_threshold=intr.kinsing_scan_threshold)
 
-    # The ideal-flag match deliberately skips the inner-layer Δ, so its basis is ideal-closed
-    # and carries no penetrated field.
-    closure = (matched && !ctrl.gal_ideal_flag) ? :matched : :ideal
-    bpen = closure === :matched ? gal_data.match.bpen :
-           zeros(ComplexF64, intr.msing, intr.numpert_total)
+    closure = :ideal
+    bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
 
     # Fixed-boundary plasma energy matrix at the edge; free of any vacuum dependence, so a
     # vac_flag=false run still publishes its energy product. Aliases free_run's when it ran.

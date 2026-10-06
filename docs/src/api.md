@@ -78,17 +78,35 @@ Which products each formalism can supply differs; a result carries `nothing` in 
 its integrator does not produce and consumers warn and skip rather than erroring. See the
 [Stability Analysis](stability.md) page for the result struct and its capability gates.
 
-Inner-layer matching is requested with the integrator-agnostic `match` keyword, which closes
-the basis with a resistive layer solution instead of the ideal jump condition:
+## Inner-layer matching
+
+Inner-layer matching is its own problem, posed on a FINISHED solve: a `MatchProblem` holds
+the outer Δ′ the solve published plus the per-surface layer parameters, and the inner-layer
+model passed to `solve` computes the layer response at the prescribed rotation. Solving it
+returns a new result with the closure changed from `:ideal` to `:matched` and the
+eigenfunctions replaced — the expensive outer solve is reused, so layer-parameter scans
+cost one cheap match solve per point:
 
 ```julia
-ffs = solve(eq, Galerkin(); nn=1,
-    match=ResistiveMatch(; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[0.0, 0.0]))
-@assert ffs.closure === :matched
+ffs = solve(eq, Galerkin(; rpec_flag=true, cut_solution=true); nn=1)
+
+matched = solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[0.0, 0.0]), GGJ())
+@assert matched.closure === :matched
+
+# A rotation scan reuses the one outer solve:
+bpens = [solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[f, f]), GGJ()).bpen
+         for f in 0.0:50.0:500.0]
 ```
 
-Only the Galerkin formalism implements the match today; requesting one from `Forward` or
-`Riccati` errors. Kinetic runs (`kinetic_factor > 0`) need kinetic profiles attached to the
+The per-surface η/ρ/rotation can also be derived from the kinetic profiles attached to the
+equilibrium (`layer_parameters`), with the explicit vectors as overrides. The problem needs
+a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and
+Riccati results; a Riccati-fed match fills `bpen` and the resonant data but keeps
+`solution === nothing` (no outer basis is retained). Only a closure-capable model is
+accepted — `GGJ()` today; `SLAYER()` is slab-only and drives the free-eigenvalue tearing
+solve instead.
+
+Kinetic runs (`kinetic_factor > 0`) need kinetic profiles attached to the
 equilibrium — either at construction or explicitly on an existing one:
 
 ```julia

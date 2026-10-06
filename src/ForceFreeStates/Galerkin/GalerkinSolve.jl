@@ -3,7 +3,7 @@
 # Top-level driver for the RDCON outer-region singular Galerkin Δ′ solve, plus the per-cell assembly
 # orchestration, the banded solve, Δ′ extraction, PEST-3 blocks, and HDF5 output.
 # Ports gal_make_arrays (gal.f), gal_solve (gal.f), and gal_write_pest3_data
-# (gal.f). The DRIVEN/RPEC inner-layer matching is wired in via gal_match_rpec (GalerkinMatch.jl).
+# (gal.f). The DRIVEN/RPEC inner-layer matching is a post-solve transformation (Matching/MatchProblem.jl).
 
 """
     gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
@@ -180,28 +180,18 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     dp_coil = ncoil > 0 ? permutedims(delta[(2*msing+1):(2*msing+ncoil), :]) : Matrix{ComplexF64}(undef, 0, 0)
     dp = DeltaPrimeData(Deltap, dp_raw, dp_coil, Ap, Bp, Gammap)
 
-    # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
+    # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution). The cut
+    # solution rides along when a later MatchProblem solve will need the composite inner-region
+    # profiles; gal_match_flag implies it so deck-driven matched runs keep their Match/Inner data.
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
-        delta=(ctrl.gal_match_flag ? delta : nothing))
+        delta=((ctrl.gal_cut_solution || ctrl.gal_match_flag) ? delta : nothing))
 
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
-    result = GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, nothing)
-
-    # DRIVEN (RPEC) outer↔inner matching: build the coil-driven matched ξ/ξ′ (gal_match_rpec).
-    ctrl.gal_match_flag || return result, dp
-    ctrl.gal_rpec_flag || error("galerkin_solve: gal_match_flag=true requires gal_rpec_flag=true")
-    ctrl.verbose && @info(
-        ctrl.gal_ideal_flag ?
-        "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
-        "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
-    )
-    match = gal_match_rpec(ctrl, equil, intr, result, dp)
-    ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(match.residual)")
-    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, match), dp
+    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, nothing), dp
 end
 
 """

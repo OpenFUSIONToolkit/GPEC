@@ -1165,6 +1165,23 @@ TearingProblem only. `ResistiveMatch` dissolves into MatchProblem kwargs + the G
   comparisons want COMMITTED refs (commit first, then `--refs develop,<branch>`), and
   commit subjects use the closed-vocabulary grammar — validate with
   `python3 ci/conventions/check_subject.py --title "..."`.
+- **PR progress (2026-10-06)**: commit (0) COMMITTED as bde0f4c15 (all gates green incl.
+  harness vs develop, fully unchanged); commit (1) COMMITTED as 56dff1801
+  (`GGJ`/`SLAYER` configs on `InnerLayer.InnerLayerModel`, `closure_capable`,
+  `layer_parameters`; 23/23 new tests, docs clean). **Commit (2) IMPLEMENTED in the
+  working tree**: match extracted from `galerkin_solve` (cut solution behind
+  `gal_cut_solution`/`Galerkin(cut_solution=)`, implied by `gal_match_flag`); ONE
+  ctrl-free match path in `Matching/MatchProblem.jl` (`MatchProblem` + `solve` +
+  `_compute_match`, the ported rmatch body) with the unified `MatchResult` in
+  `Matching/ResonantMatch.jl` (old seed kernel + `GalMatchResult` both subsumed;
+  `GalerkinMatch.jl` deleted); `_matched_result` rebuild; deck routing at the tail of
+  `run_force_free_states` (both deck and API paths); `ResistiveMatch`/`_apply_match!`/
+  `EulerLagrangeProblem.match` REMOVED; `resist_eval` loosened to `ModeSpace`; exports
+  `MatchProblem`/`GGJ`/`SLAYER`/`layer_parameters`; api.md matching section rewritten
+  with the scan idiom. Tests green (matching 23/23, solve API 71/71 incl. MatchProblem
+  gates, result-struct 133/133 incl. matched-gal decks, fullruns 21/21); byte-identity
+  runs vs 56dff1801 on LAR_{ideal,resistive}_match_test + DIIID gal resistive in
+  flight; docs build pending; harness after commit.
 - **Commit (0) third reconciliation DONE 2026-10-06**: branch reset onto develop
   0e68a0553; absorbed the `mats` renames, the runtimes threading, and ONE new
   kinetic-profiles consumer — `run_error_fields`/`efc_couplings` now reads

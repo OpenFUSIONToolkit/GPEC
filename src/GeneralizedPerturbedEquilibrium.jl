@@ -85,8 +85,9 @@ using .ForceFreeStates: galerkin_solve, write_galerkin!
 
 # Scripting-API surface: the integrator selectors, the published result, the equilibrium
 # constructor and the forcing description, re-exported so a user needs one `using`.
-using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, ResistiveMatch
-using .Equilibrium: PlasmaEquilibrium
+using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
+using .ForceFreeStates: MatchProblem, MatchResult, GGJ, SLAYER, layer_parameters, closure_capable
+using .Equilibrium: PlasmaEquilibrium, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
@@ -727,31 +728,55 @@ function run_force_free_states(
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+    result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+
+    # Deck-driven inner-layer matching: route the published ideal-closed result through the
+    # post-solve MatchProblem, so the deck keys and the scripting API share one match path.
+    if ctrl.gal_match_flag
+        ctrl.gal_rpec_flag || error("gal_match_flag=true requires gal_rpec_flag=true")
+        ctrl.gal_inner_solver in ("ray", "galerkin") ||
+            error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
+        ctrl.verbose && @info(
+            ctrl.gal_ideal_flag ?
+            "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
+            "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
+        )
+        model = ForceFreeStates.GGJ(; solver=Symbol(ctrl.gal_inner_solver),
+            inner_xfac=ctrl.gal_inner_xfac, inner_nx=ctrl.gal_inner_nx, inner_nq=ctrl.gal_inner_nq,
+            inner_cutoff=ctrl.gal_inner_cutoff, inner_kmax=ctrl.gal_inner_kmax)
+        prob = ForceFreeStates.MatchProblem(result;
+            eta=isempty(ctrl.gal_eta) ? nothing : ctrl.gal_eta,
+            rho=isempty(ctrl.gal_rho) ? nothing : ctrl.gal_rho,
+            rotation=isempty(ctrl.gal_rotation) ? nothing : ctrl.gal_rotation,
+            gamma=ctrl.gal_gamma, ideal=ctrl.gal_ideal_flag)
+        result = solve(prob, model)
+        ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(result.galerkin.match.residual)")
+    end
+
+    return result
 end
 
 """
-    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(), match=nothing,
+    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(),
                          dir_path=".", debug=DebugSettings(), kwargs...)
 
 The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
 the perturbed potential energy whose solutions are the force-free (and, via the TOML path,
 kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
 [`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
-names this one, so `solve` stays unambiguous as other problem classes appear.
+names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
+matching is a separate problem posed on the finished solve: see `MatchProblem`.
 
-`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `match` an
-optional [`ResistiveMatch`](@ref) closing the basis with an inner-layer solution instead of
-the ideal jump, `dir_path` the working directory outputs are written to, and `debug` the
-diagnostic dump settings of the DEBUG deck section. Any remaining keyword is a
-`ForceFreeStatesControl` field, so the TOML keys and the problem keywords are the same
-knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
+`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `dir_path` the
+working directory outputs are written to, and `debug` the diagnostic dump settings of the
+DEBUG deck section. Any remaining keyword is a `ForceFreeStatesControl` field, so the TOML
+keys and the problem keywords are the same knobs. `nn_low`/`nn_high` are rejected — they
+come from `nn`.
 
 ## Fields
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
   - `wall::Vacuum.WallShapeSettings` - Vacuum wall shape for the free-boundary energies.
-  - `match::Union{Nothing,ForceFreeStates.ResistiveMatch}` - Optional inner-layer closure.
   - `dir_path::String` - Working directory for outputs.
   - `debug::DebugSettings` - Diagnostic dump settings.
   - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
@@ -759,7 +784,6 @@ knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
 struct EulerLagrangeProblem
     equil::Equilibrium.PlasmaEquilibrium
     wall::Vacuum.WallShapeSettings
-    match::Union{Nothing,ForceFreeStates.ResistiveMatch}
     dir_path::String
     debug::DebugSettings
     ctrl_kwargs::Dict{Symbol,Any}
@@ -769,7 +793,6 @@ function EulerLagrangeProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
     wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
-    match::Union{Nothing,ForceFreeStates.ResistiveMatch}=nothing,
     dir_path::AbstractString=".",
     debug::DebugSettings=DebugSettings(),
     kwargs...
@@ -779,7 +802,7 @@ function EulerLagrangeProblem(
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
     ctrl_kwargs[:nn_high] = last(nn)
-    return EulerLagrangeProblem(equil, wall, match, String(dir_path), debug, ctrl_kwargs)
+    return EulerLagrangeProblem(equil, wall, String(dir_path), debug, ctrl_kwargs)
 end
 
 """
@@ -792,7 +815,7 @@ Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `al
 a `gpec.toml` run of `main` does and produces the same result object. The second form is
 sugar building the problem from an equilibrium and the problem keywords in one call.
 
-Knobs owned by `alg` or `match` are rejected as `ForceFreeStatesControl` keywords. Kinetic
+Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic
 runs (`kinetic_factor > 0`) with `kinetic_source="calculated"` need kinetic profiles on the
 equilibrium — build it with `PlasmaEquilibrium(path; kinetic_file=...)` or attach them with
 `attach_kinetic_profiles!(eq, file)` before solving; the self-contained `"fixed"` source
@@ -811,7 +834,6 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
-    ForceFreeStates._apply_match!(ctrl_kwargs, prob.match, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
 
     ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && equil.kinetic === nothing &&
@@ -1775,6 +1797,7 @@ end
 
 export main, write_imas
 export solve, perturbed_equilibrium
-export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
+export PlasmaEquilibrium, attach_kinetic_profiles!, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
+export MatchProblem, GGJ, SLAYER, layer_parameters
 
 end # module GeneralizedPerturbedEquilibrium

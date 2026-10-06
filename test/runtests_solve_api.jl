@@ -183,14 +183,6 @@ using TOML
         @test kwargs[:gal_nx] == 64
         @test kwargs[:gal_rpec_flag]
 
-        # A match implies the coil-response columns and fills the inner-layer knobs.
-        FFS._apply_match!(kwargs, ResistiveMatch(; eta=[1e-6], inner_solver="ray"), Galerkin())
-        @test kwargs[:gal_match_flag]
-        @test kwargs[:gal_rpec_flag]
-        @test kwargs[:gal_eta] == [1e-6]
-        @test kwargs[:gal_inner_solver] == "ray"
-        @test !kwargs[:gal_ideal_flag]
-
         # Every key the objects own is a `ForceFreeStatesControl` field.
         @test all(in(fieldnames(FFS.ForceFreeStatesControl)), keys(kwargs))
     end
@@ -199,11 +191,27 @@ using TOML
         # A calculated-source kinetic solve gates on profiles attached to the equilibrium.
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs...,
             kinetic_factor=0.5, kinetic_source="calculated")
-        @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., match=ResistiveMatch())
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., match=ResistiveMatch())
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
+    end
+
+    @testset "MatchProblem gates on its inputs" begin
+        mktempdir() do dir
+            # A Forward result carries no Δ′ payload, so the problem is unconstructible.
+            fwd = solve(equil, Forward(); nn=1, dir_path=dir, ffs_kwargs...)
+            @test_throws ErrorException MatchProblem(fwd; ideal=true)
+            # A slab model can never close a matched solution.
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=dir, ffs_kwargs...)
+            prob = MatchProblem(gal; ideal=true)
+            @test_throws ErrorException solve(prob, SLAYER())
+            # The ideal reference match keeps the ideal closure and replaces the solution with
+            # the bare coil columns in the identity-at-edge basis.
+            matched = solve(prob, GGJ())
+            @test matched.closure === :ideal
+            @test matched.galerkin.match !== nothing
+            @test matched.solution !== nothing && matched.solution.basis === :gal_native
+        end
     end
 
     @testset "kinetic profiles live on the equilibrium" begin

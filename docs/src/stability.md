@@ -144,8 +144,8 @@ zeroing vs GR), not from ODE tolerance; it is present at every thread count.
 the outer region is discretized on packed Hermite-cubic elements and solved as one global banded
 system, giving the RDCON resistive ``\Delta'`` matrix and the PEST-3 matching blocks.  It computes its own vacuum response and
 returns no free-boundary energies, no ODE trace, and no fixed-boundary `crit` scan.  With
-`gal_match_flag` it also matches the inner layer, producing a driven ``\xi`` solution that
-`PerturbedEquilibrium` consumes.  Kinetic runs are not supported.  See
+`gal_match_flag` the finished solve is routed through the post-solve `MatchProblem`,
+producing a driven ``\xi`` solution that `PerturbedEquilibrium` consumes.  Kinetic runs are not supported.  See
 `docs/src/galerkin.md` for the solver and its `gal_*` knobs.
 
 Enable with:
@@ -292,7 +292,7 @@ The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separa
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Matching/Models.jl", "Matching/LayerParameters.jl", "Result.jl", "Surfaces/Resist.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Matching/Models.jl", "Matching/LayerParameters.jl", "Matching/MatchProblem.jl", "Matching/ResonantMatch.jl", "Result.jl", "Surfaces/Resist.jl", "Surfaces/ResistEval.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
 
 ## Example usage

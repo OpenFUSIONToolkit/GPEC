@@ -12,7 +12,7 @@
 # performed. The `cut=true` path swaps the resonant Frobenius series for its leading-order term
 # (`sing_get_ua_gal_cut`); the resulting cut solution supplies the regular background that the
 # resistive inner-layer solution is added to when forming the composite solution at a rational
-# surface (see `gal_match_rpec`).
+# surface (see the MatchProblem solve).
 
 # Sampling points per cell, matching Fortran interp_np_res / interp_np (gal.f): coarse in regular cells,
 # dense in resonant/extension cells to resolve the near-singular asymptotic series.
@@ -153,7 +153,7 @@ and the `b_flag` ξ→b^ψ conversion (off by default) are not ported — we kee
 
 When `delta` (the `(nsol, 2·msing)` small-solution coefficient matrix) is supplied, the cut solution
 `xi_cut` is evaluated on the same grid; it is the background of the composite inner-region solution
-built by `gal_match_rpec`.
+consumed by the MatchProblem solve.
 """
 function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
     intr::ForceFreeStatesInternal, profiles, psihigh::Float64;

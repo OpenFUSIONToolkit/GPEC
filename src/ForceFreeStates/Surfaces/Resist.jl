@@ -45,7 +45,7 @@ and integrated over θ ∈ [0,1) — exactly the resist.f integrands. The timesc
 once, explicitly.
 """
 function resist_eval(sing::SingType, equil::Equilibrium.PlasmaEquilibrium,
-    intr::ForceFreeStatesInternal; eta::Real, rho::Real, gamma::Real, ising::Int=0)
+    intr::ModeSpace; eta::Real, rho::Real, gamma::Real, ising::Int=0)
 
     profiles = equil.profiles
     psifac = sing.psifac
