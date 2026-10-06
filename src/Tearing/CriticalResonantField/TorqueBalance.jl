@@ -17,6 +17,8 @@
 
 # Finite stand-in for α = S^(-1/3)·(−r_s Δ'_s) ≪ 1; b_crit moves ~4% over 1e-4 to 1e-1.
 const TORQUE_BALANCE_ALPHA = 1e-2
+# Half-width around Q_e, Q_i where the layer response is pole-dominated (Fortran SLAYER layfac).
+const TORQUE_BALANCE_POLE_WIDTH = 0.02
 
 """
     TorqueBalance{M<:InnerLayerModel,P}
@@ -80,8 +82,9 @@ end
 
 Sample `torque_balance_value` on `n` uniform real Q points and return the critical
 normalized field `br_crit = b_r/B_φ` (Cole Eq. 62) at the largest positive interior local
-maximum of `bal`, located at `Qpeak = Qs[idx_peak]`. A maximum within one grid step of
-the diamagnetic poles `Q_e`, `Q_i` is discarded as a pole artifact. `Qmin`/`Qmax`
+maximum of `bal`, located at `Qpeak = Qs[idx_peak]`. A maximum within
+`TORQUE_BALANCE_POLE_WIDTH` (or one grid step, if larger) of the diamagnetic poles `Q_e`,
+`Q_i` is discarded as a pole artifact. `Qmin`/`Qmax`
 default to `torque_balance_window`. Returns NaN for `Qpeak`, `br_crit` and 0 for
 `idx_peak` when no valid maximum is found.
 """
@@ -93,8 +96,8 @@ function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::I
     bal = first.(out)
     Δs = last.(out)
 
-    dQ = step(Qs)
-    near_pole(Q) = abs(Q - p.Q_e) <= dQ || abs(Q - p.Q_i) <= dQ
+    w = max(step(Qs), TORQUE_BALANCE_POLE_WIDTH)
+    near_pole(Q) = abs(Q - p.Q_e) <= w || abs(Q - p.Q_i) <= w
     peaks = [i for i in 2:(n-1) if isfinite(bal[i]) && bal[i] > 0 &&
              bal[i-1] < bal[i] && bal[i] >= bal[i+1] && !near_pole(Qs[i])]
     if isempty(peaks)
