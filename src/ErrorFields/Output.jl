@@ -128,7 +128,8 @@ const MC_H5_ANNOTATIONS = [
     "abs_delta_efc_pdf" => (; long_name="probability density of the corrected overlap |δ| (correctable terms divided by efc_factor), batch average", dims=("delta_bin",)),
     "abs_delta_pdf_batches" => (; long_name="probability density of the intrinsic overlap |δ| per batch", dims=("delta_bin", "batch")),
     "abs_delta_efc_pdf_batches" => (; long_name="probability density of the corrected overlap |δ| per batch", dims=("delta_bin", "batch")),
-    "abs_delta_total_as_designed" => (; long_name="|Σ δ_as_designed|, magnitude of the coherent sum of the as-designed overlaps of every coil set"),
+    "abs_delta_total_as_designed" =>
+        (; long_name="|Σ δ_as_designed|, the as-designed overlap with every error-field coil set at its design position (correction arrays and excluded sets left out)"),
     "abs_delta_worst_case" => (; long_name="worst-case alignment bound Σ(|δ_as_designed| + tolerance × |sensitivity|) used to size the histogram"),
     "abs_delta_sampled_mean" => (; long_name="sample mean of the intrinsic overlap |δ|"),
     "abs_delta_efc_sampled_mean" => (; long_name="sample mean of the corrected overlap |δ|"),

@@ -331,6 +331,29 @@ function validate_tolerances(ts::ToleranceSet, coil_names::AbstractVector{<:Abst
 end
 
 """
+    check_excluded_tolerances(ts::ToleranceSet, excluded) -> ts
+
+Throw if a tolerance, a coherent-group member or an uncorrectable-coil entry names a coil set the
+run excludes from its error field: a correction array is not an error-field source, so a
+tolerance on it has nothing to act on.
+"""
+function check_excluded_tolerances(ts::ToleranceSet, excluded)
+    excluded = Set(String[String(n) for n in excluded])
+    named = String[]
+    for c in ts.coils
+        c.name in excluded && push!(named, "coil $(c.name)")
+    end
+    for g in ts.groups, m in g.members
+        m in excluded && push!(named, "member $m of group $(g.name)")
+    end
+    for u in ts.uncorrectable_coils
+        u in excluded && push!(named, "uncorrectable coil $u")
+    end
+    isempty(named) || throw(ArgumentError("tolerances name coil sets excluded from the error field (a correction array carries no tolerance): $(join(named, "; "))"))
+    return ts
+end
+
+"""
     tilt_tolerance_deg(tilt, tilt_units, cs::CoilSet) -> Float64
     tilt_tolerance_deg(tilt, tilt_units, r_nom::Real; name="the coil set") -> Float64
     tilt_tolerance_deg(t::CoilTolerance, cs::CoilSet) -> Float64

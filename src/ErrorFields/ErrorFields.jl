@@ -74,11 +74,11 @@ include("Correction.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
-export compute_coil_sensitivities, sensitivity_table, cancelling_offset, LinearityCheck, linearity_check
+export compute_coil_sensitivities, sensitivity_table, without_coils, excluded_coil_names, cancelling_offset, LinearityCheck, linearity_check
 export ResonantDriveContext, CoilOverlap, coil_overlaps, combine_overlaps, resonant_fraction_percent
 export applied_spectrum, forcing_grids, regrid, MIN_NZETA_PER_PERIOD
 export ToleranceSet, CoilTolerance, CoherentGroupTolerance, OtherFieldBudget
-export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tolerance_deg
+export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, check_excluded_tolerances, tilt_tolerance_deg
 export RadialDistribution, Flat, UniformArea, Hollow, Ring, PowerLaw, randpow, radial_distribution
 export disk_radius, sample_disk, sample_uncertainty, sample_additive, sample_cylinder
 export MonteCarloControl, MonteCarloResult, run_monte_carlo, worst_case_terms, apply_current_factors, update

@@ -184,6 +184,43 @@ function sensitivity_table(h5path::AbstractString; psi_low::Real=PerturbedEquili
 end
 
 """
+    without_coils(table::SensitivityTable, names) -> SensitivityTable
+
+The table with the named coil sets dropped: the error-field coil sets alone, once a correction
+array or any other energized coil set that is not an error-field source is taken out. Every name
+must be in the table. This is the table the run's Monte Carlo, worst case and scans use; the
+per-coil sensitivities of the excluded sets stay in the full table.
+"""
+function without_coils(table::SensitivityTable, names)
+    names = String[String(n) for n in names]
+    unknown = setdiff(names, table.coil_names)
+    isempty(unknown) || throw(ArgumentError("coil sets to exclude not among the run's coil sets ($(join(table.coil_names, ", "))): $(join(unknown, ", "))"))
+    keep = [i for (i, n) in enumerate(table.coil_names) if !(n in names)]
+    return SensitivityTable(table.coil_names[keep], table.mode, table.delta_as_designed[keep], table.shift_sensitivity_per_m[:, keep], table.tilt_sensitivity_per_deg[:, keep],
+        table.abs_delta_shift_per_mm[keep], table.abs_delta_tilt_per_deg[keep], table.abs_delta_rim_per_mm[keep], table.cancelling_shift_m[:, keep],
+        table.cancelling_tilt_deg[:, keep])
+end
+
+"""
+    excluded_coil_names(ef_raw::AbstractDict) -> Vector{String}
+    excluded_coil_names(h5path::AbstractString) -> Vector{String}
+
+The coil sets a run leaves out of its error field: `[ErrorFields] exclude_coils` together with
+the correction arrays in `[ErrorFields.NTV] efc_coils`, read from the parsed `[ErrorFields]`
+section of a deck or from the deck echoed into a run file (none when the file carries no deck).
+"""
+function excluded_coil_names(ef_raw::AbstractDict)
+    listed = vcat(get(ef_raw, "exclude_coils", String[]), get(get(ef_raw, "NTV", Dict{String,Any}()), "efc_coils", String[]))
+    return unique(String[String(n) for n in listed])
+end
+function excluded_coil_names(h5path::AbstractString)
+    return h5open(h5path, "r") do f
+        haskey(f, "Input/gpec_toml_raw") || return String[]
+        excluded_coil_names(get(TOML.parse(read(f["Input/gpec_toml_raw"])), "ErrorFields", Dict{String,Any}()))
+    end
+end
+
+"""
     cancelling_offset(δ_as_designed, S_x, S_y) -> (Δx, Δy)
 
 The real in-plane displacement that cancels a coil set's nominal overlap to linear order,

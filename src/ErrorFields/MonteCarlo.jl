@@ -264,7 +264,7 @@ end
 function _monte_carlo_inputs(h5path::AbstractString; psi_low::Real, psi_high::Real, mode::Int)
     ts = read_tolerance_snapshot(h5path)
     ts === nothing && throw(ArgumentError("$h5path carries no tolerance snapshot (the run named no tolerance_file)"))
-    table = sensitivity_table(h5path; psi_low, psi_high, mode)
+    table = without_coils(sensitivity_table(h5path; psi_low, psi_high, mode), excluded_coil_names(h5path))
     coil_sets = h5open(h5path, "r") do f
         haskey(f, "Input/RawInputs/Coils") || throw(ArgumentError("$h5path has no Input/RawInputs/Coils snapshot"))
         sets = CoilSet[]
