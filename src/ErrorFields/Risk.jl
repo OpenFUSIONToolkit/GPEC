@@ -343,15 +343,25 @@ saying nothing would apply an n = 1 threshold to a mode that is partly n = 2.
 """
 function scaling_toroidal_mode(h5path::AbstractString)
     return h5open(h5path, "r") do f
-        nlow, nhigh = Int(read(f["Info/nlow"])), Int(read(f["Info/nhigh"]))
-        nlow == nhigh || throw(
-            ArgumentError(
-                "$h5path carries n = $nlow:$nhigh, but a locking-threshold scaling is fitted for one " *
-                "toroidal mode number. Re-run the assessment for a single n, or project onto one n's " *
-                "coupling before asking for a risk.")
-        )
-        nlow
+        single_toroidal_mode(Int(read(f["Info/nlow"])), Int(read(f["Info/nhigh"])); where=h5path)
     end
+end
+
+"""
+    single_toroidal_mode(nlow, nhigh; where="the run") -> nlow
+
+The one toroidal mode number a locking-threshold scaling is fitted for, or an `ArgumentError`
+when the run spans several. One rule for the in-run pipeline and the file-path entry points, so a
+multi-n run cannot have one n's scaling applied to a mode that spans several.
+"""
+function single_toroidal_mode(nlow::Integer, nhigh::Integer; where::AbstractString="the run")
+    nlow == nhigh || throw(
+        ArgumentError(
+            "$where carries n = $nlow:$nhigh, but a locking-threshold scaling is fitted for one " *
+            "toroidal mode number. Re-run the assessment for a single n, or project onto one n's " *
+            "coupling before asking for a risk.")
+    )
+    return Int(nlow)
 end
 
 """
@@ -451,4 +461,30 @@ function allowable_tolerance(scan::ToleranceScan, target_percent::Real; correcte
         return 10^(log10(scan.tolerance_scale[i]) + f * (log10(scan.tolerance_scale[i+1]) - log10(scan.tolerance_scale[i])))
     end
     return NaN
+end
+
+"""
+    risk_convergence(table, tolerances, coil_sets, sc, scen; nsamples, nbins_list, ctrl=MonteCarloControl(), risk_ctrl=RiskControl()) -> NamedTuple
+
+The locking probability against the Monte Carlo's sample count and bin count, with its batch
+spread, so a number at the target risk level can be shown to be free of sampling and binning bias
+before it is quoted: the spread must shrink as `1/√nsample` and the value must not move with
+`nbins` by more than the spread. Each sweep holds the other control at `ctrl`'s value and reuses
+one threshold sample. Fields: `nsample`, `locking_probability_percent_by_nsample`,
+`locking_probability_spread_percent_by_nsample`, `nbins`, `locking_probability_percent_by_nbins`,
+`locking_probability_spread_percent_by_nbins`.
+"""
+function risk_convergence(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}, sc::ThresholdScaling, scen::ScenarioParameters;
+    nsamples::AbstractVector{<:Integer}, nbins_list::AbstractVector{<:Integer}, ctrl::MonteCarloControl=MonteCarloControl(), risk_ctrl::RiskControl=RiskControl())
+    thresholds = threshold_samples(Xoshiro(risk_ctrl.seed), sc, scen; nsample=risk_ctrl.nsample_threshold, dist=risk_ctrl.distribution)
+    fields = (f => getfield(ctrl, f) for f in fieldnames(MonteCarloControl) if f != :nsample && f != :nbins)
+    function at(nsample, nbins)
+        risk = locking_risk(run_monte_carlo(table, ts, coil_sets, MonteCarloControl(; fields..., nsample, nbins)), thresholds, sc, scen)
+        b = risk.locking_probability_batches_percent
+        return risk.locking_probability_percent, maximum(b) - minimum(b)
+    end
+    by_n = [at(n, ctrl.nbins) for n in nsamples]
+    by_b = [at(ctrl.nsample, b) for b in nbins_list]
+    return (; nsample=collect(Int, nsamples), locking_probability_percent_by_nsample=first.(by_n), locking_probability_spread_percent_by_nsample=last.(by_n),
+        nbins=collect(Int, nbins_list), locking_probability_percent_by_nbins=first.(by_b), locking_probability_spread_percent_by_nbins=last.(by_b))
 end

@@ -33,6 +33,15 @@ Settings of the tolerance Monte Carlo, the `[ErrorFields.MonteCarlo]` TOML table
   - `coil_subset`: coil set names whose tolerances are sampled; every other coil set contributes
     only its as-designed overlap, and a coherent group is sampled only if all its members are listed.
     Empty means all
+  - `scale_subset`: coil set and group names that `tolerance_scale` applies to; every other name
+    keeps its own tolerance (scale 1). Empty means `tolerance_scale` applies to all. This is how one
+    class of coils is scanned while another holds its tolerance
+  - `scale_map`: an explicit multiplier per coil set or group name, applied on top of
+    `tolerance_scale`; names absent from the map are unscaled by it. A name in `scale_subset` or
+    `scale_map` that is neither a coil set of the run nor a group of the tolerance file is an error
+
+The effective multiplier of a name is `(name in scale_subset or scale_subset empty ? tolerance_scale : 1) × get(scale_map, name, 1)`. None of these change which random numbers are drawn, so two runs with the
+same seed differ only through the tolerances they scale.
 """
 Base.@kwdef struct MonteCarloControl
     nsample::Int = 1_000_000
@@ -42,6 +51,43 @@ Base.@kwdef struct MonteCarloControl
     delta_max::Float64 = 0.0
     tolerance_scale::Float64 = 1.0
     coil_subset::Vector{String} = String[]
+    scale_subset::Vector{String} = String[]
+    scale_map::Dict{String,Float64} = Dict{String,Float64}()
+end
+
+# The tolerance multiplier of one coil set or group under a control.
+function _scale_of(ctrl::MonteCarloControl, name::AbstractString)
+    base = isempty(ctrl.scale_subset) || name in ctrl.scale_subset ? ctrl.tolerance_scale : 1.0
+    return base * get(ctrl.scale_map, name, 1.0)
+end
+
+function _check_scale_names(ctrl::MonteCarloControl, coil_names, group_names)
+    known = Set{String}(vcat(String.(coil_names), String.(group_names)))
+    for (what, names) in (("scale_subset", ctrl.scale_subset), ("scale_map", collect(keys(ctrl.scale_map))))
+        bad = [n for n in names if !(n in known)]
+        isempty(bad) || throw(ArgumentError("$what names neither a coil set of the run nor a coherent group: $(join(bad, ", ")) (known: $(join(sort(collect(known)), ", ")))"))
+    end
+    all(>=(0), values(ctrl.scale_map)) || throw(ArgumentError("scale_map multipliers must be ≥ 0"))
+    return nothing
+end
+
+"""
+    apply_current_factors(table::SensitivityTable, ts::ToleranceSet) -> SensitivityTable
+
+The table with every coil set's as-designed overlap and sensitivities multiplied by its
+`current_factor` from the tolerance file. The spectrum is linear in current, so the nominal
+overlap, the worst-case bound and every sampled overlap scale together; the cancelling offsets
+do not change, since they are ratios. Returns the table itself when every factor is 1.
+"""
+function apply_current_factors(table::SensitivityTable, ts::ToleranceSet)
+    factor = Dict(t.name => t.current_factor for t in ts.coils)
+    f = [get(factor, nm, 1.0) for nm in table.coil_names]
+    all(==(1.0), f) && return table
+    scale_cols(m) = m .* permutedims(f)
+    return SensitivityTable(copy(table.coil_names), table.mode, table.delta_as_designed .* f,
+        scale_cols(table.shift_sensitivity_per_m), scale_cols(table.tilt_sensitivity_per_deg),
+        table.abs_delta_shift_per_mm .* abs.(f), table.abs_delta_tilt_per_deg .* abs.(f), table.abs_delta_rim_per_mm .* abs.(f),
+        copy(table.cancelling_shift_m), copy(table.cancelling_tilt_deg))
 end
 
 """
@@ -156,6 +202,7 @@ function run_monte_carlo(table::SensitivityTable, ts::ToleranceSet, coil_sets::V
     ctrl.nsample > 0 && ctrl.nbatch > 0 && ctrl.nbins > 0 || throw(ArgumentError("nsample, nbatch and nbins must be positive"))
     ctrl.tolerance_scale >= 0 || throw(ArgumentError("tolerance_scale must be ≥ 0"))
     validate_tolerances(ts, table.coil_names)
+    table = apply_current_factors(table, ts)
     coils, groups = _resolve_terms(table, ts, coil_sets, ctrl)
     other = ts.other_field
     p_other = _radial_p(other.radial_shape)
@@ -283,6 +330,7 @@ Declare such a group in degrees, which is unambiguous and is what the reference'
 """
 function group_tilt_deg(g::CoherentGroupTolerance, set_of)
     g.tilt_units == "deg" && return Float64(g.tilt_tol)
+    isnan(g.tilt_lever_arm_m) || return tilt_tolerance_deg(g.tilt_tol, g.tilt_units, g.tilt_lever_arm_m; name="coherent group $(g.name)")
     radii = [ForcingTerms.nominal_major_radius(set_of[m]) for m in g.members]
     lo, hi = extrema(radii)
     hi - lo <= 0.01 * hi || throw(
@@ -303,7 +351,8 @@ function _resolve_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
     end
     active(n) = isempty(ctrl.coil_subset) || n in ctrl.coil_subset
     uncorrectable = Set(ts.uncorrectable_coils)
-    scale = ctrl.tolerance_scale
+    _check_scale_names(ctrl, names, [g.name for g in ts.groups])
+    scale_of(n) = _scale_of(ctrl, n)
 
     n = length(names)
     shift_tol = zeros(n)
@@ -317,8 +366,8 @@ function _resolve_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
         i = index[t.name]
         active(t.name) || continue
         cs = set_of[t.name]
-        shift_tol[i] = scale * t.shift_tol_m
-        tilt_tol[i] = scale * tilt_tolerance_deg(t, cs)
+        shift_tol[i] = scale_of(t.name) * t.shift_tol_m
+        tilt_tol[i] = scale_of(t.name) * tilt_tolerance_deg(t, cs)
         shift_sigma[i] = t.shift_sigma_m
         tilt_sigma[i] = tilt_tolerance_deg(t.tilt_sigma, t.tilt_units, cs)
         p_radial[i] = _radial_p(t.radial_shape)
@@ -357,8 +406,8 @@ function _resolve_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
             gRy[gi] += h * table.shift_sensitivity_per_m[2, i]
             m in uncorrectable && (g_corr[gi] = false)
         end
-        g_shift[gi] = scale * g.shift_tol_m
-        g_tilt[gi] = scale * group_tilt_deg(g, set_of)
+        g_shift[gi] = scale_of(g.name) * g.shift_tol_m
+        g_tilt[gi] = scale_of(g.name) * group_tilt_deg(g, set_of)
         g_p[gi] = _radial_p(g.radial_shape)
         g_model[gi] = _model_code(g.tolerance_model)
         g_ztop[gi] = g.cylinder_half_height_m
@@ -399,13 +448,16 @@ or, under the cylinder model, the angle the axis line can reach, `atan(shift_tol
 Per coherent group (`group_names`): `abs_delta_group_shift_tolerance` and `abs_delta_group_tilt_tolerance`, the latter including the
 lateral displacement a rigid rotation gives each member. `abs_delta_unattributed` is the unattributed budget at
 `magnitude + 3σ`. `abs_delta_worst_case` is the bound itself, the sum of every term; uncertainties enter at
-three standard deviations exactly as in the bound. Every coil set is counted (no `coil_subset`),
-and `tolerance_scale` multiplies the tolerances as in the Monte Carlo. The file form rebuilds the
+three standard deviations exactly as in the bound. Every coil set is counted (no `coil_subset`);
+`tolerance_scale`, `scale_subset` and `scale_map` multiply the tolerances and the coils'
+`current_factor` scales the table, both as in the Monte Carlo. The file form rebuilds the
 inputs from `gpec.h5` as `run_monte_carlo` does.
 """
-function worst_case_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}; tolerance_scale::Real=1.0)
+function worst_case_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}; tolerance_scale::Real=1.0,
+    scale_subset::AbstractVector{<:AbstractString}=String[], scale_map::AbstractDict=Dict{String,Float64}())
     validate_tolerances(ts, table.coil_names)
-    coils, groups = _resolve_terms(table, ts, coil_sets, MonteCarloControl(; tolerance_scale))
+    table = apply_current_factors(table, ts)
+    coils, groups = _resolve_terms(table, ts, coil_sets, MonteCarloControl(; tolerance_scale, scale_subset=String.(scale_subset), scale_map=Dict{String,Float64}(scale_map)))
     other = ts.other_field
     nominal = abs.(table.delta_as_designed)
     shift = similar(nominal)
@@ -432,7 +484,7 @@ function worst_case_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::
         abs_delta_group_shift_tolerance=group_shift, abs_delta_group_tilt_tolerance=group_tilt, abs_delta_unattributed=other.magnitude + _WORST_CASE_SIGMA * other.sigma,
         abs_delta_worst_case=_worst_case(table, coils, groups, other))
 end
-function worst_case_terms(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1, tolerance_scale::Real=1.0)
+function worst_case_terms(h5path::AbstractString; psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1, kwargs...)
     table, ts, coil_sets = _monte_carlo_inputs(h5path; psi_low, psi_high, mode)
-    return worst_case_terms(table, ts, coil_sets; tolerance_scale)
+    return worst_case_terms(table, ts, coil_sets; kwargs...)
 end
