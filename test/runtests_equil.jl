@@ -147,6 +147,56 @@
             (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
     end
 
+    @testset "F and P from file derivatives" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        # Smooth profiles with exact derivatives; F varies by ~2 % like a tokamak F
+        xs = range(0.0, 1.0; length=257)
+        f_exact = @. sqrt(9.0 + 0.4 * (1 - xs)^2 - 0.1 * (1 - xs)^3)
+        ffprime = @. -0.4 * (1 - xs) + 0.15 * (1 - xs)^2
+        f2_exact = @. (ffprime^2 / f_exact^2 * -1 + 0.4 - 0.3 * (1 - xs)) / f_exact   # d²F/dx²
+        p_exact = @. 5e4 * (1 - xs)^2 + 300.0
+        pprime = @. -1e5 * (1 - xs)
+        f_single = Float64.(Float32.(f_exact))   # a table written in single precision
+
+        built = Eq.integrate_profile_derivatives(xs, f_single, p_exact, ffprime, pprime)
+        @test maximum(abs.(built.f .- f_exact) ./ f_exact) < 1e-7   # boundary anchor carries the rounding
+        @test maximum(abs.(built.p .- p_exact)) < 1e-6 * 5e4
+        @test built.f_mismatch < 1e-6 && built.p_mismatch < 1e-9
+
+        # The slope of F′ is what single-precision rounding ruins and the derivative route keeps
+        slope_error(f) = maximum(abs.(deriv2(cubic_interp(collect(xs), f)).(xs[20:end-20]) .- f2_exact[20:end-20]))
+        @test slope_error(built.f) < 1e-2 * slope_error(f_single)
+
+        # Either sign convention of the flux derivative gives the same profiles
+        flipped = Eq.integrate_profile_derivatives(xs, f_single, p_exact, -ffprime, -pprime)
+        @test flipped.f ≈ built.f && flipped.p ≈ built.p
+        @test Eq.integrate_profile_derivatives(xs, -f_single, p_exact, ffprime, pprime).f ≈ built.f
+
+        # Unusable derivatives: absent, non-finite, or signs that suit only one of the two profiles
+        @test Eq.integrate_profile_derivatives(xs, f_single, p_exact, zero(ffprime), zero(pprime)) === nothing
+        @test Eq.integrate_profile_derivatives(xs, f_single, p_exact, ffprime, zero(pprime)) === nothing
+        @test Eq.integrate_profile_derivatives(xs, f_single, p_exact, fill(NaN, 257), pprime) === nothing
+        @test Eq.integrate_profile_derivatives(xs, f_single, p_exact, ffprime, -pprime) === nothing
+
+        derivs = Eq.EquilibriumConfig(; profile_source="derivatives")
+        values = Eq.EquilibriumConfig(; profile_source="values")
+        @test_throws ErrorException Eq.EquilibriumConfig(; profile_source="spline")
+        @test Eq.file_profiles(values, xs, -f_single, p_exact, ffprime, pprime) == (f_single, p_exact)
+        @test (@test_logs (:warn, r"absent or unusable") Eq.file_profiles(derivs, xs, f_single, p_exact, zero(ffprime), zero(pprime))) == (f_single, p_exact)
+        @test (@test_logs (:info, r"integrated from") Eq.file_profiles(derivs, xs, f_single, p_exact, ffprime, pprime))[1] ≈ built.f
+        # A pressure table 20 % off its own derivative is reported, not silently accepted
+        @test_logs (:warn, r"disagree") Eq.file_profiles(derivs, xs, f_single, p_exact, ffprime, 1.2 .* pprime)
+
+        # The g-file reader keeps the boundary values and moves the interior only at the rounding level
+        gfile = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk")
+        table(source) = Eq.read_efit(Eq.EquilibriumConfig(; eq_type="efit", eq_filename=gfile, profile_source=source)).ingest.sq_fs
+        tabulated, integrated = table("values"), table("derivatives")
+        @test integrated[end, 1:2] == tabulated[end, 1:2]
+        @test integrated[:, 1] != tabulated[:, 1]
+        @test maximum(abs.(integrated[:, 1] .- tabulated[:, 1]) ./ tabulated[:, 1]) < 1e-5
+        @test integrated[:, 3:4] == tabulated[:, 3:4]
+    end
+
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 10% to allow for method-specific discretisation differences.

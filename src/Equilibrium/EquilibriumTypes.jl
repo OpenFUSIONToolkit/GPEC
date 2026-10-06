@@ -41,6 +41,11 @@ specified in the input.
   - `etol::Float64` - Error tolerance for equilibrium solver
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
+  - `imas_cocos::Int` - COCOS convention of the input IMAS `dd.equilibrium` (11 = IMAS standard, 2 = internal)
+  - `profile_source::String` - Which 1D arrays of a g-file or IMAS equilibrium define F and P.
+    `"derivatives"` (default) integrates the file's FF′ and p′ inward from the boundary values of
+    F and P; `"values"` uses the tabulated F and P directly. The reader falls back to `"values"`
+    with a warning when the derivatives are absent or unusable.
 """
 @kwdef struct EquilibriumConfig
     eq_type::String = "efit"
@@ -72,8 +77,8 @@ specified in the input.
     force_termination::Bool = false
     use_galgrid::Bool = true
 
-    # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
     imas_cocos::Int = 11
+    profile_source::String = "derivatives"
 
     """
     Modified internal constructor that enforces self consistency within the inputs
@@ -84,7 +89,7 @@ specified in the input.
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-        force_termination, use_galgrid, imas_cocos)
+        force_termination, use_galgrid, imas_cocos, profile_source)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -147,10 +152,12 @@ specified in the input.
             @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
         end
         psihigh = min(psihigh, 1.0)
+        profile_source in ("derivatives", "values") ||
+            error("Cannot recognize profile_source = $(profile_source); use \"derivatives\" or \"values\"")
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-            force_termination, use_galgrid, imas_cocos)
+            force_termination, use_galgrid, imas_cocos, profile_source)
     end
 end
 

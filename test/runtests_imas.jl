@@ -72,6 +72,35 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test isapprox(result.psio, psi_bnd_int; rtol=1e-6)
     end
 
+    # read_imas — F and P come from the stored derivatives when the dd carries them
+    @testset "read_imas: profiles from stored derivatives" begin
+        for cocos in (11, 2)
+            dd, _ = make_mock_dd(; cocos=cocos)
+            prof = dd.equilibrium.time_slice[1].profiles_1d
+            nw = length(prof.psi)
+            # Derivatives in the stored ψ that match the mock's flat F and linear pressure
+            prof.f_df_dpsi = zeros(nw)
+            prof.dpressure_dpsi = fill(-1e4 / (prof.psi[end] - prof.psi[1]), nw)
+            # A pressure table carrying an error the derivatives do not have
+            exact_pressure = copy(prof.pressure)
+            prof.pressure = exact_pressure .* (1 .+ 1e-3 .* sinpi.(range(0, 8; length=nw)))
+
+            mu0 = 4π * 1e-7
+            read_mu0p(source) = Equilibrium.read_imas(
+                EquilibriumConfig(; eq_type="imas", eq_filename="mock", imas_cocos=cocos, profile_source=source), dd).ingest.sq_fs[:, 2]
+            @test read_mu0p("derivatives") ≈ mu0 .* exact_pressure rtol = 1e-9 atol = 1e-12
+            @test read_mu0p("values") == mu0 .* prof.pressure
+        end
+    end
+
+    # read_imas — a dd without the derivative arrays falls back to the tabulated profiles
+    @testset "read_imas: fallback without stored derivatives" begin
+        dd, _ = make_mock_dd()
+        config = EquilibriumConfig(; eq_type="imas", eq_filename="mock")
+        result = @test_logs (:warn, r"absent or unusable") match_mode = :any Equilibrium.read_imas(config, dd)
+        @test result.ingest.sq_fs[:, 1] == fill(5.0, 64)
+    end
+
     # Test 3: read_imas — splines are callable after construction
     @testset "read_imas: splines callable" begin
         dd, _ = make_mock_dd()
