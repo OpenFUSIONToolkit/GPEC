@@ -12,24 +12,25 @@ const _H5_GROUP = "ErrorFields/CoilSensitivities"
 # summary is the full-window mode-1 projection, the windowed table being a post-hoc analysis.
 const EF_H5_ANNOTATIONS = [
     "coil_name" => (; long_name="name of each coil set"),
-    "nominal_field" => (; long_name="root-area-weighted control-surface field b̃ of each coil set as built", units="T", dims=("mode", "coil_set")),
-    "shift_sensitivity" => (; long_name="∂b̃/∂(Δx, Δy, Δz) of each coil set under a rigid Cartesian shift", units="T/m", dims=("mode", "axis", "coil_set")),
-    "tilt_sensitivity" => (; long_name="∂b̃/∂(θx, θy, θz) of each coil set under a rigid rotation about the machine axes", units="T/deg", dims=("mode", "axis", "coil_set")),
+    "field_as_designed" => (; long_name="root-area-weighted control-surface field b̃ of each coil set as built", units="T", dims=("mode", "coil_set")),
+    "shift_sensitivity_per_m" => (; long_name="∂b̃/∂(Δx, Δy, Δz) of each coil set under a rigid Cartesian shift", units="T/m", dims=("mode", "axis", "coil_set")),
+    "tilt_sensitivity_per_deg" =>
+        (; long_name="∂b̃/∂(θx, θy, θz) of each coil set under a rigid rotation about the machine axes", units="T/deg", dims=("mode", "axis", "coil_set")),
     "shift_linearity_residual" =>
         (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖ of each shift tap relative to the set's largest first difference", dims=("axis", "coil_set")),
     "tilt_linearity_residual" =>
         (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖ of each tilt tap relative to the set's largest first difference", dims=("axis", "coil_set")),
     "peak_current" => (; long_name="largest conductor current magnitude of each coil set at which the spectra were evaluated", units="A"),
     "winding_multiplier" => (; long_name="turns per conductor element of each coil set"),
-    "nominal_radius" => (; long_name="arc-length-weighted major radius of each coil set, the lever arm converting a tilt angle to rim displacement", units="m"),
-    "DominantMode/delta_nominal" => (; long_name="overlap δ = Vᴴ₁·b̃ / B_T0 of each coil set with the full-window dominant mode"),
-    "DominantMode/shift_sensitivity" => (; long_name="∂δ/∂(Δx, Δy, Δz) on the full-window dominant mode", units="1/m", dims=("axis", "coil_set")),
-    "DominantMode/tilt_sensitivity" => (; long_name="∂δ/∂(θx, θy, θz) on the full-window dominant mode", units="1/deg", dims=("axis", "coil_set")),
-    "DominantMode/delta_per_mm_shift" => (; long_name="direction-averaged in-plane shift sensitivity √((|∂δ/∂Δx|²+|∂δ/∂Δy|²)/2)", units="1/mm"),
-    "DominantMode/delta_per_deg_tilt" => (; long_name="direction-averaged in-plane tilt sensitivity √((|∂δ/∂θx|²+|∂δ/∂θy|²)/2)", units="1/deg"),
-    "DominantMode/delta_per_mm_rim" => (; long_name="the same tilt sensitivity as rim displacement at nominal_radius", units="1/mm"),
-    "DominantMode/cancelling_shift" => (; long_name="in-plane shift (Δx, Δy) that cancels delta_nominal to linear order", units="m", dims=("axis", "coil_set")),
-    "DominantMode/cancelling_tilt" => (; long_name="in-plane tilt (θx, θy) that cancels delta_nominal to linear order", units="deg", dims=("axis", "coil_set"))
+    "major_radius_m" => (; long_name="arc-length-weighted major radius of each coil set, the lever arm converting a tilt angle to rim displacement", units="m"),
+    "DominantMode/delta_as_designed" => (; long_name="overlap δ = Vᴴ₁·b̃ / B_T0 of each coil set with the full-window dominant mode"),
+    "DominantMode/shift_sensitivity_per_m" => (; long_name="∂δ/∂(Δx, Δy, Δz) on the full-window dominant mode", units="1/m", dims=("axis", "coil_set")),
+    "DominantMode/tilt_sensitivity_per_deg" => (; long_name="∂δ/∂(θx, θy, θz) on the full-window dominant mode", units="1/deg", dims=("axis", "coil_set")),
+    "DominantMode/abs_delta_shift_per_mm" => (; long_name="direction-averaged in-plane shift sensitivity √((|∂δ/∂Δx|²+|∂δ/∂Δy|²)/2)", units="1/mm"),
+    "DominantMode/abs_delta_tilt_per_deg" => (; long_name="direction-averaged in-plane tilt sensitivity √((|∂δ/∂θx|²+|∂δ/∂θy|²)/2)", units="1/deg"),
+    "DominantMode/abs_delta_rim_per_mm" => (; long_name="the same tilt sensitivity as rim displacement at major_radius_m", units="1/mm"),
+    "DominantMode/cancelling_shift_m" => (; long_name="in-plane shift (Δx, Δy) that cancels delta_as_designed to linear order", units="m", dims=("axis", "coil_set")),
+    "DominantMode/cancelling_tilt_deg" => (; long_name="in-plane tilt (θx, θy) that cancels delta_as_designed to linear order", units="deg", dims=("axis", "coil_set"))
 ]
 
 """
@@ -44,25 +45,25 @@ function write_to_hdf5!(h5file::HDF5.File, sens::CoilSensitivities, dom::Dominan
     haskey(h5file, _H5_GROUP) && delete_object(h5file, _H5_GROUP)
     g = create_group(h5file, _H5_GROUP)
     g["coil_name"] = sens.coil_names
-    g["nominal_field"] = sens.nominal_field
-    g["shift_sensitivity"] = sens.shift_sensitivity
-    g["tilt_sensitivity"] = sens.tilt_sensitivity
+    g["field_as_designed"] = sens.field_as_designed
+    g["shift_sensitivity_per_m"] = sens.shift_sensitivity_per_m
+    g["tilt_sensitivity_per_deg"] = sens.tilt_sensitivity_per_deg
     g["shift_linearity_residual"] = sens.shift_linearity_residual
     g["tilt_linearity_residual"] = sens.tilt_linearity_residual
     g["peak_current"] = sens.peak_current
     g["winding_multiplier"] = sens.winding_multiplier
-    g["nominal_radius"] = sens.nominal_radius
+    g["major_radius_m"] = sens.major_radius_m
 
     table = sensitivity_table(sens, dom; mode=1)
     d = create_group(g, "DominantMode")
-    d["delta_nominal"] = table.delta_nominal
-    d["shift_sensitivity"] = table.shift
-    d["tilt_sensitivity"] = table.tilt
-    d["delta_per_mm_shift"] = table.delta_per_mm_shift
-    d["delta_per_deg_tilt"] = table.delta_per_deg_tilt
-    d["delta_per_mm_rim"] = table.delta_per_mm_rim
-    d["cancelling_shift"] = table.cancelling_shift
-    d["cancelling_tilt"] = table.cancelling_tilt
+    d["delta_as_designed"] = table.delta_as_designed
+    d["shift_sensitivity_per_m"] = table.shift_sensitivity_per_m
+    d["tilt_sensitivity_per_deg"] = table.tilt_sensitivity_per_deg
+    d["abs_delta_shift_per_mm"] = table.abs_delta_shift_per_mm
+    d["abs_delta_tilt_per_deg"] = table.abs_delta_tilt_per_deg
+    d["abs_delta_rim_per_mm"] = table.abs_delta_rim_per_mm
+    d["cancelling_shift_m"] = table.cancelling_shift_m
+    d["cancelling_tilt_deg"] = table.cancelling_tilt_deg
 
     Utilities.HDF5Annotations.annotate!(g, EF_H5_ANNOTATIONS)
     return g
@@ -83,9 +84,9 @@ function CoilSensitivities(h5path::AbstractString)
         mn = read(f["Info/mn_index"])
         return CoilSensitivities(
             read(g["coil_name"]), mn[:, 1], mn[:, 2], Float64(read(f["Equilibrium/B_T_axis"])),
-            read(g["nominal_field"]), read(g["shift_sensitivity"]), read(g["tilt_sensitivity"]),
+            read(g["field_as_designed"]), read(g["shift_sensitivity_per_m"]), read(g["tilt_sensitivity_per_deg"]),
             read(g["shift_linearity_residual"]), read(g["tilt_linearity_residual"]),
-            read(g["peak_current"]), read(g["winding_multiplier"]), read(g["nominal_radius"])
+            read(g["peak_current"]), read(g["winding_multiplier"]), read(g["major_radius_m"])
         )
     end
 end
@@ -119,19 +120,19 @@ end
 
 const _MC_GROUP = "ErrorFields/MonteCarlo"
 
-# Metadata table for ErrorFields/MonteCarlo/ (paths relative to the group). bin_edges has one
+# Metadata table for ErrorFields/MonteCarlo/ (paths relative to the group). abs_delta_bin_edges has one
 # more entry than the densities, so it is documented rather than attached as a dimension scale.
 const MC_H5_ANNOTATIONS = [
-    "bin_edges" => (; long_name="|δ| bin edges of the overlap histograms (nbins + 1); samples beyond the last edge are counted in the last bin"),
-    "pdf" => (; long_name="probability density of the intrinsic dominant-mode overlap |δ| over the sampled misalignments, batch average", dims=("delta_bin",)),
-    "pdf_efc" => (; long_name="probability density of the corrected overlap |δ| (correctable terms divided by efc_factor), batch average", dims=("delta_bin",)),
-    "pdf_batches" => (; long_name="probability density of the intrinsic overlap |δ| per batch", dims=("delta_bin", "batch")),
-    "pdf_efc_batches" => (; long_name="probability density of the corrected overlap |δ| per batch", dims=("delta_bin", "batch")),
-    "delta_nominal" =>
-        (; long_name="|Σ δ_nominal|, the as-designed overlap with every error-field coil set at its nominal position (correction arrays and excluded sets left out)"),
-    "delta_worst" => (; long_name="worst-case alignment bound Σ(|δ_nominal| + tolerance × |sensitivity|) used to size the histogram"),
-    "mean_abs_delta" => (; long_name="sample mean of the intrinsic overlap |δ|"),
-    "mean_abs_delta_efc" => (; long_name="sample mean of the corrected overlap |δ|"),
+    "abs_delta_bin_edges" => (; long_name="|δ| bin edges of the overlap histograms (nbins + 1); samples beyond the last edge are counted in the last bin"),
+    "abs_delta_pdf" => (; long_name="probability density of the intrinsic dominant-mode overlap |δ| over the sampled misalignments, batch average", dims=("delta_bin",)),
+    "abs_delta_efc_pdf" => (; long_name="probability density of the corrected overlap |δ| (correctable terms divided by efc_factor), batch average", dims=("delta_bin",)),
+    "abs_delta_pdf_batches" => (; long_name="probability density of the intrinsic overlap |δ| per batch", dims=("delta_bin", "batch")),
+    "abs_delta_efc_pdf_batches" => (; long_name="probability density of the corrected overlap |δ| per batch", dims=("delta_bin", "batch")),
+    "abs_delta_total_as_designed" =>
+        (; long_name="|Σ δ_as_designed|, the as-designed overlap with every error-field coil set at its design position (correction arrays and excluded sets left out)"),
+    "abs_delta_worst_case" => (; long_name="worst-case alignment bound Σ(|δ_as_designed| + tolerance × |sensitivity|) used to size the histogram"),
+    "abs_delta_sampled_mean" => (; long_name="sample mean of the intrinsic overlap |δ|"),
+    "abs_delta_efc_sampled_mean" => (; long_name="sample mean of the corrected overlap |δ|"),
     "clamped_fraction" => (; long_name="fraction of samples beyond the last bin edge")
 ]
 
@@ -146,15 +147,15 @@ An existing group is replaced.
 function write_to_hdf5!(h5file::HDF5.File, mc::MonteCarloResult)
     haskey(h5file, _MC_GROUP) && delete_object(h5file, _MC_GROUP)
     g = create_group(h5file, _MC_GROUP)
-    g["bin_edges"] = mc.bin_edges
-    g["pdf"] = mc.pdf
-    g["pdf_efc"] = mc.pdf_efc
-    g["pdf_batches"] = mc.pdf_batches
-    g["pdf_efc_batches"] = mc.pdf_efc_batches
-    g["delta_nominal"] = mc.delta_nominal
-    g["delta_worst"] = mc.delta_worst
-    g["mean_abs_delta"] = mc.mean_abs_delta
-    g["mean_abs_delta_efc"] = mc.mean_abs_delta_efc
+    g["abs_delta_bin_edges"] = mc.abs_delta_bin_edges
+    g["abs_delta_pdf"] = mc.abs_delta_pdf
+    g["abs_delta_efc_pdf"] = mc.abs_delta_efc_pdf
+    g["abs_delta_pdf_batches"] = mc.abs_delta_pdf_batches
+    g["abs_delta_efc_pdf_batches"] = mc.abs_delta_efc_pdf_batches
+    g["abs_delta_total_as_designed"] = mc.abs_delta_total_as_designed
+    g["abs_delta_worst_case"] = mc.abs_delta_worst_case
+    g["abs_delta_sampled_mean"] = mc.abs_delta_sampled_mean
+    g["abs_delta_efc_sampled_mean"] = mc.abs_delta_efc_sampled_mean
     g["clamped_fraction"] = mc.clamped_fraction
     Utilities.HDF5Annotations.annotate!(g, MC_H5_ANNOTATIONS)
     return g
@@ -178,10 +179,10 @@ function MonteCarloResult(h5path::AbstractString)
         defaults = MonteCarloControl()
         nsample = get(mc_tbl, "nsample", defaults.nsample)
         seed = get(mc_tbl, "seed", defaults.seed)
-        pdf_batches = read(g["pdf_batches"])
-        return MonteCarloResult(read(g["bin_edges"]), read(g["pdf"]), read(g["pdf_efc"]), pdf_batches, read(g["pdf_efc_batches"]),
-            read(g["delta_nominal"]), read(g["delta_worst"]), read(g["mean_abs_delta"]), read(g["mean_abs_delta_efc"]),
-            read(g["clamped_fraction"]), nsample, size(pdf_batches, 2), seed)
+        abs_delta_pdf_batches = read(g["abs_delta_pdf_batches"])
+        return MonteCarloResult(read(g["abs_delta_bin_edges"]), read(g["abs_delta_pdf"]), read(g["abs_delta_efc_pdf"]), abs_delta_pdf_batches, read(g["abs_delta_efc_pdf_batches"]),
+            read(g["abs_delta_total_as_designed"]), read(g["abs_delta_worst_case"]), read(g["abs_delta_sampled_mean"]), read(g["abs_delta_efc_sampled_mean"]),
+            read(g["clamped_fraction"]), nsample, size(abs_delta_pdf_batches, 2), seed)
     end
 end
 
@@ -191,20 +192,24 @@ const _RISK_GROUP = "ErrorFields/Risk"
 # such; the threshold density and P(lock|δ) share the Monte Carlo's |δ| grid.
 const RISK_H5_ANNOTATIONS = [
     "threshold_pdf" => (; long_name="probability density of the sampled ITPA penetration threshold on the Monte Carlo |δ| bins", dims=("delta_bin",)),
-    "p_lock_given_delta" => (; long_name="probability that an overlap equal to each Monte Carlo bin edge locks (threshold cumulative distribution)", dims=("delta_edge",)),
-    "threshold_nominal" => (; long_name="ITPA penetration threshold at the fitted exponents"),
-    "plock_percent" => (; long_name="locking probability of the intrinsic overlap distribution, 100 ∫ pdf(δ) P(lock|δ) dδ, batch average", units="%"),
-    "plock_efc_percent" => (; long_name="locking probability of the corrected overlap distribution, batch average", units="%"),
-    "plock_batches_percent" => (; long_name="locking probability of the intrinsic distribution per Monte Carlo batch", units="%"),
-    "plock_efc_batches_percent" => (; long_name="locking probability of the corrected distribution per Monte Carlo batch", units="%"),
-    "plock_nominal_percent" => (; long_name="locking probability of the as-designed machine, 100 P(lock|δ_nominal)", units="%"),
-    "plock_sharp_percent" => (; long_name="locking probability if the threshold were exactly its nominal value, 100 P(|δ| > threshold_nominal)", units="%"),
-    "ToleranceScan/scale" => (; long_name="multiplier applied to every shift and tilt tolerance"),
-    "ToleranceScan/plock_percent" => (; long_name="locking probability of the intrinsic distribution at each tolerance scale", units="%", dims=("scale",)),
-    "ToleranceScan/plock_efc_percent" => (; long_name="locking probability of the corrected distribution at each tolerance scale", units="%", dims=("scale",)),
-    "ToleranceScan/plock_spread_percent" => (; long_name="range of the intrinsic locking probability over the Monte Carlo batches at each scale", units="%", dims=("scale",)),
-    "ToleranceScan/plock_efc_spread_percent" =>
-        (; long_name="range of the corrected locking probability over the Monte Carlo batches at each scale", units="%", dims=("scale",))
+    "locking_probability_given_delta" =>
+        (; long_name="probability that an overlap equal to each Monte Carlo bin edge locks (threshold cumulative distribution)", dims=("delta_edge",)),
+    "threshold_fit" => (; long_name="ITPA penetration threshold at the fitted exponents"),
+    "locking_probability_percent" => (; long_name="locking probability of the intrinsic overlap distribution, 100 ∫ pdf(δ) P(lock|δ) dδ, batch average", units="%"),
+    "locking_probability_efc_percent" => (; long_name="locking probability of the corrected overlap distribution, batch average", units="%"),
+    "locking_probability_batches_percent" => (; long_name="locking probability of the intrinsic distribution per Monte Carlo batch", units="%"),
+    "locking_probability_efc_batches_percent" => (; long_name="locking probability of the corrected distribution per Monte Carlo batch", units="%"),
+    "locking_probability_as_designed_percent" => (; long_name="locking probability of the as-designed machine, 100 P(lock | |Σ δ_as_designed|)", units="%"),
+    "locking_probability_fit_threshold_percent" => (; long_name="locking probability if the threshold were exactly its fitted value, 100 P(|δ| > threshold_fit)", units="%"),
+    "ToleranceScan/tolerance_scale" => (; long_name="multiplier applied to every shift and tilt tolerance"),
+    "ToleranceScan/locking_probability_percent" =>
+        (; long_name="locking probability of the intrinsic distribution at each tolerance scale", units="%", dims=("tolerance_scale",)),
+    "ToleranceScan/locking_probability_efc_percent" =>
+        (; long_name="locking probability of the corrected distribution at each tolerance scale", units="%", dims=("tolerance_scale",)),
+    "ToleranceScan/locking_probability_spread_percent" =>
+        (; long_name="range of the intrinsic locking probability over the Monte Carlo batches at each scale", units="%", dims=("tolerance_scale",)),
+    "ToleranceScan/locking_probability_efc_spread_percent" =>
+        (; long_name="range of the corrected locking probability over the Monte Carlo batches at each scale", units="%", dims=("tolerance_scale",))
 ]
 
 """
@@ -219,21 +224,21 @@ function write_to_hdf5!(h5file::HDF5.File, risk::RiskResult; scan::Union{Nothing
     haskey(h5file, _RISK_GROUP) && delete_object(h5file, _RISK_GROUP)
     g = create_group(h5file, _RISK_GROUP)
     g["threshold_pdf"] = risk.threshold_pdf
-    g["p_lock_given_delta"] = risk.p_lock_given_delta
-    g["threshold_nominal"] = risk.threshold_nominal
-    g["plock_percent"] = risk.plock
-    g["plock_efc_percent"] = risk.plock_efc
-    g["plock_batches_percent"] = risk.plock_batches
-    g["plock_efc_batches_percent"] = risk.plock_efc_batches
-    g["plock_nominal_percent"] = risk.plock_nominal
-    g["plock_sharp_percent"] = risk.plock_sharp
+    g["locking_probability_given_delta"] = risk.locking_probability_given_delta
+    g["threshold_fit"] = risk.threshold_fit
+    g["locking_probability_percent"] = risk.locking_probability_percent
+    g["locking_probability_efc_percent"] = risk.locking_probability_efc_percent
+    g["locking_probability_batches_percent"] = risk.locking_probability_batches_percent
+    g["locking_probability_efc_batches_percent"] = risk.locking_probability_efc_batches_percent
+    g["locking_probability_as_designed_percent"] = risk.locking_probability_as_designed_percent
+    g["locking_probability_fit_threshold_percent"] = risk.locking_probability_fit_threshold_percent
     if scan !== nothing
         sg = create_group(g, "ToleranceScan")
-        sg["scale"] = scan.scale
-        sg["plock_percent"] = scan.plock
-        sg["plock_efc_percent"] = scan.plock_efc
-        sg["plock_spread_percent"] = scan.plock_spread
-        sg["plock_efc_spread_percent"] = scan.plock_efc_spread
+        sg["tolerance_scale"] = scan.tolerance_scale
+        sg["locking_probability_percent"] = scan.locking_probability_percent
+        sg["locking_probability_efc_percent"] = scan.locking_probability_efc_percent
+        sg["locking_probability_spread_percent"] = scan.locking_probability_spread_percent
+        sg["locking_probability_efc_spread_percent"] = scan.locking_probability_efc_spread_percent
     end
     Utilities.HDF5Annotations.annotate!(g, RISK_H5_ANNOTATIONS)
     return g
@@ -249,8 +254,9 @@ function ToleranceScan(h5path::AbstractString)
         path = _RISK_GROUP * "/ToleranceScan"
         haskey(f, path) || throw(ArgumentError("$h5path has no $path group (set scan_scales in [ErrorFields.Risk])"))
         g = f[path]
-        return ToleranceScan(read(g["scale"]), read(g["plock_percent"]), read(g["plock_efc_percent"]), read(g["plock_spread_percent"]),
-            read(g["plock_efc_spread_percent"]), read(f[_RISK_GROUP*"/plock_nominal_percent"]))
+        return ToleranceScan(read(g["tolerance_scale"]), read(g["locking_probability_percent"]), read(g["locking_probability_efc_percent"]),
+            read(g["locking_probability_spread_percent"]),
+            read(g["locking_probability_efc_spread_percent"]), read(f[_RISK_GROUP*"/locking_probability_as_designed_percent"]))
     end
 end
 
@@ -261,7 +267,7 @@ const _NTV_GROUP = "ErrorFields/NTV"
 const NTV_H5_ANNOTATIONS = [
     "coil_name" => (; long_name="name of each correction coil array"),
     "delta_per_kat" => (; long_name="dominant-mode overlap |δ| of each array per kilo-ampere-turn", units="1/kAt"),
-    "overlap_percent" => (; long_name="resonant fraction of each array's field, 100·|Vᴴb̃|/‖b̃‖", units="%"),
+    "resonant_fraction_percent" => (; long_name="resonant fraction of each array's field, 100·|Vᴴb̃|/‖b̃‖", units="%"),
     "torque_full_per_kat2" => (; long_name="NTV torque of each array's whole field per kilo-ampere-turn squared", units="N*m/kAt^2"),
     "torque_residual_per_kat2" => (; long_name="NTV torque of each array's field with the dominant mode projected out, per kilo-ampere-turn squared", units="N*m/kAt^2"),
     "omega_reference" => (; long_name="reference rotation ω_ref of each array's torque balance: ion toroidal rotation weighted by density and volume", units="rad/s"),
@@ -309,7 +315,7 @@ function write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
     g = create_group(h5file, _NTV_GROUP)
     g["coil_name"] = [c.coil_name for c in couplings]
     g["delta_per_kat"] = [c.delta_per_kat for c in couplings]
-    g["overlap_percent"] = [c.overlap_percent for c in couplings]
+    g["resonant_fraction_percent"] = [c.resonant_fraction_percent for c in couplings]
     g["torque_full_per_kat2"] = [c.torque_full_per_kat2 for c in couplings]
     g["torque_residual_per_kat2"] = [c.torque_residual_per_kat2 for c in couplings]
     g["omega_reference"] = [c.omega_reference for c in couplings]
@@ -346,7 +352,7 @@ function read_efc_couplings(h5path::AbstractString)
         haskey(f, _NTV_GROUP) || throw(ArgumentError("$h5path has no $_NTV_GROUP group (set efc_coils in [ErrorFields.NTV])"))
         g = f[_NTV_GROUP]
         names = read(g["coil_name"])
-        δ, ov = read(g["delta_per_kat"]), read(g["overlap_percent"])
+        δ, ov = read(g["delta_per_kat"]), read(g["resonant_fraction_percent"])
         Tf, Tr = read(g["torque_full_per_kat2"]), read(g["torque_residual_per_kat2"])
         ω_ref = haskey(g, "omega_reference") ? read(g["omega_reference"]) : fill(NaN, length(names))
         ω_off = haskey(g, "omega_offset_estimate") ? read(g["omega_offset_estimate"]) : fill(NaN, length(names))

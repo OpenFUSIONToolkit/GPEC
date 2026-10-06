@@ -86,13 +86,16 @@ const TORQUE_ROTATION_SIGN = -1.0
 """
     EFCCoupling
 
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
+
 The couplings of one correction coil array, per kilo-ampere-turn of its current pattern.
 
 ## Fields
 
   - `coil_name`: the array
   - `delta_per_kat`: dominant-mode overlap `|δ|` per kAt (`C_c`)
-  - `overlap_percent`: resonant fraction of the array's field, `100·|Vᴴb̃|/‖b̃‖`
+  - `resonant_fraction_percent`: resonant fraction of the array's field, `100·|Vᴴb̃|/‖b̃‖`
   - `torque_full_per_kat2`: NTV torque of the whole field per kAt², N·m, with its sign, at the nominal rotation
   - `torque_residual_per_kat2`: NTV torque of the field with the dominant mode projected out, per kAt², N·m, with its sign, at the nominal rotation
   - `rotation_shift`: the scanned rigid E×B rotation shifts `Δω`, rad/s, sorted and containing 0 (a single 0 when no scan was made)
@@ -107,7 +110,7 @@ The constructor that omits the rotation-scan fields builds a coupling with no sc
 struct EFCCoupling
     coil_name::String
     delta_per_kat::Float64
-    overlap_percent::Float64
+    resonant_fraction_percent::Float64
     torque_full_per_kat2::Float64
     torque_residual_per_kat2::Float64
     rotation_shift::Vector{Float64}
@@ -120,8 +123,8 @@ struct EFCCoupling
     torque_residual_profile::Matrix{Float64}
 end
 
-EFCCoupling(coil_name, delta_per_kat, overlap_percent, torque_full_per_kat2, torque_residual_per_kat2) =
-    EFCCoupling(coil_name, delta_per_kat, overlap_percent, torque_full_per_kat2, torque_residual_per_kat2,
+EFCCoupling(coil_name, delta_per_kat, resonant_fraction_percent, torque_full_per_kat2, torque_residual_per_kat2) =
+    EFCCoupling(coil_name, delta_per_kat, resonant_fraction_percent, torque_full_per_kat2, torque_residual_per_kat2,
         [0.0], [Float64(torque_full_per_kat2)], [Float64(torque_residual_per_kat2)], NaN, NaN, Float64[], zeros(0, 1), zeros(0, 1))
 
 # Field-wise equality (the default falls back to identity for the array fields); NaN equals NaN.
