@@ -38,9 +38,8 @@ downstream inspection and HDF5 output.
   - `layer_widths`        -- `Vector{LayerWidths}`, one per surface: the
     resistive layer thickness (in meters) from the `del_s` Riccati solve
     plus FKR / visco-resistive sanity scales. Empty when disabled.
-  - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] resolved on each
-    surface: the kinetic file's value, or the `control.omega_E_kHz` override for that m/n.
-    Recorded in both coupling modes
+  - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] on each surface,
+    from the kinetic file. Recorded in both coupling modes
   - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
     inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
   - `scan_data`           -- scan results (per-surface in uncoupled, single

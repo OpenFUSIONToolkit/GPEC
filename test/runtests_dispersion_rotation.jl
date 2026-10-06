@@ -2,8 +2,7 @@
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
     using GeneralizedPerturbedEquilibrium.Dispersion
-    using GeneralizedPerturbedEquilibrium.Tearing.Runner: SLAYERControl,
-        slayer_control_from_toml, validate, _q_shift, _build_surface_coupling
+    using GeneralizedPerturbedEquilibrium.Tearing.Runner: _q_shift, _build_surface_coupling
     using LinearAlgebra
 
     # Linear inner layer Δ(Q) = a + b·Q makes the applied Q offset readable
@@ -84,16 +83,5 @@
             roots = [(-c[2] + disc) / (2c[3]), (-c[2] - disc) / (2c[3])]
             @test sort(roots ./ tauk[ref]; by=real) ≈ expected rtol = 1e-10
         end
-    end
-
-    @testset "omega_E_kHz parses and validates from TOML" begin
-        ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2/1" => 0, "3/1" => 3.0)))
-        @test ctrl.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
-        # Default stays empty so existing decks are untouched.
-        @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_E_kHz)
-        @test_throws "table keyed by m/n" slayer_control_from_toml(Dict("omega_E_kHz" => [0.0, 3.0]))
-        # A non-finite shift would silently poison every Q evaluation; the
-        # validator rejects it (TOML cannot express NaN, so go through validate).
-        @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=Dict("2/1" => NaN)))
     end
 end

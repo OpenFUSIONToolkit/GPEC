@@ -86,7 +86,7 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/tau_k" =>
         (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = τ_k·ω; diamagnetic inputs Q_e, Q_i carry the opposite sign by convention)", units="s", dims=("surface",)),
     "PerSurface/omega_E" =>
-        (; long_name="E×B angular frequency Ω_E per unit n on each surface (kinetic file or omega_E_kHz override)", units="rad/s", dims=("surface",)),
+        (; long_name="E×B angular frequency Ω_E per unit n on each surface, from the kinetic file", units="rad/s", dims=("surface",)),
     "PerSurface/q_shift" =>
         (; long_name="real E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E applied to each surface's inner-layer Q in the coupled determinant (0 in uncoupled mode)", dims=("surface",)),
     "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface", units="s", dims=("surface",)),
