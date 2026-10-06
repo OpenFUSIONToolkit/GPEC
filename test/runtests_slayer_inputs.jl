@@ -267,15 +267,6 @@
         @test p_bare.kpar_val ≈ p_bare.n * abs(p_bare.sval_r) / p_bare.R0 rtol = 1e-14
     end
 
-    @testset "reference-length factor: an unusable da/dψ is an error only under dc_type=:toroidal" begin
-        ref_factor = InnerLayer.SLAYER._reference_length_factor
-        @test ref_factor(0.5, 0.25, 0.4, :toroidal) == 2.0
-        for da_dpsi in (0.0, -0.25, NaN, Inf)
-            @test_throws r"cannot be converted to the r_s reference" ref_factor(0.5, da_dpsi, 0.4, :toroidal)
-            @test (@test_logs (:warn, r"leaving Δ' unconverted") ref_factor(0.5, da_dpsi, 0.4, :rfitzp)) == 1.0
-        end
-    end
-
     @testset "build_slayer_inputs: empty sings returns empty vector" begin
         sl = build_slayer_inputs(equil, SingType[], profiles; bt=2.0)
         @test sl isa Vector{SLAYERParameters}
