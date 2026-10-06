@@ -1165,6 +1165,13 @@ TearingProblem only. `ResistiveMatch` dissolves into MatchProblem kwargs + the G
   comparisons want COMMITTED refs (commit first, then `--refs develop,<branch>`), and
   commit subjects use the closed-vocabulary grammar — validate with
   `python3 ci/conventions/check_subject.py --title "..."`.
+- **§7C PR OPENED 2026-10-06 as #507** (reviewer d-burg, assignee matt-pharr): all five
+  commits bde0f4c15/56dff1801/721e39145/0b5e2fce4/a3a8a3fed pushed; consolidated harness
+  @ a3a8a3fed in the PR body (gal 10/10 + solovev 22/22 + kinetic 6/6 unchanged;
+  gal_resistive_pe N/A both refs; diiid_slayer_n1 one 0.01% γ scatter flag — known
+  root-finder nondeterminism). AWAITING DANIEL'S REVIEW — no merge without it. Next
+  after merge: §7D interpreter PR; follow-ups queued: γ-tolerance loosening for
+  diiid_slayer_n1, FFSInternal split (Jake), gal-PE response port, two-stage PE re-scope.
 - **Commit (4) IMPLEMENTED 2026-10-06 (scan benchmarks)**: new `benchmarks/scan_match_m2.jl`
   — ONE outer gal solve + cheap MatchProblem loop (rotation or η sweep), overlaying the
   matched m-target |ξ_ψ| and reporting per-point |bpen|; measured 0.97 s/match vs 6.7 s
