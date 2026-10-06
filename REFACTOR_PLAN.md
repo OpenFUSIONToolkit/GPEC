@@ -173,7 +173,7 @@ All code must be JuliaFormatter-clean per `.JuliaFormatter.toml` before commit.
 | #393 | `refactor/forcefreestates-result` | **MERGED** | ONE PR, five slice-pure commits: **(a)** §5 `ForceFreeStatesResult` + warn-and-skip consumers + standalone Galerkin; **(b)** §6 staged `main`; **(b2)** §6A unified Δ′; **(c)** §7 `solve` API + RMPField algebra; **(d)** §7A ξ unification |
 | #400 | `refactor/forcefreestates-reorg` | **MERGED** | Pure-move FFS reorg into subdirectories; seeds `Matching/` (basis-free `resonant_match_rpec` kernel) |
 | §7C PR | (post-solve matching) | **NEXT — not started** | Stacked DIRECTLY on #400. Commits (0)-(4): kinetic-on-equilibrium, `InnerLayerModel` + layer-parameter builder, `MatchProblem`, `TearingProblem`, scan benchmarks |
-| #383 | `refactor/freeze-fourfitvars` | **OPEN (Jake's)** | FourFitVars split: `ffit` → `mats`, `build_matrix_splines`, `*_spline` fields — §7C commits (1)+ sequence against it |
+| #383 | `refactor/freeze-fourfitvars` | **MERGED** | FourFitVars → `MatrixSplines`: `ffit` → `mats`, `build_matrix_splines`, `*_spline` fields |
 | §7D PR | `refactor/main-deck-interpreter` | **after §7C** | ctrl→TOML serialization; `main` as deck interpreter |
 
 Commit discipline for the interface PR: commit boundaries now do the job PR boundaries
@@ -825,6 +825,19 @@ Every TOML section corresponds 1:1 to an API object/call; the keys ARE the kwarg
    resonant-coupling work (same territory, same cycle). Payoff: coil scans and
    optimization reuse one GeneralPE across many cheap force() calls; a TOML deck maps
    onto "GeneralPE + one force()" with no deck-format change.
+   **RE-SCOPED 2026-10 (ErrorFields landed)**: the new `ErrorFields` module (merged
+   Sept, ~10 PRs) delivers the error-field *workflow* payoff by a different route —
+   it linearizes each coil set's control-surface spectrum over its six rigid dofs
+   (`compute_coil_sensitivities`, `apply_transforms` ≈ shift_coil of the north-star
+   sketch) and projects onto the PE `ResonantCoupling`/`dominant_coupling` (from the
+   new PE SVD API), so overlap-type outputs never re-apply P. Faithful to D15 semantics
+   (per-unit sources, spectra as currency). The two-stage PE therefore no longer owes
+   the tolerance/overlap workflow; it still owes: per-source FULL PE fields (profiles,
+   Jbgradpsi, per-source bpen/delta_mn — anything not linear-in-overlap), non-coil
+   sources through one interface (spectrum-literal leaf, the #377 surface-current
+   utility), ResponseMethod multiplicity + gal-fed PE, and the deck↔API unification.
+   It should FEED ErrorFields' linearization (same ForcingMode/spectrum types, shared
+   ForcingTerms grid machinery — largely true already), never duplicate it.
 
 Defaults contract (established, keep): both paths splat over the same `@kwdef` struct
 defaults — one defaults table. API is deliberately more explicit in two spots (no
@@ -1057,8 +1070,17 @@ Stacked on the §7C PR. Two commits (the former §7C (iii)/(iv), call sequence u
   reverse-translate the flat `[ForceFreeStates]` table into (alg struct, MatchProblem
   kwargs, problem kwargs) — the inverse of `_apply_alg!`, with its own unit tests — →
   `EulerLagrangeProblem` → `solve` → optional `solve(MatchProblem, model)` →
-  `perturbed_equilibrium` → `solve(TearingProblem, model)` → NTV. Stage functions
-  dissolve into `solve` or become internals; `run_force_free_states` is absorbed.
+  `perturbed_equilibrium` → `solve(TearingProblem, model)` → NTV → ErrorFields. Stage
+  functions dissolve into `solve` or become internals; `run_force_free_states` is absorbed.
+- **ErrorFields stage (added 2026-10)**: `run_error_fields` is already a thin interpreter
+  over library calls (`ResonantCoupling` → `compute_coil_sensitivities` →
+  `sensitivity_table`/`dominant_coupling` → `run_monte_carlo` → `locking_risk` →
+  `tolerance_scan`/`efc_couplings`), so it dissolves the same way. Two specifics:
+  (a) the NESTED-TABLE deck idiom (`[ErrorFields.MonteCarlo]`/`.Risk`/`.scenario`/`.NTV`
+  + the separate tolerance TOML) must be handled by the ctrl→TOML serializer in (i);
+  (b) the stage currently re-reads `[ForcingTerms]` into a `CoilConfig` and hard-requires
+  coil format — under the API it should take the coil-source `RMPField` leaf and pull
+  coil sets through the same materialization path PE uses (one-path rule).
 - HDF5 write ordering: the writer runs on the FINAL (possibly matched) result, so the
   Match/ groups come off the matched result, never from inside a solve.
 - force_termination early-exits, rerun/IMAS funnels, and return shape preserved.
@@ -1124,7 +1146,35 @@ TearingProblem only. `ResistiveMatch` dissolves into MatchProblem kwargs + the G
 
 ## 10. Progress
 
-### Live status (updated 2026-08-17 — read this first when resuming)
+### Live status (updated 2026-10-06 — read this first when resuming)
+
+- **2026-10 pickup**: ~42 PRs merged into develop between 08-26 and 10-05 while this PR
+  was parked. Headlines: **#383 MERGED 08-26** (FourFitVars → immutable `MatrixSplines`;
+  `result.ffit` → `result.mats`, `build_matrix_splines`/`build_kinetic_matrix_splines`,
+  `*_spline` fields — the stacking question below is DEAD, §7C just builds on develop);
+  **new 12th module `ErrorFields`** (coil-sensitivity linearization + tolerance Monte
+  Carlo + locking risk + NTV-limited correction; see the 2026-10 re-scope under D16
+  item 3 and the §7D ErrorFields-stage note — it is D15-faithful and pre-conformant to
+  the interpreter vision); PE grew `ResonantCoupling`/`dominant_coupling` SVD API
+  (#446) and multi-n PE (#477); Tearing/SLAYER moved (#403 Δ′ → r_s reference length
+  before slab matching — audit the dp.raw↔deltar normalization contract during §7C
+  commit (2); #431-434 fixes; OPEN: #441 toroidal Δ_crit geometry, #463 coupled
+  determinant + Doppler, #415 b_crit — commit (3) should absorb/queue behind these);
+  #385 per-stage runtimes in gpec.h5; #397 (draft) golden-values harness; #382 (open)
+  TOML variable renames — interacts with D16/§7D, watch it. New repo rules: harness
+  comparisons want COMMITTED refs (commit first, then `--refs develop,<branch>`), and
+  commit subjects use the closed-vocabulary grammar — validate with
+  `python3 ci/conventions/check_subject.py --title "..."`.
+- **Commit (0) third reconciliation DONE 2026-10-06**: branch reset onto develop
+  0e68a0553; absorbed the `mats` renames, the runtimes threading, and ONE new
+  kinetic-profiles consumer — `run_error_fields`/`efc_couplings` now reads
+  `result.equil.kinetic` (efc_couplings keeps its explicit parameter; only the deck
+  path sources it from the equilibrium). Develop also added `shift_exb_rotation`
+  (kept alongside `attach_kinetic_profiles!` in KineticProfiles.jl). Gates re-running;
+  stash `commit0-v2-pre-oct-reconciliation` is the pre-reconciliation backup (the older
+  `commit0-kinetic-on-equilibrium` stash is obsolete — both droppable once committed).
+
+### Historical status (2026-08-17/25 — superseded above, kept for context)
 
 - **MERGED into develop**: #381 + #387 (riccati unification, LocalStability), #395 (CI
   pinned manifest), **#367 (input-struct freeze — we resolved its conflicts vs develop,
@@ -1263,8 +1313,7 @@ TearingProblem only. `ResistiveMatch` dissolves into MatchProblem kwargs + the G
 - [ ] §7C PR — post-solve matching (MatchProblem / TearingProblem, commits (0)-(4)) —
   **NOT STARTED; this is where work picks up.** Stacked DIRECTLY on #400, startable now
   (Slack 2026-08-17: Jake stacks on top of us).
-- [ ] Jake's FourFitVars-split PR — **OPEN as #383** (base develop); §7C commits (1)+
-  sequence against it (stack or rebase — user's call)
+- [x] Jake's FourFitVars-split PR — **MERGED as #383, 2026-08-26** (`ffit` → `mats`)
 - [ ] `ForceFreeStatesInternal` split into `ModeGeometry` / `SingularSurfs` /
   `IntegrationLimits` (Jake's #393 review item, agreed) — do AFTER his FourFitVars
   split lands; the `ModeSpace` supertype then dissolves into `ModeGeometry`.
