@@ -48,6 +48,7 @@ fd_step_tilt_deg = 0.1          # Central-difference step for the rigid tilts [d
 rotation_center = "conductor"   # Tilt pivot: each conductor's own centre ("conductor") or the whole set's ("set")
 write_outputs_to_HDF5 = true    # Write ErrorFields/CoilSensitivities/ to the output file
 verbose = false                 # Log per-coil-set progress and linearity diagnostics
+exclude_coils = []              # Coil sets that are not error-field sources (the NTV efc_coils are excluded automatically)
 ```
 
 The stage runs after the perturbed equilibrium and writes `ErrorFields/CoilSensitivities/`:
@@ -164,6 +165,14 @@ intrinsic `|δ|` and the corrected one, in which every correctable term (coil se
 listed as uncorrectable, and the unattributed budget) is divided by `efc_factor`. Batches are
 seeded individually, so results are bit-identical for any thread count, and their spread is the
 statistical error bar of anything derived from them.
+
+A coil set the run energizes but that is not an error-field source — a correction array named
+in `[ErrorFields.NTV] efc_coils`, or anything listed in `[ErrorFields] exclude_coils` — is swept
+like the others, so its sensitivities and couplings are tabulated, but it is left out of the
+as-designed error field, the Monte Carlo, the worst-case bound and the scans, in the run and in
+every post-hoc entry point that rebuilds the table from the file. A tolerance that names it is an
+error. `without_coils(table, names)` is the same operation on a table in memory, and
+`excluded_coil_names("gpec.h5")` says which sets a run left out.
 
 ```toml
 [ErrorFields]
@@ -317,7 +326,7 @@ and safety factor are analysis choices:
 
 ```toml
 [ErrorFields.NTV]
-efc_coils = ["d3d_c"]           # Coil set names of the correction arrays to evaluate
+efc_coils = ["d3d_c"]           # Coil set names of the correction arrays to evaluate; never error-field sources
 method = "fgar"                 # KineticForces torque method (must be enabled in [KineticForces])
 ```
 
