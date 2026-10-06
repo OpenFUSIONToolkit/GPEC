@@ -1165,6 +1165,14 @@ TearingProblem only. `ResistiveMatch` dissolves into MatchProblem kwargs + the G
   comparisons want COMMITTED refs (commit first, then `--refs develop,<branch>`), and
   commit subjects use the closed-vocabulary grammar — validate with
   `python3 ci/conventions/check_subject.py --title "..."`.
+- **Commit (4) IMPLEMENTED 2026-10-06 (scan benchmarks)**: new `benchmarks/scan_match_m2.jl`
+  — ONE outer gal solve + cheap MatchProblem loop (rotation or η sweep), overlaying the
+  matched m-target |ξ_ψ| and reporting per-point |bpen|; measured 0.97 s/match vs 6.7 s
+  warm full re-solve (≈7×/point, outer solve amortized once) and one-point equivalence
+  max |Δbpen| = 0.0 (BITWISE) vs the deck-style route. The old scan plotters' PE leg is
+  blocked for standalone gal (no free_boundary → response skipped — the documented gal
+  δW / surface-current gap), so the driver scans matched profiles + bpen; plotters'
+  stale `Response/psi_area` paths fixed to `b_psi_area_weighted` and headers repointed.
 - **Commit (3) IMPLEMENTED 2026-10-06 (tearing restructure, user-approved shape)**: the
   tearing column now matches the GGJ/match pattern — model object typed end-to-end.
   `TearingProblem` + `CommonSolve.solve` in `Tearing/Runner/TearingProblem.jl` IS the

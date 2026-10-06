@@ -1,4 +1,4 @@
-# Plot the m=2 area-normalized b^ψ (PerturbedEquilibrium/Response/psi_area) across a resistivity scan
+# Plot the m=2 area-normalized b^ψ (PerturbedEquilibrium/Response/b_psi_area_weighted) across a resistivity scan
 # of the RESISTIVE gal matched PE runs (gal_match_flag=true, gal_ideal_flag=false), one curve per η.
 # Overlays the forward (ideal, η→0) reference. The η-scan dirs are produced by the bash loop over
 # /tmp/etascan_<factor> (each a copy of the 0.993 config with gal_eta scaled).
@@ -14,7 +14,7 @@ to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im
 # read m=target area-normalized b^ψ on the run's PE grid
 function read_m2(h5; gal::Bool)
     h5open(h5) do f
-        pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))   # [npsi, mpert]
+        pa = to_c(read(f["PerturbedEquilibrium/Response/b_psi_area_weighted"]))   # [npsi, mpert]
         col = mtarget - read(f["Info/mlow"]) + 1
         psi = gal ? read(f["ForceFreeStates/Solutions/GalerkinIntegration/psi"]) :
               read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"])

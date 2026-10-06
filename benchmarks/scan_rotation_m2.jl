@@ -1,7 +1,7 @@
-# Plot the m=2 area-normalized b^ψ (PerturbedEquilibrium/Response/psi_area) across a ROTATION scan
+# Plot the m=2 area-normalized b^ψ (PerturbedEquilibrium/Response/b_psi_area_weighted) across a ROTATION scan
 # of the resistive gal matched PE runs (gal_match_flag=true, gal_ideal_flag=false), fixed η=8e-8,
 # rotation f = 1,2,4,8,16 Hz (forced eigenvalue γ_s = 2πi·n·f). One curve per rotation; overlays the
-# forward (ideal) reference. Scan dirs produced by the bash loop over /tmp/rotscan_<f>.
+# forward (ideal) reference. Scan dirs come from per-point deck runs; scan_match_m2.jl produces the same scan from ONE outer solve.
 # Usage: julia --project=. benchmarks/scan_rotation_m2.jl [out.png] [m]
 
 using HDF5, Plots, Printf, TOML
@@ -13,7 +13,7 @@ to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im
 
 function read_m2(h5; gal::Bool)
     h5open(h5) do f
-        pa = to_c(read(f["PerturbedEquilibrium/Response/psi_area"]))
+        pa = to_c(read(f["PerturbedEquilibrium/Response/b_psi_area_weighted"]))
         col = mtarget - read(f["Info/mlow"]) + 1
         psi = gal ? read(f["ForceFreeStates/Solutions/GalerkinIntegration/psi"]) :
               read(f["ForceFreeStates/Solutions/ForwardIntegration/psi"])
