@@ -6,8 +6,8 @@
 #   InnerLayer  -- pure physics: Δ_inner(Q) for GGJ or SLAYER models
 #   Dispersion  -- physics-agnostic scan + contour-intersection root
 #                  extraction (consumes any InnerLayerModel)
-#   CriticalResonantField -- physics-agnostic scan + torque-balance root
-#                  extraction (consumes any InnerLayerModel)
+#   CriticalResonantField -- real-Q torque-balance scan for the critical
+#                  resonant field of error-field penetration
 #   Runner      -- user-facing orchestration: TOML config, profile
 #                  loading, HDF5 output, workflow hooks
 #

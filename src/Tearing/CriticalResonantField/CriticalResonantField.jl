@@ -7,16 +7,12 @@
 
 module CriticalResonantField
 
-using LinearAlgebra
-using StaticArrays
 using Printf
 
-using ..InnerLayer
-using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
-    SLAYERModel, SLAYERParameters
+using ..InnerLayer: InnerLayerModel, solve_inner
 
 include("TorqueBalance.jl")
 
-export TorqueBalance, torque_balance_value, torque_balance_scan
+export TorqueBalance, cole_delta, torque_balance_value, torque_balance_window, torque_balance_scan
 
 end # module CriticalResonantField
