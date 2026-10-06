@@ -135,13 +135,6 @@
 
         mc = multi_surface_coupling_full([sc1, sc2], dp_raw)
         @test mc(Q) ≈ detAt(Q * (2.0 / 2.0) + s1, 0im) * detAt(Q * (4.0 / 2.0) + s2, 0im)
-
-        # The shift is real: it moves the layer argument along Re(Q) only.
-        mc0 = multi_surface_coupling_full([surface_coupling(lin, nothing, 0 + 0im; scale=1.0, tauk=1.0, dc=0.0)],
-            Matrix{ComplexF64}(I, 2, 2))
-        mcs = multi_surface_coupling_full([surface_coupling(lin, nothing, 0 + 0im; scale=1.0, tauk=1.0, dc=0.0, q_shift=3.0)],
-            Matrix{ComplexF64}(I, 2, 2))
-        @test mcs(2.0 + 0.0im) ≈ mc0(5.0 + 0.0im)
     end
 
     @testset "SurfaceCoupling scale multiplies both inner channels" begin

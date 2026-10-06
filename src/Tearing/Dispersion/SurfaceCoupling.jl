@@ -12,10 +12,6 @@
 # multi-surface `MultiSurfaceCoupling` to rescale Q between each surface's
 # normalization.
 #
-# `q_shift = −tau_k·n·Omega_E_k` (Omega_E per unit toroidal mode number n) is a real, additive
-# offset on the layer's Q argument that puts the mode frequency in this surface's E×B frame,
-# `Q_k = tau_k·(omega − n·Omega_E_k)`; zero is the static, all-surfaces-corotating case.
-#
 # Constructor convenience: `surface_coupling(model, params, dp_diag; dc=0.0)`
 # auto-fills `scale` and `tauk` based on the model type — `scale = S^(1/3)`
 # and `tauk = params.tauk` for SLAYER (de-normalizes the inner-layer Δ to
@@ -31,8 +27,8 @@ Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk, q_shift)
 r(Q) = dp_diag - scale * solve_inner(model, params, Q + q_shift).tearing - dc
 ```
 
-`q_shift` is the real Doppler offset described in the file header; it defaults
-to zero, which leaves the residual identical to the pre-rotation form.
+`q_shift` is a real offset on the layer's Q argument, zero by default. The Tearing runner
+sets it to the surface's E×B Doppler shift.
 
 A root of `sc` in the complex `Q` plane is a **tearing** eigenvalue at
 this surface in the *uncoupled* approximation (only the tearing channel
@@ -68,8 +64,7 @@ number, `dc`, and the layer all share the `x̂ = (r−r_s)/r_s` reference
 length). `dp_diag` must already be in that same r_s reference — the Tearing
 runner converts the ψ_N-referenced BVP Δ' via `delta_prime_to_rs_reference`
 before building couplings. `tauk` is taken from `params.tauk` for use by
-`MultiSurfaceCoupling` Q rescaling. `q_shift` is the real E×B Doppler offset on
-the layer's Q argument (`-tauk * n * Omega_E`, Omega_E per unit n); it defaults to zero.
+`MultiSurfaceCoupling` Q rescaling.
 """
 function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
     dp_diag::Number; dc::Real=0.0, q_shift::Real=0.0)
@@ -79,7 +74,7 @@ end
 
 """
     surface_coupling(model::GGJModel, params::GGJParameters,
-                     dp_diag::Number; q_shift::Real=0.0) -> SurfaceCoupling
+                     dp_diag::Number) -> SurfaceCoupling
 
 GGJ convenience constructor. `scale` is `1.0` because GGJ's `solve_inner`
 applies its own `rescale_delta` (S^(2p₁/3)·v1^(2p₁)) internally, so the
@@ -92,8 +87,7 @@ interchange channel, which provides Glasser (Mercier) stabilization
 natively. A Δ_crit proxy (χ_parallel-matching offset on the diagonal) is
 meaningful only for tearing-only slab-layer approximations like SLAYER;
 for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
-struct's `dc` field is hard-wired to 0 here, and so is `q_shift`: with no time
-normalization, a physical E×B rotation has no image in GGJ's Q.
+struct's `dc` field is hard-wired to 0 here, and so is `q_shift`.
 """
 function surface_coupling(model::GGJModel, params::GGJParameters, dp_diag::Number)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
@@ -106,8 +100,8 @@ end
                      q_shift::Real=0.0) -> SurfaceCoupling
 
 Generic fallback constructor. Use this when wiring a new inner-layer model
-into the dispersion solver — pass the appropriate inner→outer-units `scale`,
-per-surface `tauk`, and (for a rotating surface) `q_shift` explicitly.
+into the dispersion solver — pass the appropriate inner→outer-units `scale`
+and per-surface `tauk` explicitly.
 """
 function surface_coupling(model::InnerLayerModel, params, dp_diag::Number;
     dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0, q_shift::Real=0.0)

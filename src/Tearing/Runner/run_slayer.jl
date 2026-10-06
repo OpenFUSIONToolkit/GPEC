@@ -184,9 +184,8 @@ the coupled scan runs in the lab frame, so
 Q_layer = τ_k·ω_lab − τ_k·n·Ω_E    ⇒    q_shift = −τ_k·n·Ω_E
 ```
 
-A layer root at rest in its E×B frame therefore sits at `ω_lab = n·Ω_E`: the mode rotates with the
-plasma, at unchanged γ. The conjugated layer Δ and the opposite-sign diamagnetic inputs
-(`Q_e = −τ_k·ω_*e`) flip together and leave this sign unchanged.
+The conjugated layer Δ and the opposite-sign diamagnetic inputs (`Q_e = −τ_k·ω_*e`) flip together
+and leave this sign unchanged.
 """
 function _q_shift(p::SLAYERParameters, Ω_E::Real)
     iszero(Ω_E) || p.n >= 1 ||
@@ -195,8 +194,6 @@ function _q_shift(p::SLAYERParameters, Ω_E::Real)
 end
 # GGJ carries no time normalization (tauk = 1), so a physical rotation has no Q-space image.
 _q_shift(::InnerLayerParameters, ::Real) = 0.0
-
-_q_shifts(params, Ω_E::AbstractVector{<:Real}) = Float64[_q_shift(params[k], Ω_E[k]) for k in eachindex(Ω_E)]
 
 # ---------------------------------------------------------------------
 # Reference-length conversion of the outer Δ' for the slab layer
@@ -334,7 +331,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     Ω_E = _omega_E_per_surface(control, params, omega_E)
     coupled && _is_ggj(model) && any(!iszero, Ω_E) && @warn(
             "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
-    q_shifts = coupled ? _q_shifts(params, Ω_E) : zeros(Float64, n)
+    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_E[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
     ref_idx = 1

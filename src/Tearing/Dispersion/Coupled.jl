@@ -38,9 +38,7 @@ A root of `mc` in the complex `Q` plane is a coupled tearing eigenvalue.
 `ratio_k = tauk_k/tauk_ref`: `Q` is defined as `tauk·ω`, so one shared physical
 ω reaches surface `k` as `Q_k = tauk_k·ω`, on the same scaling as its `Q_e`/`Q_i`.
 
-`q_shift_k` is the real, per-surface E×B Doppler offset carried on each
-`SurfaceCoupling` (zero by default, in which case every surface sees the same
-lab-frame frequency and the determinant is unchanged from the static form).
+`q_shift_k` is the real offset carried on each `SurfaceCoupling` (zero by default).
 """
 struct MultiSurfaceCoupling{V<:AbstractVector{<:SurfaceCoupling}}
     surfaces::V
@@ -98,8 +96,6 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
     M = mc.dp_matrix[1:n, 1:n]
     @inbounds for k in 1:n
         sc = mc.surfaces[k]
-        # Real q_shift Dopplers this surface's layer away from the common
-        # lab-frame frequency carried by the scanned Q.
         Q_k = Qc * (sc.tauk / ref_tauk) + sc.q_shift
         # m×m scalar coupling: use only the tearing channel. The
         # interchange (Glasser-stabilization) channel is carried in the

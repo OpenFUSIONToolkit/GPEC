@@ -2,7 +2,7 @@
 # Reuses the n=1 SLAYER deck via [overrides] in coupled mode, the only harness coverage of the
 # multi-surface determinant: its inter-surface Q normalization and the per-surface E×B Doppler
 # shift taken from the kinetic file's omega_E. The Re(Q) window is widened because that shift
-# moves the coupled root to the lab frame (Re(Q) ≈ 2.06 here, outside the deck's [-2, 2]).
+# moves the coupled root to the lab frame, outside the deck's [-2, 2].
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
 # and the noise floor below which a difference is treated as zero.
 [case]
