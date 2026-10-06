@@ -23,6 +23,7 @@ extract = "all_real"
 label = "SLAYER tauk"
 noise_threshold = 1e-12
 order = 10
+class = "physics_converged"
 
 # Applied E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E per surface
 [quantities.slayer_q_shift]
@@ -32,9 +33,13 @@ extract = "all_real"
 label = "SLAYER q_shift"
 noise_threshold = 1e-10
 order = 11
+class = "physics_converged"
 
 # Coupled eigenvalue (one root for the whole determinant). The coupled path has no root
 # polishing, so the thresholds match the uncoupled case's absolute, modestly loose floors.
+# Pin Q, ω and γ with a measured tolerance, not the class default: re-extracting one set of scan
+# samples under different triangulations gave γ = 190.646 and 191.888 s⁻¹ (0.65 %). ω and Q
+# need the same measurement.
 [quantities.slayer_Q_coupled]
 h5path = "Tearing/Roots/Q_root"
 type = "complex_vector"
@@ -42,6 +47,7 @@ extract = "all_complex"
 label = "SLAYER coupled Q_root"
 noise_threshold = 1e-4
 order = 30
+class = "physics_converged"
 
 [quantities.slayer_omega_coupled]
 h5path = "Tearing/Roots/omega"
@@ -50,6 +56,7 @@ extract = "all_real"
 label = "SLAYER coupled ω"
 noise_threshold = 1.0
 order = 32
+class = "physics_converged"
 
 [quantities.slayer_gamma_coupled]
 h5path = "Tearing/Roots/gamma"
@@ -58,6 +65,7 @@ extract = "all_real"
 label = "SLAYER coupled γ"
 noise_threshold = 1e-1
 order = 33
+class = "physics_converged"
 
 # no_root flag (1 = extraction failed); guards that the coupled root stays inside the window.
 [quantities.slayer_no_root_coupled]
@@ -67,6 +75,7 @@ extract = "all_real"
 label = "SLAYER coupled no_root flag"
 noise_threshold = 0
 order = 34
+class = "physics_converged"
 
 # Settings (catches accidental config drift)
 [quantities.slayer_enabled]
@@ -76,6 +85,7 @@ extract = "value"
 label = "SLAYER enabled flag"
 noise_threshold = 0
 order = 90
+class = "topological"
 
 [quantities.runtime]
 h5path = ""
@@ -84,3 +94,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 999
+class = "diagnostic"
