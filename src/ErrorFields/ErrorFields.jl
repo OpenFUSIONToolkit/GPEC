@@ -26,6 +26,8 @@ plasma solve or a new Biot-Savart integration.
   shapes, `sample_disk`, `sample_uncertainty`, and the additive and cylinder tolerance models
 - `MonteCarlo.jl`: `run_monte_carlo`, the batched, seeded recombination of a `SensitivityTable`
   with a `ToleranceSet` into intrinsic and corrected `|δ|` histograms
+- `Linearity.jl`: `linearity_check`, the linear model against finite displacements out to the
+  tolerance edge, one Biot–Savart pass per row
 - `Risk.jl`: the ITPA penetration-threshold scalings, keyed by publication year (the 2020 n = 1
   and n = 2 fits, the 2026 n = 1 OLS and WLS fits), `locking_risk` (the overlap distribution
   convolved with the threshold distribution), `tolerance_scan` and `allowable_tolerance`
@@ -61,14 +63,15 @@ include("Sensitivity.jl")
 include("ToleranceTOML.jl")
 include("Sampling.jl")
 include("MonteCarlo.jl")
+include("Linearity.jl")
 include("Risk.jl")
 include("Phasing.jl")
 include("NTVLimits.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
-export compute_coil_sensitivities, sensitivity_table, cancelling_offset
-export ResonantDriveContext, CoilOverlap, coil_overlaps, combine_overlaps
+export compute_coil_sensitivities, sensitivity_table, cancelling_offset, LinearityCheck, linearity_check
+export ResonantDriveContext, CoilOverlap, coil_overlaps, combine_overlaps, resonant_fraction_percent
 export applied_spectrum, forcing_grids, regrid, MIN_NZETA_PER_PERIOD
 export ToleranceSet, CoilTolerance, CoherentGroupTolerance, OtherFieldBudget
 export read_tolerance_toml, parse_tolerance_toml, validate_tolerances, tilt_tolerance_deg
