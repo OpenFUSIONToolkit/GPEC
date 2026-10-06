@@ -1165,6 +1165,23 @@ TearingProblem only. `ResistiveMatch` dissolves into MatchProblem kwargs + the G
   comparisons want COMMITTED refs (commit first, then `--refs develop,<branch>`), and
   commit subjects use the closed-vocabulary grammar — validate with
   `python3 ci/conventions/check_subject.py --title "..."`.
+- **Commit (3) IMPLEMENTED 2026-10-06 (tearing restructure, user-approved shape)**: the
+  tearing column now matches the GGJ/match pattern — model object typed end-to-end.
+  `TearingProblem` + `CommonSolve.solve` in `Tearing/Runner/TearingProblem.jl` IS the
+  orchestration (profiles from `profile_file` or `equil.kinetic` via the
+  `_profiles_from_equilibrium` bridge, params builders dispatched on the model config,
+  Δ′ conditioning, then the core); `run_slayer_from_inputs(model, params, dp, ctrl)`
+  takes the model first-class; `_build_inner_model` and BOTH loose `run_slayer` forms
+  DELETED; the deck boundary (`run_slayer_stage`) does the one `inner_model`-string →
+  model translation (`SLAYER(chi_*)` / `GGJ(solver=:shooting|:galerkin)`; `:ray` has no
+  tearing path). Exports `TearingProblem`. Known ergonomics note: a bare
+  `using GPEC.InnerLayer` shadows the `GGJ`/`SLAYER` configs with the like-named
+  InnerLayer SUBMODULES — explicit `using GeneralizedPerturbedEquilibrium: GGJ, SLAYER`
+  disambiguates (done in tests; worth a docs line). Gates: slayer-runner 83/83,
+  matching 23/23, solve API 71/71; SLAYER-deck byte-identity 198/204 datasets identical
+  with the 6 diffs confined to root-finding outputs (Roots/gamma|omega|Q_root +
+  diagnostics) — USER CONFIRMED growth-rate root-finding nondeterminism is known and
+  expected; docs pending.
 - **PR progress (2026-10-06)**: commit (0) COMMITTED as bde0f4c15 (all gates green incl.
   harness vs develop, fully unchanged); commit (1) COMMITTED as 56dff1801
   (`GGJ`/`SLAYER` configs on `InnerLayer.InnerLayerModel`, `closure_capable`,

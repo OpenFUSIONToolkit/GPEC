@@ -87,6 +87,7 @@ using .ForceFreeStates: galerkin_solve, write_galerkin!
 # constructor and the forcing description, re-exported so a user needs one `using`.
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
 using .ForceFreeStates: MatchProblem, MatchResult, GGJ, SLAYER, layer_parameters, closure_capable
+using .Tearing.Runner: TearingProblem
 using .Equilibrium: PlasmaEquilibrium, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
 
@@ -1357,8 +1358,18 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         slayer_ctrl.enabled || return nothing
         @info "\n  SLAYER\n$_SECTION"
         slayer_start = time()
-        slayer_result = Runner.run_slayer(result, slayer_ctrl;
-            dir_path=result.dir_path)
+        # The deck boundary is the one place the `inner_model` string becomes a typed model;
+        # below here the model object flows through the solve unchanged.
+        model = if slayer_ctrl.inner_model === :slayer_fitzpatrick
+            ForceFreeStates.SLAYER(; chi_perp=slayer_ctrl.chi_perp, chi_tor=slayer_ctrl.chi_tor)
+        elseif slayer_ctrl.inner_model === :ggj_shooting
+            ForceFreeStates.GGJ(; solver=:shooting)
+        elseif slayer_ctrl.inner_model === :ggj_galerkin
+            ForceFreeStates.GGJ(; solver=:galerkin)
+        else
+            error("unknown [SLAYER] inner_model $(slayer_ctrl.inner_model)")
+        end
+        slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
         slayer_dt = time() - slayer_start
         runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
         @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
@@ -1798,6 +1809,6 @@ end
 export main, write_imas
 export solve, perturbed_equilibrium
 export PlasmaEquilibrium, attach_kinetic_profiles!, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
-export MatchProblem, GGJ, SLAYER, layer_parameters
+export MatchProblem, TearingProblem, GGJ, SLAYER, layer_parameters
 
 end # module GeneralizedPerturbedEquilibrium

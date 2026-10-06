@@ -106,6 +106,25 @@ Riccati results; a Riccati-fed match fills `bpen` and the resonant data but keep
 accepted — `GGJ()` today; `SLAYER()` is slab-only and drives the free-eigenvalue tearing
 solve instead.
 
+## Tearing stability
+
+The free-eigenvalue tearing solve is the second flavor of inner-layer matching: instead of
+prescribing the layer rotation, a `TearingProblem` holds the outer Δ′ fixed and root-finds
+the growth rate where the inner-layer response matches it. The same model slot applies —
+`SLAYER()` is the slab layer that exists for exactly this problem, and
+`GGJ(; solver=:shooting|:galerkin)` runs the toroidal layer through the same scan:
+
+```julia
+ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
+tear = solve(TearingProblem(ffs; coupling_mode=:coupled), SLAYER())
+tear.gamma_Hz, tear.rational_q                               # root-found rates per surface
+```
+
+Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedure knobs
+(scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
+kinetic profiles come from `profile_file` or, when none is named, from the profiles
+attached to the equilibrium.
+
 Kinetic runs (`kinetic_factor > 0`) need kinetic profiles attached to the
 equilibrium — either at construction or explicitly on an existing one:
 
