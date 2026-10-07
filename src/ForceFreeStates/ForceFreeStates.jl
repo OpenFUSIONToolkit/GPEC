@@ -35,7 +35,6 @@ include("EulerLagrange.jl")
 # Singular-surface machinery: finding/filtering, Frobenius asymptotics, GGJ coefficients
 include("Surfaces/Finding.jl")
 include("Surfaces/Asymptotics.jl")
-include("Surfaces/Resist.jl")
 include("Surfaces/ResistEval.jl")
 
 # Outer<->inner resistive matching

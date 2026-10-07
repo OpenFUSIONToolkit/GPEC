@@ -1,23 +1,22 @@
 # LayerParameters.jl
 #
-# The shared per-surface layer-parameter builder: turn the kinetic profiles attached to the
-# equilibrium into the (η, ρ, rotation) the inner-layer models consume, with explicit
-# vectors as overrides. Uses the same Coulomb-log / resistivity closures and mass-density
-# formula as the SLAYER and GGJ input builders, so every inner-layer consumer sees one
-# plasma description per run whichever path derived it.
+# The per-surface layer-parameter builder: turn kinetic profiles into the (η, ρ, rotation)
+# the GGJ inner layer consumes, with explicit vectors as overrides. Shared by the driven
+# match and the GGJ tearing solve.
 
 using ..Utilities.PhysicalConstants: M_P, E_CHG
+using ..Utilities: KineticProfiles
 using ..Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
     coulomb_log_e, eta_spitzer, nu_star_e, eta_neoclassical
 
 """
-    layer_parameters(surfaces, equil; eta=nothing, rho=nothing, rotation=nothing,
-                     mu_i=2.0, zeff=1.0, resistivity_model=SpitzerModel(),
+    layer_parameters(surfaces, equil; profiles=equil.kinetic, eta=nothing, rho=nothing,
+                     rotation=nothing, mu_i=2.0, zeff=1.0, resistivity_model=SpitzerModel(),
                      lnLambda_form=:nrl) -> (; eta, rho, rotation)
 
 Per-surface inner-layer plasma parameters for the rational surfaces in `surfaces`, derived
-from the kinetic profiles attached to the equilibrium (`equil.kinetic`) — or taken verbatim
-from the explicit override vectors, which always win. Returns one value per surface, core
+from `profiles` — the kinetic profiles attached to the equilibrium by default, or a
+`KineticProfiles` table — or taken verbatim from the explicit override vectors, which always win. Returns one value per surface, core
 to edge in the order of `surfaces`:
 
   - `eta` — resistivity η in Ω·m: Spitzer (Sauter 1999 Eq. 18a) by default, or the
@@ -27,11 +26,8 @@ to edge in the order of `surfaces`:
   - `rotation` — rotation frequency f in Hz from the E×B frequency, f = ω_E(ψ_s)/2π; the
     forced layer eigenvalue of the driven match is γ_s = 2πi·n·f_s.
 
-A derivation (any override left `nothing`) requires `equil.kinetic` — attach profiles with
-`attach_kinetic_profiles!` or at equilibrium construction. Temperatures are converted from
-the stored Joules back to eV for the resistivity formulas; derived values agree with the
-file-driven SLAYER/GGJ input builders to the kinetic loader's resampling accuracy (the
-loader resamples onto a regular ψ grid), not bit-for-bit.
+A derivation (any override left `nothing`) requires profiles — attach them with
+`attach_kinetic_profiles!` or at equilibrium construction.
 
 Overrides are artificial-scan and no-kinetic-data paths: each of `eta`, `rho`, `rotation`
 may independently be a vector with one entry per surface.
@@ -39,6 +35,7 @@ may independently be a vector with one entry per surface.
 function layer_parameters(
     surfaces::AbstractVector,
     equil;
+    profiles=equil === nothing ? nothing : equil.kinetic,
     eta::Union{Nothing,AbstractVector{<:Real}}=nothing,
     rho::Union{Nothing,AbstractVector{<:Real}}=nothing,
     rotation::Union{Nothing,AbstractVector{<:Real}}=nothing,
@@ -55,8 +52,7 @@ function layer_parameters(
 
     needs_derivation = eta === nothing || rho === nothing || rotation === nothing
     if needs_derivation
-        kp = equil.kinetic
-        kp === nothing &&
+        profiles === nothing &&
             error("layer_parameters: deriving η/ρ/rotation needs kinetic profiles on the equilibrium — " *
                   "attach them with attach_kinetic_profiles!(equil, file) or pass all three override vectors")
 
@@ -64,9 +60,7 @@ function layer_parameters(
         rho_out = Vector{Float64}(undef, msing)
         rot_out = Vector{Float64}(undef, msing)
         for (k, sing) in enumerate(surfaces)
-            ψ = sing.psifac
-            n_e = kp.ne_spline(ψ)
-            t_e = kp.Te_spline(ψ) / E_CHG      # stored in J; resistivity formulas take eV
+            n_e, t_e, omega_E = _layer_profile(profiles, sing.psifac)
             lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
             if resistivity_model isa SpitzerModel
                 eta_out[k] = eta_spitzer(n_e, t_e, zeff; lnLamb=lnLamb)
@@ -79,7 +73,7 @@ function layer_parameters(
                 eta_out[k] = eta_neoclassical(resistivity_model, n_e, t_e, zeff, rg.f_trap, nuestar; lnLamb=lnLamb)
             end
             rho_out[k] = mu_i * M_P * n_e
-            rot_out[k] = kp.omegaE_spline(ψ) / (2π)
+            rot_out[k] = omega_E / (2π)
         end
     end
 
@@ -89,3 +83,7 @@ function layer_parameters(
         rotation=rotation === nothing ? rot_out : collect(Float64, rotation)
     )
 end
+
+# n_e in m⁻³, T_e in eV, and the E×B frequency at ψ from either profile container.
+_layer_profile(kp::Equilibrium.KineticProfileSplines, ψ) = (kp.ne_spline(ψ), kp.Te_spline(ψ) / E_CHG, kp.omegaE_spline(ψ))
+_layer_profile(kp::KineticProfiles, ψ) = (p = kp(ψ); (p.n_e, p.T_e, p.omega))

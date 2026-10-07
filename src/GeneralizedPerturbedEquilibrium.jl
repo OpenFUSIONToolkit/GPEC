@@ -579,10 +579,8 @@ function prepare_force_free_states!(
         sing_min!(intr, ctrl, equil)
     end
 
-    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H,
-    # K, M) for each surviving singular surface. Needed by the Julia GGJ
-    # inner-layer analysis; kinetic timescales (τ_A, τ_R) are layered on
-    # top by `build_ggj_inputs` using the same kinetic profiles as SLAYER.
+    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H, K, M) for each
+    # surviving singular surface; `ggj_parameters` layers τ_A / τ_R on top.
     if intr.msing > 0
         ForceFreeStates.resist_eval_all!(intr, equil)
     end
@@ -1597,7 +1595,7 @@ function write_outputs_to_HDF5(
             # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
             # Both kinetic-free (E, F, G, H, K, M) and geometry-only
             # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
-            # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
+            # downstream consumers (ForceFreeStates.ggj_parameters)
             # can reconstruct τ_A / τ_R from any kinetic-profile source.
             if all(s -> s.restype !== nothing, result.surfaces)
                 out_h5["SingularSurfaces/E"] = [s.restype.E for s in result.surfaces]

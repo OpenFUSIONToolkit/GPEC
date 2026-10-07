@@ -212,7 +212,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 "run_slayer: a $(typeof(model)) inner model requires " *
                 "$(expected_P) per-surface parameters, but got eltype " *
                 "$(eltype(params)). Build inputs with the matching builder " *
-                "(build_slayer_inputs for SLAYER, build_ggj_inputs for GGJ).")
+                "(build_slayer_inputs for SLAYER, ggj_parameters for GGJ).")
         )
 
     # Slab-layer path: convert Δ' from its ψ_N reference length to the

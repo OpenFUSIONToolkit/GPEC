@@ -153,7 +153,7 @@ function _compute_match(prob::MatchProblem, model::GGJ)
         inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ₂ = scale·resc·Ψ₂, antisymmetric (Ψ₂(0)=0)
         inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
         for i in 1:msing
-            params = resist_eval(sings[i], equil, ffs; eta=prob.eta[i], rho=prob.rho[i],
+            params = ggj_parameters(sings[i], equil; eta=prob.eta[i], rho=prob.rho[i],
                 gamma=prob.gamma, ising=i)
             inner_params[i] = params
             γ = 2π * im * nn * prob.rotation[i]    # forced eigenvalue; rotation is f in Hz, γ = 2πi·n·f

@@ -66,11 +66,12 @@ _tearing_tag(model::GGJ) =
 _tearing_tag(::SLAYER) = InnerLayer.SLAYERModel(; variant=:fitzpatrick)
 
 function _tearing_params(::GGJ, equil, surfaces, loaded, control)
-    return build_ggj_inputs(equil, surfaces, loaded.profiles;
+    lp = layer_parameters(surfaces, equil; profiles=loaded.profiles,
         mu_i=control.mu_i,
         zeff=control.zeff,
         resistivity_model=_build_resistivity_model(control.resistivity_model),
         lnLambda_form=control.lnLambda_form)
+    return [ggj_parameters(s, equil; eta=lp.eta[k], rho=lp.rho[k], ising=k) for (k, s) in enumerate(surfaces)]
 end
 
 function _tearing_params(model::SLAYER, equil, surfaces, loaded, control)

@@ -7,10 +7,8 @@
 #
 # Port of Fortran RDCON `resist_eval` (geometric part only).
 # Unlike the Fortran, this routine produces *only* the pure-equilibrium
-# quantities; kinetic timescales (τ_A, τ_R) are built on top in the
-# downstream `build_ggj_inputs` helper using the same KineticProfiles that
-# feed SLAYER, rather than Fortran's hardcoded `ne=1e14, te=3e3`
-# parameter defaults.
+# quantities; `ggj_parameters` forms τ_A / τ_R on top from caller-supplied
+# η and ρ, rather than Fortran's hardcoded `ne=1e14, te=3e3` defaults.
 #
 # The 6 theta-integrands match the Fortran layout:
 #   1: B² / |∇ψ|²
@@ -196,6 +194,28 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
         avg_B, B_max, B_min, f_trap, R_major, eps_local,
         p, p1, v1,
     )
+end
+
+"""
+    ggj_parameters(sing, equil; eta, rho, gamma=5/3, ising=0) -> InnerLayer.GGJParameters
+
+GGJ inner-layer parameters at the rational surface `sing`, from its geometry
+(`sing.restype`, see [`resist_eval_all!`](@ref)) and the local resistivity `eta` in Ω·m
+and mass density `rho` in kg/m³: `τ_A = √(ρ·M·μ₀)/|2π n q₁ χ₁/V′|`,
+`τ_R = (⟨B²/|∇ψ|²⟩/⟨B²⟩)·μ₀/η`, and `G` formed at the ratio of specific heats `gamma`.
+"""
+function ggj_parameters(sing::SingType, equil::Equilibrium.PlasmaEquilibrium;
+    eta::Real, rho::Real, gamma::Real=5 / 3, ising::Int=0)
+    rg = sing.restype
+    rg === nothing && throw(ArgumentError("ggj_parameters: the surface at ψ=$(sing.psifac) has restype = nothing; run resist_eval_all! first"))
+    equil.params.volume === nothing && throw(ArgumentError("ggj_parameters: equil.params.volume is nothing"))
+    MU_0 = Utilities.PhysicalConstants.MU_0
+    chi1 = 2π * equil.psio
+    taua = sqrt(rho * rg.M * MU_0) / abs(2π * Int(sing.n[1]) * sing.q1 * chi1 / rg.v1_local)
+    taur = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta
+    G = rg.avg_bsq / (rg.M * gamma * rg.p_local)
+    return InnerLayer.GGJParameters(; E=rg.E, F=rg.F, G=G, H=rg.H, K=rg.K, M=rg.M,
+        taua=taua, taur=taur, v1=rg.v1_local / equil.params.volume, ising=ising)
 end
 
 """
