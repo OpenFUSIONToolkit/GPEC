@@ -41,7 +41,7 @@ end
 
 """Empty `GalerkinResult` for a domain with no resonant surfaces."""
 function empty_galerkin_result()
-    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, nothing)
+    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing)
 end
 
 """
@@ -190,7 +190,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     sing_q = [s.q for s in sings]
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
-    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, nothing), dp
+    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution), dp
 end
 
 """
@@ -221,8 +221,7 @@ end
     write_galerkin!(out_h5, result::GalerkinResult; basis_output=false)
 
 Write the Galerkin solver outputs into the open HDF5 file, under
-`ForceFreeStates/Solutions/GalerkinIntegration/`: the matching diagnostics and the surface list
-the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
+`ForceFreeStates/Solutions/GalerkinIntegration/`: the surface list the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
 rationals). The Δ′/PEST-3 matrices and the closed ξ profiles are NOT written here — both go to
 formalism-independent homes from the driver writer (`SingularSurfaces/` off `result.delta_prime`;
 the shared `Solutions/` profile layout off `result.solution`). With `basis_output` the raw
@@ -252,36 +251,11 @@ function write_galerkin!(out_h5, result::GalerkinResult; basis_output::Bool=fals
         isempty(sol.xi_cut) || (out_h5["$gal/Basis/xi_psi_cut"] = permutedims(sol.xi_cut, (1, 3, 2)))
         isempty(sol.cut_range) || (out_h5["$gal/Basis/cut_range"] = sol.cut_range)
     end
-    if result.match !== nothing
-        m = result.match
-        out_h5["$gal/Match/cout"] = m.cout
-        out_h5["$gal/Match/cin"] = m.cin
-        out_h5["$gal/Match/Delta_r"] = m.deltar
-        out_h5["$gal/Match/bpen"] = m.bpen
-        out_h5["$gal/Match/rpec_eig"] = m.rpec_eig
-        # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
-        for i in eachindex(m.inner_psi)
-            out_h5["$gal/Match/Inner/psi_$i"] = m.inner_psi[i]
-            out_h5["$gal/Match/Inner/xi_$i"] = m.inner_xi[i]
-            out_h5["$gal/Match/Inner/b_$i"] = m.inner_b[i]
-        end
-        out_h5["$gal/Match/residual"] = m.residual
-        if !isempty(m.inner_params)
-            for f in (:E, :F, :G, :H, :K, :M)
-                out_h5["$gal/Match/InnerParams/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
-            end
-            # Literature names, matching the Tearing PerSurface mapping for the same fields.
-            out_h5["$gal/Match/InnerParams/tau_A"] = [pp.taua for pp in m.inner_params]
-            out_h5["$gal/Match/InnerParams/tau_R"] = [pp.taur for pp in m.inner_params]
-            out_h5["$gal/Match/InnerParams/dVdpsi"] = [pp.v1 for pp in m.inner_params]
-        end
-    end
     annotate_galerkin!(out_h5)
     return nothing
 end
 
-# Metadata tables for the Galerkin outputs (Match/** is debug-only and exempt from the
-# metadata contract; see docs/development/hdf5-conventions.md).
+# Metadata tables for the Galerkin outputs (see docs/development/hdf5-conventions.md).
 const GALERKIN_H5_ANNOTATIONS = [
     "ForceFreeStates/Solutions/GalerkinIntegration/rational_count" => (; long_name="number of rational (singular) surfaces in the Galerkin solve"),
     "ForceFreeStates/Solutions/GalerkinIntegration/psi" => (; long_name="normalized poloidal flux ψ_N grid of the closed Galerkin solution", scale="psi_gal"),

@@ -163,7 +163,6 @@ published as `ForceFreeStatesResult.delta_prime`.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
   - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
     gal-native grid; `nothing` if no resonant surfaces.
-  - `match::Union{Nothing,MatchResult}` — set by a `MatchProblem` solve; `nothing` otherwise.
 """
 struct GalerkinResult
     msing::Int
@@ -174,5 +173,4 @@ struct GalerkinResult
     di::Vector{Float64}
     alpha::Vector{ComplexF64}
     solution::Union{Nothing,GalerkinSolution}
-    match::Union{Nothing,MatchResult}
 end

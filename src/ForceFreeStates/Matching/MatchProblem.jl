@@ -9,8 +9,8 @@
 Driven inner-layer matching on a finished force-free-states solve `ffs`: each rational surface
 is matched at the forced eigenvalue γ = 2πi·n·f, with f the plasma rotation frequency there.
 `solve(prob, GGJModel())` returns a copy of `ffs` with the matched solution and the penetrated
-field `bpen`. `ffs` needs the Δ′ coil block, from `Galerkin(; rpec_flag=true)` or the Riccati
-vacuum edge coupling.
+field `bpen`. `ffs` needs the Δ′ coil block, from `Galerkin(; rpec_flag=true)` or `Riccati()`
+with `vac_flag=true`.
 
 # Keywords
 - `eta`, `rho`, `rotation`: per-surface resistivity in Ω·m, mass density in kg/m³ and rotation
@@ -47,9 +47,9 @@ function MatchProblem(
 )
     dp = ffs.delta_prime
     dp === nothing &&
-        error("MatchProblem: the $(ffs.integrator) result carries no Δ′ payload — inner-layer matching needs a Riccati or Galerkin solve")
+        error("MatchProblem: the $(ffs.integrator) result has no Δ′; solve with Galerkin(; rpec_flag=true), or Riccati() with vac_flag=true")
     isempty(dp.coil) &&
-        error("MatchProblem: the Δ′ coil-response block is empty — solve with Galerkin(; rpec_flag=true) (or the Riccati vacuum edge coupling) first")
+        error("MatchProblem: the Δ′ coil block is empty; solve with Galerkin(; rpec_flag=true), or Riccati() with vac_flag=true")
 
     sings = _matched_surfaces(ffs)
     size(dp.raw, 1) == 2 * length(sings) ||
@@ -83,8 +83,9 @@ closure_capable(::InnerLayer.SLAYERModel) = false
     solve(prob::MatchProblem, model) -> ForceFreeStatesResult
 
 Match `prob.ffs` to the inner layer of `model`. The result has `closure = :matched` (`:ideal`
-with `ideal=true`), `bpen`, the [`MatchResult`](@ref) in `result.galerkin.match` and, for a
-Galerkin solve, the matched ξ.
+with `ideal=true`), `bpen`, the [`MatchResult`](@ref) in `result.match` and, for a Galerkin
+solve, the matched ξ. A `:matched` result drops the ideal δW (`wp`, `free_boundary`), so
+PerturbedEquilibrium skips its response rather than mixing ideal and matched physics.
 """
 function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel)
     closure_capable(model) ||
@@ -245,13 +246,15 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params)
 end
 
-# Copy of ffs with the match applied; the ideal reference keeps closure :ideal and its zero bpen.
+# Copy of ffs with the match applied; the ideal reference keeps closure :ideal, its zero bpen and δW.
 function _matched_result(ffs::ForceFreeStatesResult, match::MatchResult, ideal::Bool)
-    new_gal = ffs.galerkin === nothing ? nothing : _with(ffs.galerkin; match=match)
-    solution = (new_gal !== nothing && new_gal.solution !== nothing && !isempty(match.xi)) ?
-               _matched_gal_profiles(new_gal, ffs.mats, ffs) : ffs.solution
-    return _with(ffs; closure=ideal ? :ideal : :matched, bpen=ideal ? ffs.bpen : match.bpen,
-        solution=solution, galerkin=new_gal)
+    gal = ffs.galerkin
+    solution = (gal !== nothing && gal.solution !== nothing && !isempty(match.xi)) ?
+               _matched_gal_profiles(gal, match, ffs.mats, ffs) : ffs.solution
+    ideal && return _with(ffs; match=match, solution=solution)
+    # The ideal δW does not describe the matched plasma; PE gates on its absence.
+    return _with(ffs; closure=:matched, bpen=match.bpen, match=match, solution=solution,
+        wp=nothing, free_boundary=nothing)
 end
 
 # A copy of the immutable `x` with the named fields replaced.

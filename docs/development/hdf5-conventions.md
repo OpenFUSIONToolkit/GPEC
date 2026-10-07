@@ -40,9 +40,9 @@ Top level (11 groups):
 | `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim`, `Runtimes/` (per-stage wall-clock seconds) |
 | `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
 | `Equilibrium/` | Scalars (`beta_N`, `q_axis`, `q_95`, `I_p`, …) plus `Profiles/` (1-D on `psi`: 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D on `psi`×`theta`: rcoords, offset, nu, jac) |
-| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, `Match/` diagnostics, the gal surface list, debug-gated `Basis/`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, the gal surface list, debug-gated `Basis/`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
-| `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), `Kinetic/` |
+| `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), the inner-layer `Match/` diagnostics, `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
 | `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `ErrorFields/` | `CoilSensitivities/` (per-coil-set control-surface spectra and their rigid shift/tilt derivatives, `DominantMode/` full-window projection); `MonteCarlo/` (intrinsic and corrected `\|δ\|` histograms over the sampled tolerances, per batch and averaged); `Risk/` (threshold density, `P(lock\|δ)`, locking probabilities, `ToleranceScan/`); `NTV/` (correction-coil overlap and NTV torque couplings per kAt) |
@@ -53,7 +53,7 @@ Reserved (documented, not yet written): `ForceFreeStates/Solutions/RiccatiIntegr
 
 ## Metadata contract (self-describing datasets)
 
-Every dataset outside `Input/` (raw snapshot) and `GalerkinIntegration/Match/` (debug-only) must answer "what is this, in what units, plotted against what" without opening the source — enforced by `test/runtests_h5_schema.jl`:
+Every dataset outside `Input/` (raw snapshot) and `SingularSurfaces/Match/` (debug-only) must answer "what is this, in what units, plotted against what" without opening the source — enforced by `test/runtests_h5_schema.jl`:
 
 - **`long_name`** — plain-text physics description.
 - **`units`** — SI string (`"T"`, `"Wb/rad"`, `"A"`, `"m"`, `"J"`, `"N*m"`, `"Hz"`, `"Ohm*m"`); `"1"` for dimensionless (CF convention). Normalized quantities state the normalization in `long_name` (e.g. the power-normalized stability energies are per unit ⟨|ξ|²⟩, not joules).

@@ -196,6 +196,19 @@ using TOML
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
     end
 
+    @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
+        mktempdir() do dir
+            ric = solve(equil, Riccati(); nn=1, dir_path=dir, ffs_kwargs...)
+            @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.coil)
+            n = length(MatchProblem(ric; ideal=true).surfaces)
+            matched = solve(MatchProblem(ric; eta=fill(1e-7, n), rho=fill(1e-7, n), rotation=fill(1.0, n)), GGJModel())
+            @test matched.closure === :matched
+            @test matched.match !== nothing && matched.bpen == matched.match.bpen
+            @test matched.wp === nothing && matched.free_boundary === nothing
+            @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+        end
+    end
+
     @testset "MatchProblem gates on its inputs" begin
         mktempdir() do dir
             # A Forward result carries no Δ′ payload, so the problem is unconstructible.
@@ -209,7 +222,9 @@ using TOML
             # the bare coil columns in the identity-at-edge basis.
             matched = solve(prob, GGJModel())
             @test matched.closure === :ideal
-            @test matched.galerkin.match !== nothing
+            @test matched.match !== nothing
+            # The ideal reference keeps the ideal δW (only a :matched closure drops it).
+            @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
             @test matched.solution !== nothing && matched.solution.basis === :gal_native
         end
     end

@@ -58,9 +58,11 @@ so bpen and closure are always present.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
   - `closure::Symbol` - How the basis is closed at the rationals: `:ideal` (the ideal jump
-    condition was imposed) or `:matched` (an inner-layer solution was matched in).
+    condition was imposed) or `:matched` (an inner-layer solution was matched in). A
+    `:matched` result carries no ideal δW: `wp` and `free_boundary` are `nothing`.
   - `bpen::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated resonant field from the
     inner layer, per surface and driving mode; all zeros under `:ideal` closure.
+  - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
     formalism produced none (Riccati, and Galerkin without a match).
   - `diagnostics::Union{Nothing,OdeState}` - The integrator's raw ODE state (ψ trace, `crit`,
@@ -73,8 +75,7 @@ so bpen and closure are always present.
   - `delta_prime::Union{Nothing,DeltaPrimeData}` - Δ′/outer-region matching payload from
     whichever formalism ran (Riccati BVP or Galerkin); `nothing` when neither produced one.
   - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solver internals and FEM
-    diagnostics, including the RPEC inner-layer match when requested. Its Δ′ payload lives
-    in `delta_prime`, not here.
+    diagnostics. Its Δ′ payload lives in `delta_prime`, not here.
 """
 struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} <: ModeSpace
     integrator::Symbol
@@ -106,6 +107,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} 
     # Closure of the basis at the rationals, always present.
     closure::Symbol
     bpen::Matrix{ComplexF64}
+    match::Union{Nothing,MatchResult}
 
     # Per-formalism products; presence is the capability signal.
     solution::Union{Nothing,SolutionProfiles}
@@ -147,9 +149,8 @@ end
 # analytic Galerkin derivative rather than a differenced value spline, and
 # Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) is the same outer ideal-MHD relation `sing_der!` uses. The grid runs
 # inner→edge, so the last node is the control surface and carries the edge boundary condition.
-function _matched_gal_profiles(gal_result::GalerkinResult, mats::MatrixSplines, intr::ModeSpace)
+function _matched_gal_profiles(gal_result::GalerkinResult, m::MatchResult, mats::MatrixSplines, intr::ModeSpace)
     sol = gal_result.solution
-    m = gal_result.match
     npert = intr.numpert_total
 
     keep = .!sol.issing
@@ -243,7 +244,7 @@ function build_result(
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
         intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
         metric, mats, intr.sing, kinetic,
-        closure, bpen,
+        closure, bpen, nothing,
         solution, odet, wp, free_energies, delta_prime, gal_data
     )
 end

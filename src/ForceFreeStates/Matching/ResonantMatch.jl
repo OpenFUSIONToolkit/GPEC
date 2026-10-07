@@ -5,7 +5,7 @@
 """
     MatchResult
 
-Matching coefficients and matched profiles, found in `result.galerkin.match`. The profile
+Matching coefficients and matched profiles, found in `result.match`. The profile
 fields are empty when the solve kept no Galerkin basis; the inner fields are empty with `ideal`.
 
 ## Fields
@@ -66,4 +66,30 @@ function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::
     cof = mat \ rmat
     residual = norm(mat * cof - rmat) / max(norm(rmat), 1e-300)
     return cof[1:2msing, :], cof[(2msing+1):4msing, :], residual
+end
+
+# Write `m` under SingularSurfaces/Match/ (debug-only: exempt from the metadata contract).
+function write_match!(out_h5, m::MatchResult)
+    g = "SingularSurfaces/Match"
+    out_h5["$g/cout"] = m.cout
+    out_h5["$g/cin"] = m.cin
+    out_h5["$g/Delta_r"] = m.deltar
+    out_h5["$g/bpen"] = m.bpen
+    out_h5["$g/rpec_eig"] = m.rpec_eig
+    out_h5["$g/residual"] = m.residual
+    # Ragged per-surface inner grids: one dataset triple per surface.
+    for i in eachindex(m.inner_psi)
+        out_h5["$g/Inner/psi_$i"] = m.inner_psi[i]
+        out_h5["$g/Inner/xi_$i"] = m.inner_xi[i]
+        out_h5["$g/Inner/b_$i"] = m.inner_b[i]
+    end
+    if !isempty(m.inner_params)
+        for f in (:E, :F, :G, :H, :K, :M)
+            out_h5["$g/InnerParams/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
+        end
+        out_h5["$g/InnerParams/tau_A"] = [pp.taua for pp in m.inner_params]
+        out_h5["$g/InnerParams/tau_R"] = [pp.taur for pp in m.inner_params]
+        out_h5["$g/InnerParams/dVdpsi"] = [pp.v1 for pp in m.inner_params]
+    end
+    return nothing
 end

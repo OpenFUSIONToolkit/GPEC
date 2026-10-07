@@ -144,7 +144,7 @@ using HDF5
 
                     @test ffs.integrator === :galerkin
                     @test ffs.galerkin !== nothing
-                    @test ffs.galerkin.match !== nothing
+                    @test ffs.match !== nothing
 
                     sol = ffs.solution
                     @test sol isa FFS.SolutionProfiles
@@ -184,8 +184,10 @@ using HDF5
                         @test iszero(ffs.bpen)
                     else
                         @test ffs.closure === :matched
-                        @test ffs.bpen == ffs.galerkin.match.bpen
+                        @test ffs.bpen == ffs.match.bpen
                         @test !iszero(ffs.bpen)
+                        # The ideal δW does not describe the matched plasma.
+                        @test ffs.wp === nothing && ffs.free_boundary === nothing
                     end
 
                     # The closed profiles land in the shared Solutions layout: same names and
@@ -196,10 +198,10 @@ using HDF5
                         @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
                         @test read(f["$gal/dxi_psidpsi"]) == sol.du_store
                         @test read(f["$gal/xi_s"]) == sol.xi_s_store
-                        # Matching diagnostics keep their group; the profile datasets left it,
-                        # and the raw outer basis is debug-gated off by default.
-                        @test haskey(f, "$gal/Match/cout")
-                        @test !haskey(f, "$gal/Match/xi")
+                        # Matching diagnostics sit with the other per-surface results, and the
+                        # raw outer basis is debug-gated off by default.
+                        @test haskey(f, "SingularSurfaces/Match/cout")
+                        @test !haskey(f, "$gal/Match")
                         @test !haskey(f, "$gal/Basis")
                         @test !haskey(f, "$gal/Solution")
                     end
