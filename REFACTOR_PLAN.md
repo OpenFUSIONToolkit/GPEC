@@ -1165,6 +1165,19 @@ TearingProblem only. `ResistiveMatch` dissolves into MatchProblem kwargs + the G
   comparisons want COMMITTED refs (commit first, then `--refs develop,<branch>`), and
   commit subjects use the closed-vocabulary grammar — validate with
   `python3 ci/conventions/check_subject.py --title "..."`.
+- **#507 CUT DOWN 2026-10-07 (user-directed: fewer lines, one way to do each thing)**:
+  A 3e6079da1 one GGJ-parameter path (`ggj_parameters` on `restype`; duplicate
+  `resist_eval` and `build_ggj_inputs` deleted; the two geometry ports agreed to ≤2.4e-14,
+  matched outputs move at round-off ≤1.2e-10); B ec218ddf4 InnerLayer `GGJModel` /
+  `SLAYERModel` are the solve argument (the FFS `GGJ`/`SLAYER` wrappers, `_tearing_tag` and
+  the shadowing note above are gone; `GGJModel` carries backend `options`); defaults `!`
+  ea725bb63 (ray everywhere incl. tearing `ggj_ray`; Galerkin knobs only in the backend,
+  512/4/1 — ~20× closer to ray than the deck's old 1280/5/10; Sauter η default); C ee8501b43
+  (field-name result copy; `attach_kinetic_profiles!` the one way, `kinetic_file` kwarg
+  removed); then the per-point scan scripts `scan_match_m2`/`scan_resistivity_m2`/
+  `scan_rotation_m2` deleted (a `MatchProblem` loop in docs/api.md replaces them; the PE leg
+  stays blocked on the gal-PE port). §7D is to be RE-PLANNED from scratch after #507; the
+  first attempt is parked on `refactor/main-deck-interpreter`.
 - **§7C PR OPENED 2026-10-06 as #507** (reviewer d-burg, assignee matt-pharr): all five
   commits bde0f4c15/56dff1801/721e39145/0b5e2fce4/a3a8a3fed pushed; consolidated harness
   @ a3a8a3fed in the PR body (gal 10/10 + solovev 22/22 + kinetic 6/6 unchanged;
