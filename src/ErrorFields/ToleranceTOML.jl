@@ -62,6 +62,9 @@ with [`tilt_tolerance_deg`](@ref).
     coil axis line confined to a cylinder of radius `shift_tol_m`, shift and tilt drawn together)
   - `cylinder_half_height_m`: half-height of that cylinder, metres; sets the tilt reachable at
     the given radius
+  - `current_factor`: multiplier on the coil set's current as built relative to the run, applied
+    to its as-designed overlap and its sensitivities alike (the spectrum is linear in current);
+    `1` is the run's current, `0` switches the coil off, a negative value reverses it
 """
 struct CoilTolerance
     name::String
@@ -73,6 +76,7 @@ struct CoilTolerance
     radial_shape::String
     tolerance_model::String
     cylinder_half_height_m::Float64
+    current_factor::Float64
 end
 
 """
@@ -92,6 +96,10 @@ amplitudes.
   - `phase_group`: groups with equal labels share the random direction; defaults to `name`
   - `rotation_center_z_m`: height of the pivot of the group's rigid rotation on the machine axis,
     metres; a member at height `z` tilted by θ also shifts laterally by `(z − z_pivot)·θ`
+  - `tilt_lever_arm_m`: the lever arm, metres, that converts a tilt tolerance given in metres
+    into the group's rotation angle (`asin(tilt_tol / lever_arm)`); `NaN` when absent, in which
+    case the members' common major radius is used. A group that stands for a reference structure
+    has the structure's lever arm, not any member coil's radius
 """
 struct CoherentGroupTolerance
     name::String
@@ -104,6 +112,7 @@ struct CoherentGroupTolerance
     cylinder_half_height_m::Float64
     phase_group::String
     rotation_center_z_m::Float64
+    tilt_lever_arm_m::Float64
 end
 
 """
@@ -151,9 +160,9 @@ end
 # shape and the other-field shape follow the OMFIT tool's defaults.
 const _COIL_KEY_DEFAULTS = Dict{String,Any}(
     "shift_sigma_mm" => 0.0, "tilt_sigma" => 0.0, "tilt_units" => "deg", "radial_shape" => "hollow",
-    "tolerance_model" => "additive", "cylinder_half_height_m" => 0.0
+    "tolerance_model" => "additive", "cylinder_half_height_m" => 0.0, "current_factor" => 1.0
 )
-const _GROUP_ONLY_KEYS = ("members", "phase_group", "rotation_center_z_m")
+const _GROUP_ONLY_KEYS = ("members", "phase_group", "rotation_center_z_m", "tilt_lever_arm_m")
 
 """
     read_tolerance_toml(path) -> ToleranceSet
@@ -162,8 +171,9 @@ const _GROUP_ONLY_KEYS = ("members", "phase_group", "rotation_center_z_m")
 Read and validate a tolerance TOML file (see the module docstring for the schema). Every key is
 checked against the schema so a misspelled key errors instead of silently taking a default;
 tolerances must be non-negative, names unique, enumerated fields one of their allowed values,
-`efc_factor ≥ 1`, and a cylinder model needs a positive half-height. Names are checked against
-the run's coil sets separately by [`validate_tolerances`](@ref).
+`efc_factor ≥ 1`, a cylinder model needs a positive half-height, a `current_factor` must be
+finite and a `tilt_lever_arm_m` positive. Names are checked against the run's coil sets
+separately by [`validate_tolerances`](@ref).
 """
 read_tolerance_toml(path::AbstractString) = parse_tolerance_toml(read(path, String))
 
@@ -204,6 +214,8 @@ function _parse_coil(d::Dict{String,Any}, defaults::Dict{String,Any})
     model = _enum(get_key("tolerance_model"), TOLERANCE_MODELS, "$name.tolerance_model")
     half_height = _nonneg(get_key("cylinder_half_height_m"), "$name.cylinder_half_height_m")
     model == "cylinder" && half_height <= 0 && throw(ArgumentError("coil $name: the cylinder model needs cylinder_half_height_m > 0"))
+    factor = Float64(get_key("current_factor"))
+    isfinite(factor) || throw(ArgumentError("coil $name: current_factor must be finite (got $factor)"))
     return CoilTolerance(name,
         1e-3 * _nonneg(get(d, "shift_tol_mm", 0.0), "$name.shift_tol_mm"),
         1e-3 * _nonneg(get_key("shift_sigma_mm"), "$name.shift_sigma_mm"),
@@ -211,7 +223,7 @@ function _parse_coil(d::Dict{String,Any}, defaults::Dict{String,Any})
         _nonneg(get_key("tilt_sigma"), "$name.tilt_sigma"),
         _enum(get_key("tilt_units"), TILT_UNITS, "$name.tilt_units"),
         _enum(get_key("radial_shape"), RADIAL_SHAPES, "$name.radial_shape"),
-        model, half_height)
+        model, half_height, factor)
 end
 
 function _parse_group(d::Dict{String,Any}, defaults::Dict{String,Any})
@@ -226,6 +238,8 @@ function _parse_group(d::Dict{String,Any}, defaults::Dict{String,Any})
     model = _enum(get_key("tolerance_model"), TOLERANCE_MODELS, "$name.tolerance_model")
     half_height = _nonneg(get_key("cylinder_half_height_m"), "$name.cylinder_half_height_m")
     model == "cylinder" && half_height <= 0 && throw(ArgumentError("coherent group $name: the cylinder model needs cylinder_half_height_m > 0"))
+    lever = Float64(get(d, "tilt_lever_arm_m", NaN))
+    isnan(lever) || lever > 0 || throw(ArgumentError("coherent group $name: tilt_lever_arm_m must be > 0 (got $lever)"))
     return CoherentGroupTolerance(name, members,
         1e-3 * _nonneg(get(d, "shift_tol_mm", 0.0), "$name.shift_tol_mm"),
         _nonneg(get(d, "tilt_tol", 0.0), "$name.tilt_tol"),
@@ -233,7 +247,41 @@ function _parse_group(d::Dict{String,Any}, defaults::Dict{String,Any})
         _enum(get_key("radial_shape"), RADIAL_SHAPES, "$name.radial_shape"),
         model, half_height,
         String(get(d, "phase_group", name)),
-        Float64(get(d, "rotation_center_z_m", 0.0)))
+        Float64(get(d, "rotation_center_z_m", 0.0)), lever)
+end
+
+"""
+    update(x; field=value, ...) -> x′
+
+A copy of a `ToleranceSet`, `CoilTolerance`, `CoherentGroupTolerance` or `OtherFieldBudget` with
+the named fields replaced, for programmatic scans over quantities the TOML fixes: a coil's
+`current_factor` or `shift_sigma_m`, the unattributed `magnitude`, a group's `tilt_lever_arm_m`.
+Unknown fields and an `efc_factor` below 1 are errors. The copy of a set carries an empty `raw`
+text, since the echoed file no longer describes it.
+
+```julia
+ts2 = update(ts; coils=[c.name == "F6A" ? update(c; current_factor=0.5) : c for c in ts.coils])
+ts3 = update(ts; other_field=update(ts.other_field; magnitude=2e-5))
+```
+"""
+function update(x::T; kwargs...) where {T<:Union{CoilTolerance,CoherentGroupTolerance,OtherFieldBudget}}
+    return T(_replaced_fields(x; kwargs...)...)
+end
+function update(ts::ToleranceSet; kwargs...)
+    vals = _replaced_fields(ts; kwargs...)
+    out = ToleranceSet(vals[1:5]..., haskey(kwargs, :raw) ? vals[6] : "")
+    out.efc_factor >= 1 || throw(ArgumentError("efc_factor must be ≥ 1 (got $(out.efc_factor))"))
+    return out
+end
+function _replaced_fields(x::T; kwargs...) where {T}
+    names = fieldnames(T)
+    vals = Any[getfield(x, f) for f in names]
+    for (k, v) in kwargs
+        i = findfirst(==(k), names)
+        i === nothing && throw(ArgumentError("$(nameof(T)) has no field $k (fields: $(join(names, ", ")))"))
+        vals[i] = v
+    end
+    return vals
 end
 
 function _check_keys(d::Dict{String,Any}, allowed, where::String)
@@ -283,6 +331,29 @@ function validate_tolerances(ts::ToleranceSet, coil_names::AbstractVector{<:Abst
 end
 
 """
+    check_excluded_tolerances(ts::ToleranceSet, excluded) -> ts
+
+Throw if a tolerance, a coherent-group member or an uncorrectable-coil entry names a coil set the
+run excludes from its error field: a correction array is not an error-field source, so a
+tolerance on it has nothing to act on.
+"""
+function check_excluded_tolerances(ts::ToleranceSet, excluded)
+    excluded = Set(String[String(n) for n in excluded])
+    named = String[]
+    for c in ts.coils
+        c.name in excluded && push!(named, "coil $(c.name)")
+    end
+    for g in ts.groups, m in g.members
+        m in excluded && push!(named, "member $m of group $(g.name)")
+    end
+    for u in ts.uncorrectable_coils
+        u in excluded && push!(named, "uncorrectable coil $u")
+    end
+    isempty(named) || throw(ArgumentError("tolerances name coil sets excluded from the error field (a correction array carries no tolerance): $(join(named, "; "))"))
+    return ts
+end
+
+"""
     tilt_tolerance_deg(tilt, tilt_units, cs::CoilSet) -> Float64
     tilt_tolerance_deg(tilt, tilt_units, r_nom::Real; name="the coil set") -> Float64
     tilt_tolerance_deg(t::CoilTolerance, cs::CoilSet) -> Float64
@@ -290,7 +361,7 @@ end
 A tilt tolerance in the degrees the stored sensitivities use. `"deg"` passes through; `"m"` is
 a rim displacement converted through the coil set's arc-length-weighted major radius exactly as
 `apply_transforms` converts `tilt_in_meters`: `asin(t / R_nom)`. The radius form takes that
-radius directly, as a run stores it in `ErrorFields/CoilSensitivities/nominal_radius`, for
+radius directly, as a run stores it in `ErrorFields/CoilSensitivities/major_radius_m`, for
 readers that have the file but not the geometry.
 """
 function tilt_tolerance_deg(tilt::Real, tilt_units::AbstractString, r_nom::Real; name::AbstractString="the coil set")

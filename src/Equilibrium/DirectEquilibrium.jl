@@ -293,6 +293,24 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
+    # A failed solve returns a truncated solution instead of throwing; check both the retcode and
+    # that the field line reached η = 2π, since a callback can end it early and still report Success.
+    if sol.retcode != ReturnCode.Success
+        error(
+            "direct_fieldline_int: field-line integration failed at psifac = " *
+            "$(@sprintf("%.6f", psifac)) (retcode $(sol.retcode)); the flux surface did not " *
+            "close. This usually means psihigh is too close to the separatrix for the " *
+            "equilibrium grid to resolve."
+        )
+    end
+    if !isapprox(sol.t[end], 2π; atol=1e-8)
+        error(
+            "direct_fieldline_int: field-line integration at psifac = " *
+            "$(@sprintf("%.6f", psifac)) stopped at eta = $(@sprintf("%.6f", sol.t[end])) " *
+            "instead of 2*pi; the flux surface did not close."
+        )
+    end
+
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
 end

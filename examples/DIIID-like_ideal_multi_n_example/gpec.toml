@@ -2,10 +2,11 @@
 # Same plasma as DIIID-like_ideal_example, with both toroidal modes solved together and driven by
 # mixed-n C-coil currents. The integration stops at q = qhigh, placed between rationals so no n has a
 # small edge singular factor. The q = 2 and q = 3 surfaces resonate at both n, so SingularCoupling
-# repeats them across rows. psihigh and delta_mhigh make each n block reproduce the single-n mode
-# range exactly, and keep the case small for the regression harness. frobenius_psi_max = 0 uses the
-# fixed axis start: the Frobenius start's m = 0 branch is picked by roundoff, which makes the n = 1
-# anti-Hermitian part of W (and so the torque) differ between otherwise identical runs.
+# repeats them across rows. psihigh and delta_mhigh keep the case small for the regression harness;
+# every n block spans m = -8..20, which a single-n n = 1 run matches only with delta_mhigh = 8.
+# frobenius_psi_max = 0 uses the fixed axis start: the Frobenius start's m = 0 branch is picked by
+# roundoff, which makes the n = 1 anti-Hermitian part of W (and so the torque) differ between
+# otherwise identical runs.
 
 [Equilibrium]
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
@@ -13,7 +14,7 @@ eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "ldp"              # Radial grid packing type (ldp = linear-derivative packing toward rationals)
 psilow = 1e-4                  # Lower limit of normalized poloidal flux
-psihigh = 0.9                  # Upper limit of normalized poloidal flux (q ≈ 4.1, keeps the n = 3 mode space small)
+psihigh = 0.9                  # Upper limit of normalized poloidal flux
 mpsi = 128                     # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
@@ -49,9 +50,9 @@ mthvac = 512                   # Number of points used in splines over poloidal 
 kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
-save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+save_interval = 1              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+ucrit = 1e3                    # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
 integrator            = "forward" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
