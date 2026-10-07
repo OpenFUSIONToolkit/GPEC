@@ -50,9 +50,9 @@ mthvac = 512                   # Number of points used in splines over poloidal 
 kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
-save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+save_interval = 1              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+ucrit = 1e3                    # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
 integrator            = "forward" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
@@ -211,6 +211,7 @@ rotation_center = "conductor"           # Tilt pivot: each conductor's own centr
 write_outputs_to_HDF5 = true            # Write ErrorFields/CoilSensitivities/ to the output file
 verbose = true                          # Log per-coil-set progress and linearity diagnostics
 tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the run directory
+exclude_coils = []                      # Coil sets that are not error-field sources (the NTV efc_coils are excluded automatically)
 
 [ErrorFields.MonteCarlo]
 nsample = 200000                        # Samples per batch

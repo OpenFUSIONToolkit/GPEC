@@ -77,7 +77,7 @@ include("Rerun.jl")
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings
 using .ForceFreeStates: ForceFreeStatesResult, build_result
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
@@ -562,21 +562,8 @@ function prepare_force_free_states!(
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
-    # Filter out surfaces outside the integration domain [qlow, qlim].
-    # Fortran STRIDE excludes these at the integration level; we remove them
-    # from intr.sing so the Δ' BVP sees only crossable surfaces.
-    if intr.msing > 0
-        qmin_integration = max(ctrl.qlow, equil.params.qmin)
-        n_before = intr.msing
-        keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin_integration && intr.sing[j].psifac <= intr.psilim]
-        if length(keep) < n_before
-            excluded = setdiff(1:n_before, keep)
-            excluded_mq = [(intr.sing[j].m, intr.sing[j].q) for j in excluded]
-            @info "Filtered $(n_before - length(keep)) singular surface(s) outside integration domain: $(excluded_mq)"
-            intr.sing = intr.sing[keep]
-            intr.msing = length(keep)
-        end
-    end
+    # Keep only surfaces inside the integration domain [qlow, qlim], so the Δ' BVP sees only crossable ones.
+    remove_singular_surfs!(intr; qmin=max(ctrl.qlow, equil.params.qmin))
 
     # For the outer-region Galerkin solve, exclude the q < qlow core (incl. any q≤1 sawtooth
     # surfaces) by raising psilow to where q = qlow (RDCON sing_min). Without this, the gal FEM
@@ -1093,6 +1080,8 @@ function run_error_fields(
     risk_ctrl = ErrorFields.RiskControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "Risk", Dict{String,Any}()))...)
     scenario_raw = get(ef_raw, "scenario", nothing)
     ntv_ctrl = ErrorFields.NTVControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "NTV", Dict{String,Any}()))...)
+    # Correction arrays and other excluded sets are swept like any coil but are not error-field sources.
+    excluded = ErrorFields.excluded_coil_names(ef_raw)
     pe_state === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section with compute_singular_coupling = true")
     ft_ctrl = forcing_terms_control(inputs)
     ft_ctrl.forcing_data_format == "coil" ||
@@ -1109,19 +1098,22 @@ function run_error_fields(
         tol_path = joinpath(result.dir_path, ef_ctrl.tolerance_file)
         isfile(tol_path) || error("[ErrorFields] tolerance_file not found: $tol_path")
         tolerances = ErrorFields.validate_tolerances(ErrorFields.read_tolerance_toml(tol_path), sens.coil_names)
+        ErrorFields.check_excluded_tolerances(tolerances, excluded)
         @info "Tolerances: $(length(tolerances.coils)) coil sets, $(length(tolerances.groups)) coherent groups from $(ef_ctrl.tolerance_file)"
     end
 
     # The run's Monte Carlo is the full-window, dominant-mode summary; other windows are re-run
     # post hoc with ErrorFields.run_monte_carlo.
     dom = PerturbedEquilibrium.dominant_coupling(rc)
+    table = ErrorFields.without_coils(ErrorFields.sensitivity_table(sens, dom), excluded)
+    isempty(excluded) || @info "Error field: $(join(table.coil_names, ", ")); excluded $(join(excluded, ", "))"
     monte_carlo = nothing
     if tolerances !== nothing
         mc_start = time()
-        monte_carlo = ErrorFields.run_monte_carlo(ErrorFields.sensitivity_table(sens, dom), tolerances, coil_sets, mc_ctrl)
+        monte_carlo = ErrorFields.run_monte_carlo(table, tolerances, coil_sets, mc_ctrl)
         @info "Monte Carlo: $(mc_ctrl.nbatch) × $(mc_ctrl.nsample) samples in $(@sprintf("%.2f", time() - mc_start)) s; " *
-              "⟨|δ|⟩ = $(@sprintf("%.3e", monte_carlo.mean_abs_delta)) intrinsic, $(@sprintf("%.3e", monte_carlo.mean_abs_delta_efc)) corrected " *
-              "(nominal $(@sprintf("%.3e", monte_carlo.delta_nominal)))"
+              "⟨|δ|⟩ = $(@sprintf("%.3e", monte_carlo.abs_delta_sampled_mean)) intrinsic, $(@sprintf("%.3e", monte_carlo.abs_delta_efc_sampled_mean)) corrected " *
+              "(nominal $(@sprintf("%.3e", monte_carlo.abs_delta_total_as_designed)))"
     end
 
     # Locking risk needs the operating point: [ErrorFields.scenario] with at least n_e.
@@ -1130,17 +1122,18 @@ function run_error_fields(
     if monte_carlo !== nothing && scenario_raw !== nothing
         haskey(scenario_raw, "n_e") || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
         scen = ErrorFields.ScenarioParameters(result.equil; (Symbol(k) => v for (k, v) in scenario_raw)...)
-        sc = ErrorFields.threshold_scaling(; n=result.nlow, year=risk_ctrl.year, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
+        n_scaling = ErrorFields.single_toroidal_mode(result.nlow, result.nhigh; where="the in-run locking risk of this run")
+        sc = ErrorFields.threshold_scaling(; n=n_scaling, year=risk_ctrl.year, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
         risk_start = time()
         risk = ErrorFields.locking_risk(monte_carlo, sc, scen; ctrl=risk_ctrl)
-        @info "Locking risk ($(ErrorFields.scaling_label(sc))): threshold $(@sprintf("%.3e", risk.threshold_nominal)); " *
-              "P_lock = $(@sprintf("%.2f", risk.plock)) % intrinsic, $(@sprintf("%.2f", risk.plock_efc)) % corrected, " *
-              "$(@sprintf("%.2f", risk.plock_nominal)) % as designed ($(@sprintf("%.2f", time() - risk_start)) s)"
+        @info "Locking risk ($(ErrorFields.scaling_label(sc))): threshold $(@sprintf("%.3e", risk.threshold_fit)); " *
+              "P_lock = $(@sprintf("%.2f", risk.locking_probability_percent)) % intrinsic, $(@sprintf("%.2f", risk.locking_probability_efc_percent)) % corrected, " *
+              "$(@sprintf("%.2f", risk.locking_probability_as_designed_percent)) % as designed ($(@sprintf("%.2f", time() - risk_start)) s)"
         if !isempty(risk_ctrl.scan_scales)
             scan_start = time()
-            scan = ErrorFields.tolerance_scan(ErrorFields.sensitivity_table(sens, dom), tolerances, coil_sets, mc_ctrl, sc, scen;
+            scan = ErrorFields.tolerance_scan(table, tolerances, coil_sets, mc_ctrl, sc, scen;
                 scales=risk_ctrl.scan_scales, risk_ctrl)
-            @info "Tolerance scan over $(length(scan.scale)) scales in $(@sprintf("%.2f", time() - scan_start)) s"
+            @info "Tolerance scan over $(length(scan.tolerance_scale)) scales in $(@sprintf("%.2f", time() - scan_start)) s"
         end
     end
 
