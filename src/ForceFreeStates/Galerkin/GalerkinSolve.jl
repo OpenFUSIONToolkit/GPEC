@@ -3,7 +3,7 @@
 # Top-level driver for the RDCON outer-region singular Galerkin Δ′ solve, plus the per-cell assembly
 # orchestration, the banded solve, Δ′ extraction, PEST-3 blocks, and HDF5 output.
 # Ports gal_make_arrays (gal.f), gal_solve (gal.f), and gal_write_pest3_data
-# (gal.f). The DRIVEN/RPEC inner-layer matching is a post-solve transformation (Matching/MatchProblem.jl).
+# (gal.f). Inner-layer matching is applied afterwards by MatchProblem.
 
 """
     gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
@@ -180,9 +180,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     dp_coil = ncoil > 0 ? permutedims(delta[(2*msing+1):(2*msing+ncoil), :]) : Matrix{ComplexF64}(undef, 0, 0)
     dp = DeltaPrimeData(Deltap, dp_raw, dp_coil, Ap, Bp, Gammap)
 
-    # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution). The cut
-    # solution rides along when a later MatchProblem solve will need the composite inner-region
-    # profiles; gal_match_flag implies it so deck-driven matched runs keep their Match/Inner data.
+    # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution); the cut
+    # solution only when a later match needs the composite inner profiles.
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
         delta=((ctrl.gal_cut_solution || ctrl.gal_match_flag) ? delta : nothing))

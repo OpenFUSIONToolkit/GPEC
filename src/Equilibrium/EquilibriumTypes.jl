@@ -893,10 +893,8 @@ This object provides a complete representation of the processed plasma equilibri
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
-  - `kinetic::Union{Nothing,KineticProfileSplines}`: kinetic profiles (density, temperature,
-    rotation, collisionality) attached to this equilibrium — the loaded, scaled splines, not a
-    file path. `nothing` until attached with [`attach_kinetic_profiles!`](@ref). Consumed by the two-pass grid
-    refinement, the kinetic stability matrices, and the NTV torque stage.
+  - `kinetic::Union{Nothing,KineticProfileSplines}`: kinetic profiles attached with
+    [`attach_kinetic_profiles!`](@ref), or `nothing`.
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig

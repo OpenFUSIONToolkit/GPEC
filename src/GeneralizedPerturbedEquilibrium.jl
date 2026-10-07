@@ -396,10 +396,8 @@ end
 """
     load_kinetic_context(inputs, intr, ctrl, equil) -> (kf_ctrl, species)
 
-Build the KineticForces control and, when a stage needs the kinetic profiles, attach them to
-the equilibrium — `equil.kinetic` is the one home of loaded profiles for the whole run. The
-multi-species NTV resolution stays here (it is stage configuration, not equilibrium data);
-`species` is `nothing` unless the deck requests it.
+Build the KineticForces control, attach the kinetic profiles to `equil` when a stage needs
+them, and resolve the NTV species (`nothing` unless the deck requests them).
 """
 function load_kinetic_context(
     inputs::Dict{String,Any},
@@ -730,8 +728,7 @@ function run_force_free_states(
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
     result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
 
-    # Deck-driven inner-layer matching: route the published ideal-closed result through the
-    # post-solve MatchProblem, so the deck keys and the scripting API share one match path.
+    # Deck-driven matching, through the same MatchProblem as the API.
     if ctrl.gal_match_flag
         ctrl.gal_rpec_flag || error("gal_match_flag=true requires gal_rpec_flag=true")
         ctrl.gal_inner_solver in ("ray", "galerkin") ||
@@ -850,8 +847,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
 
     resolve_mode_space!(intr, ctrl)
 
-    # The kinetic profiles live on the equilibrium; the KineticForces control here only carries
-    # the NTV-stage knobs `prepare_force_free_states!` threads into the calculated-source callback.
+    # Default NTV knobs for the calculated kinetic source; the profiles are on `equil`.
     kf_ctrl = KineticForces.KineticForcesControl()
 
     if Equilibrium.wants_two_pass(equil.config) && equil.ingest === nothing
@@ -1361,8 +1357,7 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         slayer_ctrl.enabled || return nothing
         @info "\n  SLAYER\n$_SECTION"
         slayer_start = time()
-        # The deck boundary is the one place the `inner_model` string becomes a typed model;
-        # below here the model object flows through the solve unchanged.
+        # Deck inner_model → inner-layer model.
         model = if slayer_ctrl.inner_model === :slayer_fitzpatrick
             InnerLayer.SLAYERModel()
         elseif slayer_ctrl.inner_model === :ggj_ray

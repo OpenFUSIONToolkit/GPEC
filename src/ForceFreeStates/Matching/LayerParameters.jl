@@ -1,8 +1,6 @@
 # LayerParameters.jl
 #
-# The per-surface layer-parameter builder: turn kinetic profiles into the (η, ρ, rotation)
-# the GGJ inner layer consumes, with explicit vectors as overrides. Shared by the driven
-# match and the GGJ tearing solve.
+# Per-surface η, ρ and rotation for the GGJ inner layer, from kinetic profiles.
 
 using ..Utilities.PhysicalConstants: M_P, E_CHG
 using ..Utilities: KineticProfiles
@@ -14,23 +12,11 @@ using ..Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel, Sa
                      rotation=nothing, mu_i=2.0, zeff=1.0, resistivity_model=SauterNeoModel(),
                      lnLambda_form=:nrl) -> (; eta, rho, rotation)
 
-Per-surface inner-layer plasma parameters for the rational surfaces in `surfaces`, derived
-from `profiles` — the kinetic profiles attached to the equilibrium by default, or a
-`KineticProfiles` table — or taken verbatim from the explicit override vectors, which always win. Returns one value per surface, core
-to edge in the order of `surfaces`:
-
-  - `eta` — resistivity η in Ω·m from the closure selected by `resistivity_model`: the
-    Sauter neoclassical η by default, which reads the trapped fraction and local geometry
-    off each surface's `restype` (populated by `resist_eval_all!`), or `SpitzerModel()`.
-  - `rho` — mass density ρ = μᵢ·m_p·n_e(ψ_s) in kg/m³, quasineutral main-ion convention.
-  - `rotation` — rotation frequency f in Hz from the E×B frequency, f = ω_E(ψ_s)/2π; the
-    forced layer eigenvalue of the driven match is γ_s = 2πi·n·f_s.
-
-A derivation (any override left `nothing`) requires profiles — attach them with
-`attach_kinetic_profiles!` or at equilibrium construction.
-
-Overrides are artificial-scan and no-kinetic-data paths: each of `eta`, `rho`, `rotation`
-may independently be a vector with one entry per surface.
+Resistivity η in Ω·m, mass density ρ = μᵢ·m_p·n_e in kg/m³ and E×B rotation frequency
+f = ω_E/2π in Hz at each surface, from `profiles`: the attached kinetic profiles, or a
+`KineticProfiles` table. `eta`, `rho` or `rotation` vectors, one value per surface, override
+the derived values. The default η is Sauter neoclassical; `resistivity_model=SpitzerModel()`
+gives Spitzer.
 """
 function layer_parameters(
     surfaces::AbstractVector,

@@ -207,7 +207,7 @@ gpec.toml.
     gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
     gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
     gal_edge_onesided::Bool = false # pack the two end intervals one-sided toward their single rational end (vs the Fortran symmetric "both" pack); avoids the fine edge cell that inflates cond(A). Default false = faithful to gal.f.
-    gal_cut_solution::Bool = false  # also reconstruct the cut solution (xi_cut/cut_range) needed for the composite inner-region profiles of a later match; implied by gal_match_flag
+    gal_cut_solution::Bool = false  # also keep the cut solution for a later match's composite inner profiles; implied by gal_match_flag
     # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
     gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
     gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.

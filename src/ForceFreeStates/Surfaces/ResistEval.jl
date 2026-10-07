@@ -199,10 +199,7 @@ end
 """
     ggj_parameters(sing, equil; eta, rho, gamma=5/3, ising=0) -> InnerLayer.GGJParameters
 
-GGJ inner-layer parameters at the rational surface `sing`, from its geometry
-(`sing.restype`, see [`resist_eval_all!`](@ref)) and the local resistivity `eta` in Ω·m
-and mass density `rho` in kg/m³: `τ_A = √(ρ·M·μ₀)/|2π n q₁ χ₁/V′|`,
-`τ_R = (⟨B²/|∇ψ|²⟩/⟨B²⟩)·μ₀/η`, and `G` formed at the ratio of specific heats `gamma`.
+GGJ layer parameters at `sing` from its `restype` geometry and the local η (Ω·m) and ρ (kg/m³).
 """
 function ggj_parameters(sing::SingType, equil::Equilibrium.PlasmaEquilibrium;
     eta::Real, rho::Real, gamma::Real=5 / 3, ising::Int=0)

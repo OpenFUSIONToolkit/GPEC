@@ -61,7 +61,7 @@ matching `gal_*` control key without the prefix.
   - `sing_order_ceiling::Bool` - Auto-raise the order per surface for a high Mercier index.
   - `rpec_flag::Bool` - Append the mpert coil-response columns to the Δ′ solve. Required for a later `MatchProblem` solve on the result.
   - `edge_onesided::Bool` - Pack the two end intervals one-sided toward their single rational end instead of the Fortran symmetric pack.
-  - `cut_solution::Bool` - Also reconstruct the cut solution (`xi_cut`), which a later `MatchProblem` solve needs for the composite inner-region profiles.
+  - `cut_solution::Bool` - Also keep the cut solution, for a later `MatchProblem`'s composite inner profiles.
 """
 @kwdef struct Galerkin <: AbstractIntegrator
     solver::String = "LU"

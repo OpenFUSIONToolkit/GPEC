@@ -1,36 +1,20 @@
 # TearingProblem.jl
 #
-# The free-eigenvalue tearing solve in the problem/model grammar: a TearingProblem holds a
-# finished force-free-states result and the matching-procedure control; the inner-layer
-# model passed to `solve` evaluates Δ(Q), and the growth rate is root-found where
-# Δ_inner(Q) = Δ'_outer. This file IS the orchestration (profiles → per-surface parameters
-# → Δ' conditioning → the scan core); the model stays a typed object end-to-end, and the
-# deck's `inner_model` string is translated to a model at the deck boundary, never below.
+# Tearing growth rates from a finished solve: root-find Δ_inner(Q) = Δ′_outer per surface.
 
 """
     TearingProblem(ffs; kwargs...)
 
-The free-eigenvalue tearing problem posed on a finished force-free-states solve: hold the
-outer Δ′ fixed and root-find the growth rate where the inner-layer response matches it.
-This is the WHAT; the inner-layer model passed to [`solve`](@ref) — `SLAYERModel()` or
-`GGJModel()` — is the HOW. Keyword arguments are
-[`SLAYERControl`](@ref) fields (the matching procedure: scan mode and Q-domain, coupling
-mode, critical-Δ convention, extraction filters, plasma-composition knobs, and the
-`profile_file` override); `enabled` is implied by posing the problem.
+Tearing-mode growth rates from a finished force-free-states solve: hold the outer Δ′ fixed
+and find the growth rate at which the inner layer matches it. Solve with
+`solve(prob, SLAYERModel())` or `solve(prob, GGJModel())`. Keywords are
+[`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs. Kinetic profiles come from
+`profile_file` if set, else from `ffs.equil.kinetic`. Without a full Δ′ matrix the per-surface
+Δ′ stubs are used, with a warning.
 
-Kinetic profiles come from `profile_file` when it is set, otherwise from the profiles
-attached to the equilibrium (`ffs.equil.kinetic`). The outer Δ′ comes from
-`ffs.delta_prime`; a result without one (or with the wrong surface count) falls back to the
-per-surface scalar stubs with a loud warning, exactly as the deck path always has.
-
-## Fields
-
-  - `ffs` - The force-free-states result supplying the equilibrium, surfaces and Δ′.
-  - `control::SLAYERControl` - The matching-procedure control (single source of truth; its
-    `inner_model` key is deck vocabulary resolved at the deck boundary and never read here).
+Fields: `ffs`, `control::SLAYERControl`.
 """
-# The result field is deliberately duck-typed (anything carrying equil/surfaces/
-# delta_prime/dir_path), so tests can drive the solve with lightweight stand-ins.
+# `ffs` is duck-typed (equil, surfaces, delta_prime, dir_path) so tests can use stand-ins.
 struct TearingProblem{R}
     ffs::R
     control::SLAYERControl
@@ -39,11 +23,7 @@ end
 TearingProblem(ffs::ForceFreeStatesResult; kwargs...) =
     TearingProblem(ffs, SLAYERControl(; enabled=true, kwargs...))
 
-# Kinetic profiles from the splines attached to the equilibrium, in the layer builders'
-# convention: temperatures back in eV, `omega` the E×B rotation, and the per-surface
-# diamagnetic inputs zeroed (they are recomputed from equilibrium gradients downstream,
-# exactly as the file loader does). χ profiles are not carried by the attachment, so the
-# scalar model fallbacks apply.
+# Attached profiles as a KineticProfiles table (eV; ω* recomputed downstream; no χ, so the scalar fallbacks apply).
 function _profiles_from_equilibrium(kp)
     xs = kp.xs
     E_CHG = Utilities.PhysicalConstants.E_CHG
@@ -58,8 +38,6 @@ function _profiles_from_equilibrium(kp)
         chi_perp=nothing, chi_tor=nothing)
 end
 
-# Per-surface parameter building, keyed on the model. GGJ is genuinely toroidal/ψ-based;
-# SLAYER is the slab layer with χ transport.
 function _tearing_params(::GGJModel, equil, surfaces, loaded, control)
     lp = layer_parameters(surfaces, equil; profiles=loaded.profiles,
         mu_i=control.mu_i,
@@ -73,7 +51,7 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
     # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
     # field: `control.bt = nothing` makes build_slayer_inputs compute the physical
     # B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline.
-    # χ⊥/χ_φ from the kinetic file when present, else the model's scalar fallbacks.
+    # χ⊥/χ_φ from the kinetic file when present, else the control's scalar fallbacks.
     chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
     chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
     (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
@@ -96,10 +74,7 @@ end
 """
     solve(prob::TearingProblem, model) -> SLAYERResult
 
-Run the tearing analysis: source the kinetic profiles, build the per-surface layer
-parameters for `model`, condition the outer Δ′ (full matrix when the result carries one,
-the per-surface diagonal stub fallback otherwise), and root-find the growth rates with the
-scan core. `model` is an inner-layer model — `SLAYERModel()` or `GGJModel()`.
+Tearing growth rates per surface with the inner layer of `model`.
 """
 function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerModel)
     control = prob.control

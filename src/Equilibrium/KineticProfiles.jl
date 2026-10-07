@@ -582,10 +582,7 @@ end
 """
     attach_kinetic_profiles!(equil, kinetic_file; kwargs...) -> equil
 
-Load kinetic profiles from `kinetic_file` and attach them to `equil.kinetic`, making the
-equilibrium the one canonical home of its kinetic data. The flux normalization `chi1 = 2π·ψ₀`
-is taken from the equilibrium itself; all other keywords are the [`load_kinetic_profiles`](@ref)
-species and scan knobs. Returns `equil` for chaining.
+Load `kinetic_file` into `equil.kinetic`; keywords go to [`load_kinetic_profiles`](@ref).
 """
 function attach_kinetic_profiles!(equil, kinetic_file::AbstractString; kwargs...)
     equil.kinetic = load_kinetic_profiles(kinetic_file; chi1=2π * equil.psio, kwargs...)

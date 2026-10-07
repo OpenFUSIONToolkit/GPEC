@@ -1,13 +1,7 @@
 # run_slayer.jl
 #
-# The tearing-analysis scan core and its supporting pieces: profile loading, the
-# ψ_N → r_s Δ' reference conversion for slab layers, and `run_slayer_from_inputs`,
-# which takes the inner-layer model as a typed object plus pre-built per-surface
-# parameters and a Δ' matrix, runs the requested scan mode, extracts growth rates
-# by contour intersection, and returns a `SLAYERResult`. The orchestration that
-# builds those inputs from a finished solve is the `TearingProblem` solve
-# (TearingProblem.jl); driving the core directly keeps the end-to-end code covered
-# without requiring a full equilibrium solve in every test.
+# Tearing scan core: profile loading, the slab Δ′ reference conversion, and
+# `run_slayer_from_inputs` (scan + growth-rate extraction). `TearingProblem` builds its inputs.
 
 # ---------------------------------------------------------------------
 # Profile loading
