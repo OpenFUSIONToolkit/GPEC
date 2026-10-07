@@ -16,20 +16,20 @@
 # the original ill-conditioned pin (Q ≈ 6e5·i) that was order-1 irreproducible across architecture.
 
 const IL = GeneralizedPerturbedEquilibrium.InnerLayer
-const GGJMod = IL.GGJ
+const GGJ = IL.GGJ
 
 @testset "InnerLayer GGJ (Glasser & Wang 2020, Eq. 55)" begin
     p = IL.glasser_wang_2020_eq55()
 
     @testset "Mercier index and matching powers (Eq. 49)" begin
         # D_I = E + F + H − 1/4 from the verbatim Eq. 55 coefficients.
-        D_I = GGJMod.mercier_di(p)
+        D_I = GGJ.mercier_di(p)
         @test D_I ≈ -0.268361 rtol = 1e-4
         @test D_I < 0                              # Mercier-stable: the inner-layer model's premise
 
         # p1 = √(−D_I) sets the large-x Frobenius exponents r_± = 3/2 ± √(−D_I) (Eq. 49).
-        @test GGJMod.p1(p) ≈ sqrt(-D_I) rtol = 1e-12
-        @test GGJMod.p1(p) ≈ 0.518036 rtol = 1e-4
+        @test GGJ.p1(p) ≈ sqrt(-D_I) rtol = 1e-12
+        @test GGJ.p1(p) ≈ 0.518036 rtol = 1e-4
     end
 
     @testset "Galerkin Δ(Q) at Q = 0.1234, cross-checked vs Fortran rmatch deltac" begin
@@ -37,8 +37,8 @@ const GGJMod = IL.GGJ
         # Eq. 55's companion point is the scaled growth rate Q = 0.1234 (real); build the physical
         # rate γ = Q·Q₀ so inner_Q(p, γ) lands exactly there.
         Q_paper = 0.1234
-        γ = Q_paper * GGJMod.q0(p)
-        @test GGJMod.inner_Q(p, γ) ≈ Q_paper rtol = 1e-12
+        γ = Q_paper * GGJ.q0(p)
+        @test GGJ.inner_Q(p, γ) ≈ Q_paper rtol = 1e-12
         Δ = IL.solve_inner(gal, p, γ)
         @test all(isfinite, (Δ.tearing, Δ.interchange))
         # Δ is purely real at this real Q; values cross-checked against an independent
@@ -59,7 +59,7 @@ end
     p = IL.glasser_wang_2020_eq55()
 
     @testset "agrees with :galerkin at the paper point Q = 0.1234" begin
-        γ = 0.1234 * GGJMod.q0(p)
+        γ = 0.1234 * GGJ.q0(p)
         Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, γ)
         # Same Fortran-cross-checked pins as the Galerkin testset above.
         @test real(Δ.interchange) ≈ 3.698368e4 rtol = 1e-3
@@ -72,7 +72,7 @@ end
 
     @testset "q4 physical benchmark at Q = 500i (regime beyond :galerkin)" begin
         q4 = IL.q4_surface_benchmark()
-        γ = 500.0im * GGJMod.q0(q4)
+        γ = 500.0im * GGJ.q0(q4)
         Δ = IL.solve_inner(IL.GGJModel(), q4, γ)
         # Pins from the pre-port validation suite (post extended-precision
         # march fix; S-invariant to 3e-4 / 7e-9 and θ-stable there).
@@ -82,7 +82,7 @@ end
         # Δ is an analytic invariant of the contour angle: the outward
         # θ-check drift is a direct numerical error measurement. `solve_ray`
         # returns the raw pair (Δ₁, Δ₂) = (interchange, tearing).
-        Q = GGJMod.inner_Q(q4, γ)
+        Q = GGJ.inner_Q(q4, γ)
         r2 = IL.solve_ray(q4, Q; θ=1.2 * angle(Q) / 4)
         @test abs(r2.Δ[2] - Δ.tearing) / abs(Δ.tearing) < 1e-5
         @test abs(r2.Δ[1] - Δ.interchange) / abs(Δ.interchange) < 1e-3
@@ -93,7 +93,7 @@ end
     p = IL.q4_surface_benchmark()
 
     @testset "cheblobatto nodes and differentiation matrix" begin
-        t, D = GGJMod.cheblobatto(8)
+        t, D = GGJ.cheblobatto(8)
         @test length(t) == 9
         @test issorted(t)                         # ascending, per the reflected convention
         @test t[1] ≈ -1 && t[end] ≈ 1
@@ -104,23 +104,23 @@ end
     @testset "ode_matrix: ordinary point and type-generic build" begin
         Q = 5.0im
         # x = 0 is an ordinary point: the coefficient matrix is finite there.
-        M0 = GGJMod.ode_matrix(p, Q, 0.0)
+        M0 = GGJ.ode_matrix(p, Q, 0.0)
         @test all(isfinite, M0)
         @test M0[1, 4] == 1 && M0[2, 5] == 1 && M0[3, 6] == 1   # v' = (Ψ',Ξ',Υ') block
         # The extended-precision build agrees with the Float64 build.
-        Md = GGJMod.ode_matrix(Complex{GGJMod.Double64}, p, Q, 0.3)
-        @test ComplexF64.(Md) ≈ GGJMod.ode_matrix(p, Q, 0.3) rtol = 1e-12
+        Md = GGJ.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
+        @test ComplexF64.(Md) ≈ GGJ.ode_matrix(p, Q, 0.3) rtol = 1e-12
     end
 
     @testset "parity_rows match the deltac boundary convention" begin
-        @test GGJMod.parity_rows(1) == [4, 2, 3]     # odd:  Ψ'(0)=Ξ(0)=Υ(0)=0
-        @test GGJMod.parity_rows(2) == [1, 5, 6]     # even: Ψ(0)=Ξ'(0)=Υ'(0)=0
+        @test GGJ.parity_rows(1) == [4, 2, 3]     # odd:  Ψ'(0)=Ξ(0)=Υ(0)=0
+        @test GGJ.parity_rows(2) == [1, 5, 6]     # even: Ψ(0)=Ξ'(0)=Υ'(0)=0
     end
 
     @testset "decaying_pair is an orthonormal 6×2 frame" begin
         Q = 5.0im
         θ = angle(Q) / 4
-        E = GGJMod.decaying_pair(p, Q, θ, 60.0)
+        E = GGJ.decaying_pair(p, Q, θ, 60.0)
         @test size(E) == (6, 2)
         @test all(isfinite, E)
         @test E' * E ≈ I(2) atol = 1e-10          # columns orthonormal
@@ -139,7 +139,7 @@ end
     @testset "delta_convergence: small spread, consistent with solve_inner" begin
         Q = 5.0im
         conv = IL.delta_convergence(p, Q; verbose=false)
-        Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, Q * GGJMod.q0(p))
+        Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, Q * GGJ.q0(p))
         # conv.Δ is the raw solve_ray pair (Δ₁, Δ₂) = (interchange, tearing).
         @test conv.Δ[1] ≈ Δ.interchange rtol = 1e-6   # baseline == the plain solve
         @test conv.Δ[2] ≈ Δ.tearing rtol = 1e-6
@@ -149,7 +149,7 @@ end
 
 @testset "solve_inner_profile interface (matching-driver contract)" begin
     p = IL.glasser_wang_2020_eq55()
-    γ = 0.1234 * GGJMod.q0(p)
+    γ = 0.1234 * GGJ.q0(p)
     for model in (IL.GGJModel(; solver=:ray), IL.GGJModel(; solver=:galerkin))
         prof = IL.solve_inner_profile(model, p, γ)
         # Δ agrees with the plain matching solve of the same backend (identical solve path).
@@ -165,8 +165,8 @@ end
         # Parity at the layer center: Ψ(0) ≠ 0 odd-parity column, Ψ(0) = 0 even-parity column.
         @test abs(prof.Ψ[1, 2]) < 1e-6 * abs(prof.Ψ[1, 1])
         # Conversion factors match their GGJ definitions.
-        @test prof.dψdx ≈ GGJMod.x0(p) / p.v1
-        @test prof.rescale ≈ (p.v1 / GGJMod.x0(p))^(0.5 + GGJMod.p1(p))
+        @test prof.dψdx ≈ GGJ.x0(p) / p.v1
+        @test prof.rescale ≈ (p.v1 / GGJ.x0(p))^(0.5 + GGJ.p1(p))
     end
     # Ray backend certificate: at real Q the optimal contour is θ = 0, so the two solves coincide.
     ray = IL.solve_inner_profile(IL.GGJModel(; solver=:ray), p, γ)

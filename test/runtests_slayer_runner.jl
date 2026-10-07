@@ -3,7 +3,7 @@
     using GeneralizedPerturbedEquilibrium.InnerLayer
     # The InnerLayer submodules GGJ/SLAYER shadow the top-level model configs under a bare
     # `using`; import the configs explicitly so the API names win the ambiguity.
-    using GeneralizedPerturbedEquilibrium: GGJ, SLAYER, TearingProblem, solve
+    using GeneralizedPerturbedEquilibrium: GGJModel, SLAYERModel, TearingProblem, solve
     using GeneralizedPerturbedEquilibrium.Dispersion
     using GeneralizedPerturbedEquilibrium.Runner
     using HDF5
@@ -103,20 +103,18 @@
         c = SLAYERControl(; enabled=true, profile_file="unused.h5")
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing)
-        r = solve(TearingProblem(no_surfaces, c), SLAYER())
+        r = solve(TearingProblem(no_surfaces, c), SLAYERModel())
         @test isempty(r.params)
 
         # A disabled control never looks at the result at all.
-        r_off = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5")), SLAYER())
+        r_off = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5")), SLAYERModel())
         @test r_off.enabled == false
     end
 
-    @testset "deck model vocabulary maps onto typed models" begin
-        @test Runner._tearing_tag(SLAYER()) isa InnerLayer.SLAYERModel
-        @test Runner._tearing_tag(GGJ(; solver=:shooting)) isa InnerLayer.GGJModel{:shooting}
-        @test Runner._tearing_tag(GGJ(; solver=:galerkin)) isa InnerLayer.GGJModel{:galerkin}
-        # The :ray backend has no tearing dispersion path.
-        @test_throws ErrorException Runner._tearing_tag(GGJ())
+    @testset "the :ray backend is rejected by the tearing solve" begin
+        no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
+            delta_prime=nothing, dir_path=".")
+        @test_throws ErrorException solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true, profile_file="unused.h5")), GGJModel())
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one

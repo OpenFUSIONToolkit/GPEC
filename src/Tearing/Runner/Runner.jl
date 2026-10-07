@@ -32,7 +32,7 @@ using FastInterpolations: cubic_interp
 using ..Utilities
 using ..Utilities: KineticProfiles
 using ...Equilibrium: read_kinetic_file, KineticProfileData
-using ...ForceFreeStates: ForceFreeStatesResult, GGJ, SLAYER, layer_parameters, ggj_parameters
+using ...ForceFreeStates: ForceFreeStatesResult, layer_parameters, ggj_parameters
 using ..InnerLayer
 using ..InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,

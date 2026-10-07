@@ -12,8 +12,8 @@
 
 The free-eigenvalue tearing problem posed on a finished force-free-states solve: hold the
 outer Δ′ fixed and root-find the growth rate where the inner-layer response matches it.
-This is the WHAT; the inner-layer model passed to [`solve`](@ref) — `SLAYER()` or
-`GGJ(; solver=:shooting|:galerkin)` — is the HOW. Keyword arguments are
+This is the WHAT; the inner-layer model passed to [`solve`](@ref) — `SLAYERModel()` or
+`GGJModel(; solver=:shooting|:galerkin)` — is the HOW. Keyword arguments are
 [`SLAYERControl`](@ref) fields (the matching procedure: scan mode and Q-domain, coupling
 mode, critical-Δ convention, extraction filters, plasma-composition knobs, and the
 `profile_file` override); `enabled` is implied by posing the problem.
@@ -58,14 +58,9 @@ function _profiles_from_equilibrium(kp)
         chi_perp=nothing, chi_tor=nothing)
 end
 
-# Per-surface parameter building and the dispatch tag, keyed on the user-facing model
-# config. GGJ is genuinely toroidal/ψ-based; SLAYER is the slab layer with χ transport.
-_tearing_tag(model::GGJ) =
-    model.solver in (:shooting, :galerkin) ? InnerLayer.GGJModel(; solver=model.solver) :
-    error("tearing with GGJ needs solver=:shooting or :galerkin (got :$(model.solver); the :ray backend has no tearing dispersion path)")
-_tearing_tag(::SLAYER) = InnerLayer.SLAYERModel(; variant=:fitzpatrick)
-
-function _tearing_params(::GGJ, equil, surfaces, loaded, control)
+# Per-surface parameter building, keyed on the model. GGJ is genuinely toroidal/ψ-based;
+# SLAYER is the slab layer with χ transport.
+function _tearing_params(::GGJModel, equil, surfaces, loaded, control)
     lp = layer_parameters(surfaces, equil; profiles=loaded.profiles,
         mu_i=control.mu_i,
         zeff=control.zeff,
@@ -74,13 +69,13 @@ function _tearing_params(::GGJ, equil, surfaces, loaded, control)
     return [ggj_parameters(s, equil; eta=lp.eta[k], rho=lp.rho[k], ising=k) for (k, s) in enumerate(surfaces)]
 end
 
-function _tearing_params(model::SLAYER, equil, surfaces, loaded, control)
+function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
     # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
     # field: `control.bt = nothing` makes build_slayer_inputs compute the physical
     # B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline.
     # χ⊥/χ_φ from the kinetic file when present, else the model's scalar fallbacks.
-    chi_perp = loaded.chi_perp === nothing ? model.chi_perp : loaded.chi_perp
-    chi_tor = loaded.chi_tor === nothing ? model.chi_tor : loaded.chi_tor
+    chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
+    chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
     (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
         "SLAYER: no usable chi_e/chi_phi profile(s) (dataset absent or all-zero); " *
         "using the scalar chi_perp/chi_tor fallback for the missing one(s).")
@@ -104,8 +99,8 @@ end
 Run the tearing analysis: source the kinetic profiles, build the per-surface layer
 parameters for `model`, condition the outer Δ′ (full matrix when the result carries one,
 the per-surface diagonal stub fallback otherwise), and root-find the growth rates with the
-scan core. `model` is a user-facing inner-layer config — [`SLAYER`](@ref) or
-[`GGJ`](@ref) with a `:shooting`/`:galerkin` backend.
+scan core. `model` is an inner-layer model — `SLAYERModel()` or `GGJModel` with a
+`:shooting`/`:galerkin` backend.
 """
 function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerModel)
     control = prob.control
@@ -113,6 +108,8 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
     equil = ffs.equil
     surfaces = ffs.surfaces
 
+    model isa GGJModel{:ray} &&
+        error("tearing with GGJ needs solver=:shooting or :galerkin (the :ray backend has no tearing dispersion path)")
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(surfaces) && return empty_slayer_result(control)
@@ -157,6 +154,6 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
 
     rational_psi = Float64[surfaces[p.ising].psifac for p in params]
     rational_q = Float64[surfaces[p.ising].q for p in params]
-    return run_slayer_from_inputs(_tearing_tag(model), params, dp, control;
+    return run_slayer_from_inputs(model, params, dp, control;
         rational_psi=rational_psi, rational_q=rational_q)
 end

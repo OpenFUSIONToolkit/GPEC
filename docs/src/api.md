@@ -90,11 +90,11 @@ cost one cheap match solve per point:
 ```julia
 ffs = solve(eq, Galerkin(; rpec_flag=true, cut_solution=true); nn=1)
 
-matched = solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[0.0, 0.0]), GGJ())
+matched = solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[0.0, 0.0]), GGJModel())
 @assert matched.closure === :matched
 
 # A rotation scan reuses the one outer solve:
-bpens = [solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[f, f]), GGJ()).bpen
+bpens = [solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[f, f]), GGJModel()).bpen
          for f in 0.0:50.0:500.0]
 ```
 
@@ -103,7 +103,7 @@ equilibrium (`layer_parameters`), with the explicit vectors as overrides. The pr
 a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and
 Riccati results; a Riccati-fed match fills `bpen` and the resonant data but keeps
 `solution === nothing` (no outer basis is retained). Only a closure-capable model is
-accepted — `GGJ()` today; `SLAYER()` is slab-only and drives the free-eigenvalue tearing
+accepted — `GGJModel()` today; `SLAYERModel()` is slab-only and drives the free-eigenvalue tearing
 solve instead.
 
 ## Tearing stability
@@ -111,12 +111,12 @@ solve instead.
 The free-eigenvalue tearing solve is the second flavor of inner-layer matching: instead of
 prescribing the layer rotation, a `TearingProblem` holds the outer Δ′ fixed and root-finds
 the growth rate where the inner-layer response matches it. The same model slot applies —
-`SLAYER()` is the slab layer that exists for exactly this problem, and
-`GGJ(; solver=:shooting|:galerkin)` runs the toroidal layer through the same scan:
+`SLAYERModel()` is the slab layer that exists for exactly this problem, and
+`GGJModel(; solver=:shooting|:galerkin)` runs the toroidal layer through the same scan:
 
 ```julia
 ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
-tear = solve(TearingProblem(ffs; coupling_mode=:coupled), SLAYER())
+tear = solve(TearingProblem(ffs; coupling_mode=:coupled), SLAYERModel())
 tear.gamma_Hz, tear.rational_q                               # root-found rates per surface
 ```
 

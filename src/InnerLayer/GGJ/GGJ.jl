@@ -44,15 +44,32 @@ import ..solve_inner, ..solve_inner_profile
 
 """
     GGJModel{S} <: InnerLayerModel
+    GGJModel(; solver=:ray, options...)
 
 Glasser–Greene–Johnson resistive inner-layer model. `S` selects the solver
 backend: `:ray` (default; robust at large |Q| on/near the imaginary axis),
 `:galerkin` (real-axis Hermite FEM; degrades for |Q| ≳ 1), or `:shooting`
-(|Q| ≪ 1 only). The backends take different numerical-knob keywords.
+(|Q| ≪ 1 only). The backends take different numerical-knob keywords; any given at
+construction, e.g. `GGJModel(; solver=:galerkin, nx=1280)`, are carried in `options`
+and forwarded to every solve, under keywords passed at the call.
 """
-struct GGJModel{S} <: InnerLayerModel end
+struct GGJModel{S,O<:NamedTuple} <: InnerLayerModel
+    options::O
+end
 
-GGJModel(; solver::Symbol=:ray) = GGJModel{solver}()
+GGJModel(; solver::Symbol=:ray, options...) = GGJModel{solver,typeof(values(options))}(values(options))
+GGJModel{S}() where {S} = GGJModel{S,@NamedTuple{}}((;))
+
+# The backends implement the option-free model; a model carrying options forwards them.
+const _BareGGJ{S} = GGJModel{S,@NamedTuple{}}
+function solve_inner(m::GGJModel{S}, params, γ::Number; kwargs...) where {S}
+    m isa _BareGGJ && throw(MethodError(solve_inner, (m, params, γ)))
+    return solve_inner(GGJModel{S}(), params, γ; m.options..., kwargs...)
+end
+function solve_inner_profile(m::GGJModel{S}, params, γ::Number; kwargs...) where {S}
+    m isa _BareGGJ && throw(MethodError(solve_inner_profile, (m, params, γ)))
+    return solve_inner_profile(GGJModel{S}(), params, γ; m.options..., kwargs...)
+end
 
 include("GGJParameters.jl")
 include("InnerAsymptotics.jl")

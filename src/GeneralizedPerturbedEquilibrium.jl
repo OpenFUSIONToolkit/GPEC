@@ -86,7 +86,8 @@ using .ForceFreeStates: galerkin_solve, write_galerkin!
 # Scripting-API surface: the integrator selectors, the published result, the equilibrium
 # constructor and the forcing description, re-exported so a user needs one `using`.
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
-using .ForceFreeStates: MatchProblem, MatchResult, GGJ, SLAYER, layer_parameters, closure_capable
+using .ForceFreeStates: MatchProblem, MatchResult, layer_parameters, closure_capable
+using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing.Runner: TearingProblem
 using .Equilibrium: PlasmaEquilibrium, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
@@ -740,9 +741,11 @@ function run_force_free_states(
             "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
             "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
         )
-        model = ForceFreeStates.GGJ(; solver=Symbol(ctrl.gal_inner_solver),
-            inner_xfac=ctrl.gal_inner_xfac, inner_nx=ctrl.gal_inner_nx, inner_nq=ctrl.gal_inner_nq,
-            inner_cutoff=ctrl.gal_inner_cutoff, inner_kmax=ctrl.gal_inner_kmax)
+        # The gal_inner_* grid knobs belong to the "galerkin" backend only.
+        model = ctrl.gal_inner_solver == "galerkin" ?
+                InnerLayer.GGJModel(; solver=:galerkin, xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx,
+            nq=ctrl.gal_inner_nq, cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax) :
+                InnerLayer.GGJModel(; solver=:ray)
         prob = ForceFreeStates.MatchProblem(result;
             eta=isempty(ctrl.gal_eta) ? nothing : ctrl.gal_eta,
             rho=isempty(ctrl.gal_rho) ? nothing : ctrl.gal_rho,
@@ -1359,11 +1362,11 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         # The deck boundary is the one place the `inner_model` string becomes a typed model;
         # below here the model object flows through the solve unchanged.
         model = if slayer_ctrl.inner_model === :slayer_fitzpatrick
-            ForceFreeStates.SLAYER(; chi_perp=slayer_ctrl.chi_perp, chi_tor=slayer_ctrl.chi_tor)
+            InnerLayer.SLAYERModel()
         elseif slayer_ctrl.inner_model === :ggj_shooting
-            ForceFreeStates.GGJ(; solver=:shooting)
+            InnerLayer.GGJModel(; solver=:shooting)
         elseif slayer_ctrl.inner_model === :ggj_galerkin
-            ForceFreeStates.GGJ(; solver=:galerkin)
+            InnerLayer.GGJModel(; solver=:galerkin)
         else
             error("unknown [SLAYER] inner_model $(slayer_ctrl.inner_model)")
         end
@@ -1807,6 +1810,6 @@ end
 export main, write_imas
 export solve, perturbed_equilibrium
 export PlasmaEquilibrium, attach_kinetic_profiles!, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
-export MatchProblem, TearingProblem, GGJ, SLAYER, layer_parameters
+export MatchProblem, TearingProblem, GGJModel, SLAYERModel, layer_parameters
 
 end # module GeneralizedPerturbedEquilibrium

@@ -1,8 +1,7 @@
 using TOML
 
-# Inner-layer model configuration and the shared layer-parameter builder: the structs are
-# pure config with capability gates, and `layer_parameters` must reproduce the same
-# resistivity/density closures the SLAYER/GGJ input builders use, from `equil.kinetic`.
+# Inner-layer model capability gates and option forwarding, and the shared layer-parameter
+# builder, which must reproduce the resistivity/density closures from `equil.kinetic`.
 @testset "Matching models and layer parameters" begin
     GPEC = GeneralizedPerturbedEquilibrium
     FFS = GPEC.ForceFreeStates
@@ -10,15 +9,17 @@ using TOML
     E_CHG = GPEC.Utilities.PhysicalConstants.E_CHG
     M_P = GPEC.Utilities.PhysicalConstants.M_P
 
-    @testset "model structs and capability gates" begin
-        ggj = FFS.GGJ()
-        @test ggj.solver === :ray
-        @test FFS.closure_capable(ggj)
-        @test !FFS.closure_capable(FFS.SLAYER())
-        @test FFS.GGJ(; solver=:galerkin, inner_nx=640).inner_nx == 640
-        @test FFS.SLAYER(; chi_perp=0.5).chi_perp == 0.5
-        @test ggj isa GPEC.InnerLayer.InnerLayerModel
-        @test FFS.SLAYER() isa GPEC.InnerLayer.InnerLayerModel
+    @testset "model capability gates and option forwarding" begin
+        IL = GPEC.InnerLayer
+        @test IL.GGJModel() isa IL.GGJModel{:ray}
+        @test FFS.closure_capable(IL.GGJModel())
+        @test !FFS.closure_capable(IL.SLAYERModel())
+        @test IL.GGJModel(; solver=:galerkin, nx=640).options == (nx=640,)
+        # Carried options reach the backend exactly as call-site keywords do.
+        p = IL.glasser_wang_2020_eq55()
+        γ = 1e-3im
+        @test IL.solve_inner(IL.GGJModel(; solver=:galerkin, nx=256), p, γ) == IL.solve_inner(IL.GGJModel(; solver=:galerkin), p, γ; nx=256)
+        @test IL.solve_inner(IL.GGJModel(; solver=:galerkin, nx=256), p, γ; nx=512) == IL.solve_inner(IL.GGJModel(; solver=:galerkin), p, γ)
     end
 
     @testset "override precedence needs no kinetic data" begin

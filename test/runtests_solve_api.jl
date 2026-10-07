@@ -204,10 +204,10 @@ using TOML
             # A slab model can never close a matched solution.
             gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=dir, ffs_kwargs...)
             prob = MatchProblem(gal; ideal=true)
-            @test_throws ErrorException solve(prob, SLAYER())
+            @test_throws ErrorException solve(prob, SLAYERModel())
             # The ideal reference match keeps the ideal closure and replaces the solution with
             # the bare coil columns in the identity-at-edge basis.
-            matched = solve(prob, GGJ())
+            matched = solve(prob, GGJModel())
             @test matched.closure === :ideal
             @test matched.galerkin.match !== nothing
             @test matched.solution !== nothing && matched.solution.basis === :gal_native

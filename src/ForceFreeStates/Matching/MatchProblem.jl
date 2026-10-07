@@ -1,6 +1,6 @@
 # MatchProblem.jl
 #
-# Inner-layer matching as a POST-SOLVE transformation: `solve(MatchProblem(ffs; ...), GGJ())`
+# Inner-layer matching as a POST-SOLVE transformation: `solve(MatchProblem(ffs; ...), GGJModel())`
 # consumes a published ForceFreeStatesResult and returns a new one with the closure changed
 # from :ideal to :matched and the eigenfunctions replaced — the expensive outer solve is
 # reused across arbitrarily many cheap match solves (η/ρ/rotation scans). Port of rmatch
@@ -16,7 +16,7 @@
 The driven (RPEC) inner-layer matching problem posed on a finished force-free-states solve:
 match the outer Δ′ the solve published against an inner-layer response at PRESCRIBED
 per-surface eigenvalues γ_s = 2πi·n·f_s. This is the WHAT; the inner-layer model passed to
-[`solve`](@ref) — `GGJ()` today — is the HOW. Solving it returns a NEW
+[`solve`](@ref) — `GGJModel()` today — is the HOW. Solving it returns a NEW
 `ForceFreeStatesResult` with `closure = :matched`, `bpen` filled, and (when the producing
 formalism retained its outer basis) the ξ solution replaced by the matched profiles, so
 layer-parameter scans reuse one outer solve across many cheap match solves.
@@ -87,6 +87,17 @@ function _matched_surfaces(ffs::ForceFreeStatesResult)
 end
 
 """
+    closure_capable(model) -> Bool
+
+Whether an inner-layer model can CLOSE a matched outer solution: that takes both parity
+channels of the matching data and the reconstructed layer field profiles. `GGJModel` can;
+`SLAYERModel` cannot (slab: single parity, no interchange channel, no layer profiles) — it
+is restricted to the free-eigenvalue tearing solve.
+"""
+closure_capable(::InnerLayer.GGJModel) = true
+closure_capable(::InnerLayer.SLAYERModel) = false
+
+"""
     solve(prob::MatchProblem, model) -> ForceFreeStatesResult
 
 Solve the driven inner-layer matching with the given [`InnerLayer.InnerLayerModel`](@ref)
@@ -101,7 +112,7 @@ function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel
     closure_capable(model) ||
         error("a $(nameof(typeof(model))) inner-layer model cannot close a matched solution " *
               "(slab: single parity, no interchange channel, no reconstructable layer profiles); " *
-              "use GGJ() here — SLAYER drives the free-eigenvalue tearing solve instead")
+              "use GGJModel() here — SLAYERModel drives the free-eigenvalue tearing solve instead")
     match = _compute_match(prob, model)
     return _matched_result(prob.ffs, match, prob.ideal)
 end
@@ -110,7 +121,7 @@ end
 # problem and model instead of the control struct). The matching system and resonant
 # products are basis-free; the outer-profile recombination and the composite inner-region
 # graft run only when the producing solve retained its outer basis.
-function _compute_match(prob::MatchProblem, model::GGJ)
+function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     ffs = prob.ffs
     dp = ffs.delta_prime
     sings = prob.surfaces
