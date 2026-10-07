@@ -55,10 +55,11 @@ The Cartesian evaluation grid is clipped to the separatrix bounding box and its
 resolution is set adaptively from a bilinear interpolation error bound, so no manual
 tuning is needed.
 
-## F and P from a g-file or IMAS equilibrium
+## F and P from a g-file, i-file or IMAS equilibrium
 
 A g-file tabulates both the profiles (`FPOL`, `PRES`) and their flux derivatives (`FFPRIM`,
-`PPRIME`); an IMAS equilibrium does the same (`f`, `pressure`, `f_df_dpsi`, `dpressure_dpsi`).
+`PPRIME`); an IMAS equilibrium does the same (`f`, `pressure`, `f_df_dpsi`, `dpressure_dpsi`), and so does an
+i-file (`ldp_i`) whose optional trailing FF′ and p′ records are present (TokaMaker `save_ifile` writes them).
 The stability matrices use ``F'`` directly and respond to how ``F'`` varies across each rational
 surface, i.e. to the current gradient. ``F`` itself changes by only a few percent across the
 plasma, so differentiating a tabulated ``F`` amplifies its rounding error by roughly

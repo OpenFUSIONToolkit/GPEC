@@ -42,7 +42,7 @@ specified in the input.
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
   - `imas_cocos::Int` - COCOS convention of the input IMAS `dd.equilibrium` (11 = IMAS standard, 2 = internal)
-  - `profile_source::String` - Which 1D arrays of a g-file or IMAS equilibrium define F and P.
+  - `profile_source::String` - Which 1D arrays of a g-file, i-file or IMAS equilibrium define F and P.
     `"derivatives"` (default) integrates the file's FF′ and p′ inward from the boundary values of
     F and P; `"values"` uses the tabulated F and P directly. The reader falls back to `"values"`
     with a warning when the derivatives are absent or unusable.
@@ -380,8 +380,8 @@ end
     InverseIngest
 
 The serializable raw arrays and scalars captured by an inverse-equilibrium reader
-(`read_chease_ascii`, `read_chease_binary`) — everything needed to rebuild an
-`InverseRunInput`'s splines without re-reading the original CHEASE file. Stored on
+(`read_chease_ascii`, `read_chease_binary`, `read_ldp_i`) — everything needed to rebuild an
+`InverseRunInput`'s splines without re-reading the original CHEASE file or i-file. Stored on
 `InverseRunInput.ingest` / `PlasmaEquilibrium.ingest` and reconstructed by
 `build_inverse_from_ingest`. See [`DirectIngest`](@ref) for the role this plays in
 the `gpec.h5` rerun snapshot.
