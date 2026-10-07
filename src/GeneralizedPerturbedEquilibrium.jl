@@ -741,11 +741,14 @@ function run_force_free_states(
             "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
             "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
         )
-        # The gal_inner_* grid knobs belong to the "galerkin" backend only.
-        model = ctrl.gal_inner_solver == "galerkin" ?
-                InnerLayer.GGJModel(; solver=:galerkin, xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx,
-            nq=ctrl.gal_inner_nq, cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax) :
-                InnerLayer.GGJModel(; solver=:ray)
+        # The gal_inner_* knobs override the "galerkin" backend's defaults; unset keys keep them.
+        model = if ctrl.gal_inner_solver == "galerkin"
+            knobs = (xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx, nq=ctrl.gal_inner_nq,
+                cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax)
+            InnerLayer.GGJModel(; solver=:galerkin, (k => v for (k, v) in pairs(knobs) if v !== nothing)...)
+        else
+            InnerLayer.GGJModel(; solver=:ray)
+        end
         prob = ForceFreeStates.MatchProblem(result;
             eta=isempty(ctrl.gal_eta) ? nothing : ctrl.gal_eta,
             rho=isempty(ctrl.gal_rho) ? nothing : ctrl.gal_rho,
@@ -1363,6 +1366,8 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         # below here the model object flows through the solve unchanged.
         model = if slayer_ctrl.inner_model === :slayer_fitzpatrick
             InnerLayer.SLAYERModel()
+        elseif slayer_ctrl.inner_model === :ggj_ray
+            InnerLayer.GGJModel(; solver=:ray)
         elseif slayer_ctrl.inner_model === :ggj_shooting
             InnerLayer.GGJModel(; solver=:shooting)
         elseif slayer_ctrl.inner_model === :ggj_galerkin

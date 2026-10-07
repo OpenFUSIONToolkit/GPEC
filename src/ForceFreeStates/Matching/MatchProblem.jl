@@ -11,7 +11,7 @@
 
 """
     MatchProblem(ffs; eta=nothing, rho=nothing, rotation=nothing, gamma=5/3, ideal=false,
-                 mu_i=2.0, zeff=1.0, resistivity_model=SpitzerModel(), lnLambda_form=:nrl)
+                 mu_i=2.0, zeff=1.0, resistivity_model=SauterNeoModel(), lnLambda_form=:nrl)
 
 The driven (RPEC) inner-layer matching problem posed on a finished force-free-states solve:
 match the outer Δ′ the solve published against an inner-layer response at PRESCRIBED
@@ -56,7 +56,7 @@ function MatchProblem(
     ideal::Bool=false,
     mu_i::Real=2.0,
     zeff::Real=1.0,
-    resistivity_model::NeoResistivityModel=SpitzerModel(),
+    resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl
 )
     dp = ffs.delta_prime

@@ -13,7 +13,7 @@
 The free-eigenvalue tearing problem posed on a finished force-free-states solve: hold the
 outer Δ′ fixed and root-find the growth rate where the inner-layer response matches it.
 This is the WHAT; the inner-layer model passed to [`solve`](@ref) — `SLAYERModel()` or
-`GGJModel(; solver=:shooting|:galerkin)` — is the HOW. Keyword arguments are
+`GGJModel()` — is the HOW. Keyword arguments are
 [`SLAYERControl`](@ref) fields (the matching procedure: scan mode and Q-domain, coupling
 mode, critical-Δ convention, extraction filters, plasma-composition knobs, and the
 `profile_file` override); `enabled` is implied by posing the problem.
@@ -99,8 +99,7 @@ end
 Run the tearing analysis: source the kinetic profiles, build the per-surface layer
 parameters for `model`, condition the outer Δ′ (full matrix when the result carries one,
 the per-surface diagonal stub fallback otherwise), and root-find the growth rates with the
-scan core. `model` is an inner-layer model — `SLAYERModel()` or `GGJModel` with a
-`:shooting`/`:galerkin` backend.
+scan core. `model` is an inner-layer model — `SLAYERModel()` or `GGJModel()`.
 """
 function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerModel)
     control = prob.control
@@ -108,8 +107,6 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
     equil = ffs.equil
     surfaces = ffs.surfaces
 
-    model isa GGJModel{:ray} &&
-        error("tearing with GGJ needs solver=:shooting or :galerkin (the :ray backend has no tearing dispersion path)")
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(surfaces) && return empty_slayer_result(control)

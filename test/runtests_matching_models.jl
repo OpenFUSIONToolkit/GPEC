@@ -58,7 +58,7 @@ using TOML
             @test_throws ErrorException FFS.layer_parameters(surfaces, bare)
 
             kp = ffs.equil.kinetic
-            out = FFS.layer_parameters(surfaces, ffs.equil)
+            out = FFS.layer_parameters(surfaces, ffs.equil; resistivity_model=NCR.SpitzerModel())
             for (k, sing) in enumerate(surfaces)
                 ψ = sing.psifac
                 n_e = kp.ne_spline(ψ)
@@ -70,12 +70,13 @@ using TOML
             end
 
             # Partial override: eta passed through verbatim, the rest still derived.
-            mixed = FFS.layer_parameters(surfaces, ffs.equil; eta=fill(3e-8, length(surfaces)))
+            mixed = FFS.layer_parameters(surfaces, ffs.equil; eta=fill(3e-8, length(surfaces)), resistivity_model=NCR.SpitzerModel())
             @test all(mixed.eta .== 3e-8)
             @test mixed.rho == out.rho
 
-            # The neoclassical closure reads the surface's trapped fraction and stays physical.
-            neo = FFS.layer_parameters(surfaces, ffs.equil; resistivity_model=NCR.SauterNeoModel())
+            # The default closure is Sauter neoclassical: it reads the surface's trapped fraction and stays physical.
+            neo = FFS.layer_parameters(surfaces, ffs.equil)
+            @test neo.eta == FFS.layer_parameters(surfaces, ffs.equil; resistivity_model=NCR.SauterNeoModel()).eta
             @test all(isfinite, neo.eta) && all(>(0), neo.eta)
             @test neo.eta != out.eta
         end

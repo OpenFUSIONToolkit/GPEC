@@ -111,10 +111,12 @@
         @test r_off.enabled == false
     end
 
-    @testset "the :ray backend is rejected by the tearing solve" begin
+    @testset "the default :ray backend drives the tearing solve" begin
+        @test SLAYERControl(; inner_model=:ggj_ray).inner_model === :ggj_ray
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing, dir_path=".")
-        @test_throws ErrorException solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true, profile_file="unused.h5")), GGJModel())
+        r = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true, profile_file="unused.h5")), GGJModel())
+        @test isempty(r.params)
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one

@@ -6,12 +6,12 @@
 
 using ..Utilities.PhysicalConstants: M_P, E_CHG
 using ..Utilities: KineticProfiles
-using ..Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
+using ..Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel, SauterNeoModel,
     coulomb_log_e, eta_spitzer, nu_star_e, eta_neoclassical
 
 """
     layer_parameters(surfaces, equil; profiles=equil.kinetic, eta=nothing, rho=nothing,
-                     rotation=nothing, mu_i=2.0, zeff=1.0, resistivity_model=SpitzerModel(),
+                     rotation=nothing, mu_i=2.0, zeff=1.0, resistivity_model=SauterNeoModel(),
                      lnLambda_form=:nrl) -> (; eta, rho, rotation)
 
 Per-surface inner-layer plasma parameters for the rational surfaces in `surfaces`, derived
@@ -19,9 +19,9 @@ from `profiles` — the kinetic profiles attached to the equilibrium by default,
 `KineticProfiles` table — or taken verbatim from the explicit override vectors, which always win. Returns one value per surface, core
 to edge in the order of `surfaces`:
 
-  - `eta` — resistivity η in Ω·m: Spitzer (Sauter 1999 Eq. 18a) by default, or the
-    neoclassical closure selected by `resistivity_model`, which reads the trapped fraction
-    and local geometry off each surface's `restype` (populated by `resist_eval_all!`).
+  - `eta` — resistivity η in Ω·m from the closure selected by `resistivity_model`: the
+    Sauter neoclassical η by default, which reads the trapped fraction and local geometry
+    off each surface's `restype` (populated by `resist_eval_all!`), or `SpitzerModel()`.
   - `rho` — mass density ρ = μᵢ·m_p·n_e(ψ_s) in kg/m³, quasineutral main-ion convention.
   - `rotation` — rotation frequency f in Hz from the E×B frequency, f = ω_E(ψ_s)/2π; the
     forced layer eigenvalue of the driven match is γ_s = 2πi·n·f_s.
@@ -41,7 +41,7 @@ function layer_parameters(
     rotation::Union{Nothing,AbstractVector{<:Real}}=nothing,
     mu_i::Real=2.0,
     zeff::Real=1.0,
-    resistivity_model::NeoResistivityModel=SpitzerModel(),
+    resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl
 )
     msing = length(surfaces)

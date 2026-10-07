@@ -165,7 +165,9 @@
             ua_right=zeros(ComplexF64, 0, 0, 0),
             psi_ua_left=0.0, psi_ua_right=0.0)
         @test s_unpop.restype === nothing
-        @test_throws ArgumentError ggj_from(equil, [s_unpop], profiles)
+        @test_throws ArgumentError ggj_parameters(s_unpop, equil; eta=1e-7, rho=1e-7)
+        # The default Sauter closure needs the same geometry, so the derivation refuses too.
+        @test_throws ErrorException ggj_from(equil, [s_unpop], profiles)
     end
 
     @testset "GGJ solve_inner runs on built parameters" begin
