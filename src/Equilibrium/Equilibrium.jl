@@ -145,16 +145,11 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 end
 
 """
-    PlasmaEquilibrium(path::AbstractString; eq_type="efit", kinetic_file=nothing, kwargs...) -> PlasmaEquilibrium
+    PlasmaEquilibrium(path::AbstractString; eq_type="efit", kwargs...) -> PlasmaEquilibrium
 
 Read the equilibrium file at `path` and return the processed equilibrium. Convenience entry
 point of the scripting API: `kwargs` are [`EquilibriumConfig`](@ref) fields, so
 `PlasmaEquilibrium("g000001.00001"; jac_type="hamada", mpsi=128)` is the whole setup.
-
-`kinetic_file` attaches kinetic profiles to the equilibrium in the same call; the remaining
-explicit keywords are the [`attach_kinetic_profiles!`](@ref) species and scan knobs and are
-only read when `kinetic_file` is given. Profiles can equally be attached to an existing
-equilibrium with `attach_kinetic_profiles!` directly.
 
 Only file-based equilibria go through this constructor. Analytic kinds (`sol`, `lar`,
 `tj_analytic`) take their parameters from a separate config object and are built with
@@ -162,23 +157,12 @@ Only file-based equilibria go through this constructor. Analytic kinds (`sol`, `
 
 ```julia
 eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
-eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada", kinetic_file="kin.h5", zi=1)
 ```
 """
-function PlasmaEquilibrium(path::AbstractString; eq_type::String="efit",
-    kinetic_file::Union{Nothing,AbstractString}=nothing,
-    zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
-    density_factor::Float64=1.0, temperature_factor::Float64=1.0,
-    ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
-    kwargs...)
+function PlasmaEquilibrium(path::AbstractString; eq_type::String="efit", kwargs...)
     haskey(ANALYTIC_EQ, eq_type) &&
         error("$eq_type is an analytic equilibrium: build it with setup_equilibrium(config, $(ANALYTIC_EQ[eq_type].config_type)(...)) instead")
-    equil = setup_equilibrium(EquilibriumConfig(; eq_type, eq_filename=abspath(path), kwargs...))
-    kinetic_file === nothing && return equil
-    return attach_kinetic_profiles!(equil, abspath(kinetic_file);
-        zi=zi, zimp=zimp, mi=mi, mimp=mimp,
-        density_factor=density_factor, temperature_factor=temperature_factor,
-        ExB_rotation_factor=ExB_rotation_factor, toroidal_rotation_factor=toroidal_rotation_factor)
+    return setup_equilibrium(EquilibriumConfig(; eq_type, eq_filename=abspath(path), kwargs...))
 end
 
 """

@@ -822,8 +822,7 @@ sugar building the problem from an equilibrium and the problem keywords in one c
 
 Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic
 runs (`kinetic_factor > 0`) with `kinetic_source="calculated"` need kinetic profiles on the
-equilibrium — build it with `PlasmaEquilibrium(path; kinetic_file=...)` or attach them with
-`attach_kinetic_profiles!(eq, file)` before solving; the self-contained `"fixed"` source
+equilibrium — attach them with `attach_kinetic_profiles!(eq, file)` before solving; the self-contained `"fixed"` source
 needs no attachment.
 
 ```julia
@@ -843,7 +842,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
 
     ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && equil.kinetic === nothing &&
         error("kinetic_source=\"calculated\" needs kinetic profiles on the equilibrium — " *
-              "build it with PlasmaEquilibrium(path; kinetic_file=...) or attach_kinetic_profiles!(eq, file)")
+              "attach them with attach_kinetic_profiles!(eq, file)")
 
     intr = ForceFreeStatesInternal(; dir_path=prob.dir_path)
     intr.wall_settings = prob.wall

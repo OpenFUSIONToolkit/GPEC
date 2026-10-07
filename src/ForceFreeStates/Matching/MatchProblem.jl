@@ -299,21 +299,12 @@ end
 # convention); a resistive match carries the matched-surface-set bpen. The matched profiles
 # replace the solution whenever the outer basis allowed their construction.
 function _matched_result(ffs::ForceFreeStatesResult, match::MatchResult, ideal::Bool)
-    gal = ffs.galerkin
-    new_gal = gal === nothing ? nothing :
-              GalerkinResult(gal.msing, gal.sing_psi, gal.sing_q, gal.sing_m, gal.sing_n,
-        gal.di, gal.alpha, gal.solution, match)
+    new_gal = ffs.galerkin === nothing ? nothing : _with(ffs.galerkin; match=match)
     solution = (new_gal !== nothing && new_gal.solution !== nothing && !isempty(match.xi)) ?
                _matched_gal_profiles(new_gal, ffs.mats, ffs) : ffs.solution
-    closure = ideal ? :ideal : :matched
-    bpen = ideal ? ffs.bpen : match.bpen
-
-    return ForceFreeStatesResult(
-        ffs.integrator, ffs.control, ffs.equil,
-        ffs.mlow, ffs.mhigh, ffs.mpert, ffs.nlow, ffs.nhigh, ffs.npert, ffs.numpert_total,
-        ffs.psilow, ffs.psilim, ffs.qlim, ffs.q1lim, ffs.dir_path, ffs.wall_settings, ffs.debug_settings,
-        ffs.metric, ffs.mats, ffs.surfaces, ffs.kinetic,
-        closure, bpen,
-        solution, ffs.diagnostics, ffs.wp, ffs.free_boundary, ffs.delta_prime, new_gal
-    )
+    return _with(ffs; closure=ideal ? :ideal : :matched, bpen=ideal ? ffs.bpen : match.bpen,
+        solution=solution, galerkin=new_gal)
 end
+
+# A copy of the immutable `x` with the named fields replaced.
+_with(x; fields...) = typeof(x).name.wrapper((get(fields, f, getfield(x, f)) for f in fieldnames(typeof(x)))...)

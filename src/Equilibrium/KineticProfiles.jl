@@ -580,23 +580,14 @@ function shift_exb_rotation(kp::KineticProfileSplines, Δω::Real)
 end
 
 """
-    attach_kinetic_profiles!(equil, kinetic_file; zi=1, zimp=6, mi=2, mimp=12,
-                             density_factor=1.0, temperature_factor=1.0,
-                             ExB_rotation_factor=1.0, toroidal_rotation_factor=1.0) -> equil
+    attach_kinetic_profiles!(equil, kinetic_file; kwargs...) -> equil
 
 Load kinetic profiles from `kinetic_file` and attach them to `equil.kinetic`, making the
 equilibrium the one canonical home of its kinetic data. The flux normalization `chi1 = 2π·ψ₀`
 is taken from the equilibrium itself; all other keywords are the [`load_kinetic_profiles`](@ref)
 species and scan knobs. Returns `equil` for chaining.
 """
-function attach_kinetic_profiles!(equil, kinetic_file::AbstractString;
-    zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
-    density_factor::Float64=1.0, temperature_factor::Float64=1.0,
-    ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0)
-    equil.kinetic = load_kinetic_profiles(kinetic_file;
-        zi=zi, zimp=zimp, mi=mi, mimp=mimp,
-        density_factor=density_factor, temperature_factor=temperature_factor,
-        ExB_rotation_factor=ExB_rotation_factor, toroidal_rotation_factor=toroidal_rotation_factor,
-        chi1=2π * equil.psio)
+function attach_kinetic_profiles!(equil, kinetic_file::AbstractString; kwargs...)
+    equil.kinetic = load_kinetic_profiles(kinetic_file; chi1=2π * equil.psio, kwargs...)
     return equil
 end

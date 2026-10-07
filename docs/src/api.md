@@ -126,11 +126,10 @@ kinetic profiles come from `profile_file` or, when none is named, from the profi
 attached to the equilibrium.
 
 Kinetic runs (`kinetic_factor > 0`) need kinetic profiles attached to the
-equilibrium — either at construction or explicitly on an existing one:
+equilibrium:
 
 ```julia
-eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada", kinetic_file="kin.h5", zi=1)
-attach_kinetic_profiles!(eq, "kin.h5"; zi=1)                  # equivalent, post-hoc
+eq = attach_kinetic_profiles!(PlasmaEquilibrium("input.geqdsk"; jac_type="hamada"), "kin.h5"; zi=1)
 ffs = solve(eq, Forward(); nn=1, kinetic_factor=1.0)
 ```
 
