@@ -32,6 +32,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 - Equilibrium data file in one of the supported formats:
   - `efit` — EFIT g-file from experimental reconstruction
   - `chease` / `chease2` — CHEASE equilibrium code output
+  - `ldp_i` / `ifile` — inverse i-file (e.g. TokaMaker `save_ifile`)
   - `lar` — Large aspect ratio analytical model
   - `sol` — Solov'ev analytical equilibrium
 - Kinetic profiles file (planned) — temperature and density profiles for the kinetic analysis path
