@@ -45,6 +45,7 @@ function MatchProblem(
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl
 )
+    ffs.npert == 1 || error("MatchProblem: matching is single-n; the result spans n = $(ffs.nlow):$(ffs.nhigh)")
     dp = ffs.delta_prime
     dp === nothing &&
         error("MatchProblem: the $(ffs.integrator) result has no Δ′; solve with Galerkin(; rpec_flag=true), or Riccati() with vac_flag=true")
@@ -103,6 +104,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     mcoil = size(dp.coil, 2)
     nn = ffs.nlow
     equil = ffs.equil
+    chi1 = 2π * equil.psio
 
     gal_sol = ffs.galerkin === nothing ? nothing : ffs.galerkin.solution
 
@@ -123,7 +125,6 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         deltar = zeros(ComplexF64, msing, 2)
         rpec_eig = zeros(ComplexF64, msing)
         # Layer-center field weight per parity (match.f intotsol_b).
-        chi1 = 2π * equil.psio
         pen = zeros(ComplexF64, msing, 2)
         inner_psi = Vector{Vector{Float64}}(undef, msing)      # ψ_s ± X·dψdx, ascending
         inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₁, odd about ψ_s
@@ -202,7 +203,6 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
                 cut_range = gal_sol.cut_range
                 keep = .!gal_sol.issing
                 psi_keep = gal_sol.psi[keep]
-                chi1_c = 2π * equil.psio
                 for i in 1:msing
                     m_res = round(Int, nn * sings[i].q)
                     ires = m_res - ffs.mlow + 1
@@ -235,7 +235,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
                         itp(buf, psi_p; hint=hint)
                         singfac = m_res - nn * equil.profiles.q_spline(psi_p)
                         @views inner_xi[i][ip, :] .+= buf
-                        @views inner_b[i][ip, :] .+= (2π * im * chi1_c * singfac) .* buf
+                        @views inner_b[i][ip, :] .+= (2π * im * chi1 * singfac) .* buf
                     end
                 end
             end

@@ -121,7 +121,7 @@
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one
     # does: `result.delta_prime.matrix` is populated and already sized to the surface list, which
-    # is the predicate `run_slayer` uses to accept it over the per-surface diagonal stub.
+    # is the predicate the tearing solve uses to accept it over the per-surface diagonal stub.
     @testset "Galerkin-fed SLAYER: gal Δ' drives the coupled solve" begin
         mktempdir() do dir
             deck = joinpath(@__DIR__, "..", "examples", "LAR_ideal_match_test")

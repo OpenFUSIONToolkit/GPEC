@@ -101,7 +101,7 @@ bpens = [solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[f
 The per-surface η/ρ/rotation can also be derived from the kinetic profiles attached to the
 equilibrium (`layer_parameters`), with the explicit vectors as overrides. The problem needs
 a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and
-Riccati results; a Riccati-fed match fills `bpen` and the resonant data but keeps
+Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the resonant data but keeps
 `solution === nothing` (no outer basis is retained). Only a closure-capable model is
 accepted — `GGJModel()` today; `SLAYERModel()` is slab-only and drives the free-eigenvalue tearing
 solve instead.
@@ -111,8 +111,8 @@ solve instead.
 The free-eigenvalue tearing solve is the second flavor of inner-layer matching: instead of
 prescribing the layer rotation, a `TearingProblem` holds the outer Δ′ fixed and root-finds
 the growth rate where the inner-layer response matches it. The same model slot applies —
-`SLAYERModel()` is the slab layer that exists for exactly this problem, and
-`GGJModel(; solver=:shooting|:galerkin)` runs the toroidal layer through the same scan:
+`SLAYERModel()` is the slab layer that exists for exactly this problem. `GGJModel()` also runs
+through the scan, but GGJ growth-rate extraction is not implemented yet: its γ are placeholders.
 
 ```julia
 ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion

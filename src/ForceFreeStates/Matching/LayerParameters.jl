@@ -39,8 +39,8 @@ function layer_parameters(
     needs_derivation = eta === nothing || rho === nothing || rotation === nothing
     if needs_derivation
         profiles === nothing &&
-            error("layer_parameters: deriving η/ρ/rotation needs kinetic profiles on the equilibrium — " *
-                  "attach them with attach_kinetic_profiles!(equil, file) or pass all three override vectors")
+            error("layer_parameters: deriving η/ρ/rotation needs kinetic profiles on the equilibrium; attach them " *
+                  "before solving (or to ffs.equil after), or pass all three of eta, rho, rotation")
 
         eta_out = Vector{Float64}(undef, msing)
         rho_out = Vector{Float64}(undef, msing)

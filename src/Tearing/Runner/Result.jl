@@ -7,7 +7,7 @@
 """
     SLAYERResult
 
-Output of `run_slayer`. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
+Output of the tearing solve. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
 full diagnostic detail (valid roots, poles, filtered roots, contours) for
 downstream inspection and HDF5 output.
 

@@ -731,6 +731,9 @@ function run_force_free_states(
     # Deck-driven matching, through the same MatchProblem as the API.
     if ctrl.gal_match_flag
         ctrl.gal_rpec_flag || error("gal_match_flag=true requires gal_rpec_flag=true")
+        ctrl.gal_ideal_flag || result.equil.kinetic !== nothing ||
+            !(isempty(ctrl.gal_eta) || isempty(ctrl.gal_rho) || isempty(ctrl.gal_rotation)) ||
+            error("gal_match_flag needs gal_eta, gal_rho and gal_rotation, or a [KineticForces] kinetic_file to derive them")
         ctrl.gal_inner_solver in ("ray", "galerkin") ||
             error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
         ctrl.verbose && @info(

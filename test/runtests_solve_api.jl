@@ -196,6 +196,55 @@ using TOML
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
     end
 
+    # Path of the first field where `a` and `b` differ (recursing into structs, arrays and
+    # dicts), or `nothing` when they are equal everywhere. Underscore fields are private
+    # lazily-built caches (e.g. a spline's transpose) and are skipped.
+    function first_diff(a, b, path="")
+        typeof(a) === typeof(b) || return "$path (type)"
+        a isa Union{Number,AbstractString,Symbol,Nothing,Function,Type} && return isequal(a, b) ? nothing : path
+        a isa AbstractArray{<:Number} && return isequal(a, b) ? nothing : path
+        if a isa AbstractArray
+            size(a) == size(b) || return "$path (size)"
+            for i in eachindex(a)
+                d = first_diff(a[i], b[i], "$path[$i]")
+                d === nothing || return d
+            end
+            return nothing
+        end
+        if a isa AbstractDict
+            keys(a) == keys(b) || return "$path (keys)"
+            for k in keys(a)
+                d = first_diff(a[k], b[k], "$path[$k]")
+                d === nothing || return d
+            end
+            return nothing
+        end
+        for f in fieldnames(typeof(a))
+            startswith(string(f), "_") && continue
+            isdefined(a, f) == isdefined(b, f) || return "$path.$f (definedness)"
+            isdefined(a, f) || continue
+            d = first_diff(getfield(a, f), getfield(b, f), "$path.$f")
+            d === nothing || return d
+        end
+        return nothing
+    end
+
+    @testset "solves leave their inputs untouched" begin
+        snap = deepcopy(equil)
+        mktempdir() do dir
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, dir_path=dir, ffs_kwargs...)
+            @test first_diff(equil, snap) === nothing
+            # Matching reuses the outer solve: repeated match solves must not alter it.
+            gal_snap = deepcopy(gal)
+            n = length(MatchProblem(gal; ideal=true).surfaces)
+            layer = (eta=fill(1e-7, n), rho=fill(1e-7, n))
+            slow = solve(MatchProblem(gal; layer..., rotation=fill(1.0, n)), GGJModel())
+            fast = solve(MatchProblem(gal; layer..., rotation=fill(10.0, n)), GGJModel())
+            @test slow.bpen != fast.bpen
+            @test first_diff(gal, gal_snap) === nothing
+        end
+    end
+
     @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
         mktempdir() do dir
             ric = solve(equil, Riccati(); nn=1, dir_path=dir, ffs_kwargs...)
