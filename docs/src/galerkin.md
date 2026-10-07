@@ -20,6 +20,12 @@ control surface (when `vac_flag`) and produces no free-boundary energies or ODE 
 Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution that
 `PerturbedEquilibrium` consumes in place of a forward solution.
 
+`gal_solver` picks the banded solver. `"LU"` (the default) handles any assembled matrix and is
+required for the coil-response columns (`gal_rpec_flag`) and matching. `"cholesky"` factors the
+lower band as Hermitian positive definite (LAPACK `zpbtrf`/`zpbtrs`) and stops with an error when
+the matrix is not positive definite (as on the DIII-D-like examples);
+`examples/LAR_gal_cholesky_example` is a case where it applies.
+
 The implementation lives in `src/ForceFreeStates/Galerkin/`:
 
 | File | Content |
