@@ -22,6 +22,7 @@ extract = "value"
 label = "Re(Δ_odd)"
 noise_threshold = 1e-4
 order = 10
+class = "physics_converged"
 
 [quantities.delta_odd_imag]
 h5path = "ggj/delta_odd_imag"
@@ -30,6 +31,7 @@ extract = "value"
 label = "Im(Δ_odd)"
 noise_threshold = 1e-4
 order = 11
+class = "physics_converged"
 
 [quantities.delta_even_real]
 h5path = "ggj/delta_even_real"
@@ -38,6 +40,7 @@ extract = "value"
 label = "Re(Δ_even)"
 noise_threshold = 1e-4
 order = 12
+class = "physics_converged"
 
 [quantities.delta_even_imag]
 h5path = "ggj/delta_even_imag"
@@ -46,6 +49,7 @@ extract = "value"
 label = "Im(Δ_even)"
 noise_threshold = 1e-4
 order = 13
+class = "physics_converged"
 
 [quantities.runtime]
 h5path = ""
@@ -54,3 +58,4 @@ extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
 order = 90
+class = "diagnostic"

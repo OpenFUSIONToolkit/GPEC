@@ -16,7 +16,8 @@ modify them. **Do not invent a new convention** — match what the existing exam
    files** — `examples/DIIID-like_ideal_example/gpec.toml` is the canonical reference for the
    common sections. Exception: in `regression-harness/cases/*.toml` the repeated
    `[quantities.*]` schema keys (`h5path`, `type`, `extract`, `label`, `noise_threshold`,
-   `order`) are developer metadata and do **not** need inline comments — a case file needs
+   `order`, and the required golden tolerance `class`) are developer metadata and do **not**
+   need inline comments (a `class` that is not the obvious one for its quantity should say why) — a case file needs
    the header plus an informative block comment per quantity group instead.
 3. **Section comments only when informative.** No comment is required above a section. Keep a
    block comment only when it carries real information (e.g. the Solovev `[Wall]` note on why a
