@@ -4,9 +4,6 @@
 # small edge singular factor. The q = 2 and q = 3 surfaces resonate at both n, so SingularCoupling
 # repeats them across rows. psihigh and delta_mhigh keep the case small for the regression harness;
 # every n block spans m = -8..20, which a single-n n = 1 run matches only with delta_mhigh = 8.
-# frobenius_psi_max = 0 uses the fixed axis start: the Frobenius start's m = 0 branch is picked by
-# roundoff, which makes the n = 1 anti-Hermitian part of W (and so the torque) differ between
-# otherwise identical runs.
 
 [Equilibrium]
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
