@@ -536,6 +536,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
         end
     end
+    equil.rzphi_xs[1] == 0.0 && extrap_axis_row!(flux_fs, equil.rzphi_xs, 1:2)
     # Create flux interpolants for Grad-Shafranov diagnostics
     @views flux_fs[:, end, :] .= flux_fs[:, 1, :]
     flux_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
