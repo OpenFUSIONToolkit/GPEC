@@ -164,11 +164,11 @@ _threshold(sc::ThresholdScaling, scen::ScenarioParameters, αc, αn, αb, αr, �
     10.0^αc * scen.n_e^αn * scen.b_t0^αb * scen.r_0^αr * (scen.beta_n / scen.l_i)^αβ * (αI == 0 ? 1.0 : scen.i_p^αI)
 
 """
-    nominal_threshold(sc::ThresholdScaling, scen::ScenarioParameters) -> Float64
+    fitted_threshold(sc::ThresholdScaling, scen::ScenarioParameters) -> Float64
 
 The penetration threshold at the fitted exponents.
 """
-function nominal_threshold(sc::ThresholdScaling, scen::ScenarioParameters)
+function fitted_threshold(sc::ThresholdScaling, scen::ScenarioParameters)
     _check_current(sc, scen)
     return _threshold(sc, scen, sc.alpha_c[1], sc.alpha_n[1], sc.alpha_b[1], sc.alpha_r[1], sc.alpha_beta[1], sc.alpha_ip[1])
 end
@@ -241,35 +241,38 @@ end
 """
     RiskResult
 
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
+
 The locking risk of a Monte Carlo overlap distribution under one threshold scaling. All
 probabilities are percentages.
 
 ## Fields
 
-  - `bin_edges`: the Monte Carlo's `|δ|` grid `[nbins + 1]`
+  - `abs_delta_bin_edges`: the Monte Carlo's `|δ|` grid `[nbins + 1]`
   - `threshold_pdf`: probability density of the sampled penetration threshold on that grid `[nbins]`
-  - `p_lock_given_delta`: probability that an overlap equal to each bin edge locks, the
+  - `locking_probability_given_delta`: probability that an overlap equal to each bin edge locks, the
     threshold's cumulative distribution `[nbins + 1]`
-  - `threshold_nominal`: the threshold at the fitted exponents
-  - `plock`, `plock_efc`: locking probability of the intrinsic and of the corrected distribution,
+  - `threshold_fit`: the threshold at the fitted exponents
+  - `locking_probability_percent`, `locking_probability_efc_percent`: locking probability of the intrinsic and of the corrected distribution,
     `100 ∫ pdf(δ) P(lock|δ) dδ`, batch averages
-  - `plock_batches`, `plock_efc_batches`: the same per Monte Carlo batch `[nbatch]`; their ranges
+  - `locking_probability_batches_percent`, `locking_probability_efc_batches_percent`: the same per Monte Carlo batch `[nbatch]`; their ranges
     are the statistical error bars
-  - `plock_nominal`: risk of the as-designed machine, `100 P(lock|δ_nominal)`
-  - `plock_sharp`: risk if the threshold were exactly its nominal value, `100 P(|δ| > threshold_nominal)`
+  - `locking_probability_as_designed_percent`: locking probability of the as-designed machine, `100 P(lock | |Σ δ_as_designed|)`
+  - `locking_probability_fit_threshold_percent`: locking probability if the threshold were exactly its fitted value, `100 P(|δ| > threshold_fit)`
   - `scaling`: the threshold fit used
 """
 struct RiskResult
-    bin_edges::Vector{Float64}
+    abs_delta_bin_edges::Vector{Float64}
     threshold_pdf::Vector{Float64}
-    p_lock_given_delta::Vector{Float64}
-    threshold_nominal::Float64
-    plock::Float64
-    plock_efc::Float64
-    plock_batches::Vector{Float64}
-    plock_efc_batches::Vector{Float64}
-    plock_nominal::Float64
-    plock_sharp::Float64
+    locking_probability_given_delta::Vector{Float64}
+    threshold_fit::Float64
+    locking_probability_percent::Float64
+    locking_probability_efc_percent::Float64
+    locking_probability_batches_percent::Vector{Float64}
+    locking_probability_efc_batches_percent::Vector{Float64}
+    locking_probability_as_designed_percent::Float64
+    locking_probability_fit_threshold_percent::Float64
     scaling::ThresholdScaling
 end
 
@@ -287,7 +290,7 @@ function locking_risk(mc::MonteCarloResult, sc::ThresholdScaling, scen::Scenario
 end
 
 function locking_risk(mc::MonteCarloResult, thresholds::AbstractVector{<:Real}, sc::ThresholdScaling, scen::ScenarioParameters)
-    edges = mc.bin_edges
+    edges = mc.abs_delta_bin_edges
     sorted = sort(Float64.(thresholds))
     n = length(sorted)
     cdf_at(x) = searchsortedlast(sorted, x) / n
@@ -298,13 +301,13 @@ function locking_risk(mc::MonteCarloResult, thresholds::AbstractVector{<:Real}, 
     weights = (p_given[1:end-1] .+ p_given[2:end]) ./ 2
     widths = diff(edges)
     # Densities integrate to one only to round-off, so the percentage is clamped to [0, 100].
-    plock_of(pdf) = clamp(100 * sum(pdf .* widths .* weights), 0.0, 100.0)
-    plock_b = [plock_of(view(mc.pdf_batches, :, b)) for b in 1:size(mc.pdf_batches, 2)]
-    plock_efc_b = [plock_of(view(mc.pdf_efc_batches, :, b)) for b in 1:size(mc.pdf_efc_batches, 2)]
-    nominal = nominal_threshold(sc, scen)
-    plock_sharp = clamp(100 * (1 - sum(mc.pdf[edges[2:end].<=nominal] .* widths[edges[2:end].<=nominal])), 0.0, 100.0)
+    probability_of(pdf) = clamp(100 * sum(pdf .* widths .* weights), 0.0, 100.0)
+    plock_b = [probability_of(view(mc.abs_delta_pdf_batches, :, b)) for b in 1:size(mc.abs_delta_pdf_batches, 2)]
+    plock_efc_b = [probability_of(view(mc.abs_delta_efc_pdf_batches, :, b)) for b in 1:size(mc.abs_delta_efc_pdf_batches, 2)]
+    nominal = fitted_threshold(sc, scen)
+    locking_probability_fit_threshold_percent = clamp(100 * (1 - sum(mc.abs_delta_pdf[edges[2:end].<=nominal] .* widths[edges[2:end].<=nominal])), 0.0, 100.0)
     return RiskResult(copy(edges), threshold_pdf, p_given, nominal, sum(plock_b) / length(plock_b), sum(plock_efc_b) / length(plock_efc_b),
-        plock_b, plock_efc_b, 100 * cdf_at(mc.delta_nominal), plock_sharp, sc)
+        plock_b, plock_efc_b, 100 * cdf_at(mc.abs_delta_total_as_designed), locking_probability_fit_threshold_percent, sc)
 end
 
 """
@@ -340,37 +343,50 @@ saying nothing would apply an n = 1 threshold to a mode that is partly n = 2.
 """
 function scaling_toroidal_mode(h5path::AbstractString)
     return h5open(h5path, "r") do f
-        nlow, nhigh = Int(read(f["Info/nlow"])), Int(read(f["Info/nhigh"]))
-        nlow == nhigh || throw(
-            ArgumentError(
-                "$h5path carries n = $nlow:$nhigh, but a locking-threshold scaling is fitted for one " *
-                "toroidal mode number. Re-run the assessment for a single n, or project onto one n's " *
-                "coupling before asking for a risk.")
-        )
-        nlow
+        single_toroidal_mode(Int(read(f["Info/nlow"])), Int(read(f["Info/nhigh"])); where=h5path)
     end
 end
 
 """
+    single_toroidal_mode(nlow, nhigh; where="the run") -> nlow
+
+The one toroidal mode number a locking-threshold scaling is fitted for, or an `ArgumentError`
+when the run spans several. One rule for the in-run pipeline and the file-path entry points, so a
+multi-n run cannot have one n's scaling applied to a mode that spans several.
+"""
+function single_toroidal_mode(nlow::Integer, nhigh::Integer; where::AbstractString="the run")
+    nlow == nhigh || throw(
+        ArgumentError(
+            "$where carries n = $nlow:$nhigh, but a locking-threshold scaling is fitted for one " *
+            "toroidal mode number. Re-run the assessment for a single n, or project onto one n's " *
+            "coupling before asking for a risk.")
+    )
+    return Int(nlow)
+end
+
+"""
     ToleranceScan
+
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
 
 Locking risk against a multiplier of every shift and tilt tolerance, from repeated Monte
 Carlos on the same sensitivities. Percentages throughout.
 
 ## Fields
 
-  - `scale`: tolerance multipliers `[nscale]`
-  - `plock`, `plock_efc`: locking probability at each scale, batch averages
-  - `plock_spread`, `plock_efc_spread`: range of the batch values at each scale
-  - `plock_nominal`: risk of the as-designed machine (independent of the scale)
+  - `tolerance_scale`: tolerance multipliers `[nscale]`
+  - `locking_probability_percent`, `locking_probability_efc_percent`: locking probability at each scale, batch averages
+  - `locking_probability_spread_percent`, `locking_probability_efc_spread_percent`: range of the batch values at each scale
+  - `locking_probability_as_designed_percent`: risk of the as-designed machine (independent of the scale)
 """
 struct ToleranceScan
-    scale::Vector{Float64}
-    plock::Vector{Float64}
-    plock_efc::Vector{Float64}
-    plock_spread::Vector{Float64}
-    plock_efc_spread::Vector{Float64}
-    plock_nominal::Float64
+    tolerance_scale::Vector{Float64}
+    locking_probability_percent::Vector{Float64}
+    locking_probability_efc_percent::Vector{Float64}
+    locking_probability_spread_percent::Vector{Float64}
+    locking_probability_efc_spread_percent::Vector{Float64}
+    locking_probability_as_designed_percent::Float64
 end
 
 """
@@ -388,28 +404,28 @@ function tolerance_scan(table::SensitivityTable, ts::ToleranceSet, coil_sets::Ve
     all(>=(0), scales) || throw(ArgumentError("tolerance scales must be ≥ 0"))
     thresholds = threshold_samples(Xoshiro(risk_ctrl.seed), sc, scen; nsample=risk_ctrl.nsample_threshold, dist=risk_ctrl.distribution)
     fields = (f => getfield(mc_ctrl, f) for f in fieldnames(MonteCarloControl) if f != :tolerance_scale)
-    plock = Float64[]
-    plock_efc = Float64[]
+    locking_probability_percent = Float64[]
+    locking_probability_efc_percent = Float64[]
     spread = Float64[]
     spread_efc = Float64[]
     nominal = 0.0
     for s in scales
         mc = run_monte_carlo(table, ts, coil_sets, MonteCarloControl(; fields..., tolerance_scale=Float64(s)))
         risk = locking_risk(mc, thresholds, sc, scen)
-        push!(plock, risk.plock)
-        push!(plock_efc, risk.plock_efc)
-        push!(spread, maximum(risk.plock_batches) - minimum(risk.plock_batches))
-        push!(spread_efc, maximum(risk.plock_efc_batches) - minimum(risk.plock_efc_batches))
-        nominal = risk.plock_nominal
+        push!(locking_probability_percent, risk.locking_probability_percent)
+        push!(locking_probability_efc_percent, risk.locking_probability_efc_percent)
+        push!(spread, maximum(risk.locking_probability_batches_percent) - minimum(risk.locking_probability_batches_percent))
+        push!(spread_efc, maximum(risk.locking_probability_efc_batches_percent) - minimum(risk.locking_probability_efc_batches_percent))
+        nominal = risk.locking_probability_as_designed_percent
     end
-    return ToleranceScan(Float64.(collect(scales)), plock, plock_efc, spread, spread_efc, nominal)
+    return ToleranceScan(Float64.(collect(scales)), locking_probability_percent, locking_probability_efc_percent, spread, spread_efc, nominal)
 end
 
 function tolerance_scan(h5path::AbstractString; scales::AbstractVector{<:Real}, psi_low::Real=0.0, psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH, mode::Int=1,
     n_e::Real, risk_ctrl::RiskControl=RiskControl(), kwargs...)
     ts = read_tolerance_snapshot(h5path)
     ts === nothing && throw(ArgumentError("$h5path carries no tolerance snapshot (the run named no tolerance_file)"))
-    table = sensitivity_table(h5path; psi_low, psi_high, mode)
+    table = without_coils(sensitivity_table(h5path; psi_low, psi_high, mode), excluded_coil_names(h5path))
     coil_sets, _ = h5open(h5path, "r") do f
         haskey(f, "Input/RawInputs/Coils") || throw(ArgumentError("$h5path has no Input/RawInputs/Coils snapshot"))
         sets = CoilSet[]
@@ -433,16 +449,42 @@ error-field-corrected curve.
 """
 function allowable_tolerance(scan::ToleranceScan, target_percent::Real; corrected::Bool=false)
     target_percent > 0 || throw(ArgumentError("target_percent must be positive"))
-    p = corrected ? scan.plock_efc : scan.plock
+    p = corrected ? scan.locking_probability_efc_percent : scan.locking_probability_percent
     lt = log10(target_percent)
-    for i in 1:length(scan.scale)-1
+    for i in 1:length(scan.tolerance_scale)-1
         p1, p2 = p[i], p[i+1]
         (p1 > 0 && p2 > 0) || continue
         l1, l2 = log10(p1), log10(p2)
         (min(l1, l2) <= lt <= max(l1, l2)) || continue
-        l1 == l2 && return scan.scale[i]
+        l1 == l2 && return scan.tolerance_scale[i]
         f = (lt - l1) / (l2 - l1)
-        return 10^(log10(scan.scale[i]) + f * (log10(scan.scale[i+1]) - log10(scan.scale[i])))
+        return 10^(log10(scan.tolerance_scale[i]) + f * (log10(scan.tolerance_scale[i+1]) - log10(scan.tolerance_scale[i])))
     end
     return NaN
+end
+
+"""
+    risk_convergence(table, tolerances, coil_sets, sc, scen; nsamples, nbins_list, ctrl=MonteCarloControl(), risk_ctrl=RiskControl()) -> NamedTuple
+
+The locking probability against the Monte Carlo's sample count and bin count, with its batch
+spread, so a number at the target risk level can be shown to be free of sampling and binning bias
+before it is quoted: the spread must shrink as `1/√nsample` and the value must not move with
+`nbins` by more than the spread. Each sweep holds the other control at `ctrl`'s value and reuses
+one threshold sample. Fields: `nsample`, `locking_probability_percent_by_nsample`,
+`locking_probability_spread_percent_by_nsample`, `nbins`, `locking_probability_percent_by_nbins`,
+`locking_probability_spread_percent_by_nbins`.
+"""
+function risk_convergence(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}, sc::ThresholdScaling, scen::ScenarioParameters;
+    nsamples::AbstractVector{<:Integer}, nbins_list::AbstractVector{<:Integer}, ctrl::MonteCarloControl=MonteCarloControl(), risk_ctrl::RiskControl=RiskControl())
+    thresholds = threshold_samples(Xoshiro(risk_ctrl.seed), sc, scen; nsample=risk_ctrl.nsample_threshold, dist=risk_ctrl.distribution)
+    fields = (f => getfield(ctrl, f) for f in fieldnames(MonteCarloControl) if f != :nsample && f != :nbins)
+    function at(nsample, nbins)
+        risk = locking_risk(run_monte_carlo(table, ts, coil_sets, MonteCarloControl(; fields..., nsample, nbins)), thresholds, sc, scen)
+        b = risk.locking_probability_batches_percent
+        return risk.locking_probability_percent, maximum(b) - minimum(b)
+    end
+    by_n = [at(n, ctrl.nbins) for n in nsamples]
+    by_b = [at(ctrl.nsample, b) for b in nbins_list]
+    return (; nsample=collect(Int, nsamples), locking_probability_percent_by_nsample=first.(by_n), locking_probability_spread_percent_by_nsample=last.(by_n),
+        nbins=collect(Int, nbins_list), locking_probability_percent_by_nbins=first.(by_b), locking_probability_spread_percent_by_nbins=last.(by_b))
 end
