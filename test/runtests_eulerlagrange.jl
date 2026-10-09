@@ -640,3 +640,83 @@ end
         @test !odet.du_store_populated
     end
 end
+
+@testset "resonant block Frobenius exponents" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+
+    @testset "traceless block keeps ∓√(−det) on both sides" begin
+        m0 = ComplexF64[1 2; 3 -1]
+        block_det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
+        α0 = sqrt(-ComplexF64(block_det))
+        for sig in (1.0, -1.0)
+            α, p_big, p_small = FFS.resonant_block_exponents(m0, sig)
+            @test α === α0
+            @test p_big === -α
+            @test p_small === α
+        end
+    end
+
+    @testset "nonzero trace uses the block eigenvalues" begin
+        m0 = ComplexF64[2 1; 0.5 4]
+        tr = m0[1, 1] + m0[2, 2]
+        block_det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
+        α0 = sqrt(tr * tr / 4 - block_det)
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, 1.0)
+        @test α === α0
+        @test p_big === tr / 2 - α0
+        @test p_small === tr / 2 + α0
+        @test abs(det(m0 - p_big * I)) < 1e-12
+        @test abs(det(m0 - p_small * I)) < 1e-12
+
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, -1.0)
+        p_minus = -(tr / 2 - α0)
+        p_plus = -(tr / 2 + α0)
+        @test p_big === (real(p_minus) < real(p_plus) ? p_minus : p_plus)
+        @test p_small === (real(p_minus) < real(p_plus) ? p_plus : p_minus)
+        @test real(p_big) < real(p_small)
+        @test abs(det(m0 - (-p_big) * I)) < 1e-12
+        @test abs(det(m0 - (-p_small) * I)) < 1e-12
+    end
+
+    @testset "equal real parts keep the sig ≥ 0 ordering" begin
+        # tr = 2, det = 2 → α = √(−1). Both powers have the same real part.
+        m0 = ComplexF64[1 1; -1 1]
+        tr = m0[1, 1] + m0[2, 2]
+        block_det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
+        α0 = sqrt(tr * tr / 4 - block_det)
+        @test real(α0) == 0
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, 1.0)
+        @test p_big === tr / 2 - α0
+        @test p_small === tr / 2 + α0
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, -1.0)
+        @test p_big === -(tr / 2 + α0)
+        @test p_small === -(tr / 2 - α0)
+    end
+
+    @testset "column scaling stays /dpsi^α when the powers are opposed" begin
+        α = ComplexF64(1.5)
+        dpsi = 1.3e-4
+        big = ones(ComplexF64, 2, 2)
+        small = ones(ComplexF64, 2, 2)
+        FFS._apply_column_powers!(big, small, -α, α, dpsi)
+        pfac = dpsi^α
+        big_ref = ones(ComplexF64, 2, 2)
+        small_ref = ones(ComplexF64, 2, 2)
+        big_ref ./= pfac
+        small_ref .*= pfac
+        @test big == big_ref
+        @test small == small_ref
+
+        p_big = ComplexF64(-1.2 + 0.1im)
+        p_small = ComplexF64(1.8)
+        big = ones(ComplexF64, 1, 1)
+        small = ones(ComplexF64, 1, 1)
+        FFS._apply_column_powers!(big, small, p_big, p_small, dpsi)
+        big_ref = ones(ComplexF64, 1, 1)
+        small_ref = ones(ComplexF64, 1, 1)
+        big_ref .*= dpsi^p_big
+        small_ref .*= dpsi^p_small
+        @test big == big_ref
+        @test small == small_ref
+    end
+end

@@ -1,6 +1,44 @@
 # Frobenius asymptotics and resonant-basis evaluation at singular surfaces.
 
 """
+    resonant_block_exponents(m0, sig) -> (α, p_big, p_small)
+
+Eigenvalues λ = tr/2 ∓ √(tr²/4 − det) of one resonant 2×2 M₀ block.
+α = √(tr²/4 − det) is the Mercier half-separation. Powers are sig·λ, big solution
+(more negative real part) first. A traceless block returns α = √(−det) and (−α, +α).
+"""
+function resonant_block_exponents(m0::AbstractMatrix, sig::Real)
+    tr = m0[1, 1] + m0[2, 2]
+    det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
+    # Traceless path uses the old √(−det) operations, so a zero trace stays bitwise identical.
+    if tr == 0
+        α = sqrt(-ComplexF64(det))
+        return α, -α, α
+    end
+    α = sqrt(tr * tr / 4 - det)
+    p_minus = sig * (tr / 2 - α)
+    p_plus = sig * (tr / 2 + α)
+    # Equal real parts: sig ≥ 0 keeps big = sig·(tr/2 − α).
+    if real(p_minus) < real(p_plus) || (real(p_minus) == real(p_plus) && sig >= 0)
+        return α, p_minus, p_plus
+    else
+        return α, p_plus, p_minus
+    end
+end
+
+# Scale columns by dpsi^power. Opposed powers stay /dpsi^α and *dpsi^α, not bitwise dpsi^(−α).
+function _apply_column_powers!(big_cols, small_cols, p_big, p_small, dpsi)
+    if p_big == -p_small
+        pfac = dpsi^p_small
+        big_cols ./= pfac
+        small_cols .*= pfac
+    else
+        big_cols .*= dpsi^p_big
+        small_cols .*= dpsi^p_small
+    end
+end
+
+"""
     compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
 Calculate asymptotic vmat and mmat matrices for a singular surface.
@@ -27,7 +65,6 @@ function compute_sing_asymptotics(
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
     sig::Float64=1.0,
-    alpha_override::Union{Nothing,Vector{ComplexF64}}=nothing,
     sing_order::Int=ctrl.sing_order
 )
 
@@ -58,41 +95,26 @@ function compute_sing_asymptotics(
         Matrix(vcat([transpose(mmat[r1[i], r2, :, 1]) for i in eachindex(r1)]...))
     end
 
-    # Alpha (Mercier index) — Fortran computes this ONCE from the RIGHT-SIDE m0mat
-    # and reuses it for both left and right vmat (matching Fortran STRIDE).
-    # When alpha_override is provided (for the left-side call), use that instead.
-    # Fortran: di = m0(1,1)*m0(2,2) - m0(2,1)*m0(1,2); alpha = sqrt(-di)
-    # This matches eigenvalues only when tr(m0mat_block) = 0.
-    alpha = if alpha_override !== nothing
-        alpha_override
-    else
-        # Match Fortran exactly: alpha = sqrt(-det(m0mat_block)) for each resonant mode
-        [sqrt(-ComplexF64(m0mat[(2*(i-1)+1), (2*(i-1)+1)] * m0mat[(2*i), (2*i)] -
-                          m0mat[(2*i), (2*(i-1)+1)] * m0mat[(2*(i-1)+1), (2*i)]))
-         for i in eachindex(r1)]
-    end
-
-    # This is the parameter α but for all modes - α = 0 for non-resonant modes
-    power[ipert_res] .= -alpha
-    power[ipert_res .+ intr.numpert_total] .= alpha
-
-    # Zeroth-order non-resonant solutions
+    # Zeroth-order non-resonant solutions. Nonresonant powers stay 0.
     for ipert in 1:intr.numpert_total
         vmat[ipert, ipert, 1, 1] = 1
         vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
     end
 
-    # Zeroth-order resonant solutions: v_big_ξ' = -(m0(1,1) ± sig·α)/m0(1,2).
-    # Matches Fortran STRIDE sing_vmat (sig·α sign convention separates left vs right side).
+    # This side's block: power is sig·λ (big first); the ξ' row is the eigenvector for λ.
+    alpha = Vector{ComplexF64}(undef, length(r1))
     for i in eachindex(r1)
         m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+        alpha_i, p_big, p_small = resonant_block_exponents(m0mat_block, sig)
+        alpha[i] = alpha_i
         r1_i = r1[i]
+        power[r1_i] = p_big
+        power[r1_i+intr.numpert_total] = p_small
         r2_i = r1_i + intr.numpert_total
-        alpha_i = alpha[i]
         vmat[r1_i, r1_i, 1, 1] = 1
         vmat[r1_i, r2_i, 1, 1] = 1
-        vmat[r1_i, r1_i, 2, 1] = -(m0mat_block[1, 1] + sig * alpha_i) / m0mat_block[1, 2]
-        vmat[r1_i, r2_i, 2, 1] = -(m0mat_block[1, 1] - sig * alpha_i) / m0mat_block[1, 2]
+        vmat[r1_i, r1_i, 2, 1] = -(m0mat_block[1, 1] - sig * p_big) / m0mat_block[1, 2]
+        vmat[r1_i, r2_i, 2, 1] = -(m0mat_block[1, 1] - sig * p_small) / m0mat_block[1, 2]
     end
 
     # Higher order solutions — sig propagates through the recursion (Fortran STRIDE sing_solve).
@@ -457,9 +479,9 @@ See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
   - `vmat::Array{ComplexF64,4}`: V matrix power series (modified in-place)
   - `mmat::Array{ComplexF64,4}`: M matrix power series
   - `m0mat::Matrix{ComplexF64}`: Zeroth order M matrix
-  - `alpha::Vector{ComplexF64}`: Eigenvalues of M₀ for resonant modes
+  - `alpha::Vector{ComplexF64}`: Mercier exponent of each resonant block
   - `r1, r2, n1, n2::Vector{Int}`: Resonant and nonresonant indices
-  - `power::Vector{ComplexF64}`: α values for all modes (0 for nonresonant)
+  - `power::Vector{ComplexF64}`: Frobenius power of each solution column (0 for nonresonant)
   - `k::Int`: The current order in the power series expansion
 """
 @with_pool pool function solve_higher_order_vmat!(
@@ -569,7 +591,6 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
     # SingAsymptotics (left vs right vmat built with sig=-1 or sig=+1).
     # Matches Fortran STRIDE sing_get_ua: sqrtfac=SQRT(dpsi), always positive.
     sqrtfac = sqrt(dpsi)
-    pfac_base = dpsi  # used for dpsi^alpha below
 
     # Compute power series via Horner's method (eq. 45 in Glasser 2016)
     ua = copy(sing_asymp.vmat[:, :, :, 2*sing_asymp.sing_order+1])
@@ -577,11 +598,10 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
         ua .= ua .* sqrtfac .+ sing_asymp.vmat[:, :, :, iorder+1]
     end
 
-    # Restore powers (unshear v→u) — matches Fortran STRIDE sing_get_ua
+    # Restore powers (unshear v→u). Resonant columns use their Frobenius powers.
     for i in eachindex(r1)
-        pfac = pfac_base ^ sing_asymp.alpha[i]  # dpsi^α
-        ua[:, r2[2*i-1], :] ./= pfac  # big solution column: /dpsi^α
-        ua[:, r2[2*i], :] .*= pfac    # small solution column: *dpsi^α
+        _apply_column_powers!(@view(ua[:, r2[2*i-1], :]), @view(ua[:, r2[2*i], :]),
+            sing_asymp.power[r2[2*i-1]], sing_asymp.power[r2[2*i]], dpsi)
         ua[r1[i], :, 1] ./= sqrtfac   # resonant row ξ: /√dpsi
         ua[r1[i], :, 2] .*= sqrtfac   # resonant row ξ': *√dpsi
     end
@@ -600,8 +620,8 @@ outer-region Galerkin solver (`gal_extension`, `sing_matvec`).
 Direction is carried by the `SingAsymptotics` (left vs right vmat built with sig=∓1), exactly as in
 `sing_get_ua`, so `dpsi` is always positive and the arithmetic is real (no analytic continuation).
 The term-by-term derivative is built via a `power` array tracking each term's total exponent (in
-half-powers of `dpsi`: the 2*sing_order offset, the ∓1 shearing on resonant rows, and the ∓2α on
-resonant columns), then the same shearing/`pfac` restoration and the chain-rule factor `1/(2·dpsi)`
+half-powers of `dpsi`: the 2*sing_order offset, the ∓1 shearing on resonant rows, and twice the
+column's Frobenius power), then the same shearing restoration and the chain-rule factor `1/(2·dpsi)`
 are applied. The physical d/dψ sign for the left side (ψ = ψ_res − dpsi) is applied by the caller.
 
 ### Arguments
@@ -622,8 +642,8 @@ function sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64)
     power[r1, :, 1] .-= 1
     power[r1, :, 2] .+= 1
     for i in eachindex(r1)
-        power[:, r2[2*i-1], :] .-= 2 * sing_asymp.alpha[i]
-        power[:, r2[2*i], :] .+= 2 * sing_asymp.alpha[i]
+        power[:, r2[2*i-1], :] .+= 2 * sing_asymp.power[r2[2*i-1]]
+        power[:, r2[2*i], :] .+= 2 * sing_asymp.power[r2[2*i]]
     end
 
     # Power series derivative by Horner's method (Fortran sing_get_dua)
@@ -635,9 +655,8 @@ function sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64)
 
     # Restore shearing and resonant powers, then the chain-rule factor 1/(2·dpsi) (Fortran sing_get_dua)
     for i in eachindex(r1)
-        pfac = dpsi^sing_asymp.alpha[i]
-        dua[:, r2[2*i-1], :] ./= pfac
-        dua[:, r2[2*i], :] .*= pfac
+        _apply_column_powers!(@view(dua[:, r2[2*i-1], :]), @view(dua[:, r2[2*i], :]),
+            sing_asymp.power[r2[2*i-1]], sing_asymp.power[r2[2*i]], dpsi)
         dua[r1[i], :, 1] ./= sqrtfac
         dua[r1[i], :, 2] .*= sqrtfac
     end
@@ -685,12 +704,9 @@ function sing_get_ua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsym
         out[ii, 2, k] = as
     end
 
-    # Unshear v→u: big column /dpsi^α, small column *dpsi^α; resonant row /√dpsi (qty1), *√dpsi (qty2).
-    pfac = dpsi^sing_asymp.alpha[1]
-    @inbounds for k in 1:2, ii in 1:N
-        out[ii, 1, k] /= pfac
-        out[ii, 2, k] *= pfac
-    end
+    # Unshear v→u by the column Frobenius powers; resonant row /√dpsi (qty1), *√dpsi (qty2).
+    _apply_column_powers!(@view(out[:, 1, :]), @view(out[:, 2, :]),
+        sing_asymp.power[cbig], sing_asymp.power[csml], dpsi)
     @inbounds out[ρ, 1, 1] /= sqrtfac
     @inbounds out[ρ, 2, 1] /= sqrtfac
     @inbounds out[ρ, 1, 2] *= sqrtfac
@@ -713,15 +729,15 @@ function sing_get_dua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsy
     ρ = sing_asymp.r1[1]
     cbig = sing_asymp.r2[1]
     csml = sing_asymp.r2[2]
-    α = sing_asymp.alpha[1]
+    p_big = sing_asymp.power[cbig]
+    p_small = sing_asymp.power[csml]
     nterm = 2 * order
 
-    # Per-term exponent base (×1, in half-powers of dpsi): 2·order + row offset (∓1 on the resonant row,
-    # by qty) + column offset (−2α big, +2α small). Tracked as scalars per column instead of a full array.
+    # Exponent base in half-powers of dpsi: 2·order + resonant-row offset (∓1 by qty) + 2·power.
     @inbounds for k in 1:2, ii in 1:N
         roff = ii == ρ ? (k == 1 ? ComplexF64(-1) : ComplexF64(1)) : ComplexF64(0)
-        pb = nterm + roff - 2 * α
-        ps = nterm + roff + 2 * α
+        pb = nterm + roff + 2 * p_big
+        ps = nterm + roff + 2 * p_small
         ab = vmat[ii, cbig, k, nterm+1] * pb
         as = vmat[ii, csml, k, nterm+1] * ps
         for t in (nterm-1):-1:0
@@ -734,12 +750,8 @@ function sing_get_dua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsy
         out[ii, 2, k] = as
     end
 
-    pfac = dpsi^α
+    _apply_column_powers!(@view(out[:, 1, :]), @view(out[:, 2, :]), p_big, p_small, dpsi)
     twodpsi = 2 * dpsi
-    @inbounds for k in 1:2, ii in 1:N
-        out[ii, 1, k] /= pfac
-        out[ii, 2, k] *= pfac
-    end
     @inbounds out[ρ, 1, 1] /= sqrtfac
     @inbounds out[ρ, 2, 1] /= sqrtfac
     @inbounds out[ρ, 1, 2] *= sqrtfac
@@ -782,11 +794,8 @@ function sing_get_ua_res_cut!(out::AbstractArray{ComplexF64,3}, sing_asymp::Sing
         out[ii, 2, k] = vmat[ii, csml, k, 1]
     end
 
-    pfac = dpsi^sing_asymp.alpha[1]
-    @inbounds for k in 1:2, ii in 1:N
-        out[ii, 1, k] /= pfac
-        out[ii, 2, k] *= pfac
-    end
+    _apply_column_powers!(@view(out[:, 1, :]), @view(out[:, 2, :]),
+        sing_asymp.power[cbig], sing_asymp.power[csml], dpsi)
     @inbounds out[ρ, 1, 1] /= sqrtfac
     @inbounds out[ρ, 2, 1] /= sqrtfac
     @inbounds out[ρ, 1, 2] *= sqrtfac
