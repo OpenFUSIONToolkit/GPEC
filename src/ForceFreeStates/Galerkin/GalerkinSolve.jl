@@ -100,11 +100,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     ldab = ctrl.gal_solver == "LU" ? 2kl + ku + 1 : kl + 1
     # rpec_flag (RDCON, gal.f): append mpert coil-response columns. Each is a unit source at
     # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
-    # Cholesky's lower-only edge zeroing can't represent the rpec identity edge, so require LU.
     ncoil = ctrl.gal_rpec_flag ? mpert : 0
-    if ncoil > 0 && ctrl.gal_solver != "LU"
-        error("galerkin_solve: gal_rpec_flag=true requires gal_solver=\"LU\" (coil edge BC needs the full-band path)")
-    end
     nsol = 2 * msing + ncoil
     intvl = [GalInterval(zeros(Float64, nx + 1), zeros(Float64, nx + 1), [GalCell(mpert) for _ in 1:nx])
              for _ in 0:msing]
