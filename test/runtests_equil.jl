@@ -1,3 +1,5 @@
+using Statistics
+
 
 @testset "Equilibrium Unit Tests" begin
 
@@ -195,6 +197,46 @@
         @test integrated[:, 1] != tabulated[:, 1]
         @test maximum(abs.(integrated[:, 1] .- tabulated[:, 1]) ./ tabulated[:, 1]) < 1e-5
         @test integrated[:, 3:4] == tabulated[:, 3:4]
+    end
+
+    @testset "Load TokaMaker i-file (ldp_i)" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        # One TokaMaker solve written by save_eqdsk (g65) and save_ifile (i33x65, real*8 and real*4)
+        tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
+        cfg(type, file; kw...) = Eq.EquilibriumConfig(; eq_type=type, eq_filename=joinpath(tk_dir, file), jac_type="hamada",
+            grid_type="ldp", mpsi=64, psilow=0.01, psihigh=0.99, kw...)
+        eq_i = Eq.setup_equilibrium(cfg("ldp_i", "i33x65.ifile"))
+        eq_g = Eq.setup_equilibrium(cfg("efit", "g65.geqdsk"))
+        eq_s = Eq.setup_equilibrium(cfg("ifile", "i33x65_single.ifile"))
+        @test eq_i.ingest isa Eq.InverseIngest
+
+        # Same equilibrium as the g-file of the same solve
+        @test isapprox(eq_i.ro, eq_g.ro; atol=1e-4) && isapprox(eq_i.zo, eq_g.zo; atol=1e-4)
+        @test isapprox(eq_i.psio, eq_g.psio; rtol=1e-6)
+        @test all(isapprox(eq_i.profiles.q_spline(x), eq_g.profiles.q_spline(x); rtol=1e-3) for x in (0.2, 0.5, 0.8))
+
+        # Grad-Shafranov residual on interior surfaces: small, and well below the g-file's
+        gse_median(eq) = (g = Eq.equilibrium_gse!(eq); loc = vec(maximum(g.error; dims=2)); median(loc[0.05 .< g.xs .< 0.7]))
+        @test gse_median(eq_i) < 5e-4
+        @test gse_median(eq_i) < gse_median(eq_g) / 5
+
+        # A real*4 file reads to single-precision agreement
+        @test isapprox(eq_s.ro, eq_i.ro; rtol=1e-6) && isapprox(eq_s.psio, eq_i.psio; rtol=1e-6)
+        @test all(isapprox(eq_s.profiles.q_spline(x), eq_i.profiles.q_spline(x); rtol=1e-6) for x in (0.2, 0.5, 0.8))
+        @test maximum(abs.(eq_s.ingest.R_nodes .- eq_i.ingest.R_nodes)) < 1e-6
+
+        # The FF′ and p′ records feed profile_source = "derivatives"; without them the tabulated F and P are used
+        table(file; kw...) = Eq.read_ldp_i(cfg("ldp_i", file; kw...)).ingest.sq_fs
+        integrated = @test_logs (:info, r"integrated from") match_mode = :any table("i33x65.ifile")
+        tabulated = table("i33x65.ifile"; profile_source="values")
+        @test integrated[end, 1:2] == tabulated[end, 1:2]
+        @test integrated[:, 1] != tabulated[:, 1]
+        @test maximum(abs.(integrated[:, 1] .- tabulated[:, 1]) ./ tabulated[:, 1]) < 1e-4
+        raw = read(joinpath(tk_dir, "i33x65.ifile"))
+        mx = Int(reinterpret(Int32, raw[5:8])[1])
+        stripped = joinpath(mktempdir(), "no_derivatives.ifile")
+        write(stripped, raw[1:end-2*(8mx+8)])
+        @test (@test_logs (:warn, r"absent or unusable") match_mode = :any Eq.read_ldp_i(cfg("ldp_i", stripped)).ingest.sq_fs) == tabulated
     end
 
     @testset "EFIT Method Consistency" begin

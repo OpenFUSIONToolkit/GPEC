@@ -482,6 +482,69 @@ end
 
 
 """
+    _read_fortran_reals(io, n) -> Vector{Float64}
+
+Read one little-endian Fortran sequential unformatted record of `n` reals, stored as real*4 or real*8
+(told apart by the record length).
+"""
+function _read_fortran_reals(io::IO, n::Int)
+    nbytes = ltoh(read(io, Int32))
+    T = nbytes == 8n ? Float64 : nbytes == 4n ? Float32 : error("Fortran record holds $nbytes bytes, expected $n reals")
+    data = ltoh.(read!(io, Vector{T}(undef, n)))
+    ltoh(read(io, Int32)) == nbytes || error("Fortran record end marker does not match its start")
+    return Float64.(data)
+end
+
+"""
+    read_ldp_i(config)
+
+Parses an inverse i-file (L. Don Pearlstein's format, also written by TokaMaker `save_ifile`) into an
+`InverseRunInput`. Sequential unformatted little-endian records (reals as real*8 or real*4), axis
+first, θ fastest: `mx, my` (int32), `psi(mx)` [Wb/rad], `f(mx)` = R·Bt [T·m], `p(mx)` [Pa], `q(mx)`,
+`r(my, mx)`, `z(my, mx)` [m] with the periodic θ point duplicated, then optionally `FF′(mx)` and
+`p′(mx)` per Wb/rad, which `profile_source = "derivatives"` integrates for F and P (see
+`file_profiles`). Port of Fortran `read_eq_ldp_i`.
+"""
+function read_ldp_i(config::EquilibriumConfig)
+    @info "Reading inverse i-file (ldp_i): $(config.eq_filename)"
+
+    psi, f, p, q, r, z, ffp, pp = open(config.eq_filename, "r") do io
+        ltoh(read(io, Int32)) == 8 || error("i-file header record is not two int32")
+        mx, my = Int.(ltoh.(read!(io, Vector{Int32}(undef, 2))))
+        read(io, Int32)
+        profiles = [_read_fortran_reals(io, mx) for _ in 1:4]
+        r, z = (reshape(_read_fortran_reals(io, my * mx), my, mx) for _ in 1:2)
+        derivs = eof(io) ? (zeros(mx), zeros(mx)) : (_read_fortran_reals(io, mx), _read_fortran_reals(io, mx))
+        return (profiles..., r, z, derivs...)
+    end
+    mx, my = length(psi), size(r, 1)
+    @info "Parsed from header: mx = $mx surfaces, my = $my poloidal points"
+
+    psio_signed = psi[end] - psi[1]
+    psio = abs(psio_signed)
+    xs = (psi .- psi[1]) ./ psio_signed
+
+    # FF′ and p′ are per Wb/rad; psio_signed converts them to ψ_norm (absent records read as zero)
+    f_nodes, p_nodes = file_profiles(config, xs, f, p, ffp .* psio_signed, pp .* psio_signed)
+    sq_fs = hcat(f_nodes, p_nodes .* mu0, q, sqrt.(xs))
+    sq_in = cubic_interp(xs, Series(sq_fs); extrap=ExtendExtrap())
+
+    R_data = Matrix(transpose(r))
+    Z_data = Matrix(transpose(z))
+    ro, zo = R_data[1, 1], Z_data[1, 1]
+    rz_in_ys = collect(range(0, 1; length=my))
+
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    rz_in_R = cubic_interp((xs, rz_in_ys), R_data; opts2d...)
+    rz_in_Z = cubic_interp((xs, rz_in_ys), Z_data; opts2d...)
+    ingest = InverseIngest(xs, sq_fs, xs, rz_in_ys, R_data, Z_data, ro, zo, psio)
+
+    @info "Finished reading i-file. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
+    return InverseRunInput(config, sq_in, xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, ingest)
+end
+
+
+"""
     build_direct_from_ingest(config::EquilibriumConfig, ingest::DirectIngest) -> DirectRunInput
 
 Rebuild a `DirectRunInput` from a [`DirectIngest`](@ref) captured by `read_efit`/`read_imas`
