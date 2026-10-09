@@ -333,6 +333,58 @@ function SolovevConfig(input_dict::Dict{String,Any})
 end
 
 """
+    CerfonConfig(...)
+
+Parameters for the Cerfon-Freidberg analytic Solov'ev equilibrium (`eq_type = "cerfon"`), a
+diverted generalization of [`SolovevConfig`](@ref): the plasma boundary is the `ψ = 0`
+surface and carries a magnetic null, so `q → ∞` as ψ_N → 1 and no `psihigh` converges. The
+`"sol"` model is the `A = 0`, no-null member of the same family.
+
+## Fields:
+
+  - `mr`: number of radial grid zones in the tabulated `ψ(R,Z)` map
+  - `mz`: number of axial grid zones in the tabulated `ψ(R,Z)` map
+  - `ma`: number of flux grid zones for the `F` and `μ₀p` profile spline
+  - `r0`: major radius R₀ in m
+  - `b0`: vacuum toroidal field at `r0` in T
+  - `epsilon`: inverse aspect ratio ε = a/R₀
+  - `kappa`: elongation κ
+  - `delta`: triangularity δ
+  - `A`: Cerfon & Freidberg's Solov'ev parameter A setting the `p'`/`FF'` split (0 = pressure-driven only,
+    matching the `"sol"` model)
+  - `q0`: target safety factor on axis; fixes the flux scale
+  - `null`: null topology — `"lsn"` (lower single null) or `"dn"` (double null). The double
+    null has two nulls on the boundary, so `q` climbs about twice as fast toward ψ_N = 1
+  - `xsep`: places the null(s) at `(1 − xsep·δ·ε, ±xsep·κ·ε)`, just beyond the high point
+  - `box_margin`: `ψ(R,Z)` box padding beyond the boundary, in units of ε. Keep it small —
+    the `ψ = 0` level set also contains the divertor legs, and the midplane separatrix
+    search can latch onto one of them if the box reaches too far. Known limitation: the
+    private-flux region below the X-point also has `ψ > 0` inside the box, so correctness rests on this margin
+"""
+@kwdef mutable struct CerfonConfig
+    mr::Int = 256               # number of radial grid zones in the tabulated ψ(R,Z) map
+    mz::Int = 384               # number of axial grid zones in the tabulated ψ(R,Z) map
+    ma::Int = 256               # number of flux grid zones for the F and μ₀p profile spline
+    r0::Float64 = 1.0           # major radius R₀ in m
+    b0::Float64 = 1.0           # vacuum toroidal field at r0 in T
+    epsilon::Float64 = 0.32     # inverse aspect ratio ε = a/R₀
+    kappa::Float64 = 1.7        # elongation κ
+    delta::Float64 = 0.33       # triangularity δ
+    A::Float64 = -0.155         # Solov'ev parameter A setting the p'/FF' split
+    q0::Float64 = 1.1           # target safety factor on axis; fixes the flux scale
+    null::String = "lsn"        # null topology: "lsn" (lower single null) or "dn" (double null)
+    xsep::Float64 = 1.1         # places the null(s) at (1 − xsep·δ·ε, ±xsep·κ·ε)
+    box_margin::Float64 = 0.12  # ψ(R,Z) box padding beyond the boundary, in units of ε
+end
+
+"""
+Build a `CerfonConfig` from a parsed `[CERFON_INPUT]` TOML table.
+"""
+function CerfonConfig(input_dict::Dict{String,Any})
+    return CerfonConfig(; symbolize_keys(input_dict)...)
+end
+
+"""
     DirectIngest
 
 The serializable raw arrays and scalars captured by a direct-equilibrium reader
