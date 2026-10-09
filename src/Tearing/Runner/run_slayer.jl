@@ -364,7 +364,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
     return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, scan_data_list)
+        layer_widths, scan_data_list, empty_critical_resonant_field_result())
 end
 
 # ---------------------------------------------------------------------
@@ -395,6 +395,36 @@ function ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
         out[k] = (ising=p.ising, tearing=r.tearing, interchange=r.interchange)
     end
     return out
+end
+
+# ---------------------------------------------------------------------
+# Critical resonant field (torque balance)
+# ---------------------------------------------------------------------
+"""
+    run_critical_resonant_field(params, rational_psi, profiles, ctrl) -> CriticalResonantFieldResult
+
+Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
+surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
+Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
+E×B frequency of the m/n mode, Q0 = τ_k·n·ω_E, with ω_E read from `profiles` at
+`rational_psi`.
+"""
+function run_critical_resonant_field(params::AbstractVector{SLAYERParameters}, rational_psi::AbstractVector{<:Real},
+    profiles::KineticProfiles, ctrl::CriticalResonantFieldControl)
+    ctrl.enabled || return empty_critical_resonant_field_result()
+    model = SLAYERModel{:fitzpatrick}()
+    nsurf = length(params)
+    q_peak, br_crit, q0 = fill(NaN, nsurf), fill(NaN, nsurf), zeros(nsurf)
+    scan = CriticalResonantFieldScan[]
+    for (k, p) in enumerate(params)
+        # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
+        q0[k] = p.tauk * p.n * profiles(rational_psi[k]).omega
+        tb = TorqueBalance(model, p, q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2)
+        Qs, bal, q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
+        ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Qs), bal, Δs))
+    end
+    return CriticalResonantFieldResult(true, Int[p.ising for p in params], q_peak, br_crit, q0,
+        Float64[p.P_tor for p in params], scan)
 end
 
 # ---------------------------------------------------------------------
@@ -503,5 +533,8 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
 
     rational_psi = Float64[surfaces[p.ising].psifac for p in params]
     rational_q = Float64[surfaces[p.ising].q for p in params]
-    return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
+    result = run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
+    control.critical_resonant_field.enabled || return result
+    crf = run_critical_resonant_field(params, rational_psi, profiles, control.critical_resonant_field)
+    return SLAYERResult((f === :critical_resonant_field ? crf : getfield(result, f) for f in fieldnames(SLAYERResult))...)
 end
