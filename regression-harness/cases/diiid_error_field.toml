@@ -68,7 +68,7 @@ noise_threshold = 1e-8
 order = 20
 
 [quantities.ef_delta_nominal]
-h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_nominal"
+h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_as_designed"
 type = "complex_vector"
 extract = "abs_first"
 label = "|delta_nominal| of coil set 1"
@@ -77,16 +77,16 @@ order = 21
 
 # The as-designed error field and sampled mean of the tolerance Monte Carlo, with the correction
 # array left out of the error field.
-[quantities.mc_delta_nominal]
-h5path = "ErrorFields/MonteCarlo/delta_nominal"
+[quantities.mc_abs_delta_total_as_designed]
+h5path = "ErrorFields/MonteCarlo/abs_delta_total_as_designed"
 type = "real_scalar"
 extract = "value"
-label = "|Σ δ_nominal| of the error-field coils"
+label = "|Σ δ_as_designed| of the error-field coils"
 noise_threshold = 1e-10
 order = 22
 
-[quantities.mc_mean_abs_delta]
-h5path = "ErrorFields/MonteCarlo/mean_abs_delta"
+[quantities.mc_abs_delta_sampled_mean]
+h5path = "ErrorFields/MonteCarlo/abs_delta_sampled_mean"
 type = "real_scalar"
 extract = "value"
 label = "Monte Carlo mean |δ| of the error-field coils"

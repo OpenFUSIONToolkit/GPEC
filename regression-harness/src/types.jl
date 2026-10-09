@@ -23,6 +23,10 @@ Specification for a test case: what to run and what to extract.
   - "computed"  — run a self-contained Julia computation that writes a small h5
                   (no `example_dir` required); used for analytic/reference cases
                   like the GGJ inner-layer benchmark.
+
+`precompile_workload` sets GPEC's PrecompileTools workload preference for the run. It defaults to
+`false` so every case compares code compiled on first use; a case sets it `true` to track the
+precompiled build, whose last-bit rounding (and hence near-marginal results) can differ.
 """
 struct CaseSpec
     name::String
@@ -31,6 +35,7 @@ struct CaseSpec
     quantities::Vector{QuantitySpec}
     kind::String
     overrides::Dict{String,Any}  # gpec.toml keys patched for this run; dotted keys e.g. "KineticForces.nutype" => "zero". Empty = run the deck in place.
+    precompile_workload::Bool
 end
 
 """

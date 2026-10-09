@@ -162,18 +162,18 @@ function sensitivity_table(sens::CoilSensitivities, dom::DominantCoupling; mode:
     project(b̃) = dot(v, b̃) / sens.b_t0
     nset = length(sens.coil_names)
 
-    delta_nominal = [project(view(sens.nominal_field, :, j)) for j in 1:nset]
-    shift = [project(view(sens.shift_sensitivity, :, a, j)) for a in 1:3, j in 1:nset]
-    tilt = [project(view(sens.tilt_sensitivity, :, a, j)) for a in 1:3, j in 1:nset]
+    delta_as_designed = [project(view(sens.field_as_designed, :, j)) for j in 1:nset]
+    shift = [project(view(sens.shift_sensitivity_per_m, :, a, j)) for a in 1:3, j in 1:nset]
+    tilt = [project(view(sens.tilt_sensitivity_per_deg, :, a, j)) for a in 1:3, j in 1:nset]
     inplane_rms(S) = [sqrt((abs2(S[1, j]) + abs2(S[2, j])) / 2) for j in 1:nset]
-    cancelling(S) = [cancelling_offset(delta_nominal[j], S[1, j], S[2, j])[i] for i in 1:2, j in 1:nset]
+    cancelling(S) = [cancelling_offset(delta_as_designed[j], S[1, j], S[2, j])[i] for i in 1:2, j in 1:nset]
 
     per_deg = inplane_rms(tilt)
     # A tilt of one degree sweeps the rim through r·π/180 metres, the form mechanical tolerances take.
-    mm_per_deg = [sens.nominal_radius[j] * pi / 180 * 1000 for j in 1:nset]
+    mm_per_deg = [sens.major_radius_m[j] * pi / 180 * 1000 for j in 1:nset]
     per_mm_rim = [mm_per_deg[j] > 0 ? per_deg[j] / mm_per_deg[j] : 0.0 for j in 1:nset]
 
-    return SensitivityTable(copy(sens.coil_names), mode, delta_nominal, shift, tilt,
+    return SensitivityTable(copy(sens.coil_names), mode, delta_as_designed, shift, tilt,
         1e-3 .* inplane_rms(shift), per_deg, per_mm_rim, cancelling(shift), cancelling(tilt))
 end
 
@@ -196,8 +196,9 @@ function without_coils(table::SensitivityTable, names)
     unknown = setdiff(names, table.coil_names)
     isempty(unknown) || throw(ArgumentError("coil sets to exclude not among the run's coil sets ($(join(table.coil_names, ", "))): $(join(unknown, ", "))"))
     keep = [i for (i, n) in enumerate(table.coil_names) if !(n in names)]
-    return SensitivityTable(table.coil_names[keep], table.mode, table.delta_nominal[keep], table.shift[:, keep], table.tilt[:, keep],
-        table.delta_per_mm_shift[keep], table.delta_per_deg_tilt[keep], table.delta_per_mm_rim[keep], table.cancelling_shift[:, keep], table.cancelling_tilt[:, keep])
+    return SensitivityTable(table.coil_names[keep], table.mode, table.delta_as_designed[keep], table.shift_sensitivity_per_m[:, keep], table.tilt_sensitivity_per_deg[:, keep],
+        table.abs_delta_shift_per_mm[keep], table.abs_delta_tilt_per_deg[keep], table.abs_delta_rim_per_mm[keep], table.cancelling_shift_m[:, keep],
+        table.cancelling_tilt_deg[:, keep])
 end
 
 """
@@ -220,18 +221,18 @@ function excluded_coil_names(h5path::AbstractString)
 end
 
 """
-    cancelling_offset(δ_nominal, S_x, S_y) -> (Δx, Δy)
+    cancelling_offset(δ_as_designed, S_x, S_y) -> (Δx, Δy)
 
 The real in-plane displacement that cancels a coil set's nominal overlap to linear order,
-`S_x·Δx + S_y·Δy = −δ_nominal`, as the least-squares solution of the 2×2 real system on the
+`S_x·Δx + S_y·Δy = −δ_as_designed`, as the least-squares solution of the 2×2 real system on the
 real and imaginary parts. For an axisymmetric hoop the two sensitivities are one complex number
 seen twice — `S_y = −i·S_x` in the sign convention these coils are built with — and the solution is
-`conj(−δ_nominal / S_x)`, split into its real and imaginary parts. The conjugate is not decoration:
+`conj(−δ_as_designed / S_x)`, split into its real and imaginary parts. The conjugate is not decoration:
 dropping it mirrors the offset about the x axis. A degenerate pair (`S_x` and `S_y` real
 multiples of each other) returns the minimum-norm solution.
 """
-function cancelling_offset(δ_nominal::Number, S_x::Number, S_y::Number)
+function cancelling_offset(δ_as_designed::Number, S_x::Number, S_y::Number)
     A = [real(S_x) real(S_y); imag(S_x) imag(S_y)]
-    Δ = pinv(A) * [-real(δ_nominal), -imag(δ_nominal)]
+    Δ = pinv(A) * [-real(δ_as_designed), -imag(δ_as_designed)]
     return (Δ[1], Δ[2])
 end
