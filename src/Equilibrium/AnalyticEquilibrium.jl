@@ -379,9 +379,9 @@ function tj_analytic_shape_solve(p::TJAnalyticShapeParams, nu::Float64;
     rhs_params = (; p.a, p.B0, p.qc, p.mu, p.pc, p.epsa2, nu=nu)
     prob = ODEProblem(tj_analytic_shape_rhs!, tj_analytic_shape_initial(p, nu), (p.r0, p.a), rhs_params)
     sol = if saveat === nothing
-        solve(prob, Vern9(); reltol, abstol, maxiters=10000, dense=false)
+        solve(prob, Vern9(); reltol, abstol, dense=false)
     else
-        solve(prob, Vern9(); reltol, abstol, maxiters=10000, saveat=saveat)
+        solve(prob, Vern9(); reltol, abstol, saveat=saveat)
     end
     return check_equil_solve(sol, "TJ-analytic shaping functions at ν = $nu")
 end
@@ -394,7 +394,8 @@ https://github.com/rfitzp/TJ): solve for ν so that q₂(x=1) matches
 `q₂ = x²·(1+εa²·g₂)·exp(−εa²·f3/f1)/f1`; at x=1 and low β this picks up an
 O(εa²) correction relative to the lowest-order guess ν = qa/qc, which
 matters for the TJ-analytic benchmark at large ε.  Falls back to the
-lowest-order ν if the bracket search diverges.
+lowest-order ν if the root-find has no bracket or does not converge; an
+error from a trial shaping solve propagates.
 """
 function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; reltol::Float64=1e-7, abstol::Float64=equil_abstol(reltol))
     function q2_edge(nu::Float64)
@@ -409,7 +410,10 @@ function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; relto
         find_zero(nu -> q2_edge(nu) - qa_target, (0.5 * nu_guess, 2 * nu_guess);
             atol=1e-8, rtol=1e-10)
     catch err
-        @warn "ν root-find failed for TJ-analytic equilibrium; falling back to lowest-order ν = qa/qc" error = err
+        # Only a failed root-find falls back; a shaping solve that stopped early must propagate.
+        fallback = err isa Roots.ConvergenceFailed || (err isa ArgumentError && occursin("not a bracketing interval", err.msg))
+        fallback || rethrow()
+        @warn "ν root-find failed for TJ-analytic equilibrium; falling back to lowest-order ν = qa/qc" exception = (err, catch_backtrace())
         nu_guess
     end
 end
@@ -458,8 +462,8 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     epsa2 = p.epsa2
     p00_phys = B0^2 * epsa2 * pc          # μ₀P = B₀²·εa²·p₂ at axis
 
-    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol))
-    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol))
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -552,9 +556,6 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, R0, 0.0, psio, nothing)
 end
 
-# Tighter abstol ceiling for the dense-saveat TJ-analytic solve that feeds the (R, Z) → (r, w) Newton inversion.
-const TJ_DENSE_ABSTOL_MAX = 1e-10
-
 """
     tj_analytic_run_direct(equil_input, tj_input; nrbox=257, nzbox=257, rc=1.2)
 
@@ -598,14 +599,14 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     p00_phys = B0^2 * epsa2 * pc
 
     # ν root-find (cf. Fitzpatrick TJ's Setnu): q₂(1) = qa_target.
-    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol))
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
 
     # Dense saveat so the downstream splines (H₁, g₂, f₃, ψ) are evaluated on
     # a fine uniform r grid rather than the ~30 adaptive Vern9 steps — otherwise
     # the (R, Z) → (r, w) Newton iteration hits spline interpolation artifacts.
+    # That inversion also needs a tighter abstol ceiling (1e-10) than the other equilibrium solves.
     dense_r = collect(range(p.r0, p.a; length=1024))
-    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol,
-        abstol=equil_abstol(equil_input.etol, TJ_DENSE_ABSTOL_MAX), saveat=dense_r)
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol, 1e-10), saveat=dense_r)
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
 

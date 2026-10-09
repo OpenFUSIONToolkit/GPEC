@@ -12,6 +12,7 @@ import ..Utilities
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
+include("SolveTolerances.jl")
 include("GridRefinement.jl")
 include("FluxSurfaceMetrics.jl")
 include("CoordinateInvariant.jl")

@@ -153,6 +153,14 @@
         @test_throws r"stopped early at t = .* with retcode MaxIters" check(stopped, "test")
         terminated = solve(prob, Vern9(); callback=ContinuousCallback((u, t, integrator) -> t - 0.5, terminate!))
         @test check(terminated, "test") === terminated
+        # Only Success and Terminated count as finished; other "successful" codes are nonlinear-solver exits.
+        stalled = OrdinaryDiffEq.SciMLBase.solution_new_retcode(sol, ReturnCode.StalledSuccess)
+        @test_throws r"retcode StalledSuccess" check(stalled, "test")
+
+        # A trial shaping solve that stops early must come out of the ν root-find, not become its ν = qa/qc fallback.
+        Equil = GeneralizedPerturbedEquilibrium.Equilibrium
+        tj = Equil.TJAnalyticConfig(; lar_r0=4.0, lar_a=1.0, qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0, ma=64, mtau=64)
+        @test_throws r"stopped early at t = .* with retcode DtNaN" Equil.tj_analytic_find_nu(Equil.TJAnalyticShapeParams(tj), tj.qa; abstol=NaN)
     end
 
     @testset "Deprecated TOML keys are dropped, not fatal" begin

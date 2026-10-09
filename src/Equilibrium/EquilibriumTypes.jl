@@ -38,8 +38,8 @@ specified in the input.
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Float64` - Target on-axis safety factor q(0); the q and F profiles are rescaled to
     meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
-  - `etol::Float64` - Relative tolerance of the equilibrium ODE solves (positive and finite); their
-    absolute tolerance is `equil_abstol(etol)`, i.e. `etol` capped at `EQUIL_ABSTOL_MAX`
+  - `etol::Float64` - Relative tolerance of the equilibrium ODE solves; their absolute tolerance
+    is `equil_abstol(etol)`, i.e. `etol` capped at `EQUIL_ABSTOL_MAX`
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
@@ -154,30 +154,6 @@ specified in the input.
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
             force_termination, use_galgrid, imas_cocos)
     end
-end
-
-"""
-Ceiling on the absolute tolerance of the equilibrium ODE solves; the historical fixed value, kept so a loose `etol` never loosens abstol.
-"""
-const EQUIL_ABSTOL_MAX = 1e-8
-
-"""
-    equil_abstol(etol, cap=EQUIL_ABSTOL_MAX)
-
-Absolute tolerance of an equilibrium ODE solve: follows `etol` but is never looser than `cap`.
-"""
-equil_abstol(etol::Real, cap::Real=EQUIL_ABSTOL_MAX) = min(etol, cap)
-
-"""
-    check_equil_solve(sol, what)
-
-Return the equilibrium ODE solution `sol`, or raise an error naming the solve `what` if the integrator
-stopped early (step limit, step-size underflow, instability) instead of finishing or terminating on its callback.
-"""
-function check_equil_solve(sol, what::AbstractString)
-    OrdinaryDiffEq.SciMLBase.successful_retcode(sol) ||
-        error("Equilibrium ODE solve ($what) stopped early at t = $(sol.t[end]) with retcode $(sol.retcode).")
-    return sol
 end
 
 """
