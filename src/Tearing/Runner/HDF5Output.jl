@@ -90,10 +90,10 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/sval_r" => (; long_name="r-based magnetic shear r_s·(dq/dr)/q (Fitzpatrick convention)", dims=("surface",)),
     "PerSurface/D_R" =>
         (; long_name="resistive interchange D_R = E + F + H² for the critical-Δ formula (auto-derived from GGJ coefficients unless overridden)", dims=("surface",)),
-    "PerSurface/D_geo" => (; long_name="Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied)", dims=("surface",)),
+    "PerSurface/D_geo" => (; long_name="Connor et al. 2015 Eq. 59 geometric factor (0 unless supplied)", dims=("surface",)),
     "PerSurface/eta" => (; long_name="parallel resistivity at each surface", units="Ohm*m", dims=("surface",)),
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
-    "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor-Hastie-Helander 2015 Eq. 59)", dims=("surface",)),
+    "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor et al. 2015 Eq. 59)", dims=("surface",)),
     "PerSurface/D_c_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
     "PerSurface/k_ref" => (; long_name="reference-length ratio K = r_s·(dψ_N/dr) at each surface", dims=("surface",)),
     "PerSurface/alpha_mercier" => (; long_name="Mercier Frobenius exponent α = √(−D_I) at each surface (Glasser-Greene-Johnson 1975 Eq. 48)", dims=("surface",)),

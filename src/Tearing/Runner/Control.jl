@@ -23,7 +23,7 @@ constructor.
     (multi-surface determinant)
   - `dc_type`       -- critical-Δ offset selector, one of `:none`, `:lar`,
     `:rfitzp`, `:toroidal` (χ_‖-matching critical-Δ formulas,
-    Connor-Hastie-Helander 2015)
+    Connor, Ham, Hastie & Liu 2015)
   - `msing_max`     -- number of surfaces to include in the coupled
     determinant (default 3; capped at `length(sings)` at runtime)
 
