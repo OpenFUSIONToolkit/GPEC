@@ -77,7 +77,7 @@ include("Rerun.jl")
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings
 using .ForceFreeStates: ForceFreeStatesResult, build_result
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
+using .ForceFreeStates: sing_lim!, check_qlow_domain, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
@@ -558,6 +558,7 @@ function prepare_force_free_states!(
 )
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
+    check_qlow_domain(ctrl, equil)
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)

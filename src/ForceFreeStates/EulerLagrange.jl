@@ -661,7 +661,10 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                       ctrl.singfac_min / abs(minimum(intr.kinsing[ising_current].n) * intr.kinsing[ising_current].q1)
 
             if psi_current >= psi_end
-                # Surface too close to current position — skip it
+                # The crossing standoff reaches back past the current chunk start: skip this surface, loudly.
+                ks = intr.kinsing[ising_current]
+                @warn "Skipping kinetic singular surface m/n=$(join(string.(ks.m, "/", ks.n), ", ")) at ψ=$(ks.psifac) (q'=$(ks.q1)): " *
+                      "its crossing standoff singfac_min/|n q'| = $(ks.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current."
                 ising_current = find_next_kinsing!(ising_current, intr)
                 continue
             end
@@ -704,8 +707,14 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
             psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min /
                                                         abs(minimum(intr.sing[ising_current].n) * intr.sing[ising_current].q1)
 
-            # Validate chunk bounds
-            @assert psi_current < psi_end "Invalid chunk bounds: psi_start=$psi_current >= psi_end=$psi_end"
+            # The crossing standoff singfac_min/|n q'| must not reach back past the current chunk start.
+            if psi_end <= psi_current
+                sg = intr.sing[ising_current]
+                error(
+                    "Singular surface q=$(sg.q) at ψ=$(sg.psifac) (q'=$(sg.q1)): its crossing standoff " *
+                    "singfac_min/|n q'| = $(sg.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current."
+                )
+            end
             @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"
 
             push!(chunks, IntegrationChunk(;
