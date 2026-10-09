@@ -23,7 +23,7 @@ constructor.
     (multi-surface determinant)
   - `dc_type`       -- critical-Δ offset selector, one of `:none`, `:lar`,
     `:rfitzp`, `:toroidal` (χ_‖-matching critical-Δ formulas,
-    Connor-Hastie-Helander 2015)
+    Connor, Ham, Hastie & Liu 2015)
   - `msing_max`     -- number of surfaces to include in the coupled
     determinant (default 3; capped at `length(sings)` at runtime)
 
@@ -41,9 +41,12 @@ constructor.
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `dr_val` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
-    toroidal geometric factor (required only by `dc_type=:toroidal`). Supply a
-    scalar only to override the auto-derivation; an explicit `0.0` disables the
-    critical-Δ offset (Δ_crit ≡ 0)
+    Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s` reference
+    (consumed only by `dc_type=:toroidal`). Supply a scalar only to override
+    the auto-derivation. An explicit `dr_val = 0.0` disables the critical-Δ
+    offset (Δ_crit ≡ 0) for every `dc_type`; `dgeo_val = 0.0` does so only for
+    `:toroidal`. `:toroidal` also takes the χ∥ closure's parallel wavenumber
+    from the equilibrium (`toroidal_kpar`), which has no override
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`

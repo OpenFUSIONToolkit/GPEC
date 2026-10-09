@@ -108,3 +108,9 @@ The KineticForces module (formerly PENTRC) implements neoclassical toroidal visc
   - Published: Physical Review Letters **102**, 065002 (2009)
   - Link: https://doi.org/10.1103/PhysRevLett.102.065002
   - Describes: Trapped-particle nonambipolar transport theory underpinning the NTV calculation
+
+- **Connor et al. (2015)**: "The role of thermal conduction in tearing mode theory"
+  - Location: not in `docs/resources/`; preprint at https://arxiv.org/abs/1410.7240
+  - Published: Plasma Physics and Controlled Fusion **57**, 065001 (2015)
+  - Link: https://doi.org/10.1088/0741-3335/57/6/065001
+  - Describes: Toroidal critical Δ′ from finite parallel thermal conduction at a rational surface. Eq. 59 gives the geometric factor (`toroidal_dgeo`) and Eq. 20 the parallel-wavenumber gradient (`toroidal_kpar`) used by `dc_type = :toroidal` in `InnerLayer.SLAYER`; Eq. 61 is the large-aspect-ratio form of Eq. 59, and Eq. 65 gives the corresponding critical island width of Fitzpatrick (1995)
