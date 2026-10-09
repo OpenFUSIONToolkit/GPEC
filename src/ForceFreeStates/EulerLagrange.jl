@@ -133,7 +133,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Initialization parameters
 
-  - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
+  - `zeroed_idx::Vector{Vector{Int}}` - For each ideal crossing, the positions in `index` of the zeroed resonant solutions (`1:nres`).    # Data for integrator
 
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.    # Data for integrator
 
@@ -765,10 +765,11 @@ function cross_ideal_singular_surf!(
 
     singp = intr.sing[ising]
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    nres = length(ipert_res)
 
     # Fixup solution at singular surface; the ideal jump reduces on the resonant rows so the
     # solution it removes below is the resonant one
-    compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=(ctrl.kinetic_factor == 0 ? ipert_res : Int[]))
+    compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=ipert_res)
 
     # Compute direction-specific asymptotic power series for this singular surface
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
@@ -783,11 +784,9 @@ function cross_ideal_singular_surf!(
     # The reduction above placed the column pivoted on ipert_res[i] at index position i, which also
     # keeps each zeroed column in the same n-block as the resonant mode introduced below; zeroed_idx
     # records the positions for transforming u back to the full solution after integration.
-    if ctrl.kinetic_factor == 0
-        odet.zeroed_idx[odet.ifix] = collect(eachindex(ipert_res))
-        for i in eachindex(ipert_res)
-            odet.u[:, odet.index[i, odet.ifix], :] .= 0
-        end
+    odet.zeroed_idx[odet.ifix] = collect(1:nres)
+    for i in 1:nres
+        odet.u[:, odet.index[i, odet.ifix], :] .= 0
     end
 
     # Re-initialize on opposite side of rational surface by approximating solution
@@ -801,13 +800,11 @@ function cross_ideal_singular_surf!(
 
     # Apply asymptotic solution on other side of singular surface (right side)
     ua = sing_get_ua(sing_asymp_right, dpsi)
-    if ctrl.kinetic_factor == 0
-        for i in eachindex(sing_asymp_right.r1)
-            # Zero out the resonant components
-            odet.u[ipert_res[i], :, :] .= 0
-            # Introduce the small asymptotic resonant solution on the other side of the singular surface
-            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= ua[:, ipert_res[i]+intr.numpert_total, :]
-        end
+    for i in 1:nres
+        # Zero out the resonant components
+        odet.u[ipert_res[i], :, :] .= 0
+        # Introduce the small asymptotic resonant solution on the other side of the singular surface
+        odet.u[:, odet.index[i, odet.ifix], :] .= ua[:, ipert_res[i]+intr.numpert_total, :]
     end
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
@@ -1007,9 +1004,7 @@ operate on `u` directly without extra copies.
 
   - u: Current solution vector array, updated in-place if fixfac is called
   - sing_flag: Indicates if normalization is occuring at a singular surface or not
-  - resonant_rows: Rows of the resonant harmonics at an ideal crossing. When given, the reduction
-    always runs, even right after a `ucrit` reduction, and pivots on these rows (see
-    `apply_gaussian_reduction!`)
+  - resonant_rows: Resonant rows at an ideal crossing; when given, the reduction always runs and pivots on them
 
 ### TODOs
 
@@ -1025,24 +1020,31 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
     end
 
-    # Normalize unorm and perform Gaussian reduction if required
-    if odet.new && isempty(resonant_rows)
+    # The first call after a reduction records the reference norms; an ideal crossing reduces regardless
+    at_ideal_crossing = !isempty(resonant_rows)
+    if odet.new && !at_ideal_crossing
         odet.new = false
         odet.unorm0 .= odet.unorm
-    else
-        odet.new || (odet.unorm ./= odet.unorm0)
-        uratio = maximum(odet.unorm) / minimum(odet.unorm)
-        if uratio > ctrl.ucrit || sing_flag
-            # TODO: add resizing logic here as well
-            if odet.ifix < ctrl.numunorms_init
-                odet.ifix += 1
-            else
-                @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
-                Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
-            end
-            apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
-            odet.new = true
+        return
+    end
+
+    # Growth since the last reduction (raw norms if a crossing comes right after one)
+    if !odet.new
+        odet.unorm ./= odet.unorm0
+    end
+    uratio = maximum(odet.unorm) / minimum(odet.unorm)
+
+    # Perform Gaussian reduction if the ucrit ratio is reached or at a singular surface
+    if uratio > ctrl.ucrit || sing_flag
+        # TODO: add resizing logic here as well
+        if odet.ifix < ctrl.numunorms_init
+            odet.ifix += 1
+        else
+            @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
+            Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
         end
+        apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
+        odet.new = true
     end
 end
 
@@ -1057,11 +1059,9 @@ This will update both `u` and relevant fields in `odet` in-place. See the
 description of `compute_solution_norms!` for more details on the benefits of in-place `u`
 updates.
 
-Columns are triangularized in order of their growth since the last reduction. At an ideal
-crossing, `resonant_rows` puts first, for each resonant row, the column with the largest
-component there and pivots it on that row, so that column alone carries the resonant harmonic.
-Growth order cannot identify the resonant solution when a `ucrit` reduction fired only a few
-steps before the crossing, because every column has then grown alike.
+At an ideal crossing, the first pivots are the `resonant_rows`, each on the remaining column largest
+there. Growth order cannot pick the resonant solution if a `ucrit` reduction fired just before the
+crossing, since every column has then grown alike.
 """
 function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
