@@ -45,49 +45,81 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
 
   - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
+
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
+
   - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
+
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
+
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
+
   - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
+
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
+
   - `du_store::Array{ComplexF64,3}` - dΞ_ψ/dψ (the u₁ block only) at each saved step, shape
     `(numpert_total, numpert_total, step)`. Empty until `materialize_derivative_stores!` fills it,
     except on the galerkin-matched path which supplies the analytic derivative at construction.
     du₂/dψ is never stored densely — its only consumer evaluates it on demand at bracket nodes.
+
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s at each saved step, eq. 18 of Glasser 2016,
     shape `(numpert_total, numpert_total, step)`. Empty until materialized, same as `du_store`.
+
   - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state `(u₁, u₂)`, so the
     derivative kernel can be re-applied to it. False on the sparse parallel path, whose stored columns
     are chunk-endpoint Riccati matrices; `materialize_derivative_stores!` refuses to run there.
+
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final
     (post-transform, post-normalization) basis. Set by `materialize_derivative_stores!` or by the
     galerkin-matched constructor; stays false where the stores cannot be materialized, e.g. the
     sparse parallel path whose solution is in the Riccati basis.
+
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
+
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
+
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
+
   - `ca_populated::Bool` - True once an ideal singular-surface crossing has filled `ca_l`/`ca_r`; kinetic and
     galerkin-matched runs never populate them and leave this false, and the HDF5 writer then emits zero-extent
     `ca_left`/`ca_right` datasets instead of unpopulated arrays.
+
   - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
+
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
+
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
+
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
+
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
+
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
+
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
+
+    # Initialization parameters
+
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
+
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
     # Initialization parameters
+
+    # Saved data throughout integration
+
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
+
+# Total ODE solver steps taken (all steps, not just saved ones)
+
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
 
     # Saved data throughout integration
+
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
 
 # Total ODE solver steps taken (all steps, not just saved ones)
@@ -96,8 +128,15 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
+
+    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+
+    # Initialization parameters
+
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
-  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
+
+  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.    # Data for integrator
+
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
 @kwdef mutable struct OdeState
@@ -404,20 +443,15 @@ end
 """
     compute_axis_init(mats, profiles, intr, psi_low) -> (U1_init, U2_init)
 
-Compute axis initial conditions for the Euler-Lagrange ODE via the Frobenius
-leading-coefficient eigenvalue problem [Glasser Phys. Plasmas 2016 112506 Eq. 51]:
+Opt-in diagonal approximation to the axis Frobenius problem [Glasser Phys. Plasmas 2016 112506 Eq. 51],
+evaluated at finite `psi_low` rather than in the limit ψ → 0. Used only when `frobenius_psi_max` is
+positive and the integration starts at or below it.
 
-    lim_{ψ→0} [ψ M(ψ) − a I] v = 0
-
-For each mode j, solves the 2×2 Frobenius eigenvalue problem for the diagonal block of
-A₀ = ψ_low · M(ψ_low). The eigenvector with Re(a) ≥ 0 is the regular (non-singular)
-Frobenius solution. Returns U₁_init and U₂_init normalized so that U₂_init = I (consistent
-with the N independent solutions convention).
-
-For m≠0 the regular eigenvector has a negligible U₁ component (~ψ_low^(|m|/2)), recovering
-the Glasser [0, I] limit as ψ_low → 0. For m=0 (degenerate a≈0), the regular eigenvector
-is identified by dominant |U₁| component, giving the physically correct constant-displacement
-Frobenius solution and avoiding the spurious logarithmic irregularity.
+For each mode, forms the 2×2 diagonal block of ψ_low · M from the diagonal entries of F̄⁻¹, K̄, and Ḡ,
+discards mode coupling, and returns that block's eigenvector normalized so that U₂ = I (or U₁ = 1, U₂ = 0
+when the momentum component underflows). The component ratio does not scale as a positive power of
+`psi_low`. A negative Ḡ diagonal, including the m = 0 block, gives an imaginary conjugate pair, so the
+returned U₁ is non-real and which branch is stored follows the eigen-solver's column order.
 """
 function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSplines,
     intr::ForceFreeStatesInternal, psi_low::Float64)
@@ -495,12 +529,9 @@ end
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
 Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
-The Frobenius start is used only when the starting surface lies at or below `ctrl.frobenius_psi_max`;
-an interior start (or `ctrl.frobenius_psi_max = 0`) uses U₁ = 0, U₂ = I.
-
-### TODOs
-
-Move ising_start logic to chunk_el_integration_bounds?
+The default `ctrl.frobenius_psi_max = 0` uses the fixed start, U₁ = 0, U₂ = I, with no warning. The
+Frobenius start is used only when `frobenius_psi_max` is positive and the starting surface lies at or
+below it.
 """
 function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, mats::MatrixSplines,
     profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
@@ -533,13 +564,8 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ma
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
 
-    # The Frobenius start is a series about the axis; an interior start uses the fixed start Fortran DCON always uses.
+    # Default (frobenius_psi_max = 0) is the fixed start Fortran DCON uses. A positive threshold opts into the diagonal Frobenius start.
     fixed_start = odet.psifac > ctrl.frobenius_psi_max
-    if fixed_start && ctrl.frobenius_psi_max > 0
-        @warn "Integration starts at ψ_N = $(round(odet.psifac; sigdigits=4)), above frobenius_psi_max = $(ctrl.frobenius_psi_max): " *
-              "the axis Frobenius start is only valid near the axis, so the fixed start (U₁ = 0, U₂ = I) is used, as in Fortran DCON. " *
-              "Set frobenius_psi_max = 0 to select it silently, or raise it to keep the Frobenius start."
-    end
     if fixed_start
         # Original Glasser initialization: U₁=0, U₂=I [Glasser 2016 §VI].
         # Constrains the displacement ξ^ψ=0 for all modes at the starting surface (fixed axis or rigid core).
@@ -547,9 +573,10 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ma
             odet.u[ipert, ipert, 2] = 1
         end
     else
-        # Frobenius initialization [Glasser 2016 §VI Eq. 51]: selects the regular
-        # (non-logarithmic) solution for each mode, including the correct constant
-        # displacement solution for the degenerate m=0 case (free magnetic axis).
+        # Opt-in diagonal Frobenius start. See compute_axis_init.
+        @warn "Frobenius axis start at ψ_N = $(round(odet.psifac; sigdigits=4)). " *
+              "This start is currently unreliable - use only if explicitly requested." *
+              "Set frobenius_psi_max = 0 for the fixed start (U₁ = 0, U₂ = I)."
         U1_init, U2_init = compute_axis_init(mats, profiles, intr, odet.psifac)
         odet.u[:, :, 1] .= U1_init
         odet.u[:, :, 2] .= U2_init
