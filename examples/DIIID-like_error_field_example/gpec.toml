@@ -211,6 +211,7 @@ rotation_center = "conductor"           # Tilt pivot: each conductor's own centr
 write_outputs_to_HDF5 = true            # Write ErrorFields/CoilSensitivities/ to the output file
 verbose = true                          # Log per-coil-set progress and linearity diagnostics
 tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the run directory
+exclude_coils = []                      # Coil sets that are not error-field sources (the NTV efc_coils are excluded automatically)
 
 [ErrorFields.MonteCarlo]
 nsample = 200000                        # Samples per batch

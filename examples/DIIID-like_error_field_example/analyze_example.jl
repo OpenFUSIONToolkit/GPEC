@@ -17,17 +17,17 @@ fcoils = findall(startswith("F"), names)
 
 println("coil       |δ_nom|    per mm of shift   per mm of rim    curvature")
 for (j, nm) in enumerate(names)
-    @printf("%-8s %10.3e   %13.3e   %13.3e   %9.1e\n", nm, abs(full.delta_nominal[j]), full.delta_per_mm_shift[j],
-        full.delta_per_mm_rim[j], max(maximum(sens.shift_linearity_residual[:, j]), maximum(sens.tilt_linearity_residual[:, j])))
+    @printf("%-8s %10.3e   %13.3e   %13.3e   %9.1e\n", nm, abs(full.delta_as_designed[j]), full.abs_delta_shift_per_mm[j],
+        full.abs_delta_rim_per_mm[j], max(maximum(sens.shift_linearity_residual[:, j]), maximum(sens.tilt_linearity_residual[:, j])))
 end
 
 # Error field per millimetre of in-plane shift and per millimetre of rim displacement from tilt,
 # F coils only, both in the units mechanical tolerances arrive in. Axisymmetric hoops have no
 # nominal n=1 drive, so the sensitivities are their whole error-field story.
-p_shift = bar(names[fcoils], full.delta_per_mm_shift[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
+p_shift = bar(names[fcoils], full.abs_delta_shift_per_mm[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
     ylabel="|δ| per mm", title="Dominant-mode error field per mm of F-coil shift", xrotation=45, xticks=(1:length(fcoils), names[fcoils]),
     left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
-p_tilt = bar(names[fcoils], full.delta_per_mm_rim[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
+p_tilt = bar(names[fcoils], full.abs_delta_rim_per_mm[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
     ylabel="|δ| per mm of rim", title="Dominant-mode error field per mm of F-coil rim displacement", xrotation=45,
     xticks=(1:length(fcoils), names[fcoils]), left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
 p_sens = plot(p_shift, p_tilt; layout=(2, 1), size=(900, 700))
@@ -40,16 +40,16 @@ println("Saved: ", abspath(sens_path))
 # sensitive F coils under a 1 mm shift along x, against the C-coil's nominal spectrum.
 step_series(m, a) = (vcat(m[1] - 1, m, m[end] + 1), vcat(0.0, a, 0.0))
 m = sens.m_modes
-order = sortperm(full.delta_per_mm_shift[fcoils]; rev=true)
+order = sortperm(full.abs_delta_shift_per_mm[fcoils]; rev=true)
 picks = [fcoils[order[1]], fcoils[order[end]]]
 p_spec = plot(; xlabel="poloidal mode m", ylabel="|b̃| [T]", yscale=:log10, legend=:topleft,
     title="Root-area-weighted spectra: C-coil as built vs F coils shifted 1 mm in x",
     left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
 c = findfirst(==("d3d_c"), names)   # file-based sets are named machine_name
-me, ae = step_series(m, max.(abs.(sens.nominal_field[:, c]), 1e-30))
+me, ae = step_series(m, max.(abs.(sens.field_as_designed[:, c]), 1e-30))
 plot!(p_spec, me, ae; seriestype=:steppre, lw=2, label="C-coil nominal (20 A)")
 for j in picks
-    me, ae = step_series(m, max.(1e-3 .* abs.(sens.shift_sensitivity[:, 1, j]), 1e-30))
+    me, ae = step_series(m, max.(1e-3 .* abs.(sens.shift_sensitivity_per_m[:, 1, j]), 1e-30))
     plot!(p_spec, me, ae; seriestype=:steppre, lw=2, label="$(names[j]) ∂b̃/∂Δx · 1 mm")
 end
 display(p_spec)
@@ -61,40 +61,41 @@ println("Saved: ", abspath(spec_path))
 # window, dominant mode), and a post-hoc re-run over the edge window with the same tolerances.
 mc = ErrorFields.MonteCarloResult(h5path)
 mc_edge = ErrorFields.run_monte_carlo(h5path; psi_low=0.7, nsample=200_000, nbatch=4, seed=1)
-centers(m) = (m.bin_edges[1:end-1] .+ m.bin_edges[2:end]) ./ 2
+centers(m) = (m.abs_delta_bin_edges[1:end-1] .+ m.abs_delta_bin_edges[2:end]) ./ 2
 p_pdf = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright,
     title="Tolerance Monte Carlo: |δ| over sampled misalignments", left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
-plot!(p_pdf, centers(mc), mc.pdf; lw=2, label="intrinsic, all rational surfaces")
-plot!(p_pdf, centers(mc), mc.pdf_efc; lw=2, label="corrected (efc_factor = 2)")
-plot!(p_pdf, centers(mc_edge), mc_edge.pdf; lw=2, ls=:dash, label="intrinsic, ψ_N ≥ 0.7")
-vline!(p_pdf, [mc.delta_nominal]; ls=:dot, c=:black, label="as designed")
+plot!(p_pdf, centers(mc), mc.abs_delta_pdf; lw=2, label="intrinsic, all rational surfaces")
+plot!(p_pdf, centers(mc), mc.abs_delta_efc_pdf; lw=2, label="corrected (efc_factor = 2)")
+plot!(p_pdf, centers(mc_edge), mc_edge.abs_delta_pdf; lw=2, ls=:dash, label="intrinsic, ψ_N ≥ 0.7")
+vline!(p_pdf, [mc.abs_delta_total_as_designed]; ls=:dot, c=:black, label="as designed")
 display(p_pdf)
 pdf_path = joinpath(@__DIR__, "tolerance_pdf.png")
 Plots.savefig(p_pdf, pdf_path)
 println("Saved: ", abspath(pdf_path))
 @printf("⟨|δ|⟩ = %.3e intrinsic, %.3e corrected; as designed %.3e; batch spread of ⟨|δ|⟩ ≈ %.1e\n",
-    mc.mean_abs_delta, mc.mean_abs_delta_efc, mc.delta_nominal,
-    maximum(abs.(vec(sum(mc.pdf_batches .* centers(mc) .* diff(mc.bin_edges); dims=1)) .- mc.mean_abs_delta)))
+    mc.abs_delta_sampled_mean, mc.abs_delta_efc_sampled_mean, mc.abs_delta_total_as_designed,
+    maximum(abs.(vec(sum(mc.abs_delta_pdf_batches .* centers(mc) .* diff(mc.abs_delta_bin_edges); dims=1)) .- mc.abs_delta_sampled_mean)))
 
 # Locking risk: the threshold distribution against the overlap distribution, and the risk against
 # tolerance scale with the allowable tolerance for a 1 % target read off the scan.
 scan = ErrorFields.ToleranceScan(h5path)
-risk_nominal = h5open(f -> (read(f["ErrorFields/Risk/plock_percent"]), read(f["ErrorFields/Risk/plock_efc_percent"]),
-        read(f["ErrorFields/Risk/threshold_nominal"]), read(f["ErrorFields/Risk/threshold_pdf"]), read(f["ErrorFields/Risk/p_lock_given_delta"])), h5path, "r")
-plock, plock_efc, thr_nom, thr_pdf, p_given = risk_nominal
+risk_nominal = h5open(
+    f -> (read(f["ErrorFields/Risk/locking_probability_percent"]), read(f["ErrorFields/Risk/locking_probability_efc_percent"]),
+        read(f["ErrorFields/Risk/threshold_fit"]), read(f["ErrorFields/Risk/threshold_pdf"]), read(f["ErrorFields/Risk/locking_probability_given_delta"])), h5path, "r")
+locking_probability_percent, locking_probability_efc_percent, thr_nom, thr_pdf, p_given = risk_nominal
 p_thr = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright, xscale=:log10,
     title="Overlap distribution vs ITPA penetration threshold", left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
 c = centers(mc)
 keep = c .> 0
-plot!(p_thr, c[keep], mc.pdf[keep] ./ maximum(mc.pdf); lw=2, label="intrinsic |δ| (normalized)")
-plot!(p_thr, c[keep], mc.pdf_efc[keep] ./ maximum(mc.pdf_efc); lw=2, label="corrected |δ| (normalized)")
+plot!(p_thr, c[keep], mc.abs_delta_pdf[keep] ./ maximum(mc.abs_delta_pdf); lw=2, label="intrinsic |δ| (normalized)")
+plot!(p_thr, c[keep], mc.abs_delta_efc_pdf[keep] ./ maximum(mc.abs_delta_efc_pdf); lw=2, label="corrected |δ| (normalized)")
 plot!(p_thr, c[keep], thr_pdf[keep] ./ maximum(thr_pdf); lw=2, c=:black, label="threshold density (normalized)")
-plot!(p_thr, mc.bin_edges[2:end], p_given[2:end]; lw=1.5, ls=:dash, c=:red, label="P(lock | δ)")
+plot!(p_thr, mc.abs_delta_bin_edges[2:end], p_given[2:end]; lw=1.5, ls=:dash, c=:red, label="P(lock | δ)")
 vline!(p_thr, [thr_nom]; ls=:dot, c=:black, label="nominal threshold")
 p_scan = plot(; xlabel="tolerance scale (× tolerances.toml)", ylabel="locking probability [%]", xscale=:log10, yscale=:log10,
     legend=:topleft, title="Risk vs tolerance scale", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
-plot!(p_scan, scan.scale, max.(scan.plock, 1e-4); marker=:circle, lw=2, label="intrinsic")
-plot!(p_scan, scan.scale, max.(scan.plock_efc, 1e-4); marker=:square, lw=2, label="corrected")
+plot!(p_scan, scan.tolerance_scale, max.(scan.locking_probability_percent, 1e-4); marker=:circle, lw=2, label="intrinsic")
+plot!(p_scan, scan.tolerance_scale, max.(scan.locking_probability_efc_percent, 1e-4); marker=:square, lw=2, label="corrected")
 hline!(p_scan, [1.0]; ls=:dash, c=:gray, label="1 % target")
 p_risk = plot(p_thr, p_scan; layout=(2, 1), size=(900, 760))
 display(p_risk)
@@ -102,7 +103,7 @@ risk_path = joinpath(@__DIR__, "locking_risk.png")
 Plots.savefig(p_risk, risk_path)
 println("Saved: ", abspath(risk_path))
 @printf("P_lock = %.2f %% intrinsic, %.2f %% corrected at the design tolerances; allowable scale for 1 %%: %.2f (intrinsic), %.2f (corrected)\n",
-    plock, plock_efc, ErrorFields.allowable_tolerance(scan, 1.0), ErrorFields.allowable_tolerance(scan, 1.0; corrected=true))
+    locking_probability_percent, locking_probability_efc_percent, ErrorFields.allowable_tolerance(scan, 1.0), ErrorFields.allowable_tolerance(scan, 1.0; corrected=true))
 
 # The same figures through the Analysis module, which overplots design revisions when given
 # several `label => gpec.h5` pairs.
@@ -116,7 +117,7 @@ display(p_ntv)
 for c in ErrorFields.read_efc_couplings(h5path)
     lim = ErrorFields.max_correctable_overlap(c; delta_threshold=thr_nom, torque_budget=4.0)
     @printf("%s: |δ| = %.3e per kAt, resonant fraction %.1f %%, torque %.3e (full) / %.3e (residual) N·m per kAt²; correctable up to %.2f × threshold\n",
-        c.coil_name, c.delta_per_kat, c.overlap_percent, c.torque_full_per_kat2, c.torque_residual_per_kat2, lim.with_ntv / thr_nom)
+        c.coil_name, c.delta_per_kat, c.resonant_fraction_percent, c.torque_full_per_kat2, c.torque_residual_per_kat2, lim.with_ntv / thr_nom)
 end
 
 # ---------------------------------------------------------------------------------------------
@@ -135,13 +136,13 @@ moved = ErrorFields.coil_overlaps(ctx, [FT.apply_transforms(cs, FT.CoilSetConfig
 
 println("\ncoil            |δ| as built    |δ| shifted 1 mm   resonant fraction")
 for (a, b) in zip(as_built, moved)
-    @printf("%-14s %12.4e   %14.4e   %14.1f %%\n", a.coil_name, abs(a.delta), abs(b.delta), a.fraction_percent)
+    @printf("%-14s %12.4e   %14.4e   %14.1f %%\n", a.coil_name, abs(a.delta), abs(b.delta), a.resonant_fraction_percent)
 end
 
 # Currents are applied afterwards by scaling, so a pair driven in opposition is one call. An
 # unmatched name raises rather than contributing zero, which is what a renamed coil would do.
 pair = ErrorFields.combine_overlaps(as_built, as_built[1].coil_name => 1.0, as_built[end].coil_name => -1.0; name="opposed pair")
-@printf("opposed pair: |δ| = %.4e, resonant fraction %.1f %%\n", abs(pair.delta), pair.fraction_percent)
+@printf("opposed pair: |δ| = %.4e, resonant fraction %.1f %%\n", abs(pair.delta), pair.resonant_fraction_percent)
 
 # Why a coil couples as it does, which the per-coil bars above cannot answer. The first says
 # whether it drives a different part of the spectrum or simply drives less; the second decomposes
