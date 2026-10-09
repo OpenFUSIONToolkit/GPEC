@@ -39,7 +39,9 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
     return ws
 end
 
-"""Empty `GalerkinResult` for a domain with no resonant surfaces."""
+"""
+Empty `GalerkinResult` for a domain with no resonant surfaces.
+"""
 function empty_galerkin_result()
     return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, nothing)
 end
@@ -74,22 +76,20 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
 
-    # Per-surface two-sided asymptotic series matching Fortran sing.f vmatr/vmatl:
-    # right = sig=+1, left = sig=-1, no √det normalization. The Mercier exponent α is a
-    # property of the surface, so the left series reuses the right's α (alpha_override). The order is
-    # raised to gal_sing_order + ceil(2·Re(α)) for high-Mercier-index surfaces (Fortran sing1_vmat).
+    # Per-surface two-sided asymptotic series (sig = ±1). Each side uses its own resonant block.
     asymps = GalSingAsymp[]
     for s in sings
         sing_order = ctrl.gal_sing_order
         ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
         if ctrl.gal_sing_order_ceiling
+            # The order is raised for high-Mercier-index surfaces
             order = ctrl.gal_sing_order + ceil(Int, 2 * real(ar.alpha[1]))
             if order > ctrl.gal_sing_order
                 sing_order = order
                 ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
             end
         end
-        al = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=-1.0, alpha_override=ar.alpha, sing_order=sing_order)
+        al = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=-1.0, sing_order=sing_order)
         push!(asymps, GalSingAsymp(ar, al))
     end
 
@@ -167,8 +167,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     Ap, Bp, Gammap, Deltap = gal_pest3_blocks(delta, msing)
 
-    # Mercier index D_I = -Re(α²); α is the small/large solution exponent (a surface property, taken
-    # from the right series — the left series reuses the same α via alpha_override above).
+    # Mercier index D_I = -Re(α²). α is the half-separation of the resonant exponents.
     di = [real(-asymps[i].right.alpha[1]^2) for i in 1:msing]
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
 
@@ -215,7 +214,7 @@ function gal_scaled_lu_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{Com
     n = size(mat, 2)
     off = kl + ku + 1  # band row holding the diagonal
     d = [iszero(mat[off, j]) ? 1.0 : 1 / sqrt(abs(mat[off, j])) for j in 1:n]
-    for j in 1:n, i in max(1, j - ku):min(n, j + kl)
+    for j in 1:n, i in max(1, j-ku):min(n, j+kl)
         mat[off+i-j, j] *= d[i] * d[j]
     end
     sol .*= d
@@ -320,11 +319,19 @@ const GALERKIN_H5_ANNOTATIONS = [
     "ForceFreeStates/Solutions/GalerkinIntegration/q" =>
         (; long_name="safety factor q on the Galerkin solution grid", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
     "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi" =>
-        (; long_name="closed axis-to-edge ξ^ψ profiles (ideal or inner-layer closure; identity-at-edge basis)", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+        (;
+            long_name="closed axis-to-edge ξ^ψ profiles (ideal or inner-layer closure; identity-at-edge basis)",
+            dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)
+        ),
     "ForceFreeStates/Solutions/GalerkinIntegration/dxi_psidpsi" =>
         (; long_name="analytic ψ_N derivative of the closed ξ^ψ profiles", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
     "ForceFreeStates/Solutions/GalerkinIntegration/xi_s" =>
-        (; long_name="surface displacement ξ_s from the outer ideal-MHD relation", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+        (;
+            long_name="surface displacement ξ_s from the outer ideal-MHD relation",
+            dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)
+        ),
     "ForceFreeStates/Solutions/GalerkinIntegration/Basis/psi" => (; long_name="normalized poloidal flux ψ_N grid of the raw Galerkin basis", scale="psi_gal_basis"),
     "ForceFreeStates/Solutions/GalerkinIntegration/Basis/is_rational" =>
         (; long_name="flag: grid node lies on a rational surface", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/Basis/psi",)),

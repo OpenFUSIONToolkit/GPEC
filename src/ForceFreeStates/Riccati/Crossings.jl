@@ -6,14 +6,14 @@
 Cross a singular surface for the Riccati formulation. Replaces `cross_ideal_singular_surf!`
 for the Riccati integration path with two key differences:
 
-1. **No Gaussian reduction**: `cross_ideal_singular_surf!` calls `compute_solution_norms!`
-   which applies Gaussian reduction to (S, I). This divides by pivot elements of S, which
-   can be near-zero (S = 0 at axis and grows slowly), producing NaN/Inf in U₂. For Riccati,
-   S is bounded so Gaussian reduction is unnecessary.
+ 1. **No Gaussian reduction**: `cross_ideal_singular_surf!` calls `compute_solution_norms!`
+    which applies Gaussian reduction to (S, I). This divides by pivot elements of S, which
+    can be near-zero (S = 0 at axis and grows slowly), producing NaN/Inf in U₂. For Riccati,
+    S is bounded so Gaussian reduction is unnecessary.
 
-2. **Direct column zeroing**: Instead of using the GR-sorted `odet.index` to identify the
-   column to zero, we use `ipert_res` directly (the resonant mode index). This is valid since
-   without GR there is no permutation applied to the columns of S.
+ 2. **Direct column zeroing**: Instead of using the GR-sorted `odet.index` to identify the
+    column to zero, we use `ipert_res` directly (the resonant mode index). This is valid since
+    without GR there is no permutation applied to the columns of S.
 
 **Δ' normalization**: This function expects `odet.u` in the bounded (U₁, U₂) form produced by
 `riccati_integrate_chunk!` with `needs_crossing=true` (final renorm skipped). ca_l is computed
@@ -54,16 +54,13 @@ end
 """
     _two_sided_singular_asymptotics(singp, ctrl, equil, mats, intr) -> (left, right)
 
-Compute left- (`sig=-1`) and right- (`sig=+1`) side singular asymptotics matching
-Fortran STRIDE's separate vmatl/vmatr (sing_vmat). Alpha is taken from the right
-side and shared with the left.
+Left (`sig=-1`) and right (`sig=+1`) singular asymptotics, each from its own resonant block.
 """
 function _two_sided_singular_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
-                                         equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
-                                         intr::ForceFreeStatesInternal)
+    equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
+    intr::ForceFreeStatesInternal)
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
-    sing_asymp_left  = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0,
-                                                alpha_override=sing_asymp_right.alpha)
+    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0)
     return sing_asymp_left, sing_asymp_right
 end
 
@@ -83,7 +80,7 @@ end
 
 # Capture left-side asymptotic data into odet.ca_l and singp.ua_left/psi_ua_left.
 function _capture_left_crossing_data!(odet::OdeState, singp::SingType, sing_asymp_left,
-                                      dpsi::Float64, intr::ForceFreeStatesInternal, ising::Int)
+    dpsi::Float64, intr::ForceFreeStatesInternal, ising::Int)
     ua = sing_get_ua(sing_asymp_left, dpsi)
     singp.ua_left = copy(ua)
     singp.psi_ua_left = odet.psifac
@@ -95,9 +92,9 @@ end
 # odet.psifac to the right side. The zeroed columns stay zero through the predictor
 # since du[:, ipert_res, :] = 0 when u[:, ipert_res, :] = 0.
 function _predict_across_singular_surface!(odet::OdeState, ctrl::ForceFreeStatesControl,
-                                           equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
-                                           intr::ForceFreeStatesInternal, ising::Int,
-                                           ipert_res, dpsi::Float64, sing_asymp_right)
+    equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
+    intr::ForceFreeStatesInternal, ising::Int,
+    ipert_res, dpsi::Float64, sing_asymp_right)
     if ctrl.kinetic_factor == 0
         for i in eachindex(sing_asymp_right.r1)
             odet.u[:, ipert_res[i], :] .= 0
@@ -117,8 +114,8 @@ end
 # Column ipert_res of [U₁_new; U₂_new] = ua[:, ipert_res+N, :] (the introduced small asymptotic),
 # so ca_r[ipert_res, ipert_res, 2] = 1 regardless of other columns' normalization.
 function _capture_right_crossing_data!(odet::OdeState, singp::SingType, sing_asymp_right,
-                                       dpsi::Float64, intr::ForceFreeStatesInternal, ising::Int,
-                                       ipert_res, ctrl::ForceFreeStatesControl)
+    dpsi::Float64, intr::ForceFreeStatesInternal, ising::Int,
+    ipert_res, ctrl::ForceFreeStatesControl)
     ua = sing_get_ua(sing_asymp_right, dpsi)
     singp.ua_right = copy(ua)
     singp.psi_ua_right = odet.psifac
@@ -135,9 +132,9 @@ end
 # STUB: per-surface ca-based Δ' (not physically valid; see SingType.delta_prime docstring).
 # The canonical Δ' is intr.delta_prime_matrix from compute_delta_prime_matrix!.
 function _stash_per_surface_delta_prime_stub!(odet::OdeState, intr::ForceFreeStatesInternal,
-                                              ising::Int, ipert_res, sing_asymp_right,
-                                              equil::Equilibrium.PlasmaEquilibrium,
-                                              ctrl::ForceFreeStatesControl)
+    ising::Int, ipert_res, sing_asymp_right,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ctrl::ForceFreeStatesControl)
     ctrl.kinetic_factor == 0 || return
     denom = (2π)^2 * equil.psio
     n_res = length(sing_asymp_right.r1)
