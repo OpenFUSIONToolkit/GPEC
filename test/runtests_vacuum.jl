@@ -18,7 +18,7 @@
             end
 
             @testset "keyword constructor" begin
-                vac = VacuumInput(mtheta=32, m_modes=[1, 2, 3], n_modes=[2, 3], nzeta=1)
+                vac = VacuumInput(; mtheta=32, m_modes=[1, 2, 3], n_modes=[2, 3], nzeta=1)
                 @test vac.mtheta == 32
                 @test length(vac.m_modes) == 3
                 @test vac.m_modes[1] == 1
@@ -37,7 +37,7 @@
             end
 
             @testset "keyword constructor" begin
-                w = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+                w = WallShapeSettings(; shape="conformal", a=0.2, equal_arc_wall=false)
                 @test w.shape == "conformal"
                 @test w.a == 0.2
                 @test w.equal_arc_wall == false
@@ -46,7 +46,7 @@
 
         @testset "PlasmaGeometry" begin
             @testset "from VacuumInput" begin
-                inputs = VacuumInput(
+                inputs = VacuumInput(;
                     mtheta_in=5,
                     nzeta_in=1,
                     x=[1.0, 1.1, 1.2, 1.1, 1.0],
@@ -68,7 +68,7 @@
 
             @testset "edge: mtheta larger than input length" begin
                 # Periodic spline requires at least 4 points
-                inputs = VacuumInput(
+                inputs = VacuumInput(;
                     x=[1.0, 1.1, 1.2, 1.1, 1.0],
                     z=[0.0, 0.1, 0.0, -0.1, 0.0],
                     mtheta_in=5,
@@ -87,11 +87,11 @@
         end
 
         @testset "WallGeometry" begin
-            _circle_inputs(mtheta) = VacuumInput(
+            _circle_inputs(mtheta) = VacuumInput(;
                 mtheta_in=mtheta,
                 nzeta_in=1,
-                x=1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta)),
-                z=0.3 .* sin.(range(0, 2π, length=mtheta)),
+                x=1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta)),
+                z=0.3 .* sin.(range(0, 2π; length=mtheta)),
                 ν=zeros(mtheta),
                 mtheta=mtheta,
                 nzeta=1
@@ -100,7 +100,7 @@
             @testset "nowall" begin
                 inputs = _circle_inputs(16)
                 plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
-                wall_settings = WallShapeSettings(shape="nowall")
+                wall_settings = WallShapeSettings(; shape="nowall")
                 wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == true
                 @test length(wall.x) == 16
@@ -110,7 +110,7 @@
             @testset "conformal" begin
                 inputs = _circle_inputs(16)
                 plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
-                wall_settings = WallShapeSettings(shape="conformal", a=0.2)
+                wall_settings = WallShapeSettings(; shape="conformal", a=0.2)
                 wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == false
                 @test length(wall.x) == 16
@@ -125,7 +125,7 @@
             @testset "elliptical" begin
                 inputs = _circle_inputs(16)
                 plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
-                wall_settings = WallShapeSettings(shape="elliptical", a=0.5)
+                wall_settings = WallShapeSettings(; shape="elliptical", a=0.5)
                 wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == false
                 @test length(wall.x) == 16
@@ -136,7 +136,7 @@
             @testset "dee" begin
                 inputs = _circle_inputs(16)
                 plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
-                wall_settings = WallShapeSettings(shape="dee", a=0.1, cw=0.0)
+                wall_settings = WallShapeSettings(; shape="dee", a=0.1, cw=0.0)
                 wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == false
                 @test length(wall.x) == 16
@@ -146,11 +146,11 @@
             @testset "edge: R <= 0 throws" begin
                 inputs = _circle_inputs(16)
                 plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
-                    VacuumInput(
+                    VacuumInput(;
                         mtheta_in=16,
                         nzeta_in=1,
-                        x=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
-                        z=0.03 .* sin.(range(0, 2π, length=16)),
+                        x=0.05 .+ 0.03 .* cos.(range(0, 2π; length=16)),
+                        z=0.03 .* sin.(range(0, 2π; length=16)),
                         ν=zeros(16),
                         mtheta=16,
                         nzeta=1
@@ -159,7 +159,7 @@
 
                 # Use a "dee" wall shape with parameters that will produce R < 0
                 # Setting cw (offset) to a large negative value will shift the wall left past R=0
-                wall_settings = WallShapeSettings(shape="dee", cw=-1.5, a=0.1)
+                wall_settings = WallShapeSettings(; shape="dee", cw=-1.5, a=0.1)
                 @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings)
             end
 
@@ -169,17 +169,17 @@
             @testset "edge: conformal centerstack clamp" begin
                 inputs = _circle_inputs(16)
                 plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
-                    VacuumInput(
+                    VacuumInput(;
                         mtheta_in=16,
                         nzeta_in=1,
-                        x=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
-                        z=0.03 .* sin.(range(0, 2π, length=16)),
+                        x=0.05 .+ 0.03 .* cos.(range(0, 2π; length=16)),
+                        z=0.03 .* sin.(range(0, 2π; length=16)),
                         ν=zeros(16),
                         mtheta=16,
                         nzeta=1
                     )
                 )
-                wall_settings = WallShapeSettings(shape="conformal", a=10.0, equal_arc_wall=false)
+                wall_settings = WallShapeSettings(; shape="conformal", a=10.0, equal_arc_wall=false)
                 wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings)
                 expected_min = min(0.1, 0.1 * minimum(plasma_surf_near_zero.x))
                 @test all(wall.x .>= expected_min)
@@ -189,18 +189,18 @@
 
         @testset "distribute_to_equal_arc_grid" begin
             @testset "unit circle" begin
-                theta = range(0, step=2π/10, length=10)
+                theta = range(0; step=2π / 10, length=10)
                 xin = cos.(theta)
                 zin = sin.(theta)
                 xout, zout = GeneralizedPerturbedEquilibrium.Vacuum.distribute_to_equal_arc_grid(xin, zin)
                 @test length(xout) == length(xin)
                 @test length(zout) == length(zin)
                 r = sqrt.(xout .^ 2 .+ zout .^ 2)
-                @test all(r -> isapprox(r, 1.0, atol=1e-9), r)
+                @test all(r -> isapprox(r, 1.0; atol=1e-9), r)
             end
 
             @testset "edge: ellipse" begin
-                theta = range(0, 2π, length=32)
+                theta = range(0, 2π; length=32)
                 xin = 2.0 .* cos.(theta)
                 zin = 1.0 .* sin.(theta)
                 xout, zout = GeneralizedPerturbedEquilibrium.Vacuum.distribute_to_equal_arc_grid(xin, zin)
@@ -348,11 +348,11 @@
         end
 
         @testset "compute_vacuum_response" begin
-            _make_inputs(; mtheta=128, mtheta_eq=17, m_modes=1:2, n_modes=[1]) = VacuumInput(
+            _make_inputs(; mtheta=128, mtheta_eq=17, m_modes=1:2, n_modes=[1]) = VacuumInput(;
                 mtheta_in=mtheta_eq,
                 nzeta_in=1,
-                x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
-                z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
+                x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta_eq))),
+                z=collect(0.3 .* sin.(range(0, 2π; length=mtheta_eq))),
                 ν=zeros(mtheta_eq),
                 m_modes=collect(Int, m_modes),
                 n_modes=collect(Int, n_modes),
@@ -362,7 +362,7 @@
 
             @testset "nowall" begin
                 inputs = _make_inputs()
-                wall_settings = WallShapeSettings(shape="nowall")
+                wall_settings = WallShapeSettings(; shape="nowall")
                 (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
                 numpoints = inputs.mtheta * inputs.nzeta
@@ -383,7 +383,7 @@
 
             @testset "nowall compute_Iv=true" begin
                 inputs = _make_inputs()
-                wall_settings = WallShapeSettings(shape="nowall")
+                wall_settings = WallShapeSettings(; shape="nowall")
                 (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
 
                 num_modes = length(inputs.m_modes) * length(inputs.n_modes)
@@ -397,7 +397,7 @@
 
             @testset "conformal wall" begin
                 inputs = _make_inputs()
-                wall_settings = WallShapeSettings(shape="conformal", a=0.5)
+                wall_settings = WallShapeSettings(; shape="conformal", a=0.5)
                 (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
                 num_modes = length(inputs.m_modes) * length(inputs.n_modes)
@@ -412,8 +412,8 @@
             end
 
             @testset "edge: single poloidal mode mpert=1" begin
-                inputs = _make_inputs(m_modes=[1], n_modes=[1])
-                wall_settings = WallShapeSettings(shape="nowall")
+                inputs = _make_inputs(; m_modes=[1], n_modes=[1])
+                wall_settings = WallShapeSettings(; shape="nowall")
                 (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (1, 1)
                 @test all(isfinite, wv)
@@ -422,8 +422,8 @@
 
             @testset "edge: small mtheta" begin
                 # Keep mtheta_eq=17 so boundary has enough points for periodic spline
-                inputs = _make_inputs(mtheta=16, mtheta_eq=17)
-                wall_settings = WallShapeSettings(shape="nowall")
+                inputs = _make_inputs(; mtheta=16, mtheta_eq=17)
+                wall_settings = WallShapeSettings(; shape="nowall")
                 (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
                 @test size(wv) == (2, 2)
                 @test size(I_v) == (2, 2)
@@ -433,7 +433,7 @@
             @testset "in-place compute_vacuum_response! matches wrapper" begin
                 # The allocating wrapper is a thin caller of the in-place routine; verify the
                 # in-place entry populates caller-owned storage identically.
-                for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.5))
+                for wall_settings in (WallShapeSettings(; shape="nowall"), WallShapeSettings(; shape="conformal", a=0.5))
                     inputs = _make_inputs()
                     ref = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
 
@@ -520,11 +520,11 @@
     # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
     # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default PATCH_RAD=11)
     @testset "Vacuum.jl (3D)" begin
-        _make_3d_inputs(; mtheta=32, mtheta_eq=17, m_modes=1:2, n_modes=0:1, nzeta=32) = VacuumInput(
+        _make_3d_inputs(; mtheta=32, mtheta_eq=17, m_modes=1:2, n_modes=0:1, nzeta=32) = VacuumInput(;
             mtheta_in=mtheta_eq,
             nzeta_in=1,
-            x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
-            z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
+            x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta_eq))),
+            z=collect(0.3 .* sin.(range(0, 2π; length=mtheta_eq))),
             ν=zeros(mtheta_eq),
             m_modes=collect(Int, m_modes),
             n_modes=collect(Int, n_modes),
@@ -534,8 +534,8 @@
 
         # Helper: simple nonaxisymmetric (3D) plasma boundary built from SFL-style (θ, ζ) coordinates.
         _make_3d_nonaxis_inputs(; mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2) = begin
-            θ_in = range(0, 2π, length=mtheta_in)
-            ζ_in = range(0, 2π, length=nzeta_in)
+            θ_in = range(0, 2π; length=mtheta_in)
+            ζ_in = range(0, 2π; length=nzeta_in)
 
             X = zeros(mtheta_in, nzeta_in)
             Y = zeros(mtheta_in, nzeta_in)
@@ -554,7 +554,7 @@
                 Z[i, j] = Z_ij
             end
 
-            VacuumInput(
+            VacuumInput(;
                 x=vec(X),
                 y=vec(Y),
                 z=vec(Z),
@@ -568,13 +568,13 @@
         end
 
         @testset "VacuumInput nzeta > 1" begin
-            vac = VacuumInput(mtheta=32, nzeta=24, m_modes=[1, 2], n_modes=[1, 2])
+            vac = VacuumInput(; mtheta=32, nzeta=24, m_modes=[1, 2], n_modes=[1, 2])
             @test vac.nzeta == 24
             @test vac.mtheta == 32
         end
 
         @testset "PlasmaGeometry3D" begin
-            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            inputs = _make_3d_inputs(; mtheta=32, nzeta=32, mtheta_eq=17)
             surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
             num_points = inputs.mtheta * inputs.nzeta
             @test surf.mtheta == 32
@@ -592,7 +592,7 @@
         end
 
         @testset "PlasmaGeometry3D nonaxisymmetric input" begin
-            inputs = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12)
+            inputs = _make_3d_nonaxis_inputs(; mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12)
             surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
             num_points = inputs.mtheta * inputs.nzeta
 
@@ -608,8 +608,9 @@
         end
 
         @testset "WallGeometry3D nowall" begin
-            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs), WallShapeSettings(shape="nowall"))
+            inputs = _make_3d_inputs(; mtheta=32, nzeta=32, mtheta_eq=17)
+            wall =
+                GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs), WallShapeSettings(; shape="nowall"))
             @test wall.nowall == true
             @test wall.mtheta == 32
             @test wall.nzeta == 32
@@ -617,11 +618,11 @@
         end
 
         @testset "WallGeometry3D conformal" begin
-            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            inputs = _make_3d_inputs(; mtheta=32, nzeta=32, mtheta_eq=17)
             wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
                 inputs,
                 GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs),
-                WallShapeSettings(shape="conformal", a=0.2)
+                WallShapeSettings(; shape="conformal", a=0.2)
             )
             @test wall.nowall == false
             @test wall.mtheta == 32
@@ -636,8 +637,8 @@
         # Corrugated torus on an endpoint-excluded grid. `_make_3d_nonaxis_inputs` repeats the seam point, which is
         # harmless for a nowall response but leaves a kink that folds the offset surface, so wall tests need their own.
         _make_3d_periodic_inputs(; mtheta=24, nzeta=24, mtheta_in=16, nzeta_in=16, eps=0.05) = begin
-            θ_in = range(; start=0, length=mtheta_in, step=2π/mtheta_in)
-            ζ_in = range(; start=0, length=nzeta_in, step=2π/nzeta_in)
+            θ_in = range(; start=0, length=mtheta_in, step=2π / mtheta_in)
+            ζ_in = range(; start=0, length=nzeta_in, step=2π / nzeta_in)
             X = zeros(mtheta_in, nzeta_in)
             Y = similar(X)
             Z = similar(X)
@@ -647,13 +648,13 @@
                 Y[i, j] = R * sin(ζ)
                 Z[i, j] = 0.3 * sin(θ) + eps * sin(2ζ) * sin(θ)
             end
-            VacuumInput(x=vec(X), y=vec(Y), z=vec(Z), mtheta_in=mtheta_in, nzeta_in=nzeta_in,
+            VacuumInput(; x=vec(X), y=vec(Y), z=vec(Z), mtheta_in=mtheta_in, nzeta_in=nzeta_in,
                 m_modes=[1, 2], n_modes=[0, 1], mtheta=mtheta, nzeta=nzeta)
         end
 
         @testset "WallGeometry3D conformal, non-axisymmetric input" begin
-            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24)
-            settings = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            inputs = _make_3d_periodic_inputs(; mtheta=24, nzeta=24)
+            settings = WallShapeSettings(; shape="conformal", a=0.2, equal_arc_wall=false)
             plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
             wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, settings)
 
@@ -686,10 +687,10 @@
             # exactly, so every plane offsets to a circle of radius r_minor(1 + a) about the same centre.
             # Pins the offset direction, magnitude and orientation at once, which a uniform-offset check cannot.
             r_minor, R0 = 0.3, 1.7
-            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24, mtheta_in=32, nzeta_in=16, eps=0.0)
+            inputs = _make_3d_periodic_inputs(; mtheta=24, nzeta=24, mtheta_in=32, nzeta_in=16, eps=0.0)
             plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
             for a in (0.2, 0.5)
-                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, WallShapeSettings(shape="conformal", a=a, equal_arc_wall=false))
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, WallShapeSettings(; shape="conformal", a=a, equal_arc_wall=false))
                 radii = [hypot(hypot(wall.r[i, 1], wall.r[i, 2]) - R0, wall.r[i, 3]) for i in axes(wall.r, 1)]
                 # Residual is the 32 -> 24 poloidal resampling of the boundary spline, not the offset
                 @test all(isapprox(rad, r_minor * (1 + a); atol=5e-4) for rad in radii)
@@ -697,50 +698,50 @@
         end
 
         @testset "WallGeometry3D non-axisymmetric error paths" begin
-            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24)
+            inputs = _make_3d_periodic_inputs(; mtheta=24, nzeta=24)
             plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
             for shape in ("elliptical", "dee", "mod_dee", "some_wall_file.dat")
-                @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, WallShapeSettings(shape=shape))
+                @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, WallShapeSettings(; shape=shape))
             end
             # equal_arc_wall has no meaning without a 2D contour and is ignored with a notice. It defaults to
             # true, so this fires on runs that never set it: @info, not @warn.
-            @test_logs (:info, r"equal_arc_wall is ignored") match_mode=:any GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+            @test_logs (:info, r"equal_arc_wall is ignored") match_mode = :any GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
                 inputs,
                 plasma,
-                WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=true)
+                WallShapeSettings(; shape="conformal", a=0.2, equal_arc_wall=true)
             )
             # nfp > 1 can only reach the constructor from an axisymmetric boundary, and is rejected there
-            per_period = VacuumInput(x=inputs.x, y=inputs.y, z=inputs.z, mtheta_in=16, nzeta_in=16,
+            per_period = VacuumInput(; x=inputs.x, y=inputs.y, z=inputs.z, mtheta_in=16, nzeta_in=16,
                 m_modes=inputs.m_modes, n_modes=inputs.n_modes, mtheta=24, nzeta=24, nfp=3)
-            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(per_period, plasma, WallShapeSettings(shape="conformal", a=0.2))
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(per_period, plasma, WallShapeSettings(; shape="conformal", a=0.2))
             # nowall does not skip that guard
-            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(per_period, plasma, WallShapeSettings(shape="nowall"))
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(per_period, plasma, WallShapeSettings(; shape="nowall"))
             # a plasma surface from a different grid is rejected rather than indexed off the end
-            other_grid = _make_3d_periodic_inputs(mtheta=16, nzeta=16)
+            other_grid = _make_3d_periodic_inputs(; mtheta=16, nzeta=16)
             @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
                 inputs,
                 GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(other_grid),
-                WallShapeSettings(shape="conformal", a=0.2)
+                WallShapeSettings(; shape="conformal", a=0.2)
             )
             # an offset that folds the surface is rejected rather than silently returned
-            folded = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12)
+            folded = _make_3d_nonaxis_inputs(; mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12)
             @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
                 folded,
                 GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(folded),
-                WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+                WallShapeSettings(; shape="conformal", a=0.2, equal_arc_wall=false)
             )
         end
 
         @testset "WallGeometry3D shape selection" begin
             # Every shape reaches the right builder through the same chain WallGeometry uses in 2D.
             # elongated so the elliptical branch has a well-defined focal distance
-            θ_eq = range(0, 2π, length=33)[1:32]
-            axi = VacuumInput(mtheta_in=32, nzeta_in=1, x=collect(1.7 .+ 0.3 .* cos.(θ_eq)),
+            θ_eq = range(0, 2π; length=33)[1:32]
+            axi = VacuumInput(; mtheta_in=32, nzeta_in=1, x=collect(1.7 .+ 0.3 .* cos.(θ_eq)),
                 z=collect(0.45 .* sin.(θ_eq)), ν=zeros(32), m_modes=[1, 2], n_modes=[0, 1],
                 mtheta=32, nzeta=32)
-            for (shape, settings) in (("elliptical", WallShapeSettings(shape="elliptical", a=0.5)),
-                ("dee", WallShapeSettings(shape="dee", a=0.3)),
-                ("mod_dee", WallShapeSettings(shape="mod_dee", a=0.5, cw=1.7)))
+            for (shape, settings) in (("elliptical", WallShapeSettings(; shape="elliptical", a=0.5)),
+                ("dee", WallShapeSettings(; shape="dee", a=0.3)),
+                ("mod_dee", WallShapeSettings(; shape="mod_dee", a=0.5, cw=1.7)))
                 wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(axi, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(axi), settings)
                 @test size(wall.r) == (32 * 32, 3)
                 @test all(isfinite, wall.normal)
@@ -750,20 +751,20 @@
             end
             # Gap warning uses the measured same-index separation, not a conformal-only offset that
             # is 0 for these shapes. a = 1 m sits well outside one coarser cell, so no sub-cell warning.
-            @test_logs min_level=Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
-                axi, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(axi), WallShapeSettings(shape="elliptical", a=1.0)
+            @test_logs min_level = Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+                axi, GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(axi), WallShapeSettings(; shape="elliptical", a=1.0)
             )
             # an unreadable wall file is still reported by the 2D reader
             @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
                 axi,
                 GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(axi),
-                WallShapeSettings(shape="no_such_wall.dat")
+                WallShapeSettings(; shape="no_such_wall.dat")
             )
         end
 
         @testset "compute_vacuum_response 3D nowall" begin
-            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall_settings = WallShapeSettings(shape="nowall")
+            inputs = _make_3d_inputs(; mtheta=32, nzeta=32, mtheta_eq=17)
+            wall_settings = WallShapeSettings(; shape="nowall")
             (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
@@ -783,8 +784,8 @@
         end
 
         @testset "compute_vacuum_response 3D nonaxisymmetric boundary" begin
-            inputs = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2)
-            wall_settings = WallShapeSettings(shape="nowall")
+            inputs = _make_3d_nonaxis_inputs(; mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2)
+            wall_settings = WallShapeSettings(; shape="nowall")
             (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
             numpoints = inputs.mtheta * inputs.nzeta
@@ -802,8 +803,8 @@
         end
 
         @testset "compute_vacuum_response 3D conformal wall" begin
-            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall_settings = WallShapeSettings(shape="conformal", a=0.3)
+            inputs = _make_3d_inputs(; mtheta=32, nzeta=32, mtheta_eq=17)
+            wall_settings = WallShapeSettings(; shape="conformal", a=0.3)
             (; wv, I_v, plasma_pts, wall_pts) = compute_vacuum_response(inputs, wall_settings)
 
             num_modes = length(inputs.m_modes) * length(inputs.n_modes)
@@ -817,9 +818,9 @@
         end
 
         @testset "compute_vacuum_response 3D compute_Iv=true" begin
-            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            inputs = _make_3d_inputs(; mtheta=32, nzeta=32, mtheta_eq=17)
             # Both wall branches: I_v was left zeroed in 3D before, and the wall adds a second source block
-            for wall_settings in (WallShapeSettings(shape="nowall"), WallShapeSettings(shape="conformal", a=0.3))
+            for wall_settings in (WallShapeSettings(; shape="nowall"), WallShapeSettings(; shape="conformal", a=0.3))
                 (; I_v) = compute_vacuum_response(inputs, wall_settings; compute_Iv=true)
                 @test all(isfinite, I_v)
                 @test !all(iszero, I_v)
@@ -827,9 +828,9 @@
 
             # A reused buffer must not keep a stale I_v from an earlier compute_Iv=true solve
             vac = GeneralizedPerturbedEquilibrium.Vacuum.VacuumResponse(inputs)
-            compute_vacuum_response!(vac, inputs, WallShapeSettings(shape="nowall"); compute_Iv=true)
+            compute_vacuum_response!(vac, inputs, WallShapeSettings(; shape="nowall"); compute_Iv=true)
             @test !all(iszero, vac.I_v)
-            compute_vacuum_response!(vac, inputs, WallShapeSettings(shape="nowall"))
+            compute_vacuum_response!(vac, inputs, WallShapeSettings(; shape="nowall"))
             @test all(iszero, vac.I_v)
         end
 
@@ -838,14 +839,14 @@
         # at nzeta = 96 the measured errors are 1.9e-4 (wv) and 1.1e-3 (Iᵛ); a wrong shift or sign gives O(1).
         @testset "compute_vacuum_response 3D I_v matches the 2D path" begin
             mtheta = 48
-            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            θ = range(; start=0, length=mtheta, step=2π / mtheta)
             # Up-down asymmetric so Iᵛ is genuinely complex and the θ_VAC → -θ_VAC conjugation is observable
             R = 1.7 .+ 0.3 .* cos.(θ)
             Z = 0.3 .* sin.(θ) .+ 0.08 .* sin.(2θ) .+ 0.08 .* cos.(θ)
             # Arrays are reversed for VACUUM's CW θ, as the equilibrium-based constructor does
-            make(nzeta) = VacuumInput(x=collect(reverse(R)), z=collect(reverse(Z)), ν=zeros(mtheta),
+            make(nzeta) = VacuumInput(; x=collect(reverse(R)), z=collect(reverse(Z)), ν=zeros(mtheta),
                 mtheta_in=mtheta, nzeta_in=1, m_modes=[-2, -1, 0, 1, 2], n_modes=[1], mtheta=mtheta, nzeta=nzeta)
-            nowall = WallShapeSettings(shape="nowall")
+            nowall = WallShapeSettings(; shape="nowall")
 
             r2d = compute_vacuum_response(make(1), nowall; compute_Iv=true)
             r3d = compute_vacuum_response(make(96), nowall; compute_Iv=true)
@@ -862,8 +863,8 @@
             # a = 2.5 sits above the one-cell resolution floor (1.11 cells) while keeping mtheta, nzeta > 23 so
             # the near-field patch keeps its full PATCH_RAD. On a 24 x 24 grid those two demands cannot be met
             # by a close wall: h_ζ ~ 2π R0 / nzeta is 0.45 m here.
-            inputs = _make_3d_periodic_inputs(mtheta=24, nzeta=24)
-            settings = WallShapeSettings(shape="conformal", a=2.5, equal_arc_wall=false)
+            inputs = _make_3d_periodic_inputs(; mtheta=24, nzeta=24)
+            settings = WallShapeSettings(; shape="conformal", a=2.5, equal_arc_wall=false)
 
             wv = compute_vacuum_response(inputs, settings).wv
             @test all(isfinite, wv)
@@ -871,10 +872,10 @@
 
             # A conducting wall is stabilizing, so Wᵛ must exceed the nowall value. Catches a flipped normal
             # or an offset built on the wrong side, which finiteness and Hermiticity both pass.
-            @test real(wv[1, 1]) > real(compute_vacuum_response(inputs, WallShapeSettings(shape="nowall")).wv[1, 1])
+            @test real(wv[1, 1]) > real(compute_vacuum_response(inputs, WallShapeSettings(; shape="nowall")).wv[1, 1])
 
             # This configuration clears the one-cell floor, so it draws no sub-cell or near-fold warning
-            @test_logs min_level=Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
+            @test_logs min_level = Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
                 inputs,
                 GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs),
                 settings
@@ -888,7 +889,7 @@
             # Build one field period of a 3D boundary on the full-torus ζ spacing; expand_field_periods
             # tiles it by rigid rotation, so reduced and full paths share an identical full-torus surface.
             _make_periodic_period(; mtheta, nzeta_p, nfp, R0=1.7, a=0.3, b=0.3, ε=0.04) = begin
-                θ = range(; start=0, length=mtheta, step=2π/mtheta)
+                θ = range(; start=0, length=mtheta, step=2π / mtheta)
                 X = zeros(mtheta, nzeta_p)
                 Y = zeros(mtheta, nzeta_p)
                 Z = zeros(mtheta, nzeta_p)
@@ -909,14 +910,14 @@
             n_modes = [1, 2, 3, 4]                 # residues {1, 2, 0, 1} mod nfp exercise grouping
             Xp, Yp, Zp = _make_periodic_period(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp)
 
-            inputs_red = VacuumInput(
+            inputs_red = VacuumInput(;
                 x=Xp, y=Yp, z=Zp,
                 mtheta_in=mtheta, nzeta_in=nzeta_p,
                 m_modes=m_modes, n_modes=n_modes,
                 mtheta=mtheta, nzeta=nzeta_p,
                 nfp=nfp
             )
-            wall_settings = WallShapeSettings(shape="nowall")
+            wall_settings = WallShapeSettings(; shape="nowall")
 
             # Reduced (block-circulant) path
             vac_red = compute_vacuum_response(inputs_red, wall_settings)
@@ -962,7 +963,7 @@
 
             # A wall adds a second source block to the operator, so repeat the check with one present:
             # the field-period fold has to land the wall columns in the right block for both to agree.
-            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            walled = WallShapeSettings(; shape="conformal", a=0.2, equal_arc_wall=false)
             vac_red_wall = compute_vacuum_response(inputs_red, walled; compute_Iv=true)
             vac_full_wall = compute_vacuum_response(inputs_full, walled; compute_Iv=true)
             @test isapprox(vac_red_wall.wv, vac_full_wall.wv; rtol=1e-6, atol=1e-7)
@@ -990,7 +991,7 @@
             end
             _stell_inputs(; mtheta, nzeta_p, nfp, n_modes, odd=0.0) = begin
                 X, Y, Z = _stell_boundary(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, odd=odd)
-                return VacuumInput(
+                return VacuumInput(;
                     x=X, y=Y, z=Z,
                     mtheta_in=mtheta, nzeta_in=nzeta_p,
                     m_modes=collect(-1:1), n_modes=n_modes,
@@ -1000,7 +1001,7 @@
             end
 
             mtheta, nzeta_p = 24, 8
-            walled = WallShapeSettings(shape="conformal", a=0.2, equal_arc_wall=false)
+            walled = WallShapeSettings(; shape="conformal", a=0.2, equal_arc_wall=false)
 
             # The whole item rests on the operator inheriting the reflection symmetry, so assert it directly.
             inputs = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1])
@@ -1042,7 +1043,7 @@
                 inp = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=nfp, n_modes=[k])
                 geom = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(inp)
                 plas = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(geom)
-                wal = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(geom, plas, WallShapeSettings(shape="nowall"))
+                wal = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(geom, plas, WallShapeSettings(; shape="nowall"))
                 mirror = GeneralizedPerturbedEquilibrium.Vacuum.stell_sym_map(plas, wal, nfp)
                 @test mirror !== nothing
                 nfp_pts = plas.mtheta * plas.nzeta ÷ nfp
@@ -1076,7 +1077,7 @@
             # Every reduced-vs-full check above uses a symmetric boundary; this takes the general complex path, with pairing
             asym_red = _stell_inputs(; mtheta=mtheta, nzeta_p=nzeta_p, nfp=3, n_modes=[1, 2, 3, 4], odd=0.07)
             asym_ref = GeneralizedPerturbedEquilibrium.Vacuum.expand_field_periods(asym_red)
-            for ws in (WallShapeSettings(shape="nowall"), walled)
+            for ws in (WallShapeSettings(; shape="nowall"), walled)
                 red = compute_vacuum_response(asym_red, ws; compute_Iv=true)
                 ref = compute_vacuum_response(asym_ref, ws; compute_Iv=true)
                 @test isapprox(red.wv, ref.wv; rtol=1e-10)
@@ -1118,5 +1119,22 @@
             @test all(isfinite, patch_out)
             @test size(patch_out) == (3, 3, 3)
         end
+    end
+
+    @testset "reset_caches! empties the run-filled caches" begin
+        # The precompile workload calls these before serializing the package image, so a stale name here fails the build.
+        VAC = GeneralizedPerturbedEquilibrium.Vacuum
+        KF = GeneralizedPerturbedEquilibrium.KineticForces
+        VAC.get_pn_quad_cache(3)
+        VAC.get_singular_quadrature(3, 8, 5)
+        KF._quadrature_weights(8)
+        @test !isempty(VAC._PN_CACHE)
+        @test VAC.SINGULAR_QUAD_CACHE[] !== nothing
+        @test !isempty(KF._QUAD_WEIGHTS)
+        @test VAC.reset_caches!() === nothing
+        @test isempty(VAC._PN_CACHE)
+        @test VAC.SINGULAR_QUAD_CACHE[] === nothing
+        @test KF.reset_caches!() === nothing
+        @test isempty(KF._QUAD_WEIGHTS)
     end
 end

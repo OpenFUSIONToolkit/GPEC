@@ -407,7 +407,7 @@ end
         @test length(odet.unorm0) == numpert_total
     end
 
-    @testset "interior start falls back to the fixed initialization" begin
+    @testset "axis start defaults to the fixed initialization" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
@@ -432,19 +432,21 @@ end
             odet = FFS.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
             return odet, ctrl, mats, equil, intr
         end
-        # Near the axis the Frobenius start gives the regular solution: U₂ = I with a nonzero U₁.
+        # The default threshold is 0: near the axis the fixed start is used, with no warning.
         odet, ctrl, mats, equil, intr = axis_state(1e-4)
-        FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test ctrl.frobenius_psi_max == 0
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # A start above a positive threshold uses the fixed start, still with no warning.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.01)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # Raising the threshold to cover the start opts into the Frobenius start and warns.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.5)
+        @test_logs (:warn, r"Frobenius axis start") FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
         @test odet.u[:, :, 2] ≈ I
         @test any(!iszero, odet.u[:, :, 1])
-        # An interior start switches to the fixed start (U₁ = 0, U₂ = I) and says so.
-        odet, ctrl, mats, equil, intr = axis_state(0.3)
-        @test_logs (:warn, r"fixed start") FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
-        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
-        # The threshold is a control: raising it keeps the Frobenius start, and zero selects the fixed start silently.
-        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.5)
-        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
-        @test any(!iszero, odet.u[:, :, 1])
+        # An explicit zero selects the fixed start silently even near the axis.
         odet, ctrl, mats, equil, intr = axis_state(1e-4; frobenius_psi_max=0.0)
         @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
         @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
