@@ -1,0 +1,9 @@
+# Regression case: the diiid_n1_riccati deck run from the precompiled package image.
+# Every other case runs with GPEC's precompile workload disabled; this one enables it, so it
+# tracks the build users get by default. Precompiled code can round differently in the last bit,
+# which the Δ' BVP amplifies to the percent level, so compare this case only against itself.
+[case]
+name = "diiid_n1_riccati_precompiled"
+base = "diiid_n1_riccati"   # Inherit example_dir, [quantities.*] and [overrides] from this case
+description = "DIII-D-like equilibrium, n=1, Riccati integrator Δ' matrix, precompiled build"
+precompile_workload = true   # Run from the package image built with the PrecompileTools workload

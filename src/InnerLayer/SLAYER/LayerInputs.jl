@@ -257,21 +257,20 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
     _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta)
 
-    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline
-    # derivatives. When `compute_omega_star=true` we override any ω_*e/ω_*i
-    # carried in `profiles`. Main-ion density is
-    # taken equal to the electron density (quasi-neutrality, matching the
-    # staging step).
+    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
+    # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode
+    # number enters here. Main-ion density is taken equal to the electron density
+    # (quasi-neutrality, matching the staging step).
     chi1 = 2π * equil.psio
-    _omega_star_at(ψ) = begin
+    _omega_star_at(ψ, n_tor) = begin
         n_e = Float64(profiles.n_e(ψ))
         dn_e = Float64(profiles.n_e(ψ; deriv=DerivOp(1)))
         T_e = Float64(profiles.T_e(ψ))
         dT_e = Float64(profiles.T_e(ψ; deriv=DerivOp(1)))
         T_i = Float64(profiles.T_i(ψ))
         dT_i = Float64(profiles.T_i(ψ; deriv=DerivOp(1)))
-        ω_star_e = (2π / chi1) * (T_e * dn_e / n_e + dT_e)
-        ω_star_i = -(2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
+        ω_star_e = n_tor * (2π / chi1) * (T_e * dn_e / n_e + dT_e)
+        ω_star_i = -n_tor * (2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
         return (ω_star_e, ω_star_i)
     end
 
@@ -285,19 +284,16 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         da_dpsi = _da_dpsi_at(psi)
         sval_r = r_based_shear(rs, q, q1, da_dpsi)
 
-        prof = profiles(psi)
-        # Override ω_*e, ω_*i with spline-derivative values when requested.
-        ω_e_use, ω_i_use = if compute_omega_star
-            _omega_star_at(psi)
-        else
-            (prof.omega_e, prof.omega_i)
-        end
-
         # Resonant (m, n): take the first element of the mode-number vectors.
         # Parallel-FM `sing.m`/`sing.n` hold exactly one entry each; ideal
         # DCON may hold multiple — we pick the first and document the choice.
         m_res = sing.m[1]
         n_res = sing.n[1]
+
+        prof = profiles(psi)
+        # Take ω_*e, ω_*i from the spline derivatives, or from `profiles` when the caller
+        # supplies them directly. `run_slayer` supplies zeros, so the latter is a library path.
+        ω_e_use, ω_i_use = compute_omega_star ? _omega_star_at(psi, n_res) : (prof.omega_e, prof.omega_i)
 
         # Pull geometric trapped-fraction inputs from ResistGeometry when
         # available (populated by ForceFreeStates.resist_eval_all!); else

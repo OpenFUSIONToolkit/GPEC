@@ -102,13 +102,19 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
 
+    # Initialization parameters
+
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
 
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
 
     # Initialization parameters
 
+    # Saved data throughout integration
+
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
+
+# Total ODE solver steps taken (all steps, not just saved ones)
 
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
 
@@ -123,9 +129,13 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
 
+    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+
+    # Initialization parameters
+
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
 
-  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.
+  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape `(numpert_total, numpert_total, numunorms_init)`.    # Data for integrator
 
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
@@ -232,9 +242,9 @@ end
 # at the interval endpoints. Coefficients are ported from STRIDE's ode_itime cost model
 # (Fortran reference) and unchanged here. Tune only after re-fitting against a per-chunk
 # step-count sweep; touching these affects parallel-chunk load balancing.
-const ODE_COST_AXIS  = (a = 39695.0, b = 212830.0)
-const ODE_COST_RAT   = (a = 17147.0, b = 470710.0)
-const ODE_COST_EDGE  = (a =  1646.0, b =   4683.0)
+const ODE_COST_AXIS = (a=39695.0, b=212830.0)
+const ODE_COST_RAT = (a=17147.0, b=470710.0)
+const ODE_COST_EDGE = (a=1646.0, b=4683.0)
 
 """
     ode_itime_cost(psi1, psi2, intr) -> Float64
@@ -267,7 +277,7 @@ never from `Threads.nthreads()` — so the chunk list, and hence every Riccati o
 identical whatever thread count `julia -t` provides.
 
 Each split finds the equal-cost midpoint ψ_mid via bisection:
-  ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
+ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
 
 Sub-chunks inherit `needs_crossing=false` and `ising=0`. Only the LAST sub-chunk of
 each original chunk retains `needs_crossing=true` and the original `ising`, so the
@@ -326,10 +336,10 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
         psi_mid = (lo + hi) / 2.0
 
         left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
-                                  needs_crossing=false, ising=0, direction=1)
+            needs_crossing=false, ising=0, direction=1)
         right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
-                                   needs_crossing=chunk.needs_crossing, ising=chunk.ising,
-                                   direction=chunk.direction)
+            needs_crossing=chunk.needs_crossing, ising=chunk.ising,
+            direction=chunk.direction)
         splice!(result, best_idx, [left, right])
     end
 
@@ -416,37 +426,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     odet.step -= 1
     trim_storage!(odet)
 
-    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
-    # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
-    # findmax_dW_edge! also (re)allocates odet.edge_scan; that field is the diagnostic
-    # product and is intentionally NOT restored.
-    #
-    # Default (ctrl.truncate_at_dW_peak = false): diagnostic-only. Integration domain is
-    # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
-    # location. Legacy path (true) reproduces the ode_record_edge heuristic from Fortran
-    # STRIDE — psilim/qlim/u are pulled back to the dW peak. Preserved for experimental
-    # work; see the ForceFreeStatesControl docstring for the reliability caveats.
-    if ctrl.psiedge < intr.psilim
-        saved_psifac, saved_u = odet.psifac, copy(odet.u)
-        peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
-        if ctrl.truncate_at_dW_peak
-            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
-            odet.step = peak_step
-            trim_storage!(odet)
-            intr.psilim = odet.psi_store[end]
-            intr.qlim = odet.q_store[end]
-            odet.u .= odet.u_store[:, :, :, end]
-            if verbose
-                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
-            end
-        else
-            odet.psifac = saved_psifac
-            odet.u .= saved_u
-            if verbose
-                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.3f" odet.psi_store[peak_step])),  q = $((@sprintf "%.3f" odet.q_store[peak_step])); integration domain unchanged"
-            end
-        end
-    end
+    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose)
 
     # Evaluate stability criterion (critical determinant) of saved solutions
     if verbose
@@ -463,36 +443,31 @@ end
 """
     compute_axis_init(mats, profiles, intr, psi_low) -> (U1_init, U2_init)
 
-Compute axis initial conditions for the Euler-Lagrange ODE via the Frobenius
-leading-coefficient eigenvalue problem [Glasser Phys. Plasmas 2016 112506 Eq. 51]:
+Opt-in diagonal approximation to the axis Frobenius problem [Glasser Phys. Plasmas 2016 112506 Eq. 51],
+evaluated at finite `psi_low` rather than in the limit ψ → 0. Used only when `frobenius_psi_max` is
+positive and the integration starts at or below it.
 
-    lim_{ψ→0} [ψ M(ψ) − a I] v = 0
-
-For each mode j, solves the 2×2 Frobenius eigenvalue problem for the diagonal block of
-A₀ = ψ_low · M(ψ_low). The eigenvector with Re(a) ≥ 0 is the regular (non-singular)
-Frobenius solution. Returns U₁_init and U₂_init normalized so that U₂_init = I (consistent
-with the N independent solutions convention).
-
-For m≠0 the regular eigenvector has a negligible U₁ component (~ψ_low^(|m|/2)), recovering
-the Glasser [0, I] limit as ψ_low → 0. For m=0 (degenerate a≈0), the regular eigenvector
-is identified by dominant |U₁| component, giving the physically correct constant-displacement
-Frobenius solution and avoiding the spurious logarithmic irregularity.
+For each mode, forms the 2×2 diagonal block of ψ_low · M from the diagonal entries of F̄⁻¹, K̄, and Ḡ,
+discards mode coupling, and returns that block's eigenvector normalized so that U₂ = I (or U₁ = 1, U₂ = 0
+when the momentum component underflows). The component ratio does not scale as a positive power of
+`psi_low`. A negative Ḡ diagonal, including the m = 0 block, gives an imaginary conjugate pair, so the
+returned U₁ is non-real and which branch is stored follows the eigen-solver's column order.
 """
 function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSplines,
-        intr::ForceFreeStatesInternal, psi_low::Float64)
-    N    = intr.numpert_total
+    intr::ForceFreeStatesInternal, psi_low::Float64)
+    N = intr.numpert_total
     hint = Ref(1)
 
     # Evaluate stability matrices at psi_low
     F_lower = zeros(ComplexF64, N, N)
-    kmat    = zeros(ComplexF64, N, N)
-    gmat    = zeros(ComplexF64, N, N)
+    kmat = zeros(ComplexF64, N, N)
+    gmat = zeros(ComplexF64, N, N)
     mats.ideal.F_spline_lower(vec(F_lower), psi_low; hint=hint)
-    mats.ideal.K_spline(vec(kmat),          psi_low; hint=hint)
-    mats.ideal.G_spline(vec(gmat),          psi_low; hint=hint)
+    mats.ideal.K_spline(vec(kmat), psi_low; hint=hint)
+    mats.ideal.G_spline(vec(gmat), psi_low; hint=hint)
 
     # singfac[j] = 1 / (m_j − n_j · q) for each mode j
-    q0      = profiles.q_spline(psi_low; hint=hint)
+    q0 = profiles.q_spline(psi_low; hint=hint)
     singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q0 .* (intr.nlow:intr.nhigh)'))
 
     # F̄⁻¹ = (F_lower · F_lower')⁻¹ via the Cholesky factor
@@ -506,15 +481,15 @@ function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSpl
     for j in 1:N
         sf = singfac[j]
         fi = Finv[j, j]
-        k  = kmat[j, j]
+        k = kmat[j, j]
         kd = conj(k)          # K̄†[j,j]
-        g  = gmat[j, j]
+        g = gmat[j, j]
 
         # 2×2 ODE matrix block for mode j [Glasser 2016 Eq. 22-24, diagonal approximation]
         m11 = -sf * fi * k
-        m12 =  sf^2 * fi
-        m21 =  g - kd * fi * k
-        m22 =  sf * kd * fi
+        m12 = sf^2 * fi
+        m21 = g - kd * fi * k
+        m22 = sf * kd * fi
 
         # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
         #! format: off
@@ -541,7 +516,7 @@ function compute_axis_init(mats::MatrixSplines, profiles::Equilibrium.ProfileSpl
         if abs(v2) > Base.sqrt(Base.eps(Float64)) * abs(v1)
             U1_init[j, j] = v1 / v2
         else
-            U1_init[j, j] =  one(ComplexF64)
+            U1_init[j, j] = one(ComplexF64)
             U2_init[j, j] = zero(ComplexF64)
         end
     end
@@ -554,13 +529,12 @@ end
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
 Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
-
-### TODOs
-
-Move ising_start logic to chunk_el_integration_bounds?
+The default `ctrl.frobenius_psi_max = 0` uses the fixed start, U₁ = 0, U₂ = I, with no warning. The
+Frobenius start is used only when `frobenius_psi_max` is positive and the starting surface lies at or
+below it.
 """
 function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, mats::MatrixSplines,
-        profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+    profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
     # Default psifac to minimum equilibrium psi value
     odet.psifac = profiles.xs[1]
@@ -590,17 +564,19 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ma
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
 
-    if ctrl.fixed_axis
+    # Default (frobenius_psi_max = 0) is the fixed start Fortran DCON uses. A positive threshold opts into the diagonal Frobenius start.
+    fixed_start = odet.psifac > ctrl.frobenius_psi_max
+    if fixed_start
         # Original Glasser initialization: U₁=0, U₂=I [Glasser 2016 §VI].
-        # Constrains the axis displacement ξ^ψ=0 for all modes (fixed magnetic axis).
-        # Retained as a reference/comparison option; the default (fixed_axis=false) is Frobenius.
+        # Constrains the displacement ξ^ψ=0 for all modes at the starting surface (fixed axis or rigid core).
         for ipert in 1:intr.numpert_total
             odet.u[ipert, ipert, 2] = 1
         end
     else
-        # Frobenius initialization [Glasser 2016 §VI Eq. 51]: selects the regular
-        # (non-logarithmic) solution for each mode, including the correct constant
-        # displacement solution for the degenerate m=0 case (free magnetic axis).
+        # Opt-in diagonal Frobenius start. See compute_axis_init.
+        @warn "Frobenius axis start at ψ_N = $(round(odet.psifac; sigdigits=4)). " *
+              "This start is currently unreliable - use only if explicitly requested." *
+              "Set frobenius_psi_max = 0 for the fixed start (U₁ = 0, U₂ = I)."
         U1_init, U2_init = compute_axis_init(mats, profiles, intr, odet.psifac)
         odet.u[:, :, 1] .= U1_init
         odet.u[:, :, 2] .= U2_init
@@ -737,7 +713,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                 psi_end=psi_end,
                 needs_crossing=true,
                 ising=ising_current,
-                direction = bidirectional ? -1 : 1
+                direction=bidirectional ? -1 : 1
             ))
 
             # After crossing, we jump to the other side of the singular surface
@@ -892,6 +868,41 @@ function cross_kinetic_singular_surf!(
     store_ode_data!(odet, odet.psifac, odet.u)
 end
 
+"""
+    column_abstol!(abstol, u, rtol) -> abstol
+
+Per-column absolute tolerance `max|u[:, j, k]|·rtol` for each column `j` of U₁ (`k = 1`) and U₂ (`k = 2`),
+so each solution column's error is controlled relative to its own magnitude. An all-zero block (e.g. U₁ = 0
+at a fixed start) takes the scale of its column's other block; the blocks differ in units, so this is a first-step safeguard.
+"""
+function column_abstol!(abstol::AbstractArray{Float64,3}, u::AbstractArray{<:Number,3}, rtol::Real)
+    for j in axes(u, 2)
+        a1 = maximum(abs, @view u[:, j, 1])
+        a2 = maximum(abs, @view u[:, j, 2])
+        afill = max(a1, a2, floatmin(Float64))  # floor only keeps an all-zero column's abstol nonzero; no caller produces one
+        abstol[:, j, 1] .= (a1 > 0 ? a1 : afill) * rtol
+        abstol[:, j, 2] .= (a2 > 0 ? a2 : afill) * rtol
+    end
+    return abstol
+end
+
+column_abstol(u::AbstractArray{<:Number,3}, rtol::Real) = column_abstol!(similar(u, Float64), u, rtol)
+
+function refresh_column_abstol!(integrator)
+    column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
+    u_modified!(integrator, false)
+end
+
+# Refresh-only callback for solves with no reduction, renormalization or storage of their own.
+const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refresh_column_abstol!; save_positions=(false, false))
+
+"""
+    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+
+Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
+A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
+"""
+solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK) = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
@@ -913,11 +924,6 @@ making it clear what region is being integrated.
   - `mats::MatrixSplines` - Fourier fit variables
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
-
-### TODOs
-
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(
     odet::OdeState,
@@ -948,6 +954,7 @@ function integrate_el_region!(
         steps_in_segment[] += 1
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
+        column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
@@ -966,7 +973,8 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    rtol = ctrl.eulerlagrange_tolerance
+    sol = solve_el(prob, rtol; callback=cb)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
@@ -1137,6 +1145,30 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
 end
 
 """
+    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose=ctrl.verbose) -> Bool
+
+Record the edge-dW scan over [psiedge, psilim] on `odet.edge_scan`. With `truncate_at_dW_peak`, the
+scan's peak becomes the plasma edge via `truncate_integration!`; otherwise the integration is left
+untouched. Returns whether it truncated.
+"""
+function scan_edge_dW!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    mats::MatrixSplines, intr::ForceFreeStatesInternal; verbose::Bool=ctrl.verbose)
+    ctrl.psiedge < intr.psilim || return false
+    saved_psifac, saved_u = odet.psifac, copy(odet.u)
+    peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
+    psi_peak, q_peak = odet.psi_store[peak_step], odet.q_store[peak_step]
+    if ctrl.truncate_at_dW_peak
+        truncate_integration!(odet, intr, equil, peak_step)
+    else
+        odet.psifac = saved_psifac
+        odet.u .= saved_u
+    end
+    verbose && @info "Edge-dW peak at ψ = $(@sprintf("%.4f", psi_peak)), q = $(@sprintf("%.3f", q_peak)); " *
+          (ctrl.truncate_at_dW_peak ? "adopted as the plasma edge" : "integration domain unchanged")
+    return ctrl.truncate_at_dW_peak
+end
+
+"""
     transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
 Constructs the transformation matrices to form the true solution vectors. Effectively
@@ -1196,10 +1228,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     jfix = 1
     for ifix in 1:(odet.ifix+1)
         # If after the last fixup, go to the end of integration.
-        # Cap kfix at odet.step: fixstep entries from fixups AFTER the peak (set during integration
-        # before trim_storage!) can exceed the trimmed storage size and must be clamped.
-        kfix = ifix != odet.ifix + 1 ? min(odet.fixstep[ifix], odet.step) : odet.step
-        jfix > odet.step && break
+        kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
             mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])
@@ -1448,4 +1477,3 @@ non-Hermitian contributions and needs an LU.
     xi_s .-= tmp_mat
     return xi_s
 end
-

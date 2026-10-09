@@ -57,6 +57,7 @@ Modules, with the abbreviation to use in prose:
 |---|---|---|
 | `Analysis` | — | `src/Analysis/` |
 | `Equilibrium` | EQUIL | `src/Equilibrium/` |
+| `ErrorFields` | EF | `src/ErrorFields/` |
 | `ForceFreeStates` | FFS | `src/ForceFreeStates/` |
 | `ForcingTerms` | FT | `src/ForcingTerms/` |
 | `HDF5Schema` | — | `src/HDF5Schema.jl` |
@@ -64,6 +65,7 @@ Modules, with the abbreviation to use in prose:
 | `KineticForces` | KF | `src/KineticForces/` |
 | `LocalStability` | LS | `src/LocalStability/` |
 | `PerturbedEquilibrium` | PE | `src/PerturbedEquilibrium/` |
+| `Precompile` | — | `src/Precompile.jl` |
 | `Rerun` | — | `src/Rerun.jl` |
 | `Tearing` | — | `src/Tearing/` |
 | `Utilities` | — | `src/Utilities/` |

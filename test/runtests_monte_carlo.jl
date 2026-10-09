@@ -1,0 +1,334 @@
+using Random
+using Statistics
+using LinearAlgebra
+
+# The tolerance Monte Carlo kernel on synthetic sensitivity tables: the closed-form |δ| density
+# of one axisymmetric coil under a Flat shift tolerance, agreement with a literal transcription
+# of the OMFIT tool's model in the limit where the two coincide (S_y = ±i·S_x), the corrected
+# histogram, coherent groups, the coil subset, and bit-for-bit reproducibility under a seed.
+@testset "tolerance Monte Carlo" begin
+    GPEC = GeneralizedPerturbedEquilibrium
+    EF = GPEC.ErrorFields
+    FT = GPEC.ForcingTerms
+
+    # A synthetic table: names, nominal overlaps, S = (Sx, Sy, Sz) per m, T per deg.
+    function synthetic_table(names, δ0, S, T)
+        n = length(names)
+        rms(M) = [sqrt((abs2(M[1, j]) + abs2(M[2, j])) / 2) for j in 1:n]
+        canc(M) = [EF.cancelling_offset(δ0[j], M[1, j], M[2, j])[i] for i in 1:2, j in 1:n]
+        # abs_delta_shift_per_mm, abs_delta_tilt_per_deg, abs_delta_rim_per_mm: the rim column is the tilt
+        # sensitivity re-expressed per mm at the coil radius; these hoops carry no radius here, so
+        # reuse the per-degree column. Nothing in this file reads it — the sampler uses shift/tilt.
+        return EF.SensitivityTable(names, 1, ComplexF64.(δ0), ComplexF64.(S), ComplexF64.(T),
+            rms(S), rms(T), rms(T), canc(S), canc(T))
+    end
+    hoops(names; heights=zeros(length(names))) = [FT.make_pf_hoop(; radius=1.5, height=heights[i], name=nm) for (i, nm) in enumerate(names)]
+    pdf_moments(res) = begin
+        centers = (res.abs_delta_bin_edges[1:end-1] .+ res.abs_delta_bin_edges[2:end]) ./ 2
+        w = diff(res.abs_delta_bin_edges)
+        (sum(res.abs_delta_pdf .* w), sum(centers .* res.abs_delta_pdf .* w))
+    end
+
+    @testset "one axisymmetric coil, Flat shift tolerance: box density" begin
+        # δ = S·conj(Δ) with |Δ| = R·u uniform in radius → |δ| uniform on [0, |S|R].
+        Sx = 4.0 + 3.0im
+        table = synthetic_table(["a"], [0.0], [Sx -im*Sx; 0.0 0.0]', zeros(3, 1))
+        ts = EF.parse_tolerance_toml("""
+            [[ErrorFields.coil]]
+            name = "a"
+            shift_tol_mm = 2.0
+            radial_shape = "flat"
+            """)
+        ctrl = EF.MonteCarloControl(; nsample=200_000, nbatch=2, seed=3, nbins=100, delta_max=abs(Sx) * 2e-3)
+        res = EF.run_monte_carlo(table, ts, hoops(["a"]), ctrl)
+        total, mean_δ = pdf_moments(res)
+        @test total ≈ 1 atol = 1e-2
+        @test isapprox(mean_δ, abs(Sx) * 1e-3; rtol=2e-2)
+        @test res.abs_delta_sampled_mean ≈ abs(Sx) * 1e-3 rtol = 2e-2
+        @test all(abs.(res.abs_delta_pdf .- 1 / (abs(Sx) * 2e-3)) .< 0.15 / (abs(Sx) * 2e-3))
+        @test res.clamped_fraction == 0
+        @test res.abs_delta_total_as_designed == 0
+        # Everything is correctable: the corrected |δ| is the intrinsic one halved, a box on [0, |S|R/2].
+        half = ctrl.nbins ÷ 2
+        @test all(abs.(res.abs_delta_efc_pdf[1:half] .- 2 / (abs(Sx) * 2e-3)) .< 0.3 / (abs(Sx) * 2e-3))
+        @test all(res.abs_delta_efc_pdf[half+1:end] .== 0)
+        @test res.abs_delta_efc_sampled_mean ≈ res.abs_delta_sampled_mean / 2 rtol = 2e-2
+        @test size(res.abs_delta_pdf_batches) == (100, 2)
+    end
+
+    @testset "reduction to the OMFIT model and seed reproducibility" begin
+        # Three coils with S_y = −i·S_x and T_y = +i·T_x (the axisymmetric identities) so the
+        # complex model equals OMFIT's |S|·r·e^{iφ} with a free phase; compare |δ| histograms of
+        # the kernel and of a literal transcription of the OMFIT sampling on the same tolerances.
+        names = ["c1", "c2", "c3"]
+        δ0 = [1e-4 + 2e-4im, -3e-4 + 0.5e-4im, 2e-4 - 1e-4im]
+        Sx = [0.3 + 0.1im, -0.2 + 0.25im, 0.15 - 0.3im]
+        Tx = [0.01 + 0.02im, 0.03 - 0.01im, -0.02 + 0.015im]
+        S = hcat([[Sx[j], -im * Sx[j], 0.0] for j in 1:3]...)
+        T = hcat([[Tx[j], im * Tx[j], 0.0] for j in 1:3]...)
+        table = synthetic_table(names, δ0, S, T)
+        tol = """
+            [ErrorFields.defaults]
+            radial_shape = "flat"
+            [[ErrorFields.coil]]
+            name = "c1"
+            shift_tol_mm = 1.0
+            tilt_tol = 0.02
+            shift_sigma_mm = 0.2
+            [[ErrorFields.coil]]
+            name = "c2"
+            shift_tol_mm = 0.5
+            tilt_tol = 0.01
+            radial_shape = "hollow"
+            [[ErrorFields.coil]]
+            name = "c3"
+            shift_tol_mm = 2.0
+            tilt_tol = 0.0
+            [ErrorFields.correctability]
+            uncorrectable_coils = ["c3"]
+            efc_factor = 2.0
+            [ErrorFields.other_field]
+            magnitude = 5e-5
+            radial_shape = "ring"
+            """
+        ts = EF.parse_tolerance_toml(tol)
+        ctrl = EF.MonteCarloControl(; nsample=300_000, nbatch=2, seed=11, nbins=200)
+        res = EF.run_monte_carlo(table, ts, hoops(names), ctrl)
+
+        # Literal OMFIT transcription: dfac = tol·rand^p·e^{iφ}, dunc = σ·randn·e^{iφ}, deltas =
+        # dc_nerr + dc_disp·(dfac + dunc) + dc_tilt·(tfac + tunc), other = mag·rand^0·e^{iφ},
+        # EFC divides correctable rows and the other budget.
+        rng = Xoshiro(99)
+        N = 600_000
+        dc_disp = abs.(Sx)
+        dc_tilt = abs.(Tx)
+        disp_tol = [1e-3, 0.5e-3, 2e-3]
+        tilt_tol = [0.02, 0.01, 0.0]
+        disp_unc = [0.2e-3, 0.0, 0.0]
+        pw = [1.0, 1 / 3, 1.0]
+        correct = [true, true, false]
+        δ_all = zeros(N)
+        δ_efc = zeros(N)
+        for s in 1:N
+            tot = 0.0im
+            corr = 0.0im
+            unc = 0.0im
+            for c in 1:3
+                dfac = disp_tol[c] * rand(rng)^pw[c] * cis(2π * rand(rng))
+                tfac = tilt_tol[c] * rand(rng)^pw[c] * cis(2π * rand(rng))
+                dunc = disp_unc[c] * randn(rng) * cis(2π * rand(rng))
+                d = δ0[c] + dc_disp[c] * (dfac + dunc) + dc_tilt[c] * tfac
+                correct[c] ? (corr += d) : (unc += d)
+            end
+            other = 5e-5 * cis(2π * rand(rng))
+            δ_all[s] = abs(corr + unc + other)
+            δ_efc[s] = abs((corr + other) / 2 + unc)
+        end
+        edges = res.abs_delta_bin_edges
+        hist(x) = [count(v -> edges[i] <= v < edges[i+1], x) for i in 1:length(edges)-1] ./ (length(x) * (edges[2] - edges[1]))
+        h_all = hist(δ_all)
+        h_efc = hist(δ_efc)
+        # Histograms agree to Monte Carlo noise: compare CDFs (max deviation) and means.
+        cdf(p) = cumsum(p .* (edges[2] - edges[1]))
+        @test maximum(abs.(cdf(res.abs_delta_pdf) .- cdf(h_all))) < 0.01
+        @test maximum(abs.(cdf(res.abs_delta_efc_pdf) .- cdf(h_efc))) < 0.01
+        @test isapprox(res.abs_delta_sampled_mean, mean(δ_all); rtol=1e-2)
+        @test isapprox(res.abs_delta_efc_sampled_mean, mean(δ_efc); rtol=1e-2)
+        @test res.abs_delta_total_as_designed ≈ abs(sum(δ0))
+
+        # Same seed, any thread count or batch order: bit-identical.
+        again = EF.run_monte_carlo(table, ts, hoops(names), ctrl)
+        @test again.abs_delta_pdf == res.abs_delta_pdf && again.abs_delta_efc_pdf == res.abs_delta_efc_pdf
+        @test again.abs_delta_pdf_batches == res.abs_delta_pdf_batches
+        # A different seed differs; the tolerance scale widens the distribution.
+        other_seed = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=300_000, nbatch=2, seed=12, nbins=200))
+        @test other_seed.abs_delta_pdf != res.abs_delta_pdf
+        wide = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=100_000, nbatch=1, seed=11, nbins=200, tolerance_scale=3.0))
+        @test wide.abs_delta_sampled_mean > res.abs_delta_sampled_mean
+        # Coil subset: only c1 sampled; c2 and c3 contribute their nominal overlap.
+        sub = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=100_000, nbatch=1, seed=11, nbins=200, coil_subset=["c1"]))
+        @test sub.abs_delta_worst_case < res.abs_delta_worst_case
+        none = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=11, nbins=200, coil_subset=["zzz"]))
+        # With nothing sampled but the ring budget, |δ| = |Σδ0 + 5e-5·e^{iφ}| lies within 5e-5 of the nominal.
+        @test none.abs_delta_sampled_mean ≈ res.abs_delta_total_as_designed rtol = 0.5
+        @test all(
+            abs.(none.abs_delta_bin_edges[findall(>(0), none.abs_delta_pdf)] .- res.abs_delta_total_as_designed) .<
+            5e-5 + 2 * (none.abs_delta_bin_edges[2] - none.abs_delta_bin_edges[1])
+        )
+
+        # Scan controls. Multipliers of one change nothing, bit for bit; scale_subset holds the
+        # unnamed coils at their own tolerance where coil_subset zeroes them; names the run does
+        # not know are errors.
+        same_ctrl = (f => getfield(ctrl, f) for f in fieldnames(EF.MonteCarloControl))
+        unit_map = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; same_ctrl..., scale_map=Dict("c1" => 1.0, "c3" => 1.0)))
+        @test unit_map.abs_delta_pdf == res.abs_delta_pdf && unit_map.abs_delta_efc_pdf == res.abs_delta_efc_pdf
+        all_sub = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; same_ctrl..., scale_subset=names))
+        @test all_sub.abs_delta_pdf == res.abs_delta_pdf
+        terms = EF.worst_case_terms(table, ts, hoops(names))
+        held = EF.worst_case_terms(table, ts, hoops(names); tolerance_scale=3.0, scale_subset=["c1"])
+        @test held.abs_delta_shift_tolerance[2:3] == terms.abs_delta_shift_tolerance[2:3]
+        @test held.abs_delta_tilt_tolerance[2:3] == terms.abs_delta_tilt_tolerance[2:3]
+        @test held.abs_delta_shift_tolerance[1] > terms.abs_delta_shift_tolerance[1]
+        @test held.abs_delta_worst_case < EF.worst_case_terms(table, ts, hoops(names); tolerance_scale=3.0).abs_delta_worst_case
+        mapped = EF.worst_case_terms(table, ts, hoops(names); scale_map=Dict("c2" => 2.0))
+        @test mapped.abs_delta_shift_tolerance[2] ≈ 2 * terms.abs_delta_shift_tolerance[2]   # c2 carries no placement uncertainty
+        @test mapped.abs_delta_tilt_tolerance[2] ≈ 2 * terms.abs_delta_tilt_tolerance[2]
+        @test mapped.abs_delta_shift_tolerance[[1, 3]] == terms.abs_delta_shift_tolerance[[1, 3]]
+        # A zero multiplier on c2 draws the same numbers as leaving c2 out of coil_subset (c2 has no sigma).
+        zero_c2 = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=50_000, nbatch=1, seed=11, nbins=200, scale_map=Dict("c2" => 0.0)))
+        without_c2 = EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=50_000, nbatch=1, seed=11, nbins=200, coil_subset=["c1", "c3"]))
+        @test zero_c2.abs_delta_pdf == without_c2.abs_delta_pdf
+        @test_throws ArgumentError EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=10, nbatch=1, scale_subset=["zzz"]))
+        @test_throws ArgumentError EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=10, nbatch=1, scale_map=Dict("zzz" => 1.0)))
+        @test_throws ArgumentError EF.run_monte_carlo(table, ts, hoops(names), EF.MonteCarloControl(; nsample=10, nbatch=1, scale_map=Dict("c1" => -1.0)))
+
+        # Current factors scale a coil's as-designed overlap and its sensitivities together and
+        # leave the unattributed budget alone; factors of one return the table itself.
+        @test EF.apply_current_factors(table, ts) === table
+        half = EF.update(ts; coils=[EF.update(c; current_factor=0.5) for c in ts.coils])
+        t_half = EF.worst_case_terms(table, half, hoops(names))
+        @test t_half.abs_delta_as_designed ≈ terms.abs_delta_as_designed ./ 2
+        @test t_half.abs_delta_shift_tolerance ≈ terms.abs_delta_shift_tolerance ./ 2
+        @test t_half.abs_delta_tilt_tolerance ≈ terms.abs_delta_tilt_tolerance ./ 2
+        @test t_half.abs_delta_unattributed == terms.abs_delta_unattributed
+        mc_half = EF.run_monte_carlo(table, half, hoops(names), ctrl)
+        @test mc_half.abs_delta_total_as_designed ≈ res.abs_delta_total_as_designed / 2
+        @test mc_half.abs_delta_worst_case ≈ (res.abs_delta_worst_case - terms.abs_delta_unattributed) / 2 + terms.abs_delta_unattributed
+        off = EF.update(ts; coils=[c.name == "c2" ? EF.update(c; current_factor=0.0) : c for c in ts.coils])
+        t_off = EF.worst_case_terms(table, off, hoops(names))
+        @test t_off.abs_delta_as_designed[2] == 0 && t_off.abs_delta_shift_tolerance[2] == 0
+        @test t_off.abs_delta_as_designed[[1, 3]] == terms.abs_delta_as_designed[[1, 3]]
+        reversed = EF.update(ts; coils=[EF.update(c; current_factor=-1.0) for c in ts.coils])
+        @test EF.run_monte_carlo(table, reversed, hoops(names), ctrl).abs_delta_total_as_designed == res.abs_delta_total_as_designed
+    end
+
+    @testset "coherent group tilt in metres needs one radius to mean one angle" begin
+        # A group rotates as one body, so a rim displacement only names an angle once a radius is
+        # picked. Members of equal radius agree on it; members of different radii do not, and
+        # picking one member's radius would make the answer depend on the order they were listed.
+        names = ["a", "b"]
+        table = synthetic_table(names, [0.0, 0.0], zeros(ComplexF64, 3, 2), ones(ComplexF64, 3, 2))
+        in_m = nm -> EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "$nm"
+            members = ["a", "b"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.01
+            tilt_units = "m"
+            rotation_center_z_m = 0.0
+            """)
+        same = [FT.make_pf_hoop(; radius=1.5, height=0.0, name=nm) for nm in names]
+        r_same = FT.nominal_major_radius(same[1])
+        @test EF.group_tilt_deg(only(in_m("same").groups), Dict(zip(names, same))) ≈ rad2deg(asin(0.01 / r_same))
+
+        differ = [FT.make_pf_hoop(; radius=1.5, height=0.0, name="a"),
+            FT.make_pf_hoop(; radius=2.5, height=0.0, name="b")]
+        by_name = Dict(zip(names, differ))
+        @test_throws ArgumentError EF.group_tilt_deg(only(in_m("differ").groups), by_name)
+        # Reversing the member order must not change whether it is accepted.
+        rev = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "differ"
+            members = ["b", "a"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.01
+            tilt_units = "m"
+            rotation_center_z_m = 0.0
+            """)
+        @test_throws ArgumentError EF.group_tilt_deg(only(rev.groups), by_name)
+        # Degrees are unambiguous whatever the members are, which is what the reference tables use.
+        in_deg = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "differ"
+            members = ["a", "b"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.25
+            tilt_units = "deg"
+            rotation_center_z_m = 0.0
+            """)
+        @test EF.group_tilt_deg(only(in_deg.groups), by_name) == 0.25
+        # A lever arm names the angle without any member's radius, so unequal radii are accepted.
+        with_arm = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "differ"
+            members = ["a", "b"]
+            shift_tol_mm = 0.0
+            tilt_tol = 0.01
+            tilt_units = "m"
+            rotation_center_z_m = 0.0
+            tilt_lever_arm_m = 4.0
+            """)
+        @test EF.group_tilt_deg(only(with_arm.groups), by_name) ≈ rad2deg(asin(0.01 / 4.0))
+        @test_throws ArgumentError EF.group_tilt_deg(EF.update(only(with_arm.groups); tilt_lever_arm_m=NaN), by_name)
+        @test EF.group_tilt_deg(EF.update(only(with_arm.groups); tilt_units="deg", tilt_tol=0.3), by_name) == 0.3
+    end
+
+    @testset "coherent group: shared draw and rigid rotation" begin
+        # Two identical coils at heights ±h in one group: a pure group tilt about z = 0 shifts
+        # them oppositely, so with equal S the rotation-induced shifts cancel and only 2·T·θ
+        # remains; with the pivot at the lower coil they do not cancel.
+        names = ["u", "l"]
+        Sx = 1.0 + 0.0im
+        Tx = 0.0 + 0.0im
+        S = [Sx -im*Sx 0.0; Sx -im*Sx 0.0]'
+        T = zeros(3, 2)
+        table = synthetic_table(names, [0.0, 0.0], S, T)
+        sets = hoops(names; heights=[0.5, -0.5])
+        centered = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "pair"
+            members = ["u", "l"]
+            shift_tol_mm = 0.0
+            tilt_tol = 1.0
+            radial_shape = "ring"
+            rotation_center_z_m = 0.0
+            """)
+        res0 = EF.run_monte_carlo(table, centered, sets, EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=2, nbins=50, delta_max=1e-2))
+        @test res0.abs_delta_sampled_mean < 1e-12
+        offset = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "pair"
+            members = ["u", "l"]
+            shift_tol_mm = 0.0
+            tilt_tol = 1.0
+            radial_shape = "ring"
+            rotation_center_z_m = -0.5
+            """)
+        # Rotation about the lower coil by 1° moves the upper coil by 1.0 m·deg2rad(1): |δ| = |S|·1.0·deg2rad(1).
+        res1 = EF.run_monte_carlo(table, offset, sets, EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=2, nbins=50, delta_max=0.05))
+        @test res1.abs_delta_sampled_mean ≈ deg2rad(1.0) rtol = 1e-2
+        # Two groups sharing a phase_group move in the same direction: their shifts add coherently.
+        shared = EF.parse_tolerance_toml("""
+            [[ErrorFields.coherent_group]]
+            name = "gu"
+            members = ["u"]
+            shift_tol_mm = 1.0
+            radial_shape = "ring"
+            phase_group = "same"
+            [[ErrorFields.coherent_group]]
+            name = "gl"
+            members = ["l"]
+            shift_tol_mm = 1.0
+            radial_shape = "ring"
+            phase_group = "same"
+            """)
+        res_s = EF.run_monte_carlo(table, shared, sets, EF.MonteCarloControl(; nsample=20_000, nbatch=1, seed=2, nbins=50, delta_max=5e-3))
+        @test res_s.abs_delta_sampled_mean ≈ 2e-3 rtol = 1e-2
+        independent = EF.parse_tolerance_toml(replace(shared.raw, "phase_group = \"same\"" => ""))
+        res_i = EF.run_monte_carlo(table, independent, sets, EF.MonteCarloControl(; nsample=50_000, nbatch=1, seed=2, nbins=50, delta_max=5e-3))
+        # |e^{iφ1} + e^{iφ2}| averages 4/π for independent phases.
+        @test res_i.abs_delta_sampled_mean ≈ 1e-3 * 4 / π rtol = 2e-2
+    end
+
+    @testset "guards" begin
+        table = synthetic_table(["a"], [1e-4], reshape([1.0, -1.0im, 0.0], 3, 1), zeros(3, 1))
+        ts = EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"b\"\nshift_tol_mm = 1.0\n")
+        @test_throws ArgumentError EF.run_monte_carlo(table, ts, hoops(["a"]))   # unknown coil name
+        ok = EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\nshift_tol_mm = 1.0\n")
+        @test_throws ArgumentError EF.run_monte_carlo(table, ok, hoops(["zzz"]))  # no geometry for the coil
+        @test_throws ArgumentError EF.run_monte_carlo(table, ok, hoops(["a"]), EF.MonteCarloControl(; nsample=0))
+        empty = EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\nshift_tol_mm = 0.0\n")
+        zero_table = synthetic_table(["a"], [0.0], reshape([1.0, -1.0im, 0.0], 3, 1), zeros(3, 1))
+        @test_throws ArgumentError EF.run_monte_carlo(zero_table, empty, hoops(["a"]))  # nothing to sample
+    end
+end
