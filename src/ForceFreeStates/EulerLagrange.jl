@@ -742,7 +742,7 @@ function cross_ideal_singular_surf!(
     # Compute direction-specific asymptotic power series for this singular surface
     singp = intr.sing[ising]
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
-    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
+    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0)
     dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
 
     # Get asymptotic coefficients before crossing (left side)
@@ -897,7 +897,6 @@ making it clear what region is being integrated.
   - `mats::MatrixSplines` - Fourier fit variables
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
-
 """
 function integrate_el_region!(
     odet::OdeState,
@@ -1177,7 +1176,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
+            mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
         # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
@@ -1194,7 +1193,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # and mfix + 1 is the for the region after the last fixup and before the edge
     transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, (ifix + 1)))
+        mul!(view(transforms,:,:,ifix), view(gauss,:,:,ifix), view(transforms,:,:,(ifix+1)))
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors

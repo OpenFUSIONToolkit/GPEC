@@ -133,7 +133,7 @@ function compute_delta_prime_matrix!(
     end
 
     deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
-        M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+        M, msing, N, nMat, use_S_axis, ipert_all, col_edge, debug)
 
     # Persist both the PEST3 tearing projection (msing × msing) and the raw 2msing × 2msing
     # D' matrix (side-major ordering, byte-compatible with Fortran rdcon/gal.f::gal_write_delta).
@@ -510,16 +510,13 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
-# Solve the BVP for each driving configuration and apply the PEST3 four-term combination.
-# Promotes to Complex{Double64} if ctrl.extended_precision_bvp (default true) — the PEST3
-# combination subtracts dp_raw entries up to ~3×10⁴ larger than the result, and Float64
-# precision lets the imaginary part drift 2–5× on DIIID-class equilibria.
+# Solve the BVP and apply the PEST3 four-term combination.
 function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
                                       use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
-                                      ctrl, debug::Bool)
+                                      debug::Bool)
     s2 = 2 * msing
-    Tc = (ctrl === nothing || ctrl.extended_precision_bvp) ? Complex{Double64} : ComplexF64
-    M_solve = Tc.(M)
+    Tc = ComplexF64
+    M_solve = M
 
     M_lu = lu(M_solve; check=false)
     use_lu = issuccess(M_lu)
