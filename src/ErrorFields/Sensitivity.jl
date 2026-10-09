@@ -157,22 +157,23 @@ function sensitivity_table(sens::CoilSensitivities, dom::DominantCoupling; mode:
         throw(ArgumentError("mode $mode is outside the $(length(dom.singular_values)) singular modes of the decomposition"))
     size(dom.right_singular_vectors, 1) == length(sens.m_modes) ||
         throw(DimensionMismatch("the decomposition acts on $(size(dom.right_singular_vectors, 1)) modes but the sensitivities carry $(length(sens.m_modes))"))
+    PerturbedEquilibrium.check_mode_basis(dom, sens.m_modes, sens.n_modes, "sensitivity_table")
     v = dom.right_singular_vectors[:, mode]
     project(b̃) = dot(v, b̃) / sens.b_t0
     nset = length(sens.coil_names)
 
-    delta_nominal = [project(view(sens.nominal_field, :, j)) for j in 1:nset]
-    shift = [project(view(sens.shift_sensitivity, :, a, j)) for a in 1:3, j in 1:nset]
-    tilt = [project(view(sens.tilt_sensitivity, :, a, j)) for a in 1:3, j in 1:nset]
+    delta_as_designed = [project(view(sens.field_as_designed, :, j)) for j in 1:nset]
+    shift = [project(view(sens.shift_sensitivity_per_m, :, a, j)) for a in 1:3, j in 1:nset]
+    tilt = [project(view(sens.tilt_sensitivity_per_deg, :, a, j)) for a in 1:3, j in 1:nset]
     inplane_rms(S) = [sqrt((abs2(S[1, j]) + abs2(S[2, j])) / 2) for j in 1:nset]
-    cancelling(S) = [cancelling_offset(delta_nominal[j], S[1, j], S[2, j])[i] for i in 1:2, j in 1:nset]
+    cancelling(S) = [cancelling_offset(delta_as_designed[j], S[1, j], S[2, j])[i] for i in 1:2, j in 1:nset]
 
     per_deg = inplane_rms(tilt)
     # A tilt of one degree sweeps the rim through r·π/180 metres, the form mechanical tolerances take.
-    mm_per_deg = [sens.nominal_radius[j] * pi / 180 * 1000 for j in 1:nset]
+    mm_per_deg = [sens.major_radius_m[j] * pi / 180 * 1000 for j in 1:nset]
     per_mm_rim = [mm_per_deg[j] > 0 ? per_deg[j] / mm_per_deg[j] : 0.0 for j in 1:nset]
 
-    return SensitivityTable(copy(sens.coil_names), mode, delta_nominal, shift, tilt,
+    return SensitivityTable(copy(sens.coil_names), mode, delta_as_designed, shift, tilt,
         1e-3 .* inplane_rms(shift), per_deg, per_mm_rim, cancelling(shift), cancelling(tilt))
 end
 
@@ -183,18 +184,55 @@ function sensitivity_table(h5path::AbstractString; psi_low::Real=PerturbedEquili
 end
 
 """
-    cancelling_offset(δ_nominal, S_x, S_y) -> (Δx, Δy)
+    without_coils(table::SensitivityTable, names) -> SensitivityTable
+
+The table with the named coil sets dropped: the error-field coil sets alone, once a correction
+array or any other energized coil set that is not an error-field source is taken out. Every name
+must be in the table. This is the table the run's Monte Carlo, worst case and scans use; the
+per-coil sensitivities of the excluded sets stay in the full table.
+"""
+function without_coils(table::SensitivityTable, names)
+    names = String[String(n) for n in names]
+    unknown = setdiff(names, table.coil_names)
+    isempty(unknown) || throw(ArgumentError("coil sets to exclude not among the run's coil sets ($(join(table.coil_names, ", "))): $(join(unknown, ", "))"))
+    keep = [i for (i, n) in enumerate(table.coil_names) if !(n in names)]
+    return SensitivityTable(table.coil_names[keep], table.mode, table.delta_as_designed[keep], table.shift_sensitivity_per_m[:, keep], table.tilt_sensitivity_per_deg[:, keep],
+        table.abs_delta_shift_per_mm[keep], table.abs_delta_tilt_per_deg[keep], table.abs_delta_rim_per_mm[keep], table.cancelling_shift_m[:, keep],
+        table.cancelling_tilt_deg[:, keep])
+end
+
+"""
+    excluded_coil_names(ef_raw::AbstractDict) -> Vector{String}
+    excluded_coil_names(h5path::AbstractString) -> Vector{String}
+
+The coil sets a run leaves out of its error field: `[ErrorFields] exclude_coils` together with
+the correction arrays in `[ErrorFields.NTV] efc_coils`, read from the parsed `[ErrorFields]`
+section of a deck or from the deck echoed into a run file (none when the file carries no deck).
+"""
+function excluded_coil_names(ef_raw::AbstractDict)
+    listed = vcat(get(ef_raw, "exclude_coils", String[]), get(get(ef_raw, "NTV", Dict{String,Any}()), "efc_coils", String[]))
+    return unique(String[String(n) for n in listed])
+end
+function excluded_coil_names(h5path::AbstractString)
+    return h5open(h5path, "r") do f
+        haskey(f, "Input/gpec_toml_raw") || return String[]
+        excluded_coil_names(get(TOML.parse(read(f["Input/gpec_toml_raw"])), "ErrorFields", Dict{String,Any}()))
+    end
+end
+
+"""
+    cancelling_offset(δ_as_designed, S_x, S_y) -> (Δx, Δy)
 
 The real in-plane displacement that cancels a coil set's nominal overlap to linear order,
-`S_x·Δx + S_y·Δy = −δ_nominal`, as the least-squares solution of the 2×2 real system on the
+`S_x·Δx + S_y·Δy = −δ_as_designed`, as the least-squares solution of the 2×2 real system on the
 real and imaginary parts. For an axisymmetric hoop the two sensitivities are one complex number
 seen twice — `S_y = −i·S_x` in the sign convention these coils are built with — and the solution is
-`conj(−δ_nominal / S_x)`, split into its real and imaginary parts. The conjugate is not decoration:
+`conj(−δ_as_designed / S_x)`, split into its real and imaginary parts. The conjugate is not decoration:
 dropping it mirrors the offset about the x axis. A degenerate pair (`S_x` and `S_y` real
 multiples of each other) returns the minimum-norm solution.
 """
-function cancelling_offset(δ_nominal::Number, S_x::Number, S_y::Number)
+function cancelling_offset(δ_as_designed::Number, S_x::Number, S_y::Number)
     A = [real(S_x) real(S_y); imag(S_x) imag(S_y)]
-    Δ = pinv(A) * [-real(δ_nominal), -imag(δ_nominal)]
+    Δ = pinv(A) * [-real(δ_as_designed), -imag(δ_as_designed)]
     return (Δ[1], Δ[2])
 end

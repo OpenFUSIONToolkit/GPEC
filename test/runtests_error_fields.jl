@@ -40,17 +40,17 @@ include("h5_metadata_check.jl")
         scen = EF.ScenarioParameters(; n_e=5.0, b_t0=2.0, r_0=1.7, beta_n=1.0, l_i=1.0)
 
         # Every threshold above the distribution: nothing ever locks.
-        @test EF.locking_risk(mc, fill(1.0, 100), sc, scen).plock == 0
+        @test EF.locking_risk(mc, fill(1.0, 100), sc, scen).locking_probability_percent == 0
         # Every threshold below it: everything locks, to the width of the bin the zero edge pins.
-        @test EF.locking_risk(mc, fill(1.0e-12, 100), sc, scen).plock ≈ 100 atol = 0.5
+        @test EF.locking_risk(mc, fill(1.0e-12, 100), sc, scen).locking_probability_percent ≈ 100 atol = 0.5
         # Thresholds spread uniformly across the distribution: a flat δ against a flat threshold
         # gives half, since P(δ > threshold) = 1/2 for two independent uniforms on the same range.
         straddling = EF.locking_risk(mc, collect(range(0, 2.0e-4; length=20_001)), sc, scen)
-        @test 0 < straddling.plock < 100
-        @test straddling.plock ≈ 50 atol = 1.0
+        @test 0 < straddling.locking_probability_percent < 100
+        @test straddling.locking_probability_percent ≈ 50 atol = 1.0
         # Shifting the thresholds down can only raise the risk.
         lower = EF.locking_risk(mc, collect(range(0, 1.0e-4; length=20_001)), sc, scen)
-        @test lower.plock > straddling.plock
+        @test lower.locking_probability_percent > straddling.locking_probability_percent
     end
 
     @testset "coil-forced Solovev run: identities, output, and post-hoc entry point" begin
@@ -63,13 +63,16 @@ include("h5_metadata_check.jl")
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
-            # Two PF hoops outside the plasma (Solovev R ≈ 0.67–1.33 m): one tilted so the run has
-            # a nominal n=1 forcing, one axisymmetric so its rigid-motion response is known exactly.
+            # Three PF hoops outside the plasma (Solovev R ≈ 0.67–1.33 m): one tilted so the run has
+            # a nominal n=1 forcing, one axisymmetric so its rigid-motion response is known exactly,
+            # and one tilted the other way as the correction array, which is swept but is not an
+            # error-field source.
             inputs["ForcingTerms"] = Dict{String,Any}(
                 "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                 "coil_set" => [
                     Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0]),
-                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 1.5, "height" => -0.4, "currents" => [2.0e3])
+                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 1.5, "height" => -0.4, "currents" => [2.0e3]),
+                    Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
                 "compute_response" => true, "compute_singular_coupling" => true,
@@ -83,7 +86,7 @@ include("h5_metadata_check.jl")
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 20_000, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
                 # The smallest rotation scan that exercises the table path (three shifts, no refinement).
-                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_tilted"], "rotation_scan_points" => 3, "rotation_scan_max_points" => 3))
+                "NTV" => Dict{String,Any}("efc_coils" => ["hoop_efc"], "rotation_scan_points" => 3, "rotation_scan_max_points" => 3))
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
@@ -91,24 +94,35 @@ include("h5_metadata_check.jl")
             h5path = joinpath(dir, "gpec.h5")
 
             @test sens isa EF.CoilSensitivities
-            @test sens.coil_names == ["hoop_tilted", "hoop_axi"]
+            # Per-stage wall-clock records: the ErrorFields stage must appear now that it is a
+            # stage of the pipeline, alongside the stages that ran before it.
+            h5open(h5path, "r") do h5
+                @test haskey(h5, "Info/Runtimes/error_fields")
+                @test read(h5["Info/Runtimes/error_fields"]) > 0
+                @test haskey(h5, "Info/Runtimes/forcing_terms")
+                @test haskey(h5, "Info/Runtimes/perturbed_equilibrium")
+                @test haskey(h5, "Info/Runtimes/kinetic_forces")
+                @test haskey(h5, "Info/Runtimes/total")
+            end
+
+            @test sens.coil_names == ["hoop_tilted", "hoop_axi", "hoop_efc"]
             N = ffs.numpert_total
-            @test size(sens.nominal_field) == (N, 2)
-            @test size(sens.shift_sensitivity) == (N, 3, 2)
-            @test size(sens.tilt_sensitivity) == (N, 3, 2)
+            @test size(sens.field_as_designed) == (N, 3)
+            @test size(sens.shift_sensitivity_per_m) == (N, 3, 3)
+            @test size(sens.tilt_sensitivity_per_deg) == (N, 3, 3)
             @test sens.b_t0 == ffs.equil.params.bt0
-            @test sens.peak_current == [2.0e3, 2.0e3]
+            @test sens.peak_current == [2.0e3, 2.0e3, 2.0e3]
             @test all(<(1e-2), sens.shift_linearity_residual)
             @test all(<(1e-2), sens.tilt_linearity_residual)
 
             # These coils are the run's forcing: the nominal spectra sum to the run's own b̃.
-            @test vec(sum(sens.nominal_field; dims=2)) ≈ pe.forcing_b_rootarea rtol = 1e-10
+            @test vec(sum(sens.field_as_designed; dims=2)) ≈ pe.forcing_b_rootarea rtol = 1e-10
 
             # Axisymmetric hoop at n = 1: no nominal drive, nothing from a vertical shift or a rotation
             # about the machine axis, and S_y = −i·S_x, with the tilt pair in the opposite sense.
-            Sx, Sy, Sz = (sens.shift_sensitivity[:, a, 2] for a in 1:3)
-            Tx, Ty, Tz = (sens.tilt_sensitivity[:, a, 2] for a in 1:3)
-            @test norm(sens.nominal_field[:, 2]) < 1e-10 * norm(Sx)
+            Sx, Sy, Sz = (sens.shift_sensitivity_per_m[:, a, 2] for a in 1:3)
+            Tx, Ty, Tz = (sens.tilt_sensitivity_per_deg[:, a, 2] for a in 1:3)
+            @test norm(sens.field_as_designed[:, 2]) < 1e-10 * norm(Sx)
             @test norm(Sz) < 1e-8 * norm(Sx)
             @test norm(Tz) < 1e-8 * norm(Tx)
             @test Sy ≈ -im .* Sx rtol = 1e-8
@@ -119,19 +133,39 @@ include("h5_metadata_check.jl")
             dom = PE.dominant_coupling(rc)
             table = EF.sensitivity_table(sens, dom)
             @test table.mode == 1
-            @test sum(table.delta_nominal) ≈ pe.dominant_forcing_overlap[1] / sens.b_t0 rtol = 1e-10
-            @test table.delta_per_mm_shift[2] ≈ 1e-3 * abs(table.shift[1, 2])  # axisymmetric: |S_y| = |S_x|
+            @test sum(table.delta_as_designed) ≈ pe.dominant_forcing_overlap[1] / sens.b_t0 rtol = 1e-10
+            @test table.abs_delta_shift_per_mm[2] ≈ 1e-3 * abs(table.shift_sensitivity_per_m[1, 2])  # axisymmetric: |S_y| = |S_x|
             for j in 1:2
-                @test abs(table.delta_nominal[j] + table.shift[1, j] * table.cancelling_shift[1, j] + table.shift[2, j] * table.cancelling_shift[2, j]) < 1e-12
+                @test abs(
+                    table.delta_as_designed[j] + table.shift_sensitivity_per_m[1, j] * table.cancelling_shift_m[1, j] +
+                    table.shift_sensitivity_per_m[2, j] * table.cancelling_shift_m[2, j]
+                ) < 1e-12
             end
             @test_throws ArgumentError EF.sensitivity_table(sens, dom; mode=length(dom.singular_values) + 1)
             @test_throws DimensionMismatch EF.sensitivity_table(sens, PE.dominant_coupling(rc.C[:, 1:(end-1)], rc.rational_psi))
+            # A decomposition from a different (m, n) basis has the right column count and would
+            # otherwise project and return plausible numbers, so the basis itself is checked.
+            shifted = PE.DominantCoupling(dom.singular_values, dom.right_singular_vectors, dom.left_singular_vectors,
+                dom.rational_index, dom.m_modes .+ 1, dom.n_modes)
+            @test_throws ArgumentError EF.sensitivity_table(sens, shifted)
+            # The bare-matrix construction carries no basis, so it stays permitted.
+            @test EF.sensitivity_table(sens, PE.dominant_coupling(rc.C, rc.rational_psi)) isa EF.SensitivityTable
             windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[end]))
-            @test length(windowed.delta_nominal) == 2
+            @test length(windowed.delta_as_designed) == 3
+            # The correction array is swept with the others but is not an error-field source: the run
+            # excludes the NTV efc_coils from the error field, and the table helper drops them.
+            @test EF.excluded_coil_names(h5path) == ["hoop_efc"]
+            ef_table = EF.without_coils(table, ["hoop_efc"])
+            @test ef_table.coil_names == ["hoop_tilted", "hoop_axi"] && ef_table.delta_as_designed == table.delta_as_designed[1:2]
+            @test ef_table.shift_sensitivity_per_m == table.shift_sensitivity_per_m[:, 1:2] && ef_table.cancelling_tilt_deg == table.cancelling_tilt_deg[:, 1:2]
+            @test EF.without_coils(table, String[]).coil_names == table.coil_names
+            @test_throws ArgumentError EF.without_coils(table, ["no_such"])
+            @test EF.excluded_coil_names(Dict{String,Any}("exclude_coils" => ["a"], "NTV" => Dict{String,Any}("efc_coils" => ["b", "a"]))) == ["a", "b"]
+            @test EF.excluded_coil_names(Dict{String,Any}()) == String[]
 
             # HDF5: self-describing, and the reader and file-based table reproduce memory exactly.
             h5open(h5path, "r") do f
-                @test haskey(f, "ErrorFields/CoilSensitivities/DominantMode/delta_nominal")
+                @test haskey(f, "ErrorFields/CoilSensitivities/DominantMode/delta_as_designed")
                 @test isempty(_collect_metadata_violations(f))
                 @test haskey(f, "Input/RawInputs/ErrorFields/tolerance_toml_raw")
             end
@@ -145,51 +179,56 @@ include("h5_metadata_check.jl")
             mc = res.monte_carlo
             @test mc isa EF.MonteCarloResult
             @test mc.nsample == 20_000 && mc.nbatch == 2 && mc.seed == 5
-            @test mc.delta_nominal ≈ abs(sum(table.delta_nominal))
-            @test sum(mc.pdf .* diff(mc.bin_edges)) ≈ 1 atol = 1e-6
-            @test mc.mean_abs_delta_efc < mc.mean_abs_delta
+            @test mc.abs_delta_total_as_designed ≈ abs(sum(ef_table.delta_as_designed))
+            @test !(mc.abs_delta_total_as_designed ≈ abs(sum(table.delta_as_designed)))
+            # A tolerance on the excluded array is an error, in each of the three places a name can appear.
+            @test EF.check_excluded_tolerances(snapshot, ["hoop_efc"]) === snapshot
+            @test_throws ArgumentError EF.check_excluded_tolerances(snapshot, ["hoop_tilted"])
+            @test_throws ArgumentError EF.check_excluded_tolerances(snapshot, ["hoop_axi"])
+            @test sum(mc.abs_delta_pdf .* diff(mc.abs_delta_bin_edges)) ≈ 1 atol = 1e-6
+            @test mc.abs_delta_efc_sampled_mean < mc.abs_delta_sampled_mean
             mc_file = EF.MonteCarloResult(h5path)
-            @test mc_file.pdf == mc.pdf && mc_file.bin_edges == mc.bin_edges && mc_file.nsample == 20_000
+            @test mc_file.abs_delta_pdf == mc.abs_delta_pdf && mc_file.abs_delta_bin_edges == mc.abs_delta_bin_edges && mc_file.nsample == 20_000
             rerun = EF.run_monte_carlo(h5path; nsample=20_000, nbatch=2, seed=5, nbins=100)
-            @test rerun.pdf == mc.pdf
+            @test rerun.abs_delta_pdf == mc.abs_delta_pdf
             windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[end], nsample=5_000, nbatch=1, seed=5, nbins=50)
-            @test windowed_mc.delta_nominal ≈ abs(sum(windowed.delta_nominal))
+            @test windowed_mc.abs_delta_total_as_designed ≈ abs(sum(EF.without_coils(windowed, ["hoop_efc"]).delta_as_designed))
 
             # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
             risk = res.locking_risk
             @test risk isa EF.RiskResult
             @test risk.scaling.n == 1 && risk.scaling.year == 2020 && risk.scaling.dataset == "O,L" && risk.scaling.fit == "WLS"
-            @test risk.threshold_nominal == EF.nominal_threshold(risk.scaling, EF.ScenarioParameters(ffs.equil; n_e=12.0))
-            @test 0 <= risk.plock_efc <= risk.plock <= 100
-            @test length(risk.plock_batches) == 2
+            @test risk.threshold_fit == EF.fitted_threshold(risk.scaling, EF.ScenarioParameters(ffs.equil; n_e=12.0))
+            @test 0 <= risk.locking_probability_efc_percent <= risk.locking_probability_percent <= 100
+            @test length(risk.locking_probability_batches_percent) == 2
             h5open(h5path, "r") do f
-                @test haskey(f, "ErrorFields/Risk/plock_percent") && haskey(f, "ErrorFields/Risk/ToleranceScan/scale")
-                @test read(f["ErrorFields/Risk/plock_percent"]) == risk.plock
+                @test haskey(f, "ErrorFields/Risk/locking_probability_percent") && haskey(f, "ErrorFields/Risk/ToleranceScan/tolerance_scale")
+                @test read(f["ErrorFields/Risk/locking_probability_percent"]) == risk.locking_probability_percent
                 @test isempty(_collect_metadata_violations(f))
             end
             scan = EF.ToleranceScan(h5path)
-            @test scan.scale == [0.5, 1.0, 2.0]
-            @test all(diff(scan.plock) .>= -0.5)                          # risk grows with tolerance (to Monte Carlo noise)
+            @test scan.tolerance_scale == [0.5, 1.0, 2.0]
+            @test all(diff(scan.locking_probability_percent) .>= -0.5)                          # risk grows with tolerance (to Monte Carlo noise)
             # Two 2 kA hoops on a toy equilibrium drive an overlap around 1e-5, two orders below the
             # ITPA threshold at any plausible density, so zero risk is the right answer here and the
             # scan is flat. The convolution itself is pinned by its own testset above, on a
             # distribution built to straddle a threshold.
-            @test risk.plock == 0
-            @test scan.plock[2] ≈ risk.plock rtol = 1e-12                # the scale-1 point is the run's own Monte Carlo
+            @test risk.locking_probability_percent == 0
+            @test scan.locking_probability_percent[2] ≈ risk.locking_probability_percent rtol = 1e-12                # the scale-1 point is the run's own Monte Carlo
             again = EF.locking_risk(h5path; n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
                 risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
-            @test again.plock == risk.plock
+            @test again.locking_probability_percent == risk.locking_probability_percent
             # The scan's own file entry point at unit scale is that same re-run.
             rescan = EF.tolerance_scan(h5path; scales=[1.0], n_e=12.0, nsample=20_000, nbatch=2, seed=5, nbins=100,
                 risk_ctrl=EF.RiskControl(; nsample_threshold=20_000, seed=3))
-            @test rescan.scale == [1.0]
-            @test rescan.plock[1] == again.plock
-            @test rescan.plock_efc[1] == again.plock_efc
+            @test rescan.tolerance_scale == [1.0]
+            @test rescan.locking_probability_percent[1] == again.locking_probability_percent
+            @test rescan.locking_probability_efc_percent[1] == again.locking_probability_efc_percent
 
             # Analysis plots: every ErrorFields plot renders from the file and saves; the phasing map
             # of the two hoops is the closed form on their stored spectra.
             AEF = GPEC.Analysis.ErrorFields
-            for (name, fn) in (("sens", AEF.plot_coil_sensitivities), ("pdf", AEF.plot_tolerance_pdf), ("risk", AEF.plot_locking_risk),
+            for (name, fn) in (("sens", AEF.plot_coil_sensitivities), ("abs_delta_pdf", AEF.plot_tolerance_pdf), ("risk", AEF.plot_locking_risk),
                 ("thr", AEF.plot_threshold_scaling), ("mode", AEF.plot_dominant_mode_spectrum))
                 png = joinpath(dir, "plot_$name.png")
                 @test fn(h5path; save_path=png) isa Plots.Plot
@@ -232,15 +271,16 @@ include("h5_metadata_check.jl")
             end
             @test AEF.plot_applied_spectra(h5path, plot_sets) isa Plots.Plot
             @test AEF.plot_applied_spectra(ctx_plot, ovs_plot; normalize=false)[1][:yaxis][:guide] == "|b̃| (T)"
-            @test length(AEF.plot_surface_overlay(ctx_plot, ovs_plot; ntheta=32, nzeta=24).subplots) == length(ovs_plot)
+            @test length(AEF.plot_surface_overlay(ctx_plot, ovs_plot; ntheta=32, nzeta=24).subplots) == 2 * cld(length(ovs_plot), 2)   # a two-column grid
 
             # The per-harmonic contributions the plot draws sum to each coil's resonant fraction,
             # which is what makes them readable as a decomposition. Asserted on the numbers rather
             # than the rendered series: the step recipe expands every point into two vertices.
             v_plot = ctx_plot.dom.right_singular_vectors[:, 1]
             for o in ovs_plot
-                bars = real.(conj.(v_plot) .* o.spectrum .* cis(-angle(o.raw))) ./ o.spectrum_norm
-                @test 100 * sum(bars) ≈ o.fraction_percent rtol = 1e-10
+                isnan(o.resonant_fraction_percent) && continue   # the axisymmetric hoop has no n=1 field to be a fraction of
+                bars = real.(conj.(v_plot) .* o.spectrum .* cis(-angle(o.resonant_field_t))) ./ o.spectrum_norm_t
+                @test 100 * sum(bars) ≈ o.resonant_fraction_percent rtol = 1e-10
             end
             # The resonant fraction the plot derives from the stored field and overlap is the one
             # the overlap diagnostics report; a table alone cannot supply it, and a name no source
@@ -249,9 +289,99 @@ include("h5_metadata_check.jl")
             @test frac[1][:yaxis][:guide] == "resonant fraction of |b̃| [%]"
             fraction_drawn = AEF._sensitivity_values("run", AEF._load(h5path), sens.coil_names, :fraction)
             for o in ovs_plot
-                @test fraction_drawn[findfirst(==(o.coil_name), sens.coil_names)] ≈ o.fraction_percent rtol = 1e-8
+                drawn = fraction_drawn[findfirst(==(o.coil_name), sens.coil_names)]
+                if isnan(o.resonant_fraction_percent)
+                    @test isnan(drawn)
+                else
+                    @test drawn ≈ o.resonant_fraction_percent rtol = 1e-8
+                end
             end
-            @test AEF._sensitivity_values("ovs", AEF._load(ovs_plot), sens.coil_names, :fraction) ≈ fraction_drawn rtol = 1e-8
+            # The resonant fraction is NaN, not a noise ratio and not zero, for the axisymmetric hoop,
+            # whose n=1 field is round-off next to the tilted hoop's; the tilted hoop's is finite.
+            @test isnan(only(o for o in ovs_plot if o.coil_name == "hoop_axi").resonant_fraction_percent)
+            @test 0 < only(o for o in ovs_plot if o.coil_name == "hoop_tilted").resonant_fraction_percent <= 100
+            @test isnan(EF.resonant_fraction_percent(1.0, 1e-20, 1.0)) && isnan(EF.resonant_fraction_percent(1.0, 1e-13, 0.0))
+            @test EF.resonant_fraction_percent(0.5, 1.0, 1.0) == 50.0
+            @test AEF.plot_coil_sensitivities(h5path; quantity=:fraction, yscale=:log10) isa Plots.Plot
+
+            # The linear model at finite displacements: the prediction is the table's, the error of the
+            # predicted change is small at the tolerance and shrinks with the displacement, and a
+            # coherent group is rotated as one body about its pivot.
+            lin = EF.linearity_check(ctx_plot, plot_sets, snapshot; scales=(1.0, 2.0))
+            @test length(lin.name) == 2 * 2 * 2 * 2 * 2 + 2 * 2 * 2          # two coils × (shift, tilt) × (x, y) × two scales × two signs, plus one group × (shift, tilt) × two scales × two signs
+            @test Set(lin.name) == Set(["hoop_tilted", "hoop_axi", "both_hoops"])
+            i_t = findfirst(==("hoop_tilted"), table.coil_names)
+            row = findfirst(i -> lin.name[i] == "hoop_tilted" && lin.kind[i] === :shift && lin.axis[i] == 1 && lin.scale[i] == 1.0 && lin.displacement[i] > 0, eachindex(lin.name))
+            @test lin.displacement[row] == 0.5e-3
+            @test lin.delta_as_designed[row] ≈ table.delta_as_designed[i_t] rtol = 1e-10
+            @test lin.delta_linear[row] ≈ table.delta_as_designed[i_t] + table.shift_sensitivity_per_m[1, i_t] * 0.5e-3 rtol = 1e-10
+            finite = filter(!isnan, lin.relative_error)
+            @test !isempty(finite) && maximum(finite) < 5e-2
+            small = EF.linearity_check(ctx_plot, plot_sets, snapshot; scales=(1e-2,))
+            @test maximum(filter(!isnan, small.relative_error)) < maximum(finite)
+            @test_throws ArgumentError EF.linearity_check(ctx_plot, plot_sets, snapshot; scales=(0.0,))
+            @test AEF.plot_linearity_check(lin; save_path=joinpath(dir, "linearity_check.png")) isa Plots.Plot
+            @test isfile(joinpath(dir, "linearity_check.png"))
+            @test AEF.plot_linearity_residuals(h5path; at=:step, yscale=:log10) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; yscale=:bogus)
+
+            # The correction requirement. An array identical to the source needs exactly −1 of its
+            # current and the joint least squares leaves nothing; a second, differently tilted hoop
+            # alone cancels the dominant mode and leaves no more on any surface than the least squares
+            # does; with both arrays the least squares finds the exact cancellation.
+            src = only(o for o in ovs_plot if o.coil_name == "hoop_tilted")
+            self_req = EF.correction_requirement(ctx_plot, src, [src])
+            @test self_req.current_factor_dominant ≈ [-1.0 + 0im] atol = 1e-10
+            @test self_req.current_factor_least_squares ≈ [-1.0 + 0im] atol = 1e-10
+            @test norm(self_req.resonant_field_least_squares_t) < 1e-10 * norm(self_req.resonant_field_source_t)
+            @test self_req.resonant_field_source_t ≈ ctx_plot.rc.C * src.spectrum
+            @test self_req.cosine_similarity ≈ [1.0] && self_req.rational_psi == ctx_plot.rc.rational_psi
+            # Currents in kilo-ampere-turns are the factors times the array's ampere-turns as given.
+            cs_t = only(cs for cs in plot_sets if cs.name == "hoop_tilted")
+            kat_t = abs(cs_t.nw) * maximum(abs, cs_t.currents) / 1e3
+            @test src.ampere_turns_kat ≈ kat_t && kat_t > 0
+            @test self_req.current_dominant_kat ≈ [-kat_t + 0im] atol = 1e-10 * kat_t
+            @test self_req.current_least_squares_kat ≈ [-kat_t + 0im] atol = 1e-10 * kat_t
+            @test isnan(EF.combine_overlaps(ovs_plot, "hoop_tilted" => 1.0).ampere_turns_kat)
+            cfg_y = FT.CoilConfig(; machine=ctx_plot.cfg.machine, dat_dir=ctx_plot.cfg.dat_dir, mtheta_coil=ctx_plot.cfg.mtheta_coil, nzeta_coil=ctx_plot.cfg.nzeta_coil,
+                coil_sets=[FT.CoilSetConfig(; name="hoop_y", source="pf_hoop", radius=1.6, height=-0.3, currents=[2.0e3], tilty=[3.0])])
+            arr_y = only(EF.coil_overlaps(ctx_plot, FT.load_coil_sets(cfg_y, 1; equil=ctx_plot.equil)))
+            one = EF.correction_requirement(ctx_plot, src, [arr_y])
+            @test abs(src.delta + one.current_factor_dominant[1] * arr_y.delta) < 1e-12 * abs(src.delta)
+            @test norm(one.resonant_field_least_squares_t) <= norm(one.resonant_field_dominant_t[:, 1]) + 1e-15
+            @test norm(one.resonant_field_least_squares_t) <= norm(one.resonant_field_source_t)
+            two = EF.correction_requirement(ctx_plot, src, [src, arr_y])
+            @test norm(two.resonant_field_least_squares_t) < 1e-8 * norm(two.resonant_field_source_t)
+            @test two.least_squares_rank == 2 && one.least_squares_rank == 1
+            @test two.current_factor_least_squares ≈ [-1.0, 0.0] atol = 1e-6
+            # With two arrays the dominant-mode condition is one equation in two unknowns: the
+            # minimum-current member of its family cancels the mode exactly and carries less current
+            # than the exact solution (−1, 0), which is also in the family.
+            fm = two.current_factor_dominant_minimum_norm
+            @test abs(src.delta + fm[1] * src.delta + fm[2] * arr_y.delta) < 1e-12 * abs(src.delta)
+            # The minimum is taken over the total current in ampere-turns, and it carries less than
+            # the exact solution (−1, 0), which spends all of the source array's own current.
+            kat2 = [src.ampere_turns_kat, arr_y.ampere_turns_kat]
+            @test norm(fm .* kat2) ≈ abs(src.delta) / norm([src.delta, arr_y.delta] ./ kat2)
+            @test norm(two.current_dominant_minimum_norm_kat) ≈ norm(fm .* kat2) < src.ampere_turns_kat
+            @test self_req.current_factor_dominant_minimum_norm ≈ [-1.0 + 0im] atol = 1e-10
+            @test_throws ArgumentError EF.correction_requirement(ctx_plot, src, EF.CoilOverlap[])
+            from_file = EF.correction_requirement(h5path, "hoop_tilted", ["hoop_tilted"])
+            @test from_file.current_factor_dominant ≈ self_req.current_factor_dominant atol = 1e-10
+            @test_throws ArgumentError EF.correction_requirement(h5path, "hoop_tilted", ["no_such"])
+            @test AEF.plot_correction_requirement(two; save_path=joinpath(dir, "requirement.png")) isa Plots.Plot
+            @test length(AEF.plot_correction_requirement(two).subplots) == 1 + 2   # the surfaces, then one polar panel per array
+            @test isfile(joinpath(dir, "requirement.png"))
+            # The needed-current distribution is the |δ| histogram rescaled by the array's overlap.
+            nd = EF.needed_current_distribution(mc, src)
+            @test sum(nd.current_factor_pdf .* diff(nd.current_factor_bin_edges)) ≈ 1 atol = 1e-6
+            @test nd.current_factor_bin_edges[end] ≈ mc.abs_delta_bin_edges[end] / abs(src.delta)
+            @test nd.current_bin_edges_kat ≈ nd.current_factor_bin_edges .* src.ampere_turns_kat
+            @test sum(nd.current_pdf_per_kat .* diff(nd.current_bin_edges_kat)) ≈ 1 atol = 1e-6
+            @test AEF.plot_needed_current(mc, src) isa Plots.Plot
+            @test all(
+                isnan(a) ? isnan(b) : isapprox(a, b; rtol=1e-8) for (a, b) in zip(AEF._sensitivity_values("ovs", AEF._load(ovs_plot), sens.coil_names, :fraction), fraction_drawn)
+            )
             @test_throws ArgumentError AEF.plot_coil_sensitivities(table; quantity=:fraction)
             @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; coils=["hoop_tilted", "no_such_coil"])
             @test_throws ArgumentError AEF.plot_coil_sensitivities(ovs_plot; quantity=:shift)
@@ -259,13 +389,13 @@ include("h5_metadata_check.jl")
             stems = AEF.plot_coil_sensitivities(h5path; yscale=:log10, save_path=joinpath(dir, "stems.png"))
             @test stems[1][:yaxis][:scale] === :log10
             @test all(st[:seriestype] in (:path, :scatter) for st in stems.series_list)
-            @test AEF.plot_coil_sensitivities(h5path; quantity=:nominal, yscale=:log10) isa Plots.Plot
+            @test AEF.plot_coil_sensitivities(h5path; quantity=:as_designed, yscale=:log10) isa Plots.Plot
 
             # The head-to-tail phasor walk ends at the coherent as-designed total the Monte Carlo
             # starts from; the tilted hoop carries the whole n=1 overlap and the axisymmetric one none.
             phasors = AEF.plot_overlap_phasors(h5path; save_path=joinpath(dir, "phasors.png"))
             @test phasors isa Plots.Plot
-            @test abs(sum(AEF._load(h5path).delta_nominal)) ≈ mc.delta_nominal rtol = 1e-10
+            @test abs(sum(AEF._load(h5path).delta_as_designed[1:2])) ≈ mc.abs_delta_total_as_designed rtol = 1e-10
             @test length(AEF.plot_overlap_phasors(["file" => h5path, "memory" => table]).subplots) == 2
             @test AEF.plot_overlap_phasors(ovs_plot; coils=["hoop_axi"]) isa Plots.Plot
             @test_throws ArgumentError AEF.plot_overlap_phasors(h5path; coils=["no_such_coil"])
@@ -273,19 +403,22 @@ include("h5_metadata_check.jl")
             # The worst-case budget's terms sum to the bound the Monte Carlo sized its histogram
             # by, from memory and from the file, and each term is what the bound charges: the
             # cylinder coil's tilt reach is the angle its axis line can reach, not its tilt_tol.
-            terms = EF.worst_case_terms(table, snapshot, plot_sets)
-            @test terms.total ≈ mc.delta_worst rtol = 1e-12
-            @test sum(terms.nominal) + sum(terms.shift) + sum(terms.tilt) + sum(terms.group_shift) + sum(terms.group_tilt) + terms.other ≈ mc.delta_worst rtol = 1e-12
-            @test terms.coil_names == sens.coil_names && terms.group_names == ["both_hoops"]
-            @test terms.nominal ≈ abs.(table.delta_nominal)
-            @test terms.other ≈ 8.2e-6 + 3 * 1.0e-6
+            terms = EF.worst_case_terms(ef_table, snapshot, plot_sets)
+            @test terms.abs_delta_worst_case ≈ mc.abs_delta_worst_case rtol = 1e-12
+            @test sum(terms.abs_delta_as_designed) + sum(terms.abs_delta_shift_tolerance) + sum(terms.abs_delta_tilt_tolerance) + sum(terms.abs_delta_group_shift_tolerance) +
+                  sum(terms.abs_delta_group_tilt_tolerance) + terms.abs_delta_unattributed ≈
+                  mc.abs_delta_worst_case rtol = 1e-12
+            @test terms.coil_names == ef_table.coil_names && terms.group_names == ["both_hoops"]
+            @test terms.abs_delta_as_designed ≈ abs.(ef_table.delta_as_designed)
+            @test terms.abs_delta_unattributed ≈ 8.2e-6 + 3 * 1.0e-6
             i_axi = findfirst(==("hoop_axi"), sens.coil_names)
             reach = rad2deg(atan(2.0e-3 / 1.5))
-            @test terms.tilt[i_axi] ≈ max(abs(table.tilt[1, i_axi]), abs(table.tilt[2, i_axi])) * reach rtol = 1e-12
-            @test terms.shift[i_axi] ≈ max(abs(table.shift[1, i_axi]), abs(table.shift[2, i_axi])) * (2.0e-3 + 3 * 1.0e-4) rtol = 1e-12
+            @test terms.abs_delta_tilt_tolerance[i_axi] ≈ max(abs(table.tilt_sensitivity_per_deg[1, i_axi]), abs(table.tilt_sensitivity_per_deg[2, i_axi])) * reach rtol = 1e-12
+            @test terms.abs_delta_shift_tolerance[i_axi] ≈ max(abs(table.shift_sensitivity_per_m[1, i_axi]), abs(table.shift_sensitivity_per_m[2, i_axi])) * (2.0e-3 + 3 * 1.0e-4) rtol =
+                1e-12
             from_file = EF.worst_case_terms(h5path)
-            @test from_file.total ≈ mc.delta_worst rtol = 1e-10
-            @test EF.worst_case_terms(table, snapshot, plot_sets; tolerance_scale=2.0).shift[i_axi] > terms.shift[i_axi]
+            @test from_file.abs_delta_worst_case ≈ mc.abs_delta_worst_case rtol = 1e-10
+            @test EF.worst_case_terms(table, snapshot, plot_sets; tolerance_scale=2.0).abs_delta_shift_tolerance[i_axi] > terms.abs_delta_shift_tolerance[i_axi]
             budget = AEF.plot_tolerance_budget(h5path; save_path=joinpath(dir, "budget.png"))
             @test budget isa Plots.Plot && isfile(joinpath(dir, "budget.png"))
             @test AEF.plot_tolerance_budget(table, snapshot, plot_sets; monte_carlo=mc, sort=:name) isa Plots.Plot
@@ -302,11 +435,11 @@ include("h5_metadata_check.jl")
             @test_throws ArgumentError AEF.plot_linearity_residuals(sens)
             @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; at=:bogus)
             i_tilted = findfirst(==("hoop_tilted"), sens.coil_names)
-            tilt_deg = EF.tilt_tolerance_deg(0.002, "m", sens.nominal_radius[i_tilted])
+            tilt_deg = EF.tilt_tolerance_deg(0.002, "m", sens.major_radius_m[i_tilted])
             @test tilt_deg ≈ EF.tilt_tolerance_deg(0.002, "m", plot_sets[findfirst(cs -> cs.name == "hoop_tilted", plot_sets)])
             @test_throws ArgumentError EF.tilt_tolerance_deg(5.0, "m", 1.5)
             at_tol = AEF._linearity_matrix("run", AEF._load(h5path), sens.coil_names, :tolerance)
-            @test size(at_tol) == (6, 2)
+            @test size(at_tol) == (6, 3)
             @test at_tol[1, i_tilted] ≈ sens.shift_linearity_residual[1, i_tilted] * (0.5e-3 / 1e-3) rtol = 1e-12
             @test at_tol[4, i_tilted] ≈ sens.tilt_linearity_residual[1, i_tilted] * (tilt_deg / 0.1) rtol = 1e-12
             @test at_tol[6, i_axi] ≈ sens.tilt_linearity_residual[3, i_axi] * (0.019 / 0.1) rtol = 1e-12
@@ -322,20 +455,20 @@ include("h5_metadata_check.jl")
             pmap = EF.phasing_map(h5path, ["hoop_tilted", "hoop_axi"]; nphase=36)
             @test length(pmap.phase_deg) == 1 && size(pmap.delta_per_kat) == (36,)
             kat = sens.winding_multiplier .* sens.peak_current ./ 1e3
-            δ_each = [dot(dom.right_singular_vectors[:, 1], sens.nominal_field[:, j]) / kat[j] / sens.b_t0 for j in 1:2]
+            δ_each = [dot(dom.right_singular_vectors[:, 1], sens.field_as_designed[:, j]) / kat[j] / sens.b_t0 for j in 1:2]
             @test pmap.delta_per_kat ≈ abs.(δ_each[1] .+ δ_each[2] .* cis.(deg2rad.(pmap.phase_deg[1])))
             @test AEF.plot_phasing_map(pmap; save_path=joinpath(dir, "phasing.png")) isa Plots.Plot
             @test AEF.plot_phasing_map(h5path, ["hoop_tilted", "hoop_axi"]; nphase=12) isa Plots.Plot
             from_file = EF.CoilSensitivities(h5path)
             @test from_file.coil_names == sens.coil_names
             @test from_file.m_modes == sens.m_modes && from_file.n_modes == sens.n_modes
-            @test from_file.nominal_field == sens.nominal_field
-            @test from_file.shift_sensitivity == sens.shift_sensitivity
-            @test from_file.tilt_sensitivity == sens.tilt_sensitivity
+            @test from_file.field_as_designed == sens.field_as_designed
+            @test from_file.shift_sensitivity_per_m == sens.shift_sensitivity_per_m
+            @test from_file.tilt_sensitivity_per_deg == sens.tilt_sensitivity_per_deg
             @test from_file.b_t0 == sens.b_t0
             table_file = EF.sensitivity_table(h5path)
-            @test table_file.delta_nominal == table.delta_nominal
-            @test table_file.shift == table.shift && table_file.tilt == table.tilt
+            @test table_file.delta_as_designed == table.delta_as_designed
+            @test table_file.shift_sensitivity_per_m == table.shift_sensitivity_per_m && table_file.tilt_sensitivity_per_deg == table.tilt_sensitivity_per_deg
 
             # Post-hoc entry point: equilibrium and coupling rebuilt from the file, same coils.
             cfg = FT.CoilConfig(GPEC.forcing_terms_control(inputs))
@@ -344,20 +477,20 @@ include("h5_metadata_check.jl")
             @test rebuilt.psilim == ffs.psilim
             @test rebuilt.equil.params.bt0 ≈ ffs.equil.params.bt0
             post_hoc = EF.compute_coil_sensitivities(h5path, sets)
-            @test post_hoc.nominal_field ≈ sens.nominal_field rtol = 1e-10
-            @test post_hoc.shift_sensitivity ≈ sens.shift_sensitivity rtol = 1e-10
-            @test post_hoc.tilt_sensitivity ≈ sens.tilt_sensitivity rtol = 1e-10
+            @test post_hoc.field_as_designed ≈ sens.field_as_designed rtol = 1e-10
+            @test post_hoc.shift_sensitivity_per_m ≈ sens.shift_sensitivity_per_m rtol = 1e-10
+            @test post_hoc.tilt_sensitivity_per_deg ≈ sens.tilt_sensitivity_per_deg rtol = 1e-10
 
-            # Correction-coil couplings: the tilted hoop as the correction array. Its overlap per kAt is
+            # Correction-coil couplings: the third hoop as the correction array. Its overlap per kAt is
             # the table's nominal overlap over its ampere-turns; the residual field carries no dominant
             # mode; the torques are finite and written with the metadata contract.
             couplings = res.efc_couplings
             @test couplings isa Vector{EF.EFCCoupling} && length(couplings) == 1
             c = couplings[1]
-            kat = sets[1].nw * 2.0e3 / 1e3
-            @test c.coil_name == "hoop_tilted"
-            @test c.delta_per_kat ≈ abs(table.delta_nominal[1]) / kat rtol = 1e-6
-            @test 0 < c.overlap_percent <= 100
+            kat = sets[3].nw * 2.0e3 / 1e3
+            @test c.coil_name == "hoop_efc"
+            @test c.delta_per_kat ≈ abs(table.delta_as_designed[3]) / kat rtol = 1e-6
+            @test 0 < c.resonant_fraction_percent <= 100
             @test isfinite(c.torque_full_per_kat2) && isfinite(c.torque_residual_per_kat2)
             # The rotation scan the run tabulated: symmetric about the unshifted point, whose torques
             # are the nominal ones, with a cumulative profile that starts at zero on the kinetic grid.
@@ -367,13 +500,29 @@ include("h5_metadata_check.jl")
             @test isfinite(c.omega_reference) && c.omega_reference != 0
             @test c.psi[1] == 0.0 && c.psi[end] == 1.0 && issorted(c.psi)
             @test size(c.torque_full_profile) == (length(c.psi), 3) && c.torque_full_profile[1, 2] == 0.0
-            @test abs(dot(dom.right_singular_vectors[:, 1], EF.residual_spectrum(dom, sens.nominal_field[:, 1]))) < 1e-12
+            @test abs(dot(dom.right_singular_vectors[:, 1], EF.residual_spectrum(dom, sens.field_as_designed[:, 3]))) < 1e-12
             @test EF.read_efc_couplings(h5path)[1] == c
             h5open(h5path, "r") do f
                 @test haskey(f, "ErrorFields/NTV/torque_residual_per_kat2")
                 @test isempty(_collect_metadata_violations(f))
             end
-            curve = EF.efc_current_curve(c; delta_threshold=risk.threshold_nominal, torque_budget=1.0)
+            curve = EF.efc_current_curve(c; delta_threshold=risk.threshold_fit, torque_budget=1.0)
+            # The exceedance of the NTV-limited correctable overlap is the histogram's mass beyond it.
+            unc = EF.uncorrectable_probability(mc, c; delta_threshold=risk.threshold_fit, torque_budget=1.0)
+            # The overlap's ampere-turns normalize exactly as the coupling's per-kAt overlap, so the
+            # needed current and the NTV-limited allowance share one kilo-ampere-turn axis.
+            src_efc = only(o for o in ovs_plot if o.coil_name == "hoop_efc")
+            @test c.delta_per_kat ≈ abs(src_efc.delta) / src_efc.ampere_turns_kat rtol = 1e-8
+            @test unc.abs_delta_max_correctable == EF.max_correctable_overlap(c; delta_threshold=risk.threshold_fit, torque_budget=1.0).with_ntv
+            @test 0 <= unc.probability_percent <= 100
+            mass_beyond =
+                100 * sum(
+                    mc.abs_delta_pdf[i] * max(0.0, mc.abs_delta_bin_edges[i+1] - max(mc.abs_delta_bin_edges[i], unc.abs_delta_max_correctable)) for i in eachindex(mc.abs_delta_pdf)
+                )
+            @test unc.probability_percent ≈ clamp(mass_beyond, 0, 100) rtol = 1e-10
+            @test EF.uncorrectable_probability(mc, c; delta_threshold=1e3 * mc.abs_delta_bin_edges[end], torque_budget=1.0).probability_percent == 0
+            @test AEF.plot_needed_current(mc, src_efc; coupling=c, delta_threshold=risk.threshold_fit, torque_budget=1.0) isa Plots.Plot
+            @test_throws ArgumentError AEF.plot_needed_current(mc, src_efc; coupling=c)
             @test length(curve.delta_ef) == 500 && all(curve.current_linear .>= 0)
             ntv_plot = GPEC.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=1.0, save_path=joinpath(dir, "ntv.png"))
             @test length(ntv_plot.series_list) >= 2                        # the single-mode and NTV-limited currents
@@ -387,13 +536,13 @@ include("h5_metadata_check.jl")
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; fd_step_shift_m=2e-3, fd_step_tilt_deg=0.2); psi=ffs.psilim, b_t0=sens.b_t0)
-            @test coarse.shift_sensitivity ≈ sens.shift_sensitivity rtol = 1e-4
-            @test coarse.tilt_sensitivity ≈ sens.tilt_sensitivity rtol = 1e-3
+            @test coarse.shift_sensitivity_per_m ≈ sens.shift_sensitivity_per_m rtol = 1e-4
+            @test coarse.tilt_sensitivity_per_deg ≈ sens.tilt_sensitivity_per_deg rtol = 1e-3
 
             # Single-conductor sets: the set pivot is the conductor pivot.
             set_pivot = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; rotation_center="set"); psi=ffs.psilim, b_t0=sens.b_t0)
-            @test set_pivot.tilt_sensitivity ≈ sens.tilt_sensitivity rtol = 1e-10
+            @test set_pivot.tilt_sensitivity_per_deg ≈ sens.tilt_sensitivity_per_deg rtol = 1e-10
 
             # The one-call overlap path. Built in memory from the same coupling the table used, so
             # the comparison is exact rather than up to an SVD phase.
@@ -415,12 +564,16 @@ include("h5_metadata_check.jl")
                 end
                 hand = PE.rootarea_field(rc, hand_modes)
                 @test o.spectrum ≈ hand rtol = 1e-12
-                @test o.raw ≈ PE.coupling_overlap(dom, hand)[1] rtol = 1e-12
-                @test o.delta ≈ o.raw / o.b_t0
-                @test o.spectrum_norm ≈ norm(hand)
-                @test o.fraction_percent ≈ 100 * abs(o.raw) / norm(hand)
+                @test o.resonant_field_t ≈ PE.coupling_overlap(dom, hand)[1] rtol = 1e-12
+                @test o.delta ≈ o.resonant_field_t / o.b_t0
+                @test o.spectrum_norm_t ≈ norm(hand)
+                if norm(hand) > 1e-8 * maximum(x.spectrum_norm_t for x in ovs)
+                    @test o.resonant_fraction_percent ≈ 100 * abs(o.resonant_field_t) / norm(hand)
+                else
+                    @test isnan(o.resonant_fraction_percent)
+                end
                 # And it is the same number the sensitivity sweep gets for its nominal tap.
-                @test o.delta ≈ table.delta_nominal[j] rtol = 1e-10
+                @test o.delta ≈ table.delta_as_designed[j] rtol = 1e-10
             end
 
             # Combining these sets at unit weight is the run's own forcing, which the run wrote out.
@@ -428,12 +581,12 @@ include("h5_metadata_check.jl")
             @test whole.coil_name == "assembly"
             @test whole.spectrum ≈ pe.forcing_b_rootarea rtol = 1e-10
             @test whole.delta ≈ pe.dominant_forcing_overlap[1] / sens.b_t0 rtol = 1e-10
-            @test whole.fraction_percent ≈ 100 * abs(whole.raw) / whole.spectrum_norm
+            @test whole.resonant_fraction_percent ≈ 100 * abs(whole.resonant_field_t) / whole.spectrum_norm_t
 
             # Weights scale the spectrum, and an unmatched name is an error, not a silent zero.
             doubled = EF.combine_overlaps(ovs, ovs[1].coil_name => 2.0)
-            @test doubled.raw ≈ 2 * ovs[1].raw rtol = 1e-12
-            @test doubled.spectrum_norm ≈ 2 * ovs[1].spectrum_norm rtol = 1e-12
+            @test doubled.resonant_field_t ≈ 2 * ovs[1].resonant_field_t rtol = 1e-12
+            @test doubled.spectrum_norm_t ≈ 2 * ovs[1].spectrum_norm_t rtol = 1e-12
             @test_throws ArgumentError EF.combine_overlaps(ovs, "no_such_coil" => 1.0)
             @test_throws ArgumentError EF.combine_overlaps(ovs)
             @test_throws ArgumentError EF.coil_overlaps(ctx, sets; mode=length(ctx.dom.singular_values) + 1)
@@ -441,7 +594,7 @@ include("h5_metadata_check.jl")
             # Rebuilt from the file instead: same magnitudes, up to the singular vectors' free phase.
             from_h5 = EF.coil_overlaps(h5path, sets)
             @test abs.(getfield.(from_h5, :delta)) ≈ abs.(getfield.(ovs, :delta)) rtol = 1e-8
-            @test getfield.(from_h5, :fraction_percent) ≈ getfield.(ovs, :fraction_percent) rtol = 1e-8
+            @test all(isnan(a) ? isnan(b) : isapprox(a, b; rtol=1e-8) for (a, b) in zip(getfield.(from_h5, :resonant_fraction_percent), getfield.(ovs, :resonant_fraction_percent)))
 
             # The grid override, and the warning when a deck is coarser than the converged default.
             @test EF.MIN_NZETA_PER_PERIOD == FT.NZETA_POINTS_PER_PERIOD
@@ -458,6 +611,38 @@ include("h5_metadata_check.jl")
                 EF.ErrorFieldsControl(; rotation_center="pack"); psi=ffs.psilim, b_t0=sens.b_t0)
             @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; fd_step_shift_m=0.0); psi=ffs.psilim, b_t0=sens.b_t0)
+        end
+    end
+
+    @testset "runtimes follow the ErrorFields output file when it is the only writer" begin
+        # With every other write switched off, the timings must still land in the file ErrorFields
+        # wrote. Before the orchestrator mirrored this write gate they were dropped silently.
+        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        mktempdir() do dir
+            for name in readdir(template)
+                cp(joinpath(template, name), joinpath(dir, name))
+            end
+            toml_path = joinpath(dir, "gpec.toml")
+            inputs = TOML.parsefile(toml_path)
+            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
+            inputs["ForcingTerms"] = Dict{String,Any}(
+                "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
+                "coil_set" => [
+                    Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 1.5,
+                        "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0])
+                ])
+            inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+                "compute_response" => true, "compute_singular_coupling" => true,
+                "verbose" => false, "write_outputs_to_HDF5" => false)
+            inputs["ErrorFields"] = Dict{String,Any}(
+                "verbose" => false, "output_filename" => "ef_only.h5")
+            open(io -> TOML.print(io, inputs), toml_path, "w")
+
+            GPEC.main([dir])
+
+            h5open(joinpath(dir, "ef_only.h5"), "r") do h5
+                @test haskey(h5, "Info/Runtimes/error_fields")
+            end
         end
     end
 end
