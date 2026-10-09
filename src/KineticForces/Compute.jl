@@ -83,7 +83,7 @@ function integrate_psi_quadgk(
     wdfac::Float64, divxfac::Float64, electron::Bool,
     method::String, equil, intr::KineticForcesInternal, ctrl::KineticForcesControl,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
-    psi_min::Float64=0.0, psi_max::Float64=1.0
+    psi_min::Float64=0.0, psi_max::Float64=1.0, axis_psi_c::Float64=0.0
 )
     is_matrix_method = occursin("mm", method)
     mpert = intr.mpert
@@ -99,6 +99,17 @@ function integrate_psi_quadgk(
         return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0,
             panel_psis=Float64[], resonance_psis=Float64[])
     end
+
+    # Near-axis validity suppression on the torque density. `axis_psi_c` is the run's single
+    # boundary (widest-orbit species, cleared of rationals), so the quadrature domain matches the
+    # EL kinetic matrices and the Validity output; below it the integrand is identically zero.
+    psi_c = ctrl.axis_validity_suppression ? axis_psi_c : 0.0
+    x0 = max(x0, psi_c)
+    if x0 >= xout
+        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0,
+            panel_psis=Float64[], resonance_psis=Float64[])
+    end
+    psi_c > 0 && @info "Kinetic axis-validity suppression in ψ torque quadrature: domain starts at psi_c=$(round(psi_c; sigdigits=3))"
 
     # The outer ψ-integral (the QuadGK batch / ψ-node loop) stays serial: QuadGK's refine
     # loop invokes the callback with small batches (~15 nodes), so threading it is
@@ -149,6 +160,7 @@ function integrate_psi_quadgk(
             for ell_idx in 1:nharm
                 total += harm_vals[ell_idx]
             end
+            total *= kinetic_axis_validity_envelope(psi, psi_c)
             y[k] = total
 
             push!(logged_psi, psi)
@@ -158,6 +170,7 @@ function integrate_psi_quadgk(
                 for ell_idx in 1:nharm
                     elems_accum .+= harm_elems[ell_idx]
                 end
+                elems_accum .*= kinetic_axis_validity_envelope(psi, psi_c)
                 push!(logged_elems, elems_accum)
             end
         end
@@ -166,7 +179,7 @@ function integrate_psi_quadgk(
     # Panels at the rational surfaces the run resolved plus the kinetic-resonance
     # surfaces (thermal-energy Ω_ℓ = 0 for ℓ ∈ -nl:nl) — both are torque-density peaks.
     resonance_psis = kinetic_resonance_psi_nodes(kinetic_profiles, equil; n, nl, zi, mi, electron, wdfac)
-    pts = psi_panel_points(vcat(intr.sing_psis, resonance_psis), x0, xout)
+    pts = psi_panel_points(vcat(intr.sing_psis, resonance_psis, [2 * psi_c]), x0, xout)
 
     bi = QuadGK.BatchIntegrand(psi_batch!, ComplexF64[], Float64[])
     total, quad_err = quadgk(bi, pts...; atol=ctrl.atol_psi, rtol=ctrl.rtol_psi, maxevals=ctrl.maxevals_psi)
@@ -291,10 +304,13 @@ block-diagonal kinetic matrices.
   - `ctrl::KineticForcesControl`: Control parameters specifying which methods to run
   - `equil`: PlasmaEquilibrium with 2D interpolants
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
+  - `axis_psi_c`: the run's near-axis validity boundary, suppressing the torque density below it
+    (`KineticForces.axis_validity_boundary`); 0 disables the suppression
 """
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
     ctrl::KineticForcesControl, equil,
-    kinetic_profiles::Equilibrium.KineticProfileSplines)
+    kinetic_profiles::Equilibrium.KineticProfileSplines;
+    axis_psi_c::Float64=0.0)
 
     for entry in METHOD_REGISTRY
         getfield(ctrl, entry.flag) || continue
@@ -337,7 +353,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                 n, ctrl.nl, ctrl.zi, ctrl.mi,
                 ctrl.wdfac, ctrl.divxfac, ctrl.electron,
                 method, equil, intr, ctrl, kinetic_profiles;
-                psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
+                psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2], axis_psi_c=axis_psi_c)
 
             total_torque += result.total
             psi_nsteps_total += result.psi_nsteps

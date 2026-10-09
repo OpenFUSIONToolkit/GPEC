@@ -59,10 +59,11 @@ so the solver never restricts step size for them.
 end
 
 """
-    arclength_fieldline_int(psifac, raw_profile, ro, zo, rs2)
+    arclength_fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)
 
 Arc-length-parameterized flux surface integration. Drop-in replacement for
-`direct_fieldline_int` with identical return format:
+`direct_fieldline_int` with identical return format, sampled at the straight-fieldline angles
+`theta_nodes` (see `sample_trace_at_sfl_angles`):
 
 - `y_out[:, 1]`: geometric angle η ∈ 0 to 2π (CCW from outboard midplane)
 - `y_out[:, 2]`: accumulated ∫dl/Bp
@@ -74,7 +75,7 @@ The ODE is terminated by a `ContinuousCallback` that detects the return to the
 outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 """
 @with_pool pool function arclength_fieldline_int(
-    psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64
+    psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64, theta_nodes
 )::Tuple{Matrix{Float64},DirectBField}
 
     psi0_guess = raw_profile.psio * (1.0 - psifac)
@@ -114,13 +115,14 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     reltol_vec = [equil_config.etol, equil_config.etol, 1e20, 1e20, 1e20]
     abstol_vec = [1e-8, 1e-8, 1e20, 1e20, 1e20]
     sol = solve(prob, BS5(); callback=callback, reltol=reltol_vec, abstol=abstol_vec,
-        dt=2π / 200, adaptive=true, dense=false)
+        dt=2π / 200, adaptive=true, dense=true)
 
     n = length(sol.u)
     y_out = Matrix{Float64}(undef, n, 5)
 
     # Compute geometric angles and unwrap to monotone [0, 2π]
-    η_raw = [atan(sol.u[i][2] - zo, sol.u[i][1] - ro) for i in 1:n]
+    η_atan = [atan(sol.u[i][2] - zo, sol.u[i][1] - ro) for i in 1:n]
+    η_raw = copy(η_atan)
     for i in 2:n
         Δ = η_raw[i] - η_raw[i-1]
         if Δ > π
@@ -141,7 +143,13 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
         y_out[i, 5] = sol.u[i][5]
     end
 
+    # The integration variable is arc length, so η at a sample is unwrapped against its bracketing step.
+    function state_row(u, _s, lo)
+        η = y_out[lo, 1] + rem2pi(atan(u[2] - zo, u[1] - ro) - η_atan[lo], RoundNearest)
+        return (η, u[3], sqrt((u[1] - ro)^2 + (u[2] - zo)^2), u[4], u[5])
+    end
+
     # bfield at the starting point carries F and P for the surface-averaged quantities
-    return y_out, bfield
+    return sample_trace_at_sfl_angles(sol, y_out, 5, theta_nodes, state_row), bfield
 end
 

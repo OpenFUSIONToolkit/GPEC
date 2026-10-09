@@ -19,6 +19,7 @@ where χ₁ = 2π·Ψ₀ [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10].
 Clebsch displacement components for PENTRC (matches Fortran gpout_xclebsch):
     ξ^ψ         = xsp_mn    (unregularized)
     ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + reg_spot²))
+                           reg_spot = 0 in kinetic runs — no ideal singularity to smooth
     ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp) ideal, ξ_s·singfac factor kinetic; divided by χ₁ in output)
 
 Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contra):
