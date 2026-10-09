@@ -87,7 +87,7 @@ Global workspace for the Galerkin solve. Port of Fortran `gal_type` (gal.f).
 `kl = ku = mpert*(np+1)`. The banded `mat` storage layout depends on `solver` (gal.f):
 
   - `"LU"`       → `ldab = 2*kl + ku + 1`, full band (LAPACK `gbtrf!`/`gbtrs!`)
-  - `"cholesky"` → `ldab = kl + 1`, lower band only (LAPACK `zpbtrf`/`zpbtrs`, `'L'`, unscaled as gal.f)
+  - `"cholesky"` → `ldab = kl + 1`, lower band only (LAPACK `zpbtrf`/`zpbtrs`, `'L'`)
 """
 mutable struct GalWorkspace
     solver::String
