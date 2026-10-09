@@ -11,7 +11,9 @@ so it describes what actually ran rather than what the harness intended to run.
 const RUNINFO_EPILOGUE = """
 using SHA
 using LinearAlgebra: BLAS
-let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml")
+let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml"), gpec = GeneralizedPerturbedEquilibrium
+    has_workload = any(f -> lowercase(f) == "precompile.jl", readdir(dirname(pathof(gpec))))
+    workload_on = get(Base.get_preferences(Base.PkgId(gpec).uuid), "precompile_workload", true) == true
     open(ARGS[2], "w") do f
         println(f, "runtime_s=", elapsed)
         println(f, "julia_version=", string(VERSION))
@@ -19,6 +21,7 @@ let manifest = joinpath(dirname(Base.active_project()), "Manifest.toml")
         println(f, "manifest_sha=", isfile(manifest) ? bytes2hex(SHA.sha256(read(manifest))) : "")
         println(f, "nthreads=", Threads.nthreads())
         println(f, "blas_threads=", BLAS.get_num_threads())
+        println(f, "build_mode=", has_workload && workload_on ? "aot" : "jit")
     end
 end
 """
@@ -60,6 +63,29 @@ end
 # run single-threaded. Override with e.g. GPEC_REGRESS_THREADS=1. The actual count
 # is recorded in each run's environment fingerprint.
 const SUBPROCESS_THREADS = get(ENV, "GPEC_REGRESS_THREADS", "auto")
+
+const GPEC_UUID = "462872dd-e066-4d2e-b993-6468b5239634"
+const _PREFS_ENVS = Dict{Bool,String}()
+
+"""
+Launch `cmd` with GPEC's `precompile_workload` preference set from `case_spec`, via a small
+environment stacked on the load path so no file is written into the run's project.
+
+The environment goes first: preferences from earlier load-path entries win, so this outranks a
+developer's `LocalPreferences.toml` beside the run's `Project.toml`. It declares GPEC only under
+`[extras]` and has no Manifest, so package loading still falls through to the active project.
+"""
+function with_workload_preference(cmd::Cmd, case_spec::CaseSpec)
+    workload = case_spec.precompile_workload
+    env = get!(_PREFS_ENVS, workload) do
+        dir = mktempdir()
+        write(joinpath(dir, "Project.toml"), "[extras]\nGeneralizedPerturbedEquilibrium = \"$GPEC_UUID\"\n")
+        write(joinpath(dir, "LocalPreferences.toml"), "[GeneralizedPerturbedEquilibrium]\nprecompile_workload = $workload\n")
+        return dir
+    end
+    load_path = get(ENV, "JULIA_LOAD_PATH", "@:@v#.#:@stdlib")
+    return addenv(cmd, "JULIA_LOAD_PATH" => env * (Sys.iswindows() ? ";" : ":") * load_path)
+end
 
 const RUNNER_SCRIPT_TEMPLATE = """
 using Pkg
@@ -277,7 +303,7 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
     runinfo_file = tempname() * ".runinfo"
     try
         write(tmpscript, script_content)
-        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $runinfo_file`
+        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $runinfo_file`, case_spec)
         if verbose
             run(pipeline(cmd))
         else
@@ -286,6 +312,7 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
+        _warn_build_mode(fingerprint, case_spec)
         if !isfile(h5path)
             error("Computed case '$(case_spec.name)' produced no output h5")
         end
@@ -423,6 +450,15 @@ function _warn_pin_broken(pin_manifest::Union{String,Nothing}, fp::EnvFingerprin
 end
 
 """
+Warn when a run's build mode differs from its case's, e.g. a workload case run at a commit that predates the workload.
+"""
+function _warn_build_mode(fp::EnvFingerprint, case_spec::CaseSpec)
+    expected = case_spec.precompile_workload ? "aot" : "jit"
+    (isempty(fp.build_mode) || fp.build_mode == expected) && return
+    @warn "Case $(case_spec.name) requested a $expected build but ran $(fp.build_mode); its numbers are not comparable across build modes"
+end
+
+"""
 Explain a cache miss caused by the environment rather than by absence.
 
 A cached run exists for this (commit, case) but was produced under a different Julia, host, or
@@ -479,7 +515,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         runinfo_file = tempname() * ".runinfo"
         write(tmpscript, script_content)
 
-        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $runinfo_file`
+        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $runinfo_file`, case_spec)
         if verbose
             run(pipeline(cmd))
         else
@@ -488,6 +524,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
+        _warn_build_mode(fingerprint, case_spec)
 
         h5path = joinpath(rundir, "gpec.h5")
         if !isfile(h5path)
@@ -597,7 +634,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         # Run GPEC in subprocess
         project_root = worktree_path
 
-        cmd = `julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $runinfo_file`
+        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $runinfo_file`, case_spec)
         if verbose
             run(pipeline(cmd))
         else
@@ -606,6 +643,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, commit_info.short)
+        _warn_build_mode(fingerprint, case_spec)
 
         # Check for gpec.h5
         h5path = joinpath(rundir, "gpec.h5")
