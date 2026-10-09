@@ -12,6 +12,9 @@ resonant. No solve, no field evaluation, no optimizer: the extremes are read off
 """
     PhasingMap
 
+Field names follow the ErrorFields result grammar `<quantity>[_instance][_efc][_statistic][_unit]` (see the manual's
+"Result names"); every field name is also its HDF5 dataset name.
+
 Dominant-mode overlap of `N` coil arrays against the `N − 1` relative phases of their current
 patterns, from [`phasing_map`](@ref). Array 1 sets the reference; array `k > 1` is rotated by
 the cumulative phase `Δφ_2 + … + Δφ_k`, so axis `k − 1` of the maps is the phase of array `k`
@@ -22,7 +25,7 @@ relative to array `k − 1` (the two-row EFCC convention `Δφ_ML`, `Δφ_UM`).
   - `coil_names`: the arrays in order `[N]`
   - `phase_deg`: grid of each relative phase, degrees `[N − 1]` vectors
   - `delta_per_kat`: `|δ|` per kilo-ampere-turn of every array at each grid point `[n_1 × … × n_{N−1}]`
-  - `overlap_percent`: `100·|Vᴴb̃| / ‖b̃‖`, the fraction of the applied root-area-weighted field
+  - `resonant_fraction_percent`: `100·|Vᴴb̃| / ‖b̃‖`, the fraction of the applied root-area-weighted field
     that lies along the dominant mode, at each grid point
   - `delta_per_kat_each`: `|δ_k|` per kilo-ampere-turn of each array alone `[N]`
 """
@@ -30,7 +33,7 @@ struct PhasingMap
     coil_names::Vector{String}
     phase_deg::Vector{Vector{Float64}}
     delta_per_kat::Array{Float64}
-    overlap_percent::Array{Float64}
+    resonant_fraction_percent::Array{Float64}
     delta_per_kat_each::Vector{Float64}
 end
 
@@ -63,7 +66,7 @@ function phasing_map(sens::CoilSensitivities, dom::DominantCoupling, coil_names:
     N = length(idx)
     kat = [abs(sens.winding_multiplier[i]) * sens.peak_current[i] / 1e3 for i in idx]
     all(>(0), kat) || throw(ArgumentError("every array needs a non-zero current to normalize per kilo-ampere-turn"))
-    spectra = [sens.nominal_field[:, i] ./ kat[j] for (j, i) in enumerate(idx)]   # b̃ per kAt
+    spectra = [sens.field_as_designed[:, i] ./ kat[j] for (j, i) in enumerate(idx)]   # b̃ per kAt
     deltas = [dot(v, b) / sens.b_t0 for b in spectra]                            # δ per kAt
     grid = collect(range(0.0, 360.0; length=nphase + 1))[1:end-1]
     dims = ntuple(_ -> nphase, N - 1)
@@ -107,8 +110,8 @@ The largest (or smallest) value of a map and the relative phases, in degrees, wh
 function extreme_phasing(map::PhasingMap; quantity::Symbol=:delta_per_kat, which::Symbol=:max)
     arr =
         quantity === :delta_per_kat ? map.delta_per_kat :
-        quantity === :overlap_percent ? map.overlap_percent :
-        throw(ArgumentError("quantity must be :delta_per_kat or :overlap_percent"))
+        quantity === :resonant_fraction_percent ? map.resonant_fraction_percent :
+        throw(ArgumentError("quantity must be :delta_per_kat or :resonant_fraction_percent"))
     which in (:max, :min) || throw(ArgumentError("which must be :max or :min"))
     I = which === :max ? argmax(arr) : argmin(arr)
     return arr[I], [map.phase_deg[k][I[k]] for k in 1:length(map.phase_deg)]
