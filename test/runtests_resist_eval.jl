@@ -6,7 +6,7 @@
     using GeneralizedPerturbedEquilibrium.LocalStability
     using GeneralizedPerturbedEquilibrium.Utilities
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.Tearing: build_ggj_inputs
+    using GeneralizedPerturbedEquilibrium.ForceFreeStates: layer_parameters, ggj_parameters
     using FastInterpolations
     using TOML
 
@@ -16,6 +16,12 @@
     eq_cfg = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path)
     sol_cfg = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
     equil = Equilibrium.setup_equilibrium(eq_cfg, sol_cfg)
+
+    # Per-surface GGJ parameters from a kinetic-profile table, as the GGJ tearing solve builds them.
+    function ggj_from(equil, sings, profiles; kwargs...)
+        lp = layer_parameters(sings, equil; profiles=profiles, kwargs...)
+        return [ggj_parameters(s, equil; eta=lp.eta[k], rho=lp.rho[k], ising=k) for (k, s) in enumerate(sings)]
+    end
 
     @testset "resist_geometry: returns finite values with expected signs" begin
         # Pick a few interior surfaces; compute q1 from the equilibrium
@@ -98,7 +104,7 @@
         @test intr.sing[1].restype === rg_first
     end
 
-    @testset "build_ggj_inputs: builds GGJParameters from sings + profiles" begin
+    @testset "ggj_parameters: builds GGJParameters from sings + profiles" begin
         # Synthetic profiles
         psi_pts = collect(0.0:0.1:1.0)
         profiles = KineticProfiles(; psi=psi_pts,
@@ -120,7 +126,7 @@
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
 
-        gs = build_ggj_inputs(equil, intr.sing, profiles; mu_i=2.0, zeff=1.0)
+        gs = ggj_from(equil, intr.sing, profiles; mu_i=2.0, zeff=1.0)
         @test length(gs) == 1
         @test gs[1] isa GGJParameters
 
@@ -143,7 +149,7 @@
         @test gs[1].ising == 1
     end
 
-    @testset "build_ggj_inputs: errors when restype not populated" begin
+    @testset "ggj_parameters: errors when restype not populated" begin
         # Need ≥4 points for the cubic spline
         psi_pts = collect(0.0:0.25:1.0)
         n = length(psi_pts)
@@ -159,7 +165,9 @@
             ua_right=zeros(ComplexF64, 0, 0, 0),
             psi_ua_left=0.0, psi_ua_right=0.0)
         @test s_unpop.restype === nothing
-        @test_throws ArgumentError build_ggj_inputs(equil, [s_unpop], profiles)
+        @test_throws ArgumentError ggj_parameters(s_unpop, equil; eta=1e-7, rho=1e-7)
+        # The default Sauter closure needs the same geometry, so the derivation refuses too.
+        @test_throws ErrorException ggj_from(equil, [s_unpop], profiles)
     end
 
     @testset "GGJ solve_inner runs on built parameters" begin
@@ -182,7 +190,7 @@
             psi_ua_left=0.0, psi_ua_right=0.0)
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
-        gs = build_ggj_inputs(equil, intr.sing, profiles; mu_i=2.0)
+        gs = ggj_from(equil, intr.sing, profiles; mu_i=2.0)
 
         # Verify D_I < 0 so the GGJ shooting solver doesn't bail
         @test mercier_di(gs[1]) < 0

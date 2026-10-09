@@ -1,6 +1,7 @@
-@testset "Runner: Control + run_slayer + HDF5 output" begin
+@testset "Runner: Control + TearingProblem + HDF5 output" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
+    using GeneralizedPerturbedEquilibrium: GGJModel, SLAYERModel, TearingProblem, solve
     using GeneralizedPerturbedEquilibrium.Dispersion
     using GeneralizedPerturbedEquilibrium.Runner
     using HDF5
@@ -94,23 +95,31 @@
         @test_throws ArgumentError slayer_control_from_toml(bad)
     end
 
-    @testset "run_slayer: result-facing form forwards surfaces and Δ'" begin
+    @testset "TearingProblem solve forwards surfaces and Δ'" begin
         # A result with no singular surfaces short-circuits before any equilibrium access,
         # so a stand-in result is enough to pin the forwarding of surfaces / delta_prime.
         c = SLAYERControl(; enabled=true, profile_file="unused.h5")
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing)
-        r = run_slayer(no_surfaces, c)
+        r = solve(TearingProblem(no_surfaces, c), SLAYERModel())
         @test isempty(r.params)
 
         # A disabled control never looks at the result at all.
-        r_off = run_slayer(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5"))
+        r_off = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5")), SLAYERModel())
         @test r_off.enabled == false
+    end
+
+    @testset "the default :ray backend drives the tearing solve" begin
+        @test SLAYERControl(; inner_model=:ggj_ray).inner_model === :ggj_ray
+        no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
+            delta_prime=nothing, dir_path=".")
+        r = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true, profile_file="unused.h5")), GGJModel())
+        @test isempty(r.params)
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one
     # does: `result.delta_prime.matrix` is populated and already sized to the surface list, which
-    # is the predicate `run_slayer` uses to accept it over the per-surface diagonal stub.
+    # is the predicate the tearing solve uses to accept it over the per-surface diagonal stub.
     @testset "Galerkin-fed SLAYER: gal Δ' drives the coupled solve" begin
         mktempdir() do dir
             deck = joinpath(@__DIR__, "..", "examples", "LAR_ideal_match_test")
@@ -130,7 +139,7 @@
                 _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, ising=2)]
             c = SLAYERControl(; enabled=true, coupling_mode=:coupled, scan_mode=:brute_force,
                 Q_re_range=(-1.0, 1.0), Q_im_range=(-0.5, 0.8), nre=20, nim=20, pole_threshold=1e5)
-            r = run_slayer_from_inputs(params, dpm, c)
+            r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, c)
             @test r.enabled
             @test r.coupled_extraction isa GrowthRateResult
         end
@@ -140,7 +149,7 @@
         c = SLAYERControl(; enabled=false)
         params = [_mk_params()]
         dp = ComplexF64[0.0 + 0im;;]                      # 1×1 matrix
-        r = run_slayer_from_inputs(params, dp, c)
+        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c)
         @test r.enabled == false
         @test isempty(r.Q_root)
         @test isempty(r.params)
@@ -150,7 +159,7 @@
         c = SLAYERControl(; enabled=true)
         params = [_mk_params()]
         bad_dp = ComplexF64[0.0 0.0; 0.0 0.0]
-        @test_throws ArgumentError run_slayer_from_inputs(params, bad_dp, c)
+        @test_throws ArgumentError run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, bad_dp, c)
     end
 
     @testset "delta_prime_to_rs_reference: ψ_N → r_s conversion" begin
@@ -217,7 +226,7 @@
             Q_im_range=(-0.5, 0.8),
             nre=80, nim=80,
             pole_threshold=1e5)      # tuned for lu^(1/3) scale
-        r = run_slayer_from_inputs(params, dp, c)
+        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c)
         @test r.enabled
         @test length(r.Q_root) == 1          # single coupled eigenvalue
         @test abs(r.Q_root[1] - Q_target) < 2e-2       # grid-resolution limited
@@ -245,7 +254,7 @@
             nre=40, nim=40,
             pole_threshold=1e5,
             store_scan=true)
-        r = run_slayer_from_inputs(params, dp, c;
+        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c;
             rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
 
         mktemp() do path, io

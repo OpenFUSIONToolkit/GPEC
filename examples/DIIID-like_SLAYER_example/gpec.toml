@@ -67,7 +67,7 @@ dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmli
 # invalid, no Re/Im contour crossing polishes to a true zero, and the validity
 # gate correctly reports them as no_root rather than a spurious growth rate.
 enabled                 = true       # Run the SLAYER tearing-mode analysis
-inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
+inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_ray", "ggj_shooting", or "ggj_galerkin"
 scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive refinement) or "brute_force"
 coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
 dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar", "rfitzp", or "toroidal"

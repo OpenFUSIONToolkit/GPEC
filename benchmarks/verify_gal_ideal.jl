@@ -9,7 +9,7 @@ h5path = length(ARGS) >= 1 ? ARGS[1] : "/tmp/gal_ideal_test/gpec.h5"
 to_c(a) = eltype(a) <: Complex ? ComplexF64.(a) : map(x -> ComplexF64(x.re, x.im), a)
 
 cout, deltar, mxi, mdxi, sols, sols_d, iss, sing_psi = h5open(h5path) do f
-    (to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"])),
+    (to_c(read(f["SingularSurfaces/Match/cout"])), to_c(read(f["SingularSurfaces/Match/Delta_r"])),
         to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/dxi_psidpsi"])),
         to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/xi_psi"])), to_c(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/dxi_psidpsi"])),
         Bool.(read(f["ForceFreeStates/Solutions/GalerkinIntegration/Basis/is_rational"])),

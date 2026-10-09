@@ -357,7 +357,7 @@ Tolerances `reltol`/`abstol` are the integrator tolerances; `rtol_origin`
 controls the truncation error of the origin Frobenius series and the
 choice of `tmin`.
 """
-function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
+function solve_inner(::_BareGGJ{:shooting}, params::GGJParameters, γ::Number;
     reltol::Float64=1e-6, abstol::Float64=1e-6,
     rtol_origin::Float64=1e-6, nps::Int=8,
     fmax::Float64=1.0, solver=Tsit5())
@@ -381,5 +381,5 @@ function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
     return InnerLayerResponse(Δ_rescaled[2], Δ_rescaled[1])
 end
 
-solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Real; kwargs...) =
+solve_inner(::_BareGGJ{:shooting}, params::GGJParameters, γ::Real; kwargs...) =
     solve_inner(GGJModel{:shooting}(), params, ComplexF64(γ); kwargs...)

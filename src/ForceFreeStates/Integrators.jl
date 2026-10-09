@@ -59,8 +59,9 @@ matching `gal_*` control key without the prefix.
   - `dx1dx2_flag::Bool` - Enable the special dx1/dx2 treatment of resonant and extension elements.
   - `sing_order::Int` - Base power-series order for the singular asymptotics.
   - `sing_order_ceiling::Bool` - Auto-raise the order per surface for a high Mercier index.
-  - `rpec_flag::Bool` - Append the mpert coil-response columns to the Δ′ solve. Forced on when a [`ResistiveMatch`](@ref) is requested.
+  - `rpec_flag::Bool` - Append the mpert coil-response columns to the Δ′ solve. Required for a later `MatchProblem` solve on the result.
   - `edge_onesided::Bool` - Pack the two end intervals one-sided toward their single rational end instead of the Fortran symmetric pack.
+  - `cut_solution::Bool` - Also keep the cut solution, for a later `MatchProblem`'s composite inner profiles.
 """
 @kwdef struct Galerkin <: AbstractIntegrator
     solver::String = "LU"
@@ -78,46 +79,7 @@ matching `gal_*` control key without the prefix.
     sing_order_ceiling::Bool = true
     rpec_flag::Bool = false
     edge_onesided::Bool = false
-end
-
-"""
-    ResistiveMatch(; eta=[], rho=[], rotation=[], gamma=5/3, ideal=false, inner_solver="ray", ...)
-
-Inner-layer matching configuration, passed to `solve` as `match=` and independent of the
-integrator that produced the outer solution. Requesting a match closes the basis with a
-resistive inner-layer solution instead of the ideal jump condition, so the result carries
-`closure = :matched` and a non-zero `bpen`.
-
-Only [`Galerkin`](@ref) implements the match today; a `Riccati` or `Forward` solve with
-`match` set errors. The per-surface vectors are ordered core to edge and must have one
-entry per matched rational surface.
-
-## Fields
-
-  - `eta::Vector{Float64}` - Per-surface resistivity η.
-  - `rho::Vector{Float64}` - Per-surface mass density ρ in kg/m³.
-  - `rotation::Vector{Float64}` - Per-surface rotation frequency f in Hz; the forced eigenvalue is γ_s = 2πi·n·f.
-  - `gamma::Float64` - Ratio of specific heats Γ in the resistive-layer coefficients.
-  - `ideal::Bool` - Build the ideal (perfectly shielded) matched solution: skip the inner layer and use the bare coil columns. `eta`, `rho` and `rotation` are then unread.
-  - `inner_solver::String` - Inner-layer Δ backend, `"ray"` (rotated-contour collocation) or `"galerkin"` (Hermite-cubic elements).
-  - `inner_xfac::Float64` - Asymptotic-matching radius multiplier of the `"galerkin"` backend.
-  - `inner_nx::Int` - Grid cells of the `"galerkin"` backend.
-  - `inner_nq::Int` - Quadrature order per cell of the `"galerkin"` backend.
-  - `inner_cutoff::Int` - Cells carrying the large solution as driving term in the `"galerkin"` backend.
-  - `inner_kmax::Int` - Large-x asymptotic series order of the `"galerkin"` backend.
-"""
-@kwdef struct ResistiveMatch
-    eta::Vector{Float64} = Float64[]
-    rho::Vector{Float64} = Float64[]
-    rotation::Vector{Float64} = Float64[]
-    gamma::Float64 = 5 / 3
-    ideal::Bool = false
-    inner_solver::String = "ray"
-    inner_xfac::Float64 = 10.0
-    inner_nx::Int = 1280
-    inner_nq::Int = 5
-    inner_cutoff::Int = 5
-    inner_kmax::Int = 8
+    cut_solution::Bool = false
 end
 
 """
@@ -165,26 +127,3 @@ function _apply_alg!(kwargs::Dict{Symbol,Any}, alg::Galerkin)
     return kwargs
 end
 
-"""
-    _apply_match!(kwargs, match, alg) -> kwargs
-
-Translate a [`ResistiveMatch`](@ref) into the `gal_*` matching keywords, or error for an
-integrator whose resonant matching is not implemented yet. `nothing` leaves `kwargs` alone,
-which is the ideal-closure default.
-"""
-_apply_match!(kwargs::Dict{Symbol,Any}, ::Nothing, ::AbstractIntegrator) = kwargs
-
-function _apply_match!(kwargs::Dict{Symbol,Any}, ::ResistiveMatch, alg::AbstractIntegrator)
-    return error("resonant matching for this integrator is not yet implemented (requested with $(nameof(typeof(alg))))")
-end
-
-function _apply_match!(kwargs::Dict{Symbol,Any}, match::ResistiveMatch, ::Galerkin)
-    kwargs[:gal_match_flag] = true
-    # The match consumes the coil-response columns, so it implies the rpec solve.
-    kwargs[:gal_rpec_flag] = true
-    for name in fieldnames(ResistiveMatch)
-        key = name === :ideal ? :gal_ideal_flag : Symbol(:gal_, name)
-        _set_ctrl!(kwargs, key, getfield(match, name), match)
-    end
-    return kwargs
-end

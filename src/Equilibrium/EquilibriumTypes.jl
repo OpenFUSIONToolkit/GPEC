@@ -893,6 +893,8 @@ This object provides a complete representation of the processed plasma equilibri
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
+  - `kinetic::Union{Nothing,KineticProfileSplines}`: kinetic profiles attached with
+    [`attach_kinetic_profiles!`](@ref), or `nothing`.
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -920,13 +922,15 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     psio::Float64
 
     ingest::EquilibriumIngest
+    kinetic::Union{Nothing,KineticProfileSplines}
 end
 
-# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest, so allow
-# construction without it; ingest defaults to nothing and is assigned post-construction.
+# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest and before
+# any kinetic attach, so allow construction without either; both default to nothing and are
+# assigned post-construction.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
     eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
     PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing)
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing, nothing)

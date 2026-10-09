@@ -16,8 +16,8 @@ constructor.
 # Core toggles
 
   - `enabled`       -- run the analysis at all (default `false`)
-  - `inner_model`   -- `:slayer_fitzpatrick` (default), `:ggj_shooting`, or
-    `:ggj_galerkin`
+  - `inner_model`   -- `:slayer_fitzpatrick` (default), `:ggj_ray`,
+    `:ggj_shooting`, or `:ggj_galerkin`
   - `scan_mode`     -- `:amr` (default) or `:brute_force`
   - `coupling_mode` -- `:uncoupled` (default, per-surface) or `:coupled`
     (multi-surface determinant)
@@ -157,7 +157,7 @@ there is one consistent interface for resistive and kinetic profiles.
     store_scan::Bool = false
 end
 
-const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
+const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_ray, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)

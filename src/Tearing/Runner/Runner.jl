@@ -27,16 +27,17 @@ using LinearAlgebra
 using Statistics: mean, median
 using HDF5
 
+import CommonSolve
 using FastInterpolations: cubic_interp
 using ..Utilities
 using ..Utilities: KineticProfiles
 using ...Equilibrium: read_kinetic_file, KineticProfileData
+using ...ForceFreeStates: ForceFreeStatesResult, layer_parameters, ggj_parameters
 using ..InnerLayer
 using ..InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
     GGJModel, GGJParameters,
     LayerWidths, slayer_layer_thickness
-import ..build_ggj_inputs   # defined at the Tearing level (needs ForceFreeStates)
 using ..Dispersion
 using ..Dispersion: SurfaceCoupling, surface_coupling,
     MultiSurfaceCoupling, multi_surface_coupling,
@@ -48,11 +49,12 @@ using ..Dispersion: SurfaceCoupling, surface_coupling,
 include("Control.jl")
 include("Result.jl")
 include("run_slayer.jl")
+include("TearingProblem.jl")
 include("HDF5Output.jl")
 
 export SLAYERControl, slayer_control_from_toml, validate
 export SLAYERResult, empty_slayer_result
-export run_slayer, run_slayer_from_inputs, ggj_inner_deltas
+export TearingProblem, run_slayer_from_inputs, ggj_inner_deltas
 export write_slayer_hdf5!
 
 end # module Runner

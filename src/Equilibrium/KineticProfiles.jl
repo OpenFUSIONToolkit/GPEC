@@ -578,3 +578,13 @@ function shift_exb_rotation(kp::KineticProfileSplines, Δω::Real)
     return KineticProfileSplines(xs, sample(kp.ni_spline), sample(kp.ne_spline), sample(kp.Ti_spline), sample(kp.Te_spline),
         sample(kp.omegaE_spline) .+ Float64(Δω), sample(kp.loglam_spline), sample(kp.nui_spline), sample(kp.nue_spline), sample(kp.zeff_spline))
 end
+
+"""
+    attach_kinetic_profiles!(equil, kinetic_file; kwargs...) -> equil
+
+Load `kinetic_file` into `equil.kinetic`; keywords go to [`load_kinetic_profiles`](@ref).
+"""
+function attach_kinetic_profiles!(equil, kinetic_file::AbstractString; kwargs...)
+    equil.kinetic = load_kinetic_profiles(kinetic_file; chi1=2π * equil.psio, kwargs...)
+    return equil
+end

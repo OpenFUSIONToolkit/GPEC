@@ -77,9 +77,9 @@ order = 31
 # the (grid- and ULP-fragile) near-singular points — an ill-posed benchmark. The producer is validated
 # separately by benchmarks/verify_gal_solution.jl (finite-difference self-consistency).
 
-# Inner-layer matching data Δ(Q) per surface (resist_eval geometry + GGJ inner solver). (msing × 2)
+# Inner-layer matching data Δ(Q) per surface (surface geometry + GGJ inner solver). (msing × 2)
 [quantities.gal_match_deltar_norm]
-h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/Delta_r"
+h5path = "SingularSurfaces/Match/Delta_r"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal inner-layer Δ||"
@@ -88,7 +88,7 @@ order = 41
 
 # Outer-region matched coefficients cout (2·msing × mcoil) — the 4·msing matching assembly + solve.
 [quantities.gal_match_cout_norm]
-h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/cout"
+h5path = "SingularSurfaces/Match/cout"
 type = "complex_matrix"
 extract = "norm"
 label = "||gal match cout||"
@@ -97,7 +97,7 @@ order = 42
 
 # Matching linear-solve residual ‖mat·cof − rmat‖/‖rmat‖ — health check (should stay ~machine eps).
 [quantities.gal_match_residual]
-h5path = "ForceFreeStates/Solutions/GalerkinIntegration/Match/residual"
+h5path = "SingularSurfaces/Match/residual"
 type = "real_scalar"
 extract = "value"
 label = "gal match residual"

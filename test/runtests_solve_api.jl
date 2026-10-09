@@ -183,24 +183,111 @@ using TOML
         @test kwargs[:gal_nx] == 64
         @test kwargs[:gal_rpec_flag]
 
-        # A match implies the coil-response columns and fills the inner-layer knobs.
-        FFS._apply_match!(kwargs, ResistiveMatch(; eta=[1e-6], inner_solver="ray"), Galerkin())
-        @test kwargs[:gal_match_flag]
-        @test kwargs[:gal_rpec_flag]
-        @test kwargs[:gal_eta] == [1e-6]
-        @test kwargs[:gal_inner_solver] == "ray"
-        @test !kwargs[:gal_ideal_flag]
-
         # Every key the objects own is a `ForceFreeStatesControl` field.
         @test all(in(fieldnames(FFS.ForceFreeStatesControl)), keys(kwargs))
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
-        @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., match=ResistiveMatch())
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., match=ResistiveMatch())
+        # A calculated-source kinetic solve gates on profiles attached to the equilibrium.
+        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs...,
+            kinetic_factor=0.5, kinetic_source="calculated")
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
+    end
+
+    # Path of the first field where `a` and `b` differ (recursing into structs, arrays and
+    # dicts), or `nothing` when they are equal everywhere. Underscore fields are private
+    # lazily-built caches (e.g. a spline's transpose) and are skipped.
+    function first_diff(a, b, path="")
+        typeof(a) === typeof(b) || return "$path (type)"
+        a isa Union{Number,AbstractString,Symbol,Nothing,Function,Type} && return isequal(a, b) ? nothing : path
+        a isa AbstractArray{<:Number} && return isequal(a, b) ? nothing : path
+        if a isa AbstractArray
+            size(a) == size(b) || return "$path (size)"
+            for i in eachindex(a)
+                d = first_diff(a[i], b[i], "$path[$i]")
+                d === nothing || return d
+            end
+            return nothing
+        end
+        if a isa AbstractDict
+            keys(a) == keys(b) || return "$path (keys)"
+            for k in keys(a)
+                d = first_diff(a[k], b[k], "$path[$k]")
+                d === nothing || return d
+            end
+            return nothing
+        end
+        for f in fieldnames(typeof(a))
+            startswith(string(f), "_") && continue
+            isdefined(a, f) == isdefined(b, f) || return "$path.$f (definedness)"
+            isdefined(a, f) || continue
+            d = first_diff(getfield(a, f), getfield(b, f), "$path.$f")
+            d === nothing || return d
+        end
+        return nothing
+    end
+
+    @testset "solves leave their inputs untouched" begin
+        snap = deepcopy(equil)
+        mktempdir() do dir
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, dir_path=dir, ffs_kwargs...)
+            @test first_diff(equil, snap) === nothing
+            # Matching reuses the outer solve: repeated match solves must not alter it.
+            gal_snap = deepcopy(gal)
+            n = length(MatchProblem(gal; ideal=true).surfaces)
+            layer = (eta=fill(1e-7, n), rho=fill(1e-7, n))
+            slow = solve(MatchProblem(gal; layer..., rotation=fill(1.0, n)), GGJModel())
+            fast = solve(MatchProblem(gal; layer..., rotation=fill(10.0, n)), GGJModel())
+            @test slow.bpen != fast.bpen
+            @test first_diff(gal, gal_snap) === nothing
+        end
+    end
+
+    @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
+        mktempdir() do dir
+            ric = solve(equil, Riccati(); nn=1, dir_path=dir, ffs_kwargs...)
+            @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.coil)
+            n = length(MatchProblem(ric; ideal=true).surfaces)
+            matched = solve(MatchProblem(ric; eta=fill(1e-7, n), rho=fill(1e-7, n), rotation=fill(1.0, n)), GGJModel())
+            @test matched.closure === :matched
+            @test matched.match !== nothing && matched.bpen == matched.match.bpen
+            @test matched.wp === nothing && matched.free_boundary === nothing
+            @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # A matched result is a new solution, not an outer solve to match again.
+            @test_throws ErrorException MatchProblem(matched; ideal=true)
+        end
+    end
+
+    @testset "MatchProblem gates on its inputs" begin
+        mktempdir() do dir
+            # A Forward result carries no Δ′ payload, so the problem is unconstructible.
+            fwd = solve(equil, Forward(); nn=1, dir_path=dir, ffs_kwargs...)
+            @test_throws ErrorException MatchProblem(fwd; ideal=true)
+            # A slab model can never close a matched solution.
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=dir, ffs_kwargs...)
+            prob = MatchProblem(gal; ideal=true)
+            @test_throws ErrorException solve(prob, SLAYERModel())
+            # The tearing model is the solve argument, never a TearingProblem keyword.
+            @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
+            # The ideal reference match keeps the ideal closure and replaces the solution with
+            # the bare coil columns in the identity-at-edge basis.
+            matched = solve(prob, GGJModel())
+            @test matched.closure === :ideal
+            @test matched.match !== nothing
+            # The ideal reference keeps the ideal δW (only a :matched closure drops it).
+            @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
+            @test matched.solution !== nothing && matched.solution.basis === :gal_native
+        end
+    end
+
+    @testset "kinetic profiles live on the equilibrium" begin
+        kin_file = joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat")
+        eq = attach_kinetic_profiles!(deepcopy(equil), kin_file; zi=1)
+        @test eq.kinetic isa GPEC.Equilibrium.KineticProfileSplines
+        @test eq.kinetic.ni_spline(0.5) > 0
+        # Kinetic solves stay TOML-driven even with profiles attached.
+        @test_throws ErrorException solve(eq, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
     end
 end

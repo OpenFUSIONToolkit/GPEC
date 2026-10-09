@@ -17,8 +17,7 @@ whichever formalism produced it.  These are the outer-region inputs to resistive
 Select it with `integrator = "galerkin"` in `[ForceFreeStates]`. It replaces the radial ODE
 integration rather than supplementing it: the run computes its own vacuum response at the
 control surface (when `vac_flag`) and produces no free-boundary energies or ODE trace.
-Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution that
-`PerturbedEquilibrium` consumes in place of a forward solution.
+Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution.
 
 The implementation lives in `src/ForceFreeStates/Galerkin/`:
 
@@ -28,14 +27,13 @@ The implementation lives in `src/ForceFreeStates/Galerkin/`:
 | `GalerkinGrid.jl` | Packed grid construction and local→global DOF mapping |
 | `GalerkinAssembly.jl` | Element-level assembly: Hermite basis, Gauss-Lobatto stiffness, resonant and extension cells, boundary conditions |
 | `GalerkinSolution.jl` | Reconstruct ξ(ψ) and analytic ξ′(ψ) on the gal-native grid |
-| `GalerkinMatch.jl` | DRIVEN/RPEC outer↔inner asymptotic matching, whose matched solution PerturbedEquilibrium consumes |
 | `GalerkinSolve.jl` | Top-level driver `galerkin_solve`, banded solve, Δ′ extraction, PEST-3 blocks, HDF5 output |
 
 ## API Reference
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["Galerkin/GalerkinStructs.jl", "Galerkin/GalerkinGrid.jl", "Galerkin/GalerkinAssembly.jl", "Galerkin/GalerkinSolution.jl", "Galerkin/GalerkinMatch.jl", "Galerkin/GalerkinSolve.jl"]
+Pages = ["Galerkin/GalerkinStructs.jl", "Galerkin/GalerkinGrid.jl", "Galerkin/GalerkinAssembly.jl", "Galerkin/GalerkinSolution.jl", "Galerkin/GalerkinSolve.jl"]
 ```
 
 ## See also

@@ -873,7 +873,7 @@ Hermite-FEM implementation of the [`solve_inner_profile`](@ref) interface:
 real-axis solve, so `Δ` and the profiles come from the same solution. Same
 numerics/kwargs as `solve_inner(GGJModel(; solver=:galerkin), ...)`.
 """
-function solve_inner_profile(::GGJModel{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
+function solve_inner_profile(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
     Δ, _, prof, _ = solve_inner_profile(params, γ; kwargs...)
     return (; Δ=Δ, x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
 end
@@ -894,7 +894,7 @@ Returns the parity-projected matching data (GWP2016 Eqs. 34–35) with the
 respectively — no parity swap (see the boundary-condition block above for the
 parity derivation).
 """
-function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
+function solve_inner(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number;
     kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
     cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
     Q = inner_Q(params, γ)

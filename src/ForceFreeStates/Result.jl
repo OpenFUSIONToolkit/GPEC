@@ -58,9 +58,11 @@ so bpen and closure are always present.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
   - `closure::Symbol` - How the basis is closed at the rationals: `:ideal` (the ideal jump
-    condition was imposed) or `:matched` (an inner-layer solution was matched in).
+    condition was imposed) or `:matched` (an inner-layer solution was matched in). A
+    `:matched` result carries no ideal δW: `wp` and `free_boundary` are `nothing`.
   - `bpen::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated resonant field from the
     inner layer, per surface and driving mode; all zeros under `:ideal` closure.
+  - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
     formalism produced none (Riccati, and Galerkin without a match).
   - `diagnostics::Union{Nothing,OdeState}` - The integrator's raw ODE state (ψ trace, `crit`,
@@ -73,8 +75,7 @@ so bpen and closure are always present.
   - `delta_prime::Union{Nothing,DeltaPrimeData}` - Δ′/outer-region matching payload from
     whichever formalism ran (Riccati BVP or Galerkin); `nothing` when neither produced one.
   - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solver internals and FEM
-    diagnostics, including the RPEC inner-layer match when requested. Its Δ′ payload lives
-    in `delta_prime`, not here.
+    diagnostics. Its Δ′ payload lives in `delta_prime`, not here.
 """
 struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} <: ModeSpace
     integrator::Symbol
@@ -106,6 +107,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} 
     # Closure of the basis at the rationals, always present.
     closure::Symbol
     bpen::Matrix{ComplexF64}
+    match::Union{Nothing,MatchResult}
 
     # Per-formalism products; presence is the capability signal.
     solution::Union{Nothing,SolutionProfiles}
@@ -124,7 +126,10 @@ that produced `result`. Warns naming the calculation being skipped otherwise.
 """
 function require(result::ForceFreeStatesResult, field::Symbol, calc::AbstractString)
     getfield(result, field) === nothing || return true
-    @warn "Skipping $calc: `$field` was not produced by the $(result.integrator) integrator"
+    why = result.closure === :matched && field in (:wp, :free_boundary) ?
+          "a :matched result carries no δW (the resistive δW is not implemented)" :
+          "`$field` was not produced by the $(result.integrator) integrator"
+    @warn "Skipping $calc: $why"
     return false
 end
 
@@ -147,9 +152,8 @@ end
 # analytic Galerkin derivative rather than a differenced value spline, and
 # Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) is the same outer ideal-MHD relation `sing_der!` uses. The grid runs
 # inner→edge, so the last node is the control surface and carries the edge boundary condition.
-function _matched_gal_profiles(gal_result::GalerkinResult, mats::MatrixSplines, intr::ModeSpace)
+function _matched_gal_profiles(gal_result::GalerkinResult, m::MatchResult, mats::MatrixSplines, intr::ModeSpace)
     sol = gal_result.solution
-    m = gal_result.match
     npert = intr.numpert_total
 
     keep = .!sol.issing
@@ -183,9 +187,9 @@ end
 
 Assemble the published result once the solve is finished — the one place that decides what a
 formalism's raw output means downstream. Beyond materializing the forward path's derivative
-stores, packing the matched Galerkin solution, and forming the fixed-boundary `W_p` when the
-free-boundary stage did not run, every field is copied or aliased from what the stages
-already produced.
+stores and forming the fixed-boundary `W_p` when the free-boundary stage did not run, every
+field is copied or aliased from what the stages already produced. The integrator always
+publishes the ideal closure; a `MatchProblem` solve transforms the result afterwards.
 
 `odet` is the integrator's ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` the Galerkin
 solver internals and its Δ′ payload (`nothing` otherwise). The two formalisms are never both
@@ -203,16 +207,12 @@ function build_result(
     gal_data::Union{Nothing,GalerkinResult},
     gal_dp::Union{Nothing,DeltaPrimeData}
 )
-    matched = gal_data !== nothing && gal_data.match !== nothing
-
     # The forward sweep is the only formalism whose stores need materializing; doing it here
     # keeps `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
     solution = if integrator === :forward && odet !== nothing
         materialize_derivative_stores!(odet, equil, mats, intr)
         SolutionProfiles(:el_axis, odet.step, odet.psi_store, odet.q_store,
             odet.u_store, odet.du_store, odet.xi_s_store)
-    elseif matched
-        _matched_gal_profiles(gal_data, mats, intr)
     else
         nothing
     end
@@ -229,11 +229,8 @@ function build_result(
     kinetic = (kmsing=intr.kmsing, kinsing=intr.kinsing, scan_psi=intr.kinsing_scan_psi,
         scan_cond=intr.kinsing_scan_cond, scan_threshold=intr.kinsing_scan_threshold)
 
-    # The ideal-flag match deliberately skips the inner-layer Δ, so its basis is ideal-closed
-    # and carries no penetrated field.
-    closure = (matched && !ctrl.gal_ideal_flag) ? :matched : :ideal
-    bpen = closure === :matched ? gal_data.match.bpen :
-           zeros(ComplexF64, intr.msing, intr.numpert_total)
+    closure = :ideal
+    bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
 
     # Fixed-boundary plasma energy matrix at the edge; free of any vacuum dependence, so a
     # vac_flag=false run still publishes its energy product. Aliases free_run's when it ran.
@@ -250,7 +247,7 @@ function build_result(
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
         intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
         metric, mats, intr.sing, kinetic,
-        closure, bpen,
+        closure, bpen, nothing,
         solution, odet, wp, free_energies, delta_prime, gal_data
     )
 end

@@ -292,7 +292,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         prof = profiles(psi)
         # Take ω_*e, ω_*i from the spline derivatives, or from `profiles` when the caller
-        # supplies them directly. `run_slayer` supplies zeros, so the latter is a library path.
+        # supplies them directly. The tearing solve supplies zeros, so the latter is a library path.
         ω_e_use, ω_i_use = compute_omega_star ? _omega_star_at(psi, n_res) : (prof.omega_e, prof.omega_i)
 
         # Pull geometric trapped-fraction inputs from ResistGeometry when
