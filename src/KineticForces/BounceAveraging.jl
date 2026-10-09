@@ -17,6 +17,9 @@ const MAX_SPLINE_CELLS = 100_000
 const EXTREMUM_MERGE_TOL = 1e-12
 # Cells a hinted cell search may step before falling back to bisection.
 const HINT_STEP_BUDGET = 8
+# Slack on the root-count tests below. Generous by design: a wrongly admitted repeated
+# root is a near-touch at a stationary point, which the monotone-window filter rejects.
+const ROOT_COUNT_TOL = 64 * eps(Float64)
 
 # ============================================================================
 # BounceData struct
@@ -39,7 +42,7 @@ struct BounceData
     # For matrix path (nothing if scalar-only): packed layout (nlmda, nqty_matrix(mpert)).
     # Consumer fills into fbnce_data[:, 3:end] by direct copy. See `nqty_matrix` for
     # the 3-Hermitian-triangle + 3-full-block packing (Logan 2015 Eqs 7.30–7.35).
-    wmats_vs_lambda::Union{Nothing, Matrix{ComplexF64}}
+    wmats_vs_lambda::Union{Nothing,Matrix{ComplexF64}}
 end
 
 
@@ -52,13 +55,19 @@ end
 # the full mpert² for the three non-Hermitian blocks. Block packing order:
 # A-tri, D-tri, H-tri, B-full, C-full, E-full.
 
-"""Number of packed complex entries per λ for the 6 kinetic matrices."""
+"""
+Number of packed complex entries per λ for the 6 kinetic matrices.
+"""
 @inline nqty_matrix(mpert::Int) = 3 * (mpert * (mpert + 1)) ÷ 2 + 3 * mpert^2
 
-"""Upper-triangle index (1 ≤ i ≤ j ≤ mpert) within a triangular block."""
+"""
+Upper-triangle index (1 ≤ i ≤ j ≤ mpert) within a triangular block.
+"""
 @inline _tri_idx(i::Int, j::Int) = (j * (j - 1)) ÷ 2 + i
 
-"""Full-block index (column-major) within a non-Hermitian block."""
+"""
+Full-block index (column-major) within a non-Hermitian block.
+"""
 @inline _full_idx(i::Int, j::Int, mpert::Int) = (j - 1) * mpert + i
 
 
@@ -73,14 +82,16 @@ Generate a grid with power-law concentration near endpoints.
 Port of Fortran `powspace_sub` from equil/grid.f90.
 
 # Arguments
-- `xmin, xmax`: Grid bounds
-- `pow::Int`: Power of grid concentration (higher = more refined near edges)
-- `num::Int`: Number of grid points
-- `endpoints::String`: Where to concentrate: "lower", "upper", or "both"
+
+  - `xmin, xmax`: Grid bounds
+  - `pow::Int`: Power of grid concentration (higher = more refined near edges)
+  - `num::Int`: Number of grid points
+  - `endpoints::String`: Where to concentrate: "lower", "upper", or "both"
 
 # Returns
-- `points::Vector{Float64}`: Grid point locations
-- `weights::Vector{Float64}`: Derivatives dx/dnorm (integration weights)
+
+  - `points::Vector{Float64}`: Grid point locations
+  - `weights::Vector{Float64}`: Derivatives dx/dnorm (integration weights)
 """
 function powspace(xmin::Float64, xmax::Float64, pow::Int, num::Int, endpoints::String)
     if xmax <= xmin
@@ -89,11 +100,11 @@ function powspace(xmin::Float64, xmax::Float64, pow::Int, num::Int, endpoints::S
 
     # Linear base grid in [-1,1], [0,1], or [-1,0]
     x = if endpoints == "lower"
-        collect(range(-1.0, 0.0, length=num))
+        collect(range(-1.0, 0.0; length=num))
     elseif endpoints == "upper"
-        collect(range(0.0, 1.0, length=num))
+        collect(range(0.0, 1.0; length=num))
     elseif endpoints == "both"
-        collect(range(-1.0, 1.0, length=num))
+        collect(range(-1.0, 1.0; length=num))
     else
         error("powspace: invalid endpoints '$endpoints' — use lower, upper, or both")
     end
@@ -168,31 +179,33 @@ needed by the pitch-angle quadrature.
 Ports Fortran torque.F90 lines 530-816 (GAR branch).
 
 # Arguments
-- `psi`: Normalized poloidal flux
-- `n`: Toroidal mode number
-- `l`: Bounce harmonic number
-- `q`: Safety factor at this ψ
-- `bo`: On-axis toroidal field [T]
-- `bmax, bmin`: Max/min of B(θ) at this ψ
-- `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
-- `tspl`: Periodic poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
-- `B_vpar`: Periodic cubic of B(θ) used for v_par and the bounce-point roots
-  (the Fortran `vspl` equivalent)
-- `mfac`: Poloidal mode numbers [mlow:mhigh]
-- `chi1`: 2π·ψ₀ flux normalization
-- `ro`: Major radius [m]
-- `dbob_m_f`: δB/B Fourier modes at this ψ (ComplexF64 vector, length mpert)
-- `divx_m_f`: ∇·ξ⊥ Fourier modes at this ψ (ComplexF64 vector, length mpert)
-- `divxfac, wdfac`: Scaling factors
-- `mass`: Particle mass [kg]
-- `chrg`: Particle charge [C]
-- `T_s`: Species temperature at this ψ [J]
-- `method`: Method string (first char: f/t/p determines λ range)
+
+  - `psi`: Normalized poloidal flux
+  - `n`: Toroidal mode number
+  - `l`: Bounce harmonic number
+  - `q`: Safety factor at this ψ
+  - `bo`: On-axis toroidal field [T]
+  - `bmax, bmin`: Max/min of B(θ) at this ψ
+  - `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
+  - `tspl`: Periodic poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
+  - `B_vpar`: Periodic cubic of B(θ) used for v_par and the bounce-point roots
+    (the Fortran `vspl` equivalent)
+  - `mfac`: Poloidal mode numbers [mlow:mhigh]
+  - `chi1`: 2π·ψ₀ flux normalization
+  - `ro`: Major radius [m]
+  - `dbob_m_f`: δB/B Fourier modes at this ψ (ComplexF64 vector, length mpert)
+  - `divx_m_f`: ∇·ξ⊥ Fourier modes at this ψ (ComplexF64 vector, length mpert)
+  - `divxfac, wdfac`: Scaling factors
+  - `mass`: Particle mass [kg]
+  - `chrg`: Particle charge [C]
+  - `T_s`: Species temperature at this ψ [J]
+  - `method`: Method string (first char: f/t/p determines λ range)
 
 # Keyword Arguments
-- `nlmda`: Number of pitch angle grid points (default 128, matching Fortran pentrc nlmda)
-- `ntheta`: Number of poloidal grid points per bounce (default 128)
-- `smat, tmat, xmat, ymat, zmat`: Geometric matrices (mpert×mpert) for kinetic matrix path
+
+  - `nlmda`: Number of pitch angle grid points (default 128, matching Fortran pentrc nlmda)
+  - `ntheta`: Number of poloidal grid points per bounce (default 128)
+  - `smat, tmat, xmat, ymat, zmat`: Geometric matrices (mpert×mpert) for kinetic matrix path
 """
 function compute_bounce_data(
     psi::Float64, n::Int, l::Int, q::Float64,
@@ -278,7 +291,7 @@ function compute_bounce_data(
     end
 
     return BounceData(nlmda, lambda, dlambda, sigma_arr,
-                      wb_arr, wd_arr, dJdJ_arr, wmats_arr)
+        wb_arr, wd_arr, dJdJ_arr, wmats_arr)
 end
 
 
@@ -291,23 +304,24 @@ Per-surface scratch for the bounce-averaging inner loops, allocated once in
 partially are `fill!`-reset per λ.
 
 ## Fields
-- `g_wb::Vector{Float64}`: length `ntheta` — bounce-action integrand samples
-- `g_wd::Vector{Float64}`: length `ntheta` — drift integrand samples
-- `cum_wb_arr::Vector{Float64}`: length `ntheta` — cumulative bounce-action integral
-- `jvtheta::Vector{ComplexF64}`: length `ntheta` — action integrand
-- `bj_samples::Vector{ComplexF64}`: length `ntheta` — action bounce-integral samples
-- `wsamp::Vector{ComplexF64}`: length `ntheta` — per-mode W bounce-integral samples
-- `wmu_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_μ per θ
-- `wen_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_E per θ
-- `expm::Vector{ComplexF64}`: length `mpert` — Fourier basis at a θ
-- `pl::Vector{ComplexF64}`: length `ntheta` — bounce phase factor
-- `wmu_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_μ
-- `wen_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_E
-- `wmats_lmda::Vector{ComplexF64}`: length `nqty_matrix(mpert)` — packed W outer products
-- `tspl_f::Vector{Float64}`: length 5 — in-place tspl(θ) evaluation
-- `int_w::Vector{Float64}`, `cumint_W::Matrix{Float64}`: precomputed exact-cubic
-  quadrature weights on the fixed unit θ-grid (`∫ = int_w·y`, `cumulative = cumint_W·y`);
-  shared read-only across surfaces, see `_quadrature_weights`
+
+  - `g_wb::Vector{Float64}`: length `ntheta` — bounce-action integrand samples
+  - `g_wd::Vector{Float64}`: length `ntheta` — drift integrand samples
+  - `cum_wb_arr::Vector{Float64}`: length `ntheta` — cumulative bounce-action integral
+  - `jvtheta::Vector{ComplexF64}`: length `ntheta` — action integrand
+  - `bj_samples::Vector{ComplexF64}`: length `ntheta` — action bounce-integral samples
+  - `wsamp::Vector{ComplexF64}`: length `ntheta` — per-mode W bounce-integral samples
+  - `wmu_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_μ per θ
+  - `wen_mt::Matrix{ComplexF64}`: `mpert × ntheta` — W_E per θ
+  - `expm::Vector{ComplexF64}`: length `mpert` — Fourier basis at a θ
+  - `pl::Vector{ComplexF64}`: length `ntheta` — bounce phase factor
+  - `wmu_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_μ
+  - `wen_ba::Vector{ComplexF64}`: length `mpert` — bounce-averaged W_E
+  - `wmats_lmda::Vector{ComplexF64}`: length `nqty_matrix(mpert)` — packed W outer products
+  - `tspl_f::Vector{Float64}`: length 5 — in-place tspl(θ) evaluation
+  - `int_w::Vector{Float64}`, `cumint_W::Matrix{Float64}`: precomputed exact-cubic
+    quadrature weights on the fixed unit θ-grid (`∫ = int_w·y`, `cumulative = cumint_W·y`);
+    shared read-only across surfaces, see `_quadrature_weights`
 """
 struct BounceScratch
     g_wb::Vector{Float64}
@@ -346,13 +360,24 @@ function BounceScratch(ntheta::Int, mpert::Int)
         Vector{ComplexF64}(undef, nqty_matrix(mpert)),
         Vector{Float64}(undef, 5),
         int_w,
-        cumint_W,
+        cumint_W
     )
 end
 
 # Exact-cubic θ-quadrature weights on the fixed unit grid, cached by ntheta.
 const _QUAD_WEIGHTS = Dict{Int,Tuple{Vector{Float64},Matrix{Float64}}}()
 const _QUAD_WEIGHTS_LOCK = ReentrantLock()
+
+"""
+    reset_caches!()
+
+Empty KineticForces' run-filled module-level caches (the θ-quadrature weights by ntheta). Called
+after the precompile workload so no run state is serialized into the package image.
+"""
+function reset_caches!()
+    @lock _QUAD_WEIGHTS_LOCK empty!(_QUAD_WEIGHTS)
+    return nothing
+end
 
 """
     _quadrature_weights(ntheta) → (int_w, cumint_W)
@@ -367,7 +392,7 @@ fitting and integrating each sample vector directly, but reducing the per-λ hot
 function _quadrature_weights(ntheta::Int)
     lock(_QUAD_WEIGHTS_LOCK) do
         get!(_QUAD_WEIGHTS, ntheta) do
-            xs = collect(range(0.0, 1.0, length=ntheta))
+            xs = collect(range(0.0, 1.0; length=ntheta))
             int_w = zeros(Float64, ntheta)
             cumint_W = zeros(Float64, ntheta, ntheta)
             ej = zeros(Float64, ntheta)
@@ -409,7 +434,7 @@ function _build_lambda_grid(method_char::Char, lmdatpb::Float64, lmdamax::Float6
 
     else  # 'f' = full
         if lmdatpb ≈ lmdamax
-            @warn "bmax ≈ bmin at this flux surface" maxlog=1
+            @warn "bmax ≈ bmin at this flux surface" maxlog = 1
         end
         # Passing half with refinement near upper boundary
         nhalf_p = nlmda ÷ 2
@@ -479,21 +504,11 @@ function _surface_b_field(B_vpar)
         push!(bknot, d)                      # S(0) = B at the cell's left knot
         push!(knot, cell.xR)
 
-        # S'(u) = c + 2b·u + 3a·u², u ∈ [0, h)
-        qa, qb, qc = 3a, 2b, c
-        if abs(qa) <= eps(Float64) * max(abs(qb), abs(qc), 1.0)
-            if qb != 0
-                u = -qc / qb
-                (0.0 <= u < h) && push!(theta, cell.xL + u)
-            end
-        else
-            disc = qb^2 - 4 * qa * qc
-            if disc >= 0
-                sq = sqrt(disc)
-                for u in ((-qb - sq) / (2qa), (-qb + sq) / (2qa))
-                    (0.0 <= u < h) && push!(theta, cell.xL + u)
-                end
-            end
+        # S'(u) = c + 2b·u + 3a·u² on [0, h); a double stationary point returns twice and dedupes below.
+        n, u1, u2, _ = _quadratic_real_roots(3a, 2b, c)
+        for (k, u) in ((1, u1), (2, u2))
+            k <= n || break
+            (0.0 <= u < h) && push!(theta, cell.xL + u)
         end
 
         cell.xR >= 1.0 && break
@@ -530,51 +545,58 @@ end
 end
 
 """
-Real roots of `a·u³ + b·u² + c·u + d = 0`, returned as `(count, r1, r2, r3)` with
-unused slots `NaN`. Degenerate leading coefficients fall through to the quadratic and
-linear cases; three distinct real roots use the trigonometric form, which stays well
-conditioned where Cardano's radicals cancel.
+Real roots of `a·u³ + b·u² + c·u + d = 0` as `(count, r1, r2, r3)`, unused slots `NaN`.
+The count comes from a conditioned ratio test rather than the sign of the discriminant,
+which cancels to rounding noise when two roots nearly coincide; three real roots use the
+trigonometric form. A degenerate leading coefficient falls through to `_quadratic_real_roots`.
 """
 function _real_cubic_roots(a::Float64, b::Float64, c::Float64, d::Float64)
-    scale = max(abs(b), abs(c), abs(d), 1.0)
-    if abs(a) <= eps(Float64) * scale
-        if abs(b) <= eps(Float64) * max(abs(c), abs(d), 1.0)
-            c == 0 && return (0, NaN, NaN, NaN)
-            return (1, -d / c, NaN, NaN)
-        end
-        disc = c * c - 4 * b * d
-        disc < 0 && return (0, NaN, NaN, NaN)
-        sq = sqrt(disc)
-        # Cancellation-free quadratic roots (Numerical Recipes §5.6).
-        q = c == 0 ? -0.5 * sq : -0.5 * (c + copysign(sq, c))
-        r1 = q / b
-        r2 = q == 0 ? r1 : d / q
-        return (2, r1, r2, NaN)
-    end
+    abs(a) <= eps(Float64) * max(abs(b), abs(c), abs(d), 1.0) && return _quadratic_real_roots(b, c, d)
 
     B, C, D = b / a, c / a, d / a
     shift = B / 3
     p = C - B * B / 3
     q = 2 * B^3 / 27 - B * C / 3 + D
-    disc = (q / 2)^2 + (p / 3)^3
 
-    if p == 0 && q == 0
-        return (1, -shift, NaN, NaN)               # triple root
-    elseif abs(disc) <= 8 * eps(Float64) * max((q / 2)^2, abs(p / 3)^3)
-        # Repeated root. The discriminant cancels to ~0 here, so the branches below
-        # would lose it: disc > 0 by a rounding step reports only the simple root.
-        t2 = -3q / (2p)
-        return (3, 3q / p - shift, t2 - shift, t2 - shift)
-    elseif disc > 0
-        s = sqrt(disc)
-        t = cbrt(-q / 2 + s) + cbrt(-q / 2 - s)
-        return (1, t - shift, NaN, NaN)
-    else
-        # Three real roots: t_k = 2r·cos(φ − 2πk/3), r = √(−p/3), φ = acos(−q/2r³)/3.
+    if p < 0
+        # Three real roots iff |q/2| ≤ r³, r = √(−p/3): the ratio test stays conditioned where
+        # the discriminant cancels. A ratio a rounding step past 1 is a repeated root; clamp.
         r = sqrt(-p / 3)
-        φ = acos(clamp(-q / (2 * r^3), -1.0, 1.0)) / 3
-        return (3, 2r * cos(φ) - shift, 2r * cos(φ - 2π / 3) - shift, 2r * cos(φ - 4π / 3) - shift)
+        arg = -q / (2 * r^3)
+        if abs(arg) <= 1 + ROOT_COUNT_TOL
+            φ = acos(clamp(arg, -1.0, 1.0)) / 3
+            return (3, 2r * cos(φ) - shift, 2r * cos(φ - 2π / 3) - shift, 2r * cos(φ - 4π / 3) - shift)
+        end
     end
+
+    # One real root (p ≥ 0: monotone; p < 0: |arg| > 1). The max guards sqrt against rounding.
+    s = sqrt(max(0.0, (q / 2)^2 + (p / 3)^3))
+    t = cbrt(-q / 2 + s) + cbrt(-q / 2 - s)
+    return (1, t - shift, NaN, NaN)
+end
+
+"""
+Real roots of `a·u² + b·u + c = 0` in the `(count, r1, r2, r3)` shape of `_real_cubic_roots`,
+`r3` always `NaN`. A discriminant within rounding of zero is a double root rather than none;
+a degenerate leading coefficient falls through to the linear case.
+"""
+function _quadratic_real_roots(a::Float64, b::Float64, c::Float64)
+    if abs(a) <= eps(Float64) * max(abs(b), abs(c), 1.0)
+        b == 0 && return (0, NaN, NaN, NaN)
+        return (1, -c / b, NaN, NaN)
+    end
+    disc = b * b - 4 * a * c
+    if abs(disc) <= ROOT_COUNT_TOL * max(b * b, abs(4 * a * c))
+        r = -b / (2a)
+        return (2, r, r, NaN)
+    end
+    disc < 0 && return (0, NaN, NaN, NaN)
+    sq = sqrt(disc)
+    # Cancellation-free form (Numerical Recipes §5.6).
+    q = b == 0 ? -0.5 * sq : -0.5 * (b + copysign(sq, b))
+    r1 = q / a
+    r2 = q == 0 ? r1 : c / q
+    return (2, r1, r2, NaN)
 end
 
 """
@@ -766,7 +788,7 @@ function _find_bounce_points_and_grid(
 
         nbpts = length(bpts)
         if nbpts < 1
-            @warn "No bounce points found at psi=$psi, λ=$lmda — using full transit" maxlog=3
+            @warn "No bounce points found at psi=$psi, λ=$lmda — using full transit" maxlog = 3
             t1 = theta_bmax
             t2 = theta_bmax + 1.0
         elseif nbpts < 2
@@ -820,7 +842,7 @@ function _find_deepest_well(bpts::Vector{Float64}, B_vpar, lmda::Float64, bo::Fl
     end
 
     if best_vpar ≈ 0.0
-        @warn "Could not find potential well with positive v_par" maxlog=1
+        @warn "Could not find potential well with positive v_par" maxlog = 1
     end
 
     return best_t1, best_t2
@@ -926,8 +948,8 @@ function _bounce_integrate(
         # Action integrand
         phase = cis(-twopi * n * q * (θ - theta0))
         jvtheta[i] = dt * jac * B_val *
-            (divx * sqrt_vpar + dbob * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar) *
-            phase
+                     (divx * sqrt_vpar + dbob * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar) *
+                     phase
 
         # W vectors for matrix path
         if do_matrices
@@ -1033,32 +1055,32 @@ function _bounce_integrate(
         # A (Hermitian): upper triangle of W_Z†W_Z, rank-1 → conj(wz[i])·wz[j].
         off = 0
         @inbounds for j in 1:mpert, i in 1:j
-            wmats_lmda[off + _tri_idx(i, j)] = conj(wz[i]) * wz[j] * scale
+            wmats_lmda[off+_tri_idx(i, j)] = conj(wz[i]) * wz[j] * scale
         end
         off += Mu
         # D (Hermitian): upper triangle of W_X†W_X.
         @inbounds for j in 1:mpert, i in 1:j
-            wmats_lmda[off + _tri_idx(i, j)] = conj(wx[i]) * wx[j] * scale
+            wmats_lmda[off+_tri_idx(i, j)] = conj(wx[i]) * wx[j] * scale
         end
         off += Mu
         # H (Hermitian): upper triangle of W_Y†W_Y.
         @inbounds for j in 1:mpert, i in 1:j
-            wmats_lmda[off + _tri_idx(i, j)] = conj(wy[i]) * wy[j] * scale
+            wmats_lmda[off+_tri_idx(i, j)] = conj(wy[i]) * wy[j] * scale
         end
         off += Mu
         # B (full): W_Z†W_X.
         @inbounds for j in 1:mpert, i in 1:mpert
-            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wz[i]) * wx[j] * scale
+            wmats_lmda[off+_full_idx(i, j, mpert)] = conj(wz[i]) * wx[j] * scale
         end
         off += mpert^2
         # C (full): W_Z†W_Y.
         @inbounds for j in 1:mpert, i in 1:mpert
-            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wz[i]) * wy[j] * scale
+            wmats_lmda[off+_full_idx(i, j, mpert)] = conj(wz[i]) * wy[j] * scale
         end
         off += mpert^2
         # E (full): W_X†W_Y.
         @inbounds for j in 1:mpert, i in 1:mpert
-            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wx[i]) * wy[j] * scale
+            wmats_lmda[off+_full_idx(i, j, mpert)] = conj(wx[i]) * wy[j] * scale
         end
     end
 

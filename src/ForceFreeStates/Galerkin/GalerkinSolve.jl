@@ -146,8 +146,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     ws.sol .= ws.rhs
     if ws.solver == "LU"
         ctrl.verbose && @info "Galerkin LU banded factorization + solve"
-        ab, ipiv = LinearAlgebra.LAPACK.gbtrf!(ws.kl, ws.ku, ws.ndim, ws.mat)
-        LinearAlgebra.LAPACK.gbtrs!('N', ws.kl, ws.ku, ws.ndim, ab, ipiv, ws.sol)
+        gal_scaled_lu_solve!(ws.mat, ws.sol, ws.kl, ws.ku)
     else
         ctrl.verbose && @info "Galerkin Cholesky banded factorization + solve"
         LinearAlgebra.LAPACK.pbtrf!('L', ws.kl, ws.mat)
@@ -191,6 +190,28 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
     return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution), dp
+end
+
+"""
+    gal_scaled_lu_solve!(mat, sol, kl, ku) -> sol
+
+Banded LU solve in place: `mat` (LAPACK `gbtrf!` band storage, `ldab = 2kl + ku + 1`) is overwritten by
+its factor and `sol` (the right-hand sides on entry) by the solution. The system is first symmetrically
+Jacobi-scaled, `D·A·D` with `d_j = |A_jj|^(-1/2)` (1 for a zero diagonal): the assembled diagonal spans
+~25 decades, and unscaled banded LU loses the small resonant coefficients that carry Δ′.
+"""
+function gal_scaled_lu_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int)
+    n = size(mat, 2)
+    off = kl + ku + 1  # band row holding the diagonal
+    d = [iszero(mat[off, j]) ? 1.0 : 1 / sqrt(abs(mat[off, j])) for j in 1:n]
+    for j in 1:n, i in max(1, j - ku):min(n, j + kl)
+        mat[off+i-j, j] *= d[i] * d[j]
+    end
+    sol .*= d
+    _, ipiv = LAPACK.gbtrf!(kl, ku, n, mat)
+    LAPACK.gbtrs!('N', kl, ku, n, mat, ipiv, sol)
+    sol .*= d
+    return sol
 end
 
 """

@@ -1805,4 +1805,6 @@ export solve, perturbed_equilibrium
 export PlasmaEquilibrium, attach_kinetic_profiles!, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
 export MatchProblem, TearingProblem, GGJModel, SLAYERModel, layer_parameters
 
+include("Precompile.jl")
+
 end # module GeneralizedPerturbedEquilibrium
