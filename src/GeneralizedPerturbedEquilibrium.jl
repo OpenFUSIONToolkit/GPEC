@@ -528,7 +528,8 @@ end
 
 Run the LocalStability stage when `local_stability_flag` is set. `locstab` holds `D_I` from the
 ballooning coefficient system and the local ballooning result, `ballooning_boundary` the first
-α-vs-ψ_N stability boundary; both are empty placeholders when the stage is off.
+α-vs-ψ_N stability boundary; both are empty placeholders when the stage is off, and
+`ballooning_boundary` is also empty when `alpha_boundary_scan` is false.
 """
 function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
     locstab = nothing
@@ -536,7 +537,9 @@ function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.Pl
     if ctrl.local_stability_flag
         locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
         # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
-        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
+        if ctrl.alpha_boundary_scan
+            ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
+        end
     end
     return locstab, ballooning_boundary
 end

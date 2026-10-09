@@ -118,7 +118,8 @@ gpec.toml.
 ## Fields
 
   - `verbose::Bool` - Enable verbose output
-  - `local_stability_flag::Bool` - Enable local stability analysis (`D_I` and ballooning)
+  - `local_stability_flag::Bool` - Enable local stability analysis (`D_I`, `D_R` and the per-surface ballooning criterion)
+  - `alpha_boundary_scan::Bool` - Also scan the first ballooning stability boundary (α and α_critical vs ψ) when `local_stability_flag` is set. A root find per ψ surface; `false` leaves `LocalStability/alpha*` empty. Default `true`.
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
@@ -157,6 +158,7 @@ gpec.toml.
 @kwdef struct ForceFreeStatesControl
     verbose::Bool = true
     local_stability_flag::Bool = false
+    alpha_boundary_scan::Bool = true
     vac_flag::Bool = false
     mthvac::Int = 480
     nzvac::Int = 1
