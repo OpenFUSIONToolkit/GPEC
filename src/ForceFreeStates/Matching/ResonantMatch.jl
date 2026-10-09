@@ -76,17 +76,18 @@ function write_match!(out_h5, m::MatchResult)
     out_h5["$g/Delta_r"] = m.deltar
     out_h5["$g/bpen"] = m.bpen
     out_h5["$g/rpec_eig"] = m.rpec_eig
-    out_h5["$g/residual"] = m.residual
-    # Ragged per-surface inner grids: one dataset triple per surface.
+    # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
     for i in eachindex(m.inner_psi)
         out_h5["$g/Inner/psi_$i"] = m.inner_psi[i]
         out_h5["$g/Inner/xi_$i"] = m.inner_xi[i]
         out_h5["$g/Inner/b_$i"] = m.inner_b[i]
     end
+    out_h5["$g/residual"] = m.residual
     if !isempty(m.inner_params)
         for f in (:E, :F, :G, :H, :K, :M)
             out_h5["$g/InnerParams/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
         end
+        # Literature names, matching the Tearing PerSurface mapping for the same fields.
         out_h5["$g/InnerParams/tau_A"] = [pp.taua for pp in m.inner_params]
         out_h5["$g/InnerParams/tau_R"] = [pp.taur for pp in m.inner_params]
         out_h5["$g/InnerParams/dVdpsi"] = [pp.v1 for pp in m.inner_params]

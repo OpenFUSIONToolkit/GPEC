@@ -221,7 +221,8 @@ end
     write_galerkin!(out_h5, result::GalerkinResult; basis_output=false)
 
 Write the Galerkin solver outputs into the open HDF5 file, under
-`ForceFreeStates/Solutions/GalerkinIntegration/`: the surface list the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
+`ForceFreeStates/Solutions/GalerkinIntegration/`: the surface list
+the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
 rationals). The Δ′/PEST-3 matrices and the closed ξ profiles are NOT written here — both go to
 formalism-independent homes from the driver writer (`SingularSurfaces/` off `result.delta_prime`;
 the shared `Solutions/` profile layout off `result.solution`). With `basis_output` the raw

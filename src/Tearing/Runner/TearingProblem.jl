@@ -20,8 +20,10 @@ struct TearingProblem{R}
     control::SLAYERControl
 end
 
-TearingProblem(ffs::ForceFreeStatesResult; kwargs...) =
-    TearingProblem(ffs, SLAYERControl(; enabled=true, kwargs...))
+function TearingProblem(ffs::ForceFreeStatesResult; kwargs...)
+    haskey(kwargs, :inner_model) && error("TearingProblem: the inner-layer model is the solve argument; drop inner_model")
+    return TearingProblem(ffs, SLAYERControl(; enabled=true, kwargs...))
+end
 
 # Attached profiles as a KineticProfiles table (eV; ω* recomputed downstream; no χ, so the scalar fallbacks apply).
 function _profiles_from_equilibrium(kp)
@@ -49,16 +51,19 @@ end
 
 function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
     # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
-    # field: `control.bt = nothing` makes build_slayer_inputs compute the physical
-    # B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline.
-    # χ⊥/χ_φ from the kinetic file when present, else the control's scalar fallbacks.
+    # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
+    # control value through instead: `nothing` makes build_slayer_inputs compute the
+    # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
+    # what its docstring already prescribes.
+    bt = control.bt
+    # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
     chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
     chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
     (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
         "SLAYER: no usable chi_e/chi_phi profile(s) (dataset absent or all-zero); " *
         "using the scalar chi_perp/chi_tor fallback for the missing one(s).")
     return build_slayer_inputs(equil, surfaces, loaded.profiles;
-        bt=control.bt,
+        bt=bt,
         mu_i=control.mu_i,
         zeff=control.zeff,
         chi_perp=chi_perp,

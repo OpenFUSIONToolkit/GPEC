@@ -1,8 +1,6 @@
 @testset "Runner: Control + TearingProblem + HDF5 output" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    # The InnerLayer submodules GGJ/SLAYER shadow the top-level model configs under a bare
-    # `using`; import the configs explicitly so the API names win the ambiguity.
     using GeneralizedPerturbedEquilibrium: GGJModel, SLAYERModel, TearingProblem, solve
     using GeneralizedPerturbedEquilibrium.Dispersion
     using GeneralizedPerturbedEquilibrium.Runner

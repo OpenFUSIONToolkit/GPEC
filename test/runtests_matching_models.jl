@@ -14,6 +14,7 @@ using TOML
         @test IL.GGJModel() isa IL.GGJModel{:ray}
         @test FFS.closure_capable(IL.GGJModel())
         @test !FFS.closure_capable(IL.SLAYERModel())
+        @test !FFS.closure_capable(IL.GGJModel(; solver=:shooting))    # no layer profiles
         @test IL.GGJModel(; solver=:galerkin, nx=640).options == (nx=640,)
         # Carried options reach the backend exactly as call-site keywords do.
         p = IL.glasser_wang_2020_eq55()
@@ -31,6 +32,12 @@ using TOML
         @test out.rotation == [0.0, 100.0]
         @test_throws ErrorException FFS.layer_parameters(fake_surfaces, nothing;
             eta=[1e-7], rho=[1e-7, 1e-7], rotation=[0.0, 0.0])
+        # Overriding η alone skips the neoclassical closure, so no surface geometry is needed.
+        n = 5
+        table = GPEC.Utilities.KineticProfiles(; psi=collect(range(0.0, 1.0; length=n)), n_e=fill(5e19, n),
+            T_e=fill(1e3, n), T_i=fill(1e3, n), omega=fill(100.0, n), omega_e=zeros(n), omega_i=zeros(n))
+        partial = FFS.layer_parameters(fake_surfaces, nothing; profiles=table, eta=[1e-7, 2e-7])
+        @test partial.eta == [1e-7, 2e-7] && all(>(0), partial.rho)
     end
 
     @testset "derivation from equil.kinetic matches the shared closures" begin

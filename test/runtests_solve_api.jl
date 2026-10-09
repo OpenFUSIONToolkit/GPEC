@@ -255,6 +255,8 @@ using TOML
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
             @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # A matched result is a new solution, not an outer solve to match again.
+            @test_throws ErrorException MatchProblem(matched; ideal=true)
         end
     end
 
@@ -267,6 +269,8 @@ using TOML
             gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=dir, ffs_kwargs...)
             prob = MatchProblem(gal; ideal=true)
             @test_throws ErrorException solve(prob, SLAYERModel())
+            # The tearing model is the solve argument, never a TearingProblem keyword.
+            @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
             # The ideal reference match keeps the ideal closure and replaces the solution with
             # the bare coil columns in the identity-at-edge basis.
             matched = solve(prob, GGJModel())
@@ -279,13 +283,11 @@ using TOML
     end
 
     @testset "kinetic profiles live on the equilibrium" begin
-        @test equil.kinetic === nothing
         kin_file = joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat")
-        attach_kinetic_profiles!(equil, kin_file; zi=1)
-        @test equil.kinetic isa GPEC.Equilibrium.KineticProfileSplines
-        @test equil.kinetic.ni_spline(0.5) > 0
-        # With profiles attached, the calculated-source gate passes construction (the solve
-        # itself is exercised by the kinetic regression decks, not here).
-        equil.kinetic = nothing
+        eq = attach_kinetic_profiles!(deepcopy(equil), kin_file; zi=1)
+        @test eq.kinetic isa GPEC.Equilibrium.KineticProfileSplines
+        @test eq.kinetic.ni_spline(0.5) > 0
+        # Kinetic solves stay TOML-driven even with profiles attached.
+        @test_throws ErrorException solve(eq, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
     end
 end

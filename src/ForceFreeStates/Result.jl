@@ -126,7 +126,10 @@ that produced `result`. Warns naming the calculation being skipped otherwise.
 """
 function require(result::ForceFreeStatesResult, field::Symbol, calc::AbstractString)
     getfield(result, field) === nothing || return true
-    @warn "Skipping $calc: `$field` was not produced by the $(result.integrator) integrator"
+    why = result.closure === :matched && field in (:wp, :free_boundary) ?
+          "a :matched result carries no δW (the resistive δW is not implemented)" :
+          "`$field` was not produced by the $(result.integrator) integrator"
+    @warn "Skipping $calc: $why"
     return false
 end
 

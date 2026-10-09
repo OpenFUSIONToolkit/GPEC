@@ -46,6 +46,7 @@ function MatchProblem(
     lnLambda_form::Symbol=:nrl
 )
     ffs.npert == 1 || error("MatchProblem: matching is single-n; the result spans n = $(ffs.nlow):$(ffs.nhigh)")
+    ffs.closure === :matched && error("MatchProblem: the result is already matched; pose the match on the outer solve")
     dp = ffs.delta_prime
     dp === nothing &&
         error("MatchProblem: the $(ffs.integrator) result has no Δ′; solve with Galerkin(; rpec_flag=true), or Riccati() with vac_flag=true")
@@ -65,19 +66,19 @@ function MatchProblem(
     return MatchProblem(ffs, sings, params.eta, params.rho, params.rotation, Float64(gamma), false)
 end
 
-# Surfaces inside the integration domain and m-band, in Δ′ row order (as gal_resonant_surfaces).
-function _matched_surfaces(ffs::ForceFreeStatesResult)
-    psilow = ffs.psilow > 0 ? ffs.psilow : ffs.equil.profiles.xs[1]
-    return [s for s in ffs.surfaces if psilow < s.psifac < ffs.psilim && ffs.mlow <= s.m[1] <= ffs.mhigh]
-end
+# The surfaces the Δ′ rows are indexed by (see DeltaPrimeData): all of them for Riccati, the
+# Galerkin solve's own subset otherwise.
+_matched_surfaces(ffs::ForceFreeStatesResult) =
+    ffs.galerkin === nothing ? copy(ffs.surfaces) : [s for s in ffs.surfaces if s.psifac in ffs.galerkin.sing_psi]
 
 """
     closure_capable(model) -> Bool
 
-Whether `model` can solve a [`MatchProblem`](@ref): `GGJModel` can; `SLAYERModel` (slab,
-tearing parity only, no layer profiles) cannot.
+Whether `model` can solve a [`MatchProblem`](@ref): `GGJModel` with the `:ray` or `:galerkin`
+backend can (they reconstruct the layer profiles); `SLAYERModel` (slab, tearing parity only)
+cannot.
 """
-closure_capable(::InnerLayer.GGJModel) = true
+closure_capable(::InnerLayer.GGJModel{S}) where {S} = S in (:ray, :galerkin)
 closure_capable(::InnerLayer.SLAYERModel) = false
 
 """

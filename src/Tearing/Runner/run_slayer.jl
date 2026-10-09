@@ -46,6 +46,22 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor)
 end
 
+# ---------------------------------------------------------------------
+# Inner-layer model factory
+# ---------------------------------------------------------------------
+function _build_inner_model(name::Symbol)
+    if name === :slayer_fitzpatrick
+        return SLAYERModel(; variant=:fitzpatrick)
+    elseif name === :ggj_ray
+        return GGJModel(; solver=:ray)
+    elseif name === :ggj_shooting
+        return GGJModel(; solver=:shooting)
+    elseif name === :ggj_galerkin
+        return GGJModel(; solver=:galerkin)
+    end
+    throw(ArgumentError("_build_inner_model: unknown model $name"))
+end
+
 # Map the TOML resistivity_model symbol to a NeoResistivityModel instance.
 function _build_resistivity_model(name::Symbol)
     name === :sauter && return SauterNeoModel()

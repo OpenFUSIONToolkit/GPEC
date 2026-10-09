@@ -80,7 +80,7 @@ its integrator does not produce and consumers warn and skip rather than erroring
 
 ## Inner-layer matching
 
-Inner-layer matching is its own problem, posed on a FINISHED solve: a `MatchProblem` holds
+Inner-layer matching is its own problem, posed on a finished solve: a `MatchProblem` holds
 the outer Δ′ the solve published plus the per-surface layer parameters, and the inner-layer
 model passed to `solve` computes the layer response at the prescribed rotation. Solving it
 returns a new result with the closure changed from `:ideal` to `:matched` and the
@@ -115,6 +115,7 @@ the growth rate where the inner-layer response matches it. The same model slot a
 through the scan, but GGJ growth-rate extraction is not implemented yet: its γ are placeholders.
 
 ```julia
+attach_kinetic_profiles!(eq, "kin.h5")                      # n, T, ω for the layer parameters
 ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
 tear = solve(TearingProblem(ffs; coupling_mode=:coupled), SLAYERModel())
 tear.gamma_Hz, tear.rational_q                               # root-found rates per surface
@@ -125,13 +126,8 @@ Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedur
 kinetic profiles come from `profile_file` or, when none is named, from the profiles
 attached to the equilibrium.
 
-Kinetic runs (`kinetic_factor > 0`) need kinetic profiles attached to the
-equilibrium:
-
-```julia
-eq = attach_kinetic_profiles!(PlasmaEquilibrium("input.geqdsk"; jac_type="hamada"), "kin.h5"; zi=1)
-ffs = solve(eq, Forward(); nn=1, kinetic_factor=1.0)
-```
+Kinetic runs (`kinetic_factor > 0`) need the `[KineticForces]` profiles and remain
+TOML-driven.
 
 ## Entry points
 

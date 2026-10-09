@@ -43,7 +43,7 @@ import ..InnerLayerModel, ..InnerLayerResponse, ..InnerLayerParameters
 import ..solve_inner, ..solve_inner_profile
 
 """
-    GGJModel{S} <: InnerLayerModel
+    GGJModel{S,O} <: InnerLayerModel
     GGJModel(; solver=:ray, options...)
 
 Glasser–Greene–Johnson resistive inner-layer model. `S` selects the solver
@@ -51,6 +51,10 @@ backend: `:ray` (default; robust at large |Q| on/near the imaginary axis),
 `:galerkin` (real-axis Hermite FEM; degrades for |Q| ≳ 1), or `:shooting`
 (|Q| ≪ 1 only). Backend keywords given at construction, e.g.
 `GGJModel(; solver=:galerkin, nx=1280)`, apply to every solve.
+
+## Fields
+
+  - `options::NamedTuple` - Backend keywords forwarded to every solve; call-site keywords win.
 """
 struct GGJModel{S,O<:NamedTuple} <: InnerLayerModel
     options::O

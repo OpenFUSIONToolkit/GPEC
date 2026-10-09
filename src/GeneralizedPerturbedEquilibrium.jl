@@ -86,7 +86,7 @@ using .ForceFreeStates: galerkin_solve, write_galerkin!, write_match!
 # Scripting-API surface: the integrator selectors, the published result, the equilibrium
 # constructor and the forcing description, re-exported so a user needs one `using`.
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
-using .ForceFreeStates: MatchProblem, MatchResult, layer_parameters, closure_capable
+using .ForceFreeStates: MatchProblem, layer_parameters
 using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing.Runner: TearingProblem
 using .Equilibrium: PlasmaEquilibrium, attach_kinetic_profiles!
@@ -729,11 +729,10 @@ function run_force_free_states(
     result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
 
     # Deck-driven matching, through the same MatchProblem as the API.
-    if ctrl.gal_match_flag
+    if ctrl.integrator == "galerkin" && ctrl.gal_match_flag
         ctrl.gal_rpec_flag || error("gal_match_flag=true requires gal_rpec_flag=true")
-        ctrl.gal_ideal_flag || result.equil.kinetic !== nothing ||
-            !(isempty(ctrl.gal_eta) || isempty(ctrl.gal_rho) || isempty(ctrl.gal_rotation)) ||
-            error("gal_match_flag needs gal_eta, gal_rho and gal_rotation, or a [KineticForces] kinetic_file to derive them")
+        ctrl.gal_ideal_flag || !(isempty(ctrl.gal_eta) || isempty(ctrl.gal_rho) || isempty(ctrl.gal_rotation)) ||
+            error("gal_match_flag needs gal_eta, gal_rho and gal_rotation (one value per matched surface, core to edge)")
         ctrl.gal_inner_solver in ("ray", "galerkin") ||
             error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
         ctrl.verbose && @info(
@@ -749,10 +748,7 @@ function run_force_free_states(
         else
             InnerLayer.GGJModel(; solver=:ray)
         end
-        prob = ForceFreeStates.MatchProblem(result;
-            eta=isempty(ctrl.gal_eta) ? nothing : ctrl.gal_eta,
-            rho=isempty(ctrl.gal_rho) ? nothing : ctrl.gal_rho,
-            rotation=isempty(ctrl.gal_rotation) ? nothing : ctrl.gal_rotation,
+        prob = ForceFreeStates.MatchProblem(result; eta=ctrl.gal_eta, rho=ctrl.gal_rho, rotation=ctrl.gal_rotation,
             gamma=ctrl.gal_gamma, ideal=ctrl.gal_ideal_flag)
         result = solve(prob, model)
         ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(result.match.residual)")
@@ -821,9 +817,8 @@ a `gpec.toml` run of `main` does and produces the same result object. The second
 sugar building the problem from an equilibrium and the problem keywords in one call.
 
 Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic
-runs (`kinetic_factor > 0`) with `kinetic_source="calculated"` need kinetic profiles on the
-equilibrium — attach them with `attach_kinetic_profiles!(eq, file)` before solving; the self-contained `"fixed"` source
-needs no attachment.
+runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]` profiles
+and errors here.
 
 ```julia
 eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
@@ -840,9 +835,8 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
 
-    ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && equil.kinetic === nothing &&
-        error("kinetic_source=\"calculated\" needs kinetic profiles on the equilibrium — " *
-              "attach them with attach_kinetic_profiles!(eq, file)")
+    ctrl.kinetic_factor > 0 &&
+        error("kinetic runs (kinetic_factor > 0) need the [KineticForces] profiles and are TOML-driven; run them through `main`")
 
     intr = ForceFreeStatesInternal(; dir_path=prob.dir_path)
     intr.wall_settings = prob.wall
@@ -850,7 +844,8 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
 
     resolve_mode_space!(intr, ctrl)
 
-    # Default NTV knobs for the calculated kinetic source; the profiles are on `equil`.
+    # The API path never reads kinetic profiles, so the KineticForces control is only the
+    # placeholder `prepare_force_free_states!` threads into its (unused) callback.
     kf_ctrl = KineticForces.KineticForcesControl()
 
     if Equilibrium.wants_two_pass(equil.config) && equil.ingest === nothing
@@ -1366,18 +1361,7 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         slayer_ctrl.enabled || return nothing
         @info "\n  SLAYER\n$_SECTION"
         slayer_start = time()
-        # Deck inner_model → inner-layer model.
-        model = if slayer_ctrl.inner_model === :slayer_fitzpatrick
-            InnerLayer.SLAYERModel()
-        elseif slayer_ctrl.inner_model === :ggj_ray
-            InnerLayer.GGJModel(; solver=:ray)
-        elseif slayer_ctrl.inner_model === :ggj_shooting
-            InnerLayer.GGJModel(; solver=:shooting)
-        elseif slayer_ctrl.inner_model === :ggj_galerkin
-            InnerLayer.GGJModel(; solver=:galerkin)
-        else
-            error("unknown [SLAYER] inner_model $(slayer_ctrl.inner_model)")
-        end
+        model = Runner._build_inner_model(slayer_ctrl.inner_model)
         slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
         slayer_dt = time() - slayer_start
         runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)

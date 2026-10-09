@@ -77,7 +77,7 @@ order = 31
 # the (grid- and ULP-fragile) near-singular points — an ill-posed benchmark. The producer is validated
 # separately by benchmarks/verify_gal_solution.jl (finite-difference self-consistency).
 
-# Inner-layer matching data Δ(Q) per surface (resist_eval geometry + GGJ inner solver). (msing × 2)
+# Inner-layer matching data Δ(Q) per surface (surface geometry + GGJ inner solver). (msing × 2)
 [quantities.gal_match_deltar_norm]
 h5path = "SingularSurfaces/Match/Delta_r"
 type = "complex_matrix"
