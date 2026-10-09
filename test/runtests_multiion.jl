@@ -182,7 +182,8 @@ using HDF5
             st = KF.KineticForcesState();
             st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
                 total_torque=ComplexF64(sum(dt)), psi_grid=collect(Float64, psi),
-                dtdpsi=ComplexF64.(dt), t_cumulative=zeros(ComplexF64, length(dt)));
+                dtdpsi=ComplexF64.(dt), t_cumulative=zeros(ComplexF64, length(dt)),
+                dtdpsi_ell=ComplexF64.(hcat(0.2 .* dt, 0.5 .* dt, 0.3 .* dt)), ell=collect(-1:1));
             st
         )
         s1 = mk(0.0:0.1:1.0, fill(1.0, 11))
@@ -197,6 +198,23 @@ using HDF5
         s3 = mk([0.0, 0.5, 0.5, 1.0], fill(1.0, 4))
         c2 = KF.combine_species_states([s1, s3])
         @test all(isfinite, real.(c2.method_results["fgar"].dtdpsi))
+        @test all(isfinite, real.(c2.method_results["fgar"].dtdpsi_ell))
+
+        # Per-ℓ survives the combine on the same union grid, and summing over ℓ reproduces the
+        # total exactly (it is derived as the row sum, so this is not merely interpolation noise).
+        @test r.ell == collect(-1:1)
+        @test size(r.dtdpsi_ell) == (length(r.psi_grid), 3)
+        @test vec(sum(r.dtdpsi_ell; dims=2)) ≈ r.dtdpsi
+        ov = [real(d) for (p, d) in zip(r.psi_grid, r.dtdpsi_ell[:, 2]) if 0.1 <= p <= 0.9]
+        @test all(x -> isapprox(x, 1.5; atol=1e-9), ov)        # 0.5·(1 + 2) on the overlap
+        # A species with no per-ℓ data must leave the combined matrix empty, not error.
+        s4 = KF.KineticForcesState()
+        s4.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
+            psi_grid=[0.0, 0.5, 1.0], dtdpsi=fill(ComplexF64(1.0), 3),
+            t_cumulative=zeros(ComplexF64, 3))
+        c3 = KF.combine_species_states([s1, s4])
+        @test isempty(c3.method_results["fgar"].dtdpsi_ell)
+        @test isempty(c3.method_results["fgar"].ell)
     end
 
     @testset "per-species HDF5 layout" begin
@@ -206,7 +224,8 @@ using HDF5
             st = KF.KineticForcesState();
             st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
                 total_torque=ComplexF64(tt), psi_grid=collect(0.0:0.25:1.0),
-                dtdpsi=fill(ComplexF64(tt), 5), t_cumulative=zeros(ComplexF64, 5));
+                dtdpsi=fill(ComplexF64(tt), 5), t_cumulative=zeros(ComplexF64, 5),
+                dtdpsi_ell=fill(ComplexF64(tt / 3), 5, 3), ell=collect(-1:1));
             st
         )
         h5 = tempname() * ".h5"
@@ -221,10 +240,19 @@ using HDF5
             @test read(f["KineticForces"]["fgar"]["total_torque"]) == 3.0
             @test read(f["KineticForces"]["PerSpecies"]["ion_z1_m2"]["fgar"]["total_torque"]) == 1.0
             # The metadata pass must reach the per-species method level, not stop at PerSpecies.
-            for d in ("total_torque", "dTdpsi")
+            for d in ("total_torque", "dTdpsi", "dTdpsi_ell")
                 a = HDF5.attributes(f["KineticForces"]["PerSpecies"]["electron"]["fgar"][d])
                 @test haskey(a, "long_name") && haskey(a, "units")
             end
+            # HDF5.jl round-trips the Julia shape, so a read here gives (npsi, nell); a
+            # C-ordered reader (h5py, MATLAB) sees the transpose, (nell, npsi), which is the
+            # orientation the Fortran dTdpsi_fgar(psi, ell) implies.
+            g = f["KineticForces"]["fgar"]
+            @test size(read(g["dTdpsi_ell"])) == (5, 3)
+            @test read(g["ell"]) == [-1, 0, 1]
+            # Summing over ℓ must reproduce dTdpsi.
+            @test vec(sum(read(g["dTdpsi_ell"]); dims=2)) ≈ read(g["dTdpsi"])
+            @test haskey(HDF5.attributes(g["dTdpsi_ell"]), "dims")
         end
         rm(h5)
     end
