@@ -41,6 +41,21 @@ end
 
 
 
+"""
+    resolve_psihigh!(input::InverseRunInput) -> InverseRunInput
+
+Clamp `input.psihigh_resolved` to the outermost input surface (below ψ_N = 1 for an i-file that
+carries the LCFS bounds), warning when it moves. `config.psihigh` keeps the request.
+"""
+function resolve_psihigh!(input::InverseRunInput)
+    psi_edge = input.rz_in_xs[end]
+    if input.psihigh_resolved > psi_edge
+        @warn "psihigh = $(input.psihigh_resolved) exceeds the outermost input surface ψ_N = $psi_edge; clamped to it"
+        input.psihigh_resolved = psi_edge
+    end
+    return input
+end
+
 function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
     @info "Starting Inverse Equilibrium Processing"
     # Extract input parameters

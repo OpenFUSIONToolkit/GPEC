@@ -503,26 +503,41 @@ Parses an inverse i-file (L. Don Pearlstein's format, also written by TokaMaker 
 first, θ fastest: `mx, my` (int32), `psi(mx)` [Wb/rad], `f(mx)` = R·Bt [T·m], `p(mx)` [Pa], `q(mx)`,
 `r(my, mx)`, `z(my, mx)` [m] with the periodic θ point duplicated, then optionally `FF′(mx)` and
 `p′(mx)` per Wb/rad, which `profile_source = "derivatives"` integrates for F and P (see
-`file_profiles`). Port of Fortran `read_eq_ldp_i`.
+`file_profiles`), and optionally the plasma bounds `[ψ_axis, ψ_LCFS]` (a record of length 2). With
+the bounds, ψ_N is normalised to the true LCFS, so the file's last (padded) surface sits below 1 and
+`psihigh` is clamped to it. Port of Fortran `read_eq_ldp_i`.
 """
 function read_ldp_i(config::EquilibriumConfig)
     @info "Reading inverse i-file (ldp_i): $(config.eq_filename)"
 
-    psi, f, p, q, r, z, ffp, pp = open(config.eq_filename, "r") do io
+    psi, f, p, q, r, z, ffp, pp, bounds = open(config.eq_filename, "r") do io
         ltoh(read(io, Int32)) == 8 || error("i-file header record is not two int32")
         mx, my = Int.(ltoh.(read!(io, Vector{Int32}(undef, 2))))
         read(io, Int32)
         profiles = [_read_fortran_reals(io, mx) for _ in 1:4]
         r, z = (reshape(_read_fortran_reals(io, my * mx), my, mx) for _ in 1:2)
-        derivs = eof(io) ? (zeros(mx), zeros(mx)) : (_read_fortran_reals(io, mx), _read_fortran_reals(io, mx))
-        return (profiles..., r, z, derivs...)
+        # Optional records, told apart by length: FF′ and p′ (mx each), then the ψ bounds (2)
+        ffp, pp, bounds = zeros(mx), zeros(mx), nothing
+        while !eof(io)
+            nbytes = ltoh(read(io, Int32))
+            skip(io, -4)
+            if nbytes in (4mx, 8mx)
+                ffp, pp = _read_fortran_reals(io, mx), _read_fortran_reals(io, mx)
+            else
+                bounds = _read_fortran_reals(io, 2)
+            end
+        end
+        return (profiles..., r, z, ffp, pp, bounds)
     end
     mx, my = length(psi), size(r, 1)
     @info "Parsed from header: mx = $mx surfaces, my = $my poloidal points"
 
-    psio_signed = psi[end] - psi[1]
+    psi_axis, psi_lcfs = bounds === nothing ? (psi[1], psi[end]) : bounds
+    psio_signed = psi_lcfs - psi_axis
     psio = abs(psio_signed)
-    xs = (psi .- psi[1]) ./ psio_signed
+    xs = (psi .- psi_axis) ./ psio_signed
+    bounds === nothing ||
+        @info "i-file ψ bounds: ψ_axis = $psi_axis, ψ_LCFS = $psi_lcfs; file surfaces span ψ_N ∈ [$(xs[1]), $(xs[end])]"
 
     # FF′ and p′ are per Wb/rad; psio_signed converts them to ψ_norm (absent records read as zero)
     f_nodes, p_nodes = file_profiles(config, xs, f, p, ffp .* psio_signed, pp .* psio_signed)
