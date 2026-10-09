@@ -468,6 +468,12 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
     cell = ws.intvl[msing+1].cells[ws.nx]
     if ncoil > 0
         # rpec: identity edge + unit coil sources (gal.f)
+        # Cholesky also zeroes the edge column, so first lift it into the coil RHS: rhs_I -= A_IB·e_k.
+        if chol
+            for k in 1:mpert, ip in 1:3, ipert in 1:mpert
+                ws.rhs[cell.map[ipert, ip], 2 * msing + k] -= cell.mat[ipert, k, ip, 4]
+            end
+        end
         cell.mat[:, :, 4, :] .= 0
         chol && (cell.mat[:, :, :, 4] .= 0)
         for idx in 1:mpert

@@ -100,11 +100,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     ldab = ctrl.gal_solver == "LU" ? 2kl + ku + 1 : kl + 1
     # rpec_flag (RDCON, gal.f): append mpert coil-response columns. Each is a unit source at
     # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
-    # Cholesky's lower-only edge zeroing can't represent the rpec identity edge, so require LU.
     ncoil = ctrl.gal_rpec_flag ? mpert : 0
-    if ncoil > 0 && ctrl.gal_solver != "LU"
-        error("galerkin_solve: gal_rpec_flag=true requires gal_solver=\"LU\" (coil edge BC needs the full-band path)")
-    end
     nsol = 2 * msing + ncoil
     intvl = [GalInterval(zeros(Float64, nx + 1), zeros(Float64, nx + 1), [GalCell(mpert) for _ in 1:nx])
              for _ in 0:msing]
@@ -149,8 +145,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
         gal_scaled_lu_solve!(ws.mat, ws.sol, ws.kl, ws.ku)
     else
         ctrl.verbose && @info "Galerkin Cholesky banded factorization + solve"
-        LinearAlgebra.LAPACK.pbtrf!('L', ws.kl, ws.mat)
-        LinearAlgebra.LAPACK.pbtrs!('L', ws.kl, ws.mat, ws.sol)
+        gal_zpbtrf!(ws.mat, ws.kl)
+        gal_zpbtrs!(ws.mat, ws.kl, ws.sol)
     end
 
     # --- extract Δ′ from the small resonant coefficients (gal.f) ---
@@ -360,4 +356,28 @@ const GALERKIN_H5_ANNOTATIONS = [
 function annotate_galerkin!(out_h5)
     Utilities.HDF5Annotations.annotate!(out_h5, GALERKIN_H5_ANNOTATIONS)
     return nothing
+end
+
+# Lower-band Hermitian Cholesky, unscaled, as rdcon gal.f: zpbtrf('L') then zpbtrs('L').
+# LinearAlgebra.LAPACK has no pbtrf!/pbtrs! wrapper, so call LAPACK directly.
+function gal_zpbtrf!(AB::Matrix{ComplexF64}, kd::Int)
+    info = Ref{LinearAlgebra.BlasInt}()
+    ccall((LinearAlgebra.BLAS.@blasfunc(zpbtrf_), LinearAlgebra.libblastrampoline), Cvoid,
+        (Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt},
+            Ref{LinearAlgebra.BlasInt}, Clong),
+        'L', size(AB, 2), kd, AB, max(1, stride(AB, 2)), info, 1)
+    # gal.f ignores info; a non-positive-definite matrix would leave a partial factor and a wrong Δ′.
+    info[] > 0 && error("gal_solver=\"cholesky\": Galerkin matrix is not positive definite (zpbtrf info=$(info[])); use gal_solver=\"LU\"")
+    LAPACK.chklapackerror(info[])
+    return AB
+end
+
+function gal_zpbtrs!(AB::Matrix{ComplexF64}, kd::Int, B::AbstractVecOrMat{ComplexF64})
+    info = Ref{LinearAlgebra.BlasInt}()
+    ccall((LinearAlgebra.BLAS.@blasfunc(zpbtrs_), LinearAlgebra.libblastrampoline), Cvoid,
+        (Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Ptr{ComplexF64},
+            Ref{LinearAlgebra.BlasInt}, Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Clong),
+        'L', size(AB, 2), kd, size(B, 2), AB, max(1, stride(AB, 2)), B, max(1, stride(B, 2)), info, 1)
+    LAPACK.chklapackerror(info[])
+    return B
 end
