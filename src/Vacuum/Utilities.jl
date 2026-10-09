@@ -64,6 +64,27 @@ function extract_plasma_surface_at_psi(equil::Equilibrium.PlasmaEquilibrium, ψ:
 end
 
 """
+    signed_area(x, z)
+
+Shoelace area of the closed (x, z) contour: positive when it runs counter-clockwise.
+"""
+function signed_area(x::AbstractVector{<:Real}, z::AbstractVector{<:Real})
+    n = length(x)
+    return sum(x[i] * z[mod1(i + 1, n)] - x[mod1(i + 1, n)] * z[i] for i in 1:n) / 2
+end
+
+"""
+    assert_counterclockwise(x, z, name)
+
+Throw unless the closed (x, z) contour runs counter-clockwise. The 2D kernel takes its normals from the
+direction of travel, so a clockwise contour would give a wrong operator silently.
+"""
+function assert_counterclockwise(x::AbstractVector{<:Real}, z::AbstractVector{<:Real}, name::String)
+    signed_area(x, z) > 0 || throw(ArgumentError("$name contour runs clockwise in the (R, Z) plane. The vacuum solve needs it " *
+                        "counter-clockwise, GPEC's θ direction: reverse the point order."))
+end
+
+"""
     distribute_to_equal_arc_grid(xin, zin)
 
 Given a set of points (xin, zin) that define a closed curve in 2D, redistribute these points to be equally spaced

@@ -74,7 +74,8 @@ Green's functions are internal scratch only.
 
     # Loop over all decoupled toroidal modes
     for (idx_n, n) in enumerate(inputs.n_modes)
-        ft = FourierTransform(inputs.mtheta, mpert, mlow; n=n, ν=plasma_surf.ν)
+        # On the ϕ = 0 plane, each point sits at ζ = ϕ - ν = -ν
+        ft = FourierTransform(inputs.mtheta, mpert, mlow; n=n, ζ=(-plasma_surf.ν))
 
         # Diagonal block of wv (and I_v when requested)
         block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
@@ -91,7 +92,7 @@ Green's functions are internal scratch only.
         # Plasma–Plasma block
         compute_2D_kernel_matrices!(grad_green, green_temp, plasma_surf, plasma_surf, n)
 
-        # Project plasma observer onto source basis exp(i*(mθ - nν))
+        # Project plasma observer onto source basis exp(i*(mθ - nζ))
         mul!(view(grre, 1:num_points_surf, :), green_temp, ft.basis')
 
         if !wall.nowall
@@ -101,7 +102,7 @@ Green's functions are internal scratch only.
             compute_2D_kernel_matrices!(grad_green, green_temp, wall, wall, n)
             # Wall–Plasma block
             compute_2D_kernel_matrices!(grad_green, green_temp, wall, plasma_surf, n)
-            # Project wall observer onto source basis exp(i*(mθ - nν))
+            # Project wall observer onto source basis exp(i*(mθ - nζ))
             mul!(view(grre, (num_points_surf+1):num_points_total, :), green_temp, ft.basis')
         end
 
@@ -112,32 +113,28 @@ Green's functions are internal scratch only.
             grad_green_interior = similar!(pool, grad_green)
             grad_green_interior .= grad_green
 
-            # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89); the solve gives
-            # grre = -(2π)²χ^(vo), the vacuum-outside potential. Overwrites the block to save memory.
+            # Exterior operator D_ext = 2I + 𝒦 (Chance 1997 eq. 89), normals out of the vacuum so δB·n = -b. Green's identity has
+            # -𝒢·b on the right and the solve uses +𝒢·b, so grre = -(2π)²χ^(vo); (2π)² from GPEC's Jacobian in turns. Overwrites the block.
             ldiv!(lu!(grad_green), grre)
 
-            # Interior operator D_int = D_ext - 2I: the double-layer jump between the two one-sided
-            # boundary limits is 2I here, giving the vacuum-inside potential grri = χ^(vi).
+            # Interior: same 𝒦 and right-hand side, diagonal lowered by the double-layer jump 2I, so grri = -(2π)²χ^(vi).
             for i in 1:num_points_total
                 grad_green_interior[i, i] -= 2.0
             end
             ldiv!(lu!(grad_green_interior), grri)
 
-            # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo) = grri - grre
-            # They are flipped because VACUUM builds the operators in its CW-θ frame while GPEC
-            # uses CCW-θ, flipping the outward-normal sign.
+            # Surface-current matrix, Park 2007 eq. 21b: μ₀I^v = χ^(vi) - χ^(vo), so grre - grri = (2π)²μ₀I^v
             g_diff = @view grri[1:num_points_surf, :]
             g_diff .= @view(grre[1:num_points_surf, :]) .- g_diff
             I_v_block = @view vac_data.I_v[block_idx, block_idx]
             mul!(I_v_block, ft.basis, g_diff)
-            conj!(I_v_block) # Flip θ_VAC → -θ_VAC to get I^v in GPEC's CCW-θ frame.
             I_v_block ./= num_points_surf
         else
             # Only need exterior system for wv
             ldiv!(lu!(grad_green), grre)
         end
 
-        # Project exterior kernel onto observer basis exp(-i*(mθ - nν)) and scale to get the response matrix
+        # Project exterior kernel onto observer basis exp(-i*(mθ - nζ)) and scale to get the response matrix
         mul!(wv_block, ft.basis, @view(grre[1:num_points_surf, :]))
         wv_block .*= 4π^2 / num_points_surf
     end
@@ -361,7 +358,7 @@ class operator real and splitting a self-conjugate class into two half-size bloc
                 _solve_projected_rhs!(grre_k, grri_k, Ẽ, op, real_scratch)
 
                 if compute_Iv
-                    # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), accumulated over the blocks
+                    # μ₀Iᵛ = χ^(vi) - χ^(vo) (Park 2007 eq. 21b), so grre - grri = (2π)²μ₀Iᵛ as in the 2D path; accumulated over the blocks
                     g_diff = @view grri_k[1:sz, :]
                     g_diff .= @view(grre_k[1:sz, :]) .- g_diff
                     mul!(Iv_block, Ẽ, g_diff, 1, 1)
@@ -372,13 +369,12 @@ class operator real and splitting a self-conjugate class into two half-size bloc
             end
 
             wv_block .*= 4π^2 / num_points_per_fp
-            # Partner solved the conjugated system: conjugate wv back
+            # Partner solved the conjugated system: conjugate wv and I_v back
             partner && conj!(wv_block)
             @views vac_data.wv[mode_cols, mode_cols] .= wv_block
 
             if compute_Iv
-                # The θ_VAC → -θ_VAC flip on I_v cancels that conjugation for a partner, so only the representative conj!s I_v.
-                partner || conj!(Iv_block)
+                partner && conj!(Iv_block)
                 Iv_block ./= num_points_per_fp
                 @views vac_data.I_v[mode_cols, mode_cols] .= Iv_block
             end

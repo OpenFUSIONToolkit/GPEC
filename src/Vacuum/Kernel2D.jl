@@ -215,9 +215,9 @@ grad_greenfunction is not zeroed since it fills a different block of the
         end
     end
 
-    # Normals need to point outward from vacuum region. In VACUUM clockwise θ convention, normal points
-    # out of vacuum for wall but inward for plasma, so we multiply by -1 for plasma sources
-    if source isa PlasmaGeometry
+    # Normals need to point outward from the vacuum region. With counter-clockwise θ the normal used in `green`
+    # points into the enclosed region: out of the vacuum for the plasma but into it for the wall, so wall sources flip.
+    if source isa WallGeometry
         grad_greenfunction_block .*= -1
     end
 
