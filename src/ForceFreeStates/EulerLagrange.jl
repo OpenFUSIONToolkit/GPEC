@@ -1076,24 +1076,25 @@ function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr:
     for isol in 1:intr.numpert_total
         odet.fixfac[isol, isol, ifix] = 1
     end
-    # Resonant columns first, then the rest in descending unorm (we triangularize from largest to smallest)
-    lead = Int[]
-    for r in resonant_rows
-        push!(lead, argmax(j -> j in lead ? -Inf : abs(u[r, j, 1]), 1:intr.numpert_total))
-    end
-    odet.index[:, ifix] = vcat(lead, filter(j -> !(j in lead), sortperm(odet.unorm; rev=true)))
 
-    # Triangularize primary solutions
-    mask = trues(2, intr.numpert_total)
+    # Triangularize primary solutions, resonant rows first, then columns from largest to smallest growth
+    growth_order = sortperm(odet.unorm; rev=true)
+    row_free = trues(intr.numpert_total)
+    col_free = trues(intr.numpert_total)
     for isol in 1:intr.numpert_total
-        ksol = odet.index[isol, ifix]
-        mask[2, ksol] = false
-        # Set pivot row: the resonant row for a leading resonant column, else the max location
-        @views kpert = isol <= length(lead) ? resonant_rows[isol] : argmax(abs.(u[:, ksol, 1]) .* mask[1, :])
-        mask[1, kpert] = false
+        if isol <= length(resonant_rows)
+            kpert = resonant_rows[isol]
+            ksol = argmax(j -> col_free[j] ? abs(u[kpert, j, 1]) : -Inf, 1:intr.numpert_total)
+        else
+            ksol = growth_order[findfirst(j -> col_free[j], growth_order)]
+            @views kpert = argmax(abs.(u[:, ksol, 1]) .* row_free)
+        end
+        odet.index[isol, ifix] = ksol
+        col_free[ksol] = false
+        row_free[kpert] = false
         # Eliminate other solution vectors below the pivot
         for jsol in 1:intr.numpert_total
-            if mask[2, jsol]
+            if col_free[jsol]
                 odet.fixfac[ksol, jsol, ifix] = -u[kpert, jsol, 1] / u[kpert, ksol, 1]
                 @. @views u[:, jsol, :] .= u[:, jsol, :] .+ u[:, ksol, :] .* odet.fixfac[ksol, jsol, ifix]
                 u[kpert, jsol, 1] = 0
