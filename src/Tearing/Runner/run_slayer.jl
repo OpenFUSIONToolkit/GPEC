@@ -18,9 +18,9 @@
 # ---------------------------------------------------------------------
 # Read kinetic profiles through the shared `Equilibrium.read_kinetic_file`
 # reader and adapt them to the SLAYER inner layer. Returns the spline-based
-# `KineticProfiles` plus χ⊥(ψ)/χ_φ(ψ) callables built from the file's
-# `chi_e`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
-# case the caller falls back to the scalar `control.chi_perp`/`chi_tor`).
+# `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from the file's
+# `chi_e`/`chi_i`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
+# case the caller falls back to the scalar `control.chi_perp_e`/`chi_perp_i`/`chi_tor`).
 function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     isempty(control.profile_file) &&
         error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
@@ -46,14 +46,15 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
     # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
-    # to the scalar control.chi_perp/chi_tor fallback. Build the spline only
+    # to the scalar control.chi_perp_e/chi_tor fallback. Build the spline only
     # from a usable (present, not all-zero) array.
     psi_xs = collect(Float64, data.psi)
     _chi_spline(v) = (v === nothing || all(iszero, v)) ? nothing :
                      cubic_interp(psi_xs, collect(Float64, v))
-    chi_perp = _chi_spline(data.chi_e)
+    chi_perp_e = _chi_spline(data.chi_e)
+    chi_perp_i = _chi_spline(data.chi_i)
     chi_tor = _chi_spline(data.chi_phi)
-    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor)
+    return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor)
 end
 
 # ---------------------------------------------------------------------
@@ -407,7 +408,7 @@ Orchestrate the full SLAYER analysis against a `ForceFreeStates.ForceFreeStatesR
 reading its equilibrium, singular surfaces and Δ' matrix. Kinetic profiles are
 read from `control.profile_file` (relative to `dir_path`) through the shared
 `Equilibrium.read_kinetic_file` reader; when the file carries `chi_e`/`chi_phi`
-profiles they set χ⊥(ψ)/χ_φ(ψ), otherwise the scalar `control.chi_perp`/
+profiles they set χ⊥(ψ)/χ_φ(ψ), otherwise the scalar `control.chi_perp_e`/
 `chi_tor` fallbacks are used.
 
 The toroidal field comes from `control.bt`; leaving it unset (the default) makes
@@ -454,18 +455,25 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
         # what its docstring already prescribes.
         bt = control.bt
         # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
-        chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
+        chi_perp_e = loaded.chi_perp_e === nothing ? control.chi_perp_e : loaded.chi_perp_e
         chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
-        (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
+        (loaded.chi_perp_e === nothing || loaded.chi_tor === nothing) && @warn(
             "SLAYER: kinetic file has no usable chi_e/chi_phi profile(s) " *
             "(dataset absent or all-zero); using the scalar " *
-            "control.chi_perp/chi_tor fallback for the missing one(s).")
+            "control.chi_perp_e/chi_tor fallback for the missing one(s).")
+        chi_perp_i = loaded.chi_perp_i === nothing ? control.chi_perp_i : loaded.chi_perp_i
+        (control.P_perp_model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing) && @warn(
+            "SLAYER: kinetic file has no usable chi_i profile; using the scalar " *
+            "control.chi_perp_i fallback.")
         params = build_slayer_inputs(equil, surfaces, profiles;
             bt=bt,
             mu_i=control.mu_i,
             zeff=control.zeff,
-            chi_perp=chi_perp,
+            chi_perp_e=chi_perp_e,
             chi_tor=chi_tor,
+            chi_perp_i=chi_perp_i,
+            tau_E=something(control.tau_E, NaN),
+            P_perp_model=control.P_perp_model,
             dr_val=control.dr_val,
             dgeo_val=control.dgeo_val,
             dc_type=control.dc_type,

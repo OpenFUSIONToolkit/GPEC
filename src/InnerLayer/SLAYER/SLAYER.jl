@@ -1,8 +1,8 @@
 # SLAYER.jl
 #
 # SLAYER (Slab Layer) two-fluid drift-MHD inner-layer model (Fitzpatrick,
-# Tearing Mode Dynamics in Tokamak Plasmas, IOP 2023; Park et al. 2022,
-# Phys. Plasmas 29, 122505; Burgess et al. 2026). The dispersion path uses
+# Tearing Mode Dynamics in Tokamak Plasmas, IOP 2023; Park 2022,
+# Phys. Plasmas 29, 072506; Burgess et al. 2026). The dispersion path uses
 # the Fitzpatrick layer formulation — P_perp / P_tor transport, c_beta
 # compressibility, D_norm normalized ion-skin scale, two-fluid drift
 # coupling via Q_e, Q_i, iota_e (see `Riccati.jl`).

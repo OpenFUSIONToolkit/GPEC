@@ -57,6 +57,7 @@
             "bt" => 1.8,
             "mu_i" => 2.0,
             "dr_val" => 0.01,
+            "P_perp_model" => "D_perp",
             "scan_grid" => Dict{String,Any}(
                 "Q_re_range" => [-5.0, 5.0],
                 "Q_im_range" => [-1.0, 3.0],
@@ -79,6 +80,7 @@
         @test c.msing_max == 2
         @test c.bt === 1.8
         @test c.dr_val == 0.01
+        @test c.P_perp_model === :D_perp
         @test c.Q_re_range == (-5.0, 5.0)
         @test c.Q_im_range == (-1.0, 3.0)
         @test c.nre == 50
@@ -92,6 +94,12 @@
         # Unknown keys should raise
         bad = merge(section, Dict{String,Any}("mistyped_key" => 42))
         @test_throws ArgumentError slayer_control_from_toml(bad)
+        # The renamed χ⊥,e key and bad P_perp_model values are rejected
+        @test_throws ArgumentError slayer_control_from_toml(merge(section, Dict{String,Any}("chi_perp" => 1.0)))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "bogus"))))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E"))))
+        c_te = slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => 0.05)))
+        @test c_te.tau_E == 0.05 && Runner.validate(c_te) === c_te
     end
 
     @testset "run_slayer: result-facing form forwards surfaces and Δ'" begin
