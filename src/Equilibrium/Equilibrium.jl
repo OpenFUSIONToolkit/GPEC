@@ -103,6 +103,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         eq_input = additional_input
         eq_input.config = eq_config
         eq_input.psihigh_resolved = eq_config.psihigh
+        resolve_psihigh!(eq_input)
     elseif eq_type in EFIT_KINDS
         eq_input = resolve_psihigh!(read_efit(eq_config))
     elseif eq_type in ["chease2", "chease_ascii"]
@@ -110,7 +111,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
     elseif eq_type in ["ldp_i", "ifile"]
-        eq_input = read_ldp_i(eq_config)
+        eq_input = resolve_psihigh!(read_ldp_i(eq_config))
     elseif haskey(ANALYTIC_EQ, eq_type)
         # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
         # Their parameters live in the embedded `[*_INPUT]` section and are passed in as the

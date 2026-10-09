@@ -415,26 +415,42 @@ end
 Parses an inverse i-file (L. Don Pearlstein's format, also written by TokaMaker `save_ifile`) into an
 `InverseRunInput`. Sequential unformatted little-endian records (reals as real*8 or real*4), axis
 first, θ fastest: `mx, my` (int32), `psi(mx)` [Wb/rad], `f(mx)` = R·Bt [T·m], `p(mx)` [Pa], `q(mx)`,
-`r(my, mx)`, `z(my, mx)` [m] with the periodic θ point duplicated. Trailing records are ignored.
-Port of Fortran `read_eq_ldp_i`.
+`r(my, mx)`, `z(my, mx)` [m] with the periodic θ point duplicated, then optionally `FF′(mx)` and
+`p′(mx)` per Wb/rad (skipped), and optionally the plasma bounds `[ψ_axis, ψ_LCFS]` (a record of length 2).
+With the bounds, ψ_N is normalised to the true LCFS, so the file's last (padded) surface sits below 1 and
+`psihigh` is clamped to it. Port of Fortran `read_eq_ldp_i`.
 """
 function read_ldp_i(config::EquilibriumConfig)
     @info "Reading inverse i-file (ldp_i): $(config.eq_filename)"
 
-    psi, f, p, q, r, z = open(config.eq_filename, "r") do io
+    psi, f, p, q, r, z, bounds = open(config.eq_filename, "r") do io
         ltoh(read(io, Int32)) == 8 || error("i-file header record is not two int32")
         mx, my = Int.(ltoh.(read!(io, Vector{Int32}(undef, 2))))
         read(io, Int32)
         profiles = [_read_fortran_reals(io, mx) for _ in 1:4]
         r, z = (reshape(_read_fortran_reals(io, my * mx), my, mx) for _ in 1:2)
-        return (profiles..., r, z)
+        # Optional records, told apart by length: FF′ and p′ (mx each, unused), then the ψ bounds (2)
+        bounds = nothing
+        while !eof(io)
+            nbytes = ltoh(read(io, Int32))
+            if nbytes in (4mx, 8mx)
+                skip(io, nbytes + 4)
+            else
+                skip(io, -4)
+                bounds = _read_fortran_reals(io, 2)
+            end
+        end
+        return (profiles..., r, z, bounds)
     end
     mx, my = length(psi), size(r, 1)
     @info "Parsed from header: mx = $mx surfaces, my = $my poloidal points"
 
-    psio_signed = psi[end] - psi[1]
+    psi_axis, psi_lcfs = bounds === nothing ? (psi[1], psi[end]) : bounds
+    psio_signed = psi_lcfs - psi_axis
     psio = abs(psio_signed)
-    xs = (psi .- psi[1]) ./ psio_signed
+    xs = (psi .- psi_axis) ./ psio_signed
+    bounds === nothing ||
+        @info "i-file ψ bounds: ψ_axis = $psi_axis, ψ_LCFS = $psi_lcfs; file surfaces span ψ_N ∈ [$(xs[1]), $(xs[end])]"
 
     sq_fs = hcat(abs.(f), p .* mu0, q, sqrt.(xs))
     sq_in = cubic_interp(xs, Series(sq_fs); extrap=ExtendExtrap())

@@ -239,6 +239,50 @@ using Statistics
         @test Eq.setup_equilibrium(cfg("ldp_i", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
     end
 
+    @testset "TokaMaker i-file ψ bounds record" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
+        cfg(file; kw...) = Eq.EquilibriumConfig(; eq_type="ldp_i", eq_filename=file, jac_type="hamada", grid_type="core_edge_packed", mpsi=32,
+            psilow=0.01, psihigh=0.99, kw...)
+        raw = read(joinpath(tk_dir, "i33x65.ifile"))  # carries the FF′ and p′ records
+        mx = Int(reinterpret(Int32, raw[5:8])[1])
+        psi = reinterpret(Float64, raw[21:(20+8mx)])
+        stripped = raw[1:(end-2*(8mx+8))]
+        record(v) = vcat(reinterpret(UInt8, [Int32(8length(v))]), reinterpret(UInt8, Float64.(v)), reinterpret(UInt8, [Int32(8length(v))]))
+        dir = mktempdir()
+        variant(name, bytes) = (path = joinpath(dir, name); write(path, bytes); path)
+        ingest(path) = Eq.read_ldp_i(cfg(path)).ingest
+
+        # Bounds at the file's own end surfaces reproduce the reads without them, with or without FF′/p′
+        same(a, b) = a.sq_xs == b.sq_xs && a.sq_fs == b.sq_fs && a.psio == b.psio && a.R_nodes == b.R_nodes
+        base_s, base_d = ingest(variant("s.ifile", stripped)), ingest(variant("d.ifile", raw))
+        @test same(ingest(variant("sb0.ifile", vcat(stripped, record([psi[1], psi[end]])))), base_s)
+        @test same(ingest(variant("db0.ifile", vcat(raw, record([psi[1], psi[end]])))), base_d)
+
+        # The true LCFS beyond the padded last surface: ψ_N shrinks by (1 - pad), psio grows by 1/(1 - pad)
+        pad = 0.01
+        bounds = [psi[1], psi[1] + (psi[end] - psi[1]) / (1 - pad)]
+        sb = variant("sb.ifile", vcat(stripped, record(bounds)))
+        db = variant("db.ifile", vcat(raw, record(bounds)))
+        ing_sb = @test_logs (:info, r"ψ bounds") match_mode = :any ingest(sb)
+        ing_db = ingest(db)
+        for ing in (ing_sb, ing_db)
+            @test ing.sq_xs ≈ base_s.sq_xs .* (1 - pad)
+            @test ing.sq_xs[end] ≈ 1 - pad
+            @test ing.psio ≈ base_s.psio / (1 - pad)
+        end
+        @test ing_sb.sq_fs[:, 1:3] == ing_db.sq_fs[:, 1:3] == base_s.sq_fs[:, 1:3]
+
+        # psihigh beyond the last surface is clamped to it; a rerun from the ingest keeps the normalisation
+        eq = @test_logs (:warn, r"clamped") match_mode = :any Eq.setup_equilibrium(cfg(db; psihigh=0.995))
+        @test eq.params.psihigh_resolved == ing_db.sq_xs[end] ≈ eq.rzphi_xs[end]
+        @test eq.psio == ing_db.psio
+        @test all(isfinite, eq.profiles.q_spline.y) && all(isfinite, eq.eqfun_B.nodal_derivs.partials)
+        rerun = Eq.setup_equilibrium(cfg(db; psihigh=0.995), Eq.build_inverse_from_ingest(cfg(db), eq.ingest))
+        @test rerun.rzphi_xs == eq.rzphi_xs && rerun.psio == eq.psio
+        @test rerun.profiles.q_spline.y == eq.profiles.q_spline.y
+    end
+
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 10% to allow for method-specific discretisation differences.
