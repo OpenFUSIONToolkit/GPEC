@@ -196,11 +196,10 @@ conjugate is taken.
 
 ### Interfacing with Vacuum
 
-The Vacuum module works in GPEC's own angles: ``\theta`` upward-outboard (counter-clockwise in the
-``(R, Z)`` plane) and the Fourier basis ``\exp(-i(m\theta - 2\pi n\zeta))``, so the matrices it returns are in the same
-Fourier frame as the plasma matrices and need no conversion. A plasma contour passed in clockwise is rejected;
+Unlike the Fortran VACUUM code, the GPEC Vacuum module works in the same angles as the rest of the code: ``\theta`` upward-outboard (counter-clockwise in the
+``(R, Z)`` plane) and the Fourier basis ``\exp(-i(m\theta - 2\pi n\zeta))``. A plasma contour passed in clockwise is rejected;
 a clockwise wall file is reversed with a warning. The ``\nu`` passed to Vacuum is GPEC's ``\nu = \phi - 2\pi\zeta``.
-Chance 1997 eq. 97 writes ``\zeta = \phi + \nu`` for the same ``\nu`` because VACUUM's ``\theta`` and ``\phi`` both
+Chance 1997 eq. 97 writes ``\zeta = \phi + \nu`` for the same ``\nu`` because the Fortran VACUUM code's ``\theta`` and ``\phi`` both
 run opposite to GPEC's.
 
 ## Field Amplitudes and Units
