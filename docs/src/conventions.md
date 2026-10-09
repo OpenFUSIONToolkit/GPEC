@@ -106,11 +106,9 @@ helicity = bt_sign * Int(sign(crnt))   # src/ForcingTerms/CoilFourier.jl
 ## ``F = R B_\phi``
 
 The poloidal-current function ``F = R B_\phi`` from the Grad-Shafranov equation is **forced
-positive** via `abs` (`read_eq_efit` in `src/Equilibrium/ReadEquilibrium.jl`):
-
-```julia
-abs.(fpol_data)
-```
+positive**: the g-file and IMAS readers take its magnitude (`file_profiles` in
+`src/Equilibrium/ReadEquilibrium.jl`), whether it is integrated from the file's ``FF'`` or read
+from the tabulated values.
 
 The code always works with ``|F|``; the sign of ``B_t`` is carried separately (`fpol_sign`, and the
 `bt_sign`/`crnt` helicity inputs).
