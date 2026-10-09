@@ -161,6 +161,14 @@
         @test_throws "rational surfaces were analysed" run_slayer_from_inputs(params, dpm,
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[1.0])
 
+        # omega_E_kHz takes precedence over the file on the surfaces it lists; the rest keep the file value.
+        r_ovr = run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("2/1" => 1.0), grid...); omega_E=Ω_E)
+        @test r_ovr.omega_E ≈ [2π * 1e3, Ω_E[2]]
+        @test r_ovr.q_shift ≈ [-1.0e-4 * 2π * 1e3, -1.2e-4 * Ω_E[2]]
+        @test_throws "matching no analysed surface" run_slayer_from_inputs(params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("5/1" => 1.0), grid...); omega_E=Ω_E)
+
         # A Doppler offset beyond the scan box is flagged rather than silently losing the root:
         # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].
         @test_logs (:warn, r"outside Q_re_range") match_mode = :any run_slayer_from_inputs(params, dpm,
