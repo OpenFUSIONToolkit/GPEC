@@ -209,6 +209,10 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     spl_fs = zeros(Float64, mtheta+1, 5)
     spl_post_buf = Vector{Float64}(undef, 5)   # scratch for post-SFL spline evaluation
 
+    # i-files take q from the field-line integral of their geometry (Fortran inverse_run), consistent with
+    # the SFL angle ν built from it. The tabulated q, splined in ψ, is not where the input surfaces are
+    # coarse near the edge (q ~ log(1-ψ)), and that inconsistency shifts Δ′ and psilim.
+    q_from_geometry = config.eq_type in ("ldp_i", "ifile")
     f_sq_in_buf = Vector{Float64}(undef, size(sq_in.y, 2))
     sq_in_hint = Ref(1)
     hint2d = (Ref(1), Ref(1))
@@ -280,11 +284,9 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         sq_fs[ipsi+1, 1] = f_sq_in_buf[1] * twopi
         sq_fs[ipsi+1, 2] = f_sq_in_buf[2]
         sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
-        # Use the input q profile directly (from LAR ODE or CHEASE), matching the
-        # Fortran `inverse_chease4_run` convention (sq%fs(ipsi,4) = sq_in%f(3)).
-        # The field-line-integration-based q formula (spl_fsi * F / (2*twopi*psio))
-        # is inaccurate for cylindrical LAR geometry.
-        sq_fs[ipsi+1, 4] = f_sq_in_buf[3]  # q from input profile
+        # Input q (LAR ODE, CHEASE), as Fortran `inverse_chease4_run`; the field-line q is inaccurate
+        # for cylindrical LAR geometry. An i-file uses the field-line q instead (see q_from_geometry).
+        sq_fs[ipsi+1, 4] = q_from_geometry ? spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) : f_sq_in_buf[3]
     end
 
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
