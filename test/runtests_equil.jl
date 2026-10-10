@@ -228,6 +228,15 @@ using Statistics
         stripped = joinpath(mktempdir(), "no_derivatives.ifile")
         write(stripped, raw[1:end-2*(8mx+8)])
         @test table(stripped) == tabulated
+
+        # q is the field-line q of the file's geometry (Fortran inverse_run), not its tabulated q record
+        qrec = 16 + 3 * (8mx + 8) + 4
+        bumped = copy(raw)
+        bumped[(qrec+1):(qrec+8mx)] = reinterpret(UInt8, 1.1 .* reinterpret(Float64, raw[(qrec+1):(qrec+8mx)]))
+        bumped_file = joinpath(mktempdir(), "bumped_q.ifile")
+        write(bumped_file, bumped)
+        @test Eq.read_ldp_i(cfg("ldp_i", bumped_file)).ingest.sq_fs[:, 3] ≈ 1.1 .* tabulated[:, 3]
+        @test Eq.setup_equilibrium(cfg("ldp_i", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
     end
 
     @testset "EFIT Method Consistency" begin
