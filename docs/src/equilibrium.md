@@ -55,6 +55,31 @@ The Cartesian evaluation grid is clipped to the separatrix bounding box and its
 resolution is set adaptively from a bilinear interpolation error bound, so no manual
 tuning is needed.
 
+## F and P from a g-file or IMAS equilibrium
+
+A g-file tabulates both the profiles (`FPOL`, `PRES`) and their flux derivatives (`FFPRIM`,
+`PPRIME`); an IMAS equilibrium does the same (`f`, `pressure`, `f_df_dpsi`, `dpressure_dpsi`).
+The stability matrices use ``F'`` directly and respond to how ``F'`` varies across each rational
+surface, i.e. to the current gradient. ``F`` itself changes by only a few percent across the
+plasma, so differentiating a tabulated ``F`` amplifies its rounding error by roughly
+``1/(h^2\delta)`` in the slope of ``F'`` (``h`` the node spacing, ``\delta`` the fractional
+variation of ``F``). On a 257-node file written in single precision that is an error of order
+10 % in the current gradient, and several units in ``\Delta'``.
+
+`profile_source` in `[Equilibrium]` selects where the two profiles come from:
+
+| Value | Behaviour |
+|---|---|
+| `"derivatives"` (default) | ``F`` and ``P`` are the integrals of the file's ``FF'`` and ``p'``, anchored at the boundary values of the tabulated ``F`` and ``P`` |
+| `"values"` | The tabulated ``F`` and ``P`` are used as written |
+
+With `"derivatives"` both profiles are always rebuilt together, so the pair stays consistent in
+the force balance, and everything downstream still differentiates one spline. The reader logs the
+largest interior difference between the rebuilt and the tabulated profiles and warns when it
+exceeds `1e-4` of ``F`` or 5 % of the peak pressure. It falls back to `"values"` with a warning
+when the derivative arrays are absent, all zero, or opposite in sign for only one of the two
+profiles. The two end nodes are used as written.
+
 ## Radial grid packing
 
 With `grid_type = "auto"` and `mpsi = 0` (the defaults; `"log_asymptotic"` is a legacy alias), the radial grid is

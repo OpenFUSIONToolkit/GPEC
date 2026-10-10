@@ -40,6 +40,90 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     return parsed_values
 end
 
+# Largest interior disagreement between the tabulated and the integrated profiles the reader accepts
+# without a warning: relative for F, as a fraction of the peak pressure for P.
+const PROFILE_F_MISMATCH_WARN = 1e-4
+const PROFILE_P_MISMATCH_WARN = 5e-2
+
+"""
+    integrate_profile_derivatives(xs, f, p, ffprime, pprime) -> Union{Nothing,NamedTuple}
+
+Rebuild F and P on the nodes `xs` of a normalized flux coordinate (0 at the axis, 1 at the
+boundary) by integrating the tabulated `ffprime` = d(F²/2)/dx and `pprime` = dP/dx inward from the
+boundary values of `f` and `p`:
+
+    F²(x) = F(1)² − 2∫ₓ¹ FF′ dx,    P(x) = P(1) − ∫ₓ¹ P′ dx.
+
+F varies by only a few percent across the plasma, so rounding in a tabulated F is amplified by
+roughly 1/(h²δ) in the slope of F′ (h the node spacing, δ the fractional variation of F), which is
+the current gradient the stability matrices respond to. The tabulated derivatives carry that
+information directly, and they are the source terms the Grad-Shafranov solution ψ(R,Z) was computed
+from. F and P are rebuilt together so that the pair stays consistent in the force balance.
+
+Returns `(; f, p, f_mismatch, p_mismatch)` with `f` positive, where the mismatches are the largest
+interior differences from the tabulated values (relative for F, as a fraction of the peak pressure
+for P; the two end nodes are excluded). Returns `nothing` when the derivatives cannot be used: a
+derivative array that is all zero or non-finite while its profile varies, a non-increasing `xs`, a
+non-positive F², or derivative signs that match the tabulated profiles for only one of the two.
+"""
+function integrate_profile_derivatives(xs::AbstractVector{<:Real}, f::AbstractVector{<:Real}, p::AbstractVector{<:Real},
+    ffprime::AbstractVector{<:Real}, pprime::AbstractVector{<:Real})
+    n = length(xs)
+    (n >= 4 && length(f) == n && length(p) == n && length(ffprime) == n && length(pprime) == n) || return nothing
+    (all(isfinite, ffprime) && all(isfinite, pprime) && all(>(0), diff(xs))) || return nothing
+    f_abs = abs.(f)
+    f_has, p_has = any(!iszero, ffprime), any(!iszero, pprime)
+    # A zero derivative array is only believable for a profile that is itself flat
+    (f_has || maximum(f_abs) - minimum(f_abs) <= eps(maximum(f_abs))) || return nothing
+    (p_has || maximum(p) == minimum(p)) || return nothing
+    (f_has || p_has) || return nothing
+
+    nodes = collect(Float64, xs)
+    tail(y) = (c = FastInterpolations.cumulative_integrate(cubic_interp(nodes, collect(Float64, y))); c[end] .- c)
+    f_tail, p_tail = tail(ffprime), tail(pprime)
+    interior = 2:(n-1)
+    p_scale = maximum(abs, p)
+    f_error(sgn) = maximum(i -> abs(sqrt(max(f_abs[end]^2 - 2 * sgn * f_tail[i], 0.0)) - f_abs[i]) / f_abs[i], interior)
+    p_error(sgn) = p_scale == 0 ? 0.0 : maximum(i -> abs(p[end] - sgn * p_tail[i] - p[i]), interior) / p_scale
+
+    # Writers differ in the sign convention of the flux derivative, so take the sign that reproduces
+    # the tabulated profiles and require F and P to agree on it.
+    f_sign = f_error(1) <= f_error(-1) ? 1 : -1
+    p_sign = p_error(1) <= p_error(-1) ? 1 : -1
+    f_has && p_has && f_sign != p_sign && return nothing
+    sgn = f_has ? f_sign : p_sign
+
+    f2 = f_abs[end]^2 .- 2 .* sgn .* f_tail
+    all(>(0), f2) || return nothing
+    return (; f=sqrt.(f2), p=p[end] .- sgn .* p_tail, f_mismatch=f_error(sgn), p_mismatch=p_error(sgn))
+end
+
+"""
+    file_profiles(config, xs, f, p, ffprime, pprime) -> (f_nodes, p_nodes)
+
+F (as a magnitude) and P on the 1D nodes of a file-based direct equilibrium, from the arrays that
+`config.profile_source` selects. With `"derivatives"` the profiles come from
+`integrate_profile_derivatives`, and the tabulated values are used with a warning when
+that is not possible.
+"""
+function file_profiles(config::EquilibriumConfig, xs::AbstractVector{<:Real}, f::AbstractVector{<:Real}, p::AbstractVector{<:Real},
+    ffprime::AbstractVector{<:Real}, pprime::AbstractVector{<:Real})
+    config.profile_source == "values" && return abs.(f), collect(Float64, p)
+    built = integrate_profile_derivatives(xs, f, p, ffprime, pprime)
+    if built === nothing
+        @warn "profile_source = \"derivatives\", but the file's FF′ and p′ are absent or unusable; using its tabulated F and P"
+        return abs.(f), collect(Float64, p)
+    end
+    msg = "F and P integrated from the file's FF′ and p′; largest interior difference from the tabulated values: " *
+          "$(@sprintf("%.1e", built.f_mismatch)) of F, $(@sprintf("%.1e", built.p_mismatch)) of the peak pressure"
+    if built.f_mismatch > PROFILE_F_MISMATCH_WARN || built.p_mismatch > PROFILE_P_MISMATCH_WARN
+        @warn msg * ". The file's profiles and derivatives disagree; profile_source = \"values\" selects the tabulated profiles."
+    else
+        @info msg
+    end
+    return built.f, built.p
+end
+
 """
     _read_efit(equil_in)
 
@@ -91,10 +175,13 @@ function read_efit(config::EquilibriumConfig)
     psi_rz = reshape(psi_flat_vec, nw, nh)
 
     # --- Create 1D Profile Spline (sq_in) ---
+    psio_signed = sibry - simag
     psi_norm_grid = range(0.0, 1.0; length=nw)
+    # FFPRIM and PPRIME are derivatives in the file's ψ; psio_signed converts them to ψ_norm
+    f_nodes, p_nodes = file_profiles(config, psi_norm_grid, fpol_data, pres_data, ffprime_data .* psio_signed, pprime_data .* psio_signed)
     sq_fs_nodes = hcat(
-        abs.(fpol_data),
-        max.(pres_data .* mu0, 0.0),
+        f_nodes,
+        max.(p_nodes .* mu0, 0.0),
         qprof_data,
         sqrt.(psi_norm_grid)
     )
@@ -102,7 +189,6 @@ function read_efit(config::EquilibriumConfig)
     sq_in = cubic_interp(sq_xs, Series(sq_fs_nodes); extrap=ExtendExtrap())
 
     # --- Process and Normalize 2D Psi Data ---
-    psio_signed = sibry - simag
     psi_proc = (sibry .- psi_rz)
     psio = abs(psio_signed)
     # Ensure psi at the magnetic axis is positive relative to the boundary
@@ -495,11 +581,17 @@ function read_imas(config::EquilibriumConfig, dd)
     psi_norm_grid = range(0.0, 1.0; length=nw)
 
     # Build equilibrium source terms for spline interpolation
-    # abs(f_1d): F(ψ) can be negative depending on toroidal field direction convention;
-    #            take absolute value since GPEC uses magnitude F = R·|Bt|
+    # F(ψ) can be negative depending on toroidal field direction convention; GPEC uses the
+    # magnitude F = R·|Bt|. f_df_dpsi and dpressure_dpsi are derivatives in the stored ψ, so the
+    # stored ψ span converts them to its normalized coordinate (absent arrays read as zero).
+    psi_stored = eqt.profiles_1d.psi
+    psi_span = psi_stored[end] - psi_stored[1]
+    stored_or_zero(name) = (v = getproperty(eqt.profiles_1d, name, Float64[]); length(v) == nw ? v .* psi_span : zeros(nw))
+    f_nodes, p_nodes = file_profiles(config, (psi_stored .- psi_stored[1]) ./ psi_span, f_1d, p_1d,
+        stored_or_zero(:f_df_dpsi), stored_or_zero(:dpressure_dpsi))
     sq_fs_nodes = hcat(
-        abs.(f_1d),
-        max.(p_1d .* mu0, 0.0),
+        f_nodes,
+        max.(p_nodes .* mu0, 0.0),
         q_1d,
         sqrt.(psi_norm_grid)
     )
