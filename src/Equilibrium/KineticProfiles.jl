@@ -68,6 +68,7 @@ temperatures eV, frequencies rad/s, diffusivities m²/s.
 | `omega_tor`         | toroidal rotation (optional)                                                                                      |
 | `chi_e`             | perpendicular heat diffusivity χ⊥ (shipped data: electron power-balance χ_e; see the stability docs)              |
 | `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
+| `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
 | `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
 | `provenance`        | short string recording the source file/format                                                                     |
 """
@@ -81,16 +82,17 @@ struct KineticProfileData
     omega_tor::Union{Nothing,Vector{Float64}}
     chi_e::Union{Nothing,Vector{Float64}}
     chi_phi::Union{Nothing,Vector{Float64}}
+    zeff::Union{Nothing,Vector{Float64}}
     species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
     provenance::String
 end
 
 function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
-    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing,
+    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing, zeff=nothing,
     species_densities=nothing, provenance="")
     _v(x) = x === nothing ? nothing : Float64.(collect(x))
     return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
-        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), species_densities, String(provenance))
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), _v(zeff), species_densities, String(provenance))
 end
 
 const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
@@ -98,7 +100,7 @@ const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
 # Dataset units written into / expected from the HDF5 kinetic schema.
 const _KINETIC_H5_UNITS = Dict("psi" => "normalized poloidal flux", "n_i" => "m^-3",
     "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
-    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_phi" => "m^2/s")
+    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless")
 
 """
     read_kinetic_file(path; group="/") -> KineticProfileData
@@ -137,7 +139,7 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
         haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
         # Non-standard datasets named `n_*` (e.g. "n_D", "n_T") are named per-species density
         # profiles for explicit multi-ion input; other names are reserved for future schema fields.
-        standard = ("psi", "n_i", "n_e", "T_i", "T_e", "omega_E", "omega_tor", "chi_e", "chi_phi")
+        standard = ("psi", "n_i", "n_e", "T_i", "T_e", "omega_E", "omega_tor", "chi_e", "chi_phi", "zeff")
         extras = Dict{String,Vector{Float64}}()
         for k in keys(g)
             (k in standard || !startswith(k, "n_")) && continue
@@ -147,7 +149,7 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
         return KineticProfileData(; psi=Float64.(vec(read(g["psi"]))),
             n_i=rd("n_i"), n_e=rd("n_e"), T_i=rd("T_i"), T_e=rd("T_e"),
             omega_E=rd("omega_E"), omega_tor=rd("omega_tor"),
-            chi_e=rd("chi_e"), chi_phi=rd("chi_phi"),
+            chi_e=rd("chi_e"), chi_phi=rd("chi_phi"), zeff=rd("zeff"),
             species_densities=(isempty(extras) ? nothing : extras), provenance=prov)
     end
 end
@@ -179,6 +181,7 @@ function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
         put("omega_tor", data.omega_tor)
         put("chi_e", data.chi_e)
         put("chi_phi", data.chi_phi)
+        put("zeff", data.zeff)
         # Named per-species densities (multi-ion input); dataset names must be `n_*` to round-trip.
         if data.species_densities !== nothing
             for (name, v) in data.species_densities

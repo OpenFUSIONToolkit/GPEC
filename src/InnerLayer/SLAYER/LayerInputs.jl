@@ -180,7 +180,8 @@ profiles, without an intermediate file round-trip.
     physical field, so passing it as a scalar is almost always wrong.
 
   - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
-  - `zeff`      -- effective charge (default `1.0`).
+  - `zeff`      -- effective charge. Scalar or a callable of `psi`, evaluated per
+    surface (default `1.0`).
   - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
@@ -230,7 +231,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     R0=nothing,
     rs_method::Symbol=:midplane,
     mu_i::Real=2.0,
-    zeff::Real=1.0,
+    zeff=1.0,
     z_i::Real=1.0,
     chi_perp=1.0,
     chi_tor=1.0,
@@ -308,7 +309,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         else
             lnL = coulomb_log_e(prof.n_e, prof.T_e; form=lnLambda_form)
             nu_star_e(prof.n_e, prof.T_e, rg.R_major, rg.eps_local,
-                q, zeff; lnLamb=lnL)
+                q, _eval(zeff, psi); lnLamb=lnL)
         end
 
         # dr_val: per-surface resistive interchange index D_R = E + F + H²
@@ -377,7 +378,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             n_e=prof.n_e, t_e=prof.T_e, t_i=prof.T_i,
             omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
-            rs=rs, R0=R0_use, mu_i=mu_i, zeff=zeff,
+            rs=rs, R0=R0_use, mu_i=mu_i, zeff=_eval(zeff, psi),
             chi_perp=_eval(chi_perp, psi),
             chi_tor=_eval(chi_tor, psi),
             m=m_res, n=n_res,

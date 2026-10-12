@@ -557,11 +557,17 @@ function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
         @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
         return nothing
     end
-    # chi(psi) from the file where it carries one, else the control's scalar fallback -- the same
-    # precedence run_slayer uses.
+    # chi(psi) and Z_eff(psi) from the file where it carries them, else the control's scalar
+    # fallbacks -- the same precedence run_slayer uses. Every other plasma parameter the layer
+    # widths depend on is the run's own [SLAYER] setting, so the scan and the SLAYER stage see
+    # one plasma.
     return (; profiles=loaded.profiles,
         chi_perp=loaded.chi_perp === nothing ? ctrl.chi_perp : loaded.chi_perp,
-        chi_tor=loaded.chi_tor === nothing ? ctrl.chi_tor : loaded.chi_tor)
+        chi_tor=loaded.chi_tor === nothing ? ctrl.chi_tor : loaded.chi_tor,
+        zeff=loaded.zeff === nothing ? ctrl.zeff : loaded.zeff,
+        bt=ctrl.bt, mu_i=ctrl.mu_i, theta=ctrl.theta_sample,
+        resistivity_model=Runner._build_resistivity_model(ctrl.resistivity_model),
+        lnLambda_form=ctrl.lnLambda_form)
 end
 
 # The binding scan across toroidal mode numbers: the one with the innermost overlap point, since
@@ -583,7 +589,9 @@ function _layer_overlap_scan(overlap_inputs, intr::ForceFreeStatesInternal, equi
     # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
     scans = [
         Tearing.resistive_layer_overlap(equil, overlap_inputs.profiles; n_tor=n, rs_method=:flux,
-            chi_perp=overlap_inputs.chi_perp, chi_tor=overlap_inputs.chi_tor)
+            chi_perp=overlap_inputs.chi_perp, chi_tor=overlap_inputs.chi_tor,
+            bt=overlap_inputs.bt, mu_i=overlap_inputs.mu_i, zeff=overlap_inputs.zeff, theta=overlap_inputs.theta,
+            resistivity_model=overlap_inputs.resistivity_model, lnLambda_form=overlap_inputs.lnLambda_form)
         for n in intr.nlow:intr.nhigh
     ]
     return _binding_overlap(scans)
