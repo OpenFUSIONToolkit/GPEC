@@ -330,7 +330,7 @@ end
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; ucrit=10.0)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
 
         # Case 1: Basic norm computation
         odet.u = zeros(ComplexF64, 2, 2, 2)
@@ -356,12 +356,18 @@ end
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         @test odet.unorm[1:intr.mpert] ≈ [1, 1]
 
-        # Case 4: Trigger fixup via ucrit
+        # Case 4: A large norm spread with independent columns does not reduce
         odet.unorm0 = ones(intr.mpert)
-        odet.u[:, 1, 1] .= [1000, 0]   # large norm
-        odet.u[:, 2, 1] .= [1, 0]      # small norm
+        odet.u[:, 1, 1] .= [1e8, 0]
+        odet.u[:, 2, 1] .= [0, 1]
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
-        @test odet.new == true  # implies fixup ran
+        @test odet.new == false && odet.ifix == 0
+
+        # Case 4b: Near-parallel columns reduce even though they grew alike
+        odet.u[:, 1, 1] .= [1, 0]
+        odet.u[:, 2, 1] .= [1, 1e-8]
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        @test odet.new == true && odet.ifix == 1
 
         # Case 5: Trigger fixup via sing_flag
         odet.new = false
@@ -369,6 +375,24 @@ end
         odet.u[:, 2, 1] .= [1, 0]
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
         @test odet.new == true  # fixup triggered
+    end
+
+    @testset "column_condition and reduction storage growth" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        @test FFS.column_condition(ComplexF64[1 0; 0 1e6]) ≈ 1  # column scaling does not count
+        @test FFS.column_condition(ComplexF64[1 1; 0 1e-8]) > 1e7
+        intr = FFS.ForceFreeStatesInternal(; numpert_total=2)
+        ctrl = FFS.ForceFreeStatesControl()
+        odet = FFS.OdeState(2, 10, 1, 1)
+        for k in 1:3
+            odet.u[:, :, 1] .= ComplexF64[1 0.5; 0 1]
+            odet.new = false
+            odet.unorm0 .= 1
+            FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+        end
+        @test odet.ifix == 3 && size(odet.fixfac, 3) == 4
+        @test length(odet.sing_flag) == length(odet.fixstep) == length(odet.zeroed_idx) == size(odet.index, 2) == 4
+        @test all(odet.sing_flag[1:3]) && all(odet.fixfac[i, i, k] == 1 for i in 1:2, k in 1:3)
     end
 
     @testset "ideal-crossing reduction isolates the resonant harmonic" begin
@@ -381,8 +405,8 @@ end
         u0[:, 3, 1] .= [0.2, 2.0, 1.5]
         u0[:, :, 2] .= 1.0
         intr = FFS.ForceFreeStatesInternal(; numpert_total=3)
-        ctrl = FFS.ForceFreeStatesControl(; ucrit=1e3)
-        fresh(u) = (odet = FFS.OdeState(3, 10, 10, 1); odet.u .= u; odet)
+        ctrl = FFS.ForceFreeStatesControl()
+        fresh(u) = (odet=FFS.OdeState(3, 10, 10, 1); odet.u.=u; odet)
 
         odet = fresh(u0)
         odet.new = false
@@ -393,7 +417,7 @@ end
         @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0  # only the lead column keeps the resonant harmonic
         @test odet.sing_flag[1]
 
-        # A crossing right after a ucrit reduction (new = true) still reduces on the resonant row.
+        # A crossing right after another reduction (new = true) still reduces on the resonant row.
         odet = fresh(u0)
         FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
         @test odet.ifix == 1 && odet.index[1, 1] == 2 && odet.new

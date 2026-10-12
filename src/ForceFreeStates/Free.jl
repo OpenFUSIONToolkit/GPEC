@@ -130,9 +130,9 @@ calculations and data dumping.
     # Evaluate dV/dpsi at the plasma edge
     dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
 
-    # Compute plasma response matrix W = U₂ * U₁⁻¹
+    # Compute plasma response matrix W = U₂ * U₁⁻¹; factor U₁ itself, as its column norms can span many decades after a reduction
     wp = zeros(ComplexF64, numpert_total, numpert_total)
-    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    @views wp .= (odet.u[:, :, 2] / lu(odet.u[:, :, 1])) ./ equil.psio^2
 
     wv, vac = compute_scaled_wv(ctrl, equil, intr)
 
@@ -275,8 +275,8 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
 
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
-    # Compute plasma response matrix
-    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    # Compute plasma response matrix (lu(U₁): see free_run)
+    @views wp .= (odet.u[:, :, 2] / lu(odet.u[:, :, 1])) ./ equil.psio^2
 
     # Retrieve raw vacuum matrix from spline and apply singfac analytically at the local q.
     # Singfac is not pre-applied in the spline (see free_compute_wv_spline) to avoid interpolating
