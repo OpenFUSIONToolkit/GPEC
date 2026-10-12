@@ -377,10 +377,8 @@ end
         @test odet.new == true  # fixup triggered
     end
 
-    @testset "column_condition and reduction storage growth" begin
+    @testset "reduction storage growth" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
-        @test FFS.column_condition(ComplexF64[1 0; 0 1e6]) ≈ 1  # column scaling does not count
-        @test FFS.column_condition(ComplexF64[1 1; 0 1e-8]) > 1e7
         intr = FFS.ForceFreeStatesInternal(; numpert_total=2)
         ctrl = FFS.ForceFreeStatesControl()
         odet = FFS.OdeState(2, 10, 1, 1)

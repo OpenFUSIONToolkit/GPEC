@@ -1027,21 +1027,14 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         odet.unorm ./= odet.unorm0
     end
 
-    # Reduce at a singular surface or once the U₁ columns lose independence
-    if sing_flag || column_condition(@view u[:, :, 1]) > ctrl.ucrit
+    # Reduce at a singular surface or once the U₁ columns lose independence (1-norm condition estimate of the column-normalized U₁)
+    @views if sing_flag || cond(UpperTriangular(qr!(u[:, :, 1] ./ norm.(eachcol(u[:, :, 1]))').R), 1) > ctrl.ucrit
         odet.ifix == size(odet.fixfac, 3) && grow_reduction_storage!(odet)
         odet.ifix += 1
         apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
         odet.new = true
     end
 end
-
-"""
-    column_condition(A::AbstractMatrix) -> Float64
-
-1-norm condition-number estimate of `A` with its columns scaled to unit norm, from the `R` factor of its QR.
-"""
-column_condition(A::AbstractMatrix) = cond(UpperTriangular(qr!(A ./ norm.(eachcol(A))').R), 1)
 
 """
     apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
