@@ -60,7 +60,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     intr::ForceFreeStatesInternal; wv=nothing)
 
     intr.npert == 1 || error("galerkin_solve: only single-n (npert == 1) is supported")
-    ctrl.gal_solver in ("LU", "cholesky") || error("galerkin_solve: gal_solver must be \"LU\" or \"cholesky\"")
+    ctrl.gal_solver in ("auto", "LU", "cholesky") ||
+        error("galerkin_solve: gal_solver must be \"auto\", \"LU\" or \"cholesky\"")
     nn = intr.nlow
     mpert = intr.numpert_total
     np = GAL_NP
@@ -97,7 +98,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     nx = ctrl.gal_nx
     kl = mpert * (np + 1)
     ku = kl
-    ldab = ctrl.gal_solver == "LU" ? 2kl + ku + 1 : kl + 1
+    ldab = 2kl + ku + 1
     # rpec_flag (RDCON, gal.f): append mpert coil-response columns. Each is a unit source at
     # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
     ncoil = ctrl.gal_rpec_flag ? mpert : 0
@@ -127,7 +128,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
 
     if ctrl.verbose
-        offdbg = ws.solver == "LU" ? ws.kl + ws.ku + 1 : 1
+        offdbg = ws.kl + ws.ku + 1
         @info "Galerkin assembly: ndim=$(ws.ndim) nsol=$nsol kl=$(ws.kl) ldab=$(ws.ldab) |rhs|=$(norm(ws.rhs))"
         for ising in 0:msing
             for cell in ws.intvl[ising+1].cells
@@ -140,14 +141,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     # --- banded solve (gal.f) ---
     ws.sol .= ws.rhs
-    if ws.solver == "LU"
-        ctrl.verbose && @info "Galerkin LU banded factorization + solve"
-        gal_scaled_lu_solve!(ws.mat, ws.sol, ws.kl, ws.ku)
-    else
-        ctrl.verbose && @info "Galerkin Cholesky banded factorization + solve"
-        gal_zpbtrf!(ws.mat, ws.kl)
-        gal_zpbtrs!(ws.mat, ws.kl, ws.sol)
-    end
+    ws.solver = gal_banded_solve!(ws.mat, ws.sol, ws.kl, ws.ku, ctrl.gal_solver)
+    ctrl.verbose && @info "Galerkin banded solve: $(ws.solver)"
 
     # --- extract Δ′ from the small resonant coefficients (gal.f) ---
     delta = zeros(ComplexF64, nsol, 2 * msing)
@@ -358,18 +353,67 @@ function annotate_galerkin!(out_h5)
     return nothing
 end
 
-# Lower-band Hermitian Cholesky, unscaled, as rdcon gal.f: zpbtrf('L') then zpbtrs('L').
-# LinearAlgebra.LAPACK has no pbtrf!/pbtrs! wrapper, so call LAPACK directly.
+"""
+    gal_banded_solve!(mat, sol, kl, ku, solver) -> String
+
+Solve the full-band system `mat` (LAPACK `gbtrf` storage) in place of `sol` and return the
+solver used. `"auto"` tries `gal_cholesky_solve!` and falls back to `gal_scaled_lu_solve!` when
+the matrix is not Hermitian positive definite; `"cholesky"` errors instead of falling back.
+"""
+function gal_banded_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int, solver::String)
+    if solver != "LU"
+        gal_cholesky_solve!(mat, sol, kl, ku) && return "cholesky"
+        solver == "cholesky" && error("gal_solver=\"cholesky\": the Galerkin matrix is not Hermitian positive definite; use \"auto\" or \"LU\"")
+    end
+    gal_scaled_lu_solve!(mat, sol, kl, ku)
+    return "LU"
+end
+
+"""
+    gal_cholesky_solve!(mat, sol, kl, ku) -> Bool
+
+Banded Cholesky solve of the full-band system `mat`, leaving `mat` untouched. Rows that are
+identity rows (Dirichlet DOFs: axis, fixed or coil edge) have their columns moved to the
+right-hand side, which keeps the system Hermitian. Returns `false`, with `sol` unchanged, when
+the remaining matrix is not Hermitian (to 1e-12 of its largest entry) or not positive definite.
+"""
+function gal_cholesky_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int)
+    n = size(mat, 2)
+    off = kl + ku + 1
+    a(i, j) = mat[off+i-j, j]
+    band(i) = max(1, i - kl):min(n, i + ku)
+    fixed = [all(j == i ? a(i, j) == 1 : iszero(a(i, j)) for j in band(i)) for i in 1:n]
+    tol = 1e-12 * maximum(abs, mat)
+    for j in 1:n, i in (j+1):min(n, j + kl)
+        fixed[i] || fixed[j] || abs(a(i, j) - conj(a(j, i))) <= tol || return false
+    end
+    ab = zeros(ComplexF64, kl + 1, n)
+    for j in 1:n, i in j:min(n, j + kl)
+        ab[1+i-j, j] = fixed[i] || fixed[j] ? (i == j ? one(ComplexF64) : zero(ComplexF64)) : a(i, j)
+    end
+    gal_zpbtrf!(ab, kl) || return false
+    x = copy(sol)
+    for c in 1:n
+        fixed[c] || continue
+        for r in band(c)
+            r == c || fixed[r] || (@views x[r, :] .-= a(r, c) .* x[c, :])
+        end
+    end
+    gal_zpbtrs!(ab, kl, x)
+    sol .= x
+    return true
+end
+
+# Lower-band Hermitian Cholesky as rdcon gal.f: zpbtrf('L') then zpbtrs('L'). LinearAlgebra.LAPACK
+# has no pbtrf!/pbtrs! wrapper, so call LAPACK directly. Returns false if not positive definite.
 function gal_zpbtrf!(AB::Matrix{ComplexF64}, kd::Int)
     info = Ref{LinearAlgebra.BlasInt}()
     ccall((LinearAlgebra.BLAS.@blasfunc(zpbtrf_), LinearAlgebra.libblastrampoline), Cvoid,
         (Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt},
             Ref{LinearAlgebra.BlasInt}, Clong),
         'L', size(AB, 2), kd, AB, max(1, stride(AB, 2)), info, 1)
-    # gal.f ignores info; a non-positive-definite matrix would leave a partial factor and a wrong Δ′.
-    info[] > 0 && error("gal_solver=\"cholesky\": Galerkin matrix is not positive definite (zpbtrf info=$(info[])); use gal_solver=\"LU\"")
-    LAPACK.chklapackerror(info[])
-    return AB
+    LAPACK.chklapackerror(min(info[], 0))
+    return info[] == 0
 end
 
 function gal_zpbtrs!(AB::Matrix{ComplexF64}, kd::Int, B::AbstractVecOrMat{ComplexF64})

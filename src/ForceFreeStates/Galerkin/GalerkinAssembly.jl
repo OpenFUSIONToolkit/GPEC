@@ -359,15 +359,13 @@ end
 """
     gal_assemble_mat!(ws, mpert)
 
-Scatter every cell's `mat`/`emat`/`ediag` into the banded global matrix `ws.mat`. Port of
-`gal_assemble_mat` (gal.f). Supports both `"LU"` (full band, `offset = kl+ku+1`) and
-`"cholesky"` (lower band only, `offset = 1`).
+Scatter every cell's `mat`/`emat`/`ediag` into the full-band global matrix `ws.mat`
+(`offset = kl+ku+1`). Port of `gal_assemble_mat` (gal.f).
 """
 function gal_assemble_mat!(ws::GalWorkspace, mpert::Int)
     np = ws.np
     msing = length(ws.intvl) - 1
-    lu = ws.solver == "LU"
-    offset = lu ? ws.kl + ws.ku + 1 : 1
+    offset = ws.kl + ws.ku + 1
 
     for ising in 0:msing
         for cell in ws.intvl[ising+1].cells
@@ -377,24 +375,14 @@ function gal_assemble_mat!(ws::GalWorkspace, mpert::Int)
                 # nonresonant stiffness
                 for jp in 0:np, jpert in 1:mpert
                     j = cell.map[jpert, jp+1]
-                    if lu
-                        ws.mat[offset+i-j, j] += cell.mat[ipert, jpert, ip+1, jp+1]
-                    elseif j <= i
-                        ws.mat[offset+i-j, j] += cell.mat[ipert, jpert, ip+1, jp+1]
-                    end
+                    ws.mat[offset+i-j, j] += cell.mat[ipert, jpert, ip+1, jp+1]
                 end
                 # resonant coupling (res/ext only)
                 if res
                     j = cell.emap
                     e = cell.emat[ipert, ip+1]
-                    if lu
-                        ws.mat[offset+i-j, j] += e
-                        ws.mat[offset+j-i, i] += conj(e)
-                    elseif j < i
-                        ws.mat[offset+i-j, j] += e
-                    elseif j > i
-                        ws.mat[offset+j-i, i] += conj(e)
-                    end
+                    ws.mat[offset+i-j, j] += e
+                    ws.mat[offset+j-i, i] += conj(e)
                 end
             end
             if res
@@ -452,14 +440,12 @@ including its full three-way edge branch (rpec count `ncoil = ws.nsol - 2*msing`
 `wv_edge` is `nothing` for the rpec and fixed cases.
 """
 function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
-    chol = ws.solver == "cholesky"
     msing = length(ws.intvl) - 1
     ncoil = ws.nsol - 2 * msing
 
     # axis u(0): first cell of interval 0, Hermite value DOF ip=0 (Julia index 1)
     cell = ws.intvl[1].cells[1]
     cell.mat[:, :, 1, :] .= 0
-    chol && (cell.mat[:, :, :, 1] .= 0)
     for idx in 1:mpert
         cell.mat[idx, idx, 1, 1] = 1
     end
@@ -468,14 +454,7 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
     cell = ws.intvl[msing+1].cells[ws.nx]
     if ncoil > 0
         # rpec: identity edge + unit coil sources (gal.f)
-        # Cholesky also zeroes the edge column, so first lift it into the coil RHS: rhs_I -= A_IB·e_k.
-        if chol
-            for k in 1:mpert, ip in 1:3, ipert in 1:mpert
-                ws.rhs[cell.map[ipert, ip], 2 * msing + k] -= cell.mat[ipert, k, ip, 4]
-            end
-        end
         cell.mat[:, :, 4, :] .= 0
-        chol && (cell.mat[:, :, :, 4] .= 0)
         for idx in 1:mpert
             cell.mat[idx, idx, 4, 4] = 1
         end
@@ -488,7 +467,6 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
     else
         # fixed boundary: identity edge (gal.f)
         cell.mat[:, :, 4, :] .= 0
-        chol && (cell.mat[:, :, :, 4] .= 0)
         for idx in 1:mpert
             cell.mat[idx, idx, 4, 4] = 1
         end
