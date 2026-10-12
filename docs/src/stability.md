@@ -280,11 +280,34 @@ response calculation to the region inside it.
 GPEC locates that point with a scan of the rational surfaces of each toroidal mode number in
 the run; for multi-`n` runs the innermost overlap point, over all `n`, is the one used. Each surface gets a layer solve from the kinetic profiles, and its
 diffusive-resistive width (Fitzpatrick 2025, Eq. 100) is converted to a normalized-flux width
-so it can be compared with the spacing between neighbouring surfaces. Surfaces beyond the
-equilibrium grid are located by extrapolating the separatrix law `q ∝ −ln(1 − ψ)` fitted to
-the outer knots; an equilibrium whose edge q does not follow that law (a limited plasma) is
-not extrapolated. The cut is placed at the last surface before two adjacent layers first
-touch.
+so it can be compared with the spacing between neighbouring surfaces. The cut is placed at the
+last surface before two adjacent layers first touch.
+
+Surfaces beyond the equilibrium grid are located on the logarithmic divergence of q at the
+separatrix, taken from the equilibrium's own poloidal flux rather than fitted. Each X-point on
+the last closed flux surface contributes one term,
+
+```math
+q(\psi) = q_K + \sum_i A_i \ln\frac{\psi_{X_i} - \psi_K}{\psi_{X_i} - \psi},
+\qquad A_i = \frac{F}{2\pi R_{X_i}\sqrt{-\det H_i}},
+```
+
+where ``\psi_{X_i}`` is the flux at the saddle, ``H_i`` the Hessian of the poloidal flux there,
+``F = R B_\phi``, and ``q_K`` the traced q on the outermost grid surface ``\psi_K``. One term
+describes a single null and two a double null, connected or not. The X-points are found by
+following each minimum of the poloidal field along the outermost surface to the saddle it leads
+to, so nulls the closed surface does not pass (in a divertor leg, beside a coil) are never
+candidates. The law is used only if it reproduces the traced shear over the outer knots, and a
+plasma with no X-point on its boundary (a limited plasma) is not extrapolated. Divertors with a
+second null beside the primary one or on the leg (snowflake, x-point target) are not modelled.
+
+The X-point flux need not coincide with the equilibrium's boundary: a reconstruction that places
+its boundary slightly inside the separatrix has finite q at ``\psi = 1``, and rational surfaces
+between that boundary and the X-point lie in the real plasma but outside the equilibrium GPEC
+holds. The scan places only the first of them, to judge whether the outermost surface inside is
+clean, and scores it only when the kinetic profiles extend that far. `psihigh` remains the upper
+limit throughout: the overlap point can only narrow the domain, and when no overlap can be
+established the domain keeps its requested limit.
 
 The scan takes its kinetic profiles from the `[SLAYER]` `profile_file`, through the same control
 and loader the SLAYER analysis uses, so both see the same profiles, the same HDF5 group and the

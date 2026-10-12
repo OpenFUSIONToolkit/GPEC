@@ -57,7 +57,7 @@ const CORE_MODEL_PSI_MAX = 0.03
 const EDGE_MODEL_PSI_MIN = 0.9
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
-# --- shared separatrix edge q-law -------------------------------------------------------------
+# --- edge q-law gate ----------------------------------------------------------------------------
 # Minimum knots in the edge band before a fit is attempted.
 const EDGE_FIT_MIN_KNOTS = 4
 # Weak absolute backstop against a fit that describes nothing at all. It is deliberately not a
@@ -90,8 +90,10 @@ end
         -> nothing | (; A, q_bar, u_bar, n_knots, r2_log, r2_linear)
 
 Least-squares fit of the separatrix edge law `q = q̄ + A·(ln(1−ψ) − ū)` over the equilibrium's
-outer knots — the single shared statement of that model, used both by the grid-refinement edge
-density floor and by the resistive-layer overlap scan's out-of-grid surface search.
+outer knots. It gates the grid-refinement edge density floor, which needs only to know whether q
+diverges at the edge; it does not locate anything. Placing surfaces beyond the grid is
+[`separatrix_q_law`](@ref), which takes the divergence from the X-point(s) instead of assuming
+it sits at ψ = 1.
 
 Returns `nothing` when the diverging model does **not** describe this equilibrium's edge, so a
 plasma with finite edge q is never extrapolated as if q blew up:
@@ -143,15 +145,7 @@ function edge_q_law(equil::PlasmaEquilibrium;
     return (A=A, q_bar=q_bar, u_bar=u_bar, n_knots=length(band), r2_log=r2_log, r2_linear=r2_linear)
 end
 
-"""
-ψ at which the edge law reaches `q_target`; closed form, no root-finding needed.
-"""
-edge_q_law_psi(fit, q_target::Real) = 1.0 - exp(fit.u_bar + (q_target - fit.q_bar) / fit.A)
 
-"""
-dq/dψ from the edge law: q = q̄ + A·ln(1−ψ) + const ⇒ dq/dψ = −A/(1−ψ).
-"""
-edge_q_law_dqdpsi(fit, psi::Real) = -fit.A / (1.0 - psi)
 # Rational-surface bracketing (Δ′ robustness). The ideal-MHD Δ′ asymptotic matching samples the
 # cubic equilibrium splines' 2nd/3rd derivatives across each rational ψ_s over the matching stencil
 # [ψ_s − dpsi, ψ_s + dpsi], dpsi = singfac_min/|n·q′|. A cubic 3rd derivative is piecewise constant

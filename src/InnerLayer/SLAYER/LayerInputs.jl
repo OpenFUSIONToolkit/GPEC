@@ -83,13 +83,15 @@ derivatives are analytic — no label carries a finite-difference stencil.
     implementation divides it by 2π to form `g`.
     Defined from flux alone, it carries no circular-cross-section assumption,
     and its derivative `dr/dψ ∝ q` grows toward a separatrix where the
-    geometric labels' `da/dψ` collapses.
+    geometric labels' `da/dψ` collapses. Beyond the ψ grid the q spline is a
+    cubic extrapolation that does not follow that growth, so `q_beyond`, a
+    callable of ψ, supplies q there when the caller knows it.
 
 On shaped equilibria the labels agree at low-q surfaces and diverge strongly
 near the edge, where the slab-layer matching is label-ambiguous regardless of
 choice. The label is selected programmatically; it is not exposed via TOML.
 """
-function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
+function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0, q_beyond=nothing)
     theta_f = Float64(theta)
 
     _flux_r, _flux_dr = if rs_method === :flux
@@ -103,8 +105,9 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
         Phi = collect(Float64, cumulative_integrate(cubic_interp(xs_f, qg)))
         r_knots = sqrt.(max.(2 .* psiof .* Phi ./ b0f, 0.0))
         rspl = cubic_interp(xs_f, r_knots; extrap=ExtendExtrap())
+        _q_at(ψ) = (q_beyond !== nothing && ψ > xs_f[end]) ? Float64(q_beyond(ψ)) : Float64(equil.profiles.q_spline(ψ))
         (ψ -> Float64(rspl(Float64(ψ))),
-            ψ -> psiof * Float64(equil.profiles.q_spline(Float64(ψ))) /
+            ψ -> psiof * _q_at(Float64(ψ)) /
                  (b0f * _g_at(Float64(ψ)) * max(Float64(rspl(Float64(ψ))), eps())))
     else
         (nothing, nothing)
@@ -230,6 +233,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     bt=nothing,
     R0=nothing,
     rs_method::Symbol=:midplane,
+    q_beyond=nothing,
     mu_i::Real=2.0,
     zeff=1.0,
     z_i::Real=1.0,
@@ -256,7 +260,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             Float64(bt(ψ))
         end
 
-    _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta)
+    _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
 
     # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
     # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode

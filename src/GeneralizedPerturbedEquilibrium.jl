@@ -582,7 +582,8 @@ end
 
 # Run the resistive-layer overlap scan for each toroidal mode number of the run and return the
 # binding one, or `nothing` when there are no [SLAYER] profiles. Physics refusals (a surface that
-# cannot be scored, a limited edge) are handled inside the scan and recorded in its `notes`.
+# cannot be scored, a limited edge) are handled inside the scan; what qualifies its verdict is
+# logged as a warning and the per-surface detail as info.
 function _layer_overlap_scan(overlap_inputs, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     overlap_inputs === nothing && return nothing
     # Eq. (100) is not covariant -- it is anchored to the toroidal-flux label of the paper's
@@ -594,6 +595,14 @@ function _layer_overlap_scan(overlap_inputs, intr::ForceFreeStatesInternal, equi
             resistivity_model=overlap_inputs.resistivity_model, lnLambda_form=overlap_inputs.lnLambda_form)
         for n in intr.nlow:intr.nhigh
     ]
+    for (n, scan) in zip(intr.nlow:intr.nhigh, scans)
+        for msg in scan.caveats
+            @warn "Layer-overlap scan (n = $n): $msg"
+        end
+        for msg in scan.notes
+            @info "Layer-overlap scan (n = $n): $msg"
+        end
+    end
     return _binding_overlap(scans)
 end
 
