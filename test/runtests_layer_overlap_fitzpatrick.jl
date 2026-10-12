@@ -225,6 +225,47 @@ end
     @test binding([s_none, mkscan(nothing)]) === s_none
     @test binding([s1]) === s1
 
+    # The scan must see the run's own plasma: every [SLAYER] setting the layer width depends on
+    # reaches it, and changing one changes the widths.
+    trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
+    slayer_section = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))["SLAYER"]
+    slayer_inputs(over) = Dict{String,Any}("SLAYER" => merge(slayer_section, over))
+    overlap_inputs(over; dir=trunc_dir) = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(slayer_inputs(over), dir)
+    oi = overlap_inputs(Dict("mu_i" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
+    @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
+
+    # Z_eff(psi) comes from the kinetic file's own n_i/n_e with the [SLAYER] impurity charge.
+    kin_path = joinpath(trunc_dir, slayer_section["profile_file"])
+    kin = Equilibrium.read_kinetic_file(kin_path)
+    j = length(kin.psi) ÷ 2
+    @test oi.zeff(kin.psi[j]) ≈ 6.0 - kin.n_i[j] / kin.n_e[j] * 5.0
+    @test overlap_inputs(Dict("zimp" => 10.0)).zeff(kin.psi[j]) ≈ 10.0 - kin.n_i[j] / kin.n_e[j] * 9.0
+    @test 1.0 < oi.zeff(kin.psi[j]) < 6.0
+    # A zeff profile supplied in the file overrides the n_i/n_e closure; a file with neither falls
+    # back to the scalar [SLAYER] zeff.
+    mktempdir() do tmp
+        own = fill(3.2, length(kin.psi))
+        base = (; psi=kin.psi, n_e=kin.n_e, T_i=kin.T_i, T_e=kin.T_e, omega_E=kin.omega_E, chi_e=kin.chi_e, chi_phi=kin.chi_phi)
+        Equilibrium.write_kinetic_h5(joinpath(tmp, "own_zeff.h5"), Equilibrium.KineticProfileData(; base..., n_i=kin.n_i, zeff=own))
+        @test Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5")).zeff == own
+        @test overlap_inputs(Dict("profile_file" => "own_zeff.h5", "zimp" => 10.0, "zeff" => 2.5); dir=tmp).zeff(kin.psi[j]) ≈ 3.2
+        Equilibrium.write_kinetic_h5(joinpath(tmp, "no_ni.h5"), Equilibrium.KineticProfileData(; base...))
+        @test overlap_inputs(Dict("profile_file" => "no_ni.h5", "zeff" => 2.5); dir=tmp).zeff == 2.5
+    end
+
+    widths(over) = GeneralizedPerturbedEquilibrium._layer_overlap_scan(overlap_inputs(over), _fresh(), equil).width_dr
+    w_ref = widths(Dict{String,Any}())
+    @test !isempty(w_ref) && all(isfinite, w_ref)
+    for over in (Dict("zimp" => 10.0), Dict("resistivity_model" => "spitzer"), Dict("lnLambda_form" => "sauter"))
+        @test all(.!isapprox.(widths(over), w_ref; rtol=1e-3))
+    end
+    # Ion mass and field strength cancel between the Lundquist number and the ion sound radius in
+    # Eq. (100), so the criterion width does not depend on them; the scalar zeff is only a
+    # fallback, so it is inert while the file carries n_i.
+    for over in (Dict("mu_i" => 1.0), Dict("bt" => 1.0), Dict("zeff" => 3.0))
+        @test all(isapprox.(widths(over), w_ref; rtol=1e-10))
+    end
+
     # The no-surfaces path must return an empty scan with a note, not throw (m_max=0 with
     # extrapolation off forces it deterministically).
     @testset "resistive_layer_overlap: empty surface list" begin
@@ -240,4 +281,71 @@ end
         @test scan.psihigh === nothing && scan.first_overlap === nothing
         @test any(contains("no q ="), scan.notes)
     end
+end
+
+# Surfaces beyond the grid are placed on the X-point law. Checked against the equilibrium's own
+# traced q: a law built on a short grid must land where a longer grid actually finds the surfaces.
+@testset "Separatrix q-law" begin
+    using GeneralizedPerturbedEquilibrium.Equilibrium: separatrix_q_law, separatrix_q, separatrix_q_psi, separatrix_q_dqdpsi
+    using GeneralizedPerturbedEquilibrium.ForceFreeStates: ForceFreeStatesInternal
+
+    # The functions themselves, on a two-X-point law with known parameters.
+    law2 = (psi_x=[1.0002, 1.01], A=[0.5, 0.3], psi_anchor=0.995, q_anchor=4.3)
+    @test separatrix_q(law2, law2.psi_anchor) == law2.q_anchor
+    for q_target in (4.5, 6.0, 9.0)
+        psi_q = separatrix_q_psi(law2, q_target)
+        @test law2.psi_anchor < psi_q < law2.psi_x[1]
+        @test separatrix_q(law2, psi_q) ≈ q_target rtol = 1e-10
+    end
+    @test separatrix_q_dqdpsi(law2, 0.999) ≈ 0.5 / (1.0002 - 0.999) + 0.3 / (1.01 - 0.999)
+    @test separatrix_q_psi(law2, 4.3) === nothing            # not beyond the anchor
+    @test separatrix_q_psi(law2, 4.0) === nothing
+    @test separatrix_q_psi(law2, 40.0) === nothing           # closer to the separatrix than psi_gap
+    @test separatrix_q_psi(law2, 40.0; psi_gap=1e-40) !== nothing
+
+    trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
+    trunc_inputs = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
+    diiid(psihigh) = Equilibrium.setup_equilibrium(
+        Equilibrium.EquilibriumConfig(merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh)), trunc_dir), nothing)
+    long, short = diiid(0.9999), diiid(0.995)
+
+    # One lower X-point, 1e-4 outside this file's boundary; the law reproduces the traced shear.
+    law = separatrix_q_law(short)
+    @test law !== nothing
+    @test law.psi_x[1] ≈ 1.0001 atol = 2e-5
+    @test law.A[1] ≈ 0.640 rtol = 1e-2
+    @test law.z_x[1] < 0
+    @test law.shear_ratio ≈ 1.0 atol = 0.05
+    @test separatrix_q_law(short; shear_ratio=1.001) === nothing
+
+    # Anchored at psi = 0.995, it must place q = 7 and q = 8 where the grid to 0.9999 traces them.
+    for q_target in (7.0, 8.0)
+        psi_traced = find_zero(p -> long.profiles.q_spline(p) - q_target, (0.99, 0.9999), Bisection())
+        gap_traced = law.psi_x[1] - psi_traced
+        @test law.psi_x[1] - separatrix_q_psi(law, q_target) ≈ gap_traced rtol = 0.05
+    end
+
+    # The scan's overlap point must therefore not depend on where the grid stops, and no
+    # rational may fall between the in-grid search and the law.
+    oi = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(trunc_inputs, trunc_dir)
+    one_n() = (i = ForceFreeStatesInternal(); i.nlow = 1; i.nhigh = 1; i)
+    scan_long = GeneralizedPerturbedEquilibrium._layer_overlap_scan(oi, one_n(), long)
+    scan_short = GeneralizedPerturbedEquilibrium._layer_overlap_scan(oi, one_n(), short)
+    @test scan_short.psihigh ≈ scan_long.psihigh atol = 5e-5
+    @test scan_short.first_overlap == scan_long.first_overlap
+    @test all(diff(scan_short.m) .== 1) && all(diff(scan_long.m) .== 1)
+    @test any(scan_short.extrapolated) && any(occursin("separatrix law", note) for note in scan_short.caveats)
+    # psihigh stays the upper limit: at most one rational is placed past the equilibrium boundary,
+    # and the recommendation is never beyond it.
+    for scan in (scan_long, scan_short)
+        @test count(note -> occursin("skipped", note), scan.notes) <= 1
+        @test scan.psihigh < 1.0
+    end
+
+    # No 2D flux, no X-point: an analytic equilibrium is not extrapolated.
+    sol_dir = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
+    sol_inputs = TOML.parsefile(joinpath(sol_dir, "gpec.toml"))
+    solovev = Equilibrium.setup_equilibrium(
+        Equilibrium.EquilibriumConfig(sol_inputs["Equilibrium"], sol_dir), Equilibrium.SolovevConfig(sol_inputs["SOL_INPUT"]))
+    @test separatrix_q_law(solovev) === nothing
 end
