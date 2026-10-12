@@ -190,6 +190,80 @@
                     @test abs(evalpoly(u, (d, c, b, a))) < 1e-9 * max(1.0, abs(u)^3)
                 end
             end
+
+            # Three real roots, two nearly coincident: the discriminant cancels to rounding noise
+            # and a branch trusting its sign drops two roots. Built from the roots, so exact.
+            for (x1, x2, x3) in ((0.37, 0.37000001, 0.91), (0.2, 0.8, 0.80000001), (-1.5, 0.5, 0.5 + 1e-7))
+                a = 1.0
+                b = -(x1 + x2 + x3)
+                c = x1 * x2 + x1 * x3 + x2 * x3
+                d = -x1 * x2 * x3
+                n, r1, r2, r3 = KF._real_cubic_roots(a, b, c, d)
+                @test n == 3
+                got = filter(isfinite, [r1, r2, r3][1:min(n, 3)])
+                # A near-double root is only determined to about its own separation, so the
+                # match tolerance is loose; what matters is that nothing was dropped.
+                for x in (x1, x2, x3)
+                    @test any(abs.(got .- x) .< 1e-6)
+                end
+                for u in got
+                    @test abs(evalpoly(u, (d, c, b, a))) < 1e-12
+                end
+            end
+        end
+
+        @testset "near-double quadratic roots" begin
+            # b² − 4ac cancels to rounding noise for a near-double root; a branch trusting its
+            # sign returns no roots at all. Built from the roots, so exact.
+            for (x1, x2) in ((0.5, 0.5 + 1e-9), (0.5, 0.5), (-0.3, -0.3 + 1e-10), (2.0, 2.0 + 1e-8))
+                a = 1.0
+                b = -(x1 + x2)
+                c = x1 * x2
+                n, r1, r2, _ = KF._quadratic_real_roots(a, b, c)
+                @test n == 2
+                for x in (x1, x2)
+                    @test min(abs(r1 - x), abs(r2 - x)) < 1e-6
+                end
+                for u in (r1, r2)
+                    @test abs(evalpoly(u, (c, b, a))) < 1e-12
+                end
+            end
+            # Well-separated roots and the degenerate forms are unaffected.
+            sep = KF._quadratic_real_roots(1.0, -3.0, 2.0)
+            @test sep[1] == 2 && sort([sep[2], sep[3]]) == [1.0, 2.0]
+            @test KF._quadratic_real_roots(0.0, 2.0, -4.0)[1:2] == (1, 2.0)
+            @test KF._quadratic_real_roots(1.0, 0.0, 1.0)[1] == 0
+        end
+
+        @testset "two stationary points in one cell" begin
+            # A coarse grid puts both stationary points of an interval inside one cell, so the
+            # crossing is solved between them, not between knots. Checked to occur before asserting.
+            xs2 = collect(range(0.0, 1.0; length=11))
+            B2 = @. 2.0 + 0.45 * cos(2pi * xs2) + 0.20 * cos(6pi * xs2)
+            B2[end] = B2[1]
+            Bv2 = cubic_interp(xs2, B2; bc=PeriodicBC())
+            bf2 = KF._surface_b_field(Bv2)
+            cells = [KF._cell_index(bf2.knot, t) for t in bf2.theta]
+            shared = findfirst(i -> cells[i] == cells[i+1], 1:length(cells)-1)
+            @test shared !== nothing
+            if shared !== nothing
+                i = shared
+                blo, bhi = minmax(bf2.bval[i], bf2.bval[i+1])
+                buf = Float64[]
+                hints = ones(Int, length(bf2.theta) + 1)
+                for btarget in range(blo, bhi; length=400)[2:end-1]
+                    lmda = bo / btarget
+                    roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf2, lmda, bo))
+                    ref = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(Bv2, lmda, bo, θ), 0.0, 1.0); rev=true)
+                    @test length(roots) == length(ref)
+                    # The crossing inside the shared cell lies strictly between the two
+                    # stationary points that bound it.
+                    @test any(bf2.theta[i] < r < bf2.theta[i+1] for r in roots)
+                    for r in roots
+                        @test abs(KF._vpar_from_spline(Bv2, lmda, bo, r)) < 1e-14
+                    end
+                end
+            end
         end
 
         @testset "agrees with the adaptive scan across λ" begin

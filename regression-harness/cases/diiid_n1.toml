@@ -427,7 +427,7 @@ order = 74
 # in-plane components of a whole n=1-phased array vanish by symmetry, so the norms track the
 # vertical shift and axial tilt that survive.
 [quantities.ef_delta_nominal]
-h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_nominal"
+h5path = "ErrorFields/CoilSensitivities/DominantMode/delta_as_designed"
 type = "complex_vector"
 extract = "abs_first"
 label = "|delta_nominal| of coil set 1"
@@ -435,7 +435,7 @@ noise_threshold = 1e-10
 order = 86
 
 [quantities.ef_shift_sensitivity]
-h5path = "ErrorFields/CoilSensitivities/DominantMode/shift_sensitivity"
+h5path = "ErrorFields/CoilSensitivities/DominantMode/shift_sensitivity_per_m"
 type = "complex_vector"
 extract = "norm"
 label = "||ddelta/d(shift)|| over coil sets"
@@ -443,7 +443,7 @@ noise_threshold = 1e-10
 order = 87
 
 [quantities.ef_tilt_sensitivity]
-h5path = "ErrorFields/CoilSensitivities/DominantMode/tilt_sensitivity"
+h5path = "ErrorFields/CoilSensitivities/DominantMode/tilt_sensitivity_per_deg"
 type = "complex_vector"
 extract = "norm"
 label = "||ddelta/d(tilt)|| over coil sets"
