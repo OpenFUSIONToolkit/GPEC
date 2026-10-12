@@ -625,8 +625,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             gse_data = Array{Float32,3}(undef, mpsi + 1, mtheta + 1, 7)
             for ipsi in 0:mpsi
                 for itheta in 0:mtheta
-                    gse_data[ipsi+1, itheta+1, 1] = Float32(flux.ys[itheta+1])
-                    gse_data[ipsi+1, itheta+1, 2] = Float32(flux.xs[ipsi+1])
+                    gse_data[ipsi+1, itheta+1, 1] = Float32(equil.rzphi_ys[itheta+1])
+                    gse_data[ipsi+1, itheta+1, 2] = Float32(equil.rzphi_xs[ipsi+1])
                     gse_data[ipsi+1, itheta+1, 3] = Float32(flux_fs[ipsi+1, itheta+1, 1])
                     gse_data[ipsi+1, itheta+1, 4] = Float32(flux_fs[ipsi+1, itheta+1, 2])
                     gse_data[ipsi+1, itheta+1, 5] = Float32(source[ipsi+1, itheta+1])
@@ -639,7 +639,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
         # Write integrated error criterion
         h5open(joinpath(dirname(equil.config.eq_filename), "gsei.h5"), "w") do file
-            file["xs"] = Float32.(flux.xs)
+            file["xs"] = Float32.(equil.rzphi_xs)
             file["term"] = Float32.(term)
             file["totali"] = Float32.(totali)
             file["errori"] = Float32.(errori)
