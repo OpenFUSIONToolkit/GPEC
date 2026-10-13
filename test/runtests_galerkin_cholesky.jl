@@ -52,6 +52,14 @@ using LinearAlgebra
     nonhermitian = copy(H)
     nonhermitian[6, 4] += 0.1
     @test check(dirichlet(nonhermitian), "auto") == "LU"
+    complexdiag = copy(H)
+    complexdiag[5, 5] += 0.5im
+    @test check(dirichlet(complexdiag), "auto") == "LU"
+    # a small block's asymmetry counts against its own scale, not the largest entry
+    D = Diagonal([j <= n ÷ 2 ? 1e6 : 1e-6 for j in 1:n])
+    graded = D * H * D
+    graded[n-2, n-3] *= 1.01
+    @test FFS.gal_banded_solve!(fullband(dirichlet(graded)), copy(rhs), kl, kl, "auto") == "LU"
 
     # the lower-band factor equals the dense Cholesky factor
     ab = zeros(ComplexF64, kl + 1, n)

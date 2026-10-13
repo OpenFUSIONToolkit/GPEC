@@ -6,7 +6,7 @@
 #   gal_gauss_quad    (gal.f) nonresonant stiffness via Gauss-Lobatto quadrature
 #   gal_extension     (gal.f) extension-cell matrix/rhs (big-solution driving + surface terms)
 #   gal_resonant      (gal.f)   resonant-cell integral (QuadGK in place of Fortran LSODE)
-#   gal_assemble_mat  (gal.f)   scatter cell blocks into the banded global matrix (LU/Cholesky)
+#   gal_assemble_mat  (gal.f)   scatter cell blocks into the full-band global matrix
 #   gal_assemble_rhs  (gal.f)   scatter cell rhs into the global RHS
 #   gal_set_boundary  (gal.f) axis identity + edge (vacuum or fixed) BCs
 #
