@@ -1,6 +1,5 @@
 using Statistics
 
-
 @testset "Equilibrium Unit Tests" begin
 
     # --- Directory Configuration ---
