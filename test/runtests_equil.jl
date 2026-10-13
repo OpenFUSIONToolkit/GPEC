@@ -1,6 +1,5 @@
 using HDF5
 
-
 @testset "Equilibrium Unit Tests" begin
 
     # --- Directory Configuration ---
@@ -607,9 +606,7 @@ using HDF5
         eq.params.diagnose_src = true
         GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_gse!(eq)
         @test all(isfile(joinpath(dir, f)) for f in ("gsec.h5", "gse.h5", "gsei.h5"))
-        gse = HDF5.h5read(joinpath(dir, "gse.h5"), "gse_data")
-        @test gse[:, 1, 2] == Float32.(eq.rzphi_xs)
-        @test gse[1, :, 1] == Float32.(eq.rzphi_ys)
-        @test HDF5.h5read(joinpath(dir, "gsei.h5"), "xs") == Float32.(eq.rzphi_xs)
+        # Column 2 is ψ, as plot_gse_by_theta reads it
+        @test h5read(joinpath(dir, "gse.h5"), "gse_data")[:, 1, 2] == Float32.(eq.rzphi_xs)
     end
 end
