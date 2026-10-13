@@ -509,8 +509,8 @@ A container struct for inputs to the `inverse_run` function.
   - `ingest::EquilibriumIngest` - captured raw arrays for the `gpec.h5` rerun snapshot
     (an [`InverseIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
   - `psihigh_resolved::Float64` - outer flux limit the equilibrium is formed on; see
-    [`DirectRunInput`](@ref). `config.psihigh` clamped to the outermost input surface
-    (`resolve_psihigh!`); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
+    [`DirectRunInput`](@ref). For i-files and reruns, `config.psihigh` clamped to the outermost input
+    surface (`resolve_psihigh!`); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
 """
 mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig

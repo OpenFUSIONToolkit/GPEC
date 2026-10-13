@@ -48,9 +48,9 @@ const PROFILE_P_MISMATCH_WARN = 5e-2
 """
     integrate_profile_derivatives(xs, f, p, ffprime, pprime) -> Union{Nothing,NamedTuple}
 
-Rebuild F and P on the nodes `xs` of a normalized flux coordinate (0 at the axis, 1 at the
-boundary) by integrating the tabulated `ffprime` = d(F²/2)/dx and `pprime` = dP/dx inward from the
-boundary values of `f` and `p`:
+Rebuild F and P on the nodes `xs` of a normalized flux coordinate (0 at the axis) by integrating the
+tabulated `ffprime` = d(F²/2)/dx and `pprime` = dP/dx inward from the values of `f` and `p` at the
+last node (written x = 1 below):
 
     F²(x) = F(1)² − 2∫ₓ¹ FF′ dx,    P(x) = P(1) − ∫ₓ¹ P′ dx.
 
@@ -101,7 +101,7 @@ end
 """
     file_profiles(config, xs, f, p, ffprime, pprime) -> (f_nodes, p_nodes)
 
-F (as a magnitude) and P on the 1D nodes of a file-based direct equilibrium, from the arrays that
+F (as a magnitude) and P on the 1D nodes of a file-based equilibrium, from the arrays that
 `config.profile_source` selects. With `"derivatives"` the profiles come from
 `integrate_profile_derivatives`, and the tabulated values are used with a warning when
 that is not possible.

@@ -38,6 +38,8 @@ const mu0 = 4π * 1e-7
 
 # efit-family equilibrium kinds that share the separatrix-clamp / inversion handling.
 const EFIT_KINDS = ("efit", "efit_arclength", "efit_by_inversion")
+# TokaMaker/ldp inverse i-file kinds.
+const LDP_I_KINDS = ("ldp_i", "ifile")
 
 """
     AnalyticEqSpec
@@ -107,7 +109,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
-    elseif eq_type in ["ldp_i", "ifile"]
+    elseif eq_type in LDP_I_KINDS
         eq_input = resolve_psihigh!(read_ldp_i(eq_config))
     elseif haskey(ANALYTIC_EQ, eq_type)
         # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
