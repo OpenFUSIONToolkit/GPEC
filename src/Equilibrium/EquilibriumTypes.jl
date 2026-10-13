@@ -25,7 +25,7 @@ specified in the input.
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
   - `grid_type::String` - Grid type for flux surface discretization ("auto" — two-pass measured-curvature
     refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
-    inverse equilibria also "pow2", "rho" and "original" (the input file's own ψ nodes);
+    inverse equilibria also "rho" (uniform in √ψ) and "original" (the input file's own ψ nodes);
     "log_asymptotic" is a legacy alias for "auto")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Requested upper limit of normalized flux coordinate; the value the

@@ -171,17 +171,12 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
             mpsi = 128
         end
         sq_xs = [psilow + (psihigh - psilow) * (3(i / mpsi) - (i / mpsi)^3) / 2 for i in 0:mpsi]
-    elseif grid_type == "pow2"
-        if mpsi == 0
-            mpsi = 128
-        end
-        sq_xs = Utilities.powspace(psilow, psihigh, 2, mpsi + 1, "upper")[1, :]
     elseif grid_type == "rho"
         if mpsi == 0
             mpsi = 128
         end
-        # Uniform in √ψ from psihigh/(mpsi+1)² to psihigh; psilow is ignored (Fortran inverse.f)
-        sq_xs = [psihigh * i^2 / (mpsi + 1)^2 for i in 1:(mpsi+1)]
+        # Uniform in √ψ from psilow to psihigh
+        sq_xs = [(sqrt(psilow) + (sqrt(psihigh) - sqrt(psilow)) * i / mpsi)^2 for i in 0:mpsi]
     elseif grid_type in ("original", "orig")
         # The input's own ψ nodes, axis included; psilow/psihigh are ignored (Fortran inverse.f, which
         # takes the 1D input's nodes; they differ from the 2D ones only for efit_by_inversion)
@@ -195,7 +190,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     else
         error("Unsupported grid_type: $grid_type")
     end
-    # Floor node spacing on the fixed grids (ldp/pow1/pow2 pack the edge below the integration-noise
+    # Floor node spacing on the fixed grids (ldp/pow1 pack the edge below the integration-noise
     # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, an override
     # grid arrives already floored, and the original grid keeps the input's nodes.
     if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic", "original", "orig"))

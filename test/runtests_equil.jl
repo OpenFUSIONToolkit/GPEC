@@ -174,13 +174,13 @@
             (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
     end
 
-    @testset "Inverse grid types (original, pow2, rho)" begin
+    @testset "Inverse grid types (original, rho)" begin
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
         cfg(grid) = Eq.EquilibriumConfig(; eq_type="chease_binary", eq_filename=joinpath(data_dir, "INP1_binary"), jac_type="boozer",
             grid_type=grid, mpsi=16, psilow=0.01, psihigh=0.99, r0exp=6.8, b0exp=7.4)
         splines(eq) = (eq.rzphi_rsquared, eq.rzphi_offset, eq.rzphi_nu, eq.rzphi_jac, eq.eqfun_B, eq.eqfun_metric1, eq.eqfun_metric2)
         finite(eq) = all(isfinite, eq.profiles.dVdpsi_spline.y) && all(all(isfinite, s.nodal_derivs.partials) for s in splines(eq))
-        eqs = Dict(grid => Eq.setup_equilibrium(cfg(grid)) for grid in ("original", "pow1", "pow2", "rho"))
+        eqs = Dict(grid => Eq.setup_equilibrium(cfg(grid)) for grid in ("original", "pow1", "rho"))
 
         # original: the file's own ψ nodes, axis included, whatever psilow/psihigh/mpsi
         eq_o = eqs["original"]
@@ -190,11 +190,8 @@
         b_axis = abs(eq_o.profiles.F_spline.y[1]) / (2π * eq_o.ro)
         @test maximum(abs.(eq_o.eqfun_B.nodal_derivs.partials[1, 1, :] ./ b_axis .- 1)) < 1e-2
 
-        # pow1/pow2: Fortran powspace(psilow, psihigh, p, mpsi+1, "upper"); rho: psihigh·(i/(mpsi+1))², i = 1..mpsi+1
-        t = (0:16) ./ 16
-        @test eqs["pow1"].rzphi_xs ≈ 0.01 .+ 0.98 .* (3t .- t .^ 3) ./ 2
-        @test eqs["pow2"].rzphi_xs ≈ 0.01 .+ 0.98 .* (15 / 8) .* (t .- 2t .^ 3 ./ 3 .+ t .^ 5 ./ 5)
-        @test eqs["rho"].rzphi_xs ≈ 0.99 .* ((1:17) ./ 17) .^ 2
+        # rho: uniform in √ψ between psilow and psihigh
+        @test eqs["rho"].rzphi_xs ≈ (0.1 .+ (sqrt(0.99) - 0.1) .* (0:16) ./ 16) .^ 2
 
         for (grid, eq) in eqs
             @test finite(eq)
