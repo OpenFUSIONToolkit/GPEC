@@ -39,6 +39,8 @@ const mu0 = 4π * 1e-7
 
 # efit-family equilibrium kinds that share the separatrix-clamp / inversion handling.
 const EFIT_KINDS = ("efit", "efit_arclength", "efit_by_inversion")
+# eq_type names of the inverse i-file reader (`read_ldp_i`).
+const LDP_I_KINDS = ("ldp_i", "ifile")
 
 """
     AnalyticEqSpec
@@ -101,12 +103,15 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         eq_input = additional_input
         eq_input.config = eq_config
         eq_input.psihigh_resolved = eq_config.psihigh
+        resolve_psihigh!(eq_input)
     elseif eq_type in EFIT_KINDS
         eq_input = resolve_psihigh!(read_efit(eq_config))
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
+    elseif eq_type in LDP_I_KINDS
+        eq_input = resolve_psihigh!(read_ldp_i(eq_config))
     elseif haskey(ANALYTIC_EQ, eq_type)
         # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
         # Their parameters live in the embedded `[*_INPUT]` section and are passed in as the
@@ -488,6 +493,10 @@ end
 Diagnoses the Grad-Shafranov solution by computing the residual of the
 Grad-Shafranov equation across the grid and writing diagnostic data to HDF5 files.
 Performs the same function as equil_out_gse in the Fortran code.
+
+Returns `(; xs, ys, flux_x, flux_y, source, total, error, errori)` on the `rzphi` (ψ, θ) nodes: the two
+flux-divergence terms, the source, the residual `total = flux_x - flux_y + source`, `error = |total|` over
+the largest term on the grid, and `errori`, the magnitude of the θ-integrated residual on each surface.
 """
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
@@ -646,6 +655,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             file["errlogi"] = Float32.(errlogi)
         end
     end
+    return (; xs=equil.rzphi_xs, ys=equil.rzphi_ys, flux_x=flux_fsx[:, :, 1], flux_y=flux_fsy[:, :, 2], source, total, error, errori=vec(errori))
 end
 
 end # module Equilibrium

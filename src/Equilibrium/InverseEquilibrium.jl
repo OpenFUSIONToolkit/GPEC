@@ -41,6 +41,21 @@ end
 
 
 
+"""
+    resolve_psihigh!(input::InverseRunInput) -> InverseRunInput
+
+Clamp `input.psihigh_resolved` to the outermost input surface (below ψ_N = 1 for an i-file that
+carries the LCFS bounds), warning when it moves. `config.psihigh` keeps the request.
+"""
+function resolve_psihigh!(input::InverseRunInput)
+    psi_edge = input.rz_in_xs[end]
+    if input.psihigh_resolved > psi_edge
+        @warn "psihigh = $(input.psihigh_resolved) exceeds the outermost input surface ψ_N = $psi_edge; clamped to it"
+        input.psihigh_resolved = psi_edge
+    end
+    return input
+end
+
 function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
     @info "Starting Inverse Equilibrium Processing"
     # Extract input parameters
@@ -209,6 +224,10 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     spl_fs = zeros(Float64, mtheta+1, 5)
     spl_post_buf = Vector{Float64}(undef, 5)   # scratch for post-SFL spline evaluation
 
+    # q: i-files use the field-line integral, as Fortran `inverse_run`; a tabulated q splined in ψ is
+    # inaccurate where edge surfaces are coarse (q ~ log(1-ψ)). Other inputs keep their input q (the
+    # field-line q is inaccurate in cylindrical LAR geometry).
+    q_from_geometry = config.eq_type in LDP_I_KINDS
     f_sq_in_buf = Vector{Float64}(undef, size(sq_in.y, 2))
     sq_in_hint = Ref(1)
     hint2d = (Ref(1), Ref(1))
@@ -280,11 +299,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         sq_fs[ipsi+1, 1] = f_sq_in_buf[1] * twopi
         sq_fs[ipsi+1, 2] = f_sq_in_buf[2]
         sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
-        # Use the input q profile directly (from LAR ODE or CHEASE), matching the
-        # Fortran `inverse_chease4_run` convention (sq%fs(ipsi,4) = sq_in%f(3)).
-        # The field-line-integration-based q formula (spl_fsi * F / (2*twopi*psio))
-        # is inaccurate for cylindrical LAR geometry.
-        sq_fs[ipsi+1, 4] = f_sq_in_buf[3]  # q from input profile
+        sq_fs[ipsi+1, 4] = q_from_geometry ? spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) : f_sq_in_buf[3]
     end
 
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
