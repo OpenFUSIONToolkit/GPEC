@@ -42,8 +42,8 @@ end
 """
     extrap_axis_row!(fs, xs, ks; me=3) -> fs
 
-Fill the axis row (`xs[1] == 0`) of `fs[:, :, k]` for each `k` in `ks`, extrapolating the next
-`me` surfaces in √ψ (∝ r), where the θ-dependent SFL and GSE terms are 0/0.
+Fill the axis row (`xs[1] == 0`, where the θ-dependent SFL and GSE terms are 0/0) of `fs[:, :, k]`
+for each `k` in `ks`, extrapolating from the next `me` surfaces in √ψ (∝ r).
 """
 function extrap_axis_row!(fs::Array{Float64,3}, xs::AbstractVector{Float64}, ks; me::Int=3)
     rho = repeat(sqrt.(xs[2:(me+1)]), 1, size(fs, 2))
@@ -175,11 +175,11 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         if mpsi == 0
             mpsi = 128
         end
-        # Uniform in √ψ from psilow to psihigh
+        # Uniform in √ψ from psilow to psihigh (Fortran's rho ignores psilow)
         sq_xs = [(sqrt(psilow) + (sqrt(psihigh) - sqrt(psilow)) * i / mpsi)^2 for i in 0:mpsi]
     elseif grid_type in ("original", "orig")
-        # The input's own ψ nodes, axis included; psilow/psihigh are ignored (Fortran inverse.f, which
-        # takes the 1D input's nodes; they differ from the 2D ones only for efit_by_inversion)
+        # The input's own ψ nodes; psilow and mpsi are ignored, psihigh still sets psilim (as Fortran,
+        # which takes the 1D input's nodes; they differ from these only for efit_by_inversion)
         sq_xs = copy(rz_in_xs)
         mpsi = length(sq_xs) - 1
     elseif grid_type == "uniform"
@@ -303,8 +303,8 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         end
         sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
     end
-    # An axis node (original grid) has r² = 0, where the SFL weights are 0/0: extrapolate it from the
-    # innermost surfaces as deta is above, θ-dependent fields in √ψ (∝ r) and dV/dψ in ψ.
+    # An axis node (ψ = 0) has r² = 0, where the SFL weights are 0/0: extrapolate it from the innermost
+    # surfaces as deta is above, θ-dependent fields in √ψ (∝ r) and dV/dψ in ψ.
     if sq_xs[1] == 0.0
         extrap_axis_row!(rzphi_fs, sq_xs, 2:4; me)
         sq_fs[1, 3] = inverse_extrap(reshape(sq_xs[2:(me+1)], :, 1), sq_fs[2:(me+1), 3:3], 0.0)[1]

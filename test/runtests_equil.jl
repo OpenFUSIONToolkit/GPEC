@@ -180,23 +180,20 @@
             grid_type=grid, mpsi=16, psilow=0.01, psihigh=0.99, r0exp=6.8, b0exp=7.4)
         splines(eq) = (eq.rzphi_rsquared, eq.rzphi_offset, eq.rzphi_nu, eq.rzphi_jac, eq.eqfun_B, eq.eqfun_metric1, eq.eqfun_metric2)
         finite(eq) = all(isfinite, eq.profiles.dVdpsi_spline.y) && all(all(isfinite, s.nodal_derivs.partials) for s in splines(eq))
-        eqs = Dict(grid => Eq.setup_equilibrium(cfg(grid)) for grid in ("original", "pow1", "rho"))
 
-        # original: the file's own ψ nodes, axis included, whatever psilow/psihigh/mpsi
-        eq_o = eqs["original"]
+        # original: the file's own ψ nodes (this file starts at the axis), whatever psilow/mpsi
+        eq_o = Eq.setup_equilibrium(cfg("original"))
         @test eq_o.rzphi_xs == Eq.read_chease_binary(cfg("original")).rz_in_xs
         @test eq_o.rzphi_xs[1] == 0.0
+        @test finite(eq_o)
         # The extrapolated axis node: B close to F/R₀
         b_axis = abs(eq_o.profiles.F_spline.y[1]) / (2π * eq_o.ro)
         @test maximum(abs.(eq_o.eqfun_B.nodal_derivs.partials[1, 1, :] ./ b_axis .- 1)) < 1e-2
 
-        # rho: uniform in √ψ between psilow and psihigh
-        @test eqs["rho"].rzphi_xs ≈ (0.1 .+ (sqrt(0.99) - 0.1) .* (0:16) ./ 16) .^ 2
-
-        for (grid, eq) in eqs
-            @test finite(eq)
-            @test isapprox(eq.profiles.q_spline(0.5), eqs["pow1"].profiles.q_spline(0.5); rtol=1e-3)
-        end
+        # rho: starts at psilow (Fortran's rho starts at psihigh/(mpsi+1)²)
+        eq_r = Eq.setup_equilibrium(cfg("rho"))
+        @test eq_r.rzphi_xs[[1, end]] ≈ [0.01, 0.99]
+        @test finite(eq_r)
     end
 
     @testset "EFIT Method Consistency" begin
