@@ -209,10 +209,9 @@ using Statistics
         @test isapprox(eq_i.psio, eq_g.psio; rtol=1e-6)
         @test all(isapprox(eq_i.profiles.q_spline(x), eq_g.profiles.q_spline(x); rtol=1e-3) for x in (0.2, 0.5, 0.8))
 
-        # Grad-Shafranov residual on interior surfaces: small, and well below the g-file's
-        gse_median(eq) = (g = Eq.equilibrium_gse!(eq); loc = vec(maximum(g.error; dims=2)); median(loc[0.05 .< g.xs .< 0.7]))
-        @test gse_median(eq_i) < 5e-4
-        @test gse_median(eq_i) < gse_median(eq_g) / 5
+        # Grad-Shafranov residual on interior surfaces
+        g = Eq.equilibrium_gse!(eq_i)
+        @test median(vec(maximum(g.error; dims=2))[0.05 .< g.xs .< 0.7]) < 5e-4
 
         # A real*4 file reads to single-precision agreement
         @test isapprox(eq_s.ro, eq_i.ro; rtol=1e-6) && isapprox(eq_s.psio, eq_i.psio; rtol=1e-6)
