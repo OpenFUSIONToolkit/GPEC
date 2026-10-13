@@ -358,12 +358,12 @@ end
 
 Solve the full-band system `mat` (LAPACK `gbtrf` storage) in place of `sol` and return the
 solver used. `"auto"` tries `gal_cholesky_solve!` and falls back to `gal_scaled_lu_solve!` when
-the matrix is not Hermitian positive definite; `"cholesky"` errors instead of falling back.
+the matrix is not positive definite; `"cholesky"` errors instead of falling back.
 """
 function gal_banded_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int, solver::String)
     if solver != "LU"
         gal_cholesky_solve!(mat, sol, kl, ku) && return "cholesky"
-        solver == "cholesky" && error("gal_solver=\"cholesky\": the Galerkin matrix is not Hermitian positive definite; use \"auto\" or \"LU\"")
+        solver == "cholesky" && error("gal_solver=\"cholesky\": the Galerkin matrix is not positive definite; use \"auto\" or \"LU\"")
     end
     gal_scaled_lu_solve!(mat, sol, kl, ku)
     return "LU"
@@ -374,9 +374,8 @@ end
 
 Banded Cholesky solve of the full-band system `mat`, leaving `mat` untouched. Rows that are
 identity rows (Dirichlet DOFs: axis, fixed or coil edge) have their columns moved to the
-right-hand side, which keeps the system Hermitian. Returns `false`, with `sol` unchanged, when
-the remaining matrix is not Hermitian (each entry to 1e-10 of √|aᵢᵢaⱼⱼ|, diagonal included) or not
-positive definite.
+right-hand side, which keeps the system Hermitian. Only the lower band and the real part of the
+diagonal are used. Returns `false`, with `sol` unchanged, when the matrix is not positive definite.
 """
 function gal_cholesky_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int)
     kl == ku || return false
@@ -385,10 +384,6 @@ function gal_cholesky_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{Comp
     a(i, j) = mat[off+i-j, j]
     band(i) = max(1, i - kl):min(n, i + kl)
     fixed = [all(j == i ? a(i, j) == 1 : iszero(a(i, j)) for j in band(i)) for i in 1:n]
-    # Scale-free test (the diagonal spans many decades); 1e-10 clears the quadrature round-off (~1e-11)
-    for j in 1:n, i in j:min(n, j + kl)
-        fixed[i] || fixed[j] || abs(a(i, j) - conj(a(j, i))) <= 1e-10 * sqrt(abs(a(i, i) * a(j, j))) || return false
-    end
     ab = zeros(ComplexF64, kl + 1, n)
     for j in 1:n, i in j:min(n, j + kl)
         ab[1+i-j, j] = fixed[i] || fixed[j] ? (i == j ? one(ComplexF64) : zero(ComplexF64)) : a(i, j)

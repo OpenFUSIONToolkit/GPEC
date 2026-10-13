@@ -192,7 +192,7 @@ gpec.toml.
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
 
     # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port); selected by integrator = "galerkin" ---
-    gal_solver::String = "auto"     # "auto" (banded Cholesky if the matrix is Hermitian positive definite, else LU), "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs, error if not positive definite)
+    gal_solver::String = "auto"     # "auto" (banded Cholesky if the matrix is positive definite, else LU), "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs, error if not positive definite)
     gal_nx::Int = 256               # elements per interval between singular surfaces
     gal_nq::Int = 6                 # Gauss-Lobatto quadrature order per element
     gal_pfac::Float64 = 0.001       # grid packing ratio near singular surfaces

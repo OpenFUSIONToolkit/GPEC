@@ -46,7 +46,7 @@ matching `gal_*` control key without the prefix.
 
 ## Fields
 
-  - `solver::String` - Banded linear solver: `"auto"` (Cholesky, zpbtrf/zpbtrs, when the matrix is Hermitian positive definite, else LU), `"LU"` (zgbtrf/zgbtrs) or `"cholesky"` (error if not positive definite).
+  - `solver::String` - Banded linear solver: `"auto"` (Cholesky, zpbtrf/zpbtrs, when the matrix is positive definite, else LU), `"LU"` (zgbtrf/zgbtrs) or `"cholesky"` (error if not positive definite).
   - `nx::Int` - Elements per interval between singular surfaces.
   - `nq::Int` - Gauss-Lobatto quadrature order per element.
   - `pfac::Float64` - Grid packing ratio near singular surfaces.

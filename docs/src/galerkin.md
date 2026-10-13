@@ -22,8 +22,8 @@ Setting `gal_match_flag` additionally matches the inner layer, giving a driven Î
 
 `gal_solver` picks the banded solver. `"auto"` (the default) tries a Hermitian Cholesky
 factorization of the lower band (LAPACK `zpbtrf`/`zpbtrs`, with the Dirichlet rows' columns moved
-to the right-hand side) and falls back to Jacobi-scaled LU when the matrix is not Hermitian
-positive definite. `"LU"` skips the Cholesky attempt;
+to the right-hand side; the diagonal's imaginary part is ignored) and falls back to Jacobi-scaled
+LU when the matrix is not positive definite. `"LU"` skips the Cholesky attempt;
 `"cholesky"` stops with an error instead of falling back.
 
 The implementation lives in `src/ForceFreeStates/Galerkin/`:
