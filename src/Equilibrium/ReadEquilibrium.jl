@@ -496,16 +496,18 @@ function _read_fortran_reals(io::IO, n::Int)
 end
 
 """
-    read_ldp_i(config)
+    read_ldp_i(config) -> InverseRunInput
 
-Parses an inverse i-file (L. Don Pearlstein's format, also written by TokaMaker `save_ifile`) into an
-`InverseRunInput`. Sequential unformatted little-endian records (reals as real*8 or real*4), axis
-first, θ fastest: `mx, my` (int32), `psi(mx)` [Wb/rad], `f(mx)` = R·Bt [T·m], `p(mx)` [Pa], `q(mx)`,
-`r(my, mx)`, `z(my, mx)` [m] with the periodic θ point duplicated, then optionally `FF′(mx)` and
-`p′(mx)` per Wb/rad, which `profile_source = "derivatives"` integrates for F and P (see
-`file_profiles`), and optionally the plasma bounds `[ψ_axis, ψ_LCFS]` (a record of length 2). With
-the bounds, ψ_N is normalised to the true LCFS, so the file's last (padded) surface sits below 1 and
-`psihigh` is clamped to it. Port of Fortran `read_eq_ldp_i`.
+Read an inverse i-file (L. Don Pearlstein's format, also written by TokaMaker `save_ifile`): little-endian
+Fortran unformatted records, reals as real*8 or real*4, axis first, θ fastest.
+
+  - `mx, my` (int32); `psi(mx)` [Wb/rad], `f(mx)` = R·Bt [T·m], `p(mx)` [Pa], `q(mx)`
+  - `r(my, mx)`, `z(my, mx)` [m], with the periodic θ point duplicated
+  - optional `FF′(mx)`, `p′(mx)` per Wb/rad, used by `profile_source = "derivatives"` (see `file_profiles`)
+  - optional `[ψ_axis, ψ_LCFS]`: ψ_N is then normalized to this LCFS, so the last file surface (written just
+    inside it) sits below ψ_N = 1
+
+Port of Fortran `read_eq_ldp_i`.
 """
 function read_ldp_i(config::EquilibriumConfig)
     @info "Reading inverse i-file (ldp_i): $(config.eq_filename)"

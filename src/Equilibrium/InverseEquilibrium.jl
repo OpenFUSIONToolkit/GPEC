@@ -224,10 +224,9 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     spl_fs = zeros(Float64, mtheta+1, 5)
     spl_post_buf = Vector{Float64}(undef, 5)   # scratch for post-SFL spline evaluation
 
-    # q source: the input q for LAR and CHEASE (Fortran `inverse_chease4_run`; the field-line q is inaccurate
-    # in cylindrical LAR geometry), the field-line integral for i-files (Fortran `inverse_run`). The latter is
-    # consistent with the SFL angle ν; a tabulated q splined in ψ is not where the edge surfaces are coarse
-    # (q ~ log(1-ψ)), which shifts Δ′ and psilim.
+    # q: i-files use the field-line integral, as Fortran `inverse_run`; a tabulated q splined in ψ is
+    # inaccurate where edge surfaces are coarse (q ~ log(1-ψ)). Other inputs keep their input q (the
+    # field-line q is inaccurate in cylindrical LAR geometry).
     q_from_geometry = config.eq_type in LDP_I_KINDS
     f_sq_in_buf = Vector{Float64}(undef, size(sq_in.y, 2))
     sq_in_hint = Ref(1)
