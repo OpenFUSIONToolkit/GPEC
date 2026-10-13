@@ -43,9 +43,9 @@ specified in the input.
   - `use_galgrid::Bool` - Use the same grid as galerkin method
   - `imas_cocos::Int` - COCOS convention of the input IMAS `dd.equilibrium` (11 = IMAS standard, 2 = internal)
   - `profile_source::String` - Which 1D arrays of a g-file, i-file or IMAS equilibrium define F and P.
-    `"derivatives"` (default) integrates the file's FF′ and p′ inward from the boundary values of
-    F and P; `"values"` uses the tabulated F and P directly. The reader falls back to `"values"`
-    with a warning when the derivatives are absent or unusable.
+    `"values"` (default) uses the tabulated F and P directly; `"derivatives"` integrates the file's
+    FF′ and p′ inward from the boundary values of F and P, falling back to `"values"` with a
+    warning when the derivatives are absent or unusable.
 """
 @kwdef struct EquilibriumConfig
     eq_type::String = "efit"
@@ -78,7 +78,7 @@ specified in the input.
     use_galgrid::Bool = true
 
     imas_cocos::Int = 11
-    profile_source::String = "derivatives"
+    profile_source::String = "values"
 
     """
     Modified internal constructor that enforces self consistency within the inputs

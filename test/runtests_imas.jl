@@ -96,7 +96,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
     # read_imas — a dd without the derivative arrays falls back to the tabulated profiles
     @testset "read_imas: fallback without stored derivatives" begin
         dd, _ = make_mock_dd()
-        config = EquilibriumConfig(; eq_type="imas", eq_filename="mock")
+        config = EquilibriumConfig(; eq_type="imas", eq_filename="mock", profile_source="derivatives")
         result = @test_logs (:warn, r"absent or unusable") match_mode = :any Equilibrium.read_imas(config, dd)
         @test result.ingest.sq_fs[:, 1] == fill(5.0, 64)
     end

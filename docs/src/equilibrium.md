@@ -71,8 +71,8 @@ variation of ``F``). On a 257-node file written in single precision that is an e
 
 | Value | Behaviour |
 |---|---|
-| `"derivatives"` (default) | ``F`` and ``P`` are the integrals of the file's ``FF'`` and ``p'``, anchored at the boundary values of the tabulated ``F`` and ``P`` |
-| `"values"` | The tabulated ``F`` and ``P`` are used as written |
+| `"values"` (default) | The tabulated ``F`` and ``P`` are used as written |
+| `"derivatives"` | ``F`` and ``P`` are the integrals of the file's ``FF'`` and ``p'``, anchored at the boundary values of the tabulated ``F`` and ``P`` |
 
 With `"derivatives"` both profiles are always rebuilt together, so the pair stays consistent in
 the force balance, and everything downstream still differentiates one spline. The reader logs the

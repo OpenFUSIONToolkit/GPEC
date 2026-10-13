@@ -224,14 +224,14 @@ using Statistics
 
         # The FF′ and p′ records feed profile_source = "derivatives"; without them the tabulated F and P are used
         table(file; kw...) = Eq.read_ldp_i(cfg("ldp_i", file; kw...)).ingest.sq_fs
-        integrated = @test_logs (:info, r"integrated from") match_mode = :any table("i33x65.ifile")
-        tabulated = table("i33x65.ifile"; profile_source="values")
+        integrated = @test_logs (:info, r"integrated from") match_mode = :any table("i33x65.ifile"; profile_source="derivatives")
+        tabulated = table("i33x65.ifile")
         @test maximum(abs.(integrated[:, 1] .- tabulated[:, 1]) ./ tabulated[:, 1]) < 1e-4
         raw = read(joinpath(tk_dir, "i33x65.ifile"))
         mx = Int(reinterpret(Int32, raw[5:8])[1])
         stripped = joinpath(mktempdir(), "no_derivatives.ifile")
         write(stripped, raw[1:end-2*(8mx+8)])
-        @test (@test_logs (:warn, r"absent or unusable") match_mode = :any Eq.read_ldp_i(cfg("ldp_i", stripped)).ingest.sq_fs) == tabulated
+        @test (@test_logs (:warn, r"absent or unusable") match_mode = :any table(stripped; profile_source="derivatives")) == tabulated
 
         # q is the field-line q of the file's geometry (Fortran inverse_run), not its tabulated q record
         qrec = 16 + 3 * (8mx + 8) + 4
@@ -247,7 +247,7 @@ using Statistics
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
         tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
         cfg(file; kw...) = Eq.EquilibriumConfig(; eq_type="ldp_i", eq_filename=file, jac_type="hamada", grid_type="ldp", mpsi=32,
-            psilow=0.01, psihigh=0.99, kw...)
+            psilow=0.01, psihigh=0.99, profile_source="derivatives", kw...)
         raw = read(joinpath(tk_dir, "i33x65.ifile"))  # carries the FF′ and p′ records
         mx = Int(reinterpret(Int32, raw[5:8])[1])
         psi = reinterpret(Float64, raw[21:(20+8mx)])
