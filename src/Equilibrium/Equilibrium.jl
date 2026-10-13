@@ -41,7 +41,7 @@ const mu0 = 4π * 1e-7
 
 # efit-family equilibrium kinds that share the separatrix-clamp / inversion handling.
 const EFIT_KINDS = ("efit", "efit_arclength", "efit_by_inversion")
-# TokaMaker/ldp inverse i-file kinds.
+# eq_type names of the inverse i-file reader (`read_ldp_i`).
 const LDP_I_KINDS = ("ldp_i", "ifile")
 
 """
@@ -496,9 +496,9 @@ Diagnoses the Grad-Shafranov solution by computing the residual of the
 Grad-Shafranov equation across the grid and writing diagnostic data to HDF5 files.
 Performs the same function as equil_out_gse in the Fortran code.
 
-Returns `(; xs, ys, flux_x, flux_y, source, total, error, errori)` on the `rzphi` (ψ, θ) nodes:
-the two flux-divergence terms, the source, their sum (the residual), the residual normalized by the
-largest term, and the θ-integrated residual per surface.
+Returns `(; xs, ys, flux_x, flux_y, source, total, error, errori)` on the `rzphi` (ψ, θ) nodes: the two
+flux-divergence terms, the source, the residual `total = flux_x - flux_y + source`, `error = |total|` over
+the largest term on the grid, and `errori`, the magnitude of the θ-integrated residual on each surface.
 """
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
