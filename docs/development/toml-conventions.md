@@ -10,7 +10,7 @@ modify them. **Do not invent a new convention** — match what the existing exam
    n-range, ideal vs kinetic). No ASCII-art separators or decorative dividers.
 2. **Inline annotation on every variable line.** Every `key = value` gets a trailing
    `# description`. Source the wording from the matching config struct's docstring
-   (`EquilibriumConfig`, `WallShapeSettings`, `ForceFreeStatesControl`, `ForcingTermsControl`,
+   (`EquilibriumConfig`, the `WallSettings` types, `ForceFreeStatesControl`, `ForcingTermsControl`,
    `PerturbedEquilibriumControl`, `SolovevConfig`, `TJAnalyticConfig`, `KineticForcesControl`)
    and keep it to one terse line. **Use the same description for the same variable across all
    files** — `examples/DIIID-like_ideal_example/gpec.toml` is the canonical reference for the
@@ -20,7 +20,8 @@ modify them. **Do not invent a new convention** — match what the existing exam
    the header plus an informative block comment per quantity group instead.
 3. **Section comments only when informative.** No comment is required above a section. Keep a
    block comment only when it carries real information (e.g. the Solovev `[Wall]` note on why a
-   conformal wall is needed). Never add decorative section dividers.
+   conformal wall is needed). Never add decorative section dividers. No wall is spelled by omitting `[Wall]`
+   entirely; a `[Wall]` section always names a `shape` and only that shape's parameters.
 4. **No Fortran references — annotations must be self-contained and Julia-centric.** The Julia
    code is the production workhorse; a new user must not need to know the legacy Fortran GPEC
    code to read an example. Headers explain the *scenario and its unique aspect*; inline comments

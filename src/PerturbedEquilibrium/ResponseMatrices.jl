@@ -299,8 +299,7 @@ function calc_surface_inductance(
     n_modes::Union{Integer,AbstractVector{<:Integer}}
 )::Matrix{ComplexF64}
     vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, vcat(n_modes))
-    wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
-    I_v = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true).I_v
+    I_v = Vacuum.compute_vacuum_response(vac_input, nothing; compute_Iv=true).I_v
     μ₀ = 4π * 1e-7
     return inv(I_v) .* (μ₀ * (2π)^2)
 end

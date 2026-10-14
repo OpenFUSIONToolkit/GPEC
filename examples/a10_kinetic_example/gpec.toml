@@ -18,9 +18,6 @@ mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 etol = 1e-7                    # Error tolerance for equilibrium solver
 
-[Wall]
-shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-
 [ForceFreeStates]
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes

@@ -353,7 +353,7 @@ println("Beta-N: ", equil.params.betan)
 GPEC uses TOML configuration files (`gpec.toml`) with the following main sections:
 
 - **`[Equilibrium]`**: Equilibrium solver settings (input file, grid resolution, coordinate system, etc.)
-- **`[Wall]`**: Wall geometry for vacuum calculations (shape, size, position)
+- **`[Wall]`**: Wall geometry for vacuum calculations (shape, size, position); omit for no wall
 - **`[ForceFreeStates]`**: Stability analysis settings (mode numbers, tolerances, flags)
 - **`[PerturbedEquilibrium]`**: Plasma response settings (forcing data, output options)
 
