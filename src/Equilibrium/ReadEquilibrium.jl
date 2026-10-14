@@ -492,7 +492,9 @@ function read_imas(config::EquilibriumConfig, dd)
     ip_sign = ip_imas == 0 ? 1 : Int(sign(ip_imas))
 
     nw = length(psi_1d)
-    psi_norm_grid = range(0.0, 1.0; length=nw)
+    psi_norm_grid = (psi_1d .- psi_axis) ./ (psi_boundary - psi_axis)
+    @assert all(diff(psi_norm_grid) .> 0) "read_imas: profiles_1d.psi must increase strictly from psi_axis to psi_boundary"
+    @assert 0 <= psi_norm_grid[1] && psi_norm_grid[end] <= 1 "read_imas: profiles_1d.psi must lie between psi_axis and psi_boundary"
 
     # Build equilibrium source terms for spline interpolation
     # abs(f_1d): F(ψ) can be negative depending on toroidal field direction convention;
