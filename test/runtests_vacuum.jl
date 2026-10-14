@@ -52,8 +52,10 @@ import GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, De
                 # A section needs a shape, and "nowall" is spelled by omitting the section
                 @test_throws "needs a `shape`" parse_wall(Dict("a" => 0.2))
                 @test_throws "omit the [Wall] section" parse_wall(Dict("shape" => "nowall"))
-                # Keys must belong to the chosen shape
-                @test_throws "has no parameter aw" parse_wall(Dict("shape" => "conformal", "aw" => 0.05))
+                # Keys the shape does not use are ignored with a warning; a required one that is missing is an error
+                w = @test_logs (:warn, r"does not use aw") parse_wall(Dict("shape" => "conformal", "a" => 0.2, "aw" => 0.05))
+                @test w == ConformalWall(a=0.2)
+                @test_throws "requires `file`" parse_wall(Dict("shape" => "file"))
             end
         end
 

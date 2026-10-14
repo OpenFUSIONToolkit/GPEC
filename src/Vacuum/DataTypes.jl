@@ -307,8 +307,8 @@ const WALL_SHAPES = Dict("conformal" => ConformalWall, "elliptical" => Elliptica
     parse_wall(section) -> Union{Nothing,WallSettings}
 
 Build the wall from the `[Wall]` section of a deck, or return `nothing` (no wall) when there is no
-section. The section's `shape` picks the [`WallSettings`](@ref) type, and every other key must be a
-parameter of that type.
+section. The section's `shape` picks the [`WallSettings`](@ref) type. Keys that type does not use are
+ignored with a warning, and a parameter it requires (such as `file` for `FileWall`) is an error if missing.
 """
 parse_wall(::Nothing) = nothing
 function parse_wall(section::AbstractDict)
@@ -316,9 +316,13 @@ function parse_wall(section::AbstractDict)
     shape = pop!(params, "shape", nothing)
     haskey(WALL_SHAPES, shape) || error("[Wall] needs a `shape` of $(join(sort!(collect(keys(WALL_SHAPES))), ", ")), got $(repr(shape)). For no wall, omit the [Wall] section.")
     T = WALL_SHAPES[shape]
-    unknown = setdiff(keys(params), string.(fieldnames(T)))
-    isempty(unknown) || error("[Wall] shape \"$shape\" has no parameter $(join(sort!(collect(unknown)), ", ")); its parameters are $(join(fieldnames(T), ", ")).")
-    return T(; (Symbol(k) => v for (k, v) in params)...)
+    unused = setdiff(keys(params), string.(fieldnames(T)))
+    isempty(unused) || @warn "[Wall] shape \"$shape\" does not use $(join(sort!(collect(unused)), ", ")); ignoring it. Its parameters are $(join(fieldnames(T), ", "))."
+    try
+        return T(; (Symbol(k) => v for (k, v) in params if !(k in unused))...)
+    catch err
+        err isa UndefKeywordError ? error("[Wall] shape \"$shape\" requires `$(err.var)`.") : rethrow()
+    end
 end
 
 """
