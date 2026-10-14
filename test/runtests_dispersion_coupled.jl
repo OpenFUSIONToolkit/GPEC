@@ -24,7 +24,7 @@
             omega=0.0, omega_e=-1.0e4, omega_i=5.0e3,
             qval=2.0, sval_r=1.0, bt=2.0,
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
-            chi_perp=1.0, chi_tor=1.0, m=2, n=1)
+            chi_perp_e=1.0, chi_tor=1.0, m=2, n=1)
     end
 
     @testset "Constructor validation" begin

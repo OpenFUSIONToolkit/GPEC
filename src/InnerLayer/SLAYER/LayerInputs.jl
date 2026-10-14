@@ -181,8 +181,14 @@ profiles, without an intermediate file round-trip.
 
   - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
   - `zeff`      -- effective charge (default `1.0`).
-  - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
+  - `chi_perp_e`  -- electron perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
+  - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], scalar or callable of
+    `psi` (default `1.0`); used by `P_perp_model = :chi_perp_i` and `:D_perp`.
+  - `tau_E` -- whole-plasma energy confinement time [s], one scalar for every surface;
+    required by `P_perp_model=:tau_E`.
+  - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
+    (default `:chi_perp_e`).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
     of `psi` (default `1.0`).
   - `dr_val`    -- resistive interchange index `D_R = E + F + H²`
@@ -232,7 +238,10 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     mu_i::Real=2.0,
     zeff::Real=1.0,
     z_i::Real=1.0,
-    chi_perp=1.0,
+    chi_perp_e=1.0,
+    chi_perp_i=1.0,
+    tau_E::Real=NaN,
+    P_perp_model::Symbol=:chi_perp_e,
     chi_tor=1.0,
     dr_val=nothing,
     dgeo_val=nothing,
@@ -262,13 +271,11 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     # number enters here. Main-ion density is taken equal to the electron density
     # (quasi-neutrality, matching the staging step).
     chi1 = 2π * equil.psio
+    _kinetic_at(ψ) = (n_e=Float64(profiles.n_e(ψ)), dn_e=Float64(profiles.n_e(ψ; deriv=DerivOp(1))),
+        T_e=Float64(profiles.T_e(ψ)), dT_e=Float64(profiles.T_e(ψ; deriv=DerivOp(1))),
+        T_i=Float64(profiles.T_i(ψ)), dT_i=Float64(profiles.T_i(ψ; deriv=DerivOp(1))))
     _omega_star_at(ψ, n_tor) = begin
-        n_e = Float64(profiles.n_e(ψ))
-        dn_e = Float64(profiles.n_e(ψ; deriv=DerivOp(1)))
-        T_e = Float64(profiles.T_e(ψ))
-        dT_e = Float64(profiles.T_e(ψ; deriv=DerivOp(1)))
-        T_i = Float64(profiles.T_i(ψ))
-        dT_i = Float64(profiles.T_i(ψ; deriv=DerivOp(1)))
+        (; n_e, dn_e, T_e, dT_e, T_i, dT_i) = _kinetic_at(ψ)
         ω_star_e = n_tor * (2π / chi1) * (T_e * dn_e / n_e + dT_e)
         ω_star_i = -n_tor * (2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
         return (ω_star_e, ω_star_i)
@@ -291,6 +298,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         n_res = sing.n[1]
 
         prof = profiles(psi)
+        kin = _kinetic_at(psi)
         # Take ω_*e, ω_*i from the spline derivatives, or from `profiles` when the caller
         # supplies them directly. `run_slayer` supplies zeros, so the latter is a library path.
         ω_e_use, ω_i_use = compute_omega_star ? _omega_star_at(psi, n_res) : (prof.omega_e, prof.omega_i)
@@ -378,8 +386,12 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
             rs=rs, R0=R0_use, mu_i=mu_i, zeff=zeff,
-            chi_perp=_eval(chi_perp, psi),
+            chi_perp_e=_eval(chi_perp_e, psi),
             chi_tor=_eval(chi_tor, psi),
+            chi_perp_i=_eval(chi_perp_i, psi),
+            dlnn=kin.dn_e / kin.n_e, dlnTe=kin.dT_e / kin.T_e, dlnTi=kin.dT_i / kin.T_i,
+            tau_E=tau_E,
+            P_perp_model=P_perp_model,
             m=m_res, n=n_res,
             dr_val=dr_val_k,
             dgeo_val=dgeo_val_k,
