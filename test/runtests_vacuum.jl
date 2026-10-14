@@ -50,7 +50,7 @@
                     mtheta_in=5,
                     nzeta_in=1,
                     x=[1.0, 1.1, 1.2, 1.1, 1.0],
-                    z=[0.0, 0.1, 0.0, -0.1, 0.0],
+                    z=[0.0, -0.1, 0.0, 0.1, 0.0],
                     ν=zeros(5),
                     mtheta=5,
                     m_modes=[1],
@@ -70,7 +70,7 @@
                 # Periodic spline requires at least 4 points
                 inputs = VacuumInput(;
                     x=[1.0, 1.1, 1.2, 1.1, 1.0],
-                    z=[0.0, 0.1, 0.0, -0.1, 0.0],
+                    z=[0.0, -0.1, 0.0, 0.1, 0.0],
                     mtheta_in=5,
                     nzeta_in=1,
                     ν=zeros(5),
@@ -840,11 +840,10 @@
         @testset "compute_vacuum_response 3D I_v matches the 2D path" begin
             mtheta = 48
             θ = range(; start=0, length=mtheta, step=2π / mtheta)
-            # Up-down asymmetric so Iᵛ is genuinely complex and the θ_VAC → -θ_VAC conjugation is observable
+            # Up-down asymmetric so Iᵛ is genuinely complex and a frame mismatch between the paths is observable
             R = 1.7 .+ 0.3 .* cos.(θ)
             Z = 0.3 .* sin.(θ) .+ 0.08 .* sin.(2θ) .+ 0.08 .* cos.(θ)
-            # Arrays are reversed for VACUUM's CW θ, as the equilibrium-based constructor does
-            make(nzeta) = VacuumInput(; x=collect(reverse(R)), z=collect(reverse(Z)), ν=zeros(mtheta),
+            make(nzeta) = VacuumInput(; x=collect(R), z=collect(Z), ν=zeros(mtheta),
                 mtheta_in=mtheta, nzeta_in=1, m_modes=[-2, -1, 0, 1, 2], n_modes=[1], mtheta=mtheta, nzeta=nzeta)
             nowall = WallShapeSettings(; shape="nowall")
 
@@ -853,8 +852,67 @@
 
             @test norm(r3d.wv - r2d.wv) / norm(r2d.wv) < 1e-3
             @test norm(r3d.I_v - r2d.I_v) / norm(r2d.I_v) < 5e-3
-            # The imaginary parts must agree in sign, not be opposed — this is what pins the conjugation
+            # The imaginary parts must agree in sign, not be opposed — this is what pins the two paths to one frame
             @test norm(imag.(r3d.I_v) - imag.(r2d.I_v)) < norm(imag.(r3d.I_v) + imag.(r2d.I_v))
+        end
+
+        # ν enters the 3D path only through the geometry (ϕ = ζ + ν) and the 2D path only through the basis (ζ = -ν at ϕ = 0),
+        # so the two agree only if both use the same relation. Negating ν in 2D alone misses by O(0.1).
+        @testset "2D and 3D paths agree for a nonzero ν" begin
+            mtheta = 48
+            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            R = 1.7 .+ 0.3 .* cos.(θ)
+            Z = 0.3 .* sin.(θ) .+ 0.08 .* sin.(2θ) .+ 0.08 .* cos.(θ)
+            ν = 0.25 .* sin.(θ) .+ 0.1 .* cos.(2θ) .+ 0.05
+            make(nzeta, ν) = VacuumInput(x=collect(R), z=collect(Z), ν=collect(ν),
+                mtheta_in=mtheta, nzeta_in=1, m_modes=collect(-3:3), n_modes=[1], mtheta=mtheta, nzeta=nzeta)
+            nowall = WallShapeSettings(shape="nowall")
+
+            r3d = compute_vacuum_response(make(48, ν), nowall)
+            @test norm(compute_vacuum_response(make(1, ν), nowall).wv - r3d.wv) / norm(r3d.wv) < 1e-2
+            @test norm(compute_vacuum_response(make(1, -ν), nowall).wv - r3d.wv) / norm(r3d.wv) > 1e-1
+        end
+
+        # Moving the θ origin by a multiplies every harmonic by exp(i·m·a), so both operators must follow D·A·D† with
+        # D = diag(exp(i·m·a)). An operator left in the conjugate frame follows D†·A·D instead and fails this by O(0.1).
+        @testset "wv and I_v follow a θ-origin shift in the same Fourier frame" begin
+            mtheta, k = 64, 4
+            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            R = 1.7 .+ 0.5 .* cos.(θ .+ 0.3 .* sin.(θ))
+            Z = 0.8 .* sin.(θ) .+ 0.08 .* cos.(θ) .+ 0.1 .* cos.(2θ)
+            m_modes = collect(-4:6)
+            D = Diagonal(cis.(m_modes .* (2π * k / mtheta)))
+            nowall = WallShapeSettings(shape="nowall")
+            # 2D only: "3D I_v matches the 2D path" ties the 3D frame to this one
+            make(x, z) = VacuumInput(; x, z, ν=zeros(mtheta), mtheta_in=mtheta, nzeta_in=1, m_modes, n_modes=[1], mtheta, nzeta=1)
+            ref = compute_vacuum_response(make(collect(R), collect(Z)), nowall; compute_Iv=true)
+            rolled = compute_vacuum_response(make(circshift(R, -k), circshift(Z, -k)), nowall; compute_Iv=true)
+            for (A, B) in ((ref.wv, rolled.wv), (ref.I_v, rolled.I_v))
+                @test norm(B - D * A * D') / norm(B) < 1e-3
+                @test norm(B - D' * A * D) / norm(B) > 5e-2
+            end
+        end
+
+        @testset "clockwise contours" begin
+            mtheta = 32
+            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            R, Z = 1.7 .+ 0.3 .* cos.(θ), 0.4 .* sin.(θ)
+            make(x, z) = VacuumInput(; x, z, ν=zeros(mtheta), mtheta_in=mtheta, nzeta_in=1, m_modes=collect(-2:2), n_modes=[1], mtheta, nzeta=1)
+            @test_throws ArgumentError compute_vacuum_response(make(reverse(R), reverse(Z)), WallShapeSettings(shape="nowall"))
+
+            # A wall file written clockwise is turned round and gives the same operator as its counter-clockwise twin
+            Rw, Zw = 1.7 .+ 0.6 .* cos.(θ), 0.8 .* sin.(θ)
+            wall_response(x, z) = mktempdir() do dir
+                path = joinpath(dir, "wall.dat")
+                open(path, "w") do io
+                    println(io, mtheta, "\n", 1.7, "\nindex R Z")
+                    foreach(i -> println(io, i, " ", x[i], " ", z[i]), 1:mtheta)
+                end
+                compute_vacuum_response(make(collect(R), collect(Z)), WallShapeSettings(shape=path, equal_arc_wall=false))
+            end
+            ccw = wall_response(Rw, Zw)
+            cw = @test_logs (:warn, r"runs clockwise") match_mode = :any wall_response(circshift(reverse(Rw), 1), circshift(reverse(Zw), 1))
+            @test cw.wv ≈ ccw.wv
         end
 
         @testset "compute_vacuum_response 3D conformal wall on a non-axisymmetric boundary" begin
@@ -984,7 +1042,7 @@
                         R = R0 + a * cos(θi) + b * cos(θi - nfp * ζ) + odd * sin(θi - nfp * ζ)
                         push!(X, R * cos(ζ))
                         push!(Y, R * sin(ζ))
-                        push!(Z, -a * sin(θi) + b * sin(θi - nfp * ζ) + odd * cos(2θi - nfp * ζ))
+                        push!(Z, a * sin(θi) - b * sin(θi - nfp * ζ) - odd * cos(2θi - nfp * ζ))
                     end
                 end
                 return X, Y, Z
