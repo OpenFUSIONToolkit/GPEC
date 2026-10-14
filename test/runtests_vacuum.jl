@@ -1,3 +1,5 @@
+import GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, DeeWall, ModDeeWall, FileWall, parse_wall
+
 @testset "Vacuum.jl Unit Tests" begin
 
     @testset "Vacuum.jl (2D)" begin

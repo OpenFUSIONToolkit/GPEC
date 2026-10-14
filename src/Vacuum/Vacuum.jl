@@ -18,7 +18,7 @@ include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
 
-export VacuumInput, VacuumResponse, WallSettings, ConformalWall, EllipticalWall, DeeWall, ModDeeWall, FileWall, parse_wall
+export VacuumInput, VacuumResponse, WallSettings
 export compute_vacuum_response, compute_vacuum_response!
 export extract_plasma_surface_at_psi
 export PlasmaGeometry
