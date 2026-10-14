@@ -108,6 +108,13 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         for c in (0.3, 0.7)
             @test !any(g -> abs(g - c) < 1e-12, b)
         end
+
+        # Adjacent brackets that overlap (c₂ − w₂ ≤ c₁ + w₁), e.g. two reverse-shear crossings near q_min, error.
+        @test_throws ErrorException GridRef.bracket_mandatory_nodes(grid, [0.5, 0.51], [0.01, 0.01], 1e-4)
+        # A tangent surface (q′ = 0) has an infinite bracket half-width.
+        @test_throws ErrorException GridRef.bracket_mandatory_nodes(grid, [0.5], [Inf], 1e-4)
+        # Centers within collapse_atol still share one bracket instead of erroring.
+        @test all(diff(GridRef.bracket_mandatory_nodes(grid, [0.5, 0.5 + 1e-9], [0.01, 0.01], 1e-4)) .> 0)
     end
 
     @testset "_validate_psi_nodes" begin

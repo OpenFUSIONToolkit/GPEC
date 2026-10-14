@@ -42,27 +42,32 @@ end
     rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
 
 Unique ψ_N locations of all rational surfaces q = m/n for n in `nlow:nhigh`, sorted
-increasing. Used as mandatory knots for the two-pass equilibrium grid refinement (the
-same physical surface reached through several (m, n) pairs is deduplicated by q value).
+increasing. Used as mandatory knots for the two-pass equilibrium grid refinement. Roots
+are deduplicated by (q, ψ), so several (m, n) of equal ratio collapse to one node while the
+two crossings of one rational on a reverse-shear profile stay distinct.
 """
 function rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
     surfaces = _find_rational_surfaces(equil, nlow, nhigh)
-    nodes = Float64[]
-    qs = Float64[]
+    kept = @NamedTuple{q::Float64, psifac::Float64}[]
     for s in surfaces
-        any(q -> isapprox(q, s.m / s.n; atol=1e-8), qs) && continue
-        push!(qs, s.m / s.n)
-        push!(nodes, s.psifac)
+        q = s.m / s.n
+        any(k -> _same_surface(k.q, k.psifac, q, s.psifac), kept) && continue
+        push!(kept, (q=q, psifac=s.psifac))
     end
-    return sort!(nodes)
+    return sort!([k.psifac for k in kept])
 end
+
+# Two rational-surface roots are one physical surface when both q and ψ agree.
+const SURFACE_TOLERANCE = 1e-8
+_same_surface(q_a, psi_a, q_b, psi_b) = isapprox(q_a, q_b; atol=SURFACE_TOLERANCE) && isapprox(psi_a, psi_b; atol=SURFACE_TOLERANCE)
 
 """
     sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
 
-Locate singular rational q-surfaces (q = m/nn) using a bisection method
-between extrema of the q-profile, and store their properties in `intr.sing`.
-Performs the same function as `sing_find` in the Fortran code.
+Locate singular rational q-surfaces (q = m/n) by bisection between extrema of the q-profile,
+and store their properties in `intr.sing`, sorted by increasing ψ. Roots of equal ratio m/n at
+the same ψ (e.g. (2,1) and (4,2)) merge into one surface carrying all its (m, n); the two
+crossings of one rational on a reverse-shear profile stay separate surfaces with opposite-sign q′.
 """
 function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     profiles = equil.profiles
@@ -70,10 +75,8 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 
     for s in _find_rational_surfaces(equil, intr.nlow, intr.nhigh)
         m, n, psifac = s.m, s.n, s.psifac
-        if any(sg -> isapprox(sg.q, m / n; atol=1e-8), intr.sing)
-            # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
-            # Technically only need m or n, but simplifies some later code and cheap to store both
-            idx = findfirst(sg -> isapprox(sg.q, m / n; atol=1e-8), intr.sing)
+        idx = findfirst(sg -> _same_surface(sg.q, sg.psifac, m / n, psifac), intr.sing)
+        if idx !== nothing
             push!(intr.sing[idx].m, m)
             push!(intr.sing[idx].n, n)
         else
@@ -125,9 +128,11 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # strategy. Multi-n runs are not supported — the "outermost rational + dmlim/n" cutoff depends
     # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
     if ctrl.set_psilim_via_dmlim && intr.nlow <= 0
-        error("sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
-              "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
-              "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead.")
+        error(
+            "sing_lim!: set_psilim_via_dmlim = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+            "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
+            "or set set_psilim_via_dmlim = false to truncate via qhigh / psihigh instead."
+        )
     elseif ctrl.set_psilim_via_dmlim && intr.nlow != intr.nhigh
         @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
     elseif ctrl.set_psilim_via_dmlim
@@ -156,6 +161,27 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         )
         intr.q1lim = profiles.q_deriv(intr.psilim)
     end
+end
+
+"""
+    check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+
+Error when `qmin < qlow < q0`. On such a reversed-shear profile the q < qlow region is a ring
+around q_min rather than a core, so there is no single lower bound that excludes it: `sing_min!`
+places `psilow` on the outer leg, while `initialize_el_at_axis!` starts at the axis because
+`qlow < q0`, and the two disagree about the integration domain.
+"""
+function check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+    q0 = equil.profiles.q_spline.y[1]
+    qmin = equil.params.qmin
+    if ctrl.qlow > qmin && q0 > ctrl.qlow
+        error(
+            "qlow=$(ctrl.qlow) lies between qmin=$qmin and the axis value q0=$q0 of a reversed-shear q profile: " *
+            "the q < qlow region is a ring around q_min, not a core, so no single lower integration bound excludes it. " *
+            "Set qlow ≤ qmin to integrate from the axis, or qlow ≥ q0 to start outside q_min."
+        )
+    end
+    return nothing
 end
 
 """
