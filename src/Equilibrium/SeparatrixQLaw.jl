@@ -13,10 +13,11 @@
 # disconnected one.
 #
 # The saddles are selected from the last closed flux surface itself: each minimum of the poloidal
-# field along the outermost traced surface is followed to the critical point it leads to. A null
-# the closed surface does not pass (in a divertor leg, beside a coil) is therefore never a
-# candidate. Divertors with a second null beside the primary one (snowflake) or on the leg
-# (x-point target) are not modelled; the shear check below is the backstop.
+# field along the outermost traced surface is followed to the critical point it leads to. On a
+# single-null shape this usually also reaches the far secondary X-point; its term is small. A
+# limited plasma with an X-point nearby is not told apart from a diverted one. Divertors with a
+# second null beside the primary one (snowflake) or on the leg (x-point target) are not modelled;
+# the shear check below is the backstop.
 
 # Accepted disagreement between the law's dq/dψ and the traced profile's over the outer knots. A
 # law missing one of two equal X-points is low by a factor of two, so the bound sits well inside it.
@@ -80,8 +81,8 @@ reconstruction may place its boundary slightly inside the X-point flux.
 Returns `nothing` when the law does not apply or cannot be trusted:
 
   - the equilibrium is not a direct (2D flux) one — an inverse equilibrium carries its own q;
-  - no minimum of the poloidal field on the outermost surface leads to a saddle outside the grid,
-    which is what a limited plasma looks like;
+  - no minimum of the poloidal field on the outermost surface leads to a saddle outside the grid
+    (a plasma with no X-point nearby; a limited plasma that has one still gets a law);
   - q is not rising at the anchor;
   - the law's dq/dψ and the traced profile's differ by more than `shear_ratio` over the outer
     knots (returned as `shear_ratio`, law over traced).

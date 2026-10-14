@@ -296,9 +296,11 @@ where ``\psi_{X_i}`` is the flux at the saddle, ``H_i`` the Hessian of the poloi
 ``F = R B_\phi``, and ``q_K`` the traced q on the outermost grid surface ``\psi_K``. One term
 describes a single null and two a double null, connected or not. The X-points are found by
 following each minimum of the poloidal field along the outermost surface to the saddle it leads
-to, so nulls the closed surface does not pass (in a divertor leg, beside a coil) are never
-candidates. The law is used only if it reproduces the traced shear over the outer knots, and a
-plasma with no X-point on its boundary (a limited plasma) is not extrapolated. Divertors with a
+to; on a single-null shape this usually also reaches the far secondary X-point, whose term is
+small. The law is used only if it reproduces the traced shear over the outer knots, and an
+equilibrium with no X-point nearby is not extrapolated. A limited plasma that has an X-point
+nearby is not told apart from a diverted one: one rational is placed past its boundary and the run
+warns that no overlap could be established there, leaving the domain unchanged. Divertors with a
 second null beside the primary one or on the leg (snowflake, x-point target) are not modelled.
 
 The X-point flux need not coincide with the equilibrium's boundary: a reconstruction that places
@@ -308,6 +310,11 @@ holds. The scan places only the first of them, to judge whether the outermost su
 clean, and scores it only when the kinetic profiles extend that far. `psihigh` remains the upper
 limit throughout: the overlap point can only narrow the domain, and when no overlap can be
 established the domain keeps its requested limit.
+
+TokaMaker's `save_eqdsk` writes such files when `lcfs_pad` (``p``) is set with the default
+`truncate_eq=True`: the equilibrium is cut at ``1 - p`` and renormalised, so the X-point sits at
+``\psi = 1/(1 - p)``. Writing with `truncate_eq=False` keeps the whole plasma; EFIT-written files
+place their boundary on the X-point flux.
 
 The scan takes its kinetic profiles from the `[SLAYER]` `profile_file`, through the same control
 and loader the SLAYER analysis uses, so both see the same profiles, the same HDF5 group and the

@@ -221,8 +221,8 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         if edge_fit === nothing
             push!(
                 notes,
-                "no separatrix q-law: no X-point was found on the outermost flux surface (a " *
-                "limited plasma), or the law it gives does not reproduce the traced shear " *
+                "no separatrix q-law: no X-point was found from the outermost flux surface, " *
+                "or the law it gives does not reproduce the traced shear " *
                 "there, so no surfaces are placed beyond ψ = $(@sprintf("%.6f", psihigh_safe))"
             )
         else
