@@ -148,6 +148,41 @@
         @test_throws ArgumentError slayer_parameters(; _drifts(0.0, 5.0e3)...)       # no electron drift: iota_e = 0
     end
 
+    @testset "Test 1e: toroidal χ∥ closure algebra" begin
+        # The :toroidal W_d balance takes its field-line geometry from (g_w, K∥) = (dgeo_val, kpar_val):
+        # W_d = √8·(χ⊥/χ∥)^¼/g_w and the free-streaming χ∥ = 2v_te/(√π·K∥·W_d).
+        using GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER: _solve_dc_tmp
+        common = (; dr_val=0.01, chi_perp=1.0, t_e=1000.0, zeff=1.0, rs=0.5, R0=1.7, sval_r=1.0, n_tor=1)
+        vte = sqrt(2.0 * common.t_e * E_CHG / M_E)
+        g_cyl = sqrt(common.rs / common.R0 * common.sval_r * common.n_tor)
+        k_cyl = common.n_tor * common.sval_r / common.R0
+        dc(dc_type, g, k; tau_ee=1e-6) = _solve_dc_tmp(; common..., dc_type=dc_type, dgeo_val=g, kpar_val=k, tau_ee=tau_ee)
+
+        # Cylindrical geometry reproduces :lar (which is per metre, hence the r_s) and :rfitzp.
+        @test dc(:toroidal, g_cyl, k_cyl) ≈ common.rs * dc(:lar, 0.0, nothing) rtol = 1e-12
+        @test dc(:toroidal, g_cyl, k_cyl) ≈ dc(:rfitzp, 0.0, nothing) rtol = 1e-8
+        # kpar_val = nothing falls back to the cylindrical K∥.
+        @test dc(:toroidal, g_cyl, nothing) == dc(:toroidal, g_cyl, k_cyl)
+
+        # Collisional limit: χ∥ is the Spitzer-Härm value, so K∥ drops out.
+        tau_c = 1e-20
+        chi_smfp = 1.581 * tau_c * vte^2 / (1.0 + 0.2535 * common.zeff)
+        for (g, k) in ((0.3, 0.4), (0.3, 4.0), (0.6, 0.4))
+            @test dc(:toroidal, g, k; tau_ee=tau_c) ≈ 0.5 * π^1.5 * (-common.dr_val) * (chi_smfp / common.chi_perp)^0.25 * g rtol = 1e-8
+        end
+
+        # Free-streaming limit: the fixed point solves in closed form,
+        # χ∥^(3/4) = 2·v_te·g_w / (√(8π)·K∥·χ⊥^(1/4)), so Δ_crit ∝ g_w^(4/3)·K∥^(-1/3).
+        tau_f = 1e20
+        for (g, k) in ((0.3, 0.4), (0.3, 4.0), (0.6, 0.4))
+            chi_fs = (2.0 * vte * g / (sqrt(8π) * k * common.chi_perp^0.25))^(4 / 3)
+            @test dc(:toroidal, g, k; tau_ee=tau_f) ≈ 0.5 * π^1.5 * (-common.dr_val) * (chi_fs / common.chi_perp)^0.25 * g rtol = 1e-8
+        end
+
+        # dgeo_val = 0 keeps its meaning of no toroidal offset.
+        @test dc(:toroidal, 0.0, k_cyl) == 0.0
+    end
+
     @testset "Test 2: r-based shear conversion" begin
         # Direct application of r_s · (dq/dψ) / (q · da/dψ).
         @test r_based_shear(0.5, 2.0, 4.0, 0.5) ≈ 2.0
@@ -191,7 +226,7 @@
         # Every normalized layer quantity is bit-identical: abs(-1.0) === 1.0,
         # so the whole downstream chain reproduces exactly.
         for f in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor, :Q_e, :Q_i,
-                  :iota_e, :tauk, :tau_r, :delta_n, :eta, :d_beta, :dc_tmp)
+            :iota_e, :tauk, :tau_r, :delta_n, :eta, :d_beta, :dc_tmp)
             @test getfield(neg, f) == getfield(pos, f)
         end
 
