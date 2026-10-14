@@ -76,10 +76,10 @@ After renormalization (at crossing or when norms exceed ucrit):
 This is compatible with downstream code (which uses U₁/U₂ ratio):
   - Free.jl:     wp = u[:,:,2] / u[:,:,1] = I · S⁻¹ = P  ✓  (post-renorm)
   - FixedBoundaryStability.jl: crit = min_eigval(u[:,:,1] / u[:,:,2]) = min_eigval(S)  ✓
-  - Axis init:   determined by `ctrl.frobenius_psi_max`. When the start lies above it (or it is 0), U₁=0, U₂=I → S(ψ₀)=0 (original
-    Glasser fixed-axis BC). Otherwise (default near the axis), Frobenius eigenvalue init [Glasser 2016 Eq. 51]
-    sets U₂=I and U₁ to the regular Frobenius eigenvector per mode → S(ψ₀) = U₁_Frobenius is
-    nonzero in general. Riccati S-evolution remains well-defined either way.
+  - Axis init:   determined by `ctrl.frobenius_psi_max`. The default 0, and any start above a positive threshold,
+    uses U₁=0, U₂=I → S(ψ₀)=0 (Fortran DCON's fixed-axis BC). A positive threshold at or above the start
+    opts into the diagonal Frobenius init, which sets U₂=I and a per-mode U₁, so S(ψ₀) is nonzero.
+    Riccati S-evolution remains well-defined either way.
 
 ## Key Differences from Standard Integration
 
@@ -105,7 +105,7 @@ chunks concurrently using `Threads.@threads`, then re-integrates the outer plasm
     to sub-divide chunks for load balancing. The chunk count depends only on `intr.msing` and
     `ctrl.nchunks`, never on the thread count, so results are thread-independent.
  2. **Propagator phase**: `integrate_propagator_chunk!` integrates each chunk independently
-    from identity initial conditions (no accumulated state, no normalization/callback).
+    from identity initial conditions (no accumulated state, normalization or storage).
     Each thread uses a private `OdeState` proxy for `sing_der!` side effects.
  3. **Serial assembly**: propagators are applied sequentially with `apply_propagator!`.
     Rational surface crossings use `riccati_cross_ideal_singular_surf!` (no Gaussian

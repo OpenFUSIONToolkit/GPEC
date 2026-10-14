@@ -43,6 +43,26 @@ You operate under a hard budget to protect the user's token quota:
    - For major optimizations, recommend adding benchmark scripts to test/ directory
    - Compare performance metrics (time, allocations, memory) between original and optimized versions
 
+## Before optimizing: cost the work, don't just locate it
+
+A profiler says where time goes. It never says what the work *should* cost, and optimizing inside its
+framing yields a faster version of an operation that should not exist. Answer both before proposing
+any micro-optimization:
+
+1. **What is the mathematical object?** Name the operation and what its data structure already
+   determines. A level set of a piecewise cubic is a root *formula*, not a search; an integral of a
+   spline is a closed form. If a general-purpose solver is being called on a structure with an exact
+   solution, replacing the solver *is* the optimization and everything else is polishing.
+2. **What is the cost per work item?** Divide the profile's share by the number of items (calls ×
+   roots × evaluations) and compare against a first-principles estimate. A ratio of 10× or more means
+   the algorithm is wrong, not the constants — report that and stop, rather than shaving constants.
+
+Read the **enclosing loop for invariants a profile cannot show**. If an outer loop advances
+monotonically, each iteration's answer is a hint for the next and a blind search is waste — the
+codebase already uses this idiom through FastInterpolations' `hint=` arguments. Report allocations per
+call for any loop running more than ~10³ times, and say plainly when an optimization buys exactness
+rather than speed.
+
 ## Workflow
 
 When presented with code to optimize, follow this structured approach:

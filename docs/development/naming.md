@@ -65,6 +65,7 @@ Modules, with the abbreviation to use in prose:
 | `KineticForces` | KF | `src/KineticForces/` |
 | `LocalStability` | LS | `src/LocalStability/` |
 | `PerturbedEquilibrium` | PE | `src/PerturbedEquilibrium/` |
+| `Precompile` | — | `src/Precompile.jl` |
 | `Rerun` | — | `src/Rerun.jl` |
 | `Tearing` | — | `src/Tearing/` |
 | `Utilities` | — | `src/Utilities/` |
