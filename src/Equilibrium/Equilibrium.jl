@@ -3,6 +3,7 @@ module Equilibrium
 # --- Module-level Dependencies ---
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
+using Statistics: median
 using Roots
 using TOML
 using FastInterpolations
@@ -14,6 +15,7 @@ import ..Utilities
 include("EquilibriumTypes.jl")
 include("SolveTolerances.jl")
 include("GridRefinement.jl")
+include("SeparatrixQLaw.jl")
 include("FluxSurfaceMetrics.jl")
 include("CoordinateInvariant.jl")
 include("ReadEquilibrium.jl")
