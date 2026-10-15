@@ -23,6 +23,16 @@ Run sequentially, reading each agent's findings before launching the next:
 3. **`julia-performance-optimizer`** and/or **`fast-interpolations-optimizer`** — only if the change is performance-relevant.
 4. **`regression-guardian`** — always, last, before merge. Confirms the numbers didn't silently move.
 
+**These agents are diff-scoped, and that leaves one thing uncovered.** Each reviews what changed, so a
+hot path nobody is editing is invisible to all of them — permanently, no matter how expensive it
+becomes. `julia-performance-optimizer` in particular is handed a named function and told not to
+profile the suite, so it cannot find a hotspot outside the diff and should not be described as though
+it had. Whole-program cost is answered only by profiling a full run, which is a developer-initiated
+check rather than anything the pipeline does on its own. Two moments are worth spending it on: when a
+module first lands in a hot path, and when someone's sense is that runtime has changed a lot. When
+asked to do performance work, do not assume the diff is the scope — say what the whole-run cost
+picture is, or say that it is unmeasured.
+
 Not every change needs all four. A docs-only change needs none; a pure perf refactor still needs the physics reviewer (to confirm no numerical change) and the regression-guardian.
 
 ## Budget

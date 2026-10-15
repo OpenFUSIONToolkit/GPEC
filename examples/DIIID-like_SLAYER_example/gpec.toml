@@ -72,7 +72,8 @@ scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive re
 coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
 dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar", "rfitzp", or "toroidal"
 mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
-zeff                    = 1.0        # Effective charge
+zeff                    = 1.0        # fallback only; Z_eff(ψ) comes from the kinetic file (its zeff profile, else n_i/n_e with zimp)
+zimp                    = 6.0        # Impurity charge closing quasi-neutrality when Z_eff(ψ) is derived from n_i/n_e (6.0 = carbon)
 chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)

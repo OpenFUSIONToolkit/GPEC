@@ -24,6 +24,7 @@ using ..Utilities
 import ..InnerLayer as InnerLayer
 
 include("LayerInputs.jl")
+include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")
 include("CriticalResonantField/CriticalResonantField.jl")
 include("Runner/Runner.jl")
@@ -34,5 +35,6 @@ import .Runner as Runner
 
 export InnerLayer, Dispersion, CriticalResonantField, Runner
 export build_ggj_inputs
+export resistive_layer_overlap, LayerOverlapScan
 
 end # module Tearing

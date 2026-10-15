@@ -62,7 +62,7 @@ Throws if any surface's `restype` is still `nothing` — call
 `ForceFreeStates.resist_eval_all!(intr, equil)` first.
 """
 function build_ggj_inputs(equil, sings, profiles::KineticProfiles;
-    mu_i::Real=2.0, zeff::Real=1.0,
+    mu_i::Real=2.0, zeff=1.0,
     v1_scale::Real=1.0,
     resistivity_model::NeoResistivityModel=SpitzerModel(),
     lnLambda_form::Symbol=:nrl)
@@ -93,12 +93,13 @@ function build_ggj_inputs(equil, sings, profiles::KineticProfiles;
         # Shared Coulomb log and resistivity closure (identical to SLAYER
         # when the same resistivity_model is selected).
         lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
+        zeff_k = zeff isa Real ? Float64(zeff) : Float64(zeff(sing.psifac))
         if resistivity_model isa SpitzerModel
-            eta_use = eta_spitzer(n_e, t_e, zeff; lnLamb=lnLamb)
+            eta_use = eta_spitzer(n_e, t_e, zeff_k; lnLamb=lnLamb)
         else
             nuestar = nu_star_e(n_e, t_e, rg.R_major, rg.eps_local,
-                sing.q, zeff; lnLamb=lnLamb)
-            eta_use = eta_neoclassical(resistivity_model, n_e, t_e, zeff,
+                sing.q, zeff_k; lnLamb=lnLamb)
+            eta_use = eta_neoclassical(resistivity_model, n_e, t_e, zeff_k,
                 rg.f_trap, nuestar; lnLamb=lnLamb)
         end
         rho = mu_i * M_P * n_e
