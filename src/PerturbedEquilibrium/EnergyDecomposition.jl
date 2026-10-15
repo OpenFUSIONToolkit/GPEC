@@ -2,8 +2,8 @@
 Energy decomposition of free-boundary eigenmodes on the (ψ,θ) grid.
 
 Evaluates the ideal-MHD plasma potential energy δW_p of a ForceFreeStates eigenmode in two
-forms and splits it into its physical terms (Fortran GPEC `gpout_recon`/`gpout_recon2`, theory
-note `docs/tex/recon/main.tex` of the Fortran repository, Bernstein et al. 1958):
+forms and splits it into its physical terms (Fortran GPEC `gpout_recon`/`gpout_recon2` of the
+`recon` branch, theory note `docs/tex/recon/main.tex` there, Bernstein et al. 1958):
 
   - effective-field form  2δW_p = ∫dψ ∮dθ J [ |b_eff|²/μ₀ − K|ξ_n|² ],  b_eff = b + ξ_n (μ₀ j × n̂)
   - standard form         2δW_p = ∫dψ ∮dθ J [ |b|²/μ₀ − j·(b×ξ*) + (∇·ξ)*(ξ·∇p) ]
@@ -245,6 +245,7 @@ function curvature_kernel!(kern::CurvatureKernel, geom::SurfaceGeometry, equil::
     for k in 1:mtheta
         jac = geom.jac[k]
         kern.shear[k] = (chi1^2 / jac) * (q1 + dratio(thetas_ext[k]))
+        # Deviation from Fortran gpeq_curvature/gpeq_K: κ_ψ, σ and K2 use the metric B², not eqfun B², so K2|ξ_n|² matches |V|².
         kern.curvature[k] = (geom.delpsi2[k] / geom.bsq[k]) * (mu0p1 + 0.5 * geom.bsq_psi[k] + 0.5 * geom.bsq_theta[k] * geom.dpdt[k] / geom.delpsi2[k])
         jt = geom.mu0_j_theta[k] / MU_0
         jz = geom.mu0_j_zeta[k] / MU_0
@@ -267,9 +268,11 @@ const _EDGE_KNOT_TOL = 1e-10
     decomposition_grid(ffs) -> (psi, is_knot)
 
 Radial nodes of the decomposition: the equilibrium ψ knots inside the ξ solution domain, where
-the metric coefficients, the Euler-Lagrange matrices and the geometry are all exact (the Fortran
-`gpout_recon` loops over the same knots), plus the solution edge appended when the last knot
-falls short of it so the radial integral reaches the plasma edge. `is_knot` marks the exact
+the metric coefficients, the Euler-Lagrange matrices and the geometry are all exact and the
+standard-form integrand equals the DCON Lagrangian density (1e-11 pointwise), plus the solution
+edge appended when the last knot falls short of it so the radial integral reaches the plasma edge.
+The Fortran `gpout_recon` uses these knots for its profiles but integrates its energy check on
+the DCON `psifac` grid. `is_knot` marks the exact
 nodes; the (∇×b_eff)·∇ψ residual is an algebraic identity there and is reported on them only.
 """
 function decomposition_grid(ffs::ForceFreeStatesResult)
@@ -322,6 +325,7 @@ function eigenmode_modes(ffs::ForceFreeStatesResult, k::Int, psi::Vector{Float64
 
     chi1 = 2π * equil.psio
     Jb_psi, Jb_theta, Jb_zeta = compute_perturbed_field_modes(xi_psi, xi_psi1, xi_s, psi, equil, ffs)
+    # Deviation from Fortran gpeq_sol/gpeq_contra: always unregularized (reg_spot = 0), the Fortran regularizes when reg_flag is set.
     Jxi_psi, Jxi_theta, Jxi_zeta, _, _ = compute_contra_displacements(xi_psi, xi_psi1, xi_s ./ chi1, psi, equil, ffs, ffs.metric; reg_spot=0.0)
     return (; xi_psi, xi_psi1, Jxi_psi, Jxi_theta, Jxi_zeta, Jb_psi, Jb_theta, Jb_zeta)
 end
@@ -362,13 +366,11 @@ SurfaceFields(mtheta::Int) = _zeros_struct(SurfaceFields, mtheta)
     surface_fields!(sf, ft, modes, ipsi, mvals, geom, work_modes) -> sf
 
 Inverse-transform row `ipsi` of every matrix in `modes` onto the θ grid of `ft`, take the
-θ-derivative of Jξ^θ spectrally (2πi m per mode, exact for the band-limited field where the
-Fortran `gpeq_firstform` fits a periodic spline), lower the field with the exact local metric of
-`geom` (b_i = g_ij Jb^j/J), and form Jξ^ψ = J·ξ^ψ and ξ_n = ξ^ψ/|∇ψ| pointwise. The Fortran
-`gpeq_contra`, `gpeq_cova` and `gpeq_normal` instead truncate Jξ^ψ, b_i and ξ_n to the mode range;
-the pointwise products keep every harmonic, which is what lets |V|² and K₂|ξ_n|² cancel exactly
-in the effective-field form (the truncated versions leave a resolution-independent few-percent
-deficit on the Solovev fixture).
+θ-derivative of Jξ^θ spectrally, lower the field with the local metric of `geom`
+(b_i = g_ij Jb^j/J), and form Jξ^ψ = J·ξ^ψ and ξ_n = ξ^ψ/|∇ψ| pointwise. The pointwise products
+keep every θ harmonic, so |V|² and K₂|ξ_n|² cancel exactly in the effective-field form; truncating
+them to the mode range leaves a ψ-resolution-independent, mpert-dependent deficit. Jξ^θ and Jξ^ζ
+still come from the mode-truncated `jmat` convolution of `compute_contra_displacements`.
 `work_modes` is an `mpert` scratch vector.
 """
 function surface_fields!(sf::SurfaceFields, ft::Utilities.FourierTransforms.FourierTransform, modes::NamedTuple, ipsi::Int,
@@ -376,10 +378,12 @@ function surface_fields!(sf::SurfaceFields, ft::Utilities.FourierTransforms.Four
     for name in (:xi_psi, :xi_psi1, :Jxi_theta, :Jxi_zeta, :Jb_psi, :Jb_theta, :Jb_zeta)
         Utilities.FourierTransforms.inverse_transform!(getfield(sf, name), ft, view(getfield(modes, name), ipsi, :))
     end
+    # Deviation from Fortran gpeq_firstform: ∂_θ(Jξ^θ) is spectral (2πi m per mode), not a periodic-spline derivative.
     for i in eachindex(mvals)
         work_modes[i] = 2π * im * mvals[i] * modes.Jxi_theta[ipsi, i]
     end
     Utilities.FourierTransforms.inverse_transform!(sf.dJxi_theta, ft, work_modes)
+    # Deviation from Fortran gpeq_contra/gpeq_cova/gpeq_normal: Jξ^ψ, b_i and ξ_n are pointwise, not band-truncated.
     for k in eachindex(geom.jac)
         jac = geom.jac[k]
         sf.Jxi_psi[k] = jac * sf.xi_psi[k]
@@ -427,6 +431,7 @@ current of `geom` (Fortran `gpeq_c`, main.tex Eqs. 148–151):
     b_eff,ζ   = b_ζ − (Jξ^ψ) μ₀j^θ
 """
 function effective_field!(eff::EffectiveField, geom::SurfaceGeometry, sf::SurfaceFields)
+    # Deviation from Fortran gpeq_c: b_eff^i and b_eff,i are formed pointwise in θ, not band-truncated.
     for k in eachindex(geom.jac)
         jac = geom.jac[k]
         mu0jt = geom.mu0_j_theta[k]
@@ -666,6 +671,7 @@ function decompose_energy(ffs::ForceFreeStatesResult; eigenmodes::Vector{Int}=[1
         1 <= k <= nmodes || throw(ArgumentError("EnergyDecomposition: eigenmode $k is outside 1:$nmodes"))
     end
 
+    # Deviation from Fortran gpout_recon: the totals integrate over the equilibrium knots, the Fortran ones over the ODE psifac grid.
     psi, is_knot = decomposition_grid(ffs)
     knots = [on_knot ? searchsortedfirst(equil.rzphi_xs, p) : 0 for (p, on_knot) in zip(psi, is_knot)]
     npsi = length(psi)
@@ -859,8 +865,8 @@ const ENERGY_DECOMPOSITION_H5_ANNOTATIONS = [
     "parallel_current_squared" => (; long_name="∮J K2|ξ_n|² dθ with K2 = μ₀B²σ² (parallel current squared), $_ED_NORM", _ED_PROFILE...),
     "pressure_curvature" => (; long_name="∮J K3|ξ_n|² dθ with K3 = 2p'κ_ψ (pressure-curvature drive), $_ED_NORM", _ED_PROFILE...),
     "b_squared" => (; long_name="standard form: ∮J|b|²/μ₀ dθ, $_ED_NORM", _ED_PROFILE...),
-    "current_coupling" => (; long_name="standard form: ∮J j·(b×ξ*) dθ (imaginary part is roundoff), $_ED_NORM", _ED_PROFILE...),
-    "pressure_compression" => (; long_name="standard form: ∮J (∇·ξ)*(ξ·∇p) dθ (imaginary part is roundoff), $_ED_NORM", _ED_PROFILE...),
+    "current_coupling" => (; long_name="standard form: ∮J j·(b×ξ*) dθ (complex per surface; its ψ-integral is real to roundoff), $_ED_NORM", _ED_PROFILE...),
+    "pressure_compression" => (; long_name="standard form: ∮J (∇·ξ)*(ξ·∇p) dθ (complex per surface; its ψ-integral is real to roundoff), $_ED_NORM", _ED_PROFILE...),
     "dW_cumulative" => (; long_name="running ½∫dψ [effective_b_squared − shear_current − parallel_current_squared − pressure_curvature]", _ED_PROFILE...),
     "dW_cumulative_standard_form" => (; long_name="running ½∫dψ [b_squared − current_coupling + pressure_compression]", _ED_PROFILE...),
     "dW_plasma" => (; long_name="plasma potential energy δW_p in the effective-field form, $_ED_NORM", dims=("eigenmode",)),

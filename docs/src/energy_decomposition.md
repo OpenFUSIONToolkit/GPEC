@@ -2,8 +2,9 @@
 
 `EnergyDecomposition.jl` evaluates the ideal-MHD plasma potential energy ``\delta W_p`` of a
 free-boundary eigenmode of the ForceFreeStates solve on the ``(\psi,\theta)`` grid and splits
-it into its physical terms. It is the Julia counterpart of the reconstruction diagnostics of
-the Fortran GPEC (its `docs/tex/recon/main.tex` note carries the full derivation); this page
+it into its physical terms. It is the Julia counterpart of the reconstruction diagnostics on the
+`recon` branch of the Fortran GPEC (its `docs/tex/recon/main.tex` note carries the full
+derivation); "Fortran" on this page and in the code comments refers to that branch. This page
 keeps only what is needed to read the output.
 
 ## The two forms of ``\delta W_p``
@@ -52,7 +53,9 @@ of the perturbed equilibrium, which has to lie in the perturbed flux surfaces, s
 (Boozer 2004, Eq. 99; Park 2009, §2.2). The decomposition evaluates this identity on every
 equilibrium knot and reports the residual; a non-zero value means the reconstructed field
 components are inconsistent. It is an algebraic identity there, so the residual sits at roundoff
-(1e-13).
+(1e-13). It validates that ``\delta\mathbf B_{\rm eff}`` was assembled consistently from
+``\delta\mathbf B``, ``\xi_n`` and the metric on each surface; it does not test the radial
+``\xi`` solution, the curvature kernel ``K``, the radial integral or the convergence of the totals.
 
 ## Normalization and the reference energy
 
@@ -61,12 +64,16 @@ The eigenmode is built from the free-boundary eigenvector ``\mathbf w_k`` of the
 is. Every stored energy is scaled by ``2\mu_0/\psi_0^2`` so that `dW_plasma` reads in the same
 normalization, and `dW_plasma_reference` holds the corresponding entry ``e_{p,k}``. The relative
 mismatch of each form against the reference is stored and, above 5 %, reported with a warning.
-On the Solovev decks both forms reproduce ``e_{p,k}`` to better than 1 % (between 1e-5 and 1e-2
-depending on the radial resolution). The effective-field form needs the metric-consistent
+On the Solovev test fixture (`mpsi = 16`) both forms reproduce ``e_{p,k}`` to ≲1–3 %
+(effective / standard form +1.5 % / +1.2 % for the least stable mode, −3.4 % / −3.4 % for the
+second), converging with resolution (+5.1e-3 / +2.5e-4 and +6.0e-4 / −4.3e-5 at `mpsi = 128`,
+`mpert = 8`). The effective-field form needs the metric-consistent
 ``B^2 = (\chi'/\mathcal J)^2(g_{\theta\theta} + 2q g_{\theta\zeta} + q^2 g_{\zeta\zeta})`` for
-``\sigma``, ``K_2`` and ``\kappa_\psi`` rather than the equilibrium's separate ``|B|`` spline, and
-it depends on derivatives of the metric (the shear and the curvature) that the standard form does
-not, so its residual mismatch tracks the coordinate accuracy of the equilibrium.
+``\sigma``, ``K_2`` and ``\kappa_\psi`` rather than the equilibrium's separate ``|B|`` spline.
+The standard-form remainder is pure ``\psi``-quadrature error of the DCON Lagrangian (converging
+roughly as ``h^2``–``h^3``); the effective-field form carries an extra offset localized at the edge
+(``\psi \in [0.99, \psi_{\rm edge}]``) of +5e-3 for the least stable mode and +6e-4 for the second,
+constant for `mpsi` ≥ 32 and every `mpert`, so it is not a grid effect; its cause is still open.
 
 ## Running it
 
@@ -91,7 +98,8 @@ energy = GeneralizedPerturbedEquilibrium.energy_decomposition(result.ffs; eigenm
 The radial nodes are the equilibrium ``\psi`` knots inside the solution domain plus the solution
 edge: on the knots the metric, the Euler–Lagrange matrices and the geometry are all exact, which
 is what keeps the curl identity at roundoff. ``\xi`` and ``\xi'`` are splined there from the
-solution grid and ``\xi_s`` is recomputed from the matrices at each node.
+solution grid and ``\xi_s`` is recomputed from the matrices at each node. The Fortran evaluates
+its profiles on the same knots but integrates its totals over the ODE `psifac` grid.
 
 ## Output
 
