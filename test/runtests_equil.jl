@@ -1,3 +1,4 @@
+using HDF5
 
 @testset "Equilibrium Unit Tests" begin
 
@@ -611,5 +612,19 @@
         src = read(joinpath(dirname(@__DIR__), "src", "Equilibrium", "DirectEquilibrium.jl"), String)
         @test occursin("sol.retcode != ReturnCode.Success", src)
         @test occursin("isapprox(sol.t[end], 2π", src)
+    end
+
+    @testset "equilibrium_gse! writes gse.h5 with diagnose_src" begin
+        dir = mktempdir()
+        cp(joinpath(data_dir, "EQDSK_COCOS_02"), joinpath(dir, "EQDSK_COCOS_02"))
+        config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
+            eq_filename=joinpath(dir, "EQDSK_COCOS_02"), eq_type="efit", jac_type="boozer",
+            grid_type="ldp", psilow=0.01, psihigh=0.994)
+        eq = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(config)
+        eq.params.diagnose_src = true
+        GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_gse!(eq)
+        @test all(isfile(joinpath(dir, f)) for f in ("gsec.h5", "gse.h5", "gsei.h5"))
+        # Column 2 is ψ, as plot_gse_by_theta reads it
+        @test h5read(joinpath(dir, "gse.h5"), "gse_data")[:, 1, 2] == Float32.(eq.rzphi_xs)
     end
 end
