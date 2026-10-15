@@ -42,7 +42,7 @@ end
     EnergyDecompositionResult
 
 Energy decomposition of the requested free-boundary eigenmodes. Field names are the dataset
-names under `ForceFreeStates/EnergyDecomposition/`; profiles are `(psi × eigenmode)` matrices,
+names under `PerturbedEquilibrium/EnergyDecomposition/`; profiles are `(psi × eigenmode)` matrices,
 totals `(eigenmode)` vectors, densities `(psi × theta × eigenmode)` arrays. Energies are scaled
 by 2μ₀/ψ₀² to the normalization of `eigenmode_plasma_energies`. Fields of a disabled form or of
 unrequested densities stay empty.
@@ -653,9 +653,11 @@ stored as `dW_plasma_reference`. Two checks run every time: the relative (∇×b
 over the equilibrium knots and the relative mismatch of each total against the reference; both
 warn above their tolerance and are stored as data.
 
-Requires the dense ξ solution (`integrator = "forward"`), the free-boundary eigenmodes
-(`vac_flag = true`), an ideal solve, a single toroidal mode number, and at least one enabled
-form; anything else throws an `ArgumentError`.
+It covers the free-boundary DCON eigenmodes only: the edge condition is the eigenvector
+`wt[:, k]` and the reference is `ep[k]`, which fixed-boundary or forced-response perturbations
+do not supply. Requires the dense ξ solution (`integrator = "forward"`), the free-boundary
+eigenmodes (`vac_flag = true`), an ideal solve, a single toroidal mode number, and at least one
+enabled form; anything else throws an `ArgumentError`.
 """
 function decompose_energy(ffs::ForceFreeStatesResult; eigenmodes::Vector{Int}=[1], effective_field_form::Bool=true, standard_form::Bool=true,
     write_densities::Bool=false, verbose::Bool=ffs.control.verbose)
@@ -850,13 +852,14 @@ const _ED_MAIN_FIELDS = (:psi, :eigenmode_index, :effective_b_squared, :effectiv
 const _ED_DENSITY_FIELDS = (map(_density_field, _ED_EFFECTIVE_PROFILES)..., :effective_b_curl_residual_density, map(_density_field, _ED_STANDARD_PROFILES)...)
 
 const _ED_NORM = "power-normalized like eigenmode_plasma_energies (per unit ⟨|ξ|²⟩, scaled by 2μ₀/ψ₀²)"
-const _ED_PROFILE = (; dims=("psi", "eigenmode"), attach=(1 => "psi",))
-const _ED_DENSITY = (; dims=("psi", "theta", "eigenmode"), attach=(1 => "psi", 2 => "Densities/theta"))
+const _ED_TOTAL = (; dims=("eigenmode",), attach=(1 => "eigenmode_index",))
+const _ED_PROFILE = (; dims=("psi", "eigenmode"), attach=(1 => "psi", 2 => "eigenmode_index"))
+const _ED_DENSITY = (; dims=("psi", "theta", "eigenmode"), attach=(1 => "psi", 2 => "Densities/theta", 3 => "eigenmode_index"))
 
-# Metadata table for ForceFreeStates/EnergyDecomposition/ (paths relative to the group).
+# Metadata table for PerturbedEquilibrium/EnergyDecomposition/ (paths relative to the group).
 const ENERGY_DECOMPOSITION_H5_ANNOTATIONS = [
     "psi" => (; long_name="normalized poloidal flux ψ_N of the decomposition nodes (equilibrium knots plus the solution edge)", scale="psi"),
-    "eigenmode_index" => (; long_name="free-boundary eigenmode index of each decomposed mode (1 = least stable)", dims=("eigenmode",)),
+    "eigenmode_index" => (; long_name="free-boundary eigenmode index (1 = least stable) of each decomposed mode, the eigenmode coordinate", scale="eigenmode"),
     "effective_b_squared" => (; long_name="∮J|b_eff|²/μ₀ dθ with b_eff = b + ξ_n μ₀ j×n̂, $_ED_NORM", _ED_PROFILE...),
     "effective_b_squared_psi" => (; long_name="ψ-component contribution Re[(J b_eff^ψ)* b_eff,ψ]/(μ₀J) to effective_b_squared", _ED_PROFILE...),
     "effective_b_squared_theta" => (; long_name="θ-component contribution Re[(J b_eff^θ)* b_eff,θ]/(μ₀J) to effective_b_squared", _ED_PROFILE...),
@@ -869,15 +872,15 @@ const ENERGY_DECOMPOSITION_H5_ANNOTATIONS = [
     "pressure_compression" => (; long_name="standard form: ∮J (∇·ξ)*(ξ·∇p) dθ (complex per surface; its ψ-integral is real to roundoff), $_ED_NORM", _ED_PROFILE...),
     "dW_cumulative" => (; long_name="running ½∫dψ [effective_b_squared − shear_current − parallel_current_squared − pressure_curvature]", _ED_PROFILE...),
     "dW_cumulative_standard_form" => (; long_name="running ½∫dψ [b_squared − current_coupling + pressure_compression]", _ED_PROFILE...),
-    "dW_plasma" => (; long_name="plasma potential energy δW_p in the effective-field form, $_ED_NORM", dims=("eigenmode",)),
-    "dW_plasma_standard_form" => (; long_name="plasma potential energy δW_p in the standard form (imaginary part is roundoff), $_ED_NORM", dims=("eigenmode",)),
-    "dW_plasma_reference" => (; long_name="eigenmode_plasma_energies entry of the same eigenmode, the reference for both forms", dims=("eigenmode",)),
-    "dW_plasma_relative_error" => (; long_name="(dW_plasma − dW_plasma_reference)/|dW_plasma_reference|", dims=("eigenmode",)),
-    "dW_plasma_standard_form_relative_error" => (; long_name="(Re dW_plasma_standard_form − dW_plasma_reference)/|dW_plasma_reference|", dims=("eigenmode",)),
+    "dW_plasma" => (; long_name="plasma potential energy δW_p in the effective-field form, $_ED_NORM", _ED_TOTAL...),
+    "dW_plasma_standard_form" => (; long_name="plasma potential energy δW_p in the standard form (imaginary part is roundoff), $_ED_NORM", _ED_TOTAL...),
+    "dW_plasma_reference" => (; long_name="eigenmode_plasma_energies entry of the same eigenmode, the reference for both forms", _ED_TOTAL...),
+    "dW_plasma_relative_error" => (; long_name="(dW_plasma − dW_plasma_reference)/|dW_plasma_reference|", _ED_TOTAL...),
+    "dW_plasma_standard_form_relative_error" => (; long_name="(Re dW_plasma_standard_form − dW_plasma_reference)/|dW_plasma_reference|", _ED_TOTAL...),
     "effective_b_curl_residual_max" =>
-        (; long_name="max over the equilibrium knots and θ of |(∇×b_eff)·∇ψ|, which vanishes for a consistent effective field", dims=("eigenmode",)),
-    "effective_b_curl_residual_rms" => (; long_name="rms over the equilibrium knots and θ of |(∇×b_eff)·∇ψ|", dims=("eigenmode",)),
-    "effective_b_curl_residual_relative" => (; long_name="effective_b_curl_residual_max divided by max|∂_θ b_eff,ζ/J|, the size of the cancelling terms", dims=("eigenmode",)),
+        (; long_name="max over the equilibrium knots and θ of |(∇×b_eff)·∇ψ|, which vanishes for a consistent effective field", _ED_TOTAL...),
+    "effective_b_curl_residual_rms" => (; long_name="rms over the equilibrium knots and θ of |(∇×b_eff)·∇ψ|", _ED_TOTAL...),
+    "effective_b_curl_residual_relative" => (; long_name="effective_b_curl_residual_max divided by max|∂_θ b_eff,ζ/J|, the size of the cancelling terms", _ED_TOTAL...),
     "Densities/theta" => (; long_name="poloidal angle θ ∈ [0,1) of the density grid", scale="theta"),
     "Densities/R" => (; long_name="major radius of the (ψ,θ) grid points", units="m", dims=("psi", "theta"), attach=(1 => "psi", 2 => "Densities/theta")),
     "Densities/Z" => (; long_name="vertical position of the (ψ,θ) grid points", units="m", dims=("psi", "theta"), attach=(1 => "psi", 2 => "Densities/theta")),
@@ -897,14 +900,14 @@ const ENERGY_DECOMPOSITION_H5_ANNOTATIONS = [
 """
     write_energy_decomposition!(h5, res) -> nothing
 
-Write `res` to `ForceFreeStates/EnergyDecomposition/` of the open file `h5`, replacing the group
+Write `res` to `PerturbedEquilibrium/EnergyDecomposition/` of the open file `h5`, replacing the group
 if it exists, and apply the metadata table. Fields of a disabled form are written zero-extent;
 `Densities/` appears only when the densities were requested.
 """
 function write_energy_decomposition!(h5::HDF5.File, res::EnergyDecompositionResult)
-    ffs_group = haskey(h5, "ForceFreeStates") ? h5["ForceFreeStates"] : create_group(h5, "ForceFreeStates")
-    haskey(ffs_group, "EnergyDecomposition") && delete_object(ffs_group, "EnergyDecomposition")
-    g = create_group(ffs_group, "EnergyDecomposition")
+    pe_group = haskey(h5, "PerturbedEquilibrium") ? h5["PerturbedEquilibrium"] : create_group(h5, "PerturbedEquilibrium")
+    haskey(pe_group, "EnergyDecomposition") && delete_object(pe_group, "EnergyDecomposition")
+    g = create_group(pe_group, "EnergyDecomposition")
     # Disabled forms hold zero-extent arrays of the documented rank, the file's not-computed sentinel.
     for name in _ED_MAIN_FIELDS
         g[String(name)] = getfield(res, name)

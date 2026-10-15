@@ -5,7 +5,9 @@ free-boundary eigenmode of the ForceFreeStates solve on the ``(\psi,\theta)`` gr
 it into its physical terms. It is the Julia counterpart of the reconstruction diagnostics on the
 `recon` branch of the Fortran GPEC (its `docs/tex/recon/main.tex` note carries the full
 derivation); "Fortran" on this page and in the code comments refers to that branch. This page
-keeps only what is needed to read the output.
+keeps only what is needed to read the output. The stage covers the free-boundary DCON
+eigenmodes only: the edge condition is the free-boundary eigenvector and the reference energy is
+its ``e_{p,k}``, which fixed-boundary or forced-response perturbations do not supply.
 
 ## The two forms of ``\delta W_p``
 
@@ -103,8 +105,9 @@ its profiles on the same knots but integrates its totals over the ODE `psifac` g
 
 ## Output
 
-Everything lands in `ForceFreeStates/EnergyDecomposition/` of `gpec.h5`, profiles on the
-decomposition ``\psi`` nodes with one column per decomposed eigenmode:
+Everything lands in `PerturbedEquilibrium/EnergyDecomposition/` of `gpec.h5`, profiles on the
+decomposition ``\psi`` nodes with one column per decomposed eigenmode; `eigenmode_index` is the
+coordinate of that axis (the free-boundary eigenmode number, 1 = least stable):
 
 | Dataset | Content |
 |---|---|

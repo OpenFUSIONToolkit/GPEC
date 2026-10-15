@@ -196,7 +196,7 @@ end
         PerturbedEquilibrium.write_energy_decomposition!(h5, res)
     end
     h5open(path, "r") do h5
-        g = h5["ForceFreeStates/EnergyDecomposition"]
+        g = h5["PerturbedEquilibrium/EnergyDecomposition"]
         for name in ("psi", "eigenmode_index", "effective_b_squared", "shear_current", "b_squared", "current_coupling",
             "dW_cumulative", "dW_cumulative_standard_form", "dW_plasma", "dW_plasma_standard_form", "dW_plasma_reference",
             "dW_plasma_relative_error", "dW_plasma_standard_form_relative_error", "effective_b_curl_residual_max",
@@ -210,6 +210,11 @@ end
         @test HDF5.API.h5ds_is_scale(g["psi"])
         @test HDF5.API.h5ds_is_attached(g["effective_b_squared"], g["psi"], 1)
         @test HDF5.API.h5ds_is_attached(g["Densities/effective_b_squared_density"], g["Densities/theta"], 1)
+        # eigenmode_index is the coordinate of the eigenmode axis (C index 0 is the last Julia axis).
+        @test HDF5.API.h5ds_is_scale(g["eigenmode_index"])
+        @test HDF5.API.h5ds_is_attached(g["dW_plasma"], g["eigenmode_index"], 0)
+        @test HDF5.API.h5ds_is_attached(g["effective_b_squared"], g["eigenmode_index"], 0)
+        @test HDF5.API.h5ds_is_attached(g["Densities/effective_b_squared_density"], g["eigenmode_index"], 0)
         @test attrs(g["Densities/R"])["units"] == "m"
     end
     # A disabled form writes zero-extent datasets, never missing ones.
@@ -218,7 +223,7 @@ end
         PerturbedEquilibrium.write_energy_decomposition!(h5, _ED_ONLY_EFF)
     end
     h5open(path2, "r") do h5
-        g = h5["ForceFreeStates/EnergyDecomposition"]
+        g = h5["PerturbedEquilibrium/EnergyDecomposition"]
         @test length(read(g["dW_plasma_standard_form"])) == 0
         @test length(read(g["b_squared"])) == 0
         # Zero-extent sentinels keep the documented rank so the dimension metadata stays consistent.
@@ -233,7 +238,7 @@ end
     # main keeps its (ffs, pe, slayer) shape; the stage's result lives in gpec.h5 only.
     @test keys(_ED_RES) == (:ffs, :pe, :slayer)
     h5open(joinpath(_ED_DIR, "gpec.h5"), "r") do h5
-        g = h5["ForceFreeStates/EnergyDecomposition"]
+        g = h5["PerturbedEquilibrium/EnergyDecomposition"]
         @test read(g["eigenmode_index"]) == [1]
         @test length(read(g["dW_plasma"])) == 1
         @test haskey(g, "Densities/R")
@@ -254,9 +259,9 @@ end
     scripted = GeneralizedPerturbedEquilibrium.energy_decomposition(_with(_ED_FFS, :dir_path => scratch); eigenmodes=[2], standard_form=false, verbose=false)
     @test scripted.eigenmode_index == [2]
     h5open(joinpath(scratch, "gpec.h5"), "r") do h5
-        @test read(h5["ForceFreeStates/EnergyDecomposition/eigenmode_index"]) == [2]
+        @test read(h5["PerturbedEquilibrium/EnergyDecomposition/eigenmode_index"]) == [2]
     end
     h5open(joinpath(_ED_DIR, "gpec.h5"), "r") do h5
-        @test read(h5["ForceFreeStates/EnergyDecomposition/eigenmode_index"]) == [1]
+        @test read(h5["PerturbedEquilibrium/EnergyDecomposition/eigenmode_index"]) == [1]
     end
 end
