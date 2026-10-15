@@ -852,8 +852,10 @@ end
 
 Decompose the plasma energy of the free-boundary eigenmodes named in the `[EnergyDecomposition]`
 section against a published force-free-states `result` and write the group into the run's
-`gpec.h5`. Returns `nothing` when the deck has no such section, or when the solve carries no
-dense ξ solution or no free-boundary eigenmodes (warned and skipped, like every optional stage).
+`gpec.h5`. Returns `nothing` when the deck has no such section, or when the solve cannot supply
+what the decomposition needs: the forward integrator's dense ξ solution, the free-boundary
+eigenmodes, a single toroidal mode number and ideal matrices (warned and skipped, like every
+optional stage).
 """
 function run_energy_decomposition(result::ForceFreeStatesResult, inputs::Dict{String,Any})
     "EnergyDecomposition" in keys(inputs) || return nothing
@@ -862,6 +864,19 @@ function run_energy_decomposition(result::ForceFreeStatesResult, inputs::Dict{St
     ed_ctrl = PerturbedEquilibrium.EnergyDecompositionControl(; (Symbol(k) => v for (k, v) in inputs["EnergyDecomposition"])...)
     ForceFreeStates.require_solution(result, "energy decomposition") || return nothing
     ForceFreeStates.require(result, :free_boundary, "energy decomposition") || return nothing
+    reason = if result.integrator !== :forward
+        "it needs the forward integrator's ξ solution"
+    elseif result.nlow != result.nhigh
+        "it handles a single toroidal mode number (nn_low == nn_high)"
+    elseif result.mats.kinetic !== nothing
+        "it decomposes ideal eigenmodes only (kinetic_factor = 0)"
+    else
+        ""
+    end
+    if !isempty(reason)
+        @warn "Skipping energy decomposition: $reason"
+        return nothing
+    end
     energy = energy_decomposition(result; eigenmodes=ed_ctrl.eigenmodes, effective_field_form=ed_ctrl.effective_field_form,
         standard_form=ed_ctrl.standard_form, write_densities=ed_ctrl.write_densities)
     @info "Energy Decomposition completed in $(@sprintf("%.3f", time() - ed_start)) s"

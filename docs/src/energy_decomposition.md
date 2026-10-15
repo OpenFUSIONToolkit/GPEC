@@ -80,7 +80,8 @@ write_densities = false       # Also store the per-(ψ,θ) energy densities with
 
 The stage runs right after ForceFreeStates, also with `force_termination = true`, and needs the
 dense ``\xi`` solution (`integrator = "forward"`), the free-boundary eigenmodes
-(`vac_flag = true`) and an ideal solve; otherwise it warns and is skipped. From a script:
+(`vac_flag = true`), a single toroidal mode number and an ideal solve; otherwise it warns and is
+skipped. From a script:
 
 ```julia
 result = GeneralizedPerturbedEquilibrium.main(["examples/Solovev_ideal_example"])

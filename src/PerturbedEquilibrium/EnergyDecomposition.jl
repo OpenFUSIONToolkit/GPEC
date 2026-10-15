@@ -918,9 +918,6 @@ const _ED_DENSITY_FIELDS = (:effective_b_squared_density, :effective_b_squared_p
     :effective_b_squared_zeta_density, :shear_current_density, :parallel_current_squared_density, :pressure_curvature_density,
     :effective_b_curl_residual_density, :b_squared_density, :current_coupling_density, :pressure_compression_density)
 
-# Empty result arrays are written zero-extent (the file's not-computed sentinel).
-_h5_value(x::AbstractArray) = isempty(x) ? similar(x, 0) : x
-
 const _ED_NORM = "power-normalized like eigenmode_plasma_energies (per unit ⟨|ξ|²⟩, scaled by 2μ₀/ψ₀²)"
 const _ED_PROFILE = (; dims=("psi", "eigenmode"), attach=(1 => "psi",))
 const _ED_DENSITY = (; dims=("psi", "theta", "eigenmode"), attach=(1 => "psi", 2 => "Densities/theta"))
@@ -977,8 +974,9 @@ function write_energy_decomposition!(h5::HDF5.File, res::EnergyDecompositionResu
     ffs_group = haskey(h5, "ForceFreeStates") ? h5["ForceFreeStates"] : create_group(h5, "ForceFreeStates")
     haskey(ffs_group, "EnergyDecomposition") && delete_object(ffs_group, "EnergyDecomposition")
     g = create_group(ffs_group, "EnergyDecomposition")
+    # Disabled forms hold zero-extent arrays of the documented rank, the file's not-computed sentinel.
     for name in _ED_MAIN_FIELDS
-        g[String(name)] = _h5_value(getfield(res, name))
+        g[String(name)] = getfield(res, name)
     end
     if !isempty(res.theta)
         d = create_group(g, "Densities")
@@ -986,7 +984,7 @@ function write_energy_decomposition!(h5::HDF5.File, res::EnergyDecompositionResu
         d["R"] = res.R
         d["Z"] = res.Z
         for name in _ED_DENSITY_FIELDS
-            d[String(name)] = _h5_value(getfield(res, name))
+            d[String(name)] = getfield(res, name)
         end
     end
     Utilities.HDF5Annotations.annotate!(g, ENERGY_DECOMPOSITION_H5_ANNOTATIONS)
