@@ -418,8 +418,7 @@ equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
             GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
 
 intr  = FFS.ForceFreeStatesInternal(; dir_path=ex)
-intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-    (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
 intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
 FFS.sing_lim!(intr, ctrl, equil)
 FFS.sing_find!(intr, equil)

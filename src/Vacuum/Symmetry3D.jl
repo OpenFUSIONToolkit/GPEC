@@ -86,11 +86,11 @@ end
 """
     stell_sym_map(plasma, wall, nfp) -> Union{Vector{Int},Nothing}
 
-Within-period map of `(θ, ζ) → (−θ, −ζ)` if both surfaces are stellarator symmetric to 1e-10 of the largest
+Within-period map of `(θ, ζ) → (−θ, −ζ)` if the plasma and the wall (when there is one) are stellarator symmetric to 1e-10 of the largest
 coordinate, `nothing` otherwise. A nearly symmetric boundary (e.g. one extracted from an equilibrium, off by
 ~1e-3) is rejected and takes the general path; this test is the only guard on the symmetric path.
 """
-function stell_sym_map(plasma::PlasmaGeometry3D, wall::WallGeometry3D, nfp::Int)
+function stell_sym_map(plasma::PlasmaGeometry3D, wall::Union{Nothing,WallGeometry3D}, nfp::Int)
     # This must be called after expand_field_periods, so nzeta_full is the full-torus nzeta
     mtheta, nzeta_full = plasma.mtheta, plasma.nzeta
     @assert nzeta_full % nfp == 0 "full-torus nzeta ($nzeta_full) must be divisible by nfp ($nfp)"
@@ -105,7 +105,7 @@ function stell_sym_map(plasma::PlasmaGeometry3D, wall::WallGeometry3D, nfp::Int)
 
     # Check if the boundary(s) are stellarator symmetric
     # return the mapping if so, otherwise return nothing
-    if is_symmetric(plasma.r) && (wall.nowall || is_symmetric(wall.r))
+    if is_symmetric(plasma.r) && (isnothing(wall) || is_symmetric(wall.r))
         nzeta = nzeta_full ÷ nfp
         return [reflect_index(p, mtheta, nzeta) for p in 1:(mtheta*nzeta)]
     else

@@ -562,7 +562,7 @@ end
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
         sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, sol_cfg)
-        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
         FFS.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low
         intr.nhigh = ctrl.nn_high

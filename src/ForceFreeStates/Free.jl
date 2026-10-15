@@ -16,7 +16,7 @@ power-normalized and invariant to the working (Jacobian) coordinate.
   - `et::Vector{ComplexF64}` - Total energy eigenvalues of the pencil (W, N); et = ep + ev per mode
   - `n_tor_idx::Vector{Int}` - 0-based toroidal mode number index of each sorted eigenvalue
   - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the pencil (wv, N), clamped to zero
-  - `plasma_pts`, `wall_pts::Matrix{Float64}` - Cartesian (x, y, z) surface coordinates, `numpoints × 3`, retained for HDF5 output
+  - `plasma_pts`, `wall_pts::Matrix{Float64}` - Cartesian (x, y, z) surface coordinates, `numpoints × 3`, retained for HDF5 output; `wall_pts` has no rows when there is no wall
 """
 struct FreeBoundaryResult
     wt::Matrix{ComplexF64}
@@ -202,7 +202,7 @@ calculations and data dumping.
               "  Total  = $((@sprintf "%+.3e %+.3ei" real(et[1]) imag(et[1])))"
     end
 
-    return FreeBoundaryResult(wt, wt0, wp, wv, ep, ev, et, n_tor_idx, vacuum_eigenvalue, vac.plasma_pts, vac.wall_pts)
+    return FreeBoundaryResult(wt, wt0, wp, wv, ep, ev, et, n_tor_idx, vacuum_eigenvalue, vac.plasma_pts, isnothing(intr.wall_settings) ? zeros(0, 3) : vac.wall_pts)
 end
 
 """

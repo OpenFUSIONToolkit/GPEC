@@ -31,8 +31,8 @@ ma     = 128                   # TJ-analytic internal radial grid resolution (sh
 mtau   = 128                   # TJ-analytic internal poloidal grid resolution (θ-spline nodes)
 
 [Wall]
-shape = "conformal"            # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a     = 20                     # Distance from plasma (conformal) or shape parameter (20× → effectively no wall)
+shape = "conformal"            # Wall shape (conformal, elliptical, dee, mod_dee, file)
+a     = 20                     # Distance from plasma in units of the minor radius (20× → effectively no wall)
 
 [ForceFreeStates]
 local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile

@@ -14,12 +14,12 @@ using TOML
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
-    wall = GPEC.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in deck["Wall"])...)
+    wall = GPEC.Vacuum.parse_wall(get(deck, "Wall", nothing))
 
     # The deck's `[ForceFreeStates]` block as `solve` keywords: everything except the knobs the
     # integrator object and the `nn` keyword own.
     ffs_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"]
-                      if !(k in ("integrator", "nn_low", "nn_high")))
+                                         if !(k in ("integrator", "nn_low", "nn_high")))
 
     # Copy the fixture deck into `dir` and apply `[ForceFreeStates]` overrides / extra sections.
     function _stage_deck(dir; ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
@@ -160,7 +160,7 @@ using TOML
         @test d.terms[2].scale == 1.0 + 0.0im
         @test (im * a).scale == im
         @test (a * 3).scale == 3.0 + 0.0im
-        @test (a - b).terms[2].scale == -0.5 + 0.0im
+        @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
     end
 

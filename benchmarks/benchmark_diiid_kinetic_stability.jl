@@ -36,7 +36,9 @@ using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 const AnalysisFFS = GPE.Analysis.ForceFreeStates
 
-"Fortran GPEC DIII-D kinetic example run directory, from the environment (no on-disk default)."
+"""
+Fortran GPEC DIII-D kinetic example run directory, from the environment (no on-disk default).
+"""
 default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID_DCON, or pass the Fortran run directory as the first argument"),
     ENV, "GPEC_FORTRAN_DIIID_DCON")
 
@@ -131,9 +133,6 @@ mpsi = 128
 mtheta = 256
 newq0 = 0
 etol = 1e-7
-
-[Wall]
-shape = "nowall"
 
 [ForceFreeStates]
 local_stability_flag = true

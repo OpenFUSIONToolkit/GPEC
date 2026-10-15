@@ -136,7 +136,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
 All GPEC modules are configured via a single TOML file with the following sections:
 
 - `[Equilibrium]` - Equilibrium solver settings
-- `[Wall]` - Wall geometry and vacuum region
+- `[Wall]` - Wall geometry (omitted for no wall)
 - `[ForceFreeStates]` - Stability analysis parameters
 - `[PerturbedEquilibrium]` - Perturbed equilibrium settings
 - `[ForcingTerms]` - External field specification
@@ -199,7 +199,7 @@ The complete GPEC analysis pipeline:
 
 ### Vacuum
 - `VacuumInput` - Input parameters for vacuum calculations
-- `WallShapeSettings` - Wall geometry configuration
+- `WallSettings` - Wall shape configuration (`ConformalWall`, `DeeWall`, ...); no wall is `nothing`
 
 ### Stability
 - `SingType` - Singular surface data including:

@@ -22,11 +22,11 @@ Contains plasma boundary data and calculation parameters including:
 - Grid resolution (mtheta) for vacuum calculations
 - Optional kernel sign and symmetry flags
 
-### WallShapeSettings
-Specifies wall geometry configuration with options for:
-- No wall, conformal, elliptical, dee-shaped, or custom walls
-- Geometric parameters (a, aw, bw, cw, dw, tw)
-- Equal arc length spacing option
+### WallSettings
+Abstract type of the wall shapes, one concrete type each with only its own parameters:
+- `ConformalWall`, `EllipticalWall`, `DeeWall`, `ModDeeWall`, `FileWall`
+- Equal arc length spacing option (`equal_arc_wall`)
+- No wall is `nothing` rather than a shape: the `[Wall]` section is omitted from the deck, and `compute_vacuum_response(inputs, nothing)` leaves the vacuum region unbounded
 
 ## API Reference
 
@@ -61,10 +61,9 @@ inputs = GeneralizedPerturbedEquilibrium.Vacuum.VacuumInput(
     kernelsign = 1.0          # Kernel sign (+1 or -1)
 )
 
-# Define wall settings
-wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(
-    shape = "conformal",      # Wall shape type
-    a = 0.3,                  # Wall distance parameter
+# Define wall settings (use `nothing` for no wall)
+wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.ConformalWall(
+    a = 0.3,                  # Wall distance in units of the minor radius
     equal_arc_wall = true     # Use equal arc length spacing
 )
 
@@ -77,5 +76,5 @@ vac = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wal
 - The Julia implementation uses Bulirsch's algorithm for elliptic integrals, providing improved accuracy over polynomial approximations
 - For large mode numbers (nρ̂ ≥ 0.1), 32-point Gaussian quadrature is used for Legendre function evaluation
 - For n=0 modes with closed walls, automatic regularization is applied
-- Wall shapes support: nowall, conformal, elliptical, dee, mod_dee, or custom from file
+- Wall shapes: conformal, elliptical, dee, mod_dee, or custom from file; no wall is `nothing`
 - The vacuum response matrix wv is scaled by the singular factor (m - nq)(m' - nq) per [Chance Phys. Plasmas 1997]

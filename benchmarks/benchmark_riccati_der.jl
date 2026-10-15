@@ -30,8 +30,7 @@ function setup_solovev()
         (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
     eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
-    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-        (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
     FFS.sing_lim!(intr, ctrl, equil)
     intr.nlow = ctrl.nn_low;
     intr.nhigh = ctrl.nn_high;

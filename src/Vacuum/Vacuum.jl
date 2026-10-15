@@ -18,7 +18,7 @@ include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
 
-export VacuumInput, VacuumResponse, WallShapeSettings
+export VacuumInput, VacuumResponse, WallSettings
 export compute_vacuum_response, compute_vacuum_response!
 export extract_plasma_surface_at_psi
 export PlasmaGeometry
@@ -50,7 +50,7 @@ function _warn_and_symmetrize!(mat::AbstractMatrix, name::String)
 end
 
 """
-    _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv=false)
 
 2D (axisymmetric) vacuum response calculation.
 
@@ -59,7 +59,7 @@ building the double-/single-layer operators, solving the exterior system for `wv
 optionally the interior system to build `I_v` when `compute_Iv=true`.
 Green's functions are internal scratch only.
 """
-@with_pool pool function _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+@with_pool pool function _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv::Bool=false)
 
     mpert = length(inputs.m_modes)
     mlow = inputs.m_modes[1]
@@ -70,7 +70,7 @@ Green's functions are internal scratch only.
 
     # Form the plasma and wall geometries
     plasma_surf = PlasmaGeometry(inputs)
-    wall = WallGeometry(inputs, plasma_surf, wall_settings)
+    wall = isnothing(wall_settings) ? nothing : WallGeometry(plasma_surf, wall_settings)
 
     # Loop over all decoupled toroidal modes
     for (idx_n, n) in enumerate(inputs.n_modes)
@@ -82,7 +82,7 @@ Green's functions are internal scratch only.
         wv_block = @view vac_data.wv[block_idx, block_idx]
 
         # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
-        num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
+        num_points_total = isnothing(wall) ? num_points_surf : 2 * num_points_surf
 
         # Local work matrices
         grad_green = zeros!(pool, num_points_total, num_points_total)
@@ -95,7 +95,7 @@ Green's functions are internal scratch only.
         # Project plasma observer onto source basis exp(i*(mθ - nζ))
         mul!(view(grre, 1:num_points_surf, :), green_temp, ft.basis')
 
-        if !wall.nowall
+        if !isnothing(wall)
             # Plasma–Wall block
             compute_2D_kernel_matrices!(grad_green, green_temp, plasma_surf, wall, n)
             # Wall–Wall block
@@ -148,9 +148,9 @@ Green's functions are internal scratch only.
         vac_data.plasma_pts[:, 1] .= plasma_surf.x
         vac_data.plasma_pts[:, 2] .= 0.0
         vac_data.plasma_pts[:, 3] .= plasma_surf.z
-        vac_data.wall_pts[:, 1] .= wall.x
+        vac_data.wall_pts[:, 1] .= isnothing(wall) ? 0.0 : wall.x
         vac_data.wall_pts[:, 2] .= 0.0
-        vac_data.wall_pts[:, 3] .= wall.z
+        vac_data.wall_pts[:, 3] .= isnothing(wall) ? 0.0 : wall.z
     end
 end
 
@@ -226,7 +226,7 @@ Real `D_d`, `S_d` give `D̂₋ₖ = conj(D̂ₖ)`, so class `mod(nfp - k, nfp)` 
 a conjugated mode basis. A stellarator-symmetric boundary gets a [`StellSymBasis`](@ref), making the
 class operator real and splitting a self-conjugate class into two half-size blocks.
 """
-@with_pool pool function _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+@with_pool pool function _compute_vacuum_response_3d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv::Bool=false)
 
     (; mtheta, nzeta, nfp, m_modes, n_modes) = inputs
     fill!(vac_data.wv, 0)
@@ -234,12 +234,18 @@ class operator real and splitting a self-conjugate class into two half-size bloc
 
     # Full-torus geometry for sources; observers are one field period
     full = expand_field_periods(inputs)
+    # Expansion leaves nfp > 1 only on an axisymmetric boundary, which has no field periodicity
+    full.nfp > 1 && error(
+        "3D vacuum requires nfp = 1 on an axisymmetric (nzeta_in = 1) boundary: an axisymmetric " *
+        "surface has no field periodicity, and nfp > 1 leaves the solve reading $(mtheta)×$(nzeta) points " *
+        "as a full torus of $(mtheta)×$(nzeta * nfp)."
+    )
     plasma_surf = PlasmaGeometry3D(full)
-    wall = WallGeometry3D(full, plasma_surf, wall_settings)
+    wall = isnothing(wall_settings) ? nothing : WallGeometry3D(full, plasma_surf, wall_settings)
 
     num_points_per_fp = mtheta * nzeta
     mpert = length(m_modes)
-    nb = wall.nowall ? 1 : 2  # plasma, or [plasma; wall]
+    nb = isnothing(wall) ? 1 : 2  # plasma, or [plasma; wall]
     n_obs = nb * num_points_per_fp
     num_modes = mpert * length(n_modes)
 
@@ -298,7 +304,7 @@ class operator real and splitting a self-conjugate class into two half-size bloc
         # Plasma–Plasma block
         compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
 
-        if !wall.nowall
+        if !isnothing(wall)
             # Plasma–Wall block
             compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
             # Wall–Wall block
@@ -388,27 +394,28 @@ class operator real and splitting a self-conjugate class into two half-size bloc
 
     # Populate coordinate arrays
     vac_data.plasma_pts .= plasma_surf.r
-    vac_data.wall_pts .= wall.r
+    vac_data.wall_pts .= isnothing(wall) ? 0.0 : wall.r
 end
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false) -> VacuumResponse
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv=false) -> VacuumResponse
 
 Allocating version of [`compute_vacuum_response!`](@ref).
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv::Bool=false)
     vac = VacuumResponse(inputs)
     compute_vacuum_response!(vac, inputs, wall_settings; compute_Iv)
     return vac
 end
 
 """
-    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv=false)
+    compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv=false)
 
 Compute the vacuum response into `vac_data`. 2D (`inputs.nzeta == 1`) and 3D otherwise. Pass
-`compute_Iv=true` to also fill the surface-current matrix `I_v`.
+`compute_Iv=true` to also fill the surface-current matrix `I_v`. `wall_settings` is a
+[`WallSettings`](@ref), or `nothing` for no wall (the vacuum region extends to infinity).
 """
-function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::WallShapeSettings; compute_Iv::Bool=false)
+function compute_vacuum_response!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv::Bool=false)
     if inputs.nzeta == 1
         _compute_vacuum_response_2d!(vac_data, inputs, wall_settings; compute_Iv)
     else

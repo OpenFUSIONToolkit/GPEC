@@ -27,8 +27,8 @@ ma     = 128                   # Radial grid points
 mtau   = 128                   # Poloidal grid points
 
 [Wall]
-shape = "conformal"            # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a     = 20                     # Distance from plasma (conformal) or shape parameter
+shape = "conformal"            # Wall shape (conformal, elliptical, dee, mod_dee, file)
+a     = 20                     # Distance from plasma in units of the minor radius
 
 [ForceFreeStates]
 HDF5_filename        = "gpec_lar_ideal.h5"  # Output filename for the stability-stage results

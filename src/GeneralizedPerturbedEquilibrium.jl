@@ -232,11 +232,7 @@ function main_from_inputs(
         return
     end
 
-    if "Wall" in keys(inputs)
-        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    else
-        intr.wall_settings = Vacuum.WallShapeSettings()
-    end
+    intr.wall_settings = Vacuum.parse_wall(get(inputs, "Wall", nothing))
 
     if "DEBUG" in keys(inputs)
         intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
@@ -779,7 +775,7 @@ function run_force_free_states(
         # Compute free boundary energies.
         if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
             if ctrl.verbose
-                wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
+                wall_desc = isnothing(intr.wall_settings) ? "no wall" : nameof(typeof(intr.wall_settings))
                 @info "Computing free boundary energies ($wall_desc)"
             end
             free_energies = free_run(odet, ctrl, equil, mats, intr)
@@ -813,7 +809,7 @@ function run_force_free_states(
 end
 
 """
-    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(), match=nothing,
+    EulerLagrangeProblem(equil; nn, wall=nothing, match=nothing,
                          dir_path=".", debug=DebugSettings(), kwargs...)
 
 The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
@@ -822,7 +818,7 @@ kinetic) perturbed states. This is the WHAT of a stability solve; the integrator
 [`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
 names this one, so `solve` stays unambiguous as other problem classes appear.
 
-`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `match` an
+`nn` is the toroidal mode number or range. `wall` is the vacuum `Vacuum.WallSettings`, or `nothing` for no wall, `match` an
 optional [`ResistiveMatch`](@ref) closing the basis with an inner-layer solution instead of
 the ideal jump, `dir_path` the working directory outputs are written to, and `debug` the
 diagnostic dump settings of the DEBUG deck section. Any remaining keyword is a
@@ -832,7 +828,7 @@ knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
 ## Fields
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
-  - `wall::Vacuum.WallShapeSettings` - Vacuum wall shape for the free-boundary energies.
+  - `wall::Union{Nothing,Vacuum.WallSettings}` - Vacuum wall shape for the free-boundary energies; `nothing` for no wall.
   - `match::Union{Nothing,ForceFreeStates.ResistiveMatch}` - Optional inner-layer closure.
   - `dir_path::String` - Working directory for outputs.
   - `debug::DebugSettings` - Diagnostic dump settings.
@@ -840,7 +836,7 @@ knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
 """
 struct EulerLagrangeProblem
     equil::Equilibrium.PlasmaEquilibrium
-    wall::Vacuum.WallShapeSettings
+    wall::Union{Nothing,Vacuum.WallSettings}
     match::Union{Nothing,ForceFreeStates.ResistiveMatch}
     dir_path::String
     debug::DebugSettings
@@ -850,7 +846,7 @@ end
 function EulerLagrangeProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
-    wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
+    wall::Union{Nothing,Vacuum.WallSettings}=nothing,
     match::Union{Nothing,ForceFreeStates.ResistiveMatch}=nothing,
     dir_path::AbstractString=".",
     debug::DebugSettings=DebugSettings(),
@@ -1303,7 +1299,9 @@ function efc_couplings(
     ψk = kp.xs
     ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
     ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
-    ω_star_n = [(n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk]
+    ω_star_n = [
+        (n=kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
+    ]
     ω_φ = ω_E .+ ω_star_n .+ ω_star_T
     # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
     w = [ψ <= ffs.psilim ? max(kp.ni_spline(ψ), 0.0) * equil.profiles.dVdpsi_spline(clamp(ψ, equil.profiles.xs[1], equil.profiles.xs[end])) : 0.0 for ψ in ψk]

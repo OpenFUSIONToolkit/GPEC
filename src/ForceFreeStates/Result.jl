@@ -52,7 +52,7 @@ so bpen and closure are always present.
   - `mlow`, `mhigh`, `mpert`, `nlow`, `nhigh`, `npert`, `numpert_total` - Resolved (m, n) mode space; see `ModeSpace`.
   - `psilow`, `psilim`, `qlim`, `q1lim` - Integration bounds, and q with its ψ-derivative at `psilim`.
   - `dir_path::String` - Working directory of the run.
-  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape used by the vacuum calculation.
+  - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape used by the vacuum calculation; `nothing` for no wall.
   - `debug_settings::DebugSettings` - Diagnostic dump settings (the `[DEBUG]` deck section / `debug=` API keyword).
   - `metric::MetricData`, `mats::MatrixSplines` - Metric data and Euler-Lagrange matrix interpolants.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
@@ -94,7 +94,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} 
     qlim::Float64
     q1lim::Float64
     dir_path::String
-    wall_settings::Vacuum.WallShapeSettings
+    wall_settings::Union{Nothing,Vacuum.WallSettings}
     debug_settings::DebugSettings
 
     # Assembly products, always present.
