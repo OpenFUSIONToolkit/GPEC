@@ -3,7 +3,8 @@
 The `Tearing` module groups the resistive tearing-mode analysis stack:
 `InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
 SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
-contour-intersection root extraction), and `Runner` (user-facing TOML
+contour-intersection root extraction), `CriticalResonantField` (torque-balance
+error-field penetration threshold), and `Runner` (user-facing TOML
 configuration, profile loading, and HDF5 output).
 
 ## Layer Inputs
@@ -278,6 +279,60 @@ res = solve_ray(p, GGJ.inner_Q(p, γ))
 res.Δ, res.resid, res.bc_cond
 ```
 
+## Critical resonant field
+
+With `[SLAYER.CriticalResonantField] enabled = true`, each SLAYER surface also gets the
+critical resonant field for error-field penetration, from the steady-state torque balance of
+Cole and Fitzpatrick, Phys. Plasmas **13**, 032503 (2006). The electromagnetic torque on the
+layer balances the viscous restoring torque when (Cole Eq. 61)
+
+```math
+\frac{\operatorname{Im}\hat\Delta(Q)}{|\alpha + \hat\Delta(Q)|^2}
+  = \frac{2P\,(Q_0 - Q)}{S\hat\kappa\,(b_r/B_\phi)^2},
+\qquad
+\hat\kappa = \left[\frac{2}{s}\right]^2 \int_{r_s}^{a} \frac{\mu(r_s)}{\mu(r)}\,\frac{dr}{r},
+```
+
+and balance is lost above (Cole Eq. 62)
+
+```math
+\left(\frac{b_r}{B_\phi}\right)^2_\mathrm{crit}
+  = \max_Q \frac{2P\,(Q_0 - Q)}{S\hat\kappa\,\operatorname{Im}[-1/(\alpha + \hat\Delta(Q))]} .
+```
+
+- **Inputs.** P is each layer's `P_tor` (so χ_φ from the kinetic file, or the scalar
+  `chi_tor`), S its Lundquist number, and Q0 = τ_k·n·ω_E the natural E×B rotation of the
+  m/n mode (Cole's ω0; the diamagnetic drifts enter through Q_e and Q_i in Δ̂).
+- **Approximations.** As in Fortran `gslayer.f`, the viscosity integral is taken as 1/2
+  (κ̂ = 2/s²) and α = 10⁻² stands in for S^(−1/3)(−r_s Δ'_s) ≪ 1 (b_crit moves about 4 %
+  over 10⁻⁴–10⁻¹).
+- **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; `solve_inner`
+  mirrors the real axis, so the scan uses conj(Δ(−Q)).
+- **Maximum.** The scan window follows `gslayer.f` (between Q0 and the Q_e pole), and the
+  largest positive interior local maximum is taken, skipping any within 0.02 of Q_e or Q_i
+  (Fortran SLAYER's pole-regularization radius).
+
+Outputs go to `Tearing/CriticalResonantField/` (`br_crit` = b_r/B_φ, `q_peak`, `q0`, `p_phi`,
+and with `store_scan` the per-surface `Scan/Surface_<k>/{Q, balance, Delta}`).
+
+### Benchmark against Fortran
+
+On the DIII-D-like example (2/1–6/1, n = 1, P = 1, κ̂ = 2/s², Q ∈ [−5, 5] with 20001
+points), both codes were given Fortran's normalized inputs.
+
+- **Torque-balance routine.** Fed Fortran's own Δ(Q) table with the pole exclusion narrowed to
+  one grid step, the Julia routine reproduces Fortran's b_crit and Q_peak to all printed digits
+  on every surface.
+- **Pole handling.** Fortran's global maximum sits within 0.003 of the Q_e pole on 2/1, 3/1,
+  4/1 and 6/1. Skipping the pole region moves the threshold to the torque-balance maximum
+  between Q_e and Q0 (blue dots below), lowering the Fortran-table b_crit by 6–88 %.
+- **Layer model.** Fortran solves Park's drift-MHD layer and Julia Fitzpatrick's, so Δ(Q)
+  differs by a median 7–78 % between Q_i and Q_e, and Julia's b_crit is 82–89 % of the
+  Fortran-table value on 2/1, 3/1, 4/1 and 6/1. The 5/1 edge surface is dominated by a
+  zero of the electromagnetic torque in both codes and is not a usable threshold.
+
+![Fortran vs Julia inner-layer Δ(Q) and torque balance](assets/crf_fortran_benchmark.png)
+
 ## API Reference
 
 ### InnerLayer
@@ -302,6 +357,12 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Dispersion]
+```
+
+## CriticalResonantField
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
 ```
 
 ## Runner
