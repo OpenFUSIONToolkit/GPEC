@@ -66,6 +66,10 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
             mg["psi"] = result.psi_grid
             mg["dTdpsi"] = result.dtdpsi
             mg["T"] = result.t_cumulative
+            if !isempty(result.dtdpsi_ell)
+                mg["ell"] = result.ell
+                mg["dTdpsi_ell"] = result.dtdpsi_ell
+            end
             if dVdpsi_spline !== nothing
                 mg["dVdpsi"] = [dVdpsi_spline(p) for p in result.psi_grid]
             end
@@ -114,6 +118,8 @@ const KF_METHOD_H5_ANNOTATIONS = [
     "psi" => (; long_name="normalized poloidal flux ψ_N at quadrature evaluation points", scale="psi"),
     "dTdpsi" => (; long_name="complex torque density dT/dψ_N = dT_φ/dψ_N + 2i·n·dδW_k/dψ_N; divide by dVdpsi for dT/dV", units="N*m", dims=("psi",), attach=(1 => "psi",)),
     "T" => (; long_name="cumulative complex torque T(ψ_N) = T_φ + 2i·n·δW_k (trapezoidal)", units="N*m", dims=("psi",), attach=(1 => "psi",)),
+    "ell" => (; long_name="bounce harmonic ℓ ∈ -nl:nl of the per-harmonic torque density", scale="ell"),
+    "dTdpsi_ell" => (; long_name="complex torque density dT/dψ_N resolved by bounce harmonic ℓ; summing over ℓ reproduces dTdpsi", units="N*m", dims=("psi", "ell"), attach=(1 => "psi", 2 => "ell")),
     "dVdpsi" => (; long_name="flux-surface volume derivative dV/dψ_N at quadrature points", units="m^3", dims=("psi",), attach=(1 => "psi",)),
     "EnergyIntegrals/psi" => (; long_name="ψ_N of each energy-integration record"),
     "EnergyIntegrals/lambda" => (; long_name="pitch λ = μB0/E of each record"),
