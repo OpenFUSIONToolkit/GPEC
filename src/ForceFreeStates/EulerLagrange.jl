@@ -1388,20 +1388,20 @@ end
 
 Evaluate Ξ_s = -A⁻¹(B·Ξ′_ψ + C·Ξ_ψ) [Glasser Phys. Plasmas 2016 112506 eq. 18] at `psieval`,
 writing into `xi_s`. `du1` and `u1` are the Ξ′_ψ and Ξ_ψ blocks at the same ψ, i.e. slices of a
-`el_derivatives!` result and its input state.
+`el_derivatives!` result and its input state, or a single displacement vector and its derivative.
 
 Split out of the derivative kernel because Ξ_s is needed only at saved nodes, not at every
 Runge-Kutta stage. Ideal runs factor the Hermitian A by Cholesky; with `kinetic=true` A picks up
 non-Hermitian contributions and needs an LU.
 """
-@with_pool pool function compute_node_xi_s!(xi_s::AbstractMatrix{ComplexF64}, du1::AbstractMatrix{ComplexF64},
-    u1::AbstractMatrix{ComplexF64}, mats::MatrixSplines, psieval::Float64; kinetic::Bool=false, hint::Base.RefValue{Int}=Ref(1))
+@with_pool pool function compute_node_xi_s!(xi_s::AbstractVecOrMat{ComplexF64}, du1::AbstractVecOrMat{ComplexF64},
+    u1::AbstractVecOrMat{ComplexF64}, mats::MatrixSplines, psieval::Float64; kinetic::Bool=false, hint::Base.RefValue{Int}=Ref(1))
 
     Npert = size(u1, 1)
     amat = acquire!(pool, ComplexF64, Npert, Npert)
     bmat = similar!(pool, amat)
     cmat = similar!(pool, amat)
-    tmp_mat = similar!(pool, amat)
+    tmp_mat = acquire!(pool, ComplexF64, size(u1)...)
 
     # A/B/C of the active model: the kinetic A is non-Hermitian, hence the factorization split below
     active_mats = kinetic ? mats.kinetic : mats.ideal
