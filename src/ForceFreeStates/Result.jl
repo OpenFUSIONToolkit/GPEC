@@ -61,7 +61,7 @@ so bpen and closure are always present.
     condition was imposed) or `:matched` (an inner-layer solution was matched in). A
     `:matched` result carries no ideal δW: `wp` and `free_boundary` are `nothing`.
   - `bpen::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated resonant field from the
-    inner layer, per surface and driving mode; all zeros under `:ideal` closure.
+    inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` closure.
   - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
     formalism produced none (Riccati, and Galerkin without a match).

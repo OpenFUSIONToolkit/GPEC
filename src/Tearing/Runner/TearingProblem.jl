@@ -11,9 +11,10 @@ and find the growth rate at which the inner layer matches it. Solve with
 [`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs; kinetic profiles come from
 `profile_file`. Without a full Δ′ matrix the per-surface Δ′ stubs are used, with a warning.
 
-Fields: `ffs`, `control::SLAYERControl`.
+## Fields
+  - `ffs` - The finished solve; duck-typed on `equil`, `surfaces`, `delta_prime`, `dir_path`, so tests can use stand-ins.
+  - `control::SLAYERControl` - The tearing knobs.
 """
-# `ffs` is duck-typed (equil, surfaces, delta_prime, dir_path) so tests can use stand-ins.
 struct TearingProblem{R}
     ffs::R
     control::SLAYERControl

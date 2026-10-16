@@ -18,7 +18,11 @@ with `vac_flag=true`.
 - `gamma`: ratio of specific heats.
 - `ideal`: skip the inner layer and return the perfectly shielding solution.
 
-Fields: `ffs`, and the resolved `eta`, `rho`, `rotation`, `gamma`, `ideal`.
+## Fields
+  - `ffs` - The outer solve being matched; held by reference, not copied.
+  - `eta`, `rho`, `rotation` - Per-surface η in Ω·m, ρ in kg/m³ and rotation frequency in Hz, following `ffs.surfaces`.
+  - `gamma` - Ratio of specific heats.
+  - `ideal` - Whether the inner layer is skipped.
 
 Ref: Fortran rmatch `match_rpec` (match.f).
 """
@@ -192,7 +196,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             sols_cut = gal_sol.xi_cut
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
-                      "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected"
+                      "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog=1
                 empty!(inner_psi); empty!(inner_xi); empty!(inner_b)
             else
                 cut_range = gal_sol.cut_range

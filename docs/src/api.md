@@ -114,8 +114,8 @@ extraction is not implemented yet, so `GGJModel()` errors here.
 
 ```julia
 ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
-tear = solve(TearingProblem(ffs; profile_file="kin.h5", coupling_mode=:coupled), SLAYERModel())
-tear.gamma_Hz, tear.rational_q                               # root-found rates per surface
+tear = solve(TearingProblem(ffs; profile_file="kin.h5"), SLAYERModel())  # coupling_mode=:coupled returns one global root instead
+tear.gamma_Hz, tear.rational_q                               # root-found rate at each rational surface
 ```
 
 Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedure knobs
