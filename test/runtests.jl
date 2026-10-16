@@ -44,6 +44,7 @@ else
     include("./runtests_sing.jl")
     include("./runtests_innerlayer.jl")
     include("./runtests_tj_analytic.jl")
+    include("./runtests_cerfon.jl")
     include("./runtests_kinetic_profiles.jl")
     include("./runtests_resist_eval.jl")
     include("./runtests_slayer_params.jl")

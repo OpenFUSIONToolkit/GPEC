@@ -134,9 +134,13 @@ Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 - `PlasmaEquilibrium` — the runtime structure containing spline fields,
 	geometry, profiles, and computed diagnostics (q-profile, separatrix,
 	etc.).
-- `LargeAspectRatioConfig`, `SolovevConfig` — convenience structs to
-	construct analytic/model equilibria when using `eq_type = "lar"` or
-	`eq_type = "sol"`.
+- `LargeAspectRatioConfig`, `SolovevConfig`, `CerfonConfig` — convenience
+	structs to construct analytic/model equilibria when using
+	`eq_type = "lar"`, `"sol"` or `"cerfon"`. `CerfonConfig` is the diverted
+	Cerfon-Freidberg generalization of `SolovevConfig`: a magnetic null sits on
+	the plasma boundary, so `q` diverges logarithmically as ψ_N → 1 and no
+	choice of `psihigh` converges — which makes it the fixture for truncation
+	sensitivity studies.
 
 ## Key functions
 
