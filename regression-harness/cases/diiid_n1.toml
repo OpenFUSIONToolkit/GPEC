@@ -431,7 +431,7 @@ type = "real_vector"
 extract = "all_real"
 label = "energy decomposition dW_p (effective field)"
 noise_threshold = 1e-10
-order = 80
+order = 75
 
 [quantities.energy_dW_plasma_standard_form]
 h5path = "PerturbedEquilibrium/EnergyDecomposition/dW_plasma_standard_form"
@@ -439,7 +439,7 @@ type = "complex_vector"
 extract = "all_complex"
 label = "energy decomposition dW_p (standard form)"
 noise_threshold = 1e-10
-order = 81
+order = 76
 
 [quantities.energy_dW_relative_error]
 h5path = "PerturbedEquilibrium/EnergyDecomposition/dW_plasma_relative_error"
@@ -447,7 +447,7 @@ type = "real_vector"
 extract = "all_real"
 label = "energy decomposition rel. error vs ep"
 noise_threshold = 1e-10
-order = 82
+order = 77
 
 [quantities.energy_dW_standard_form_relative_error]
 h5path = "PerturbedEquilibrium/EnergyDecomposition/dW_plasma_standard_form_relative_error"
@@ -455,7 +455,7 @@ type = "real_vector"
 extract = "all_real"
 label = "energy decomposition std-form rel. error vs ep"
 noise_threshold = 1e-10
-order = 83
+order = 78
 
 [quantities.energy_curl_residual]
 h5path = "PerturbedEquilibrium/EnergyDecomposition/effective_b_curl_residual_relative"
@@ -463,7 +463,7 @@ type = "real_vector"
 extract = "all_real"
 label = "energy decomposition curl residual (relative)"
 noise_threshold = 1e-9
-order = 84
+order = 79
 
 # Error fields — per-coil-set overlap with the full-window dominant mode and its rigid shift/tilt
 # sensitivities. Singular vectors carry an arbitrary phase, so only magnitudes are tracked; the
