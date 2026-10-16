@@ -10,11 +10,6 @@ Eigenvalues λ = tr/2 ∓ √(tr²/4 − det) of one resonant 2×2 M₀ block.
 function resonant_block_exponents(m0::AbstractMatrix, sig::Real)
     tr = m0[1, 1] + m0[2, 2]
     det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
-    # Traceless path uses the old √(−det) operations, so a zero trace stays bitwise identical.
-    if tr == 0
-        α = sqrt(-ComplexF64(det))
-        return α, -α, α
-    end
     α = sqrt(tr * tr / 4 - det)
     p_minus = sig * (tr / 2 - α)
     p_plus = sig * (tr / 2 + α)
@@ -26,16 +21,10 @@ function resonant_block_exponents(m0::AbstractMatrix, sig::Real)
     end
 end
 
-# Scale columns by dpsi^power. Opposed powers stay /dpsi^α and *dpsi^α, not bitwise dpsi^(−α).
+# Scale the big and small resonant columns by dpsi^power.
 function _apply_column_powers!(big_cols, small_cols, p_big, p_small, dpsi)
-    if p_big == -p_small
-        pfac = dpsi^p_small
-        big_cols ./= pfac
-        small_cols .*= pfac
-    else
-        big_cols .*= dpsi^p_big
-        small_cols .*= dpsi^p_small
-    end
+    big_cols .*= dpsi^p_big
+    small_cols .*= dpsi^p_small
 end
 
 """

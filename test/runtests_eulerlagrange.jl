@@ -644,15 +644,14 @@ end
 @testset "resonant block Frobenius exponents" begin
     FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
-    @testset "traceless block keeps ∓√(−det) on both sides" begin
+    @testset "traceless block reduces to ∓√(−det) on both sides" begin
         m0 = ComplexF64[1 2; 3 -1]
-        block_det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
-        α0 = sqrt(-ComplexF64(block_det))
+        α0 = sqrt(-(m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]))
         for sig in (1.0, -1.0)
             α, p_big, p_small = FFS.resonant_block_exponents(m0, sig)
-            @test α === α0
-            @test p_big === -α
-            @test p_small === α
+            @test α ≈ α0
+            @test p_big ≈ -α0
+            @test p_small ≈ α0
         end
     end
 
