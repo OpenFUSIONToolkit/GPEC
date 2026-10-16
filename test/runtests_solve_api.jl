@@ -234,11 +234,12 @@ using TOML
             @test first_diff(equil, snap) === nothing
             # Matching reuses the outer solve: repeated match solves must not alter it.
             gal_snap = deepcopy(gal)
-            n = length(MatchProblem(gal; ideal=true).surfaces)
-            layer = (eta=fill(1e-7, n), rho=fill(1e-7, n))
-            slow = solve(MatchProblem(gal; layer..., rotation=fill(1.0, n)), GGJModel())
-            fast = solve(MatchProblem(gal; layer..., rotation=fill(10.0, n)), GGJModel())
+            n = length(gal.surfaces)
+            slow = solve(MatchProblem(gal; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
+            fast = solve(MatchProblem(gal; eta=fill(1e-7, n), rho=fill(1e-7, n), rotation=fill(10.0, n)), GGJModel())
             @test slow.bpen != fast.bpen
+            # The result records which model it was matched with.
+            @test slow.match.model === GGJModel()
             @test first_diff(gal, gal_snap) === nothing
         end
     end
@@ -247,8 +248,7 @@ using TOML
         mktempdir() do dir
             ric = solve(equil, Riccati(); nn=1, dir_path=dir, ffs_kwargs...)
             @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.coil)
-            n = length(MatchProblem(ric; ideal=true).surfaces)
-            matched = solve(MatchProblem(ric; eta=fill(1e-7, n), rho=fill(1e-7, n), rotation=fill(1.0, n)), GGJModel())
+            matched = solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             @test matched.closure === :matched
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
@@ -268,7 +268,8 @@ using TOML
             prob = MatchProblem(gal; ideal=true)
             @test_throws ErrorException solve(prob, SLAYERModel())
             # A resistive match needs every layer input.
-            @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(prob.surfaces)))
+            @test_throws ErrorException MatchProblem(gal; eta=1e-7)
+            @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(gal.surfaces) + 1), rho=1e-7, rotation=1.0)
             # The tearing model is the solve argument, never a TearingProblem keyword.
             @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
             # The ideal reference match keeps the ideal closure and replaces the solution with

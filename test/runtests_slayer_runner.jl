@@ -255,6 +255,7 @@
             store_scan=true)
         r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c;
             rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
+        @test r.model === SLAYERModel(; variant=:fitzpatrick)
 
         mktemp() do path, io
             close(io)
@@ -269,6 +270,7 @@
                 isempty(viol) || @error "metadata contract violations in Tearing/" viol
                 @test isempty(viol)
                 @test attrs(f["Tearing"])["layer_model"] == "slayer"
+                @test attrs(f["Tearing"])["inner_model"] == "slayer_fitzpatrick"
             end
 
             h5open(path, "r") do f

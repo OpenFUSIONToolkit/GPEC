@@ -12,18 +12,18 @@ field `bpen`. `ffs` needs the Δ′ coil block, from `Galerkin(; rpec_flag=true)
 with `vac_flag=true`.
 
 # Keywords
-- `eta`, `rho`, `rotation`: per-surface resistivity in Ω·m, mass density in kg/m³ and rotation
-  frequency in Hz, core to edge. Required unless `ideal=true`.
+- `eta`, `rho`, `rotation`: resistivity in Ω·m, mass density in kg/m³ and rotation frequency
+  in Hz, a scalar for every surface or one value per `ffs.surfaces` entry (core to edge).
+  Required unless `ideal=true`.
 - `gamma`: ratio of specific heats.
 - `ideal`: skip the inner layer and return the perfectly shielding solution.
 
-Fields: `ffs`, the matched `surfaces`, and the resolved `eta`, `rho`, `rotation`, `gamma`, `ideal`.
+Fields: `ffs`, and the resolved `eta`, `rho`, `rotation`, `gamma`, `ideal`.
 
 Ref: Fortran rmatch `match_rpec` (match.f).
 """
 struct MatchProblem{R<:ForceFreeStatesResult}
     ffs::R
-    surfaces::Vector{SingType}
     eta::Vector{Float64}
     rho::Vector{Float64}
     rotation::Vector{Float64}
@@ -33,9 +33,9 @@ end
 
 function MatchProblem(
     ffs::ForceFreeStatesResult;
-    eta::Union{Nothing,AbstractVector{<:Real}}=nothing,
-    rho::Union{Nothing,AbstractVector{<:Real}}=nothing,
-    rotation::Union{Nothing,AbstractVector{<:Real}}=nothing,
+    eta::Union{Nothing,Real,AbstractVector{<:Real}}=nothing,
+    rho::Union{Nothing,Real,AbstractVector{<:Real}}=nothing,
+    rotation::Union{Nothing,Real,AbstractVector{<:Real}}=nothing,
     gamma::Real=5 / 3,
     ideal::Bool=false
 )
@@ -47,23 +47,23 @@ function MatchProblem(
     isempty(dp.coil) &&
         error("MatchProblem: the Δ′ coil block is empty; solve with Galerkin(; rpec_flag=true), or Riccati() with vac_flag=true")
 
-    sings = _matched_surfaces(ffs)
-    size(dp.raw, 1) == 2 * length(sings) ||
-        error("MatchProblem: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $(length(sings)) matchable surfaces")
-
-    msing = length(sings)
-    ideal && return MatchProblem(ffs, sings, zeros(msing), zeros(msing), zeros(msing), Float64(gamma), true)
-    for (name, v) in (("eta", eta), ("rho", rho), ("rotation", rotation))
-        v === nothing && error("MatchProblem: $name is required (one value per matched surface, core to edge)")
-        length(v) == msing || error("MatchProblem: $name has length $(length(v)), expected $msing (one per matched surface, core to edge)")
+    msing = length(ffs.surfaces)
+    if ffs.galerkin !== nothing
+        dropped = [s.psifac for s in ffs.surfaces if !(s.psifac in ffs.galerkin.sing_psi)]
+        isempty(dropped) || error("MatchProblem: the Galerkin solve dropped the surfaces at ψ = $dropped (on the domain edge or " *
+              "outside mlow:mhigh); matching needs every surface")
     end
-    return MatchProblem(ffs, sings, collect(Float64, eta), collect(Float64, rho), collect(Float64, rotation), Float64(gamma), false)
-end
+    size(dp.raw, 1) == 2msing ||
+        error("MatchProblem: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $msing surfaces")
 
-# The surfaces the Δ′ rows are indexed by (see DeltaPrimeData): all of them for Riccati, the
-# Galerkin solve's own subset otherwise.
-_matched_surfaces(ffs::ForceFreeStatesResult) =
-    ffs.galerkin === nothing ? copy(ffs.surfaces) : [s for s in ffs.surfaces if s.psifac in ffs.galerkin.sing_psi]
+    ideal && return MatchProblem(ffs, zeros(msing), zeros(msing), zeros(msing), Float64(gamma), true)
+    per_surface(name, v) =
+        v === nothing ? error("MatchProblem: $name is required (a scalar, or one value per surface, core to edge)") :
+        v isa Real ? fill(Float64(v), msing) :
+        length(v) == msing ? collect(Float64, v) :
+        error("MatchProblem: $name has length $(length(v)), expected $msing (one per surface, core to edge)")
+    return MatchProblem(ffs, per_surface("eta", eta), per_surface("rho", rho), per_surface("rotation", rotation), Float64(gamma), false)
+end
 
 """
     closure_capable(model) -> Bool
@@ -94,7 +94,7 @@ end
 function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     ffs = prob.ffs
     dp = ffs.delta_prime
-    sings = prob.surfaces
+    sings = ffs.surfaces
     msing = length(sings)
     mcoil = size(dp.coil, 2)
     nn = ffs.nlow
@@ -238,7 +238,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     end
 
     return MatchResult(cout, cin, deltar, rpec_eig, residual, bpen, reconnected_flux,
-        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params)
+        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model)
 end
 
 # Copy of ffs with the match applied; the ideal reference keeps closure :ideal, its zero bpen and δW.

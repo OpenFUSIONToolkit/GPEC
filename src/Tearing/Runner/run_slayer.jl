@@ -350,7 +350,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         control.store_scan && push!(scan_data_list, scan)
     end
 
-    return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
+    return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
         layer_widths, scan_data_list)

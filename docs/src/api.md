@@ -90,16 +90,15 @@ cost one cheap match solve per point:
 ```julia
 ffs = solve(eq, Galerkin(; rpec_flag=true, cut_solution=true); nn=1)
 
-matched = solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[0.0, 0.0]), GGJModel())
+matched = solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=0.0), GGJModel())
 @assert matched.closure === :matched
 
 # A rotation scan reuses the one outer solve:
-bpens = [solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[f, f]), GGJModel()).bpen
-         for f in 0.0:50.0:500.0]
+bpens = [solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=f), GGJModel()).bpen for f in 0.0:50.0:500.0]
 ```
 
-The problem needs
-a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and
+A scalar applies to every surface; a vector gives one value per entry of `ffs.surfaces`,
+core to edge. The problem needs a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and
 Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the resonant data but keeps
 `solution === nothing` (no outer basis is retained). Only a closure-capable model is
 accepted — `GGJModel()` today; `SLAYERModel()` is slab-only and drives the free-eigenvalue tearing

@@ -1,5 +1,6 @@
 using TOML
 using HDF5
+include("h5_metadata_check.jl")
 
 # ForceFreeStatesResult: what each formalism publishes, and how consumers gate on it.
 # The Solovev fixture deck (mpsi=16, delta_m=0) is coarse but has two rational surfaces,
@@ -202,6 +203,12 @@ using HDF5
                         # raw outer basis is debug-gated off by default.
                         @test haskey(f, "SingularSurfaces/Match/cout")
                         @test !haskey(f, "$gal/Match")
+                        # Match/ is self-describing: rows follow SingularSurfaces/rational_psi, and it names the model that ran.
+                        mg = f["SingularSurfaces/Match"]
+                        @test size(read(mg["bpen"]), 1) == length(read(f["SingularSurfaces/rational_psi"]))
+                        @test read(mg["reconnected_flux"]) == ffs.match.reconnected_flux
+                        @test attrs(mg)["inner_model"] == GeneralizedPerturbedEquilibrium.InnerLayer.model_name(ffs.match.model)
+                        @test isempty(_collect_metadata_violations(mg))
                         @test !haskey(f, "$gal/Basis")
                         @test !haskey(f, "$gal/Solution")
                     end

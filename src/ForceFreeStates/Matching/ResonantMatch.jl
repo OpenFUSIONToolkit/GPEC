@@ -18,6 +18,7 @@ fields are empty when the solve kept no Galerkin basis; the inner fields are emp
   - `xi`, `xi_deriv`: `(mpert, ngrid, ncoil)` matched outer ξ and ξ′, one column per coil.
   - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it.
   - `inner_params`: per-surface `GGJParameters` used.
+  - `model`: the inner-layer model solved, with its backend options.
 """
 struct MatchResult
     cout::Matrix{ComplexF64}
@@ -33,6 +34,7 @@ struct MatchResult
     inner_xi::Vector{Matrix{ComplexF64}}
     inner_b::Vector{Matrix{ComplexF64}}
     inner_params::Vector{InnerLayer.GGJParameters}
+    model::InnerLayer.InnerLayerModel
 end
 
 # Solve the 4·msing system mat·[cout; cin] = rmat (rmatch match_rpec).
@@ -68,13 +70,14 @@ function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::
     return cof[1:2msing, :], cof[(2msing+1):4msing, :], residual
 end
 
-# Write `m` under SingularSurfaces/Match/ (debug-only: exempt from the metadata contract).
+# Write `m` under SingularSurfaces/Match/, annotated per the metadata contract.
 function write_match!(out_h5, m::MatchResult)
     g = "SingularSurfaces/Match"
     out_h5["$g/cout"] = m.cout
     out_h5["$g/cin"] = m.cin
     out_h5["$g/Delta_r"] = m.deltar
     out_h5["$g/bpen"] = m.bpen
+    out_h5["$g/reconnected_flux"] = m.reconnected_flux
     out_h5["$g/rpec_eig"] = m.rpec_eig
     # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
     for i in eachindex(m.inner_psi)
@@ -92,5 +95,41 @@ function write_match!(out_h5, m::MatchResult)
         out_h5["$g/InnerParams/tau_R"] = [pp.taur for pp in m.inner_params]
         out_h5["$g/InnerParams/dVdpsi"] = [pp.v1 for pp in m.inner_params]
     end
+    a = attrs(out_h5[g])
+    a["inner_model"] = InnerLayer.model_name(m.model)
+    m.model isa InnerLayer.GGJModel && (a["inner_model_options"] = string(m.model.options))
+    inner = ["$g/Inner/$(v)_$i" => meta for i in eachindex(m.inner_psi) for (v, meta) in _MATCH_INNER_H5_ANNOTATIONS]
+    Utilities.HDF5Annotations.annotate!(out_h5, vcat(MATCH_H5_ANNOTATIONS, inner))
     return nothing
 end
+
+# Matching quantities are per unit coil-response column (the Δ′ coil block's normalization).
+const _MATCH_SURF = (; dims=("surface",))
+const MATCH_H5_ANNOTATIONS = [
+    "SingularSurfaces/Match/cout" =>
+        (; long_name="outer-region matching coefficients per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
+    "SingularSurfaces/Match/cin" =>
+        (; long_name="inner-region matching coefficients per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
+    "SingularSurfaces/Match/Delta_r" =>
+        (; long_name="inner-layer Δ per surface and parity (deltac convention)", dims=("surface", "parity")),
+    "SingularSurfaces/Match/bpen" =>
+        (; long_name="penetrated resonant field b^ψ at each layer center, per unit coil-response column", dims=("surface", "coil")),
+    "SingularSurfaces/Match/reconnected_flux" =>
+        (; long_name="reconnected flux Δ_coil + Δ_outᵀ·cout per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
+    "SingularSurfaces/Match/rpec_eig" => (; long_name="forced eigenvalue γ = 2πi·n·f at each surface", units="rad/s", _MATCH_SURF...),
+    "SingularSurfaces/Match/residual" => (; long_name="relative residual of the matching linear solve"),
+    "SingularSurfaces/Match/InnerParams/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/H" => (; long_name="Glasser-Greene-Johnson coefficient H per surface", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/K" => (; long_name="Glasser-Greene-Johnson coefficient K per surface", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/tau_A" => (; long_name="Alfvén time τ_A per surface", units="s", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/tau_R" => (; long_name="resistive diffusion time τ_R per surface", units="s", _MATCH_SURF...),
+    "SingularSurfaces/Match/InnerParams/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", _MATCH_SURF...)
+]
+const _MATCH_INNER_H5_ANNOTATIONS = [
+    "psi" => (; long_name="normalized poloidal flux ψ_N grid across the inner layer of this surface", dims=("inner_psi",)),
+    "xi" => (; long_name="composite inner-layer ξ^ψ per unit coil-response column", dims=("inner_psi", "coil")),
+    "b" => (; long_name="composite inner-layer b^ψ per unit coil-response column", dims=("inner_psi", "coil"))
+]
