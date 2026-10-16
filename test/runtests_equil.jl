@@ -174,6 +174,24 @@
             (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
     end
 
+    @testset "Inverse grid types (original, rho)" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        cfg(grid) = Eq.EquilibriumConfig(; eq_type="chease_binary", eq_filename=joinpath(data_dir, "INP1_binary"), jac_type="boozer",
+            grid_type=grid, mpsi=16, psilow=0.01, psihigh=0.99, r0exp=6.8, b0exp=7.4)
+        splines(eq) = (eq.rzphi_rsquared, eq.rzphi_offset, eq.rzphi_nu, eq.rzphi_jac, eq.eqfun_B, eq.eqfun_metric1, eq.eqfun_metric2)
+        finite(eq) = all(isfinite, eq.profiles.dVdpsi_spline.y) && all(all(isfinite, s.nodal_derivs.partials) for s in splines(eq))
+
+        # original: the file's own ψ nodes off the axis (this file starts at the axis), whatever psilow/mpsi
+        eq_o = Eq.setup_equilibrium(cfg("original"))
+        @test eq_o.rzphi_xs == Eq.read_chease_binary(cfg("original")).rz_in_xs[2:end]
+        @test finite(eq_o)
+
+        # rho: starts at psilow (Fortran's rho starts at psihigh/(mpsi+1)²)
+        eq_r = Eq.setup_equilibrium(cfg("rho"))
+        @test eq_r.rzphi_xs[[1, end]] ≈ [0.01, 0.99]
+        @test finite(eq_r)
+    end
+
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 10% to allow for method-specific discretisation differences.

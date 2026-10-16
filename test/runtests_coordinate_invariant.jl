@@ -134,3 +134,24 @@ end
     @test sum(abs2, Σ_full * b_full) ≈ sum(w .^ 2 .* abs2.(f_full)) / mtheta rtol = 1e-10
     @test S * EQ.area_to_rootarea_weight(equil, psi, ft) ≈ I atol = 1e-10
 end
+
+# N must be the quadratic form ξ†Nξ = ⟨J|ξ|²⟩/(dV/dψ) with N[m, m'] = J_{m−m'}. An up-down asymmetric J makes the
+# band complex, so the transposed (conjugate-frame) N misses by O(0.1).
+@testset "power_norm_matrix! is the ∮J|ξ|² quadratic form" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    mpert, mlow, ntheta, dV_dpsi = 5, -2, 64, 1.7
+    θ = range(; start=0, length=ntheta, step=2π/ntheta)
+    J = 1 .+ 0.3 .* cos.(θ) .+ 0.2 .* sin.(θ) .+ 0.1 .* sin.(2θ)
+    # Fourfit storage: jmat[mpert − d] = J_d = ⟨J e^{−idθ}⟩
+    jmat = ComplexF64[sum(J .* cis.(-d .* θ)) / ntheta for d in (mpert-1):-1:(-(mpert-1))]
+    m_modes = mlow:(mlow+mpert-1)
+    ξ = ComplexF64[cis(0.7m) * (1 + 0.2m) for m in m_modes]
+    ξθ = [sum(ξ[l] * cis(m * t) for (l, m) in enumerate(m_modes)) for t in θ]
+    expected = sum(J .* abs2.(ξθ)) / ntheta / dV_dpsi
+
+    N = zeros(ComplexF64, mpert, mpert)
+    FFS.power_norm_matrix!(N, jmat, mpert, 1, dV_dpsi)
+    @test N ≈ N'
+    @test real(ξ' * N * ξ) ≈ expected rtol = 1e-12
+    @test abs(ξ' * transpose(N) * ξ - expected) > 0.1 * expected
+end
