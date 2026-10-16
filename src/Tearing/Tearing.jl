@@ -20,6 +20,7 @@ using ..Utilities
 
 import ..InnerLayer as InnerLayer
 
+include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")
 include("Runner/Runner.jl")
 
@@ -27,5 +28,6 @@ import .Dispersion as Dispersion
 import .Runner as Runner
 
 export InnerLayer, Dispersion, Runner
+export resistive_layer_overlap, LayerOverlapScan
 
 end # module Tearing

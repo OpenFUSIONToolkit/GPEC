@@ -38,10 +38,19 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
     (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
         "SLAYER: no usable chi_e/chi_phi profile(s) (dataset absent or all-zero); " *
         "using the scalar chi_perp/chi_tor fallback for the missing one(s).")
+    # Z_eff(ψ) from the kinetic file when it carries n_i, else the scalar fallback.
+    zeff = loaded.zeff === nothing ? control.zeff : loaded.zeff
+    if loaded.zeff_source === :scalar
+        @warn "SLAYER: kinetic file has no usable zeff or n_i profile (dataset absent or all-zero); " *
+              "using the scalar control.zeff = $(control.zeff) at every surface."
+    else
+        zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with zimp = $(control.zimp)"
+        @info "SLAYER: Z_eff(ψ) from the kinetic file's $zeff_origin"
+    end
     return build_slayer_inputs(equil, surfaces, loaded.profiles;
         bt=bt,
         mu_i=control.mu_i,
-        zeff=control.zeff,
+        zeff=zeff,
         chi_perp=chi_perp,
         chi_tor=chi_tor,
         dr_val=control.dr_val,

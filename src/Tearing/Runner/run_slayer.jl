@@ -10,7 +10,10 @@
 # reader and adapt them to the SLAYER inner layer. Returns the spline-based
 # `KineticProfiles` plus χ⊥(ψ)/χ_φ(ψ) callables built from the file's
 # `chi_e`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
-# case the caller falls back to the scalar `control.chi_perp`/`chi_tor`).
+# case the caller falls back to the scalar `control.chi_perp`/`chi_tor`), and
+# a Z_eff(ψ) callable: the file's own `zeff` profile when it carries one, else
+# derived from its `n_i/n_e` (or `nothing` when the file carries neither, in which
+# case the caller falls back to the scalar `control.zeff`).
 function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     isempty(control.profile_file) &&
         error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
@@ -43,7 +46,25 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
                      cubic_interp(psi_xs, collect(Float64, v))
     chi_perp = _chi_spline(data.chi_e)
     chi_tor = _chi_spline(data.chi_phi)
-    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor)
+    # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
+    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `zimp` and a
+    # charge-1 main ion, the single-ion closure the kinetic spline set uses:
+    # Z_eff = zimp − (n_i/n_e)(zimp − 1).
+    _usable(v) = v !== nothing && !all(iszero, v)
+    zeff = if _usable(data.zeff)
+        minimum(data.zeff) >= 1.0 - 1e-8 ||
+            error("run_slayer: kinetic file '$path' has zeff = $(minimum(data.zeff)) < 1 — unphysical")
+        cubic_interp(psi_xs, collect(Float64, data.zeff))
+    elseif !_usable(data.n_i)
+        nothing
+    else
+        z = [ne > 0 ? control.zimp - (ni / ne) * (control.zimp - 1.0) : control.zimp for (ni, ne) in zip(data.n_i, data.n_e)]
+        minimum(z) >= 1.0 - 1e-8 ||
+            error("run_slayer: kinetic file '$path' has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
+        cubic_interp(psi_xs, z)
+    end
+    zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
+    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source)
 end
 
 # ---------------------------------------------------------------------
