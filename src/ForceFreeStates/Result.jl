@@ -254,3 +254,29 @@ function build_result(
         solution, odet, wp, free_energies, delta_prime, gal_data
     )
 end
+
+"""
+    solution_state_at(ffs, psi; rtol=ffs.control.eulerlagrange_tolerance) -> Array{ComplexF64,3}
+
+State `(u₁, u₂)` of a forward run's stored Euler-Lagrange solution at `psi`, in the basis of
+`ffs.solution.u_store`. A saved step is returned as stored; otherwise the system is integrated to
+`psi` from the nearest saved step that no singular surface separates from it. The stored basis is a
+constant right-multiple of the integrated one and the system is linear in `u`, so this is the state
+the forward sweep would have saved at `psi`, without interpolating between saved steps.
+"""
+function solution_state_at(ffs::ForceFreeStatesResult, psi::Float64; rtol::Float64=ffs.control.eulerlagrange_tolerance)
+    sol = ffs.solution
+    psis = @view sol.psi_store[1:sol.step]
+    i = searchsortedlast(psis, psi)
+    (i >= 1 && psis[i] == psi) && return sol.u_store[:, :, :, i]
+    sing = [s.psifac for s in ffs.surfaces]
+    reachable(j) = 1 <= j <= sol.step && !any(s -> min(psis[j], psi) < s < max(psis[j], psi), sing)
+    from = filter(reachable, [i, i + 1])
+    isempty(from) && throw(ArgumentError("ψ = $psi is cut off from both neighbouring saved steps by a singular surface"))
+    j = argmin(j -> abs(psis[j] - psi), from)
+    kinetic = ffs.mats.kinetic !== nothing
+    hints = (Ref(1), Ref(1))
+    rhs!(du, u, _, t) = (el_derivatives!(du, u, kinetic, ffs.equil, ffs.mats, ffs, t, hints...); nothing)
+    prob = ODEProblem(rhs!, sol.u_store[:, :, :, j], (psis[j], psi))
+    return solve_el(prob, rtol).u[end]
+end

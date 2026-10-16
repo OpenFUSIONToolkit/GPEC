@@ -68,7 +68,7 @@ normalization, and `dW_plasma_reference` holds the corresponding entry ``e_{p,k}
 mismatch of each form against the reference is stored and, above 5 %, reported with a warning.
 On the Solovev test fixture (`mpsi = 16`, `mpert = 8`) both forms reproduce ``e_{p,k}`` to ≲2 %
 (effective / standard form +1.7 % / +1.4 % for the least stable mode, −2.0 % / −2.0 % for the
-second), converging with resolution (+5.0e-3 / +7.9e-5 and +5.4e-4 / −1.1e-4 at `mpsi = 128`).
+second), converging with resolution (+5.0e-3 / +1.7e-4 and +5.6e-4 / −7.8e-5 at `mpsi = 128`).
 The effective-field form needs the metric-consistent
 ``B^2 = (\chi'/\mathcal J)^2(g_{\theta\theta} + 2q g_{\theta\zeta} + q^2 g_{\zeta\zeta})`` for
 ``\sigma``, ``K_2`` and ``\kappa_\psi`` rather than the equilibrium's separate ``|B|`` spline.
@@ -101,8 +101,10 @@ energy = GeneralizedPerturbedEquilibrium.energy_decomposition(result.ffs; eigenm
 
 The radial nodes are the equilibrium ``\psi`` knots inside the solution domain plus the solution
 edge: on the knots the metric, the Euler–Lagrange matrices and the geometry are all exact, which
-is what keeps the curl identity at roundoff. ``\xi`` and ``\xi'`` are splined there from the
-solution grid and ``\xi_s`` is recomputed from the matrices at each node. The Fortran evaluates
+is what keeps the curl identity at roundoff. ``\xi`` and ``\xi'`` at each node come from
+integrating the Euler–Lagrange system from the nearest saved ODE step that no singular surface
+separates from it, so they do not depend on how densely the forward sweep saved its solution, and
+``\xi_s`` is recomputed from the matrices at each node. The Fortran evaluates
 its profiles on the same knots but integrates its totals over the ODE `psifac` grid.
 
 ## Output

@@ -289,27 +289,46 @@ function decomposition_grid(ffs::ForceFreeStatesResult)
 end
 
 """
-    eigenmode_modes(ffs, k, psi) -> NamedTuple
+    node_solution(ffs, psi) -> (u1, du1)
+
+Euler-Lagrange basis Ξ_ψ and dΞ_ψ/dψ at the radial nodes `psi`, `(numpert_total × numpert_total ×
+length(psi))` in the basis of the stored solution. Each node state comes from
+`ForceFreeStates.solution_state_at`, so ξ is the ODE's own value there rather than a spline through
+the saved steps, whose spacing follows the integrator's tolerance control.
+"""
+function node_solution(ffs::ForceFreeStatesResult, psi::Vector{Float64})
+    npert = ffs.numpert_total
+    u1 = zeros(ComplexF64, npert, npert, length(psi))
+    du1 = zeros(ComplexF64, npert, npert, length(psi))
+    du = zeros(ComplexF64, npert, npert, 2)
+    hints = (Ref(1), Ref(1))
+    for (i, p) in enumerate(psi)
+        u = ForceFreeStates.solution_state_at(ffs, p)
+        ForceFreeStates.el_derivatives!(du, u, false, ffs.equil, ffs.mats, ffs, p, hints...)
+        u1[:, :, i] .= @view u[:, :, 1]
+        du1[:, :, i] .= @view du[:, :, 1]
+    end
+    return u1, du1
+end
+
+"""
+    eigenmode_modes(ffs, k, psi, u1, du1) -> NamedTuple
 
 Mode-space displacement and perturbed field of free-boundary eigenmode `k` on the radial nodes
 `psi`, `(length(psi) × mpert)` matrices named after the gpeq arrays: `xi_psi` = ξ^ψ,
 `xi_psi1` = ∂ξ^ψ/∂ψ, `Jxi_psi/theta/zeta` = Jξ^i, `Jb_psi/theta/zeta` = Jb^i. The edge boundary
-condition is the eigenvector `wt[:, k]` (unit power norm); ξ and ξ' are cubic-spline interpolated
-from the ξ solution grid and ξ_s = −A⁻¹(Bξ' + Cξ) is recomputed at every node from the ideal
-Euler-Lagrange matrices there (`ForceFreeStates.compute_node_xi_s!`, Fortran `gpeq_sol`), which keeps
-the fields algebraically consistent with the metric at the equilibrium knots. The rest of the chain
-is the unregularized one `reconstruct_physical_fields` runs for a forced response.
+condition is the eigenvector `wt[:, k]` (unit power norm), which fixes the combination of the node
+basis `u1`, `du1` from `node_solution`. ξ_s = −A⁻¹(Bξ' + Cξ) is recomputed at every node
+from the ideal Euler-Lagrange matrices there (`ForceFreeStates.compute_node_xi_s!`, Fortran
+`gpeq_sol`), which keeps the fields algebraically consistent with the metric at the equilibrium
+knots. The rest of the chain is the unregularized one `reconstruct_physical_fields` runs for a
+forced response.
 """
-function eigenmode_modes(ffs::ForceFreeStatesResult, k::Int, psi::Vector{Float64})
+function eigenmode_modes(ffs::ForceFreeStatesResult, k::Int, psi::Vector{Float64}, u1::Array{ComplexF64,3}, du1::Array{ComplexF64,3})
     solution = ffs.solution
     equil = ffs.equil
-    nsol = solution.step
-    psi_store = solution.psi_store[1:nsol]
-    u1_edge = Matrix(@view solution.u_store[:, :, 1, nsol])
-    edge = Vector{ComplexF64}(@view ffs.free_boundary.wt[:, k])
-    xi_sol, xi1_sol, _ = sum_eigenmode_contributions(edge, u1_edge, solution, ffs)
-    itp_xi = cubic_interp(psi_store, Series(xi_sol); bc=CubicFit(), extrap=ExtendExtrap())
-    itp_xi1 = cubic_interp(psi_store, Series(xi1_sol); bc=CubicFit(), extrap=ExtendExtrap())
+    u1_edge = @view solution.u_store[:, :, 1, solution.step]
+    alpha = u1_edge \ Vector{ComplexF64}(@view ffs.free_boundary.wt[:, k])
 
     nnode = length(psi)
     mpert = ffs.mpert
@@ -318,8 +337,8 @@ function eigenmode_modes(ffs::ForceFreeStatesResult, k::Int, psi::Vector{Float64
     xi_s = zeros(ComplexF64, nnode, mpert)
     hint = Ref(1)
     for (i, p) in enumerate(psi)
-        xi_psi[i, :] .= itp_xi(p)
-        xi_psi1[i, :] .= itp_xi1(p)
+        mul!(view(xi_psi, i, :), view(u1, :, :, i), alpha)
+        mul!(view(xi_psi1, i, :), view(du1, :, :, i), alpha)
         ForceFreeStates.compute_node_xi_s!(view(xi_s, i, :), view(xi_psi1, i, :), view(xi_psi, i, :), ffs.mats, p; hint=hint)
     end
 
@@ -727,8 +746,9 @@ function decompose_energy(ffs::ForceFreeStatesResult; eigenmodes::Vector{Int}=[1
     blas_threads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
+        u1, du1 = node_solution(ffs, psi)
         for (ik, k) in enumerate(eigenmodes)
-            modes = eigenmode_modes(ffs, k, psi)
+            modes = eigenmode_modes(ffs, k, psi, u1, du1)
             Threads.@threads :static for ipsi in 1:npsi
                 tid = Threads.threadid()
                 geom = geoms[ipsi]

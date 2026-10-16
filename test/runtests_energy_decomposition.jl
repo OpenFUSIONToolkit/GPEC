@@ -96,11 +96,27 @@ end
     @test sum(kern.shear .* geom.jac) / mtheta ≈ chi1^2 * q1 rtol = 1e-6
 end
 
+@testset "EnergyDecomposition: solution state between saved steps" begin
+    ffs = _ED_FFS
+    sol = ffs.solution
+    # A saved step comes back as stored.
+    @test ForceFreeStates.solution_state_at(ffs, sol.psi_store[5]) == sol.u_store[:, :, :, 5]
+    # Just left of a mid-interval point is integrated forward from the left step, just right of it
+    # backward from the right step; the two must meet.
+    sing = [s.psifac for s in ffs.surfaces]
+    i = 9 + findfirst(j -> !any(s -> sol.psi_store[j] < s < sol.psi_store[j+1], sing), 10:sol.step-1)
+    a, b = sol.psi_store[i], sol.psi_store[i+1]
+    delta = 1e-9 * (b - a)
+    from_left = ForceFreeStates.solution_state_at(ffs, (a + b) / 2 - delta)
+    from_right = ForceFreeStates.solution_state_at(ffs, (a + b) / 2 + delta)
+    @test maximum(abs, from_left - from_right) / maximum(abs, from_left) < 1e-6
+end
+
 @testset "EnergyDecomposition: surface densities" begin
     ffs = _ED_FFS
     equil = ffs.equil
     psi_grid, _ = PerturbedEquilibrium.decomposition_grid(ffs)
-    modes = PerturbedEquilibrium.eigenmode_modes(ffs, 1, psi_grid)
+    modes = PerturbedEquilibrium.eigenmode_modes(ffs, 1, psi_grid, PerturbedEquilibrium.node_solution(ffs, psi_grid)...)
     @test size(modes.Jxi_psi) == (length(psi_grid), ffs.mpert)
     thetas_ext = collect(equil.rzphi_ys)
     mtheta = length(thetas_ext) - 1
