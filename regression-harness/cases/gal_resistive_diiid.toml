@@ -95,6 +95,15 @@ label = "||gal match cout||"
 noise_threshold = 1e-6
 order = 42
 
+# Penetrated resonant field at each layer center (msing × mcoil) — the headline matching output.
+[quantities.gal_match_bpen_norm]
+h5path = "SingularSurfaces/Match/bpen"
+type = "complex_matrix"
+extract = "norm"
+label = "||gal match bpen||"
+noise_threshold = 1e-6
+order = 43
+
 # Matching linear-solve residual ‖mat·cof − rmat‖/‖rmat‖ — health check (should stay ~machine eps).
 [quantities.gal_match_residual]
 h5path = "SingularSurfaces/Match/residual"
