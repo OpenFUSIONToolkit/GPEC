@@ -1,0 +1,108 @@
+@testset "Direct equilibrium: magnetic-axis search robustness" begin
+    using GeneralizedPerturbedEquilibrium.Equilibrium
+    using GeneralizedPerturbedEquilibrium.Equilibrium: EquilibriumConfig, SolovevConfig, DirectRunInput, sol_run, read_efit, direct_position!
+    using FastInterpolations
+
+    fallback = r"restarting Newton from a first-derivative bisection"
+    # Relative Newton step tolerance of the axis search, reused as the bound on the residual |∇ψ|.
+    newton_tol = 1e-12
+
+    # Up-down symmetric Solovev ψ whose axis sits off the grid's R-midpoint and off every node, plus a
+    # conical cusp -A·ρ·exp(-(ρ/w)⁴) at the axis: the cells there carry a curvature spike, and the
+    # cusp strength A is set so that a Newton step overshoots the axis by `ncell` grid cells.
+    # `r_in`, `r_out` set the grid's extent about r0 in units of a; with r_in > r_out the grid's R-midpoint lies inboard
+    # of the axis, so the midplane march takes a step and brackets the axis in R. `z_shift` moves the grid, and with it
+    # the march's midplane, in Z in units of a.
+    function cusp_solovev(; ncell, nr=96, r_in=1.4, r_out=1.6, z_shift=0.0)
+        sol = SolovevConfig(; mr=nr, mz=nr)
+        cfg = EquilibriumConfig(; eq_type="sol")
+        (; e, a, r0, q0, b0fac) = sol
+        psio = e * r0 * b0fac * a^2 / (2 * q0 * r0)
+        psifac = psio / (a * r0)^2
+        rs = collect(range(r0 - r_in * a, r0 + r_out * a; length=nr + 1))
+        zh = collect(range(0.0, 1.5e * a; length=nr ÷ 2 + 1))
+        zs = z_shift * a .+ vcat(-reverse(zh[2:end]), zh)
+        h = rs[2] - rs[1]
+        A = ncell * 2 * psifac * r0^2 * h
+        cusp(ρ) = A * ρ * exp(-(ρ / (0.5a))^4)
+        psi = [psio - psifac * ((R * Z)^2 / e^2 + (R^2 - r0^2)^2 / 4) - cusp(hypot(R - r0, Z)) for R in rs, Z in zs]
+        psi_in = cubic_interp((rs, zs), psi; extrap=ExtendExtrap())
+        rp = DirectRunInput(cfg, sol_run(cfg, sol).sq_in, psi_in, rs, zs, rs[1], rs[end], zs[1], zs[end], psio, 1, 1, nothing)
+        return rp, r0, h
+    end
+
+    # The returned axis must be an O-point of the ψ spline with a vanishing gradient.
+    function test_axis_is_o_point(rp, ro, zo)
+        d(i, j) = rp.psi_in((ro, zo); deriv=DerivOp(i, j))
+        @test d(2, 0) * d(0, 2) - d(1, 1)^2 > 0
+        @test hypot(d(1, 0), d(0, 1)) < newton_tol * rp.psio / (rp.rmax - rp.rmin)
+    end
+
+    # Newton on the cusp is chaotic: whether it converges, cycles or leaves the grid at a given cusp strength depends
+    # on the machine's rounding. Whatever it does, the search must return the O-point at the cusp or fail loudly.
+    @testset "curvature spike at the axis: a verified axis or a loud failure" begin
+        n_fallback = 0
+        grids = ((;), (; r_in=1.6, r_out=1.4), (; r_in=1.7, r_out=1.3, z_shift=0.7))
+        for grid in grids, ncell in 1.0:0.25:3.0
+            rp, r0, h = cusp_solovev(; ncell, grid...)
+            logger = Test.TestLogger(; min_level=Base.CoreLogging.Warn)
+            outcome = try
+                Base.CoreLogging.with_logger(() -> direct_position!(rp), logger)
+            catch err
+                err
+            end
+            if outcome isa Exception
+                @test occursin("Failed to find magnetic axis", sprint(showerror, outcome))
+            else
+                ro, zo = outcome[1], outcome[2]
+                test_axis_is_o_point(rp, ro, zo)
+                @test hypot(ro - r0, zo) < h
+                n_fallback += any(occursin(fallback, log.message) for log in logger.logs)
+            end
+        end
+        @test n_fallback > 0
+    end
+
+    @testset "smooth ψ takes the plain Newton path" begin
+        rp, r0, h = cusp_solovev(; ncell=0.0)
+        ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
+        test_axis_is_o_point(rp, ro, zo)
+        @test abs(zo) <= eps(ro)
+        @test abs(ro - r0) < h
+    end
+
+    @testset "well-behaved geqdsk takes the plain Newton path" begin
+        cfg = EquilibriumConfig(; eq_filename=joinpath(@__DIR__, "test_data", "CHEASE_test_data", "EQDSK_COCOS_02"), eq_type="efit")
+        rp = read_efit(cfg)
+        ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
+        test_axis_is_o_point(rp, ro, zo)
+        @test 6.5 < ro < 7.5
+    end
+
+    @testset "midplane march that brackets the axis takes the plain Newton path" begin
+        rp, r0, h = cusp_solovev(; ncell=0.0, r_in=1.6, r_out=1.4)
+        ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
+        test_axis_is_o_point(rp, ro, zo)
+        @test abs(zo) <= eps(ro)
+        @test abs(ro - r0) < h
+    end
+
+    @testset "axis outside the R-bracket of the midplane march is found" begin
+        # Off the axis's midplane the Solovev B_z changes sign at R² = r0² - 2Z²/e², inboard of the axis, and the
+        # march stops between that point and the axis, so the axis lies outside the march's last step.
+        (; e, a) = SolovevConfig()
+        rp, r0, h = cusp_solovev(; ncell=0.0, r_in=1.7, r_out=1.3, z_shift=0.7)
+        r_mid, z_mid, dr = (rp.rmin + rp.rmax) / 2, (rp.zmin + rp.zmax) / 2, (rp.rmax - rp.rmin) / 20
+        @test r_mid < sqrt(r0^2 - 2 * z_mid^2 / e^2) < r_mid + dr < r0
+        ro, zo, _, _ = @test_logs min_level = Base.CoreLogging.Warn direct_position!(rp)
+        test_axis_is_o_point(rp, ro, zo)
+        @test hypot(ro - r0, zo) < h
+    end
+
+    @testset "Newton converging off the ψ grid is an error" begin
+        # A smooth ψ on a grid that lies wholly outboard of the axis: Newton follows the spline's extrapolation inboard.
+        rp, r0, _ = cusp_solovev(; ncell=0.0, r_in=-0.2, r_out=1.6)
+        @test rp.rmin > r0
+        @test_throws r"outside the ψ grid" direct_position!(rp)
+    end
+end
