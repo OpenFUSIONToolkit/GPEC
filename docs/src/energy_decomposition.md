@@ -66,16 +66,18 @@ The eigenmode is built from the free-boundary eigenvector ``\mathbf w_k`` of the
 is. Every stored energy is scaled by ``2\mu_0/\psi_0^2`` so that `dW_plasma` reads in the same
 normalization, and `dW_plasma_reference` holds the corresponding entry ``e_{p,k}``. The relative
 mismatch of each form against the reference is stored and, above 5 %, reported with a warning.
-On the Solovev test fixture (`mpsi = 16`) both forms reproduce ``e_{p,k}`` to ≲1–3 %
-(effective / standard form +1.5 % / +1.2 % for the least stable mode, −3.4 % / −3.4 % for the
-second), converging with resolution (+5.1e-3 / +2.5e-4 and +6.0e-4 / −4.3e-5 at `mpsi = 128`,
-`mpert = 8`). The effective-field form needs the metric-consistent
+On the Solovev test fixture (`mpsi = 16`, `mpert = 8`) both forms reproduce ``e_{p,k}`` to ≲2 %
+(effective / standard form +1.7 % / +1.4 % for the least stable mode, −2.0 % / −2.0 % for the
+second), converging with resolution (+5.0e-3 / +7.9e-5 and +5.4e-4 / −1.1e-4 at `mpsi = 128`).
+The effective-field form needs the metric-consistent
 ``B^2 = (\chi'/\mathcal J)^2(g_{\theta\theta} + 2q g_{\theta\zeta} + q^2 g_{\zeta\zeta})`` for
 ``\sigma``, ``K_2`` and ``\kappa_\psi`` rather than the equilibrium's separate ``|B|`` spline.
 The standard-form remainder is pure ``\psi``-quadrature error of the DCON Lagrangian (converging
-roughly as ``h^2``–``h^3``); the effective-field form carries an extra offset localized at the edge
-(``\psi \in [0.99, \psi_{\rm edge}]``) of +5e-3 for the least stable mode and +6e-4 for the second,
-constant for `mpsi` ≥ 32 and every `mpert`, so it is not a grid effect; its cause is still open.
+roughly as ``h^2``–``h^3``). The remaining offset between the two forms is equilibrium noise from
+the fixture's loose `etol = 1e-7`: with `etol = 1e-10` it drops 50–300× to ≲1e-4 for both modes at
+`mpsi` = 64 and 128. The pressure-curvature term ``K_3`` (through ``\partial_\psi B^2``) carries
+most of it for the least stable mode but not all of it for the second, and at `etol = 1e-7` every
+term is rough near the edge.
 
 ## Running it
 
