@@ -2,9 +2,10 @@
 
 `EnergyDecomposition.jl` evaluates the ideal-MHD plasma potential energy ``\delta W_p`` of a
 free-boundary eigenmode of the ForceFreeStates solve on the ``(\psi,\theta)`` grid and splits
-it into its physical terms. It is the Julia counterpart of the reconstruction diagnostics on the
-`recon` branch of the Fortran GPEC (its `docs/tex/recon/main.tex` note carries the full
-derivation); "Fortran" on this page and in the code comments refers to that branch. This page
+it into its physical terms. It is the Julia counterpart of the Fortran GPEC energy-decomposition
+diagnostics (`effective_field_flag` and `standard_form_flag`, routines `gpout_recon` and
+`gpout_recon2`; their `docs/tex/recon/main.tex` note carries the full derivation); "Fortran" on
+this page and in the code comments refers to them. This page
 keeps only what is needed to read the output. The stage covers the free-boundary DCON
 eigenmodes only: the edge condition is the free-boundary eigenvector and the reference energy is
 its ``e_{p,k}``, which fixed-boundary or forced-response perturbations do not supply.

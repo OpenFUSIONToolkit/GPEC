@@ -2,8 +2,8 @@
 Energy decomposition of free-boundary eigenmodes on the (ψ,θ) grid.
 
 Evaluates the ideal-MHD plasma potential energy δW_p of a ForceFreeStates eigenmode in two
-forms and splits it into its physical terms (Fortran GPEC `gpout_recon`/`gpout_recon2` of the
-`recon` branch, theory note `docs/tex/recon/main.tex` there, Bernstein et al. 1958):
+forms and splits it into its physical terms (Fortran GPEC `effective_field_flag`/`standard_form_flag`,
+routines `gpout_recon`/`gpout_recon2`, theory note `docs/tex/recon/main.tex` there, Bernstein et al. 1958):
 
   - effective-field form  2δW_p = ∫dψ ∮dθ J [ |b_eff|²/μ₀ − K|ξ_n|² ],  b_eff = b + ξ_n (μ₀ j × n̂)
   - standard form         2δW_p = ∫dψ ∮dθ J [ |b|²/μ₀ − j·(b×ξ*) + (∇·ξ)*(ξ·∇p) ]
