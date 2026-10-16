@@ -160,7 +160,7 @@ using TOML
         @test d.terms[2].scale == 1.0 + 0.0im
         @test (im * a).scale == im
         @test (a * 3).scale == 3.0 + 0.0im
-        @test (a - b).terms[2].scale == -0.5 + 0.0im
+        @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
     end
 
@@ -193,6 +193,14 @@ using TOML
 
         # Every key the objects own is a `ForceFreeStatesControl` field.
         @test all(in(fieldnames(FFS.ForceFreeStatesControl)), keys(kwargs))
+    end
+
+    @testset "alpha_boundary_scan=false skips only the α-boundary scan" begin
+        @test FFS.ForceFreeStatesControl().alpha_boundary_scan
+        ctrl = FFS.ForceFreeStatesControl(; verbose=false, local_stability_flag=true, alpha_boundary_scan=false)
+        locstab, boundary = GPEC.run_local_stability(ctrl, equil)
+        @test locstab !== nothing
+        @test isempty(boundary.psi) && isempty(boundary.alpha) && isempty(boundary.alpha_critical)
     end
 
     @testset "rejected keyword combinations" begin
