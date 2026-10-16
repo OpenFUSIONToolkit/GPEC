@@ -82,6 +82,39 @@ Establishes the area weightings that make flux-surface Fourier spectra of pertur
 
 ---
 
+### Energy decomposition of free-boundary eigenmodes
+
+> I. B. Bernstein, E. A. Frieman, M. D. Kruskal, and R. M. Kulsrud, "An energy principle for hydromagnetic stability problems,"
+> *Proceedings of the Royal Society A* **244**, 17 (1958).
+> DOI: [10.1098/rspa.1958.0023](https://doi.org/10.1098/rspa.1958.0023)
+
+The ideal-MHD energy principle: the standard form of the plasma potential energy δW_p that the `EnergyDecomposition` stage evaluates on the (ψ,θ) grid — see [Energy Decomposition](energy_decomposition.md).
+
+---
+
+> I. B. Bernstein, in *Basic Plasma Physics I*, Handbook of Plasma Physics Vol. 1, edited by A. A. Galeev and R. N. Sudan,
+> North-Holland, Amsterdam (1983), p. 421.
+
+Derives the effective-field (Bernstein) form of δW_p, in which the current and pressure terms are completed into |δB_eff|²/μ₀ − K|ξ_n|².
+
+---
+
+> M. S. Chance, Y.-C. Sun, S. C. Jardin, C. E. Kessel, and M. Okabayashi, "MHD stability of tokamak plasmas,"
+> PPPL-CFP-2687, 2nd Symposium on Plasma Dynamics, Trieste (1992).
+> Link: [OSTI 7234275](https://www.osti.gov/biblio/7234275)
+
+Writes both forms of δW_p side by side (Eqs. 12a–12c) and defines the destabilizing kernel K = K₁ + K₂ + K₃ with its shear–current, parallel-current and pressure–curvature pieces (Eqs. 15–17), the split reported as `shear_current`, `parallel_current_squared` and `pressure_curvature`.
+
+---
+
+> A. H. Boozer, "Physics of magnetically confined plasmas,"
+> *Reviews of Modern Physics* **76**, 1071 (2004).
+> DOI: [10.1103/RevModPhys.76.1071](https://doi.org/10.1103/RevModPhys.76.1071)
+
+Sec. V.C derives the energy principle in the form used here, introduces the effective field C = δB + ξ_n(μ₀ j × n̂) (Eq. 98), the constraint (∇×C)·∇ψ = 0 that the perturbed current lie in the perturbed flux surfaces (Eq. 99) and the split w = C²/2μ₀ − w_d (Eq. 100): the two consistency checks of the stage.
+
+---
+
 ## InnerLayer Module
 
 > A. H. Glasser, Z. R. Wang, and J.-K. Park, "Computation of resistive instabilities by matched asymptotic expansions,"

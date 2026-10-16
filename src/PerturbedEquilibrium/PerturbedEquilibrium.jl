@@ -23,6 +23,7 @@ import DelimitedFiles: readdlm
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
 include("FieldReconstruction.jl")
+include("EnergyDecomposition.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
 include("ResonantCoupling.jl")
@@ -33,6 +34,8 @@ export PerturbedEquilibriumControl
 export PerturbedEquilibriumInternal
 export PerturbedEquilibriumState
 export ForcingMode
+export EnergyDecompositionControl, EnergyDecompositionResult
+export decompose_energy, write_energy_decomposition!
 
 # Export main functions
 export compute_perturbed_equilibrium

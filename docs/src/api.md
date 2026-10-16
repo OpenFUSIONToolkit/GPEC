@@ -97,6 +97,7 @@ remain TOML-driven.
 GeneralizedPerturbedEquilibrium.EulerLagrangeProblem
 GeneralizedPerturbedEquilibrium.solve
 GeneralizedPerturbedEquilibrium.perturbed_equilibrium
+GeneralizedPerturbedEquilibrium.energy_decomposition
 ```
 
 ## Integrator selectors
