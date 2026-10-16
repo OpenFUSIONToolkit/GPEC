@@ -340,6 +340,8 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
                                 ffs::ForceFreeStates.ForceFreeStatesResult,
                                 equil::Equilibrium.PlasmaEquilibrium,
                                 metric::ForceFreeStates.MetricData)
+    ffs.npert == 1 || error("KineticForces supports a single toroidal mode; this run has n = $(ffs.nlow):$(ffs.nhigh).")
+
     # Copy mode numbers from FFS
     kf_intr.mlow = ffs.mlow
     kf_intr.mhigh = ffs.mhigh

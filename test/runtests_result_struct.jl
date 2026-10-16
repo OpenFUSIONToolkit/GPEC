@@ -26,7 +26,7 @@ using HDF5
             _stage_deck(dir, template)
             ret = GeneralizedPerturbedEquilibrium.main([dir])
 
-            @test keys(ret) == (:ffs, :pe, :slayer)
+            @test keys(ret)[1:3] == (:ffs, :pe, :slayer)   # later stages append their own outputs
             ffs = ret.ffs
             @test ffs isa FFS.ForceFreeStatesResult
             @test ffs.integrator === :forward

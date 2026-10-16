@@ -92,6 +92,19 @@ The energy decomposition of free-boundary eigenmodes (`EnergyDecomposition.jl`) 
   - Link: https://doi.org/10.1103/RevModPhys.76.1071
   - Describes: Sec. V.C, the energy principle, the effective field C = δB + ξ_n(μ₀ j × n̂) (Eq. 98), the (∇×C)·∇ψ = 0 constraint (Eq. 99) and w = C²/2μ₀ − w_d (Eq. 100)
 
+## InnerLayer Module (SLAYER)
+
+The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are based on:
+
+- **Burgess et al. (2026)**: "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer"
+  - Location: `docs/resources/2026-Burgess-Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer.pdf`
+  - Describes: The two-fluid slab layer, its four regimes, and the `S^(1/3)` outer-inner matching
+
+- **Fitzpatrick (2025)**: "Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation"
+  - Location: `docs/resources/2025-Fitzpatrick-Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation.pdf`
+  - Published: Nuclear Fusion (2025), doi 10.1088/1741-4326/ae4fdd (open access: arXiv:2511.07666)
+  - Describes: Diffusive-resistive layer width (Eq. 100) and the resistive-layer-overlap truncation `0 < Ψ < 1 − ε_c` (Sect. 5.9)
+
 ## Resistive MHD Stability Analysis (Future Work)
 
 GPEC will eventually implement resistive MHD stability analysis based on:

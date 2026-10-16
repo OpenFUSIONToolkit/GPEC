@@ -235,8 +235,9 @@ end
 
 @testset "EnergyDecomposition: main stage from the TOML section" begin
     # The fixture deck carries [EnergyDecomposition] with write_densities = true.
-    # main keeps its (ffs, pe, slayer) shape; the stage's result lives in gpec.h5 only.
-    @test keys(_ED_RES) == (:ffs, :pe, :slayer)
+    # The stage adds nothing to main's return; its result lives in gpec.h5 only.
+    @test keys(_ED_RES)[1:3] == (:ffs, :pe, :slayer)
+    @test !any(k -> occursin("energy", String(k)), keys(_ED_RES))
     h5open(joinpath(_ED_DIR, "gpec.h5"), "r") do h5
         g = h5["PerturbedEquilibrium/EnergyDecomposition"]
         @test read(g["eigenmode_index"]) == [1]

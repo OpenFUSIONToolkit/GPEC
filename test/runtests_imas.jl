@@ -42,6 +42,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 
         resize!(eqt.profiles_2d, 1; wipe=true)
         prof2d              = eqt.profiles_2d[1]
+        prof2d.grid_type.index = 1
         prof2d.grid.dim1    = R_grid
         prof2d.grid.dim2    = Z_grid
         prof2d.psi          = psi_rz .* cf

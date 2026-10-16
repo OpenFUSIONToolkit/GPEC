@@ -38,6 +38,7 @@ makedocs(;
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
             "Energy Decomposition" => "energy_decomposition.md",
+            "Error Fields" => "error_fields.md",
             "Tearing" => "inner_layer.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"

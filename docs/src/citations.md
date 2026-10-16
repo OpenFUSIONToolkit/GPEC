@@ -164,6 +164,61 @@ Combines the toroidal outer-region calculation with the two-fluid slab layer mod
 
 ---
 
+> R. Fitzpatrick, "Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation,"
+> *Nuclear Fusion* (2025).
+> DOI: [10.1088/1741-4326/ae4fdd](https://doi.org/10.1088/1741-4326/ae4fdd) (open access: arXiv:2511.07666)
+
+Gives the diffusive-resistive layer width (Eq. 100) and, in Sect. 5.9, restricts the response calculation to the region inside the point where adjacent resonant layers first overlap. Both are implemented by the layer-overlap scan in `src/Tearing/LayerOverlap.jl`, which feeds the `psilim_from_layer_overlap` cap described in [Integration domain truncation](@ref).
+
+---
+
+> R. Fitzpatrick, "Investigation of tearing mode stability near ideal stability boundaries via asymptotic matching techniques,"
+> *Physics of Plasmas* **32**, 062509 (2025).
+> DOI: [10.1063/5.0273568](https://doi.org/10.1063/5.0273568) (arXiv:2503.24184)
+
+The critical island width `W_d` and its short/long-mean-free-path parallel conductivity blend, used for the critical-Δ offset in `src/InnerLayer/SLAYER/LayerParameters.jl`.
+
+---
+
+> J. W. Connor, C. J. Ham, R. J. Hastie, and Y. Q. Liu, "The role of thermal conduction in tearing mode theory,"
+> *Plasma Physics and Controlled Fusion* **57**, 065001 (2015). arXiv:1410.7240
+
+The toroidal (Eq. 59) and large-aspect-ratio (Eq. 61) critical-Δ offsets from finite parallel thermal conduction, building on H. Lütjens, J.-F. Luciani, and X. Garbet, *Physics of Plasmas* **8**, 4267 (2001).
+
+---
+
+## ErrorFields Module
+
+> N. C. Logan et al., "Robustness of the tokamak error field correction tolerance scaling,"
+> *Plasma Physics and Controlled Fusion* **62**, 084001 (2020).
+
+The n = 1 ITPA error-field penetration-threshold fits on the ohmic and L-mode (`"O,L"`) and
+ohmic, L- and H-mode (`"O,L,H"`) databases, each by OLS, downsampled OLS and weighted least
+squares. Used by `ErrorFields.Risk` (`ITPA_THRESHOLD_SCALINGS`).
+
+---
+
+> N. C. Logan et al., "Empirical scaling of the n = 2 error field penetration threshold in tokamaks,"
+> *Nuclear Fusion* **60**, 086010 (2020).
+
+The n = 2 penetration-threshold fits used by `ErrorFields.Risk`.
+
+---
+
+> E. M. Bursch, J.-K. Park, N. C. Logan, F. Mao, N. Wang, C. F. B. Zimmermann, R. J. Buttery, C. Paz-Soldan, M. Pharr, L. Piron, G. Szepesi, H. Wang, S. M. Yang, JET Contributors, and the EUROfusion Tokamak Exploitation Team,
+> "Improved n=1 empirical error field penetration threshold scaling with Ohmic and L-mode conventional tokamak plasma discharges,"
+> *Plasma Physics and Controlled Fusion* (2026).
+> DOI: [10.1088/1361-6587/aea7d6](https://doi.org/10.1088/1361-6587/aea7d6)
+
+The 2026 n = 1 penetration-threshold scalings on the core dominant-mode overlap δ, fitted to
+ohmic and L-mode discharges of conventional tokamaks only (C-Mod, DIII-D, EAST, JET, J-TEXT,
+KSTAR) and adding a plasma-current term: Eq. 7 (OLS) and Eq. 8 (KDE-weighted WLS),
+`δ = 10^α_c (β_n/l_i)^α_β |I_p|^α_I R_0^α_R n_e^α_n |B_T|^α_B`. These are the `year = 2026`
+fits of `ErrorFields.Risk`. The paper's overlap is the same dominant-mode metric the `ErrorFields`
+module computes (Eqs. 1–5).
+
+---
+
 ## Kinetic Forces
 
 The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical TRansport Code) formalism.

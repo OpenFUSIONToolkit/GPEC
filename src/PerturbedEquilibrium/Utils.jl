@@ -55,6 +55,7 @@ Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeS
 
 ```
 PerturbedEquilibrium/
+├── mode_m / mode_n  # (m, n) of each entry along every `mode` axis below [numpert_total]
 ├── ForcingModes/
 │   ├── n              # Toroidal mode numbers
 │   ├── m              # Poloidal mode numbers
@@ -63,11 +64,11 @@ PerturbedEquilibrium/
 ├── response_b / response_b_root_area / response_b_area   # control-surface response spectrum (b, b̃, b̄) [numpert_total], tesla
 ├── Response/
 │   ├── psi             # Radial abscissa ψ_N [npsi] shared by every response profile below
-│   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
+│   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, numpert_total])
 │   ├── Jxi_psi        # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
-│   ├── b_psi_area_weighted       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, mpert])
-│   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, mpert])
-│   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
+│   ├── b_psi_area_weighted       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, numpert_total])
+│   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, numpert_total])
+│   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, numpert_total])
 │   ├── Jb_theta
 │   └── Jb_zeta
 ├── ResponseMatrices/         # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
@@ -120,6 +121,10 @@ function write_outputs_to_HDF5(
         forcing_group["n"] = [mode.n for mode in intr.forcing_modes]
         forcing_group["m"] = [mode.m for mode in intr.forcing_modes]
         forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
+
+        # Labels of the mode axis shared by the spectra, matrices and profiles below
+        !isempty(intr.m_modes) && (pe_group["mode_m"] = intr.m_modes)
+        !isempty(intr.n_modes) && (pe_group["mode_n"] = intr.n_modes)
 
         # Control-surface forcing/response spectra in the three Pharr field representations
         # (all tesla; flux/weber is never stored). b̃ = root-area-weighted (coordinate-invariant).
@@ -254,6 +259,8 @@ const PE_H5_ANNOTATIONS = [
     "ForcingModes/n" => (; long_name="toroidal mode number of each forcing mode"),
     "ForcingModes/m" => (; long_name="poloidal mode number of each forcing mode"),
     "ForcingModes/amplitude" => (; long_name="complex forcing amplitude of each mode", units="T"),
+    "mode_m" => (; long_name="poloidal mode number m of each entry along the mode axis (m fastest, one block per n)", units="1", dims=("mode",)),
+    "mode_n" => (; long_name="toroidal mode number n of each entry along the mode axis (m fastest, one block per n)", units="1", dims=("mode",)),
     "forcing_b" => (; long_name="control-surface forcing spectrum, bare normal field b", units="T", dims=("mode",)),
     "forcing_b_root_area" => (; long_name="control-surface forcing spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
     "forcing_b_area" => (; long_name="control-surface forcing spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),

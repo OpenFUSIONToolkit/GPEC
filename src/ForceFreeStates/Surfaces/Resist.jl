@@ -94,6 +94,8 @@ function resist_eval(sing::SingType, equil::Equilibrium.PlasmaEquilibrium,
         ff[itheta, 6] = dpsisq / bsq
         @views ff[itheta, :] .*= jac / v1
     end
+    # Snap the repeated endpoint exactly equal to the start
+    @views ff[end, :] .= ff[1, :]
     itp = cubic_interp(equil.rzphi_ys, Series(ff); bc=PeriodicBC())
     avg = FastInterpolations.integrate(itp)
 

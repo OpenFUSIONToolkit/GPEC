@@ -42,6 +42,26 @@ function trim_storage!(odet::OdeState)
 end
 
 """
+    truncate_integration!(odet, intr, equil, step)
+
+Make stored step `step` the plasma edge, resetting every piece of state derived from the old one:
+the stores, the fixups recorded beyond it, the edge limits, and the rational surfaces outside it.
+"""
+function truncate_integration!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium, step::Int)
+    odet.step = step
+    trim_storage!(odet)
+    # fixstep is nondecreasing; a fixup at fixstep == step was applied after the last stored step.
+    odet.ifix = count(<(step), view(odet.fixstep, 1:odet.ifix))
+    @views odet.u .= odet.u_store[:, :, :, end]
+    odet.psifac, odet.q = odet.psi_store[end], odet.q_store[end]
+    intr.psilim, intr.qlim = odet.psifac, odet.q
+    intr.q1lim = equil.profiles.q_deriv(intr.psilim)
+    keep = remove_singular_surfs!(intr)
+    odet.ca_l, odet.ca_r = odet.ca_l[:, :, :, keep], odet.ca_r[:, :, :, keep]
+    return odet
+end
+
+"""
     store_ode_data!(odet::OdeState, psi::Float64, u)
 
 Save the current integration state at `psi`: `u` plus `odet.q`, which callers set for the

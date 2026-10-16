@@ -7,10 +7,11 @@ using TOML
 
 # Collect every leaf dataset path under an open HDF5 file, skipping the groups/paths that
 # legitimately differ between a source run and its replay (`Input/` is re-emitted with the
-# rerun's own filename/TOML blob; `Info/git_version` reflects the running commit).
+# rerun's own filename/TOML blob; `Info/git_version` reflects the running commit;
+# `Info/Runtimes/` records wall-clock seconds, which never repeat).
 function _rerun_leaf_paths(h5)
     skip_toplevel = Set(["Input"])
-    skip_paths = Set(["Info/git_version"])
+    skip_paths = Set(["Info/git_version", "Info/Runtimes"])
     paths = String[]
     function walk(node, prefix)
         for k in keys(node)
