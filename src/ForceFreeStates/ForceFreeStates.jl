@@ -38,7 +38,6 @@ include("Surfaces/Asymptotics.jl")
 include("Surfaces/ResistEval.jl")
 
 # Outer<->inner resistive matching
-include("Matching/LayerParameters.jl")
 include("Matching/ResonantMatch.jl")
 
 include("FixedKineticMatrices.jl")

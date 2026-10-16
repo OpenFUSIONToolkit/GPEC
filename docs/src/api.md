@@ -98,8 +98,7 @@ bpens = [solve(MatchProblem(ffs; eta=[1e-6, 2e-6], rho=[1e-7, 1e-7], rotation=[f
          for f in 0.0:50.0:500.0]
 ```
 
-The per-surface η/ρ/rotation can also be derived from the kinetic profiles attached to the
-equilibrium (`layer_parameters`), with the explicit vectors as overrides. The problem needs
+The problem needs
 a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and
 Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the resonant data but keeps
 `solution === nothing` (no outer basis is retained). Only a closure-capable model is
@@ -111,20 +110,18 @@ solve instead.
 The free-eigenvalue tearing solve is the second flavor of inner-layer matching: instead of
 prescribing the layer rotation, a `TearingProblem` holds the outer Δ′ fixed and root-finds
 the growth rate where the inner-layer response matches it. The same model slot applies —
-`SLAYERModel()` is the slab layer that exists for exactly this problem. `GGJModel()` also runs
-through the scan, but GGJ growth-rate extraction is not implemented yet: its γ are placeholders.
+`SLAYERModel()` is the slab layer that exists for exactly this problem. GGJ growth-rate
+extraction is not implemented yet, so `GGJModel()` errors here.
 
 ```julia
-attach_kinetic_profiles!(eq, "kin.h5")                      # n, T, ω for the layer parameters
 ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
-tear = solve(TearingProblem(ffs; coupling_mode=:coupled), SLAYERModel())
+tear = solve(TearingProblem(ffs; profile_file="kin.h5", coupling_mode=:coupled), SLAYERModel())
 tear.gamma_Hz, tear.rational_q                               # root-found rates per surface
 ```
 
 Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedure knobs
 (scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
-kinetic profiles come from `profile_file` or, when none is named, from the profiles
-attached to the equilibrium.
+kinetic profiles come from `profile_file`, relative to the run directory.
 
 Kinetic runs (`kinetic_factor > 0`) need the `[KineticForces]` profiles and remain
 TOML-driven.

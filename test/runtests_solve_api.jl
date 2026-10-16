@@ -188,9 +188,7 @@ using TOML
     end
 
     @testset "rejected keyword combinations" begin
-        # A calculated-source kinetic solve gates on profiles attached to the equilibrium.
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs...,
-            kinetic_factor=0.5, kinetic_source="calculated")
+        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
@@ -269,6 +267,8 @@ using TOML
             gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=dir, ffs_kwargs...)
             prob = MatchProblem(gal; ideal=true)
             @test_throws ErrorException solve(prob, SLAYERModel())
+            # A resistive match needs every layer input.
+            @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(prob.surfaces)))
             # The tearing model is the solve argument, never a TearingProblem keyword.
             @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
             # The ideal reference match keeps the ideal closure and replaces the solution with
@@ -280,14 +280,5 @@ using TOML
             @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
             @test matched.solution !== nothing && matched.solution.basis === :gal_native
         end
-    end
-
-    @testset "kinetic profiles live on the equilibrium" begin
-        kin_file = joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat")
-        eq = attach_kinetic_profiles!(deepcopy(equil), kin_file; zi=1)
-        @test eq.kinetic isa GPEC.Equilibrium.KineticProfileSplines
-        @test eq.kinetic.ni_spline(0.5) > 0
-        # Kinetic solves stay TOML-driven even with profiles attached.
-        @test_throws ErrorException solve(eq, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
     end
 end

@@ -3,8 +3,7 @@
 # Driven inner-layer matching on a finished solve (rmatch match_rpec + match_output_solution, match.f).
 
 """
-    MatchProblem(ffs; eta=nothing, rho=nothing, rotation=nothing, gamma=5/3, ideal=false,
-                 mu_i=2.0, zeff=1.0, resistivity_model=SauterNeoModel(), lnLambda_form=:nrl)
+    MatchProblem(ffs; eta, rho, rotation, gamma=5/3, ideal=false)
 
 Driven inner-layer matching on a finished force-free-states solve `ffs`: each rational surface
 is matched at the forced eigenvalue γ = 2πi·n·f, with f the plasma rotation frequency there.
@@ -14,8 +13,7 @@ with `vac_flag=true`.
 
 # Keywords
 - `eta`, `rho`, `rotation`: per-surface resistivity in Ω·m, mass density in kg/m³ and rotation
-  frequency in Hz, core to edge. Any left `nothing` is derived from `ffs.equil.kinetic` by
-  [`layer_parameters`](@ref) with `mu_i`, `zeff`, `resistivity_model` and `lnLambda_form`.
+  frequency in Hz, core to edge. Required unless `ideal=true`.
 - `gamma`: ratio of specific heats.
 - `ideal`: skip the inner layer and return the perfectly shielding solution.
 
@@ -39,11 +37,7 @@ function MatchProblem(
     rho::Union{Nothing,AbstractVector{<:Real}}=nothing,
     rotation::Union{Nothing,AbstractVector{<:Real}}=nothing,
     gamma::Real=5 / 3,
-    ideal::Bool=false,
-    mu_i::Real=2.0,
-    zeff::Real=1.0,
-    resistivity_model::NeoResistivityModel=SauterNeoModel(),
-    lnLambda_form::Symbol=:nrl
+    ideal::Bool=false
 )
     ffs.npert == 1 || error("MatchProblem: matching is single-n; the result spans n = $(ffs.nlow):$(ffs.nhigh)")
     ffs.closure === :matched && error("MatchProblem: the result is already matched; pose the match on the outer solve")
@@ -57,13 +51,13 @@ function MatchProblem(
     size(dp.raw, 1) == 2 * length(sings) ||
         error("MatchProblem: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $(length(sings)) matchable surfaces")
 
-    if ideal
-        msing = length(sings)
-        return MatchProblem(ffs, sings, zeros(msing), zeros(msing), zeros(msing), Float64(gamma), true)
+    msing = length(sings)
+    ideal && return MatchProblem(ffs, sings, zeros(msing), zeros(msing), zeros(msing), Float64(gamma), true)
+    for (name, v) in (("eta", eta), ("rho", rho), ("rotation", rotation))
+        v === nothing && error("MatchProblem: $name is required (one value per matched surface, core to edge)")
+        length(v) == msing || error("MatchProblem: $name has length $(length(v)), expected $msing (one per matched surface, core to edge)")
     end
-    params = layer_parameters(sings, ffs.equil; eta=eta, rho=rho, rotation=rotation,
-        mu_i=mu_i, zeff=zeff, resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
-    return MatchProblem(ffs, sings, params.eta, params.rho, params.rotation, Float64(gamma), false)
+    return MatchProblem(ffs, sings, collect(Float64, eta), collect(Float64, rho), collect(Float64, rotation), Float64(gamma), false)
 end
 
 # The surfaces the Δ′ rows are indexed by (see DeltaPrimeData): all of them for Riccati, the

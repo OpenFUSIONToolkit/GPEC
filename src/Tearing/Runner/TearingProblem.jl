@@ -7,10 +7,9 @@
 
 Tearing-mode growth rates from a finished force-free-states solve: hold the outer Δ′ fixed
 and find the growth rate at which the inner layer matches it. Solve with
-`solve(prob, SLAYERModel())` or `solve(prob, GGJModel())`. Keywords are
-[`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs. Kinetic profiles come from
-`profile_file` if set, else from `ffs.equil.kinetic`. Without a full Δ′ matrix the per-surface
-Δ′ stubs are used, with a warning.
+`solve(prob, SLAYERModel())`; GGJ growth-rate extraction is not implemented yet. Keywords are
+[`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs; kinetic profiles come from
+`profile_file`. Without a full Δ′ matrix the per-surface Δ′ stubs are used, with a warning.
 
 Fields: `ffs`, `control::SLAYERControl`.
 """
@@ -23,30 +22,6 @@ end
 function TearingProblem(ffs::ForceFreeStatesResult; kwargs...)
     haskey(kwargs, :inner_model) && error("TearingProblem: the inner-layer model is the solve argument; drop inner_model")
     return TearingProblem(ffs, SLAYERControl(; enabled=true, kwargs...))
-end
-
-# Attached profiles as a KineticProfiles table (eV; ω* recomputed downstream; no χ, so the scalar fallbacks apply).
-function _profiles_from_equilibrium(kp)
-    xs = kp.xs
-    E_CHG = Utilities.PhysicalConstants.E_CHG
-    return (profiles=KineticProfiles(;
-            psi=xs,
-            n_e=[kp.ne_spline(ψ) for ψ in xs],
-            T_e=[kp.Te_spline(ψ) / E_CHG for ψ in xs],
-            T_i=[kp.Ti_spline(ψ) / E_CHG for ψ in xs],
-            omega=[kp.omegaE_spline(ψ) for ψ in xs],
-            omega_e=zeros(length(xs)),
-            omega_i=zeros(length(xs))),
-        chi_perp=nothing, chi_tor=nothing)
-end
-
-function _tearing_params(::GGJModel, equil, surfaces, loaded, control)
-    lp = layer_parameters(surfaces, equil; profiles=loaded.profiles,
-        mu_i=control.mu_i,
-        zeff=control.zeff,
-        resistivity_model=_build_resistivity_model(control.resistivity_model),
-        lnLambda_form=control.lnLambda_form)
-    return [ggj_parameters(s, equil; eta=lp.eta[k], rho=lp.rho[k], ising=k) for (k, s) in enumerate(surfaces)]
 end
 
 function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
@@ -87,18 +62,12 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
     equil = ffs.equil
     surfaces = ffs.surfaces
 
+    model isa SLAYERModel || error("TearingProblem: GGJ tearing growth rates are not implemented yet; use SLAYERModel()")
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(surfaces) && return empty_slayer_result(control)
 
-    loaded = if !isempty(control.profile_file)
-        _load_profiles(control, ffs.dir_path)
-    elseif equil.kinetic !== nothing
-        _profiles_from_equilibrium(equil.kinetic)
-    else
-        error("TearingProblem: no kinetic profiles — set profile_file, or attach profiles " *
-              "to the equilibrium with attach_kinetic_profiles!(equil, file)")
-    end
+    loaded = _load_profiles(control, ffs.dir_path)
 
     params = _tearing_params(model, equil, surfaces, loaded, control)
 
