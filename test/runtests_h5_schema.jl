@@ -58,7 +58,8 @@ end
             cp(joinpath(template_dir, name), joinpath(run_dir, name))
         end
         toml_path = joinpath(run_dir, "gpec.toml")
-        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_outputs_to_HDF5 = true"))
+        # Opt into the Euler-Lagrange matrices so the metadata pass below covers that group too.
+        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_el_matrices = true\nwrite_outputs_to_HDF5 = true"))
 
         GeneralizedPerturbedEquilibrium.main([run_dir])
         h5_path = joinpath(run_dir, "gpec.h5")
@@ -73,6 +74,9 @@ end
             # two moved under ForceFreeStates/ and are CamelCase, so pin them explicitly.
             @test !haskey(h5, "FreeBoundaryStability")
             @test !haskey(h5, "EdgeScan")
+
+            # The opt-in above writes the Euler-Lagrange matrix group.
+            @test haskey(h5, "ForceFreeStates/EulerLagrangeMatrices/Ideal/A")
 
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")
