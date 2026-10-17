@@ -99,6 +99,11 @@ function compute_sing_asymptotics(
         m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
         alpha_i, p_big, p_small = resonant_block_exponents(m0mat_block, sig)
         alpha[i] = alpha_i
+        # The assembled block's trace is ideally zero; a large one flags a non-converged block.
+        block_tr = m0mat_block[1, 1] + m0mat_block[2, 2]
+        abs(block_tr) / 2 > 1e-3 * abs(alpha_i) &&
+            @warn @sprintf("Resonant M₀ block at ψ=%.6f, m=%d (sig=%+.0f): |tr|/2 = %.3e is not small against |α| = %.3e",
+                singp.psifac, singp.m[i], sig, abs(block_tr) / 2, abs(alpha_i))
         r1_i = r1[i]
         power[r1_i] = p_big
         power[r1_i+intr.numpert_total] = p_small
