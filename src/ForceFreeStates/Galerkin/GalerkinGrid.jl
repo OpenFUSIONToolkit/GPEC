@@ -130,7 +130,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
         xn[nx+1] = psihigh
     else
         x1 = sings[ising+1].psifac
-        nq1 = abs(sings[ising+1].q1)   # NOTE: no nn factor, faithful to gal.f
+        nq1 = abs(nn * sings[ising+1].q1)
         xn[nx+1] = x1
         cells[nx].x_lsode = x1 - dx0 / nq1
         if ctrl.gal_dx1dx2_flag
