@@ -6,11 +6,16 @@
 Eigenvalues λ = tr/2 ∓ √(tr²/4 − det) of one resonant 2×2 M₀ block.
 α = √(tr²/4 − det) is the Mercier half-separation. Powers are sig·λ, big solution
 (more negative real part) first. A traceless block returns α = √(−det) and (−α, +α).
+The assembled block gives a real tr²/4 − det; a round-off imaginary part is dropped, so α
+(and which root is big) is the same on both sides of the surface.
 """
 function resonant_block_exponents(m0::AbstractMatrix, sig::Real)
     tr = m0[1, 1] + m0[2, 2]
     det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
-    α = sqrt(tr * tr / 4 - det)
+    rad = ComplexF64(tr * tr / 4 - det)
+    scale = abs(tr * tr) / 4 + abs(m0[1, 1] * m0[2, 2]) + abs(m0[2, 1] * m0[1, 2])
+    abs(imag(rad)) <= 64 * Base.eps(Float64) * scale && (rad = ComplexF64(real(rad)))
+    α = sqrt(rad)
     p_minus = sig * (tr / 2 - α)
     p_plus = sig * (tr / 2 + α)
     # Equal real parts: sig ≥ 0 keeps big = sig·(tr/2 − α).
@@ -122,8 +127,10 @@ function compute_sing_asymptotics(
         msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1, 2]), imag(m0mat[1, 2]))
         msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2, 1]), imag(m0mat[2, 1]))
         msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2, 2]), imag(m0mat[2, 2]))
-        di = m0mat[1, 1]*m0mat[2, 2] - m0mat[2, 1]*m0mat[1, 2]
-        msg *= @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei\n", real(di), real(alpha[1]), imag(alpha[1]))
+        block_det = m0mat[1, 1]*m0mat[2, 2] - m0mat[2, 1]*m0mat[1, 2]
+        block_tr = m0mat[1, 1] + m0mat[2, 2]
+        msg *= @sprintf("  det= %+.12e, tr= %+.12e %+.12ei\n", real(block_det), real(block_tr), imag(block_tr))
+        msg *= @sprintf("  alpha= %+.12e %+.12ei\n", real(alpha[1]), imag(alpha[1]))
         msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
         msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0, 2, 1]), imag(vmat[ipert0, ipert0, 2, 1]))
         msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0+N, 2, 1]), imag(vmat[ipert0, ipert0+N, 2, 1]))

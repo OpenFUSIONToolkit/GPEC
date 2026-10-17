@@ -692,20 +692,38 @@ end
         @test p_small === -(tr / 2 - α0)
     end
 
-    @testset "column scaling stays /dpsi^α when the powers are opposed" begin
-        α = ComplexF64(1.5)
-        dpsi = 1.3e-4
-        big = ones(ComplexF64, 2, 2)
-        small = ones(ComplexF64, 2, 2)
-        FFS._apply_column_powers!(big, small, -α, α, dpsi)
-        pfac = dpsi^α
-        big_ref = ones(ComplexF64, 2, 2)
-        small_ref = ones(ComplexF64, 2, 2)
-        big_ref ./= pfac
-        small_ref .*= pfac
-        @test big == big_ref
-        @test small == small_ref
+    @testset "Hermitian-structured block: shared imaginary shift, real eigenvectors, same powers on both sides" begin
+        # Shape the assembly produces: [−κ+σ/2 φ; γ conj(κ)−σ/2] with φ, γ real and κ → −κ on the left side.
+        κ, φ, γ = 0.3 + 0.02im, 0.7, 2.5
+        m_right = ComplexF64[-κ+0.5 φ; γ conj(κ)-0.5]
+        m_left = ComplexF64[κ-0.5 φ; γ -conj(κ)+0.5]
+        α_right, big_right, small_right = FFS.resonant_block_exponents(m_right, 1.0)
+        α_left, big_left, small_left = FFS.resonant_block_exponents(m_left, -1.0)
+        @test α_right ≈ sqrt((real(κ) - 0.5)^2 + φ * γ)
+        @test α_left ≈ α_right
+        @test imag(big_right) ≈ -imag(κ)
+        @test imag(small_right) ≈ -imag(κ)
+        @test big_left ≈ big_right
+        @test small_left ≈ small_right
+        # ξ′ entries of both leading eigenvectors are real, so the big/small cross-Wronskian 2α/φ is real.
+        @test abs(imag(-(m_right[1, 1] - big_right) / φ)) < 1e-14
+        @test abs(imag(-(m_right[1, 1] - small_right) / φ)) < 1e-14
+        @test -(m_right[1, 1] - small_right) / φ + (m_right[1, 1] - big_right) / φ ≈ 2 * α_right / φ
+    end
 
+    @testset "Mercier-unstable block: round-off sign of Im(tr²/4 − det) does not flip α or the big root" begin
+        # tr²/4 − det = −0.36 ± 1e-17i; without canonicalisation α = ±0.6i, so the big root depends on that sign.
+        for δ in (1e-17, -1e-17)
+            m0 = ComplexF64[0.1im 1.0; -0.36+δ*im 0.1im]
+            α, p_big, p_small = FFS.resonant_block_exponents(m0, 1.0)
+            @test real(α) == 0 && α ≈ 0.6im
+            @test p_big ≈ -0.5im
+            @test p_small ≈ 0.7im
+        end
+    end
+
+    @testset "column scaling multiplies each column by dpsi^power" begin
+        dpsi = 1.3e-4
         p_big = ComplexF64(-1.2 + 0.1im)
         p_small = ComplexF64(1.8)
         big = ones(ComplexF64, 1, 1)
