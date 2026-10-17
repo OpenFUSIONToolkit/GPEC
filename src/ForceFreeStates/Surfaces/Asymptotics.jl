@@ -6,16 +6,14 @@
 Eigenvalues λ = tr/2 ∓ √(tr²/4 − det) of one resonant 2×2 M₀ block.
 α = √(tr²/4 − det) is the Mercier half-separation. Powers are sig·λ, big solution
 (more negative real part) first. A traceless block returns α = √(−det) and (−α, +α).
-The assembled block gives a real tr²/4 − det; a round-off imaginary part is dropped, so α
-(and which root is big) is the same on both sides of the surface.
+When tr²/4 − det is negative (Mercier-unstable), α is taken with Im α > 0, so both sides
+of the surface get the same α and the same big root whatever the round-off sign.
 """
 function resonant_block_exponents(m0::AbstractMatrix, sig::Real)
     tr = m0[1, 1] + m0[2, 2]
     det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
-    rad = ComplexF64(tr * tr / 4 - det)
-    scale = abs(tr * tr) / 4 + abs(m0[1, 1] * m0[2, 2]) + abs(m0[2, 1] * m0[1, 2])
-    abs(imag(rad)) <= 64 * Base.eps(Float64) * scale && (rad = ComplexF64(real(rad)))
-    α = sqrt(rad)
+    α = sqrt(ComplexF64(tr * tr / 4 - det))
+    abs(real(α)) <= 64 * Base.eps(Float64) * abs(α) && (α = ComplexF64(0, abs(imag(α))))
     p_minus = sig * (tr / 2 - α)
     p_plus = sig * (tr / 2 + α)
     # Equal real parts: sig ≥ 0 keeps big = sig·(tr/2 − α).

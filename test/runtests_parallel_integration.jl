@@ -555,6 +555,15 @@ using TOML
         @test isapprox(real(dpm[1, 1]), +9.300000e+00; rtol=3e-2)   # q=2, converged (ldp2048 9.244)
         @test isapprox(real(dpm[2, 2]), -5.344199e+00; rtol=1e-1)   # q=3
         @test isapprox(real(dpm[3, 3]), -1.590034e+01; rtol=1e-1)   # q=4
+
+        # extended_precision_bvp: the same BVP solved in Complex{Double64}
+        ctrl_ext = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., extended_precision_bvp=true)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
+            intr, fm_propagators, fm_chunks;
+            wv=vac.wv, psio=equil.psio,
+            S_at_surface_left=fm_S_left, ctrl=ctrl_ext, equil=equil, mats=mats)
+        @test isapprox(real.(diag(intr.delta_prime_matrix)), real.(diag(dpm)); rtol=1e-8)
     end
 
 end

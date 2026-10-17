@@ -140,7 +140,7 @@ function compute_delta_prime_matrix!(
     end
 
     deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
-        M, msing, N, nMat, use_S_axis, ipert_all, col_edge, debug)
+        M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
 
     # Persist both the PEST3 tearing projection (msing × msing) and the raw 2msing × 2msing
     # D' matrix (side-major ordering, byte-compatible with Fortran rdcon/gal.f::gal_write_delta).
@@ -520,17 +520,19 @@ end
 # Solve the BVP and apply the PEST3 four-term combination.
 function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
     use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
-    debug::Bool)
+    ctrl, debug::Bool)
     s2 = 2 * msing
-    M_lu = lu(M; check=false)
+    Tc = (ctrl !== nothing && ctrl.extended_precision_bvp) ? Complex{Double64} : ComplexF64
+    M_solve = Tc.(M)
+    M_lu = lu(M_solve; check=false)
     use_lu = issuccess(M_lu)
-    M_pinv = use_lu ? nothing : pinv(M)
+    M_pinv = use_lu ? nothing : pinv(M_solve)
     if !use_lu
         @warn "Δ' BVP: LU factorization singular (rank $(rank(M))/$nMat), using pseudo-inverse fallback"
     end
 
-    dp_raw = zeros(ComplexF64, s2, s2)
-    b = zeros(ComplexF64, nMat)
+    dp_raw = zeros(Tc, s2, s2)
+    b = zeros(Tc, nMat)
     for jsing in 1:msing, side in 1:2
         dRow = 2jsing - (2 - side)
         fill!(b, 0)
@@ -538,7 +540,7 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
         b[drive_row] = 1
         x = use_lu ? (M_lu \ b) : (M_pinv * b)
 
-        debug && _log_bvp_solve(x, b, M, jsing, side, dRow, msing, N,
+        debug && _log_bvp_solve(x, b, M_solve, jsing, side, dRow, msing, N,
             ipert_all, col_edge, use_S_axis)
 
         for ksing in 1:msing
@@ -550,14 +552,14 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
 
     # PEST3 four-term combination [Chance PPPL-2527; Glasser-Kolemen 2018 PoP 25, 032501 Eq. 31].
     # Δ'[i,j] = (NW − NE − SW + SE) on each 2×2 block of dp_raw.
-    deltap = zeros(ComplexF64, msing, msing)
+    deltap = zeros(Tc, msing, msing)
     for i in 1:msing, j in 1:msing
         deltap[i, j] = dp_raw[2i, 2j] - dp_raw[2i, 2j-1] - dp_raw[2i-1, 2j] + dp_raw[2i-1, 2j-1]
     end
 
     debug && _log_bvp_pest3(dp_raw, deltap, s2, msing)
     # Return the PEST3-combined matrix AND the raw 2msing×2msing D' matrix.
-    return deltap, dp_raw
+    return ComplexF64.(deltap), ComplexF64.(dp_raw)
 end
 
 # Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
