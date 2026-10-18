@@ -164,8 +164,8 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         # Uniform in √ψ from psilow to psihigh (Fortran's rho ignores psilow)
         sq_xs = [(sqrt(psilow) + (sqrt(psihigh) - sqrt(psilow)) * i / mpsi)^2 for i in 0:mpsi]
     elseif grid_type in ("original", "orig")
-        # The input's own ψ nodes off the axis; psilow and mpsi are ignored, psihigh still sets psilim
-        sq_xs = filter(>(0.0), rz_in_xs)
+        # The input's own ψ nodes, ended by psilow and psihigh as the other grids are; mpsi is ignored
+        sq_xs = [psilow; filter(x -> psilow < x < psihigh, rz_in_xs); psihigh]
         mpsi = length(sq_xs) - 1
     elseif grid_type == "uniform"
         if mpsi == 0
