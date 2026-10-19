@@ -721,3 +721,17 @@
         end
     end
 end
+
+@testset "CGL reconstruction accepts a vector of Fourier modes" begin
+    KF = GeneralizedPerturbedEquilibrium.KineticForces
+    intr = KF.KineticForcesInternal(; mthsurf=64, mfac=[0, 1])
+    field = (x; hint=nothing) -> 3.0
+    jac = (x; hint=nothing) -> 2.0
+    equil = (; eqfun_B=field, rzphi_jac=jac)
+    D = 1.0 + 0.2im
+    b = ComplexF64[-D, 0]
+    d = ComplexF64[D, 0]
+    actual = KF.calculate_fcgl(0.4, 1, 0, nothing, b, d, 1.0, 5.0, 7.0, equil, intr)
+    # Zero curvature: double-adiabatic pressure work is |D|², with J=2.
+    @test actual ≈ 2im * 5.0 * 7.0 * abs2(D) rtol=1e-13
+end
