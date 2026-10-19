@@ -13,6 +13,7 @@ using AdaptiveArrayPools
 using Roots
 using FastGaussQuadrature: gausslobatto
 using QuadGK: quadgk, quadgk!
+import CommonSolve
 
 import ..Equilibrium
 import ..Utilities
@@ -34,7 +35,6 @@ include("EulerLagrange.jl")
 # Singular-surface machinery: finding/filtering, Frobenius asymptotics, GGJ coefficients
 include("Surfaces/Finding.jl")
 include("Surfaces/Asymptotics.jl")
-include("Surfaces/Resist.jl")
 include("Surfaces/ResistEval.jl")
 
 # Outer<->inner resistive matching
@@ -57,7 +57,6 @@ include("Galerkin/GalerkinStructs.jl")
 include("Galerkin/GalerkinGrid.jl")
 include("Galerkin/GalerkinAssembly.jl")
 include("Galerkin/GalerkinSolution.jl")
-include("Galerkin/GalerkinMatch.jl")
 include("Galerkin/GalerkinSolve.jl")
 
 # Scripting-API integrator selectors: pure configuration translated onto ForceFreeStatesControl.
@@ -65,6 +64,10 @@ include("Integrators.jl")
 
 # The published solve product; last, so it can name every type the stages above define.
 include("Result.jl")
+
+# Post-solve inner-layer matching: consumes and produces ForceFreeStatesResult, so it loads
+# after the result machinery.
+include("Matching/MatchProblem.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
