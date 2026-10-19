@@ -74,6 +74,9 @@ end
 function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
     model = control.P_perp_model
     pick(f, s) = f === nothing ? s : f
+    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && !(isfinite(control.chi_perp_i) && control.chi_perp_i > 0) &&
+        throw(ArgumentError("SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
+                            "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."))
     if warn
         uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
         uses_i = model in (:chi_perp_i, :D_perp)

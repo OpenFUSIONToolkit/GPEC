@@ -102,6 +102,12 @@
         @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => Inf))))
         c_te = slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => 0.05)))
         @test c_te.tau_E == 0.05 && Runner.validate(c_te) === c_te
+        # D_perp is the default, and it refuses to run without an ion diffusivity from the file or the deck.
+        @test SLAYERControl().P_perp_model === :D_perp
+        no_chi = (; chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing)
+        @test_throws "needs the ion diffusivity" Runner._slayer_chi_inputs(no_chi, SLAYERControl(); warn=false)
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7); warn=false).chi_perp_i == 0.7
+        @test isnan(Runner._slayer_chi_inputs(no_chi, SLAYERControl(; P_perp_model=:chi_perp_e); warn=false).chi_perp_i)
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin

@@ -326,14 +326,15 @@ resolve it from, so the cap cannot be applied there and setting the flag warns i
 `psilim_from_layer_overlap = true`. It then caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction`
 still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
 
-The flag is off by default, so every shipped deck is unchanged by it. With the shipped
-DIII-D-like profiles the overlap point is ψ ≈ 0.9985: outside the ideal and Riccati decks'
-`psihigh = 0.995`, where the cap could not bind even if enabled, but inside the SLAYER deck's
-0.9995, where enabling it would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
-raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and q = 8, and the resulting
-domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen `psihigh = 0.995` of the
-ideal deck. Whenever `psilim` lands past the overlap point, with the flag on or off, GPEC warns;
-on the shipped decks that includes the SLAYER deck.
+The flag is off by default, so every shipped deck is unchanged by it. With the default
+`P_perp_model = "D_perp"` the layers on the shipped DIII-D-like profiles do not overlap inside
+ψ = 1. With the electron-channel `"chi_perp_e"` they are about 40% wider and the overlap point is
+ψ ≈ 0.9985: outside the ideal and Riccati decks' `psihigh = 0.995`, but inside the SLAYER deck's
+0.9995, where the cap would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
+pins `"chi_perp_e"` and raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and
+q = 8, and the resulting domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen
+`psihigh = 0.995` of the ideal deck. Whenever `psilim` lands past the overlap point, with the flag
+on or off, GPEC warns.
 
 **Which perpendicular diffusivity.** The two formulas that take a perpendicular diffusivity want
 different quantities. The layer width goes through `P_perp`, which multiplies the diffusion of the
@@ -341,10 +342,12 @@ total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular 
 `D_⊥` of Fitzpatrick, Phys. Plasmas **29**, 032507 (2022), Eq. 16, which weights the electron and ion energy diffusivities by
 `n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
 flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
-in every case. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `chi_e` alone (the
-default, the same single-χ convention as Fitzpatrick's TJ code), from `chi_i`, from `D_⊥`
-(`"D_perp"`), from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
-confinement time (`"tau_E"`); see `slayer_parameters`. Since the widths scale as `χ^{1/4}`, a
+in every case. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
+the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code, and GPEC's
+only option before), from `chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or
+from a whole-plasma confinement time (`"tau_E"`); see `slayer_parameters`. On the DIII-D-like
+profiles `D_⊥` is 0.22–0.32 of `chi_e` at the outer rational surfaces, because the weights sum to
+less than one where density gradients carry part of `p′`. Since the widths scale as `χ^{1/4}`, a
 factor-2 change in χ moves them by about 19%, which can be enough to move the overlap cut by a
 surface.
 

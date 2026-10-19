@@ -47,9 +47,9 @@ constructor.
     needs χ⊥,i fails loudly when neither the file nor the deck supplies it
   - `tau_E`    -- whole-plasma energy confinement time τ̄_E [s], required by
     `P_perp_model = :tau_E` (default `nothing`)
-  - `P_perp_model` -- how the perpendicular Prandtl number is built: `:chi_perp_e`
-    (default, the backward-compatible electron-channel proxy), `:chi_perp_i`, `:P_phi`
-    (P_perp = P_tor), `:D_perp` (D⊥ from χ⊥,e, χ⊥,i and the n, T gradients), `:c_beta`
+  - `P_perp_model` -- how the perpendicular Prandtl number is built: `:D_perp` (default; D⊥ from
+    χ⊥,e, χ⊥,i and the n, T gradients, Fitzpatrick 2022 Eq. 16, so χ⊥,i is required), `:chi_perp_e`
+    (the electron-channel proxy used before this option existed), `:chi_perp_i`, `:P_phi` (P_perp = P_tor), `:c_beta`
     (P_perp = c_β²), or `:tau_E` (a uniform χ_E = (3/16)a²/τ̄_E sets both P_perp and P_tor,
     so `chi_phi`/`chi_tor` are ignored); see `InnerLayer.SLAYER.slayer_parameters`.
     `chi_perp_e` still sets the critical-Δ width in every mode
@@ -127,7 +127,7 @@ there is one consistent interface for resistive and kinetic profiles.
     chi_perp_i::Float64 = NaN
     chi_tor::Float64 = 1.0
     tau_E::Union{Float64,Nothing} = nothing
-    P_perp_model::Symbol = :chi_perp_e
+    P_perp_model::Symbol = :D_perp
     D_R::Union{Float64,Nothing} = nothing
     D_geo::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0

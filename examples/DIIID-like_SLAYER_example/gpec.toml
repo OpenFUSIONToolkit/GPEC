@@ -77,7 +77,7 @@ impurity_charge         = 6.0        # Impurity charge closing quasi-neutrality 
 chi_perp_e              = 1.0       # fallback only; the kinetic file supplies χ⊥,e(ψ)
 chi_perp_i              = 1.0       # fallback only; the kinetic file supplies χ⊥,i(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
-P_perp_model            = "chi_perp_e" # Perpendicular Prandtl number model: "chi_perp_e", "chi_perp_i", "P_phi", "D_perp", "c_beta", or "tau_E" (needs tau_E [s]; also replaces the χ_φ-based P_tor)
+P_perp_model            = "D_perp"   # Perpendicular Prandtl number model: "D_perp" (default), "chi_perp_e", "chi_perp_i", "P_phi", "c_beta", or "tau_E" (needs tau_E [s]; also replaces the χ_φ-based P_tor)
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
 filter_above_poles      = true       # Discard roots above the highest pole γ
 filter_outside_re       = true       # Condition the above-pole filter on the +γ step exiting the Re(Δ)=0 contour loop

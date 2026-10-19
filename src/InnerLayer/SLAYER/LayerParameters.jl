@@ -225,8 +225,9 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `tau_E`   -- whole-plasma energy confinement time τ̄_E [s], required by `P_perp_model=:tau_E`
   - `a_minor` -- plasma minor radius `a` [m], required by `P_perp_model=:tau_E` (`build_slayer_inputs` takes it from the flux label)
   - `P_perp_model` -- how `P_perp` is built:
-      + `:chi_perp_e` (default) -- τ_R·χ⊥,e/r_s². The electron channel is a proxy for the
-        one-fluid energy diffusivity; it is kept as the default for backward compatibility
+      + `:chi_perp_e` (default of this function, which has no profile gradients) -- τ_R·χ⊥,e/r_s².
+        The electron channel is a proxy for the one-fluid energy diffusivity; the `[SLAYER]` deck
+        default is `:D_perp`
       + `:chi_perp_i` -- τ_R·χ⊥,i/r_s²
       + `:P_phi`  -- P_perp = P_tor (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 143)
       + `:D_perp` -- τ_R/τ_⊥ with τ_⊥ = r_s²/D_⊥ and the perpendicular particle diffusivity D_⊥ of
