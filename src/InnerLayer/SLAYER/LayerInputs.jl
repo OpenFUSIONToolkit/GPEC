@@ -190,8 +190,10 @@ profiles, without an intermediate file round-trip.
   - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], scalar or callable of
     `psi` (no default: NaN); used by `P_perp_model = :chi_perp_i` and `:D_perp`.
   - `tau_E` -- whole-plasma energy confinement time τ̄_E [s], one scalar for every surface;
-    required by `P_perp_model=:tau_E`, which also takes the minor radius `a` from the
-    boundary surface (ψ = 1) on the same radial label as `r_s`.
+    required by `P_perp_model=:tau_E`, which also takes the minor radius `a` of the boundary
+    surface (ψ = 1) from the `:flux` label `√(2ψ_t/B₀)` whatever `rs_method` is. Every P_perp
+    model is μ₀χ/η, so `r_s` cancels except through η's trapped fraction; in this mode `a` sets
+    χ_E, and the flux label is the area-equivalent radius of a shaped boundary.
   - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
     (default `:chi_perp_e`).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
@@ -271,8 +273,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         end
 
     _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
-    # Boundary minor radius, needed only to turn a whole-plasma τ̄_E into a uniform χ_E.
-    a_minor = P_perp_model === :tau_E ? _rs_at(1.0) : NaN
+    # Boundary minor radius on the flux label, needed only to turn a whole-plasma τ̄_E into a uniform χ_E.
+    a_minor = P_perp_model === :tau_E ? first(radial_label(equil; rs_method=:flux, theta=theta, q_beyond=q_beyond))(1.0) : NaN
 
     # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
     # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode

@@ -175,9 +175,12 @@
         dp = build_slayer_inputs(equil, sings, profiles; kw..., P_perp_model=:D_perp)[1]
         D_hand = dp.c_beta^2 * dp.eta / MU_0 + (2 / 3) * (1 - dp.c_beta^2) * (2.0 * 7 / 13 + 1.0 * 6 / 13)
         @test dp.P_perp ≈ ref.P_perp * D_hand / 2.0 rtol = 1e-8
-        # τ̄_E mode takes a from the boundary surface on the same radial label as r_s
+        # τ̄_E mode takes a from the boundary surface on the flux label, whatever rs_method is
         te = build_slayer_inputs(equil, sings, profiles; kw..., P_perp_model=:tau_E, tau_E=0.1)[1]
-        a = surface_minor_radius(equil, 1.0)
+        a = first(radial_label(equil; rs_method=:flux))(1.0)
+        ref_fsa = build_slayer_inputs(equil, sings, profiles; kw..., rs_method=:fsa)[1]
+        te_fsa = build_slayer_inputs(equil, sings, profiles; kw..., P_perp_model=:tau_E, tau_E=0.1, rs_method=:fsa)[1]
+        @test te_fsa.P_perp ≈ ref_fsa.P_perp * ((3 / 16) * a^2 / 0.1) / 2.0 rtol = 1e-12
         @test te.P_perp ≈ ref.P_perp * ((3 / 16) * a^2 / 0.1) / 2.0 rtol = 1e-12
         @test te.P_tor == te.P_perp
     end

@@ -223,7 +223,7 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `dlnn`, `dlnTe`, `dlnTi` -- radial log-gradients of n, T_e, T_i in any common radial variable
     (only their ratios enter; required by `P_perp_model=:D_perp`)
   - `tau_E`   -- whole-plasma energy confinement time τ̄_E [s], required by `P_perp_model=:tau_E`
-  - `a_minor` -- plasma minor radius `a` [m] on the same radial label as `rs`, required by `P_perp_model=:tau_E`
+  - `a_minor` -- plasma minor radius `a` [m], required by `P_perp_model=:tau_E` (`build_slayer_inputs` takes it from the flux label)
   - `P_perp_model` -- how `P_perp` is built:
       + `:chi_perp_e` (default) -- τ_R·χ⊥,e/r_s². The electron channel is a proxy for the
         one-fluid energy diffusivity; it is kept as the default for backward compatibility
