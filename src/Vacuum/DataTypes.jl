@@ -206,13 +206,13 @@ Struct containing input settings for vacuum wall geometry.
     ("conformal" and "dee"). On a non-axisymmetric boundary the extrema are taken over the whole torus,
     so it scales with half the global R-extent; this reduces to the axisymmetric definition.
 
-  - `minor_radius::Float64`: Wall minor radius [m] ("elliptical" and "mod_dee")
+  - `minor_radius::Float64`: Wall minor radius in m ("elliptical" and "mod_dee")
 
   - `half_thickness::Float64`: Half-thickness parameter for Dee-shaped walls
 
   - `elongation::Float64`: Elongation parameter for wall shapes
 
-  - `center_offset::Float64`: Offset of the wall center from the major radius ("dee", in minor radii); wall center R [m] ("mod_dee")
+  - `center_offset::Float64`: Offset of the wall center from the major radius ("dee", in minor radii); wall center R in m ("mod_dee")
 
   - `triangularity::Float64`: Triangularity parameter for wall shapes
 
