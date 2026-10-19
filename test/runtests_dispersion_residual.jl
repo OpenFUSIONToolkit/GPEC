@@ -97,7 +97,7 @@
         p_ggj  = glasser_wang_2020_eq55()
         sc_ggj = surface_coupling(GGJModel(solver=:shooting), p_ggj,
                                    -1.0 + 0.0im)
-        @test sc_ggj isa SurfaceCoupling{GGJModel{:shooting},GGJParameters}
+        @test sc_ggj isa SurfaceCoupling{<:GGJModel{:shooting},GGJParameters}
         @test sc_ggj(1e-3 + 0.0im) isa ComplexF64
     end
 

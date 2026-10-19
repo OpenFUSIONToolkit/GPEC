@@ -72,8 +72,8 @@ integrator = "forward"
 
 `riccati_eulerlagrange_integration` (the default) is our implementation of the STRIDE
 approach [Glasser 2018b], built on the dual Riccati reformulation [Glasser 2018a].  It
-decomposes the radial domain into
-independent chunks, integrates each chunk's fundamental-matrix (FM) propagator in parallel
+decomposes the radial domain into independent chunks, integrates each chunk's
+fundamental-matrix (FM) propagator in parallel
 using `Threads.@threads`, then multiplies the propagators in order and applies each
 singular-surface crossing serially.  It is the only driver that produces the inter-surface
 ``\Delta'`` matrix.  Because chunk endpoints are all it stores, `u_store` is sparse and stays
@@ -93,7 +93,7 @@ than integrating the quadratic Riccati ODE directly (which blows up when ``|S|``
 the code integrates the linear EL system with `sing_der!` as the RHS and recovers
 ``S = U_1 U_2^{-1}`` via periodic renormalization — an approach that is mathematically
 equivalent to O(Δψ) but uses `Vern9`'s full 9th-order accuracy.  Renormalization is
-triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `ucrit`, and is
+triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `renorm_threshold`, and is
 forced at the end of each chunk.  At singular surface crossings,
 `riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching directly in column
 `ipert_res` — without Gaussian reduction — and renormalizes to ``(S, I)``.
@@ -144,8 +144,8 @@ zeroing vs GR), not from ODE tolerance; it is present at every thread count.
 the outer region is discretized on packed Hermite-cubic elements and solved as one global banded
 system, giving the RDCON resistive ``\Delta'`` matrix and the PEST-3 matching blocks.  It computes its own vacuum response and
 returns no free-boundary energies, no ODE trace, and no fixed-boundary `crit` scan.  With
-`gal_match_flag` it also matches the inner layer, producing a driven ``\xi`` solution that
-`PerturbedEquilibrium` consumes.  Kinetic runs are not supported.  See
+`gal_match_flag` it also matches the inner layer, producing a driven ``\xi`` solution.
+Kinetic runs are not supported.  See
 `docs/src/galerkin.md` for the solver and its `gal_*` knobs.
 
 Enable with:
@@ -253,6 +253,111 @@ The Galerkin integrator computes the same quantity in the same PEST-3 convention
 publishes it on the same path, so downstream consumers (SLAYER among them) never branch
 on which formalism ran.
 
+## Integration domain truncation
+
+The Euler–Lagrange integration runs from the axis out to `psilim`, which is set from the
+target safety factor `qlim`:
+
+- `qlim` starts at `min(qmax, qhigh)`, where `qmax` is q at the equilibrium's `psihigh`.
+- With `truncate_at_rational_offset = true` (the default, for diverted equilibria where q → ∞ at the
+  separatrix), `qlim` moves to `(last rational + rational_offset_fraction) / n`, so the integration ends a fixed
+  fraction of a rational spacing past the last surface instead of close to one. The offset is
+  then stepped back by `1/n` until it no longer exceeds the bound it started from, so `rational_offset_fraction`
+  never extends the domain past `qmax`, `qhigh`, or the layer-overlap cap below. A bound that
+  falls on a rational, or less than `rational_offset_fraction / n` above one, therefore excludes it: with
+  `rational_offset_fraction = 0.2`, both `qhigh = 4.0` and `qhigh = 4.1` give `qlim = 3.2`.
+- With `truncate_at_rational_offset = false` (limited or analytic equilibria with finite edge q),
+  `qhigh` and `psihigh` set the domain directly.
+
+### Resistive-layer overlap
+
+Near the separatrix the rational surfaces crowd together faster than their resistive layers
+narrow, so eventually adjacent layers overlap. Past that point no surface keeps a
+well-separated inner region and the matched-asymptotic treatment is not defined; Sect. 5.9 of
+Fitzpatrick (2025), listed under [InnerLayer Module](@ref) in the citations, restricts the
+response calculation to the region inside it.
+
+GPEC locates that point with a scan of the rational surfaces of each toroidal mode number in
+the run; for multi-`n` runs the innermost overlap point, over all `n`, is the one used. Each surface gets a layer solve from the kinetic profiles, and its
+diffusive-resistive width (Fitzpatrick 2025, Eq. 100) is converted to a normalized-flux width
+so it can be compared with the spacing between neighbouring surfaces. The cut is placed at the
+last surface before two adjacent layers first touch.
+
+Surfaces beyond the equilibrium grid are located on the logarithmic divergence of q at the
+separatrix, taken from the equilibrium's own poloidal flux rather than fitted. Each X-point on
+the last closed flux surface contributes one term,
+
+```math
+q(\psi) = q_K + \sum_i A_i \ln\frac{\psi_{X_i} - \psi_K}{\psi_{X_i} - \psi},
+\qquad A_i = \frac{F}{2\pi R_{X_i}\sqrt{-\det H_i}},
+```
+
+where ``\psi_{X_i}`` is the flux at the saddle, ``H_i`` the Hessian of the poloidal flux there,
+``F = R B_\phi``, and ``q_K`` the traced q on the outermost grid surface ``\psi_K``. One term
+describes a single null and two a double null, connected or not. The X-points are found by
+following each minimum of the poloidal field along the outermost surface to the saddle it leads
+to; on a single-null shape this usually also reaches the far secondary X-point, whose term is
+small. The law is used only if it reproduces the traced shear over the outer knots, and an
+equilibrium with no X-point nearby is not extrapolated. A limited plasma that has an X-point
+nearby is not told apart from a diverted one: one rational is placed past its boundary and the run
+warns that no overlap could be established there, leaving the domain unchanged. Divertors with a
+second null beside the primary one or on the leg (snowflake, x-point target) are not modelled.
+
+The X-point flux need not coincide with the equilibrium's boundary: a reconstruction that places
+its boundary slightly inside the separatrix has finite q at ``\psi = 1``, and rational surfaces
+between that boundary and the X-point lie in the real plasma but outside the equilibrium GPEC
+holds. The scan places only the first of them, to judge whether the outermost surface inside is
+clean, and scores it only when the kinetic profiles extend that far. `psihigh` remains the upper
+limit throughout: the overlap point can only narrow the domain, and when no overlap can be
+established the domain keeps its requested limit.
+
+TokaMaker's `save_eqdsk` writes such files when `lcfs_pad` (``p``) is set with the default
+`truncate_eq=True`: the equilibrium is cut at ``1 - p`` and renormalised, so the X-point sits at
+``\psi = 1/(1 - p)``. Writing with `truncate_eq=False` keeps the whole plasma; EFIT-written files
+place their boundary on the X-point flux.
+
+The scan takes its kinetic profiles from the `[SLAYER]` `profile_file`, through the same control
+and loader the SLAYER analysis uses, so both see the same profiles, the same HDF5 group and the
+same χ⊥(ψ) — the layer widths cannot disagree between them. A deck without a `[SLAYER]`
+`profile_file` does not get the scan. Because the file is resolved from the run's TOML, the scan
+only runs on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path has no inputs to
+resolve it from, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
+`ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
+`psilim_from_layer_overlap = true`. It then caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction`
+still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
+
+The flag is off by default, so every shipped deck is unchanged by it. With the shipped
+DIII-D-like profiles the overlap point is ψ ≈ 0.9985: outside the ideal and Riccati decks'
+`psihigh = 0.995`, where the cap could not bind even if enabled, but inside the SLAYER deck's
+0.9995, where enabling it would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
+raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and q = 8, and the resulting
+domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen `psihigh = 0.995` of the
+ideal deck. Whenever `psilim` lands past the overlap point, with the flag on or off, GPEC warns;
+on the shipped decks that includes the SLAYER deck.
+
+**Which perpendicular diffusivity.** The two formulas that take `chi_perp` want different
+quantities. The layer width goes through `P_perp = τ_R/τ_E` with `τ_E = r²/χ_E`, and χ_E is the
+one-fluid perpendicular *energy* diffusivity, the gradient-weighted combination of the electron and
+ion channels, `χ_E = (n_e χ_e ∇T_e + n_i χ_i ∇T_i)/(n_e ∇T_e + n_i ∇T_i)`. The critical-Δ island
+width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature flattening against an electron parallel
+conductivity, so its χ_⊥ is the electron channel. GPEC currently feeds both from one profile, the
+kinetic file's `chi_e`, which in the shipped DIII-D-like data is the electron power-balance
+diffusivity: the right channel for the critical Δ, and a proxy for χ_E in the layer width. This is
+the same single-χ convention as Fitzpatrick's TJ code, which also assumes `T_e = T_i`.
+Separating the two is deferred: it needs an ion `chi_i` in the kinetic-profile schema, and the
+power-balance ion diffusivity available upstream is not yet usable (it comes back negative across
+most of the radius on the cases checked). Since both widths scale as `χ^{1/4}`, a factor-2 error in
+χ moves them by about 19%, but that can be enough to move the overlap cut by a surface.
+
+| Dataset | Contents |
+|---|---|
+| `psi`, `m`, `n`, `r_s` | scanned surfaces and their minor radius |
+| `delta_s_abs`, `width_delta_s` | Riccati layer thickness, in metres and as a Δψ width |
+| `width_visco`, `width_dr` | visco-resistive and diffusive-resistive (Eq. 100) Δψ widths; `width_dr` sets the cut |
+| `extrapolated` | 1 where the surface lies beyond the equilibrium grid |
+| `psilim_overlap`, `first_overlap_index` | the cut, and the first surface whose layer overlaps its neighbour |
+| `applied` | 1 when the cap was passed to the truncation (`rational_offset_fraction` / `qhigh` may still cut deeper) |
+
 ## Configuration reference
 
 All `ForceFreeStates` options are set in the `[ForceFreeStates]` section of `gpec.toml`.
@@ -292,7 +397,7 @@ The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separa
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/Resist.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
 
 ## Example usage

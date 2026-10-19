@@ -27,6 +27,8 @@ Available regression cases:
 regress --cases diiid_n1 --refs develop,feature/kinetic-damping
 ```
 
+**Build mode.** Every case runs with GPEC's PrecompileTools workload disabled (the harness sets the `precompile_workload` preference per subprocess), so results compare code compiled on first use. `diiid_n1_riccati_precompiled` sets `precompile_workload = true` in its `[case]` table to track the precompiled build users get by default; the two builds can differ at the percent level in Δ′, so compare that case only against itself. That case is a variant: its file sets `base = "diiid_n1_riccati"` and supplies only `name`, `description` and `precompile_workload`, inheriting the base's `example_dir`, `[quantities.*]` and `[overrides]`. Any `[case]` key, `[quantities.*]` block or `[overrides]` entry a variant sets replaces the base's same-named one. The base is read from the sibling `<base>.toml`; a missing base, or a base that itself has a base, is a load error. To check a variant, `regress --list-cases` should show it with the same quantity count as its base. Each run records the build mode it actually ran (`aot` or `jit`) in its environment fingerprint; the report flags two compared runs whose modes differ, and a run whose mode differs from its case's (e.g. the precompiled case at a commit that predates the workload) logs a warning.
+
 All cases requested in a single invocation share one git worktree (and one `Pkg.instantiate`/precompile) per commit, so `--cases a,b,c` in one command is substantially faster than three separate runs.
 ```
 ================================================================
@@ -138,6 +140,10 @@ regress --cases diiid_n1 --refs develop,my-feature-branch
 `develop` resolves to your **local** branch, and the harness never fetches, so the first line is
 what keeps the baseline current (or pass `origin/develop` directly). After a fetch, a local pointer
 that still lags its remote prints a `!! STALE BASELINE` banner; without one the banner is silent.
+
+A pull request stacked on another one compares against the branch it targets, not `develop`, so
+its report shows only its own changes: `regress --cases diiid_n1 --refs <base-branch>,my-feature-branch`
+(see [Stacked pull requests](git-workflow.md#stacked-pull-requests)).
 
 `local` stays the right tool for a quick spot check on uncommitted work, provided you leave the tree
 alone until it finishes.

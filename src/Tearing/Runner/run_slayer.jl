@@ -1,17 +1,7 @@
-# Runner.jl
+# run_slayer.jl
 #
-# Top-level orchestration for the SLAYER tearing-mode analysis. Given a
-# `ForceFreeStatesResult` (which supplies the equilibrium, the rational-surface
-# list and the outer-region Δ' matrix) + a
-# populated `SLAYERControl`, `run_slayer` loads kinetic profiles, builds
-# per-surface SLAYER parameters, runs the requested scan mode, extracts
-# growth rates by contour intersection, and returns a `SLAYERResult`.
-#
-# A secondary entry point `run_slayer_from_inputs` takes pre-built
-# per-surface parameters + a Δ' matrix and bypasses the
-# equilibrium-driven `build_slayer_inputs` step. This is what the test
-# suite drives; it keeps the end-to-end code covered without requiring a
-# full equilibrium solve in every test.
+# Tearing scan core: profile loading, the slab Δ′ reference conversion, and
+# `run_slayer_from_inputs` (scan + growth-rate extraction). `TearingProblem` builds its inputs.
 
 # ---------------------------------------------------------------------
 # Profile loading
@@ -20,7 +10,10 @@
 # reader and adapt them to the SLAYER inner layer. Returns the spline-based
 # `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from the file's
 # `chi_e`/`chi_i`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
-# case the caller falls back to the scalar `control.chi_perp_e`/`chi_perp_i`/`chi_tor`).
+# case the caller falls back to the scalar `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), and
+# a Z_eff(ψ) callable: the file's own `zeff` profile when it carries one, else
+# derived from its `n_i/n_e` (or `nothing` when the file carries neither, in which
+# case the caller falls back to the scalar `control.zeff`).
 function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     isempty(control.profile_file) &&
         error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
@@ -54,7 +47,49 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     chi_perp_e = _chi_spline(data.chi_e)
     chi_perp_i = _chi_spline(data.chi_i)
     chi_tor = _chi_spline(data.chi_phi)
-    return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor)
+    # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
+    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
+    # charge-1 main ion, the single-ion closure the kinetic spline set uses:
+    # Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
+    _usable(v) = v !== nothing && !all(iszero, v)
+    zeff = if _usable(data.zeff)
+        minimum(data.zeff) >= 1.0 - 1e-8 ||
+            error("run_slayer: kinetic file '$path' has zeff = $(minimum(data.zeff)) < 1 — unphysical")
+        cubic_interp(psi_xs, collect(Float64, data.zeff))
+    elseif !_usable(data.n_i)
+        nothing
+    else
+        z = [ne > 0 ? control.impurity_charge - (ni / ne) * (control.impurity_charge - 1.0) : control.impurity_charge for (ni, ne) in zip(data.n_i, data.n_e)]
+        minimum(z) >= 1.0 - 1e-8 ||
+            error("run_slayer: kinetic file '$path' has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
+        cubic_interp(psi_xs, z)
+    end
+    zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
+    return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source)
+end
+
+# χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the control's
+# scalar fallbacks. With `warn`, a fallback is reported only for a χ the selected P_perp model
+# (and, for χ⊥,e, the critical Δ) actually uses.
+function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
+    model = control.P_perp_model
+    pick(f, s) = f === nothing ? s : f
+    if warn
+        uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+        uses_i = model in (:chi_perp_i, :D_perp)
+        uses_tor = model !== :tau_E
+        fallbacks = String[]
+        uses_e && loaded.chi_perp_e === nothing && push!(fallbacks, "chi_e → chi_perp_e = $(control.chi_perp_e)")
+        uses_i && loaded.chi_perp_i === nothing && push!(fallbacks, "chi_i → chi_perp_i = $(control.chi_perp_i)")
+        uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_tor = $(control.chi_tor)")
+        isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
+                                  "$(join(fallbacks, ", ")); using the scalar fallback."
+        model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
+                                  "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
+    end
+    return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
+        chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
+        chi_tor=pick(loaded.chi_tor, control.chi_tor))
 end
 
 # ---------------------------------------------------------------------
@@ -63,6 +98,8 @@ end
 function _build_inner_model(name::Symbol)
     if name === :slayer_fitzpatrick
         return SLAYERModel(; variant=:fitzpatrick)
+    elseif name === :ggj_ray
+        return GGJModel(; solver=:ray)
     elseif name === :ggj_shooting
         return GGJModel(; solver=:shooting)
     elseif name === :ggj_galerkin
@@ -198,17 +235,16 @@ end
 # Core analysis entry point that takes pre-built parameters.
 # ---------------------------------------------------------------------
 """
-    run_slayer_from_inputs(params::Vector{SLAYERParameters},
-                            dp_matrix::AbstractMatrix,
-                            control::SLAYERControl) -> SLAYERResult
+    run_slayer_from_inputs(model::InnerLayerModel, params, dp_matrix, control) -> SLAYERResult
 
-Run the SLAYER tearing analysis given pre-built per-surface
-`SLAYERParameters` and the outer-region Δ' matrix. Bypasses the
-equilibrium-driven `build_slayer_inputs` step — use this when the
-parameters are already known (e.g. in unit tests or when rebuilding
-from cached HDF5 output).
+Run the tearing analysis scan core given the inner-layer dispatch `model`, the pre-built
+per-surface parameters, and the outer-region Δ' matrix. Bypasses the orchestration of the
+`TearingProblem` solve — use this when the parameters are already known (e.g. in unit
+tests or when rebuilding from cached HDF5 output). The model is a typed object end to
+end; nothing below this point reads `control.inner_model`.
 """
-function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
+function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
+    params::AbstractVector{<:InnerLayerParameters},
     dp_matrix::AbstractMatrix,
     control::SLAYERControl;
     rational_psi::Vector{Float64}=Float64[],
@@ -223,18 +259,16 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
                             "≠ ($n, $n)"))
     dp = Matrix{ComplexF64}(dp_matrix)
 
-    model = _build_inner_model(control.inner_model)
-
     # Guard: the inner-layer model and the parameter eltype must match, or
     # `_build_surface_coupling` throws an opaque MethodError downstream.
     expected_P = _is_ggj(model) ? GGJParameters : SLAYERParameters
     all(p -> p isa expected_P, params) ||
         throw(
             ArgumentError(
-                "run_slayer: inner_model=$(control.inner_model) requires " *
+                "run_slayer: a $(typeof(model)) inner model requires " *
                 "$(expected_P) per-surface parameters, but got eltype " *
                 "$(eltype(params)). Build inputs with the matching builder " *
-                "(build_slayer_inputs for SLAYER, build_ggj_inputs for GGJ).")
+                "(build_slayer_inputs for SLAYER, ggj_parameters for GGJ).")
         )
 
     # Slab-layer path: convert Δ' from its ψ_N reference length to the
@@ -362,7 +396,7 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         control.store_scan && push!(scan_data_list, scan)
     end
 
-    return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
+    return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
         layer_widths, scan_data_list)
@@ -396,120 +430,4 @@ function ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
         out[k] = (ising=p.ising, tearing=r.tearing, interchange=r.interchange)
     end
     return out
-end
-
-# ---------------------------------------------------------------------
-# Full pipeline: equilibrium + ForceFreeStates → parameters → analysis
-# ---------------------------------------------------------------------
-"""
-    run_slayer(result, control; dir_path="./") -> SLAYERResult
-
-Orchestrate the full SLAYER analysis against a `ForceFreeStates.ForceFreeStatesResult`,
-reading its equilibrium, singular surfaces and Δ' matrix. Kinetic profiles are
-read from `control.profile_file` (relative to `dir_path`) through the shared
-`Equilibrium.read_kinetic_file` reader; when the file carries `chi_e`/`chi_phi`
-profiles they set χ⊥(ψ)/χ_φ(ψ), otherwise the scalar `control.chi_perp_e`/
-`chi_tor` fallbacks are used.
-
-The toroidal field comes from `control.bt`; leaving it unset (the default) makes
-`build_slayer_inputs` evaluate the physical `B_T = F(ψ)/(2π·R₀)` per surface.
-
-Returns an `enabled=false` `SLAYERResult` when `control.enabled` is
-false.
-"""
-function run_slayer(result, control::SLAYERControl; dir_path::AbstractString="./")
-    dpm = result.delta_prime === nothing ? Matrix{ComplexF64}(undef, 0, 0) : result.delta_prime.matrix
-    return run_slayer(result.equil, result.surfaces, dpm, control; dir_path=dir_path)
-end
-
-"""
-    run_slayer(equil, surfaces, delta_prime_matrix, control; dir_path="./") -> SLAYERResult
-
-Loose-argument form of [`run_slayer`](@ref), taking the equilibrium, the singular-surface
-vector and the outer-region Δ' matrix directly. Per-surface parameters are built via
-`build_slayer_inputs`; an empty or wrong-sized `delta_prime_matrix` falls back to a diagonal
-built from the `sing.delta_prime` stubs.
-"""
-function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::AbstractMatrix,
-    control::SLAYERControl; dir_path::AbstractString="./")
-    validate(control)
-    control.enabled || return empty_slayer_result(control)
-    isempty(surfaces) && return empty_slayer_result(control)
-
-    loaded = _load_profiles(control, dir_path)
-    profiles = loaded.profiles
-
-    if control.inner_model in (:ggj_shooting, :ggj_galerkin)
-        # GGJ γ-extraction is future work; `run_slayer_from_inputs` emits the
-        # warning once the model is built (so direct callers see it too).
-        params = build_ggj_inputs(equil, surfaces, profiles;
-            mu_i=control.mu_i,
-            zeff=control.zeff,
-            resistivity_model=_build_resistivity_model(control.resistivity_model),
-            lnLambda_form=control.lnLambda_form)
-    else
-        # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
-        # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
-        # control value through instead: `nothing` makes build_slayer_inputs compute the
-        # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
-        # what its docstring already prescribes.
-        bt = control.bt
-        # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
-        chi_perp_e = loaded.chi_perp_e === nothing ? control.chi_perp_e : loaded.chi_perp_e
-        chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
-        (loaded.chi_perp_e === nothing || loaded.chi_tor === nothing) && @warn(
-            "SLAYER: kinetic file has no usable chi_e/chi_phi profile(s) " *
-            "(dataset absent or all-zero); using the scalar " *
-            "control.chi_perp_e/chi_tor fallback for the missing one(s).")
-        chi_perp_i = loaded.chi_perp_i === nothing ? control.chi_perp_i : loaded.chi_perp_i
-        (control.P_perp_model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing) && @warn(
-            "SLAYER: kinetic file has no usable chi_i profile; using the scalar " *
-            "control.chi_perp_i fallback.")
-        params = build_slayer_inputs(equil, surfaces, profiles;
-            bt=bt,
-            mu_i=control.mu_i,
-            zeff=control.zeff,
-            chi_perp_e=chi_perp_e,
-            chi_tor=chi_tor,
-            chi_perp_i=chi_perp_i,
-            tau_E=something(control.tau_E, NaN),
-            P_perp_model=control.P_perp_model,
-            dr_val=control.dr_val,
-            dgeo_val=control.dgeo_val,
-            dc_type=control.dc_type,
-            theta=control.theta_sample,
-            resistivity_model=_build_resistivity_model(control.resistivity_model),
-            lnLambda_form=control.lnLambda_form)
-    end
-
-    # Δ' matrix: prefer the full parallel-FM matrix; fall back to a
-    # diagonal built from each SingType's scalar delta_prime.
-    dp = if !isempty(delta_prime_matrix) &&
-       size(delta_prime_matrix) == (length(params), length(params))
-        Matrix{ComplexF64}(delta_prime_matrix)
-    else
-        # The full Δ' matrix is unavailable (e.g. the parallel-FM stage that
-        # populates it was not run). The scalar-diagonal fallback uses
-        # `sing.delta_prime`, which is a coarse per-surface stub; surfaces
-        # with no entry default to Δ'=0, giving γ computed from zero drive.
-        n_missing = count(s -> isempty(s.delta_prime), surfaces)
-        @warn(
-            "SLAYER: delta_prime_matrix is empty or wrong-sized " *
-            "($(size(delta_prime_matrix)) vs " *
-            "($(length(params)),$(length(params)))); falling back to the " *
-            "diagonal `sing.delta_prime` stub. Growth rates use a coarse " *
-            "per-surface Δ' and may be unreliable" *
-            (n_missing > 0 ? "; $n_missing surface(s) have NO Δ' entry and " *
-                             "default to Δ'=0 (zero tearing drive)." : ".")
-        )
-        M = zeros(ComplexF64, length(params), length(params))
-        for (k, s) in enumerate(surfaces)
-            M[k, k] = isempty(s.delta_prime) ? 0.0 + 0im : s.delta_prime[1]
-        end
-        M
-    end
-
-    rational_psi = Float64[surfaces[p.ising].psifac for p in params]
-    rational_q = Float64[surfaces[p.ising].q for p in params]
-    return run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
 end

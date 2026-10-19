@@ -48,7 +48,7 @@ recover S = U₁·U₂⁻¹ by renormalization. This achieves the same Riccati t
 
 This works because the EL ODE is **linear** in (U₁, U₂): the RHS does not grow with |S|,
 so relative error control is faithful even when S is large. Renormalization triggered by
-`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > ucrit) keeps
+`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > renorm_threshold) keeps
 both matrices bounded, preventing overflow and maintaining a well-conditioned state for the
 solver — exactly analogous to Gaussian reduction in the standard ODE.
 
@@ -69,17 +69,17 @@ During chunk integration (with sing_der! as ODE RHS):
   u[:,:,1] = U₁  (starts as S_prev, evolves toward new S)
   u[:,:,2] = U₂  (starts as I, evolves with EL dynamics)
 
-After renormalization (at crossing or when norms exceed ucrit):
+After renormalization (at crossing or when norms exceed renorm_threshold):
   u[:,:,1] = S = U₁ · U₂⁻¹
   u[:,:,2] = I
 
 This is compatible with downstream code (which uses U₁/U₂ ratio):
   - Free.jl:     wp = u[:,:,2] / u[:,:,1] = I · S⁻¹ = P  ✓  (post-renorm)
   - FixedBoundaryStability.jl: crit = min_eigval(u[:,:,1] / u[:,:,2]) = min_eigval(S)  ✓
-  - Axis init:   determined by `ctrl.frobenius_psi_max`. When the start lies above it (or it is 0), U₁=0, U₂=I → S(ψ₀)=0 (original
-    Glasser fixed-axis BC). Otherwise (default near the axis), Frobenius eigenvalue init [Glasser 2016 Eq. 51]
-    sets U₂=I and U₁ to the regular Frobenius eigenvector per mode → S(ψ₀) = U₁_Frobenius is
-    nonzero in general. Riccati S-evolution remains well-defined either way.
+  - Axis init:   determined by `ctrl.frobenius_psi_max`. The default 0, and any start above a positive threshold,
+    uses U₁=0, U₂=I → S(ψ₀)=0 (Fortran DCON's fixed-axis BC). A positive threshold at or above the start
+    opts into the diagonal Frobenius init, which sets U₂=I and a per-mode U₁, so S(ψ₀) is nonzero.
+    Riccati S-evolution remains well-defined either way.
 
 ## Key Differences from Standard Integration
 
