@@ -80,17 +80,17 @@ end
 @testset "compute_fourier_coefficients" begin
     atol = ATOL_TIGHT
 
-    @testset "2D basis is exp(-i(mθ - nν))" begin
+    @testset "2D basis is exp(-i(mθ - nζ))" begin
         N, mlow, mpert = 32, -3, 7
         m_modes = mlow:(mlow+mpert-1)
         n = 2
-        ν = collect(range(; start=0.0, length=N, step=0.05))
-        basis = compute_fourier_coefficients(N, m_modes, n, ν)
+        ζ = collect(range(; start=0.0, length=N, step=0.05))
+        basis = compute_fourier_coefficients(N, m_modes, n, ζ)
         @test size(basis) == (mpert, N)
 
         θ = collect(range(; start=0, length=N, step=2π/N))
         for (l, m) in enumerate(m_modes)
-            expected = exp.(-im .* (m .* θ .- n .* ν))
+            expected = exp.(-im .* (m .* θ .- n .* ζ))
             @test all(isapprox.(basis[l, :], expected; atol))
         end
 

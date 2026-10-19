@@ -33,7 +33,7 @@ different n never couple:
     An integer-q surface appears once for each n that resonates there. Those rows are not
     neighbors of each other when the Chirikov parameter is computed.
 
-`set_psilim_via_dmlim` is ignored for multi-n runs, so set the edge with `qhigh` or `psihigh`,
+`truncate_at_rational_offset` is ignored for multi-n runs, so set the edge with `qhigh` or `psihigh`,
 away from any rational m/n in the range. KineticForces still takes a single n.
 
 ## Dominant resonant-coupling mode

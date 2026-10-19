@@ -933,7 +933,7 @@ channels are swapped into the named fields of [`InnerLayerResponse`](@ref).
 Preferred for |Q| ≳ 1 and near the imaginary axis; use `solve_ray` directly
 when the full [`RaySolveResult`](@ref) is wanted.
 """
-function solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs...)
+function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number; kwargs...)
     res = solve_ray(params, inner_Q(params, γ); kwargs...)
     return InnerLayerResponse(res.Δ[2], res.Δ[1])
 end
@@ -954,7 +954,7 @@ is returned as `certΔ` and warns above `certify_rtol`. `npc` sets the profile
 points per mesh cell; extra keywords forward to both [`solve_ray`](@ref) calls
 (θ is fixed by the method — do not pass it).
 """
-function solve_inner_profile(::GGJModel{:ray}, params::GGJParameters, γ::Number;
+function solve_inner_profile(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
     npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
     Q = inner_Q(params, γ)
     rr = solve_ray(params, Q; kwargs...)             # certified Δ (optimal θ)

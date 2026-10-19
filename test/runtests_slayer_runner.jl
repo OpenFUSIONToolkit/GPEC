@@ -1,6 +1,7 @@
-@testset "Runner: Control + run_slayer + HDF5 output" begin
+@testset "Runner: Control + TearingProblem + HDF5 output" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
+    using GeneralizedPerturbedEquilibrium: GGJModel, SLAYERModel, TearingProblem, solve
     using GeneralizedPerturbedEquilibrium.Dispersion
     using GeneralizedPerturbedEquilibrium.Runner
     using HDF5
@@ -39,7 +40,7 @@
         @test_throws ArgumentError Runner.validate(
             SLAYERControl(; coupling_mode=:bogus))
         @test_throws ArgumentError Runner.validate(
-            SLAYERControl(; dc_type=:bogus))
+            SLAYERControl(; D_c_type=:bogus))
         @test_throws ArgumentError Runner.validate(
             SLAYERControl(; msing_max=0))
         @test_throws ArgumentError Runner.validate(
@@ -52,11 +53,11 @@
             "inner_model" => "slayer_fitzpatrick",
             "scan_mode" => "brute_force",
             "coupling_mode" => "coupled",
-            "dc_type" => "rfitzp",
+            "D_c_type" => "fitzpatrick",
             "msing_max" => 2,
             "bt" => 1.8,
-            "mu_i" => 2.0,
-            "dr_val" => 0.01,
+            "ion_mass" => 2.0,
+            "D_R" => 0.01,
             "scan_grid" => Dict{String,Any}(
                 "Q_re_range" => [-5.0, 5.0],
                 "Q_im_range" => [-1.0, 3.0],
@@ -75,10 +76,10 @@
         @test c.inner_model === :slayer_fitzpatrick
         @test c.scan_mode === :brute_force
         @test c.coupling_mode === :coupled
-        @test c.dc_type === :rfitzp
+        @test c.D_c_type === :fitzpatrick
         @test c.msing_max == 2
         @test c.bt === 1.8
-        @test c.dr_val == 0.01
+        @test c.D_R == 0.01
         @test c.Q_re_range == (-5.0, 5.0)
         @test c.Q_im_range == (-1.0, 3.0)
         @test c.nre == 50
@@ -94,23 +95,30 @@
         @test_throws ArgumentError slayer_control_from_toml(bad)
     end
 
-    @testset "run_slayer: result-facing form forwards surfaces and Δ'" begin
+    @testset "TearingProblem solve forwards surfaces and Δ'" begin
         # A result with no singular surfaces short-circuits before any equilibrium access,
         # so a stand-in result is enough to pin the forwarding of surfaces / delta_prime.
         c = SLAYERControl(; enabled=true, profile_file="unused.h5")
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing)
-        r = run_slayer(no_surfaces, c)
+        r = solve(TearingProblem(no_surfaces, c), SLAYERModel())
         @test isempty(r.params)
 
         # A disabled control never looks at the result at all.
-        r_off = run_slayer(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5"))
+        r_off = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5")), SLAYERModel())
         @test r_off.enabled == false
+    end
+
+    @testset "GGJ tearing errors until its growth-rate extraction exists" begin
+        @test SLAYERControl(; inner_model=:ggj_ray).inner_model === :ggj_ray
+        no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
+            delta_prime=nothing, dir_path=".")
+        @test_throws ErrorException solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true, profile_file="unused.h5")), GGJModel())
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one
     # does: `result.delta_prime.matrix` is populated and already sized to the surface list, which
-    # is the predicate `run_slayer` uses to accept it over the per-surface diagonal stub.
+    # is the predicate the tearing solve uses to accept it over the per-surface diagonal stub.
     @testset "Galerkin-fed SLAYER: gal Δ' drives the coupled solve" begin
         mktempdir() do dir
             deck = joinpath(@__DIR__, "..", "examples", "LAR_ideal_match_test")
@@ -130,7 +138,7 @@
                 _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, ising=2)]
             c = SLAYERControl(; enabled=true, coupling_mode=:coupled, scan_mode=:brute_force,
                 Q_re_range=(-1.0, 1.0), Q_im_range=(-0.5, 0.8), nre=20, nim=20, pole_threshold=1e5)
-            r = run_slayer_from_inputs(params, dpm, c)
+            r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, c)
             @test r.enabled
             @test r.coupled_extraction isa GrowthRateResult
         end
@@ -145,30 +153,30 @@
             nre=8, nim=8, pole_threshold=1e5)
 
         # Uncoupled layers are solved in their own plasma frame: no shift, even when supplied.
-        r_unc = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...); omega_E=Ω_E)
+        r_unc = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...); omega_E=Ω_E)
         @test r_unc.q_shift == [0.0, 0.0]
         # The resolved rotation is still reported in both modes.
         @test r_unc.omega_E == Ω_E
 
         # Coupled: the kinetic-file Ω_E Dopplers each surface by −τ_k·n·Ω_E.
-        r_cpl = run_slayer_from_inputs(params, dpm, SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=Ω_E)
+        r_cpl = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=Ω_E)
         @test r_cpl.q_shift ≈ [-1.0e-4 * 1 * Ω_E[1], -1.2e-4 * 1 * Ω_E[2]]
         @test r_cpl.omega_E == Ω_E
         # The mode sees n·Ω_E: the same rotation shifts an n = 2 surface twice as far.
-        r_n2 = run_slayer_from_inputs([_mk_params(; tauk=1.0e-4, m=3, n=2)], ComplexF64[-2.0;;],
+        r_n2 = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), [_mk_params(; tauk=1.0e-4, m=3, n=2)], ComplexF64[-2.0;;],
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[2.0e3])
         @test r_n2.q_shift ≈ [-1.0e-4 * 2 * 2.0e3]
-        @test_throws "rational surfaces were analysed" run_slayer_from_inputs(params, dpm,
+        @test_throws "rational surfaces were analysed" run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[1.0])
 
         # A Doppler offset beyond the scan box is flagged rather than silently losing the root:
         # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].
-        @test_logs (:warn, r"outside Q_re_range") match_mode = :any run_slayer_from_inputs(params, dpm,
+        @test_logs (:warn, r"outside Q_re_range") match_mode = :any run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[3.0e4, 0.0])
 
         # Rotation without a toroidal mode number would silently vanish, so it is an error.
         params_n0 = [_mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, n=0, ising=1)]
-        @test_throws "needs the toroidal mode number" run_slayer_from_inputs(params_n0, ComplexF64[-2.0;;],
+        @test_throws "needs the toroidal mode number" run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params_n0, ComplexF64[-2.0;;],
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[2.0e3])
     end
 
@@ -176,7 +184,7 @@
         c = SLAYERControl(; enabled=false)
         params = [_mk_params()]
         dp = ComplexF64[0.0 + 0im;;]                      # 1×1 matrix
-        r = run_slayer_from_inputs(params, dp, c)
+        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c)
         @test r.enabled == false
         @test isempty(r.Q_root)
         @test isempty(r.params)
@@ -186,7 +194,7 @@
         c = SLAYERControl(; enabled=true)
         params = [_mk_params()]
         bad_dp = ComplexF64[0.0 0.0; 0.0 0.0]
-        @test_throws ArgumentError run_slayer_from_inputs(params, bad_dp, c)
+        @test_throws ArgumentError run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, bad_dp, c)
     end
 
     @testset "delta_prime_to_rs_reference: ψ_N → r_s conversion" begin
@@ -253,7 +261,7 @@
             Q_im_range=(-0.5, 0.8),
             nre=80, nim=80,
             pole_threshold=1e5)      # tuned for lu^(1/3) scale
-        r = run_slayer_from_inputs(params, dp, c)
+        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c)
         @test r.enabled
         @test length(r.Q_root) == 1          # single coupled eigenvalue
         @test abs(r.Q_root[1] - Q_target) < 2e-2       # grid-resolution limited
@@ -281,8 +289,9 @@
             nre=40, nim=40,
             pole_threshold=1e5,
             store_scan=true)
-        r = run_slayer_from_inputs(params, dp, c;
+        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c;
             rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
+        @test r.model === SLAYERModel(; variant=:fitzpatrick)
 
         mktemp() do path, io
             close(io)
@@ -297,6 +306,7 @@
                 isempty(viol) || @error "metadata contract violations in Tearing/" viol
                 @test isempty(viol)
                 @test attrs(f["Tearing"])["layer_model"] == "slayer"
+                @test attrs(f["Tearing"])["inner_model"] == "slayer_fitzpatrick"
             end
 
             h5open(path, "r") do f

@@ -81,18 +81,21 @@ using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
-using .ForceFreeStates: galerkin_solve, write_galerkin!
+using .ForceFreeStates: galerkin_solve, write_galerkin!, write_match!
 
 # Scripting-API surface: the integrator selectors, the published result, the equilibrium
 # constructor and the forcing description, re-exported so a user needs one `using`.
-using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, ResistiveMatch
+using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
+using .ForceFreeStates: MatchProblem
+using .InnerLayer: GGJModel, SLAYERModel
+using .Tearing.Runner: TearingProblem
 using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag")
-const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
+    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing")
+const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
 # instead of throwing an unknown-keyword error; warn so the removal is not silent.
@@ -253,7 +256,9 @@ function main_from_inputs(
     ffs_start = time()
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
-    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles; species=kf_species)
+    metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles;
+        species=kf_species,
+        overlap_inputs=_overlap_slayer_inputs(inputs, intr.dir_path))
     ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric; runtimes=runtimes)
 
     if ctrl.write_outputs_to_HDF5
@@ -263,7 +268,8 @@ function main_from_inputs(
             inputs=inputs,
             forcing_modes=forcing_modes_snapshot,
             locstab=locstab,
-            ballooning_boundary=ballooning_boundary
+            ballooning_boundary=ballooning_boundary,
+            layer_overlap=layer_overlap
         )
         written_h5 = ctrl.HDF5_filename
         @info "Results written to $(ctrl.HDF5_filename)"
@@ -421,16 +427,16 @@ function load_kinetic_context(
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
             kinetic_file;
-            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
-            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge,
+            mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass,
             density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
             ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
             chi1=2π * equil.psio)
         if !isempty(kf_ctrl.ion_species) || kf_ctrl.electron
             speclist = isempty(kf_ctrl.ion_species) ?
-                       [KineticForces.IonSpecies(; z=kf_ctrl.zi, m=kf_ctrl.mi, fraction=1.0)] : kf_ctrl.ion_species
+                       [KineticForces.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)] : kf_ctrl.ion_species
             species = Equilibrium.resolve_ntv_species(kinetic_file, speclist;
-                electron=kf_ctrl.electron, zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp,
+                electron=kf_ctrl.electron, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass,
                 density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
                 ExB_rotation_factor=kf_ctrl.ExB_rotation_factor,
                 toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
@@ -541,8 +547,70 @@ function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.Pl
     return locstab, ballooning_boundary
 end
 
+# Kinetic profiles for the overlap scan come from the [SLAYER] section, through the same control
+# and loader the SLAYER analysis itself uses, so the scan sees the same profiles, the same HDF5
+# group and the same chi(psi). Returns `nothing` when there is no usable [SLAYER] profile_file.
+function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
+    (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
+    ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+    isempty(ctrl.profile_file) && return nothing
+    loaded = try
+        Runner._load_profiles(ctrl, dir_path)
+    catch err
+        @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
+        return nothing
+    end
+    # chi(psi) and Z_eff(psi) from the file where it carries them, else the control's scalar
+    # fallbacks -- the same precedence run_slayer uses. Every other plasma parameter the layer
+    # widths depend on is the run's own [SLAYER] setting, so the scan and the SLAYER stage see
+    # one plasma.
+    return (; profiles=loaded.profiles,
+        chi_perp=loaded.chi_perp === nothing ? ctrl.chi_perp : loaded.chi_perp,
+        chi_tor=loaded.chi_tor === nothing ? ctrl.chi_tor : loaded.chi_tor,
+        zeff=loaded.zeff === nothing ? ctrl.zeff : loaded.zeff,
+        bt=ctrl.bt, mu_i=ctrl.ion_mass, theta=ctrl.theta_sample,
+        resistivity_model=Runner._build_resistivity_model(ctrl.resistivity_model),
+        lnLambda_form=ctrl.lnLambda_form)
+end
+
+# The binding scan across toroidal mode numbers: the one with the innermost overlap point, since
+# the domain must stop before the first overlap of any n. Scans that find no overlap do not bind;
+# when none overlap, the first scan is returned so its surfaces are still recorded.
+function _binding_overlap(scans)
+    isempty(scans) && return nothing
+    overlapping = filter(sc -> sc.psihigh !== nothing, scans)
+    isempty(overlapping) && return first(scans)
+    return overlapping[argmin([sc.psihigh for sc in overlapping])]
+end
+
+# Run the resistive-layer overlap scan for each toroidal mode number of the run and return the
+# binding one, or `nothing` when there are no [SLAYER] profiles. Physics refusals (a surface that
+# cannot be scored, a limited edge) are handled inside the scan; what qualifies its verdict is
+# logged as a warning and the per-surface detail as info.
+function _layer_overlap_scan(overlap_inputs, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    overlap_inputs === nothing && return nothing
+    # Eq. (100) is not covariant -- it is anchored to the toroidal-flux label of the paper's
+    # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
+    scans = [
+        Tearing.resistive_layer_overlap(equil, overlap_inputs.profiles; n_tor=n, rs_method=:flux,
+            chi_perp=overlap_inputs.chi_perp, chi_tor=overlap_inputs.chi_tor,
+            bt=overlap_inputs.bt, mu_i=overlap_inputs.mu_i, zeff=overlap_inputs.zeff, theta=overlap_inputs.theta,
+            resistivity_model=overlap_inputs.resistivity_model, lnLambda_form=overlap_inputs.lnLambda_form)
+        for n in intr.nlow:intr.nhigh
+    ]
+    for (n, scan) in zip(intr.nlow:intr.nhigh, scans)
+        for msg in scan.caveats
+            @warn "Layer-overlap scan (n = $n): $msg"
+        end
+        for msg in scan.notes
+            @info "Layer-overlap scan (n = $n): $msg"
+        end
+    end
+    return _binding_overlap(scans)
+end
+
 """
-    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles) -> (metric, mats)
+    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles; overlap_inputs=nothing) -> (metric, mats, overlap)
 
 Set up the force-free-states solve on `intr`: integration limits, the surviving singular
 surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
@@ -554,10 +622,31 @@ function prepare_force_free_states!(
     equil::Equilibrium.PlasmaEquilibrium,
     kf_ctrl::KineticForces.KineticForcesControl,
     kinetic_profiles;
-    species=nothing
+    species=nothing,
+    overlap_inputs=nothing
 )
+    # Resistive-layer overlap: locate where adjacent rational surfaces' layers run into each
+    # other, and use it as an upper bound on the integration domain. The scan runs whenever
+    # kinetic profiles are readable so `ForceFreeStates/LayerOverlap/` always records the point,
+    # but it only constrains the domain when the user opts in.
+    overlap = _layer_overlap_scan(overlap_inputs, intr, equil)
+    psilim_cap = (ctrl.psilim_from_layer_overlap && overlap !== nothing) ? overlap.psihigh : nothing
+    if ctrl.psilim_from_layer_overlap && overlap === nothing
+        @warn "psilim_from_layer_overlap = true but no layer-overlap scan was available; the domain is untouched."
+    end
+
     # Determine psilim and qlim (where we will integrate to)
-    sing_lim!(intr, ctrl, equil)
+    sing_lim!(intr, ctrl, equil; psilim_cap=psilim_cap)
+
+    # Fires whether or not the cap was applied: past the overlap point no surface retains a
+    # well-separated inner region, so a domain reaching beyond it is worth flagging even when
+    # the user did not opt in to the cap.
+    if overlap !== nothing && overlap.psihigh !== nothing && intr.psilim > overlap.psihigh
+        @warn "Integration domain extends past the resistive-layer overlap point: psilim = " *
+              "$(@sprintf("%.6f", intr.psilim)) > $(@sprintf("%.6f", overlap.psihigh)). Adjacent resistive " *
+              "layers overlap there, so the matched-asymptotic treatment is not defined. " *
+              "Set psilim_from_layer_overlap = true to cap the domain at that point."
+    end
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
@@ -573,10 +662,8 @@ function prepare_force_free_states!(
         sing_min!(intr, ctrl, equil)
     end
 
-    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H,
-    # K, M) for each surviving singular surface. Needed by the Julia GGJ
-    # inner-layer analysis; kinetic timescales (τ_A, τ_R) are layered on
-    # top by `build_ggj_inputs` using the same kinetic profiles as SLAYER.
+    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H, K, M) for each
+    # surviving singular surface; `ggj_parameters` layers τ_A / τ_R on top.
     if intr.msing > 0
         ForceFreeStates.resist_eval_all!(intr, equil)
     end
@@ -643,7 +730,7 @@ function prepare_force_free_states!(
         end
     end
 
-    return metric, mats
+    return metric, mats, overlap
 end
 
 """
@@ -691,7 +778,7 @@ function run_force_free_states(
         end
 
         # Compute free boundary energies.
-        if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
+        if ctrl.vac_flag
             if ctrl.verbose
                 wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
                 @info "Computing free boundary energies ($wall_desc)"
@@ -723,31 +810,58 @@ function run_force_free_states(
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+    result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+
+    # Deck-driven matching, through the same MatchProblem as the API.
+    if ctrl.integrator == "galerkin" && ctrl.gal_match_flag
+        ctrl.gal_rpec_flag || error("gal_match_flag=true requires gal_rpec_flag=true")
+        ctrl.gal_ideal_flag || !(isempty(ctrl.gal_eta) || isempty(ctrl.gal_rho) || isempty(ctrl.gal_rotation)) ||
+            error("gal_match_flag needs gal_eta, gal_rho and gal_rotation (one value per matched surface, core to edge)")
+        ctrl.gal_inner_solver in ("ray", "galerkin") ||
+            error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
+        ctrl.verbose && @info(
+            ctrl.gal_ideal_flag ?
+            "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
+            "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
+        )
+        # The gal_inner_* knobs override the "galerkin" backend's defaults; unset keys keep them.
+        model = if ctrl.gal_inner_solver == "galerkin"
+            knobs = (xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx, nq=ctrl.gal_inner_nq,
+                cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax)
+            InnerLayer.GGJModel(; solver=:galerkin, (k => v for (k, v) in pairs(knobs) if v !== nothing)...)
+        else
+            InnerLayer.GGJModel(; solver=:ray)
+        end
+        prob = ForceFreeStates.MatchProblem(result; eta=ctrl.gal_eta, rho=ctrl.gal_rho, rotation=ctrl.gal_rotation,
+            gamma=ctrl.gal_gamma, ideal=ctrl.gal_ideal_flag)
+        result = solve(prob, model)
+        ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(result.match.residual)")
+    end
+
+    return result
 end
 
 """
-    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(), match=nothing,
+    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(),
                          dir_path=".", debug=DebugSettings(), kwargs...)
 
 The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
 the perturbed potential energy whose solutions are the force-free (and, via the TOML path,
 kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
 [`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
-names this one, so `solve` stays unambiguous as other problem classes appear.
+names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
+matching is a separate problem posed on the finished solve: see `MatchProblem`.
 
-`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `match` an
-optional [`ResistiveMatch`](@ref) closing the basis with an inner-layer solution instead of
-the ideal jump, `dir_path` the working directory outputs are written to, and `debug` the
-diagnostic dump settings of the DEBUG deck section. Any remaining keyword is a
-`ForceFreeStatesControl` field, so the TOML keys and the problem keywords are the same
-knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
+`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `dir_path` the
+working directory outputs are written to, and `debug` the diagnostic dump settings of the
+DEBUG deck section. Any remaining keyword is a `ForceFreeStatesControl` field, so the TOML
+keys and the problem keywords are the same knobs. `nn_low`/`nn_high` are rejected — they
+come from `nn`.
 
 ## Fields
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
   - `wall::Vacuum.WallShapeSettings` - Vacuum wall shape for the free-boundary energies.
-  - `match::Union{Nothing,ForceFreeStates.ResistiveMatch}` - Optional inner-layer closure.
   - `dir_path::String` - Working directory for outputs.
   - `debug::DebugSettings` - Diagnostic dump settings.
   - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
@@ -755,7 +869,6 @@ knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
 struct EulerLagrangeProblem
     equil::Equilibrium.PlasmaEquilibrium
     wall::Vacuum.WallShapeSettings
-    match::Union{Nothing,ForceFreeStates.ResistiveMatch}
     dir_path::String
     debug::DebugSettings
     ctrl_kwargs::Dict{Symbol,Any}
@@ -765,7 +878,6 @@ function EulerLagrangeProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
     wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
-    match::Union{Nothing,ForceFreeStates.ResistiveMatch}=nothing,
     dir_path::AbstractString=".",
     debug::DebugSettings=DebugSettings(),
     kwargs...
@@ -775,7 +887,7 @@ function EulerLagrangeProblem(
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
     ctrl_kwargs[:nn_high] = last(nn)
-    return EulerLagrangeProblem(equil, wall, match, String(dir_path), debug, ctrl_kwargs)
+    return EulerLagrangeProblem(equil, wall, String(dir_path), debug, ctrl_kwargs)
 end
 
 """
@@ -788,7 +900,7 @@ Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `al
 a `gpec.toml` run of `main` does and produces the same result object. The second form is
 sugar building the problem from an equilibrium and the problem keywords in one call.
 
-Knobs owned by `alg` or `match` are rejected as `ForceFreeStatesControl` keywords. Kinetic
+Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic
 runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]` profiles
 and errors here.
 
@@ -805,7 +917,6 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
-    ForceFreeStates._apply_match!(ctrl_kwargs, prob.match, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
 
     ctrl.kinetic_factor > 0 &&
@@ -829,7 +940,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     end
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
-    metric, mats = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
+    metric, mats, _ = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
     result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
@@ -1002,7 +1113,7 @@ function run_kinetic_forces(
                 # built from the run's control with only its own identity overridden.
                 sctrl = KineticForces.KineticForcesControl(;
                     (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
-                    zi=sp.z, mi=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
+                    ion_charge=sp.z, ion_mass=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
                 st = KineticForces.KineticForcesState()
                 KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles)
                 push!(states, st)
@@ -1213,7 +1324,7 @@ function efc_couplings(
     # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
     kp = kinetic_profiles
     chi1 = 2π * equil.psio
-    chrg = kf_ctrl.zi * Utilities.E_CHG
+    chrg = kf_ctrl.ion_charge * Utilities.E_CHG
     ψk = kp.xs
     ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
     ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
@@ -1336,8 +1447,8 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         slayer_ctrl.enabled || return nothing
         @info "\n  SLAYER\n$_SECTION"
         slayer_start = time()
-        slayer_result = Runner.run_slayer(result, slayer_ctrl;
-            dir_path=result.dir_path)
+        model = Runner._build_inner_model(slayer_ctrl.inner_model)
+        slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
         slayer_dt = time() - slayer_start
         runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
         @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
@@ -1388,7 +1499,8 @@ function write_outputs_to_HDF5(
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
-    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
+    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[]),
+    layer_overlap=nothing
 )
 
     ctrl = result.control
@@ -1510,6 +1622,30 @@ function write_outputs_to_HDF5(
         out_h5["LocalStability/alpha"] = ballooning_boundary.alpha
         out_h5["LocalStability/alpha_critical"] = ballooning_boundary.alpha_critical
 
+        # Resistive-layer overlap scan. Written whenever the scan ran, whether or not it
+        # constrained the domain, so a run always shows where layer physics would have cut.
+        if layer_overlap !== nothing
+            lo = layer_overlap
+            out_h5["ForceFreeStates/LayerOverlap/m"] = lo.m
+            out_h5["ForceFreeStates/LayerOverlap/n"] = lo.n
+            out_h5["ForceFreeStates/LayerOverlap/psi"] = lo.psi
+            out_h5["ForceFreeStates/LayerOverlap/r_s"] = lo.rs
+            out_h5["ForceFreeStates/LayerOverlap/delta_s_abs"] = lo.delta_s_m
+            out_h5["ForceFreeStates/LayerOverlap/width_delta_s"] = lo.width_delta_s
+            out_h5["ForceFreeStates/LayerOverlap/width_visco"] = lo.width_visco
+            out_h5["ForceFreeStates/LayerOverlap/width_dr"] = lo.width_dr
+            out_h5["ForceFreeStates/LayerOverlap/extrapolated"] = Int.(lo.extrapolated)
+            out_h5["ForceFreeStates/LayerOverlap/psilim_overlap"] =
+                lo.psihigh === nothing ? NaN : lo.psihigh
+            out_h5["ForceFreeStates/LayerOverlap/first_overlap_index"] =
+                lo.first_overlap === nothing ? -1 : lo.first_overlap
+            # "applied" records that the bound was active going into sing_lim!, not that it set
+            # the final psilim -- rational_offset_fraction/qhigh may truncate deeper inside it.
+            out_h5["ForceFreeStates/LayerOverlap/applied"] =
+                Int(ctrl.psilim_from_layer_overlap && lo.psihigh !== nothing &&
+                    lo.psihigh < equil.params.psihigh_resolved)
+        end
+
         # Write integration data: the ψ trace and integrator diagnostics from the raw ODE state,
         # the ξ profiles from the solution. Either may be absent (Galerkin has no ODE state;
         # Riccati has no ξ solution), in which case the datasets are written empty.
@@ -1524,7 +1660,7 @@ function write_outputs_to_HDF5(
         out_h5["$fwd/xi_s"] = xi_solution !== nothing ? xi_solution.xi_s_store : ComplexF64[]
         out_h5["$fwd/crit"] = diag !== nothing ? diag.crit_store : Float64[]
 
-        # Write edge stability scan data (only present when psiedge < psilim).
+        # Write edge stability scan data (only present when dW_edge_scan_start < psilim).
         # Generalized (W, N) pencil energies — power-normalized, Jacobian-invariant; these are
         # the values findmax_dW_edge! uses to choose the truncation point.
         if diag !== nothing && !isempty(diag.edge_scan.psi)
@@ -1565,7 +1701,7 @@ function write_outputs_to_HDF5(
             # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
             # Both kinetic-free (E, F, G, H, K, M) and geometry-only
             # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
-            # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
+            # downstream consumers (ForceFreeStates.ggj_parameters)
             # can reconstruct τ_A / τ_R from any kinetic-profile source.
             if all(s -> s.restype !== nothing, result.surfaces)
                 out_h5["SingularSurfaces/E"] = [s.restype.E for s in result.surfaces]
@@ -1611,6 +1747,7 @@ function write_outputs_to_HDF5(
             dp.B === nothing || (out_h5["SingularSurfaces/pest3_B"] = dp.B)
             dp.Gamma === nothing || (out_h5["SingularSurfaces/pest3_Gamma"] = dp.Gamma)
         end
+        result.match === nothing || write_match!(out_h5, result.match)
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
         # used to find them. Populated only when kinetic crossings were searched for.
@@ -1776,7 +1913,8 @@ end
 
 export main, write_imas
 export solve, perturbed_equilibrium
-export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
+export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
+export MatchProblem, TearingProblem, GGJModel, SLAYERModel
 
 include("Precompile.jl")
 
