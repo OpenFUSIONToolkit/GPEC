@@ -1,0 +1,10 @@
+# Regression case: the diiid_slayer_n1 deck with P_perp built from the perpendicular particle
+# diffusivity D_⊥ (Fitzpatrick 2022, Eq. 16) instead of the electron-channel default. It gives
+# the non-default P_perp models a baseline, and is the one case that reads the kinetic file's chi_i.
+[case]
+name = "diiid_slayer_n1_d_perp"
+base = "diiid_slayer_n1"   # Inherit example_dir, [quantities.*] and [overrides] from this case
+description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis with P_perp_model = D_perp"
+
+[overrides]
+"SLAYER.P_perp_model" = "D_perp"   # P_perp from D_⊥, weighting chi_e and chi_i by n T_s'/p'

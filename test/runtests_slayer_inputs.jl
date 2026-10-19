@@ -2,6 +2,7 @@
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.Equilibrium
     using GeneralizedPerturbedEquilibrium.Utilities
+    using GeneralizedPerturbedEquilibrium.Utilities: MU_0
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.ForceFreeStates: SingType
     using TOML
@@ -164,6 +165,21 @@
         # ψ=0.5 (χ⊥=6) gives a *larger* P_perp than the scalar χ⊥=2.
         @test sl_var[1].P_perp > sl_s[1].P_perp
         @test sl_var[1].P_perp ≈ sl_s[1].P_perp * 6.0 / 2.0 rtol = 1e-10
+    end
+
+    @testset "build_slayer_inputs: P_perp_model forwards the profile gradients and minor radius" begin
+        sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
+        kw = (; bt=2.0, chi_perp_e=2.0, chi_perp_i=1.0, chi_tor=1.5, dr_val=0.0)
+        ref = build_slayer_inputs(equil, sings, profiles; kw...)[1]
+        # Flat n_e and linear T_e, T_i: the D_⊥ weights are T_s′/(T_e′ + T_i′) = 7/13 and 6/13
+        dp = build_slayer_inputs(equil, sings, profiles; kw..., P_perp_model=:D_perp)[1]
+        D_hand = dp.c_beta^2 * dp.eta / MU_0 + (2 / 3) * (1 - dp.c_beta^2) * (2.0 * 7 / 13 + 1.0 * 6 / 13)
+        @test dp.P_perp ≈ ref.P_perp * D_hand / 2.0 rtol = 1e-8
+        # τ̄_E mode takes a from the boundary surface on the same radial label as r_s
+        te = build_slayer_inputs(equil, sings, profiles; kw..., P_perp_model=:tau_E, tau_E=0.1)[1]
+        a = surface_minor_radius(equil, 1.0)
+        @test te.P_perp ≈ ref.P_perp * ((3 / 16) * a^2 / 0.1) / 2.0 rtol = 1e-12
+        @test te.P_tor == te.P_perp
     end
 
     @testset "build_slayer_inputs: rs_method radial labels are self-consistent" begin

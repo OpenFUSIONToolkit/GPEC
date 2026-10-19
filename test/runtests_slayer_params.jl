@@ -214,13 +214,25 @@
         d1 = slayer_parameters(; base..., P_perp_model=:D_perp, grads..., chi_perp_i=2.0)
         D_hand = d1.c_beta^2 * d1.eta / MU_0 + (2 / 3) * (1 - d1.c_beta^2) * ((2 / 3) * (3 / 7) * 1.0 + (3 / 4) * (4 / 7) * 2.0)
         @test d1.P_perp ≈ d1.tau_r * D_hand / d1.rs^2 rtol = 1e-12
+        # T_e = 2T_i ⇒ τ = 3/2, τ_e = 3/5, τ_i = 2/5: fixes the orientation of the temperature ratio
+        d2 = slayer_parameters(; base..., t_e=2000.0, P_perp_model=:D_perp, grads..., chi_perp_i=2.0)
+        D_hand2 = d2.c_beta^2 * d2.eta / MU_0 + (2 / 3) * (1 - d2.c_beta^2) * ((2 / 3) * (3 / 5) * 1.0 + (3 / 4) * (2 / 5) * 2.0)
+        @test d2.P_perp ≈ d2.tau_r * D_hand2 / d2.rs^2 rtol = 1e-12
+        # Flat temperatures leave only the c_β² floor, and a flat ion profile is finite (no 0·∞)
+        @test slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=-1.0, dlnTe=0.0, dlnTi=0.0, chi_perp_i=2.0).P_perp ≈ d0.P_perp rtol = 1e-12
+        @test isfinite(slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=0.0, dlnTe=-2.0, dlnTi=0.0, chi_perp_i=2.0).P_perp)
+        # A non-positive or missing χ⊥,i is an error in every model that uses it
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:chi_perp_i)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:chi_perp_i, chi_perp_i=0.0)
         @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:D_perp)
         @test slayer_parameters(; base..., P_perp_model=:c_beta).P_perp == ref.c_beta^2
         @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:bogus)
-        te = slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1)
-        @test te.P_tor == te.tau_r / 0.1
+        # τ̄_E = 0.1 s and a = 0.6 m ⇒ uniform χ_E = (3/16)·0.36/0.1 m²/s sets both Prandtl numbers
+        te = slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1, a_minor=0.6)
+        @test te.P_tor ≈ te.tau_r * ((3 / 16) * 0.6^2 / 0.1) / te.rs^2 rtol = 1e-14
         @test te.P_perp == te.P_tor
         @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:tau_E)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1)
         # Only P_perp moves; the critical-Δ offset keeps using chi_perp_e.
         cb = slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))..., P_perp_model=:c_beta)
         @test cb.dc_tmp == slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))...).dc_tmp
