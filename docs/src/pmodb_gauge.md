@@ -85,3 +85,10 @@ without an independent equilibrium-residual calculation. The pressure
 coefficient near 0.168 is explained numerically by a missing division by B
 in the old fitting regressor, plus the omitted parallel gauge term;
 the correct pressure coefficient is one (FortSym P1).
+
+The general-J continuum budget R6-R7 additionally separates the ordinary
+gauge term, the reconstructed surface-displacement defect, the difference
+between the derivatives used in the field and the output, and the force
+residual. When both paths use the same derivative its explicit contribution
+to the column mismatch cancels, even for a regularized derivative. A large
+Bdivxprp by itself therefore does not determine the net error budget.
