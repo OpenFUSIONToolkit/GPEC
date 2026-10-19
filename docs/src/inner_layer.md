@@ -35,7 +35,7 @@ The GGJ layer equations (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) couple the perturbed f
 the layer variables ``\Xi``, ``\Upsilon`` in the scaled distance ``x`` from the rational surface.
 Their equilibrium coefficients ``E, F, G, H, K`` (GWP2016 Eq. A8) are held in
 [`GGJParameters`](@ref InnerLayer.GGJParameters). A physical growth rate ``\gamma`` maps to the
-scaled ``Q`` by [`inner_Q`](@ref InnerLayer.inner_Q) (GWP2016 Eqs. A14–A15), and
+scaled ``Q`` by [`inner_Q`](@ref InnerLayer.inner_Q) (GWP2016 Eqs. A11, A14–A16), and
 [`rescale_delta`](@ref InnerLayer.rescale_delta) returns the matching data to physical units. The
 model requires Mercier stability, ``D_I < 0`` ([`mercier_di`](@ref InnerLayer.mercier_di),
 GWP2016 Eq. A9), so that at large ``x`` the solutions include two power laws (GW2020 Eq. 49).
@@ -46,14 +46,15 @@ Eqs. (34)–(35). Parity is that of the displacement ``\Xi`` (GWP2016 Eq. 34; Pl
 Dewar, J. Comput. Phys. **115**, 530 (1994), Eqs. 32–33): ``\Delta_+`` is even,
 ``\Psi(0)=\Xi'(0)=\Upsilon'(0)=0``, the **interchange** channel; ``\Delta_-`` is odd,
 ``\Psi'(0)=\Xi(0)=\Upsilon(0)=0``, the **tearing** channel. Positional pairs, such as `deltar` in
-the matching and `RaySolveResult.Δ`, are always ordered ``(\Delta_+, \Delta_-)``, as in GWP2016
-Eq. (38); `InnerLayerResponse` names them `interchange` and `tearing`.
+the matching and `RaySolveResult.Δ`, are always ordered ``(\Delta_+, \Delta_-)``, like the
+unknowns ``d_\pm`` of GWP2016 Eq. (38) and Pletzer, Bondeson & Dewar Eqs. 83, 85;
+`InnerLayerResponse` names them `interchange` and `tearing`.
 
 ## Numerical method
 
 !!! note "Benchmark surface used in the figures"
-    The figures use the ``q = 4`` surface of the DIII-D-like `resistive_resmets` benchmark,
-    frozen into [`q4_surface_benchmark`](@ref InnerLayer.q4_surface_benchmark)
+    The figures use the ``q = 4`` DIII-D-like surface of
+    [`q4_surface_benchmark`](@ref InnerLayer.q4_surface_benchmark)
     (``S \approx 4.6\times10^{6}``, ``D_I \approx -0.31``).
 
 ### Solver backends
@@ -65,12 +66,12 @@ The `GGJ` model exposes three solvers through the `solver` type parameter of
 | backend | method | robust regime |
 |:--------|:-------|:--------------|
 | `:shooting` | backward stable shoot from ``X_\mathrm{max}\to 0`` | ``\lvert Q\rvert \ll 1`` |
-| `:galerkin` | Hermite-cubic finite-element (real axis) | drift onset ``\lvert Q\rvert \sim 1``; 1% error by ``\lvert Q\rvert \sim 4`` |
+| `:galerkin` | Hermite-cubic finite-element (real axis) | surface- and ``\arg Q``-dependent; see [Choosing a backend](@ref) |
 | `:ray` (default) | rotated contour: inward-marched far-field condition + Hermite-cubic BVP | ``\lvert Q\rvert \sim 500`` on/near the imaginary axis |
 
 Rotation and resistivity scans live on the imaginary-``Q`` axis, where the pseudo-resonance at
-``x^2 = -Q^2(G+KF)`` sits on the real-``x`` path. There `:shooting` and `:galerkin` lose
-accuracy beyond ``|Q| \sim 1`` and ``|Q| \sim 4`` respectively (the poles of ``\Delta(Q)``
+``x^2 = -Q^2(G+KF)`` sits on the real-``x`` path. On the ``q = 4`` surface there `:shooting` and
+`:galerkin` lose accuracy beyond ``|Q| \sim 1`` and ``|Q| \sim 4`` respectively (the poles of ``\Delta(Q)``
 themselves lie near the real-``Q`` axis):
 
 ![Relative error of the :shooting and :galerkin backends against the :ray reference along the imaginary-Q axis, on the q=4 benchmark surface. Each curve's crossing of the 1% line marks that method's practical reach.](figures/inner_layer/backend_regime_map.png)
@@ -94,8 +95,7 @@ pseudo-resonance off the contour; ``\theta = 0`` is a real-axis solve.
 
 On ``[0, s_m]`` the system is solved with the `:galerkin` backend's Hermite-cubic assembly
 (GWP2016 Eq. 32) written on the ray, ``A u_{ss} + e^{i\theta}B u_s + e^{2i\theta}C u = 0``,
-with the parity conditions at ``s = 0``. Instead of resonant and extension cells, the far end
-carries the point condition
+with the parity conditions at ``s = 0``. The far end carries the point condition
 
 ```math
 v(s_m) = U_s + \Delta\, U_b + c_1 E_1 + c_2 E_2 ,
@@ -108,16 +108,15 @@ Each cell resolves the local WKB rate, with a minimum cell count for small ``|Q|
 ### Far-field boundary and the inward march
 
 The boundary data come from the same `inps` Wasow basis as the other backends (GW2020
-Eqs. 3–52), evaluated at the radius ``S`` where its residual is below tolerance
+Eqs. 3–53), evaluated at the radius ``S`` where its residual is below tolerance
 ([`pick_smax`](@ref InnerLayer.pick_smax)). At large ``|Q|``, ``S`` lies far beyond ``s_m``, and
 the power pair is marched inward by 2-stage Radau IIA modulo the decaying pair, the subspace in
-which ``\Delta`` is defined. The decaying pair grows under backward integration, so an explicit
-method would need ``O(\rho S^2)`` steps. Radau's stability function decays as ``2/z``, so steps
-with every growing mode at ``z > 8`` damp those directions while the slowly varying power pair
-stays resolved. Nearer ``s_m`` the march resolves the growing directions, carries the decaying
-frame, and projects it out periodically. The damped zone runs in `Complex{Double64}`: in
-`Float64` the ill-conditioned implicit solves mix the power pair at about ``10^{-4}`` at
-``|Q| = 500``.
+which ``\Delta`` is defined. The decaying pair grows under backward integration at a rate
+``\sim\rho s``. Radau's stability function decays as ``2/z``, so steps with every growing mode at
+``z > 8`` damp those directions while the slowly varying power pair stays resolved; the step count
+grows only like ``\ln(S/s_m)``. Nearer ``s_m`` the march resolves the growing directions, carries
+the decaying frame, and projects it out periodically. The damped zone runs in `Complex{Double64}`
+because its ill-conditioned implicit solves mix the power pair at a level ``\sim\epsilon\rho S^2``.
 
 On the real axis with imaginary ``Q`` the switch to resolved steps lands on the
 pseudo-resonance, a turning point where the decaying directions cannot be identified; the
@@ -163,16 +162,30 @@ worst case is ``\sim 5\times10^{-6}`` for ``\Delta_+`` and ``\sim 6\times10^{-7}
 Across machines and BLAS builds the values reproduce to ``\sim 10^{-5}`` relative, hence the five
 significant figures above.
 
-![Relative change of Δ at Q = 500i under independent perturbations of each numerical knob (contour angle, mesh resolution, series order/radius, march tolerance, handoff radius, purification depth). The worst-case spread is the reported error bar.](figures/inner_layer/convergence_Sinvariance.png)
+![Relative change of Δ at Q = 500i under independent perturbations of each numerical knob (contour angle, mesh resolution, series order/radius, march tolerance, BVP edge s_m, decaying-pair separation). The worst-case spread is the reported error bar.](figures/inner_layer/convergence_Sinvariance.png)
 
 ## Choosing a backend
 
-`:ray` is the **default** — `GGJModel()` constructs `GGJModel{:ray}()`. It is
-the correct choice for ``|Q| \gtrsim 1`` and for any ``Q`` near the imaginary
-axis. `:galerkin` remains available and may be faster for very small real
-``|Q|``, but note the backends take disjoint numerical-knob keywords: pass
-`GGJModel(solver=:galerkin)` explicitly when supplying the Galerkin `nx`/`xfac`
-knobs — passing them to the default `:ray` backend throws a `MethodError`.
+`:ray` is the **default** — `GGJModel()` constructs `GGJModel{:ray}()` — and the recommended
+backend for every ``Q``. It uses the same Hermite-cubic weak form as `:galerkin`; they differ in
+where and how the far-field condition is imposed. `:galerkin` imposes it on the real axis through
+resonant and extension cells at the radius where the series residual reaches ``10^{-7}``, on a
+fixed `nx`-cell grid. `:ray` takes the series data where the residual reaches `smax_tol` =
+``10^{-9}`` ([`pick_smax`](@ref InnerLayer.pick_smax)), marches them inward to ``s_m``, where every
+exponential family has decayed 45 e-folds from the origin, and resolves the local WKB rate in
+every cell on ``[0, s_m]``. Both radii are computed per solve; `S`, `smax_tol` and `sm_fac`
+override them, and [`delta_convergence`](@ref InnerLayer.delta_convergence) perturbs them to give
+an error bar.
+
+`:galerkin` takes a few milliseconds per solve, 3–60 times less than `:ray`, but its accuracy
+depends on the surface and on ``\arg Q`` even at small ``|Q|``. Against a tightened `:ray`
+reference, on the GW2020 Eq. (55) surface it errs by ``7\times10^{-5}`` at ``Q = 0.1`` and
+``3\times10^{-3}`` at ``Q = 0.3``; near ``\arg Q = 157.5^\circ`` it errs by order unity at
+``|Q| = 0.1`` on that surface and by 0.4 at ``|Q| = 0.3`` on the ``q = 4`` surface. `:ray` held
+``2\times10^{-6}`` on all three surfaces tested, for ``|Q|`` from 0.01 to 1.
+
+The backends take disjoint numerical-knob keywords: pass `GGJModel(solver=:galerkin)` explicitly
+when supplying the Galerkin `nx`/`xfac` knobs; passing them to `:ray` throws a `MethodError`.
 
 ```julia
 using GeneralizedPerturbedEquilibrium.InnerLayer

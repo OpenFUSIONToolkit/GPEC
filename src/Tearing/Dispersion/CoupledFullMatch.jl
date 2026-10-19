@@ -4,7 +4,7 @@
 # the m inner-layer resonances decoupled via the matching-identity rows
 #
 #     C^j_L = d^j_+ − d^j_-
-#     C^j_R = -(d^j_+ + d^j_-)
+#     C^j_R = d^j_+ + d^j_-
 #
 # (see Wang-Glasser-Brennan-Liu-Park 2020, Phys. Plasmas **27**, 122503,
 # Eq. (11a)-(11d) and Glasser-Wang-Park 2016, Phys. Plasmas **23**, 112506,
@@ -195,15 +195,15 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
 
         # --- Upper-right 2×2 block: matching identity ---
         #   C^k_L = d^k_+ − d^k_-         ⇒ mat[idx1,idx3]=-1, mat[idx1,idx4]=+1
-        #   C^k_R = -(d^k_+ + d^k_-)      ⇒ mat[idx2,idx3]=-1, mat[idx2,idx4]=-1
+        #   C^k_R = d^k_+ + d^k_-         ⇒ mat[idx2,idx3]=-1, mat[idx2,idx4]=-1
         mat[idx1, idx3] = -1
         mat[idx1, idx4] = 1
         mat[idx2, idx3] = -1
         mat[idx2, idx4] = -1
 
         # --- Lower-right 2×2 block: inner Δ matching ---
-        #   d^k_+ eqn: -Δ_int·d^k_+ + Δ_tear·d^k_- + (outer D' terms) = 0
-        #   d^k_- eqn: -Δ_int·d^k_+ - Δ_tear·d^k_- + (outer D' terms) = 0
+        #   L-side row: -Δ_int·d^k_+ + Δ_tear·d^k_- + (outer D' terms) = 0  (GWP2016 Eq. 37)
+        #   R-side row: -Δ_int·d^k_+ - Δ_tear·d^k_- + (outer D' terms) = 0
         mat[idx3, idx3] = -delta1
         mat[idx3, idx4] = delta2
         mat[idx4, idx3] = -delta1

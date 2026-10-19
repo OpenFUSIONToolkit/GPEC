@@ -1,7 +1,7 @@
 # InnerLayerInterface.jl
 #
-# Abstract interface for resistive inner-layer models. Concrete models
-# (e.g. GGJ, SLAYER, kinetic) live in submodules and specialize `solve_inner`.
+# Abstract interface for resistive inner-layer models. Concrete models (GGJ, SLAYER) live in
+# submodules and specialize `solve_inner`.
 
 """
     InnerLayerModel
@@ -35,25 +35,16 @@ the `Δ_{j,±}(γ)` of Glasser, Wang & Park, Phys. Plasmas **23**, 112506
 
 # Fields
 
-  - `tearing` — the **odd-parity** matching coefficient Δ₋ (GWP2016 Eq. 34; Pletzer,
-    Bondeson & Dewar, J. Comput. Phys. 115, 530 (1994), Eqs. 87–89). Corresponds to a
-    flux perturbation W that is EVEN in x and a displacement/velocity/temperature
-    perturbation that is ODD — i.e., the
-    reconnecting mode with a current sheet at the rational surface. This is
-    the tearing drive that appears as Δ' in the classical constant-ψ
-    tearing equation. Must be populated by every resistive inner-layer model.
+  - `tearing` — odd-parity matching coefficient Δ₋: Ξ odd, Ψ even, the reconnecting channel
+    whose Δ is the constant-ψ tearing Δ′ (Pletzer, Bondeson & Dewar, J. Comput. Phys. 115, 530
+    (1994), Eqs. 77, 86–87, 89). Every resistive inner-layer model populates it.
+  - `interchange` — even-parity matching coefficient Δ₊: Ξ even, Ψ odd, the non-reconnecting
+    interchange channel carrying the Glasser, Greene & Johnson (1975) stabilization.
+    Pressureless models (SLAYER) set it to zero.
 
-  - `interchange` — the **even-parity** matching coefficient Δ₊. Corresponds to W odd,
-    N and Θ even — i.e., the
-    non-reconnecting interchange/ballooning channel. Its dissipative piece
-    in toroidal geometry is the Glasser, Greene & Johnson stabilization
-    term that opposes tearing growth (Glasser, Greene & Johnson 1975;
-    Lütjens-Bondeson-Roy 1993). Pressureless inner-layer models (e.g.
-    SLAYER's Fitzpatrick Riccati) set this identically zero.
-
-Parity labels follow GWP2016 and Pletzer, Bondeson & Dewar: the parity of the
-displacement (Ξ, matched to the outer ξ), with + even and − odd. The fields are named
-by the physics channel because the parity of the flux W is the opposite. Positional
+Parity is that of the displacement Ξ, matched to the outer ξ (GWP2016 Eq. 34; Pletzer,
+Bondeson & Dewar Eqs. 32–33), with + even and − odd. The fields are named by the physics
+channel because the parity of the flux Ψ is the opposite. Positional
 pairs elsewhere in `InnerLayer` (e.g. the `Δ` of [`solve_inner_profile`](@ref)) are
 ordered (Δ₊, Δ₋) = (interchange, tearing).
 """
@@ -68,13 +59,14 @@ InnerLayerResponse(; tearing::Number=0, interchange::Number=0) =
 """
     solve_inner(model::InnerLayerModel, params, γ::Number; kwargs...) -> InnerLayerResponse
 
-Compute the parity-projected matching data `(Δ_tearing, Δ_interchange)` for
+Compute the parity-projected matching data (the `tearing` and `interchange` fields of
+`InnerLayerResponse`) for
 the given inner-layer `model`, physical parameters `params`, and complex
 growth rate `γ`. Concrete models specialize this function.
 
 See `InnerLayerResponse` for the physics-oriented field definitions.
 Pressureless models (SLAYER) populate only `tearing` and leave
-`interchange` at zero; two-fluid / finite-β models (GGJ) populate both.
+`interchange` at zero; finite-pressure models (GGJ) populate both.
 """
 function solve_inner end
 

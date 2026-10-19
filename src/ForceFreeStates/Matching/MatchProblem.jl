@@ -143,7 +143,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             deltar[i, 2] = inner.Δ[2]
             profΨ, profΞ, xg = inner.Ψ, inner.Ξ, inner.x
             resc = inner.rescale                    # inner big-branch amplitude → outer δψ normalization
-            # b_m = 2πi·χ₁·(m−nq)·ξ_m with m−nq = −n·q′·dψdx·X and Ψ = XΞ (GWP2016 Eq. 16) ⇒ b_m = scale·resc·Ψ.
+            # b_m = 2πi·χ₁·(m−nq)·ξ_m with m−nq = −n·q′·dψdx·X and Ψ = XΞ at leading order (GWP2016 Eqs. 16, 27; Ψ normalization Eq. A17) ⇒ b_m = scale·resc·Ψ.
             scale = -2π * chi1 * im * nn * sings[i].q1 * inner.dψdx
             pen[i, 1] = scale * profΨ[1, 1] * resc   # X = 0, even parity (Ψ(0) = 0)
             pen[i, 2] = scale * profΨ[1, 2] * resc   # odd parity

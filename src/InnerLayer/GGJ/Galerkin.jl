@@ -4,8 +4,8 @@
 # Sec. III singular-Galerkin method: the half-domain weak form (Eq. 32) on a packed grid
 # (Eq. 33), parity conditions at x = 0, and resonant/extension cells at x_max supplying the
 # matching data (Eqs. 34–35). Fortran deltac configuration: "resonant" + noexp + inps,
-# Hermite basis, mpert = 3 (Ψ, Ξ, Υ). The equations are assembled as I·u'' − V·u' − U·u = 0
-# with (I, V, U) = (A, −B, −C) of GWP2016 Eq. 12; see `_physical_uv`.
+# Hermite basis, mpert = 3 (Ψ, Ξ, Υ). `_assemble_and_solve_point!` reuses the assembly on the
+# rotated ray with a point far-field condition (Ray.jl).
 
 using LinearAlgebra
 using FastGaussQuadrature: gausslobatto
@@ -29,7 +29,7 @@ function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Number)
 
     Imat = @SMatrix ComplexF64[1 0 0; 0 q2 0; 0 0 q]
 
-    # U = −C (GWP2016 Eq. 15) and V = −B (Eq. 14), rows pre-scaled as in the Fortran.
+    # U = −C (GWP2016 Eq. 15) and V = −B (Eq. 14), rows scaled by diag(1, Q², Q) like `Imat`.
     #! format: off
     U = @SMatrix ComplexF64[
         q                     (-q * x)                       0
@@ -68,8 +68,8 @@ function _hermite(x::Real, x0::Real, x1::Real)
     return pb, qb
 end
 
-# Grid packing (GWP2016 Eq. 33): pfac > 1 concentrates nodes near X = 0, pfac = 1 is uniform,
-# 0 < pfac < 1 packs toward the edge.
+# Grid packing: pfac > 1 concentrates nodes near X = 0 (GWP2016 Eq. 33), pfac = 1 is uniform,
+# 0 < pfac < 1 packs toward the edge (Eq. 5).
 function _pack(nx::Int, pfac::Float64, side::String)
     xi = zeros(Float64, 2nx + 1)
     if side == "right"
@@ -162,36 +162,66 @@ function _xmax_3level(params::GGJParameters, Q::ComplexF64;
     return (; xmax, dx1, dx2, cache)
 end
 
-# Cell types of GWP2016 Fig. 1, toward x_max: normal Hermite cells (CT_NONE), extension cells
-# blending the small resonant solution into the Hermite basis (CT_EXT2, CT_EXT1, CT_EXT), and the
-# resonant cell (CT_RES) whose large-solution coefficient is the matching data. The half domain has
-# one resonant cell; x = 0 carries the parity conditions.
+# Cell types toward x_max (GWP2016 Sec. III text after Eq. 33; the outer-region analogue is Fig. 1):
+# normal Hermite cells (CT_NONE), extension cells blending the asymptotic solutions into the Hermite
+# basis (CT_EXT2, CT_EXT1, CT_EXT), and the resonant cell (CT_RES) whose large-solution coefficient is
+# the matching data. x = 0 carries the parity conditions.
 @enum CellType CT_NONE CT_EXT2 CT_EXT1 CT_EXT CT_RES
 
+"""
+    GalerkinCell
+
+One finite element of the Galerkin grid.
+
+## Fields
+
+  - `etype` - Cell type (`CT_NONE`, `CT_EXT2`, `CT_EXT1`, `CT_EXT`, `CT_RES`).
+  - `x_left`, `x_right` - Cell end points.
+  - `x_lsode` - Upper limit of the resonant-cell integral and the x_max surface term (`CT_RES` only).
+  - `np` - Highest local Hermite slot per component: 3 for Hermite cells, 1 for `CT_EXT` (left node only), −1 for `CT_RES`.
+  - `map` - `(mpert, np+1)` local-to-global DOF map; `CT_EXT` appends a column of asymptotic DOFs, `CT_RES` holds only those.
+  - `emap` - Asymptotic DOF indices shared by `CT_EXT` and `CT_RES`; only `emap[1]` is active (noexp).
+"""
 struct GalerkinCell
     etype::CellType
     x_left::Float64
     x_right::Float64
-    x_lsode::Float64     # right integration limit for res cell
-    np::Int               # Hermite DOF count per component (-1 for res)
-    map::Matrix{Int}      # (mpert, 0:np_eff) local-to-global DOF map
-    emap::Vector{Int}     # extra (asymptotic) DOF indices (length 1 for noexp)
+    x_lsode::Float64
+    np::Int
+    map::Matrix{Int}
+    emap::Vector{Int}
 end
 
+"""
+    GalerkinWorkspace
+
+Grid, banded system and scratch buffers of one Galerkin solve.
+
+## Fields
+
+  - `cells` - Grid cells from x = 0 outward.
+  - `ndim` - Number of global unknowns.
+  - `nx` - Number of cells.
+  - `kl` - Banded half-bandwidth (`ku = kl`).
+  - `mat` - `(2kl+ku+1, ndim, 2)` LAPACK banded matrices, one per parity (1 = even/Δ₊, 2 = odd/Δ₋).
+  - `rhs`, `sol` - `(ndim, 2)` right-hand sides and solutions per parity.
+  - `cell_mat_buf`, `cell_mat_ext_buf` - `(3, 3, 4, 4)` per-cell scratch for the Hermite and extension terms.
+  - `cell_rhs_ext_buf` - `(3, 4)` per-cell extension RHS scratch.
+  - `ab_buf`, `rhs_buf` - Scratch copies for the banded LU solve.
+"""
 struct GalerkinWorkspace
     cells::Vector{GalerkinCell}
     ndim::Int
     nx::Int
     kl::Int
-    mat::Array{ComplexF64,3}              # (ldab, ndim, 2) banded storage
-    rhs::Matrix{ComplexF64}               # (ndim, 2)
-    sol::Matrix{ComplexF64}               # (ndim, 2)
-    # Per-cell scratch buffers, zeroed with `fill!`.
-    cell_mat_buf::Array{ComplexF64,4}     # (mpert=3, mpert, np+1=4, np+1=4)
-    cell_mat_ext_buf::Array{ComplexF64,4} # (3, 3, 4, 4)  max over CT_EXT/EXT1/EXT2
-    cell_rhs_ext_buf::Matrix{ComplexF64}  # (3, 4)
-    ab_buf::Matrix{ComplexF64}            # (ldab, ndim) scratch for banded LU
-    rhs_buf::Vector{ComplexF64}           # (ndim,) scratch for banded solve
+    mat::Array{ComplexF64,3}
+    rhs::Matrix{ComplexF64}
+    sol::Matrix{ComplexF64}
+    cell_mat_buf::Array{ComplexF64,4}
+    cell_mat_ext_buf::Array{ComplexF64,4}
+    cell_rhs_ext_buf::Matrix{ComplexF64}
+    ab_buf::Matrix{ComplexF64}
+    rhs_buf::Vector{ComplexF64}
 end
 
 function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Float64,
@@ -250,7 +280,7 @@ function _galerkin_workspace(x_nodes::Vector{Float64}, etypes::Vector{CellType})
         cell_np = if et == CT_NONE || et == CT_EXT1 || et == CT_EXT2
             np
         elseif et == CT_EXT
-            1  # method=true: left Hermite pair only + 1 extra
+            1  # left-node Hermite pair only, plus one asymptotic DOF
         else # CT_RES
             -1  # no Hermite DOFs
         end
@@ -303,7 +333,7 @@ function _galerkin_workspace(x_nodes::Vector{Float64}, etypes::Vector{CellType})
     ndim = has_res ? imap : imap - 1  # noexp → ndim = imap (only emap[1] ≤ ndim); plain grid: Hermite DOFs only
 
     # Bandwidth
-    kl = mpert * (np + 1) + 1 - 1  # resonant method with noexp; +1-1 kept for indexing agreement
+    kl = mpert * (np + 1)  # one cell's mpert·(np+1) DOFs
     ku = kl
     ldab = 2kl + ku + 1
 
@@ -346,7 +376,6 @@ function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
         pb, qb = _hermite(x, cell.x_left, cell.x_right)
 
         for ip in 0:np_cell, jp in 0:np_cell
-            # cell_mat[:,:,ip+1,jp+1] += w*(I*qb[ip]*qb[jp] + V*pb[ip]*qb[jp] + U*pb[ip]*pb[jp])
             for jpert in 1:3, ipert in 1:3
                 cell_mat[ipert, jpert, ip+1, jp+1] +=
                     w * (
@@ -359,7 +388,7 @@ function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
     end
 end
 
-# Extension cells (GWP2016 Fig. 1): the large resonant solution (column 1) is blended into the
+# Extension cells (GWP2016 Sec. III): the large resonant solution (column 1) is blended into the
 # Hermite cubics with C¹ continuity as an extra DOF; the small one (column 2) drives the RHS.
 function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64},
     cell::GalerkinCell,
@@ -383,13 +412,9 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
             Imat, Umat, Vmat = _physical_uv(params, Q, x)
             pb, qb = _hermite(x, cell.x_left, cell.x_right)
 
-            # The asymptotic basis function in the ext cell uses Hermite blending
-            # at the right node: phi_j(x) = ua_j * pb[3] + dua_j * pb[4]
-            # (pb[3] = H_10, pb[4] = H_11 at right node)
-
-            # (h_i, L*phi_j) for i=0:np_cell, j=1 (only large algebraic, noexp)
-            # and (phi_j^T, L*h_i) for the transpose
-            jp = 1  # only tid(1) = column 1 = large algebraic (with noexp)
+            # Extra DOF φ = ua₁(x_r)·H₁₀ + ua₁'(x_r)·H₁₁, the large solution Hermite-blended at the right
+            # node; assembles (hᵢ, Lφ), (φ, Lhᵢ) and (φ, Lφ).
+            jp = 1  # column 1 = large solution (noexp)
             ua1 = ua_bdy[:, jp] * pb[3] + dua_bdy[:, jp] * pb[4]
             dua1 = ua_bdy[:, jp] * qb[3] + dua_bdy[:, jp] * qb[4]
 
@@ -409,7 +434,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
             term = transpose(dua2_s) * Imat * dua1 + transpose(ua2_s) * Vmat * dua1 + transpose(ua2_s) * Umat * ua1
             cell_mat[1, 1, ep+1, ep+1] += w * term
 
-            # RHS: driving from small algebraic (column 2 = tid(4))
+            # RHS: driven by the small solution (column 2)
             ua_drv = uax[:, 2]
             dua_drv = duax[:, 2]
             for ip in 0:np_cell
@@ -501,7 +526,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     for ix in 1:ws.nx
         cell = ws.cells[ix]
 
-        # Gauss quadrature for Hermite contribution (all cell types)
+        # Gauss quadrature for the Hermite contribution (all cells but CT_RES)
         if cell.np >= 0
             np_eff = cell.np
             fill!(cell_mat, 0)
@@ -554,7 +579,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         end
     end
 
-    # IBP surface term [αᵢ A uⱼ'] at x_max (GWP2016 Eq. 32), kept because the resonant cell carries Δ.
+    # IBP surface term [αᵢ A uⱼ'] at x_max, dropped in GWP2016 Eq. 32 and kept here because the resonant cell carries Δ.
     res_cell = ws.cells[ws.nx]
     x_lsode = res_cell.x_lsode
     ua_xmax, dua_xmax = physical_ua_dua(cache, x_lsode)
@@ -605,7 +630,7 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q:
     cell1 = ws.cells[1]
     Imat0, _, _ = _physical_uv(params, Q, cell1.x_left)
 
-    # Restore surface term at x=0 (IBP boundary)
+    # IBP surface term at x = 0
     for ipert in 1:mpert, jpert in 1:mpert
         i = cell1.map[ipert, 1]   # ip=0
         j = cell1.map[jpert, 2]   # ip=1
@@ -674,10 +699,9 @@ end
     _assemble_and_solve_point!(ws, params, Q, θ, Us, Ub, E; nq=6) -> (Δraw, cexp)
 
 Hermite Galerkin solve on the all-`CT_NONE` grid of `ws` along the ray x = e^{iθ}s, with the
-far-field condition imposed at the last node instead of resonant/extension cells: its state is
-v = Us + Δ·Ub + c₁E₁ + c₂E₂, with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives. The last node's six
-DOFs are replaced by (Δ, c₁, c₂) and tested in the same three directions, as the extension cell
-does for the stock backend. Returns the raw Δ and decaying-pair coefficients per parity
+far-field condition imposed strongly at the last node: its state is v = Us + Δ·Ub + c₁E₁ + c₂E₂,
+with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives. The last node's six DOFs are
+replaced by (Δ, c₁, c₂), tested in the same three directions. Returns the raw Δ and decaying-pair coefficients per parity
 (isol = 1 even/Δ₊, 2 odd/Δ₋); `ws.sol` holds the full nodal solution afterwards.
 """
 function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64,
@@ -693,8 +717,8 @@ function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters
         _scatter_cell!(ws, ws.cells[ix], cell_mat, ws.cells[ix].np)
     end
 
-    # Replaces GWP2016 ext/res cells: the far-field state is imposed strongly at the last node.
-    # Last cell as a dense 12×12 block, local DOF index 3·ip + ipert (ip = 0..3 Hermite slots).
+    # Last cell as a dense 12×12 block, local DOF index 3·ip + ipert (ip = 0..3 Hermite slots); the
+    # far-field state is imposed at its right node.
     cell = ws.cells[N]
     _gauss_quad!(cell_mat, cell, quad_nodes, quad_weights, params, Q; θ=θ)
     Kc = zeros(ComplexF64, 12, 12)
@@ -746,13 +770,8 @@ function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters
     return SVector(Δraw), SMatrix(cexp)
 end
 
-# -----------------------------------------------------------------------
-# Reconstruct the inner-layer field profiles (Ψ, Ξ, Υ) from the solved
-# Hermite DOFs over the bulk (Hermite) cells. The thin CT_EXT / CT_RES
-# matching cells near xmax are skipped (their solution is carried by the
-# asymptotic emap DOF, not the Hermite basis). Returns the grid `x` and the
-# three fields for both parities (columns: 1 = even/Δ₊, 2 = odd/Δ₋).
-# -----------------------------------------------------------------------
+# Profiles (Ψ, Ξ, Υ) from the Hermite DOFs, columns 1 = even/Δ₊, 2 = odd/Δ₋; CT_EXT/CT_RES cells are
+# skipped because their solution lives in the asymptotic emap DOF.
 function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
     mpert = 3
     # Every Hermite cell contributes npc points.
@@ -831,9 +850,13 @@ Solve the GGJ inner-layer matching problem using the Hermite-cubic finite
 element (Galerkin) method (GWP2016 Sec. III), in the "resonant + noexp + inps"
 configuration.
 
-Returns the parity-projected matching data (GWP2016 Eqs. 34–35) with the
-`X₀^{2√(−D_I)}` physical rescaling applied, as an `InnerLayerResponse`:
-`interchange` is the even-parity Δ₊ (isol = 1), `tearing` the odd-parity Δ₋ (isol = 2).
+Returns the parity-projected matching data (GWP2016 Eqs. 34–35), rescaled by
+[`rescale_delta`](@ref), as an `InnerLayerResponse`: `interchange` is the even-parity Δ₊
+(isol = 1), `tearing` the odd-parity Δ₋ (isol = 2).
+
+Knobs: `kmax` series order; `nx` cell count; `nq` Gauss–Lobatto order; `pfac` grid packing;
+`cutoff` extension-cell span (cells nx−cutoff−1 … nx−1); `xfac` scale on the two inner matching radii; `tol_res`
+resonant-cell quadrature tolerance.
 """
 function solve_inner(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
     Δ, _ = _galerkin_solve(params, γ; kwargs...)

@@ -1,36 +1,29 @@
 # GGJ.jl
 #
-# Glasser–Greene–Johnson resistive inner-layer model. Provides three
-# interchangeable solvers selected via the `solver` type-parameter of
-# `GGJModel`:
+# Glasser–Greene–Johnson resistive inner-layer model, with three solvers selected by the
+# `solver` type parameter of `GGJModel`:
 #
-#   - `:shooting`  – stable backward shoot from X_max → 0;
-#                    numerically stable only for |Q| ≪ 1, should not be used
-#   - `:galerkin`  – Hermite-cubic finite element method with resonant/extension
-#                    matching cells (GWP2016 Sec. III); degrades for |Q| ≳ 1
-#   - `:ray`       – rotated-contour solve (Ray.jl): far-field series + inward march,
-#                    and the same Hermite assembly with a point far-field condition;
-#                    robust to |Q| ~ 500 on/near the imaginary axis
+#   - `:shooting`  – backward shoot from X_max → 0; valid only for |Q| ≪ 1 (tests and comparisons)
+#   - `:galerkin`  – Hermite-cubic finite elements with resonant/extension matching cells
+#                    (GWP2016 Sec. III); accuracy depends on the surface and arg Q
+#   - `:ray`       – the same Hermite assembly on the rotated contour (Ray.jl), with the far-field
+#                    condition marched in from where the series converges; robust to |Q| ~ 500
 #
-# They return the parity-projected matching data Δ± of GWP2016 Eqs. (34)–(35). Parity is
-# that of the displacement Ξ: Δ₊ (even) is the interchange channel, Δ₋ (odd) the tearing
-# channel; positional pairs are always ordered (Δ₊, Δ₋), as in GWP2016 Eq. (38).
+# They return the matching data Δ± of GWP2016 Eqs. (34)–(35). Parity is that of the displacement Ξ:
+# Δ₊ (even) is the interchange channel, Δ₋ (odd) the tearing channel. Positional pairs are always
+# ordered (Δ₊, Δ₋), as d₊, d₋ in GWP2016 Eq. (38) and Pletzer, Bondeson & Dewar (1994) Eqs. 83, 85.
 #
-# Equation references throughout this module use two source papers:
+# Main source papers, cited by equation number throughout:
 #
 #   GWP2016 — A. H. Glasser, Z. R. Wang & J.-K. Park, "Computation of resistive
 #             instabilities by matched asymptotic expansions", Phys. Plasmas 23,
-#             112506 (2016). Inner-region equations (Eq. 11), matrix form
-#             A Ψ'' + B Ψ' + C Ψ = 0 (Eqs. 12–15), singular-Galerkin weak form
-#             (Eq. 32), grid packing (Eq. 33), matching data (Eqs. 34–35),
-#             dimensionless parameters / scale factors (Appendix, Eqs. A8–A15).
+#             112506 (2016). Inner-region equations (Eq. 11), singular-Galerkin method
+#             (Sec. III), matching data (Eqs. 34–35), scale factors (Appendix, Eqs. A8–A16).
 #
 #   GW2020  — A. H. Glasser & Z. R. Wang, "Asymptotic solutions and convergence
 #             studies of the resistive inner region equations", Phys. Plasmas 27,
 #             012506 (2020). Wasow construction of the large-x asymptotic basis
 #             (Eqs. 1–55); implemented in InnerAsymptotics.jl.
-#
-# The inner-region equations are identical in both: GW2020 Eq. (1) ≡ GWP2016 Eq. (11).
 
 module GGJ
 
@@ -50,7 +43,7 @@ import ..solve_inner, ..solve_inner_profile
 Glasser–Greene–Johnson resistive inner-layer model. `S` selects the solver
 backend: `:ray` (default; rotated contour with an inward-marched far-field condition,
 robust at large |Q|), `:galerkin` (real-axis Hermite FEM with resonant/extension matching
-cells; degrades for |Q| ≳ 1), or `:shooting` (|Q| ≪ 1 only). Backend keywords given at
+cells; accuracy depends on the surface and arg Q, even at small |Q|), or `:shooting` (|Q| ≪ 1 only). Backend keywords given at
 construction, e.g. `GGJModel(; solver=:galerkin, nx=1280)`, apply to every solve.
 
 ## Fields

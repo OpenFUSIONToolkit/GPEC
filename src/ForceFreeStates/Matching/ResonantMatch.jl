@@ -1,6 +1,6 @@
 # ResonantMatch.jl
 #
-# Matching result and the 4·msing outer↔inner system (rmatch match_rpec; Wang et al. 2020 PoP 27 122509, Eq. 11).
+# Matching result and the 4·msing outer↔inner system (rmatch match_rpec; Wang et al., Phys. Plasmas 27, 122503 (2020), Eq. 11).
 
 """
     MatchResult
@@ -51,7 +51,7 @@ function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::
         idx2 = 2ising
         idx3 = idx1 + 2msing
         idx4 = idx2 + 2msing
-        delta1 = deltar[ising, 1]   # Δ₊; rows idx3, idx4 of cin are d₊, d₋ (GWP2016 Eqs. 36–37)
+        delta1 = deltar[ising, 1]   # Δ₊; unknowns idx3, idx4 (cin rows 2i−1, 2i) are d₊, d₋ (GWP2016 Eqs. 36–37)
         delta2 = deltar[ising, 2]   # Δ₋
         mat[idx1, idx1] = 1
         mat[idx2, idx2] = 1

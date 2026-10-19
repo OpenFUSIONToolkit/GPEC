@@ -5,14 +5,12 @@
 # decaying exponential pair, then the Galerkin.jl Hermite assembly solves [0, s_m] with
 # v(s_m) = Us + Δ·Ub + c₁E₁ + c₂E₂. Method and rationale: docs/src/inner_layer.md.
 
-# GWP2016 Eq. 11 as dv/dx = M(x)·v in the plain state v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ'). M is polynomial
-# in x, so x = 0 is an ordinary point and the system continues analytically to complex x.
-
 """
     ode_matrix([CT,] p::GGJParameters, Q, x) -> SMatrix{6,6,CT}
 
-Coefficient matrix `M(x)` of `dv/dx = M v`, `v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ')`, for
-real or complex `x`. `CT` selects the element type (default `ComplexF64`;
+Coefficient matrix `M(x)` of GWP2016 Eq. 11 as `dv/dx = M v`, `v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ')`, for
+real or complex `x`. `M` is polynomial in `x`, so x = 0 is an ordinary point and the system
+continues analytically to complex `x`. `CT` selects the element type (default `ComplexF64`;
 `Complex{Double64}` for the extended-precision march).
 """
 ode_matrix(p::GGJParameters, Q::ComplexF64, x::Number) =
@@ -146,12 +144,15 @@ function decaying_pair(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Flo
 end
 
 """
-    march_boundary(params, Q, θ, S, s_m, Us, Ub; rtol=1e-9, growth=30.0, seed=20260707)
+    march_boundary(params, Q, θ, S, s_m, Us, Ub; rtol=1e-9, ztrk=0.3, purge_budget=2.5,
+                   growth=30.0, seed=20260707, dp_res=20.0)
         -> (Us_m, Ub_m, F)
 
 Transport the power-pair boundary data from the series radius `S` inward to
 `s_m` along the ray, modulo the decaying exponential pair (the quotient in
 which Δ is defined): 2-stage Radau IIA with purges against a carried decaying frame.
+`rtol` sets the step factor c = (rtol/100)^{1/3}; `ztrk` caps resolved-band steps at ztrk/g_max;
+`purge_budget` is the e-folds between purges; `growth`, `seed`, `dp_res` go to [`decaying_pair`](@ref).
 """
 function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     S::Float64, s_m::Float64, Us::Vector{ComplexF64}, Ub::Vector{ComplexF64};
@@ -180,8 +181,8 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
         return W + hc * ((CT(3) / 4) * @view(K[1:6, :]) + (CT(1) / 4) * @view(K[7:12, :]))
     end
 
-    # Damped-zone steps have cond ~ z ≫ 1; their structured LU backward error mixes u_small and u_big
-    # by ~eps·ρS²/2·‖u_big‖/‖u_small‖ (≈1e-4 at |Q| = 500 in Float64), so that zone runs in Double64.
+    # Damped-zone steps have cond ~ z ≫ 1; their structured LU backward error mixes u_small into u_big
+    # by ~eps·ρS²/2·‖u_big‖/‖u_small‖, so that zone runs in Double64.
     CTd = Complex{Double64}
     phd = CTd(cos(Double64(θ)), sin(Double64(θ)))
     𝔐d(s) = phd * Matrix(ode_matrix(CTd, params, Q, phd * Double64(s)))
@@ -268,11 +269,11 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
 end
 
 """
-    boundary_basis(params, Q, cache, θ, S; growth=30.0)
+    boundary_basis(params, Q, cache, θ, S; growth=30.0, seed=20260707, dp_res=20.0)
         -> (Us, Ub, E, cond_est)
 
-Boundary data at s = S directly from the inps series (no march; used when
-the series is already valid at the BVP edge): `Us`, `Ub` are the small/large
+Boundary data at s = S taken directly from the inps series, used when the BVP edge is S itself
+(s_m ≳ S): `Us`, `Ub` are the small/large
 power-like solutions as 6-component states in the inps normalization, `E`
 the numerically-generated decaying pair, `cond_est` the condition number of
 the column-normalized basis.
@@ -323,14 +324,19 @@ end
 
 """
     solve_ray(params::GGJParameters, Q; θ=angle(Q)/4, kmax=12, S=nothing, smax_tol=1e-9,
-              cfl=0.2, min_cells=1024, nq=6, verbose=false, kwargs...) -> RaySolveResult
+              cfl=0.2, min_cells=1024, nq=6, verbose=false, …) -> RaySolveResult
 
-Solve the GGJ inner-layer problem on the rotated ray x = e^{iθ}s.
-`Δ` is the rescaled pair (Δ₊, Δ₋) = (interchange, tearing), directly
-comparable to the `:galerkin` backend. θ = 0 reproduces a real-axis solve;
-`S` defaults to the inps series-residual radius (`pick_smax`); `cfl`, `min_cells` set the
-Hermite grid ([`ray_breaks`](@ref)) and `nq` its quadrature; remaining keywords are march
-knobs (see `march_boundary`, `decaying_pair`).
+Solve the GGJ inner-layer problem on the rotated ray x = e^{iθ}s. `Δ` is the rescaled pair
+(Δ₊, Δ₋) = (interchange, tearing), directly comparable to the `:galerkin` backend; θ = 0 is a
+real-axis solve.
+
+Both boundary points are computed per solve. `S` defaults to the smallest radius where the series
+residual is below `smax_tol` with order `kmax` ([`pick_smax`](@ref); it warns and uses the best
+point if the tolerance is not reached). The BVP edge s_m is where every exponential family has
+decayed 45 e-folds from the origin, from the local spectrum, scaled by `sm_fac`. `cfl`,
+`min_cells` set the Hermite grid ([`ray_breaks`](@ref)) and `nq` its quadrature. `march_rtol`
+is [`march_boundary`](@ref)'s `rtol`; `growth`, `seed`, `ztrk`, `purge_budget`, `dp_res` go to
+`march_boundary`/[`decaying_pair`](@ref); `handoff` (diagnostic) supplies (Us, Ub) at S.
 """
 function solve_ray(params::GGJParameters, Q::ComplexF64;
     θ::Float64=angle(Q) / 4, kmax::Int=12,
@@ -485,7 +491,7 @@ end
     delta_convergence(params, Q; verbose=true, kwargs...) -> (; Δ, spread, base, table)
 
 Error bar for the matching data: re-solve with each numerical knob perturbed in turn (contour
-angle, mesh, series order and radius, march tolerance, handoff radius, purification e-folds) and
+angle, mesh, series order and radius, march tolerance, BVP edge s_m, decaying-pair separation) and
 report the relative change of (Δ₊, Δ₋); `spread` is the worst case per parity. θ moves outward
 only, away from the pseudo-resonance x² = −Q²(G+KF).
 """
