@@ -14,11 +14,11 @@ system. Calling it a toroidal displacement confuses it with `xi^zeta`.
 The corrected docstrings preserve the definition and numerical behavior.
 See `src/PerturbedEquilibrium/FieldReconstruction.jl` and the conversion to
 `clebsch_alpha` before the geometric matrix products in
-`src/KineticForces/KineticForcesStructs.jl:407`.
+`src/KineticForces/KineticForcesStructs.jl:375`.
 
 **Verified.** The kinetic matrix input uses the perpendicular displacement:
 `dbob=delta B_L(xi_perp)/B=-(divx+kapx)`
-(`src/KineticForces/KineticForcesStructs.jl:435`). The curvature matrices
+(`src/KineticForces/KineticForcesStructs.jl:437`). The curvature matrices
 supply `kapx=kappa.xi_perp`, and the divergence matrices supply `divx` after
 removing their `J B^2` weight. FortSym G7 and G8 verify these normalizations,
 including the `xi_s/chi1` conversion. The paired `dbob,divx` is the correct
