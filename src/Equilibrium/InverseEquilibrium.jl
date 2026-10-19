@@ -125,14 +125,6 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; itp_opts2d...)
     rz_deta = cubic_interp((rz_in_xs, rz_in_ys), deta; itp_opts2d...)
     # c-----------------------------------------------------------------------
-    # c     prepare new spline type for surface quantities.
-    # c-----------------------------------------------------------------------
-
-    if grid_type in ["original", "orig"]
-        mpsi = size(sq_in._fs, 1) - 1
-    end
-
-    # c-----------------------------------------------------------------------
     # c     set up radial grid
     # c-----------------------------------------------------------------------
     if override_psi_nodes !== nothing
@@ -165,6 +157,16 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
             mpsi = 128
         end
         sq_xs = [psilow + (psihigh - psilow) * (3(i / mpsi) - (i / mpsi)^3) / 2 for i in 0:mpsi]
+    elseif grid_type == "rho"
+        if mpsi == 0
+            mpsi = 128
+        end
+        # Uniform in √ψ from psilow to psihigh (Fortran's rho ignores psilow)
+        sq_xs = [(sqrt(psilow) + (sqrt(psihigh) - sqrt(psilow)) * i / mpsi)^2 for i in 0:mpsi]
+    elseif grid_type in ("original", "orig")
+        # The input's own ψ nodes off the axis; psilow and mpsi are ignored, psihigh still sets psilim
+        sq_xs = filter(>(0.0), rz_in_xs)
+        mpsi = length(sq_xs) - 1
     elseif grid_type == "uniform"
         if mpsi == 0
             mpsi = 128
@@ -174,9 +176,9 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         error("Unsupported grid_type: $grid_type")
     end
     # Floor node spacing on the fixed grids (core_edge_packed/pow1 pack the edge below the integration-noise
-    # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, and an
-    # override grid arrives already floored.
-    if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic"))
+    # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, an override
+    # grid arrives already floored, and the original grid keeps the input's nodes.
+    if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic", "original", "orig"))
         sq_xs = enforce_min_spacing(sq_xs, MIN_KNOT_SPACING)
         mpsi = length(sq_xs) - 1
     end

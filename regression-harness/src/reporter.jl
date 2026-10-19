@@ -62,6 +62,8 @@ function _warn_env_difference(fp1::EnvFingerprint, fp2::EnvFingerprint)
     fp1.manifest_sha != fp2.manifest_sha && push!(differences, "different package sets (Manifest hashes differ)")
     fp1.nthreads != fp2.nthreads && push!(differences, "$(fp1.nthreads) vs $(fp2.nthreads) Julia threads")
     fp1.blas_threads != fp2.blas_threads && push!(differences, "$(fp1.blas_threads) vs $(fp2.blas_threads) BLAS threads")
+    fp1.build_mode != fp2.build_mode && !isempty(fp1.build_mode) && !isempty(fp2.build_mode) &&
+        push!(differences, "$(fp1.build_mode) vs $(fp2.build_mode) build (precompile workload); results differ between build modes")
     isempty(differences) && return
     println()
     println("!! ENVIRONMENTS DIFFER — source code is not the only variable in this comparison:")
@@ -233,7 +235,7 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     println("Summary: ", join(parts, ", "))
     println()
     return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
-            n_failed=count(identity, (failed1, failed2)))
+        n_failed=count(identity, (failed1, failed2)))
 end
 
 """
@@ -366,7 +368,7 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
         end
     end
     if length(refs) >= 2
-        last_two = filter(!isnothing, run_infos[(end - 1):end])
+        last_two = filter(!isnothing, run_infos[(end-1):end])
         length(last_two) == 2 && _warn_env_difference(last_two[1].fingerprint, last_two[2].fingerprint)
     end
     println("-"^total_w)
@@ -387,7 +389,7 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
     end
     println()
     return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
-            n_failed=count(identity, failed_mask))
+        n_failed=count(identity, failed_mask))
 end
 
 """

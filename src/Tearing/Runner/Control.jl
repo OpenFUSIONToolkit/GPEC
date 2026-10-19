@@ -23,7 +23,7 @@ constructor.
     (multi-surface determinant)
   - `D_c_type`      -- critical-Δ offset selector, one of `:none`, `:lar`,
     `:fitzpatrick`, `:toroidal` (χ_‖-matching critical-Δ formulas,
-    Connor-Hastie-Helander 2015)
+    Connor, Ham, Hastie & Liu 2015)
   - `msing_max`     -- number of surfaces to include in the coupled
     determinant (default 3; capped at `length(sings)` at runtime)
 
@@ -33,7 +33,13 @@ constructor.
     `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
     callable of `psi` overrides it
   - `ion_mass` -- ion mass in proton-mass units (default 2.0 for D)
-  - `zeff`     -- effective charge
+  - `zeff`     -- fallback effective charge. `Z_eff(ψ)` is taken, in order of precedence, from
+    the kinetic file's own `zeff` profile; else derived from the file's `n_i/n_e` with the
+    `impurity_charge`; else this scalar at every surface. A dataset that is absent or
+    all-zero counts as not provided
+  - `impurity_charge` -- charge of the single impurity species that closes quasi-neutrality when
+    `Z_eff(ψ)` is derived from `n_i/n_e` (default 6.0, carbon); the main ion has charge 1.
+    Unused when the file supplies a `zeff` profile
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
     diffusivity [m²/s], used only when the kinetic file carries no usable
     `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
@@ -107,6 +113,7 @@ there is one consistent interface for resistive and kinetic profiles.
     bt::Union{Float64,Nothing} = nothing
     ion_mass::Float64 = 2.0
     zeff::Float64 = 1.0
+    impurity_charge::Float64 = 6.0
     chi_perp::Float64 = 1.0
     chi_tor::Float64 = 1.0
     D_R::Union{Float64,Nothing} = nothing
@@ -183,6 +190,8 @@ function validate(ctrl::SLAYERControl)
     ctrl.lnLambda_form in _VALID_LNLAMBDA_FORMS ||
         throw(ArgumentError("SLAYERControl: lnLambda_form=$(ctrl.lnLambda_form) " *
                             "not in $(_VALID_LNLAMBDA_FORMS)"))
+    ctrl.impurity_charge > 1 ||
+        throw(ArgumentError("SLAYERControl: impurity_charge=$(ctrl.impurity_charge) must exceed the main-ion charge 1"))
     ctrl.msing_max >= 1 ||
         throw(ArgumentError("SLAYERControl: msing_max=$(ctrl.msing_max) must be ≥ 1"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||

@@ -63,10 +63,12 @@ Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to c
 ```bash
 alias regress='julia --project=regression-harness regression-harness/regress.jl'
 regress --list-cases
-regress --cases diiid_n1 --refs develop,local   # working tree vs develop
+regress --cases diiid_n1 --refs develop,my-branch   # commit first; each ref runs in its own worktree
 ```
 
 Full command reference (comparing branches/commits, tracking a quantity's history, git-bisect-style scans, sample report output) is in **[`docs/development/regression-harness.md`](docs/development/regression-harness.md)**.
+
+**Fetch and fast-forward `develop` first, commit your work, and compare branch refs.** `develop` resolves to your local branch, and the `local` ref runs in the live checkout, so a stale baseline or a mid-run edit silently corrupts one report. See *Run isolation* in that doc for this and the matching `runtests.jl` hazards.
 
 ## Architecture
 
@@ -111,6 +113,7 @@ Roster, the recommended review pipeline (physics fidelity → readability → pe
 ### Minimal-change discipline
 - **Reuse native ops and existing utilities before writing new ones.** FastInterpolations splines integrate and differentiate natively (`integrate`, `cumulative_integrate`, `deriv1`); the Equilibrium module already has flux-surface integration/average patterns. Do not reimplement spline integration, quadrature, or differentiation — grep for the existing idiom first.
 - **Size the change to the problem.** A small numerical correction (e.g. a ~1% fix) should be a handful of lines, not new general-purpose machinery. Resist faithfully porting Fortran scaffolding (custom integrators, power-law spline bases) when a native call plus a one-line correction gives the same numbers — verify equivalence instead of assuming the elaborate version is needed.
+- **Replacing a solver with its closed form is a reduction, not new machinery.** The rule above targets ported scaffolding, not exact methods. Where the data structure already determines the answer — a spline cell is a cubic, so a level set of it is a root formula and the stationary points are roots of a quadratic — writing that solution and deleting the iterative solver removes machinery even when the line count rises. Justify it with the residual, not the line count.
 - **Don't commit throwaway artifacts for minor fixes.** No in-repo benchmark scripts/outputs or agent-memory churn for a small change — these accumulate and outsize `src`. Verify with a scratch script (e.g. under `/tmp`) and the regression harness; the regression harness is the durable record of numerical behavior.
 
 ### Output Files

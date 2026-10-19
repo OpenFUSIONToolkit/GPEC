@@ -83,13 +83,15 @@ derivatives are analytic — no label carries a finite-difference stencil.
     implementation divides it by 2π to form `g`.
     Defined from flux alone, it carries no circular-cross-section assumption,
     and its derivative `dr/dψ ∝ q` grows toward a separatrix where the
-    geometric labels' `da/dψ` collapses.
+    geometric labels' `da/dψ` collapses. Beyond the ψ grid the q spline is a
+    cubic extrapolation that does not follow that growth, so `q_beyond`, a
+    callable of ψ, supplies q there when the caller knows it.
 
 On shaped equilibria the labels agree at low-q surfaces and diverge strongly
 near the edge, where the slab-layer matching is label-ambiguous regardless of
 choice. The label is selected programmatically; it is not exposed via TOML.
 """
-function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
+function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0, q_beyond=nothing)
     theta_f = Float64(theta)
 
     _flux_r, _flux_dr = if rs_method === :flux
@@ -103,8 +105,9 @@ function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0)
         Phi = collect(Float64, cumulative_integrate(cubic_interp(xs_f, qg)))
         r_knots = sqrt.(max.(2 .* psiof .* Phi ./ b0f, 0.0))
         rspl = cubic_interp(xs_f, r_knots; extrap=ExtendExtrap())
+        _q_at(ψ) = (q_beyond !== nothing && ψ > xs_f[end]) ? Float64(q_beyond(ψ)) : Float64(equil.profiles.q_spline(ψ))
         (ψ -> Float64(rspl(Float64(ψ))),
-            ψ -> psiof * Float64(equil.profiles.q_spline(Float64(ψ))) /
+            ψ -> psiof * _q_at(Float64(ψ)) /
                  (b0f * _g_at(Float64(ψ)) * max(Float64(rspl(Float64(ψ))), eps())))
     else
         (nothing, nothing)
@@ -180,7 +183,8 @@ profiles, without an intermediate file round-trip.
     physical field, so passing it as a scalar is almost always wrong.
 
   - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
-  - `zeff`      -- effective charge (default `1.0`).
+  - `zeff`      -- effective charge. Scalar or a callable of `psi`, evaluated per
+    surface (default `1.0`).
   - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
@@ -190,7 +194,7 @@ profiles, without an intermediate file round-trip.
     (`:lar`, `:fitzpatrick`, `:toroidal`). When `nothing` (default), Julia
     derives it per-surface from the equilibrium as
     `dr_val_k = D_R(ψ_k) = E_k + F_k + H_k²`,
-    consistent with Connor-Hastie-Helander 2015 (PPCF 57 065001) Eq. 59
+    consistent with Connor, Ham, Hastie & Liu 2015 (PPCF 57 065001) Eq. 59
     which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar /
     vector / callable to override.
 
@@ -229,8 +233,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     bt=nothing,
     R0=nothing,
     rs_method::Symbol=:midplane,
+    q_beyond=nothing,
     mu_i::Real=2.0,
-    zeff::Real=1.0,
+    zeff=1.0,
     z_i::Real=1.0,
     chi_perp=1.0,
     chi_tor=1.0,
@@ -255,7 +260,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             Float64(bt(ψ))
         end
 
-    _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta)
+    _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
 
     # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
     # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode
@@ -308,12 +313,12 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         else
             lnL = coulomb_log_e(prof.n_e, prof.T_e; form=lnLambda_form)
             nu_star_e(prof.n_e, prof.T_e, rg.R_major, rg.eps_local,
-                q, zeff; lnLamb=lnL)
+                q, _eval(zeff, psi); lnLamb=lnL)
         end
 
         # dr_val: per-surface resistive interchange index D_R = E + F + H²
         # (Glasser-Greene-Johnson 1975). Used by `_solve_dc_tmp` to compute
-        # the χ_‖-matching critical-Δ via Connor-Hastie-Helander 2015 Eq. 59,
+        # the χ_‖-matching critical-Δ via Connor et al. 2015 Eq. 59,
         # which has `(−D_R)` as a multiplier. NOT the Mercier index
         # D_I = E + F + H − 1/4 (see this function's docstring); we use the
         # physically correct D_R here.
@@ -332,8 +337,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             _eval(dr_val, psi)
         end
 
-        # dgeo_val: only used by dc_type=:toroidal (the Connor-Hastie-
-        # Helander 2015 formula). Auto-derivation requires ⟨|∇ψ|²⟩ FSA
+        # dgeo_val: only used by dc_type=:toroidal (the Connor et al.
+        # 2015 formula). Auto-derivation requires ⟨|∇ψ|²⟩ FSA
         # which the current `ResistGeometry` doesn't expose; for now we
         # require an explicit value if the toroidal dc_type is selected.
         dgeo_val_k = if dgeo_val === nothing
@@ -377,7 +382,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             n_e=prof.n_e, t_e=prof.T_e, t_i=prof.T_i,
             omega=prof.omega, omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
-            rs=rs, R0=R0_use, mu_i=mu_i, zeff=zeff,
+            rs=rs, R0=R0_use, mu_i=mu_i, zeff=_eval(zeff, psi),
             chi_perp=_eval(chi_perp, psi),
             chi_tor=_eval(chi_tor, psi),
             m=m_res, n=n_res,

@@ -123,17 +123,18 @@ gpec.toml.
   - `mtheta_vacuum::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzeta_vacuum::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
-  - `frobenius_psi_max::Float64` - Largest starting ψ_N at which the Frobenius start is used. The Frobenius start [Glasser 2016 Eq. 51] is a power series about the magnetic axis, so an integration beginning above this value (an interior start from a raised `psilow`, or `qlow` above q₀) instead starts every solution with zero displacement and unit "momentum" (U₁ = 0, U₂ = I), the initialization Fortran DCON always uses, and warns that it did. `0` selects the fixed start everywhere, silently. Default 0.01, which keeps every axis-started case on the Frobenius start.
+  - `frobenius_psi_max::Float64` - Largest starting ψ_N at which the opt-in Frobenius start is used. Default `0` selects the fixed start everywhere and silently: U₁ = 0, U₂ = I, the initialization Fortran DCON uses. A positive value uses the diagonal Frobenius 2×2 when the integration starts at or below it, and warns that this start is currently unreliable. A start above the threshold uses the fixed start with no warning. That 2×2 does not recover a displacement that vanishes as a positive power of the starting ψ, and its m = 0 branch is an imaginary pair whose sign follows roundoff. Leave this at 0 unless the Frobenius start itself is under test.
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
-  - `renorm_threshold::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e4` empirically keeps max(|U₁|, |U₂|) in O(1)–O(10⁴) over the integration domain on DIII-D / Solovev sweeps; lower triggers excess renorms without accuracy gain, higher risks overflow before the next renorm.
+  - `renorm_threshold::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e3`. The trigger compares column-norm growth, not conditioning, so near-parallel columns can leave an error in the free-boundary energies that does not shrink with `eulerlagrange_tolerance`.
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `truncate_at_rational_offset::Bool` - Truncate the integration domain at `(last_rational_q + rational_offset_fraction) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`rational_offset_fraction = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `truncate_at_rational_offset = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `truncate_at_rational_offset = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + rational_offset_fraction / n" depends on which `n`); when `truncate_at_rational_offset = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
+  - `psilim_from_layer_overlap::Bool` - Cap the integration domain where adjacent rational surfaces' resistive layers overlap, after Fitzpatrick, Nucl. Fusion 2025 Sect. 5.9: past that point no surface retains a well-separated inner region. Applied as an upper bound on `qlim` at the top of `sing_lim!`, so `rational_offset_fraction` / `qhigh` still select the final surface from inside it. The scan runs whenever the run's `[SLAYER]` section names a readable `profile_file` — the same profiles and χ⊥(ψ) the SLAYER analysis uses — and is recorded under `ForceFreeStates/LayerOverlap/` either way; this flag only decides whether it constrains the domain. It resolves that file from the run's TOML, so the programmatic `solve(prob, alg)` entry point cannot run it and the flag is inert there (with a warning). Off on every shipped deck; with the shipped DIII-D-like profiles the overlap point (ψ ≈ 0.9985) lies outside the 0.995 decks' domain but inside the SLAYER deck's 0.9995. See the integration-domain truncation section of the stability documentation. Default `false`.
   - `rational_offset_fraction::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `truncate_at_rational_offset` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
   - `frobenius_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
@@ -144,7 +145,7 @@ gpec.toml.
   - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `rational_offset_fraction`.
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
-  - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
+  - `save_interval::Int` - Save every Nth ODE step (1=all). Always saves near rational surfaces. Default `1`: PerturbedEquilibrium and KineticForces interpolate ξ(ψ) between saved steps, so their accuracy follows the saved-step density.
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
   - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
@@ -162,11 +163,12 @@ gpec.toml.
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
     eulerlagrange_tolerance::Float64 = 1e-8
-    renorm_threshold::Float64 = 1e4
+    renorm_threshold::Float64 = 1e3
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
     singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
     truncate_at_rational_offset::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
+    psilim_from_layer_overlap::Bool = false  # Cap psilim where adjacent resistive layers overlap. Opt-in; the scan is recorded either way. See docstring.
     rational_offset_fraction::Float64 = 0.2
     frobenius_order::Int = 6
     qhigh::Float64 = 1e3
@@ -177,7 +179,7 @@ gpec.toml.
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
-    save_interval::Int = 3
+    save_interval::Int = 1
     force_termination::Bool = false
     integrator::String = "riccati"   # Default: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream. Use "forward" for dense ξ (PerturbedEquilibrium) or kinetic runs.
     nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
@@ -213,5 +215,5 @@ gpec.toml.
     gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
     gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
     gal_gamma::Float64 = 5 / 3       # ratio of specific heats Γ for the resistive-layer coefficients (resist_eval G term)
-    frobenius_psi_max::Float64 = 0.01
+    frobenius_psi_max::Float64 = 0.0
 end

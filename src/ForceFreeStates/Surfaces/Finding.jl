@@ -93,7 +93,8 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 end
 
 """
-    sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+    sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium;
+              psilim_cap=nothing)
 
 Compute and set integration ψ, q, and q' limits by handling cases where user truncates
 before the last singular surface. Performs a similar function to `sing_lim`
@@ -101,16 +102,22 @@ in the Fortran code. Main differences include renaming of sas_flag -> truncate_a
 removing dW edge storage variables since we now store all integration terms in memory, and
 simplification of the logic.
 
-The target value `qlim` is first determined from user-specified control parameters
-(`ctrl.qhigh` or `ctrl.rational_offset_fraction`), subject to the constraint that it does not exceed
-`equil.params.qmax`. If `truncate_at_rational_offset` is true, `qlim` is adjusted to the largest
-rational surface such that `nq + rational_offset_fraction < qmax`. If `qlim < qmax`, a Newton iteration is
-performed to find the corresponding `psilim` to integrate to.
+The target `qlim` starts at `min(equil.params.qmax, ctrl.qhigh)`. When `psilim_cap` is given
+and lies inside the domain, `qlim` is further capped at `q(psilim_cap)`: the resistive-layer
+overlap point of Fitzpatrick, Nucl. Fusion 2025 Sect. 5.9, past which no surface retains a
+well-separated inner region. The cap only ever narrows the domain; one beyond `psihigh` is inert.
+
+If `truncate_at_rational_offset` is true, `qlim` is then moved to `(last rational + rational_offset_fraction) / n` and
+stepped back by `1/n` until it no longer exceeds the bound above, so `rational_offset_fraction` never extends the
+domain past `qmax`, `qhigh` or the cap. A bound that falls exactly on, or less than `rational_offset_fraction / n`
+above, a rational excludes that rational. If `qlim < qmax`, a Newton iteration finds the
+corresponding `psilim` to integrate to.
 
 Note that the Newton iteration will be triggered if either `truncate_at_rational_offset` is true
 or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
 """
-function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium;
+    psilim_cap::Union{Nothing,Real}=nothing)
 
     profiles = equil.profiles
 
@@ -118,6 +125,16 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.params.psihigh_resolved
+
+    # Resistive-layer overlap caps qlim (not psilim), so rational_offset_fraction below still picks a surface inside it.
+    if psilim_cap !== nothing && psilim_cap < intr.psilim
+        q_cap = profiles.q_spline(Float64(psilim_cap))
+        if q_cap < intr.qlim
+            @info "Resistive-layer overlap caps the domain: qlim $(@sprintf("%.3f", intr.qlim)) -> " *
+                  "$(@sprintf("%.3f", q_cap)) (psi $(@sprintf("%.6f", intr.psilim)) -> $(@sprintf("%.6f", Float64(psilim_cap))))"
+            intr.qlim = q_cap
+        end
+    end
 
     # Optionally override qlim based on rational_offset_fraction (Fortran sas_flag=t equivalent). The cutoff reads
     # the *resolved* toroidal range on `intr`, so callers must assign intr.nlow / intr.nhigh
@@ -134,10 +151,12 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         @info "Setting psilim via rational_offset_fraction: initial qlim = $(@sprintf("%.3f", intr.qlim)), rational_offset_fraction = $(@sprintf("%.3f", ctrl.rational_offset_fraction))"
         # Normalize rational_offset_fraction ∈ [0,1)
         rational_offset_fraction = mod(ctrl.rational_offset_fraction, 1.0)
+        # qlim already holds min(qmax, qhigh, overlap cap); rational_offset_fraction must never step past any of them.
+        qlim_bound = intr.qlim
         intr.qlim = (trunc(Int, intr.nlow * intr.qlim) + rational_offset_fraction) / intr.nlow
 
-        # Reduce qlim if above qmax
-        while intr.qlim > equil.params.qmax
+        # Step back one rational at a time until inside the bound, keeping the rational_offset_fraction offset
+        while intr.qlim > qlim_bound
             intr.qlim -= 1.0 / intr.nlow
         end
     end
