@@ -46,7 +46,11 @@ Under ideal induction and equilibrium force balance,
 `b_perp=-B(div xi_perp+kappa.xi_perp)`. With a force residual
 `F=(curl B) cross B-mu0 grad p`, the force-balance curvature representation
 instead leaves `-xi_perp.F/B`. Regularized numerical outputs need not be
-an exact ideal-induction pair near a rational surface.
+an exact ideal-induction pair near a rational surface. In the diagonal
+Jacobian model the reconstructed surface displacement is `R xi_s`, and
+the legacy llagb differs from the reconstructed perpendicular projection by
+`(1-R) xi_s/(chi1 q) partial_theta B` (native proofs R4-R5). The llagb
+identification above assumes unregularized components.
 
 **Verified target-gauge equations.** In angles in turns put
 `D=partial_theta+q partial_zeta`. On a matching equilibrium chart
