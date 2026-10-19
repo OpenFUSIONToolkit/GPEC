@@ -340,7 +340,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     # Dense output so the surface can be sampled at prescribed SFL angles between solver steps.
-    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=true)
+    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=equil_abstol(equil_config.etol), dt=2π / 200, adaptive=true, dense=true)
 
     # A failed solve returns a truncated solution instead of throwing; check both the retcode and
     # that the field line reached η = 2π, since a callback can end it early and still report Success.

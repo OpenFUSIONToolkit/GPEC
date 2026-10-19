@@ -41,7 +41,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `bt`       | Toroidal field [T]                                                |
 | `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention) |
 | `dr_val`   | Resistive interchange D_R = E + F + H² (critical-Δ input; auto-derived from GGJ coefficients unless overridden) |
-| `dgeo_val` | Connor-Hastie-Helander 2015 Eq. 59 geometric factor (0 unless supplied) |
+| `dgeo_val` | Connor et al. (2015) Eq. 59 geometric factor (0 unless supplied) |
 | `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                |
 | `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
 | `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
@@ -129,8 +129,10 @@ function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
     return rs * dq_dpsi / (q * da_dpsi)
 end
 
-# Internal: solve the Wd self-consistency loop for the chi_parallel-based
-# critical Δ (Connor-Hastie-Helander 2015). Returns dc_tmp as a Float64.
+# Internal: solve the Wd self-consistency loop for the chi_parallel-based critical Δ. W_d and the
+# smfp/lmfp chi_parallel blend follow Fitzpatrick, Phys. Plasmas 32, 062509 (2025); the toroidal and
+# large-aspect-ratio offsets are Connor, Ham, Hastie & Liu, PPCF 57, 065001 (2015) Eqs. (59) and (61),
+# after Lütjens, Luciani & Garbet, Phys. Plasmas 8, 4267 (2001). Returns dc_tmp as a Float64.
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
     rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
@@ -210,7 +212,9 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `R0`      -- major radius [m]
   - `mu_i`    -- ion mass in proton-mass units (e.g. 2.0 for D)
   - `zeff`    -- effective charge
-  - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]
+  - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]. `chi_perp` feeds both
+    `P_perp` (which wants the one-fluid energy diffusivity χ_E) and the critical-Δ `W_d` (which wants
+    the electron channel); one profile serves both for now, see the stability docs
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
   - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`

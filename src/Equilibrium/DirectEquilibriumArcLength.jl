@@ -65,11 +65,11 @@ Arc-length-parameterized flux surface integration. Drop-in replacement for
 `direct_fieldline_int` with identical return format, sampled at the straight-fieldline angles
 `theta_nodes` (see `sample_trace_at_sfl_angles`):
 
-- `y_out[:, 1]`: geometric angle η ∈ 0 to 2π (CCW from outboard midplane)
-- `y_out[:, 2]`: accumulated ∫dl/Bp
-- `y_out[:, 3]`: rfac = √((R−ro)² + (Z−zo)²)
-- `y_out[:, 4]`: accumulated ∫dl/(R²Bp)
-- `y_out[:, 5]`: accumulated ∫jac·dl/Bp
+  - `y_out[:, 1]`: geometric angle η ∈ 0 to 2π (CCW from outboard midplane)
+  - `y_out[:, 2]`: accumulated ∫dl/Bp
+  - `y_out[:, 3]`: rfac = √((R−ro)² + (Z−zo)²)
+  - `y_out[:, 4]`: accumulated ∫dl/(R²Bp)
+  - `y_out[:, 5]`: accumulated ∫jac·dl/Bp
 
 The ODE is terminated by a `ContinuousCallback` that detects the return to the
 outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
@@ -113,9 +113,15 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     prob = ODEProblem{true}(arclength_fieldline_der!, u0, (0.0, 1.0e4), params)
     # Tight tolerances on position (y[1:2]); integrals (y[3:5]) effectively unconstrained near x-points
     reltol_vec = [equil_config.etol, equil_config.etol, 1e20, 1e20, 1e20]
-    abstol_vec = [1e-8, 1e-8, 1e20, 1e20, 1e20]
+    abstol_vec = [equil_abstol(equil_config.etol), equil_abstol(equil_config.etol), 1e20, 1e20, 1e20]
     sol = solve(prob, BS5(); callback=callback, reltol=reltol_vec, abstol=abstol_vec,
         dt=2π / 200, adaptive=true, dense=true)
+    # The only complete ending is the callback's terminate! on return to the midplane; Success means it never fired.
+    sol.retcode == ReturnCode.Terminated || error(
+        "arclength_fieldline_int: field line at psifac = $(@sprintf("%.6f", psifac)) did not return to the midplane " *
+        "(retcode $(sol.retcode) at arc length $(sol.t[end])); the flux surface did not close. " *
+        "This usually means psihigh is too close to the separatrix for the equilibrium grid to resolve."
+    )
 
     n = length(sol.u)
     y_out = Matrix{Float64}(undef, n, 5)
@@ -152,4 +158,3 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     # bfield at the starting point carries F and P for the surface-averaged quantities
     return sample_trace_at_sfl_angles(sol, y_out, 5, theta_nodes, state_row), bfield
 end
-

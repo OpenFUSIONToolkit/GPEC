@@ -3,7 +3,7 @@
 
 Pre-computed complex Fourier basis and functor interface for θ ↔ mode transforms.
 
-`basis[ℓ, i] = exp(-i(m_ℓ θ_i - n ν_i))` with shape `(mpert, mtheta)`. Forward: `basis * data / mtheta`;
+`basis[ℓ, i] = exp(-i(m_ℓ θ_i - n ζ_i))` with shape `(mpert, mtheta)`. Forward: `basis * data / mtheta`;
 inverse: `adjoint(basis) * modes` (Fortran `iscdftf`/`iscdftb`; see `docs/src/conventions.md`).
 """
 module FourierTransforms
@@ -14,27 +14,27 @@ export FourierTransform, inverse, inverse_transform!, transform!
 export compute_fourier_coefficients
 
 """
-    compute_fourier_coefficients(mtheta, m_modes, n, ν)
+    compute_fourier_coefficients(mtheta, m_modes, n, ζ)
 
-Build complex basis ``\\exp(-i(m\\theta - n\\nu))`` on the uniform poloidal grid.
+Build complex basis ``\\exp(-i(m\\theta - n\\zeta))`` at the points ``(\\theta_i, \\zeta_i)`` of the uniform poloidal grid.
 
 ## Arguments
 
   - `mtheta`: number of poloidal grid points
   - `m_modes`: poloidal mode numbers (one row per mode)
   - `n`: toroidal mode number
-  - `ν`: toroidal angle offset on the poloidal grid, length `mtheta`
+  - `ζ`: toroidal angle of each grid point in radians, length `mtheta`
 
 ## Returns
 
   - Basis matrix, size `(length(m_modes), mtheta)`
 """
-function compute_fourier_coefficients(mtheta::Int, m_modes::AbstractVector{<:Integer}, n::Integer, ν::Vector{Float64})
+function compute_fourier_coefficients(mtheta::Int, m_modes::AbstractVector{<:Integer}, n::Integer, ζ::Vector{Float64})
 
-    @assert length(ν) == mtheta "ν must have length mtheta"
+    @assert length(ζ) == mtheta "ζ must have length mtheta"
 
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    arg = m_modes' .* θ_grid .- n .* ν
+    arg = m_modes' .* θ_grid .- n .* ζ
     return transpose(exp.(-im .* arg))
 end
 
@@ -97,7 +97,7 @@ Struct with precomputed complex Fourier basis for repeated θ ↔ mode transform
   - `mtheta`: poloidal grid size
   - `mpert`: number of poloidal modes
   - `mlow`: lowest poloidal mode number
-  - `basis`: ``\\exp(-i(m\\theta - n\\nu))``, size `(mpert, mtheta)`
+  - `basis`: ``\\exp(-i(m\\theta - n\\zeta))``, size `(mpert, mtheta)`
 """
 struct FourierTransform
     mtheta::Int
@@ -107,7 +107,7 @@ struct FourierTransform
 end
 
 """
-    FourierTransform(mtheta, mpert, mlow; n=0, ν=zeros(mtheta))
+    FourierTransform(mtheta, mpert, mlow; n=0, ζ=zeros(mtheta))
 
 Construct a transform with precomputed basis for contiguous modes `mlow:(mlow+mpert-1)`.
 
@@ -120,7 +120,7 @@ Construct a transform with precomputed basis for contiguous modes `mlow:(mlow+mp
 ## Keyword Arguments
 
   - `n`: toroidal mode number (default 0)
-  - `ν`: toroidal angle offset on the poloidal grid, length `mtheta`
+  - `ζ`: toroidal angle of each grid point in radians, length `mtheta`
 
 ## Returns
 
@@ -131,9 +131,9 @@ function FourierTransform(
     mpert::Int,
     mlow::Int;
     n::Int=0,
-    ν::Vector{Float64}=zeros(Float64, mtheta)
+    ζ::Vector{Float64}=zeros(Float64, mtheta)
 )
-    basis = compute_fourier_coefficients(mtheta, mlow:(mlow+mpert-1), n, ν)
+    basis = compute_fourier_coefficients(mtheta, mlow:(mlow+mpert-1), n, ζ)
     return FourierTransform(mtheta, mpert, mlow, basis)
 end
 
