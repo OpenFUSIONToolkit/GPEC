@@ -8,7 +8,7 @@ then write to gpec.h5 in a single pass.
 
 """
     write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
-                   species_label=nothing)
+                   species_label=nothing, perturbation=nothing)
 
 Write KineticForces results to the "KineticForces" group in gpec.h5.
 
@@ -18,13 +18,16 @@ Write KineticForces results to the "KineticForces" group in gpec.h5.
 - `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
   written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
   is directly available
+- `perturbation`: optional `KineticForcesInternal`; its δB/B and ∇·ξ⊥ mode tables are written
+  once to `KineticForces/Perturbation/`. The perturbation is a property of the run, not of a
+  species, so it is written only on the call that has no `species_label`.
 - `species_label`: `nothing` writes the run total to `KineticForces/<method>/`; a label
   (e.g. `"ion_z1_m2"`, `"electron"`) writes one species' contribution to
   `KineticForces/PerSpecies/<label>/<method>/`. A multi-species run calls this once per
   species and once for the summed total, so the group is opened-or-created each time.
 """
 function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
-    species_label::Union{Nothing,AbstractString}=nothing)
+    species_label::Union{Nothing,AbstractString}=nothing, perturbation=nothing)
     root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
     g = root
     if species_label !== nothing
@@ -94,7 +97,30 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
     for method_name in method_names
         Utilities.HDF5Annotations.annotate!(g[method_name], KF_METHOD_H5_ANNOTATIONS)
     end
+
+    # The perturbation driving the torque: one table per run, not per species or per method.
+    if species_label === nothing && perturbation !== nothing &&
+       !isempty(perturbation.perturbation_psi) && !haskey(root, "Perturbation")
+        pg = create_group(root, "Perturbation")
+        pg["psi"] = perturbation.perturbation_psi
+        pg["m"] = collect(perturbation.mlow:perturbation.mhigh)
+        pg["n"] = perturbation.nlow
+        pg["dBoB_lagrangian"] = perturbation.dbob_m_data
+        pg["div_xi_perp"] = perturbation.divx_m_data
+        Utilities.HDF5Annotations.annotate!(pg, KF_PERTURBATION_H5_ANNOTATIONS)
+    end
 end
+
+# Metadata for KineticForces/Perturbation/. δB/B and ∇·ξ⊥ are the JBB-deweighted physical
+# spectra built in `set_perturbation_data!` (Fortran pentrc set_peq), in the same poloidal
+# angle and sign convention as the PerturbedEquilibrium field spectra.
+const KF_PERTURBATION_H5_ANNOTATIONS = [
+    "psi" => (; long_name="normalized poloidal flux ψ_N of the perturbation grid", scale="psi"),
+    "m" => (; long_name="poloidal mode number m", scale="m"),
+    "n" => (; long_name="toroidal mode number n of the perturbation"),
+    "dBoB_lagrangian" => (; long_name="Lagrangian δ|B|/B Fourier modes, δB/B(θ) = Σ_m value·exp(2πi·m·θ) with θ ∈ [0,1); dimensionless", dims=("psi", "m"), attach=(1 => "psi", 2 => "m")),
+    "div_xi_perp" => (; long_name="∇·ξ_⊥ Fourier modes, same angle and sign convention as dBoB_lagrangian", units="1/m", dims=("psi", "m"), attach=(1 => "psi", 2 => "m"))
+]
 
 # Storage slice → Logan 2015 matrix letter (Eqs 7.30-7.35); see BounceAveraging.jl
 # for the Hermitian/full packing details.

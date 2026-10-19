@@ -243,6 +243,14 @@ this struct.
     dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
     divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
 
+    # The same two quantities as the raw mode tables the interpolants were built from, kept
+    # so they can be written to the HDF5 file. δB/B is the Lagrangian perturbation of the
+    # field strength, which is what an NTV code needs as input; nothing in the torque
+    # calculation reads these fields back.
+    perturbation_psi::Vector{Float64} = Float64[]            # ψ_N of each row
+    dbob_m_data::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # (nψ, mpert)
+    divx_m_data::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # (nψ, mpert)
+
     # Sticky bracket-search hints for amortized lookup in `tpsi!`. When the outer
     # quadrature evaluates ψ non-monotonically, FastInterpolations falls back to a
     # broader search when the hint is stale — still a net win over a cold bracket
@@ -444,6 +452,13 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
     # Build CubicSeriesInterpolants over ψ for dbob_m and divx_m
     kf_intr.dbob_m = cubic_interp(psi_grid, Series(dbob_m_data); itp_opts...)
     kf_intr.divx_m = cubic_interp(psi_grid, Series(divx_m_data); itp_opts...)
+
+    # Retain the mode tables for output. They are the physical δB/B and ∇·ξ⊥ spectra on the
+    # PE ψ grid, in the same poloidal angle and (m, n) convention as the PerturbedEquilibrium
+    # field spectra, and are of direct interest to other NTV codes run on GPEC fields.
+    kf_intr.perturbation_psi = copy(psi_grid)
+    kf_intr.dbob_m_data = dbob_m_data
+    kf_intr.divx_m_data = divx_m_data
 
     if kf_intr.verbose
         @info "set_perturbation_data!: built dbob_m/divx_m/xs_m interpolants " *

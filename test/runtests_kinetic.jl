@@ -1,3 +1,4 @@
+using HDF5
 
 @testset "KineticForces Unit Tests" begin
 
@@ -664,6 +665,57 @@
         @test mr.total_torque == 0.0 + 0.0im
         @test mr.total_energy == 0.0
         @test isempty(mr.records)
+    end
+
+    @testset "perturbation output" begin
+        # KineticForces/Perturbation/ carries the δB/B and ∇·ξ⊥ spectra that drive the torque,
+        # so another NTV code can be run on the same perturbation. It is a property of the run,
+        # not of a species or a method, so it is written once by the call with no species_label.
+        @test isempty(KF.KineticForcesInternal().perturbation_psi)
+        @test isempty(KF.KineticForcesInternal().dbob_m_data)
+
+        npsi, mpert = 4, 3
+        intr = KF.KineticForcesInternal(; mlow=-1, mhigh=1, mpert=mpert, nlow=3, nhigh=3,
+            perturbation_psi=collect(range(0.1, 0.9; length=npsi)),
+            dbob_m_data=ComplexF64[0.1 * i + 0.01im * j for i in 1:npsi, j in 1:mpert],
+            divx_m_data=ComplexF64[0.2 * i - 0.02im * j for i in 1:npsi, j in 1:mpert])
+        st = KF.KineticForcesState()
+        st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=3,
+            psi_grid=collect(0.0:0.25:1.0), dtdpsi=fill(ComplexF64(1.0), 5),
+            t_cumulative=zeros(ComplexF64, 5))
+
+        h5 = tempname() * ".h5"
+        HDF5.h5open(h5, "cw") do f
+            KF.write_to_hdf5!(f, st; species_label="electron", perturbation=intr)  # must NOT write it
+            KF.write_to_hdf5!(f, st; perturbation=intr)
+        end
+        HDF5.h5open(h5, "r") do f
+            @test !haskey(f["KineticForces"]["PerSpecies"]["electron"], "Perturbation")
+            pg = f["KineticForces"]["Perturbation"]
+            @test read(pg["m"]) == [-1, 0, 1]
+            @test read(pg["n"]) == 3
+            @test read(pg["psi"]) ≈ intr.perturbation_psi
+            # HDF5.jl round-trips the Julia shape, so (npsi, mpert) here; h5py and MATLAB see
+            # the transpose, matching the field spectra written by PerturbedEquilibrium.
+            @test size(read(pg["dBoB_lagrangian"])) == (npsi, mpert)
+            @test read(pg["dBoB_lagrangian"]) ≈ intr.dbob_m_data
+            @test read(pg["div_xi_perp"]) ≈ intr.divx_m_data
+            for d in ("dBoB_lagrangian", "div_xi_perp")
+                a = HDF5.attributes(pg[d])
+                @test haskey(a, "long_name") && haskey(a, "dims")
+            end
+        end
+        rm(h5; force=true)
+
+        # Nothing is written when the perturbation was never built (PE did not run).
+        h5b = tempname() * ".h5"
+        HDF5.h5open(h5b, "cw") do f
+            KF.write_to_hdf5!(f, st; perturbation=KF.KineticForcesInternal())
+        end
+        HDF5.h5open(h5b, "r") do f
+            @test !haskey(f["KineticForces"], "Perturbation")
+        end
+        rm(h5b; force=true)
     end
 
     # =========================================================================

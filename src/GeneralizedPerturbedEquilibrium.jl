@@ -1077,7 +1077,7 @@ function run_kinetic_forces(
             if kf_ctrl.write_outputs_to_HDF5
                 h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
                     KineticForces.write_to_hdf5!(h5file, kf_state;
-                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline, perturbation=kf_intr)
                 end
             end
         else
@@ -1102,7 +1102,7 @@ function run_kinetic_forces(
                             dVdpsi_spline=result.equil.profiles.dVdpsi_spline, species_label=label)
                     end
                     KineticForces.write_to_hdf5!(h5file, kf_state;
-                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline, perturbation=kf_intr)
                 end
             end
         end
