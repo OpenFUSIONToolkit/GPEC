@@ -119,9 +119,9 @@ radius ⟨r⟩ — potato width `(q²ρ²R₀)^(1/3)`, banana width `q·ρ/√ε
 `q·ρ/ε` (ε = ⟨r⟩/⟨R⟩, clamped as in `kinetic_resonance_psi_nodes`; thermal gyroradius
 ρ = √(2·m·T)·/(Z·e·B₀) of the computed species). Inside this boundary trapped bananas become potato
 orbits of width comparable to r itself, so the bounce-averaged kinetic response is evaluated outside
-its validity domain. Returns 0.0 when no criterion is met anywhere. The Fortran precedent
-(`ktanh_flag`, dcon/fourfit.F) suppressed the same region with four hand-tuned knobs; here the
-boundary is derived from the profiles with no user parameters.
+its validity domain. Returns 0.0 when no criterion is met anywhere. The boundary is derived from
+the profiles with no user parameters.
+``
 """
 function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
     zi::Int=1, mi::Int=2, electron::Bool=false)
