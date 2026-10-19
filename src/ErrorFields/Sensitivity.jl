@@ -118,7 +118,7 @@ function _rigidly_perturbed(cs::CoilSet, kind::Symbol, axis::Int, h::Real, pivot
     end
     nom(i) = pivot === nothing ? Float64[] : fill(pivot[i], cs.ncoil)
     cfg = CoilSetConfig(; tiltx=component(1), tilty=component(2), tiltz=component(3),
-        xnom=nom(1), ynom=nom(2), znom=nom(3), tilt_in_meters=false)
+        rotation_center_x=nom(1), rotation_center_y=nom(2), rotation_center_z=nom(3), tilt_in_meters=false)
     return apply_transforms(cs, cfg; n_tilt=1)
 end
 

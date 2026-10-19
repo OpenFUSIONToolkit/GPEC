@@ -268,8 +268,8 @@ end
     Equil = GeneralizedPerturbedEquilibrium.Equilibrium
     config = Equil.EquilibriumConfig(;
         eq_filename=joinpath(@__DIR__, "test_data", "CHEASE_test_data", "INP1_ascii"),
-        eq_type="chease_ascii", jac_type="boozer", grid_type="ldp",
-        psilow=0.01, psihigh=0.994, r0exp=6.8, b0exp=7.4
+        eq_type="chease_ascii", jac_type="boozer", grid_type="core_edge_packed",
+        psilow=0.01, psihigh=0.994, r0_norm=6.8, b0_norm=7.4
     )
     src = Equil.read_chease_ascii(config)
     @test src isa Equil.InverseRunInput

@@ -57,9 +57,9 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     chi_perp = _chi_spline(data.chi_e)
     chi_tor = _chi_spline(data.chi_phi)
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
-    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `zimp` and a
+    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
-    # Z_eff = zimp − (n_i/n_e)(zimp − 1).
+    # Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
     _usable(v) = v !== nothing && !all(iszero, v)
     zeff = if _usable(data.zeff)
         minimum(data.zeff) >= 1.0 - 1e-8 ||
@@ -68,7 +68,7 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     elseif !_usable(data.n_i)
         nothing
     else
-        z = [ne > 0 ? control.zimp - (ni / ne) * (control.zimp - 1.0) : control.zimp for (ni, ne) in zip(data.n_i, data.n_e)]
+        z = [ne > 0 ? control.impurity_charge - (ni / ne) * (control.impurity_charge - 1.0) : control.impurity_charge for (ni, ne) in zip(data.n_i, data.n_e)]
         minimum(z) >= 1.0 - 1e-8 ||
             error("run_slayer: kinetic file '$path' has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
         cubic_interp(psi_xs, z)
@@ -464,7 +464,7 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
         @warn "SLAYER: kinetic file has no usable zeff or n_i profile (dataset absent or all-zero); " *
               "using the scalar control.zeff = $(control.zeff) at every surface."
     else
-        zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with zimp = $(control.zimp)"
+        zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with impurity_charge = $(control.impurity_charge)"
         @info "SLAYER: Z_eff(ψ) from the kinetic file's $zeff_origin"
     end
 
@@ -472,12 +472,12 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
         # GGJ γ-extraction is future work; `run_slayer_from_inputs` emits the
         # warning once the model is built (so direct callers see it too).
         params = build_ggj_inputs(equil, surfaces, profiles;
-            mu_i=control.mu_i,
+            mu_i=control.ion_mass,
             zeff=zeff,
             resistivity_model=_build_resistivity_model(control.resistivity_model),
             lnLambda_form=control.lnLambda_form)
     else
-        # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
+        # `equil.config.b0_norm` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
         # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
         # control value through instead: `nothing` makes build_slayer_inputs compute the
         # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
@@ -492,13 +492,13 @@ function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::Abstrac
             "control.chi_perp/chi_tor fallback for the missing one(s).")
         params = build_slayer_inputs(equil, surfaces, profiles;
             bt=bt,
-            mu_i=control.mu_i,
+            mu_i=control.ion_mass,
             zeff=zeff,
             chi_perp=chi_perp,
             chi_tor=chi_tor,
-            dr_val=control.dr_val,
-            dgeo_val=control.dgeo_val,
-            dc_type=control.dc_type,
+            dr_val=control.D_R,
+            dgeo_val=control.D_geo,
+            dc_type=control.D_c_type,
             theta=control.theta_sample,
             resistivity_model=_build_resistivity_model(control.resistivity_model),
             lnLambda_form=control.lnLambda_form)
