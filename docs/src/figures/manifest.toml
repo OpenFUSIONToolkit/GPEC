@@ -25,8 +25,8 @@ depends = ["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/Galerkin.jl", "src/I
 script = "make_backend_regime_map.jl"
 
 [inner_layer.convergence_Sinvariance]
-commit = "3a0837e3-dirty"
-date = "2026-07-08"
+commit = "20887ed8c-dirty"
+date = "2026-10-16"
 depends = ["src/InnerLayer/GGJ/Ray.jl"]
 script = "make_convergence_Sinvariance.jl"
 
@@ -37,7 +37,7 @@ depends = ["src/InnerLayer/GGJ/Ray.jl"]
 script = "make_rotated_ray_contour.jl"
 
 [inner_layer.solution_profiles]
-commit = "3a0837e3-dirty"
-date = "2026-07-08"
-depends = ["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/RayAsymptotics.jl", "src/InnerLayer/GGJ/InnerAsymptotics.jl"]
+commit = "20887ed8c-dirty"
+date = "2026-10-16"
+depends = ["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/InnerAsymptotics.jl"]
 script = "make_solution_profiles.jl"

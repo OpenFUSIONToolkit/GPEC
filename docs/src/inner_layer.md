@@ -111,7 +111,7 @@ The `GGJ` model exposes three solvers through the `solver` type parameter of
 |:--------|:-------|:--------------|
 | `:shooting` | backward stable shoot from ``X_\mathrm{max}\to 0`` | ``\lvert Q\rvert \ll 1`` |
 | `:galerkin` | Hermite-cubic finite-element (real axis) | drift onset ``\lvert Q\rvert \sim 1``; 1% error by ``\lvert Q\rvert \sim 4`` |
-| `:ray` (default) | rotated-contour spectral-element collocation | ``\lvert Q\rvert \sim 500`` on/near the imaginary axis |
+| `:ray` (default) | rotated contour: inward-marched far-field condition + Hermite-cubic BVP | ``\lvert Q\rvert \sim 500`` on/near the imaginary axis |
 
 The difficulty is the large-``|Q|`` imaginary-``Q`` axis itself, where rotation
 and resistivity scans live: there the layer's pseudo-resonance at
@@ -163,38 +163,34 @@ contour lifts it off that point; ``\theta = 0`` recovers a real-axis solve.
 
 ![The rotated integration ray in the complex layer-coordinate plane at Q = 500i. The real-axis contour runs through the pseudo-resonance x² = −Q²(G+KF); the ray at θ = arg(Q)/4 = 22.5° clears it.](figures/inner_layer/rotated_ray_contour.png)
 
-### Spectral-element collocation BVP
+### Hermite-Galerkin BVP
 
-On ``[0, s_m]`` the system is discretized by a **global Chebyshev
-spectral-element collocation** boundary-value problem: right-biased (Radau-like)
-collocation at the Chebyshev–Lobatto nodes of each cell, three parity conditions
-at the ordinary-point origin ``s = 0``, and six matching conditions at the outer
-edge,
+On ``[0, s_m]`` the system is solved with the same Hermite-cubic Galerkin assembly
+as the `:galerkin` backend (GWP2016 Eq. 32), written on the ray
+(``A u_{ss} + e^{i\theta}B u_s + e^{2i\theta}C u = 0``), with the stock parity
+conditions at the ordinary-point origin ``s = 0``. Instead of resonant and extension
+cells, the far end carries the point condition
 
 ```math
-v(S) - \Delta\, U_b - c_1 E_1 - c_2 E_2 = U_s ,
+v(s_m) = U_s + \Delta\, U_b + c_1 E_1 + c_2 E_2 ,
 ```
 
 with the matching datum ``\Delta`` and the two decaying-mode amplitudes
-``c_1, c_2`` carried as **bordered unknowns**. Here ``U_s, U_b`` are the small
-and large power-like solutions and ``E_{1,2}`` the forward-decaying exponential
-pair. No quantity is ever propagated across the layer, so the exponential
-dichotomy that limits the shooting backend never enters; the boundary condition
-splits it exactly.
-
-The two parities differ only in their three ``s=0`` rows, i.e. by a rank-3
-update, so both are obtained from a **single sparse LU factorization** plus a
-Woodbury correction (the `GGJ` internal `_solve_parities`) rather than two
-factorizations. A residual-driven bisection refinement adds cells until the
-collocation residual meets tolerance, with a roundoff-plateau guard.
+``c_1, c_2`` replacing the last node's six Hermite unknowns. Here ``U_s, U_b`` are the
+small and large power-like solutions and ``E_{1,2}`` the forward-decaying exponential
+pair, all transported from the series radius by the march below. No quantity is ever
+propagated across the layer, so the exponential dichotomy that limits the shooting
+backend never enters; the boundary condition splits it exactly. The grid resolves the
+full local WKB rate in every cell, with a minimum cell count for small ``|Q|``
+(the `GGJ` internal `ray_breaks`).
 
 ### Far-field boundary and the inward march
 
 The large-``x`` boundary data use the **same** `inps` Wasow asymptotic basis as
-the other backends (GW2020 Eqs. 3–52), evaluated at complex ``x`` by
-`RayAsymptotics.jl` and applied at the series radius ``S`` where the series is
+the other backends (GW2020 Eqs. 3–52), evaluated at complex ``x`` and applied at
+the series radius ``S`` where the series is
 trusted (residual below tolerance; [`pick_smax`](@ref InnerLayer.pick_smax)). For large ``|Q|`` the
-trusted radius ``S`` can be far outside the collocation domain ``s_m``, so the
+trusted radius ``S`` can be far outside the BVP domain ``s_m``, so the
 power-pair data are transported inward from ``S`` to ``s_m`` by an **L-stable
 2-stage Radau IIA march** in the quotient modulo the decaying exponential pair —
 the subspace in which ``\Delta`` is defined (the `GGJ` internal
@@ -209,12 +205,12 @@ error of the ill-conditioned implicit solves into ``\Delta``-mixing of order
 ``10^{-4}`` at ``|Q| = 500`` in `Float64`; extended precision removes this
 floor, while the well-conditioned resolved band stays in `Float64`.
 
-The result is a seamless numeric↔asymptotic solution: the collocation solution
+The result is a seamless numeric↔asymptotic solution: the BVP solution
 on ``[0, s_m]`` and the analytic ``u_\mathrm{small} + \Delta\,u_\mathrm{big}``
 representation for ``s \ge S`` share the same power-law tail — the overlap the
 outer-region matching relies on.
 
-![Inner-layer fields Ψ, Ξ, Υ on the rotated ray for the q=4 surface at Q = 2i. The collocation solution (solid) joins the asymptotic representation (dashed) seamlessly at the match point S = s_m.](figures/inner_layer/solution_profiles.png)
+![Inner-layer fields Ψ, Ξ, Υ on the rotated ray for the q=4 surface at Q = 2i. The BVP solution (solid) joins the asymptotic representation (dashed) seamlessly at the match point S = s_m.](figures/inner_layer/solution_profiles.png)
 
 ## Validation and benchmarks
 
@@ -254,7 +250,7 @@ machines/BLAS builds the absolute values reproduce to ``\sim 10^{-5}``
 relative (the damped-zone implicit solves carry platform-dependent structured
 roundoff), which is why the table above quotes five significant figures.
 
-![Relative change of Δ at Q = 500i under independent perturbations of each numerical knob (contour angle, spectral order, series order/radius, refinement depth, march tolerance, handoff radius, purification depth). The worst-case spread is the reported error bar.](figures/inner_layer/convergence_Sinvariance.png)
+![Relative change of Δ at Q = 500i under independent perturbations of each numerical knob (contour angle, mesh resolution, series order/radius, march tolerance, handoff radius, purification depth). The worst-case spread is the reported error bar.](figures/inner_layer/convergence_Sinvariance.png)
 
 ## Choosing a backend
 
@@ -273,9 +269,9 @@ p = q4_surface_benchmark()          # GGJParameters for the q=4 benchmark surfac
 
 Δ = solve_inner(GGJModel(), p, γ)   # (Δ_odd, Δ_even) with the default :ray backend
 
-# Full result (raw Δ, contour, mesh, nodal solution, residuals) via solve_ray:
+# Full result (raw Δ, contour, mesh, nodal solution, boundary conditioning) via solve_ray:
 res = solve_ray(p, GGJ.inner_Q(p, γ))
-res.Δ, res.resid, res.bc_cond
+res.Δ, res.breaks, res.bc_cond
 ```
 
 ## API Reference

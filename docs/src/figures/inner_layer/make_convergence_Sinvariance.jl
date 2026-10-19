@@ -2,10 +2,10 @@
 #
 # Figure: honest numerical error bar on the matching data Δ at Q = 500i. The
 # `delta_convergence` battery re-solves with each numerical knob perturbed on
-# an independent axis (contour angle θ, spectral order p, series order/radius,
-# refinement depth, march tolerance, handoff radius, purification e-folds). Δ
+# an independent axis (contour angle θ, mesh resolution, series order/radius,
+# march tolerance, handoff radius, purification e-folds). Δ
 # is an analytic invariant of the contour, so the worst-case spread across
-# these orthogonal perturbations bounds the true error. Eight solves; ~30 s.
+# these orthogonal perturbations bounds the true error. Seven solves; ~30 s.
 #
 # Run manually:  julia --project=. docs/src/figures/inner_layer/make_convergence_Sinvariance.jl
 

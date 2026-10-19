@@ -289,7 +289,7 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         # C_k = [[0, 0], [K2[2,1], K2[1,1] + K2[2,2]]]
         Cm[k+1] = @SMatrix ComplexF64[
             0 0
-            K2acc[2, 1] K2acc[1, 1] + K2acc[2, 2]
+            K2acc[2, 1] K2acc[1, 1]+K2acc[2, 2]
         ]
     end
 
@@ -382,10 +382,10 @@ build_asymptotics(params::GGJParameters, Q::Number; kmax::Int=8) =
 # and       dy[i] = d/dx of the above.
 #
 # `c` is an n_components × (n+1) matrix; the second axis is k = 0..n,
-# 1-indexed in Julia.
+# 1-indexed in Julia. `x` may be real or complex (principal branch of x^rvec).
 # -----------------------------------------------------------------------
 
-function _horner(x::Real, c::AbstractMatrix{ComplexF64};
+function _horner(x::Number, c::AbstractMatrix{ComplexF64};
     rvec::Union{Nothing,AbstractVector{<:Real}}=nothing,
     derivative::Bool=false)
     nrows, ncols = size(c)
@@ -488,11 +488,12 @@ end
 # -----------------------------------------------------------------------
 
 """
-    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real; derivative=true, apply_T=true) -> (U, dU)
+    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Number; derivative=true, apply_T=true) -> (U, dU)
 
-Evaluate the inps asymptotic basis at `x > 0`. Returns the 6×2 complex
-matrix `U` whose two columns are the algebraically-decaying ("small")
-asymptotic solutions of the GGJ system, and (if `derivative=true`) the
+Evaluate the inps asymptotic basis at `x`, real (`x > 0`) or complex on a
+rotated contour (principal branch of `x^r`; the series is in 1/x², so valid for |arg x| < π/2).
+Returns the 6×2 complex matrix `U` whose two columns are the power-like (Mercier) solutions of
+the GGJ system (column 1 large, column 2 small), and (if `derivative=true`) the
 6×2 matrix `dU` of their derivatives `dU/dx`.
 
 If `apply_T=false`, the result is left in the J-rotated coordinate basis
@@ -500,7 +501,7 @@ If `apply_T=false`, the result is left in the J-rotated coordinate basis
 returns the solutions in the original 6-component first-order-system
 basis used by `_physical_uv` and the shooting / Galerkin solvers.
 """
-function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
+function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Number;
     derivative::Bool=true, apply_T::Bool=true)
     xfac = 1.0 / (x * x)
     R = cache.R
@@ -569,6 +570,29 @@ function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
     end
 end
 
+"""
+    physical_ua_dua(cache, x::Number) -> (ua, dua)
+
+Convert the inps 6×2 basis at real or complex `x` to physical `(Ψ, Ξ, Υ)`
+values and x-derivatives, each 3×2 (column 1 = large power solution, 2 = small).
+The inps columns are in the GW2020 Eq. (2) state `u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x)`,
+hence the /x and ·x factors; same map as the deltac `inpso_get_ua/dua` convention.
+"""
+function physical_ua_dua(cache::InnerAsymptoticsCache, x::Number)
+    U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=true)
+    ua = zeros(ComplexF64, 3, 2)
+    dua = zeros(ComplexF64, 3, 2)
+    @inbounds for j in 1:2
+        ua[1, j] = U[1, j] / x
+        ua[2, j] = U[2, j]
+        ua[3, j] = U[3, j]
+        dua[1, j] = U[4, j] - U[1, j] / (x * x)
+        dua[2, j] = U[5, j] * x
+        dua[3, j] = U[6, j] * x
+    end
+    return ua, dua
+end
+
 # -----------------------------------------------------------------------
 # Residual `delta` and adaptive xmax — the convergence measure Δ± of GW2020
 # Eq. (54), ‖u' − xJu‖/max(‖u'‖,‖xJu‖) in the J-rotated basis, used to choose
@@ -576,15 +600,15 @@ end
 # -----------------------------------------------------------------------
 
 """
-    asymptotic_residual(cache::InnerAsymptoticsCache, x::Real) -> SVector{2,Float64}
+    asymptotic_residual(cache::InnerAsymptoticsCache, x::Number) -> SVector{2,Float64}
 
-Compute the convergence measure `Δ±` of the asymptotic basis at `x` for each
+Compute the convergence measure `Δ±` of the asymptotic basis at real or complex `x` for each
 of the two algebraic columns (GW2020 Eq. 54). Returns
 `‖dU − x·matrix·U‖∞ / max(‖dU‖∞, ‖x·matrix·U‖∞)` per column, where
 `matrix = J₀ + xfac·J₁ + xfac²·J₂` is the J-rotated coefficient matrix (the
 residual of `v' = xJv`, GW2020 Eq. 6).
 """
-function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
+function asymptotic_residual(cache::InnerAsymptoticsCache, x::Number)
     U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=false)
 
     xfac = 1.0 / (x * x)
@@ -651,3 +675,38 @@ end
 
 pick_xmax(params::GGJParameters, Q::Number; kwargs...) =
     pick_xmax(params, ComplexF64(Q); kwargs...)
+
+"""
+    pick_smax(params, Q; θ=angle(Q)/4, eps=1e-9, kmax=12, cache=nothing,
+              slogmin=-1.0, slogmax=6.5, dslog=0.01) -> (S, cache, achieved)
+
+Rotated-contour analog of [`pick_xmax`](@ref): the smallest `s` at which the series
+residual along `x = e^{iθ}s` drops below `eps`. If never reached, returns the
+residual-minimizing `s` with `achieved = false`.
+"""
+function pick_smax(params::GGJParameters, Q::ComplexF64;
+    θ::Float64=angle(Q) / 4, eps::Float64=1e-9, kmax::Int=12,
+    cache::Union{Nothing,InnerAsymptoticsCache}=nothing,
+    slogmin::Float64=-1.0, slogmax::Float64=6.5, dslog::Float64=0.01)
+    c = cache === nothing ? build_asymptotics(params, Q; kmax=kmax) : cache
+    ph = cis(θ)
+    best_s = 10.0^slogmin
+    best_r = Inf
+    slog = slogmin
+    while slog <= slogmax
+        s = 10.0^slog
+        r = maximum(asymptotic_residual(c, ph * s))
+        if r < eps
+            return s, c, true
+        end
+        if r < best_r
+            best_r = r
+            best_s = s
+        end
+        slog += dslog
+    end
+    return best_s, c, false
+end
+
+pick_smax(params::GGJParameters, Q::Number; kwargs...) =
+    pick_smax(params, ComplexF64(Q); kwargs...)

@@ -38,29 +38,6 @@ using QuadGK: quadgk
 # -----------------------------------------------------------------------
 
 """
-Convert the inps 6×2 output U_inps (the Wasow asymptotic basis U = TPQSY of
-GW2020 Eq. 53) at coordinate `x` to the physical (Ψ, Ξ, Υ) and (Ψ', Ξ', Υ')
-representation. The 6-component first-order state packs
-(Ψ, Ξ, Υ, Ψ', Ξ', Υ') with the GW2020 Eq. (2) scaling 𝚿 ≡ (xΨ, Ξ, Υ), hence
-the /x and ·x factors below. Returns `(ua, dua)` each 3×2 complex, where columns
-are the two power-like (Mercier) solutions and rows are the components (Ψ, Ξ, Υ).
-"""
-function _physical_ua_dua(cache::InnerAsymptoticsCache, x::Real)
-    U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=true)
-    ua = zeros(ComplexF64, 3, 2)
-    dua = zeros(ComplexF64, 3, 2)
-    @inbounds for j in 1:2
-        ua[1, j] = U[1, j] / x
-        ua[2, j] = U[2, j]
-        ua[3, j] = U[3, j]
-        dua[1, j] = U[4, j] - U[1, j] / (x * x)
-        dua[2, j] = U[5, j] * x
-        dua[3, j] = U[6, j] * x
-    end
-    return ua, dua
-end
-
-"""
 Build the (I, U, V) coefficient matrices of the second-order system
 `I·u'' − V·u' − U·u = 0` for u = (Ψ, Ξ, Υ) at coordinate `x`.
 All matrices are 3×3 complex.
@@ -79,7 +56,7 @@ row 2 (Ξ): Q² Ξ_xx − Q x² Ξ + Q x Ψ + (E+F) Υ + H Ψ_x = 0
 row 3 (Υ): Q Υ_xx − x² Υ + x Ψ + Q²[G(Ξ−Υ) − K(E Ξ + F Υ + H Ψ_x)] = 0
 ⇒ I=(0,0,Q)  V=(K Q² H,0,0)   U=(−x, −Q²(G−KE), x²+Q²(G+KF))
 """
-function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Real)
+function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Number)
     e = ComplexF64(params.E)
     f = ComplexF64(params.F)
     h = ComplexF64(params.H)
@@ -299,8 +276,6 @@ end
 
 function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Float64,
     pfac::Float64, cutoff::Int, nq::Int)
-    mpert = 3
-    np = 3
     side = pfac < 1 ? "left" : "right"
 
     # Cell types
@@ -331,6 +306,18 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     end
     x_nodes[1] = 0.0
     x_nodes[ixmax+1] = x1_packed
+
+    return _galerkin_workspace(x_nodes, etypes)
+end
+
+# Cells, local-to-global Hermite DOF maps, bandwidth and buffers for given nodes and cell types.
+# The stock layout ends in an EXT/RES pair; an all-CT_NONE layout is the plain Hermite grid
+# used with an external far-field condition (`_assemble_and_solve_point!`).
+function _galerkin_workspace(x_nodes::Vector{Float64}, etypes::Vector{CellType})
+    mpert = 3
+    np = 3
+    nx = length(etypes)
+    has_res = etypes[end] == CT_RES
 
     # Build cells and local-to-global mapping
     cells = Vector{GalerkinCell}(undef, nx)
@@ -385,13 +372,15 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     end
 
     # Set resonant cell mapping: shares emap with ext cell
-    ext_cell = cells[nx-1]
-    emap_vals = ext_cell.emap
-    res_map = reshape(copy(emap_vals), mpert, 1)
-    cells[nx] = GalerkinCell(CT_RES, x_nodes[nx], x_nodes[nx+1], x_nodes[nx+1],
-        -1, res_map, copy(emap_vals))
+    if has_res
+        ext_cell = cells[nx-1]
+        emap_vals = ext_cell.emap
+        res_map = reshape(copy(emap_vals), mpert, 1)
+        cells[nx] = GalerkinCell(CT_RES, x_nodes[nx], x_nodes[nx+1], x_nodes[nx+1],
+            -1, res_map, copy(emap_vals))
+    end
 
-    ndim = imap  # noexp → ndim = imap (only emap[1] ≤ ndim)
+    ndim = has_res ? imap : imap - 1  # noexp → ndim = imap (only emap[1] ≤ ndim); plain grid: Hermite DOFs only
 
     # Bandwidth
     kl = mpert * (np + 1) + 1 - 1  # resonant method with noexp; +1-1 kept for indexing agreement
@@ -427,7 +416,7 @@ end
 
 function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
     quad_nodes::Vector{Float64}, quad_weights::Vector{Float64},
-    params::GGJParameters, Q::ComplexF64)
+    params::GGJParameters, Q::ComplexF64; θ::Float64=0.0)
     np_cell = cell.np
     nq = length(quad_nodes)
     x0 = (cell.x_right + cell.x_left) / 2
@@ -437,7 +426,13 @@ function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
     @inbounds for iq in 1:nq
         x = x0 + dx * quad_nodes[iq]
         w = dx * quad_weights[iq]
-        Imat, Umat, Vmat = _physical_uv(params, Q, x)
+        if iszero(θ)
+            Imat, Umat, Vmat = _physical_uv(params, Q, x)
+        else
+            # Rotated contour x = e^{iθ}s: d/dx = e^{-iθ} d/ds; times e^{2iθ}, I is unchanged, V gains e^{iθ}, U gains e^{2iθ}.
+            Imat, U0, V0 = _physical_uv(params, Q, cis(θ) * x)
+            Umat, Vmat = cis(2θ) * U0, cis(θ) * V0
+        end
         pb, qb = _hermite(x, cell.x_left, cell.x_right)
 
         for ip in 0:np_cell, jp in 0:np_cell
@@ -475,13 +470,13 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
 
     if cell.etype == CT_EXT
         # Asymptotic basis at right boundary of ext cell
-        ua_bdy, dua_bdy = _physical_ua_dua(cache, cell.x_right)
+        ua_bdy, dua_bdy = physical_ua_dua(cache, cell.x_right)
         ep = np_cell + 1  # index of the extra DOF (1-based → ep+1 in array)
 
         @inbounds for iq in 1:nq
             x = x0c + dxc * quad_nodes[iq]
             w = dxc * quad_weights[iq]
-            uax, duax = _physical_ua_dua(cache, x)
+            uax, duax = physical_ua_dua(cache, x)
             Imat, Umat, Vmat = _physical_uv(params, Q, x)
             pb, qb = _hermite(x, cell.x_left, cell.x_right)
 
@@ -532,11 +527,11 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
             pb, qb = _hermite(x, cell.x_left, cell.x_right)
 
             if cell.etype == CT_EXT1
-                uax, duax = _physical_ua_dua(cache, x)
+                uax, duax = physical_ua_dua(cache, x)
                 ua_drv = uax[:, 2]
                 dua_drv = duax[:, 2]
             else # CT_EXT2
-                ua_bdy, dua_bdy = _physical_ua_dua(cache, cell.x_right)
+                ua_bdy, dua_bdy = physical_ua_dua(cache, cell.x_right)
                 ua_drv = ua_bdy[:, 2] * pb[3] + dua_bdy[:, 2] * pb[4]
                 dua_drv = ua_bdy[:, 2] * qb[3] + dua_bdy[:, 2] * qb[4]
             end
@@ -570,7 +565,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
     # u_res[1,2] = ∫ ua_1^T L ua_2 dx  (RHS/driving)
     # Weak form after IBP: (test') I (trial') + (test) V (trial') + (test) U (trial)
     function integrand_11(x)
-        ua, dua = _physical_ua_dua(cache, x)
+        ua, dua = physical_ua_dua(cache, x)
         Imat, Umat, Vmat = _physical_uv(params, Q, x)
         ua1 = ua[:, 1]
         dua1 = dua[:, 1]
@@ -578,7 +573,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
     end
 
     function integrand_12(x)
-        ua, dua = _physical_ua_dua(cache, x)
+        ua, dua = physical_ua_dua(cache, x)
         Imat, Umat, Vmat = _physical_uv(params, Q, x)
         dua1 = dua[:, 1]
         ua1 = ua[:, 1]
@@ -622,21 +617,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
             np_eff = cell.np
             fill!(cell_mat, 0)
             _gauss_quad!(cell_mat, cell, quad_nodes, quad_weights, params, Q)
-
-            # Assemble into global banded matrix (both parities use same base matrix)
-            for ip in 0:np_eff, ipert in 1:mpert
-                i = cell.map[ipert, ip+1]
-                if i > ws.ndim
-                    continue
-                end
-                for jp in 0:np_eff, jpert in 1:mpert
-                    j = cell.map[jpert, jp+1]
-                    if j > ws.ndim
-                        continue
-                    end
-                    ws.mat[offset+i-j, j, 1] += cell_mat[ipert, jpert, ip+1, jp+1]
-                end
-            end
+            _scatter_cell!(ws, cell, cell_mat, np_eff)
         end
 
         # Extension terms
@@ -693,7 +674,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     # here (not dropped) because the resonant cell carries the matching data.
     res_cell = ws.cells[ws.nx]
     x_lsode = res_cell.x_lsode
-    ua_xmax, dua_xmax = _physical_ua_dua(cache, x_lsode)
+    ua_xmax, dua_xmax = physical_ua_dua(cache, x_lsode)
     Imat_xmax, _, _ = _physical_uv(params, Q, x_lsode)
     emap1 = res_cell.emap[1]
     if emap1 <= ws.ndim
@@ -704,6 +685,34 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         surf_12 = transpose(ua_xmax[:, 1]) * Imat_xmax * dua_xmax[:, 2]
         ws.rhs[emap1, 1] += surf_12
     end
+
+    _parity_bcs_and_solve!(ws, params, Q, ws.ndim)
+end
+
+# Add one cell's Hermite block to the base (isol = 1) banded matrix; both parities share it.
+function _scatter_cell!(ws::GalerkinWorkspace, cell::GalerkinCell, cell_mat::Array{ComplexF64,4}, np_eff::Int)
+    mpert = 3
+    offset = ws.kl + ws.kl + 1
+    for ip in 0:np_eff, ipert in 1:mpert
+        i = cell.map[ipert, ip+1]
+        if i > ws.ndim
+            continue
+        end
+        for jp in 0:np_eff, jpert in 1:mpert
+            j = cell.map[jpert, jp+1]
+            if j > ws.ndim
+                continue
+            end
+            ws.mat[offset+i-j, j, 1] += cell_mat[ipert, jpert, ip+1, jp+1]
+        end
+    end
+end
+
+# Copy the base system to both parities, impose the x = 0 parity conditions, and solve the
+# leading n×n banded system of each parity by LAPACK banded LU.
+function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64, n::Int)
+    mpert = 3
+    offset = ws.kl + ws.kl + 1
 
     # Copy base matrix/rhs for both parities
     ws.mat[:, :, 2] .= ws.mat[:, :, 1]
@@ -738,7 +747,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
 
                 continue
             end
-            for jj in max(1, i-ws.kl):min(ws.ndim, i+ws.kl)
+            for jj in max(1, i - ws.kl):min(ws.ndim, i + ws.kl)
                 ws.mat[offset+i-jj, jj, isol] = 0
             end
         end
@@ -778,16 +787,93 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     end
 
     # Solve for each parity using LAPACK banded LU (gbtrf! + gbtrs!)
-    n = ws.ndim
     kl = ws.kl
     ku = kl
+    ab = @view ws.ab_buf[:, 1:n]
+    rb = @view ws.rhs_buf[1:n]
     for isol in 1:2
-        copyto!(ws.ab_buf, @view(ws.mat[:, :, isol]))
-        copyto!(ws.rhs_buf, @view(ws.rhs[:, isol]))
-        _, ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, n, ws.ab_buf)
-        LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, n, ws.ab_buf, ipiv, ws.rhs_buf)
-        ws.sol[:, isol] .= ws.rhs_buf
+        copyto!(ab, @view(ws.mat[:, 1:n, isol]))
+        copyto!(rb, @view(ws.rhs[1:n, isol]))
+        _, ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, n, ab)
+        LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, n, ab, ipiv, rb)
+        ws.sol[1:n, isol] .= rb
     end
+end
+
+"""
+    _assemble_and_solve_point!(ws, params, Q, θ, Us, Ub, E; nq=6) -> (Δraw, cexp)
+
+Hermite Galerkin solve on the all-`CT_NONE` grid of `ws` along the ray x = e^{iθ}s, with the
+far-field condition imposed at the last node instead of resonant/extension cells: its state is
+v = Us + Δ·Ub + c₁E₁ + c₂E₂, with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives. The last node's six
+DOFs are replaced by (Δ, c₁, c₂) and tested in the same three directions, as the extension cell
+does for the stock backend. Returns the raw Δ and decaying-pair coefficients per parity
+(isol = 1 odd, 2 even); `ws.sol` holds the full nodal solution afterwards.
+"""
+function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64,
+    θ::Float64, Us::Vector{ComplexF64}, Ub::Vector{ComplexF64}, E::Matrix{ComplexF64}; nq::Int=6)
+    quad_nodes, quad_weights = gausslobatto(nq + 1)
+    offset = ws.kl + ws.kl + 1
+    N = ws.nx
+    fill!(ws.mat, 0)
+    fill!(ws.rhs, 0)
+    cell_mat = ws.cell_mat_buf
+    for ix in 1:(N-1)
+        _gauss_quad!(cell_mat, ws.cells[ix], quad_nodes, quad_weights, params, Q; θ=θ)
+        _scatter_cell!(ws, ws.cells[ix], cell_mat, ws.cells[ix].np)
+    end
+
+    # Replaces GWP2016 ext/res cells: the far-field state is imposed strongly at the last node.
+    # Last cell as a dense 12×12 block, local DOF index 3·ip + ipert (ip = 0..3 Hermite slots).
+    cell = ws.cells[N]
+    _gauss_quad!(cell_mat, cell, quad_nodes, quad_weights, params, Q; θ=θ)
+    Kc = zeros(ComplexF64, 12, 12)
+    for ip in 0:3, jp in 0:3, ipert in 1:3, jpert in 1:3
+        Kc[3ip+ipert, 3jp+jpert] = cell_mat[ipert, jpert, ip+1, jp+1]
+    end
+    # IBP boundary term at the far end, mirroring the x = 0 term of `_parity_bcs_and_solve!` (I is x-independent).
+    Imat, _, _ = _physical_uv(params, Q, 0.0)
+    for ipert in 1:3, jpert in 1:3
+        Kc[6+ipert, 9+jpert] -= Imat[ipert, jpert]
+    end
+
+    # Far-field trace in DOF units (values, s-derivatives = e^{iθ}·x-derivatives); Ub normalized.
+    dof(v) = ComplexF64[v[1], v[2], v[3], cis(θ)*v[4], cis(θ)*v[5], cis(θ)*v[6]]
+    βb = norm(Ub)
+    Bd = hcat(dof(Ub) ./ βb, dof(E[:, 1]), dof(E[:, 2]))
+    usd = dof(Us)
+    # Tl maps the 9 reduced unknowns (left node's 6 DOFs, Δ̃, c₁, c₂) to the cell's 12 Hermite DOFs; test space = Tlᵀ.
+    Tl = zeros(ComplexF64, 12, 9)
+    for k in 1:6
+        Tl[k, k] = 1
+    end
+    Tl[7:12, 7:9] .= Bd
+    K9 = transpose(Tl) * Kc * Tl
+    r9 = -(transpose(Tl) * (Kc[:, 7:12] * usd))
+    # (Δ̃, c₁, c₂) occupy the last node's value slots; its derivative slots drop out of the reduced system.
+    yslots = cell.map[:, 3]
+    glob = vcat(cell.map[:, 1], cell.map[:, 2], yslots)
+    for a in 1:9
+        i = glob[a]
+        ws.rhs[i, 1] += r9[a]
+        for b in 1:9
+            j = glob[b]
+            ws.mat[offset+i-j, j, 1] += K9[a, b]
+        end
+    end
+
+    _parity_bcs_and_solve!(ws, params, Q, yslots[end])
+
+    Δraw = MVector{2,ComplexF64}(0, 0)
+    cexp = zeros(MMatrix{2,2,ComplexF64})
+    for isol in 1:2
+        y = ws.sol[yslots, isol]
+        Δraw[isol] = y[1] / βb
+        cexp[1, isol] = y[2]
+        cexp[2, isol] = y[3]
+        ws.sol[vcat(cell.map[:, 3], cell.map[:, 4]), isol] .= usd .+ Bd * y   # reconstruct the last node for profiles
+    end
+    return SVector(Δraw), SMatrix(cexp)
 end
 
 # -----------------------------------------------------------------------

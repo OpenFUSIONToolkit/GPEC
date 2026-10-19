@@ -52,10 +52,9 @@ const GGJ = IL.GGJ
     end
 end
 
-@testset "InnerLayer GGJ :ray backend (rotated-contour collocation)" begin
-    # The method was validated before landing here: manufactured Δ* to 3e-14,
-    # Fortran rmatch pins, 96-equilibrium robustness scans to Q = 500i. These
-    # tests pin the implementation, not the method.
+@testset "InnerLayer GGJ :ray backend (rotated contour, Hermite BVP)" begin
+    # These tests pin the implementation; the method is validated against an independent
+    # strict reference over the Q plane outside the test suite.
     p = IL.glasser_wang_2020_eq55()
 
     @testset "agrees with :galerkin at the paper point Q = 0.1234" begin
@@ -92,13 +91,12 @@ end
 @testset "InnerLayer GGJ :ray internal machinery" begin
     p = IL.q4_surface_benchmark()
 
-    @testset "cheblobatto nodes and differentiation matrix" begin
-        t, D = GGJ.cheblobatto(8)
-        @test length(t) == 9
-        @test issorted(t)                         # ascending, per the reflected convention
-        @test t[1] ≈ -1 && t[end] ≈ 1
-        @test D * ones(9) ≈ zeros(9) atol = 1e-10  # d/dt of a constant is zero
-        @test D * t ≈ ones(9) atol = 1e-10         # d/dt of the linear function is one
+    @testset "Hermite BVP resolution floor at small |Q|" begin
+        # At |Q| ≪ 1 the local WKB rates are small; refining the grid (cfl/8, 2× min_cells) must not move Δ.
+        Q = 0.01 + 0.0im
+        r = IL.solve_ray(p, Q)
+        r2 = IL.solve_ray(p, Q; cfl=0.025, min_cells=2048)
+        @test maximum(abs.(r2.Δraw .- r.Δraw) ./ abs.(r.Δraw)) < 1e-6
     end
 
     @testset "ode_matrix: ordinary point and type-generic build" begin

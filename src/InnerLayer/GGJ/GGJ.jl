@@ -6,9 +6,10 @@
 #
 #   - `:shooting`  – stable backward shoot from X_max → 0;
 #                    numerically stable only for |Q| ≪ 1, should not be used
-#   - `:galerkin`  – Hermite-cubic finite element method;
-#                    real-axis method, degrades for |Q| ≳ 1 off the real axis
-#   - `:ray`       – rotated-contour spectral-element collocation (Ray.jl);
+#   - `:galerkin`  – Hermite-cubic finite element method with resonant/extension
+#                    matching cells (GWP2016 Sec. III); degrades for |Q| ≳ 1
+#   - `:ray`       – rotated-contour solve (Ray.jl): far-field series + inward march,
+#                    and the same Hermite assembly with a point far-field condition;
 #                    robust to |Q| ~ 500 on/near the imaginary axis
 #
 # They return the parity-projected matching data
@@ -47,10 +48,10 @@ import ..solve_inner, ..solve_inner_profile
     GGJModel(; solver=:ray, options...)
 
 Glasser–Greene–Johnson resistive inner-layer model. `S` selects the solver
-backend: `:ray` (default; robust at large |Q| on/near the imaginary axis),
-`:galerkin` (real-axis Hermite FEM; degrades for |Q| ≳ 1), or `:shooting`
-(|Q| ≪ 1 only). Backend keywords given at construction, e.g.
-`GGJModel(; solver=:galerkin, nx=1280)`, apply to every solve.
+backend: `:ray` (default; rotated contour with an inward-marched far-field condition,
+robust at large |Q|), `:galerkin` (real-axis Hermite FEM with resonant/extension matching
+cells; degrades for |Q| ≳ 1), or `:shooting` (|Q| ≪ 1 only). Backend keywords given at
+construction, e.g. `GGJModel(; solver=:galerkin, nx=1280)`, apply to every solve.
 
 ## Fields
 
@@ -76,7 +77,6 @@ end
 
 include("GGJParameters.jl")
 include("InnerAsymptotics.jl")
-include("RayAsymptotics.jl")
 include("Reference.jl")
 include("Shooting.jl")
 include("Galerkin.jl")
