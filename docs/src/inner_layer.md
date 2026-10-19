@@ -194,10 +194,20 @@ trusted radius ``S`` can be far outside the BVP domain ``s_m``, so the
 power-pair data are transported inward from ``S`` to ``s_m`` by an **L-stable
 2-stage Radau IIA march** in the quotient modulo the decaying exponential pair —
 the subspace in which ``\Delta`` is defined (the `GGJ` internal
-`march_boundary`). An L-stable implicit method is essential: the decaying pair
+`march_boundary`). An implicit method is essential: the decaying pair
 grows under backward integration, so any explicit marcher is stability-limited
-to ``O(\rho S^2)`` steps, while the Radau march *damps* the unresolvable
-backward-growing directions instead of amplifying them.
+to ``O(\rho S^2)`` steps. The Radau IIA stability function decays as ``2/z`` at
+large ``|z|``, so steps that leave the exponential directions unresolved *damp*
+them instead of amplifying them, while the slowly varying power pair stays fully
+resolved; ``\Delta`` does not depend on the decaying-pair content. Damped steps are
+only taken where every growing mode has ``z > 8``, clear of the method's
+amplifying window ``0 < z < 6``; nearer ``s_m`` the march resolves the growing
+directions and periodically projects out the decaying content.
+
+The march decides where to switch to resolved steps from the local rates. On the
+real axis with imaginary ``Q`` the pseudo-resonance is a turning point where one
+rate vanishes, the switch lands on it, and the decaying directions cannot be
+identified there; the default ``\theta = \arg(Q)/4`` keeps it off the contour.
 
 The damped-zone march runs in `Complex{Double64}` extended precision. At large
 ``S`` the near-parallel power-pair geometry amplifies the structured backward
@@ -209,6 +219,15 @@ The result is a seamless numeric↔asymptotic solution: the BVP solution
 on ``[0, s_m]`` and the analytic ``u_\mathrm{small} + \Delta\,u_\mathrm{big}``
 representation for ``s \ge S`` share the same power-law tail — the overlap the
 outer-region matching relies on.
+
+For matching, `solve_inner_profile` returns ``\Delta`` and the layer-center fields
+``\Psi(0), \Xi(0)`` from the single rotated solve; ``x = 0`` lies on every contour,
+so these are the real-axis values and the penetrated field needs nothing more.
+Fields across the layer on the real ``\psi`` axis are opt-in
+(`GGJModel(; real_profiles=true)`): they come from an extra ``\theta = 0`` solve,
+whose ``\Delta`` is compared against the rotated one (`certΔ`, warned when they
+disagree). At large ``|Q|`` near the imaginary axis that real-axis solve can fail
+for the turning-point reason above, and the warning says so.
 
 ![Inner-layer fields Ψ, Ξ, Υ on the rotated ray for the q=4 surface at Q = 2i. The BVP solution (solid) joins the asymptotic representation (dashed) seamlessly at the match point S = s_m.](figures/inner_layer/solution_profiles.png)
 

@@ -131,6 +131,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₁, even
         inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₂, odd
         inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
+        profiles = true
         for i in 1:msing
             params = ggj_parameters(sings[i], equil; eta=prob.eta[i], rho=prob.rho[i],
                 gamma=prob.gamma, ising=i)
@@ -146,6 +147,11 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             scale = -2π * chi1 * im * nn * sings[i].q1 * inner.dψdx
             pen[i, 1] = scale * profΨ[1, 1] * resc   # X = 0, parity 1
             pen[i, 2] = scale * profΨ[1, 2] * resc   # parity 2 (Ψ(0) = 0)
+            # A backend returning only layer-center values (real-ψ profiles not requested) skips the inner profiles.
+            if length(xg) == 1
+                profiles = false
+                continue
+            end
             xvar = xg .* inner.dψdx                  # X → ψ distance
             inner_psi[i] = vcat(reverse(sings[i].psifac .- xvar), sings[i].psifac .+ xvar)
             inner_odd[i] = resc .* vcat(reverse(.-profΞ[:, 1]), profΞ[:, 1])
@@ -163,8 +169,14 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         end
 
         # Matched inner ξ_ψ and b^ψ per coil: odd parity × cin[2i], even × cin[2i-1] (match.f intotsol).
-        inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
-        inner_b = [inner_bodd[i] * transpose(cin[2i, :]) .+ inner_beven[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+        if profiles
+            inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+            inner_b = [inner_bodd[i] * transpose(cin[2i, :]) .+ inner_beven[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+        else
+            inner_psi = Vector{Float64}[]
+            inner_xi = Matrix{ComplexF64}[]
+            inner_b = Matrix{ComplexF64}[]
+        end
     end
 
     reconnected_flux = Matrix{ComplexF64}(dp.coil .+ transpose(dp.raw) * cout)

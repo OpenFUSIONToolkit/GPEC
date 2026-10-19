@@ -148,7 +148,7 @@ end
 @testset "solve_inner_profile interface (matching-driver contract)" begin
     p = IL.glasser_wang_2020_eq55()
     γ = 0.1234 * GGJ.q0(p)
-    for model in (IL.GGJModel(; solver=:ray), IL.GGJModel(; solver=:galerkin))
+    for model in (IL.GGJModel(; solver=:ray, real_profiles=true), IL.GGJModel(; solver=:galerkin))
         prof = IL.solve_inner_profile(model, p, γ)
         # Δ agrees with the plain matching solve of the same backend (identical solve path).
         # prof.Δ stays the positional pair (Δ₁, Δ₂) = (interchange, tearing) that feeds deltar.
@@ -167,6 +167,17 @@ end
         @test prof.rescale ≈ (p.v1 / GGJ.x0(p))^(0.5 + GGJ.p1(p))
     end
     # Ray backend certificate: at real Q the optimal contour is θ = 0, so the two solves coincide.
-    ray = IL.solve_inner_profile(IL.GGJModel(; solver=:ray), p, γ)
+    ray = IL.solve_inner_profile(IL.GGJModel(; solver=:ray, real_profiles=true), p, γ)
     @test ray.certΔ < 1e-12
+
+    # Default :ray returns only the layer-center fields of the rotated solve; x = 0 lies on every
+    # contour, so they match the θ = 0 real-axis profile at its first point.
+    γi = 5.0im * GGJ.q0(p)
+    c = IL.solve_inner_profile(IL.GGJModel(; solver=:ray), p, γi)
+    full = IL.solve_inner_profile(IL.GGJModel(; solver=:ray, real_profiles=true), p, γi)
+    @test c.x == [0.0] && size(c.Ψ) == (1, 2) && isnan(c.certΔ)
+    @test c.Δ == full.Δ
+    @test c.Ψ[1, 1] ≈ full.Ψ[1, 1] rtol = 1e-6
+    @test c.Ξ[1, 2] ≈ full.Ξ[1, 2] rtol = 1e-6
+    @test full.certΔ < 1e-5
 end

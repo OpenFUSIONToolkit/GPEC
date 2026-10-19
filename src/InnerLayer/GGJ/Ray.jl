@@ -134,17 +134,18 @@ end
 #     projected/continuous-QR variants, whose unprojected stage points
 #     reintroduce the transverse stiffness — is stability-limited to
 #     h ≲ 3/(ρs), i.e. O(ρS²) steps: hopeless at S ~ 10⁵.
-#   - The system is LINEAR, so we use a stiffly-accurate L-STABLE implicit
-#     method (2-stage Radau IIA, order 3; one 12×12 solve per step). For
-#     resolved slow content it is 3rd-order accurate; for the unresolvable
-#     backward-growing exponential directions |R(z)| < 1 at large |z| —
-#     the method DAMPS what it cannot resolve instead of amplifying it.
-#     That is normally an accuracy vice; here it is exactly the required
-#     behavior, because Δ is defined modulo the decaying pair.
+#   - The system is LINEAR, so we use an implicit method (2-stage Radau IIA,
+#     order 3; one 12×12 solve per step) with stability function
+#     R(z) = 2(3+z)/(z² − 4z + 6) → 2/z as |z| → ∞ in any direction. Resolved
+#     slow content is integrated to 3rd order; under-resolved exponential
+#     directions are DAMPED whatever their sign. That is normally an accuracy
+#     vice; here it is exactly the required behavior, because Δ is defined
+#     modulo the decaying pair. For a backward-growing mode |R| > 1 on
+#     0 < z < 6 (poles at z = 2 ± i√2), so damped steps need z > 8.
 #   - In the partially-resolved band (|z| = ρs·h ≲ 10) genuine backward
 #     growth of rounding-injected decaying-pair content still occurs, so W
-#     is PURGED against a locally-extracted decaying frame every
-#     Φ = ∫ρs ds ≈ 8 e-folds. Purging only ever removes span{E} content —
+#     is PURGED against the decaying frame every `purge_budget` e-folds of
+#     ∫g_max ds. Purging only ever removes span{E} content —
 #     legitimate by the definition of Δ — so the transported coefficients
 #     of u_small/u_big are exact up to integrator tolerance.
 
@@ -279,9 +280,9 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     #
     #   damped zone (g_min·c·s > 8 for all growers): h = -c·s. All growing
     #     content — including the O(smax_tol) fast-direction contamination of
-    #     the series data — sits at z ≫ 1 where L-stable Radau DAMPS it
-    #     (|R| ~ 6/z²). Slow-mode global error ≈ 10²c³ → c = (rtol/100)^{1/3};
-    #     step count ~ ln(S/s_m)/c independent of S.
+    #     the series data — sits at z > 8 where Radau DAMPS it
+    #     (|R| ≈ 2/z). Slow-mode global error ≈ 10²c³ → c = (rtol/100)^{1/3};
+    #     step count ~ ln(S/s_m)/c, growing only logarithmically with S.
     #
     #   resolved band (some grower at z ≲ 8): genuine backward growth must be
     #     tracked and removed. h = -min(c·s, 0.3/g_max) keeps z ≤ 0.3 so the
@@ -291,6 +292,11 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     #     e^Φ·δ < 0.2 and contamination stays at the rounding floor). The
     #     frame F is carried CONTINUOUSLY with the same Radau steps + QR
     #     (backward-attracting ⇒ self-correcting), so no re-extraction cost.
+    #
+    #   The band is entered where the slowest grower's rate drops. On the real
+    #   axis with imaginary Q that is the Υ-family turning point x² = −Q²(G+KF),
+    #   where the decaying frame cannot be identified and the march fails; the
+    #   default θ = arg(Q)/4 keeps the turning point off the contour.
     c = clamp(cbrt(rtol / 100.0), 2e-5, 2e-3)
 
     # --- Phase 1: damped zone, W in Double64 (see radau_step_d comment). ---
@@ -552,33 +558,36 @@ Rotated-ray backend: converts γ via `inner_Q`, forwards keywords to
 `solve_ray` pair is ordered `(Δ₁, Δ₂) = (interchange, tearing)`, so the two
 channels are swapped into the named fields of [`InnerLayerResponse`](@ref).
 Preferred for |Q| ≳ 1 and near the imaginary axis; use `solve_ray` directly
-when the full [`RaySolveResult`](@ref) is wanted.
+when the full [`RaySolveResult`](@ref) is wanted. `real_profiles` is a profile-only model
+option (see `solve_inner_profile`) and is ignored here.
 """
-function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number; kwargs...)
+function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number; real_profiles::Bool=false, kwargs...)
     res = solve_ray(params, inner_Q(params, γ); kwargs...)
     return InnerLayerResponse(res.Δ[2], res.Δ[1])
 end
 
 """
     solve_inner_profile(::GGJModel{:ray}, params::GGJParameters, γ::Number;
-                        npc=8, certify_rtol=1e-3, kwargs...)
+                        real_profiles=false, npc=8, certify_rtol=1e-3, kwargs...)
         -> (; Δ, x, Ψ, Ξ, dψdx, rescale, certΔ)
 
-Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. The
-certified `Δ` comes from the optimal-contour solve at θ = arg(Q)/4 (robust for
-|Q| ≳ 1, where real-axis methods drift); the profiles come from a θ = 0
-re-solve on the real axis, valid at physical (RPEC) |Q| since the on-axis
-pseudo-resonance is a regular point of the BVP. The
-θ=0-vs-optimal-θ Δ agreement doubles as a runtime certificate (two maximally
-different contours through the same entire solutions): the relative mismatch
-is returned as `certΔ` and warns above `certify_rtol`. `npc` sets the profile
-points per mesh cell; extra keywords forward to both [`solve_ray`](@ref) calls
-(θ is fixed by the method — do not pass it).
+Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. `Δ` and the
+layer-center fields come from the solve at θ = arg(Q)/4; x = 0 lies on every contour, so
+Ψ(0), Ξ(0) there are the real-axis values. By default only those center values are
+returned (`x = [0.0]`, one-row `Ψ`, `Ξ`; `certΔ = NaN`), which is all the penetrated field
+needs. With `real_profiles = true` the fields across the layer come from an extra θ = 0
+re-solve on the real axis, and the θ = 0 vs θ = arg(Q)/4 Δ agreement is returned as `certΔ`
+(a runtime certificate; warns above `certify_rtol`). `npc` sets the profile points per mesh
+cell; extra keywords forward to [`solve_ray`](@ref) (θ is fixed by the method — do not pass it).
 """
 function solve_inner_profile(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
-    npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
+    real_profiles::Bool=false, npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
     Q = inner_Q(params, γ)
-    rr = solve_ray(params, Q; kwargs...)             # certified Δ (optimal θ)
+    rr = solve_ray(params, Q; kwargs...)             # Δ and layer-center fields (optimal θ)
+    if !real_profiles
+        c = solution_profile(rr; npc=1)              # first point is s = 0
+        return (; Δ=rr.Δ, x=[0.0], Ψ=c.Ψ[1:1, :], Ξ=c.Ξ[1:1, :], _profile_conversions(params)..., certΔ=NaN)
+    end
     r0 = solve_ray(params, Q; θ=0.0, kwargs...)      # real-axis profile solve
     certΔ = abs(r0.Δ[1] - rr.Δ[1]) / max(abs(rr.Δ[1]), 1e-300)
     certΔ > certify_rtol && @warn "GGJ ray: θ=0 profile solve disagrees with certified Δ" ising = params.ising Q certΔ

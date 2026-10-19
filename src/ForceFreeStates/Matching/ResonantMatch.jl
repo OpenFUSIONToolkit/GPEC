@@ -16,7 +16,8 @@ fields are empty when the solve kept no Galerkin basis; the inner fields are emp
   - `bpen`: `(msing, ncoil)` penetrated resonant field at each layer center.
   - `reconnected_flux`: `(2msing, ncoil)` `Δ_coil + Δ_outᵀ·cout`.
   - `xi`, `xi_deriv`: `(mpert, ngrid, ncoil)` matched outer ξ and ξ′, one column per coil.
-  - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it.
+  - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it; empty unless the
+    inner model returns real-ψ profiles (`GGJModel(; solver=:galerkin)` or `GGJModel(; real_profiles=true)`).
   - `inner_params`: per-surface `GGJParameters` used.
   - `model`: the inner-layer model solved, with its backend options.
 """
