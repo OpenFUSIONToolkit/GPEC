@@ -7,7 +7,7 @@
 """
     SLAYERResult
 
-Output of `run_slayer`. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
+Output of the tearing solve. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
 full diagnostic detail (valid roots, poles, filtered roots, contours) for
 downstream inspection and HDF5 output.
 
@@ -15,6 +15,7 @@ downstream inspection and HDF5 output.
 
   - `enabled`             -- `true` only when the analysis actually ran
   - `control`             -- the `SLAYERControl` used (frozen snapshot)
+  - `model`               -- the inner-layer model solved; `nothing` when the analysis did not run
   - `params`              -- `Vector{SLAYERParameters}`, one per surface
   - `rational_psi`, `rational_q` -- normalized poloidal flux ψ_N and safety
     factor q of each analyzed surface, aligned with `params`. Empty when the
@@ -49,6 +50,7 @@ downstream inspection and HDF5 output.
 struct SLAYERResult
     enabled::Bool
     control::SLAYERControl
+    model::Union{Nothing,InnerLayer.InnerLayerModel}
     params::AbstractVector{<:InnerLayerParameters}
     rational_psi::Vector{Float64}
     rational_q::Vector{Float64}
@@ -66,7 +68,7 @@ end
 
 # Empty result (enabled=false path)
 function empty_slayer_result(control::SLAYERControl)
-    return SLAYERResult(false, control,
+    return SLAYERResult(false, control, nothing,
         SLAYERParameters[],
         Float64[], Float64[],
         zeros(ComplexF64, 0, 0),

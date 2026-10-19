@@ -16,14 +16,14 @@ constructor.
 # Core toggles
 
   - `enabled`       -- run the analysis at all (default `false`)
-  - `inner_model`   -- `:slayer_fitzpatrick` (default), `:ggj_shooting`, or
-    `:ggj_galerkin`
+  - `inner_model`   -- `:slayer_fitzpatrick` (default), `:ggj_ray`,
+    `:ggj_shooting`, or `:ggj_galerkin`
   - `scan_mode`     -- `:amr` (default) or `:brute_force`
   - `coupling_mode` -- `:uncoupled` (default, per-surface) or `:coupled`
     (multi-surface determinant)
-  - `dc_type`       -- critical-Δ offset selector, one of `:none`, `:lar`,
-    `:rfitzp`, `:toroidal` (χ_‖-matching critical-Δ formulas,
-    Connor-Hastie-Helander 2015)
+  - `D_c_type`      -- critical-Δ offset selector, one of `:none`, `:lar`,
+    `:fitzpatrick`, `:toroidal` (χ_‖-matching critical-Δ formulas,
+    Connor, Ham, Hastie & Liu 2015)
   - `msing_max`     -- number of surfaces to include in the coupled
     determinant (default 3; capped at `length(sings)` at runtime)
 
@@ -37,16 +37,22 @@ constructor.
     like the kinetic file's `omega_E`, but given as Ω_E/2π in kHz rather than the file's rad/s.
     Surfaces not listed (all of them by default) take Ω_E from the kinetic file; a key matching
     no analysed surface is an error. Rotation enters only the coupled determinant
-  - `mu_i`     -- ion mass in proton-mass units (default 2.0 for D)
-  - `zeff`     -- effective charge
+  - `ion_mass` -- ion mass in proton-mass units (default 2.0 for D)
+  - `zeff`     -- fallback effective charge. `Z_eff(ψ)` is taken, in order of precedence, from
+    the kinetic file's own `zeff` profile; else derived from the file's `n_i/n_e` with the
+    `impurity_charge`; else this scalar at every surface. A dataset that is absent or
+    all-zero counts as not provided
+  - `impurity_charge` -- charge of the single impurity species that closes quasi-neutrality when
+    `Z_eff(ψ)` is derived from `n_i/n_e` (default 6.0, carbon); the main ion has charge 1.
+    Unused when the file supplies a `zeff` profile
   - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
     diffusivity [m²/s], used only when the kinetic file carries no usable
     `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
     file's χ⊥(ψ)/χ_φ(ψ) take precedence
-  - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs. `nothing` (default)
-    auto-derives them from the equilibrium: `dr_val` from the resistive
-    interchange index `D_R = E + F + H²` at each surface, `dgeo_val` from the
-    toroidal geometric factor (required only by `dc_type=:toroidal`). Supply a
+  - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
+    auto-derives them from the equilibrium: `D_R` from the resistive
+    interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
+    toroidal geometric factor (required only by `D_c_type=:toroidal`). Supply a
     scalar only to override the auto-derivation; an explicit `0.0` disables the
     critical-Δ offset (Δ_crit ≡ 0)
   - `theta_sample` -- poloidal angle at which to sample minor radius
@@ -106,16 +112,17 @@ there is one consistent interface for resistive and kinetic profiles.
     inner_model::Symbol = :slayer_fitzpatrick
     scan_mode::Symbol = :amr
     coupling_mode::Symbol = :uncoupled
-    dc_type::Symbol = :none
+    D_c_type::Symbol = :none
     msing_max::Int = 3
 
     bt::Union{Float64,Nothing} = nothing
-    mu_i::Float64 = 2.0
+    ion_mass::Float64 = 2.0
     zeff::Float64 = 1.0
+    impurity_charge::Float64 = 6.0
     chi_perp::Float64 = 1.0
     chi_tor::Float64 = 1.0
-    dr_val::Union{Float64,Nothing} = nothing
-    dgeo_val::Union{Float64,Nothing} = nothing
+    D_R::Union{Float64,Nothing} = nothing
+    D_geo::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0
     resistivity_model::Symbol = :sauter
     lnLambda_form::Symbol = :nrl
@@ -164,10 +171,10 @@ there is one consistent interface for resistive and kinetic profiles.
     store_scan::Bool = false
 end
 
-const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
+const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_ray, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
-const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
+const _VALID_D_C_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
@@ -181,15 +188,17 @@ function validate(ctrl::SLAYERControl)
     ctrl.coupling_mode in _VALID_COUPLING_MODES ||
         throw(ArgumentError("SLAYERControl: coupling_mode=$(ctrl.coupling_mode) " *
                             "not in $(_VALID_COUPLING_MODES)"))
-    ctrl.dc_type in _VALID_DC_TYPES ||
-        throw(ArgumentError("SLAYERControl: dc_type=$(ctrl.dc_type) " *
-                            "not in $(_VALID_DC_TYPES)"))
+    ctrl.D_c_type in _VALID_D_C_TYPES ||
+        throw(ArgumentError("SLAYERControl: D_c_type=$(ctrl.D_c_type) " *
+                            "not in $(_VALID_D_C_TYPES)"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
         throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
                             "not in $(_VALID_RESISTIVITY_MODELS)"))
     ctrl.lnLambda_form in _VALID_LNLAMBDA_FORMS ||
         throw(ArgumentError("SLAYERControl: lnLambda_form=$(ctrl.lnLambda_form) " *
                             "not in $(_VALID_LNLAMBDA_FORMS)"))
+    ctrl.impurity_charge > 1 ||
+        throw(ArgumentError("SLAYERControl: impurity_charge=$(ctrl.impurity_charge) must exceed the main-ion charge 1"))
     ctrl.msing_max >= 1 ||
         throw(ArgumentError("SLAYERControl: msing_max=$(ctrl.msing_max) must be ≥ 1"))
     all(isfinite, values(ctrl.omega_E_kHz)) ||
@@ -251,12 +260,12 @@ function slayer_control_from_toml(section::AbstractDict)
     kwargs = Dict{Symbol,Any}()
     for (k, v) in flat
         sym = Symbol(k)
-        if sym in (:inner_model, :scan_mode, :coupling_mode, :dc_type,
+        if sym in (:inner_model, :scan_mode, :coupling_mode, :D_c_type,
             :resistivity_model, :lnLambda_form)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym in (:bt, :dr_val, :dgeo_val)
+        elseif sym in (:bt, :D_R, :D_geo)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :omega_E_kHz

@@ -95,7 +95,7 @@ function compute_calculated_kinetic_matrices(
     # ipsi row of kw_flat/kt_flat. Per-thread copies of kf_intr provide isolated
     # tpsi_* θ-grid buffers and interpolant hint refs; geometric/profile splines
     # are read-only and safely shared through deepcopy semantics.
-    nl = kf_ctrl.nl
+    nl = kf_ctrl.bounce_harmonic_max
     nthreads = Threads.maxthreadid()
     thread_intrs = [deepcopy(kf_intr) for _ in 1:nthreads]
     thread_full_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
@@ -108,7 +108,7 @@ function compute_calculated_kinetic_matrices(
     # from kf_ctrl. The kinetic W/torque matrices are additive over species, so we
     # accumulate (+=) each species' block-diagonal contribution.
     splist = species === nothing ?
-             [Equilibrium.ResolvedNTVSpecies(kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.electron, "single", kinetic_profiles)] : species
+             [Equilibrium.ResolvedNTVSpecies(kf_ctrl.ion_charge, kf_ctrl.ion_mass, kf_ctrl.electron, "single", kinetic_profiles)] : species
 
     for sp in splist
         # Hoisted per-species scalars: the closure then captures concrete values, not a
@@ -133,10 +133,10 @@ function compute_calculated_kinetic_matrices(
                     fill!(block_t, 0)
                     compute_kinetic_matrices_at_psi!(
                         block_w, block_t, psi, n, ell,
-                        z_s, m_s, kf_ctrl.wdfac, kf_ctrl.divxfac,
+                        z_s, m_s, kf_ctrl.magnetic_drift_factor, kf_ctrl.divxi_factor,
                         el_s, equil, intr_t, prof_s;
-                        nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
-                        atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda,
+                        nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.collisionality_factor,
+                        atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=kf_ctrl.rtol_pitch,
                         atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
                         nested_tolerance_margin=kf_ctrl.nested_tolerance_margin
                     )
