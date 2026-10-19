@@ -1,9 +1,7 @@
 # Shooting.jl
 #
-# NOTE: This solver is NOT used in production and is not to be used. It was a
-# porting exercise retained for reference only. The Galerkin solver
-# (Galerkin.jl) is the sole supported GGJ inner-layer solver; shooting underflows
-# at large |γ| and shares none of the production matching path. Do not call it.
+# Valid only for |Q| ≪ 1 (it underflows at large |γ|); the default GGJ backend is `:ray`
+# (Ray.jl). Kept as a cheap model for tests and backend comparisons.
 #
 # Stable backward shooting solver for the GGJ inner-layer model.
 # Integrates the 4×4 origin-diagonalized
@@ -12,10 +10,9 @@
 # Frobenius basis at the origin and reads off the parity-projected
 # matching data.
 #
-# This solves the same inner-region equations as the production Galerkin path
+# This solves the same inner-region equations as the Galerkin-based backends
 # (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) but by a different numerical method: a
-# backward shoot in the origin-diagonalized basis rather than the matched
-# singular-Galerkin weak form. The 4 origin Frobenius exponents are
+# backward shoot in the origin-diagonalized basis rather than a weak form. The 4 origin Frobenius exponents are
 # `al0 = (p1, 1/2, −p1, −1/2)` where `p1 = √(−D_I)` (Mercier-stable required;
 # D_I = E+F+H−1/4, GWP2016 Eq. A9). The two "small" (singular) modes are
 # columns 3 and 4 (`x^{−p1}` and `x^{−1/2}`); the two "large" (smooth) modes

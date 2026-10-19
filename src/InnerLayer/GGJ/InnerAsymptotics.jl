@@ -20,12 +20,6 @@
 using LinearAlgebra
 using StaticArrays
 
-# Index ranges that partition the 6-component first-order system into the
-# 2-dimensional algebraic ("small") subspace and the 4-dimensional
-# exponential ("large") subspace.
-const _R1 = SVector(1, 2)
-const _R2 = SVector(3, 4, 5, 6)
-
 """
     InnerAsymptoticsCache
 
@@ -67,9 +61,6 @@ struct InnerAsymptoticsCache
     Y::Vector{SMatrix{2,2,ComplexF64,4}}     # k = 0..kmax
     Z::Vector{SMatrix{2,2,ComplexF64,4}}     # k = 0..kmax
 end
-
-# Helpers for cache indexing using physical (zero-based) order k.
-@inline _at(v::Vector, k::Int) = v[k+1]
 
 # -----------------------------------------------------------------------
 # Build T, Tinv, A_0..A_2, J_0..J_2. The coefficient matrices A₀,A₁,A₂ are
@@ -353,7 +344,7 @@ end
 
 Construct the `inps` Wasow asymptotic basis (GW2020 Eqs. 7–53), truncating
 each power series at order `kmax`. Evaluate with [`evaluate_asymptotics`](@ref);
-pick a cutoff with [`pick_xmax`](@ref).
+pick a matching radius with [`pick_smax`](@ref).
 """
 function build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8)
     p1v = p1(params)
@@ -643,45 +634,11 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Number)
 end
 
 """
-    pick_xmax(params, Q; eps=1e-7, kmax=8, xlogmin=-1.0, xlogmax=4.0, dxlog=0.01) -> (x_max, cache)
-
-Sweep `x` log-uniformly upward from `10^xlogmin` and return the smallest
-`x` at which `max(asymptotic_residual(cache, x)) < eps` — the cutoff `x_max`
-where the GW2020 Eq. (54) convergence measure drops below tolerance
-(GW2020 Sec. III, Fig. 3). Also returns the `InnerAsymptoticsCache` it built
-so callers can reuse it.
-
-Throws an `ErrorException` if no `x` in the sweep range achieves the
-target tolerance.
-"""
-function pick_xmax(params::GGJParameters, Q::ComplexF64;
-    eps::Float64=1e-7, kmax::Int=8,
-    xlogmin::Float64=-1.0, xlogmax::Float64=4.0,
-    dxlog::Float64=0.01)
-    cache = build_asymptotics(params, Q; kmax=kmax)
-    dxfac = 10.0^dxlog
-    xlog = xlogmin
-    x = 10.0^xlog
-    while xlog <= xlogmax
-        delta = asymptotic_residual(cache, x)
-        if maximum(delta) < eps
-            return x, cache
-        end
-        xlog += dxlog
-        x *= dxfac
-    end
-    error("pick_xmax: failed to reach residual < $eps for x in [10^$xlogmin, 10^$xlogmax]")
-end
-
-pick_xmax(params::GGJParameters, Q::Number; kwargs...) =
-    pick_xmax(params, ComplexF64(Q); kwargs...)
-
-"""
     pick_smax(params, Q; θ=angle(Q)/4, eps=1e-9, kmax=12, cache=nothing,
               slogmin=-1.0, slogmax=6.5, dslog=0.01) -> (S, cache, achieved)
 
-Rotated-contour analog of [`pick_xmax`](@ref): the smallest `s` at which the series
-residual along `x = e^{iθ}s` drops below `eps`. If never reached, returns the
+Sweep `s` log-uniformly upward and return the smallest `s` at which the series residual
+(GW2020 Eq. 54) along `x = e^{iθ}s` drops below `eps`. If never reached, returns the
 residual-minimizing `s` with `achieved = false`.
 """
 function pick_smax(params::GGJParameters, Q::ComplexF64;

@@ -23,8 +23,8 @@ using FastInterpolations: DerivOp, integrate, cubic_interp, cumulative_integrate
 
 Minor radius at normalized flux `psi` and poloidal angle `theta`,
 computed from `equil.rzphi_rsquared` as `√((R − R₀)² + (Z − Z₀)²)`.
-`theta = 0.0` (outboard midplane) is the default; pass `θ = π` to measure
-the inboard side if you want an average.
+`theta` is normalized to [0, 1): `0.0` (outboard midplane) is the default and
+`0.5` is the inboard midplane.
 """
 function surface_minor_radius(equil, psi::Real; theta::Real=0.0)
     r_sq = equil.rzphi_rsquared((Float64(psi), Float64(theta)))

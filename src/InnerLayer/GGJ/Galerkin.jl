@@ -275,7 +275,7 @@ struct GalerkinWorkspace
 end
 
 function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Float64,
-    pfac::Float64, cutoff::Int, nq::Int)
+    pfac::Float64, cutoff::Int)
     side = pfac < 1 ? "left" : "right"
 
     # Cell types
@@ -877,17 +877,11 @@ function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters
 end
 
 # -----------------------------------------------------------------------
-# Top-level Galerkin solver.
-# -----------------------------------------------------------------------
-
-# -----------------------------------------------------------------------
-# Diagnostic: reconstruct the physical inner-layer field profiles (Ψ, Ξ, Υ)
-# from the solved Hermite DOFs over the bulk (Hermite) cells. The thin
-# CT_EXT / CT_RES matching cells near xmax are skipped (their solution is
-# carried by the asymptotic emap DOF, not the Hermite basis). Returns the
-# inner-coordinate grid `x` and the three fields for both parities
-# (columns: 1 = odd, 2 = even). Used to diagnose the resonant-layer
-# structure vs resistivity. Not part of the production matching path.
+# Reconstruct the inner-layer field profiles (Ψ, Ξ, Υ) from the solved
+# Hermite DOFs over the bulk (Hermite) cells. The thin CT_EXT / CT_RES
+# matching cells near xmax are skipped (their solution is carried by the
+# asymptotic emap DOF, not the Hermite basis). Returns the grid `x` and the
+# three fields for both parities (columns: 1 = odd, 2 = even).
 # -----------------------------------------------------------------------
 function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
     mpert = 3
@@ -930,25 +924,18 @@ function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
     return (; x=xs[p], Ψ=Ψ[p, :], Ξ=Ξ[p, :], Υ=Υ[p, :])
 end
 
-"""
-    solve_inner_profile(params::GGJParameters, γ::Number; kwargs...)
-
-Diagnostic variant of `solve_inner(GGJModel(:galerkin), ...)` that also returns the reconstructed
-inner-layer field profiles. Returns `(Δ, Q, profile)` where `profile = (x, Ψ, Ξ, Υ)` (Ψ = inner ξ,
-columns odd/even parity). Same numerics/kwargs as `solve_inner`; for investigating resonant-layer
-structure vs resistivity, not the production matching path.
-"""
-function solve_inner_profile(params::GGJParameters, γ::Number;
+# Stock Galerkin solve shared by `solve_inner` and `solve_inner_profile`. The matching data are the
+# resonant cell's emap DOF, the coefficient of the large resonant solution (GWP2016 Eqs. 34–35), per
+# parity isol = 1 (odd), 2 (even); returns them rescaled, with the solved workspace.
+function _galerkin_solve(params::GGJParameters, γ::Number;
     kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
     cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
     Q = inner_Q(params, γ)
     xmax_info = _xmax_3level(params, Q; kmax=kmax, xfac=xfac)
-    ws = _build_grid_and_workspace(nx, xmax_info.xmax, xmax_info.dx1, xmax_info.dx2, pfac, cutoff, nq)
+    ws = _build_grid_and_workspace(nx, xmax_info.xmax, xmax_info.dx1, xmax_info.dx2, pfac, cutoff)
     _assemble_and_solve!(ws, params, Q, xmax_info.cache; nq=nq, tol_res=tol_res)
-    res_cell = ws.cells[ws.nx]
-    emap1 = res_cell.emap[1]
-    Δ = rescale_delta(SVector{2,ComplexF64}(ws.sol[emap1, 2], ws.sol[emap1, 1]), params)
-    return Δ, Q, _solution_profile(ws), (; xmax=xmax_info.xmax, x0=x0(params), sfac=sfac(params))
+    emap1 = ws.cells[ws.nx].emap[1]
+    return rescale_delta(SVector{2,ComplexF64}(ws.sol[emap1, 1], ws.sol[emap1, 2]), params), ws
 end
 
 """
@@ -960,8 +947,9 @@ real-axis solve, so `Δ` and the profiles come from the same solution. Same
 numerics/kwargs as `solve_inner(GGJModel(; solver=:galerkin), ...)`.
 """
 function solve_inner_profile(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
-    Δ, _, prof, _ = solve_inner_profile(params, γ; kwargs...)
-    return (; Δ=Δ, x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
+    Δ, ws = _galerkin_solve(params, γ; kwargs...)
+    prof = _solution_profile(ws)
+    return (; Δ=SVector(Δ[2], Δ[1]), x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
 end
 
 """
@@ -980,85 +968,7 @@ Returns the parity-projected matching data (GWP2016 Eqs. 34–35) with the
 respectively — no parity swap (see the boundary-condition block above for the
 parity derivation).
 """
-function solve_inner(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number;
-    kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
-    cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
-    Q = inner_Q(params, γ)
-
-    # Build asymptotic cache and determine grid parameters
-    xmax_info = _xmax_3level(params, Q; kmax=kmax, xfac=xfac)
-    cache = xmax_info.cache
-
-    # Build grid and workspace
-    ws = _build_grid_and_workspace(nx, xmax_info.xmax, xmax_info.dx1, xmax_info.dx2,
-        pfac, cutoff, nq)
-
-    # Assemble and solve
-    _assemble_and_solve!(ws, params, Q, cache; nq=nq, tol_res=tol_res)
-
-    # Extract the matching data from the resonant cell's emap DOF: the solved
-    # coefficient of the large resonant solution is Δ for each parity
-    # (GWP2016 Eqs. 34–35), here columns isol=1 (odd) and isol=2 (even).
-    res_cell = ws.cells[ws.nx]
-    emap1 = res_cell.emap[1]
-    Δ_raw = SVector{2,ComplexF64}(ws.sol[emap1, 1], ws.sol[emap1, 2])
-
-    # Rescaling is linear & diagonal; apply to the (tearing, interchange)
-    # pair directly, no parity swap.
-    Δ_rescaled = rescale_delta(Δ_raw, params)
-
-    return InnerLayerResponse(Δ_rescaled[1], Δ_rescaled[2])
-end
-
-
-# THIS IS AN ATTEMPT AT A CONVERGENCE-GUARDED INNER-LAYER SOLVE. IT PRESENTLY HAS SOME
-# ISSUES AND IS NOT RELIABLE IN BROAD SCANS. IT IS LEFT HERE FOR REFERENCE AND MAY BE REWORKED LATER.
-"""
-    solve_inner_converged(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
-                          rtol=1e-2, max_levels=6, kwargs...)
-        -> (; delta, converged, err, kmax, xfac, nx, nlevels)
-
-Convergence-guarded Galerkin solve: jointly refines the three coupled accuracy
-knobs (series order `kmax`, asymptotic reach `xfac`, grid `nx` scaled to hold
-cells-per-unit-x ≈ `cells_per_unit`) until the per-component relative change
-of (Δ₁, Δ₂) drops below `rtol`, or `max_levels` is hit (`converged=false`).
-The metric is per real/imag component with a 5% significance floor, so a
-converged norm cannot mask a wrong small component.
-"""
-function solve_inner_converged(model::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
-    rtol::Float64=1e-2, kmax0::Int=12, xfac0::Float64=1.5,
-    cells_per_unit::Float64=3.0, nx_min::Int=1024, nx_max::Int=8192,
-    kmax_step::Int=2, kmax_max::Int=28, xfac_growth::Float64=1.5,
-    max_levels::Int=6, nq::Int=6, pfac::Float64=1.0, cutoff::Int=8, tol_res::Float64=1e-4)
-    Q = inner_Q(params, γ)
-    # nx sized so cells-per-unit-x ≈ cells_per_unit over [0, xmax]; gal_nx must be even.
-    nx_for(km, xf) = clamp(2 * cld(ceil(Int, cells_per_unit * _xmax_3level(params, Q; kmax=km, xfac=xf).xmax), 2), nx_min, nx_max)
-    function level(km, xf)
-        nx = nx_for(km, xf)
-        return solve_inner(model, params, γ; kmax=km, nx=nx, nq=nq, pfac=pfac, cutoff=cutoff, xfac=xf, tol_res=tol_res), nx
-    end
-    # Per real/imag component relative change with a significance floor (5% of |Δᵢ|).
-    function comperr(a, b)
-        e = 0.0
-        for i in 1:2
-            fl = 0.05 * abs(b[i])
-            e = max(e, abs(real(a[i]) - real(b[i])) / (abs(real(b[i])) + fl))
-            e = max(e, abs(imag(a[i]) - imag(b[i])) / (abs(imag(b[i])) + fl))
-        end
-        return e
-    end
-
-    kmax = kmax0
-    xfac = xfac0
-    Δ, nx = level(kmax, xfac)
-    err = Inf
-    for ℓ in 1:max_levels
-        kmax = min(kmax + kmax_step, kmax_max)
-        xfac *= xfac_growth
-        Δnew, nx = level(kmax, xfac)
-        err = comperr(Δnew, Δ)
-        Δ = Δnew
-        err < rtol && return (; delta=Δ, converged=true, err=err, kmax=kmax, xfac=xfac, nx=nx, nlevels=ℓ)
-    end
-    return (; delta=Δ, converged=false, err=err, kmax=kmax, xfac=xfac, nx=nx, nlevels=max_levels)
+function solve_inner(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
+    Δ, _ = _galerkin_solve(params, γ; kwargs...)
+    return InnerLayerResponse(Δ[1], Δ[2])
 end

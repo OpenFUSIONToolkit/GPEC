@@ -11,15 +11,7 @@
 #   the quotient modulo the decaying exponential pair (damped zone in Complex{Double64}).
 #   On [0, s_m] the stock Hermite-cubic Galerkin assembly (Galerkin.jl) solves the BVP with
 #   parity conditions at the origin and v(s_m) = Us + Δ·Ub + c₁E₁ + c₂E₂ at the far end.
-#
-# File layout:
-#   1. system   — plain-variable first-order ODE matrix (used by the march), parity sets
-#   2. mesh     — WKB-graded Hermite grid on [0, s_m]
-#   3. boundary — decaying pair, Radau IIA quotient march
-#   4. solve    — driver, profiles, convergence battery
 
-# system.jl
-#
 # The GGJ inner-region equations (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) as a plain
 # first-order system in v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ'), dv/dx = M(x)·v.
 # All coefficients are POLYNOMIAL in x, so x = 0 is an ordinary point (the
@@ -79,18 +71,6 @@ function ode_matrix(::Type{CT}, p::GGJParameters, Q::Number, x::Number) where {C
 end
 
 """
-    parity_rows(isol) -> SVector{3,Int}
-
-Component indices of `v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ')` that vanish at s = 0 for
-each parity solution, mirroring deltac_set_boundary:
-
-  - `isol = 1` ("odd"):  Ψ'(0) = 0, Ξ(0) = 0, Υ(0) = 0  → components (4, 2, 3)
-  - `isol = 2` ("even"): Ψ(0) = 0, Ξ'(0) = 0, Υ'(0) = 0 → components (1, 5, 6)
-"""
-parity_rows(isol::Int) = isol == 1 ? SVector(4, 2, 3) : SVector(1, 5, 6)
-# mesh.jl
-
-"""
     ray_breaks(params, Q, θ, S; cfl=0.2, min_cells=1024) -> Vector{Float64}
 
 Cell boundaries `0 = s₀ < s₁ < … = S` for the Hermite BVP: each cell resolves the full
@@ -114,8 +94,7 @@ function ray_breaks(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Float6
     end
     return breaks
 end
-# boundary.jl
-#
+
 # Large-s boundary data at the matching point on the ray x = e^{iθ}s.
 #
 # The admissible (bounded-as-s→∞) solution space is spanned by
@@ -148,6 +127,15 @@ end
 #     ∫g_max ds. Purging only ever removes span{E} content —
 #     legitimate by the definition of Δ — so the transported coefficients
 #     of u_small/u_big are exact up to integrator tolerance.
+
+# Small and large power-like solutions at x as 6-component states (Ψ, Ξ, Υ, Ψ', Ξ', Υ').
+function _power_states(cache::InnerAsymptoticsCache, x::Number)
+    ua, dua = physical_ua_dua(cache, x)
+    return vcat(ua[:, 2], dua[:, 2]), vcat(ua[:, 1], dua[:, 1])
+end
+
+# Condition number of the column-normalized boundary basis [Us, Ub, E].
+_basis_cond(Us, Ub, E) = cond(hcat(Us ./ norm(Us), Ub ./ norm(Ub), E))
 
 """
     decaying_pair(params, Q, θ, S; growth=30.0, seed=20260707, dp_res=20.0) -> E (6×2)
@@ -236,18 +224,20 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
         return Floc
     end
 
-    I6 = Matrix{ComplexF64}(I, 6, 6)
-    # One Radau IIA step: A = [5/12 -1/12; 3/4 1/4], c = (1/3, 1), b = A[2,:].
-    function radau_step(s, W, h)
-        M1 = 𝔐(s + h / 3)
-        M2 = 𝔐(s + h)
-        Ablk = [I6-(5h/12)*M1 (h/12)*M1; -(3h / 4)*M2 I6-(h/4)*M2]
-        rhs = [M1 * W; M2 * W]
-        K = Ablk \ rhs
-        return W + h * ((3 / 4) * @view(K[1:6, :]) + (1 / 4) * @view(K[7:12, :]))
+    # One Radau IIA step in the precision of W (`Mfun` returns the matrix in that precision):
+    # A = [5/12 -1/12; 3/4 1/4], c = (1/3, 1), b = A[2,:].
+    function radau_step(Mfun, s, W, h)
+        CT = eltype(W)
+        hc = real(CT)(h)
+        Id = Matrix{CT}(I, 6, 6)
+        M1 = Mfun(s + h / 3)
+        M2 = Mfun(s + h)
+        Ablk = [Id-(5hc/12)*M1 (hc/12)*M1; -(3hc / 4)*M2 Id-(hc/4)*M2]
+        K = Ablk \ [M1 * W; M2 * W]
+        return W + hc * ((CT(3) / 4) * @view(K[1:6, :]) + (CT(1) / 4) * @view(K[7:12, :]))
     end
 
-    # Extended-precision (Double64) Radau step for the damped-zone W march.
+    # Extended precision (Double64) for the damped-zone W march.
     # At z = ρ·c·s² ≫ 1 the step matrices have cond ~ z and the LU backward
     # error has a SYSTEMATIC direction set by the elimination structure — it
     # does not dither away, accumulating a relative error Σ eps·z ≈ eps·ρS²/2
@@ -260,17 +250,7 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     # band stays Float64 (z ≤ ztrk there, solves well-conditioned).
     CTd = Complex{Double64}
     phd = CTd(cos(Double64(θ)), sin(Double64(θ)))
-    I6d = Matrix{CTd}(I, 6, 6)
     𝔐d(s) = phd * Matrix(ode_matrix(CTd, params, Q, phd * Double64(s)))
-    function radau_step_d(s, Wd, h)
-        hd = Double64(h)
-        M1 = 𝔐d(s + h / 3)
-        M2 = 𝔐d(s + h)
-        Ablk = [I6d-(5hd/12)*M1 (hd/12)*M1; -(3hd / 4)*M2 I6d-(hd/4)*M2]
-        rhs = [M1 * Wd; M2 * Wd]
-        K = Ablk \ rhs
-        return Wd + hd * ((CTd(3) / 4) * K[1:6, :] + (CTd(1) / 4) * K[7:12, :])
-    end
 
     # --- Schedule: geometric where damped, growth-capped where resolved. ---
     # No adaptive controller (three generations died on estimator artifacts);
@@ -299,7 +279,7 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     #   default θ = arg(Q)/4 keeps the turning point off the contour.
     c = clamp(cbrt(rtol / 100.0), 2e-5, 2e-3)
 
-    # --- Phase 1: damped zone, W in Double64 (see radau_step_d comment). ---
+    # --- Phase 1: damped zone, W in Double64 (see the Double64 comment above). ---
     # First purge (at S) and all damped-zone steps run in extended precision;
     # on resolved-band entry W drops back to Float64 for phase 2.
     Wd = CTd.(W)
@@ -318,7 +298,7 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
         end
         (isfinite(gmin) && gmin * c * s < 8.0) && break   # resolved-band entry
         h = -min(c * s, s - s_m)
-        Wd = radau_step_d(s, Wd, h)
+        Wd = radau_step(𝔐d, s, Wd, h)
         s += h
         nstep += 1
         nstep > 5_000_000 && error("march_boundary: step limit exceeded (s=$s)")
@@ -350,9 +330,9 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
             have_F = true
             Φ = 0.0
         end
-        W = radau_step(s, W, h)
+        W = radau_step(𝔐, s, W, h)
         if have_F
-            F = radau_step(s, F, h)
+            F = radau_step(𝔐, s, F, h)
             F = Matrix(qr(F).Q)
             Φ += gmax * abs(h)
             if Φ > purge_budget
@@ -395,20 +375,11 @@ the column-normalized basis.
 function boundary_basis(params::GGJParameters, Q::ComplexF64,
     cache::InnerAsymptoticsCache, θ::Float64, S::Float64;
     growth::Float64=30.0, seed::Int=20260707, dp_res::Float64=20.0)
-    xS = cis(θ) * S
-    ua, dua = physical_ua_dua(cache, xS)
-    Ub = ComplexF64[ua[1, 1], ua[2, 1], ua[3, 1], dua[1, 1], dua[2, 1], dua[3, 1]]
-    Us = ComplexF64[ua[1, 2], ua[2, 2], ua[3, 2], dua[1, 2], dua[2, 2], dua[3, 2]]
+    Us, Ub = _power_states(cache, cis(θ) * S)
     E = decaying_pair(params, Q, θ, S; growth=growth, seed=seed, dp_res=dp_res)
-
-    Bmat = hcat(Us ./ norm(Us), Ub ./ norm(Ub), E)
-    cond_est = cond(Bmat)
-    return Us, Ub, E, cond_est
+    return Us, Ub, E, _basis_cond(Us, Ub, E)
 end
 
-
-# solve.jl
-#
 # Driver: series radius S, BVP edge s_m, march S → s_m, then the Hermite Galerkin BVP on
 # [0, s_m] with the far-field state v(s_m) = Us + Δ·Ub + c₁E₁ + c₂E₂ (Galerkin.jl,
 # `_assemble_and_solve_point!`).
@@ -447,10 +418,6 @@ struct RaySolveResult
     ws::GalerkinWorkspace
 end
 
-# -----------------------------------------------------------------------
-# Driver.
-# -----------------------------------------------------------------------
-
 """
     solve_ray(params::GGJParameters, Q; θ=angle(Q)/4, kmax=12, S=nothing, smax_tol=1e-9,
               cfl=0.2, min_cells=1024, nq=6, verbose=false, kwargs...) -> RaySolveResult
@@ -469,7 +436,6 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     cfl::Float64=0.2, min_cells::Int=1024, nq::Int=6, seed::Int=20260707,
     ztrk::Float64=0.3, purge_budget::Float64=2.5, dp_res::Float64=20.0,
     handoff::Union{Nothing,NTuple{2,Vector{ComplexF64}}}=nothing,
-    boundary::Union{Nothing,Tuple{Vector{ComplexF64},Vector{ComplexF64},Matrix{ComplexF64}}}=nothing,
     verbose::Bool=false)
 
     cache = build_asymptotics(params, Q; kmax=kmax)
@@ -504,28 +470,14 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     end
 
     local Us, Ub, E, bc_cond, Sbvp
-    if boundary !== nothing
-        # diagnostic: externally supplied boundary data (Us, Ub, E) at s_m,
-        # e.g. from an extended-precision march
-        Us, Ub, E = boundary
-        Sbvp = s_m
-        bc_cond = cond(hcat(Us ./ norm(Us), Ub ./ norm(Ub), E))
-    elseif s_m < 0.98 * Sv
-        local UsS, UbS
-        if handoff === nothing
-            ua, dua = physical_ua_dua(cache, cis(θ) * Sv)
-            UbS = ComplexF64[ua[1, 1], ua[2, 1], ua[3, 1], dua[1, 1], dua[2, 1], dua[3, 1]]
-            UsS = ComplexF64[ua[1, 2], ua[2, 2], ua[3, 2], dua[1, 2], dua[2, 2], dua[3, 2]]
-        else
-            # diagnostic: externally supplied series hand-off (Us, Ub) at
-            # x = e^{iθ}S, e.g. evaluated in extended precision
-            UsS, UbS = handoff
-        end
+    if s_m < 0.98 * Sv
+        # `handoff` is a diagnostic: externally supplied series data (Us, Ub) at x = e^{iθ}S.
+        UsS, UbS = handoff === nothing ? _power_states(cache, cis(θ) * Sv) : handoff
         Us, Ub, E = march_boundary(params, Q, θ, Sv, s_m, UsS, UbS;
             rtol=march_rtol, growth=growth, seed=seed,
             ztrk=ztrk, purge_budget=purge_budget, dp_res=dp_res)
         Sbvp = s_m
-        bc_cond = cond(hcat(Us ./ norm(Us), Ub ./ norm(Ub), E))
+        bc_cond = _basis_cond(Us, Ub, E)
         verbose && @printf("  march: S=%.4g → s_m=%.4g, bc_cond=%.1e\n", Sv, s_m, bc_cond)
     else
         Us, Ub, E, bc_cond = boundary_basis(params, Q, cache, θ, Sv;

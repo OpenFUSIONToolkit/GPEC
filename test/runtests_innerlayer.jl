@@ -110,11 +110,6 @@ end
         @test ComplexF64.(Md) ≈ GGJ.ode_matrix(p, Q, 0.3) rtol = 1e-12
     end
 
-    @testset "parity_rows match the deltac boundary convention" begin
-        @test GGJ.parity_rows(1) == [4, 2, 3]     # odd:  Ψ'(0)=Ξ(0)=Υ(0)=0
-        @test GGJ.parity_rows(2) == [1, 5, 6]     # even: Ψ(0)=Ξ'(0)=Υ'(0)=0
-    end
-
     @testset "decaying_pair is an orthonormal 6×2 frame" begin
         Q = 5.0im
         θ = angle(Q) / 4
