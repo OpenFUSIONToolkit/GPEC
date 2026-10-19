@@ -12,13 +12,15 @@ field `bpen`. `ffs` needs the Δ′ coil block, from `Galerkin(; rpec_flag=true)
 with `vac_flag=true`.
 
 # Keywords
-- `eta`, `rho`, `rotation`: resistivity in Ω·m, mass density in kg/m³ and rotation frequency
-  in Hz, a scalar for every surface or one value per `ffs.surfaces` entry (core to edge).
-  Required unless `ideal=true`.
-- `gamma`: ratio of specific heats.
-- `ideal`: skip the inner layer and return the perfectly shielding solution.
+
+  - `eta`, `rho`, `rotation`: resistivity in Ω·m, mass density in kg/m³ and rotation frequency
+    in Hz, a scalar for every surface or one value per `ffs.surfaces` entry (core to edge).
+    Required unless `ideal=true`.
+  - `gamma`: ratio of specific heats.
+  - `ideal`: skip the inner layer and return the perfectly shielding solution.
 
 ## Fields
+
   - `ffs` - The outer solve being matched; held by reference, not copied.
   - `eta`, `rho`, `rotation` - Per-surface η in Ω·m, ρ in kg/m³ and rotation frequency in Hz, following `ffs.surfaces`.
   - `gamma` - Ratio of specific heats.
@@ -185,7 +187,9 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     if gal_sol === nothing
         xi = Array{ComplexF64,3}(undef, 0, 0, 0)
         xi_deriv = Array{ComplexF64,3}(undef, 0, 0, 0)
-        empty!(inner_psi); empty!(inner_xi); empty!(inner_b)
+        empty!(inner_psi);
+        empty!(inner_xi);
+        empty!(inner_b)
     else
         sols = gal_sol.xi          # (mpert, ngrid, nsol)
         sols_deriv = gal_sol.xi_deriv
@@ -209,7 +213,9 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
                       "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog=1
-                empty!(inner_psi); empty!(inner_xi); empty!(inner_b)
+                empty!(inner_psi);
+                empty!(inner_xi);
+                empty!(inner_b)
             else
                 cut_range = gal_sol.cut_range
                 keep = .!gal_sol.issing

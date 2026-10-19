@@ -649,7 +649,7 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q:
             if i > ws.ndim
                 continue
             end
-            for jj in max(1, i - ws.kl):min(ws.ndim, i + ws.kl)
+            for jj in max(1, i-ws.kl):min(ws.ndim, i+ws.kl)
                 ws.mat[offset+i-jj, jj, isol] = 0
             end
         end

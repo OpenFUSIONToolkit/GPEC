@@ -499,7 +499,7 @@ function delta_convergence(params::GGJParameters, Q::ComplexF64; verbose::Bool=t
     base = solve_ray(params, Q; kwargs...)
     variations = [
         ("θ → 1.2θ", (; θ=(base.θ == 0 ? 0.1 : 1.2 * base.θ))),
-        ("mesh ×2", (; cfl=base.cfl / 2, min_cells=2 * base.min_cells)),
+        ("mesh ×2", (; cfl=(base.cfl / 2), min_cells=2 * base.min_cells)),
         ("kmax+4, S↑", (; kmax=16, smax_tol=1e-10)),
         ("march_rtol/100", (; march_rtol=1e-11)),
         ("sm_fac 1→1.4", (; sm_fac=1.4)),

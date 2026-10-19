@@ -80,15 +80,15 @@ needs from the layer, so drivers never touch model internals. Returns a named
 tuple with at least:
 
   - `Δ`       — the same matching data as [`solve_inner`](@ref), as the pair
-                (Δ₊, Δ₋) = (interchange, tearing)
+    (Δ₊, Δ₋) = (interchange, tearing)
   - `x`       — real ascending grid in the model's stretched inner coordinate,
-                `x ≥ 0` with the rational surface at `x = 0`
+    `x ≥ 0` with the rational surface at `x = 0`
   - `Ψ`, `Ξ`  — `length(x) × 2` profiles, columns in the order of `Δ`, in the
-                model's inner normalization: `Ψ` the normal-field
-                (reconnected-flux) variable, `Ξ` the displacement
+    model's inner normalization: `Ψ` the normal-field
+    (reconnected-flux) variable, `Ξ` the displacement
   - `dψdx`    — conversion to poloidal-flux distance, `δψ = dψdx · x`
   - `rescale` — amplitude factor converting the inner-normalized profiles to
-                the outer δψ-normalized convention (companion of the Δ rescale)
+    the outer δψ-normalized convention (companion of the Δ rescale)
 
 Concrete models may return additional diagnostic fields (e.g. a solve-quality
 certificate). Solver-knob keywords are model-specific.

@@ -9,6 +9,7 @@ Matching coefficients and matched profiles, found in `result.match`. The profile
 fields are empty when the solve kept no Galerkin basis; the inner fields are empty with `ideal`.
 
 ## Fields
+
   - `cout`, `cin`: `(2msing, ncoil)` outer and inner coefficients.
   - `deltar`: `(msing, 2)` inner-layer Δ per surface, columns (Δ₊, Δ₋) = (interchange, tearing).
   - `rpec_eig`: forced eigenvalue γ = 2πi·n·f per surface.
