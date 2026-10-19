@@ -391,9 +391,9 @@ Output of [`solve_ray`](@ref).
 
 ## Fields
 
-  - `Δ`: rescaled matching data in the deltac output ordering (index 1 ↔ even-BC solution,
-    2 ↔ odd-BC solution, the same swap deltac_solve applies).
-  - `Δraw`: (isol = 1, isol = 2) in raw inps normalization, before `rescale_delta`.
+  - `Δ`: rescaled matching data (Δ₊, Δ₋) = (interchange, tearing), the even (isol = 1) and
+    odd (isol = 2) parities of the displacement Ξ.
+  - `Δraw`: the same pair in raw inps normalization, before `rescale_delta`.
   - `cexp`: decaying-pair coefficients (c₁, c₂) at s_m, one column per parity.
   - `Q`, `θ`: scaled eigenvalue and contour angle.
   - `S`: series radius where the far-field data were taken.
@@ -423,7 +423,7 @@ end
               cfl=0.2, min_cells=1024, nq=6, verbose=false, kwargs...) -> RaySolveResult
 
 Solve the GGJ inner-layer problem on the rotated ray x = e^{iθ}s.
-`Δ` follows the deltac output convention (swap + `rescale_delta`), directly
+`Δ` is the rescaled pair (Δ₊, Δ₋) = (interchange, tearing), directly
 comparable to the `:galerkin` backend. θ = 0 reproduces a real-axis solve;
 `S` defaults to the inps series-residual radius (`pick_smax`); `cfl`, `min_cells` set the
 Hermite grid ([`ray_breaks`](@ref)) and `nq` its quadrature; remaining keywords are march
@@ -492,8 +492,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     verbose && @printf("  BVP: %d Hermite cells on [0, %.4g], Δraw[1] = %.6e %+.6eim\n",
         length(breaks) - 1, Sbvp, real(Δraw[1]), imag(Δraw[1]))
 
-    Δswapped = SVector{2,ComplexF64}(Δraw[2], Δraw[1])   # deltac_solve convention
-    Δ = rescale_delta(Δswapped, params)
+    Δ = rescale_delta(Δraw, params)
 
     return RaySolveResult(Δ, Δraw, cexp, Q, θ, Sv, series_ok, bc_cond, breaks, cfl, min_cells, ws)
 end
@@ -506,16 +505,15 @@ solve_ray(params::GGJParameters, Q::Number; kwargs...) =
         -> InnerLayerResponse
 
 Rotated-ray backend: converts γ via `inner_Q`, forwards keywords to
-[`solve_ray`](@ref), and returns the parity-projected matching data. The
-`solve_ray` pair is ordered `(Δ₁, Δ₂) = (interchange, tearing)`, so the two
-channels are swapped into the named fields of [`InnerLayerResponse`](@ref).
+[`solve_ray`](@ref), and returns the parity-projected matching data (Δ₊, Δ₋) as the
+`interchange` and `tearing` fields of [`InnerLayerResponse`](@ref).
 Preferred for |Q| ≳ 1 and near the imaginary axis; use `solve_ray` directly
 when the full [`RaySolveResult`](@ref) is wanted. `real_profiles` is a profile-only model
 option (see `solve_inner_profile`) and is ignored here.
 """
 function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number; real_profiles::Bool=false, kwargs...)
     res = solve_ray(params, inner_Q(params, γ); kwargs...)
-    return InnerLayerResponse(res.Δ[2], res.Δ[1])
+    return InnerLayerResponse(; interchange=res.Δ[1], tearing=res.Δ[2])
 end
 
 """
@@ -528,7 +526,7 @@ layer-center fields come from the solve at θ = arg(Q)/4; x = 0 lies on every co
 Ψ(0), Ξ(0) there are the real-axis values. By default only those center values are
 returned (`x = [0.0]`, one-row `Ψ`, `Ξ`; `certΔ = NaN`), which is all the penetrated field
 needs. With `real_profiles = true` the fields across the layer come from an extra θ = 0
-re-solve on the real axis, and the θ = 0 vs θ = arg(Q)/4 Δ agreement is returned as `certΔ`
+re-solve on the real axis, and the θ = 0 vs θ = arg(Q)/4 agreement of Δ₊ is returned as `certΔ`
 (a runtime certificate; warns above `certify_rtol`). `npc` sets the profile points per mesh
 cell; extra keywords forward to [`solve_ray`](@ref) (θ is fixed by the method — do not pass it).
 """
@@ -551,7 +549,7 @@ end
     solution_profile(res::RaySolveResult; npc=8) -> (; s, x, Ψ, Ξ, Υ)
 
 Reconstruct (Ψ, Ξ, Υ) on the solution contour from the Hermite nodal solution, `npc`
-points per cell; each field is `npts × 2` with columns (odd, even) and `x = e^{iθ}s`.
+points per cell; each field is `npts × 2` with columns (even, odd) as in `Δ`, and `x = e^{iθ}s`.
 For rotated solves the fields live on the ray — continuation back to real x is a
 separate (unstable) problem, by design.
 """
@@ -592,7 +590,7 @@ end
 Error bar for the matching data: solve at the baseline, then re-solve with each
 numerical knob perturbed on an independent axis (contour angle θ, mesh resolution,
 series order/radius, march tolerance, handoff radius, purification e-folds — see
-`variations` below) and report the relative change of (Δ₁, Δ₂) per knob. θ is perturbed
+`variations` below) and report the relative change of (Δ₊, Δ₋) per knob. θ is perturbed
 outward only: inward moves toward the x² ≈ −Q²(G+KF) pseudo-resonance and measures the
 perturbed solve, not the baseline. `spread` is the per-parity worst case over all knobs.
 """
@@ -609,7 +607,7 @@ function delta_convergence(params::GGJParameters, Q::ComplexF64; verbose::Bool=t
     table = NamedTuple[]
     spread = MVector{2,Float64}(0.0, 0.0)
     verbose && @printf("Δ convergence check, Q = %s:\n", string(Q))
-    verbose && @printf("  baseline: Δ₁ = %+.8e %+.8eim, Δ₂ = %+.8e %+.8eim\n",
+    verbose && @printf("  baseline: Δ₊ = %+.8e %+.8eim, Δ₋ = %+.8e %+.8eim\n",
         real(base.Δ[1]), imag(base.Δ[1]), real(base.Δ[2]), imag(base.Δ[2]))
     for (name, kw) in variations
         r = solve_ray(params, Q; kwargs..., kw...)
@@ -618,9 +616,9 @@ function delta_convergence(params::GGJParameters, Q::ComplexF64; verbose::Bool=t
         spread[1] = max(spread[1], d1)
         spread[2] = max(spread[2], d2)
         push!(table, (; name, d1, d2))
-        verbose && @printf("  %-16s δΔ₁ = %.2e   δΔ₂ = %.2e\n", name, d1, d2)
+        verbose && @printf("  %-16s δΔ₊ = %.2e   δΔ₋ = %.2e\n", name, d1, d2)
     end
-    verbose && @printf("  %-16s δΔ₁ = %.2e   δΔ₂ = %.2e\n", "WORST CASE", spread[1], spread[2])
+    verbose && @printf("  %-16s δΔ₊ = %.2e   δΔ₋ = %.2e\n", "WORST CASE", spread[1], spread[2])
     return (; Δ=base.Δ, spread=SVector(spread), base=base, table=table)
 end
 

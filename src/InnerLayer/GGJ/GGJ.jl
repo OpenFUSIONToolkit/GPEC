@@ -12,8 +12,9 @@
 #                    and the same Hermite assembly with a point far-field condition;
 #                    robust to |Q| ~ 500 on/near the imaginary axis
 #
-# They return the parity-projected matching data
-# `(Δ_odd, Δ_even)` of GWP2016 Eqs. (34)–(35) in the same (deltac) convention.
+# They return the parity-projected matching data Δ± of GWP2016 Eqs. (34)–(35). Parity is
+# that of the displacement Ξ: Δ₊ (even) is the interchange channel, Δ₋ (odd) the tearing
+# channel; positional pairs are always ordered (Δ₊, Δ₋), as in GWP2016 Eq. (38).
 #
 # Equation references throughout this module use two source papers:
 #

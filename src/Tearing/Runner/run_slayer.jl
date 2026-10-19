@@ -387,7 +387,7 @@ end
 Evaluate both parity channels of the GGJ inner-layer matching data at the
 complex normalized growth rate `Q` for each rational surface. Returns a
 vector of `(ising, tearing, interchange)` named tuples, where `tearing`
-(GWP Δ_+) is the reconnecting channel and `interchange` (GWP Δ_−) the
+(GWP Δ₋, odd) is the reconnecting channel and `interchange` (GWP Δ₊, even) the
 non-reconnecting Glasser-stabilization channel (see `InnerLayerResponse`).
 
 This is the supported GGJ diagnostic: both parity Δ's are physical and

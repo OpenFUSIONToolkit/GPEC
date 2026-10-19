@@ -84,10 +84,15 @@ r_\pm = \tfrac32 \pm \sqrt{-D_I}, \qquad p_1 \equiv \sqrt{-D_I}
 The matching datum ``\Delta`` is the amplitude of the large solution
 ``x^{r_+}`` when the small solution ``x^{r_-}`` is normalized to unity (i.e. the
 ratio of large to small coefficient), in the physical (outer-matching)
-normalization. Imposing the two parities at ``x=0`` (odd:
-``\Psi'(0)=\Xi(0)=\Upsilon(0)=0``; even: ``\Psi(0)=\Xi'(0)=\Upsilon'(0)=0``)
-gives the pair ``(\Delta_\mathrm{odd}, \Delta_\mathrm{even})`` of GWP2016
-Eqs. (34)–(35).
+normalization. Imposing the two parities at ``x=0`` gives the pair
+``(\Delta_+, \Delta_-)`` of GWP2016 Eqs. (34)–(35). Parity is that of the
+displacement ``\Xi`` (GWP2016 Eq. 34; Pletzer, Bondeson & Dewar, J. Comput. Phys. **115**, 530 (1994), Eqs. 32–33):
+``\Delta_+`` is even, ``\Psi(0)=\Xi'(0)=\Upsilon'(0)=0``, the **interchange**
+channel; ``\Delta_-`` is odd, ``\Psi'(0)=\Xi(0)=\Upsilon(0)=0``, the **tearing**
+channel, whose flux ``\Psi`` is even and reconnects at the surface. Positional
+pairs, such as `deltar` in the matching and `RaySolveResult.Δ`, are always ordered
+``(\Delta_+, \Delta_-)``, as in GWP2016 Eq. (38); `InnerLayerResponse` names them
+`interchange` and `tearing`.
 
 ## Numerical method
 
@@ -239,14 +244,14 @@ reproduces the Fortran `rmatch deltac` solver to ``\sim 10^{-8}``:
 
 | quantity | `:galerkin` (= Fortran to ``10^{-8}``) | `:ray` |
 |:---------|:---------------------------------------|:-------|
-| ``\Delta_\mathrm{odd}`` | ``3.698368\times 10^{4}`` | ``3.69789\times 10^{4}`` |
-| ``\Delta_\mathrm{even}`` | ``14.759721`` | ``14.759715`` |
+| ``\Delta_+`` (interchange) | ``3.698368\times 10^{4}`` | ``3.69789\times 10^{4}`` |
+| ``\Delta_-`` (tearing) | ``14.759721`` | ``14.759715`` |
 
-The large ``\lvert\Delta_\mathrm{odd}\rvert \sim 4\times10^{4}`` means this
+The large ``\lvert\Delta_+\rvert \sim 4\times10^{4}`` means this
 operating point sits near a pole of ``\Delta(Q)``, where every solver's error
 is amplified by the pole geometry; the ``1.3\times10^{-4}``
-`:galerkin`↔`:ray` difference in ``\Delta_\mathrm{odd}`` (versus
-``4\times10^{-7}`` in ``\Delta_\mathrm{even}``) is consistent with that
+`:galerkin`↔`:ray` difference in ``\Delta_+`` (versus
+``4\times10^{-7}`` in ``\Delta_-``) is consistent with that
 amplification, not a defect of either backend.
 
 **Physical benchmark on the imaginary axis.** On the ``q=4`` rational-surface
@@ -256,15 +261,15 @@ entirely beyond `:galerkin`:
 
 | quantity | value at ``Q = 500i`` |
 |:---------|:----------------------|
-| ``\Delta_\mathrm{odd}`` | ``2.4720 + 13.3540\,i`` |
-| ``\Delta_\mathrm{even}`` | ``0.13750 + 0.74275\,i`` |
+| ``\Delta_+`` (interchange) | ``2.4720 + 13.3540\,i`` |
+| ``\Delta_-`` (tearing) | ``0.13750 + 0.74275\,i`` |
 
 **Convergence and contour invariance.** Because ``\Delta`` is an analytic
 invariant of the contour angle, re-solving with each numerical knob perturbed on
 an independent axis ([`delta_convergence`](@ref InnerLayer.delta_convergence)) gives an honest error bar: at
 ``Q = 500i`` the worst-case spread across all knobs is ``\sim 5\times10^{-6}``
-for ``\Delta_\mathrm{odd}`` and ``\sim 6\times10^{-7}`` for
-``\Delta_\mathrm{even}``. That is a single-machine error bar: across
+for ``\Delta_+`` and ``\sim 6\times10^{-7}`` for
+``\Delta_-``. That is a single-machine error bar: across
 machines/BLAS builds the absolute values reproduce to ``\sim 10^{-5}``
 relative (the damped-zone implicit solves carry platform-dependent structured
 roundoff), which is why the table above quotes five significant figures.
@@ -286,11 +291,11 @@ using GeneralizedPerturbedEquilibrium.InnerLayer
 p = q4_surface_benchmark()          # GGJParameters for the q=4 benchmark surface
 γ = 500im * GGJ.q0(p)               # physical rate placing Q on the imaginary axis at 500i
 
-Δ = solve_inner(GGJModel(), p, γ)   # (Δ_odd, Δ_even) with the default :ray backend
+Δ = solve_inner(GGJModel(), p, γ)   # Δ.interchange, Δ.tearing with the default :ray backend
 
 # Full result (raw Δ, contour, mesh, nodal solution, boundary conditioning) via solve_ray:
 res = solve_ray(p, GGJ.inner_Q(p, γ))
-res.Δ, res.breaks, res.bc_cond
+res.Δ, res.breaks, res.bc_cond      # res.Δ = (Δ₊, Δ₋) = (interchange, tearing)
 ```
 
 ## API Reference

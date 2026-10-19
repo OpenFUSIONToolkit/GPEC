@@ -133,7 +133,7 @@ end
         Q = 5.0im
         conv = IL.delta_convergence(p, Q; verbose=false)
         Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, Q * GGJ.q0(p))
-        # conv.Δ is the raw solve_ray pair (Δ₁, Δ₂) = (interchange, tearing).
+        # conv.Δ is the solve_ray pair (Δ₊, Δ₋) = (interchange, tearing).
         @test conv.Δ[1] ≈ Δ.interchange rtol = 1e-6   # baseline == the plain solve
         @test conv.Δ[2] ≈ Δ.tearing rtol = 1e-6
         @test maximum(conv.spread) < 1e-4         # honest error bar is small here
@@ -146,7 +146,7 @@ end
     for model in (IL.GGJModel(; solver=:ray, real_profiles=true), IL.GGJModel(; solver=:galerkin))
         prof = IL.solve_inner_profile(model, p, γ)
         # Δ agrees with the plain matching solve of the same backend (identical solve path).
-        # prof.Δ stays the positional pair (Δ₁, Δ₂) = (interchange, tearing) that feeds deltar.
+        # prof.Δ is the positional pair (Δ₊, Δ₋) = (interchange, tearing) that feeds deltar.
         Δ_plain = IL.solve_inner(model, p, γ)
         @test prof.Δ[1] ≈ Δ_plain.interchange rtol = 1e-12
         @test prof.Δ[2] ≈ Δ_plain.tearing rtol = 1e-12
@@ -155,8 +155,8 @@ end
         @test prof.x[1] ≈ 0 atol = 1e-12
         @test size(prof.Ψ) == (length(prof.x), 2) && size(prof.Ξ) == (length(prof.x), 2)
         @test all(isfinite, prof.Ψ) && all(isfinite, prof.Ξ)
-        # Parity at the layer center: Ψ(0) ≠ 0 odd-parity column, Ψ(0) = 0 even-parity column.
-        @test abs(prof.Ψ[1, 2]) < 1e-6 * abs(prof.Ψ[1, 1])
+        # Parity at the layer center: Ψ(0) = 0 in the even (Δ₊) column, Ψ(0) ≠ 0 in the odd (Δ₋) one.
+        @test abs(prof.Ψ[1, 1]) < 1e-6 * abs(prof.Ψ[1, 2])
         # Conversion factors match their GGJ definitions.
         @test prof.dψdx ≈ GGJ.x0(p) / p.v1
         @test prof.rescale ≈ (p.v1 / GGJ.x0(p))^(0.5 + GGJ.p1(p))
@@ -172,7 +172,7 @@ end
     full = IL.solve_inner_profile(IL.GGJModel(; solver=:ray, real_profiles=true), p, γi)
     @test c.x == [0.0] && size(c.Ψ) == (1, 2) && isnan(c.certΔ)
     @test c.Δ == full.Δ
-    @test c.Ψ[1, 1] ≈ full.Ψ[1, 1] rtol = 1e-6
-    @test c.Ξ[1, 2] ≈ full.Ξ[1, 2] rtol = 1e-6
+    @test c.Ψ[1, 2] ≈ full.Ψ[1, 2] rtol = 1e-6
+    @test c.Ξ[1, 1] ≈ full.Ξ[1, 1] rtol = 1e-6
     @test full.certΔ < 1e-5
 end

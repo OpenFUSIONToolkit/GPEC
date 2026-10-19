@@ -342,13 +342,9 @@ end
 Solve the GGJ inner-layer matching problem by stable backward shooting in
 the origin-diagonalized 4×4 basis.
 
-Returns an `InnerLayerResponse(tearing, interchange)` with rescaling
-applied. `_delta_from_c0` returns a `(Δ₁, Δ₂)` pair where `Δ₁` is the
-**interchange** (anti-symmetric / W-odd) channel and `Δ₂` is the
-**tearing** (symmetric / W-even) channel. We therefore map
-`Δ₂ → tearing` and `Δ₁ → interchange` into the named fields, matching the
-physics channel labels used by the Galerkin solver and by the
-`InnerLayerResponse` docstring.
+Returns an `InnerLayerResponse` with rescaling applied. `_delta_from_c0` returns the
+pair (Δ₊, Δ₋) = (interchange, tearing): even and odd parity of the displacement Ξ
+(Ψ odd and even), the same order as the other GGJ backends.
 
 Tolerances `reltol`/`abstol` are the integrator tolerances; `rtol_origin`
 controls the truncation error of the origin Frobenius series and the
@@ -374,8 +370,7 @@ function solve_inner(::_BareGGJ{:shooting}, params::GGJParameters, γ::Number;
 
     Δ_raw = _delta_from_c0(c0, sys)
     Δ_rescaled = rescale_delta(Δ_raw, params)
-    # Δ_rescaled ≡ (Δ₁, Δ₂) = (interchange, tearing).
-    return InnerLayerResponse(Δ_rescaled[2], Δ_rescaled[1])
+    return InnerLayerResponse(; interchange=Δ_rescaled[1], tearing=Δ_rescaled[2])
 end
 
 solve_inner(::_BareGGJ{:shooting}, params::GGJParameters, γ::Real; kwargs...) =

@@ -10,7 +10,7 @@ fields are empty when the solve kept no Galerkin basis; the inner fields are emp
 
 ## Fields
   - `cout`, `cin`: `(2msing, ncoil)` outer and inner coefficients.
-  - `deltar`: `(msing, 2)` inner-layer Δ per surface and parity.
+  - `deltar`: `(msing, 2)` inner-layer Δ per surface, columns (Δ₊, Δ₋) = (interchange, tearing).
   - `rpec_eig`: forced eigenvalue γ = 2πi·n·f per surface.
   - `residual`: relative residual of the linear solve.
   - `bpen`: `(msing, ncoil)` penetrated resonant field at each layer center.
@@ -51,8 +51,8 @@ function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::
         idx2 = 2ising
         idx3 = idx1 + 2msing
         idx4 = idx2 + 2msing
-        delta1 = deltar[ising, 1]
-        delta2 = deltar[ising, 2]
+        delta1 = deltar[ising, 1]   # Δ₊; rows idx3, idx4 of cin are d₊, d₋ (GWP2016 Eqs. 36–37)
+        delta2 = deltar[ising, 2]   # Δ₋
         mat[idx1, idx1] = 1
         mat[idx2, idx2] = 1
         mat[idx1, idx3] = -1
@@ -112,7 +112,7 @@ const MATCH_H5_ANNOTATIONS = [
     "SingularSurfaces/Match/cin" =>
         (; long_name="inner-region matching coefficients per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
     "SingularSurfaces/Match/Delta_r" =>
-        (; long_name="inner-layer Δ per surface and parity (deltac convention)", dims=("surface", "parity")),
+        (; long_name="inner-layer Δ per surface and parity, (Δ₊ interchange, Δ₋ tearing)", dims=("surface", "parity")),
     "SingularSurfaces/Match/bpen" =>
         (; long_name="penetrated resonant field b^ψ at each layer center, per unit coil-response column", dims=("surface", "coil")),
     "SingularSurfaces/Match/reconnected_flux" =>

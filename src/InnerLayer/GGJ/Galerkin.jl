@@ -732,11 +732,10 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q:
         end
     end
 
-    # Apply parity BCs for each solution (isol=1: odd, isol=2: even). The
-    # inner equations have reflection symmetry about X=0 (GWP2016 Sec. III):
-    # one solution has even Ξ, Υ and odd Ψ, the other odd Ξ, Υ and even Ψ.
-    # Imposing both at X=0 gives the two parities that each contribute a Δ for
-    # outer-region matching (the Δ_odd, Δ_even of GWP2016 Eqs. 34–35).
+    # Apply parity BCs for each solution. The inner equations have reflection symmetry
+    # about X=0 (GWP2016 Sec. III); parity is that of the displacement Ξ (GWP2016 Eq. 34):
+    # isol=1 is even (+, interchange: even Ξ, Υ, odd Ψ), isol=2 odd (−, tearing: odd Ξ, Υ,
+    # even Ψ). Each contributes a Δ± for outer-region matching (GWP2016 Eqs. 34–35).
     # For each isol, build a modified local
     # matrix for ip=0..1 of cell 1, then write it into the global matrix.
     for isol in 1:2
@@ -744,37 +743,36 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q:
         for ipert in 1:mpert
             i = cell1.map[ipert, 1]  # ip=0 DOFs
             if i > ws.ndim
-
                 continue
             end
             for jj in max(1, i - ws.kl):min(ws.ndim, i + ws.kl)
                 ws.mat[offset+i-jj, jj, isol] = 0
             end
         end
-        # Odd parity (isol=1): Ψ'(0)=0, Ξ(0)=0, Υ(0)=0
-        # → row=Ψ(ip=0), col=Ψ(ip=1): A[map[1,1], map[1,2]] = 1
-        # → row=Ξ(ip=0), col=Ξ(ip=0): A[map[2,1], map[2,1]] = 1
-        # → row=Υ(ip=0), col=Υ(ip=0): A[map[3,1], map[3,1]] = 1
-        # Even parity (isol=2): Ψ(0)=0, Ξ'(0)=0, Υ'(0)=0
+        # Even parity (isol=1): Ψ(0)=0, Ξ'(0)=0, Υ'(0)=0
         # → row=Ψ(ip=0), col=Ψ(ip=0): A[map[1,1], map[1,1]] = 1
         # → row=Ξ(ip=0), col=Ξ(ip=1): A[map[2,1], map[2,2]] = 1
         # → row=Υ(ip=0), col=Υ(ip=1): A[map[3,1], map[3,2]] = 1
+        # Odd parity (isol=2): Ψ'(0)=0, Ξ(0)=0, Υ(0)=0
+        # → row=Ψ(ip=0), col=Ψ(ip=1): A[map[1,1], map[1,2]] = 1
+        # → row=Ξ(ip=0), col=Ξ(ip=0): A[map[2,1], map[2,1]] = 1
+        # → row=Υ(ip=0), col=Υ(ip=0): A[map[3,1], map[3,1]] = 1
         if isol == 1
-            i = cell1.map[1, 1]
-            j = cell1.map[1, 2]
-            ws.mat[offset+i-j, j, isol] = 1
-            for ipert in 2:3
-                i = cell1.map[ipert, 1]
-                j = cell1.map[ipert, 1]
-                ws.mat[offset+i-j, j, isol] = 1
-            end
-        else
             i = cell1.map[1, 1]
             j = cell1.map[1, 1]
             ws.mat[offset+i-j, j, isol] = 1
             for ipert in 2:3
                 i = cell1.map[ipert, 1]
                 j = cell1.map[ipert, 2]
+                ws.mat[offset+i-j, j, isol] = 1
+            end
+        else
+            i = cell1.map[1, 1]
+            j = cell1.map[1, 2]
+            ws.mat[offset+i-j, j, isol] = 1
+            for ipert in 2:3
+                i = cell1.map[ipert, 1]
+                j = cell1.map[ipert, 1]
                 ws.mat[offset+i-j, j, isol] = 1
             end
         end
@@ -808,7 +806,7 @@ far-field condition imposed at the last node instead of resonant/extension cells
 v = Us + Δ·Ub + c₁E₁ + c₂E₂, with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives. The last node's six
 DOFs are replaced by (Δ, c₁, c₂) and tested in the same three directions, as the extension cell
 does for the stock backend. Returns the raw Δ and decaying-pair coefficients per parity
-(isol = 1 odd, 2 even); `ws.sol` holds the full nodal solution afterwards.
+(isol = 1 even/Δ₊, 2 odd/Δ₋); `ws.sol` holds the full nodal solution afterwards.
 """
 function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64,
     θ::Float64, Us::Vector{ComplexF64}, Ub::Vector{ComplexF64}, E::Matrix{ComplexF64}; nq::Int=6)
@@ -881,7 +879,7 @@ end
 # Hermite DOFs over the bulk (Hermite) cells. The thin CT_EXT / CT_RES
 # matching cells near xmax are skipped (their solution is carried by the
 # asymptotic emap DOF, not the Hermite basis). Returns the grid `x` and the
-# three fields for both parities (columns: 1 = odd, 2 = even).
+# three fields for both parities (columns: 1 = even/Δ₊, 2 = odd/Δ₋).
 # -----------------------------------------------------------------------
 function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
     mpert = 3
@@ -926,7 +924,7 @@ end
 
 # Stock Galerkin solve shared by `solve_inner` and `solve_inner_profile`. The matching data are the
 # resonant cell's emap DOF, the coefficient of the large resonant solution (GWP2016 Eqs. 34–35), per
-# parity isol = 1 (odd), 2 (even); returns them rescaled, with the solved workspace.
+# parity isol = 1 (even, Δ₊), 2 (odd, Δ₋); returns them rescaled, with the solved workspace.
 function _galerkin_solve(params::GGJParameters, γ::Number;
     kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
     cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
@@ -949,7 +947,7 @@ numerics/kwargs as `solve_inner(GGJModel(; solver=:galerkin), ...)`.
 function solve_inner_profile(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
     Δ, ws = _galerkin_solve(params, γ; kwargs...)
     prof = _solution_profile(ws)
-    return (; Δ=SVector(Δ[2], Δ[1]), x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
+    return (; Δ=Δ, x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
 end
 
 """
@@ -963,12 +961,10 @@ element (Galerkin) method (GWP2016 Sec. III), in the "resonant + noexp + inps"
 configuration.
 
 Returns the parity-projected matching data (GWP2016 Eqs. 34–35) with the
-`X₀^{2√(−D_I)}` physical rescaling applied, as an `InnerLayerResponse` whose
-`tearing`/`interchange` fields are the isol=1/isol=2 element solutions
-respectively — no parity swap (see the boundary-condition block above for the
-parity derivation).
+`X₀^{2√(−D_I)}` physical rescaling applied, as an `InnerLayerResponse`:
+`interchange` is the even-parity Δ₊ (isol = 1), `tearing` the odd-parity Δ₋ (isol = 2).
 """
 function solve_inner(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
     Δ, _ = _galerkin_solve(params, γ; kwargs...)
-    return InnerLayerResponse(Δ[1], Δ[2])
+    return InnerLayerResponse(; interchange=Δ[1], tearing=Δ[2])
 end

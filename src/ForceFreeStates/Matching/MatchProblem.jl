@@ -126,10 +126,10 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         # Layer-center field weight per parity (match.f intotsol_b).
         pen = zeros(ComplexF64, msing, 2)
         inner_psi = Vector{Vector{Float64}}(undef, msing)      # ψ_s ± X·dψdx, ascending
-        inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₁, odd about ψ_s
-        inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₂, even
-        inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₁, even
-        inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₂, odd
+        inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₋, odd about ψ_s
+        inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₊, even
+        inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₋, even
+        inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₊, odd
         inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
         profiles = true
         for i in 1:msing
@@ -138,15 +138,15 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             inner_params[i] = params
             γ = 2π * im * nn * prob.rotation[i]    # forced eigenvalue, f in Hz
             rpec_eig[i] = γ
-            inner = InnerLayer.solve_inner_profile(model, params, γ)
+            inner = InnerLayer.solve_inner_profile(model, params, γ)   # parity columns (Δ₊, Δ₋)
             deltar[i, 1] = inner.Δ[1]
             deltar[i, 2] = inner.Δ[2]
             profΨ, profΞ, xg = inner.Ψ, inner.Ξ, inner.x
             resc = inner.rescale                    # inner big-branch amplitude → outer δψ normalization
             # b_m = 2πi·χ₁·(m−nq)·ξ_m with m−nq = −n·q′·dψdx·X and Ψ = XΞ (GWP2016 Eq. 16) ⇒ b_m = scale·resc·Ψ.
             scale = -2π * chi1 * im * nn * sings[i].q1 * inner.dψdx
-            pen[i, 1] = scale * profΨ[1, 1] * resc   # X = 0, parity 1
-            pen[i, 2] = scale * profΨ[1, 2] * resc   # parity 2 (Ψ(0) = 0)
+            pen[i, 1] = scale * profΨ[1, 1] * resc   # X = 0, even parity (Ψ(0) = 0)
+            pen[i, 2] = scale * profΨ[1, 2] * resc   # odd parity
             # A backend returning only layer-center values (real-ψ profiles not requested) skips the inner profiles.
             if length(xg) == 1
                 profiles = false
@@ -154,18 +154,18 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             end
             xvar = xg .* inner.dψdx                  # X → ψ distance
             inner_psi[i] = vcat(reverse(sings[i].psifac .- xvar), sings[i].psifac .+ xvar)
-            inner_odd[i] = resc .* vcat(reverse(.-profΞ[:, 1]), profΞ[:, 1])
-            inner_even[i] = resc .* vcat(reverse(profΞ[:, 2]), profΞ[:, 2])
-            inner_bodd[i] = (scale * resc) .* vcat(reverse(profΨ[:, 1]), profΨ[:, 1])
-            inner_beven[i] = (scale * resc) .* vcat(reverse(.-profΨ[:, 2]), profΨ[:, 2])
+            inner_odd[i] = resc .* vcat(reverse(.-profΞ[:, 2]), profΞ[:, 2])
+            inner_even[i] = resc .* vcat(reverse(profΞ[:, 1]), profΞ[:, 1])
+            inner_bodd[i] = (scale * resc) .* vcat(reverse(profΨ[:, 2]), profΨ[:, 2])
+            inner_beven[i] = (scale * resc) .* vcat(reverse(.-profΨ[:, 1]), profΨ[:, 1])
         end
 
         cout, cin, residual = _match_system(dp.raw, dp.coil, deltar)
 
-        # Penetrated field at each layer center (match.f intotsol_b).
+        # Penetrated field at each layer center (match.f intotsol_b); cin rows per surface are (d₊, d₋).
         bpen = zeros(ComplexF64, msing, mcoil)
         for i in 1:msing, j in 1:mcoil
-            bpen[i, j] = pen[i, 1] * cin[2i, j] + pen[i, 2] * cin[2i-1, j]
+            bpen[i, j] = pen[i, 1] * cin[2i-1, j] + pen[i, 2] * cin[2i, j]
         end
 
         # Matched inner ξ_ψ and b^ψ per coil: odd parity × cin[2i], even × cin[2i-1] (match.f intotsol).

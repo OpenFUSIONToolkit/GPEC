@@ -171,7 +171,7 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
         Q_k = Qc * (ref_tauk / sc.tauk) + 1im * mc.ntor * mc.rotation[k]
         resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
-        # delta1 = interchange (parity −), delta2 = tearing (parity +); named
+        # delta1 = interchange (parity +), delta2 = tearing (parity −); named
         # fields expose the two channels directly. sc.scale converts inner-basis
         # Δ to outer units (1.0 for GGJ since rescale_delta is applied inside
         # solve_inner; S^(1/3) for SLAYER).

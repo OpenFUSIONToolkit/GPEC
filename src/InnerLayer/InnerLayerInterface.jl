@@ -35,25 +35,27 @@ the `Δ_{j,±}(γ)` of Glasser, Wang & Park, Phys. Plasmas **23**, 112506
 
 # Fields
 
-  - `tearing` — the **odd-parity** matching coefficient (GWP Δ_+, the
-    "odd mode"). Corresponds to a flux perturbation W that is EVEN in x and
-    a velocity/temperature perturbation that is ODD — i.e., the
+  - `tearing` — the **odd-parity** matching coefficient Δ₋ (GWP2016 Eq. 34; Pletzer,
+    Bondeson & Dewar, J. Comput. Phys. 115, 530 (1994), Eqs. 87–89). Corresponds to a
+    flux perturbation W that is EVEN in x and a displacement/velocity/temperature
+    perturbation that is ODD — i.e., the
     reconnecting mode with a current sheet at the rational surface. This is
     the tearing drive that appears as Δ' in the classical constant-ψ
     tearing equation. Must be populated by every resistive inner-layer model.
 
-  - `interchange` — the **even-parity** matching coefficient (GWP Δ_−, the
-    "even mode"). Corresponds to W odd, N and Θ even — i.e., the
+  - `interchange` — the **even-parity** matching coefficient Δ₊. Corresponds to W odd,
+    N and Θ even — i.e., the
     non-reconnecting interchange/ballooning channel. Its dissipative piece
     in toroidal geometry is the Glasser, Greene & Johnson stabilization
     term that opposes tearing growth (Glasser, Greene & Johnson 1975;
     Lütjens-Bondeson-Roy 1993). Pressureless inner-layer models (e.g.
     SLAYER's Fitzpatrick Riccati) set this identically zero.
 
-The naming follows the physics channel rather than a mathematical parity
-label because `odd/even` carries different meanings across the literature
-depending on whether you label by the parity of W (GWP paper convention)
-or the parity of (N, Θ). Using `tearing` and `interchange` avoids ambiguity.
+Parity labels follow GWP2016 and Pletzer, Bondeson & Dewar: the parity of the
+displacement (Ξ, matched to the outer ξ), with + even and − odd. The fields are named
+by the physics channel because the parity of the flux W is the opposite. Positional
+pairs elsewhere in `InnerLayer` (e.g. the `Δ` of [`solve_inner_profile`](@ref)) are
+ordered (Δ₊, Δ₋) = (interchange, tearing).
 """
 struct InnerLayerResponse
     tearing::ComplexF64
@@ -85,10 +87,11 @@ profiles for the given `model` — everything an outer↔inner matching driver
 needs from the layer, so drivers never touch model internals. Returns a named
 tuple with at least:
 
-  - `Δ`       — the same `(Δ_odd, Δ_even)` matching data as [`solve_inner`](@ref)
+  - `Δ`       — the same matching data as [`solve_inner`](@ref), as the pair
+                (Δ₊, Δ₋) = (interchange, tearing)
   - `x`       — real ascending grid in the model's stretched inner coordinate,
                 `x ≥ 0` with the rational surface at `x = 0`
-  - `Ψ`, `Ξ`  — `length(x) × 2` profiles, columns (odd, even) parity, in the
+  - `Ψ`, `Ξ`  — `length(x) × 2` profiles, columns in the order of `Δ`, in the
                 model's inner normalization: `Ψ` the normal-field
                 (reconnected-flux) variable, `Ξ` the displacement
   - `dψdx`    — conversion to poloidal-flux distance, `δψ = dψdx · x`
