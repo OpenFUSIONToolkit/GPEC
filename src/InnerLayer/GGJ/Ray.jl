@@ -1,30 +1,12 @@
 # Ray.jl
 #
-# Rotated-contour backend (`GGJModel{:ray}`) for the GGJ inner-layer matching data,
-# robust at large |Q| where the stock `:galerkin` matching degrades. Method write-up:
-# docs/src/inner_layer.md, "Numerical method".
-#
-#   The equations are continued analytically onto the ray x = e^{iθ}s, θ = arg(Q)/4
-#   (parabolic-cylinder exponent exactly real; pseudo-resonance off the contour). The
-#   far-field condition uses the same inps Wasow basis as the other backends, applied at
-#   the series radius S and transported S → s_m by an L-stable 2-stage Radau IIA march in
-#   the quotient modulo the decaying exponential pair (damped zone in Complex{Double64}).
-#   On [0, s_m] the stock Hermite-cubic Galerkin assembly (Galerkin.jl) solves the BVP with
-#   parity conditions at the origin and v(s_m) = Us + Δ·Ub + c₁E₁ + c₂E₂ at the far end.
+# Rotated-contour backend (`GGJModel{:ray}`): the GGJ equations continued onto x = e^{iθ}s,
+# θ = arg(Q)/4. Far-field series data at the radius S are marched inward to s_m modulo the
+# decaying exponential pair, then the Galerkin.jl Hermite assembly solves [0, s_m] with
+# v(s_m) = Us + Δ·Ub + c₁E₁ + c₂E₂. Method and rationale: docs/src/inner_layer.md.
 
-# The GGJ inner-region equations (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) as a plain
-# first-order system in v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ'), dv/dx = M(x)·v.
-# All coefficients are POLYNOMIAL in x, so x = 0 is an ordinary point (the
-# x⁻²/x⁻⁴ singularities of the GW2020 Eq. 2 form are artifacts of the
-# (xΨ, Ψ'/x) scaling) and the system continues analytically to complex x.
-#
-#   Ψ'' = H Υ' + Q(Ψ − xΞ)
-#   Ξ'' = [Q x² Ξ − Q x Ψ − (E+F) Υ − H Ψ'] / Q²
-#   Υ'' = [x² Υ − x Ψ − Q²(G(Ξ−Υ) − K(EΞ + FΥ + HΨ'))] / Q
-#
-# Row-by-row this matches the deltac `inpso_get_uv` matrices (I, V, U) after
-# dividing each equation by its diagonal second-derivative coefficient
-# (1, Q², Q).
+# GWP2016 Eq. 11 as dv/dx = M(x)·v in the plain state v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ'). M is polynomial
+# in x, so x = 0 is an ordinary point and the system continues analytically to complex x.
 
 """
     ode_matrix([CT,] p::GGJParameters, Q, x) -> SMatrix{6,6,CT}
@@ -95,38 +77,11 @@ function ray_breaks(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Float6
     return breaks
 end
 
-# Large-s boundary data at the matching point on the ray x = e^{iθ}s.
-#
-# The admissible (bounded-as-s→∞) solution space is spanned by
-#   { u_small, u_big }  — the two power-like Mercier solutions, taken from
-#                         the inps series in the standard normalization, and
-#   { E₁, E₂ }          — the two forward-DECAYING exponential solutions.
-#
-# The inps series is only trusted at radius S (residual ≤ smax_tol), which
-# for extreme-coefficient surfaces (K ~ 10⁶) can be S ~ 10⁴–10⁵, while the
-# BVP ends at s_m ~ 30–150. The gap is bridged by MARCHING the
-# power-pair data W = [u_small, u_big] backward S → s_m.
-#
-# Marching design (the hard-won part):
-#   - Backward, the decaying pair GROWS at rate ρs (ρ = Re(e^{2iθ}/√Q)), up
-#     to ~10³/unit at large s. Any explicit integrator — including
-#     projected/continuous-QR variants, whose unprojected stage points
-#     reintroduce the transverse stiffness — is stability-limited to
-#     h ≲ 3/(ρs), i.e. O(ρS²) steps: hopeless at S ~ 10⁵.
-#   - The system is LINEAR, so we use an implicit method (2-stage Radau IIA,
-#     order 3; one 12×12 solve per step) with stability function
-#     R(z) = 2(3+z)/(z² − 4z + 6) → 2/z as |z| → ∞ in any direction. Resolved
-#     slow content is integrated to 3rd order; under-resolved exponential
-#     directions are DAMPED whatever their sign. That is normally an accuracy
-#     vice; here it is exactly the required behavior, because Δ is defined
-#     modulo the decaying pair. For a backward-growing mode |R| > 1 on
-#     0 < z < 6 (poles at z = 2 ± i√2), so damped steps need z > 8.
-#   - In the partially-resolved band (|z| = ρs·h ≲ 10) genuine backward
-#     growth of rounding-injected decaying-pair content still occurs, so W
-#     is PURGED against the decaying frame every `purge_budget` e-folds of
-#     ∫g_max ds. Purging only ever removes span{E} content —
-#     legitimate by the definition of Δ — so the transported coefficients
-#     of u_small/u_big are exact up to integrator tolerance.
+# Far-field boundary data. The admissible solutions at large s are the power pair (u_small, u_big)
+# from the inps series and the forward-decaying exponential pair E. The series is trusted only at
+# S, which can lie far beyond s_m, so the power pair is marched S → s_m by 2-stage Radau IIA,
+# R(z) = 2(3+z)/(z² − 4z + 6). Unresolved steps (z > 8, clear of |R| > 1 on 0 < z < 6) damp the
+# exponential directions, which is harmless because Δ is defined modulo E.
 
 # Small and large power-like solutions at x as 6-component states (Ψ, Ξ, Υ, Ψ', Ξ', Υ').
 function _power_states(cache::InnerAsymptoticsCache, x::Number)
@@ -150,13 +105,7 @@ function decaying_pair(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Flo
     ρ = real(cis(2θ) / sq)
     ρ > 0 || throw(ArgumentError("θ=$θ gives ρ=$ρ ≤ 0; decaying pair undefined"))
     ph = cis(θ)
-    # Purification window: BOTH backward-growing directions must separate
-    # from the power pair by ≥ `growth` e-folds over [S, S+ΔS], so the
-    # budget is set by the SLOWEST grower's rate margin over the algebraic
-    # power rates (from the frozen spectrum) — not by ρS. At moderate |Q|
-    # the fast-Ohm grower can be ~0.6/unit while ρS ~ 10²: budgeting on ρS
-    # leaves the second frame column O(1)-contaminated with power content,
-    # which then poisons every march purge that uses the frame.
+    # Window ΔS: the slowest backward grower separates from the power pair by `growth` e-folds.
     g2 = Inf
     gmax_loc = 0.0
     for λ in eigvals(Matrix(ph * ode_matrix(params, Q, ph * S)))
@@ -167,11 +116,7 @@ function decaying_pair(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Flo
     gsep = isfinite(g2) ? max(g2 - 20.0 / S, 0.05 * g2) : ρ * S
     ΔS = min(growth / gsep, 3.0 * S)
 
-    # Step resolution must use the TRUE local spectrum, not the analytic
-    # ρs + |√Q| estimate: on extreme-coefficient surfaces the Υ-family rate
-    # √|Q(G+KF)| dominates at small s and the analytic estimate under-counts
-    # it 10×, leaving h·λ ~ 0.2 — stable but phase-inaccurate, which corrupts
-    # the extracted frame directions (observed as O(1) θ-drift downstream).
+    # Resolve the true local spectrum; ρs + |√Q| under-counts the Υ-family rate √|Q(G+KF)|.
     for λ in eigvals(Matrix(ph * ode_matrix(params, Q, ph * (S + ΔS))))
         gmax_loc = max(gmax_loc, abs(real(λ)))
     end
@@ -206,9 +151,7 @@ end
 
 Transport the power-pair boundary data from the series radius `S` inward to
 `s_m` along the ray, modulo the decaying exponential pair (the quotient in
-which Δ is defined). 2-stage Radau IIA (L-stable) with Φ-budgeted purges
-against a carried decaying frame; explicit marchers cannot do this at large S
-(see file header).
+which Δ is defined): 2-stage Radau IIA with purges against a carried decaying frame.
 """
 function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     S::Float64, s_m::Float64, Us::Vector{ComplexF64}, Ub::Vector{ComplexF64};
@@ -237,51 +180,22 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
         return W + hc * ((CT(3) / 4) * @view(K[1:6, :]) + (CT(1) / 4) * @view(K[7:12, :]))
     end
 
-    # Extended precision (Double64) for the damped-zone W march.
-    # At z = ρ·c·s² ≫ 1 the step matrices have cond ~ z and the LU backward
-    # error has a SYSTEMATIC direction set by the elimination structure — it
-    # does not dither away, accumulating a relative error Σ eps·z ≈ eps·ρS²/2
-    # on the power columns that is INDEPENDENT of the step law (c cancels).
-    # The near-parallel power-pair geometry at large S turns that into
-    # u_small/u_big coefficient mixing β ~ eps·ρS²/2 · (‖u_big‖/‖u_small‖)(S)
-    # ~ 1e-4 at |Q| = 500 — saturating Δ of the near-pole parity at ~1/β and
-    # flooring the other at |Δ|·β — the Δ-mixing defect extended precision removes.
-    # Double64 arithmetic (eps ~ 5e-33) removes it outright; the resolved
-    # band stays Float64 (z ≤ ztrk there, solves well-conditioned).
+    # Damped-zone steps have cond ~ z ≫ 1; their structured LU backward error mixes u_small and u_big
+    # by ~eps·ρS²/2·‖u_big‖/‖u_small‖ (≈1e-4 at |Q| = 500 in Float64), so that zone runs in Double64.
     CTd = Complex{Double64}
     phd = CTd(cos(Double64(θ)), sin(Double64(θ)))
     𝔐d(s) = phd * Matrix(ode_matrix(CTd, params, Q, phd * Double64(s)))
 
-    # --- Schedule: geometric where damped, growth-capped where resolved. ---
-    # No adaptive controller (three generations died on estimator artifacts);
-    # the step law is derived from the local mode structure instead. At each
-    # step the eigenvalues of 𝔐(s) give the two backward-growing exponential
-    # rates g (Re λ < 0, excluding the algebraic power-pair rates ~ r/s):
-    #
-    #   damped zone (g_min·c·s > 8 for all growers): h = -c·s. All growing
-    #     content — including the O(smax_tol) fast-direction contamination of
-    #     the series data — sits at z > 8 where Radau DAMPS it
-    #     (|R| ≈ 2/z). Slow-mode global error ≈ 10²c³ → c = (rtol/100)^{1/3};
-    #     step count ~ ln(S/s_m)/c, growing only logarithmically with S.
-    #
-    #   resolved band (some grower at z ≲ 8): genuine backward growth must be
-    #     tracked and removed. h = -min(c·s, 0.3/g_max) keeps z ≤ 0.3 so the
-    #     DISCRETE growing eigendirection matches the continuous one to
-    #     O(z²) ~ 1% (an orthogonal purge against a frame misaligned by δ
-    #     leaks δ·content — with e-fold budget Φ ≤ 2.5 the cycle gain
-    #     e^Φ·δ < 0.2 and contamination stays at the rounding floor). The
-    #     frame F is carried CONTINUOUSLY with the same Radau steps + QR
-    #     (backward-attracting ⇒ self-correcting), so no re-extraction cost.
-    #
-    #   The band is entered where the slowest grower's rate drops. On the real
-    #   axis with imaginary Q that is the Υ-family turning point x² = −Q²(G+KF),
-    #   where the decaying frame cannot be identified and the march fails; the
-    #   default θ = arg(Q)/4 keeps the turning point off the contour.
+    # Step law, from the local growth rates g of 𝔐(s):
+    #   damped zone (every grower has g·c·s > 8): h = −c·s with c = (rtol/100)^{1/3}, so the step
+    #     count grows only like ln(S/s_m);
+    #   resolved band: h = −min(c·s, ztrk/g_max), with the decaying frame F carried by the same
+    #     steps and purged from W every `purge_budget` e-folds.
+    # On the real axis with imaginary Q the band entry lands on the turning point x² = −Q²(G+KF),
+    # where F cannot be identified; the default θ keeps it off the contour.
     c = clamp(cbrt(rtol / 100.0), 2e-5, 2e-3)
 
-    # --- Phase 1: damped zone, W in Double64 (see the Double64 comment above). ---
-    # First purge (at S) and all damped-zone steps run in extended precision;
-    # on resolved-band entry W drops back to Float64 for phase 2.
+    # Damped zone, in Double64 from the first purge at S to the resolved-band entry.
     Wd = CTd.(W)
     let Floc = decaying_pair(params, Q, θ, S; growth=growth, seed=seed, dp_res=dp_res)
         Fd = CTd.(Floc)
@@ -305,14 +219,12 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
     end
     W = ComplexF64.(Wd)
 
-    # --- Phase 2: resolved band (Float64, carried frame + purges). ---
+    # Resolved band, in Float64 with the carried frame.
     Φ = 0.0
     F = Matrix{ComplexF64}(undef, 6, 2)
     have_F = false
     while s > s_m + 1e-12 * S
-        # Backward-growing exponential rates from the frozen-coefficient
-        # spectrum (Re λ < 0 ⇒ grows as s decreases); rates ≲ 10/s are the
-        # algebraic power pair, not exponential growers.
+        # Backward-growing rates (Re λ < 0); rates ≲ 10/s belong to the algebraic power pair.
         λs = eigvals(Matrix(𝔐(s)))
         gmin, gmax = Inf, 0.0
         for λ in λs
@@ -344,16 +256,9 @@ function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
         nstep += 1
         nstep > 5_000_000 && error("march_boundary: step limit exceeded (s=$s)")
     end
-    # The boundary basis must span the traces AT s_m of the solutions that
-    # decay AT INFINITY — which, after the mode families morph around
-    # s ~ |Q|, is NOT the same subspace as the locally-decaying pair at s_m.
-    # The carried frame F is exactly the marched ∞-decaying pair (it enters
-    # the resolved band before the morphing region and tracks the subspace
-    # through it), so it IS the correct E-basis; re-extracting locally at
-    # s_m substitutes the wrong subspace and corrupts Δ at O(1) on
-    # extreme-coefficient surfaces. Local extraction remains only as the
-    # fallback when the march never entered the resolved band (no morphing
-    # crossed under resolution — the subspaces then coincide).
+    # E must span the solutions that decay at infinity, which differ from the locally decaying pair at
+    # s_m once the mode families morph (s ~ |Q|); the carried F is that subspace. Local extraction is
+    # the fallback when the march never entered the resolved band.
     if have_F
         W .-= F * (F' * W)
     else
@@ -380,9 +285,7 @@ function boundary_basis(params::GGJParameters, Q::ComplexF64,
     return Us, Ub, E, _basis_cond(Us, Ub, E)
 end
 
-# Driver: series radius S, BVP edge s_m, march S → s_m, then the Hermite Galerkin BVP on
-# [0, s_m] with the far-field state v(s_m) = Us + Δ·Ub + c₁E₁ + c₂E₂ (Galerkin.jl,
-# `_assemble_and_solve_point!`).
+# Driver: series radius S, BVP edge s_m, march S → s_m, Hermite BVP on [0, s_m].
 
 """
     RaySolveResult
@@ -447,11 +350,8 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
         Sv = S
     end
 
-    # Beyond s_m the solution is pure power law, carried by the quotient march; for small |Q| (s_m ≳ S) no march is needed.
-    # s_m: where every exponential solution family has decayed ≥ 45 e-folds from the origin, computed from the actual
-    # frozen-coefficient spectrum (the asymptotic ρs rate is wrong near the
-    # origin for extreme-coefficient surfaces, where the Υ-family rate
-    # √|Q(G+KF)| dominates and kills exponential content within s ~ O(1)).
+    # s_m: where every exponential family has decayed 45 e-folds from the origin, from the local spectrum.
+    # When s_m ≳ S (small |Q|) the series data are applied at S directly.
     s_m = let acc = 0.0, sprev = 0.0, out = Sv
         for sk in exp10.(range(-2, log10(Sv); length=400))
             gdec = Inf
@@ -523,12 +423,10 @@ end
 
 Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. `Δ` and the
 layer-center fields come from the solve at θ = arg(Q)/4; x = 0 lies on every contour, so
-Ψ(0), Ξ(0) there are the real-axis values. By default only those center values are
-returned (`x = [0.0]`, one-row `Ψ`, `Ξ`; `certΔ = NaN`), which is all the penetrated field
-needs. With `real_profiles = true` the fields across the layer come from an extra θ = 0
-re-solve on the real axis, and the θ = 0 vs θ = arg(Q)/4 agreement of Δ₊ is returned as `certΔ`
-(a runtime certificate; warns above `certify_rtol`). `npc` sets the profile points per mesh
-cell; extra keywords forward to [`solve_ray`](@ref) (θ is fixed by the method — do not pass it).
+Ψ(0), Ξ(0) are the real-axis values, and by default only they are returned (`x = [0.0]`,
+`certΔ = NaN`). With `real_profiles = true` the fields across the layer come from an extra
+θ = 0 solve (`npc` points per cell), and the relative difference of its Δ₊ is `certΔ`,
+warned above `certify_rtol`. Other keywords forward to [`solve_ray`](@ref), except θ.
 """
 function solve_inner_profile(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
     real_profiles::Bool=false, npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
@@ -550,8 +448,7 @@ end
 
 Reconstruct (Ψ, Ξ, Υ) on the solution contour from the Hermite nodal solution, `npc`
 points per cell; each field is `npts × 2` with columns (even, odd) as in `Δ`, and `x = e^{iθ}s`.
-For rotated solves the fields live on the ray — continuation back to real x is a
-separate (unstable) problem, by design.
+For rotated solves the fields live on the ray, not the real axis.
 """
 function solution_profile(res::RaySolveResult; npc::Int=8)
     prof = _solution_profile(res.ws; npc=npc)
@@ -587,12 +484,10 @@ end
 """
     delta_convergence(params, Q; verbose=true, kwargs...) -> (; Δ, spread, base, table)
 
-Error bar for the matching data: solve at the baseline, then re-solve with each
-numerical knob perturbed on an independent axis (contour angle θ, mesh resolution,
-series order/radius, march tolerance, handoff radius, purification e-folds — see
-`variations` below) and report the relative change of (Δ₊, Δ₋) per knob. θ is perturbed
-outward only: inward moves toward the x² ≈ −Q²(G+KF) pseudo-resonance and measures the
-perturbed solve, not the baseline. `spread` is the per-parity worst case over all knobs.
+Error bar for the matching data: re-solve with each numerical knob perturbed in turn (contour
+angle, mesh, series order and radius, march tolerance, handoff radius, purification e-folds) and
+report the relative change of (Δ₊, Δ₋); `spread` is the worst case per parity. θ moves outward
+only, away from the pseudo-resonance x² = −Q²(G+KF).
 """
 function delta_convergence(params::GGJParameters, Q::ComplexF64; verbose::Bool=true, kwargs...)
     base = solve_ray(params, Q; kwargs...)
