@@ -93,7 +93,7 @@ than integrating the quadratic Riccati ODE directly (which blows up when ``|S|``
 the code integrates the linear EL system with `sing_der!` as the RHS and recovers
 ``S = U_1 U_2^{-1}`` via periodic renormalization — an approach that is mathematically
 equivalent to O(Δψ) but uses `Vern9`'s full 9th-order accuracy.  Renormalization is
-triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `ucrit`, and is
+triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `renorm_threshold`, and is
 forced at the end of each chunk.  At singular surface crossings,
 `riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching directly in column
 `ipert_res` — without Gaussian reduction — and renormalizes to ``(S, I)``.
@@ -259,14 +259,14 @@ The Euler–Lagrange integration runs from the axis out to `psilim`, which is se
 target safety factor `qlim`:
 
 - `qlim` starts at `min(qmax, qhigh)`, where `qmax` is q at the equilibrium's `psihigh`.
-- With `set_psilim_via_dmlim = true` (the default, for diverted equilibria where q → ∞ at the
-  separatrix), `qlim` moves to `(last rational + dmlim) / n`, so the integration ends a fixed
+- With `truncate_at_rational_offset = true` (the default, for diverted equilibria where q → ∞ at the
+  separatrix), `qlim` moves to `(last rational + rational_offset_fraction) / n`, so the integration ends a fixed
   fraction of a rational spacing past the last surface instead of close to one. The offset is
-  then stepped back by `1/n` until it no longer exceeds the bound it started from, so `dmlim`
+  then stepped back by `1/n` until it no longer exceeds the bound it started from, so `rational_offset_fraction`
   never extends the domain past `qmax`, `qhigh`, or the layer-overlap cap below. A bound that
-  falls on a rational, or less than `dmlim / n` above one, therefore excludes it: with
-  `dmlim = 0.2`, both `qhigh = 4.0` and `qhigh = 4.1` give `qlim = 3.2`.
-- With `set_psilim_via_dmlim = false` (limited or analytic equilibria with finite edge q),
+  falls on a rational, or less than `rational_offset_fraction / n` above one, therefore excludes it: with
+  `rational_offset_fraction = 0.2`, both `qhigh = 4.0` and `qhigh = 4.1` give `qlim = 3.2`.
+- With `truncate_at_rational_offset = false` (limited or analytic equilibria with finite edge q),
   `qhigh` and `psihigh` set the domain directly.
 
 ### Resistive-layer overlap
@@ -323,7 +323,7 @@ same χ⊥(ψ) — the layer widths cannot disagree between them. A deck without
 only runs on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path has no inputs to
 resolve it from, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
 `ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
-`psilim_from_layer_overlap = true`. It then caps `qlim` before the `dmlim` step, so `dmlim`
+`psilim_from_layer_overlap = true`. It then caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction`
 still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
 
 The flag is off by default, so every shipped deck is unchanged by it. With the shipped
@@ -356,7 +356,7 @@ most of the radius on the cases checked). Since both widths scale as `χ^{1/4}`,
 | `width_visco`, `width_dr` | visco-resistive and diffusive-resistive (Eq. 100) Δψ widths; `width_dr` sets the cut |
 | `extrapolated` | 1 where the surface lies beyond the equilibrium grid |
 | `psilim_overlap`, `first_overlap_index` | the cut, and the first surface whose layer overlaps its neighbour |
-| `applied` | 1 when the cap was passed to the truncation (`dmlim` / `qhigh` may still cut deeper) |
+| `applied` | 1 when the cap was passed to the truncation (`rational_offset_fraction` / `qhigh` may still cut deeper) |
 
 ## Configuration reference
 

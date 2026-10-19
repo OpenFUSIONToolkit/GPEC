@@ -26,7 +26,7 @@ function TearingProblem(ffs::ForceFreeStatesResult; kwargs...)
 end
 
 function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
-    # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
+    # `equil.config.b0_norm` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
     # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
     # control value through instead: `nothing` makes build_slayer_inputs compute the
     # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
@@ -44,18 +44,18 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
         @warn "SLAYER: kinetic file has no usable zeff or n_i profile (dataset absent or all-zero); " *
               "using the scalar control.zeff = $(control.zeff) at every surface."
     else
-        zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with zimp = $(control.zimp)"
+        zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with impurity_charge = $(control.impurity_charge)"
         @info "SLAYER: Z_eff(ψ) from the kinetic file's $zeff_origin"
     end
     return build_slayer_inputs(equil, surfaces, loaded.profiles;
         bt=bt,
-        mu_i=control.mu_i,
+        mu_i=control.ion_mass,
         zeff=zeff,
         chi_perp=chi_perp,
         chi_tor=chi_tor,
-        dr_val=control.dr_val,
-        dgeo_val=control.dgeo_val,
-        dc_type=control.dc_type,
+        dr_val=control.D_R,
+        dgeo_val=control.D_geo,
+        dc_type=control.D_c_type,
         theta=control.theta_sample,
         resistivity_model=_build_resistivity_model(control.resistivity_model),
         lnLambda_form=control.lnLambda_form)

@@ -47,9 +47,9 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     chi_perp = _chi_spline(data.chi_e)
     chi_tor = _chi_spline(data.chi_phi)
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
-    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `zimp` and a
+    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
-    # Z_eff = zimp − (n_i/n_e)(zimp − 1).
+    # Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
     _usable(v) = v !== nothing && !all(iszero, v)
     zeff = if _usable(data.zeff)
         minimum(data.zeff) >= 1.0 - 1e-8 ||
@@ -58,7 +58,7 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     elseif !_usable(data.n_i)
         nothing
     else
-        z = [ne > 0 ? control.zimp - (ni / ne) * (control.zimp - 1.0) : control.zimp for (ni, ne) in zip(data.n_i, data.n_e)]
+        z = [ne > 0 ? control.impurity_charge - (ni / ne) * (control.impurity_charge - 1.0) : control.impurity_charge for (ni, ne) in zip(data.n_i, data.n_e)]
         minimum(z) >= 1.0 - 1e-8 ||
             error("run_slayer: kinetic file '$path' has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
         cubic_interp(psi_xs, z)

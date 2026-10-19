@@ -147,7 +147,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         N_core = round(Int, mpsi * log_core / log_total)
         N_mid = mpsi - N_edge - N_core
         sq_xs = make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
-    elseif grid_type == "ldp"
+    elseif grid_type == "core_edge_packed"
         if mpsi == 0
             mpsi = 128
         end
@@ -175,7 +175,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     else
         error("Unsupported grid_type: $grid_type")
     end
-    # Floor node spacing on the fixed grids (ldp/pow1 pack the edge below the integration-noise
+    # Floor node spacing on the fixed grids (core_edge_packed/pow1 pack the edge below the integration-noise
     # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, an override
     # grid arrives already floored, and the original grid keeps the input's nodes.
     if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic", "original", "orig"))

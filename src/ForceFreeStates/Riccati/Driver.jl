@@ -48,7 +48,7 @@ recover S = U₁·U₂⁻¹ by renormalization. This achieves the same Riccati t
 
 This works because the EL ODE is **linear** in (U₁, U₂): the RHS does not grow with |S|,
 so relative error control is faithful even when S is large. Renormalization triggered by
-`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > ucrit) keeps
+`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > renorm_threshold) keeps
 both matrices bounded, preventing overflow and maintaining a well-conditioned state for the
 solver — exactly analogous to Gaussian reduction in the standard ODE.
 
@@ -69,7 +69,7 @@ During chunk integration (with sing_der! as ODE RHS):
   u[:,:,1] = U₁  (starts as S_prev, evolves toward new S)
   u[:,:,2] = U₂  (starts as I, evolves with EL dynamics)
 
-After renormalization (at crossing or when norms exceed ucrit):
+After renormalization (at crossing or when norms exceed renorm_threshold):
   u[:,:,1] = S = U₁ · U₂⁻¹
   u[:,:,2] = I
 

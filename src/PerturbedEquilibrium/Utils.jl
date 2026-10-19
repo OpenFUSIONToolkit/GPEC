@@ -288,7 +288,7 @@ const PE_H5_ANNOTATIONS = [
     "Response/xi_clebsch_psi" =>
         (; long_name="Clebsch displacement component ξ^ψ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/dxi_clebsch_psidpsi" =>
-        (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+reg_spot²))", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
+        (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+regularization_width²))", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_clebsch_alpha" =>
         (; long_name="Clebsch displacement component ξ^α/χ₁ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_n" => (; long_name="physical normal displacement ξ_n", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
