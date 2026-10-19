@@ -175,3 +175,5 @@ x_k = g["x_all"][g["trajectory_offsets"][k]:g["trajectory_offsets"][k + 1]]
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.KineticForces]
 ```
+
+See [CGL pressure work and field-strength convention](cgl_pressure.md).

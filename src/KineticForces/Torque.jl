@@ -257,7 +257,7 @@ end
     calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac, n_s, T_s,
                    equil, intr)::ComplexF64
 
-Calculate FCGL (Full Circular Gyrokinetic Landau) torque.
+Calculate the full Chew-Goldberger-Low double-adiabatic torque.
 Implements simplified energy balance equation.
 Only valid for bounce harmonic l=0.
 
@@ -292,7 +292,7 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
         dbob = sum(dbob_m_f .* expm)  # dB/B
         divx = sum(divx_m_f .* expm) * divxfac  # ∇·ξ⊥
 
-        kapx = -0.5 * (dbob + divx)  # Kappa coupling
+        kapx = -(dbob + divx)  # κ·ξ⊥ from δB_L/B = -(∇·ξ⊥ + κ·ξ⊥)
 
         # Poloidal integrands (include 0.5 factor for quadratic form)
         cglspl[1, i] = jac_val * 0.5 * abs(divx)^2
