@@ -140,7 +140,7 @@ tiltx = [2.0]
 # Analytic window-pane (picture-frame) array — corner mode: two opposite [R, Z] corners
 [[ForcingTerms.coil_set]]
 source = "window_pane"
-ncoil_gen = 8
+n_coils = 8
 rz_corners = [[2.2, -0.6], [2.2, 0.6]]
 gap_fraction = 0.15
 currents = [1e3, -1e3, 1e3, -1e3, 1e3, -1e3, 1e3, -1e3]
@@ -151,7 +151,7 @@ currents = [1e3, -1e3, 1e3, -1e3, 1e3, -1e3, 1e3, -1e3]
 # (degrees, 0 = tangential). Requires an equilibrium (the main forcing pipeline supplies it).
 [[ForcingTerms.coil_set]]
 source = "window_pane"
-ncoil_gen = 2
+n_coils = 2
 standoff = 0.25
 poloidal_angle = 0.0
 poloidal_length = 1.2
