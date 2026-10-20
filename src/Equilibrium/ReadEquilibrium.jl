@@ -410,10 +410,10 @@ function _read_fortran_reals(io::IO, n::Int)
 end
 
 """
-    read_ldp_i(config) -> InverseRunInput
+    read_ifile(config) -> InverseRunInput
 
-Read an inverse i-file (L. Don Pearlstein's format, also written by TokaMaker `save_ifile`): little-endian
-Fortran unformatted records, reals as real*8 or real*4, axis first, θ fastest.
+Read an inverse i-file, such as TokaMaker `save_ifile` writes: little-endian Fortran unformatted records,
+reals as real*8 or real*4, axis first, θ fastest.
 
   - `mx, my` (int32); `psi(mx)` [Wb/rad], `f(mx)` = R·Bt [T·m], `p(mx)` [Pa], `q(mx)`
   - `r(my, mx)`, `z(my, mx)` [m], with the periodic θ point duplicated
@@ -423,8 +423,8 @@ Fortran unformatted records, reals as real*8 or real*4, axis first, θ fastest.
 
 Port of Fortran `read_eq_ldp_i`.
 """
-function read_ldp_i(config::EquilibriumConfig)
-    @info "Reading inverse i-file (ldp_i): $(config.eq_filename)"
+function read_ifile(config::EquilibriumConfig)
+    @info "Reading inverse i-file: $(config.eq_filename)"
 
     psi, f, p, q, r, z, bounds = open(config.eq_filename, "r") do io
         ltoh(read(io, Int32)) == 8 || error("i-file header record is not two int32")

@@ -374,7 +374,7 @@ end
     InverseIngest
 
 The serializable raw arrays and scalars captured by an inverse-equilibrium reader
-(`read_chease_ascii`, `read_chease_binary`, `read_ldp_i`) — everything needed to rebuild an
+(`read_chease_ascii`, `read_chease_binary`, `read_ifile`) — everything needed to rebuild an
 `InverseRunInput`'s splines without re-reading the original CHEASE file or i-file. Stored on
 `InverseRunInput.ingest` / `PlasmaEquilibrium.ingest` and reconstructed by
 `build_inverse_from_ingest`. See [`DirectIngest`](@ref) for the role this plays in

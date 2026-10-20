@@ -229,7 +229,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     # q: i-files use the field-line integral, as Fortran `inverse_run`; a tabulated q splined in ψ is
     # inaccurate where edge surfaces are coarse (q ~ log(1-ψ)). Other inputs keep their input q (the
     # field-line q is inaccurate in cylindrical LAR geometry).
-    q_from_geometry = config.eq_type in LDP_I_KINDS
+    q_from_geometry = config.eq_type == "ifile"
     f_sq_in_buf = Vector{Float64}(undef, size(sq_in.y, 2))
     sq_in_hint = Ref(1)
     hint2d = (Ref(1), Ref(1))

@@ -193,13 +193,13 @@ using Statistics
         @test finite(eq_r)
     end
 
-    @testset "Load TokaMaker i-file (ldp_i)" begin
+    @testset "Load TokaMaker i-file" begin
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
         # One TokaMaker solve written by save_eqdsk (g65) and save_ifile (i33x65, real*8 and real*4)
         tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
         cfg(type, file; kw...) = Eq.EquilibriumConfig(; eq_type=type, eq_filename=joinpath(tk_dir, file), jac_type="hamada",
             grid_type="core_edge_packed", mpsi=64, psilow=0.01, psihigh=0.99, kw...)
-        eq_i = Eq.setup_equilibrium(cfg("ldp_i", "i33x65.ifile"))
+        eq_i = Eq.setup_equilibrium(cfg("ifile", "i33x65.ifile"))
         eq_g = Eq.setup_equilibrium(cfg("efit", "g65.geqdsk"))
         eq_s = Eq.setup_equilibrium(cfg("ifile", "i33x65_single.ifile"))
 
@@ -218,7 +218,7 @@ using Statistics
         @test maximum(abs.(eq_s.ingest.R_nodes .- eq_i.ingest.R_nodes)) < 1e-6
 
         # The trailing FF′ and p′ records are ignored: a file without them reads the same
-        table(file) = Eq.read_ldp_i(cfg("ldp_i", file)).ingest.sq_fs
+        table(file) = Eq.read_ifile(cfg("ifile", file)).ingest.sq_fs
         tabulated = table("i33x65.ifile")
         raw = read(joinpath(tk_dir, "i33x65.ifile"))
         mx = Int(reinterpret(Int32, raw[5:8])[1])
@@ -232,14 +232,14 @@ using Statistics
         bumped[(qrec+1):(qrec+8mx)] = reinterpret(UInt8, 1.1 .* reinterpret(Float64, raw[(qrec+1):(qrec+8mx)]))
         bumped_file = joinpath(mktempdir(), "bumped_q.ifile")
         write(bumped_file, bumped)
-        @test Eq.read_ldp_i(cfg("ldp_i", bumped_file)).ingest.sq_fs[:, 3] ≈ 1.1 .* tabulated[:, 3]
-        @test Eq.setup_equilibrium(cfg("ldp_i", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
+        @test Eq.read_ifile(cfg("ifile", bumped_file)).ingest.sq_fs[:, 3] ≈ 1.1 .* tabulated[:, 3]
+        @test Eq.setup_equilibrium(cfg("ifile", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
     end
 
     @testset "TokaMaker i-file ψ bounds record" begin
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
         tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
-        cfg(file; kw...) = Eq.EquilibriumConfig(; eq_type="ldp_i", eq_filename=file, jac_type="hamada", grid_type="core_edge_packed", mpsi=32,
+        cfg(file; kw...) = Eq.EquilibriumConfig(; eq_type="ifile", eq_filename=file, jac_type="hamada", grid_type="core_edge_packed", mpsi=32,
             psilow=0.01, psihigh=0.99, kw...)
         raw = read(joinpath(tk_dir, "i33x65.ifile"))  # carries the FF′ and p′ records
         mx = Int(reinterpret(Int32, raw[5:8])[1])
@@ -248,7 +248,7 @@ using Statistics
         record(v) = vcat(reinterpret(UInt8, [Int32(8length(v))]), reinterpret(UInt8, Float64.(v)), reinterpret(UInt8, [Int32(8length(v))]))
         dir = mktempdir()
         variant(name, bytes) = (path = joinpath(dir, name); write(path, bytes); path)
-        ingest(path) = Eq.read_ldp_i(cfg(path)).ingest
+        ingest(path) = Eq.read_ifile(cfg(path)).ingest
 
         base_s = ingest(variant("s.ifile", stripped))
 
