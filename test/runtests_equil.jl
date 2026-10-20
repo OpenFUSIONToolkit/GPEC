@@ -217,6 +217,16 @@ using Statistics
         @test all(isapprox(eq_s.profiles.q_spline(x), eq_i.profiles.q_spline(x); rtol=1e-6) for x in (0.2, 0.5, 0.8))
         @test maximum(abs.(eq_s.ingest.R_nodes .- eq_i.ingest.R_nodes)) < 1e-6
 
+        # Re-forming from the captured ingest matches re-reading the file on the same nodes
+        @test eq_i.ingest isa Eq.InverseIngest
+        nodes = collect(range(0.01, 0.99; length=33))
+        reformed = Eq.reform(eq_i, nodes)
+        fresh = Eq.PlasmaEquilibrium(cfg("ifile", "i33x65.ifile"); override_psi_nodes=nodes)
+        @test reformed.rzphi_xs == fresh.rzphi_xs == nodes
+        @test map(reformed.profiles.q_spline, nodes) == map(fresh.profiles.q_spline, nodes)
+        @test all(reformed.rzphi_rsquared(pt) == fresh.rzphi_rsquared(pt) && reformed.rzphi_jac(pt) == fresh.rzphi_jac(pt)
+                  for pt in ((0.1, 0.0), (0.5, 0.3), (0.9, 0.7)))
+
         # The trailing FF′ and p′ records are ignored: a file without them reads the same
         table(file) = Eq.read_ifile(cfg("ifile", file)).ingest.sq_fs
         tabulated = table("i33x65.ifile")
