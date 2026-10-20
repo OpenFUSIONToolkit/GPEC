@@ -74,7 +74,7 @@
             omega=0.0, omega_e=1.0e4, omega_i=5.0e3,
             qval=q_of(r), sval_r=s_of(r), bt=B0,
             rs=r * A_MIN, R0=R0, mu_i=MNUM, zeff=ZEFF,
-            chi_perp=CHI, chi_tor=CHI, m=1, n=n,
+            chi_perp_e=CHI, chi_tor=CHI, m=1, n=n,
             resistivity_model=SpitzerHarmModel(), lnLambda_form=:nrl)
         return p
     end

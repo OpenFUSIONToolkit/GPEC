@@ -12,7 +12,7 @@
             omega=0.0, omega_e=-1.0e4, omega_i=5.0e3,
             qval=2.0, sval_r=1.0, bt=2.0,
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
-            chi_perp=1.0, chi_tor=1.0,
+            chi_perp_e=1.0, chi_tor=1.0,
             m=2, n=1,
             dr_val=dr_val, dgeo_val=0.5, dc_type=dc_type,
             ising=3
@@ -79,7 +79,7 @@
         # Compressibility is in (0,1) for finite β
         @test 0.0 < p.c_beta < 1.0
 
-        # Prandtl-like ratios are positive and equal here (chi_perp=chi_tor=1)
+        # Prandtl-like ratios are positive and equal here (chi_perp_e=chi_tor=1)
         @test p.P_perp ≈ p.P_tor
         @test p.P_perp > 0
 
@@ -198,5 +198,44 @@
         # tau_h > 0 keeps the Lundquist number positive, so S^(1/3) is defined on reverse shear.
         @test neg.lu > 0
         @test neg.tauk > 0
+    end
+
+    @testset "Test 4: P_perp_model options" begin
+        base = merge(_ref_kwargs(), (chi_tor=1.7,))
+        ref = slayer_parameters(; base...)
+        @test ref.P_perp ≈ ref.tau_r * 1.0 / ref.rs^2 rtol = 1e-14
+        @test slayer_parameters(; base..., P_perp_model=:chi_perp_i, chi_perp_i=2.0).P_perp ≈ 2 * ref.P_perp
+        @test slayer_parameters(; base..., P_perp_model=:P_phi).P_perp == ref.P_tor
+        # Eq. 16: with χ⊥,e = χ⊥,i = 0 only c_β²η/μ₀ survives, so P_perp = c_β²
+        grads = (dlnn=-1.0, dlnTe=-2.0, dlnTi=-3.0)
+        d0 = slayer_parameters(; base..., P_perp_model=:D_perp, grads..., chi_perp_e=0.0, chi_perp_i=0.0)
+        @test d0.P_perp ≈ d0.c_beta^2 rtol = 1e-12
+        # η_e = 2, η_i = 3, T_e = T_i ⇒ τ = 3/4, τ_e = 3/7, τ_i = 4/7
+        d1 = slayer_parameters(; base..., P_perp_model=:D_perp, grads..., chi_perp_i=2.0)
+        D_hand = d1.c_beta^2 * d1.eta / MU_0 + (2 / 3) * (1 - d1.c_beta^2) * ((2 / 3) * (3 / 7) * 1.0 + (3 / 4) * (4 / 7) * 2.0)
+        @test d1.P_perp ≈ d1.tau_r * D_hand / d1.rs^2 rtol = 1e-12
+        # T_e = 2T_i ⇒ τ = 3/2, τ_e = 3/5, τ_i = 2/5: fixes the orientation of the temperature ratio
+        d2 = slayer_parameters(; base..., t_e=2000.0, P_perp_model=:D_perp, grads..., chi_perp_i=2.0)
+        D_hand2 = d2.c_beta^2 * d2.eta / MU_0 + (2 / 3) * (1 - d2.c_beta^2) * ((2 / 3) * (3 / 5) * 1.0 + (3 / 4) * (2 / 5) * 2.0)
+        @test d2.P_perp ≈ d2.tau_r * D_hand2 / d2.rs^2 rtol = 1e-12
+        # Flat temperatures leave only the c_β² floor, and a flat ion profile is finite (no 0·∞)
+        @test slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=-1.0, dlnTe=0.0, dlnTi=0.0, chi_perp_i=2.0).P_perp ≈ d0.P_perp rtol = 1e-12
+        @test isfinite(slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=0.0, dlnTe=-2.0, dlnTi=0.0, chi_perp_i=2.0).P_perp)
+        # A non-positive or missing χ⊥,i is an error in every model that uses it
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:chi_perp_i)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:chi_perp_i, chi_perp_i=0.0)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:D_perp)
+        @test slayer_parameters(; base..., P_perp_model=:c_beta).P_perp == ref.c_beta^2
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:bogus)
+        # τ̄_E = 0.1 s and a = 0.6 m ⇒ uniform χ_E = (3/16)·0.36/0.1 m²/s sets both Prandtl numbers
+        te = slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1, a_minor=0.6)
+        @test te.P_tor ≈ te.tau_r * ((3 / 16) * 0.6^2 / 0.1) / te.rs^2 rtol = 1e-14
+        @test te.P_perp == te.P_tor
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:tau_E)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1)
+        # Only P_perp moves; the critical-Δ offset keeps using chi_perp_e.
+        cb = slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))..., P_perp_model=:c_beta)
+        @test cb.dc_tmp == slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))...).dc_tmp
+        @test cb.P_tor == ref.P_tor
     end
 end

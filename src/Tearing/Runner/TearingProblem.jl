@@ -32,12 +32,8 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
     # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
     # what its docstring already prescribes.
     bt = control.bt
-    # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
-    chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
-    chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
-    (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
-        "SLAYER: no usable chi_e/chi_phi profile(s) (dataset absent or all-zero); " *
-        "using the scalar chi_perp/chi_tor fallback for the missing one(s).")
+    # χ⊥,e/χ⊥,i/χ_φ from the kinetic file when present, else the scalar fallbacks.
+    chi = _slayer_chi_inputs(loaded, control)
     # Z_eff(ψ) from the kinetic file when it carries n_i, else the scalar fallback.
     zeff = loaded.zeff === nothing ? control.zeff : loaded.zeff
     if loaded.zeff_source === :scalar
@@ -51,8 +47,11 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
         bt=bt,
         mu_i=control.ion_mass,
         zeff=zeff,
-        chi_perp=chi_perp,
-        chi_tor=chi_tor,
+        chi_perp_e=chi.chi_perp_e,
+        chi_perp_i=chi.chi_perp_i,
+        chi_tor=chi.chi_tor,
+        tau_E=something(control.tau_E, NaN),
+        P_perp_model=control.P_perp_model,
         dr_val=control.D_R,
         dgeo_val=control.D_geo,
         dc_type=control.D_c_type,

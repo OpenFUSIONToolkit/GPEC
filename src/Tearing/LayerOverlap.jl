@@ -155,7 +155,7 @@ Riccati solve; `delta_s` is solved per surface as a reported comparison only.
   - `rs_method` -- radial label the widths and their ψ-conversion Jacobian are taken in
     (default `:midplane`; see `radial_label`). The caller wiring this scan into the domain
     truncation passes `:flux`, the label Fitzpatrick Eq. (100) is anchored to
-  - `bt`, `mu_i`, `zeff`, `chi_perp`, `chi_tor`, `resistivity_model`, `lnLambda_form`
+  - `bt`, `mu_i`, `zeff`, `chi_perp_e`, `chi_perp_i`, `chi_tor`, `tau_E`, `P_perp_model`, `resistivity_model`, `lnLambda_form`
     -- passed through to `build_slayer_inputs`. The defaults are placeholders: a caller
     scanning a real run must pass that run's own values, as the domain-truncation wiring does
 
@@ -176,8 +176,11 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
     bt=nothing,
     mu_i::Real=2.0,
     zeff=1.0,
-    chi_perp=1.0,
+    chi_perp_e=1.0,
+    chi_perp_i=NaN,
     chi_tor=1.0,
+    tau_E::Real=NaN,
+    P_perp_model::Symbol=:chi_perp_e,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl)
 
@@ -316,7 +319,8 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         # which makes iota_e singular) is recorded and skipped rather than aborting the scan.
         params = try
             build_slayer_inputs(equil, [sing], profiles; rs_method=rs_method, q_beyond=q_beyond,
-                bt=bt, mu_i=mu_i, zeff=zeff, chi_perp=chi_perp, chi_tor=chi_tor,
+                bt=bt, mu_i=mu_i, zeff=zeff, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor,
+                tau_E=tau_E, P_perp_model=P_perp_model,
                 dr_val=0.0, dc_type=:none, theta=theta,
                 resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
         catch err

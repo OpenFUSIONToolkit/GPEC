@@ -679,8 +679,9 @@
             da = E.read_kinetic_file(gpeckf)
             db = E.read_kinetic_file(h5)
             # legacy ASCII carries no optional fields; the example .h5 carries chi
-            @test da.chi_e === nothing && da.chi_phi === nothing
-            @test db.chi_e !== nothing && db.chi_phi !== nothing
+            @test da.chi_e === nothing && da.chi_i === nothing && da.chi_phi === nothing
+            @test db.chi_e !== nothing && db.chi_i !== nothing && db.chi_phi !== nothing
+            @test all(>(0), db.chi_i)
             # core columns identical (the .h5 was generated from the .gpeckf)
             @test da.psi == db.psi
             @test da.n_e == db.n_e
@@ -708,6 +709,9 @@
             @test dc.chi_phi ≈ db.chi_phi
             @test dc.n_e ≈ db.n_e
             @test dc.provenance == "roundtrip"
+            @test dc.chi_i ≈ db.chi_i
+            E.write_kinetic_h5(tmp, E.KineticProfileData(; psi=db.psi, chi_e=db.chi_e))
+            @test E.read_kinetic_file(tmp).chi_i === nothing
             rm(tmp; force=true)
         end
 
