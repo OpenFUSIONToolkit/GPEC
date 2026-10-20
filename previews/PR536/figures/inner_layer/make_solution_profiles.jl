@@ -16,7 +16,7 @@ using Printf
 const IL = GeneralizedPerturbedEquilibrium.InnerLayer
 const GGJ = IL.GGJ
 
-p = IL.q4_surface_benchmark()
+p = IL.GGJ.q4_surface_benchmark()
 Q = 2.0im                  # imaginary axis, beyond the |Q|≪1 shooting regime,
 #                            small enough that the BVP domain reaches
 #                            the series radius directly (no march) — so the

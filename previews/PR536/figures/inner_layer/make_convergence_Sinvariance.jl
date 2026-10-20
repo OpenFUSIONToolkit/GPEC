@@ -16,7 +16,7 @@ using Printf
 
 const IL = GeneralizedPerturbedEquilibrium.InnerLayer
 
-p = IL.q4_surface_benchmark()
+p = IL.GGJ.q4_surface_benchmark()
 Q = 500.0im
 
 conv = IL.delta_convergence(p, Q; verbose=false)
