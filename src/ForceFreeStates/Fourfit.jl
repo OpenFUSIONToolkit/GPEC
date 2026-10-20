@@ -437,7 +437,7 @@ equilibrium-grade core packing amplifies tolerance-level node error into jumps t
 Euler-Lagrange step size. Near the axis every component is a Frobenius power law in ψ, and power
 laws are scale-free, so log-uniform sampling (Δψ ≥ 0.05·ψ) resolves them at constant relative
 accuracy — cubic interpolation of ψ^p on that grid errs by ~(0.05p)⁴/384, resolving even the
-steepest component (p = m_max/2) to ~2e-4, well below where the physics responds. The capped region
+steepest component (p = m_max/2) to ~2e-4 at m_max = 22 (~1e-2 at m_max = 60). The capped region
 ends at the innermost rational (or ψ = 0.1, whichever is smaller) and never drops a knot inside a
 rational's resolution window, preserving the Δ′-stencil structure the equilibrium grid encodes
 (`Equilibrium.RATIONAL_RES_RADIUS`).

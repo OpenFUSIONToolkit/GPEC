@@ -27,6 +27,7 @@ else
     include("./runtests_equil.jl")
     include("./runtests_sfl_sampling.jl")
     include("./runtests_grid_refinement.jl")
+    include("./runtests_core_capped_knots.jl")
     include("./runtests_coordinate_invariant.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_riccati.jl")

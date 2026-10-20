@@ -587,7 +587,7 @@ robustness.
         ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC())
         ff_deriv = deriv1(ff_interp)
 
-        # Resample ff onto uniform theta grid
+        # Evaluate the θ-fit and its derivative at the nodes (the Jacobian needs the derivative)
         for itheta in 1:(mtheta+1)
             theta = theta_nodes[itheta]
             ff_interp(ff_val, theta)
