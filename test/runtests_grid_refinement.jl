@@ -197,6 +197,7 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         equil1c = GridRef.PlasmaEquilibrium(sol_config; grid_type="auto", mpsi=0, psi_accuracy=1e-3, psilow=0.01, psihigh=0.995)
         @test equil1c.config.eq_type == "sol" && equil1c.rzphi_xs == equil1.rzphi_xs
         @test_throws ErrorException GridRef.PlasmaEquilibrium(sol_config; eq_type="lar")
+        @test_throws ErrorException GridRef.PlasmaEquilibrium(eq_config)  # analytic kind without its config
         @test GridRef._analytic_eq_type(GridRef.TJAnalyticConfig()) == "tj_analytic"
 
         # Solovev has finite edge q, so the auto grid must classify it as limited: no separatrix

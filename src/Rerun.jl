@@ -329,7 +329,7 @@ function equilibrium_from_h5(h5path::AbstractString)
     end
     inputs = TOML.parse(toml_raw)
     eq_config, additional_input = rebuild_equilibrium_inputs(inputs, ingest, dirname(abspath(h5path)))
-    equil = Equilibrium.setup_equilibrium(eq_config, additional_input; override_psi_nodes=psi_nodes)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, additional_input; override_psi_nodes=psi_nodes)
     return (; equil, inputs, psilim)
 end
 

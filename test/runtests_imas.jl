@@ -115,6 +115,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         equil = PlasmaEquilibrium(dd; imas_cocos=11, grid_type="core_edge_packed", mpsi=64, psilow=0.01, psihigh=0.5)
         @test equil.config.eq_type == "imas"
         @test equil.ingest isa Equilibrium.DirectIngest && equil.analytic === nothing
+        @test_throws ErrorException setup_equilibrium(EquilibriumConfig(; eq_type="efit"), dd)  # dd needs eq_type="imas"
 
         nodes = Equilibrium.refined_psi_grid(equil; tau=1e-3, mandatory=Float64[], singfac_min=1e-4, n_min=1)
         reformed = Equilibrium.reform(equil, nodes)
