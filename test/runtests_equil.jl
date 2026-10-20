@@ -1,3 +1,4 @@
+using Statistics
 
 @testset "Equilibrium Unit Tests" begin
 
@@ -190,6 +191,88 @@
         eq_r = Eq.setup_equilibrium(cfg("rho"))
         @test eq_r.rzphi_xs[[1, end]] ≈ [0.01, 0.99]
         @test finite(eq_r)
+    end
+
+    @testset "Load TokaMaker i-file" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        # One TokaMaker solve written by save_eqdsk (g65) and save_ifile (i33x65, real*8 and real*4)
+        tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
+        cfg(type, file; kw...) = Eq.EquilibriumConfig(; eq_type=type, eq_filename=joinpath(tk_dir, file), jac_type="hamada",
+            grid_type="core_edge_packed", mpsi=64, psilow=0.01, psihigh=0.99, kw...)
+        eq_i = Eq.setup_equilibrium(cfg("ifile", "i33x65.ifile"))
+        eq_g = Eq.setup_equilibrium(cfg("efit", "g65.geqdsk"))
+        eq_s = Eq.setup_equilibrium(cfg("ifile", "i33x65_single.ifile"))
+
+        # Same equilibrium as the g-file of the same solve
+        @test isapprox(eq_i.ro, eq_g.ro; atol=1e-4) && isapprox(eq_i.zo, eq_g.zo; atol=1e-4)
+        @test isapprox(eq_i.psio, eq_g.psio; rtol=1e-6)
+        @test all(isapprox(eq_i.profiles.q_spline(x), eq_g.profiles.q_spline(x); rtol=1e-3) for x in (0.2, 0.5, 0.8))
+
+        # Grad-Shafranov residual on interior surfaces
+        g = Eq.equilibrium_gse!(eq_i)
+        @test median(vec(maximum(g.error; dims=2))[0.05 .< g.xs .< 0.7]) < 5e-4
+
+        # A real*4 file reads to single-precision agreement
+        @test isapprox(eq_s.psio, eq_i.psio; rtol=1e-6)
+        @test all(isapprox(eq_s.profiles.q_spline(x), eq_i.profiles.q_spline(x); rtol=1e-6) for x in (0.2, 0.5, 0.8))
+        @test maximum(abs.(eq_s.ingest.R_nodes .- eq_i.ingest.R_nodes)) < 1e-6
+
+        # The trailing FF′ and p′ records are ignored: a file without them reads the same
+        table(file) = Eq.read_ifile(cfg("ifile", file)).ingest.sq_fs
+        tabulated = table("i33x65.ifile")
+        raw = read(joinpath(tk_dir, "i33x65.ifile"))
+        mx = Int(reinterpret(Int32, raw[5:8])[1])
+        stripped = joinpath(mktempdir(), "no_derivatives.ifile")
+        write(stripped, raw[1:end-2*(8mx+8)])
+        @test table(stripped) == tabulated
+
+        # q is the field-line q of the file's geometry (Fortran inverse_run), not its tabulated q record
+        qrec = 16 + 3 * (8mx + 8) + 4
+        bumped = copy(raw)
+        bumped[(qrec+1):(qrec+8mx)] = reinterpret(UInt8, 1.1 .* reinterpret(Float64, raw[(qrec+1):(qrec+8mx)]))
+        bumped_file = joinpath(mktempdir(), "bumped_q.ifile")
+        write(bumped_file, bumped)
+        @test Eq.read_ifile(cfg("ifile", bumped_file)).ingest.sq_fs[:, 3] ≈ 1.1 .* tabulated[:, 3]
+        @test Eq.setup_equilibrium(cfg("ifile", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
+    end
+
+    @testset "TokaMaker i-file ψ bounds record" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
+        cfg(file; kw...) = Eq.EquilibriumConfig(; eq_type="ifile", eq_filename=file, jac_type="hamada", grid_type="core_edge_packed", mpsi=32,
+            psilow=0.01, psihigh=0.99, kw...)
+        raw = read(joinpath(tk_dir, "i33x65.ifile"))  # carries the FF′ and p′ records
+        mx = Int(reinterpret(Int32, raw[5:8])[1])
+        psi = reinterpret(Float64, raw[21:(20+8mx)])
+        stripped = raw[1:(end-2*(8mx+8))]
+        record(v) = vcat(reinterpret(UInt8, [Int32(8length(v))]), reinterpret(UInt8, Float64.(v)), reinterpret(UInt8, [Int32(8length(v))]))
+        dir = mktempdir()
+        variant(name, bytes) = (path = joinpath(dir, name); write(path, bytes); path)
+        ingest(path) = Eq.read_ifile(cfg(path)).ingest
+
+        base_s = ingest(variant("s.ifile", stripped))
+
+        # The true LCFS beyond the padded last surface: ψ_N shrinks by (1 - pad), psio grows by 1/(1 - pad).
+        # The record is read both after r, z (sb) and after FF′, p′ (db).
+        pad = 0.01
+        bounds = [psi[1], psi[1] + (psi[end] - psi[1]) / (1 - pad)]
+        sb = variant("sb.ifile", vcat(stripped, record(bounds)))
+        db = variant("db.ifile", vcat(raw, record(bounds)))
+        ing_sb = @test_logs (:info, r"ψ bounds") match_mode = :any ingest(sb)
+        ing_db = ingest(db)
+        for ing in (ing_sb, ing_db)
+            @test ing.sq_xs ≈ base_s.sq_xs .* (1 - pad)
+            @test ing.psio ≈ base_s.psio / (1 - pad)
+        end
+        @test ing_sb.sq_fs[:, 1:3] == ing_db.sq_fs[:, 1:3] == base_s.sq_fs[:, 1:3]
+
+        # psihigh beyond the last surface is clamped to it; a rerun from the ingest keeps the normalisation
+        eq = @test_logs (:warn, r"clamped") match_mode = :any Eq.setup_equilibrium(cfg(db; psihigh=0.995))
+        @test eq.params.psihigh_resolved == ing_db.sq_xs[end] ≈ eq.rzphi_xs[end]
+        @test all(isfinite, eq.profiles.q_spline.y) && all(isfinite, eq.eqfun_B.nodal_derivs.partials)
+        rerun = Eq.setup_equilibrium(cfg(db; psihigh=0.995), Eq.build_inverse_from_ingest(cfg(db), eq.ingest))
+        @test rerun.rzphi_xs == eq.rzphi_xs && rerun.psio == eq.psio
+        @test rerun.profiles.q_spline.y == eq.profiles.q_spline.y
     end
 
     @testset "EFIT Method Consistency" begin
