@@ -137,8 +137,8 @@ normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object
 function read_chease_binary(config::EquilibriumConfig)
     @info "Reading CHEASE file (Binary): $(config.eq_filename)"
 
-    R0EXP = config.r0exp
-    B0EXP = config.b0exp
+    R0EXP = config.r0_norm
+    B0EXP = config.b0_norm
 
     open(config.eq_filename, "r") do io
         seekstart(io)
@@ -244,8 +244,8 @@ them into a `InverseRunInput` object.
 function read_chease_ascii(config::EquilibriumConfig)
     @info "Reading CHEASE file (ASCII): $(config.eq_filename)"
     lines = readlines(config.eq_filename)
-    R0EXP = config.r0exp
-    B0EXP = config.b0exp
+    R0EXP = config.r0_norm
+    B0EXP = config.b0_norm
 
     # --- Parse Header (FORMAT 10: 3I5) ---
     header_parts = split(lines[1])
@@ -446,7 +446,7 @@ internal COCOS 2 convention:
 
       + `global_quantities.psi_axis`, `global_quantities.psi_boundary`
       + `profiles_1d.psi`, `profiles_1d.f`, `profiles_1d.pressure`, `profiles_1d.q`
-      + `profiles_2d[1].grid.dim1` (R), `profiles_2d[1].grid.dim2` (Z), `profiles_2d[1].psi`
+      + the `profiles_2d` entry with `grid_type.index == 1` (rectangular), supplying `grid.dim1` (R), `grid.dim2` (Z) and `psi`
 """
 function read_imas(config::EquilibriumConfig, dd)
     @info "Processing IMAS equilibrium at global_time = $(dd.global_time) s"
@@ -492,7 +492,9 @@ function read_imas(config::EquilibriumConfig, dd)
     ip_sign = ip_imas == 0 ? 1 : Int(sign(ip_imas))
 
     nw = length(psi_1d)
-    psi_norm_grid = range(0.0, 1.0; length=nw)
+    psi_norm_grid = (psi_1d .- psi_axis) ./ (psi_boundary - psi_axis)
+    @assert all(diff(psi_norm_grid) .> 0) "read_imas: profiles_1d.psi must increase strictly from psi_axis to psi_boundary"
+    @assert 0 <= psi_norm_grid[1] && psi_norm_grid[end] <= 1 "read_imas: profiles_1d.psi must lie between psi_axis and psi_boundary"
 
     # Build equilibrium source terms for spline interpolation
     # abs(f_1d): F(ψ) can be negative depending on toroidal field direction convention;
@@ -511,7 +513,8 @@ function read_imas(config::EquilibriumConfig, dd)
         error("read_imas: no profiles_2d found in equilibrium time slice. " *
               "Ensure the 2D ψ(R,Z) map is stored in dd.equilibrium.")
     end
-    prof2d = eqt.profiles_2d[1]
+    prof2d = findfirst(:rectangular, eqt.profiles_2d)
+    prof2d === nothing && error("read_imas: no rectangular profiles_2d found.")
     r_grid = prof2d.grid.dim1
     z_grid = prof2d.grid.dim2
 

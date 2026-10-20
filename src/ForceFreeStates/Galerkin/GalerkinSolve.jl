@@ -3,7 +3,7 @@
 # Top-level driver for the RDCON outer-region singular Galerkin Δ′ solve, plus the per-cell assembly
 # orchestration, the banded solve, Δ′ extraction, PEST-3 blocks, and HDF5 output.
 # Ports gal_make_arrays (gal.f), gal_solve (gal.f), and gal_write_pest3_data
-# (gal.f). The DRIVEN/RPEC inner-layer matching is wired in via gal_match_rpec (GalerkinMatch.jl).
+# (gal.f). Inner-layer matching is applied afterwards by MatchProblem.
 
 """
     gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
@@ -41,7 +41,7 @@ end
 
 """Empty `GalerkinResult` for a domain with no resonant surfaces."""
 function empty_galerkin_result()
-    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, nothing)
+    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing)
 end
 
 """
@@ -146,8 +146,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     ws.sol .= ws.rhs
     if ws.solver == "LU"
         ctrl.verbose && @info "Galerkin LU banded factorization + solve"
-        ab, ipiv = LinearAlgebra.LAPACK.gbtrf!(ws.kl, ws.ku, ws.ndim, ws.mat)
-        LinearAlgebra.LAPACK.gbtrs!('N', ws.kl, ws.ku, ws.ndim, ab, ipiv, ws.sol)
+        gal_scaled_lu_solve!(ws.mat, ws.sol, ws.kl, ws.ku)
     else
         ctrl.verbose && @info "Galerkin Cholesky banded factorization + solve"
         LinearAlgebra.LAPACK.pbtrf!('L', ws.kl, ws.mat)
@@ -180,28 +179,39 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     dp_coil = ncoil > 0 ? permutedims(delta[(2*msing+1):(2*msing+ncoil), :]) : Matrix{ComplexF64}(undef, 0, 0)
     dp = DeltaPrimeData(Deltap, dp_raw, dp_coil, Ap, Bp, Gammap)
 
-    # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
+    # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution); the cut
+    # solution only when a later match needs the composite inner profiles.
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
-        delta=(ctrl.gal_match_flag ? delta : nothing))
+        delta=((ctrl.gal_cut_solution || ctrl.gal_match_flag) ? delta : nothing))
 
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
-    result = GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, nothing)
+    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution), dp
+end
 
-    # DRIVEN (RPEC) outer↔inner matching: build the coil-driven matched ξ/ξ′ (gal_match_rpec).
-    ctrl.gal_match_flag || return result, dp
-    ctrl.gal_rpec_flag || error("galerkin_solve: gal_match_flag=true requires gal_rpec_flag=true")
-    ctrl.verbose && @info(
-        ctrl.gal_ideal_flag ?
-        "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
-        "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
-    )
-    match = gal_match_rpec(ctrl, equil, intr, result, dp)
-    ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(match.residual)")
-    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, match), dp
+"""
+    gal_scaled_lu_solve!(mat, sol, kl, ku) -> sol
+
+Banded LU solve in place: `mat` (LAPACK `gbtrf!` band storage, `ldab = 2kl + ku + 1`) is overwritten by
+its factor and `sol` (the right-hand sides on entry) by the solution. The system is first symmetrically
+Jacobi-scaled, `D·A·D` with `d_j = |A_jj|^(-1/2)` (1 for a zero diagonal): the assembled diagonal spans
+~25 decades, and unscaled banded LU loses the small resonant coefficients that carry Δ′.
+"""
+function gal_scaled_lu_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int)
+    n = size(mat, 2)
+    off = kl + ku + 1  # band row holding the diagonal
+    d = [iszero(mat[off, j]) ? 1.0 : 1 / sqrt(abs(mat[off, j])) for j in 1:n]
+    for j in 1:n, i in max(1, j - ku):min(n, j + kl)
+        mat[off+i-j, j] *= d[i] * d[j]
+    end
+    sol .*= d
+    _, ipiv = LAPACK.gbtrf!(kl, ku, n, mat)
+    LAPACK.gbtrs!('N', kl, ku, n, mat, ipiv, sol)
+    sol .*= d
+    return sol
 end
 
 """
@@ -232,7 +242,7 @@ end
     write_galerkin!(out_h5, result::GalerkinResult; basis_output=false)
 
 Write the Galerkin solver outputs into the open HDF5 file, under
-`ForceFreeStates/Solutions/GalerkinIntegration/`: the matching diagnostics and the surface list
+`ForceFreeStates/Solutions/GalerkinIntegration/`: the surface list
 the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
 rationals). The Δ′/PEST-3 matrices and the closed ξ profiles are NOT written here — both go to
 formalism-independent homes from the driver writer (`SingularSurfaces/` off `result.delta_prime`;
@@ -263,36 +273,11 @@ function write_galerkin!(out_h5, result::GalerkinResult; basis_output::Bool=fals
         isempty(sol.xi_cut) || (out_h5["$gal/Basis/xi_psi_cut"] = permutedims(sol.xi_cut, (1, 3, 2)))
         isempty(sol.cut_range) || (out_h5["$gal/Basis/cut_range"] = sol.cut_range)
     end
-    if result.match !== nothing
-        m = result.match
-        out_h5["$gal/Match/cout"] = m.cout
-        out_h5["$gal/Match/cin"] = m.cin
-        out_h5["$gal/Match/Delta_r"] = m.deltar
-        out_h5["$gal/Match/bpen"] = m.bpen
-        out_h5["$gal/Match/rpec_eig"] = m.rpec_eig
-        # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
-        for i in eachindex(m.inner_psi)
-            out_h5["$gal/Match/Inner/psi_$i"] = m.inner_psi[i]
-            out_h5["$gal/Match/Inner/xi_$i"] = m.inner_xi[i]
-            out_h5["$gal/Match/Inner/b_$i"] = m.inner_b[i]
-        end
-        out_h5["$gal/Match/residual"] = m.residual
-        if !isempty(m.inner_params)
-            for f in (:E, :F, :G, :H, :K, :M)
-                out_h5["$gal/Match/InnerParams/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
-            end
-            # Literature names, matching the Tearing PerSurface mapping for the same fields.
-            out_h5["$gal/Match/InnerParams/tau_A"] = [pp.taua for pp in m.inner_params]
-            out_h5["$gal/Match/InnerParams/tau_R"] = [pp.taur for pp in m.inner_params]
-            out_h5["$gal/Match/InnerParams/dVdpsi"] = [pp.v1 for pp in m.inner_params]
-        end
-    end
     annotate_galerkin!(out_h5)
     return nothing
 end
 
-# Metadata tables for the Galerkin outputs (Match/** is debug-only and exempt from the
-# metadata contract; see docs/development/hdf5-conventions.md).
+# Metadata tables for the Galerkin outputs (see docs/development/hdf5-conventions.md).
 const GALERKIN_H5_ANNOTATIONS = [
     "ForceFreeStates/Solutions/GalerkinIntegration/rational_count" => (; long_name="number of rational (singular) surfaces in the Galerkin solve"),
     "ForceFreeStates/Solutions/GalerkinIntegration/psi" => (; long_name="normalized poloidal flux ψ_N grid of the closed Galerkin solution", scale="psi_gal"),
