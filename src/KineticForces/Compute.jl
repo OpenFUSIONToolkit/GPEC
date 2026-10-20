@@ -161,19 +161,20 @@ function integrate_psi_quadgk(
             for ell_idx in 1:nharm
                 total += harm_vals[ell_idx]
             end
-            total *= kinetic_axis_validity_envelope(psi, psi_c)
+            envelope = kinetic_axis_validity_envelope(psi, psi_c)
+            total *= envelope
             y[k] = total
 
             push!(logged_psi, psi)
             push!(logged_dtdpsi, total)
-            # `harm_vals` is overwritten at every ψ node, so the per-ℓ log must own a copy.
-            push!(logged_dtdpsi_ell, copy(harm_vals))
+            # Same envelope as `total` so Σ_ℓ still reproduces it; the broadcast also copies the reused `harm_vals`.
+            push!(logged_dtdpsi_ell, harm_vals .* envelope)
             if is_matrix_method
                 elems_accum = zeros(ComplexF64, mpert, mpert, 6)
                 for ell_idx in 1:nharm
                     elems_accum .+= harm_elems[ell_idx]
                 end
-                elems_accum .*= kinetic_axis_validity_envelope(psi, psi_c)
+                elems_accum .*= envelope
                 push!(logged_elems, elems_accum)
             end
         end
