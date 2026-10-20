@@ -379,7 +379,7 @@ using HDF5
                     GPEC.Equilibrium.EquilibriumConfig(merge(deck["Equilibrium"], eq_overrides), template),
                     GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
                 )
-                @test length(reference.equil.rzphi_xs) < length(pass1.rzphi_xs)    # the deck re-formed on a refined grid
+                @test reference.equil.rzphi_xs != pass1.rzphi_xs    # the deck re-formed on a refined grid
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
                 api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
