@@ -245,8 +245,7 @@ using HDF5
                 @test haskey(a, "long_name") && haskey(a, "units")
             end
             # HDF5.jl round-trips the Julia shape, so a read here gives (npsi, nell); a
-            # C-ordered reader (h5py, MATLAB) sees the transpose, (nell, npsi), which is the
-            # orientation the Fortran dTdpsi_fgar(psi, ell) implies.
+            # C-ordered reader (h5py, xarray) sees the transpose, (nell, npsi).
             g = f["KineticForces"]["fgar"]
             @test size(read(g["dTdpsi_ell"])) == (5, 3)
             @test read(g["ell"]) == [-1, 0, 1]
