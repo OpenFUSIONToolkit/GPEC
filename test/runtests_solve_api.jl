@@ -1,4 +1,5 @@
 using TOML
+using HDF5
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
 # same pipeline the TOML driver does. Every assertion is anchored on the coarse Solovev fixture
@@ -21,13 +22,14 @@ using TOML
     ffs_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"]
                       if !(k in ("integrator", "nn_low", "nn_high")))
 
-    # Copy the fixture deck into `dir` and apply `[ForceFreeStates]` overrides / extra sections.
-    function _stage_deck(dir; ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
+    # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
+    function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
         for name in readdir(template)
             cp(joinpath(template, name), joinpath(dir, name))
         end
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
+        merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
@@ -73,6 +75,12 @@ using TOML
             # Chunking is a decomposition of the same problem, so Δ′ tracks the TOML run.
             @test size(reference.delta_prime.matrix) == size(api.delta_prime.matrix)
             @test api.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-6
+
+            # With the deck's own (auto) chunking the two runs are the same computation.
+            same = solve(prob, Riccati())
+            @test same.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
+            @test same.delta_prime.raw ≈ reference.delta_prime.raw rtol = 1e-12
+            @test same.delta_prime.coil ≈ reference.delta_prime.coil rtol = 1e-12
         end
     end
 
@@ -115,6 +123,11 @@ using TOML
             # With no free-boundary δW, PE refuses the response rather than returning an empty state.
             forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
             @test_throws ErrorException perturbed_equilibrium(api, RMPField(forcing); compute_response=true, write_outputs_to_HDF5=false)
+
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "galerkin", "gal_nx" => 32))]).ffs
+            @test reference.galerkin.msing == msing
+            @test dp.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
+            @test dp.raw ≈ reference.delta_prime.raw rtol = 1e-12
         end
     end
 
@@ -331,6 +344,73 @@ using TOML
             # The ideal reference keeps the ideal δW (only a :matched closure drops it).
             @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
             @test matched.solution !== nothing && matched.solution.basis === :gal_native
+        end
+    end
+
+    # Each workflow is run from a deck through `main` and from the same inputs through the API.
+    # A known drift is `@test_broken`, so the change that removes it surfaces as an unexpected pass.
+    @testset "deck and API parity" begin
+        @testset "hdf5 file forcing" begin
+            pe_kwargs = (compute_response=true, compute_singular_coupling=true, verbose=false, write_outputs_to_HDF5=false)
+            mktempdir() do dir
+                modes = GPEC.ForcingTerms.ForcingMode[]
+                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example"), "forcing.dat", "ascii", false)
+                h5open(f -> GPEC.ForcingTerms.save_forcing_to_h5(modes, f), joinpath(dir, "forcing.h5"), "w")
+                _stage_deck(dir;
+                    extra_sections=Dict{String,Any}(
+                        "ForcingTerms" => Dict{String,Any}("forcing_data_file" => "forcing.h5", "forcing_data_format" => "hdf5"),
+                        "PerturbedEquilibrium" => Dict{String,Any}(String(k) => v for (k, v) in pairs(pe_kwargs))))
+                reference = GPEC.main([dir])
+                pe = perturbed_equilibrium(reference.ffs, RMPField(joinpath(dir, "forcing.h5")); pe_kwargs...)
+
+                @test pe.permeability ≈ reference.pe.permeability rtol = 1e-10
+                # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
+                @test pe.forcing_b ≈ reference.pe.forcing_b rtol = 1e-10
+            end
+        end
+
+        @testset "analytic equilibrium on the two-pass auto grid" begin
+            # A coarse psi_accuracy and no local-stability scan keep the 1024-interval pass-1 grid cheap.
+            eq_overrides = Dict{String,Any}("grid_type" => "auto", "mpsi" => 0, "psi_accuracy" => 3e-2)
+            ffs_overrides = Dict{String,Any}("local_stability_flag" => false, "vac_flag" => false)
+            mktempdir() do dir
+                reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
+                pass1 = GPEC.Equilibrium.setup_equilibrium(
+                    GPEC.Equilibrium.EquilibriumConfig(merge(deck["Equilibrium"], eq_overrides), template),
+                    GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
+                )
+                @test length(reference.equil.rzphi_xs) < length(pass1.rzphi_xs)    # the deck re-formed on a refined grid
+
+                kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
+                api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
+                # Known drift: the equilibrium does not store its analytic config, so `solve` cannot re-form it.
+                @test_broken api.equil.rzphi_xs == reference.equil.rzphi_xs
+            end
+        end
+
+        @testset "deck matching under gal_match_flag" begin
+            layer = (eta=1e-7, rho=1e-7, rotation=1.0)
+            mktempdir() do dir
+                gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:ray))
+                n = length(gal.surfaces)
+                reference = GPEC.main([_stage_deck(dir;
+                    ffs_overrides=Dict{String,Any}(
+                        "integrator" => "galerkin", "gal_nx" => 32, "gal_rpec_flag" => true, "gal_match_flag" => true,
+                        "gal_inner_solver" => "ray", "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n),
+                        "gal_rotation" => fill(layer.rotation, n)))]).ffs
+
+                @test reference.closure === api.closure === :matched
+                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.match.xi ≈ reference.match.xi rtol = 1e-12
+                @test length(api.match.inner_xi) == length(reference.match.inner_xi) == n
+                @test all(isapprox.(api.match.inner_xi, reference.match.inner_xi; rtol=1e-12))
+
+                uncut = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                matched = solve(MatchProblem(uncut; layer...), GGJModel(; solver=:ray))
+                # Known drift: gal_match_flag implies the cut solution on the deck; the API keeps it only when asked.
+                @test_broken length(matched.match.inner_xi) == length(reference.match.inner_xi)
+            end
         end
     end
 end
