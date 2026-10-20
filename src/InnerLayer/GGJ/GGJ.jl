@@ -77,10 +77,6 @@ include("Ray.jl")
 
 export GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
-export build_asymptotics, evaluate_asymptotics
-export InnerAsymptoticsCache
-export glasser_wang_2020_eq55
-export solve_ray, RaySolveResult, pick_smax, physical_ua_dua
-export delta_convergence, solution_profile, asymptotic_profile, q4_surface_benchmark
+export solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_profile
 
 end # module GGJ

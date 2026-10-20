@@ -30,36 +30,23 @@ convention: `P[k+1]` holds the k-th-order matrix `P_k`, etc.
 ## Fields
 
   - `params, Q, kmax` — input parameters and series truncation order.
-  - `λ = 1/√Q` — complex scale factor used by the Wasow split.
   - `R = (r₊, r₋)` — Mercier-shifted Frobenius exponents at infinity (Eq. 49).
-  - `T, Tinv` — 6×6 eigenvector basis of A₀ (Eq. 7–8).
-  - `J` — `(J₀, J₁, J₂)`, the J-rotated coefficient matrices (Eq. 9–10).
-  - `P, B` — splitting matrices, k = 0..kmax+2 (Eqs. 16, 22).
-  - `K2` — 2×2 inner working matrices, k = 0..kmax+2 (Eq. 32; entry k=0 unused).
-  - `Qmat, Cmat` — 2×2 inner-block transformation matrices, k = 0..kmax+2 (Eqs. 32–39).
-  - `Dmat` — 2×2 shearing matrices, k = 0..kmax (Eq. 43).
-  - `Y0, Y0inv` — lowest-order Y matrix and its inverse (Eq. 48; exponents from Eq. 49).
-  - `Y, Z` — 2×2 series matrices, k = 0..kmax (Eq. 52).
+  - `T` — 6×6 eigenvector basis of A₀ (Eq. 7).
+  - `J` — `(J₀, J₁, J₂)`, the J-rotated coefficient matrices (Eqs. 9–10).
+  - `P` — splitting matrices, k = 0..kmax+2 (Eqs. 16, 22).
+  - `Qmat` — 2×2 inner-block transformation matrices, k = 0..kmax+2 (Eqs. 32–39).
+  - `Y` — 2×2 series matrices Y_k = Y₀Z_k, k = 0..kmax (Eqs. 50–52).
 """
 struct InnerAsymptoticsCache
     params::GGJParameters
     Q::ComplexF64
     kmax::Int
-    λ::ComplexF64
     R::SVector{2,Float64}
     T::SMatrix{6,6,ComplexF64,36}
-    Tinv::SMatrix{6,6,ComplexF64,36}
     J::NTuple{3,SMatrix{6,6,ComplexF64,36}}
-    P::Vector{SMatrix{6,6,ComplexF64,36}}    # k = 0..kmax+2
-    B::Vector{SMatrix{6,6,ComplexF64,36}}    # k = 0..kmax+2
-    K2::Vector{SMatrix{2,2,ComplexF64,4}}    # k = 0..kmax+2
-    Qmat::Vector{SMatrix{2,2,ComplexF64,4}}  # k = 0..kmax+2
-    Cmat::Vector{SMatrix{2,2,ComplexF64,4}}  # k = 0..kmax+2
-    Dmat::Vector{SMatrix{2,2,ComplexF64,4}}  # k = 0..kmax
-    Y0::SMatrix{2,2,ComplexF64,4}
-    Y0inv::SMatrix{2,2,ComplexF64,4}
-    Y::Vector{SMatrix{2,2,ComplexF64,4}}     # k = 0..kmax
-    Z::Vector{SMatrix{2,2,ComplexF64,4}}     # k = 0..kmax
+    P::Vector{SMatrix{6,6,ComplexF64,36}}
+    Qmat::Vector{SMatrix{2,2,ComplexF64,4}}
+    Y::Vector{SMatrix{2,2,ComplexF64,4}}
 end
 
 # T, T⁻¹, λ = Q^{-1/2} and J_i = T⁻¹A_iT from the coefficient matrices A₀–A₂ (GW2020 Eqs. 3–10).
@@ -135,7 +122,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
     J1 = Tinv * A1s * T
     J2 = Tinv * A2s * T
 
-    return T, Tinv, (J0, J1, J2), λ
+    return T, (J0, J1, J2), λ
 end
 
 # Closed-form solve of the GW2020 Eq. (22) Lyapunov equations for the off-diagonal blocks of P_k,
@@ -180,21 +167,19 @@ function _lyap_solve(K::SMatrix{6,6,ComplexF64}, λ::ComplexF64)
     return SMatrix{6,6,ComplexF64}(Bm), SMatrix{6,6,ComplexF64}(Pm)
 end
 
-# Splitting recurrence (GW2020 Eqs. 14–19): P_k, B_k, K_k for k = 0..kmax+2, each order by `_lyap_solve`.
+# Splitting recurrence (GW2020 Eqs. 14–19): P_k, B_k for k = 0..kmax+2, each order by `_lyap_solve` of K_k.
 function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64, kmax::Int)
     N = kmax + 3                          # store k = 0..kmax+2
     P = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
     B = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
-    K6 = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
 
     Z6 = zero(SMatrix{6,6,ComplexF64})
     P[1] = SMatrix{6,6,ComplexF64}(I)     # P_0 = I
     B[1] = J[1]                            # B_0 = J_0
-    K6[1] = J[1]
 
     for k in 1:(kmax+2)
-        kk = k + 1                         # 1-based slot for K6/B/P at index k
-        # K6_k starts as J_k (only k = 1, 2 contribute), else 0
+        kk = k + 1                         # 1-based slot for B/P at index k
+        # K_k starts as J_k (only k = 1, 2 contribute), else 0
         Kacc = (k <= 2) ? J[k+1] : Z6
         # +2*(k-1)*P_{k-1}  (k > 1 only)
         if k > 1
@@ -208,12 +193,11 @@ function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64,
             end
             Kacc = Kacc - P[l+1] * B[kml+1]
         end
-        K6[kk] = Kacc
         Bk, Pk = _lyap_solve(Kacc, λ)
         B[kk] = Bk
         P[kk] = Pk
     end
-    return P, B, K6
+    return P, B
 end
 
 # Reduced 2×2 construction (GW2020 Eqs. 25–52): Q_k, C_k via K2_k, shearing D_k, lowest-order Y₀
@@ -298,7 +282,7 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         Y[k+1] = Y0 * Z[k+1]
     end
 
-    return K2, Qm, Cm, D, Y0, Y0inv, Y, Z
+    return Qm, Y
 end
 
 """
@@ -313,14 +297,10 @@ function build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8)
     # Mercier Frobenius exponents r± = 3/2 ± √(−D_I) — GW2020 Eq. (49).
     R = SVector{2,Float64}(p1v + 1.5, -p1v + 1.5)
 
-    T, Tinv, J, λ = _build_tjmat(params, Q)
-    P, B, _ = _split_recurrence(J, λ, kmax)
-    K2, Qm, Cm, D, Y0, Y0inv, Y, Z = _coefs(B, R, kmax)
-
-    return InnerAsymptoticsCache(
-        params, Q, kmax, λ, R, T, Tinv, J,
-        P, B, K2, Qm, Cm, D, Y0, Y0inv, Y, Z
-    )
+    T, J, λ = _build_tjmat(params, Q)
+    P, B = _split_recurrence(J, λ, kmax)
+    Qm, Y = _coefs(B, R, kmax)
+    return InnerAsymptoticsCache(params, Q, kmax, R, T, J, P, Qm, Y)
 end
 
 build_asymptotics(params::GGJParameters, Q::Number; kmax::Int=8) =

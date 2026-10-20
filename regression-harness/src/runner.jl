@@ -110,7 +110,7 @@ using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.InnerLayer
 using HDF5
 γ = 2π * 1e3 * im
-p = glasser_wang_2020_eq55(; taua=2.11226e-7, taur=0.968219)
+p = InnerLayer.GGJ.glasser_wang_2020_eq55(; taua=2.11226e-7, taur=0.968219)
 t_start = time()
 Δ = solve_inner(GGJModel(solver=:galerkin), p, γ)
 elapsed = time() - t_start
@@ -133,7 +133,7 @@ using Pkg
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.InnerLayer
 using HDF5
-p = q4_surface_benchmark()
+p = InnerLayer.GGJ.q4_surface_benchmark()
 γ = 500.0im * InnerLayer.GGJ.q0(p)
 t_start = time()
 Δ = solve_inner(GGJModel(solver=:ray), p, γ)

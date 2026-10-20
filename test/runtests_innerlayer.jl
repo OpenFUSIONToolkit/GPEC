@@ -19,7 +19,7 @@ const IL = GeneralizedPerturbedEquilibrium.InnerLayer
 const GGJ = IL.GGJ
 
 @testset "InnerLayer GGJ (Glasser & Wang 2020, Eq. 55)" begin
-    p = IL.glasser_wang_2020_eq55()
+    p = IL.GGJ.glasser_wang_2020_eq55()
 
     @testset "Mercier index and matching powers (Eq. 49)" begin
         # D_I = E + F + H − 1/4 from the verbatim Eq. 55 coefficients.
@@ -55,7 +55,7 @@ end
 @testset "InnerLayer GGJ :ray backend (rotated contour, Hermite BVP)" begin
     # These tests pin the implementation; the method is validated against an independent
     # strict reference over the Q plane outside the test suite.
-    p = IL.glasser_wang_2020_eq55()
+    p = IL.GGJ.glasser_wang_2020_eq55()
 
     @testset "agrees with :galerkin at the paper point Q = 0.1234" begin
         γ = 0.1234 * GGJ.q0(p)
@@ -70,7 +70,7 @@ end
     end
 
     @testset "q4 physical benchmark at Q = 500i (regime beyond :galerkin)" begin
-        q4 = IL.q4_surface_benchmark()
+        q4 = IL.GGJ.q4_surface_benchmark()
         γ = 500.0im * GGJ.q0(q4)
         Δ = IL.solve_inner(IL.GGJModel(), q4, γ)
         # Pins from the pre-port validation suite (post extended-precision
@@ -89,7 +89,7 @@ end
 end
 
 @testset "InnerLayer GGJ :ray internal machinery" begin
-    p = IL.q4_surface_benchmark()
+    p = IL.GGJ.q4_surface_benchmark()
 
     @testset "Hermite BVP resolution floor at small |Q|" begin
         # At |Q| ≪ 1 the local WKB rates are small; refining the grid (cfl/8, 2× min_cells) must not move Δ.
@@ -141,7 +141,7 @@ end
 end
 
 @testset "solve_inner_profile interface (matching-driver contract)" begin
-    p = IL.glasser_wang_2020_eq55()
+    p = IL.GGJ.glasser_wang_2020_eq55()
     γ = 0.1234 * GGJ.q0(p)
     for model in (IL.GGJModel(; solver=:ray, real_profiles=true), IL.GGJModel(; solver=:galerkin))
         prof = IL.solve_inner_profile(model, p, γ)

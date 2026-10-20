@@ -54,7 +54,7 @@ unknowns ``d_\pm`` of GWP2016 Eq. (38) and Pletzer, Bondeson & Dewar Eqs. 83, 85
 
 !!! note "Benchmark surface used in the figures"
     The figures use the ``q = 4`` DIII-D-like surface of
-    [`q4_surface_benchmark`](@ref InnerLayer.q4_surface_benchmark)
+    [`q4_surface_benchmark`](@ref InnerLayer.GGJ.q4_surface_benchmark)
     (``S \approx 4.6\times10^{6}``, ``D_I \approx -0.31``).
 
 ### Solver backends
@@ -146,7 +146,7 @@ This point sits near a pole of ``\Delta_+(Q)``, which amplifies every solver's e
 ``1.3\times10^{-4}`` `:galerkin`↔`:ray` difference in ``\Delta_+`` against ``4\times10^{-7}`` in ``\Delta_-``.
 
 **Physical benchmark on the imaginary axis.** On the ``q=4`` rational-surface
-benchmark ([`q4_surface_benchmark`](@ref InnerLayer.q4_surface_benchmark), ``S \approx 4.58\times10^6``,
+benchmark ([`q4_surface_benchmark`](@ref InnerLayer.GGJ.q4_surface_benchmark), ``S \approx 4.58\times10^6``,
 ``D_I \approx -0.312``) the `:ray` backend is pinned at ``Q = 500i``, a regime
 entirely beyond `:galerkin`:
 
@@ -190,7 +190,7 @@ when supplying the Galerkin `nx`/`xfac` knobs; passing them to `:ray` throws a `
 ```julia
 using GeneralizedPerturbedEquilibrium.InnerLayer
 
-p = q4_surface_benchmark()          # GGJParameters for the q=4 benchmark surface
+p = GGJ.q4_surface_benchmark()      # GGJParameters for the q=4 benchmark surface
 γ = 500im * GGJ.q0(p)               # physical rate placing Q on the imaginary axis at 500i
 
 Δ = solve_inner(GGJModel(), p, γ)   # Δ.interchange, Δ.tearing with the default :ray backend
