@@ -81,18 +81,21 @@ using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
-using .ForceFreeStates: galerkin_solve, write_galerkin!
+using .ForceFreeStates: galerkin_solve, write_galerkin!, write_match!
 
 # Scripting-API surface: the integrator selectors, the published result, the equilibrium
 # constructor and the forcing description, re-exported so a user needs one `using`.
-using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, ResistiveMatch
+using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
+using .ForceFreeStates: MatchProblem
+using .InnerLayer: GGJModel, SLAYERModel
+using .Tearing.Runner: TearingProblem
 using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag")
-const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc")
+    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing")
+const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
 # instead of throwing an unknown-keyword error; warn so the removal is not silent.
@@ -424,16 +427,16 @@ function load_kinetic_context(
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
             kinetic_file;
-            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
-            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge,
+            mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass,
             density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
             ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
             chi1=2π * equil.psio)
         if !isempty(kf_ctrl.ion_species) || kf_ctrl.electron
             speclist = isempty(kf_ctrl.ion_species) ?
-                       [KineticForces.IonSpecies(; z=kf_ctrl.zi, m=kf_ctrl.mi, fraction=1.0)] : kf_ctrl.ion_species
+                       [KineticForces.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)] : kf_ctrl.ion_species
             species = Equilibrium.resolve_ntv_species(kinetic_file, speclist;
-                electron=kf_ctrl.electron, zimp=kf_ctrl.zimp, mimp=kf_ctrl.mimp,
+                electron=kf_ctrl.electron, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass,
                 density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
                 ExB_rotation_factor=kf_ctrl.ExB_rotation_factor,
                 toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
@@ -565,7 +568,7 @@ function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
         chi_perp=loaded.chi_perp === nothing ? ctrl.chi_perp : loaded.chi_perp,
         chi_tor=loaded.chi_tor === nothing ? ctrl.chi_tor : loaded.chi_tor,
         zeff=loaded.zeff === nothing ? ctrl.zeff : loaded.zeff,
-        bt=ctrl.bt, mu_i=ctrl.mu_i, theta=ctrl.theta_sample,
+        bt=ctrl.bt, mu_i=ctrl.ion_mass, theta=ctrl.theta_sample,
         resistivity_model=Runner._build_resistivity_model(ctrl.resistivity_model),
         lnLambda_form=ctrl.lnLambda_form)
 end
@@ -659,10 +662,8 @@ function prepare_force_free_states!(
         sing_min!(intr, ctrl, equil)
     end
 
-    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H,
-    # K, M) for each surviving singular surface. Needed by the Julia GGJ
-    # inner-layer analysis; kinetic timescales (τ_A, τ_R) are layered on
-    # top by `build_ggj_inputs` using the same kinetic profiles as SLAYER.
+    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H, K, M) for each
+    # surviving singular surface; `ggj_parameters` layers τ_A / τ_R on top.
     if intr.msing > 0
         ForceFreeStates.resist_eval_all!(intr, equil)
     end
@@ -777,7 +778,7 @@ function run_force_free_states(
         end
 
         # Compute free boundary energies.
-        if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
+        if ctrl.vac_flag
             if ctrl.verbose
                 wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
                 @info "Computing free boundary energies ($wall_desc)"
@@ -809,31 +810,58 @@ function run_force_free_states(
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    return build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+    result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+
+    # Deck-driven matching, through the same MatchProblem as the API.
+    if ctrl.integrator == "galerkin" && ctrl.gal_match_flag
+        ctrl.gal_rpec_flag || error("gal_match_flag=true requires gal_rpec_flag=true")
+        ctrl.gal_ideal_flag || !(isempty(ctrl.gal_eta) || isempty(ctrl.gal_rho) || isempty(ctrl.gal_rotation)) ||
+            error("gal_match_flag needs gal_eta, gal_rho and gal_rotation (one value per matched surface, core to edge)")
+        ctrl.gal_inner_solver in ("ray", "galerkin") ||
+            error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
+        ctrl.verbose && @info(
+            ctrl.gal_ideal_flag ?
+            "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
+            "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
+        )
+        # The gal_inner_* knobs override the "galerkin" backend's defaults; unset keys keep them.
+        model = if ctrl.gal_inner_solver == "galerkin"
+            knobs = (xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx, nq=ctrl.gal_inner_nq,
+                cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax)
+            InnerLayer.GGJModel(; solver=:galerkin, (k => v for (k, v) in pairs(knobs) if v !== nothing)...)
+        else
+            InnerLayer.GGJModel(; solver=:ray)
+        end
+        prob = ForceFreeStates.MatchProblem(result; eta=ctrl.gal_eta, rho=ctrl.gal_rho, rotation=ctrl.gal_rotation,
+            gamma=ctrl.gal_gamma, ideal=ctrl.gal_ideal_flag)
+        result = solve(prob, model)
+        ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(result.match.residual)")
+    end
+
+    return result
 end
 
 """
-    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(), match=nothing,
+    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(),
                          dir_path=".", debug=DebugSettings(), kwargs...)
 
 The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
 the perturbed potential energy whose solutions are the force-free (and, via the TOML path,
 kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
 [`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
-names this one, so `solve` stays unambiguous as other problem classes appear.
+names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
+matching is a separate problem posed on the finished solve: see `MatchProblem`.
 
-`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `match` an
-optional [`ResistiveMatch`](@ref) closing the basis with an inner-layer solution instead of
-the ideal jump, `dir_path` the working directory outputs are written to, and `debug` the
-diagnostic dump settings of the DEBUG deck section. Any remaining keyword is a
-`ForceFreeStatesControl` field, so the TOML keys and the problem keywords are the same
-knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
+`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `dir_path` the
+working directory outputs are written to, and `debug` the diagnostic dump settings of the
+DEBUG deck section. Any remaining keyword is a `ForceFreeStatesControl` field, so the TOML
+keys and the problem keywords are the same knobs. `nn_low`/`nn_high` are rejected — they
+come from `nn`.
 
 ## Fields
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
   - `wall::Vacuum.WallShapeSettings` - Vacuum wall shape for the free-boundary energies.
-  - `match::Union{Nothing,ForceFreeStates.ResistiveMatch}` - Optional inner-layer closure.
   - `dir_path::String` - Working directory for outputs.
   - `debug::DebugSettings` - Diagnostic dump settings.
   - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
@@ -841,7 +869,6 @@ knobs. `nn_low`/`nn_high` are rejected — they come from `nn`.
 struct EulerLagrangeProblem
     equil::Equilibrium.PlasmaEquilibrium
     wall::Vacuum.WallShapeSettings
-    match::Union{Nothing,ForceFreeStates.ResistiveMatch}
     dir_path::String
     debug::DebugSettings
     ctrl_kwargs::Dict{Symbol,Any}
@@ -851,7 +878,6 @@ function EulerLagrangeProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
     wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
-    match::Union{Nothing,ForceFreeStates.ResistiveMatch}=nothing,
     dir_path::AbstractString=".",
     debug::DebugSettings=DebugSettings(),
     kwargs...
@@ -861,7 +887,7 @@ function EulerLagrangeProblem(
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
     ctrl_kwargs[:nn_high] = last(nn)
-    return EulerLagrangeProblem(equil, wall, match, String(dir_path), debug, ctrl_kwargs)
+    return EulerLagrangeProblem(equil, wall, String(dir_path), debug, ctrl_kwargs)
 end
 
 """
@@ -874,7 +900,7 @@ Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `al
 a `gpec.toml` run of `main` does and produces the same result object. The second form is
 sugar building the problem from an equilibrium and the problem keywords in one call.
 
-Knobs owned by `alg` or `match` are rejected as `ForceFreeStatesControl` keywords. Kinetic
+Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic
 runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]` profiles
 and errors here.
 
@@ -891,7 +917,6 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
-    ForceFreeStates._apply_match!(ctrl_kwargs, prob.match, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
 
     ctrl.kinetic_factor > 0 &&
@@ -1088,7 +1113,7 @@ function run_kinetic_forces(
                 # built from the run's control with only its own identity overridden.
                 sctrl = KineticForces.KineticForcesControl(;
                     (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
-                    zi=sp.z, mi=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
+                    ion_charge=sp.z, ion_mass=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
                 st = KineticForces.KineticForcesState()
                 KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles)
                 push!(states, st)
@@ -1299,7 +1324,7 @@ function efc_couplings(
     # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
     kp = kinetic_profiles
     chi1 = 2π * equil.psio
-    chrg = kf_ctrl.zi * Utilities.E_CHG
+    chrg = kf_ctrl.ion_charge * Utilities.E_CHG
     ψk = kp.xs
     ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
     ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
@@ -1422,8 +1447,8 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         slayer_ctrl.enabled || return nothing
         @info "\n  SLAYER\n$_SECTION"
         slayer_start = time()
-        slayer_result = Runner.run_slayer(result, slayer_ctrl;
-            dir_path=result.dir_path)
+        model = Runner._build_inner_model(slayer_ctrl.inner_model)
+        slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
         slayer_dt = time() - slayer_start
         runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
         @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
@@ -1615,7 +1640,7 @@ function write_outputs_to_HDF5(
             out_h5["ForceFreeStates/LayerOverlap/first_overlap_index"] =
                 lo.first_overlap === nothing ? -1 : lo.first_overlap
             # "applied" records that the bound was active going into sing_lim!, not that it set
-            # the final psilim -- dmlim/qhigh may truncate deeper inside it.
+            # the final psilim -- rational_offset_fraction/qhigh may truncate deeper inside it.
             out_h5["ForceFreeStates/LayerOverlap/applied"] =
                 Int(ctrl.psilim_from_layer_overlap && lo.psihigh !== nothing &&
                     lo.psihigh < equil.params.psihigh_resolved)
@@ -1635,7 +1660,7 @@ function write_outputs_to_HDF5(
         out_h5["$fwd/xi_s"] = xi_solution !== nothing ? xi_solution.xi_s_store : ComplexF64[]
         out_h5["$fwd/crit"] = diag !== nothing ? diag.crit_store : Float64[]
 
-        # Write edge stability scan data (only present when psiedge < psilim).
+        # Write edge stability scan data (only present when dW_edge_scan_start < psilim).
         # Generalized (W, N) pencil energies — power-normalized, Jacobian-invariant; these are
         # the values findmax_dW_edge! uses to choose the truncation point.
         if diag !== nothing && !isempty(diag.edge_scan.psi)
@@ -1676,7 +1701,7 @@ function write_outputs_to_HDF5(
             # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
             # Both kinetic-free (E, F, G, H, K, M) and geometry-only
             # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
-            # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
+            # downstream consumers (ForceFreeStates.ggj_parameters)
             # can reconstruct τ_A / τ_R from any kinetic-profile source.
             if all(s -> s.restype !== nothing, result.surfaces)
                 out_h5["SingularSurfaces/E"] = [s.restype.E for s in result.surfaces]
@@ -1722,6 +1747,7 @@ function write_outputs_to_HDF5(
             dp.B === nothing || (out_h5["SingularSurfaces/pest3_B"] = dp.B)
             dp.Gamma === nothing || (out_h5["SingularSurfaces/pest3_Gamma"] = dp.Gamma)
         end
+        result.match === nothing || write_match!(out_h5, result.match)
 
         # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
         # used to find them. Populated only when kinetic crossings were searched for.
@@ -1887,7 +1913,8 @@ end
 
 export main, write_imas
 export solve, perturbed_equilibrium
-export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ResistiveMatch, ForceFreeStatesResult, RMPField
+export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
+export MatchProblem, TearingProblem, GGJModel, SLAYERModel
 
 include("Precompile.jl")
 

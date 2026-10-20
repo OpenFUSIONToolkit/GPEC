@@ -117,13 +117,13 @@ function build_benchmark_tomldir(eq_file::String)
 eq_filename = "$eq_name"
 eq_type = "efit"
 jac_type = "hamada"
-grid_type = "ldp"
+grid_type = "core_edge_packed"
 psilow = 1e-4
 psihigh = 0.993
 mpsi = 128
 mtheta = 256
 newq0 = 0
-etol = 1e-7
+flux_surface_rtol = 1e-7
 
 [Wall]
 shape = "nowall"
@@ -133,7 +133,7 @@ local_stability_flag = true
 vac_flag = true
 force_termination = false
 
-psiedge = 1.00                # No edge-scan truncation (dmlim mechanism removed in develop)
+dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
 qhigh = 1e3
 sing_start = 0
@@ -142,14 +142,14 @@ nn_low = 1
 nn_high = 1
 delta_mlow = 8
 delta_mhigh = 8
-mthvac = 512
+mtheta_vacuum = 512
 
 kinetic_source = "fixed"
 kinetic_factor = 0.0
 eulerlagrange_tolerance = 1e-7
 save_interval = 3
 singfac_min = 1e-4
-ucrit = 1e4
+renorm_threshold = 1e4
 """
         )
     end
@@ -278,9 +278,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     # for the final full-validation run.
     tgar_enabled = get(ENV, "BENCHMARK_TGAR", "0") == "1"
     kf_ctrl = KF.KineticForcesControl(;
-        fgar_flag=true, tgar_flag=tgar_enabled, nn=1, nl=4,
-        mi=2, zi=1, nutype="harmonic", f0type="maxwellian",
-        nufac=1, psilims=[0.0, 1.0], kinetic_file=inputs.kin_file,
+        fgar_flag=true, tgar_flag=tgar_enabled, nn=1, bounce_harmonic_max=4,
+        ion_mass=2, ion_charge=1, nutype="harmonic", f0type="maxwellian",
+        collisionality_factor=1, psilims=[0.0, 1.0], kinetic_file=inputs.kin_file,
         verbose=false)
 
     # Initialize KF internal state
@@ -309,7 +309,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
 
     kinetic_profiles = Eq.load_kinetic_profiles(
         kf_ctrl.kinetic_file;
-        zi=kf_ctrl.zi, zimp=kf_ctrl.zimp, mi=kf_ctrl.mi, mimp=kf_ctrl.mimp)
+        zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass)
 
     kf_state = KF.KineticForcesState()
     KF.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)

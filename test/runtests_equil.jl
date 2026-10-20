@@ -10,7 +10,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -25,7 +25,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit_arclength",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -49,7 +49,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit_by_inversion",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -90,7 +90,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=1.0
         )
@@ -107,7 +107,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             mpsi=32,
             psilow=0.01,
             psihigh=0.994,
@@ -136,11 +136,11 @@
         @test isapprox(q_axis, 1.05; rtol=0.02)
     end
 
-    @testset "etol must be positive and finite" begin
-        for etol in (0.0, -1e-8, NaN, Inf)
-            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; etol=etol)
+    @testset "flux_surface_rtol must be positive and finite" begin
+        for rtol in (0.0, -1e-8, NaN, Inf)
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; flux_surface_rtol=rtol)
         end
-        @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; etol=1e-8).etol == 1e-8
+        @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; flux_surface_rtol=1e-8).flux_surface_rtol == 1e-8
     end
 
     @testset "an equilibrium ODE solve that stops early is an error" begin
@@ -159,7 +159,7 @@
 
         # A trial shaping solve that stops early must come out of the ν root-find, not become its ν = qa/qc fallback.
         Equil = GeneralizedPerturbedEquilibrium.Equilibrium
-        tj = Equil.TJAnalyticConfig(; lar_r0=4.0, lar_a=1.0, qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0, ma=64, mtau=64)
+        tj = Equil.TJAnalyticConfig(; r0=4.0, a=1.0, q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0, ma=64, mtheta=64)
         @test_throws r"stopped early at t = .* with retcode DtNaN" Equil.tj_analytic_find_nu(Equil.TJAnalyticShapeParams(tj), tj.qa; abstol=NaN)
     end
 
@@ -177,7 +177,7 @@
     @testset "Inverse grid types (original, rho)" begin
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
         cfg(grid) = Eq.EquilibriumConfig(; eq_type="chease_binary", eq_filename=joinpath(data_dir, "INP1_binary"), jac_type="boozer",
-            grid_type=grid, mpsi=16, psilow=0.01, psihigh=0.99, r0exp=6.8, b0exp=7.4)
+            grid_type=grid, mpsi=16, psilow=0.01, psihigh=0.99, r0_norm=6.8, b0_norm=7.4)
         splines(eq) = (eq.rzphi_rsquared, eq.rzphi_offset, eq.rzphi_nu, eq.rzphi_jac, eq.eqfun_B, eq.eqfun_metric1, eq.eqfun_metric2)
         finite(eq) = all(isfinite, eq.profiles.dVdpsi_spline.y) && all(all(isfinite, s.nodal_derivs.partials) for s in splines(eq))
 
@@ -214,11 +214,11 @@
             eq_filename=joinpath(data_dir, "INP1_binary"),
             eq_type="chease_binary",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994,
-            r0exp=6.8,
-            b0exp=7.4
+            r0_norm=6.8,
+            b0_norm=7.4
         )
         global plasma_eq_binary = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(binary_config)
 
@@ -230,11 +230,11 @@
             eq_filename=joinpath(data_dir, "INP1_ascii"),
             eq_type="chease_ascii",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994,
-            r0exp=6.8,
-            b0exp=7.4
+            r0_norm=6.8,
+            b0_norm=7.4
         )
         global plasma_eq_ascii = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(ascii_config)
 
@@ -291,7 +291,7 @@
     # values up to 2π from values in [0,0.5]), causing physically impossible B fields
     # and wildly non-constant r² on what should be closed flux surfaces.
     @testset "CHEASE Physical Validation" begin
-        b0exp = 7.4  # CHEASE normalization field [T]
+        b0_norm = 7.4  # CHEASE normalization field [T]
 
         B_nodes_binary = plasma_eq_binary.eqfun_B.nodal_derivs.partials[1, :, :]
         B_nodes_ascii = plasma_eq_ascii.eqfun_B.nodal_derivs.partials[1, :, :]
@@ -303,10 +303,10 @@
         @test all(>(0), B_nodes_ascii)
 
         # B field must be within a factor of 3 of the normalization field
-        @test all(B_nodes_binary .> b0exp / 3)
-        @test all(B_nodes_binary .< b0exp * 3)
-        @test all(B_nodes_ascii .> b0exp / 3)
-        @test all(B_nodes_ascii .< b0exp * 3)
+        @test all(B_nodes_binary .> b0_norm / 3)
+        @test all(B_nodes_binary .< b0_norm * 3)
+        @test all(B_nodes_ascii .> b0_norm / 3)
+        @test all(B_nodes_ascii .< b0_norm * 3)
 
         # q must be finite, positive, and in a physically reasonable range
         q_binary = plasma_eq_binary.profiles.q_spline.y
@@ -325,13 +325,13 @@
         lar_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_type="lar",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.99
         )
         lar_input = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(;
-            lar_r0=10.0, lar_a=1.0, q0=1.5, beta0=1e-4,
-            mtau=64, ma=64, zeroth=true
+            r0=10.0, a=1.0, q0=1.5, beta0=1e-4,
+            mtheta=64, ma=64, zeroth=true
         )
         plasma_eq_lar = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(lar_config, lar_input)
 
@@ -391,7 +391,7 @@
         @testset "sol_run scalar relationships" begin
             equil_inputs, sol_inputs = make_inputs()
             mr, mz, ma = sol_inputs.mr, sol_inputs.mz, sol_inputs.ma
-            e, a, r0, q0 = sol_inputs.e, sol_inputs.a, sol_inputs.r0, sol_inputs.q0
+            e, a, r0, q0 = sol_inputs.elongation, sol_inputs.a, sol_inputs.r0, sol_inputs.q0
             p0fac, b0fac, f0fac = sol_inputs.p0fac, sol_inputs.b0fac, sol_inputs.f0fac
 
             dri = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(equil_inputs, sol_inputs)
@@ -453,7 +453,7 @@
             dri2 = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(
                 equil_inputs,
                 GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(sol_inputs.mr, sol_inputs.mz, sol_inputs.ma,
-                    sol_inputs.e * 1.1, sol_inputs.a, sol_inputs.r0,
+                    sol_inputs.elongation * 1.1, sol_inputs.a, sol_inputs.r0,
                     sol_inputs.q0, sol_inputs.p0fac, sol_inputs.b0fac,
                     sol_inputs.f0fac)
             )
@@ -491,7 +491,7 @@
             mpsi=64, mtheta=128)
             eq_config = Eq.EquilibriumConfig(;
                 eq_type="sol", eq_filename="unused",
-                jac_type="pest", grid_type="ldp",
+                jac_type="pest", grid_type="core_edge_packed",
                 psilow=1e-4, psihigh=0.99999, mpsi=mpsi, mtheta=mtheta)
             sol_config = Eq.SolovevConfig(64, 64, 64, e, a, r0, q0, 1.0, 1.0, 1.0)
             dri = Eq.sol_run(eq_config, sol_config)
