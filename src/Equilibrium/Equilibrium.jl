@@ -10,6 +10,7 @@ using FastInterpolations
 using AdaptiveArrayPools
 import StaticArrays: @MMatrix, SVector
 import ..Utilities
+import IMASdd
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
@@ -28,7 +29,7 @@ include("GeometryProfiles.jl")
 include("KineticProfiles.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
+export setup_equilibrium, reform, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, AnalyticEquilibriumConfig,
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
     KineticProfileSplines, load_kinetic_profiles, shift_exb_rotation,
     KineticProfileData, read_kinetic_file, write_kinetic_h5
@@ -80,7 +81,7 @@ Read an equilibrium file, run the appropriate solver, and return the processed
 
 `override_psi_nodes` bypasses the config-driven radial grid (`grid_type`/`mpsi`) and forms
 the equilibrium on the given strictly increasing ψ_N node vector, whose endpoints must match
-`psilow`/`psihigh`. Used by the two-pass auto-grid refinement in the main driver; standalone
+`psilow`/`psihigh`. Used by the two-pass auto-grid refinement through [`reform`](@ref); standalone
 callers with `mpsi=0` get the coarse first-pass grid unless they refine and re-form.
 """
 function setup_equilibrium(path::String="equil.toml")
@@ -142,6 +143,8 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 
     # Forward the captured ingest so the gpec.h5 writer can snapshot it (nothing for analytic).
     plasma_equilibrium.ingest = eq_input.ingest
+    # Analytic configs are still mutable; copy so later edits by the caller cannot change a re-form.
+    haskey(ANALYTIC_EQ, eq_type) && (plasma_equilibrium.analytic = deepcopy(additional_input))
 
     equilibrium_global_parameters!(plasma_equilibrium)
     equilibrium_qfind!(plasma_equilibrium)
@@ -151,15 +154,35 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 end
 
 """
+    reform(equil::PlasmaEquilibrium, psi_nodes::Vector{Float64}) -> PlasmaEquilibrium
+
+Re-form `equil` on the ψ_N nodes `psi_nodes` from the source it remembers: the stored
+`analytic` config, else its raw `ingest`, so no file is re-read. Only an equilibrium carrying
+neither (one built with the positional constructor, or by a reader that captures no ingest)
+falls back to re-reading `config.eq_filename`. The node endpoints must match `psilow`/`psihigh`.
+"""
+function reform(equil::PlasmaEquilibrium, psi_nodes::Vector{Float64})
+    source = if equil.analytic !== nothing
+        equil.analytic
+    elseif equil.ingest isa DirectIngest
+        build_direct_from_ingest(equil.config, equil.ingest)
+    elseif equil.ingest isa InverseIngest
+        build_inverse_from_ingest(equil.config, equil.ingest)
+    else
+        nothing
+    end
+    return setup_equilibrium(equil.config, source; override_psi_nodes=psi_nodes)
+end
+
+"""
     PlasmaEquilibrium(path::AbstractString; eq_type="efit", kwargs...) -> PlasmaEquilibrium
 
 Read the equilibrium file at `path` and return the processed equilibrium. Convenience entry
 point of the scripting API: `kwargs` are [`EquilibriumConfig`](@ref) fields, so
 `PlasmaEquilibrium("g000001.00001"; jac_type="hamada", mpsi=128)` is the whole setup.
 
-Only file-based equilibria go through this constructor. Analytic kinds (`sol`, `lar`,
-`tj_analytic`) take their parameters from a separate config object and are built with
-`setup_equilibrium(config, analytic_config)` instead.
+Only file-based equilibria go through this constructor. Analytic and IMAS equilibria have
+their own `PlasmaEquilibrium(::AnalyticEquilibriumConfig)` and `PlasmaEquilibrium(::IMASdd.dd)` forms.
 
 ```julia
 eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
@@ -167,8 +190,42 @@ eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
 """
 function PlasmaEquilibrium(path::AbstractString; eq_type::String="efit", kwargs...)
     haskey(ANALYTIC_EQ, eq_type) &&
-        error("$eq_type is an analytic equilibrium: build it with setup_equilibrium(config, $(ANALYTIC_EQ[eq_type].config_type)(...)) instead")
+        error("$eq_type is an analytic equilibrium: build it with PlasmaEquilibrium($(ANALYTIC_EQ[eq_type].config_type)(...)) instead")
     return setup_equilibrium(EquilibriumConfig(; eq_type, eq_filename=abspath(path), kwargs...))
+end
+
+# Default analytic eq_type for a config: the first registry kind, in sorted order, that takes it.
+_analytic_eq_type(cfg::AnalyticEquilibriumConfig) = first(k for k in sort!(collect(keys(ANALYTIC_EQ))) if ANALYTIC_EQ[k].config_type === typeof(cfg))
+
+"""
+    PlasmaEquilibrium(cfg::AnalyticEquilibriumConfig; eq_type=<from ANALYTIC_EQ>, kwargs...) -> PlasmaEquilibrium
+
+Solve the analytic equilibrium described by `cfg` and return the processed equilibrium. The
+`eq_type` is implied by the config type; `TJAnalyticConfig` defaults to `tj_analytic` and takes
+`eq_type="tj_analytic_direct"` for the direct solve. `kwargs` are [`EquilibriumConfig`](@ref) fields.
+
+```julia
+eq = PlasmaEquilibrium(Equilibrium.SolovevConfig(; elongation=1.5); mpsi=0, psi_accuracy=1e-3)
+```
+"""
+function PlasmaEquilibrium(cfg::AnalyticEquilibriumConfig; eq_type::String=_analytic_eq_type(cfg), kwargs...)
+    haskey(ANALYTIC_EQ, eq_type) && ANALYTIC_EQ[eq_type].config_type === typeof(cfg) ||
+        error("eq_type=\"$eq_type\" is not an analytic kind solved from a $(typeof(cfg))")
+    return setup_equilibrium(EquilibriumConfig(; eq_type, kwargs...), cfg)
+end
+
+"""
+    PlasmaEquilibrium(dd::IMASdd.dd; kwargs...) -> PlasmaEquilibrium
+
+Read the active equilibrium time slice of the IMAS data dictionary `dd` and return the processed
+equilibrium. `kwargs` are [`EquilibriumConfig`](@ref) fields; `imas_cocos` sets the ψ convention.
+
+```julia
+eq = PlasmaEquilibrium(dd; imas_cocos=11, jac_type="hamada")
+```
+"""
+function PlasmaEquilibrium(dd::IMASdd.dd; kwargs...)
+    return setup_equilibrium(EquilibriumConfig(; eq_type="imas", kwargs...), dd)
 end
 
 """

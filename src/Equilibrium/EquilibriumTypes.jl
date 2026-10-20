@@ -214,6 +214,15 @@ function EquilibriumConfig(path::String)
 end
 
 """
+    AnalyticEquilibriumConfig
+
+Supertype of the parameter structs of the analytic equilibrium kinds. Each subtype is the
+`config_type` of one or more `ANALYTIC_EQ` rows, which pair it with an `eq_type`, its TOML
+section, and its solver.
+"""
+abstract type AnalyticEquilibriumConfig end
+
+"""
     LargeAspectRatioConfig(...)
 
 A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equilibrium model.
@@ -231,7 +240,7 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
   - `ma`: The number of grid points in the radial direction.
   - `zeroth`: If set to true, it neglects the Shafranov shift
 """
-@kwdef mutable struct LargeAspectRatioConfig
+@kwdef mutable struct LargeAspectRatioConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0
     a::Float64 = 1.0
     beta0::Float64 = 1e-3
@@ -275,7 +284,7 @@ profile is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`.
 
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-@kwdef mutable struct TJAnalyticConfig
+@kwdef mutable struct TJAnalyticConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0         # Major radius R₀ [m]
     a::Float64 = 1.0           # Minor radius a [m] (ε = a/R₀)
     q0::Float64 = 1.5          # On-axis safety factor
@@ -313,7 +322,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
   - `b0fac`: scale toroidal field at constant beta (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
   - `f0fac`: scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 """
-@kwdef mutable struct SolovevConfig
+@kwdef mutable struct SolovevConfig <: AnalyticEquilibriumConfig
     mr::Int = 128      # number of radial grid zones
     mz::Int = 128      # number of axial grid zones
     ma::Int = 128      # number of flux grid zones
@@ -894,6 +903,10 @@ This object provides a complete representation of the processed plasma equilibri
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
+  - `analytic::Union{Nothing,AnalyticEquilibriumConfig}`: the parameters an analytic kind
+    (`sol`, `lar`, `tj_analytic`, `tj_analytic_direct`) was solved from, so [`reform`](@ref) can
+    re-solve it on a new grid; `nothing` for file-based and IMAS equilibria. A defensive copy, so
+    later edits to the caller's config do not reach it.
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -921,13 +934,14 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     psio::Float64
 
     ingest::EquilibriumIngest
+    analytic::Union{Nothing,AnalyticEquilibriumConfig}
 end
 
-# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest, so allow
-# construction without it; ingest defaults to nothing and is assigned post-construction.
+# Solvers build the equilibrium before setup_equilibrium records its source, so allow
+# construction without it; ingest and analytic default to nothing and are assigned post-construction.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
     eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
     PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing)
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing, nothing)

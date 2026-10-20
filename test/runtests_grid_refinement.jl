@@ -183,6 +183,22 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         @test equil2.profiles.xs == grid
         @test equil2.rzphi_xs == grid
 
+        # The equilibrium keeps a private copy of its config, so reform needs no input and
+        # ignores later edits to the caller's config.
+        @test equil1.analytic isa GridRef.SolovevConfig && equil1.analytic !== sol_config
+        sol_config.elongation += 0.1
+        equil2r = GridRef.reform(equil1, grid)
+        sol_config.elongation -= 0.1
+        @test equil2r.rzphi_xs == equil2.rzphi_xs
+        @test map(equil2r.profiles.q_spline, grid) == map(equil2.profiles.q_spline, grid)
+        @test equil2r.rzphi_rsquared((0.5, 0.3)) == equil2.rzphi_rsquared((0.5, 0.3))
+
+        # The one-call constructor implies eq_type from the config type and gives the same pass 1.
+        equil1c = GridRef.PlasmaEquilibrium(sol_config; grid_type="auto", mpsi=0, psi_accuracy=1e-3, psilow=0.01, psihigh=0.995)
+        @test equil1c.config.eq_type == "sol" && equil1c.rzphi_xs == equil1.rzphi_xs
+        @test_throws ErrorException GridRef.PlasmaEquilibrium(sol_config; eq_type="lar")
+        @test GridRef._analytic_eq_type(GridRef.TJAnalyticConfig()) == "tj_analytic"
+
         # Solovev has finite edge q, so the auto grid must classify it as limited: no separatrix
         # log law, on either pass, even with the absolute r² floor disabled (the relative
         # log-vs-linear comparison is what rejects it).
