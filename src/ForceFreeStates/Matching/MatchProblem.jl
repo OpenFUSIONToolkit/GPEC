@@ -187,8 +187,8 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     if gal_sol === nothing
         xi = Array{ComplexF64,3}(undef, 0, 0, 0)
         xi_deriv = Array{ComplexF64,3}(undef, 0, 0, 0)
-        empty!(inner_psi);
-        empty!(inner_xi);
+        empty!(inner_psi)
+        empty!(inner_xi)
         empty!(inner_b)
     else
         sols = gal_sol.xi          # (mpert, ngrid, nsol)
@@ -213,8 +213,8 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
                       "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog=1
-                empty!(inner_psi);
-                empty!(inner_xi);
+                empty!(inner_psi)
+                empty!(inner_xi)
                 empty!(inner_b)
             else
                 cut_range = gal_sol.cut_range
