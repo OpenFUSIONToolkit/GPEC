@@ -198,6 +198,11 @@ currents) is captured under `Input/RawInputs/Coils/`. The run can then be replay
 - `--coil-source coils` recomputes the field from the geometry stored in `gpec.h5`, so no
   original files are required — and the equilibrium may be overridden on replay.
 
+An ASCII or HDF5 forcing file is captured raw, with its `normalization` tag, under
+`Input/RawInputs/ForcingTerms/`. The replay writes it back out as `<stem>_forcing.h5` beside its
+output and reads it like any forcing file, so the normalization is redone against the replay's
+own equilibrium.
+
 ## Comparison with Fortran GPEC
 
 | Quantity | Julia convention | Fortran GPEC convention |

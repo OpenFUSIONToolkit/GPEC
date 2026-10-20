@@ -194,32 +194,7 @@ function load_forcing_hdf5!(
     if !isfile(filepath)
         error("Forcing data file not found: $filepath")
     end
-
-    norm_tag = h5open(filepath, "r") do file
-        tag = haskey(HDF5.attrs(file), "normalization") ?
-              read(HDF5.attrs(file)["normalization"]) : "normal_field_T"
-
-        n_array = read(file, "n")
-        m_array = read(file, "m")
-        amp_real = read(file, "amplitude_real")
-        amp_imag = read(file, "amplitude_imag")
-
-        if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
-            error("Inconsistent array lengths in HDF5 forcing file")
-        end
-
-        empty!(forcing_modes)
-
-        for i in eachindex(n_array)
-            push!(forcing_modes, ForcingMode(;
-                n=Int(n_array[i]),
-                m=Int(m_array[i]),
-                amplitude=complex(amp_real[i], amp_imag[i])
-            ))
-        end
-        return tag
-    end
-    return norm_tag
+    return h5open(file -> load_forcing_from_h5_group!(forcing_modes, file), filepath, "r")
 end
 
 # Coil-forcing helpers; these depend on ForcingTermsControl and ForcingMode defined above.
@@ -228,35 +203,32 @@ include("BiotSavart.jl")
 include("CoilFourier.jl")
 
 """
-    save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
+    save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group; normalization="normal_field_T")
 
-Write forcing modes to an open HDF5 group using the same layout that
-`load_forcing_hdf5!` consumes: datasets `n`, `m`, `amplitude_real`,
-`amplitude_imag`. Used by the gpec.h5 snapshot writer so the replay path can
-re-read forcing data from the output file with no reference to the original
-ASCII/HDF5 ingest file.
+Write forcing modes to an open HDF5 group (or file root) in the layout `load_forcing_hdf5!`
+consumes: datasets `n`, `m`, `amplitude_real`, `amplitude_imag` and the `normalization`
+attribute. Used by the gpec.h5 snapshot writer so the replay path can re-read forcing data
+from the output file with no reference to the original ASCII/HDF5 ingest file.
 """
-function save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
-    n_arr = Int[mode.n for mode in forcing_modes]
-    m_arr = Int[mode.m for mode in forcing_modes]
-    re_arr = Float64[real(mode.amplitude) for mode in forcing_modes]
-    im_arr = Float64[imag(mode.amplitude) for mode in forcing_modes]
-    group["n"] = n_arr
-    group["m"] = m_arr
-    group["amplitude_real"] = re_arr
-    group["amplitude_imag"] = im_arr
+function save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group; normalization::String="normal_field_T")
+    group["n"] = Int[mode.n for mode in forcing_modes]
+    group["m"] = Int[mode.m for mode in forcing_modes]
+    group["amplitude_real"] = Float64[real(mode.amplitude) for mode in forcing_modes]
+    group["amplitude_imag"] = Float64[imag(mode.amplitude) for mode in forcing_modes]
+    HDF5.attrs(group)["normalization"] = normalization
     return nothing
 end
 
 """
-    load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+    load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group) -> String
 
-Populate `forcing_modes` from an already-open HDF5 group with datasets `n`,
-`m`, `amplitude_real`, `amplitude_imag`. Mirror of `save_forcing_to_h5` for the
-rerun path — deliberately accepts an open group rather than a file path so
-the snapshot data can live inside `gpec.h5/Input/RawInputs/ForcingTerms/`.
+Populate `forcing_modes` from an already-open HDF5 group (or file root) with datasets `n`,
+`m`, `amplitude_real`, `amplitude_imag`, and return its `normalization` attribute
+(`"normal_field_T"` when absent). Mirror of `save_forcing_to_h5`, shared by the forcing-file
+reader and the rerun path that reads `gpec.h5/Input/RawInputs/ForcingTerms/`.
 """
-function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)::String
+    tag = haskey(HDF5.attrs(group), "normalization") ? HDF5.attrs(group)["normalization"] : "normal_field_T"
     n_array = read(group, "n")
     m_array = read(group, "m")
     amp_real = read(group, "amplitude_real")
@@ -274,7 +246,7 @@ function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
             amplitude=complex(amp_real[i], amp_imag[i])
         ))
     end
-    return forcing_modes
+    return tag
 end
 
 """

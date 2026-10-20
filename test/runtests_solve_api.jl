@@ -121,15 +121,9 @@ using TOML
             @test size(pe.C_delta_prime) == size(reference.C_delta_prime)
             @test !isempty(pe.resonant_area_weighted_field)
 
-            # The amplitude-linear outputs are compared through the driver's own input path:
-            # the driver hands the stage the modes it snapshotted before the solve, whereas a
-            # fresh RMPField re-reads the file and re-runs the normalization conversion.
-            snapshot = GPEC.ForcingTerms.ForcingMode[]
-            GPEC.ForcingTerms.load_forcing_data!(snapshot, dir, "forcing.dat", "ascii", false)
-            injected = perturbed_equilibrium(ffs, RMPField(forcing); forcing_modes=snapshot,
-                (Symbol(k) => v for (k, v) in pe_section)...)
-            @test injected.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
-            @test injected.forcing_b ≈ reference.forcing_b rtol = 1e-10
+            # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
+            @test pe.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
+            @test pe.forcing_b ≈ reference.forcing_b rtol = 1e-10
 
             # `scale` is a uniform multiplier on the materialized forcing, and the response is
             # linear in it.

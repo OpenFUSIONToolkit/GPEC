@@ -113,9 +113,8 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # Every input source builds a ready `(inputs, eq_config, additional_input)` and hands it to
     # `main_from_inputs`: a gpec.toml working directory, an IMAS `dd`, or a gpec.h5 snapshot.
     if !isempty(args) && endswith(lowercase(args[1]), ".h5")
-        inputs, eq_config, additional_input, path, git_version, preloaded_forcing, preloaded_coils = build_inputs_from_h5(args)
-        return main_from_inputs(inputs, eq_config, additional_input, path, git_version;
-            preloaded_forcing_modes=preloaded_forcing, preloaded_coil_sets=preloaded_coils)
+        inputs, eq_config, additional_input, path, git_version, preloaded_coils = build_inputs_from_h5(args)
+        return main_from_inputs(inputs, eq_config, additional_input, path, git_version; preloaded_coil_sets=preloaded_coils)
     end
 
     path = length(args) >= 1 ? args[1] : "./"
@@ -165,7 +164,7 @@ end
 
 """
     main_from_inputs(inputs, eq_config, additional_input, path, git_version;
-                     preloaded_forcing_modes=nothing)
+                     preloaded_coil_sets=nothing)
 
 Shared pipeline body that every input source funnels into. The caller (one of the
 `build_inputs_from_*` builders) is responsible for producing a fully merged
@@ -174,13 +173,12 @@ does no source dispatch of its own. `additional_input` is forwarded directly to
 `setup_equilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
 analytic `*Config` or IMAS `dd` (TOML path), or `nothing` for file-based equilibria.
 
-`preloaded_forcing_modes` lets the rerun path inject a `Vector{ForcingMode}`
-already read from the source HDF5 snapshot, so `compute_perturbed_equilibrium`
-does not have to touch the original `forcing.dat` path. When `nothing`, the
-ForcingTerms data is loaded from disk at snapshot time (if PerturbedEquilibrium
-is enabled) so it still ends up in `Input/RawInputs/ForcingTerms/`.
+File forcing always comes from the `[ForcingTerms]` file, read and normalized by the PE stage
+exactly as on the scripting path; the raw file contents are also captured in
+`Input/RawInputs/ForcingTerms/`. The rerun path replays them by pointing `[ForcingTerms]` at a
+forcing file it writes from that snapshot.
 
-`preloaded_coil_sets` similarly lets the rerun path inject coil geometry read from
+`preloaded_coil_sets` lets the rerun path inject coil geometry read from
 `Input/RawInputs/Coils/` so a coil run can be replayed (recomputing the field
 against the current equilibrium) without the original `.dat`/`.h5` files. The coil
 geometry actually used by the run is always written back into `Input/RawInputs/Coils/`.
@@ -196,7 +194,6 @@ function main_from_inputs(
     additional_input,
     path::String,
     git_version::String;
-    preloaded_forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing
 )
     total_start = time()
@@ -248,7 +245,7 @@ function main_from_inputs(
         intr.debug_settings = DebugSettings()
     end
 
-    forcing_modes_snapshot = snapshot_forcing_modes(inputs, path, ctrl, preloaded_forcing_modes)
+    forcing_snapshot = snapshot_forcing_modes(inputs, path, ctrl)
 
     # ----------------------------------------------------------------
     # Force-Free States
@@ -267,7 +264,7 @@ function main_from_inputs(
             ffs_result;
             git_version=git_version,
             inputs=inputs,
-            forcing_modes=forcing_modes_snapshot,
+            forcing_snapshot=forcing_snapshot,
             locstab=locstab,
             ballooning_boundary=ballooning_boundary,
             layer_overlap=layer_overlap
@@ -313,7 +310,7 @@ function main_from_inputs(
     end
 
     pe_start = time()
-    pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets; runtimes=runtimes)
+    pe_state = run_perturbed_equilibrium(ffs_result, inputs, preloaded_coil_sets; runtimes=runtimes)
     # Record only when the stage ran; an absent [PerturbedEquilibrium] section would otherwise
     # stamp a ~0 s entry for work that never happened.
     if "PerturbedEquilibrium" in keys(inputs)
@@ -513,39 +510,20 @@ function maybe_reform_equilibrium(
 end
 
 """
-    snapshot_forcing_modes(inputs, path, ctrl, preloaded) -> Union{Nothing,Vector{ForcingMode}}
+    snapshot_forcing_modes(inputs, path, ctrl) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
 
-Capture the file-based forcing modes before the solve, when PerturbedEquilibrium is enabled, so
-they land in `Input/RawInputs/ForcingTerms/` alongside the TOML blob. Returns `preloaded`
-unchanged when the caller (the rerun path) already supplied the modes.
+The raw file-based forcing modes and their normalization tag, read when PerturbedEquilibrium is
+enabled so they land in `Input/RawInputs/ForcingTerms/` alongside the TOML blob. They feed only
+the writer: the PE stage reads and normalizes the forcing file itself.
 """
-function snapshot_forcing_modes(
-    inputs::Dict{String,Any},
-    path::String,
-    ctrl::ForceFreeStatesControl,
-    preloaded::Union{Nothing,Vector{ForcingTerms.ForcingMode}}
-)
-    # Coil forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on replay,
-    # so only the file-based formats need their modes captured here.
-    forcing_modes_snapshot = preloaded
-    if forcing_modes_snapshot === nothing && "PerturbedEquilibrium" in keys(inputs)
-        ft_raw = get(inputs, "ForcingTerms", Dict{String,Any}())
-        scalar_forcing = filter(p -> p.first != "coil_set", ft_raw)
-        ft_ctrl_snapshot = ForcingTerms.ForcingTermsControl(;
-            (Symbol(k) => v for (k, v) in scalar_forcing)...
-        )
-        if ft_ctrl_snapshot.forcing_data_format in ("ascii", "hdf5")
-            forcing_modes_snapshot = ForcingTerms.ForcingMode[]
-            ForcingTerms.load_forcing_data!(
-                forcing_modes_snapshot,
-                path,
-                ft_ctrl_snapshot.forcing_data_file,
-                ft_ctrl_snapshot.forcing_data_format,
-                ctrl.verbose
-            )
-        end
-    end
-    return forcing_modes_snapshot
+function snapshot_forcing_modes(inputs::Dict{String,Any}, path::String, ctrl::ForceFreeStatesControl)
+    # Coil forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on replay.
+    "PerturbedEquilibrium" in keys(inputs) || return nothing
+    ft_ctrl = forcing_terms_control(inputs)
+    ft_ctrl.forcing_data_format in ("ascii", "hdf5") || return nothing
+    modes = ForcingTerms.ForcingMode[]
+    normalization = ForcingTerms.load_forcing_data!(modes, path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
+    return modes, normalization
 end
 
 """
@@ -988,7 +966,7 @@ solve(equil::Equilibrium.PlasmaEquilibrium, alg::ForceFreeStates.AbstractIntegra
     solve(EulerLagrangeProblem(equil; kwargs...), alg)
 
 """
-    run_perturbed_equilibrium(result, inputs, forcing_modes_snapshot, preloaded_coil_sets) -> pe_state
+    run_perturbed_equilibrium(result, inputs, preloaded_coil_sets) -> pe_state
 
 Run the perturbed-equilibrium stage against a published force-free-states `result` and write its
 outputs. Returns `nothing` when the deck carries no `[PerturbedEquilibrium]` section.
@@ -996,7 +974,6 @@ outputs. Returns `nothing` when the deck carries no `[PerturbedEquilibrium]` sec
 function run_perturbed_equilibrium(
     result::ForceFreeStatesResult,
     inputs::Dict{String,Any},
-    forcing_modes_snapshot::Union{Nothing,Vector{ForcingTerms.ForcingMode}},
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}};
     runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
 )
@@ -1014,7 +991,7 @@ function run_perturbed_equilibrium(
         # The deck's forcing block is an unscaled RMPField, so the TOML path and the
         # scripting API share one stage.
         pe_state = perturbed_equilibrium(result, ForcingTerms.RMPField(ft_ctrl);
-            forcing_modes=forcing_modes_snapshot, coil_sets=preloaded_coil_sets, runtimes=runtimes,
+            coil_sets=preloaded_coil_sets, runtimes=runtimes,
             (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...)
     end
 
@@ -1024,7 +1001,7 @@ function run_perturbed_equilibrium(
 end
 
 """
-    perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, runtimes=nothing, kwargs...) -> PerturbedEquilibriumState
+    perturbed_equilibrium(ffs, rmp; coil_sets=nothing, runtimes=nothing, kwargs...) -> PerturbedEquilibriumState
 
 Compute the plasma response to the external field `rmp` on top of a force-free-states solve
 `ffs`, and write the perturbed-equilibrium outputs. `rmp` is an [`RMPField`](@ref); keyword
@@ -1034,9 +1011,8 @@ Products the producing integrator could not supply gate the corresponding calcul
 step warns and is skipped rather than erroring, so a Riccati- or Galerkin-fed result still
 flows through.
 
-`forcing_modes` injects already-loaded modes (the gpec.h5 replay path) and `coil_sets`
-already-built coil geometry, both bypassing the corresponding read. A `runtimes` collector,
-when given, receives the forcing-mode materialization's wall-clock seconds as `"forcing_terms" => dt`.
+`coil_sets` injects already-built coil geometry (the gpec.h5 replay path), bypassing the
+geometry read. A `runtimes` collector, when given, receives the forcing-mode materialization's wall-clock seconds as `"forcing_terms" => dt`.
 
 ```julia
 pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
@@ -1045,7 +1021,6 @@ pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
 function perturbed_equilibrium(
     ffs::ForceFreeStatesResult,
     rmp::ForcingTerms.RMPField;
-    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing,
     runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing,
     kwargs...
@@ -1056,12 +1031,6 @@ function perturbed_equilibrium(
 
     # Inner-layer penetrated resonant field; zeros under ideal closure.
     pe_intr.inner_bpen = ffs.bpen
-
-    # Reuse forcing modes loaded at snapshot time (or injected by `build_inputs_from_h5`) so
-    # the materialization step never re-reads the original forcing file.
-    if forcing_modes !== nothing
-        pe_intr.forcing_modes = copy(forcing_modes)
-    end
 
     # Injected coil geometry (gpec.h5 replay with `--coil-source coils`) lets the coil field
     # be recomputed from stored geometry without the .dat/.h5 files.
@@ -1501,7 +1470,7 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
 end
 
 """
-    write_outputs_to_HDF5(result::ForceFreeStatesResult; git_version, inputs, forcing_modes,
+    write_outputs_to_HDF5(result::ForceFreeStatesResult; git_version, inputs, forcing_snapshot,
                           locstab, ballooning_boundary)
 
 Write the HDF5 output file with the run, equilibrium and stability products carried by a
@@ -1517,8 +1486,9 @@ The solution-adjacent datasets come from two independent sources: the dense
 instead), and ψ, q, the step counts, `crit`, the asymptotic coefficients and the edge scan
 from `result.diagnostics`. Either may be absent, and is then written empty.
 
-`locstab` and `ballooning_boundary` come from the LocalStability stage, which is not part of
-the force-free-states solve.
+`forcing_snapshot` is the `(modes, normalization)` pair from `snapshot_forcing_modes`,
+written to `Input/RawInputs/ForcingTerms/`. `locstab` and `ballooning_boundary` come from the
+LocalStability stage, which is not part of the force-free-states solve.
 
 ### TODOs
 
@@ -1528,7 +1498,7 @@ function write_outputs_to_HDF5(
     result::ForceFreeStatesResult;
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
-    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    forcing_snapshot::Union{Nothing,Tuple{Vector{ForcingTerms.ForcingMode},String}}=nothing,
     locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
     ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[]),
     layer_overlap=nothing
@@ -1582,9 +1552,9 @@ function write_outputs_to_HDF5(
                 out_h5["$eq_group/$f"] = getfield(equil.ingest, f)
             end
         end
-        if forcing_modes !== nothing
-            forcing_group = create_group(out_h5, "Input/RawInputs/ForcingTerms")
-            ForcingTerms.save_forcing_to_h5(forcing_modes, forcing_group)
+        if forcing_snapshot !== nothing  # read back by Rerun.build_inputs_from_h5
+            modes, normalization = forcing_snapshot
+            ForcingTerms.save_forcing_to_h5(modes, create_group(out_h5, "Input/RawInputs/ForcingTerms"); normalization)
         end
 
         # Write derived run parameters

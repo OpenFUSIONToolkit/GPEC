@@ -50,10 +50,10 @@ function _rerun_dataset_mismatches(source_h5, rerun_h5)
     return n_compared, n_mismatched
 end
 
-# Analytic (Solovev) equilibrium: the single end-to-end source + replay. The replay runs from a
-# temp directory containing nothing but the captured gpec.h5, proving the snapshot is
-# self-contained (no g-file or forcing data needed), and reproduces the source
-# bit-for-bit across every output dataset.
+# Analytic (Solovev) equilibrium with ASCII file forcing: the single end-to-end source + replay.
+# The forcing file is deleted before replay and the replay runs from a temp directory, proving
+# the snapshot is self-contained (no g-file or forcing data needed), and reproduces the source
+# bit-for-bit across every output dataset, the normalized perturbed equilibrium included.
 @testset "Rerun from gpec.h5 (analytic Solovev)" begin
     template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
@@ -61,19 +61,33 @@ end
         for name in readdir(template_dir)
             cp(joinpath(template_dir, name), joinpath(snapshot_dir, name))
         end
+        forcing_dat = joinpath(snapshot_dir, "forcing.dat")
+        cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), forcing_dat)
         toml_path = joinpath(snapshot_dir, "gpec.toml")
-        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_outputs_to_HDF5 = true"))
+        inputs = TOML.parsefile(toml_path)
+        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
+        inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
+        inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+            "compute_response" => true, "compute_singular_coupling" => true,
+            "verbose" => false, "write_outputs_to_HDF5" => true)
+        open(io -> TOML.print(io, inputs), toml_path, "w")
 
         @info "Generating source gpec.h5 for rerun tests"
         GeneralizedPerturbedEquilibrium.main([snapshot_dir])
         source_h5 = joinpath(snapshot_dir, "gpec.h5")
         @test isfile(source_h5)
+        h5open(source_h5, "r") do h5
+            @test HDF5.attrs(h5["Input/RawInputs/ForcingTerms"])["normalization"] == "normal_field_T"
+        end
+        rm(forcing_dat)
 
         @testset "self-contained replay matches source across all datasets" begin
             mktempdir() do replay_dir
                 GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", replay_dir])
                 replay_h5 = joinpath(replay_dir, "gpec_rerun.h5")
                 @test isfile(replay_h5)
+                @test isfile(joinpath(replay_dir, "gpec_rerun_forcing.h5"))
+                @test "PerturbedEquilibrium" in h5open(keys, replay_h5, "r")
 
                 n_compared, n_mismatched = _rerun_dataset_mismatches(source_h5, replay_h5)
                 @test n_compared > 0

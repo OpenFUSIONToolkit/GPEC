@@ -84,8 +84,8 @@ function compute_perturbed_equilibrium(
     solution = ffs.solution
     intr.odet_from_gal = solution !== nothing && solution.basis === :gal_native
 
-    # The one place forcing state lands on `intr`: injected (replay) modes short-circuit the
-    # materialization entirely, so they are never re-converted or re-weighted.
+    # Unit-norm modes an internal caller already placed on `intr` skip materialization, so they
+    # are never re-converted or re-weighted.
     if isempty(intr.forcing_modes)
         ft_start = time()
         modes, coil_sets = materialize_forcing_modes(ffs, forcing;
