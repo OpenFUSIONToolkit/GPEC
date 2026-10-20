@@ -19,6 +19,7 @@ where χ₁ = 2π·Ψ₀ [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10].
 Clebsch displacement components for PENTRC (matches Fortran gpout_xclebsch):
     ξ^ψ         = xsp_mn    (unregularized)
     ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + reg_spot²))
+                           regularization_width = 0 in kinetic runs — no ideal singularity to smooth
     ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp) ideal, ξ_s·singfac factor kinetic; divided by χ₁ in output)
 
 Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contra):
@@ -337,7 +338,7 @@ Matches Fortran gpeq_sol regularization + gpout_xclebsch output convention:
   - `clebsch_psi1` = xmp1 = ∂ξ^ψ/∂ψ × singfac²/(singfac² + reg_spot²)
   - `clebsch_alpha` = xms/χ₁ (regularized ξ^α divided by χ₁ per gpout_xclebsch convention)
 
-When reg_spot=0, clebsch_psi1 = xi_psi1 and clebsch_alpha = xi_s/χ₁ (no regularization).
+When regularization_width = 0, clebsch_psi1 = xi_psi1 and clebsch_alpha = xi_s/χ₁ (no regularization).
 
 Ideal runs re-solve the regularized xms = -A⁻¹(B·xmp1 + C·xsp) from `mats.ideal`.
 Kinetic runs scale the stored ξ_s by the same singfac factor (Fortran gpeq.f), since the kinetic A is non-Hermitian.
@@ -360,8 +361,8 @@ function compute_clebsch_displacements(
     clebsch_psi1 = copy(xi_psi1_modes)        # will be regularized below
     clebsch_alpha = xi_s_modes ./ chi1         # ξ^α/χ₁ (will be regularized below)
 
-    reg_spot = ctrl.reg_spot
-    @assert reg_spot >= 0 "reg_spot must be non-negative (got $reg_spot)"
+    reg_spot = ctrl.regularization_width  # Fortran gpec reg_spot
+    @assert reg_spot >= 0 "regularization_width must be non-negative (got $reg_spot)"
 
     if reg_spot == 0
         return clebsch_psi, clebsch_psi1, clebsch_alpha
@@ -511,7 +512,7 @@ function compute_contra_displacements(
     npsi, numpert_total = size(xi_psi_modes)
     (; mpert, mlow, nlow, npert) = ffs
     chi1 = 2π * equil.psio
-    reg_spot = ctrl.reg_spot
+    reg_spot = ctrl.regularization_width  # Fortran gpec reg_spot
     fc = metric.fourier_coeffs
 
     xwp_modes = zeros(ComplexF64, npsi, numpert_total)

@@ -1,10 +1,9 @@
 name: Build and Test Julia Package
 
 on:
+  # Every pull request, whatever its base, so a PR stacked on another feature branch
+  # is tested too; it is tested again once retargeted, when it syncs with develop.
   pull_request:
-    branches:
-      - main
-      - develop
   push:
     branches:
       - main
