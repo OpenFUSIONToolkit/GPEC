@@ -295,6 +295,8 @@ using TOML
             @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(gal.surfaces) + 1), rho=1e-7, rotation=1.0)
             # The tearing model is the solve argument, never a TearingProblem keyword.
             @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
+            # The deck's tearing stage propagates errors rather than finishing without a Tearing/ group.
+            @test_throws ArgumentError GPEC.run_slayer_stage(gal, Dict{String,Any}("SLAYER" => Dict{String,Any}("enabled" => true, "inner_model" => "ggj_ray")), nothing)
             # The ideal reference match keeps the ideal closure and replaces the solution with
             # the bare coil columns in the identity-at-edge basis.
             matched = solve(prob, GGJModel())

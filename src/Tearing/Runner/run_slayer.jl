@@ -73,12 +73,6 @@ end
 function _build_inner_model(name::Symbol)
     if name === :slayer_fitzpatrick
         return SLAYERModel(; variant=:fitzpatrick)
-    elseif name === :ggj_ray
-        return GGJModel(; solver=:ray)
-    elseif name === :ggj_shooting
-        return GGJModel(; solver=:shooting)
-    elseif name === :ggj_galerkin
-        return GGJModel(; solver=:galerkin)
     end
     throw(ArgumentError("_build_inner_model: unknown model $name"))
 end
