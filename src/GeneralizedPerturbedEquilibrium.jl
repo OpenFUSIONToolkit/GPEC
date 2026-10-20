@@ -1094,7 +1094,7 @@ function run_kinetic_forces(
     else
         # kf_ctrl and kinetic_profiles were loaded once before the equilibrium was re-formed.
         kf_intr = KineticForces.KineticForcesInternal(result.equil; verbose=kf_ctrl.verbose)
-        KineticForces.set_perturbation_data!(kf_intr, pe_state, result, result.equil, result.metric)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, result)
 
         if species === nothing
             kf_state = KineticForces.KineticForcesState()
@@ -1102,7 +1102,7 @@ function run_kinetic_forces(
             if kf_ctrl.write_outputs_to_HDF5
                 h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
                     KineticForces.write_to_hdf5!(h5file, kf_state;
-                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline, perturbation=kf_intr)
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
                 end
             end
         else
@@ -1127,7 +1127,7 @@ function run_kinetic_forces(
                             dVdpsi_spline=result.equil.profiles.dVdpsi_spline, species_label=label)
                     end
                     KineticForces.write_to_hdf5!(h5file, kf_state;
-                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline, perturbation=kf_intr)
+                        dVdpsi_spline=result.equil.profiles.dVdpsi_spline)
                 end
             end
         end
@@ -1345,7 +1345,7 @@ function efc_couplings(
         pe_intr.forcing_modes = modes
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, ForcingTerms.RMPField(ForcingTerms.ForcingTermsControl()), quiet, pe_intr)
         kf_intr = KineticForces.KineticForcesInternal(equil; verbose=verbose)
-        KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs)
         return kf_intr
     end
     # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.

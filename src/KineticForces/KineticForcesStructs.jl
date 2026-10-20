@@ -243,14 +243,6 @@ this struct.
     dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
     divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
 
-    # The same two quantities as the raw mode tables the interpolants were built from, kept
-    # so they can be written to the HDF5 file. δB/B is the Lagrangian perturbation of the
-    # field strength, which is what an NTV code needs as input; nothing in the torque
-    # calculation reads these fields back.
-    perturbation_psi::Vector{Float64} = Float64[]            # ψ_N of each row
-    dbob_m_data::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # (nψ, mpert)
-    divx_m_data::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # (nψ, mpert)
-
     # Sticky bracket-search hints for amortized lookup in `tpsi!`. When the outer
     # quadrature evaluates ψ non-monotonically, FastInterpolations falls back to a
     # broader search when the hint is stale — still a net win over a cold bracket
@@ -329,25 +321,21 @@ function KineticForcesInternal(equil; verbose::Bool=false)
 end
 
 """
-    set_perturbation_data!(kf_intr, pe_state, ffs, equil, metric)
+    set_perturbation_data!(kf_intr, pe_state, ffs)
 
 Populate perturbation data from PerturbedEquilibriumState into KineticForcesInternal.
 
-Builds three interpolant sets from PE Clebsch displacements:
-1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] CubicSeriesInterpolants over ψ
-2. `dbob_m` — δB/B Fourier modes via JBB deweighting (Fortran set_peq)
-3. `divx_m` — ∇·ξ⊥ Fourier modes via JBB deweighting
+Builds three interpolant sets over ψ:
+1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] from the PE Clebsch displacements
+2. `dbob_m` — Lagrangian δ|B|/B, taken from `pe_state.modb_modes`
+3. `divx_m` — ∇·ξ⊥, taken from `pe_state.modb_modes`
 
-The JBB deweighting algorithm (Fortran pentrc/inputs.f90:828-868):
-1. Apply geometric matrices S,T,X,Y,Z in m-space
-2. Inverse DFT to θ-space
-3. Divide by J·B² at each θ
-4. Forward DFT back to m-space
+The perturbation spectra themselves are a property of the perturbed equilibrium and are
+derived and written there (`PerturbedEquilibrium.compute_modb_modes`); this function only
+interpolates them onto the torque quadrature.
 """
 function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
-                                ffs::ForceFreeStates.ForceFreeStatesResult,
-                                equil::Equilibrium.PlasmaEquilibrium,
-                                metric::ForceFreeStates.MetricData)
+                                ffs::ForceFreeStates.ForceFreeStatesResult)
     ffs.npert == 1 || error("KineticForces supports a single toroidal mode; this run has n = $(ffs.nlow):$(ffs.nhigh).")
 
     # Copy mode numbers from FFS
@@ -386,79 +374,19 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
     xs_m_3 = cubic_interp(psi_grid, Series(clebsch_alpha_mat); itp_opts...)
     kf_intr.xs_m = [xs_m_1, xs_m_2, xs_m_3]
 
-    # Build geometric matrices (S,T,X,Y,Z) for JBB deweighting
-    geom_mats = ForceFreeStates.build_kinetic_metric_matrices(equil, ffs, metric)
-
-    # Build FourierTransform for the JBB deweighting DFT round-trip
-    mthsurf = kf_intr.mthsurf
-    ft = Utilities.FourierTransforms.FourierTransform(mthsurf, mpert, ffs.mlow)
-
-    # JBB deweighting: convert Clebsch modes → physical δB/B and ∇·ξ⊥ modes
-    dbob_m_data = zeros(ComplexF64, npsi, mpert)
-    divx_m_data = zeros(ComplexF64, npsi, mpert)
-
-    # Pre-allocate buffers
-    smat_flat = Vector{ComplexF64}(undef, mpert^2)
-    tmat_flat = Vector{ComplexF64}(undef, mpert^2)
-    xmat_flat = Vector{ComplexF64}(undef, mpert^2)
-    ymat_flat = Vector{ComplexF64}(undef, mpert^2)
-    zmat_flat = Vector{ComplexF64}(undef, mpert^2)
-    jbb_kapx = Vector{ComplexF64}(undef, mpert)
-    jbb_divx = Vector{ComplexF64}(undef, mpert)
-    jbb_dbob = Vector{ComplexF64}(undef, mpert)
-    theta_buf = Vector{ComplexF64}(undef, mthsurf)
-
-    hint_s = Ref(1)
-    hint_t = Ref(1)
-    hint_x = Ref(1)
-    hint_y = Ref(1)
-    hint_z = Ref(1)
-
-    for ipsi in 1:npsi
-        psi = psi_grid[ipsi]
-
-        # Get Clebsch displacement vectors at this ψ
-        xsp  = view(xi_modes.clebsch_psi,  ipsi, :)       # ξ^ψ [mpert]
-        xmp1 = view(xi_modes.clebsch_psi1, ipsi, :)       # ∂ξ^ψ/∂ψ [mpert]
-        xms  = view(clebsch_alpha_mat, ipsi, :)            # ξ^α [mpert]
-
-        # Evaluate geometric matrices at ψ → mpert² flat vectors, reshape to mpert×mpert
-        geom_mats.smats(smat_flat, psi; hint=hint_s)
-        geom_mats.tmats(tmat_flat, psi; hint=hint_t)
-        geom_mats.xmats(xmat_flat, psi; hint=hint_x)
-        geom_mats.ymats(ymat_flat, psi; hint=hint_y)
-        geom_mats.zmats(zmat_flat, psi; hint=hint_z)
-
-        smat = reshape(smat_flat, mpert, mpert)
-        tmat = reshape(tmat_flat, mpert, mpert)
-        xmat = reshape(xmat_flat, mpert, mpert)
-        ymat = reshape(ymat_flat, mpert, mpert)
-        zmat = reshape(zmat_flat, mpert, mpert)
-
-        # Apply geometric matrices in m-space. xs_m ordering: (1)=∂ξ^ψ/∂ψ, (2)=ξ^ψ, (3)=ξ^α.
-        #   jbb_kapx = smat·xsp + tmat·xms;  jbb_divx = xmat·xmp1 + ymat·xsp + zmat·xms
-        mul!(jbb_kapx, smat, xsp)
-        mul!(jbb_kapx, tmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)   # += tmat * xms
-        mul!(jbb_divx, xmat, xmp1)
-        mul!(jbb_divx, ymat, xsp,  1.0 + 0.0im, 1.0 + 0.0im)  # += ymat * xsp
-        mul!(jbb_divx, zmat, xms,  1.0 + 0.0im, 1.0 + 0.0im)  # += zmat * xms
-        @. jbb_dbob = -(jbb_divx + jbb_kapx)
-
-        # Inverse DFT to θ-space, divide by J·B², forward DFT back
-        _jbb_deweight!(view(dbob_m_data, ipsi, :), jbb_dbob, ft, psi, equil, mthsurf, theta_buf)
-        _jbb_deweight!(view(divx_m_data, ipsi, :), jbb_divx, ft, psi, equil, mthsurf, theta_buf)
-    end
+    # δB/B and ∇·ξ⊥ come from PerturbedEquilibrium, which derives them from the same
+    # displacement (`compute_modb_modes`, Fortran gpout_pmodb / set_peq) and writes them to
+    # `PerturbedEquilibrium/Response/`. Nothing kinetic enters them, so they are not rebuilt
+    # here; a run whose npert > 1 has already failed the single-mode check above.
+    modb = pe_state.modb_modes
+    modb === nothing && error("set_perturbation_data!: the perturbed equilibrium carries no " *
+                              "δ|B|/B spectra; KineticForces cannot evaluate the torque without them.")
+    size(modb.dbob) == (npsi, mpert) || error("set_perturbation_data!: δ|B|/B spectra are " *
+        "$(size(modb.dbob)), expected ($npsi, $mpert).")
 
     # Build CubicSeriesInterpolants over ψ for dbob_m and divx_m
-    kf_intr.dbob_m = cubic_interp(psi_grid, Series(dbob_m_data); itp_opts...)
-    kf_intr.divx_m = cubic_interp(psi_grid, Series(divx_m_data); itp_opts...)
-
-    # Retain the mode tables for output. They are the physical δB/B and ∇·ξ⊥ spectra on the
-    # PE ψ grid, in the same poloidal angle and (m, n) convention as the PerturbedEquilibrium
-    # field spectra, and are of direct interest to other NTV codes run on GPEC fields.
-    kf_intr.perturbation_psi = copy(psi_grid)
-    kf_intr.dbob_m_data = dbob_m_data
-    kf_intr.divx_m_data = divx_m_data
+    kf_intr.dbob_m = cubic_interp(psi_grid, Series(modb.dbob); itp_opts...)
+    kf_intr.divx_m = cubic_interp(psi_grid, Series(modb.divx); itp_opts...)
 
     if kf_intr.verbose
         @info "set_perturbation_data!: built dbob_m/divx_m/xs_m interpolants " *
@@ -466,34 +394,6 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
     end
 end
 
-"""
-    _jbb_deweight!(out, jbb_modes, ft, psi, equil, mthsurf, theta_buf)
-
-JBB deweighting step: inverse DFT → divide by J(ψ,θ)·B(ψ,θ)² → forward DFT.
-
-Matches Fortran set_peq lines 859-868: transforms JBB-weighted m-space data
-to θ-space, removes the J·B² weighting at each poloidal angle, and transforms back.
-"""
-function _jbb_deweight!(out::AbstractVector{ComplexF64}, jbb_modes::Vector{ComplexF64},
-                        ft::Utilities.FourierTransforms.FourierTransform,
-                        psi::Float64, equil::Equilibrium.PlasmaEquilibrium,
-                        mthsurf::Int, theta_buf::Vector{ComplexF64})
-    # Inverse DFT: m-space → θ-space
-    theta_buf .= Utilities.FourierTransforms.inverse(ft, jbb_modes)
-
-    # Divide by J·B² at each θ point
-    for j in 1:mthsurf
-        theta_norm = (j - 1) / mthsurf   # θ ∈ [0, 1)
-        pt = (psi, theta_norm)
-        jac = equil.rzphi_jac(pt)
-        B = equil.eqfun_B(pt)
-        theta_buf[j] /= jac * B^2
-    end
-
-    # Forward DFT: θ-space → m-space
-    out .= ft(theta_buf)
-    return nothing
-end
 
 
 # ============================================================================

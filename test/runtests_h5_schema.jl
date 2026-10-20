@@ -105,3 +105,42 @@ end
         end
     end
 end
+
+@testset "PerturbedEquilibrium δ|B|/B output contract" begin
+    PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+    npsi, mpert = 4, 3
+
+    # Written when the spectra exist. The NTV codes this serves read them as (m, ψ) — the
+    # transpose of the Julia shape — exactly like every other Response spectrum.
+    state = PE.PerturbedEquilibriumState(;
+        psi_grid=collect(range(0.1, 0.9; length=npsi)),
+        modb_modes=(dbob=ComplexF64[0.1i + 0.01im * j for i in 1:npsi, j in 1:mpert],
+                    divx=ComplexF64[0.2i - 0.02im * j for i in 1:npsi, j in 1:mpert]))
+    f1 = tempname() * ".h5"
+    PE.write_outputs_to_HDF5(state, PE.PerturbedEquilibriumInternal(), f1)
+    HDF5.h5open(f1, "r") do f
+        g = f["PerturbedEquilibrium/Response"]
+        @test size(read(g["dBoB_lagrangian"])) == (npsi, mpert)
+        @test read(g["dBoB_lagrangian"]) ≈ state.modb_modes.dbob
+        @test read(g["div_xi_perp"]) ≈ state.modb_modes.divx
+        for d in ("dBoB_lagrangian", "div_xi_perp")
+            a = HDF5.attributes(g[d])
+            @test haskey(a, "long_name") && haskey(a, "dims")
+            # Same ψ dimension scale as every other Response spectrum, which is what lets
+            # Analysis.PerturbedEquilibriumModes.modes_to_theta read these datasets unchanged.
+            @test HDF5.API.h5ds_is_attached(g[d], g["psi"], 0)
+        end
+        @test size(read(g["dBoB_lagrangian"])) == size(read(g["xi_clebsch_psi"])) ||
+              isempty(read(g["xi_clebsch_psi"]))
+    end
+    rm(f1; force=true)
+
+    # Absent, not empty, when the run could not produce them (npert > 1).
+    f2 = tempname() * ".h5"
+    PE.write_outputs_to_HDF5(PE.PerturbedEquilibriumState(), PE.PerturbedEquilibriumInternal(), f2)
+    HDF5.h5open(f2, "r") do f
+        @test !haskey(f["PerturbedEquilibrium/Response"], "dBoB_lagrangian")
+        @test !haskey(f["PerturbedEquilibrium/Response"], "div_xi_perp")
+    end
+    rm(f2; force=true)
+end
