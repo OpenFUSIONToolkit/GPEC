@@ -404,7 +404,7 @@ function write_gpec_toml_coil(
         @printf(io, "psihigh     = %.6f\n", p.psihigh)
         println(io, "mpsi        = $(p.mpsi)")
         println(io, "mtheta      = $(p.mtheta_equil)")
-        println(io, "etol        = 1e-7")
+        println(io, "flux_surface_rtol = 1e-7")
         println(io)
         println(io, "[Wall]")
         println(io, "shape = \"nowall\"")
@@ -416,12 +416,12 @@ function write_gpec_toml_coil(
         # Match the Fortran sas_flag truncation: integration stops at q = qhigh
         # (= outermost rational q + dmlim). psiedge from dcon.in (=1.0 → no edge dW scan).
         @printf(io, "qhigh    = %.4f\n", qhigh)
-        @printf(io, "psiedge  = %.4f\n", p.psiedge)
+        @printf(io, "dW_edge_scan_start = %.4f\n", p.psiedge)
         println(io, "nn_low   = $(p.nn)")
         println(io, "nn_high  = $(p.nn)")
         println(io, "delta_mlow  = $(p.delta_mlow)")
         println(io, "delta_mhigh = $(p.delta_mhigh)")
-        println(io, "mthvac   = 512")
+        println(io, "mtheta_vacuum = 512")
         println(io, "eulerlagrange_tolerance = 1e-7")
         println(io, "singfac_min = 1e-4")
         println(io, "save_interval = $(p.euler_stride)")
@@ -467,7 +467,7 @@ function write_gpec_toml_file(
         @printf(io, "psihigh     = %.6f\n", p.psihigh)
         println(io, "mpsi        = $(p.mpsi)")
         println(io, "mtheta      = $(p.mtheta_equil)")
-        println(io, "etol        = 1e-7")
+        println(io, "flux_surface_rtol = 1e-7")
         println(io)
         println(io, "[Wall]")
         println(io, "shape = \"nowall\"")
@@ -476,12 +476,12 @@ function write_gpec_toml_file(
         println(io, "local_stability_flag = true")
         println(io, "vac_flag = true")
         @printf(io, "qlow     = %.4f\n", p.qlow)
-        @printf(io, "psiedge  = %.4f\n", p.psiedge)
+        @printf(io, "dW_edge_scan_start = %.4f\n", p.psiedge)
         println(io, "nn_low   = $(p.nn)")
         println(io, "nn_high  = $(p.nn)")
         println(io, "delta_mlow  = $(p.delta_mlow)")
         println(io, "delta_mhigh = $(p.delta_mhigh)")
-        println(io, "mthvac   = 512")
+        println(io, "mtheta_vacuum = 512")
         println(io, "eulerlagrange_tolerance = 1e-7")
         println(io, "singfac_min = 1e-4")
         println(io, "save_interval = $(p.euler_stride)")
@@ -511,7 +511,7 @@ function setup_equil(p::FortranRunParams, fortran_dir::String)
         "mpsi" => p.mpsi,
         "mtheta" => p.mtheta_equil,
         "grid_type" => p.grid_type,
-        "etol" => 1e-7
+        "flux_surface_rtol" => 1e-7
     )
     eq_config = Equilibrium.EquilibriumConfig(eq_dict, fortran_dir)
     return Equilibrium.setup_equilibrium(eq_config)

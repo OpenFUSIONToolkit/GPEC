@@ -296,7 +296,7 @@ end
     axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil) → Float64
 
 ψ_c for a run: the widest-orbit species' near-axis validity boundary, or `0.0` when suppression is
-disabled or no kinetic profiles were loaded. Falls back to `kf_ctrl.zi`/`mi` when the resolved
+disabled or no kinetic profiles were loaded. Falls back to `kf_ctrl.ion_charge`/`ion_mass` when the resolved
 species set is unavailable.
 """
 function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_profiles, equil,
@@ -304,7 +304,7 @@ function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_
     (kf_ctrl.axis_validity_suppression && kinetic_profiles !== nothing) || return 0.0
     psi_c =
         species === nothing ?
-        kinetic_axis_validity_psi(kinetic_profiles, equil; zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron) :
+        kinetic_axis_validity_psi(kinetic_profiles, equil; zi=kf_ctrl.ion_charge, mi=kf_ctrl.ion_mass, electron=kf_ctrl.electron) :
         kinetic_axis_validity_psi(species, equil)
     return clear_rational_windows(psi_c, rationals)
 end
@@ -326,8 +326,8 @@ function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profi
     for n_res in intr.nlow:intr.nhigh
         n_res == 0 && continue
         append!(nodes, kinetic_resonance_psi_nodes(kinetic_profiles, equil;
-            n=n_res, nl=kf_ctrl.nl, zi=kf_ctrl.zi, mi=kf_ctrl.mi,
-            electron=kf_ctrl.electron, wdfac=kf_ctrl.wdfac))
+            n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=kf_ctrl.ion_charge, mi=kf_ctrl.ion_mass,
+            electron=kf_ctrl.electron, wdfac=kf_ctrl.magnetic_drift_factor))
     end
     psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
     psi_c > 0 && filter!(p -> p > psi_c, nodes)

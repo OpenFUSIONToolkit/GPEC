@@ -206,7 +206,7 @@ function write_validity!(h5file::HDF5.File, kf_ctrl::KineticForcesControl, speci
     # resolved set is available, else the control's single species.
     vp =
         species === nothing ?
-        kinetic_validity_profiles(kinetic_profiles, equil; zi=kf_ctrl.zi, mi=kf_ctrl.mi, electron=kf_ctrl.electron) :
+        kinetic_validity_profiles(kinetic_profiles, equil; zi=kf_ctrl.ion_charge, mi=kf_ctrl.ion_mass, electron=kf_ctrl.electron) :
         kinetic_validity_profiles(species, equil)
     psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
     root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")

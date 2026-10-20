@@ -119,26 +119,26 @@ builds a second control for its differing tolerance).
     prmm_flag::Bool = false         # Passing MXM E-L torque matrix norm
 
     # Plasma species parameters
-    zi::Int = 1                     # Ion charge (fundamental units)
-    mi::Int = 2                     # Ion mass (proton masses)
-    zimp::Int = 6                   # Impurity charge
-    mimp::Int = 12                  # Impurity mass
+    ion_charge::Int = 1             # Ion charge (fundamental units)
+    ion_mass::Int = 2               # Ion mass (proton masses)
+    impurity_charge::Int = 6        # Impurity charge
+    impurity_mass::Int = 12         # Impurity mass
     electron::Bool = false          # Add electron NTV in addition to the ion species
     ion_species::Vector{IonSpecies} = IonSpecies[]   # multi-main-ion set; empty ⇒ single ion
 
     # Mode numbers
     nn::Int = 1                     # Toroidal mode number
-    nl::Int = 1                     # Bounce harmonic number
+    bounce_harmonic_max::Int = 1    # Bounce harmonics summed over ℓ = -max:max
 
     # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy); each level must
     # resolve tighter than the one enclosing it, or the outer integrator chases quadrature noise.
-    atol_xlmda::Float64 = 1e-8     # Absolute tolerance for the inner pitch integration
-    rtol_xlmda::Float64 = 1e-5     # Relative tolerance for the inner pitch integration
+    atol_pitch::Float64 = 1e-8      # Absolute tolerance for the inner pitch integration
+    rtol_pitch::Float64 = 1e-5      # Relative tolerance for the inner pitch integration
     atol_x::Float64 = NaN          # Absolute tolerance for the energy integration (NaN ⇒ derived)
     rtol_x::Float64 = NaN          # Relative tolerance for the energy integration (NaN ⇒ derived)
     # Energy tolerances default to this fraction of the pitch ones (the pitch integrand is itself an energy integral).
     nested_tolerance_margin::Float64 = 1e-2   # Factor relating derived energy tolerances to the pitch ones
-    # Primary convergence knob (~2 sig figs matches NTV model validity); keep rtol_psi ≳ 10 × rtol_xlmda or it chases inner-integral noise.
+    # Primary convergence knob (~2 sig figs matches NTV model validity); keep rtol_psi ≳ 10 × rtol_pitch or it chases inner-integral noise.
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
     # Amplitude-sensitive (NTV ∝ δB²); default 0 (rtol-only). Nonzero is an expert opt-out for near-zero-torque cases and warns when it dominates.
     atol_psi::Float64 = 0.0        # Absolute tolerance for outer ψ quadrature [N·m]
@@ -149,16 +149,16 @@ builds a second control for its differing tolerance).
     density_factor::Float64 = 1.0            # Density scaling (ni, ne)
     temperature_factor::Float64 = 1.0        # Temperature scaling (Ti, Te)
     ExB_rotation_factor::Float64 = 1.0       # ExB rotation scaling (omegaE)
-    wdfac::Float64 = 1.0                     # Magnetic drift scaling
+    magnetic_drift_factor::Float64 = 1.0 # Magnetic drift scaling
     toroidal_rotation_factor::Float64 = 1.0  # Total toroidal rotation scaling (wphi)
 
-    nufac::Float64 = 1.0           # Collisionality scaling
-    divxfac::Float64 = 1.0         # div(xi_perp) scaling
+    collisionality_factor::Float64 = 1.0 # Collisionality scaling
+    divxi_factor::Float64 = 1.0     # div(xi_perp) scaling
     axis_validity_suppression::Bool = true  # documented in the `## Fields` docstring
 
     # Energy integration parameters
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
-    f0type::String = "maxwellian"   # Distribution function: "maxwellian", "jkp", "cgl"
+    f0type::String = "maxwellian"   # Distribution function: "maxwellian", "park", "cgl"
 
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi

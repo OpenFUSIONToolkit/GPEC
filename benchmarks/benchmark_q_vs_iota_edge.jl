@@ -18,10 +18,10 @@ using Plots
 const GPE = GeneralizedPerturbedEquilibrium
 const EXAMPLE_DIR = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
 
-# Dense ldp reference equilibrium: treat its q(ψ) as ground truth
+# Dense core_edge_packed reference equilibrium: treat its q(ψ) as ground truth
 function reference_q()
     inputs, _, additional_input = GPE.build_inputs_from_toml(EXAMPLE_DIR)
-    equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("grid_type" => "ldp", "mpsi" => 1024))
+    equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("grid_type" => "core_edge_packed", "mpsi" => 1024))
     eq_config = GPE.Equilibrium.EquilibriumConfig(equil_dict, EXAMPLE_DIR)
     equil = GPE.Equilibrium.setup_equilibrium(eq_config, additional_input)
     # The dict rides along so the mpsi scan can rebuild configs; EquilibriumConfig is immutable.

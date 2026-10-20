@@ -112,8 +112,8 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 
     prob = ODEProblem{true}(arclength_fieldline_der!, u0, (0.0, 1.0e4), params)
     # Tight tolerances on position (y[1:2]); integrals (y[3:5]) effectively unconstrained near x-points
-    reltol_vec = [equil_config.etol, equil_config.etol, 1e20, 1e20, 1e20]
-    abstol_vec = [equil_abstol(equil_config.etol), equil_abstol(equil_config.etol), 1e20, 1e20, 1e20]
+    reltol_vec = [equil_config.flux_surface_rtol, equil_config.flux_surface_rtol, 1e20, 1e20, 1e20]
+    abstol_vec = [equil_abstol(equil_config.flux_surface_rtol), equil_abstol(equil_config.flux_surface_rtol), 1e20, 1e20, 1e20]
     sol = solve(prob, BS5(); callback=callback, reltol=reltol_vec, abstol=abstol_vec,
         dt=2π / 200, adaptive=true, dense=true)
     # The only complete ending is the callback's terminate! on return to the midplane; Success means it never fired.
