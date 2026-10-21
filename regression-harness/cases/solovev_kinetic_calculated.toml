@@ -113,7 +113,7 @@ extract = "value"
 label = "npert"
 noise_threshold = 0
 
-# Torque of the run's own coil forcing, three routes on one kinetic solve: the ψ-resolved torque
+# Torque of the run's own forcing, three routes on one kinetic solve: the ψ-resolved torque
 # response matrix T_xe contracted with the applied field (its Hermitian part carries the torque),
 # the boundary-response torque from the plasma inductance (same number, different algebra), and
 # the KineticForces NTV quadrature of the same displacement (an independent evaluation that

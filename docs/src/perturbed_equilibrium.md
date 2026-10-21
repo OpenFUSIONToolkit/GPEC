@@ -105,9 +105,10 @@ Two conventions are worth stating explicitly:
     its eigenvectors are the applied spectra of extremal torque and its eigenvalues their torque
     per unit `‖b̃‖²/2`. The anti-Hermitian part carries the energy.
 
-The coil-space form `T_coil(ψ) = M†·T·M`, with one column of `M` per coil set of the run's
-`[ForcingTerms]` (each as built, at its deck currents), is written alongside when the forcing
-is coils; driving the sets at scale factors `s` gives `s†·T_coil·s/2`.
+The forcing-source form `T_source(ψ) = M†·T·M` is written alongside, with one column of `M` per
+forcing source of the run's `[ForcingTerms]`, each as built: every coil set at its deck currents,
+or the forcing file's spectrum as a single source. Driving the sources at scale factors `s` gives
+`s†·T_source·s/2`.
 
 ```julia
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium

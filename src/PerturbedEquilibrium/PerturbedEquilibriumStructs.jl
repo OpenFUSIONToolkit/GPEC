@@ -16,10 +16,10 @@ on the plasma inside ψ and whose imaginary part is `2n·δW` of that plasma (id
   - `psi::Vector{Float64}` - ψ_N of each stored node of the solve `[npsi]`
   - `m_modes`, `n_modes::Vector{Int}` - (m, n) of each row and column of `T_xe` `[numpert_total]`
   - `T_xe::Array{ComplexF64,3}` - torque response on b̃, N·m/T² `[numpert_total × numpert_total × npsi]`
-  - `coil_names::Vector{String}` - name of each coil set of `T_coil` `[ncoil_set]`
-  - `T_coil::Array{ComplexF64,3}` - torque response in coil-set space `[ncoil_set × ncoil_set × npsi]`,
-    N·m per squared scale factor of the coil-set currents as built: driving the sets at `s_c` times
-    their deck currents gives the complex 2× torque `s†·T_coil·s`. Empty when the forcing is not coils.
+  - `source_names::Vector{String}` - name of each forcing source of `T_source`: the coil sets, or the forcing file `[nsource]`
+  - `T_source::Array{ComplexF64,3}` - torque response in forcing-source space `[nsource × nsource × npsi]`,
+    N·m per squared scale factor of each source as built: driving the sources at `s` times their deck
+    currents or file amplitudes gives the complex 2× torque `s†·T_source·s`. Empty without forcing.
   - `T_applied::Vector{ComplexF64}` - the run's own forcing contracted, `b̃ₓ†·T_xe(ψ)·b̃ₓ/2` `[npsi]`;
     empty when no forcing spectrum was supplied
 """
@@ -28,8 +28,8 @@ struct TorqueResponse
     m_modes::Vector{Int}
     n_modes::Vector{Int}
     T_xe::Array{ComplexF64,3}
-    coil_names::Vector{String}
-    T_coil::Array{ComplexF64,3}
+    source_names::Vector{String}
+    T_source::Array{ComplexF64,3}
     T_applied::Vector{ComplexF64}
 end
 
@@ -48,7 +48,7 @@ High Priority (MWE):
   - `output_eigenmodes::Bool` - Output mode fields as b-fields (default: true)
   - `compute_response::Bool` - Compute plasma response (default: true)
   - `compute_singular_coupling::Bool` - Compute singular coupling metrics (default: true)
-  - `compute_torque_response::Bool` - Build the ψ-resolved torque response matrices `T_xe` and `T_coil` (default: false). Needs a forward-integrated kinetic solve (`integrator = "forward"`, `kinetic_factor > 0`) and `compute_response`; errors otherwise
+  - `compute_torque_response::Bool` - Build the ψ-resolved torque response matrices `T_xe` and `T_source` (default: false). Needs a forward-integrated kinetic solve (`integrator = "forward"`, `kinetic_factor > 0`) and `compute_response`; errors otherwise
   - `verbose::Bool` - Enable verbose logging (default: true)
 
 Output Settings:

@@ -11,12 +11,12 @@ eigenvectors are the applied spectra of extremal torque [Logan 2015, ch. 7].
 
 """
     torque_response_matrices(ffs, permeability, flux_conform;
-        forcing_b_rootarea=ComplexF64[], coil_flux=zeros(ComplexF64, N, 0), coil_names=String[]) -> TorqueResponse
+        forcing_b_rootarea=ComplexF64[], source_flux=zeros(ComplexF64, N, 0), source_names=String[]) -> TorqueResponse
 
 Build the ψ-resolved torque response of a forward kinetic solve from its stored solution.
 `permeability` is the flux-space plasma response operator `P` (Φ_tot = P·Φ_x) and `flux_conform`
-the b̃ → Φ operator `R = S·A`, both at the control surface; `coil_flux` holds one unit-norm
-Φ_x column per coil set and `forcing_b_rootarea` the run's applied b̃ for `T_applied`.
+the b̃ → Φ operator `R = S·A`, both at the control surface; `source_flux` holds one unit-norm
+Φ_x column per forcing source and `forcing_b_rootarea` the run's applied b̃ for `T_applied`.
 
 Per stored node `k`, with `U₁`, `U₂` the displacement and momentum blocks of `u_store` and
 `U₁ₗ` the displacement block at the control surface:
@@ -26,7 +26,7 @@ Per stored node `k`, with `U₁`, `U₂` the displacement and momentum blocks of
 `K` maps an applied b̃ to the coefficients of the solution basis (b̃ → Φ_x → Φ_tot → boundary ξ
 → coefficients), so `T_xe` is the Fortran `gresp` chain (`dwks`, `bsurfmat`, `gind`, `gres`,
 `ptof`) with the single edge inverse the stored, globally consistent basis allows.
-`T_coil = Kc†·[U₁†U₂]·Kc · 2n·i/(2μ₀)` with `Kc = U₁ₗ⁻¹·D·P·coil_flux` is the Fortran `gcoil`.
+`T_source = Ks†·[U₁†U₂]·Ks · 2n·i/(2μ₀)` with `Ks = U₁ₗ⁻¹·D·P·source_flux` is the Fortran `gcoil`.
 
 Errors unless the solve is a single-`n` forward integration with kinetic matrices; the ideal
 Euler-Lagrange energy is Hermitian and carries no torque. Warns when the kinetic matrices are
@@ -37,8 +37,8 @@ function torque_response_matrices(
     permeability::AbstractMatrix{ComplexF64},
     flux_conform::AbstractMatrix{ComplexF64};
     forcing_b_rootarea::AbstractVector{ComplexF64}=ComplexF64[],
-    coil_flux::AbstractMatrix{ComplexF64}=zeros(ComplexF64, ffs.numpert_total, 0),
-    coil_names::Vector{String}=String[]
+    source_flux::AbstractMatrix{ComplexF64}=zeros(ComplexF64, ffs.numpert_total, 0),
+    source_names::Vector{String}=String[]
 )::TorqueResponse
     ffs.integrator === :forward ||
         throw(ArgumentError("torque response matrices need the dense forward-integrated solution; this result came from the $(ffs.integrator) integrator"))
@@ -48,8 +48,8 @@ function torque_response_matrices(
     ffs.npert == 1 || throw(ArgumentError("torque response matrices are defined per toroidal harmonic; this solve stacks $(ffs.npert) (nn_low != nn_high)"))
     ffs.control.kinetic_source == "fixed" &&
         @warn "kinetic_source = \"fixed\": the torque response is built from synthetic test matrices and has no physical meaning"
-    size(coil_flux, 2) == length(coil_names) ||
-        throw(DimensionMismatch("coil_flux has $(size(coil_flux, 2)) columns but $(length(coil_names)) coil names were given"))
+    size(source_flux, 2) == length(source_names) ||
+        throw(DimensionMismatch("source_flux has $(size(source_flux, 2)) columns but $(length(source_names)) source names were given"))
 
     solution = ffs.solution
     N = ffs.numpert_total
@@ -65,22 +65,22 @@ function torque_response_matrices(
     U1_lim = solution.u_store[:, :, 1, npsi]
     boundary_xi = Diagonal(t) * permeability
     K = U1_lim \ (boundary_xi * flux_conform)
-    Kc = U1_lim \ (boundary_xi * coil_flux)
+    Ks = U1_lim \ (boundary_xi * source_flux)
 
-    ncoil = size(coil_flux, 2)
+    nsource = size(source_flux, 2)
     T_xe = Array{ComplexF64}(undef, N, N, npsi)
-    T_coil = Array{ComplexF64}(undef, ncoil, ncoil, npsi)
+    T_source = Array{ComplexF64}(undef, nsource, nsource, npsi)
     prefactor = 2 * nn * im / (2 * μ₀)
     W = Matrix{ComplexF64}(undef, N, N)
     for k in 1:npsi
         mul!(W, adjoint(@view(solution.u_store[:, :, 1, k])), @view(solution.u_store[:, :, 2, k]))
         W .*= prefactor
         T_xe[:, :, k] = K' * W * K
-        ncoil > 0 && (T_coil[:, :, k] = Kc' * W * Kc)
+        nsource > 0 && (T_source[:, :, k] = Ks' * W * Ks)
     end
 
     T_applied = isempty(forcing_b_rootarea) ? ComplexF64[] : torque_profile(T_xe, forcing_b_rootarea)
-    return TorqueResponse(solution.psi_store[1:npsi], m_modes, n_modes, T_xe, coil_names, T_coil, T_applied)
+    return TorqueResponse(solution.psi_store[1:npsi], m_modes, n_modes, T_xe, source_names, T_source, T_applied)
 end
 
 """
@@ -131,9 +131,10 @@ end
     compute_torque_response!(state, ffs, forcing, intr, ctrl)
 
 Build the torque response of the solve from the plasma response already on `state` and
-`intr` and store it in `state.torque_response`. The coil-space matrix is added when the run's
-forcing came from coil sets (`intr.coil_sets`) whose grid configuration `forcing` carries;
-file forcing and summed fields leave it empty. Errors when the plasma response was not computed.
+`intr` and store it in `state.torque_response`. Every forcing source is one column of
+`T_source`: each coil set (`intr.coil_sets`, on the grid `forcing` carries) when the forcing is
+coils, otherwise the run's applied spectrum as a single source named after its forcing file.
+Errors when the plasma response was not computed.
 """
 function compute_torque_response!(
     state::PerturbedEquilibriumState,
@@ -149,17 +150,18 @@ function compute_torque_response!(
 
     ft_ctrl = forcing isa ForcingTerms.ForcingTermsControl ? forcing :
               forcing isa ForcingTerms.RMPSource ? forcing.ctrl : nothing
-    coil_flux = zeros(ComplexF64, ffs.numpert_total, 0)
-    coil_names = String[]
+    source_flux = zeros(ComplexF64, ffs.numpert_total, 0)
+    source_names = String[]
     if !isempty(intr.coil_sets) && ft_ctrl !== nothing && ft_ctrl.forcing_data_format == "coil"
-        coil_flux = coil_flux_spectra(ffs, intr.coil_sets, ForcingTerms.CoilConfig(ft_ctrl))
-        coil_names = [cs.name for cs in intr.coil_sets]
-    else
-        ctrl.verbose && @info "No coil-set forcing: the coil-space torque response is skipped"
+        source_flux = coil_flux_spectra(ffs, intr.coil_sets, ForcingTerms.CoilConfig(ft_ctrl))
+        source_names = [cs.name for cs in intr.coil_sets]
+    elseif !isempty(state.forcing_b_rootarea)
+        source_flux = reshape(flux_conform * state.forcing_b_rootarea, :, 1)
+        source_names = [ft_ctrl === nothing ? "forcing" : basename(ft_ctrl.forcing_data_file)]
     end
 
     state.torque_response = torque_response_matrices(ffs, intr.plasma_response, flux_conform;
-        forcing_b_rootarea=state.forcing_b_rootarea, coil_flux=coil_flux, coil_names=coil_names)
+        forcing_b_rootarea=state.forcing_b_rootarea, source_flux=source_flux, source_names=source_names)
 
     if ctrl.verbose
         total = state.torque_response.T_applied[end]

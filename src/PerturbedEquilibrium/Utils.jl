@@ -110,8 +110,8 @@ PerturbedEquilibrium/
     ├── psi                   # ψ_N of each stored node [npsi]
     ├── m, n                  # (m, n) of each row/column of T_xe [numpert_total]
     ├── T_xe                  # torque response on b̃, N·m/T² (ComplexF64 [numpert_total, numpert_total, npsi])
-    ├── coil_name             # coil-set names [ncoil_set] (coil forcing only)
-    ├── T_coil                # torque response in coil-set space (ComplexF64 [ncoil_set, ncoil_set, npsi])
+    ├── source_name           # forcing-source names: the coil sets, or the forcing file [nsource]
+    ├── T_source              # torque response in forcing-source space (ComplexF64 [nsource, nsource, npsi])
     ├── T_applied             # b̃ₓ†·T_xe(ψ)·b̃ₓ/2: Re = torque inside ψ, Im = 2n·δW inside ψ (ComplexF64 [npsi])
     └── total_torque          # Re T_applied at the control surface [N·m]
 ```
@@ -263,9 +263,9 @@ function write_outputs_to_HDF5(
             tr_group["m"] = tr.m_modes
             tr_group["n"] = tr.n_modes
             tr_group["T_xe"] = tr.T_xe
-            if !isempty(tr.coil_names)
-                tr_group["coil_name"] = tr.coil_names
-                tr_group["T_coil"] = tr.T_coil
+            if !isempty(tr.source_names)
+                tr_group["source_name"] = tr.source_names
+                tr_group["T_source"] = tr.T_source
             end
             if !isempty(tr.T_applied)
                 tr_group["T_applied"] = tr.T_applied
@@ -421,11 +421,11 @@ const PE_H5_ANNOTATIONS = [
         (;
             long_name="torque response matrix on the applied root-area-weighted field b̃, cumulative inside ψ_N: b̃†·T_xe·b̃/2 is the complex torque (Re = toroidal torque, Im = 2n·δW ideal+kinetic); the Hermitian part is the torque quadratic form",
             units="N*m/T^2", dims=("mode_row", "mode_col", "psi"), attach=(1 => "TorqueResponse/m", 2 => "TorqueResponse/m", 3 => "TorqueResponse/psi")),
-    "TorqueResponse/coil_name" => (; long_name="name of each coil set of T_coil"),
-    "TorqueResponse/T_coil" =>
+    "TorqueResponse/source_name" => (; long_name="name of each forcing source of T_source (coil set or forcing file)"),
+    "TorqueResponse/T_source" =>
         (;
-            long_name="torque response matrix in coil-set space, cumulative inside ψ_N: s†·T_coil·s/2 is the complex torque of the sets driven at s times their currents as built",
-            units="N*m", dims=("coil_set_row", "coil_set_col", "psi"), attach=(3 => "TorqueResponse/psi",)),
+            long_name="torque response matrix in forcing-source space, cumulative inside ψ_N: s†·T_source·s/2 is the complex torque of the sources driven at s times their strength as built",
+            units="N*m", dims=("source_row", "source_col", "psi"), attach=(3 => "TorqueResponse/psi",)),
     "TorqueResponse/T_applied" =>
         (;
             long_name="run's own forcing contracted with the torque response, b̃ₓ†·T_xe(ψ)·b̃ₓ/2: Re = toroidal torque on the plasma inside ψ_N, Im = 2n·δW (ideal + kinetic) of that plasma",

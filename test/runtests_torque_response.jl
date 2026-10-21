@@ -3,7 +3,7 @@ using HDF5
 using LinearAlgebra
 
 # ψ-resolved torque response matrices of a kinetic forward solve: the Solovev calculated-kinetic
-# fixture driven by two analytic window-pane coil sets, so T_xe, T_coil and the run's own
+# fixture driven by two analytic window-pane coil sets, so T_xe, T_source and the run's own
 # forcing are all exercised on one (cheap, mpsi=16) solve.
 
 const _GPE_TR = GeneralizedPerturbedEquilibrium
@@ -37,7 +37,7 @@ currents = [1000.0, 0.0, -1000.0, -1000.0, 0.0, 1000.0]  # n=1 phasing shifted b
 [PerturbedEquilibrium]
 compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = false       # Compute singular layer coupling metrics
-compute_torque_response = true          # Build the ψ-resolved torque response matrices T_xe and T_coil
+compute_torque_response = true          # Build the ψ-resolved torque response matrices T_xe and T_source
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 """
@@ -65,8 +65,8 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
         @testset "shapes and mode ordering" begin
             @test tr isa _PE_TR.TorqueResponse
             @test size(tr.T_xe) == (N, N, npsi)
-            @test size(tr.T_coil) == (2, 2, npsi)
-            @test tr.coil_names == ["pane_upper", "pane_lower"]
+            @test size(tr.T_source) == (2, 2, npsi)
+            @test tr.source_names == ["pane_upper", "pane_lower"]
             @test length(tr.psi) == npsi && tr.psi == sol.psi_store[1:npsi]
             @test tr.psi[end] ≈ ffs.psilim
             h5open(joinpath(dir, "gpec.h5"), "r") do h5
@@ -77,8 +77,8 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
                 @test read(g["m"]) == tr.m_modes
                 @test read(g["n"]) == tr.n_modes
                 @test read(g["T_xe"]) == tr.T_xe
-                @test read(g["T_coil"]) == tr.T_coil
-                @test read(g["coil_name"]) == tr.coil_names
+                @test read(g["T_source"]) == tr.T_source
+                @test read(g["source_name"]) == tr.source_names
                 @test read(g["T_applied"]) == tr.T_applied
                 @test read(g["total_torque"]) == real(tr.T_applied[end])
                 @test read(g["psi"]) == tr.psi
@@ -132,20 +132,31 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             @test all(isreal, eigvals(T_h))
         end
 
-        @testset "coil-space matrix" begin
+        @testset "forcing-source matrix: coil sets" begin
             M = _PE_TR.coil_flux_spectra(ffs, coil_sets, cfg)
             @test size(M) == (N, 2)
             @test vec(sum(M; dims=2)) ≈ Φx rtol = 1e-10
             M̃ = R \ M
             for k in (1, npsi ÷ 2, npsi)
-                @test tr.T_coil[:, :, k] ≈ M̃' * tr.T_xe[:, :, k] * M̃ rtol = 1e-10
+                @test tr.T_source[:, :, k] ≈ M̃' * tr.T_xe[:, :, k] * M̃ rtol = 1e-10
             end
-            @test sum(tr.T_coil[:, :, end]) / 2 ≈ tr.T_applied[end] rtol = 1e-10
+            @test sum(tr.T_source[:, :, end]) / 2 ≈ tr.T_applied[end] rtol = 1e-10
+        end
+
+        @testset "forcing-source matrix: a forcing file is one source" begin
+            file_state = deepcopy(pe)
+            file_intr = _PE_TR.PerturbedEquilibriumInternal(; plasma_response=P)
+            file_ctrl = _GPE_TR.ForcingTerms.ForcingTermsControl(; forcing_data_file="forcing.dat")
+            _PE_TR.compute_torque_response!(file_state, ffs, file_ctrl, file_intr, _PE_TR.PerturbedEquilibriumControl())
+            ts = file_state.torque_response
+            @test ts.source_names == ["forcing.dat"]
+            @test size(ts.T_source) == (1, 1, npsi)
+            @test ts.T_source[1, 1, :] ./ 2 ≈ tr.T_applied rtol = 1e-8
         end
 
         @testset "argument checks" begin
             flux_conform = pe.rootarea_to_area_weight .* pe.surface_area
-            @test_throws DimensionMismatch _PE_TR.torque_response_matrices(ffs, P, flux_conform; coil_flux=zeros(ComplexF64, N, 1))
+            @test_throws DimensionMismatch _PE_TR.torque_response_matrices(ffs, P, flux_conform; source_flux=zeros(ComplexF64, N, 1))
             @test_throws DimensionMismatch _PE_TR.torque_profile(tr, ComplexF64[1.0])
             empty_state = _PE_TR.PerturbedEquilibriumState()
             empty_intr = _PE_TR.PerturbedEquilibriumInternal()
