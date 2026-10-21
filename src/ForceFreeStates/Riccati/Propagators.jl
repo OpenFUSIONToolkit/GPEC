@@ -201,7 +201,7 @@ Callback function for the Riccati ODE integrator. Handles tolerance updates,
 renormalization, and storage at each step.
 
 Uses `sing_der!` as the ODE RHS: u[:,:,1] = U₁ (starts as S), u[:,:,2] = U₂ (starts as I).
-When max(|U₁|) or max(|U₂|) exceeds `ctrl.ucrit`, applies `renormalize_riccati_inplace!`
+When max(|U₁|) or max(|U₂|) exceeds `ctrl.renorm_threshold`, applies `renormalize_riccati_inplace!`
 to compute S = U₁·U₂⁻¹ and reset U₂ = I. This is the Riccati analogue of Gaussian
 reduction in the standard `integrator_callback!`, and keeps the ODE inputs bounded.
 """
@@ -211,16 +211,16 @@ function riccati_integrator_callback!(integrator)
 
     odet.total_steps += 1  # count every accepted solver step (saved or not), as segment_callback! does
 
-    # Use unified tolerance (matches integrate_el_region! on develop)
-    integrator.opts.reltol = ctrl.eulerlagrange_tolerance
-
-    # Renormalize when norms exceed ucrit (analogous to Gaussian reduction in integrator_callback!)
+    # Renormalize when norms exceed renorm_threshold (analogous to Gaussian reduction in integrator_callback!)
     # During sing_der! integration: u[:,:,1]=U₁ (grows), u[:,:,2]=U₂ (grows).
     # Renorm computes S = U₁·U₂⁻¹ and resets U₂ = I, keeping inputs bounded.
-    if maximum(abs, @view(integrator.u[:, :, 1])) > ctrl.ucrit ||
-       maximum(abs, @view(integrator.u[:, :, 2])) > ctrl.ucrit
+    if maximum(abs, @view(integrator.u[:, :, 1])) > ctrl.renorm_threshold ||
+       maximum(abs, @view(integrator.u[:, :, 2])) > ctrl.renorm_threshold
         renormalize_riccati_inplace!(integrator.u, intr.numpert_total)
     end
+
+    # Refresh after any renorm so the tolerance matches the current state.
+    column_abstol!(integrator.opts.abstol, integrator.u, ctrl.eulerlagrange_tolerance)
 
     # Determine if we should save this step. Always save the first 1-2 steps of a segment
     # and the last few steps near the right endpoint (relative band SAVE_NEAR_END_FRAC of the
@@ -244,7 +244,7 @@ end
 Integrate the dual Riccati ODE from `chunk.psi_start` to `chunk.psi_end`.
 
 Uses `sing_der!` as the ODE RHS with `riccati_integrator_callback!`, which applies
-`renormalize_riccati_inplace!` (instead of Gaussian reduction) when norms exceed ucrit.
+`renormalize_riccati_inplace!` (instead of Gaussian reduction) when norms exceed renorm_threshold.
 Starting state: u[:,:,1] = S_prev, u[:,:,2] = I (set by initialization or previous renorm).
 Ending state: u[:,:,1] = U₁, u[:,:,2] = U₂ (ratio S = U₁·U₂⁻¹ is the updated Riccati matrix).
 """
@@ -256,14 +256,14 @@ function riccati_integrate_chunk!(
     rtol = ctrl.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
                       (ctrl, equil, mats, intr, odet, chunk))
-    sol = solve(prob, Vern9(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol; callback=cb)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
     # Renormalize end state to (S, I) convention for the next chunk.
     # When a crossing follows (needs_crossing=true), skip renorm so that ca_l is computed
     # from the bounded (U₁, U₂) state in riccati_cross_ideal_singular_surf!: this gives
     # consistent normalization with ca_r (also from pre-renorm state), enabling correct Δ'.
-    # The callback guarantees max(|U₁|), max(|U₂|) ≤ ucrit, so the state is bounded.
+    # The callback guarantees max(|U₁|), max(|U₂|) ≤ renorm_threshold, so the state is bounded.
     if !chunk.needs_crossing
         renormalize_riccati_inplace!(odet.u, intr.numpert_total)
     end
@@ -302,7 +302,7 @@ In-place Riccati renormalization on an arbitrary N×N×2 array:
   u[:,:,2] = I
 
 Used in `riccati_integrator_callback!` to renormalize the integrator's live state
-when column norms grow beyond `ctrl.ucrit`, analogous to Gaussian reduction in the
+when column norms grow beyond `ctrl.renorm_threshold`, analogous to Gaussian reduction in the
 standard ODE. This keeps the inputs to `sing_der!` bounded, preventing the same
 exponential growth that occurs in the standard (non-Riccati) ODE without Gaussian reduction.
 """
@@ -329,8 +329,9 @@ the result in `prop.block_lower_ic`.
 storage for `sing_der!` side effects (`q`, `ud`, `spline_hint`). Multiple threads
 may call this function concurrently using distinct `odet_proxy` objects.
 
-No callback is used: the propagator integration proceeds without normalization or
-storage steps, since the identity ICs ensure bounded solutions within each chunk.
+The propagator integration proceeds without normalization or storage steps, since the
+identity ICs ensure bounded solutions within each chunk; its only callback refreshes the
+per-column abstol after every step (`solve_el`).
 """
 function integrate_propagator_chunk!(
     prop::ChunkPropagator,
@@ -359,7 +360,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     prop.block_upper_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept  # thread-local; summed into odet after the BVP barrier
 
@@ -371,7 +372,7 @@ function integrate_propagator_chunk!(
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     prop.block_lower_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept
 end
@@ -428,29 +429,20 @@ function integrate_fm_with_ua_ic(
     u0 = zeros(ComplexF64, N, N, 2)
     u0[:, :, 1] .= ua[:, 1:N, 1]
     u0[:, :, 2] .= ua[:, 1:N, 2]
-    # Per-column absolute tolerance so a batch's largest column cannot set the error floor of its smallest:
-    # otherwise the resonant small-solution column inherits an absolute error set by the big solution's magnitude.
-    abstol_arr = similar(u0, Float64)
-    for j in 1:N
-        abstol_arr[:, j, :] .= max(maximum(abs, @view u0[:, j, :]), 1e-30) * rtol
-    end
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     result[1:N, 1:N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, 1:N]  .= sol.u[end][:, :, 2]
 
     # Batch 2: columns N+1:2N of T (small solutions)
     u0[:, :, 1] .= ua[:, N+1:2N, 1]
     u0[:, :, 2] .= ua[:, N+1:2N, 2]
-    for j in 1:N
-        abstol_arr[:, j, :] .= max(maximum(abs, @view u0[:, j, :]), 1e-30) * rtol
-    end
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=abstol_arr, save_everystep=false, save_end=true)
+    sol = solve_el(prob, rtol)
     result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]
     result[N+1:2N, N+1:2N]  .= sol.u[end][:, :, 2]
 

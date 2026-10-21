@@ -1,0 +1,10 @@
+# Regression case: the gal_resistive_diiid deck matched with the Hermite-cubic Galerkin inner-layer
+# backend instead of the default ray backend, at that backend's own grid defaults. Tracks the same
+# inner-layer Δ, matching coefficients and penetrated field, so the Galerkin inner backend has coverage.
+[case]
+name = "gal_resistive_diiid_galinner"
+base = "gal_resistive_diiid"   # Inherit example_dir and [quantities.*] from this case
+description = "DIII-D-like, n=1, Galerkin Δ′ matched with the Galerkin inner-layer backend"
+
+[overrides]
+"ForceFreeStates.gal_inner_solver" = "galerkin"   # Inner-layer Δ backend for the match: "ray" or "galerkin"

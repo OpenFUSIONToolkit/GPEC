@@ -68,6 +68,44 @@ using TOML
         @test EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\nradial_shape = \"Hollow\"\n").coils[1].radial_shape == "hollow"
     end
 
+    @testset "current factor, lever arm and update" begin
+        ts = EF.parse_tolerance_toml("""
+            [ErrorFields.defaults]
+            current_factor = 0.5
+            [[ErrorFields.coil]]
+            name = "a"
+            shift_tol_mm = 1.0
+            [[ErrorFields.coil]]
+            name = "b"
+            shift_tol_mm = 1.0
+            current_factor = -2.0
+            [[ErrorFields.coherent_group]]
+            name = "g"
+            members = ["a", "b"]
+            tilt_tol = 0.004
+            tilt_units = "m"
+            tilt_lever_arm_m = 2.0
+            """)
+        @test [c.current_factor for c in ts.coils] == [0.5, -2.0]
+        @test only(ts.groups).tilt_lever_arm_m == 2.0
+        @test isnan(EF.parse_tolerance_toml("[[ErrorFields.coherent_group]]\nname = \"g\"\nmembers = [\"a\"]\n").groups[1].tilt_lever_arm_m)
+        @test EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\n").coils[1].current_factor == 1.0
+        @test_throws ArgumentError EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\ncurrent_factor = inf\n")
+        @test_throws ArgumentError EF.parse_tolerance_toml("[[ErrorFields.coherent_group]]\nname = \"g\"\nmembers = [\"a\"]\ntilt_lever_arm_m = 0.0\n")
+        @test_throws ArgumentError EF.parse_tolerance_toml("[[ErrorFields.coil]]\nname = \"a\"\ntilt_lever_arm_m = 1.0\n")
+        # update copies with the named fields replaced, validates, and drops the stale raw text.
+        c = EF.update(ts.coils[1]; current_factor=3.0, shift_sigma_m=2e-3)
+        @test c.current_factor == 3.0 && c.shift_sigma_m == 2e-3 && c.name == "a" && c.shift_tol_m == ts.coils[1].shift_tol_m
+        g = EF.update(only(ts.groups); tilt_lever_arm_m=NaN)
+        @test isnan(g.tilt_lever_arm_m) && g.members == ["a", "b"]
+        ts2 = EF.update(ts; coils=[c, ts.coils[2]], efc_factor=4.0, other_field=EF.update(ts.other_field; magnitude=1e-5))
+        @test ts2.coils[1].current_factor == 3.0 && ts2.efc_factor == 4.0 && ts2.other_field.magnitude == 1e-5 && ts2.raw == ""
+        @test ts2.groups === ts.groups && ts2.uncorrectable_coils === ts.uncorrectable_coils
+        @test_throws ArgumentError EF.update(ts; efc_factor=0.5)
+        @test_throws ArgumentError EF.update(ts.coils[1]; no_such_field=1)
+        @test EF.update(ts; raw="kept").raw == "kept"
+    end
+
     @testset "name validation against a run" begin
         ts = EF.read_tolerance_toml(fixture)
         @test EF.validate_tolerances(ts, ["hoop_tilted", "hoop_axi", "c"]) === ts

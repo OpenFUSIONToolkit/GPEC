@@ -63,9 +63,9 @@ Medium Priority (defer for MWE):
 
 Regularization:
 
-# High Priority (MWE)
-
-  - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
+  - `regularization_width::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0
+    to disable. Must be ≥ 0. Forced to 0 in kinetic runs, whose Euler-Lagrange operator has no
+    resonant singularity to smooth.
 """
 @kwdef struct PerturbedEquilibriumControl
     # High Priority (MWE)
@@ -86,7 +86,7 @@ Regularization:
 
     # Regularization width for singular surface smoothing (matches Fortran gpec.f reg_spot).
     # Set to 0 to disable regularization. Must be non-negative.
-    reg_spot::Float64 = 5e-2
+    regularization_width::Float64 = 5e-2
 end
 
 """
@@ -129,10 +129,10 @@ Results from perturbed equilibrium calculations.
 
 Response fields (mode space):
 
-  - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, mpert]
-  - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, mpert]
-  - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, mpert]
+  - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, numpert_total]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
+  - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, numpert_total]
+  - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, numpert_total]
 
 Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
 Each row maps the full applied field to the resonant response at that surface.
@@ -194,8 +194,10 @@ well-conditioned flux-space inductances L, Λ:
 
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
-  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")
-  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 ) — the boundary-response torque, zero for ideal
+  - `plasma_energy`  - Σₙ Re( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ ) / 4 over the diagonal n blocks of Λ (energy to
+    perturb the plasma; Fortran's "total energy")
+  - `toroidal_torque` - Σₙ −2n·Im( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ / 4 ) [Park 2011 PoP 18 110702, eq. 1] —
+    the boundary-response torque, zero for ideal
     (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
     self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
 
@@ -208,11 +210,11 @@ Torque response (kinetic forward solves with `compute_torque_response`):
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
     psi_grid::Vector{Float64} = Float64[]
 
-    # Response fields in mode space [npsi, mpert]
+    # Response fields in mode space [npsi, numpert_total]
     xi_modes::Union{Nothing,NamedTuple} = nothing
     b_modes::Union{Nothing,NamedTuple} = nothing
-    b_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal field b_n [npsi, mpert]
-    xi_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, mpert]
+    b_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal field b_n [npsi, numpert_total]
+    xi_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, numpert_total]
 
     # Coupling matrices [n_rational × numpert_total]
     C_resonant_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
@@ -272,4 +274,26 @@ Torque response (kinetic forward solves with `compute_torque_response`):
 
     # ψ-resolved torque response matrices of a kinetic forward solve
     torque_response::Union{Nothing,TorqueResponse} = nothing
+end
+
+"""
+    kinetic_regularization_kwargs(ffs, kwargs) -> NamedTuple
+
+`regularization_width` smooths the **ideal** 1/(m−nq) divergence of ξ^ψ′ and ξ^α before they drive the NTV
+integrand. A kinetic solve has no such divergence — det(F̄) is complex and nonzero at the rationals
+(Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D) — so regularizing there suppresses a finite
+physical response, and does so inconsistently, since ξ^ψ is never regularized. Force
+`regularization_width = 0` whenever a kinetic fit is present (either `kinetic_source`, both of which remove the
+resonant singularity) and log the override; ideal solves keep their setting. `ffs` is duck-typed:
+only `ffs.mats.kinetic` is read, so the override is unit-testable without a full run.
+"""
+function kinetic_regularization_kwargs(ffs, kwargs)
+    base = values(kwargs)
+    default_reg = PerturbedEquilibrium.PerturbedEquilibriumControl().regularization_width
+    prev = get(base, :regularization_width, default_reg)
+    kinetic = ffs.mats.kinetic !== nothing
+    kinetic && prev != 0 &&
+        @info "Kinetic run: overriding regularization_width=$prev with 0 " *
+              "(the kinetic terms remove the ideal resonant singularity; see docs/src/kinetic_forces.md)"
+    return merge(base, (; regularization_width=kinetic ? 0.0 : prev))
 end

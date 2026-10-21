@@ -3,6 +3,7 @@ module Equilibrium
 # --- Module-level Dependencies ---
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
+using Statistics: median
 using Roots
 using TOML
 using FastInterpolations
@@ -12,7 +13,9 @@ import ..Utilities
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
+include("SolveTolerances.jl")
 include("GridRefinement.jl")
+include("SeparatrixQLaw.jl")
 include("FluxSurfaceMetrics.jl")
 include("CoordinateInvariant.jl")
 include("ReadEquilibrium.jl")
@@ -27,7 +30,7 @@ include("KineticProfiles.jl")
 # --- Expose types and functions to the user ---
 export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
-    KineticProfileSplines, load_kinetic_profiles,
+    KineticProfileSplines, load_kinetic_profiles, shift_exb_rotation,
     KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
 export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, bracket_mandatory_nodes, enforce_min_spacing, implied_knot_count
@@ -100,12 +103,15 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         eq_input = additional_input
         eq_input.config = eq_config
         eq_input.psihigh_resolved = eq_config.psihigh
+        resolve_psihigh!(eq_input)
     elseif eq_type in EFIT_KINDS
         eq_input = resolve_psihigh!(read_efit(eq_config))
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
+    elseif eq_type == "ifile"
+        eq_input = resolve_psihigh!(read_ifile(eq_config))
     elseif haskey(ANALYTIC_EQ, eq_type)
         # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
         # Their parameters live in the embedded `[*_INPUT]` section and are passed in as the
@@ -330,10 +336,10 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     P_vals = profiles.P_spline.y
     dVdpsi_vals = profiles.dVdpsi_spline.y
 
-    fsi_pdv  = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
-    fsi_dv   = fsi(dVdpsi_vals)                   # ∫ dV/dψ
+    fsi_pdv = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
+    fsi_dv = fsi(dVdpsi_vals)                   # ∫ dV/dψ
     fsi_p2dv = fsi(P_vals .^ 2 .* dVdpsi_vals)    # ∫ p² dV/dψ
-    volume   = fsi_dv                             # same integrand as hs col 2 in Fortran
+    volume = fsi_dv                             # same integrand as hs col 2 in Fortran
 
     # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J).
     # This is Fortran equil_out.f's hs%fs(:,3) and is the correct integrand for
@@ -343,21 +349,21 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     for ipsi in 0:mpsi
         acc = 0.0
         for itheta in 0:mtheta
-            r2       = pe.rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1]
-            offset   = pe.rzphi_offset.nodal_derivs.partials[1,    ipsi+1, itheta+1]
-            jac      = pe.rzphi_jac.nodal_derivs.partials[1,       ipsi+1, itheta+1]
-            r2_y     = pe.rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1]
-            offset_y = pe.rzphi_offset.nodal_derivs.partials[3,    ipsi+1, itheta+1]
+            r2 = pe.rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            offset = pe.rzphi_offset.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            jac = pe.rzphi_jac.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            r2_y = pe.rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1]
+            offset_y = pe.rzphi_offset.nodal_derivs.partials[3, ipsi+1, itheta+1]
 
             jacfac = π / jac
-            rfac   = sqrt(r2)
-            eta    = 2π * (pe.rzphi_ys[itheta+1] + offset)
-            r      = pe.ro + rfac * cos(eta)
-            v21    = jacfac * r2_y / (2π * rfac)
-            v22    = jacfac * (1 + offset_y) * (2 * rfac)
-            v33    = jacfac * 2π * (r / π)
-            dvsq   = (v21^2 + v22^2) * (v33 * jac^2)^2
-            acc   += dvsq / (r^2) / jac
+            rfac = sqrt(r2)
+            eta = 2π * (pe.rzphi_ys[itheta+1] + offset)
+            r = pe.ro + rfac * cos(eta)
+            v21 = jacfac * r2_y / (2π * rfac)
+            v22 = jacfac * (1 + offset_y) * (2 * rfac)
+            v33 = jacfac * 2π * (r / π)
+            dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
+            acc += dvsq / (r^2) / jac
         end
         # Periodic trapezoidal rule on uniform θ grid reduces to a plain mean
         # because the first and last grid points coincide — matches the int1/int2
@@ -367,15 +373,15 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     fsi_bp2 = fsi(hs_bp2)
 
     p0 = P_vals[1] - profiles.P_deriv(profiles.xs[1]; hint=Ref(1)) * profiles.xs[1]  # linear extrapolation
-    betat  = 2 * (fsi_pdv / fsi_dv) / bt0^2
-    betaj  = 2 * sqrt(fsi_p2dv / fsi_dv) / bwall^2
-    betan  = 100 * amean * bt0 * betat / crnt
+    betat = 2 * (fsi_pdv / fsi_dv) / bt0^2
+    betaj = 2 * sqrt(fsi_p2dv / fsi_dv) / bwall^2
+    betan = 100 * amean * bt0 * betat / crnt
     betap1 = 2 * (fsi_pdv / fsi_dv) / bp0^2
     betap2 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * pe.ro)
     betap3 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * rmean)
-    li1    = fsi_bp2 / fsi_dv / bp0^2
-    li2    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * pe.ro)
-    li3    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * rmean)
+    li1 = fsi_bp2 / fsi_dv / bp0^2
+    li2 = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * pe.ro)
+    li3 = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * rmean)
 
     pe.params.psi0 = psio
     pe.params.psi_axis = pe.psio
@@ -487,6 +493,10 @@ end
 Diagnoses the Grad-Shafranov solution by computing the residual of the
 Grad-Shafranov equation across the grid and writing diagnostic data to HDF5 files.
 Performs the same function as equil_out_gse in the Fortran code.
+
+Returns `(; xs, ys, flux_x, flux_y, source, total, error, errori)` on the `rzphi` (ψ, θ) nodes: the two
+flux-divergence terms, the source, the residual `total = flux_x - flux_y + source`, `error = |total|` over
+the largest term on the grid, and `errori`, the magnitude of the θ-integrated residual on each surface.
 """
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
@@ -645,6 +655,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             file["errlogi"] = Float32.(errlogi)
         end
     end
+    return (; xs=equil.rzphi_xs, ys=equil.rzphi_ys, flux_x=flux_fsx[:, :, 1], flux_y=flux_fsy[:, :, 2], source, total, error, errori=vec(errori))
 end
 
 end # module Equilibrium

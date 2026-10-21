@@ -41,6 +41,21 @@ end
 
 
 
+"""
+    resolve_psihigh!(input::InverseRunInput) -> InverseRunInput
+
+Clamp `input.psihigh_resolved` to the outermost input surface (below ψ_N = 1 for an i-file that
+carries the LCFS bounds), warning when it moves. `config.psihigh` keeps the request.
+"""
+function resolve_psihigh!(input::InverseRunInput)
+    psi_edge = input.rz_in_xs[end]
+    if input.psihigh_resolved > psi_edge
+        @warn "psihigh = $(input.psihigh_resolved) exceeds the outermost input surface ψ_N = $psi_edge; clamped to it"
+        input.psihigh_resolved = psi_edge
+    end
+    return input
+end
+
 function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
     @info "Starting Inverse Equilibrium Processing"
     # Extract input parameters
@@ -125,14 +140,6 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; itp_opts2d...)
     rz_deta = cubic_interp((rz_in_xs, rz_in_ys), deta; itp_opts2d...)
     # c-----------------------------------------------------------------------
-    # c     prepare new spline type for surface quantities.
-    # c-----------------------------------------------------------------------
-
-    if grid_type in ["original", "orig"]
-        mpsi = size(sq_in._fs, 1) - 1
-    end
-
-    # c-----------------------------------------------------------------------
     # c     set up radial grid
     # c-----------------------------------------------------------------------
     if override_psi_nodes !== nothing
@@ -155,7 +162,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         N_core = round(Int, mpsi * log_core / log_total)
         N_mid = mpsi - N_edge - N_core
         sq_xs = make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
-    elseif grid_type == "ldp"
+    elseif grid_type == "core_edge_packed"
         if mpsi == 0
             mpsi = 128
         end
@@ -165,6 +172,16 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
             mpsi = 128
         end
         sq_xs = [psilow + (psihigh - psilow) * (3(i / mpsi) - (i / mpsi)^3) / 2 for i in 0:mpsi]
+    elseif grid_type == "rho"
+        if mpsi == 0
+            mpsi = 128
+        end
+        # Uniform in √ψ from psilow to psihigh (Fortran's rho ignores psilow)
+        sq_xs = [(sqrt(psilow) + (sqrt(psihigh) - sqrt(psilow)) * i / mpsi)^2 for i in 0:mpsi]
+    elseif grid_type in ("original", "orig")
+        # The input's own ψ nodes off the axis; psilow and mpsi are ignored, psihigh still sets psilim
+        sq_xs = filter(>(0.0), rz_in_xs)
+        mpsi = length(sq_xs) - 1
     elseif grid_type == "uniform"
         if mpsi == 0
             mpsi = 128
@@ -173,10 +190,10 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     else
         error("Unsupported grid_type: $grid_type")
     end
-    # Floor node spacing on the fixed grids (ldp/pow1 pack the edge below the integration-noise
-    # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, and an
-    # override grid arrives already floored.
-    if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic"))
+    # Floor node spacing on the fixed grids (core_edge_packed/pow1 pack the edge below the integration-noise
+    # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, an override
+    # grid arrives already floored, and the original grid keeps the input's nodes.
+    if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic", "original", "orig"))
         sq_xs = enforce_min_spacing(sq_xs, MIN_KNOT_SPACING)
         mpsi = length(sq_xs) - 1
     end
@@ -209,6 +226,10 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     spl_fs = zeros(Float64, mtheta+1, 5)
     spl_post_buf = Vector{Float64}(undef, 5)   # scratch for post-SFL spline evaluation
 
+    # q: i-files use the field-line integral, as Fortran `inverse_run`; a tabulated q splined in ψ is
+    # inaccurate where edge surfaces are coarse (q ~ log(1-ψ)). Other inputs keep their input q (the
+    # field-line q is inaccurate in cylindrical LAR geometry).
+    q_from_geometry = config.eq_type == "ifile"
     f_sq_in_buf = Vector{Float64}(undef, size(sq_in.y, 2))
     sq_in_hint = Ref(1)
     hint2d = (Ref(1), Ref(1))
@@ -280,11 +301,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         sq_fs[ipsi+1, 1] = f_sq_in_buf[1] * twopi
         sq_fs[ipsi+1, 2] = f_sq_in_buf[2]
         sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
-        # Use the input q profile directly (from LAR ODE or CHEASE), matching the
-        # Fortran `inverse_chease4_run` convention (sq%fs(ipsi,4) = sq_in%f(3)).
-        # The field-line-integration-based q formula (spl_fsi * F / (2*twopi*psio))
-        # is inaccurate for cylindrical LAR geometry.
-        sq_fs[ipsi+1, 4] = f_sq_in_buf[3]  # q from input profile
+        sq_fs[ipsi+1, 4] = q_from_geometry ? spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) : f_sq_in_buf[3]
     end
 
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())

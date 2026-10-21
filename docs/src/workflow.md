@@ -32,6 +32,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 - Equilibrium data file in one of the supported formats:
   - `efit` — EFIT g-file from experimental reconstruction
   - `chease` / `chease2` — CHEASE equilibrium code output
+  - `ifile` — inverse i-file (e.g. TokaMaker `save_ifile`)
   - `lar` — Large aspect ratio analytical model
   - `sol` — Solov'ev analytical equilibrium
 - Kinetic profiles file (planned) — temperature and density profiles for the kinetic analysis path
@@ -175,7 +176,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 
 | Group | Contents |
 |---|---|
-| `Info/` | Run metadata: git version, mode-number ranges, ψ limit |
+| `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
 | `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
 | `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |

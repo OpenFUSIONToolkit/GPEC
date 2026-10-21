@@ -27,6 +27,16 @@ Examples: `bugfix/sing-lim-bounds-error`, `feature/kinetic-damping`, `performanc
 
 Author-named branches (e.g. `jmh/`, `nlogan/`) are not used — git history already records authorship on every commit.
 
+## Stacked Pull Requests
+
+A change that builds on another unmerged pull request can be opened against that pull request's branch instead of `develop`. When the lower pull request merges, its branch is deleted and GitHub retargets the one above it to `develop`.
+
+- **Update by merging, not rebasing.** Merge the parent branch into yours when it moves. A rebase rewrites the commit your harness stamp points at, and CI can no longer find it.
+- **Merge the lower pull request with a merge commit.** A squash or rebase merge forces every pull request above it to rebase.
+- **Run the harness against the base branch:** `regress --cases diiid_n1 --refs <base-branch>,<your-branch>`, so the report and the release note's **Numerical impact** cover only this pull request.
+
+CI runs the test suite on every pull request whatever its base. While the base is another feature branch, the harness stamp stays current until this pull request's own `src/` changes differ from those at the stamped commit, so merging an updated parent in does not invalidate it. Once retargeted to `develop`, the usual check applies: nothing under `src/` may differ from the stamped commit. Because the check compares file contents, a report taken on top of the final parent survives the retarget unless `develop` has since gained other `src/` changes.
+
 ## Hotfix Workflow
 
 Hotfixes address critical bugs in production (`main`) that cannot wait for the next release cycle:

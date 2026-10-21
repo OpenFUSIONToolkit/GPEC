@@ -42,7 +42,7 @@ export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, co
 export TorqueResponse, torque_response_matrices, torque_profile
 
 """
-    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
+    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr; runtimes=nothing)::PerturbedEquilibriumState
 
 Main entry point for perturbed equilibrium calculations.
 
@@ -58,6 +58,8 @@ the step warns and is skipped instead of erroring.
   - `forcing`: the external-field description — a `ForcingTermsControl` (TOML path) or any [`ForcingTerms.RMPField`](@ref)
   - `ctrl`: Control parameters from [PerturbedEquilibrium] section
   - `intr`: Internal state variables
+  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
+    materialization (coil Biot-Savart onto the plasma surface), when that step runs
 
 ## Returns
 
@@ -67,13 +69,14 @@ function compute_perturbed_equilibrium(
     ffs::ForceFreeStatesResult,
     forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField},
     ctrl::PerturbedEquilibriumControl,
-    intr::PerturbedEquilibriumInternal
+    intr::PerturbedEquilibriumInternal;
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
 )::PerturbedEquilibriumState
 
     state = PerturbedEquilibriumState()
     equil = ffs.equil
     mats = ffs.mats
-    mthvac = ffs.control.mthvac
+    mtheta_vacuum = ffs.control.mtheta_vacuum
 
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs)
@@ -86,8 +89,10 @@ function compute_perturbed_equilibrium(
     # The one place forcing state lands on `intr`: injected (replay) modes short-circuit the
     # materialization entirely, so they are never re-converted or re-weighted.
     if isempty(intr.forcing_modes)
+        ft_start = time()
         modes, coil_sets = materialize_forcing_modes(ffs, forcing;
             dir_path=intr.dir_path, preloaded_coil_sets=intr.coil_sets, verbose=ctrl.verbose)
+        runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
         intr.forcing_modes = modes
         isempty(coil_sets) || (intr.coil_sets = coil_sets)
     end
@@ -96,7 +101,7 @@ function compute_perturbed_equilibrium(
     if ctrl.compute_response &&
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
-        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, mats)
+        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mtheta_vacuum, ffs, intr, ctrl, ffs.metric, mats)
     end
 
     # Torque response matrices of a kinetic forward solve, on the plasma response just computed
@@ -111,7 +116,7 @@ function compute_perturbed_equilibrium(
     if ctrl.compute_singular_coupling &&
        ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
        ForceFreeStates.require_solution(ffs, "singular coupling calculation")
-        compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, mats)
+        compute_singular_coupling_metrics!(state, equil, solution, mtheta_vacuum, ffs, intr, ctrl, mats)
         compute_dominant_coupling!(state, ctrl)
     end
 
@@ -168,7 +173,7 @@ function materialize_forcing_modes(
             # Same control surface as the coil branch above: psilim, the integration
             # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
             # the normalization was taken on the equilibrium-spline limit, which differs
-            # whenever dmlim/qhigh/psiedge truncation moves psilim inward.
+            # whenever rational_offset_fraction/qhigh/dW_edge_scan_start truncation moves psilim inward.
             convert_forcing_normalization!(modes_n, norm_tag, equil, n,
                 minimum(m_vals), maximum(m_vals); psi=ffs.psilim)
         end

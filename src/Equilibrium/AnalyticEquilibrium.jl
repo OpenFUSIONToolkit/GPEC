@@ -15,8 +15,8 @@ Also evaluates the initial derivative using the analytic model.
   - `y`: Initial state vector of length 5.
 """
 function lar_init_conditions(rmin::Float64, lar_input::LargeAspectRatioConfig)
-    lar_a = lar_input.lar_a
-    lar_r0 = lar_input.lar_r0
+    lar_a = lar_input.a
+    lar_r0 = lar_input.r0
     q0 = lar_input.q0
 
     # Ensure rmin is not too small to avoid numerical issues in LAR equations
@@ -63,8 +63,8 @@ at a given radius `r`, using the current state vector `y` and equilibrium parame
 """
 
 function lar_der(dy::Vector{Float64}, r::Float64, y::Vector{Float64}, lar_input::LargeAspectRatioConfig)
-    lar_a = lar_input.lar_a
-    lar_r0 = lar_input.lar_r0
+    lar_a = lar_input.a
+    lar_r0 = lar_input.r0
 
     q0 = lar_input.q0
 
@@ -115,8 +115,8 @@ defined by `lar_input`, and returns the full solution table including derived qu
 
 function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConfig)
     rmin = 1e-4
-    lar_a = lar_input.lar_a
-    lar_r0 = lar_input.lar_r0
+    lar_a = lar_input.a
+    lar_r0 = lar_input.r0
     q0 = lar_input.q0
     beta0 = lar_input.beta0
     sigma_type = lar_input.sigma_type
@@ -127,7 +127,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     sigma0 = 2.0 / (q0 * lar_r0)
 
     ma = lar_input.ma
-    mtau = lar_input.mtau
+    mtau = lar_input.mtheta
 
     function dydr(du, u, p, r)
         lar_input = p
@@ -140,7 +140,8 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=1e-8, maxiters=10000, dense=false)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.flux_surface_rtol, abstol=equil_abstol(equil_input.flux_surface_rtol), dense=false)
+    check_equil_solve(sol, "large-aspect-ratio radial profiles")
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -295,14 +296,14 @@ struct TJAnalyticShapeParams
 end
 
 function TJAnalyticShapeParams(tj::TJAnalyticConfig; rmin::Float64=1e-4)
-    a, R0 = tj.lar_a, tj.lar_r0
-    mu = max(tj.mu, 1.001)
+    a, R0 = tj.a, tj.r0
+    mu = max(tj.pressure_peaking, 1.001)
     return TJAnalyticShapeParams(
-        a, R0, tj.qc, mu, tj.pc, tj.B0,
+        a, R0, tj.q0, mu, tj.p0, tj.B0,
         (a / R0)^2,
         rmin, rmin, rmin * a,
-        1.0 / tj.qc,
-        -2.0 * mu * tj.pc
+        1.0 / tj.q0,
+        -2.0 * mu * tj.p0
     )
 end
 
@@ -369,18 +370,20 @@ end
 Integrate the TJ-analytic shape ODE for the given ν.  Pass `saveat` to collect
 output on a prescribed dense grid (used by `tj_analytic_run_direct` so the
 downstream Hₙ / ψ splines sit on uniform nodes); leave it `nothing` for
-the default adaptive save pattern used by `tj_analytic_run`.
+the default adaptive save pattern used by `tj_analytic_run`. `reltol` and `abstol` go to the
+Vern9 solve; `abstol` defaults to `equil_abstol(reltol)`.
 """
 function tj_analytic_shape_solve(p::TJAnalyticShapeParams, nu::Float64;
-    reltol::Float64=1e-7, abstol::Float64=1e-8,
+    reltol::Float64=1e-7, abstol::Float64=equil_abstol(reltol),
     saveat=nothing)
     rhs_params = (; p.a, p.B0, p.qc, p.mu, p.pc, p.epsa2, nu=nu)
     prob = ODEProblem(tj_analytic_shape_rhs!, tj_analytic_shape_initial(p, nu), (p.r0, p.a), rhs_params)
-    if saveat === nothing
-        return solve(prob, Vern9(); reltol, abstol, maxiters=10000, dense=false)
+    sol = if saveat === nothing
+        solve(prob, Vern9(); reltol, abstol, dense=false)
     else
-        return solve(prob, Vern9(); reltol, abstol, maxiters=10000, saveat=saveat)
+        solve(prob, Vern9(); reltol, abstol, saveat=saveat)
     end
+    return check_equil_solve(sol, "TJ-analytic shaping functions at ν = $nu")
 end
 
 """
@@ -391,11 +394,12 @@ https://github.com/rfitzp/TJ): solve for ν so that q₂(x=1) matches
 `q₂ = x²·(1+εa²·g₂)·exp(−εa²·f3/f1)/f1`; at x=1 and low β this picks up an
 O(εa²) correction relative to the lowest-order guess ν = qa/qc, which
 matters for the TJ-analytic benchmark at large ε.  Falls back to the
-lowest-order ν if the bracket search diverges.
+lowest-order ν if the root-find has no bracket or does not converge; an
+error from a trial shaping solve propagates.
 """
-function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; reltol::Float64=1e-7)
+function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; reltol::Float64=1e-7, abstol::Float64=equil_abstol(reltol))
     function q2_edge(nu::Float64)
-        sol = tj_analytic_shape_solve(p, nu; reltol)
+        sol = tj_analytic_shape_solve(p, nu; reltol, abstol)
         g2end = sol.u[end][2]
         f3end = sol.u[end][5]
         f1end = tj_analytic_f1(1.0, nu, p.qc)
@@ -406,7 +410,10 @@ function tj_analytic_find_nu(p::TJAnalyticShapeParams, qa_target::Float64; relto
         find_zero(nu -> q2_edge(nu) - qa_target, (0.5 * nu_guess, 2 * nu_guess);
             atol=1e-8, rtol=1e-10)
     catch err
-        @warn "ν root-find failed for TJ-analytic equilibrium; falling back to lowest-order ν = qa/qc" error = err
+        # Only a failed root-find falls back; a shaping solve that stopped early must propagate.
+        fallback = err isa Roots.ConvergenceFailed || (err isa ArgumentError && occursin("not a bracketing interval", err.msg))
+        fallback || rethrow()
+        @warn "ν root-find failed for TJ-analytic equilibrium; falling back to lowest-order ν = qa/qc" exception = (err, catch_backtrace())
         nu_guess
     end
 end
@@ -447,16 +454,16 @@ included; they are zero in the TJ-analytic benchmark scans.
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
 function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
-    a, R0 = tj.lar_a, tj.lar_r0
-    qc, mu = tj.qc, max(tj.mu, 1.001)
-    pc, B0 = tj.pc, tj.B0
-    ma, mtau = tj.ma, tj.mtau
+    a, R0 = tj.a, tj.r0
+    qc, mu = tj.q0, max(tj.pressure_peaking, 1.001)
+    pc, B0 = tj.p0, tj.B0
+    ma, mtau = tj.ma, tj.mtheta
     p = TJAnalyticShapeParams(tj)
     epsa2 = p.epsa2
     p00_phys = B0^2 * epsa2 * pc          # μ₀P = B₀²·εa²·p₂ at axis
 
-    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
-    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol)
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.flux_surface_rtol)
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.flux_surface_rtol)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -584,22 +591,22 @@ EFIT-writer (R, Z) → (r, w) Newton inversion that this routine adapts.
 """
 function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticConfig;
     nrbox::Int=257, nzbox::Int=257, rc::Float64=1.2)
-    a, R0 = tj.lar_a, tj.lar_r0
-    qc, mu = tj.qc, max(tj.mu, 1.001)
-    pc, B0 = tj.pc, tj.B0
+    a, R0 = tj.a, tj.r0
+    qc, mu = tj.q0, max(tj.pressure_peaking, 1.001)
+    pc, B0 = tj.p0, tj.B0
     p = TJAnalyticShapeParams(tj)
     epsa, epsa2 = p.a / p.R0, p.epsa2
     p00_phys = B0^2 * epsa2 * pc
 
     # ν root-find (cf. Fitzpatrick TJ's Setnu): q₂(1) = qa_target.
-    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.flux_surface_rtol)
 
     # Dense saveat so the downstream splines (H₁, g₂, f₃, ψ) are evaluated on
     # a fine uniform r grid rather than the ~30 adaptive Vern9 steps — otherwise
     # the (R, Z) → (r, w) Newton iteration hits spline interpolation artifacts.
+    # That inversion also needs a tighter abstol ceiling (1e-10) than the other equilibrium solves.
     dense_r = collect(range(p.r0, p.a; length=1024))
-    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol,
-        abstol=1e-10, saveat=dense_r)
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.flux_surface_rtol, abstol=equil_abstol(equil_input.flux_surface_rtol, 1e-10), saveat=dense_r)
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
 
@@ -792,7 +799,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     mr = sol_inputs.mr
     mz = sol_inputs.mz
     ma = sol_inputs.ma
-    e = sol_inputs.e
+    e = sol_inputs.elongation
     a = sol_inputs.a
     r0 = sol_inputs.r0
     q0 = sol_inputs.q0

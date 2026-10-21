@@ -12,8 +12,9 @@ extension:
   - **HDF5 (`.h5`/`.hdf5`)** — the GPEC kinetic schema (recommended). Datasets
     at the file root: required `psi` (normalized poloidal flux), `n_e`, `T_i`,
     `T_e`, `omega_E` (and `n_i`, defaulting to `n_e` if omitted); optional
-    `omega_tor`, `chi_e` (perpendicular heat diffusivity ``\chi_\perp``), and
-    `chi_phi` (toroidal momentum diffusivity ``\chi_\phi``). Each dataset
+    `omega_tor`, `chi_e` (perpendicular heat diffusivity ``\chi_\perp``),
+    `chi_phi` (toroidal momentum diffusivity ``\chi_\phi``), and `zeff`
+    (effective charge ``Z_\mathrm{eff}``, dimensionless). Each dataset
     carries a `units` attribute; the root carries `schema_version` and
     `provenance`. Densities are m⁻³, temperatures eV, frequencies rad/s,
     diffusivities m²/s. Additional datasets named `n_*` (e.g. `n_D`, `n_T`)
@@ -24,9 +25,12 @@ extension:
     `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`, retained for backward
     compatibility. Header rows are skipped.
 
-The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_phi`,
+The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_phi`/`zeff`,
 when present, are carried for the resistive-layer (SLAYER) analysis and ignored
-here.
+here. That analysis takes ``Z_\mathrm{eff}(\psi)`` from the `zeff` dataset when the file
+has one, otherwise from `n_i/n_e` with the `[SLAYER]` `impurity_charge`, otherwise
+from the scalar `[SLAYER] zeff`. Supply `zeff` whenever the impurity content is not a
+single species fixed by `n_i/n_e`.
 
 ## Multi-ion runs
 
@@ -41,8 +45,8 @@ paths: the post-PE ψ-quadrature diagnostic and the self-consistent
 [KineticForces]
 kinetic_file = "kinetic.h5"    # n_i column/dataset = TOTAL main-ion density
 electron = true                # add electron NTV in addition to the ion species
-zimp = 6                       # impurity charge (closes quasineutrality)
-mimp = 12                      # impurity mass
+impurity_charge = 6            # impurity charge (closes quasineutrality)
+impurity_mass = 12             # impurity mass
 
 [[KineticForces.ion_species]]
 z = 1
@@ -58,8 +62,8 @@ Each species sets exactly one of `fraction` (share of the file's total `n_i`)
 or `density` (a named `n_*` dataset). An all-fraction list must sum to 1; in a
 mixed list the impurity content is set by the file's `n_i`/`n_e` deficit, not
 by a fraction shortfall, and fractions may sum below (never above) 1. Every
-main-ion charge must satisfy `z < zimp`. An empty `ion_species` list runs the
-single main ion from `zi`/`mi` (with `electron = true` still adding the
+main-ion charge must satisfy `z < impurity_charge`. An empty `ion_species` list runs the
+single main ion from `ion_charge`/`ion_mass` (with `electron = true` still adding the
 electron species — the electron flag always means *in addition to* the ions).
 
 The summed total is written to `KineticForces/<method>/` exactly as in a single-ion
@@ -85,9 +89,9 @@ profiles and physics parameters for sensitivity studies:
 | `temperature_factor` | 1.0 | Profile loader | Temperature scaling (Ti, Te) |
 | `ExB_rotation_factor` | 1.0 | Profile loader | ExB rotation scaling (omegaE) |
 | `toroidal_rotation_factor` | 1.0 | Profile loader | Total toroidal rotation scaling (wphi) |
-| `wdfac` | 1.0 | Evaluation time | Magnetic drift frequency scaling |
-| `nufac` | 1.0 | Evaluation time | Collisionality scaling |
-| `divxfac` | 1.0 | Evaluation time | ``\nabla \cdot \xi_\perp`` scaling |
+| `magnetic_drift_factor` | 1.0 | Evaluation time | Magnetic drift frequency scaling |
+| `collisionality_factor` | 1.0 | Evaluation time | Collisionality scaling |
+| `divxi_factor` | 1.0 | Evaluation time | ``\nabla \cdot \xi_\perp`` scaling |
 
 ### Profile-loader knobs (`density_factor`, `temperature_factor`, `ExB_rotation_factor`, `toroidal_rotation_factor`)
 
@@ -119,7 +123,7 @@ The scaling sequence is:
 6. Recompute collisionality from scaled density and temperature
 7. Build final splines from scaled arrays
 
-### Evaluation-time knobs (`wdfac`, `nufac`, `divxfac`)
+### Evaluation-time knobs (`magnetic_drift_factor`, `collisionality_factor`, `divxi_factor`)
 
 These three knobs are applied during the bounce-averaged kinetic matrix and
 torque calculations in `KineticForces/Torque.jl` and related modules. They
@@ -131,12 +135,41 @@ terms respectively, and do not modify the stored kinetic profile splines.
        (``\nu_i``, ``\nu_e``) from the scaled density and temperature arrays.
        Fortran PENTRC (`inputs.f90:237-246`) computes collisionality from
        **unscaled** profiles. If you need independent collisionality scaling
-       without changing the density/temperature profiles, use `nufac`.
+       without changing the density/temperature profiles, use `collisionality_factor`.
 
     2. **Consistent derivative ordering:** Fortran's `inputs.f90:269-272`
        mixes pre-scaling spline derivatives with post-scaling array values
        when computing the `toroidal_rotation_factor` back-solve. Julia uses a
        clean reimplementation with consistent pre-scaling derivatives throughout.
+
+## Regularization: why kinetic runs set `regularization_width = 0`
+
+`[PerturbedEquilibrium] regularization_width` smooths the displacements before they drive the NTV
+integrand, multiplying ``\xi^{\psi\prime}`` and ``\xi^\alpha`` by
+``Q^2/(Q^2 + \mathrm{regularization\_width}^2)`` with ``Q = m - nq``. It exists because **ideal** MHD is
+singular at the rationals: ``\bar F_\mathrm{ideal} = Q F Q`` has ``\det \bar F = 0`` there, so
+those two components diverge as ``1/Q`` and the torque integral does not converge.
+
+The **self-consistent kinetic** workflow has no such singularity. Park & Logan
+([Phys. Plasmas 24, 032505 (2017)](https://doi.org/10.1063/1.4978562), §III D) decompose the
+kinetic composite matrix as ``F_k = Q \bar F_k Q - P_l^\dagger Q - Q P_u + R_1`` where
+``R_1 \neq 0`` at ``Q = 0``; with finite torque ``\det \bar F`` is complex, its zeros leave the
+real ``\psi`` axis, and the singularity is removed from both the solution and the torque
+integral. (Torque-free kinetic energy principles instead *shift and split* the zeros to
+``\psi_r \mp r_{L,R}``, where the singularity is logarithmic and integrable — still not a case
+for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmetries* (PhD thesis,
+Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
+notation.
+
+GPEC therefore **forces `regularization_width = 0` whenever `kinetic_factor > 0`**, logging the override.
+Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
+is never regularized, so damping the other two breaks their near-resonance cancellation in
+``\delta B/B`` and leaves a spurious residue driving the NTV integrand.
+
+The check that this is right is that the NTV torque and the Euler–Lagrange solution's own
+dissipation ``-2n\,\mathrm{Im}\langle \xi, u_2\rangle/4\mu_0`` — two independent calculations
+of the same quantity — agree to a fraction of a percent with the regularization off, and disagree
+by tens of percent with it on.
 
 ## HDF5 outputs: complex torque convention and the EnergyIntegrals layout
 
