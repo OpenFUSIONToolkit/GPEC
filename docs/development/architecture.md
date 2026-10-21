@@ -34,6 +34,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
      - `sol` - Solovev analytical equilibrium
    - Key files:
      - `EquilibriumTypes.jl` - Core data structures
+     - `Construction.jl` - Forming a `PlasmaEquilibrium` from each source type, and re-forming it
+     - `PostProcessing.jl` - Separatrix, global parameters, q extrema, Grad-Shafranov residual
      - `ReadEquilibrium.jl` - Parsing equilibrium files
      - `DirectEquilibrium.jl` - Direct Grad-Shafranov solver
      - `InverseEquilibrium.jl` - Inverse equilibrium solver
