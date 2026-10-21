@@ -374,8 +374,8 @@ end
     InverseIngest
 
 The serializable raw arrays and scalars captured by an inverse-equilibrium reader
-(`read_chease_ascii`, `read_chease_binary`) — everything needed to rebuild an
-`InverseRunInput`'s splines without re-reading the original CHEASE file. Stored on
+(`read_chease_ascii`, `read_chease_binary`, `read_ifile`) — everything needed to rebuild an
+`InverseRunInput`'s splines without re-reading the original CHEASE file or i-file. Stored on
 `InverseRunInput.ingest` / `PlasmaEquilibrium.ingest` and reconstructed by
 `build_inverse_from_ingest`. See [`DirectIngest`](@ref) for the role this plays in
 the `gpec.h5` rerun snapshot.
@@ -503,8 +503,8 @@ A container struct for inputs to the `inverse_run` function.
   - `ingest::EquilibriumIngest` - captured raw arrays for the `gpec.h5` rerun snapshot
     (an [`InverseIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
   - `psihigh_resolved::Float64` - outer flux limit the equilibrium is formed on; see
-    [`DirectRunInput`](@ref). Equals `config.psihigh` for every inverse reader (CHEASE,
-    analytic); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
+    [`DirectRunInput`](@ref). `config.psihigh`, clamped to the outermost input surface for i-files and
+    reruns (`resolve_psihigh!`); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
 """
 mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
