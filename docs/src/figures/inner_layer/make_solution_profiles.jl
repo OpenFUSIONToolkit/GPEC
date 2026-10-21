@@ -21,7 +21,7 @@ Q = 2.0im                  # imaginary axis, beyond the |Q|≪1 shooting regime,
 #                            small enough that the BVP domain reaches
 #                            the series radius directly (no march) — so the
 #                            numeric and asymptotic segments join seamlessly.
-isol = 1                   # "odd" parity solution (Ψ'(0)=Ξ(0)=Υ(0)=0)
+isol = 2                   # odd-parity (tearing, Δ₋) solution: Ψ'(0)=Ξ(0)=Υ(0)=0
 
 res = IL.solve_ray(p, Q)
 s_m = res.breaks[end]
@@ -39,7 +39,7 @@ fields = ((:Ψ, prof.Ψ, asy.Ψ, 1), (:Ξ, prof.Ξ, asy.Ξ, 2), (:Υ, prof.Υ, a
 
 plt = plot(; size=(760, 560), legend=:bottomleft, xscale=:log10, yscale=:log10,
     ylims=(1e-3, 1e2),
-    xlabel="ray parameter s   (x = e^{iθ}s)", ylabel="|field|  (odd parity)",
+    xlabel="ray parameter s   (x = e^{iθ}s)", ylabel="|field|  (odd parity, tearing)",
     title=@sprintf("Inner-layer fields on the rotated ray, Q = %gi  (q=4)", imag(Q)),
     left_margin=8Plots.mm, bottom_margin=5Plots.mm)
 

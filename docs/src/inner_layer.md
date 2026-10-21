@@ -124,10 +124,11 @@ default ``\theta = \arg(Q)/4`` keeps it off the contour.
 
 For matching, `solve_inner_profile` returns ``\Delta`` and the layer-center fields
 ``\Psi(0), \Xi(0)`` from the rotated solve; ``x = 0`` lies on every contour, so these are the
-real-axis values. Fields across the layer on the real ``\psi`` axis are opt-in
-(`GGJModel(; real_profiles=true)`): they come from an extra ``\theta = 0`` solve, whose ``\Delta``
-is checked against the rotated one (`certΔ`, which warns on disagreement, as can happen at large
-``|Q|`` near the imaginary axis).
+real-axis values. Fields across the layer on the real ``\psi`` axis are an opt-in diagnostic
+(`GGJModel(; real_profiles=true)`, not exposed in the deck): they come from an extra ``\theta = 0``
+solve, while the ``x = 0`` values, and so the penetrated field, stay those of the rotated solve.
+The ``\theta = 0`` solve's ``\Delta_\pm`` are checked against the rotated ones (`certΔ`, which
+warns on disagreement, as can happen at large ``|Q|`` near the imaginary axis).
 
 ![Inner-layer fields Ψ, Ξ, Υ on the rotated ray for the q=4 surface at Q = 2i. The BVP solution (solid) joins the asymptotic representation (dashed) seamlessly at the match point S = s_m.](figures/inner_layer/solution_profiles.png)
 

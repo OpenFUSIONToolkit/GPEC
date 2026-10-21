@@ -430,22 +430,25 @@ end
 Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. `Δ` and the
 layer-center fields come from the solve at θ = arg(Q)/4; x = 0 lies on every contour, so
 Ψ(0), Ξ(0) are the real-axis values, and by default only they are returned (`x = [0.0]`,
-`certΔ = NaN`). With `real_profiles = true` the fields across the layer come from an extra
-θ = 0 solve (`npc` points per cell), and the relative difference of its Δ₊ is `certΔ`,
-warned above `certify_rtol`. Other keywords forward to [`solve_ray`](@ref), except θ.
+`certΔ = NaN`). With `real_profiles = true` the fields across the layer (x > 0) come from an
+extra θ = 0 solve (`npc` points per cell), a diagnostic; the x = 0 row stays the rotated
+solve's, and `certΔ` is the largest relative difference of the two solves' Δ₊, Δ₋, warned
+above `certify_rtol`. Other keywords forward to [`solve_ray`](@ref), except θ.
 """
 function solve_inner_profile(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
     real_profiles::Bool=false, npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
     Q = inner_Q(params, γ)
     rr = solve_ray(params, Q; kwargs...)             # Δ and layer-center fields (optimal θ)
+    c = solution_profile(rr; npc=1)                  # first point is s = 0
     if !real_profiles
-        c = solution_profile(rr; npc=1)              # first point is s = 0
         return (; Δ=rr.Δ, x=[0.0], Ψ=c.Ψ[1:1, :], Ξ=c.Ξ[1:1, :], _profile_conversions(params)..., certΔ=NaN)
     end
     r0 = solve_ray(params, Q; θ=0.0, kwargs...)      # real-axis profile solve
-    certΔ = abs(r0.Δ[1] - rr.Δ[1]) / max(abs(rr.Δ[1]), 1e-300)
+    certΔ = maximum(abs.(r0.Δ .- rr.Δ) ./ max.(abs.(rr.Δ), 1e-300))
     certΔ > certify_rtol && @warn "GGJ ray: θ=0 profile solve disagrees with certified Δ" ising = params.ising Q certΔ
     prof = solution_profile(r0; npc=npc)
+    prof.Ψ[1, :] .= c.Ψ[1, :]                        # x = 0 from the rotated solve, as without profiles
+    prof.Ξ[1, :] .= c.Ξ[1, :]
     return (; Δ=rr.Δ, x=prof.s, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)..., certΔ=certΔ)
 end
 

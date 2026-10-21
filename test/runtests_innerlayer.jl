@@ -165,14 +165,15 @@ end
     ray = IL.solve_inner_profile(IL.GGJModel(; solver=:ray, real_profiles=true), p, γ)
     @test ray.certΔ < 1e-12
 
-    # Default :ray returns only the layer-center fields of the rotated solve; x = 0 lies on every
-    # contour, so they match the θ = 0 real-axis profile at its first point.
+    # Default :ray returns only the layer-center fields of the rotated solve. With real profiles the
+    # x = 0 row is still the rotated solve's, so the penetrated field does not depend on the option,
+    # and the θ = 0 profile next to it is continuous with it.
     γi = 5.0im * GGJ.q0(p)
     c = IL.solve_inner_profile(IL.GGJModel(; solver=:ray), p, γi)
     full = IL.solve_inner_profile(IL.GGJModel(; solver=:ray, real_profiles=true), p, γi)
     @test c.x == [0.0] && size(c.Ψ) == (1, 2) && isnan(c.certΔ)
     @test c.Δ == full.Δ
-    @test c.Ψ[1, 2] ≈ full.Ψ[1, 2] rtol = 1e-6
-    @test c.Ξ[1, 1] ≈ full.Ξ[1, 1] rtol = 1e-6
+    @test full.x[1] == 0 && full.Ψ[1, :] == c.Ψ[1, :] && full.Ξ[1, :] == c.Ξ[1, :]
+    @test full.Ψ[2, 2] ≈ c.Ψ[1, 2] rtol = 1e-2      # odd Ψ is even, so smooth through x = 0
     @test full.certΔ < 1e-5
 end
