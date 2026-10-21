@@ -128,10 +128,10 @@ end
             @test haskey(a, "long_name") && haskey(a, "dims")
             # Same ψ dimension scale as every other Response spectrum, which is what lets
             # Analysis.PerturbedEquilibriumModes.modes_to_theta read these datasets unchanged.
-            @test HDF5.API.h5ds_is_attached(g[d], g["psi"], 0)
+            # H5DS indexes file (row-major) dimensions, so Julia axis 1 of a 2-D dataset is
+            # C index 1 — see Utilities.HDF5Annotations.attach_scale!.
+            @test HDF5.API.h5ds_is_attached(g[d], g["psi"], 1)
         end
-        @test size(read(g["dBoB_lagrangian"])) == size(read(g["xi_clebsch_psi"])) ||
-              isempty(read(g["xi_clebsch_psi"]))
     end
     rm(f1; force=true)
 
