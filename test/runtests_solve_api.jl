@@ -90,6 +90,10 @@ using TOML
             @test size(dp.matrix) == (msing, msing)
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
+
+            # With no free-boundary δW, PE refuses the response rather than returning an empty state.
+            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+            @test_throws ErrorException perturbed_equilibrium(api, RMPField(forcing); compute_response=true, write_outputs_to_HDF5=false)
         end
     end
 
@@ -247,6 +251,11 @@ using TOML
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
             @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # PE refuses the response and coupling on it, but still materializes the forcing alone.
+            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+            @test_throws ErrorException perturbed_equilibrium(matched, RMPField(forcing); compute_singular_coupling=true, write_outputs_to_HDF5=false)
+            idle = perturbed_equilibrium(matched, RMPField(forcing); compute_response=false, compute_singular_coupling=false, write_outputs_to_HDF5=false)
+            @test idle isa GPEC.PerturbedEquilibrium.PerturbedEquilibriumState
             # A matched result is a new solution, not an outer solve to match again.
             @test_throws ErrorException MatchProblem(matched; ideal=true)
         end
