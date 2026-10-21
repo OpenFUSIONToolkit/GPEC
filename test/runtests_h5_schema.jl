@@ -115,7 +115,7 @@ end
     state = PE.PerturbedEquilibriumState(;
         psi_grid=collect(range(0.1, 0.9; length=npsi)),
         modb_modes=(dbob=ComplexF64[0.1i + 0.01im * j for i in 1:npsi, j in 1:mpert],
-                    divx=ComplexF64[0.2i - 0.02im * j for i in 1:npsi, j in 1:mpert]))
+            divx=ComplexF64[0.2i - 0.02im * j for i in 1:npsi, j in 1:mpert]))
     f1 = tempname() * ".h5"
     PE.write_outputs_to_HDF5(state, PE.PerturbedEquilibriumInternal(), f1)
     HDF5.h5open(f1, "r") do f

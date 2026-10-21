@@ -302,12 +302,14 @@ const PE_H5_ANNOTATIONS = [
     "Response/xi_clebsch_alpha" =>
         (; long_name="Clebsch displacement component ξ^α/χ₁ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/dBoB_lagrangian" =>
-        (; long_name="Lagrangian perturbation of the field strength δ|B|/B (gpout_pmodb lagbpar/|B|), the NTV drive; " *
-            "δB/B(θ) = Σ_m value·exp(2πi·m·θ), θ ∈ [0,1). Eulerian form = this − ξ·∇|B|/|B| from xi_clebsch_*",
+        (;
+            long_name="Lagrangian perturbation of the field strength δ|B|/B (gpout_pmodb lagbpar/|B|), the NTV drive; " *
+                      "δB/B(θ) = Σ_m value·exp(2πi·m·θ), θ ∈ [0,1). Eulerian form = this − ξ·∇|B|/|B| from xi_clebsch_*",
             dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/div_xi_perp" =>
-        (; long_name="∇·ξ_⊥ (gpout_pmodb divxprp/|B|), the second NTV input; same angle and sign convention as " *
-            "dBoB_lagrangian, with κ·ξ = −(dBoB_lagrangian + div_xi_perp)", units="1/m",
+        (;
+            long_name="∇·ξ_⊥ (gpout_pmodb divxprp/|B|), the second NTV input; same angle and sign convention as " *
+                      "dBoB_lagrangian, with κ·ξ = −(dBoB_lagrangian + div_xi_perp)", units="1/m",
             dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_n" => (; long_name="physical normal displacement ξ_n", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_R" => (; long_name="cylindrical displacement component ξ_R (mode space)", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),

@@ -324,16 +324,17 @@ end
 Populate perturbation data from PerturbedEquilibriumState into KineticForcesInternal.
 
 Builds three interpolant sets over ψ:
-1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] from the PE Clebsch displacements
-2. `dbob_m` — Lagrangian δ|B|/B, taken from `pe_state.modb_modes`
-3. `divx_m` — ∇·ξ⊥, taken from `pe_state.modb_modes`
+
+ 1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] from the PE Clebsch displacements
+ 2. `dbob_m` — Lagrangian δ|B|/B, taken from `pe_state.modb_modes`
+ 3. `divx_m` — ∇·ξ⊥, taken from `pe_state.modb_modes`
 
 The perturbation spectra themselves are a property of the perturbed equilibrium and are
 derived and written there (`PerturbedEquilibrium.compute_modb_modes`); this function only
 interpolates them onto the torque quadrature.
 """
 function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
-                                ffs::ForceFreeStates.ForceFreeStatesResult)
+    ffs::ForceFreeStates.ForceFreeStatesResult)
     ffs.npert == 1 || error("KineticForces supports a single toroidal mode; this run has n = $(ffs.nlow):$(ffs.nhigh).")
 
     # Copy mode numbers from FFS
@@ -380,7 +381,7 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
     modb === nothing && error("set_perturbation_data!: the perturbed equilibrium carries no " *
                               "δ|B|/B spectra; KineticForces cannot evaluate the torque without them.")
     size(modb.dbob) == (npsi, mpert) || error("set_perturbation_data!: δ|B|/B spectra are " *
-        "$(size(modb.dbob)), expected ($npsi, $mpert).")
+                                              "$(size(modb.dbob)), expected ($npsi, $mpert).")
 
     # Build CubicSeriesInterpolants over ψ for dbob_m and divx_m
     kf_intr.dbob_m = cubic_interp(psi_grid, Series(modb.dbob); itp_opts...)
