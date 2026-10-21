@@ -259,7 +259,7 @@ function main_from_inputs(
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles;
         species=kf_species,
         overlap_inputs=_overlap_slayer_inputs(inputs, intr.dir_path))
-    ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric; runtimes=runtimes)
+    ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric)
 
     if ctrl.write_outputs_to_HDF5
         write_outputs_to_HDF5(
@@ -279,56 +279,44 @@ function main_from_inputs(
     push!(runtimes, "force_free_states" => ffs_dt)
     @info "Force-Free States completed in $(@sprintf("%.3f", ffs_dt)) s"
 
-    # Early exit if user only requested force-free states (SLAYER still runs).
-    if ctrl.force_termination
-        slayer_result = run_slayer_stage(ffs_result, inputs, nothing; runtimes=runtimes)
-        # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
-        slayer_result === nothing || (written_h5 = ctrl.HDF5_filename)
-        total_dt = time() - total_start
-        push!(runtimes, "total" => total_dt)
-        if written_h5 !== nothing
-            _write_runtimes!(joinpath(intr.dir_path, written_h5), runtimes)
-        end
-        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
-        return (; ffs=ffs_result, pe=nothing, slayer=slayer_result, coil_sensitivities=nothing, monte_carlo=nothing, locking_risk=nothing, efc_couplings=nothing)
-    end
+    # A force_termination run stops after ForceFreeStates; only SLAYER still runs off the result.
+    run_response = !ctrl.force_termination
 
     # PE (and SLAYER, which appends after it) writes to PE's own output filename when set,
     # falling back to the ForceFreeStates file.
-    pe_file = if "PerturbedEquilibrium" in keys(inputs)
+    pe_file = if run_response && "PerturbedEquilibrium" in keys(inputs)
         pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
         isempty(pe_out) ? ctrl.HDF5_filename : pe_out
     else
         ctrl.HDF5_filename
     end
 
-    pe_start = time()
-    pe_state = run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets; runtimes=runtimes)
-    # Record only when the stage ran; an absent [PerturbedEquilibrium] section would otherwise
-    # stamp a ~0 s entry for work that never happened.
-    if "PerturbedEquilibrium" in keys(inputs)
-        push!(runtimes, "perturbed_equilibrium" => time() - pe_start)
+    pe_state = nothing
+    if run_response && "PerturbedEquilibrium" in keys(inputs)
+        pe_state = _timed_stage(runtimes, "perturbed_equilibrium", "Perturbed Equilibrium") do
+            run_perturbed_equilibrium(ffs_result, inputs, forcing_modes_snapshot, preloaded_coil_sets)
+        end
         # Mirrors the write gate inside `perturbed_equilibrium` (write flag defaults to true).
         if get(inputs["PerturbedEquilibrium"], "write_outputs_to_HDF5", true)
             written_h5 = pe_file
         end
     end
 
-    kf_start = time()
-    run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles, kf_species)
-    if "KineticForces" in keys(inputs)
-        push!(runtimes, "kinetic_forces" => time() - kf_start)
+    if run_response && "KineticForces" in keys(inputs)
+        _timed_stage(runtimes, "kinetic_forces", "KineticForces") do
+            run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl, kinetic_profiles, kf_species)
+        end
         # Mirrors the write gate inside `run_kinetic_forces` (needs a PE state to contract against).
         if pe_state !== nothing && kf_ctrl.write_outputs_to_HDF5
             written_h5 = kf_ctrl.HDF5_filename
         end
     end
 
-    ef_start = time()
-    error_fields = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles)
-    coil_sensitivities, monte_carlo, locking_risk, efc_couplings = error_fields === nothing ? (nothing, nothing, nothing, nothing) : error_fields
-    if "ErrorFields" in keys(inputs)
-        push!(runtimes, "error_fields" => time() - ef_start)
+    coil_sensitivities, monte_carlo, locking_risk, efc_couplings = nothing, nothing, nothing, nothing
+    if run_response && "ErrorFields" in keys(inputs)
+        coil_sensitivities, monte_carlo, locking_risk, efc_couplings = _timed_stage(runtimes, "error_fields", "ErrorFields") do
+            run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles)
+        end
         # Mirrors the write gate inside `run_error_fields` (write flag defaults to true, filename
         # falls back to the ForceFreeStates file since the result carries this same control).
         ef_raw = inputs["ErrorFields"]
@@ -338,9 +326,15 @@ function main_from_inputs(
         end
     end
 
-    slayer_result = run_slayer_stage(ffs_result, inputs, pe_file; runtimes=runtimes)
+    tearing_start = time()
+    slayer_result = run_slayer_stage(ffs_result, inputs, pe_file)
+    tearing_dt = time() - tearing_start
     # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
-    slayer_result === nothing || (written_h5 = pe_file)
+    if slayer_result !== nothing
+        written_h5 = pe_file
+        push!(runtimes, "tearing" => tearing_dt)
+        @info "SLAYER completed in $(@sprintf("%.3f", tearing_dt)) s"
+    end
 
     # ----------------------------------------------------------------
     # Done
@@ -364,6 +358,22 @@ end
 Compact label for the resolved toroidal mode range, `"1"` for a single `n` and `"1:3"` for a range.
 """
 _mode_range_label(intr::ForceFreeStatesInternal) = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
+
+"""
+    _timed_stage(f, runtimes, key, label) -> f()
+
+Run the pipeline stage `f` under a `label` section banner, log its wall-clock time and record
+it in `runtimes` as `key => seconds` for the `Info/Runtimes` record.
+"""
+function _timed_stage(f, runtimes::Vector{Pair{String,Float64}}, key::String, label::String)
+    @info "\n  $label\n$_SECTION"
+    start = time()
+    out = f()
+    dt = time() - start
+    push!(runtimes, key => dt)
+    @info "$label completed in $(@sprintf("%.3f", dt)) s"
+    return out
+end
 
 """
     resolve_mode_space!(intr, ctrl) -> intr
@@ -738,16 +748,14 @@ end
 
 Run the formalism selected by `ctrl.integrator` — the standalone Galerkin solve, or the
 Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publish its products as a
-`ForceFreeStatesResult`. A `runtimes` collector, when given, receives the Galerkin solve's
-wall-clock seconds as a `"galerkin" => dt` pair for the `Info/Runtimes` record.
+`ForceFreeStatesResult`.
 """
 function run_force_free_states(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     mats,
     intr::ForceFreeStatesInternal,
-    metric;
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    metric
 )
     nstring = _mode_range_label(intr)
 
@@ -765,7 +773,6 @@ function run_force_free_states(
         wv = ctrl.vac_flag ? first(ForceFreeStates.compute_scaled_wv(ctrl, equil, intr)) : nothing
         gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv)
         gal_dt = time() - gal_start
-        runtimes === nothing || push!(runtimes, "galerkin" => gal_dt)
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
     else
         # Integrate Euler-Lagrange Equation
@@ -972,15 +979,8 @@ function run_perturbed_equilibrium(
     result::ForceFreeStatesResult,
     inputs::Dict{String,Any},
     forcing_modes_snapshot::Union{Nothing,Vector{ForcingTerms.ForcingMode}},
-    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}};
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}
 )
-    # ----------------------------------------------------------------
-    # Perturbed Equilibrium
-    # ----------------------------------------------------------------
-    @info "\n  Perturbed Equilibrium\n$_SECTION"
-    pe_start = time()
-
     # Check for PerturbedEquilibrium section and run if present
     pe_state = nothing
     if "PerturbedEquilibrium" in keys(inputs)
@@ -989,17 +989,15 @@ function run_perturbed_equilibrium(
         # The deck's forcing block is an unscaled RMPField, so the TOML path and the
         # scripting API share one stage.
         pe_state = perturbed_equilibrium(result, ForcingTerms.RMPField(ft_ctrl);
-            forcing_modes=forcing_modes_snapshot, coil_sets=preloaded_coil_sets, runtimes=runtimes,
+            forcing_modes=forcing_modes_snapshot, coil_sets=preloaded_coil_sets,
             (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...)
     end
-
-    @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
 
     return pe_state
 end
 
 """
-    perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, runtimes=nothing, kwargs...) -> PerturbedEquilibriumState
+    perturbed_equilibrium(ffs, rmp; forcing_modes=nothing, coil_sets=nothing, kwargs...) -> PerturbedEquilibriumState
 
 Compute the plasma response to the external field `rmp` on top of a force-free-states solve
 `ffs`, and write the perturbed-equilibrium outputs. `rmp` is an [`RMPField`](@ref); keyword
@@ -1010,8 +1008,7 @@ step warns and is skipped rather than erroring, so a Riccati- or Galerkin-fed re
 flows through.
 
 `forcing_modes` injects already-loaded modes (the gpec.h5 replay path) and `coil_sets`
-already-built coil geometry, both bypassing the corresponding read. A `runtimes` collector,
-when given, receives the forcing-mode materialization's wall-clock seconds as `"forcing_terms" => dt`.
+already-built coil geometry, both bypassing the corresponding read.
 
 ```julia
 pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
@@ -1022,7 +1019,6 @@ function perturbed_equilibrium(
     rmp::ForcingTerms.RMPField;
     forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
     coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing,
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing,
     kwargs...
 )
     ctrl = ffs.control
@@ -1044,7 +1040,7 @@ function perturbed_equilibrium(
         pe_intr.coil_sets = copy(coil_sets)
     end
 
-    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, rmp, pe_ctrl, pe_intr; runtimes=runtimes)
+    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, rmp, pe_ctrl, pe_intr)
 
     # Write perturbed equilibrium outputs to same HDF5 file
     if pe_ctrl.write_outputs_to_HDF5
@@ -1083,9 +1079,6 @@ function run_kinetic_forces(
     # KineticForces (Neoclassical Toroidal Viscosity)
     # ----------------------------------------------------------------
     ("KineticForces" in keys(inputs)) || return nothing
-
-    @info "\n  KineticForces\n$_SECTION"
-    kf_start = time()
 
     # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
     # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
@@ -1133,8 +1126,6 @@ function run_kinetic_forces(
         end
     end
 
-    @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
-
     return nothing
 end
 
@@ -1178,9 +1169,6 @@ function run_error_fields(
     kinetic_profiles=nothing
 )
     ("ErrorFields" in keys(inputs)) || return nothing
-
-    @info "\n  ErrorFields\n$_SECTION"
-    ef_start = time()
 
     # [ErrorFields.MonteCarlo], [ErrorFields.Risk] and [ErrorFields.scenario] are nested tables,
     # excluded from the control-struct splat.
@@ -1273,8 +1261,6 @@ function run_error_fields(
         end
         @info "Results written to $output_file"
     end
-
-    @info "ErrorFields completed in $(@sprintf("%.3f", time() - ef_start)) s"
 
     return sens, monte_carlo, risk, couplings
 end
@@ -1431,12 +1417,9 @@ end
 
 Run the SLAYER tearing-mode analysis off the force-free-states `result`, appending its group to
 `pe_file` (or the force-free-states output when PE did not run). Needs only the result, so it
-runs in both the `force_termination = true` path and the full pipeline. A `runtimes` collector,
-when given, receives the solver's wall-clock seconds as a `"tearing" => dt` pair for the
-`Info/Runtimes` record.
+runs in both the `force_termination = true` path and the full pipeline.
 """
-function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any}, pe_file::Union{String,Nothing};
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing)
+function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any}, pe_file::Union{String,Nothing})
     ("SLAYER" in keys(inputs)) || return nothing
     # SLAYER is a post-processing diagnostic. A failure here must not
     # discard the equilibrium / stability / PE results already computed,
@@ -1446,12 +1429,8 @@ function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any
         slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
         slayer_ctrl.enabled || return nothing
         @info "\n  SLAYER\n$_SECTION"
-        slayer_start = time()
         model = Runner._build_inner_model(slayer_ctrl.inner_model)
         slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
-        slayer_dt = time() - slayer_start
-        runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
-        @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
         h5_filename = pe_file === nothing ? result.control.HDF5_filename : pe_file
         h5_path = joinpath(result.dir_path, h5_filename)
         # Append the Tearing/ group; create the file if no prior stage wrote
