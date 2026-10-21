@@ -183,7 +183,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     # solution only when a later match needs the composite inner profiles.
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
-        delta=((ctrl.gal_cut_solution || ctrl.gal_match_flag) ? delta : nothing))
+        delta=(ctrl.gal_cut_solution ? delta : nothing))
 
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]

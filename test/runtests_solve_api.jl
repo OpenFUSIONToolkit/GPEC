@@ -226,6 +226,7 @@ using HDF5
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
+        @test_throws ErrorException solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=".", ffs_kwargs..., gal_match_flag=true)
     end
 
     # Path of the first field where `a` and `b` differ (recursing into structs, arrays and
@@ -390,27 +391,42 @@ using HDF5
 
         @testset "deck matching under gal_match_flag" begin
             layer = (eta=1e-7, rho=1e-7, rotation=1.0)
-            # The galerkin inner model returns real-ψ profiles, so the composite inner profiles are compared too.
+            # The deck's match keys for `n` surfaces on top of the integrator's own.
+            match_keys(n, solver) = Dict{String,Any}("gal_match_flag" => true, "gal_inner_solver" => solver,
+                "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n), "gal_rotation" => fill(layer.rotation, n))
+
             mktempdir() do dir
-                gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                # The galerkin inner model returns real-ψ profiles, so the inner profiles are compared too.
                 api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:galerkin))
                 n = length(gal.surfaces)
-                reference = GPEC.main([_stage_deck(dir;
-                    ffs_overrides=Dict{String,Any}(
-                        "integrator" => "galerkin", "gal_nx" => 32, "gal_rpec_flag" => true, "gal_match_flag" => true,
-                        "gal_inner_solver" => "galerkin", "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n),
-                        "gal_rotation" => fill(layer.rotation, n)))]).ffs
+                overrides = merge(Dict{String,Any}("integrator" => "galerkin", "gal_nx" => 32, "gal_rpec_flag" => true), match_keys(n, "galerkin"))
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
 
                 @test reference.closure === api.closure === :matched
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.xi ≈ reference.match.xi rtol = 1e-12
-                @test length(api.match.inner_xi) == length(reference.match.inner_xi) == n
-                @test all(isapprox.(api.match.inner_xi, reference.match.inner_xi; rtol=1e-12))
+                # The composite inner profiles are API-only: a deck never keeps the cut solution.
+                @test isempty(reference.match.inner_xi) && isempty(api.match.inner_xi)
+                cut = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                @test length(solve(MatchProblem(cut; layer...), GGJModel(; solver=:galerkin)).match.inner_xi) == n
+            end
 
-                uncut = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
-                matched = solve(MatchProblem(uncut; layer...), GGJModel(; solver=:galerkin))
-                # Known drift: gal_match_flag implies the cut solution on the deck; the API keeps it only when asked.
-                @test_broken length(matched.match.inner_xi) == length(reference.match.inner_xi)
+            mktempdir() do dir
+                ric = solve(equil, Riccati(); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                api = solve(MatchProblem(ric; layer...), GGJModel(; solver=:ray))
+                overrides = merge(Dict{String,Any}("integrator" => "riccati"), match_keys(length(ric.surfaces), "ray"))
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
+
+                @test reference.closure === :matched
+                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.match.cout ≈ reference.match.cout rtol = 1e-12
+            end
+
+            # A forward solve has no Δ′ to match against, so the deck errors instead of ignoring the flag.
+            mktempdir() do dir
+                @test_throws ErrorException GPEC.main([_stage_deck(dir;
+                    ffs_overrides=Dict{String,Any}("gal_match_flag" => true, "gal_ideal_flag" => true))])
             end
         end
     end

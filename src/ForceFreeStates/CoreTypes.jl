@@ -201,9 +201,9 @@ gpec.toml.
     gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
     gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
     gal_edge_onesided::Bool = false # pack the two end intervals one-sided toward their single rational end (vs the Fortran symmetric "both" pack); avoids the fine edge cell that inflates cond(A). Default false = faithful to gal.f.
-    gal_cut_solution::Bool = false  # also keep the cut solution for a later match's composite inner profiles; implied by gal_match_flag
+    gal_cut_solution::Bool = false  # also keep the cut solution for a later match's composite inner profiles; set by Galerkin(; cut_solution=true), not a deck key
     # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
-    gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
+    gal_match_flag::Bool = false    # match the inner layer on the finished solve (coil-driven ξ from Δ′ + inner Δ(Q)); needs gal_rpec_flag=true, or riccati with vac_flag=true
     gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
     gal_inner_solver::String = "ray" # inner-layer Δ backend for the match: "ray" (rotated contour + inward march; recommended for every Q) or "galerkin" (real-axis Hermite FEM; accuracy depends on the surface and arg Q)
     # --- Inner-layer "galerkin" backend overrides (gal_inner_solver = "galerkin"; unset keeps the backend default) ---
