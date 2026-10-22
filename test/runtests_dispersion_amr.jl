@@ -226,6 +226,56 @@
         @test result.box_activity[3] == NoActivity
     end
 
+    @testset "find_growth_rates(AMR): independent of the global RNG" begin
+        # The quadtree's cell corners are cocircular, so the Delaunay
+        # triangulation (and the contours marched on it) depends on the
+        # point-insertion order. That order must not come from the global RNG:
+        # identical input has to give identical roots and poles in every session.
+        using Random
+        f(Q) = (ComplexF64(Q) - (0.2 - 0.05im)) * (ComplexF64(Q) - (-0.6 - 0.4im)) /
+               ((ComplexF64(Q) - (0.25 + 0.3im)) * (ComplexF64(Q) - (-0.1 - 0.6im)))
+        amr = amr_scan(f, (-1.0, 1.0), (-1.0, 0.8); nre0=8, nim0=8, passes=4)
+        res = map(1:6) do s
+            Random.seed!(s)
+            find_growth_rates(amr, 1.0; filter_above_poles=false)
+        end
+        for r in res[2:end]
+            @test r.valid_roots == res[1].valid_roots
+            @test r.poles == res[1].poles
+            @test isequal(r.Q_root, res[1].Q_root)
+        end
+        # an explicit seed is honoured and still gives a valid extraction
+        r2 = find_growth_rates(amr, 1.0; filter_above_poles=false, triangulation_seed=7)
+        @test !isempty(r2.valid_roots)
+        @test_throws ArgumentError find_growth_rates(amr, 1.0; n_triangulations=0)
+    end
+
+    @testset "find_growth_rates(AMR): pooling several triangulations" begin
+        using Random
+        f(Q) = (ComplexF64(Q) - (0.2 - 0.05im)) * (ComplexF64(Q) - (-0.6 - 0.4im)) /
+               ((ComplexF64(Q) - (0.25 + 0.3im)) * (ComplexF64(Q) - (-0.1 - 0.6im)))
+        amr = amr_scan(f, (-1.0, 1.0), (-1.0, 0.8); nre0=8, nim0=8, passes=4)
+        single = [find_growth_rates(amr, 1.0; filter_above_poles=false, triangulation_seed=s)
+                  for s in 1:4]
+        pooled = find_growth_rates(amr, 1.0; filter_above_poles=false,
+                                   n_triangulations=4, triangulation_seed=1)
+        # n_triangulations=1 is exactly the single extraction
+        @test isequal(find_growth_rates(amr, 1.0; filter_above_poles=false,
+                                        n_triangulations=1, triangulation_seed=1).Q_root,
+                      single[1].Q_root)
+        # the pooled choice is the least-damped of the per-triangulation choices
+        @test imag(pooled.Q_root) ≈ maximum(imag(r.Q_root) for r in single)
+        # every root any triangulation accepted is in the pooled list
+        for r in single, z in r.valid_roots
+            @test any(w -> abs(w - z) <= 1e-6 * max(abs(z), 1.0), pooled.valid_roots)
+        end
+        # and pooling is itself independent of the global RNG
+        Random.seed!(99)
+        @test isequal(find_growth_rates(amr, 1.0; filter_above_poles=false,
+                                        n_triangulations=4, triangulation_seed=1).Q_root,
+                      pooled.Q_root)
+    end
+
     @testset "multi_box_amr_scan: argument validation" begin
         f(Q) = ComplexF64(Q)
         boxes = [((-1.0, 1.0), (-1.0, 1.0))]

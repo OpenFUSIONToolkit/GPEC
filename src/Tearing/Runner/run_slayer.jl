@@ -330,7 +330,8 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 filter_outside_re=control.filter_outside_re,
                 gap_kHz_threshold=control.gap_kHz_threshold,
                 residual=control.polish_roots ? sc : nothing,
-                validity_rtol=control.validity_rtol)
+                validity_rtol=control.validity_rtol,
+                (scan isa AMRResult ? (; n_triangulations=control.n_triangulations) : (;))...)
             :no_root in gr.warning_flags && @warn(
                 "SLAYER: no usable growth-rate root found for surface " *
                 "$(_surface_label(params[k])); reported γ=0 is a " *
