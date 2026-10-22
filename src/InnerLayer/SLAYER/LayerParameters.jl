@@ -89,7 +89,7 @@ Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     sval_r::Float64
     dr_val::Float64 = 0.0
     dgeo_val::Float64 = 0.0
-    kpar_val::Float64 = 0.0
+    kpar_val::Float64 = n * abs(sval_r) / R0
     eta::Float64
     d_beta::Float64
 
@@ -156,6 +156,9 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     else
         (sqrt((rs / R0) * abs(sval_r) * n_tor), kpar_cyl)
     end
+    isfinite(g_w) && g_w > 0 && isfinite(kpar) && kpar > 0 ||
+        throw(ArgumentError("SLAYERParameters: the $dc_type critical Δ needs a positive, finite geometric factor and K∥; " *
+                            "got g_w = $g_w, K∥ = $kpar"))
 
     Wd = 0.1
     converged = false

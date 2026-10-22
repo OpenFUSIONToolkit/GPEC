@@ -131,9 +131,11 @@
             Q_e=-1.0, Q_i=0.5, iota_e=2.0 / 3.0,
             tauk=1e-4, tau_r=10.0, delta_n=400.0,
             rs=0.5, R0=1.7, bt=2.0, sval_r=1.0,
-            eta=2.5e-8, d_beta=4e-3
+            eta=2.5e-8, d_beta=4e-3, n=2
         )
         @test p.tau == 1.0
+        # Without a derived value K∥ falls back to the cylindrical n·|s|/R₀, as slayer_parameters stores it.
+        @test p.kpar_val ≈ 2 * 1.0 / 1.7 rtol = 1e-14
         @test p.dc_tmp == 0.0
         @test p.dc_type === :none
         @test p.dr_val == 0.0
@@ -163,6 +165,11 @@
         @test dc(:toroidal, g_cyl, k_cyl) ≈ dc(:fitzpatrick, 0.0, nothing) rtol = 1e-8
         # kpar_val = nothing falls back to the cylindrical K∥.
         @test dc(:toroidal, g_cyl, nothing) == dc(:toroidal, g_cyl, k_cyl)
+        # Invalid factors are rejected before the W_d iteration; dgeo_val = 0 still disables the offset.
+        for (g, k) in ((NaN, k_cyl), (-0.3, k_cyl), (g_cyl, 0.0), (g_cyl, Inf))
+            @test_throws "positive, finite geometric factor" dc(:toroidal, g, k)
+        end
+        @test dc(:toroidal, 0.0, k_cyl) == 0.0
 
         # Collisional limit: χ∥ is the Spitzer-Härm value, so K∥ drops out.
         tau_c = 1e-20
