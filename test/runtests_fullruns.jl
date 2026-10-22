@@ -10,13 +10,13 @@ using TOML
         true
     end
 
-    # A ucrit reduction landing just before an ideal crossing must not change which solution the crossing removes.
+    # A renorm_threshold reduction landing just before an ideal crossing must not change which solution the crossing removes.
     @info "Running Solovev ideal example with frequent Gaussian reductions"
     @testset "et[1] is independent of the reduction frequency" begin
         deck = TOML.parsefile(joinpath(ex1, "gpec.toml"))
         deck["ForceFreeStates"]["write_outputs_to_HDF5"] = true
-        function total_energy(ucrit)
-            deck["ForceFreeStates"]["ucrit"] = ucrit
+        function total_energy(renorm_threshold)
+            deck["ForceFreeStates"]["renorm_threshold"] = renorm_threshold
             return mktempdir() do workdir
                 open(io -> TOML.print(io, deck), joinpath(workdir, "gpec.toml"), "w")
                 GeneralizedPerturbedEquilibrium.main([workdir])
@@ -24,8 +24,8 @@ using TOML
             end
         end
         et_ref = total_energy(1e3)
-        for ucrit in (2.0, 3.0, 5.0, 10.0)
-            @test total_energy(ucrit) ≈ et_ref rtol = 1e-6
+        for renorm_threshold in (2.0, 3.0, 5.0, 10.0)
+            @test total_energy(renorm_threshold) ≈ et_ref rtol = 1e-6
         end
     end
 

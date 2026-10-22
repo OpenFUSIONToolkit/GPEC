@@ -322,7 +322,7 @@ end
         @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
         # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
         c = FFS.ForceFreeStatesControl()
-        @test c.ucrit == 1e3
+        @test c.renorm_threshold == 1e3
         @test c.save_interval == 1
     end
 
@@ -330,7 +330,7 @@ end
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; ucrit=10.0)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; renorm_threshold=10.0)
 
         # Case 1: Basic norm computation
         odet.u = zeros(ComplexF64, 2, 2, 2)
@@ -356,7 +356,7 @@ end
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         @test odet.unorm[1:intr.mpert] ≈ [1, 1]
 
-        # Case 4: Trigger fixup via ucrit
+        # Case 4: Trigger fixup via renorm_threshold
         odet.unorm0 = ones(intr.mpert)
         odet.u[:, 1, 1] .= [1000, 0]   # large norm
         odet.u[:, 2, 1] .= [1, 0]      # small norm
@@ -381,7 +381,7 @@ end
         u0[:, 3, 1] .= [0.2, 2.0, 1.5]
         u0[:, :, 2] .= 1.0
         intr = FFS.ForceFreeStatesInternal(; numpert_total=3)
-        ctrl = FFS.ForceFreeStatesControl(; ucrit=1e3)
+        ctrl = FFS.ForceFreeStatesControl(; renorm_threshold=1e3)
         fresh(u) = (odet = FFS.OdeState(3, 10, 10, 1); odet.u .= u; odet)
 
         odet = fresh(u0)
@@ -393,7 +393,7 @@ end
         @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0  # only the lead column keeps the resonant harmonic
         @test odet.sing_flag[1]
 
-        # A crossing right after a ucrit reduction (new = true) still reduces on the resonant row.
+        # A crossing right after a renorm_threshold reduction (new = true) still reduces on the resonant row.
         odet = fresh(u0)
         FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
         @test odet.ifix == 1 && odet.index[1, 1] == 2 && odet.new
