@@ -100,3 +100,5 @@ end
 In Python the same scales are visible through `h5py`'s dimension API
 (`dset.dims[0]["psi_rational"]`, `dset.dims[0]["q_rational"]`), so xarray-style tooling can
 label the axis automatically.
+
+See [field strength and displacement gauge](pmodb_gauge.md).
