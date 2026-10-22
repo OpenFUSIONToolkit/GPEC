@@ -288,7 +288,7 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
         jac_val = equil.rzphi_jac((psi, theta); hint=hJ)
 
         # Fourier component of field perturbations
-        expm = exp(im * twopi * intr.mfac * theta)
+        expm = exp.(im * twopi * intr.mfac * theta)
         dbob = sum(dbob_m_f .* expm)  # dB/B
         divx = sum(divx_m_f .* expm) * divxfac  # ∇·ξ⊥
 
