@@ -19,7 +19,7 @@ const GGJ = IL.GGJ
 # q = 4 rational-surface benchmark on the imaginary-Q axis (the regime that
 # defeats :galerkin). Q is the scaled growth rate; θ makes the parabolic
 # exponent real.
-p = IL.q4_surface_benchmark()
+p = IL.GGJ.q4_surface_benchmark()
 Q = 500.0im
 θ = angle(Q) / 4                                   # = π/8 = 22.5°
 
