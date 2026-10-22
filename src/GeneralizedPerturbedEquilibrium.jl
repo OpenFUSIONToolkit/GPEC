@@ -289,7 +289,7 @@ function main_from_inputs(
     # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing; runtimes=runtimes)
-        # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
+        # A non-nothing result means the Tearing/ group was appended.
         slayer_result === nothing || (written_h5 = ctrl.HDF5_filename)
         total_dt = time() - total_start
         push!(runtimes, "total" => total_dt)
@@ -346,7 +346,7 @@ function main_from_inputs(
     end
 
     slayer_result = run_slayer_stage(ffs_result, inputs, pe_file; runtimes=runtimes)
-    # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
+    # A non-nothing result means the Tearing/ group was appended.
     slayer_result === nothing || (written_h5 = pe_file)
 
     # ----------------------------------------------------------------
@@ -1434,40 +1434,29 @@ Run the SLAYER tearing-mode analysis off the force-free-states `result`, appendi
 `pe_file` (or the force-free-states output when PE did not run). Needs only the result, so it
 runs in both the `force_termination = true` path and the full pipeline. A `runtimes` collector,
 when given, receives the solver's wall-clock seconds as a `"tearing" => dt` pair for the
-`Info/Runtimes` record.
+`Info/Runtimes` record. Errors propagate; every earlier stage has already written its output.
 """
 function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any}, pe_file::Union{String,Nothing};
     runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing)
     ("SLAYER" in keys(inputs)) || return nothing
-    # SLAYER is a post-processing diagnostic. A failure here must not
-    # discard the equilibrium / stability / PE results already computed,
-    # so the whole stage is guarded: on error we log loudly and return
-    # `nothing` for the `slayer` field rather than propagating.
-    try
-        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-        slayer_ctrl.enabled || return nothing
-        @info "\n  SLAYER\n$_SECTION"
-        slayer_start = time()
-        model = Runner._build_inner_model(slayer_ctrl.inner_model)
-        slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
-        slayer_dt = time() - slayer_start
-        runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
-        @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
-        h5_filename = pe_file === nothing ? result.control.HDF5_filename : pe_file
-        h5_path = joinpath(result.dir_path, h5_filename)
-        # Append the Tearing/ group; create the file if no prior stage wrote
-        # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
-        HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
-            Runner.write_slayer_hdf5!(f, slayer_result)
-        end
-        @info "SLAYER results written to $h5_filename"
-        return slayer_result
-    catch err
-        @error "SLAYER stage failed; continuing without tearing results. " *
-               "Equilibrium / stability / PE outputs are unaffected." exception =
-            (err, catch_backtrace())
-        return nothing
+    slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+    slayer_ctrl.enabled || return nothing
+    @info "\n  SLAYER\n$_SECTION"
+    slayer_start = time()
+    model = Runner._build_inner_model(slayer_ctrl.inner_model)
+    slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
+    slayer_dt = time() - slayer_start
+    runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
+    @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
+    h5_filename = pe_file === nothing ? result.control.HDF5_filename : pe_file
+    h5_path = joinpath(result.dir_path, h5_filename)
+    # Append the Tearing/ group; create the file if no prior stage wrote
+    # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+    HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+        Runner.write_slayer_hdf5!(f, slayer_result)
     end
+    @info "SLAYER results written to $h5_filename"
+    return slayer_result
 end
 
 """

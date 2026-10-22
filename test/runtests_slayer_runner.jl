@@ -109,8 +109,11 @@
         @test r_off.enabled == false
     end
 
-    @testset "GGJ tearing errors until its growth-rate extraction exists" begin
-        @test SLAYERControl(; inner_model=:ggj_ray).inner_model === :ggj_ray
+    @testset "GGJ tearing is rejected until its growth-rate extraction exists" begin
+        for name in ("ggj_ray", "ggj_shooting", "ggj_galerkin")
+            @test_throws ArgumentError Runner.validate(SLAYERControl(; inner_model=Symbol(name)))
+            @test_throws ArgumentError Runner.slayer_control_from_toml(Dict{String,Any}("enabled" => true, "inner_model" => name))
+        end
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing, dir_path=".")
         @test_throws ErrorException solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true, profile_file="unused.h5")), GGJModel())
