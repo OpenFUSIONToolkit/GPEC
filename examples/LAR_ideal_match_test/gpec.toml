@@ -45,7 +45,7 @@ delta_mhigh = 8                # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960            # Number of points used in splines over poloidal angle at plasma-vacuum interface
 
 eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations
-singfac_min             = 1e-4  # Fractional distance from rational q at which ideal jump enforced
+singfac_min             = 1e-6  # Fractional distance from rational q at which ideal jump enforced
 renorm_threshold        = 1e3   # Column-norm threshold that triggers solution renormalization
 frobenius_order         = 6     # Power-series order for the singular-surface asymptotics
 save_interval           = 1     # Save every Nth ODE step (1=all). Always saves near rational surfaces.

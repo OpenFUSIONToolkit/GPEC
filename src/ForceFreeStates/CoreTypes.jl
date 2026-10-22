@@ -166,7 +166,7 @@ gpec.toml.
     renorm_threshold::Float64 = 1e3
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
-    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
+    singfac_min::Float64 = 1e-6   # Converges the singular coupling (Fortran STRIDE uses 1e-4); required nonzero for the Riccati path.
     truncate_at_rational_offset::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
     psilim_from_layer_overlap::Bool = false  # Cap psilim where adjacent resistive layers overlap. Opt-in; the scan is recorded either way. See docstring.
     rational_offset_fraction::Float64 = 0.2
